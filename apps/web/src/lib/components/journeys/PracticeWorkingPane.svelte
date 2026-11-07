@@ -282,7 +282,7 @@
   }
 
   .pane__crumb-link:hover {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   .pane__crumb-sep {
@@ -290,7 +290,7 @@
   }
 
   .pane__crumb-here {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   /* ── journey badge ── */
@@ -304,7 +304,7 @@
     border: var(--border-width) var(--border-style)
       color-mix(in oklab, var(--color-brand-primary) 30%, transparent);
     background: color-mix(in oklab, var(--color-brand-primary) 12%, transparent);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     letter-spacing: 0.14em;
@@ -443,7 +443,7 @@
     border: var(--border-width) var(--border-style)
       color-mix(in oklab, var(--color-brand-primary) 40%, transparent);
     background: color-mix(in oklab, var(--color-brand-primary) 16%, transparent);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   .pane__next {
@@ -486,7 +486,7 @@
   }
 
   :global(.pane__auto-glyph) {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   /* ── peak-end completion card ── */
@@ -562,7 +562,7 @@
   }
 
   .pane__foot-link:hover {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   .pane__foot-link:focus-visible {

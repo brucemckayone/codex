@@ -202,7 +202,7 @@
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

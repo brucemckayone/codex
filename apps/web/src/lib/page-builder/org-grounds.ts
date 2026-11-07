@@ -10,6 +10,7 @@
  */
 import type { BrandEditorState } from '$lib/brand-editor';
 import { parseDarkColorOverrides } from '$lib/brand-editor';
+import { paintableColour } from '$lib/brand-editor/ground';
 import type { OrganizationData } from '$lib/types';
 import type { ThemeGrounds } from './kit/model/resolve';
 
@@ -22,14 +23,16 @@ export function orgGrounds(
 ): ThemeGrounds {
   if (pending) {
     return {
-      light: pending.backgroundColor,
-      dark: pending.darkOverrides?.backgroundColor,
+      light: paintableColour(pending.backgroundColor),
+      dark: paintableColour(pending.darkOverrides?.backgroundColor),
     };
   }
   return {
-    light: org?.brandColors?.background,
-    dark: parseDarkColorOverrides(org?.brandFineTune?.darkModeOverrides)
-      ?.backgroundColor,
+    light: paintableColour(org?.brandColors?.background),
+    dark: paintableColour(
+      parseDarkColorOverrides(org?.brandFineTune?.darkModeOverrides)
+        ?.backgroundColor
+    ),
   };
 }
 

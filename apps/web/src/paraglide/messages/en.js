@@ -14483,6 +14483,126 @@ export const search_clear_button = () => `Clear`
 
 
 /**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_adjusted = (params) => `${params.count} adjusted`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_title = () => `How your colours read`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_links = () => `Links and tabs`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_link_states = () => `Hovered and pressed links`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_brand_text = () => `Labels in your brand colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_focus = () => `Focus outline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_halo = () => `Focus halo`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_hover = () => `Hovered buttons`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_hover_detail = () => `Label follows the hover colour`
+
+
+/**
+ * @param {{ ratio: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_as_picked = (params) => `As you picked it · ${params.ratio}`
+
+
+/**
+ * @param {{ before: NonNullable<unknown>, after: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_darkened_little = (params) => `Darkened a little to read on light pages · ${params.before} → ${params.after}`
+
+
+/**
+ * @param {{ before: NonNullable<unknown>, after: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_darkened_lot = (params) => `Darkened a lot to read on light pages · ${params.before} → ${params.after}`
+
+
+/**
+ * @param {{ before: NonNullable<unknown>, after: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_lightened_little = (params) => `Lightened a little to read on dark pages · ${params.before} → ${params.after}`
+
+
+/**
+ * @param {{ before: NonNullable<unknown>, after: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_lightened_lot = (params) => `Lightened a lot to read on dark pages · ${params.before} → ${params.after}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_set_dark = () => `Dark pages use your light brand colour. Pick a dark-mode colour above to choose your own.`
+
+
+/**
  * 
  * @returns {string}
  */

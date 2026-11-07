@@ -11,11 +11,19 @@
 	};
 
 	let {
-		positioning,
-		arrowSize,
-		preventScroll,
-		loop,
-		closeOnItemClick,
+		// Every option the $effect below sets needs a default: one left
+		// `undefined` is `.set(undefined)` over Melt's own. These four are
+		// Melt's. Unset, `positioning` let floating-ui fall back to its own
+		// 'top', and `closeOnItemClick` let no item press close the menu, so
+		// an item that opens a dialog left the menu open under it, holding
+		// the focus the dialog gives back (Codex-vlphc review G4-M3). Nothing
+		// renders Melt's arrow yet; `arrowSize` sizes one if it ever does.
+		positioning = { placement: 'bottom' },
+		arrowSize = 8,
+		loop = false,
+		closeOnItemClick = true,
+		// A menu deliberately leaves the page free to scroll; Melt's default locks it.
+		preventScroll = false,
 		// Default to Melt's own default (true). Destructuring with no default
 		// leaves this `undefined`, and the $effect below then does
 		// `.set(undefined)` — which disables Melt's interact-outside listener
@@ -34,8 +42,24 @@
 		children
 	}: Props = $props();
 
+	/** The menu's id, once the builder has made it. */
+	let menuId: string | undefined;
+
 	const builder = createDropdownMenu({
 		defaultOpen: untrack(() => defaultOpen),
+		// Melt's default gives the trigger focus at every close, whatever has
+		// it by then. An item that opens a dialog has handed focus to the
+		// dialog a millisecond before: the trigger, behind the overlay, took
+		// it, focus-trap pulled it back without preventScroll, and a
+		// Body-less confirm opened scrolled down to its Footer (Codex-vlphc
+		// review G5-C-L1). So the trigger takes focus back only from the
+		// menu, or from nowhere; anywhere else keeps it.
+		closeFocus: (trigger) => {
+			const active = document.activeElement;
+			const menu = menuId ? document.getElementById(menuId) : null;
+			const fromMenu = !active || active === document.body || !!menu?.contains(active);
+			return fromMenu ? (trigger ?? null) : null;
+		},
 		onOpenChange: ({ next }) => {
 			if (open !== next) {
 				open = next;
@@ -49,6 +73,7 @@
 		options,
 		states: { open: openStore }
 	} = builder;
+	menuId = builder.ids.menu.get();
 	setCtx(builder);
 
 	$effect(() => {

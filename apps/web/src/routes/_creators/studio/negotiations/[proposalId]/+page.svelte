@@ -639,7 +639,7 @@
   }
 
   .agreement-detail__crumb-link:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
   }
 

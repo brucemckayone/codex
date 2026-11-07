@@ -1252,7 +1252,7 @@
   }
 
   .cc__title a:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .cc__title a:focus-visible {
@@ -1293,7 +1293,7 @@
     padding: var(--space-1) var(--space-3);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: transparent;
     border: var(--border-width) var(--border-style) var(--color-interactive);
     border-radius: var(--radius-full);
@@ -1324,7 +1324,7 @@
   }
 
   .cc__creator-link:hover .cc__creator-name {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .cc__creator-name {

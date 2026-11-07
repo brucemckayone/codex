@@ -3,13 +3,14 @@
 
   Formatting toolbar for the Tiptap rich text editor.
   Renders different button sets based on the preset.
-  Includes an inline link popover instead of browser prompt.
+  Includes a link popover (the shared Popover) instead of browser prompt.
 
   @prop {Editor} editor - The Tiptap editor instance
   @prop {'full' | 'minimal'} preset - Controls which buttons are shown
 -->
 <script lang="ts">
   import type { Editor } from '@tiptap/core';
+  import * as Popover from '$lib/components/ui/Popover';
   import type { EditorPreset } from '$lib/editor/types';
 
   interface Props {
@@ -24,14 +25,25 @@
   let linkUrl = $state('');
   // svelte-ignore non_reactive_update
   let linkInput: HTMLInputElement;
-  // svelte-ignore non_reactive_update
-  let linkBtnElement: HTMLButtonElement;
 
-  function openLinkPopover() {
-    linkUrl = editor.getAttributes('link').href ?? '';
-    showLinkPopover = true;
-    // Focus the input after Svelte renders the popover
-    requestAnimationFrame(() => linkInput?.focus());
+  /** The --space-2 gap it has always kept under its button, in floating-ui's px. */
+  const LINK_GAP = 8;
+
+  // Opening reads the link under the cursor.
+  function onLinkOpenChange(next: boolean) {
+    if (next) linkUrl = editor.getAttributes('link').href ?? '';
+  }
+
+  /**
+   * As the popover closes the editor gets its focus back, as Escape and Apply
+   * always gave it. A press outside that put focus elsewhere (the text,
+   * another field) keeps it there.
+   */
+  function returnFocus(): null {
+    const at = document.activeElement;
+    const elsewhere = at instanceof HTMLElement && at !== document.body && !at.closest('.link-row');
+    if (!elsewhere) editor.commands.focus();
+    return null;
   }
 
   function applyLink() {
@@ -53,13 +65,11 @@
     showLinkPopover = false;
   }
 
+  // Escape is the Popover's, from anywhere in it; `returnFocus` refocuses the editor.
   function handleLinkKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       e.preventDefault();
       applyLink();
-    } else if (e.key === 'Escape') {
-      showLinkPopover = false;
-      editor.chain().focus().run();
     }
   }
 </script>
@@ -175,26 +185,32 @@
     </svg>
   </button>
 
-  <!-- Link (with inline popover) -->
-  <div class="toolbar-link-wrapper">
-    <button
-      bind:this={linkBtnElement}
-      type="button"
+  <!-- Link: the shared Popover, a non-modal dialog under its button. It
+       shifts into view at the screen's edge and closes on a press outside.
+       No focus trap: Tab moves on to the toolbar as it always has, and a
+       press on another field keeps the focus it gives that field. -->
+  <Popover.Root
+    bind:open={showLinkPopover}
+    onOpenChange={onLinkOpenChange}
+    disableFocusTrap
+    positioning={{ placement: 'bottom', gutter: LINK_GAP }}
+    openFocus={() => linkInput}
+    closeFocus={returnFocus}
+  >
+    <Popover.Trigger
       class="toolbar-btn"
       data-active={editor.isActive('link') || undefined}
-      onclick={openLinkPopover}
       title="Link"
       aria-pressed={editor.isActive('link')}
-      aria-expanded={showLinkPopover}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
       </svg>
-    </button>
-
-    {#if showLinkPopover}
-      <div class="link-popover" role="dialog" aria-label="Insert link">
+    </Popover.Trigger>
+    <!-- A fade, no travel: the motion the owner approved for this popup. -->
+    <Popover.Content aria-label="Insert link" transitionConfig={{ y: 0, duration: 150 }}>
+      <div class="link-row">
         <input
           bind:this={linkInput}
           bind:value={linkUrl}
@@ -229,8 +245,8 @@
           </button>
         {/if}
       </div>
-    {/if}
-  </div>
+    </Popover.Content>
+  </Popover.Root>
 
   {#if preset === 'full'}
     <span class="toolbar-separator" aria-hidden="true"></span>
@@ -319,7 +335,9 @@
     background-color: var(--color-surface);
   }
 
-  .toolbar-btn {
+  /* `:global` under the toolbar: the link button is rendered by the shared
+     Popover's Trigger, which this file's scoped classes cannot reach. */
+  .editor-toolbar :global(.toolbar-btn) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -334,17 +352,17 @@
     transition: var(--transition-colors);
   }
 
-  .toolbar-btn:hover:not(:disabled) {
+  .editor-toolbar :global(.toolbar-btn:hover:not(:disabled)) {
     background-color: var(--color-surface-secondary, var(--color-neutral-100));
     color: var(--color-text);
   }
 
-  .toolbar-btn[data-active] {
+  .editor-toolbar :global(.toolbar-btn[data-active]) {
     background-color: var(--color-brand-primary-subtle);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
   }
 
-  .toolbar-btn:disabled {
+  .editor-toolbar :global(.toolbar-btn:disabled) {
     opacity: var(--opacity-40);
     cursor: not-allowed;
   }
@@ -363,29 +381,20 @@
     margin: 0 var(--space-1);
   }
 
-  /* Link popover */
-  .toolbar-link-wrapper {
-    position: relative;
-  }
-
-  .link-popover {
-    position: absolute;
-    top: calc(100% + var(--space-2));
-    left: 50%;
-    transform: translateX(-50%);
+  /* Link popover: its panel is the shared Popover's; this is its one row. */
+  .link-row {
     display: flex;
     align-items: center;
     gap: var(--space-1);
-    padding: var(--space-2);
-    background-color: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-md);
-    z-index: var(--z-dropdown, 10);
     white-space: nowrap;
   }
 
+  /* The box takes what the row has left: 240px beside Apply alone, less
+     when Remove joins it (the shared popover caps the row at 286px), and
+     the square buttons never give way. */
   .link-input {
+    flex: 1;
+    min-width: 0;
     width: 240px;
     padding: var(--space-1) var(--space-2);
     font-size: var(--text-sm);
@@ -403,6 +412,7 @@
   }
 
   .link-action-btn {
+    flex: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;

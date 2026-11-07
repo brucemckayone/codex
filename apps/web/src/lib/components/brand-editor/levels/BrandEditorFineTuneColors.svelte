@@ -464,7 +464,7 @@
 
   .fine-tune__auto-btn {
     font-size: var(--text-xs);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: none;
     border: none;
     cursor: pointer;
@@ -499,7 +499,7 @@
   }
 
   .fine-tune__customize-btn:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
     border-color: var(--color-interactive);
   }
 

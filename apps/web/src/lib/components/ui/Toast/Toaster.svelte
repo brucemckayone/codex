@@ -46,7 +46,10 @@
   .toaster {
     position: fixed;
     bottom: var(--space-4);
-    right: var(--space-4);
+    /* While a dialog holds the page, WebKit drops the scrollbar's gutter
+       and the viewport widens by it; the lock publishes that width
+       (lib/utils/scroll-lock.ts), so the toasts stay where they were. */
+    right: calc(var(--space-4) + var(--scroll-lock-pad, 0px));
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
@@ -104,7 +107,7 @@
     align-self: flex-start;
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
     text-underline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);

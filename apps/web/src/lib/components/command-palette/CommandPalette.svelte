@@ -3,11 +3,11 @@
 
   Studio-only command palette triggered by Cmd/Ctrl+K.
   Provides fast access to pages, content, and actions.
-  Positioned in top-third of viewport as an overlay.
+  A shared Dialog placed in the top third: it traps Tab, holds the page
+  still, closes on Escape or a press outside, and gives focus back.
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { browser } from '$app/environment';
   import {
     SearchIcon,
     LayoutDashboardIcon,
@@ -18,6 +18,7 @@
     SettingsIcon,
     PlusIcon,
   } from '$lib/components/ui/Icon';
+  import * as Dialog from '$lib/components/ui/Dialog';
   import * as m from '$paraglide/messages';
 
   interface CommandItem {
@@ -31,7 +32,6 @@
   let isOpen = $state(false);
   let query = $state('');
   let activeIndex = $state(0);
-  let inputEl: HTMLInputElement | undefined = $state();
 
   // Static page items — use $derived so paraglide messages resolve at render time
   const pageItems: CommandItem[] = $derived([
@@ -73,11 +73,12 @@
 
   const flatItems = $derived(filteredItems);
 
+  // The dialog moves focus to the box, its first tabbable, and back to what
+  // held it when Cmd+K opened the palette.
   function open() {
     isOpen = true;
     query = '';
     activeIndex = 0;
-    requestAnimationFrame(() => inputEl?.focus());
   }
 
   function close() {
@@ -94,17 +95,26 @@
     }
   }
 
+  // The arrows bring the row they highlight into view: focus stays in the
+  // box, so the browser never scrolls the list for it. Not an effect on
+  // activeIndex, which a hover moves too, and a hover must not scroll.
+  function highlight(index: number) {
+    activeIndex = index;
+    const item = flatItems[index];
+    if (item) document.getElementById(`cmd-${item.id}`)?.scrollIntoView({ block: 'nearest' });
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (!isOpen) return;
 
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        activeIndex = (activeIndex + 1) % flatItems.length;
+        highlight((activeIndex + 1) % flatItems.length);
         break;
       case 'ArrowUp':
         e.preventDefault();
-        activeIndex = (activeIndex - 1 + flatItems.length) % flatItems.length;
+        highlight((activeIndex - 1 + flatItems.length) % flatItems.length);
         break;
       case 'Enter':
         e.preventDefault();
@@ -112,26 +122,6 @@
           selectItem(flatItems[activeIndex]);
         }
         break;
-      case 'Escape':
-        e.preventDefault();
-        close();
-        break;
-      case 'Tab': {
-        e.preventDefault();
-        // Get all focusable elements within the palette
-        const palette = e.currentTarget.closest('.palette') as HTMLElement;
-        if (!palette) break;
-        const focusable = palette.querySelectorAll<HTMLElement>(
-          'input, [role="option"], button:not([disabled])'
-        );
-        if (focusable.length === 0) break;
-        const currentIndex = Array.from(focusable).indexOf(document.activeElement as HTMLElement);
-        const nextIndex = e.shiftKey
-          ? (currentIndex - 1 + focusable.length) % focusable.length
-          : (currentIndex + 1) % focusable.length;
-        focusable[nextIndex]?.focus();
-        break;
-      }
     }
   }
 
@@ -139,8 +129,11 @@
   function handleGlobalKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
       // Don't hijack TipTap editor's Cmd+K (link shortcut)
-      if (document.activeElement?.isContentEditable) return;
+      const at = document.activeElement;
+      if (at instanceof HTMLElement && at.isContentEditable) return;
       e.preventDefault();
+      // A held Cmd+K repeats: one press, one toggle.
+      if (e.repeat) return;
       if (isOpen) {
         close();
       } else {
@@ -158,39 +151,41 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-{#if isOpen}
-  <!-- Backdrop -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="palette-backdrop" onclick={close} aria-hidden="true"></div>
-
-  <!-- Palette -->
-  <div
-    class="palette"
-    role="dialog"
-    tabindex="-1"
+<Dialog.Root bind:open={isOpen}>
+  <Dialog.Content
+    placement="top"
+    maxWidth="min(35rem, 90vw)"
+    maxHeight="60vh"
+    radius="lg"
+    surface="base"
+    overlay="dark"
+    motion="none"
+    flush
+    closeButton={false}
     aria-label={m.command_palette_label()}
     onkeydown={handleKeydown}
   >
-    <div class="palette__input-wrapper">
-      <SearchIcon size={18} class="palette__search-icon" />
-      <input
-        bind:this={inputEl}
-        type="text"
-        id="command-palette-input"
-        name="command-palette-query"
-        class="palette__input"
-        placeholder={m.command_palette_search_placeholder()}
-        bind:value={query}
-        aria-label={m.command_palette_search_label()}
-        role="combobox"
-        aria-controls="palette-results"
-        aria-expanded={flatItems.length > 0}
-        aria-activedescendant={flatItems[activeIndex] ? `cmd-${flatItems[activeIndex].id}` : undefined}
-        autocomplete="off"
-      />
-    </div>
+    <Dialog.Toolbar>
+      <div class="palette__input-wrapper">
+        <SearchIcon size={18} class="palette__search-icon" />
+        <input
+          type="text"
+          id="command-palette-input"
+          name="command-palette-query"
+          class="palette__input"
+          placeholder={m.command_palette_search_placeholder()}
+          bind:value={query}
+          aria-label={m.command_palette_search_label()}
+          role="combobox"
+          aria-controls="palette-results"
+          aria-expanded={flatItems.length > 0}
+          aria-activedescendant={flatItems[activeIndex] ? `cmd-${flatItems[activeIndex].id}` : undefined}
+          autocomplete="off"
+        />
+      </div>
+    </Dialog.Toolbar>
 
-    <div class="palette__results" id="palette-results" role="listbox">
+    <Dialog.Body id="palette-results" role="listbox">
       {#if flatItems.length === 0}
         <div class="palette__empty">{m.command_palette_no_results()}</div>
       {:else}
@@ -199,8 +194,11 @@
             <div class="palette__group-label">{group}</div>
             {#each items as item (item.id)}
               {@const globalIndex = flatItems.indexOf(item)}
+              <!-- Not a Tab stop: focus stays in the box and the arrows move
+                   the highlight, so Enter opens the row that is highlighted. -->
               <button
                 id="cmd-{item.id}"
+                tabindex="-1"
                 class="palette__item"
                 class:palette__item--active={globalIndex === activeIndex}
                 role="option"
@@ -217,49 +215,19 @@
           </div>
         {/each}
       {/if}
-    </div>
+    </Dialog.Body>
 
-    <div class="palette__footer">
-      <span class="palette__hint"><kbd>&uarr;&darr;</kbd> {m.command_palette_hint_navigate()}</span>
-      <span class="palette__hint"><kbd>Enter</kbd> {m.command_palette_hint_select()}</span>
-      <span class="palette__hint"><kbd>Esc</kbd> {m.command_palette_hint_close()}</span>
-    </div>
-  </div>
-{/if}
+    <Dialog.Footer>
+      <div class="palette__footer">
+        <span class="palette__hint"><kbd>&uarr;&darr;</kbd> {m.command_palette_hint_navigate()}</span>
+        <span class="palette__hint"><kbd>Enter</kbd> {m.command_palette_hint_select()}</span>
+        <span class="palette__hint"><kbd>Esc</kbd> {m.command_palette_hint_close()}</span>
+      </div>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
 <style>
-  .palette-backdrop {
-    position: fixed;
-    inset: 0;
-    background: var(--color-overlay);
-    z-index: var(--z-modal-backdrop);
-  }
-
-  .palette {
-    position: fixed;
-    top: 15%;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(560px, 90vw);
-    background: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-xl);
-    z-index: var(--z-modal);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    max-height: 60vh;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .palette,
-    .palette-backdrop {
-      animation: none;
-      transition: none;
-    }
-  }
-
   .palette__input-wrapper {
     display: flex;
     align-items: center;
@@ -285,11 +253,6 @@
 
   .palette__input::placeholder {
     color: var(--color-text-muted);
-  }
-
-  .palette__results {
-    overflow-y: auto;
-    flex: 1;
   }
 
   .palette__empty {

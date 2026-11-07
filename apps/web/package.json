@@ -21,6 +21,8 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "check:brand-boundary": "node scripts/check-brand-editor-boundary.mjs",
     "check:brand-boundary:test": "node --test scripts/check-brand-editor-boundary.test.mjs",
+    "check:dialog-structure": "node scripts/check-dialog-structure.mjs",
+    "check:dialog-structure:test": "node --test scripts/check-dialog-structure.test.mjs",
     "lint": "biome lint --write .",
     "format": "biome format --write .",
     "typecheck": "svelte-kit sync && tsc --noEmit",

@@ -121,7 +121,7 @@
 
   .activity-icon.event-publish {
     background-color: var(--color-interactive-subtle, hsl(210, 100%, 95%));
-    color: var(--color-interactive-active, hsl(210, 80%, 40%));
+    color: var(--color-link-active, hsl(210, 80%, 40%));
   }
 
   .activity-icon.event-signup {

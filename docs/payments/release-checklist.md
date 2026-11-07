@@ -78,13 +78,29 @@ below is then the test-mode one: `sk_test_`, `rk_test_`.
   has NONE today: the deploy uploads one only from the GitHub production
   secret `ADMIN_API_STRIPE_RESTRICTED_KEY` (Codex-2hxff.92).
   - **Create it:** a restricted key in the SAME mode as `STRIPE_SECRET_KEY`
-    (`rk_test_` beside `sk_test_`), with Refunds write; Charges,
-    PaymentIntents, Invoices and Disputes read; and Balance read on connected
-    accounts. Save it as `ADMIN_API_STRIPE_RESTRICTED_KEY`; the next deploy
-    uploads it.
+    (`rk_test_` beside `sk_test_`; the upload refuses any other prefix). Set
+    these Dashboard rows, on the platform account unless noted, and leave every
+    other row at None:
+    - **Charges and Refunds: Write.** Stripe has no refunds-only permission;
+      this one row covers `refunds.create` and the charge and refund reads.
+    - **Payment Intents: Read.**
+    - **Payment Disputes: Read.**
+    - **Invoices: Read.**
+    - **Transfers: Read.** `transfers.list`, `retrieve` and `listReversals`,
+      for settling a failed refund and "Check Stripe again".
+    - **Balance: Read, on connected accounts**, for Creator debts' live
+      balance. Also on the platform account: the charge detail expands
+      `balance_transaction` for Stripe's fee, and Stripe's permission reference
+      names no row for balance transactions, so Balance is assumed to cover it.
+
+    This list is built from the Stripe calls in the header of
+    `packages/admin/src/services/support-service.ts`; the other places that
+    mention this key point here. Save it as `ADMIN_API_STRIPE_RESTRICTED_KEY`;
+    the next deploy uploads it.
   - **Without it:** support refunds fail, and Creator debts shows the 08:00
     snapshot with a warning per load.
-  - **Check it:** after the deploy, Creator debts shows a live balance.
+  - **Check it:** after the deploy, Creator debts shows a live balance, and a
+    payment's refund detail shows Stripe's fee.
 
 ### R9 — before the backfill: the Express dashboard settings (owner)
 

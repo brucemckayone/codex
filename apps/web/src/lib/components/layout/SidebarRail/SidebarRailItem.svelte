@@ -137,7 +137,7 @@
 
 	.rail-item--active {
 		background-color: color-mix(in oklch, var(--color-interactive) 15%, transparent);
-		color: var(--color-interactive);
+		color: var(--color-link);
 	}
 
 	.rail-item__label {

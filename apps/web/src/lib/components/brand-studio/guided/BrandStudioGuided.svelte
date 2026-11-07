@@ -377,7 +377,7 @@
   }
 
   .guided :global(.guided__tablist button[data-state='active']) {
-    color: var(--color-interactive);
+    color: var(--color-link);
     border-bottom-color: var(--color-interactive);
   }
 

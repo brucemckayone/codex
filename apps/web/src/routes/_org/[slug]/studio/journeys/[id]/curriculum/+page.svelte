@@ -715,7 +715,7 @@
     <Dialog.Header>
       <Dialog.Title>Choose from your library</Dialog.Title>
     </Dialog.Header>
-    <div class="picker__controls">
+    <Dialog.Toolbar direction="column">
       <div class="picker__search">
         <SearchIcon size={16} />
         <input
@@ -737,7 +737,7 @@
           </button>
         {/each}
       </div>
-    </div>
+    </Dialog.Toolbar>
     <Dialog.Body>
       {#if pickerLoading}
         <p class="picker__state">Loading your library…</p>
@@ -1443,12 +1443,6 @@
   }
 
   /* ── Picker dialog ── */
-  .picker__controls {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: 0 var(--space-5) var(--space-3);
-  }
   .picker__search {
     display: flex;
     align-items: center;

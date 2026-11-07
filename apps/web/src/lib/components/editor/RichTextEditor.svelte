@@ -333,7 +333,7 @@
     margin: var(--space-3) 0;
     color: var(--color-text-secondary);
   }
-  .rich-text-editor__wrapper :global(a) { color: var(--color-interactive-hover); text-decoration: underline; cursor: pointer; }
+  .rich-text-editor__wrapper :global(a) { color: var(--color-link-hover); text-decoration: underline; cursor: pointer; }
   .rich-text-editor__wrapper :global(strong) { font-weight: var(--font-bold); }
   .rich-text-editor__wrapper :global(hr) {
     border: none;

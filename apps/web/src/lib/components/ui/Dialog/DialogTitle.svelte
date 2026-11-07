@@ -14,7 +14,7 @@
   } = getContext<ReturnType<typeof createDialog>>('DIALOG');
 </script>
 
-<h2 use:melt={$title} class="dialog-title {className ?? ''}" {...restProps}>
+<h2 use:melt={$title} class={['dialog-title', className]} {...restProps}>
   {@render children()}
 </h2>
 

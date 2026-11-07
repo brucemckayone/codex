@@ -291,7 +291,7 @@
   .drop-text {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     margin: 0;
     text-align: center;
   }

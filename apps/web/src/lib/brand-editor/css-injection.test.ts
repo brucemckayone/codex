@@ -1,11 +1,18 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  applyLayoutBrandInputs,
+  clearBrandVars,
+  clearTokenOverrides,
   darkTokenOverridesToCssVars,
+  endFontPreview,
   injectBrandVars,
   previewFont,
-  revertFontPreview,
   tokenOverridesToCssVars,
 } from './css-injection';
+import { groundLuminance } from './ground';
 import type { BrandEditorState } from './types';
 
 /**
@@ -271,15 +278,351 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
     );
   });
 
-  it('revertFontPreview restores a bare family name', () => {
+  // Codex-q01h8: a preview puts back what it found, never the picker's value.
+  it('endFontPreview puts back the family the layout had, after several hovers', () => {
     const el = makeOrgLayout();
-    revertFontPreview('heading', 'Space Grotesk');
+    el.style.setProperty('--brand-font-heading', "'Lobster'");
+    previewFont('heading', 'Space Grotesk');
+    previewFont('heading', 'Syne');
+    endFontPreview('heading');
 
-    expect(el.style.getPropertyValue('--brand-font-heading')).toBe(
-      "'Space Grotesk', 'Space Grotesk-fallback'"
+    expect(el.style.getPropertyValue('--brand-font-heading')).toBe("'Lobster'");
+  });
+
+  it('endFontPreview removes a preview the layout had no family under', () => {
+    const el = makeOrgLayout();
+    previewFont('body', 'Syne');
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe('');
+  });
+
+  it('endFontPreview with no preview leaves the layout font alone', () => {
+    const el = makeOrgLayout();
+    el.style.setProperty('--brand-font-body', "'Lobster'");
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Lobster'");
+  });
+
+  it('endFontPreview keeps a family written since the preview, e.g. the pick', () => {
+    const el = makeOrgLayout();
+    el.style.setProperty('--brand-font-body', "'Lobster'");
+    previewFont('body', 'Syne');
+    el.style.setProperty('--brand-font-body', "'Pacifico'");
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Pacifico'");
+  });
+
+  it('endFontPreview keeps a family written between two hovers', () => {
+    const el = makeOrgLayout();
+    el.style.setProperty('--brand-font-body', "'Lobster'");
+    previewFont('body', 'Syne');
+    el.style.setProperty('--brand-font-body', "'Pacifico'");
+    previewFont('body', 'Space Grotesk');
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Pacifico'");
+  });
+});
+
+/**
+ * The org layout binds its brand inputs with `style:`, which Svelte re-sets
+ * only when a value changes, and clears the token overrides right after
+ * hydration. An input the clear removes stays gone until reload: the ground
+ * numbers did, so every org page nudged against the platform's (Codex-mik4h).
+ */
+describe('the token overrides and the preview keep what the org layout binds', () => {
+  const previewState: BrandEditorState = {
+    primaryColor: '#3355ff',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  function orgLayout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    el.style.setProperty('--brand-shader-logo-url', 'url(logo.svg)');
+    document.body.appendChild(el);
+    return el;
+  }
+
+  const layout = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../routes/_org/[slug]/+layout.svelte'
+    ),
+    'utf8'
+  );
+  const bound = [...layout.matchAll(/style:(--[\w-]+)=/g)].map(
+    ([, prop]) => prop
+  );
+
+  it('keeps every bound input, the ground numbers among them, and clears the overrides', () => {
+    expect(bound).toEqual(
+      expect.arrayContaining([
+        '--brand-bg',
+        '--brand-bg-dark',
+        '--brand-ground-y',
+        '--brand-ground-dark-y',
+        '--brand-shader-logo-url',
+      ])
     );
-    expect(el.style.getPropertyValue('--brand-font-heading')).not.toContain(
-      'var(--font-sans)'
+    const el = document.createElement('div');
+    for (const prop of bound) el.style.setProperty(prop, '1');
+    el.style.setProperty('--color-interactive', '#2563eb');
+    el.style.setProperty('--brand-glass-tint', '#abc');
+
+    clearTokenOverrides(el);
+
+    expect(bound.filter((prop) => !el.style.getPropertyValue(prop))).toEqual(
+      []
+    );
+    expect(el.style.getPropertyValue('--color-interactive')).toBe('');
+    expect(el.style.getPropertyValue('--brand-glass-tint')).toBe('');
+  });
+
+  // Codex-q01h8: the preview's sweep, and a light override, wrote them too.
+  it('injectBrandVars keeps the logo, which it never writes', () => {
+    const el = orgLayout();
+    injectBrandVars(previewState);
+
+    expect(el.style.getPropertyValue('--brand-shader-logo-url')).toBe(
+      'url(logo.svg)'
+    );
+  });
+
+  it('a light override writes no bound input, while other keys still emit', () => {
+    const overrides = Object.fromEntries(
+      bound.map((prop) => [prop.replace(/^--brand-/, ''), 'override'])
+    );
+    const emitted = tokenOverridesToCssVars({
+      ...overrides,
+      'shadow-scale': '2',
+    });
+
+    expect(bound.filter((prop) => prop in emitted)).toEqual([]);
+    expect(emitted['--brand-shadow-scale']).toBe('2');
+  });
+
+  it('nor does one in the preview: the field and the layout keep theirs', () => {
+    const el = orgLayout();
+    injectBrandVars({
+      ...previewState,
+      fontBody: 'Lobster',
+      tokenOverrides: {
+        'font-body': 'Pacifico',
+        'shader-logo-url': 'url(other.svg)',
+      },
+    });
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toContain('Lobster');
+    expect(el.style.getPropertyValue('--brand-shader-logo-url')).toBe(
+      'url(logo.svg)'
+    );
+  });
+});
+
+// Codex-q01h8: leaving the brand studio stripped the org layout's brand vars
+// until a reload. Svelte re-sets a `style:` directive only when its value
+// changes, so the layout writes its inputs back itself when the editor closes.
+describe('applyLayoutBrandInputs writes the layout back after the editor', () => {
+  const saved: BrandEditorState = {
+    primaryColor: '#2563EB',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+  // What the layout binds for an org with a background and no fine-tune
+  // overrides: the case that lost its brand.
+  const inputs = {
+    '--brand-color': '#2563EB',
+    '--brand-bg': '#F5F0E8',
+    '--brand-density': '1',
+    '--brand-radius': '0.5rem',
+    '--brand-secondary': undefined,
+  };
+  const attributes = { 'data-org-brand': true, 'data-org-bg': true };
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  function renderedLayout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    for (const [prop, value] of Object.entries(inputs)) {
+      if (value !== undefined) el.style.setProperty(prop, value);
+    }
+    el.setAttribute('data-org-brand', '');
+    el.setAttribute('data-org-bg', '');
+    document.body.appendChild(el);
+    return el;
+  }
+
+  it('restores every input and attribute the preview and the close took away', () => {
+    const el = renderedLayout();
+    // A preview with a background the nudge cannot measure drops data-org-bg.
+    injectBrandVars({
+      ...saved,
+      backgroundColor: 'rgb(30 30 46)',
+      secondaryColor: '#123456',
+    });
+    expect(el.hasAttribute('data-org-bg')).toBe(false);
+    clearBrandVars();
+    expect(el.style.getPropertyValue('--brand-color')).toBe('');
+    expect(el.style.getPropertyValue('--brand-radius')).toBe('');
+
+    applyLayoutBrandInputs(el, inputs, attributes);
+
+    expect(el.style.getPropertyValue('--brand-color')).toBe('#2563EB');
+    expect(el.style.getPropertyValue('--brand-bg')).toBe('#F5F0E8');
+    expect(el.style.getPropertyValue('--brand-density')).toBe('1');
+    expect(el.style.getPropertyValue('--brand-radius')).toBe('0.5rem');
+    expect(el.hasAttribute('data-org-brand')).toBe(true);
+    expect(el.hasAttribute('data-org-bg')).toBe(true);
+  });
+
+  it('removes an input the layout no longer binds, and an attribute it turns off', () => {
+    const el = renderedLayout();
+    el.style.setProperty('--brand-secondary', '#123456');
+
+    applyLayoutBrandInputs(el, inputs, { ...attributes, 'data-org-bg': false });
+
+    expect(el.style.getPropertyValue('--brand-secondary')).toBe('');
+    expect(el.hasAttribute('data-org-bg')).toBe(false);
+  });
+});
+
+// Owner, Codex-mik4h: "Ignore it, like On Brand". The editor paints only a
+// background the nudge can measure, as the layouts do.
+describe('injectBrandVars paints only a background it can measure', () => {
+  const state: BrandEditorState = {
+    primaryColor: '#3355ff',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  function layout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  it('ignores a light background in a form it cannot measure', () => {
+    const el = layout();
+    injectBrandVars({ ...state, backgroundColor: 'rgb(30 30 46)' });
+
+    expect(el.hasAttribute('data-org-bg')).toBe(false);
+    expect(el.style.getPropertyValue('--brand-bg')).toBe('');
+    expect(el.style.getPropertyValue('--brand-ground-y')).toBe('');
+    expect(el.style.getPropertyValue('--brand-color')).toBe('#3355ff');
+  });
+
+  it('drops a dark background it cannot measure, so dark reads the light one', () => {
+    const el = layout();
+    injectBrandVars({
+      ...state,
+      backgroundColor: '#ffffff',
+      darkOverrides: { backgroundColor: 'rgb(20 20 20)' },
+    });
+
+    expect(el.hasAttribute('data-org-bg')).toBe(true);
+    expect(el.style.getPropertyValue('--brand-bg')).toBe('#ffffff');
+    expect(el.style.getPropertyValue('--brand-bg-dark')).toBe('');
+    // In dark, white binds at the sticky glass over dark content (ground.test.ts).
+    expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe(
+      groundLuminance('#ffffff', 'dark')
+    );
+  });
+
+  // Owner, Codex-mik4h: "Same rule as backgrounds". A dark brand colour the
+  // chip bound cannot hold is not painted, so dark reads the light brand.
+  it('drops a dark brand colour that is not a hex, so dark reads the light one', () => {
+    const el = layout();
+    injectBrandVars({
+      ...state,
+      darkOverrides: {
+        primaryColor: 'oklch(0.6 0.4 0)',
+        secondaryColor: 'color(display-p3 1 0 0.4)',
+        accentColor: ' #aabbcc ',
+      },
+    });
+
+    expect(el.style.getPropertyValue('--brand-color-dark')).toBe('');
+    expect(el.style.getPropertyValue('--brand-secondary-dark')).toBe('');
+    expect(el.style.getPropertyValue('--brand-accent-dark')).toBe('#aabbcc');
+  });
+});
+
+describe('injectBrandVars paints the canonical hex', () => {
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  it('trims a padded background and measures the ground from what it paints', () => {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    document.body.appendChild(el);
+    injectBrandVars({
+      primaryColor: '#3355ff',
+      secondaryColor: null,
+      accentColor: null,
+      backgroundColor: '#ffffff',
+      fontBody: null,
+      fontHeading: null,
+      radius: 0.5,
+      density: 1,
+      logoUrl: null,
+      tokenOverrides: {},
+      darkOverrides: { backgroundColor: ' #000000 ' },
+      darkTokenOverrides: null,
+      heroLayout: 'default',
+    });
+
+    expect(el.style.getPropertyValue('--brand-bg-dark')).toBe('#000000');
+    // Measured from the trimmed black, not borrowed from the light white.
+    expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe(
+      groundLuminance('#000000', 'dark')
     );
   });
 });

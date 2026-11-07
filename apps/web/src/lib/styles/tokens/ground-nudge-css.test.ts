@@ -1,0 +1,212 @@
+// @vitest-environment node
+/**
+ * org-brand.css nudges links and focus colours against the hardest ground
+ * they sit on (Codex-mik4h). The fragments are generated here, from the same floors the
+ * brand studio's pill reports with (`ground-nudge.ts`); the test fails if the
+ * stylesheet's text drifts from them, so the page and the pill cannot
+ * disagree about what was moved.
+ */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, test } from 'vitest';
+import { PLATFORM_GROUND_LUMINANCE } from '$lib/brand-editor/ground';
+import { LINK_FLOOR, MARK_FLOOR } from '$lib/brand-editor/ground-nudge';
+import { TEXT_ON_BRAND_LUMINANCE_PIVOT } from '$lib/brand-editor/ink';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const ORG_BRAND = readFileSync(join(here, 'org-brand.css'), 'utf8');
+const GUARD =
+  '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))';
+const GUARDED = ORG_BRAND.slice(ORG_BRAND.indexOf(GUARD));
+const count = (css: string, text: string) => css.split(text).length - 1;
+
+/**
+ * One family of fragments: the colour in `rgb(from COLOUR …)`, moved in
+ * linear light to the family's target luminance `--_X-t` on the ground
+ * `--_gy`. Darkened (`-dk`, a scale down) on a light ground, lightened on a
+ * dark one (`-s` scales up, each channel capped at 1; `-k` mixes toward white
+ * for what the cap left short); `--_gw` picks the side. ground-nudge.ts does
+ * the same arithmetic. `ground` names the ground and side properties: the
+ * org's, or a scoped kit preview's own (schemes.css).
+ */
+function nudgeFragments(
+  x: string,
+  floor: number,
+  ground = { y: '--_gy', w: '--_gw' }
+): string[] {
+  const lin = (c: string) => `var(--_lin-${c})`;
+  const t = `var(--_${x}-t)`;
+  const gy = `var(${ground.y})`;
+  const gw = `var(${ground.w})`;
+  return [
+    `--_${x}-t: calc(${gw} * min(1, ${floor} * (${gy} + 0.05) - 0.05) + (1 - ${gw}) * max(0, (${gy} + 0.05) / ${floor} - 0.05));`,
+    `--_${x}-dk: min(1, ${t} / max(var(--_lum), 1e-6));`,
+    `--_${x}-s: max(1, ${t} / max(var(--_lum), 1e-6));`,
+    ...['r', 'g', 'b'].map(
+      (c) => `--_${x}-1${c}: min(1, ${lin(c)} * var(--_${x}-s));`
+    ),
+    `--_${x}-y1: (0.2126 * var(--_${x}-1r) + 0.7152 * var(--_${x}-1g) + 0.0722 * var(--_${x}-1b));`,
+    `--_${x}-k: max(0, (${t} - var(--_${x}-y1)) / max(1 - var(--_${x}-y1), 1e-6));`,
+    ...['r', 'g', 'b'].map(
+      (c) =>
+        `--_${x}-${c}: max(0, 255 * (1.055 * pow(${gw} * (var(--_${x}-1${c}) + var(--_${x}-k) * (1 - var(--_${x}-1${c}))) + (1 - ${gw}) * ${lin(c)} * var(--_${x}-dk), 1 / 2.4) - 0.055));`
+    ),
+  ];
+}
+
+const channels = (x: string) =>
+  `var(--_${x}-r) var(--_${x}-g) var(--_${x}-b));`;
+const NUDGED = [
+  `--color-link: rgb(from var(--color-interactive) ${channels('gl')}`,
+  `--color-link-hover: rgb(from var(--color-interactive-hover) ${channels('gl')}`,
+  `--color-link-active: rgb(from var(--color-interactive-active) ${channels('gl')}`,
+  `--color-brand-text: rgb(from var(--color-brand-primary) ${channels('gl')}`,
+  `--color-brand-text-hover: rgb(from var(--color-brand-primary-hover) ${channels('gl')}`,
+  `--color-focus: rgb(from var(--_focus-src) ${channels('gm')}`,
+  `--color-focus-ring: rgb(from var(--_focus-ring-src) ${channels('gm')}`,
+  `--color-border-focus: rgb(from var(--_focus-src) ${channels('gm')}`,
+];
+
+describe('the ground nudge org-brand.css paints', () => {
+  test('its fragments are the generated ones, at the pill’s floors, written once', () => {
+    for (const line of [
+      ...nudgeFragments('gl', LINK_FLOOR),
+      ...nudgeFragments('gm', MARK_FLOOR),
+    ]) {
+      expect(count(GUARDED, line), line).toBe(1);
+    }
+  });
+
+  test('the ground is the number the writers emit, else the platform’s, per theme', () => {
+    expect(
+      count(
+        GUARDED,
+        `--_gy: var(--brand-ground-y, ${PLATFORM_GROUND_LUMINANCE.light});`
+      )
+    ).toBe(1);
+    expect(
+      count(
+        GUARDED,
+        `--_gy: var(--brand-ground-dark-y, ${PLATFORM_GROUND_LUMINANCE.dark});`
+      )
+    ).toBe(1);
+    expect(
+      count(
+        GUARDED,
+        `--_gw: clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - var(--_gy)) * 1e12, 1);`
+      )
+    ).toBe(1);
+  });
+
+  test('links and focus colours are nudged in both themes', () => {
+    // The dark twin restates them: the dark fallbacks out-rank the light rule.
+    for (const declaration of NUDGED)
+      expect(count(GUARDED, declaration), declaration).toBe(2);
+  });
+
+  test('a fine-tune focus colour is an input to the nudge, in both themes', () => {
+    expect(count(ORG_BRAND, '--_focus-src: var(--brand-focus, ')).toBe(2);
+    expect(
+      count(ORG_BRAND, '--_focus-ring-src: var(--brand-focus-ring, ')
+    ).toBe(2);
+  });
+
+  test('outside the guard, links are the interactive colour and focus is its source', () => {
+    const fallback = ORG_BRAND.slice(0, ORG_BRAND.indexOf(GUARD));
+    expect(count(fallback, '--color-link: var(--color-interactive);')).toBe(1);
+    expect(
+      count(fallback, '--color-link-active: var(--color-interactive-active);')
+    ).toBe(1);
+    expect(
+      count(fallback, '--color-brand-text: var(--color-brand-primary);')
+    ).toBe(1);
+    expect(count(fallback, '--color-focus: var(--_focus-src);')).toBe(2);
+  });
+});
+
+// A scoped kit preview re-states the org's colours for the theme it previews,
+// and cannot inherit the nudge: its fragments substitute the ground where they
+// are declared, the viewer's. So schemes.css re-runs the focus nudge on the
+// preview, from these fragments, under names of its own (owner: "Preview
+// re-runs the nudge (Recommended)").
+const SCHEMES = readFileSync(
+  join(here, '../../page-builder/kit/styles/schemes.css'),
+  'utf8'
+).replace(/\/\*[\s\S]*?\*\//g, '');
+const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
+/** Every innermost rule as `{ selector, body }`, squashed. */
+const rulesOf = (css: string) =>
+  [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    selector: squash(m[1] ?? ''),
+    body: squash(m[2] ?? ''),
+  }));
+
+describe('the focus nudge a scoped kit preview re-runs (schemes.css)', () => {
+  const at = SCHEMES.indexOf(GUARD);
+  const exact = rulesOf(SCHEMES.slice(at));
+  const fallback = rulesOf(SCHEMES.slice(0, at));
+  // org-brand.css's focus sources: the light rule's first, the dark twin's next.
+  const [lightSource, darkSource] = [
+    ...ORG_BRAND.matchAll(/--_focus-src: (var\(--brand-focus, [^;]+);/g),
+  ].map((m) => m[1]);
+
+  test('its fragments are the generated ones, under the preview’s own names, written once', () => {
+    // Calibration: the guard is found, after the fallback it overrides.
+    expect(at).toBeGreaterThan(0);
+    const guarded = exact.map((r) => r.body).join(' ');
+    for (const line of [
+      `--_pvw: clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - var(--_pvy)) * 1e12, 1);`,
+      ...nudgeFragments('pvm', MARK_FLOOR, { y: '--_pvy', w: '--_pvw' }),
+    ])
+      expect(count(guarded, line), line).toBe(1);
+  });
+
+  test.each([
+    [
+      'dark',
+      `--_pvy: var(--brand-ground-dark-y, ${PLATFORM_GROUND_LUMINANCE.dark});`,
+      () => darkSource,
+    ],
+    [
+      'light',
+      `--_pvy: var(--brand-ground-y, ${PLATFORM_GROUND_LUMINANCE.light});`,
+      () => lightSource,
+    ],
+  ] as const)('a %s preview reads that theme’s ground and nudges the org’s focus source for it, on the fallback rule’s own selector', (_theme, ground, source) => {
+    expect(source()).toBeDefined();
+    const nudged = exact.filter((r) => r.body.includes(ground));
+    expect(nudged).toHaveLength(1);
+    expect(nudged[0]?.body).toContain(
+      `--_org-focus: rgb(from ${source()} ${channels('pvm')}`
+    );
+    // It overrides the fallback's re-statement, the org's focus source as is.
+    const overridden = fallback.filter(
+      (r) => r.selector === nudged[0]?.selector
+    );
+    expect(overridden).toHaveLength(1);
+    expect(overridden[0]?.body).toContain(`--_org-focus: ${source()};`);
+  });
+
+  test('the fragments sit on every preview either rule nudges: the union of the fallback’s two lists', () => {
+    // A preview missing from it leaves `--_pvm-*` undefined there, and its
+    // `--_org-focus` invalid at computed-value time: no brand focus at all.
+    const BRANDED = ':is([data-org-brand] .lp, [data-org-brand])';
+    /** The previews a fallback rule lists, from its `:is( … )` head. */
+    const previews = (source: string | undefined) => {
+      const rule = fallback.filter((r) =>
+        r.body.includes(`--_org-focus: ${source};`)
+      );
+      expect(rule).toHaveLength(1);
+      const selector = rule[0]?.selector ?? '';
+      expect(selector.startsWith(':is('), selector).toBe(true);
+      expect(selector.endsWith(`)${BRANDED}`), selector).toBe(true);
+      return selector.slice(':is('.length, -`)${BRANDED}`.length).trim();
+    };
+    const fragments = exact.filter((r) => r.body.includes('--_pvw:'));
+    expect(fragments).toHaveLength(1);
+    expect(fragments[0]?.selector).toBe(
+      `:is( ${previews(darkSource)}, ${previews(lightSource)} )${BRANDED}`
+    );
+  });
+});

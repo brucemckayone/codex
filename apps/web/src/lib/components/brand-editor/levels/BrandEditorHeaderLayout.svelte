@@ -371,7 +371,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-interactive);
+    color: var(--color-link);
     flex-shrink: 0;
     width: var(--space-4);
   }

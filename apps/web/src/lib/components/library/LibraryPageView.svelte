@@ -313,7 +313,7 @@
     align-items: center;
     padding: var(--space-2) var(--space-4);
     background-color: transparent;
-    color: var(--color-interactive);
+    color: var(--color-link);
     border: var(--border-width) var(--border-style) var(--color-interactive);
     border-radius: var(--radius-lg);
     font-weight: var(--font-medium);

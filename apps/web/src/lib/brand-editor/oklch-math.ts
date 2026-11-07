@@ -117,7 +117,7 @@ function srgbToOklch(r: number, g: number, b: number): OklchColor {
 // ── Hex conversion ────────────────────────────────────────────────────────
 
 /** Parse a hex color string to sRGB. Accepts #RGB, #RRGGBB. */
-function hexToSrgb(hex: string): SrgbColor | null {
+export function hexToSrgb(hex: string): SrgbColor | null {
   const clean = hex.replace(/^#/, '');
   if (clean.length === 3) {
     return {

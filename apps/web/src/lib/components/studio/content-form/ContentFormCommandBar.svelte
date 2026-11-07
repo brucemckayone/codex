@@ -173,7 +173,7 @@
     transition: var(--transition-colors);
   }
 
-  .breadcrumb:hover { color: var(--color-interactive); }
+  .breadcrumb:hover { color: var(--color-link); }
 
   .breadcrumb:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
@@ -263,7 +263,7 @@
   }
 
   .ready-chip[data-ready] {
-    color: var(--color-interactive);
+    color: var(--color-link);
     border-color: color-mix(in srgb, var(--color-interactive) 40%, transparent);
     background: color-mix(in srgb, var(--color-interactive) 6%, var(--color-surface));
   }

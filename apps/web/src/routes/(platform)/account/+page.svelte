@@ -124,13 +124,13 @@
     font-family: var(--font-heading);
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
     margin-bottom: var(--space-1);
   }
 
   .upgrade-content p {
     font-size: var(--text-sm);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
   }
 
   .danger-zone {

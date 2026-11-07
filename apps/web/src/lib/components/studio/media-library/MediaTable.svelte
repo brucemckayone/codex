@@ -258,7 +258,7 @@
   }
 
   .row-open:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .row-open:focus-visible {
@@ -300,7 +300,7 @@
 
   .row-thumb--ghost {
     background: color-mix(in srgb, var(--color-interactive-subtle) 60%, transparent);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .row-text {
@@ -331,7 +331,7 @@
   .ghost-progress {
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }

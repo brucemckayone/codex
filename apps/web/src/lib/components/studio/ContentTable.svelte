@@ -213,7 +213,7 @@
   }
 
   .title-link:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .title-link:focus-visible {
@@ -308,7 +308,7 @@
   .action-edit {
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-md);
@@ -318,7 +318,7 @@
 
   .action-edit:hover {
     background-color: var(--color-interactive-subtle);
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .action-edit:focus-visible {

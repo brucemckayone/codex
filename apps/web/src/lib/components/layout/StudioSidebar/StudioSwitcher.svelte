@@ -285,7 +285,7 @@
   }
 
   .studio-switcher-menu__item--accent {
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-weight: var(--font-medium);
   }
 

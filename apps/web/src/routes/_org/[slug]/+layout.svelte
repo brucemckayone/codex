@@ -27,13 +27,15 @@
   // Every brand face's own fallback, so a face on its way draws on its lines (Codex-61zsk.61).
   import '$lib/styles/tokens/font-fallbacks.css';
   import { withFallback } from '$lib/brand-editor/font-fallbacks';
-  import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
+  import { groundLuminanceVars, paintableColour } from '$lib/brand-editor/ground';
+  import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars, writeBackLayoutBrandInputs } from '$lib/brand-editor';
   import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
   import { followingStore } from '$lib/client/following.svelte';
   import { getFollowingStatus } from '$lib/remote/org.remote';
   import * as m from '$paraglide/messages';
+  import { themeState } from '$lib/theme.svelte';
 
   interface Props {
     data: LayoutData;
@@ -71,7 +73,8 @@
   const brandPrimary = $derived(data.org?.brandColors?.primary ?? undefined);
   const brandSecondary = $derived(data.org?.brandColors?.secondary ?? undefined);
   const brandAccent = $derived(data.org?.brandColors?.accent ?? undefined);
-  const brandBackground = $derived(data.org?.brandColors?.background ?? undefined);
+  // A background the nudge cannot measure is not painted (`paintableColour`).
+  const brandBackground = $derived(paintableColour(data.org?.brandColors?.background));
 
   // Dark-mode color overrides — parsed once from the JSON string stored in
   // branding_settings.dark_mode_overrides (Partial<ThemeColors> shape).
@@ -83,10 +86,18 @@
   const darkColorOverrides = $derived(
     parseDarkColorOverrides(data.org?.brandFineTune?.darkModeOverrides)
   );
-  const brandPrimaryDark = $derived(darkColorOverrides?.primaryColor ?? undefined);
-  const brandSecondaryDark = $derived(darkColorOverrides?.secondaryColor ?? undefined);
-  const brandAccentDark = $derived(darkColorOverrides?.accentColor ?? undefined);
-  const brandBackgroundDark = $derived(darkColorOverrides?.backgroundColor ?? undefined);
+  // Each painted only as a hex, like the light colours the API validates
+  // (`paintableColour`); any other form falls back to the light one.
+  const brandPrimaryDark = $derived(paintableColour(darkColorOverrides?.primaryColor));
+  const brandSecondaryDark = $derived(paintableColour(darkColorOverrides?.secondaryColor));
+  const brandAccentDark = $derived(paintableColour(darkColorOverrides?.accentColor));
+  const brandBackgroundDark = $derived(paintableColour(darkColorOverrides?.backgroundColor));
+  // The binding ground's luminance, the hardest surface painted from the
+  // background, which org-brand.css nudges links and focus colours against
+  // (Codex-mik4h).
+  const groundVars = $derived(
+    groundLuminanceVars({ background: brandBackground, backgroundDark: brandBackgroundDark })
+  );
 
   const brandFontBody = $derived(data.org?.brandFonts?.body ?? undefined);
   const brandFontHeading = $derived(data.org?.brandFonts?.heading ?? undefined);
@@ -116,6 +127,34 @@
     data.org ? { ...data.org, logoUrl: brandLogoUrl } : data.org
   );
   const hasBranding = $derived(!!brandPrimary);
+
+  // Every input this element binds with `style:`, and its two brand
+  // attributes, each in one place (Codex-q01h8). The markup renders them, and
+  // the write-back after the token overrides restores them whenever the brand
+  // editor is closed: its preview overwrote most of the properties and flipped
+  // the attributes, clearBrandVars then removed every property, and Svelte
+  // re-sets one only when its own value changes.
+  const brandInputVars = $derived({
+    '--brand-color': brandPrimary,
+    '--brand-secondary': brandSecondary,
+    '--brand-accent': brandAccent,
+    '--brand-bg': brandBackground,
+    '--brand-color-dark': brandPrimaryDark,
+    '--brand-secondary-dark': brandSecondaryDark,
+    '--brand-accent-dark': brandAccentDark,
+    '--brand-bg-dark': brandBackgroundDark,
+    '--brand-ground-y': groundVars['--brand-ground-y'],
+    '--brand-ground-dark-y': groundVars['--brand-ground-dark-y'],
+    '--brand-density': brandDensity,
+    '--brand-radius': brandRadius,
+    '--brand-font-body': brandFontBody ? withFallback(brandFontBody, `'${brandFontBody}'`) : undefined,
+    '--brand-font-heading': brandFontHeading ? withFallback(brandFontHeading, `'${brandFontHeading}'`) : undefined,
+    '--brand-shader-logo-url': brandLogoUrl,
+  });
+  const brandInputAttributes = $derived({
+    'data-org-brand': hasBranding,
+    'data-org-bg': !!brandBackground,
+  });
 
   // Hero element visibility — reads from brand editor when open, server tokenOverrides otherwise.
   // Stored as tokenOverrides keys: 'hero-hide-stats', 'hero-hide-pills', etc.
@@ -240,6 +279,11 @@
     if (darkOverrides) injectDarkTokenOverrides(el, darkOverrides);
   });
 
+  // Write this element's brand inputs back whenever the brand editor is
+  // closed (Codex-q01h8, see brandInputVars). Otherwise it repeats what the
+  // markup already set.
+  writeBackLayoutBrandInputs(() => brandInputVars, () => brandInputAttributes);
+
   // Build Google Fonts URL from the brand's font families. An org that never
   // picked a font still RENDERS in the tokens' default, 'Inter' (typography.css),
   // so load it — otherwise every such org falls back to the one-weight
@@ -286,13 +330,17 @@
 
   // Sync org background to html element so scrollbar gutter area matches.
   // Without this, the scrollbar track shows the root light background on dark org brands.
-  // Tracks brandBackground (from server data) and brandEditor.pending?.backgroundColor
-  // (live editor changes) so it re-runs when either changes.
+  // Tracks brandBackground (from server data), brandEditor.pending?.backgroundColor
+  // (live editor changes), the theme (a toggle flips --color-background under the
+  // same brand) and the brand editor's preview theme (data-editing-theme on
+  // .org-layout flips it too) so it re-runs when any of them changes.
   $effect(() => {
     if (!browser) return;
-    // Track reactive deps: server brand bg + editor pending bg
+    // Track reactive deps: server brand bg + editor pending bg + theme + preview theme
     const serverBg = brandBackground;
     const editorBg = brandEditor.pending?.backgroundColor;
+    void themeState.theme;
+    void brandEditor.editingTheme;
     // Read the actual computed color after CSS derivation
     const layout = document.querySelector('.org-layout');
     if (!layout) return;
@@ -454,8 +502,8 @@
   class:org-layout--studio={isStudio}
   class:org-layout--kit-gallery={isKitGallery}
   class:org-layout--landing={isLanding}
-  data-org-brand={hasBranding ? '' : undefined}
-  data-org-bg={brandBackground ? '' : undefined}
+  data-org-brand={brandInputAttributes['data-org-brand'] ? '' : undefined}
+  data-org-bg={brandInputAttributes['data-org-bg'] ? '' : undefined}
   data-hero-layout={brandEditor.isOpen
     ? (brandEditor.pending?.heroLayout ?? 'default')
     : (data.org?.heroLayout ?? 'default')}
@@ -465,19 +513,21 @@
   data-hero-hide-logo={heroHideFlags.logo ? '' : undefined}
   data-hero-hide-title={heroHideFlags.title ? '' : undefined}
   data-hero-shader-active={hasShaderPreset ? '' : undefined}
-  style:--brand-color={brandPrimary}
-  style:--brand-secondary={brandSecondary}
-  style:--brand-accent={brandAccent}
-  style:--brand-bg={brandBackground}
-  style:--brand-color-dark={brandPrimaryDark}
-  style:--brand-secondary-dark={brandSecondaryDark}
-  style:--brand-accent-dark={brandAccentDark}
-  style:--brand-bg-dark={brandBackgroundDark}
-  style:--brand-density={brandDensity}
-  style:--brand-radius={brandRadius}
-  style:--brand-font-body={brandFontBody ? withFallback(brandFontBody, `'${brandFontBody}'`) : undefined}
-  style:--brand-font-heading={brandFontHeading ? withFallback(brandFontHeading, `'${brandFontHeading}'`) : undefined}
-  style:--brand-shader-logo-url={brandLogoUrl}
+  style:--brand-color={brandInputVars['--brand-color']}
+  style:--brand-secondary={brandInputVars['--brand-secondary']}
+  style:--brand-accent={brandInputVars['--brand-accent']}
+  style:--brand-bg={brandInputVars['--brand-bg']}
+  style:--brand-color-dark={brandInputVars['--brand-color-dark']}
+  style:--brand-secondary-dark={brandInputVars['--brand-secondary-dark']}
+  style:--brand-accent-dark={brandInputVars['--brand-accent-dark']}
+  style:--brand-bg-dark={brandInputVars['--brand-bg-dark']}
+  style:--brand-ground-y={brandInputVars['--brand-ground-y']}
+  style:--brand-ground-dark-y={brandInputVars['--brand-ground-dark-y']}
+  style:--brand-density={brandInputVars['--brand-density']}
+  style:--brand-radius={brandInputVars['--brand-radius']}
+  style:--brand-font-body={brandInputVars['--brand-font-body']}
+  style:--brand-font-heading={brandInputVars['--brand-font-heading']}
+  style:--brand-shader-logo-url={brandInputVars['--brand-shader-logo-url']}
   style={serverTokenOverrideStyle}
 >
   <!-- The page-load bar, mounted HERE so it inherits this element's brand remap

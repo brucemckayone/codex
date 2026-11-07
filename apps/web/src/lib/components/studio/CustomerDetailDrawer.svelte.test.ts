@@ -164,6 +164,33 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+// Melt points the panel's aria-labelledby at Dialog.Title's id: with no
+// Title, a loading or failed drawer was an unnamed dialog.
+describe('a name in every state', () => {
+  const name = () =>
+    clean(
+      document.getElementById(drawer()?.getAttribute('aria-labelledby') ?? '')
+    );
+
+  test('the drawer is named while the details load', () => {
+    getCustomerDetail.mockReturnValue(new Promise(() => {}));
+    mountDrawer();
+
+    expect(drawer()?.querySelector('.drawer-loading')).toBeTruthy();
+    expect(name()).toBe(m.studio_customers_drawer_title());
+  });
+
+  test('the drawer is named when the details failed to load', async () => {
+    getCustomerDetail.mockRejectedValue(new Error('load failed'));
+    mountDrawer();
+
+    await vi.waitFor(() =>
+      expect(drawer()?.querySelector('.drawer-error')).toBeTruthy()
+    );
+    expect(name()).toBe(m.studio_customers_drawer_title());
+  });
+});
+
 describe('loading', () => {
   test('asks for the grants as the drawer opens, before the details land', () => {
     const details = deferred<CustomerDetails>();
