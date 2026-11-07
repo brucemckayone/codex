@@ -17,6 +17,7 @@
   @prop {(open: boolean) => void} [onOpenChange] - Callback when open state changes
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import type { CustomerDetails } from '@codex/admin';
   import * as Dialog from '$lib/components/ui/Dialog';
   import { Button, Skeleton } from '$lib/components/ui';
@@ -32,6 +33,7 @@
     revokeCustomerGrant,
   } from '$lib/remote/admin.remote';
   import type { CustomerGrant } from '$lib/types';
+  import { survivingFocus } from '$lib/utils/surviving-focus';
   import GrantAccessDialog from './GrantAccessDialog.svelte';
 
   interface Props {
@@ -63,12 +65,36 @@
   let revokeTarget = $state.raw<CustomerGrant | null>(null);
   let revokeDialogOpen = $state(false);
   let revokeFailedId = $state<string | null>(null);
+  // The revoked grant's place among the live ones, set as the revoke lands.
+  // The confirm closes on the refreshed list, which has taken that grant's
+  // Revoke away, and focus fell to the drawer's first control at the top of
+  // its scroll (Codex-p10nx).
+  let revokedIndex = $state<number | null>(null);
 
+  /** The next live grant's Revoke, else the previous one's, else Grant access. */
+  function revokeFocus(): HTMLElement | null {
+    if (revokedIndex === null) return null;
+    return survivingFocus(
+      [...document.querySelectorAll('[data-grant-revoke]')],
+      revokedIndex,
+      document.querySelector('[data-grant-access]')
+    );
+  }
+
+  // Loads once per open, customer and org, and reads nothing else. Run
+  // tracked, the loads made this effect depend on the queries' own state
+  // (making or awaiting one reads its promise), so the grants refresh
+  // after a revoke re-ran it: the drawer fell back to its loading state at
+  // the top of its scroll, and the revoke's confirm was rebuilt
+  // mid-request, its focus gone and its buttons live again (Codex-p10nx).
   $effect(() => {
-    if (open && customerId) {
-      loadCustomer(customerId);
-      grantsQuery = getCustomerGrants({ customerId, organizationId: orgId });
-    }
+    if (!open || !customerId) return;
+    const id = customerId;
+    const organizationId = orgId;
+    untrack(() => {
+      loadCustomer(id);
+      grantsQuery = getCustomerGrants({ customerId: id, organizationId });
+    });
   });
 
   async function loadCustomer(id: string) {
@@ -116,6 +142,7 @@
   function askRevoke(grant: CustomerGrant) {
     revokeTarget = grant;
     revokeFailedId = null;
+    revokedIndex = null;
     revokeDialogOpen = true;
   }
 
@@ -135,6 +162,7 @@
       revokeFailedId = grant.id;
       return;
     }
+    revokedIndex = grants?.findIndex((g) => g.id === grant.id) ?? 0;
     await refreshGrants();
   }
 
@@ -374,6 +402,7 @@
                       class="grant-revoke"
                       aria-label={m.studio_customers_grants_revoke_label({ title: grant.contentTitle })}
                       onclick={() => askRevoke(grant)}
+                      data-grant-revoke
                     >
                       {m.studio_customers_grants_revoke()}
                     </Button>
@@ -390,7 +419,7 @@
         <Button variant="secondary" onclick={() => handleOpenChange(false)}>
           {m.common_cancel()}
         </Button>
-        <Button variant="primary" onclick={() => { grantDialogOpen = true; }}>
+        <Button variant="primary" onclick={() => { grantDialogOpen = true; }} data-grant-access>
           {m.studio_customers_drawer_grant_access()}
         </Button>
       </Dialog.Footer>
@@ -419,6 +448,7 @@
     variant="destructive"
     awaitConfirm
     onConfirm={confirmRevoke}
+    closeFocus={revokedIndex === null ? undefined : revokeFocus}
   />
 {/if}
 

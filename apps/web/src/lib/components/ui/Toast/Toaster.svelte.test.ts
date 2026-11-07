@@ -383,25 +383,30 @@ type CssNode = {
 // WebKit a dialog's scroll lock widens the viewport by the scrollbar, and
 // the toasts moved 15px right while it was open (Codex-vlphc review G4-U4).
 describe('Toaster · scroll lock', () => {
-  // Read with svelte's own parser, which drops the comments; every
-  // `right` of every `.toaster` rule counts, since the last one wins
-  // (review G5-C-N2).
+  // Read with svelte's own parser, which drops the comments. Every rule
+  // that names `.toaster` counts, in an at-rule too, and every property
+  // that sets its right edge: a later `right`, an `inset`, an
+  // `inset-inline` or `inset-inline-end`, or a `.toaster:not(...)` rule
+  // would win over the padded one (review G5-C-N2, c6).
   test('the toasts’ right edge adds the padding the scroll lock publishes', () => {
     const source = readFileSync(
       join(import.meta.dirname, 'Toaster.svelte'),
       'utf8'
     );
-    const rights: string[] = [];
-    const isToaster = (node: CssNode) =>
-      node.type === 'Rule' &&
-      typeof node.prelude === 'object' &&
-      source.slice(node.prelude.start, node.prelude.end).trim() === '.toaster';
+    const EDGE = ['right', 'inset', 'inset-inline', 'inset-inline-end'];
+    const edges: string[] = [];
     const visit = (nodes: CssNode[]) => {
       for (const node of nodes) {
-        if (isToaster(node))
+        const selector =
+          node.type === 'Rule' && typeof node.prelude === 'object'
+            ? source.slice(node.prelude.start, node.prelude.end).trim()
+            : '';
+        if (/\.toaster(?![\w-])/.test(selector))
           for (const d of node.block?.children ?? [])
-            if (d.type === 'Declaration' && d.property === 'right')
-              rights.push((d.value ?? '').replace(/\s+/g, ' ').trim());
+            if (d.type === 'Declaration' && EDGE.includes(d.property ?? ''))
+              edges.push(
+                `${selector} { ${d.property}: ${(d.value ?? '').replace(/\s+/g, ' ').trim()} }`
+              );
         visit(node.block?.children ?? []);
       }
     };
@@ -410,8 +415,8 @@ describe('Toaster · scroll lock', () => {
         []) as unknown as CssNode[]
     );
 
-    expect(rights).toEqual([
-      'calc(var(--space-4) + var(--scroll-lock-pad, 0px))',
+    expect(edges).toEqual([
+      '.toaster { right: calc(var(--space-4) + var(--scroll-lock-pad, 0px)) }',
     ]);
   });
 });

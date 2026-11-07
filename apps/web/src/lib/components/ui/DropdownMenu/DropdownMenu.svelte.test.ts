@@ -130,11 +130,15 @@ describe('DropdownMenu', () => {
     afterEach(() => {
       window.removeEventListener('focusin', record, true);
       visits.length = 0;
+      vi.restoreAllMocks();
     });
 
     // Window, capturing: focus-trap stops a stray focusin at the document.
-    function pressItem(testId: string) {
-      component = mount(DropdownMenuDialogHarness, { target: document.body });
+    function pressItem(testId: string, props: { forceVisible?: boolean } = {}) {
+      component = mount(DropdownMenuDialogHarness, {
+        target: document.body,
+        props,
+      });
       flushSync();
       window.addEventListener('focusin', record, true);
       document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.click();
@@ -171,6 +175,9 @@ describe('DropdownMenu', () => {
 
       expect(dialog?.contains(document.activeElement)).toBe(true);
       expect(visits).not.toContain(trigger());
+      // Pins openFocus (G4-U3), its one write to the stand-in. jsdom's
+      // focus() never scrolls, so a closeFocus regression fails `visits`
+      // above, not this (review c6).
       expect(scrollTop).toBe(0);
     });
 
@@ -184,17 +191,32 @@ describe('DropdownMenu', () => {
     // on it. Melt's roving answered a millisecond later by taking tabindex 0
     // from whatever had focus by then: the dialog's buttons (review c5).
     test('the pointer leaving the pressed item takes no tab stop from the dialog', async () => {
-      pressItem('opens-dialog');
+      // forceVisible, as in the app: the menu stays through its outro, inert,
+      // and a browser's focus() refuses an inert node. jsdom keeps Svelte's
+      // `inert` as a plain property and focuses anything, so here focus()
+      // refuses a node under one, as a browser does.
+      const focus = HTMLElement.prototype.focus;
+      const inert = (el: HTMLElement | null): boolean =>
+        !!el && (el.inert || inert(el.parentElement));
+      vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (
+        this: HTMLElement,
+        options?: FocusOptions
+      ) {
+        if (!inert(this)) focus.call(this, options);
+      });
+      pressItem('opens-dialog', { forceVisible: true });
       const item = document.querySelector('[data-testid="opens-dialog"]');
       item?.dispatchEvent(mouse('pointerleave'));
       await happens(() =>
         expect(panel()?.contains(document.activeElement)).toBe(true)
       );
       await lingers();
-      // The menu has closed: a pointer still over what is left of it.
+      // The menu has closed: a pointer still over what is left of it,
+      // which its outro keeps in the DOM.
       await happens(() =>
         expect(trigger()?.getAttribute('aria-expanded')).toBe('false')
       );
+      expect(item?.isConnected).toBe(true);
       item?.dispatchEvent(mouse('pointermove'));
       await lingers();
 
@@ -255,6 +277,34 @@ describe('DropdownMenu', () => {
       await happens(() =>
         expect(trigger()?.getAttribute('aria-expanded')).toBe('false')
       );
+    });
+
+    // The usual close in the app: focus on the item, where the menu's own
+    // focus trap keeps it. With forceVisible the leaving menu stays in the
+    // DOM, item focused, when closeFocus asks where focus is (review c6,
+    // Codex-q6qjb). The trap, live in jsdom, then pulls focus back onto
+    // the item, so the trigger's focus() is what is checked.
+    test('an item chosen by keyboard gives focus back to the trigger', async () => {
+      component = mount(DropdownMenuDialogHarness, {
+        target: document.body,
+        props: { forceVisible: true },
+      });
+      flushSync();
+      // Melt's own focus on open, a few timers later: into the menu.
+      await happens(() =>
+        expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull()
+      );
+      const item = document.querySelector<HTMLElement>('[data-testid="plain"]');
+      const button = trigger();
+      const focus =
+        button instanceof HTMLElement ? vi.spyOn(button, 'focus') : null;
+      item?.focus();
+      item?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+
+      await happens(() => expect(focus).toHaveBeenCalled());
+      expect(item?.isConnected).toBe(true);
     });
 
     test('an item that opens nothing gives focus back to the trigger', async () => {
@@ -363,6 +413,22 @@ describe('DropdownMenuContent', () => {
     expect(trigger).toBe(
       document.querySelector('[data-testid="dropdown-trigger"]')
     );
+  });
+
+  // The trigger's aria-controls, the close focus and a dialog's way back
+  // to the menu's button all find the menu by Melt's id (review c6).
+  test("keeps Melt's id whatever a page passes, so the trigger still names it", () => {
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true, contentAttrs: { id: 'page-id' } },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('[data-testid="dropdown-content"]');
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    expect(content?.id).not.toBe('page-id');
+    expect(content?.id).toBe(trigger?.getAttribute('aria-controls'));
   });
 
   test('is focusable via tabindex="-1"', () => {

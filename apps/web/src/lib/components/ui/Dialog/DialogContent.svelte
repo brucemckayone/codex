@@ -59,8 +59,9 @@
     on a 600px-tall screen still keeps the Footer in view. One that can't
     resolve (an undefined `var()`, or a token set on a page container,
     which the portal under <body> doesn't inherit) keeps the default.
-    Write vh for a viewport height: a dvh value has no fallback in Safari
-    < 15.4, Chrome < 108 or Firefox < 101, so there it drops the cap.
+    Write vh for a viewport height: a dvh, svh or lvh value has no fallback
+    in Safari < 15.4, Chrome < 108 or Firefox < 101, so there it drops the
+    cap.
   @prop {'modal' | 'lg'} [radius='modal'] - dialog only: the corner,
     `--radius-modal` or the smaller `--radius-lg`.
   @prop {'elevated' | 'base' | 'glass'} [surface] - the panel's fill.

@@ -91,6 +91,7 @@
   import { getOrgSettings } from '$lib/remote/org.remote';
   import { formatDate, formatPrice, formatSentenceDate } from '$lib/utils/format';
   import { randomUuid } from '$lib/utils/random-uuid';
+  import { survivingFocus } from '$lib/utils/surviving-focus';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
   import {
     type ConnectQueryState,
@@ -490,6 +491,25 @@
   let deleteDialogOpen = $state(false);
   let editingTier = $state<SubscriptionTier | null>(null);
   let deletingTier = $state<SubscriptionTier | null>(null);
+  // Set as a delete succeeds, before the dialog closes: the removed row's
+  // Delete can't take focus back, so the close sends it to what survives
+  // (Codex-p10nx). `at` is the row's place in the list.
+  let deletedTier = $state<{ id: string; at: number } | null>(null);
+
+  /** The next tier's Delete, else the previous one's, else Create, else the heading. */
+  function tierDeleteFocus(): HTMLElement | null {
+    if (!deletedTier) return null;
+    const removed = deletedTier;
+    const left = [
+      ...document.querySelectorAll<HTMLElement>('[data-tier-delete]'),
+    ].filter((el) => el.dataset.tierDelete !== removed.id);
+    return survivingFocus(
+      left,
+      removed.at,
+      document.querySelector('[data-tier-create]'),
+      document.querySelector('[data-tiers-heading]')
+    );
+  }
 
   // Tier form state
   let tierName = $state('');
@@ -987,6 +1007,7 @@
 
   function openDeleteTier(tier: SubscriptionTier) {
     deletingTier = tier;
+    deletedTier = null;
     deleteError = '';
     deleteChoice = null;
     deleteMoveTo = [];
@@ -1237,6 +1258,10 @@
     try {
       const result = await deleteTier({ orgId, tierId: deletingTier.id, choice });
       if (result.success) {
+        deletedTier = {
+          id: deletingTier.id,
+          at: tiers.findIndex((t) => t.id === deletingTier?.id),
+        };
         deleteDialogOpen = false;
         deletingTier = null;
         await invalidateAll();
@@ -1676,13 +1701,20 @@
     <Card.Header>
       <div class="card-header-row">
         <div>
-          <Card.Title level={3}>{m.monetisation_tiers_title()}</Card.Title>
+          <Card.Title level={3} tabindex={-1} data-tiers-heading>
+            {m.monetisation_tiers_title()}
+          </Card.Title>
           <Card.Description>{m.monetisation_tiers_description()}</Card.Description>
         </div>
         <!-- Hidden while the tiers failed to load: a "first" tier made over a
              list nobody has seen can be a duplicate. -->
         {#if !tiersFailed}
-          <Button onclick={openCreateTier} size="sm" disabled={dataLoading || !connectReady}>
+          <Button
+            onclick={openCreateTier}
+            size="sm"
+            disabled={dataLoading || !connectReady}
+            data-tier-create
+          >
             <PlusIcon size={14} />
             {m.monetisation_tiers_create()}
           </Button>
@@ -1844,6 +1876,7 @@
                   size="sm"
                   onclick={() => openDeleteTier(tier)}
                   aria-label={m.monetisation_tiers_delete_aria({ name: tier.name })}
+                  data-tier-delete={tier.id}
                 >
                   <TrashIcon size={14} />
                 </Button>
@@ -2106,7 +2139,10 @@
 </Dialog.Root>
 
 <!-- Delete Tier Dialog -->
-<Dialog.Root bind:open={deleteDialogOpen}>
+<Dialog.Root
+  bind:open={deleteDialogOpen}
+  closeFocus={deletedTier ? tierDeleteFocus : undefined}
+>
   <Dialog.Content size="sm">
     <Dialog.Header>
       <Dialog.Title>{m.monetisation_tiers_delete()}</Dialog.Title>

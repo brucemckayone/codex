@@ -2,21 +2,20 @@
 /**
  * The org layout copies its background onto <html> so the scrollbar's
  * gutter matches the page. A dialog's scroll lock keeps that gutter, and
- * Chromium paints it with <html>'s background. The copy re-ran only when
- * the brand or the editor's pending colour changed, never on a theme
- * toggle, which flips `--color-background` under the same brand: the strip
- * beside every dialog showed the previous theme (Codex-vlphc review G4-U5).
- * The brand editor's preview theme is a second writer: `data-editing-theme`
- * on .org-layout flips the same background (org-brand.css), and nothing the
- * effect read changed with it (review G5-C-L2).
+ * Chromium paints it with <html>'s background. A copy taken only when the
+ * layout's own state changed went stale under every writer that changes
+ * the background through the DOM instead: a theme toggle (Codex-vlphc
+ * review G4-U5), the brand editor's preview theme (G5-C-L2), and
+ * PreviewFrame stamping the preview's theme onto a framed page's <html>,
+ * where no state changes at all (review c6, Codex-q6qjb).
+ * `followLayoutBackground` watches those attributes itself; its own tests
+ * are in lib/utils/root-background.test.ts.
  *
  * A SOURCE test, the weaker instrument (this layout has no render harness):
- * the effect that writes <html>'s background reads `themeState.theme` and
- * `brandEditor.editingTheme`. The
- * paint was measured in Chromium with a classic scrollbar on a verbatim copy
- * of the effect: after a toggle to dark the strip stayed rgb(250, 250, 250)
- * without the read and turned rgb(23, 23, 23) with it. Read with svelte's own
- * parser, so a commented-out read is not a read.
+ * one $effect hands .org-layout to followLayoutBackground and re-runs on
+ * the brand and the editor's pending colour, and nothing else in the layout
+ * writes <html>'s background. Read with svelte's own parser, so a
+ * commented-out call is not a call.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,32 +54,40 @@ function chain(node: Node | undefined): string {
 
 describe("the org layout's <html> background", () => {
   const ast = parse(readFileSync(LAYOUT, 'utf8'), { modern: true });
-  const effects = [...walk(ast.instance?.content)].filter(
+  const nodes = [...walk(ast.instance?.content)];
+  const effects = nodes.filter(
     (n) => n.type === 'CallExpression' && chain(n.callee as Node) === '$effect'
   );
-  const writer = effects.find((effect) =>
+  const followers = effects.filter((effect) =>
     [...walk(effect)].some(
       (n) =>
-        n.type === 'AssignmentExpression' &&
-        chain(n.left as Node) ===
-          'document.documentElement.style.backgroundColor'
+        n.type === 'CallExpression' &&
+        chain(n.callee as Node) === 'followLayoutBackground'
     )
   );
 
-  it('is written by one $effect', () => {
-    expect(writer).toBeDefined();
+  it('is followed by one $effect, through followLayoutBackground', () => {
+    expect(followers).toHaveLength(1);
   });
 
   const reads = (member: string) =>
-    [...walk(writer)].some(
-      (n) => n.type === 'MemberExpression' && chain(n) === member
+    [...walk(followers[0])].some(
+      (n) =>
+        (n.type === 'MemberExpression' || n.type === 'Identifier') &&
+        chain(n) === member
     );
 
-  it('re-runs on a theme toggle: that effect reads themeState.theme', () => {
-    expect(reads('themeState.theme')).toBe(true);
+  it("re-runs on the brand and on the editor's pending colour", () => {
+    expect(reads('brandBackground')).toBe(true);
+    expect(reads('brandEditor.pending.backgroundColor')).toBe(true);
   });
 
-  it("re-runs on the brand editor's preview theme: it reads brandEditor.editingTheme", () => {
-    expect(reads('brandEditor.editingTheme')).toBe(true);
+  it('has no other writer in the layout', () => {
+    const writes = nodes.filter(
+      (n) =>
+        n.type === 'AssignmentExpression' &&
+        chain(n.left as Node).startsWith('document.documentElement.style')
+    );
+    expect(writes).toEqual([]);
   });
 });
