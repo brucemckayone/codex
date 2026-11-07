@@ -11,8 +11,9 @@
   A dark room over the page, a row with the film's name and a close button,
   and the film at 16:9 as large as the window allows. Escape, the close
   button or a click on the room outside the film dismiss it; Tab stays
-  inside, and focus goes back to what had it before it opened. When the film
-  ends, its poster returns with "Watch again".
+  inside, the page behind holds still, and focus goes back to what had it
+  before it opened. When the film ends, its poster returns with "Watch
+  again".
 
   The player's code loads on demand (`components/player/load-core.ts`).
   When it has loaded — a kit play button fetches it ahead — the theatre
@@ -41,6 +42,7 @@
   } from '$lib/components/player/load-core';
   import { RefreshCwIcon, XIcon } from '$lib/components/ui/Icon';
   import { getThumbnailSrcset, getThumbnailUrl } from '$lib/utils/image';
+  import { lockScroll } from '$lib/utils/scroll-lock';
   import * as m from '$paraglide/messages';
 
   interface CaptionTrack {
@@ -109,6 +111,14 @@
       dialogEl?.focus({ preventScroll: true });
     }
     return () => opener?.focus({ preventScroll: true });
+  });
+
+  // The page behind holds still while the theatre is open: a wheel or a
+  // swipe over the room scrolled it, unseen, under the film (Codex-vlphc.4).
+  // It is the app's one counted lock, which a dialog holds too.
+  $effect(() => {
+    if (!open) return;
+    return lockScroll();
   });
 
   // ── Click outside ──

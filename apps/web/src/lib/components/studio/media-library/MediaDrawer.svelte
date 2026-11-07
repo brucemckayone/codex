@@ -253,22 +253,26 @@
   navigation re-ran the sync, and the page spun (9.8 GB in Chrome).
 -->
 <Dialog.Root open={mediaId !== null} onOpenChange={(open) => !open && mediaId !== null && onClose()}>
-  <Dialog.Content class="media-drawer">
+  <Dialog.Content variant="drawer" sheet class="media-drawer">
     {#if failed && failed.id === mediaId}
       <Dialog.Header>
         <Dialog.Title>{m.media_drawer_failed_title()}</Dialog.Title>
       </Dialog.Header>
-      <p class="drawer-note">{failedCopy.text}</p>
-      {#if failedCopy.retry}
-        <Button variant="secondary" onclick={() => mediaId && load(mediaId)}>{m.media_library_retry()}</Button>
-      {/if}
+      <Dialog.Body>
+        <p class="drawer-note">{failedCopy.text}</p>
+        {#if failedCopy.retry}
+          <Button variant="secondary" onclick={() => mediaId && load(mediaId)}>{m.media_library_retry()}</Button>
+        {/if}
+      </Dialog.Body>
     {:else if !media || !view}
-      <div class="drawer-loading" aria-busy="true">
-        <Dialog.Title class="sr-only">{m.media_drawer_loading()}</Dialog.Title>
-        <Skeleton width="100%" height="12rem" />
-        <Skeleton width="70%" height="var(--text-xl)" />
-        <Skeleton width="100%" height="4rem" />
-      </div>
+      <Dialog.Body>
+        <div class="drawer-loading" aria-busy="true">
+          <Dialog.Title class="sr-only">{m.media_drawer_loading()}</Dialog.Title>
+          <Skeleton width="100%" height="12rem" />
+          <Skeleton width="70%" height="var(--text-xl)" />
+          <Skeleton width="100%" height="4rem" />
+        </div>
+      </Dialog.Body>
     {:else}
       <Dialog.Header>
         <!-- The title is the editable box; the dialog's name is the item's. -->
@@ -279,86 +283,54 @@
         </div>
       </Dialog.Header>
 
-      {#if playable}
-        {#key media.id}
-          <MediaPreviewPlayer
-            mediaId={media.id}
-            mediaType={media.mediaType === 'audio' ? 'audio' : 'video'}
-            title={media.title}
-            {poster}
-          />
-        {/key}
-      {:else if view.kind === 'failed' && view.canRetry}
-        <Button variant="secondary" loading={retrying} disabled={retrying} onclick={tryAgain}>
-          <RefreshCwIcon size={14} />
-          {m.media_tile_try_again()}
-        </Button>
-      {/if}
+      <!-- The sections lie straight in the drawer, which spaces and scrolls them. -->
+      <Dialog.Body>
+        {#if playable}
+          {#key media.id}
+            <MediaPreviewPlayer
+              mediaId={media.id}
+              mediaType={media.mediaType === 'audio' ? 'audio' : 'video'}
+              title={media.title}
+              {poster}
+            />
+          {/key}
+        {:else if view.kind === 'failed' && view.canRetry}
+          <Button variant="secondary" loading={retrying} disabled={retrying} onclick={tryAgain}>
+            <RefreshCwIcon size={14} />
+            {m.media_tile_try_again()}
+          </Button>
+        {/if}
 
-      {@render editor()}
+        {@render editor()}
 
-      {#if facts.length > 0}
-        <dl class="drawer-facts">
-          {#each facts as fact (fact.label)}
-            <div class="fact"><dt>{fact.label}</dt><dd>{fact.value}</dd></div>
-          {/each}
-        </dl>
-      {/if}
+        {#if facts.length > 0}
+          <dl class="drawer-facts">
+            {#each facts as fact (fact.label)}
+              <div class="fact"><dt>{fact.label}</dt><dd>{fact.value}</dd></div>
+            {/each}
+          </dl>
+        {/if}
 
-      {@render usedInSection(media.id)}
+        {@render usedInSection(media.id)}
 
-      <div class="drawer-actions">
-        <a
-          class="drawer-create"
-          href={newContentHref({ id: media.id, mediaType: media.mediaType === 'audio' ? 'audio' : 'video' })}
-        >
-          {m.media_tray_create_content()}
-        </a>
-        <Button variant="destructive" onclick={() => onDelete(media)}>
-          <TrashIcon size={14} />
-          {m.media_action_delete()}
-        </Button>
-      </div>
+        <div class="drawer-actions">
+          <a
+            class="drawer-create"
+            href={newContentHref({ id: media.id, mediaType: media.mediaType === 'audio' ? 'audio' : 'video' })}
+          >
+            {m.media_tray_create_content()}
+          </a>
+          <Button variant="destructive" onclick={() => onDelete(media)}>
+            <TrashIcon size={14} />
+            {m.media_action_delete()}
+          </Button>
+        </div>
+      </Dialog.Body>
     {/if}
   </Dialog.Content>
 </Dialog.Root>
 
 <style>
-  /* The Dialog primitive renders the panel: reached through its class. */
-  :global(.dialog-content.media-drawer) {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: auto;
-    width: 100%;
-    max-width: 32rem;
-    height: 100%;
-    max-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-    padding: var(--space-6);
-    overflow-y: auto;
-    border-radius: 0;
-    border: none;
-    border-left: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  /* Phone (M7b): a bottom sheet. */
-  @media (--below-sm) {
-    :global(.dialog-content.media-drawer) {
-      top: auto;
-      max-width: none;
-      height: auto;
-      max-height: 90vh;
-      padding: var(--space-5) var(--space-4);
-      border-left: none;
-      border-top: var(--border-width) var(--border-style) var(--color-border);
-      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    }
-  }
-
   .drawer-loading {
     display: flex;
     flex-direction: column;

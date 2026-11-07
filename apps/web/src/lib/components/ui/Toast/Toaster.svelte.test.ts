@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse } from 'svelte/compiler';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
   flushSync,
@@ -365,5 +368,50 @@ describe('Toaster · action', () => {
     const [plain, withAction] = entries();
     expect(plain.closeDelay).toBe(5000);
     expect(withAction.closeDelay).toBe(0);
+  });
+});
+
+type CssNode = {
+  type: string;
+  property?: string;
+  value?: string;
+  prelude?: { start: number; end: number } | string;
+  block?: { children: CssNode[] } | null;
+};
+
+// jsdom applies no component CSS, so the rule is read from the source. In
+// WebKit a dialog's scroll lock widens the viewport by the scrollbar, and
+// the toasts moved 15px right while it was open (Codex-vlphc review G4-U4).
+describe('Toaster · scroll lock', () => {
+  // Read with svelte's own parser, which drops the comments; every
+  // `right` of every `.toaster` rule counts, since the last one wins
+  // (review G5-C-N2).
+  test('the toasts’ right edge adds the padding the scroll lock publishes', () => {
+    const source = readFileSync(
+      join(import.meta.dirname, 'Toaster.svelte'),
+      'utf8'
+    );
+    const rights: string[] = [];
+    const isToaster = (node: CssNode) =>
+      node.type === 'Rule' &&
+      typeof node.prelude === 'object' &&
+      source.slice(node.prelude.start, node.prelude.end).trim() === '.toaster';
+    const visit = (nodes: CssNode[]) => {
+      for (const node of nodes) {
+        if (isToaster(node))
+          for (const d of node.block?.children ?? [])
+            if (d.type === 'Declaration' && d.property === 'right')
+              rights.push((d.value ?? '').replace(/\s+/g, ' ').trim());
+        visit(node.block?.children ?? []);
+      }
+    };
+    visit(
+      (parse(source, { modern: true }).css?.children ??
+        []) as unknown as CssNode[]
+    );
+
+    expect(rights).toEqual([
+      'calc(var(--space-4) + var(--scroll-lock-pad, 0px))',
+    ]);
   });
 });

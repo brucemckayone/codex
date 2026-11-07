@@ -7,6 +7,7 @@ import {
 } from '$tests/utils/component-test-utils.svelte';
 import DropdownMenu from './DropdownMenu.svelte';
 import DropdownMenuContent from './DropdownMenuContent.svelte';
+import DropdownMenuDialogHarness from './DropdownMenuDialogHarness.test.svelte';
 import DropdownMenuHarness from './DropdownMenuHarness.test.svelte';
 import DropdownMenuItem from './DropdownMenuItem.svelte';
 import DropdownMenuSeparator from './DropdownMenuSeparator.svelte';
@@ -74,10 +75,176 @@ describe('DropdownMenu', () => {
     expect(content?.getAttribute('role')).toBe('menu');
   });
 
+  // A guard against `preventScroll = true`, Melt's default, coming back.
+  // It cannot tell `false` from unset: Melt's effect reads an undefined
+  // preventScroll as falsy too (review G4-N4).
+  test('a menu never locks the page', () => {
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    expect(
+      document.querySelector('[data-testid="dropdown-content"]')
+    ).toBeTruthy();
+    expect(document.body.hasAttribute('data-melt-scroll-lock')).toBe(false);
+    expect(document.body.style.overflow).toBe('');
+  });
+
+  test('an item press closes the menu', async () => {
+    // closeOnItemClick at Melt's default. Left unset, it was set to
+    // undefined over that default, and no item press closed the menu: an
+    // item that opens a dialog left the menu open under it.
+    const onOpenChange = vi.fn();
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true, onOpenChange },
+    });
+    flushSync();
+
+    document.querySelector<HTMLElement>('[data-testid="item-1"]')?.click();
+
+    // Melt closes a millisecond later, so a form can submit first. Read
+    // the trigger, not the panel: whether the panel's outro ends under the
+    // stubbed animate() depends on which tests ran before this one.
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    await vi.waitFor(() =>
+      expect(trigger?.getAttribute('aria-expanded')).toBe('false')
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  // Melt's own close put focus back on the trigger, whatever had it by
+  // then. An item that opens a dialog had already handed focus to the
+  // dialog: the trigger, behind the overlay, took it, focus-trap pulled it
+  // back without preventScroll, and a Body-less panel scrolled down to its
+  // Footer again (Codex-vlphc review G5-C-L1).
+  describe('an item that opens a dialog', () => {
+    const visits: Element[] = [];
+    const record = (event: FocusEvent) => {
+      if (event.target instanceof Element) visits.push(event.target);
+    };
+
+    afterEach(() => {
+      window.removeEventListener('focusin', record, true);
+      visits.length = 0;
+    });
+
+    // Window, capturing: focus-trap stops a stray focusin at the document.
+    function pressItem(testId: string) {
+      component = mount(DropdownMenuDialogHarness, { target: document.body });
+      flushSync();
+      window.addEventListener('focusin', record, true);
+      document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.click();
+      flushSync();
+    }
+    const trigger = () => document.querySelector('[data-testid="trigger"]');
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+    test('leaves focus in the dialog: the trigger never takes it', async () => {
+      pressItem('opens-dialog');
+      // A panel that scrolls as a whole, scrolled down as focus-trap left it.
+      const panel = document.querySelector<HTMLElement>('.dialog-content');
+      let scrollTop = 166;
+      if (panel)
+        Object.defineProperty(panel, 'scrollTop', {
+          configurable: true,
+          get: () => scrollTop,
+          set: (value: number) => {
+            scrollTop = value;
+          },
+        });
+      await settle();
+
+      expect(panel?.contains(document.activeElement)).toBe(true);
+      expect(visits).not.toContain(trigger());
+      expect(scrollTop).toBe(0);
+    });
+
+    const mouse = (type: string) => {
+      const event = new MouseEvent(type);
+      Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+      return event;
+    };
+
+    // In Chromium the overlay covering the pressed item fires a pointerleave
+    // on it. Melt's roving answered a millisecond later by taking tabindex 0
+    // from whatever had focus by then: the dialog's buttons (review c5).
+    test('the pointer leaving the pressed item takes no tab stop from the dialog', async () => {
+      pressItem('opens-dialog');
+      const item = document.querySelector('[data-testid="opens-dialog"]');
+      item?.dispatchEvent(mouse('pointerleave'));
+      await settle();
+      // The menu has closed: a pointer still over what is left of it.
+      item?.dispatchEvent(mouse('pointermove'));
+      await settle();
+
+      const panel = document.querySelector('.dialog-content');
+      expect(
+        document.querySelector<HTMLElement>('[data-testid="cancel"]')?.tabIndex
+      ).toBe(0);
+      expect(panel?.contains(document.activeElement)).toBe(true);
+      // Nothing behind the dialog took focus, even for a moment.
+      expect(visits.filter((el) => el.closest('[role="menu"]'))).toEqual([]);
+    });
+
+    // Melt deferred it by a millisecond, which a dialog's render can stretch
+    // past the press: so it happens at once, and only while the menu is open.
+    test('the pointer moves focus through the menu at once', async () => {
+      component = mount(DropdownMenuDialogHarness, { target: document.body });
+      flushSync();
+      const item = document.querySelector<HTMLElement>('[data-testid="plain"]');
+
+      item?.dispatchEvent(mouse('pointermove'));
+      expect(document.activeElement).toBe(item);
+      expect(item?.tabIndex).toBe(0);
+
+      item?.dispatchEvent(mouse('pointerleave'));
+      expect(document.activeElement?.getAttribute('role')).toBe('menu');
+      expect(item?.tabIndex).toBe(-1);
+
+      // Closed before the unmount: a menu unmounted open closes late, in
+      // the next test.
+      item?.click();
+      await settle();
+    });
+
+    // A press that leaves the menu open: in the app, a menu reopened during
+    // its closing animation keeps its items, pressed one and all. A move
+    // onto the item shows nothing covers it, and its leave counts again.
+    test('a pressed item still open under the pointer gives focus back to the menu', async () => {
+      component = mount(DropdownMenuDialogHarness, {
+        target: document.body,
+        props: { closeOnItemClick: false },
+      });
+      flushSync();
+      const item = document.querySelector<HTMLElement>('[data-testid="plain"]');
+      item?.click();
+      await settle();
+
+      item?.dispatchEvent(mouse('pointermove'));
+      item?.dispatchEvent(mouse('pointerleave'));
+      expect(document.activeElement?.getAttribute('role')).toBe('menu');
+
+      // Closed before the unmount, as above.
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+      );
+      await settle();
+      expect(trigger()?.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    test('an item that opens nothing gives focus back to the trigger', async () => {
+      pressItem('plain');
+      await settle();
+
+      expect(document.activeElement).toBe(trigger());
+    });
+  });
+
   test('accepts an onOpenChange callback without throwing', () => {
-    // Full close-on-item-click behaviour needs Melt UI pointer event handling
-    // which JSDOM does not fully simulate. We verify callback wiring here and
-    // cover the end-to-end close flow in E2E tests.
     const onOpenChange = vi.fn();
     component = mount(DropdownMenuHarness, {
       target: document.body,
