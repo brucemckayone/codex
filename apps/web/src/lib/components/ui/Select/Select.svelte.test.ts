@@ -249,6 +249,25 @@ describe('Select', () => {
     expect(document.body.querySelector('.select-trigger')).toBeTruthy();
   });
 
+  // A guard against `preventScroll = true`, Melt's default, coming back: a
+  // select is a popup like a menu, and never locks the page (Codex-zkujt).
+  test('an open select never locks the page', async () => {
+    component = mount(Select, {
+      target: document.body,
+      props: { options: mockOptions },
+    });
+    flushSync();
+
+    document.body.querySelector<HTMLElement>('.select-trigger')?.click();
+    flushSync();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+
+    expect(document.body.querySelector('.select-content')).toBeTruthy();
+    expect(document.body.hasAttribute('data-melt-scroll-lock')).toBe(false);
+    expect(document.body.style.overflow).toBe('');
+  });
+
   test('handles empty options array', () => {
     component = mount(Select, {
       target: document.body,
