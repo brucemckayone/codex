@@ -25,21 +25,6 @@ import { describe, expect, it } from 'vitest';
 const STYLES = dirname(fileURLToPath(import.meta.url));
 const SRC = dirname(dirname(STYLES));
 
-/**
- * Borderless fields that pass today only because of where they are drawn,
- * not because they carry a cue that holds. Each draws its box's border in
- * --color-interactive, the brand's colour as picked: 4.93 to 5.75:1 on the
- * platform, but 1.47:1 on a pale yellow brand and 1.83:1 on a navy one on a
- * dark page. There the brand engine's halo, held to 3.06:1 against the
- * ground, carries the focus instead (3.67 to 3.85:1, measured in Chromium
- * and WebKit). Moving one to `data-field-box` means taking it off this list.
- */
-const INTERACTIVE_BORDER = new Set([
-  'lib/components/ui/FilterBar/FilterBar.svelte',
-  'lib/components/studio/content-list/ContentListCommandBar.svelte',
-  'lib/components/studio/media-library/MediaLibraryToolbar.svelte',
-]);
-
 /** Inputs that take no text, so draw no field. */
 const NOT_A_FIELD = new Set([
   'hidden',
@@ -434,15 +419,10 @@ describe('every borderless field keeps a focus cue that holds 3:1 (Codex-c5prp)'
   });
 
   it('no component draws a borderless field with only the halo', () => {
-    const left = found
-      .filter((f) => !INTERACTIVE_BORDER.has(f.file))
-      .flatMap((f) => uncued(f.source).map((field) => `${f.file}: ${field}`));
+    const left = found.flatMap((f) =>
+      uncued(f.source).map((field) => `${f.file}: ${field}`)
+    );
     expect(left).toEqual([]);
-  });
-
-  it('every field on the --color-interactive list is still drawn that way', () => {
-    for (const file of INTERACTIVE_BORDER)
-      expect(cues(file), file).toContain('none');
   });
 
   it('still reads every borderless field the census of 2026-11-07 found', () => {
@@ -465,14 +445,14 @@ describe('every borderless field keeps a focus cue that holds 3:1 (Codex-c5prp)'
       'box',
     ]);
     expect(cues('lib/components/ui/FilterBar/FilterBar.svelte')).toEqual([
-      'none',
+      'box',
     ]);
     expect(
       cues('lib/components/studio/content-list/ContentListCommandBar.svelte')
-    ).toEqual(['none']);
+    ).toEqual(['box']);
     expect(
       cues('lib/components/studio/media-library/MediaLibraryToolbar.svelte')
-    ).toEqual(['none']);
+    ).toEqual(['box']);
     expect(
       cues('lib/components/brand-editor/color-picker/ColorInput.svelte')
     ).toEqual(['own']);
