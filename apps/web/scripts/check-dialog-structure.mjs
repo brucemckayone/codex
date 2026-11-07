@@ -125,8 +125,12 @@
  *                  result in, nor a prop with no default or an empty one
  *                  (a wrapper's `label?: string`, `title = ''` or
  *                  `$bindable()`, which a parent may leave unset). A branch
- *                  its own test proves set names it (`label ? label :
- *                  m.x()`, `label.length ? label : 'Info'`), and so does a
+ *                  its own test proves set names it: `label ? label :`,
+ *                  `!!label ?`, `label.length ?` (and `!label ?`,
+ *                  `!label.length ?` for the other branch); and `label !==
+ *                  ''` / `!= ''` (`=== ''` / `== ''` for the other branch)
+ *                  only when label defaults to a string, since with no
+ *                  default it is undefined and `undefined !== ''`. So does a
  *                  pair that chooses under one test (`aria-labelledby={h ?
  *                  id : undefined} aria-label={h ? undefined : label}`). Its
  *                  Name type requires one, but CI type-checks no .svelte.
@@ -701,11 +705,11 @@ const worstName = (verdicts) =>
 
 /**
  * What a name expression names: 'named', 'none' (an undefined, null or ''
- * it can result in) or 'unproven' (a prop in `unsetProps`). A call or a
+ * it can result in) or 'unproven' (a prop in `props.unset`). A call or a
  * member (paraglide's `m.x()`) names it.
  */
-function judgeName(expr, unsetProps) {
-  const judge = (e) => judgeName(e, unsetProps);
+function judgeName(expr, props) {
+  const judge = (e) => judgeName(e, props);
   switch (expr?.type) {
     case 'Literal':
       return expr.value === null ||
@@ -714,7 +718,7 @@ function judgeName(expr, unsetProps) {
         : 'named';
     case 'Identifier':
       if (expr.name === 'undefined') return 'none';
-      return unsetProps.has(expr.name) ? 'unproven' : 'named';
+      return props.unset.has(expr.name) ? 'unproven' : 'named';
     case 'TemplateLiteral':
       if (expr.quasis.some((q) => (q.value.cooked ?? q.value.raw).trim()))
         return 'named';
@@ -724,9 +728,14 @@ function judgeName(expr, unsetProps) {
         : 'none';
     case 'ConditionalExpression': {
       // A branch its own test proves set names it: `label ? label : m.x()`.
+      // `label !== ''` proves it only when label can't be undefined or null.
       const proven = provenName(expr.test);
+      const proves =
+        proven !== null &&
+        (!proven.emptyTest || props.stringDefault.has(proven.name));
       const branch = (e, key) =>
-        proven?.branch === key &&
+        proves &&
+        proven.branch === key &&
         e.type === 'Identifier' &&
         e.name === proven.name
           ? 'named'
@@ -756,7 +765,9 @@ function judgeName(expr, unsetProps) {
 /**
  * The name a conditional's test proves non-empty, and in which branch:
  * `label`, `label.length`, `label !== ''` and `!!label` prove it in the
- * consequent; `!label` and `label === ''` in the alternate.
+ * consequent; `!label` and `label === ''` in the alternate. A `''`
+ * comparison is marked `emptyTest`: it proves only that label is not '',
+ * which judgeName counts as set only for a prop with a string default.
  */
 function provenName(test) {
   if (test.type === 'Identifier')
@@ -785,6 +796,7 @@ function provenName(test) {
       return {
         name: id.name,
         branch: test.operator.startsWith('!') ? 'consequent' : 'alternate',
+        emptyTest: true,
       };
     }
   }
@@ -792,7 +804,7 @@ function provenName(test) {
     const inner = provenName(test.argument);
     return (
       inner && {
-        name: inner.name,
+        ...inner,
         branch: inner.branch === 'consequent' ? 'alternate' : 'consequent',
       }
     );
@@ -800,8 +812,25 @@ function provenName(test) {
   return null;
 }
 
-function unsetPropNames(programs) {
-  const names = new Set();
+const NO_PROPS = { unset: new Set(), stringDefault: new Set() };
+
+/** A string literal or template, under any TS holder: what a prop is when it defaults to one. */
+const isStringLiteral = (e) =>
+  (e?.type === 'Literal' && typeof e.value === 'string') ||
+  e?.type === 'TemplateLiteral' ||
+  (TS_VALUE_HOLDERS.has(e?.type) && isStringLiteral(e.expression));
+
+/**
+ * The $props() names popover-name judges: `unset`, those a parent can leave
+ * undefined, null or '' (no default, an empty one, `$bindable()`); and
+ * `stringDefault`, those whose default is a string. Only those are '' and
+ * not undefined when the parent leaves them unset, so only for them does
+ * `x !== ''` prove x set (with no default, x is undefined, and
+ * `undefined !== ''`).
+ */
+function propNames(programs) {
+  const unset = new Set();
+  const stringDefault = new Set();
   walk(programs, (node) => {
     const init = node.type === 'VariableDeclarator' ? node.init : null;
     if (
@@ -813,7 +842,7 @@ function unsetPropNames(programs) {
     if (node.id.type !== 'ObjectPattern') return;
     for (const p of node.id.properties) {
       if (p.type !== 'Property') continue;
-      if (p.value.type === 'Identifier') names.add(p.value.name);
+      if (p.value.type === 'Identifier') unset.add(p.value.name);
       else if (
         p.value.type === 'AssignmentPattern' &&
         p.value.left.type === 'Identifier'
@@ -825,16 +854,17 @@ function unsetPropNames(programs) {
           right.callee.type === 'Identifier' &&
           right.callee.name === '$bindable';
         const fallback = bindable ? right.arguments[0] : right;
-        if (!fallback || judgeName(fallback, new Set()) === 'none')
-          names.add(p.value.left.name);
+        if (!fallback || judgeName(fallback, NO_PROPS) === 'none')
+          unset.add(p.value.left.name);
+        if (isStringLiteral(fallback)) stringDefault.add(p.value.left.name);
       }
     }
   });
-  return names;
+  return { unset, stringDefault };
 }
 
 /** What an aria-label / aria-labelledby value names: its text, or what its expressions judge. */
-function nameVerdict(attr, unsetProps) {
+function nameVerdict(attr, props) {
   const text = staticValue(attr);
   if (text !== null) return text.trim() ? 'named' : 'none';
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
@@ -842,7 +872,7 @@ function nameVerdict(attr, unsetProps) {
   return worstName(
     parts
       .filter((p) => p.type !== 'Text')
-      .map((p) => judgeName(p.expression, unsetProps))
+      .map((p) => judgeName(p.expression, props))
   );
 }
 
@@ -860,7 +890,7 @@ function nameVerdict(attr, unsetProps) {
  * name the panel when each branch has a name from one or the other. null
  * when they don't form such a pair.
  */
-function pairVerdict(names, unsetProps) {
+function pairVerdict(names, props) {
   if (names.length !== 2) return null;
   const choices = names.map((a) => {
     const parts = Array.isArray(a.value) ? a.value : [a.value];
@@ -879,10 +909,7 @@ function pairVerdict(names, unsetProps) {
   const best = (a, b) => (NAME_RANK[a] < NAME_RANK[b] ? a : b);
   return worstName(
     ['consequent', 'alternate'].map((key) =>
-      best(
-        judgeName(choices[0][key], unsetProps),
-        judgeName(choices[1][key], unsetProps)
-      )
+      best(judgeName(choices[0][key], props), judgeName(choices[1][key], props))
     )
   );
 }
@@ -917,7 +944,7 @@ function sameExpression(a, b) {
 }
 
 function checkPopoverNames(fragment, programs, popover, report) {
-  const unsetProps = unsetPropNames(programs);
+  const props = propNames(programs);
   walk(fragment, (node) => {
     if (!isPopoverContent(node, popover)) return;
     const names = node.attributes.filter(
@@ -926,8 +953,8 @@ function checkPopoverNames(fragment, programs, popover, report) {
         (a.name === 'aria-label' || a.name === 'aria-labelledby')
     );
     const verdicts = [
-      ...names.map((a) => nameVerdict(a, unsetProps)),
-      pairVerdict(names, unsetProps),
+      ...names.map((a) => nameVerdict(a, props)),
+      pairVerdict(names, props),
     ];
     if (verdicts.includes('named')) return;
     if (verdicts.includes('unproven')) {

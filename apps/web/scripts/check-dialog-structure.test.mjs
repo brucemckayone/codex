@@ -2668,6 +2668,12 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
 <Popover.Content aria-labelledby={wide ? 'h-id' : undefined} aria-label={title ? undefined : 'Info'}>w</Popover.Content>
 <Popover.Content aria-labelledby={wide ? 'h-id' : undefined} aria-label={wide ? undefined : undefined}>x</Popover.Content>
 <Popover.Content aria-label={title !== 'x' ? title : 'Info'}>y</Popover.Content>
+<Popover.Content aria-label={label !== '' ? label : 'Info'}>z1</Popover.Content>
+<Popover.Content aria-label={label != '' ? label : 'Info'}>z2</Popover.Content>
+<Popover.Content aria-label={label === '' ? 'Info' : label}>z3</Popover.Content>
+<Popover.Content aria-label={heading !== '' ? heading : 'Info'}>z4</Popover.Content>
+<Popover.Content aria-label={hint != '' ? hint : 'Info'}>z5</Popover.Content>
+<Popover.Content aria-label={!(label === '') ? label : 'Info'}>z6</Popover.Content>
 `
   );
 
@@ -2675,12 +2681,13 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
   // @16-18: an empty default is no name either (review c6, G6-G-L1).
   // @23-26: nor an empty template, or `$bindable()` (review c7, G7 NIT 5).
   // @27-29, @32: a test proves only its own name, in its own branch, and only against '' (review c7, G7 LOW 2).
+  // @33-38: and a '' test proves nothing of a prop with no default, or one of undefined or null (review fu-ci, LOW 1).
   // @30-31: a pair needs one test, and a name in each branch (review c7, G7 LOW 4).
   // @5-6: the alias rule, so a panel can't leave the tags popover-name reads.
   assert.deepEqual(summary(result), [
     ...[
       8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-      27, 28, 29, 30, 31, 32,
+      27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
     ].map((line) => `popover-name@${line}`),
     'alias@5',
     'alias@6',
@@ -2710,7 +2717,7 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
   import * as UI from '$lib/components/ui';
   import { m } from '$lib/paraglide/messages';
   import { defaultLabel } from '$lib/copy';
-  let { label = 'Details', copy, wide, title, empty = '', bound = $bindable('Info'), desc = m.media_uses_where_title(), named = defaultLabel() } = $props();
+  let { label = 'Details', copy, wide, title, empty = '', bound = $bindable('Info'), desc = m.media_uses_where_title(), named = defaultLabel(), blank = $bindable(''), tplBlank = \`\`, typedBlank = '' as string } = $props();
   let open = $state(true);
   const Btn = UI.Button;
 </script>
@@ -2739,6 +2746,9 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
 <Popover.Content aria-label={bound}>h13</Popover.Content>
 <Popover.Content aria-label={desc}>h14</Popover.Content>
 <Popover.Content aria-label={named}>h15</Popover.Content>
+<Popover.Content aria-label={blank !== '' ? blank : 'Info'}>h16</Popover.Content>
+<Popover.Content aria-label={tplBlank !== '' ? tplBlank : 'Info'}>h17</Popover.Content>
+<Popover.Content aria-label={typedBlank !== '' ? typedBlank : 'Info'}>h18</Popover.Content>
 <UI.Popover.Content aria-label="Pick">i</UI.Popover.Content>
 <UI.Button>j</UI.Button>
 <UI.Card.Content>j2</UI.Card.Content>
