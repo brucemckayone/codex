@@ -31,8 +31,9 @@ import { isIos } from '@melt-ui/svelte/internal/helpers';
  *
  * Every style is put back exactly at the last release. The lock keeps
  * Melt's `data-melt-scroll-lock` mark: a Melt builder that locks on its own
- * (a Select open inside a dialog) finds the page held and stacks nothing on
- * it, and a page Melt already holds is left as it is.
+ * (a component that builds its own Melt select with Melt's default lock)
+ * finds the page held and stacks nothing on it, and a page Melt already
+ * holds is left as it is.
  */
 const MARK = 'data-melt-scroll-lock';
 let holders = 0;

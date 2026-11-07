@@ -141,24 +141,35 @@ describe('DropdownMenu', () => {
       flushSync();
     }
     const trigger = () => document.querySelector('[data-testid="trigger"]');
-    const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+    const panel = () => document.querySelector('.dialog-content');
+    // Melt moves focus through chained sleep(1) timers, which a loaded
+    // machine stretches well past any fixed wait. What must HAPPEN is
+    // waited for; a fixed wait is only for what must NEVER happen, and
+    // starts once a positive anchor holds, not from the press.
+    const happens = (assertion: () => void) =>
+      vi.waitFor(assertion, { timeout: 2000 });
+    const lingers = () => new Promise((resolve) => setTimeout(resolve, 50));
 
     test('leaves focus in the dialog: the trigger never takes it', async () => {
       pressItem('opens-dialog');
       // A panel that scrolls as a whole, scrolled down as focus-trap left it.
-      const panel = document.querySelector<HTMLElement>('.dialog-content');
+      const dialog = document.querySelector<HTMLElement>('.dialog-content');
       let scrollTop = 166;
-      if (panel)
-        Object.defineProperty(panel, 'scrollTop', {
+      if (dialog)
+        Object.defineProperty(dialog, 'scrollTop', {
           configurable: true,
           get: () => scrollTop,
           set: (value: number) => {
             scrollTop = value;
           },
         });
-      await settle();
+      await happens(() => {
+        expect(dialog?.contains(document.activeElement)).toBe(true);
+        expect(scrollTop).toBe(0);
+      });
+      await lingers();
 
-      expect(panel?.contains(document.activeElement)).toBe(true);
+      expect(dialog?.contains(document.activeElement)).toBe(true);
       expect(visits).not.toContain(trigger());
       expect(scrollTop).toBe(0);
     });
@@ -176,16 +187,21 @@ describe('DropdownMenu', () => {
       pressItem('opens-dialog');
       const item = document.querySelector('[data-testid="opens-dialog"]');
       item?.dispatchEvent(mouse('pointerleave'));
-      await settle();
+      await happens(() =>
+        expect(panel()?.contains(document.activeElement)).toBe(true)
+      );
+      await lingers();
       // The menu has closed: a pointer still over what is left of it.
+      await happens(() =>
+        expect(trigger()?.getAttribute('aria-expanded')).toBe('false')
+      );
       item?.dispatchEvent(mouse('pointermove'));
-      await settle();
+      await lingers();
 
-      const panel = document.querySelector('.dialog-content');
       expect(
         document.querySelector<HTMLElement>('[data-testid="cancel"]')?.tabIndex
       ).toBe(0);
-      expect(panel?.contains(document.activeElement)).toBe(true);
+      expect(panel()?.contains(document.activeElement)).toBe(true);
       // Nothing behind the dialog took focus, even for a moment.
       expect(visits.filter((el) => el.closest('[role="menu"]'))).toEqual([]);
     });
@@ -208,7 +224,9 @@ describe('DropdownMenu', () => {
       // Closed before the unmount: a menu unmounted open closes late, in
       // the next test.
       item?.click();
-      await settle();
+      await happens(() =>
+        expect(trigger()?.getAttribute('aria-expanded')).toBe('false')
+      );
     });
 
     // A press that leaves the menu open: in the app, a menu reopened during
@@ -222,7 +240,9 @@ describe('DropdownMenu', () => {
       flushSync();
       const item = document.querySelector<HTMLElement>('[data-testid="plain"]');
       item?.click();
-      await settle();
+      // Left open: whatever the press set off in Melt has run by now.
+      await lingers();
+      expect(trigger()?.getAttribute('aria-expanded')).toBe('true');
 
       item?.dispatchEvent(mouse('pointermove'));
       item?.dispatchEvent(mouse('pointerleave'));
@@ -232,15 +252,15 @@ describe('DropdownMenu', () => {
       document.activeElement?.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
       );
-      await settle();
-      expect(trigger()?.getAttribute('aria-expanded')).toBe('false');
+      await happens(() =>
+        expect(trigger()?.getAttribute('aria-expanded')).toBe('false')
+      );
     });
 
     test('an item that opens nothing gives focus back to the trigger', async () => {
       pressItem('plain');
-      await settle();
 
-      expect(document.activeElement).toBe(trigger());
+      await happens(() => expect(document.activeElement).toBe(trigger()));
     });
   });
 
