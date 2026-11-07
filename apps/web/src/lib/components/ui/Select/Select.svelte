@@ -58,8 +58,9 @@
     forceVisible: true,
     portal: true, // Portal to body required for Storybook iframe rendering
     // A select is a popup, not a modal: it leaves the page free to scroll, as
-    // a menu and a popover do. Melt's default locks it, and that lock (on
-    // <body>) never held the page here, only narrowed it by the scrollbar.
+    // a menu and a popover do. Melt's default locks it: off iOS that lock
+    // (on <body>) never held the page here and only narrowed it by the
+    // scrollbar; on iOS it fixed <body>, which a popup should never do.
     preventScroll: false,
     defaultSelected: untrack(() => value ? { value, label: options.find(o => o.value === value)?.label ?? '' } : undefined),
     onSelectedChange: ({ next }) => {

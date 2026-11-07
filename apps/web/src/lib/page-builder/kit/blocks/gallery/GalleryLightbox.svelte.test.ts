@@ -6,6 +6,7 @@ import {
   describe,
   expect,
   it,
+  onTestFinished,
   vi,
 } from 'vitest';
 import { logger } from '$lib/observability';
@@ -607,6 +608,8 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       await render({ items: pictures(2) });
       press(tiles()[0]);
       const other = lockScroll();
+      // Let go however the test ends, or a failure leaves the page held.
+      onTestFinished(other);
 
       press(control(GALLERY_COPY.close));
       expect(dialog()).toBeNull();
