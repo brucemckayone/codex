@@ -9,18 +9,21 @@
     open?: boolean;
     defaultOpen?: boolean;
     onOpenChange?: (open: boolean) => void;
+    /** Attributes a page might pass to Content. */
+    contentAttrs?: Record<string, string>;
   }
 
   let {
     open = $bindable(false),
     defaultOpen = false,
     onOpenChange,
+    contentAttrs = {},
   }: Props = $props();
 </script>
 
 <DropdownMenu bind:open {defaultOpen} {onOpenChange} forceVisible={false}>
   <DropdownMenuTrigger data-testid="dropdown-trigger">Menu</DropdownMenuTrigger>
-  <DropdownMenuContent data-testid="dropdown-content">
+  <DropdownMenuContent data-testid="dropdown-content" {...contentAttrs}>
     <DropdownMenuItem data-testid="item-1">Item One</DropdownMenuItem>
     <DropdownMenuItem data-testid="item-2">Item Two</DropdownMenuItem>
     <DropdownMenuSeparator data-testid="separator" />

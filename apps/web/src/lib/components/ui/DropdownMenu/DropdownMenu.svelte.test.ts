@@ -415,6 +415,22 @@ describe('DropdownMenuContent', () => {
     );
   });
 
+  // The trigger's aria-controls, the close focus and a dialog's way back
+  // to the menu's button all find the menu by Melt's id (review c6).
+  test("keeps Melt's id whatever a page passes, so the trigger still names it", () => {
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true, contentAttrs: { id: 'page-id' } },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('[data-testid="dropdown-content"]');
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    expect(content?.id).not.toBe('page-id');
+    expect(content?.id).toBe(trigger?.getAttribute('aria-controls'));
+  });
+
   test('is focusable via tabindex="-1"', () => {
     component = mount(DropdownMenuHarness, {
       target: document.body,

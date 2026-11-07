@@ -11,8 +11,15 @@
 		class: className,
 		transitionConfig = { y: -5, duration: 150 },
 		...rest
-	}: { children?: Snippet; class?: string; transitionConfig?: FlyParams } & HTMLAttributes<HTMLDivElement> = $props();
+	}: { children?: Snippet; class?: string; transitionConfig?: FlyParams } & Omit<
+		HTMLAttributes<HTMLDivElement>,
+		'id'
+	> = $props();
 
+	// Melt's id stays, after the spread, whatever a page passes: the
+	// trigger's aria-controls, the menu's close focus (DropdownMenu.svelte)
+	// and a dialog's way back to the menu's button (Dialog.svelte's
+	// menuTrigger) all find the menu by it (Codex-vlphc review c6).
 	const {
 		elements: { menu },
 		states: { open }
@@ -35,6 +42,7 @@
 		class="dropdown-content {className ?? ''}"
 		transition:fly={motion}
 		{...rest}
+		id={$menu.id}
 	>
 		{@render children?.()}
 	</div>
