@@ -15,7 +15,13 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -47,7 +53,10 @@ function writeFixture(relPath, content) {
 function scanFixture() {
   return collectViolations({
     requiredRoots: [join(root, 'routes')],
-    optionalRoots: [join(root, 'lib/page-builder'), join(root, 'lib/brand-editor')],
+    optionalRoots: [
+      join(root, 'lib/page-builder'),
+      join(root, 'lib/brand-editor'),
+    ],
     // The banned DIRECTORIES must be fixture-relative, or a relative specifier
     // would resolve into the temp tree and be compared against the real repo's
     // editor paths — i.e. the relative-crossing cases would pass vacuously.
@@ -70,7 +79,10 @@ test('CATCHES a page-builder editor leak from the public lib renderer', () => {
   const { violations } = scanFixture();
   assert.equal(violations.length, 1);
   assert.match(violations[0].file, /lib\/page-builder\/render\.ts$/);
-  assert.match(violations[0].text, /\$lib\/components\/page-builder\/Editor\.svelte/);
+  assert.match(
+    violations[0].text,
+    /\$lib\/components\/page-builder\/Editor\.svelte/
+  );
 });
 
 test('CATCHES a brand-editor leak from the public brand store (rule applies within lib)', () => {
@@ -181,7 +193,11 @@ test('CATCHES a RELATIVE-path crossing into the editor (the IDE auto-import shap
   writeFixture('lib/components/page-builder/Editor.svelte', '<div></div>\n');
 
   const { violations } = scanFixture();
-  assert.equal(violations.length, 1, 'a relative specifier must be resolved, not pattern-matched');
+  assert.equal(
+    violations.length,
+    1,
+    'a relative specifier must be resolved, not pattern-matched'
+  );
   assert.match(violations[0].text, /\.\.\/\.\.\/components\/page-builder/);
 });
 
@@ -207,7 +223,10 @@ test('CATCHES `export … from` an editor UI — a re-export is a static depende
 });
 
 test('CATCHES `export * from` an editor UI', () => {
-  writeFixture('lib/page-builder/index.ts', "export * from '$lib/components/page-builder';\n");
+  writeFixture(
+    'lib/page-builder/index.ts',
+    "export * from '$lib/components/page-builder';\n"
+  );
   assert.equal(scanFixture().violations.length, 1);
 });
 
@@ -218,7 +237,7 @@ test('CATCHES a MULTI-LINE re-export of the editor', () => {
   // prettier produces once the clause is long enough.
   writeFixture(
     'lib/page-builder/index.ts',
-    'export {\n  Editor,\n  Panel,\n} from \'$lib/components/page-builder\';\n'
+    "export {\n  Editor,\n  Panel,\n} from '$lib/components/page-builder';\n"
   );
   const { violations } = scanFixture();
   assert.equal(violations.length, 1);
@@ -251,7 +270,11 @@ test('does NOT flag a relative import that resolves OUTSIDE the editor dirs', ()
   writeFixture('lib/page-builder/shared.ts', 'export const near = 2;\n');
   writeFixture('lib/components/page-builder/Editor.svelte', '<div></div>\n');
 
-  assert.deepEqual(scanFixture().violations, [], 'containment, not prefix matching');
+  assert.deepEqual(
+    scanFixture().violations,
+    [],
+    'containment, not prefix matching'
+  );
 });
 
 test('does NOT flag a DYNAMIC relative import of the editor (lazy chunk)', () => {
@@ -266,7 +289,7 @@ test('does NOT flag a DYNAMIC relative import of the editor (lazy chunk)', () =>
 
 test('tolerates an absent optional root (page-builder not built yet)', () => {
   // Only brand-editor exists; page-builder root is absent → skipped, no throw.
-  writeFixture('lib/brand-editor/index.ts', "export const ok = true;\n");
+  writeFixture('lib/brand-editor/index.ts', 'export const ok = true;\n');
 
   const { violations, filesScanned } = scanFixture();
   assert.equal(violations.length, 0);
@@ -302,8 +325,16 @@ test('RUNS when started through a symlink, rather than exiting 0 unchecked (Code
   // entry check skipped main() and exited 0 with no output. main() scans the
   // real tree, so either verdict is fine here: the point is that it ran.
   const link = join(root, 'linked-gate.mjs');
-  symlinkSync(fileURLToPath(new URL('./check-brand-editor-boundary.mjs', import.meta.url)), link);
+  symlinkSync(
+    fileURLToPath(
+      new URL('./check-brand-editor-boundary.mjs', import.meta.url)
+    ),
+    link
+  );
 
   const result = spawnSync(process.execPath, [link], { encoding: 'utf8' });
-  assert.match(`${result.stdout}${result.stderr}`, /OK: no static editor imports|violation\(s\)\. Public route\/lib files/);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /OK: no static editor imports|violation\(s\)\. Public route\/lib files/
+  );
 });

@@ -90,7 +90,10 @@ const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ROUTE_FILE_EXTENSIONS = new Set(['.svelte', '.ts', '.js']);
 
 // Editor UIs that must never be STATICALLY imported by public-bundle code.
-const BANNED_MODULES = ['$lib/components/brand-editor', '$lib/components/page-builder'];
+const BANNED_MODULES = [
+  '$lib/components/brand-editor',
+  '$lib/components/page-builder',
+];
 
 // The same two editor UIs as absolute DIRECTORIES, used to judge a RELATIVE
 // specifier after resolving it against the importing file. Path-based rather
@@ -106,7 +109,9 @@ const BANNED_DIRS = [
 const EXCLUDED_DIR_NAMES = new Set(['studio', 'node_modules']);
 
 // Public route surface — REQUIRED (a missing one is a misconfiguration).
-const REQUIRED_ROOTS = [fileURLToPath(new URL('../src/routes', import.meta.url))];
+const REQUIRED_ROOTS = [
+  fileURLToPath(new URL('../src/routes', import.meta.url)),
+];
 
 // Public `$lib` entry modules — OPTIONAL (scanned only when present; the
 // page-builder renderer is armed ahead of the Journeys build). See header.
@@ -231,7 +236,9 @@ export function collectViolations({
 
   for (const root of requiredRoots) {
     if (!existsSync(root)) {
-      throw new Error(`Import boundary gate: required scan root does not exist: ${root}`);
+      throw new Error(
+        `Import boundary gate: required scan root does not exist: ${root}`
+      );
     }
     scan(root);
   }
@@ -249,7 +256,9 @@ function main() {
   // path would otherwise pass silently (green with 0 files) — the exact class
   // of blind spot that let the routes-only scan miss lib leaks (HARDENING §B18).
   if (filesScanned === 0) {
-    console.error('Import boundary gate scanned 0 files — scan roots are misconfigured. Failing closed.');
+    console.error(
+      'Import boundary gate scanned 0 files — scan roots are misconfigured. Failing closed.'
+    );
     process.exit(1);
   }
 
@@ -282,7 +291,10 @@ function main() {
 function isEntrypoint() {
   if (!process.argv[1]) return false;
   try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+    return (
+      realpathSync(process.argv[1]) ===
+      realpathSync(fileURLToPath(import.meta.url))
+    );
   } catch {
     return false;
   }

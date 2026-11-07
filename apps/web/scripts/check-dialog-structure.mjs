@@ -225,19 +225,22 @@ export const ALLOWLIST = [
     file: 'src/lib/page-builder/kit/blocks/gallery/GalleryLightbox.svelte',
     rule: 'own-dialog',
     expect: 2,
-    reason: 'Permanent: a full-screen lightbox, a native modal that is correct as built (the model the immersive player follows)',
+    reason:
+      'Permanent: a full-screen lightbox, a native modal that is correct as built (the model the immersive player follows)',
   },
   {
     file: 'src/lib/components/AudioPlayer/ImmersiveShaderPlayer.svelte',
     rule: 'own-dialog',
     expect: 2,
-    reason: "Permanent: a full-screen player, outside the Dialog by the owner's decision",
+    reason:
+      "Permanent: a full-screen player, outside the Dialog by the owner's decision",
   },
   {
     file: 'src/lib/components/ui/IntroVideoModal/IntroVideoModal.svelte',
     rule: 'own-dialog',
     expect: 2,
-    reason: "Permanent: a full-screen video player, outside the Dialog by the owner's decision",
+    reason:
+      "Permanent: a full-screen video player, outside the Dialog by the owner's decision",
   },
 ];
 
@@ -257,7 +260,10 @@ const DIALOG_CLASSES = [
 ];
 // A class token, not a prefix: `.dialog-content` must not match inside
 // `.dialog-content-wrapper`, which is listed on its own.
-const DIALOG_CLASS_RE = new RegExp(`\\.(${DIALOG_CLASSES.join('|')})(?![\\w-])`, 'g');
+const DIALOG_CLASS_RE = new RegExp(
+  `\\.(${DIALOG_CLASSES.join('|')})(?![\\w-])`,
+  'g'
+);
 
 // The classes of the elements that draw the panel. A `[class*='-title']`
 // test (org-brand.css colours headings that way) reaches only Title, whose
@@ -277,7 +283,8 @@ const BOX_CLASSES = [
 // `data-variant`, `data-placement`, `data-radius` and `data-surface` are
 // common words (page-builder blocks, Button, floating UI, theme tokens), so
 // only the Dialog's own values count for them.
-const valued = (name, values) => String.raw`${name}\s*[~|^$*]?=\s*['"]?(?:${values})(?![\w-])`;
+const valued = (name, values) =>
+  String.raw`${name}\s*[~|^$*]?=\s*['"]?(?:${values})(?![\w-])`;
 
 // The attributes that reach the Dialog's elements as its classes do: Melt's,
 // the dialog semantics, and the parts' own.
@@ -319,7 +326,8 @@ export const PART_DATA_ATTRS = new Set([
 ]);
 
 // What a page writes instead of restyling a part from outside.
-const CONTENT_PROPS = "Content's props (size, variant, placement, surface, radius, flush, maxWidth, maxHeight)";
+const CONTENT_PROPS =
+  "Content's props (size, variant, placement, surface, radius, flush, maxWidth, maxHeight)";
 const INSTEAD = `style your own element inside the part, or use ${CONTENT_PROPS}`;
 
 // The part's own prop, where one replaces what a page reached for.
@@ -329,7 +337,10 @@ const PART_PROPS = {
   Footer: 'Footer\'s align="end" | "between"',
 };
 // Each part data attribute's prop: a page sets the prop, the part the attribute.
-const DATA_ATTR_PROP = { 'data-direction': PART_PROPS.Toolbar, 'data-align': PART_PROPS.Footer };
+const DATA_ATTR_PROP = {
+  'data-direction': PART_PROPS.Toolbar,
+  'data-align': PART_PROPS.Footer,
+};
 
 // Another component's scoping class: `.svelte-1vhe744` is a part's own.
 const SVELTE_HASH_RE = /\.svelte-[a-z0-9]+(?![\w-])/;
@@ -337,7 +348,27 @@ const SVELTE_HASH_RE = /\.svelte-[a-z0-9]+(?![\w-])/;
 // The units and math functions Dialog.Content's CssLength type takes
 // (ui/Dialog/css-length.ts). A test pins that these lists equal the type's,
 // so the gate and svelte-check agree on which units a length may take.
-export const LENGTH_UNITS = ['px', 'rem', 'em', 'ch', '%', 'vw', 'vh', 'dvw', 'dvh', 'svw', 'svh', 'lvw', 'lvh', 'vmin', 'vmax', 'cqw', 'cqh', 'cqi', 'cqb'];
+export const LENGTH_UNITS = [
+  'px',
+  'rem',
+  'em',
+  'ch',
+  '%',
+  'vw',
+  'vh',
+  'dvw',
+  'dvh',
+  'svw',
+  'svh',
+  'lvw',
+  'lvh',
+  'vmin',
+  'vmax',
+  'cqw',
+  'cqh',
+  'cqi',
+  'cqb',
+];
 export const MATH_FUNCTIONS = ['calc', 'min', 'max', 'clamp'];
 
 // A CSS length for maxHeight / maxWidth, as CssLength spells one: a number
@@ -349,10 +380,12 @@ const CSS_LENGTH = new RegExp(
 
 // All a page may set on its own Dialog.Form class. Anything else could
 // decide whether the form passes the panel's column down to Body.
-const SPACING_PROP = /^(gap|row-gap|column-gap|padding(-[a-z]+)*|margin(-[a-z]+)*)$/;
+const SPACING_PROP =
+  /^(gap|row-gap|column-gap|padding(-[a-z]+)*|margin(-[a-z]+)*)$/;
 // And the values it may set them to: 0, the spacing tokens, or calc() of those.
 const SPACING_TOKEN = /^(?:0|var\(--space-[\w-]+\))$/;
-const SPACING_CALC = /^calc\((?:\s*(?:var\(--space-[\w-]+\)|-?\d*\.?\d+|[-+*/()])\s*)+\)$/;
+const SPACING_CALC =
+  /^calc\((?:\s*(?:var\(--space-[\w-]+\)|-?\d*\.?\d+|[-+*/()])\s*)+\)$/;
 // Two or more classes and nothing else: `.dialog-form` plus the page's own.
 const OWN_FORM_COMPOUND = /^(?:\.[\w-]+){2,}$/;
 
@@ -360,7 +393,14 @@ const OWN_FORM_COMPOUND = /^(?:\.[\w-]+){2,}$/;
 // page's own class on them either (part-class), take an inline style
 // (part-style) or a class this check can't read (part-dynamic). Title and
 // Description are text inside a part; their type is the page's choice.
-const BOX_PARTS = new Set(['Content', 'Header', 'Toolbar', 'Body', 'Footer', 'Form']);
+const BOX_PARTS = new Set([
+  'Content',
+  'Header',
+  'Toolbar',
+  'Body',
+  'Footer',
+  'Form',
+]);
 
 // Attribute names that land on a part's element as written, and so are a
 // handle a global rule can reach it through (part-class). The parts' own
@@ -382,7 +422,10 @@ const HTML_GLOBAL_ATTRS = new Set([
 
 /** The parts each container part may hold directly, and the rule's name. */
 const CHILD_RULES = {
-  Content: { rule: 'content-child', allowed: new Set(['Header', 'Toolbar', 'Body', 'Footer', 'Form']) },
+  Content: {
+    rule: 'content-child',
+    allowed: new Set(['Header', 'Toolbar', 'Body', 'Footer', 'Form']),
+  },
   Form: { rule: 'form-child', allowed: new Set(['Toolbar', 'Body', 'Footer']) },
 };
 
@@ -403,7 +446,16 @@ const PLACEMENT = {
 // Melt's builders for a modal of one's own (own-dialog).
 const MODAL_BUILDERS = new Set(['createDialog', 'createPopover']);
 
-const SCANNED_EXTS = ['.svelte', '.css', '.ts', '.js', '.mts', '.mjs', '.cts', '.cjs'];
+const SCANNED_EXTS = [
+  '.svelte',
+  '.css',
+  '.ts',
+  '.js',
+  '.mts',
+  '.mjs',
+  '.cts',
+  '.cjs',
+];
 
 // Tests are not shipped: what they import reaches no page.
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]s$/;
@@ -440,7 +492,8 @@ function walk(node, enter) {
     for (const item of node) walk(item, enter);
   } else if (node && typeof node.type === 'string' && enter(node) !== false) {
     for (const [key, value] of Object.entries(node)) {
-      if (key !== 'metadata' && value && typeof value === 'object') walk(value, enter);
+      if (key !== 'metadata' && value && typeof value === 'object')
+        walk(value, enter);
     }
   }
 }
@@ -463,7 +516,8 @@ function isInside(dir, candidate) {
 
 function lineOf(source, offset) {
   let line = 1;
-  for (let i = 0; i < offset && i < source.length; i++) if (source.charCodeAt(i) === 10) line++;
+  for (let i = 0; i < offset && i < source.length; i++)
+    if (source.charCodeAt(i) === 10) line++;
   return line;
 }
 
@@ -471,13 +525,18 @@ function lineOf(source, offset) {
 function readPartFiles(dialogDir) {
   const index = join(dialogDir, 'index.ts');
   if (!existsSync(index)) {
-    throw new Error(`Dialog structure gate: ${index} does not exist, so the Dialog parts are unknown.`);
+    throw new Error(
+      `Dialog structure gate: ${index} does not exist, so the Dialog parts are unknown.`
+    );
   }
   const parts = new Map();
-  for (const m of readFileSync(index, 'utf8').matchAll(/import\s+(\w+)\s+from\s+['"]\.\/(\w+)\.svelte['"]/g)) {
+  for (const m of readFileSync(index, 'utf8').matchAll(
+    /import\s+(\w+)\s+from\s+['"]\.\/(\w+)\.svelte['"]/g
+  )) {
     parts.set(m[2], m[1]);
   }
-  if (parts.size === 0) throw new Error(`Dialog structure gate: no parts found in ${index}.`);
+  if (parts.size === 0)
+    throw new Error(`Dialog structure gate: no parts found in ${index}.`);
   return parts;
 }
 
@@ -486,7 +545,8 @@ function specifierTarget(importer, spec, ctx) {
   // A trailing separator names the same directory: '…/ui/Dialog/' is the module.
   const clean = spec.replace(/\/+$/, '');
   let target;
-  if (clean === '$lib' || clean.startsWith('$lib/')) target = join(ctx.libRoot, clean.slice(4));
+  if (clean === '$lib' || clean.startsWith('$lib/'))
+    target = join(ctx.libRoot, clean.slice(4));
   else if (clean.startsWith('.')) target = resolve(dirname(importer), clean);
   else return null;
   return target.replace(/\/index(\.(ts|js))?$/, '').replace(/\.(ts|js)$/, '');
@@ -501,7 +561,9 @@ function resolveSpecifier(importer, spec, ctx) {
   if (!target) return null;
   if (target === ctx.dialogDir) return { module: true };
   if (dirname(target) === ctx.dialogDir && target.endsWith('.svelte')) {
-    const part = ctx.partFiles.get(target.slice(ctx.dialogDir.length + 1, -'.svelte'.length));
+    const part = ctx.partFiles.get(
+      target.slice(ctx.dialogDir.length + 1, -'.svelte'.length)
+    );
     return part ? { part } : null;
   }
   return null;
@@ -519,7 +581,10 @@ function bindImport(stmt, target, bindings) {
       bindings.set(s.local.name, { namespace: true });
     } else if (s.type === 'ImportSpecifier' && target.module) {
       bindings.set(s.local.name, { part: imported });
-    } else if (target.part && (s.type === 'ImportDefaultSpecifier' || imported === 'default')) {
+    } else if (
+      target.part &&
+      (s.type === 'ImportDefaultSpecifier' || imported === 'default')
+    ) {
       bindings.set(s.local.name, { part: target.part });
     }
   }
@@ -534,7 +599,9 @@ function collectBindings(file, programs, ctx, report) {
   const bindings = new Map();
   for (const stmt of programs.flatMap((program) => program.body)) {
     if (stmt.importKind === 'type' || stmt.exportKind === 'type') continue;
-    const target = stmt.source ? resolveSpecifier(file, stmt.source.value, ctx) : null;
+    const target = stmt.source
+      ? resolveSpecifier(file, stmt.source.value, ctx)
+      : null;
     if (!target) continue;
     if (stmt.type === 'ImportDeclaration') bindImport(stmt, target, bindings);
     else report(stmt.start, 'alias', reexportDetail(stmt.source.value));
@@ -552,23 +619,36 @@ const POPOVER_CONTENT = new Set(['Content', 'PopoverContent']);
  * whose `UI.Popover` is the module).
  */
 function collectPopoverNames(file, programs, ctx) {
-  const names = { namespaces: new Set(), parts: new Set(), contents: new Set(), uiNamespaces: new Set() };
+  const names = {
+    namespaces: new Set(),
+    parts: new Set(),
+    contents: new Set(),
+    uiNamespaces: new Set(),
+  };
   for (const stmt of programs.flatMap((program) => program.body)) {
-    if (stmt.type !== 'ImportDeclaration' || stmt.importKind === 'type') continue;
+    if (stmt.type !== 'ImportDeclaration' || stmt.importKind === 'type')
+      continue;
     const target = specifierTarget(file, stmt.source.value, ctx);
     if (!target) continue;
     const popover = isPopoverTarget(target, ctx);
     for (const s of stmt.specifiers) {
       if (s.importKind === 'type') continue;
       const imported = s.imported?.name ?? s.imported?.value;
-      if (popover) (s.type === 'ImportNamespaceSpecifier' ? names.namespaces : names.parts).add(s.local.name);
-      else if (target === ctx.uiDir && s.type === 'ImportNamespaceSpecifier') names.uiNamespaces.add(s.local.name);
+      if (popover)
+        (s.type === 'ImportNamespaceSpecifier'
+          ? names.namespaces
+          : names.parts
+        ).add(s.local.name);
+      else if (target === ctx.uiDir && s.type === 'ImportNamespaceSpecifier')
+        names.uiNamespaces.add(s.local.name);
       // The ui barrel re-exports the module as `Popover`.
-      else if (target === ctx.uiDir && imported === 'Popover') names.namespaces.add(s.local.name);
+      else if (target === ctx.uiDir && imported === 'Popover')
+        names.namespaces.add(s.local.name);
       const isContent =
         target === ctx.popoverDir
           ? POPOVER_CONTENT.has(imported)
-          : target === join(ctx.popoverDir, 'PopoverContent.svelte') && (s.type === 'ImportDefaultSpecifier' || imported === 'default');
+          : target === join(ctx.popoverDir, 'PopoverContent.svelte') &&
+            (s.type === 'ImportDefaultSpecifier' || imported === 'default');
       if (isContent) names.contents.add(s.local.name);
     }
   }
@@ -581,7 +661,10 @@ function collectPopoverNames(file, programs, ctx) {
  * closed.
  */
 function isPopoverTarget(target, ctx) {
-  return target === ctx.popoverDir || (dirname(target) === ctx.popoverDir && target.endsWith('.svelte'));
+  return (
+    target === ctx.popoverDir ||
+    (dirname(target) === ctx.popoverDir && target.endsWith('.svelte'))
+  );
 }
 
 /** A Popover tag's part name: `Content` of `Popover.Content` or `UI.Popover.Content`, the local name of a part, or null. */
@@ -589,8 +672,13 @@ function popoverPartName(node, popover) {
   if (node.type !== 'Component') return null;
   const path = node.name.split('.');
   if (path.length === 1) return popover.parts.has(node.name) ? node.name : null;
-  if (path.length === 2) return popover.namespaces.has(path[0]) ? path[1] : null;
-  return path.length === 3 && popover.uiNamespaces.has(path[0]) && path[1] === 'Popover' ? path[2] : null;
+  if (path.length === 2)
+    return popover.namespaces.has(path[0]) ? path[1] : null;
+  return path.length === 3 &&
+    popover.uiNamespaces.has(path[0]) &&
+    path[1] === 'Popover'
+    ? path[2]
+    : null;
 }
 
 function isPopoverPart(node, popover) {
@@ -599,11 +687,17 @@ function isPopoverPart(node, popover) {
 
 function isPopoverContent(node, popover) {
   const name = popoverPartName(node, popover);
-  return name !== null && (node.name.includes('.') ? POPOVER_CONTENT.has(name) : popover.contents.has(name));
+  return (
+    name !== null &&
+    (node.name.includes('.')
+      ? POPOVER_CONTENT.has(name)
+      : popover.contents.has(name))
+  );
 }
 
 const NAME_RANK = { named: 0, unproven: 1, none: 2 };
-const worstName = (verdicts) => verdicts.reduce((a, b) => (NAME_RANK[b] > NAME_RANK[a] ? b : a), 'named');
+const worstName = (verdicts) =>
+  verdicts.reduce((a, b) => (NAME_RANK[b] > NAME_RANK[a] ? b : a), 'named');
 
 /**
  * What a name expression names: 'named', 'none' (an undefined, null or ''
@@ -614,25 +708,43 @@ function judgeName(expr, unsetProps) {
   const judge = (e) => judgeName(e, unsetProps);
   switch (expr?.type) {
     case 'Literal':
-      return expr.value === null || (typeof expr.value === 'string' && !expr.value.trim()) ? 'none' : 'named';
+      return expr.value === null ||
+        (typeof expr.value === 'string' && !expr.value.trim())
+        ? 'none'
+        : 'named';
     case 'Identifier':
       if (expr.name === 'undefined') return 'none';
       return unsetProps.has(expr.name) ? 'unproven' : 'named';
     case 'TemplateLiteral':
-      if (expr.quasis.some((q) => (q.value.cooked ?? q.value.raw).trim())) return 'named';
+      if (expr.quasis.some((q) => (q.value.cooked ?? q.value.raw).trim()))
+        return 'named';
       // `` `` `` is '': no name.
-      return expr.expressions.length ? worstName(expr.expressions.map(judge)) : 'none';
+      return expr.expressions.length
+        ? worstName(expr.expressions.map(judge))
+        : 'none';
     case 'ConditionalExpression': {
       // A branch its own test proves set names it: `label ? label : m.x()`.
       const proven = provenName(expr.test);
-      const branch = (e, key) => (proven?.branch === key && e.type === 'Identifier' && e.name === proven.name ? 'named' : judge(e));
-      return worstName([branch(expr.consequent, 'consequent'), branch(expr.alternate, 'alternate')]);
+      const branch = (e, key) =>
+        proven?.branch === key &&
+        e.type === 'Identifier' &&
+        e.name === proven.name
+          ? 'named'
+          : judge(e);
+      return worstName([
+        branch(expr.consequent, 'consequent'),
+        branch(expr.alternate, 'alternate'),
+      ]);
     }
     case 'LogicalExpression':
       // `label ?? 'Info'` names it whenever label doesn't; `label && 'Info'` can give back label.
-      return expr.operator === '&&' ? worstName([judge(expr.left), judge(expr.right)]) : judge(expr.right);
+      return expr.operator === '&&'
+        ? worstName([judge(expr.left), judge(expr.right)])
+        : judge(expr.right);
     default:
-      return TS_VALUE_HOLDERS.has(expr?.type) ? judge(expr.expression) : 'named';
+      return TS_VALUE_HOLDERS.has(expr?.type)
+        ? judge(expr.expression)
+        : 'named';
   }
 }
 
@@ -647,19 +759,43 @@ function judgeName(expr, unsetProps) {
  * consequent; `!label` and `label === ''` in the alternate.
  */
 function provenName(test) {
-  if (test.type === 'Identifier') return { name: test.name, branch: 'consequent' };
-  if (test.type === 'MemberExpression' && !test.computed && test.object.type === 'Identifier' && test.property.name === 'length') {
+  if (test.type === 'Identifier')
+    return { name: test.name, branch: 'consequent' };
+  if (
+    test.type === 'MemberExpression' &&
+    !test.computed &&
+    test.object.type === 'Identifier' &&
+    test.property.name === 'length'
+  ) {
     return { name: test.object.name, branch: 'consequent' };
   }
-  if (test.type === 'BinaryExpression' && ['!==', '!=', '===', '=='].includes(test.operator)) {
-    const [id, other] = test.left.type === 'Identifier' ? [test.left, test.right] : [test.right, test.left];
-    if (id.type === 'Identifier' && other.type === 'Literal' && other.value === '') {
-      return { name: id.name, branch: test.operator.startsWith('!') ? 'consequent' : 'alternate' };
+  if (
+    test.type === 'BinaryExpression' &&
+    ['!==', '!=', '===', '=='].includes(test.operator)
+  ) {
+    const [id, other] =
+      test.left.type === 'Identifier'
+        ? [test.left, test.right]
+        : [test.right, test.left];
+    if (
+      id.type === 'Identifier' &&
+      other.type === 'Literal' &&
+      other.value === ''
+    ) {
+      return {
+        name: id.name,
+        branch: test.operator.startsWith('!') ? 'consequent' : 'alternate',
+      };
     }
   }
   if (test.type === 'UnaryExpression' && test.operator === '!') {
     const inner = provenName(test.argument);
-    return inner && { name: inner.name, branch: inner.branch === 'consequent' ? 'alternate' : 'consequent' };
+    return (
+      inner && {
+        name: inner.name,
+        branch: inner.branch === 'consequent' ? 'alternate' : 'consequent',
+      }
+    );
   }
   return null;
 }
@@ -668,17 +804,29 @@ function unsetPropNames(programs) {
   const names = new Set();
   walk(programs, (node) => {
     const init = node.type === 'VariableDeclarator' ? node.init : null;
-    if (init?.type !== 'CallExpression' || init.callee.type !== 'Identifier' || init.callee.name !== '$props') return;
+    if (
+      init?.type !== 'CallExpression' ||
+      init.callee.type !== 'Identifier' ||
+      init.callee.name !== '$props'
+    )
+      return;
     if (node.id.type !== 'ObjectPattern') return;
     for (const p of node.id.properties) {
       if (p.type !== 'Property') continue;
       if (p.value.type === 'Identifier') names.add(p.value.name);
-      else if (p.value.type === 'AssignmentPattern' && p.value.left.type === 'Identifier') {
+      else if (
+        p.value.type === 'AssignmentPattern' &&
+        p.value.left.type === 'Identifier'
+      ) {
         // `$bindable(x)` defaults to x, and `$bindable()` to nothing.
         const { right } = p.value;
-        const bindable = right.type === 'CallExpression' && right.callee.type === 'Identifier' && right.callee.name === '$bindable';
+        const bindable =
+          right.type === 'CallExpression' &&
+          right.callee.type === 'Identifier' &&
+          right.callee.name === '$bindable';
         const fallback = bindable ? right.arguments[0] : right;
-        if (!fallback || judgeName(fallback, new Set()) === 'none') names.add(p.value.left.name);
+        if (!fallback || judgeName(fallback, new Set()) === 'none')
+          names.add(p.value.left.name);
       }
     }
   });
@@ -691,7 +839,11 @@ function nameVerdict(attr, unsetProps) {
   if (text !== null) return text.trim() ? 'named' : 'none';
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
   if (parts.some((p) => p.type === 'Text' && p.data.trim())) return 'named';
-  return worstName(parts.filter((p) => p.type !== 'Text').map((p) => judgeName(p.expression, unsetProps)));
+  return worstName(
+    parts
+      .filter((p) => p.type !== 'Text')
+      .map((p) => judgeName(p.expression, unsetProps))
+  );
 }
 
 /**
@@ -712,31 +864,71 @@ function pairVerdict(names, unsetProps) {
   if (names.length !== 2) return null;
   const choices = names.map((a) => {
     const parts = Array.isArray(a.value) ? a.value : [a.value];
-    const expr = parts.length === 1 && parts[0].type === 'ExpressionTag' ? parts[0].expression : null;
+    const expr =
+      parts.length === 1 && parts[0].type === 'ExpressionTag'
+        ? parts[0].expression
+        : null;
     return expr?.type === 'ConditionalExpression' ? expr : null;
   });
-  if (!choices[0] || !choices[1] || !sameExpression(choices[0].test, choices[1].test)) return null;
+  if (
+    !choices[0] ||
+    !choices[1] ||
+    !sameExpression(choices[0].test, choices[1].test)
+  )
+    return null;
   const best = (a, b) => (NAME_RANK[a] < NAME_RANK[b] ? a : b);
   return worstName(
-    ['consequent', 'alternate'].map((key) => best(judgeName(choices[0][key], unsetProps), judgeName(choices[1][key], unsetProps)))
+    ['consequent', 'alternate'].map((key) =>
+      best(
+        judgeName(choices[0][key], unsetProps),
+        judgeName(choices[1][key], unsetProps)
+      )
+    )
   );
 }
 
 /** Whether two expressions are written the same, positions aside. */
 function sameExpression(a, b) {
   if (a === b) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
-  const keys = (n) => Object.keys(n).filter((k) => !['start', 'end', 'loc', 'range', 'metadata', 'leadingComments', 'trailingComments'].includes(k));
+  if (
+    typeof a !== 'object' ||
+    typeof b !== 'object' ||
+    a === null ||
+    b === null
+  )
+    return false;
+  const keys = (n) =>
+    Object.keys(n).filter(
+      (k) =>
+        ![
+          'start',
+          'end',
+          'loc',
+          'range',
+          'metadata',
+          'leadingComments',
+          'trailingComments',
+        ].includes(k)
+    );
   const ka = keys(a);
-  return ka.length === keys(b).length && ka.every((k) => sameExpression(a[k], b[k]));
+  return (
+    ka.length === keys(b).length && ka.every((k) => sameExpression(a[k], b[k]))
+  );
 }
 
 function checkPopoverNames(fragment, programs, popover, report) {
   const unsetProps = unsetPropNames(programs);
   walk(fragment, (node) => {
     if (!isPopoverContent(node, popover)) return;
-    const names = node.attributes.filter((a) => a.type === 'Attribute' && (a.name === 'aria-label' || a.name === 'aria-labelledby'));
-    const verdicts = [...names.map((a) => nameVerdict(a, unsetProps)), pairVerdict(names, unsetProps)];
+    const names = node.attributes.filter(
+      (a) =>
+        a.type === 'Attribute' &&
+        (a.name === 'aria-label' || a.name === 'aria-labelledby')
+    );
+    const verdicts = [
+      ...names.map((a) => nameVerdict(a, unsetProps)),
+      pairVerdict(names, unsetProps),
+    ];
     if (verdicts.includes('named')) return;
     if (verdicts.includes('unproven')) {
       report(
@@ -746,7 +938,9 @@ function checkPopoverNames(fragment, programs, popover, report) {
       );
       return;
     }
-    const spread = node.attributes.some((a) => a.type === 'SpreadAttribute') ? '; a {...spread} cannot be read, so write it on the tag' : '';
+    const spread = node.attributes.some((a) => a.type === 'SpreadAttribute')
+      ? '; a {...spread} cannot be read, so write it on the tag'
+      : '';
     report(
       node.start,
       'popover-name',
@@ -758,8 +952,12 @@ function checkPopoverNames(fragment, programs, popover, report) {
 /** Whether an Identifier under `parent[key]` names something, rather than reads it. */
 function isNameOnly(parent, key) {
   if (!parent) return false;
-  if (parent.type === 'MemberExpression' && key === 'property') return !parent.computed;
-  const keyed = parent.type === 'Property' || parent.type === 'PropertyDefinition' || parent.type === 'MethodDefinition';
+  if (parent.type === 'MemberExpression' && key === 'property')
+    return !parent.computed;
+  const keyed =
+    parent.type === 'Property' ||
+    parent.type === 'PropertyDefinition' ||
+    parent.type === 'MethodDefinition';
   return keyed && key === 'key' && !parent.computed && !parent.shorthand;
 }
 
@@ -768,7 +966,13 @@ function isNameOnly(parent, key) {
  * expression, can hand a part to something this check cannot see. Type
  * positions read no value; tag names are not expressions.
  */
-function checkValueReads(roots, bindings, report, what = 'Dialog', uiNamespaces = new Set()) {
+function checkValueReads(
+  roots,
+  bindings,
+  report,
+  what = 'Dialog',
+  uiNamespaces = new Set()
+) {
   if (bindings.size === 0 && uiNamespaces.size === 0) return;
   const detail = (name) =>
     what === 'Dialog'
@@ -779,22 +983,47 @@ function checkValueReads(roots, bindings, report, what = 'Dialog', uiNamespaces 
       for (const item of node) visit(item, parent, key);
       return;
     }
-    if (!node || typeof node.type !== 'string' || node.type === 'ImportDeclaration') return;
+    if (
+      !node ||
+      typeof node.type !== 'string' ||
+      node.type === 'ImportDeclaration'
+    )
+      return;
     if (node.type.startsWith('TS')) {
-      if (TS_VALUE_HOLDERS.has(node.type)) visit(node.expression, node, 'expression');
+      if (TS_VALUE_HOLDERS.has(node.type))
+        visit(node.expression, node, 'expression');
       return;
     }
-    if (node.type === 'Identifier' && bindings.has(node.name) && !isNameOnly(parent, key)) report(node.start, 'alias', detail(node.name));
+    if (
+      node.type === 'Identifier' &&
+      bindings.has(node.name) &&
+      !isNameOnly(parent, key)
+    )
+      report(node.start, 'alias', detail(node.name));
     // The ui barrel's namespace hands on its Popover through anything but a
     // plain member of another name (`UI.Button`): `UI.Popover`, `UI['Popover']`,
     // `const { Popover } = UI`, or UI itself passed on.
-    if (node.type === 'Identifier' && uiNamespaces.has(node.name) && !isNameOnly(parent, key)) {
-      const member = parent?.type === 'MemberExpression' && key === 'object' && !parent.computed ? parent.property.name : null;
+    if (
+      node.type === 'Identifier' &&
+      uiNamespaces.has(node.name) &&
+      !isNameOnly(parent, key)
+    ) {
+      const member =
+        parent?.type === 'MemberExpression' &&
+        key === 'object' &&
+        !parent.computed
+          ? parent.property.name
+          : null;
       if (member !== null && member !== what) return;
-      report(node.start, 'alias', detail(member ? `${node.name}.${member}` : node.name));
+      report(
+        node.start,
+        'alias',
+        detail(member ? `${node.name}.${member}` : node.name)
+      );
     }
     for (const [k, value] of Object.entries(node)) {
-      if (k !== 'metadata' && value && typeof value === 'object') visit(value, node, k);
+      if (k !== 'metadata' && value && typeof value === 'object')
+        visit(value, node, k);
     }
   };
   for (const root of roots) visit(root, null, null);
@@ -824,13 +1053,19 @@ function checkDynamicImports(roots, file, ctx, report) {
 /** The Dialog part an expression names (`Dialog.Content`, a named `Content`), or null. */
 function partOfExpression(expr, bindings) {
   if (expr?.type === 'Identifier') return bindings.get(expr.name)?.part ?? null;
-  if (expr?.type !== 'MemberExpression' || expr.computed || expr.object.type !== 'Identifier') return null;
+  if (
+    expr?.type !== 'MemberExpression' ||
+    expr.computed ||
+    expr.object.type !== 'Identifier'
+  )
+    return null;
   return bindings.get(expr.object.name)?.namespace ? expr.property.name : null;
 }
 
 /** The Dialog part a markup node renders, or null. */
 function partOf(node, bindings) {
-  if (node.type === 'SvelteComponent') return partOfExpression(node.expression, bindings);
+  if (node.type === 'SvelteComponent')
+    return partOfExpression(node.expression, bindings);
   if (node.type !== 'Component') return null;
   const dot = node.name.indexOf('.');
   if (dot === -1) return bindings.get(node.name)?.part ?? null;
@@ -851,7 +1086,9 @@ function collectSnippets(fragment) {
 function renderCallee(tag) {
   let call = tag.expression;
   if (call.type === 'ChainExpression') call = call.expression;
-  return call.type === 'CallExpression' && call.callee.type === 'Identifier' ? call.callee.name : null;
+  return call.type === 'CallExpression' && call.callee.type === 'Identifier'
+    ? call.callee.name
+    : null;
 }
 
 /**
@@ -861,10 +1098,17 @@ function renderCallee(tag) {
 function boundaryRenders(node) {
   const sites = [];
   for (const attr of node.attributes ?? []) {
-    if (attr.type !== 'Attribute' || (attr.name !== 'failed' && attr.name !== 'pending')) continue;
+    if (
+      attr.type !== 'Attribute' ||
+      (attr.name !== 'failed' && attr.name !== 'pending')
+    )
+      continue;
     const value = Array.isArray(attr.value) ? attr.value[0] : attr.value;
     const expr = value?.type === 'ExpressionTag' ? value.expression : null;
-    sites.push({ name: expr?.type === 'Identifier' ? expr.name : null, at: attr });
+    sites.push({
+      name: expr?.type === 'Identifier' ? expr.name : null,
+      at: attr,
+    });
   }
   return sites;
 }
@@ -881,10 +1125,17 @@ function* directChildren(fragment, snippets, onUnknown, seen = new Set()) {
         yield* directChildren(inner, snippets, onUnknown, seen);
       }
       if (node.type === 'SvelteBoundary') {
-        for (const { name, at } of boundaryRenders(node)) yield* renderedChildren(name, at, snippets, onUnknown, seen);
+        for (const { name, at } of boundaryRenders(node))
+          yield* renderedChildren(name, at, snippets, onUnknown, seen);
       }
     } else if (node.type === 'RenderTag') {
-      yield* renderedChildren(renderCallee(node), node, snippets, onUnknown, seen);
+      yield* renderedChildren(
+        renderCallee(node),
+        node,
+        snippets,
+        onUnknown,
+        seen
+      );
     } else if (rendersSomething(node)) {
       yield node;
     }
@@ -896,7 +1147,12 @@ function* renderedChildren(name, at, snippets, onUnknown, seen) {
   const snippet = name && snippets.get(name);
   if (!snippet) onUnknown(at, name);
   else if (!seen.has(snippet)) {
-    yield* directChildren(snippet.body, snippets, onUnknown, new Set([...seen, snippet]));
+    yield* directChildren(
+      snippet.body,
+      snippets,
+      onUnknown,
+      new Set([...seen, snippet])
+    );
   }
 }
 
@@ -917,12 +1173,23 @@ function checkChildren(node, part, { bindings, snippets, report }) {
   const { rule, allowed } = CHILD_RULES[part];
   const want = [...allowed].map((p) => `Dialog.${p}`).join(' / ');
   const onUnknown = (tag, name) =>
-    report(tag.start, rule, `{@render ${name ?? '…'}()} directly in Dialog.${part} renders what this check cannot see`);
+    report(
+      tag.start,
+      rule,
+      `{@render ${name ?? '…'}()} directly in Dialog.${part} renders what this check cannot see`
+    );
   for (const child of directChildren(node.fragment, snippets, onUnknown)) {
     if (allowed.has(partOf(child, bindings))) continue;
     // A Text node starts at the whitespace before its words.
-    const at = child.type === 'Text' ? child.start + child.data.search(/\S/) : child.start;
-    report(at, rule, `${describe(child)} is a direct child of Dialog.${part}; only ${want}`);
+    const at =
+      child.type === 'Text'
+        ? child.start + child.data.search(/\S/)
+        : child.start;
+    report(
+      at,
+      rule,
+      `${describe(child)} is a direct child of Dialog.${part}; only ${want}`
+    );
   }
 }
 
@@ -935,7 +1202,11 @@ function checkToolbarHasBody(node, { bindings, snippets, report }) {
   const parts = [];
   let unknown = false;
   const collect = (fragment) => {
-    for (const child of directChildren(fragment, snippets, () => (unknown = true))) {
+    for (const child of directChildren(
+      fragment,
+      snippets,
+      () => (unknown = true)
+    )) {
       const part = partOf(child, bindings);
       parts.push({ part, child });
       if (part === 'Form') collect(child.fragment);
@@ -962,18 +1233,24 @@ function checkToolbarHasBody(node, { bindings, snippets, report }) {
 function checkPlacement(fragment, { bindings, report }) {
   const renders = new Map();
   const placed = [];
-  const addRender = (name, holder) => renders.set(name, [...(renders.get(name) ?? []), holder]);
+  const addRender = (name, holder) =>
+    renders.set(name, [...(renders.get(name) ?? []), holder]);
   const visit = (nodes, holder) => {
     for (const node of nodes ?? []) {
       if (node.type === 'SnippetBlock') {
         visit(node.body.nodes, { snippet: node.expression.name });
       } else if (TRANSPARENT_BLOCKS[node.type]) {
-        for (const inner of TRANSPARENT_BLOCKS[node.type](node)) visit(inner?.nodes, holder);
+        for (const inner of TRANSPARENT_BLOCKS[node.type](node))
+          visit(inner?.nodes, holder);
         if (node.type === 'SvelteBoundary') {
-          for (const { name } of boundaryRenders(node)) if (name) addRender(name, holder);
+          for (const { name } of boundaryRenders(node))
+            if (name) addRender(name, holder);
           // `{#snippet failed()}` / `{#snippet pending()}` inside it render in its place too.
           for (const child of node.fragment.nodes) {
-            if (child.type === 'SnippetBlock' && /^(failed|pending)$/.test(child.expression.name)) {
+            if (
+              child.type === 'SnippetBlock' &&
+              /^(failed|pending)$/.test(child.expression.name)
+            ) {
               addRender(child.expression.name, holder);
             }
           }
@@ -996,13 +1273,24 @@ function checkPlacement(fragment, { bindings, report }) {
     if (seen.has(holder.snippet)) return true;
     const sites = renders.get(holder.snippet) ?? [];
     const next = new Set([...seen, holder.snippet]);
-    return sites.length > 0 && sites.every((site) => allowed(holders, site, next));
+    return (
+      sites.length > 0 && sites.every((site) => allowed(holders, site, next))
+    );
   };
   const where = (holder) =>
-    holder.part ? `in Dialog.${holder.part}` : holder.snippet ? `in snippet ${holder.snippet}()` : 'outside any Dialog.Content';
+    holder.part
+      ? `in Dialog.${holder.part}`
+      : holder.snippet
+        ? `in snippet ${holder.snippet}()`
+        : 'outside any Dialog.Content';
   for (const { node, part, holder } of placed) {
     const { rule, holders, why } = PLACEMENT[part];
-    if (!allowed(holders, holder, new Set())) report(node.start, rule, `${describe(node)} sits ${where(holder)}; ${why}`);
+    if (!allowed(holders, holder, new Set()))
+      report(
+        node.start,
+        rule,
+        `${describe(node)} sits ${where(holder)}; ${why}`
+      );
   }
 }
 
@@ -1012,7 +1300,9 @@ function patternNames(pattern) {
     case 'Identifier':
       return [pattern.name];
     case 'ObjectPattern':
-      return pattern.properties.flatMap((p) => patternNames(p.type === 'RestElement' ? p.argument : p.value));
+      return pattern.properties.flatMap((p) =>
+        patternNames(p.type === 'RestElement' ? p.argument : p.value)
+      );
     case 'ArrayPattern':
       return pattern.elements.flatMap(patternNames);
     case 'RestElement':
@@ -1056,12 +1346,22 @@ function checkSnippetNames(ast, programs, report) {
   };
   bind(programs.flatMap((program) => program.body.flatMap(declaredNames)));
   walk(ast.fragment, (node) => {
-    if (node.type === 'RenderTag' && renderCallee(node)) rendered.add(renderCallee(node));
-    if (node.type === 'SvelteBoundary') for (const { name } of boundaryRenders(node)) if (name) rendered.add(name);
-    if (node.type === 'SnippetBlock') bind([node.expression.name, ...node.parameters.flatMap(patternNames)]);
-    if (node.type === 'EachBlock') bind([...patternNames(node.context), ...(node.index ? [node.index] : [])]);
-    if (node.type === 'AwaitBlock') bind([...patternNames(node.value), ...patternNames(node.error)]);
-    if (node.type === 'ConstTag') bind(node.declaration.declarations.flatMap((d) => patternNames(d.id)));
+    if (node.type === 'RenderTag' && renderCallee(node))
+      rendered.add(renderCallee(node));
+    if (node.type === 'SvelteBoundary')
+      for (const { name } of boundaryRenders(node))
+        if (name) rendered.add(name);
+    if (node.type === 'SnippetBlock')
+      bind([node.expression.name, ...node.parameters.flatMap(patternNames)]);
+    if (node.type === 'EachBlock')
+      bind([
+        ...patternNames(node.context),
+        ...(node.index ? [node.index] : []),
+      ]);
+    if (node.type === 'AwaitBlock')
+      bind([...patternNames(node.value), ...patternNames(node.error)]);
+    if (node.type === 'ConstTag')
+      bind(node.declaration.declarations.flatMap((d) => patternNames(d.id)));
   });
   walk(ast.fragment, (node) => {
     if (node.type !== 'SnippetBlock') return;
@@ -1091,8 +1391,10 @@ function checkMarkup(ast, programs, bindings, report) {
 function literalStrings(expr) {
   const out = [];
   walk(expr, (node) => {
-    if (node.type === 'Literal' && typeof node.value === 'string') out.push(node.value);
-    if (node.type === 'TemplateElement') out.push(node.value.cooked ?? node.value.raw);
+    if (node.type === 'Literal' && typeof node.value === 'string')
+      out.push(node.value);
+    if (node.type === 'TemplateElement')
+      out.push(node.value.cooked ?? node.value.raw);
   });
   return out;
 }
@@ -1101,16 +1403,21 @@ function literalStrings(expr) {
 function constInits(programs) {
   const inits = new Map();
   for (const stmt of programs.flatMap((program) => program.body)) {
-    const decl = stmt.type === 'ExportNamedDeclaration' ? stmt.declaration : stmt;
+    const decl =
+      stmt.type === 'ExportNamedDeclaration' ? stmt.declaration : stmt;
     if (decl?.type !== 'VariableDeclaration' || decl.kind !== 'const') continue;
-    for (const d of decl.declarations) if (d.id.type === 'Identifier' && d.init) inits.set(d.id.name, d.init);
+    for (const d of decl.declarations)
+      if (d.id.type === 'Identifier' && d.init) inits.set(d.id.name, d.init);
   }
   return inits;
 }
 
 /** What an {@html} can write, as far as literals show: its own, and a same-file const's. */
 function htmlStrings(expr, consts) {
-  const held = expr?.type === 'Identifier' && consts.has(expr.name) ? literalStrings(consts.get(expr.name)) : [];
+  const held =
+    expr?.type === 'Identifier' && consts.has(expr.name)
+      ? literalStrings(consts.get(expr.name))
+      : [];
   return [...literalStrings(expr), ...held];
 }
 
@@ -1124,13 +1431,21 @@ function resultStrings(expr) {
     case 'Literal':
       return typeof expr.value === 'string' ? [expr.value] : [];
     case 'TemplateLiteral':
-      return [expr.quasis.map((q) => q.value.cooked ?? q.value.raw).join(''), ...expr.expressions.flatMap(resultStrings)];
+      return [
+        expr.quasis.map((q) => q.value.cooked ?? q.value.raw).join(''),
+        ...expr.expressions.flatMap(resultStrings),
+      ];
     case 'ConditionalExpression':
-      return [...resultStrings(expr.consequent), ...resultStrings(expr.alternate)];
+      return [
+        ...resultStrings(expr.consequent),
+        ...resultStrings(expr.alternate),
+      ];
     case 'LogicalExpression':
       return [...resultStrings(expr.left), ...resultStrings(expr.right)];
     default:
-      return TS_VALUE_HOLDERS.has(expr?.type) ? resultStrings(expr.expression) : [];
+      return TS_VALUE_HOLDERS.has(expr?.type)
+        ? resultStrings(expr.expression)
+        : [];
   }
 }
 
@@ -1145,7 +1460,8 @@ function attrStrings(attr) {
   return out;
 }
 
-const dialogRole = (strings) => strings.map((s) => s.match(/\b(?:alert)?dialog\b/)?.[0]).find(Boolean);
+const dialogRole = (strings) =>
+  strings.map((s) => s.match(/\b(?:alert)?dialog\b/)?.[0]).find(Boolean);
 
 /** What a hand-built modal attribute claims, or null. */
 function ownDialogAttr(attr) {
@@ -1159,8 +1475,13 @@ function ownDialogAttr(attr) {
 
 /** What an object literal property claims for a spread onto an element, or null. */
 function ownDialogProperty(prop) {
-  if (prop.type !== 'Property' || (prop.computed && prop.key.type !== 'Literal')) return null;
-  const key = prop.key.type === 'Identifier' ? prop.key.name : String(prop.key.value);
+  if (
+    prop.type !== 'Property' ||
+    (prop.computed && prop.key.type !== 'Literal')
+  )
+    return null;
+  const key =
+    prop.key.type === 'Identifier' ? prop.key.name : String(prop.key.value);
   if (key === 'aria-modal') return 'aria-modal';
   const role = key === 'role' ? dialogRole(resultStrings(prop.value)) : null;
   return role ? `role: '${role}'` : null;
@@ -1170,34 +1491,66 @@ function ownDialogProperty(prop) {
 function isShowModalRead(node) {
   if (node.type !== 'MemberExpression') return false;
   const { property, computed } = node;
-  return computed ? property.type === 'Literal' && property.value === 'showModal' : property.name === 'showModal';
+  return computed
+    ? property.type === 'Literal' && property.value === 'showModal'
+    : property.name === 'showModal';
 }
 
 const SHOW_MODAL_DETAIL =
   'reads showModal, which opens a hand-built native modal; build the modal from Dialog.Root/Content ' +
   "(a feature check is `typeof … .showModal === 'function'`)";
-const meltDetail = (name) => `uses Melt's ${name}, a modal of its own; build it from the shared Dialog or Popover`;
+const meltDetail = (name) =>
+  `uses Melt's ${name}, a modal of its own; build it from the shared Dialog or Popover`;
 
 function checkOwnDialog(ast, programs, bindings, popover, report) {
   const consts = constInits(programs);
   walk(ast.fragment, (node) => {
     if (node.type === 'RegularElement' && node.name === 'dialog') {
-      report(node.start, 'own-dialog', '<dialog> is a hand-built modal; build the modal from Dialog.Root/Content');
+      report(
+        node.start,
+        'own-dialog',
+        '<dialog> is a hand-built modal; build the modal from Dialog.Root/Content'
+      );
     }
-    if (node.type === 'SvelteElement' && resultStrings(node.tag).some((s) => s.trim() === 'dialog')) {
-      report(node.start, 'own-dialog', '<svelte:element this="dialog"> is a hand-built modal; build the modal from Dialog.Root/Content');
+    if (
+      node.type === 'SvelteElement' &&
+      resultStrings(node.tag).some((s) => s.trim() === 'dialog')
+    ) {
+      report(
+        node.start,
+        'own-dialog',
+        '<svelte:element this="dialog"> is a hand-built modal; build the modal from Dialog.Root/Content'
+      );
     }
-    if (node.type === 'HtmlTag' && htmlStrings(node.expression, consts).some((s) => /<dialog\b/i.test(s))) {
-      report(node.start, 'own-dialog', '{@html} writes a <dialog>, a hand-built modal; build the modal from Dialog.Root/Content');
+    if (
+      node.type === 'HtmlTag' &&
+      htmlStrings(node.expression, consts).some((s) => /<dialog\b/i.test(s))
+    ) {
+      report(
+        node.start,
+        'own-dialog',
+        '{@html} writes a <dialog>, a hand-built modal; build the modal from Dialog.Root/Content'
+      );
     }
     // The shared parts are part-attr's to judge.
-    if (!Array.isArray(node.attributes) || partOf(node, bindings) || isPopoverPart(node, popover)) return;
+    if (
+      !Array.isArray(node.attributes) ||
+      partOf(node, bindings) ||
+      isPopoverPart(node, popover)
+    )
+      return;
     for (const attr of node.attributes) {
       const claim = ownDialogAttr(attr);
       if (!claim) continue;
       const instead =
-        claim === 'the popover attribute' ? ', a hand-built popover; use the shared Popover' : '; build the modal from Dialog.Root/Content';
-      report(attr.start, 'own-dialog', `${describe(node)} sets ${claim}${instead}`);
+        claim === 'the popover attribute'
+          ? ', a hand-built popover; use the shared Popover'
+          : '; build the modal from Dialog.Root/Content';
+      report(
+        attr.start,
+        'own-dialog',
+        `${describe(node)} sets ${claim}${instead}`
+      );
     }
   });
 
@@ -1205,12 +1558,23 @@ function checkOwnDialog(ast, programs, bindings, popover, report) {
   const typeofArgs = new Set();
   for (const root of [...programs, ast.fragment]) {
     walk(root, (node) => {
-      if (node.type === 'UnaryExpression' && node.operator === 'typeof') typeofArgs.add(node.argument);
-      if (node.type !== 'ImportDeclaration' || node.source.value !== '@melt-ui/svelte' || node.importKind === 'type') return;
+      if (node.type === 'UnaryExpression' && node.operator === 'typeof')
+        typeofArgs.add(node.argument);
+      if (
+        node.type !== 'ImportDeclaration' ||
+        node.source.value !== '@melt-ui/svelte' ||
+        node.importKind === 'type'
+      )
+        return;
       for (const s of node.specifiers) {
         const name = s.imported?.name ?? s.imported?.value;
-        if (s.type === 'ImportNamespaceSpecifier') meltNamespaces.add(s.local.name);
-        if (s.type === 'ImportSpecifier' && s.importKind !== 'type' && MODAL_BUILDERS.has(name)) {
+        if (s.type === 'ImportNamespaceSpecifier')
+          meltNamespaces.add(s.local.name);
+        if (
+          s.type === 'ImportSpecifier' &&
+          s.importKind !== 'type' &&
+          MODAL_BUILDERS.has(name)
+        ) {
           report(s.start, 'own-dialog', meltDetail(name));
         }
       }
@@ -1218,16 +1582,26 @@ function checkOwnDialog(ast, programs, bindings, popover, report) {
   }
   for (const root of [...programs, ast.fragment]) {
     walk(root, (node) => {
-      if (isShowModalRead(node) && !typeofArgs.has(node)) report(node.start, 'own-dialog', SHOW_MODAL_DETAIL);
-      if (node.type === 'MemberExpression' && node.object.type === 'Identifier' && meltNamespaces.has(node.object.name)) {
+      if (isShowModalRead(node) && !typeofArgs.has(node))
+        report(node.start, 'own-dialog', SHOW_MODAL_DETAIL);
+      if (
+        node.type === 'MemberExpression' &&
+        node.object.type === 'Identifier' &&
+        meltNamespaces.has(node.object.name)
+      ) {
         const name = node.computed ? node.property.value : node.property.name;
-        if (MODAL_BUILDERS.has(name)) report(node.start, 'own-dialog', meltDetail(name));
+        if (MODAL_BUILDERS.has(name))
+          report(node.start, 'own-dialog', meltDetail(name));
       }
       if (node.type === 'ObjectExpression') {
         for (const prop of node.properties) {
           const claim = ownDialogProperty(prop);
           if (claim) {
-            report(prop.start, 'own-dialog', `an object sets ${claim}, a hand-built modal once spread; build the modal from Dialog.Root/Content`);
+            report(
+              prop.start,
+              'own-dialog',
+              `an object sets ${claim}, a hand-built modal once spread; build the modal from Dialog.Root/Content`
+            );
           }
         }
       }
@@ -1241,7 +1615,10 @@ function checkPartAttributes(fragment, bindings, report) {
     const part = partOf(node, bindings);
     if (!part || part === 'Root') return;
     for (const attr of node.attributes ?? []) {
-      const role = attr.type === 'Attribute' && attr.name === 'role' ? dialogRole(attrStrings(attr)) : null;
+      const role =
+        attr.type === 'Attribute' && attr.name === 'role'
+          ? dialogRole(attrStrings(attr))
+          : null;
       if (role || (attr.type === 'Attribute' && attr.name === 'aria-modal')) {
         report(
           attr.start,
@@ -1250,7 +1627,12 @@ function checkPartAttributes(fragment, bindings, report) {
         );
       }
       if (!BOX_PARTS.has(part)) continue;
-      const size = part === 'Content' && attr.type === 'Attribute' && /^max(Height|Width)$/.test(attr.name) ? sizeVerdict(attr) : null;
+      const size =
+        part === 'Content' &&
+        attr.type === 'Attribute' &&
+        /^max(Height|Width)$/.test(attr.name)
+          ? sizeVerdict(attr)
+          : null;
       if (attr.type === 'Attribute' && PART_DATA_ATTRS.has(attr.name)) {
         report(
           attr.start,
@@ -1269,7 +1651,10 @@ function checkPartAttributes(fragment, bindings, report) {
           'part-dynamic',
           `${describe(node)}'s ${attr.name} is not a literal, so nothing in CI can see it is a CSS length (a wrapper's string prop brings back ${attr.name}="none"); write a literal length, or a conditional of literal lengths`
         );
-      } else if ((attr.type === 'Attribute' && attr.name === 'style') || attr.type === 'StyleDirective') {
+      } else if (
+        (attr.type === 'Attribute' && attr.name === 'style') ||
+        attr.type === 'StyleDirective'
+      ) {
         report(
           attr.start,
           'part-style',
@@ -1287,7 +1672,11 @@ function checkPartAttributes(fragment, bindings, report) {
           'part-dynamic',
           `${describe(node)} takes an {@attach}, which gets the part's element and can restyle it; attach to your own element inside the part`
         );
-      } else if (attr.type === 'Attribute' && attr.name === 'class' && !isLiteralClass(attr)) {
+      } else if (
+        attr.type === 'Attribute' &&
+        attr.name === 'class' &&
+        !isLiteralClass(attr)
+      ) {
         report(
           attr.start,
           'part-dynamic',
@@ -1335,9 +1724,13 @@ function sizeVerdict(attr) {
       opaque = true;
       return;
     }
-    const combos = slots.reduce((acc, s) => acc.flatMap((a) => s.map((v) => ({ test: a.test + v.test, shown: a.shown + v.shown }))), [
-      { test: '', shown: '' },
-    ]);
+    const combos = slots.reduce(
+      (acc, s) =>
+        acc.flatMap((a) =>
+          s.map((v) => ({ test: a.test + v.test, shown: a.shown + v.shown }))
+        ),
+      [{ test: '', shown: '' }]
+    );
     values.push(...combos);
   };
   const visit = (expr) => {
@@ -1346,10 +1739,16 @@ function sizeVerdict(attr) {
         // A falsy value sets no inline cap, so the default holds (DialogContent's
         // max-height is on a truthy maxHeight only, and max-width='' removes it);
         // but max-width={0} is `max-width: 0`. true or a regex is no length.
-        if (expr.value || (expr.value === 0 && attr.name === 'maxWidth')) whole([text(String(expr.value))]);
+        if (expr.value || (expr.value === 0 && attr.name === 'maxWidth'))
+          whole([text(String(expr.value))]);
         return;
       case 'TemplateLiteral':
-        whole(expr.quasis.flatMap((q, i) => [text(q.value.cooked ?? q.value.raw), ...(i < expr.expressions.length ? [slot(expr.expressions[i])] : [])]));
+        whole(
+          expr.quasis.flatMap((q, i) => [
+            text(q.value.cooked ?? q.value.raw),
+            ...(i < expr.expressions.length ? [slot(expr.expressions[i])] : []),
+          ])
+        );
         return;
       case 'ConditionalExpression':
         visit(expr.consequent);
@@ -1368,8 +1767,12 @@ function sizeVerdict(attr) {
     }
   };
   // `maxHeight="{rows * 2}rem"` is a template too; a lone `{…}` is its expression.
-  if (parts.length === 1 && parts[0].type === 'ExpressionTag') visit(parts[0].expression);
-  else whole(parts.map((p) => (p.type === 'Text' ? text(p.data) : slot(p.expression))));
+  if (parts.length === 1 && parts[0].type === 'ExpressionTag')
+    visit(parts[0].expression);
+  else
+    whole(
+      parts.map((p) => (p.type === 'Text' ? text(p.data) : slot(p.expression)))
+    );
   // A template that renders '' is falsy too.
   const bad = values.find((v) => v.test !== '' && !CSS_LENGTH.test(v.test));
   if (bad) return { bad: bad.shown };
@@ -1385,10 +1788,18 @@ function sizeVerdict(attr) {
 function fragmentValues(expr) {
   switch (expr?.type) {
     case 'Literal':
-      return typeof expr.value === 'string' || typeof expr.value === 'number' ? [String(expr.value)] : null;
+      return typeof expr.value === 'string' || typeof expr.value === 'number'
+        ? [String(expr.value)]
+        : null;
     case 'UnaryExpression':
-      return (expr.operator === '-' || expr.operator === '+') && expr.argument.type === 'Literal' && typeof expr.argument.value === 'number'
-        ? [String(expr.operator === '-' ? -expr.argument.value : expr.argument.value)]
+      return (expr.operator === '-' || expr.operator === '+') &&
+        expr.argument.type === 'Literal' &&
+        typeof expr.argument.value === 'number'
+        ? [
+            String(
+              expr.operator === '-' ? -expr.argument.value : expr.argument.value
+            ),
+          ]
         : null;
     case 'TemplateLiteral': {
       let out = [''];
@@ -1403,37 +1814,54 @@ function fragmentValues(expr) {
     }
     case 'ConditionalExpression':
     case 'LogicalExpression': {
-      const [x, y] = expr.type === 'ConditionalExpression' ? [expr.consequent, expr.alternate] : [expr.left, expr.right];
+      const [x, y] =
+        expr.type === 'ConditionalExpression'
+          ? [expr.consequent, expr.alternate]
+          : [expr.left, expr.right];
       const a = fragmentValues(x);
       const b = fragmentValues(y);
       return a && b ? [...a, ...b] : null;
     }
     default:
-      return TS_VALUE_HOLDERS.has(expr?.type) ? fragmentValues(expr.expression) : null;
+      return TS_VALUE_HOLDERS.has(expr?.type)
+        ? fragmentValues(expr.expression)
+        : null;
   }
 }
 
 function isLiteralClass(attr) {
   if (attr.value === true) return true;
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
-  return parts.every((part) => part.type === 'Text' || literalClassValue(part.expression));
+  return parts.every(
+    (part) => part.type === 'Text' || literalClassValue(part.expression)
+  );
 }
 
 /** Whether a class expression can produce only classes written in it. */
 function literalClassValue(expr) {
   switch (expr?.type) {
     case 'Literal':
-      return expr.value === null || typeof expr.value === 'string' || typeof expr.value === 'boolean';
+      return (
+        expr.value === null ||
+        typeof expr.value === 'string' ||
+        typeof expr.value === 'boolean'
+      );
     case 'Identifier':
       return expr.name === 'undefined';
     case 'TemplateLiteral':
       return expr.expressions.every(literalClassValue);
     case 'ConditionalExpression':
-      return literalClassValue(expr.consequent) && literalClassValue(expr.alternate);
+      return (
+        literalClassValue(expr.consequent) && literalClassValue(expr.alternate)
+      );
     case 'LogicalExpression':
-      return expr.operator === '&&' ? literalClassValue(expr.right) : literalClassValue(expr.left) && literalClassValue(expr.right);
+      return expr.operator === '&&'
+        ? literalClassValue(expr.right)
+        : literalClassValue(expr.left) && literalClassValue(expr.right);
     case 'ArrayExpression':
-      return expr.elements.every((e) => e && e.type !== 'SpreadElement' && literalClassValue(e));
+      return expr.elements.every(
+        (e) => e && e.type !== 'SpreadElement' && literalClassValue(e)
+      );
     case 'ObjectExpression':
       return expr.properties.every((p) => p.type === 'Property' && !p.computed);
     default:
@@ -1446,11 +1874,23 @@ function checkMarkupStyle(fragment, consts, report) {
   walk(fragment, (node) => {
     const isStyle =
       (node.type === 'RegularElement' && node.name === 'style') ||
-      (node.type === 'SvelteElement' && resultStrings(node.tag).some((s) => s.trim() === 'style'));
+      (node.type === 'SvelteElement' &&
+        resultStrings(node.tag).some((s) => s.trim() === 'style'));
     if (isStyle) {
-      report(node.start, 'markup-style', "<style> in markup is global CSS this check never parses; use the component's own <style>");
-    } else if (node.type === 'HtmlTag' && htmlStrings(node.expression, consts).some((s) => /<style\b/i.test(s))) {
-      report(node.start, 'markup-style', "{@html} writes a <style> element, global CSS this check never parses; use the component's own <style>");
+      report(
+        node.start,
+        'markup-style',
+        "<style> in markup is global CSS this check never parses; use the component's own <style>"
+      );
+    } else if (
+      node.type === 'HtmlTag' &&
+      htmlStrings(node.expression, consts).some((s) => /<style\b/i.test(s))
+    ) {
+      report(
+        node.start,
+        'markup-style',
+        "{@html} writes a <style> element, global CSS this check never parses; use the component's own <style>"
+      );
     }
   });
 }
@@ -1525,10 +1965,17 @@ function closeParen(text, open) {
 /** One selector with `:global(...)` / `:global` unwrapped, at any depth. */
 function unwrapGlobal(selector) {
   let out = selector;
-  for (let at = out.indexOf(':global('); at !== -1; at = out.indexOf(':global(')) {
+  for (
+    let at = out.indexOf(':global(');
+    at !== -1;
+    at = out.indexOf(':global(')
+  ) {
     const end = closeParen(out, at + ':global'.length);
     if (end === -1) break;
-    out = out.slice(0, at) + out.slice(at + ':global('.length, end - 1) + out.slice(end);
+    out =
+      out.slice(0, at) +
+      out.slice(at + ':global('.length, end - 1) +
+      out.slice(end);
   }
   return out.replace(/:global\b/g, ' ').trim();
 }
@@ -1555,18 +2002,25 @@ function withoutFunctional(compound) {
  * `.x > div`. Inside `:global(…)` they are not top level; unwrap first.
  */
 function alternatives(selector, budget = 64) {
-  for (const m of selector.matchAll(/:(?:is|where|matches|any|-webkit-any)\(/g)) {
+  for (const m of selector.matchAll(
+    /:(?:is|where|matches|any|-webkit-any)\(/g
+  )) {
     // Only at the top level: not inside another function's parentheses.
     let depth = 0;
-    for (let i = 0; i < m.index; i++) depth += selector[i] === '(' ? 1 : selector[i] === ')' ? -1 : 0;
+    for (let i = 0; i < m.index; i++)
+      depth += selector[i] === '(' ? 1 : selector[i] === ')' ? -1 : 0;
     if (depth !== 0) continue;
     const open = m.index + m[0].length - 1;
     const end = closeParen(selector, open);
-    const options = end === -1 ? [] : selectorList(selector.slice(open + 1, end - 1));
+    const options =
+      end === -1 ? [] : selectorList(selector.slice(open + 1, end - 1));
     if (options.length === 0) return [selector];
     const out = [];
     for (const option of options) {
-      for (const variant of alternatives(`${selector.slice(0, m.index)}${option}${selector.slice(end)}`, budget)) {
+      for (const variant of alternatives(
+        `${selector.slice(0, m.index)}${option}${selector.slice(end)}`,
+        budget
+      )) {
         if (out.length >= budget) return [selector, ...out];
         out.push(variant);
       }
@@ -1585,7 +2039,8 @@ function cssUnescape(text) {
   });
 }
 
-const ATTR_SELECTOR = /\[\s*([\w-]+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([\w-]+)))?\s*(?:[iIsS]\s*)?\]/g;
+const ATTR_SELECTOR =
+  /\[\s*([\w-]+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([\w-]+)))?\s*(?:[iIsS]\s*)?\]/g;
 
 /** The classes, ids and attribute tests a selector text names. */
 function selectorNames(text) {
@@ -1632,12 +2087,16 @@ function attrTestMatches({ op, value }, actual) {
 function classTestMatches({ op, value }, name) {
   if (op === null) return false;
   const v = value.toLowerCase();
-  return op === '=' || op === '~=' ? name.toLowerCase() === v : v !== '' && name.toLowerCase().includes(v);
+  return op === '=' || op === '~='
+    ? name.toLowerCase() === v
+    : v !== '' && name.toLowerCase().includes(v);
 }
 
 /** The first Dialog box class a `[class…]` test in the prelude can match, or null. */
 function classTestBoxClass(prelude) {
-  for (const test of selectorNames(prelude).attrs.filter((a) => a.name === 'class')) {
+  for (const test of selectorNames(prelude).attrs.filter(
+    (a) => a.name === 'class'
+  )) {
     const hit = BOX_CLASSES.find((name) => classTestMatches(test, name));
     if (hit) return hit;
   }
@@ -1652,7 +2111,8 @@ function classTestBoxClass(prelude) {
 function restyleDetail(prelude, decls) {
   const classes = [...prelude.matchAll(DIALOG_CLASS_RE)].map((m) => m[1]);
   const text = squash(prelude);
-  const other = classes.find((c) => c !== 'dialog-form') ?? classTestBoxClass(prelude);
+  const other =
+    classes.find((c) => c !== 'dialog-form') ?? classTestBoxClass(prelude);
   if (other) return `${text} restyles the Dialog's .${other}; ${INSTEAD}`;
   const hash = prelude.match(SVELTE_HASH_RE);
   if (hash) {
@@ -1660,14 +2120,23 @@ function restyleDetail(prelude, decls) {
   }
   const attr = prelude.match(DIALOG_ATTR_RE);
   if (attr) {
-    const shown = prelude.slice(attr.index, prelude.indexOf(']', attr.index) + 1 || undefined);
+    const shown = prelude.slice(
+      attr.index,
+      prelude.indexOf(']', attr.index) + 1 || undefined
+    );
     return `${text} reaches the Dialog's elements through ${shown}; ${INSTEAD}`;
   }
   if (classes.length === 0) return null;
-  const loose = selectors(prelude).find((s) => /\.dialog-form(?![\w-])/.test(s) && !OWN_FORM_COMPOUND.test(s));
-  if (loose !== undefined) return `${text}: style a Dialog.Form only as .dialog-form.<your-class>, with nothing around it`;
-  const notSpacing = decls.filter((d) => !SPACING_PROP.test(d.property)).map((d) => d.property);
-  if (notSpacing.length > 0) return `${text} sets ${notSpacing.join(', ')} on .dialog-form; only gap, padding and margin may change`;
+  const loose = selectors(prelude).find(
+    (s) => /\.dialog-form(?![\w-])/.test(s) && !OWN_FORM_COMPOUND.test(s)
+  );
+  if (loose !== undefined)
+    return `${text}: style a Dialog.Form only as .dialog-form.<your-class>, with nothing around it`;
+  const notSpacing = decls
+    .filter((d) => !SPACING_PROP.test(d.property))
+    .map((d) => d.property);
+  if (notSpacing.length > 0)
+    return `${text} sets ${notSpacing.join(', ')} on .dialog-form; only gap, padding and margin may change`;
   const off = decls.find((d) => !isSpacingValue(d.value));
   if (!off) return null;
   return `${text} sets ${off.property}: ${squash(off.value)} on .dialog-form; spacing takes 0, var(--space-*) or a calc() of those`;
@@ -1675,8 +2144,13 @@ function restyleDetail(prelude, decls) {
 
 /** A spacing declaration's value: each of its words 0, a space token, or a calc() of them. */
 function isSpacingValue(value) {
-  const words = splitTop(String(value).replace(/!important\s*$/, ''), (c) => /\s/.test(c));
-  return words.length > 0 && words.every((w) => SPACING_TOKEN.test(w) || SPACING_CALC.test(w));
+  const words = splitTop(String(value).replace(/!important\s*$/, ''), (c) =>
+    /\s/.test(c)
+  );
+  return (
+    words.length > 0 &&
+    words.every((w) => SPACING_TOKEN.test(w) || SPACING_CALC.test(w))
+  );
 }
 
 /**
@@ -1687,7 +2161,8 @@ function isSpacingValue(value) {
  */
 function classNames(attr) {
   const names = [];
-  const add = (text) => names.push(...String(text).split(/\s+/).filter(Boolean));
+  const add = (text) =>
+    names.push(...String(text).split(/\s+/).filter(Boolean));
   const results = (expr) => {
     switch (expr?.type) {
       case 'Literal':
@@ -1710,7 +2185,8 @@ function classNames(attr) {
         return;
       case 'ObjectExpression':
         for (const p of expr.properties) {
-          if (p.type === 'Property' && !p.computed) add(p.key.type === 'Identifier' ? p.key.name : p.key.value);
+          if (p.type === 'Property' && !p.computed)
+            add(p.key.type === 'Identifier' ? p.key.name : p.key.value);
         }
         return;
       default:
@@ -1729,7 +2205,9 @@ function classNames(attr) {
 function staticValue(attr) {
   if (attr.value === true) return '';
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
-  return parts.every((p) => p.type === 'Text') ? parts.map((p) => p.data).join('') : null;
+  return parts.every((p) => p.type === 'Text')
+    ? parts.map((p) => p.data).join('')
+    : null;
 }
 
 /**
@@ -1748,22 +2226,40 @@ function idShapes(attr, consts) {
   const choices =
     parts.length === 1 && parts[0].type === 'ExpressionTag'
       ? idChoices(parts[0].expression, consts)
-      : [parts.flatMap((p) => (p.type === 'Text' ? [p.data] : stringPieces(p.expression, consts)))];
+      : [
+          parts.flatMap((p) =>
+            p.type === 'Text' ? [p.data] : stringPieces(p.expression, consts)
+          ),
+        ];
   return choices.map((pieces) =>
     pieces.includes(null)
-      ? { prefix: pieces.slice(0, pieces.indexOf(null)).join(''), suffix: pieces.slice(pieces.lastIndexOf(null) + 1).join('') }
+      ? {
+          prefix: pieces.slice(0, pieces.indexOf(null)).join(''),
+          suffix: pieces.slice(pieces.lastIndexOf(null) + 1).join(''),
+        }
       : { id: pieces.join('') }
   );
 }
 
 /** A whole id expression's possible ids, as pieces each: a choice gives each branch its own. */
 function idChoices(expr, consts) {
-  if (expr?.type === 'ConditionalExpression') return [...idChoices(expr.consequent, consts), ...idChoices(expr.alternate, consts)];
-  if (expr?.type === 'LogicalExpression') return [...idChoices(expr.left, consts), ...idChoices(expr.right, consts)];
-  return TS_VALUE_HOLDERS.has(expr?.type) ? idChoices(expr.expression, consts) : [stringPieces(expr, consts)];
+  if (expr?.type === 'ConditionalExpression')
+    return [
+      ...idChoices(expr.consequent, consts),
+      ...idChoices(expr.alternate, consts),
+    ];
+  if (expr?.type === 'LogicalExpression')
+    return [...idChoices(expr.left, consts), ...idChoices(expr.right, consts)];
+  return TS_VALUE_HOLDERS.has(expr?.type)
+    ? idChoices(expr.expression, consts)
+    : [stringPieces(expr, consts)];
 }
 
-const isDerivedCall = (e) => e.type === 'CallExpression' && e.callee.type === 'Identifier' && e.callee.name === '$derived' && e.arguments.length === 1;
+const isDerivedCall = (e) =>
+  e.type === 'CallExpression' &&
+  e.callee.type === 'Identifier' &&
+  e.callee.name === '$derived' &&
+  e.arguments.length === 1;
 
 /** Whether an expression is surely a string: a string literal or template, a same-file const or $derived of one, or a `+` with one. */
 function isStringish(expr, consts, seen = new Set()) {
@@ -1773,13 +2269,30 @@ function isStringish(expr, consts, seen = new Set()) {
     case 'TemplateLiteral':
       return true;
     case 'BinaryExpression':
-      return expr.operator === '+' && (isStringish(expr.left, consts, seen) || isStringish(expr.right, consts, seen));
+      return (
+        expr.operator === '+' &&
+        (isStringish(expr.left, consts, seen) ||
+          isStringish(expr.right, consts, seen))
+      );
     case 'Identifier':
-      return consts.has(expr.name) && !seen.has(expr.name) && isStringish(consts.get(expr.name), consts, new Set([...seen, expr.name]));
+      return (
+        consts.has(expr.name) &&
+        !seen.has(expr.name) &&
+        isStringish(
+          consts.get(expr.name),
+          consts,
+          new Set([...seen, expr.name])
+        )
+      );
     case 'CallExpression':
-      return isDerivedCall(expr) && isStringish(expr.arguments[0], consts, seen);
+      return (
+        isDerivedCall(expr) && isStringish(expr.arguments[0], consts, seen)
+      );
     default:
-      return TS_VALUE_HOLDERS.has(expr?.type) && isStringish(expr.expression, consts, seen);
+      return (
+        TS_VALUE_HOLDERS.has(expr?.type) &&
+        isStringish(expr.expression, consts, seen)
+      );
   }
 }
 
@@ -1794,23 +2307,36 @@ function stringPieces(expr, consts, seen = new Set()) {
   const of = (e) => stringPieces(e, consts, seen);
   switch (expr?.type) {
     case 'Literal':
-      return typeof expr.value === 'string' || typeof expr.value === 'number' ? [String(expr.value)] : [null];
+      return typeof expr.value === 'string' || typeof expr.value === 'number'
+        ? [String(expr.value)]
+        : [null];
     case 'TemplateLiteral':
-      return expr.quasis.flatMap((q, i) => [q.value.cooked ?? q.value.raw, ...(i < expr.expressions.length ? of(expr.expressions[i]) : [])]);
+      return expr.quasis.flatMap((q, i) => [
+        q.value.cooked ?? q.value.raw,
+        ...(i < expr.expressions.length ? of(expr.expressions[i]) : []),
+      ]);
     case 'BinaryExpression':
-      return expr.operator === '+' && (isStringish(expr.left, consts) || isStringish(expr.right, consts)) ? [...of(expr.left), ...of(expr.right)] : [null];
+      return expr.operator === '+' &&
+        (isStringish(expr.left, consts) || isStringish(expr.right, consts))
+        ? [...of(expr.left), ...of(expr.right)]
+        : [null];
     case 'CallExpression':
       return isDerivedCall(expr) ? of(expr.arguments[0]) : [null];
     case 'Identifier':
       if (!consts.has(expr.name) || seen.has(expr.name)) return [null];
-      return stringPieces(consts.get(expr.name), consts, new Set([...seen, expr.name]));
+      return stringPieces(
+        consts.get(expr.name),
+        consts,
+        new Set([...seen, expr.name])
+      );
     default:
       return TS_VALUE_HOLDERS.has(expr?.type) ? of(expr.expression) : [null];
   }
 }
 
 /** An attribute that lands on a part's element as written (not a part prop, not a handler). */
-const landsOnElement = (name) => name.includes('-') || HTML_GLOBAL_ATTRS.has(name);
+const landsOnElement = (name) =>
+  name.includes('-') || HTML_GLOBAL_ATTRS.has(name);
 
 /**
  * Pass one of part-class: every handle this file hands a part that draws
@@ -1822,7 +2348,9 @@ const landsOnElement = (name) => name.includes('-') || HTML_GLOBAL_ATTRS.has(nam
  * (the conservative reading). An owner is {part, file, line}.
  */
 function collectHandles(ast, bindings, file, handles, source) {
-  const consts = constInits([ast.module?.content, ast.instance?.content].filter(Boolean));
+  const consts = constInits(
+    [ast.module?.content, ast.instance?.content].filter(Boolean)
+  );
   walk(ast.fragment, (node) => {
     const part = partOf(node, bindings);
     if (!BOX_PARTS.has(part)) return;
@@ -1836,9 +2364,11 @@ function collectHandles(ast, bindings, file, handles, source) {
         if (attr.value === true) continue;
         for (const { id, prefix, suffix } of idShapes(attr, consts)) {
           if (id) handles.ids.set(id, owner);
-          else if (prefix) (handles.idPrefixes ??= []).push({ prefix, ...owner });
+          else if (prefix)
+            (handles.idPrefixes ??= []).push({ prefix, ...owner });
           // An id that is all expression (`{listId}`) is known by nothing.
-          else if (suffix) (handles.idSuffixes ??= []).push({ suffix, ...owner });
+          else if (suffix)
+            (handles.idSuffixes ??= []).push({ suffix, ...owner });
         }
       } else if (landsOnElement(attr.name)) {
         const list = handles.attrs.get(attr.name) ?? [];
@@ -1857,7 +2387,9 @@ function idPrefixMatches({ op, value }, prefix) {
   if (op === null || op === '$=' || op === '*=') return true;
   const v = value.toLowerCase();
   const p = prefix.toLowerCase();
-  return op === '^=' || op === '|=' ? v.startsWith(p) || p.startsWith(v) : v.startsWith(p);
+  return op === '^=' || op === '|='
+    ? v.startsWith(p) || p.startsWith(v)
+    : v.startsWith(p);
 }
 
 /**
@@ -1872,7 +2404,11 @@ function idSuffixMatches({ op, value }, suffix) {
   const s = suffix.toLowerCase();
   if (op === '$=') return v !== '' && (v.endsWith(s) || s.endsWith(v));
   // `*=` also matches across the unknown head: `tier-delta` in `{kind}-delta`.
-  if (op === '*=') return v !== '' && (s.includes(v) || [...s].some((_, k) => v.endsWith(s.slice(0, k + 1))));
+  if (op === '*=')
+    return (
+      v !== '' &&
+      (s.includes(v) || [...s].some((_, k) => v.endsWith(s.slice(0, k + 1))))
+    );
   return op === '=' || op === '~=' ? v.endsWith(s) : false;
 }
 
@@ -1887,24 +2423,30 @@ function namedHandle(text, handles) {
   }
   for (const id of ids) {
     const owner =
-      handles.ids.get(id) ?? prefixes.find((p) => id.startsWith(p.prefix)) ?? suffixes.find((p) => id.endsWith(p.suffix));
+      handles.ids.get(id) ??
+      prefixes.find((p) => id.startsWith(p.prefix)) ??
+      suffixes.find((p) => id.endsWith(p.suffix));
     if (owner) return { ...owner, shown: `its id #${id}` };
   }
   for (const test of attrs) {
     if (test.name === 'class') {
       for (const [name, owner] of handles.classes) {
-        if (classTestMatches(test, name)) return { ...owner, shown: `its class .${name}` };
+        if (classTestMatches(test, name))
+          return { ...owner, shown: `its class .${name}` };
       }
     } else if (test.name === 'id') {
       for (const [id, owner] of handles.ids) {
-        if (attrTestMatches(test, id)) return { ...owner, shown: `its id #${id}` };
+        if (attrTestMatches(test, id))
+          return { ...owner, shown: `its id #${id}` };
       }
       const owner = prefixes.find((p) => idPrefixMatches(test, p.prefix));
       if (owner) return { ...owner, shown: `its id ${owner.prefix}…` };
       const tail = suffixes.find((p) => idSuffixMatches(test, p.suffix));
       if (tail) return { ...tail, shown: `its id …${tail.suffix}` };
     } else {
-      const owner = (handles.attrs.get(test.name) ?? []).find((h) => attrTestMatches(test, h.value));
+      const owner = (handles.attrs.get(test.name) ?? []).find((h) =>
+        attrTestMatches(test, h.value)
+      );
       if (owner) return { ...owner, shown: `its attribute [${test.name}]` };
     }
   }
@@ -1919,7 +2461,9 @@ function namedHandle(text, handles) {
  */
 function isOwnElement(compound, handles) {
   const bare = withoutFunctional(compound);
-  const type = bare.match(/^(?:[\w-]*\|)?([a-zA-Z][\w-]*|\*)/)?.[1]?.toLowerCase();
+  const type = bare
+    .match(/^(?:[\w-]*\|)?([a-zA-Z][\w-]*|\*)/)?.[1]
+    ?.toLowerCase();
   if (type && type !== 'div' && type !== 'form' && type !== '*') return true;
   const { classes, ids } = selectorNames(bare);
   const prefixes = handles.idPrefixes ?? [];
@@ -1927,7 +2471,10 @@ function isOwnElement(compound, handles) {
   return (
     classes.some((name) => !handles.classes.has(name)) ||
     ids.some(
-      (id) => !handles.ids.has(id) && !prefixes.some((p) => id.startsWith(p.prefix)) && !suffixes.some((p) => id.endsWith(p.suffix))
+      (id) =>
+        !handles.ids.has(id) &&
+        !prefixes.some((p) => id.startsWith(p.prefix)) &&
+        !suffixes.some((p) => id.endsWith(p.suffix))
     )
   );
 }
@@ -1941,7 +2488,10 @@ function selectorSteps(selector) {
   let combinator = null;
   const flush = () => {
     if (buf.trim()) {
-      steps.push({ compound: buf.trim(), combinator: steps.length ? (combinator ?? ' ') : null });
+      steps.push({
+        compound: buf.trim(),
+        combinator: steps.length ? (combinator ?? ' ') : null,
+      });
       combinator = null;
     }
     buf = '';
@@ -1979,12 +2529,19 @@ function selectorSteps(selector) {
 function globalReach(selector, inGlobalBlock) {
   const steps = selectorSteps(selector);
   const isGlobal = (i) =>
-    inGlobalBlock || steps[i].compound.startsWith(':global') || steps.slice(0, i).some((s) => s.compound === ':global');
-  if (!steps.every((s, i) => s.compound === ':global' || isGlobal(i))) return null;
+    inGlobalBlock ||
+    steps[i].compound.startsWith(':global') ||
+    steps.slice(0, i).some((s) => s.compound === ':global');
+  if (!steps.every((s, i) => s.compound === ':global' || isGlobal(i)))
+    return null;
   let out = '';
   for (const step of steps) {
     if (step.compound === ':global') continue;
-    const join = !out ? '' : step.combinator && step.combinator !== ' ' ? ` ${step.combinator} ` : ' ';
+    const join = !out
+      ? ''
+      : step.combinator && step.combinator !== ' '
+        ? ` ${step.combinator} `
+        : ' ';
     out += join + unwrapGlobal(step.compound);
   }
   return out;
@@ -2003,8 +2560,11 @@ function reachingHandle(steps, handles) {
     const inner = direct ? null : namedHandle(compound, handles);
     const hit = direct ?? inner;
     if (!hit) continue;
-    const sibling = steps.slice(i + 1).some((s) => s.combinator === '+' || s.combinator === '~');
-    if (inner || sibling || hit.part === 'Content' || hit.part === 'Form') return hit;
+    const sibling = steps
+      .slice(i + 1)
+      .some((s) => s.combinator === '+' || s.combinator === '~');
+    if (inner || sibling || hit.part === 'Content' || hit.part === 'Form')
+      return hit;
   }
   return null;
 }
@@ -2023,10 +2583,15 @@ function partHandleDetail(prelude, handles, inGlobalBlock, file) {
     for (const selector of alternatives(reach)) {
       const steps = selectorSteps(selector);
       const subject = steps.at(-1)?.compound ?? '';
-      if (/\.dialog-form(?![\w-])/.test(subject) || isOwnElement(subject, handles)) continue;
+      if (
+        /\.dialog-form(?![\w-])/.test(subject) ||
+        isOwnElement(subject, handles)
+      )
+        continue;
       const inSubject = namedHandle(withoutFunctional(subject), handles);
       if (inSubject) return handleMessage(text, inSubject, file, false);
-      const walked = namedHandle(subject, handles) ?? reachingHandle(steps, handles);
+      const walked =
+        namedHandle(subject, handles) ?? reachingHandle(steps, handles);
       if (walked) return handleMessage(text, walked, file, true);
     }
   }
@@ -2039,16 +2604,24 @@ function partHandleDetail(prelude, handles, inGlobalBlock, file) {
  * the rule's subject (`walk`: the element it walks to) the page's own.
  */
 function handleMessage(text, hit, file, walk) {
-  const from = hit.file === file ? '' : ` (${hit.file}:${hit.line} hands it to Dialog.${hit.part})`;
+  const from =
+    hit.file === file
+      ? ''
+      : ` (${hit.file}:${hit.line} hands it to Dialog.${hit.part})`;
   const what = walk
     ? `walks from Dialog.${hit.part}'s ${hit.shown.replace(/^its /, '')}${from} to an element no class names, which may be a part`
     : `restyles Dialog.${hit.part} through ${hit.shown}${from}`;
-  const mark = walk ? 'give that element a class of its own' : "give this selector's subject a class of its own";
+  const mark = walk
+    ? 'give that element a class of its own'
+    : "give this selector's subject a class of its own";
   const props = PART_PROPS[hit.part] ? `; ${PART_PROPS[hit.part]}` : '';
   const isAttr = hit.shown.startsWith('its attribute');
-  const not = hit.shown.startsWith('its class') ? 'utility classes' : 'hooks for page CSS';
+  const not = hit.shown.startsWith('its class')
+    ? 'utility classes'
+    : 'hooks for page CSS';
   const own = `put it on your own element inside Dialog.${hit.part} (a part takes props, not ${not}${props})`;
-  if (hit.file === file) return { detail: `${text} ${what}; ${own}, or ${mark}` };
+  if (hit.file === file)
+    return { detail: `${text} ${what}; ${own}, or ${mark}` };
   return {
     detail: `${text} ${what}; in ${hit.file}, ${own}, or here ${mark}`,
     // An attribute keeps its name wherever it goes; a class or id can take another.
@@ -2064,7 +2637,10 @@ function handleMessage(text, hit, file, walk) {
 /** global-style, then part-class, for one global rule: [rule, detail, echo?] or null. */
 function globalRuleViolation(rule, handles, file) {
   const prelude = cssUnescape(rule.prelude);
-  const restyle = restyleDetail(prelude, rule.decls ?? rule.properties.map((property) => ({ property, value: '0' })));
+  const restyle = restyleDetail(
+    prelude,
+    rule.decls ?? rule.properties.map((property) => ({ property, value: '0' }))
+  );
   if (restyle) return ['global-style', restyle];
   if (rule.preludeOnly) return null;
   const own = partHandleDetail(prelude, handles, rule.block, file);
@@ -2075,7 +2651,8 @@ function globalRuleViolation(rule, handles, file) {
 function nestSelectors(parent, child) {
   const out = [];
   for (const c of selectorList(child)) {
-    for (const p of selectorList(parent)) out.push(c.includes('&') ? c.replaceAll('&', p) : `${p} ${c}`);
+    for (const p of selectorList(parent))
+      out.push(c.includes('&') ? c.replaceAll('&', p) : `${p} ${c}`);
   }
   return out.join(', ');
 }
@@ -2085,7 +2662,9 @@ function scopePrelude(text) {
   const read = (from) => {
     const open = text.indexOf('(', from);
     const end = open === -1 ? -1 : closeParen(text, open);
-    return end === -1 ? null : { selector: text.slice(open + 1, end - 1).trim(), end };
+    return end === -1
+      ? null
+      : { selector: text.slice(open + 1, end - 1).trim(), end };
   };
   const trimmed = text.trimStart();
   const offset = text.length - trimmed.length;
@@ -2097,7 +2676,9 @@ function scopePrelude(text) {
 
 /** A rule's declarations, by property and value. */
 const declarationsOf = (children) =>
-  children.filter((c) => c.type === 'Declaration').map((c) => ({ property: c.property, value: c.value ?? '' }));
+  children
+    .filter((c) => c.type === 'Declaration')
+    .map((c) => ({ property: c.property, value: c.value ?? '' }));
 
 /**
  * Every rule of a style sheet, nesting resolved: a nested rule takes its
@@ -2113,7 +2694,11 @@ const declarationsOf = (children) =>
 function cssRules(stylesheet, source, inFile) {
   const rules = [];
   const asWritten = (selector) =>
-    inFile || !selector ? selector : selectorList(selector).map((s) => `:global(${s})`).join(', ');
+    inFile || !selector
+      ? selector
+      : selectorList(selector)
+          .map((s) => `:global(${s})`)
+          .join(', ');
   const visit = (node, ctx) => {
     if (node.type === 'Atrule') {
       const children = node.block?.children ?? [];
@@ -2121,36 +2706,79 @@ function cssRules(stylesheet, source, inFile) {
         const prelude = scopePrelude(node.prelude ?? '');
         const root = asWritten(prelude.root);
         const limit = asWritten(prelude.limit);
-        const scope = root ? (ctx.prelude ? nestSelectors(ctx.prelude, root) : root) : ctx.prelude;
+        const scope = root
+          ? ctx.prelude
+            ? nestSelectors(ctx.prelude, root)
+            : root
+          : ctx.prelude;
         const named = [scope, limit].filter(Boolean).join(', ');
         if (named) {
-          rules.push({ prelude: named, global: true, block: ctx.block, preludeOnly: true, properties: [], decls: [], start: node.start });
+          rules.push({
+            prelude: named,
+            global: true,
+            block: ctx.block,
+            preludeOnly: true,
+            properties: [],
+            decls: [],
+            start: node.start,
+          });
         }
         // Declarations straight in @scope style the root itself.
         const decls = declarationsOf(children);
         if (scope && decls.length) {
-          rules.push({ prelude: scope, global: true, block: ctx.block, properties: decls.map((d) => d.property), decls, start: node.start });
+          rules.push({
+            prelude: scope,
+            global: true,
+            block: ctx.block,
+            properties: decls.map((d) => d.property),
+            decls,
+            start: node.start,
+          });
         }
-        for (const child of children) visit(child, { ...ctx, prelude: scope, scope, scopeDirect: true });
+        for (const child of children)
+          visit(child, { ...ctx, prelude: scope, scope, scopeDirect: true });
         return;
       }
       const decls = declarationsOf(children);
-      if (ctx.prelude && decls.length) rules.push({ ...ctx, properties: decls.map((d) => d.property), decls, start: node.start });
-      for (const child of children) if (child.type !== 'Declaration') visit(child, ctx);
+      if (ctx.prelude && decls.length)
+        rules.push({
+          ...ctx,
+          properties: decls.map((d) => d.property),
+          decls,
+          start: node.start,
+        });
+      for (const child of children)
+        if (child.type !== 'Declaration') visit(child, ctx);
       return;
     }
     if (node.type !== 'Rule') return;
     let own = source.slice(node.prelude.start, node.prelude.end).trim();
     // In @scope, `:scope` is the root: in place for a direct rule, by name below it.
-    if (ctx.scope) own = own.replace(/:scope\b/g, ctx.scopeDirect ? '&' : `:is(${ctx.scope})`);
+    if (ctx.scope)
+      own = own.replace(
+        /:scope\b/g,
+        ctx.scopeDirect ? '&' : `:is(${ctx.scope})`
+      );
     const children = node.block.children;
     const prelude = ctx.prelude ? nestSelectors(ctx.prelude, own) : own;
-    const next = { prelude, global: ctx.global || own.includes(':global'), block: ctx.block, scope: ctx.scope };
+    const next = {
+      prelude,
+      global: ctx.global || own.includes(':global'),
+      block: ctx.block,
+      scope: ctx.scope,
+    };
     const decls = declarationsOf(children);
-    rules.push({ ...next, properties: decls.map((d) => d.property), decls, start: node.start });
-    for (const child of children) if (child.type !== 'Declaration') visit(child, next);
+    rules.push({
+      ...next,
+      properties: decls.map((d) => d.property),
+      decls,
+      start: node.start,
+    });
+    for (const child of children)
+      if (child.type !== 'Declaration') visit(child, next);
   };
-  for (const node of stylesheet.children) visit(node, { prelude: null, global: inFile, block: inFile });
+  for (const node of stylesheet.children)
+    visit(node, { prelude: null, global: inFile, block: inFile });
   return rules;
 }
 
@@ -2195,13 +2823,15 @@ function blankComments(source) {
     const c = source[i];
     const next = source[i + 1];
     if (c === '/' && (next === '/' || next === '*')) {
-      const end = next === '/' ? source.indexOf('\n', i) : source.indexOf('*/', i + 2);
+      const end =
+        next === '/' ? source.indexOf('\n', i) : source.indexOf('*/', i + 2);
       const stop = end === -1 ? source.length : next === '/' ? end : end + 2;
       out += source.slice(i, stop).replace(/[^\n]/g, ' ');
       i = stop;
     } else if (c === '"' || c === "'" || c === '`') {
       let j = i + 1;
-      while (j < source.length && source[j] !== c) j += source[j] === '\\' ? 2 : 1;
+      while (j < source.length && source[j] !== c)
+        j += source[j] === '\\' ? 2 : 1;
       out += source.slice(i, j + 1);
       i = j + 1;
     } else {
@@ -2231,14 +2861,30 @@ function namesOnlyTypes(clause) {
  * import(), which hands back the whole module.
  */
 function* moduleSpecifiers(code) {
-  for (const m of code.matchAll(/\b(import|export)\b(\s+type\b)?([^;'"`]*?)\bfrom\s*(['"])([^'"]+)\4/g)) {
-    yield { kind: m[1], spec: m[5], index: m.index, typeOnly: Boolean(m[2]) || namesOnlyTypes(m[3]), clause: m[3] };
+  for (const m of code.matchAll(
+    /\b(import|export)\b(\s+type\b)?([^;'"`]*?)\bfrom\s*(['"])([^'"]+)\4/g
+  )) {
+    yield {
+      kind: m[1],
+      spec: m[5],
+      index: m.index,
+      typeOnly: Boolean(m[2]) || namesOnlyTypes(m[3]),
+      clause: m[3],
+    };
   }
   for (const m of code.matchAll(/\bimport\s*(['"])([^'"]+)\1/g)) {
-    yield { kind: 'import', spec: m[2], index: m.index, typeOnly: false, clause: '' };
+    yield {
+      kind: 'import',
+      spec: m[2],
+      index: m.index,
+      typeOnly: false,
+      clause: '',
+    };
   }
   for (const m of code.matchAll(/\bimport\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g)) {
-    const typeOnly = /\btypeof\s*$/.test(code.slice(Math.max(0, m.index - 40), m.index));
+    const typeOnly = /\btypeof\s*$/.test(
+      code.slice(Math.max(0, m.index - 40), m.index)
+    );
     yield { kind: 'import', spec: m[2], index: m.index, typeOnly, clause: '*' };
   }
 }
@@ -2257,13 +2903,19 @@ const escapeRegExp = (text) => text.replace(/[$.*+?^()[\]{}|\\]/g, '\\$&');
  */
 function checkScriptFile(file, source, ctx, report) {
   const code = blankComments(source);
-  const isIndex = (dir) => dirname(file) === dir && /\/index\.[cm]?[jt]s$/.test(file);
+  const isIndex = (dir) =>
+    dirname(file) === dir && /\/index\.[cm]?[jt]s$/.test(file);
   const popoverIndex = isIndex(ctx.popoverDir);
   const uiBarrel = isIndex(ctx.uiDir);
-  for (const { kind, spec, index, typeOnly, clause } of moduleSpecifiers(code)) {
+  for (const { kind, spec, index, typeOnly, clause } of moduleSpecifiers(
+    code
+  )) {
     if (typeOnly) continue;
     const target = specifierTarget(file, spec, ctx);
-    const popover = target !== null && (isPopoverTarget(target, ctx) || (target === ctx.uiDir && /\*|\bPopover\b/.test(clause)));
+    const popover =
+      target !== null &&
+      (isPopoverTarget(target, ctx) ||
+        (target === ctx.uiDir && /\*|\bPopover\b/.test(clause)));
     if (resolveSpecifier(file, spec, ctx)) {
       report(
         index,
@@ -2273,7 +2925,10 @@ function checkScriptFile(file, source, ctx, report) {
           : `a .ts/.js file imports the Dialog module ('${spec}'), which can hand its parts on as values this check can't follow; import the parts in the .svelte that renders them`
       );
     } else if (popover && !popoverIndex) {
-      const whole = kind === 'export' && target === ctx.popoverDir && /^\s*\*\s+as\s+Popover\s*$/.test(clause);
+      const whole =
+        kind === 'export' &&
+        target === ctx.popoverDir &&
+        /^\s*\*\s+as\s+Popover\s*$/.test(clause);
       if (uiBarrel && whole) continue;
       report(
         index,
@@ -2285,31 +2940,49 @@ function checkScriptFile(file, source, ctx, report) {
     }
   }
   if (!ctx.scriptSelectExempt(file)) {
-    for (const m of code.matchAll(DIALOG_CLASS_RE)) report(m.index, 'script-select', scriptSelectDetail(m[0]));
+    for (const m of code.matchAll(DIALOG_CLASS_RE))
+      report(m.index, 'script-select', scriptSelectDetail(m[0]));
   }
   if (ctx.ownDialogExempt(file)) return;
-  for (const m of code.matchAll(/(?:\?\.|\.)\s*showModal\b|\[\s*(['"`])showModal\1\s*\]/g)) {
+  for (const m of code.matchAll(
+    /(?:\?\.|\.)\s*showModal\b|\[\s*(['"`])showModal\1\s*\]/g
+  )) {
     const line = code.slice(code.lastIndexOf('\n', m.index) + 1, m.index);
     if (/\btypeof\s+[\w$.?\s[\]'"`]*$/.test(line)) continue;
     report(m.index, 'own-dialog', SHOW_MODAL_DETAIL);
   }
-  for (const m of code.matchAll(/\bimport\s*(type\s+)?\{([^}]*)\}\s*from\s*(['"])@melt-ui\/svelte\3/g)) {
+  for (const m of code.matchAll(
+    /\bimport\s*(type\s+)?\{([^}]*)\}\s*from\s*(['"])@melt-ui\/svelte\3/g
+  )) {
     if (m[1]) continue;
     for (const spec of m[2].split(',')) {
       const [name, ...rest] = spec.trim().split(/\s+/);
-      if (name === 'type' || !MODAL_BUILDERS.has(name) || rest.includes('type')) continue;
+      if (name === 'type' || !MODAL_BUILDERS.has(name) || rest.includes('type'))
+        continue;
       report(m.index, 'own-dialog', meltDetail(name));
     }
   }
-  for (const m of code.matchAll(/\bimport\s*\*\s*as\s+([\w$]+)\s+from\s*(['"])@melt-ui\/svelte\2/g)) {
+  for (const m of code.matchAll(
+    /\bimport\s*\*\s*as\s+([\w$]+)\s+from\s*(['"])@melt-ui\/svelte\2/g
+  )) {
     const ns = escapeRegExp(m[1]);
-    const read = new RegExp(String.raw`(?<![\w$])${ns}\s*(?:\??\.\s*(createDialog|createPopover)\b|\[\s*(['"\`])(createDialog|createPopover)\2\s*\])`, 'g');
-    for (const r of code.matchAll(read)) report(r.index, 'own-dialog', meltDetail(r[1] ?? r[3]));
+    const read = new RegExp(
+      String.raw`(?<![\w$])${ns}\s*(?:\??\.\s*(createDialog|createPopover)\b|\[\s*(['"\`])(createDialog|createPopover)\2\s*\])`,
+      'g'
+    );
+    for (const r of code.matchAll(read))
+      report(r.index, 'own-dialog', meltDetail(r[1] ?? r[3]));
   }
   // `role: 'dialog' | 'region'` is a union type, not a value to spread.
-  for (const m of code.matchAll(/\brole\s*:\s*(['"`])((?:alert)?dialog)\1(?!\s*\|)|(['"])aria-modal\3\s*:/g)) {
+  for (const m of code.matchAll(
+    /\brole\s*:\s*(['"`])((?:alert)?dialog)\1(?!\s*\|)|(['"])aria-modal\3\s*:/g
+  )) {
     const claim = m[2] ? `role: '${m[2]}'` : 'aria-modal';
-    report(m.index, 'own-dialog', `an object sets ${claim}, a hand-built modal once spread; build the modal from Dialog.Root/Content`);
+    report(
+      m.index,
+      'own-dialog',
+      `an object sets ${claim}, a hand-built modal once spread; build the modal from Dialog.Root/Content`
+    );
   }
 }
 
@@ -2317,7 +2990,10 @@ function checkScriptFile(file, source, ctx, report) {
 function parseSvelte(file, source) {
   try {
     const ast = parse(source, { modern: true, filename: file });
-    return { ast, programs: [ast.module?.content, ast.instance?.content].filter(Boolean) };
+    return {
+      ast,
+      programs: [ast.module?.content, ast.instance?.content].filter(Boolean),
+    };
   } catch (error) {
     return { error };
   }
@@ -2325,7 +3001,11 @@ function parseSvelte(file, source) {
 
 function checkSvelteFile(file, source, unit, ctx, report) {
   if (unit.error) {
-    report(unit.error.position?.[0] ?? 0, 'parse', `does not parse, so it cannot be checked: ${unit.error.message.split('\n')[0]}`);
+    report(
+      unit.error.position?.[0] ?? 0,
+      'parse',
+      `does not parse, so it cannot be checked: ${unit.error.message.split('\n')[0]}`
+    );
     return;
   }
   const { ast, programs } = unit;
@@ -2337,21 +3017,32 @@ function checkSvelteFile(file, source, unit, ctx, report) {
   if (!isInside(ctx.dialogDir, file)) {
     checkPartAttributes(ast.fragment, bindings, report);
     checkMarkupStyle(ast.fragment, constInits(programs), report);
-    if (!ctx.scriptSelectExempt(file)) checkScriptSelectors([...programs, ast.fragment], report);
-    if (ast.css) checkSvelteCss(ast.css, source, ctx.handles, ctx.nameOf(file), report);
+    if (!ctx.scriptSelectExempt(file))
+      checkScriptSelectors([...programs, ast.fragment], report);
+    if (ast.css)
+      checkSvelteCss(ast.css, source, ctx.handles, ctx.nameOf(file), report);
   }
   if (!isInside(ctx.popoverDir, file)) {
     checkPopoverNames(ast.fragment, programs, popover, report);
-    checkValueReads([...programs, ast.fragment], new Set([...popover.namespaces, ...popover.parts]), report, 'Popover', popover.uiNamespaces);
+    checkValueReads(
+      [...programs, ast.fragment],
+      new Set([...popover.namespaces, ...popover.parts]),
+      report,
+      'Popover',
+      popover.uiNamespaces
+    );
   }
-  if (!ctx.ownDialogExempt(file)) checkOwnDialog(ast, programs, bindings, popover, report);
+  if (!ctx.ownDialogExempt(file))
+    checkOwnDialog(ast, programs, bindings, popover, report);
 }
 
 /** Every rule that applies to one file, by its kind and where it lives. */
 function scanFile(file, source, unit, ctx, report) {
-  if (file.endsWith('.svelte')) checkSvelteFile(file, source, unit, ctx, report);
+  if (file.endsWith('.svelte'))
+    checkSvelteFile(file, source, unit, ctx, report);
   else if (isInside(ctx.dialogDir, file) || TEST_FILE.test(file)) return;
-  else if (file.endsWith('.css')) checkCssFile(source, ctx.handles, ctx.nameOf(file), report);
+  else if (file.endsWith('.css'))
+    checkCssFile(source, ctx.handles, ctx.nameOf(file), report);
   else checkScriptFile(file, source, ctx, report);
 }
 
@@ -2371,7 +3062,12 @@ function applyAllowlist(found, allowlist) {
   const miscounted = allowlist
     .filter((a) => counts.get(a) > 0 && counts.get(a) !== a.expect)
     .map((a) => ({ ...a, found: counts.get(a) }));
-  return { violations, allowlisted: found.length - violations.length, stale, miscounted };
+  return {
+    violations,
+    allowlisted: found.length - violations.length,
+    stale,
+    miscounted,
+  };
 }
 
 /**
@@ -2385,8 +3081,15 @@ function applyAllowlist(found, allowlist) {
  *   allowlisted: number, stale: typeof ALLOWLIST,
  *   miscounted: (typeof ALLOWLIST[number] & { found: number })[], filesScanned: number }}
  */
-export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_ROOT, allowlist = ALLOWLIST } = {}) {
-  if (!existsSync(srcRoot)) throw new Error(`Dialog structure gate: scan root does not exist: ${srcRoot}`);
+export function collectViolations({
+  srcRoot = join(WEB_ROOT, 'src'),
+  cwd = WEB_ROOT,
+  allowlist = ALLOWLIST,
+} = {}) {
+  if (!existsSync(srcRoot))
+    throw new Error(
+      `Dialog structure gate: scan root does not exist: ${srcRoot}`
+    );
   const libRoot = join(srcRoot, 'lib');
   const uiDir = join(libRoot, 'components', 'ui');
   const dialogDir = join(uiDir, 'Dialog');
@@ -2398,10 +3101,18 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
     popoverDir,
     partFiles: readPartFiles(dialogDir),
     // The shared Dialog and Popover are the only modals built by hand.
-    ownDialogExempt: (file) => isInside(dialogDir, file) || isInside(popoverDir, file),
+    ownDialogExempt: (file) =>
+      isInside(dialogDir, file) || isInside(popoverDir, file),
     // Test helpers and stories find parts to drive them, and never ship.
-    scriptSelectExempt: (file) => isInside(join(srcRoot, 'tests'), file) || STORY_FILE.test(file),
-    handles: { classes: new Map(), ids: new Map(), idPrefixes: [], idSuffixes: [], attrs: new Map() },
+    scriptSelectExempt: (file) =>
+      isInside(join(srcRoot, 'tests'), file) || STORY_FILE.test(file),
+    handles: {
+      classes: new Map(),
+      ids: new Map(),
+      idPrefixes: [],
+      idSuffixes: [],
+      attrs: new Map(),
+    },
     nameOf: (file) => relative(cwd, file).split(sep).join('/'),
   };
   const { nameOf } = ctx;
@@ -2416,7 +3127,13 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
     const unit = parseSvelte(file, source);
     units.set(file, unit);
     if (unit.ast && !isInside(dialogDir, file)) {
-      collectHandles(unit.ast, collectBindings(file, unit.programs, ctx, () => {}), nameOf(file), ctx.handles, source);
+      collectHandles(
+        unit.ast,
+        collectBindings(file, unit.programs, ctx, () => {}),
+        nameOf(file),
+        ctx.handles,
+        source
+      );
     }
   }
 
@@ -2425,17 +3142,31 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
     const source = sources.get(file);
     const name = nameOf(file);
     // `echo`: the same violation, told to the file that handed the part its handle.
-    scanFile(file, source, units.get(file), ctx, (offset, rule, detail, echo) => {
-      const line = lineOf(source, offset);
-      found.push({ file: name, line, rule, detail });
-      if (echo) found.push({ file: echo.file, line: echo.line, rule, detail: echo.detail(`${name}:${line}`) });
-    });
+    scanFile(
+      file,
+      source,
+      units.get(file),
+      ctx,
+      (offset, rule, detail, echo) => {
+        const line = lineOf(source, offset);
+        found.push({ file: name, line, rule, detail });
+        if (echo)
+          found.push({
+            file: echo.file,
+            line: echo.line,
+            rule,
+            detail: echo.detail(`${name}:${line}`),
+          });
+      }
+    );
   }
   return { ...applyAllowlist(found, allowlist), filesScanned: files.length };
 }
 
 function usage(why) {
-  console.error(`Dialog structure gate: ${why} Usage: check-dialog-structure.mjs [--root <dir>]`);
+  console.error(
+    `Dialog structure gate: ${why} Usage: check-dialog-structure.mjs [--root <dir>]`
+  );
   process.exit(2);
 }
 
@@ -2456,16 +3187,22 @@ function optionsFrom(argv) {
 
 function main(argv = process.argv.slice(2)) {
   const options = optionsFrom(argv);
-  const { violations, allowlisted, stale, miscounted, filesScanned } = collectViolations(options);
+  const { violations, allowlisted, stale, miscounted, filesScanned } =
+    collectViolations(options);
 
   if (filesScanned === 0) {
-    console.error('Dialog structure gate scanned 0 files: the scan root is misconfigured. Failing closed.');
+    console.error(
+      'Dialog structure gate scanned 0 files: the scan root is misconfigured. Failing closed.'
+    );
     process.exit(1);
   }
 
-  for (const v of violations) console.error(`${v.file}:${v.line} ${v.rule}: ${v.detail}`);
+  for (const v of violations)
+    console.error(`${v.file}:${v.line} ${v.rule}: ${v.detail}`);
   for (const a of stale) {
-    console.error(`${a.file} ${a.rule}: allowlisted but no longer violates. Delete its ALLOWLIST entry.`);
+    console.error(
+      `${a.file} ${a.rule}: allowlisted but no longer violates. Delete its ALLOWLIST entry.`
+    );
   }
   for (const a of miscounted) {
     console.error(
@@ -2501,7 +3238,10 @@ function main(argv = process.argv.slice(2)) {
 function isEntrypoint() {
   if (!process.argv[1]) return false;
   try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+    return (
+      realpathSync(process.argv[1]) ===
+      realpathSync(fileURLToPath(import.meta.url))
+    );
   } catch {
     return false;
   }

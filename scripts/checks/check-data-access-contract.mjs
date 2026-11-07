@@ -920,7 +920,8 @@ const OWNERSHIP_CALL_RE = new RegExp(
 const AWAITED_RE = /\b(?:await|return|yield)\s*$/;
 
 /** `const write = ` / `let write = ` — a named promise that may be handed off. */
-const ASSIGNMENT_RE = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]*)?=\s*$/;
+const ASSIGNMENT_RE =
+  /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]*)?=\s*$/;
 
 /**
  * How far forward to look for the hand-off of a named promise. VersionedCache's
@@ -989,14 +990,19 @@ export function collectFloatingKvWriteViolations({
         if (!captured) continue;
         if (!isKvReceiver(captured.receiver)) continue;
 
-        const prefix = code.slice(Math.max(0, captured.start - 200), captured.start);
+        const prefix = code.slice(
+          Math.max(0, captured.start - 200),
+          captured.start
+        );
         if (AWAITED_RE.test(prefix)) continue;
         if (OWNERSHIP_CALL_RE.test(prefix)) continue;
 
         const assigned = ASSIGNMENT_RE.exec(prefix);
         if (assigned) {
           const name = assigned[1];
-          const after = code.slice(captured.start).split('\n')
+          const after = code
+            .slice(captured.start)
+            .split('\n')
             .slice(0, HANDOFF_LOOKAHEAD_LINES)
             .join('\n');
           const handoff = new RegExp(
@@ -1098,7 +1104,11 @@ export function searchValueHead(expr) {
     if (ch === '(' || ch === '[' || ch === '{') depth += 1;
     else if (ch === ')' || ch === ']' || ch === '}') {
       depth -= 1;
-      if (depth < 0) return line.slice(0, i).trim().replace(/[,;]+$/, '');
+      if (depth < 0)
+        return line
+          .slice(0, i)
+          .trim()
+          .replace(/[,;]+$/, '');
     } else if (depth === 0 && (ch === ',' || ch === ';')) {
       return line.slice(0, i).trim();
     }
@@ -1503,15 +1513,13 @@ export function collectCacheWaitUntilViolations({
             file: toPosix(relative(cwd, file)),
             line,
             text: 'new VersionedCache(<non-literal>)',
-            reason: 'config is not an inline object literal, so waitUntil cannot be verified',
+            reason:
+              'config is not an inline object literal, so waitUntil cannot be verified',
           });
           continue;
         }
 
-        const literal = captureObjectLiteral(
-          rest,
-          brace
-        );
+        const literal = captureObjectLiteral(rest, brace);
         if (!literal) {
           violations.push({
             file: toPosix(relative(cwd, file)),
@@ -1566,7 +1574,7 @@ function formatCacheWaitUntilGuidance() {
     '  still had the bug: it handed its cache to ConnectAccountService, whose',
     '  getStatus reads through it via getWithResult, in ANOTHER FILE where no',
     '  textual rule can follow. "This site only invalidates" is a property of',
-    '  today\'s callers, not of the construction, so it cannot be the basis of an',
+    "  today's callers, not of the construction, so it cannot be the basis of an",
     '  exemption. payment-webhook and subscription-webhook were both one `get` away',
     '  from the same silence for the same reason.',
     '',
@@ -1677,7 +1685,8 @@ function main() {
     console.error(
       '\nRULE 3 (SHARED WINDOW) — a hand-written Cache-Control carrying s-maxage or stale-while-revalidate:\n'
     );
-    for (const v of shared) console.error(`  ${v.file}:${v.line}: '${v.value}'`);
+    for (const v of shared)
+      console.error(`  ${v.file}:${v.line}: '${v.value}'`);
     console.error(
       '\n  A shared cache keys on URL and NEVER on Cookie, so a stored body is handed to the\n' +
         '  next viewer.\n' +
@@ -1690,7 +1699,8 @@ function main() {
     console.error(
       '\nRULE 3 (OFF-VOCABULARY) — a hand-written Cache-Control outside CACHE_PRESETS:\n'
     );
-    for (const v of offVocab) console.error(`  ${v.file}:${v.line}: '${v.value}'`);
+    for (const v of offVocab)
+      console.error(`  ${v.file}:${v.line}: '${v.value}'`);
     console.error(
       '\n  The value cannot be changed centrally and its reasoning is not next to the preset.\n' +
         presetMenu
@@ -1700,7 +1710,8 @@ function main() {
   if (kv.violations.length > 0) {
     failed = true;
     console.error('\nRULE 4 — a floating KV write:\n');
-    for (const v of kv.violations) console.error(`  ${v.file}:${v.line}: ${v.text}`);
+    for (const v of kv.violations)
+      console.error(`  ${v.file}:${v.line}: ${v.text}`);
     console.error(
       '\n  A Workers response CANCELS an in-flight promise nothing is holding, so this write\n' +
         '  silently never happens — and a fire-and-forget write has no failure signal.\n' +
@@ -1721,7 +1732,7 @@ function main() {
     }
     console.error(
       '\n  Ten of the twelve original declarations set no minimum and two were written\n' +
-        "  `z.string().trim().min(1)` — so a grep for `z.string().min` matched NONE of them\n" +
+        '  `z.string().trim().min(1)` — so a grep for `z.string().min` matched NONE of them\n' +
         '  and the drift was invisible. This rule does not look for the bad spellings; it\n' +
         '  looks for the absence of the good one.\n' +
         formatSearchBuilderGuidance()
@@ -1774,6 +1785,9 @@ function main() {
   );
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main();
 }

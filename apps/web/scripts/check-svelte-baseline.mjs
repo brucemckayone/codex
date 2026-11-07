@@ -44,7 +44,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
-const DEFAULT_BASELINE = fileURLToPath(new URL('./svelte-check-baseline.json', import.meta.url));
+const DEFAULT_BASELINE = fileURLToPath(
+  new URL('./svelte-check-baseline.json', import.meta.url)
+);
 
 /** A diagnostic's code as a key: `TS2322` for TypeScript, `<source>/<code>` otherwise. */
 export function codeKey(diagnostic) {
@@ -66,9 +68,15 @@ export function parseMachineVerbose(text) {
     if (!line.trim()) continue;
     const rest = line.replace(/^\d+ /, '');
     if (rest.startsWith('START ')) continue;
-    const done = rest.match(/^COMPLETED (\d+) FILES (\d+) ERRORS (\d+) WARNINGS (\d+) FILES_WITH_PROBLEMS$/);
+    const done = rest.match(
+      /^COMPLETED (\d+) FILES (\d+) ERRORS (\d+) WARNINGS (\d+) FILES_WITH_PROBLEMS$/
+    );
     if (done) {
-      completed = { files: Number(done[1]), errors: Number(done[2]), warnings: Number(done[3]) };
+      completed = {
+        files: Number(done[1]),
+        errors: Number(done[2]),
+        warnings: Number(done[3]),
+      };
       continue;
     }
     if (rest.startsWith('{')) {
@@ -84,10 +92,16 @@ export function parseMachineVerbose(text) {
     }
     problems.push(`unexpected svelte-check output: ${line.slice(0, 200)}`);
   }
-  if (!completed) problems.push('svelte-check printed no COMPLETED line, so it did not finish');
-  else if (completed.files === 0) problems.push('svelte-check checked 0 files, so its config found nothing');
+  if (!completed)
+    problems.push(
+      'svelte-check printed no COMPLETED line, so it did not finish'
+    );
+  else if (completed.files === 0)
+    problems.push('svelte-check checked 0 files, so its config found nothing');
   else if (completed.errors !== errors.length) {
-    problems.push(`svelte-check reported ${completed.errors} error(s) but printed ${errors.length}`);
+    problems.push(
+      `svelte-check reported ${completed.errors} error(s) but printed ${errors.length}`
+    );
   }
   return { errors, completed, problems };
 }
@@ -107,7 +121,8 @@ function sortCounts(counts) {
   const sorted = {};
   for (const file of Object.keys(counts).sort()) {
     const codes = Object.keys(counts[file]).sort();
-    if (codes.length) sorted[file] = Object.fromEntries(codes.map((c) => [c, counts[file][c]]));
+    if (codes.length)
+      sorted[file] = Object.fromEntries(codes.map((c) => [c, counts[file][c]]));
   }
   return sorted;
 }
@@ -118,7 +133,10 @@ export function compareCounts(current, baseline) {
   const stale = [];
   const files = new Set([...Object.keys(current), ...Object.keys(baseline)]);
   for (const file of [...files].sort()) {
-    const codes = new Set([...Object.keys(current[file] ?? {}), ...Object.keys(baseline[file] ?? {})]);
+    const codes = new Set([
+      ...Object.keys(current[file] ?? {}),
+      ...Object.keys(baseline[file] ?? {}),
+    ]);
     for (const code of [...codes].sort()) {
       const found = current[file]?.[code] ?? 0;
       const expected = baseline[file]?.[code] ?? 0;
@@ -142,10 +160,14 @@ export function prunedBaseline(baseline, stale) {
 export function readBaseline(path) {
   const parsed = JSON.parse(readFileSync(path, 'utf8'));
   const errors = parsed?.errors;
-  if (!errors || typeof errors !== 'object') throw new Error(`${path} has no "errors" object`);
+  if (!errors || typeof errors !== 'object')
+    throw new Error(`${path} has no "errors" object`);
   for (const [file, codes] of Object.entries(errors)) {
     for (const [code, n] of Object.entries(codes)) {
-      if (!Number.isInteger(n) || n < 1) throw new Error(`${path}: ${file} ${code} must be a count of 1 or more, not ${n}`);
+      if (!Number.isInteger(n) || n < 1)
+        throw new Error(
+          `${path}: ${file} ${code} must be a count of 1 or more, not ${n}`
+        );
     }
   }
   return errors;
@@ -159,16 +181,26 @@ function runSvelteCheck() {
   const require = createRequire(import.meta.url);
   const pkgPath = require.resolve('svelte-check/package.json');
   const { bin } = JSON.parse(readFileSync(pkgPath, 'utf8'));
-  const binPath = join(dirname(pkgPath), typeof bin === 'string' ? bin : bin['svelte-check']);
-  const run = spawnSync(process.execPath, [binPath, '--tsconfig', './tsconfig.json', '--output', 'machine-verbose'], {
-    cwd: WEB_ROOT,
-    encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
-  });
+  const binPath = join(
+    dirname(pkgPath),
+    typeof bin === 'string' ? bin : bin['svelte-check']
+  );
+  const run = spawnSync(
+    process.execPath,
+    [binPath, '--tsconfig', './tsconfig.json', '--output', 'machine-verbose'],
+    {
+      cwd: WEB_ROOT,
+      encoding: 'utf8',
+      maxBuffer: 256 * 1024 * 1024,
+    }
+  );
   if (run.error) throw run.error;
   // Exit 1 just means errors were found; the counts decide. Anything else is a crash.
   if (run.status !== 0 && run.status !== 1) {
-    return { stdout: run.stdout, crash: `svelte-check exited ${run.status ?? run.signal}: ${(run.stderr ?? '').slice(0, 2000)}` };
+    return {
+      stdout: run.stdout,
+      crash: `svelte-check exited ${run.status ?? run.signal}: ${(run.stderr ?? '').slice(0, 2000)}`,
+    };
   }
   return { stdout: run.stdout, crash: null };
 }
@@ -189,7 +221,8 @@ function parseArgs(argv) {
   return options;
 }
 
-const show = (e) => `      ${e.filename}:${e.start.line + 1}:${e.start.character + 1} ${e.message.split('\n')[0]}`;
+const show = (e) =>
+  `      ${e.filename}:${e.start.line + 1}:${e.start.character + 1} ${e.message.split('\n')[0]}`;
 
 /** The whole check; returns the exit code. */
 export function run(argv, log = console) {
@@ -214,18 +247,31 @@ export function run(argv, log = console) {
 
   if (options.prune && stale.length) {
     writeBaseline(options.baseline, prunedBaseline(baseline, stale));
-    for (const s of stale) log.log(`pruned ${s.file} ${s.code}: ${s.expected} -> ${s.found}`);
+    for (const s of stale)
+      log.log(`pruned ${s.file} ${s.code}: ${s.expected} -> ${s.found}`);
   }
   if (added.length) {
-    log.error('svelte-check found errors the baseline does not list. Fix them; the baseline only shrinks.\n');
+    log.error(
+      'svelte-check found errors the baseline does not list. Fix them; the baseline only shrinks.\n'
+    );
     for (const a of added) {
-      log.error(`  ${a.file} ${a.code}: ${a.found} found, ${a.expected} in the baseline`);
-      for (const e of errors.filter((x) => x.filename === a.file && codeKey(x) === a.code)) log.error(show(e));
+      log.error(
+        `  ${a.file} ${a.code}: ${a.found} found, ${a.expected} in the baseline`
+      );
+      for (const e of errors.filter(
+        (x) => x.filename === a.file && codeKey(x) === a.code
+      ))
+        log.error(show(e));
     }
   }
   if (stale.length && !options.prune) {
-    log.error('\nThese baseline entries are stale: the errors are fixed. Run with --prune to lower them.\n');
-    for (const s of stale) log.error(`  ${s.file} ${s.code}: ${s.expected} in the baseline, ${s.found} found`);
+    log.error(
+      '\nThese baseline entries are stale: the errors are fixed. Run with --prune to lower them.\n'
+    );
+    for (const s of stale)
+      log.error(
+        `  ${s.file} ${s.code}: ${s.expected} in the baseline, ${s.found} found`
+      );
   }
   if (added.length || (stale.length && !options.prune)) return 1;
   const total = errors.length;
@@ -243,7 +289,10 @@ export function run(argv, log = console) {
 function isEntrypoint() {
   if (!process.argv[1]) return false;
   try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+    return (
+      realpathSync(process.argv[1]) ===
+      realpathSync(fileURLToPath(import.meta.url))
+    );
   } catch {
     return false;
   }
