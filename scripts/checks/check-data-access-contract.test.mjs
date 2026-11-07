@@ -29,10 +29,18 @@
  * the real file's shape moved.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   classifySearchFieldValue,
@@ -1398,4 +1406,27 @@ test('RULE 7 ignores a construction inside a comment or a docstring example', ()
   const { violations, constructionsFound } = scanSink();
   assert.equal(constructionsFound, 0);
   assert.deepEqual(violations, []);
+});
+
+test('RUNS when started through a symlink, rather than exiting 0 unchecked (Codex-noyrq)', () => {
+  // Node resolves import.meta.url through the link but not argv[1], so the old
+  // entry check skipped main() and exited 0 with no output. main() scans the
+  // real tree, so either verdict is fine here: the point is that it ran.
+  const dir = mkdtempSync(join(tmpdir(), 'data-access-link-'));
+  try {
+    const link = join(dir, 'linked-gate.mjs');
+    symlinkSync(
+      fileURLToPath(
+        new URL('./check-data-access-contract.mjs', import.meta.url)
+      ),
+      link
+    );
+    const result = spawnSync(process.execPath, [link], { encoding: 'utf8' });
+    assert.match(
+      `${result.stdout}${result.stderr}`,
+      /^OK: no hand-written Cache-Control|^RULE \d/m
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

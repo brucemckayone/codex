@@ -76,9 +76,9 @@
  * Reusable-workflow jobs (`uses:` at JOB level, no `steps:`) are not steps
  * either; testing.yml calls static_analysis.yml that way.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -386,9 +386,23 @@ function main() {
   );
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
-  main();
+/**
+ * Whether this file is the process's entry, so the self-test can import it
+ * without running main(). Compared as real paths: Node resolves
+ * import.meta.url through symlinks but not argv[1], so a plain comparison
+ * skipped main() under a symlinked path and exited 0 having checked nothing
+ * (Codex-noyrq).
+ */
+function isEntrypoint() {
+  if (!process.argv[1]) return false;
+  try {
+    return (
+      realpathSync(process.argv[1]) ===
+      realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
 }
+
+if (isEntrypoint()) main();

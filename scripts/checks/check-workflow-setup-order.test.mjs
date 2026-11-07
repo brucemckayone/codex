@@ -32,8 +32,12 @@
  * the static-analysis CI job.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   collectSetupOrderViolations,
@@ -357,4 +361,27 @@ test('the REAL workflow tree parses — "OK" cannot mean "parsed nothing"', () =
     testingYmlSetupNodeJobs >= 4,
     `testing.yml carries four independent setup pairs; parser attributed ${testingYmlSetupNodeJobs} jobs`
   );
+});
+
+test('RUNS when started through a symlink, rather than exiting 0 unchecked (Codex-noyrq)', () => {
+  // Node resolves import.meta.url through the link but not argv[1], so the old
+  // entry check skipped main() and exited 0 with no output. main() scans the
+  // real tree, so either verdict is fine here: the point is that it ran.
+  const dir = mkdtempSync(join(tmpdir(), 'setup-order-link-'));
+  try {
+    const link = join(dir, 'linked-gate.mjs');
+    symlinkSync(
+      fileURLToPath(
+        new URL('./check-workflow-setup-order.mjs', import.meta.url)
+      ),
+      link
+    );
+    const result = spawnSync(process.execPath, [link], { encoding: 'utf8' });
+    assert.match(
+      `${result.stdout}${result.stderr}`,
+      /^OK: \d+ actions\/setup-node step\(s\)|^Workflow setup-order violations:/m
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
