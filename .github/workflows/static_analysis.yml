@@ -10,9 +10,12 @@ jobs:
   static-analysis:
     name: Lint, Format & Type Check
     runs-on: ubuntu-latest
-    # About 2x the p95 of 40 green runs (4.5 min). It lives here because a job
-    # that calls a reusable workflow (`uses:`) cannot set it (Codex-j7x4u).
-    timeout-minutes: 15
+    # About 2x the p95 of 40 green runs (4.5 min) was 15. The svelte-check
+    # step (Codex-3ckzk) then took a 20-minute timeout of its own, which a
+    # 15-minute job would cut short, so the job allows the two together. Set
+    # both from CI's measured p95 once there is one. It lives here because a
+    # job that calls a reusable workflow (`uses:`) cannot set it (Codex-j7x4u).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
@@ -165,6 +168,8 @@ jobs:
       - name: svelte-check baseline gate self-test
         run: pnpm --filter web run check:svelte-baseline:test
 
+      # 20 minutes until CI's own runs give a p95: a local run took 273-1039 s
+      # under load, and a step that times out reads like a failure.
       - name: svelte-check (no error beyond the baseline)
         run: pnpm --filter web run check:svelte-baseline
-        timeout-minutes: 10
+        timeout-minutes: 20
