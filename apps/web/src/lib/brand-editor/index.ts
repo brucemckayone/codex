@@ -15,7 +15,6 @@ export {
 } from './brand-preview-bridge';
 // Brand Editor - CSS Injection
 export {
-  applyLayoutBrandInputs,
   clearTokenOverrides,
   // Codex-wwedk: per-theme dark tokenOverrides helpers (parallel to the
   // light versions). Used by the org layout SSR injection path.
@@ -31,6 +30,8 @@ export {
   BRAND_DEFAULT_PRIMARY,
   BRAND_DEFAULT_SECONDARY,
 } from './defaults';
+// Brand Editor - The org layout's write-back of its own inputs (Codex-q01h8)
+export { writeBackLayoutBrandInputs } from './layout-brand-inputs.svelte';
 // Brand Editor - Navigation
 export { LEVELS } from './levels';
 

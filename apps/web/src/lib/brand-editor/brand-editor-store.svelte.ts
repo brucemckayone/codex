@@ -189,8 +189,15 @@ function close(): void {
       .querySelector('.org-layout')
       ?.removeAttribute('data-editing-theme');
   }
-  clearBrandVars();
-  clearStorage();
+  // An editor that never opened previewed nothing, so it undoes nothing. The
+  // brand page closes on destroy even when it left before its query let it
+  // open, and clearBrandVars would then strip the org layout's own brand with
+  // `isClosed` unchanged, so nothing writes it back (Codex-q01h8). Skipping
+  // clearStorage also keeps a crashed session's draft through such a visit.
+  if (state.panel !== 'closed') {
+    clearBrandVars();
+    clearStorage();
+  }
   state.panel = 'closed';
   state.pending = null;
   state.saved = null;

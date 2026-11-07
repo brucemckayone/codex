@@ -737,9 +737,10 @@ export function clearTokenOverrides(el: HTMLElement): void {
 
 /**
  * Remove all brand editor CSS overrides from the org layout, the layout's own
- * bound inputs among them: the preview wrote those same properties. Called
- * whenever the editor closes. The org layout then writes its inputs back
- * (`applyLayoutBrandInputs`, Codex-q01h8).
+ * bound properties among them: the preview wrote those same properties. It
+ * leaves the brand attributes the preview flipped. Called when an open editor
+ * closes. The org layout then writes its inputs back
+ * (`writeBackLayoutBrandInputs`, Codex-q01h8).
  */
 export function clearBrandVars(): void {
   const el = getOrgLayoutElement();
@@ -756,14 +757,16 @@ export function clearBrandVars(): void {
 /**
  * Write the org layout's own brand inputs back onto its element (Codex-q01h8).
  *
- * The editor previews by setting the same inline properties and attributes
- * the layout binds, and `clearBrandVars` removes them when it closes. Svelte
- * re-sets a `style:` directive or an attribute only when its VALUE changes, so
- * an input whose value had not changed stayed removed until a reload: the org
- * lost its brand on every page after the studio. Only an org with fine-tune
- * overrides escaped, because its `style` attribute changes on close and Svelte
- * then rewrites the whole style. The layout calls this whenever the editor is
- * closed, with every input it binds. An absent value is removed, as Svelte
+ * The editor previews by setting the same inline properties the layout binds
+ * and flipping its two brand attributes. `clearBrandVars` removes the
+ * properties when it closes, and nothing undid the attributes. Svelte re-sets
+ * a `style:` directive or an attribute only when its VALUE changes, so an
+ * input whose value had not changed stayed wrong until a reload: the org lost
+ * its brand on every page after the studio. An org with fine-tune overrides
+ * kept its properties, because its `style` attribute changes on close and
+ * Svelte then rewrites the whole style, but not its attributes.
+ * `writeBackLayoutBrandInputs` calls this whenever the editor is closed, with
+ * every input the layout binds. An absent value is removed, as Svelte
  * removes it.
  */
 export function applyLayoutBrandInputs(

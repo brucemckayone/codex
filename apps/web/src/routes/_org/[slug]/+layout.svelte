@@ -28,7 +28,7 @@
   import '$lib/styles/tokens/font-fallbacks.css';
   import { withFallback } from '$lib/brand-editor/font-fallbacks';
   import { groundLuminanceVars, paintableColour } from '$lib/brand-editor/ground';
-  import { applyLayoutBrandInputs, brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
+  import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars, writeBackLayoutBrandInputs } from '$lib/brand-editor';
   import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
@@ -130,9 +130,10 @@
 
   // Every input this element binds with `style:`, and its two brand
   // attributes, each in one place (Codex-q01h8). The markup renders them, and
-  // the effect after the token overrides writes them back whenever the brand
-  // editor is closed: its preview overwrote them, clearBrandVars removed them,
-  // and Svelte re-sets one only when its value changes.
+  // the write-back after the token overrides restores them whenever the brand
+  // editor is closed: its preview overwrote the properties and flipped the
+  // attributes, clearBrandVars then removed the properties, and Svelte re-sets
+  // one only when its own value changes.
   const brandInputVars = $derived({
     '--brand-color': brandPrimary,
     '--brand-secondary': brandSecondary,
@@ -281,12 +282,7 @@
   // Write this element's brand inputs back whenever the brand editor is
   // closed (Codex-q01h8, see brandInputVars). Otherwise it repeats what the
   // markup already set.
-  $effect(() => {
-    if (!browser || !brandEditor.isClosed) return;
-    const el = document.querySelector('.org-layout') as HTMLElement | null;
-    if (!el) return;
-    applyLayoutBrandInputs(el, brandInputVars, brandInputAttributes);
-  });
+  writeBackLayoutBrandInputs(() => brandInputVars, () => brandInputAttributes);
 
   // Build Google Fonts URL from the brand's font families. An org that never
   // picked a font still RENDERS in the tokens' default, 'Inter' (typography.css),

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { type AST, parse } from 'svelte/compiler';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyLayoutBrandInputs,
@@ -414,47 +415,113 @@ describe('applyLayoutBrandInputs writes the layout back after the editor', () =>
   });
 });
 
+// Read with svelte's own parser, so a comment is not code, and only a
+// top-level statement of the script runs once at mount: never one inside
+// onMount, untrack or a branch. layout-brand-inputs.svelte.test.ts runs the
+// write-back itself.
 describe('the org layout writes back every input it binds', () => {
-  const layout = readFileSync(
+  const source = readFileSync(
     join(
       dirname(fileURLToPath(import.meta.url)),
       '../../routes/_org/[slug]/+layout.svelte'
     ),
     'utf8'
   );
-  const directives = [...layout.matchAll(/style:(--[\w-]+)=\{([^}]*)\}/g)];
-  const record = layout.match(
-    /const brandInputVars = \$derived\(\{([\s\S]*?)\n {2}\}\);/
+  const ast = parse(source, { modern: true });
+  const script = ast.instance?.content.body ?? [];
+  const carrier = ast.fragment.nodes.find(
+    (node): node is AST.RegularElement =>
+      node.type === 'RegularElement' &&
+      node.attributes.some(
+        (a) =>
+          a.type === 'Attribute' &&
+          a.name === 'class' &&
+          Array.isArray(a.value) &&
+          a.value.some(
+            (v) =>
+              v.type === 'Text' && v.data.split(/\s+/).includes('org-layout')
+          )
+      )
   );
-  const recordKeys = [
-    ...(record?.[1] ?? '').matchAll(/^\s*'(--[\w-]+)':/gm),
-  ].map(([, key]) => key);
+  /** An attribute's or directive's `{…}` exactly as written, braces included. */
+  const written = (value: AST.Attribute['value']) =>
+    value !== true && !Array.isArray(value)
+      ? source.slice(value.start, value.end)
+      : undefined;
 
-  it('binds each style input from the one record, under its own name', () => {
+  /** The keys of a top-level `const <name> = $derived({ … })` record. */
+  function recordKeys(name: string): string[] {
+    for (const statement of script) {
+      if (statement.type !== 'VariableDeclaration') continue;
+      for (const { id, init } of statement.declarations) {
+        if (id.type !== 'Identifier' || id.name !== name) continue;
+        if (
+          init?.type !== 'CallExpression' ||
+          init.callee.type !== 'Identifier' ||
+          init.callee.name !== '$derived'
+        )
+          return [];
+        const [record] = init.arguments;
+        if (record?.type !== 'ObjectExpression') return [];
+        return record.properties.flatMap((p) =>
+          p.type === 'Property' &&
+          p.key.type === 'Literal' &&
+          typeof p.key.value === 'string'
+            ? [p.key.value]
+            : []
+        );
+      }
+    }
+    return [];
+  }
+
+  it('binds each style input on .org-layout from the one record, under its own name', () => {
+    expect(carrier, '.org-layout').toBeDefined();
+    const directives = (carrier?.attributes ?? []).filter(
+      (a) => a.type === 'StyleDirective'
+    );
     expect(directives.length).toBeGreaterThan(0);
     expect(
       directives.filter(
-        ([, prop, value]) => value !== `brandInputVars['${prop}']`
+        (d) => written(d.value) !== `{brandInputVars['${d.name}']}`
       )
     ).toEqual([]);
-    expect([...recordKeys].sort()).toEqual(
-      directives.map(([, prop]) => prop).sort()
+    expect(recordKeys('brandInputVars').sort()).toEqual(
+      directives.map((d) => d.name).sort()
     );
   });
 
   it('binds both brand attributes from the record it writes back', () => {
-    expect(layout).toContain(
-      "data-org-brand={brandInputAttributes['data-org-brand'] ? '' : undefined}"
-    );
-    expect(layout).toContain(
-      "data-org-bg={brandInputAttributes['data-org-bg'] ? '' : undefined}"
-    );
+    const names = recordKeys('brandInputAttributes');
+    expect(names.sort()).toEqual(['data-org-bg', 'data-org-brand']);
+    for (const name of names) {
+      const attribute = carrier?.attributes.find(
+        (a) => a.type === 'Attribute' && a.name === name
+      );
+      expect(
+        attribute?.type === 'Attribute' ? written(attribute.value) : undefined,
+        name
+      ).toBe(`{brandInputAttributes['${name}'] ? '' : undefined}`);
+    }
   });
 
-  it('writes the record back whenever the editor is closed', () => {
-    expect(layout).toMatch(
-      /if \(!browser \|\| !brandEditor\.isClosed\) return;[\s\S]{0,200}applyLayoutBrandInputs\(el, brandInputVars, brandInputAttributes\)/
+  it('registers the write-back once, at the top level, reading both records', () => {
+    const calls = script.flatMap((s) =>
+      s.type === 'ExpressionStatement' &&
+      s.expression.type === 'CallExpression' &&
+      s.expression.callee.type === 'Identifier' &&
+      s.expression.callee.name === 'writeBackLayoutBrandInputs'
+        ? [s.expression]
+        : []
     );
+    expect(calls).toHaveLength(1);
+    expect(
+      calls[0]?.arguments.map((arg) =>
+        arg.type === 'ArrowFunctionExpression' && arg.body.type === 'Identifier'
+          ? arg.body.name
+          : undefined
+      )
+    ).toEqual(['brandInputVars', 'brandInputAttributes']);
   });
 });
 
