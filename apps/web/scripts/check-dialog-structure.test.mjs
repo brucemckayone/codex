@@ -1456,7 +1456,7 @@ test('CATCHES an id built inside one expression: a template, a string +, a const
   writeFixture(
     'src/lib/styles/built.css',
     [
-      "[id$='-alpha'] { overflow: visible; }",
+      '#a-alpha { overflow: visible; }',
       '#tier-bravo { flex: none; }',
       '#a-kilo { flex: none; }',
       '#india-1 { flex: none; }',
@@ -1469,6 +1469,53 @@ test('CATCHES an id built inside one expression: a template, a string +, a const
   assert.deepEqual(
     result.violations.filter((v) => v.file.endsWith('built.css')).map((v) => `${v.rule}@${v.line}`),
     [1, 2, 3, 4, 5].map((line) => `part-class@${line}`)
+  );
+});
+
+test('CATCHES an id built through a const or $derived +, a chain of +, a $derived const, and each branch of a choice', () => {
+  // Review c7 (G7 LOW 3). Only #-tests, so no handle answers another's line.
+  writeFixture(
+    'src/routes/chain/+page.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { tier, kind, open }: { tier: { id: string }; kind: string; open: boolean } = $props();
+  const uid = $props.id();
+  const PREFIX = 'kilo-';
+  const NOV = $derived('nov-');
+  const MIKE_ID = $derived(\`\${uid}-mike\`);
+</script>
+<Dialog.Root><Dialog.Content><Dialog.Body id={PREFIX + tier.id}>a</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={'lima-' + kind + tier.id}>b</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={MIKE_ID}>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={open ? \`\${uid}-sierra\` : undefined}>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={open ? 'tier-papa' : 'tier-quebec'}>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={kind ?? 'tier-romeo'}>f</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={NOV + tier.id}>g</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={('oscar-' as string) + tier.id}>h</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={(open ? 'tier-tango' : undefined) as string | undefined}>i</Dialog.Body></Dialog.Content></Dialog.Root>
+`
+  );
+  writeFixture(
+    'src/lib/styles/chain.css',
+    [
+      '#kilo-1 { flex: none; }',
+      '#lima-a1 { flex: none; }',
+      '#x-mike { flex: none; }',
+      '#a-sierra { flex: none; }',
+      '#tier-papa { flex: none; }',
+      '#tier-quebec { flex: none; }',
+      '#tier-romeo { flex: none; }',
+      '#nov-1 { flex: none; }',
+      '#oscar-1 { flex: none; }',
+      '#tier-tango { flex: none; }',
+      '',
+    ].join('\n')
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.filter((v) => v.file.endsWith('chain.css')).map((v) => `${v.rule}@${v.line}`),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((line) => `part-class@${line}`)
   );
 });
 
@@ -1667,6 +1714,10 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
 <Dialog.Root><Dialog.Content maxHeight={\`\${\`40\`}rem\`} maxWidth={\`\${-48}rem\`}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={false} maxWidth={\`min(\${tall ? 90 : 60}dvw, 40rem)\`}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${a ? (b ? 1 : 2) : c ? 3 : 4}\${d ? (e ? 5 : 6) : f ? 7 : 8}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={''} maxWidth={''}><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={0}><Dialog.Body>m</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={tall ? '48rem' : ''} maxWidth={\`\${wide ? '40rem' : ''}\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight=""><Dialog.Body>o</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   // A wrapper inside ui/Dialog/ may forward the props: its own file is the part's.
@@ -1703,6 +1754,8 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
 <Dialog.Root><Dialog.Content maxHeight={\`\${tall ? '' : 40}rem\`}><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight="{tall ? 'auto' : 40}rem"><Dialog.Body>m</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${'' && 48}rem\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={0}><Dialog.Body>o</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${tall ? '' : 'none'}\`}><Dialog.Body>p</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
 
@@ -1723,8 +1776,13 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
     'part-style@16',
     'part-style@17',
     'part-style@18',
+    'part-style@19',
+    'part-style@20',
   ]);
   assert.match(result.violations[9].detail, /maxHeight="true" is not a CSS length/);
+  // max-width={0} is `max-width: 0`; a template's '' is falsy, so its 'none' is the one shown (review c7, G7 NIT 9).
+  assert.match(result.violations[14].detail, /maxWidth="0" is not a CSS length/);
+  assert.match(result.violations[15].detail, /maxHeight="none" is not a CSS length/);
   // A template's literal choices are each tested, as rendered (review c6, G6-G-L3).
   assert.match(result.violations[10].detail, /maxHeight="nonerem" is not a CSS length/);
   assert.match(result.violations[12].detail, /maxHeight="autorem" is not a CSS length/);
@@ -1761,6 +1819,7 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
 <Dialog.Root><Dialog.Content maxHeight={\`\${-rows}rem\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${\`\${rows}\`}rem\`}><Dialog.Body>o</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${a ? (b ? 1 : 2) : c ? 3 : 4}\${d ? (e ? 5 : 6) : f ? 7 : 8}\${g ? 1 : 2}rem\`}><Dialog.Body>p</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${a===1?1:a===2?2:a===3?3:a===4?4:a===5?5:a===6?6:a===7?7:a===8?8:a===9?9:a===10?10:a===11?11:a===12?12:a===13?13:a===14?14:a===15?15:a===16?16:17}rem\`}><Dialog.Body>q</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   writeFixture('src/routes/big/+page.svelte', `<script lang="ts">\n  import BigDialog from '$lib/components/BigDialog.svelte';\n</script>\n<BigDialog maxHeight="none" />\n`);
@@ -1769,8 +1828,8 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
   // @12-16: a template whose `${}` is no literal is "NaNrem" while its prop is unset (review c5).
   assert.deepEqual(
     summary(result),
-    // @21: more than 16 combinations of literal choices counts as unknown.
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].map((line) => `part-dynamic@${line}`)
+    // @21-22: more than 16 combinations of literal choices counts as unknown, 17 included.
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map((line) => `part-dynamic@${line}`)
   );
   assert.match(
     result.violations[0].detail,
@@ -2187,7 +2246,7 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
     `<script lang="ts">
   import * as Popover from '$lib/components/ui/Popover';
   import * as UI from '$lib/components/ui';
-  let { label, labelledby, wide, title = '', heading = undefined, hint = null }: Props = $props();
+  let { label, labelledby, wide, title = '', heading = undefined, hint = null, tpl = \`\`, bound = $bindable(), boundEmpty = $bindable('') }: Props = $props();
   const Alias = Popover.Content;
   const Panel = UI.Popover;
 </script>
@@ -2206,23 +2265,36 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
 <Popover.Content aria-label={label ?? ''}>m</Popover.Content>
 <Popover.Content aria-label={\`\${label}\`}>n</Popover.Content>
 <Popover.Content aria-label={label as string}>o</Popover.Content>
+<Popover.Content aria-label={\`\`}>p</Popover.Content>
+<Popover.Content aria-label={tpl}>q</Popover.Content>
+<Popover.Content aria-label={bound}>r</Popover.Content>
+<Popover.Content aria-label={boundEmpty}>s</Popover.Content>
+<Popover.Content aria-label={title ? heading : 'Info'}>t</Popover.Content>
+<Popover.Content aria-label={!title ? title : 'Info'}>u</Popover.Content>
+<Popover.Content aria-label={title === '' ? title : 'Info'}>v</Popover.Content>
+<Popover.Content aria-labelledby={wide ? 'h-id' : undefined} aria-label={title ? undefined : 'Info'}>w</Popover.Content>
+<Popover.Content aria-labelledby={wide ? 'h-id' : undefined} aria-label={wide ? undefined : undefined}>x</Popover.Content>
 `
   );
 
   const result = scan();
   // @16-18: an empty default is no name either (review c6, G6-G-L1).
+  // @23-26: nor an empty template, or `$bindable()` (review c7, G7 NIT 5).
+  // @27-29: a test proves only its own name, in its own branch (review c7, G7 LOW 2).
+  // @30-31: a pair needs one test, and a name in each branch (review c7, G7 LOW 4).
   // @5-6: the alias rule, so a panel can't leave the tags popover-name reads.
   assert.deepEqual(summary(result), [
-    ...[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map((line) => `popover-name@${line}`),
+    ...[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].map((line) => `popover-name@${line}`),
     'alias@5',
     'alias@6',
   ]);
   assert.match(
     result.violations[0].detail,
-    /^<Popover\.Content>'s name comes from a prop with no default or an empty one, .*; give the prop a non-empty default, or write the name on the tag$/
+    /^<Popover\.Content>'s name comes from a prop with no default or an empty one, .*; give the prop a non-empty default, write a fallback \(`label \|\| m\.x\(\)`\), or write the name on the tag$/
   );
   assert.match(result.violations[3].detail, /^<Popover\.Content> has no name/);
-  assert.match(result.violations[16].detail, /'UI\.Popover' is read as a value; use the Popover's parts as tags only/);
+  assert.match(result.violations.find((v) => v.line === 31).detail, /^<Popover\.Content> has no name/);
+  assert.match(result.violations.find((v) => v.rule === 'alias' && v.line === 6).detail, /'UI\.Popover' is read as a value; use the Popover's parts as tags only/);
 });
 
 test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a default), the other Popover parts, another Content, and ui/Popover's own files", () => {
@@ -2234,7 +2306,7 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
   import * as Dialog from '$lib/components/ui/Dialog';
   import * as UI from '$lib/components/ui';
   import { m } from '$lib/paraglide/messages';
-  let { label = 'Details', copy, wide, title, empty = '' } = $props();
+  let { label = 'Details', copy, wide, title, empty = '', bound = $bindable('Info') } = $props();
   let open = $state(true);
   const Btn = UI.Button;
 </script>
@@ -2252,6 +2324,15 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
 <Popover.Content aria-label={\`Uses of \${title}\`}>h2</Popover.Content>
 <Popover.Content aria-label={empty || 'Info'}>h3</Popover.Content>
 <Popover.Content aria-label={open && 'Info'}>h4</Popover.Content>
+<Popover.Content aria-label={empty ? empty : m.media_uses_where_title()}>h5</Popover.Content>
+<Popover.Content aria-label={empty.length ? empty : 'Info'}>h6</Popover.Content>
+<Popover.Content aria-label={empty !== '' ? empty : 'Info'}>h7</Popover.Content>
+<Popover.Content aria-label={'' != empty ? empty : 'Info'}>h8</Popover.Content>
+<Popover.Content aria-label={!!empty ? empty : 'Info'}>h9</Popover.Content>
+<Popover.Content aria-label={!empty ? 'Info' : empty}>h10</Popover.Content>
+<Popover.Content aria-label={empty === '' ? 'Info' : empty}>h11</Popover.Content>
+<Popover.Content aria-labelledby={empty ? 'range-heading' : undefined} aria-label={empty ? undefined : label}>h12</Popover.Content>
+<Popover.Content aria-label={bound}>h13</Popover.Content>
 <UI.Popover.Content aria-label="Pick">i</UI.Popover.Content>
 <UI.Button>j</UI.Button>
 <UI.Card.Content>j2</UI.Card.Content>
@@ -2341,9 +2422,47 @@ export type Load = typeof import('$lib/components/ui/Popover');
 `
   );
   writeFixture('src/lib/components/ui/index.ts', "export * as Popover from './Popover/index';\nexport { default as Button } from './Button.svelte';\n");
-  writeFixture('src/lib/components/ui/Popover/ctx.ts', "export * from './index';\n");
+  writeFixture('src/lib/components/ui/Popover/ctx.ts', "export const POPOVER_CTX = Symbol('popover');\n");
+  writeFixture(
+    'src/lib/components/ui/Popover/index.ts',
+    "export { default as Content } from './PopoverContent.svelte';\nexport { POPOVER_CTX } from './ctx';\n"
+  );
 
   assert.deepEqual(summary(scan()), []);
+});
+
+test("CATCHES the Popover handed on from inside ui/: a .ts in ui/Popover/ but its index, and the ui barrel's flat, star or part export", () => {
+  // Review c7 (G7 LOW 1): only these two homes are followed, so only they may.
+  writeFixture('src/lib/components/ui/Popover/ctx.ts', "export * from './index';\n");
+  writeFixture('src/lib/components/ui/Popover/parts.ts', "export { Content as Panel, Root } from './index';\n");
+  writeFixture(
+    'src/lib/components/ui/index.ts',
+    [
+      "export * as Popover from './Popover/index';",
+      "export { PopoverContent, Content as PopoverPanel } from './Popover/index';",
+      "export * from './Popover';",
+      "export { default as Tip } from './Popover/PopoverContent.svelte';",
+      "export * as Popover from './Popover/PopoverContent.svelte';",
+      "export * as Popover from './Popover';",
+      '',
+    ].join('\n')
+  );
+
+  const result = scan();
+  assert.deepEqual(result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`).sort(), [
+    'src/lib/components/ui/Popover/ctx.ts alias@1',
+    'src/lib/components/ui/Popover/parts.ts alias@1',
+    'src/lib/components/ui/index.ts alias@2',
+    'src/lib/components/ui/index.ts alias@3',
+    'src/lib/components/ui/index.ts alias@4',
+    'src/lib/components/ui/index.ts alias@5',
+  ]);
+  const at = (file, line) => result.violations.find((v) => v.file === file && v.line === line).detail;
+  assert.match(
+    at('src/lib/components/ui/index.ts', 2),
+    /^the ui barrel hands the Popover on \('\.\/Popover\/index'\) under a name popover-name can't follow; export it only as `export \* as Popover from '\.\/Popover\/index'`$/
+  );
+  assert.match(at('src/lib/components/ui/Popover/ctx.ts', 1), /^a \.ts\/\.js file re-exports the Popover \('\.\/index'\)/);
 });
 
 // --- own-dialog ----------------------------------------------------------
