@@ -36,10 +36,20 @@ interface Rung {
   where: string;
 }
 
-/** A rung is the unit, or a multiple of it; nothing else follows density. */
-const RUNG =
-  /^(?:calc\(var\(--space-unit\) \* \d+(?:\.\d+)?\)|var\(--space-unit\))$/;
 const UNIT = ['--space-unit', '--brand-density-scale'];
+
+/**
+ * The one formula a rung's name allows: `--space-N` is N units, `--space-N-5`
+ * N and a half, `--space-1` the unit itself. Nothing else follows density.
+ */
+function formulaFor(name: string): string | null {
+  const match = /^--space-(\d+)(-5)?$/.exec(name);
+  if (!match) return null;
+  const units = Number(match[1]) + (match[2] ? 0.5 : 0);
+  return units === 1
+    ? 'var(--space-unit)'
+    : `calc(var(--space-unit) * ${units})`;
+}
 
 /**
  * Every `--space-*` declaration in a sheet, and the density scale, wherever it
@@ -71,7 +81,10 @@ function scale(file: keyof typeof SCALE_BLOCK): Rung[] {
       ) {
         found.push({
           name: node.property,
-          formula: node.value.replace(/\/\*[\s\S]*?\*\//g, '').trim(),
+          formula: node.value
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/\s+/g, ' ')
+            .trim(),
           where: where.join(' > '),
         });
       }
@@ -98,6 +111,9 @@ describe('spacing scale', () => {
     expect(formula('spacing.css', '--space-unit')).toBe(
       'calc(0.25rem * var(--brand-density-scale, 1))'
     );
+    // At :root the scale is the default; a value there would rescale every
+    // platform route.
+    expect(formula('spacing.css', '--brand-density-scale')).toBeUndefined();
     expect(formula('org-brand.css', '--brand-density-scale')).toBe(
       'var(--brand-density, 1)'
     );
@@ -115,10 +131,13 @@ describe('spacing scale', () => {
       );
     const root = rungs('spacing.css');
     const org = rungs('org-brand.css');
-    // Zero needs no density; every other rung is a multiple of the unit.
+    // Zero needs no density, so it needs no twin; where declared it is 0px.
     expect(root.get('--space-0')).toBe('0px');
-    root.delete('--space-0');
-    expect([...root].filter(([, f]) => !RUNG.test(f))).toEqual([]);
+    for (const sheet of [root, org]) {
+      expect(sheet.get('--space-0') ?? '0px').toBe('0px');
+      sheet.delete('--space-0');
+    }
+    expect([...root].filter(([name, f]) => f !== formulaFor(name))).toEqual([]);
     expect(Object.fromEntries(org)).toEqual(Object.fromEntries(root));
   });
 });

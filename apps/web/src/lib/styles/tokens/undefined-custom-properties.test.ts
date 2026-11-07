@@ -17,7 +17,8 @@
  *
  * Defined means one of: a custom-property declaration (but not
  * `--x: initial`, which is the invalid value) in CSS or an inline `style`,
- * `@property --x`, a Svelte `style:--x` directive or `--x=` component prop
+ * `@property --x` with an `initial-value`, a Svelte `style:--x` directive or
+ * `--x=` component prop
  * (whose text value, like any attribute's, is read for bare references too),
  * an object key `'--x': …`, `setProperty('--x', …)`, or `--x:` written into a
  * string or template (an inline style built in script).
@@ -76,12 +77,19 @@ function bareVars(text: string): string[] {
     .map((m) => m[1]);
 }
 
-/** A declaration of `name` with `value`, and the bare reads in that value. */
+/** Where markup interpolates script: `{v}` in an attribute or inline style. */
+const INTERPOLATION = String.fromCharCode(0);
+
+/**
+ * A declaration of `name` with `value`, and the bare reads in that value. A
+ * value that is only interpolation is set from script, not written.
+ */
 function declare(name: string, raw: string, line: number, out: Scan) {
   const custom = name.startsWith('--');
   const value = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+  const written = value.replaceAll(INTERPOLATION, '').trim() !== '';
   if (custom && value.trim() !== 'initial')
-    out.definitions.push({ name, value });
+    out.definitions.push({ name, value: written ? value : null });
   for (const read of bareVars(value))
     out.reads.push({ name: read, line, into: custom ? name : null });
 }
@@ -97,8 +105,16 @@ function scanCss(
     if (node.type === 'Declaration') {
       declare(node.property, node.value, lineAt(node.start), out);
     } else if (node.type === 'Atrule') {
-      if (node.name === 'property')
-        out.definitions.push({ name: node.prelude.trim(), value: null });
+      // Registered with an initial value, it is never invalid. Without one
+      // (`syntax: '*'` allows that) it starts out guaranteed-invalid.
+      if (
+        node.name === 'property' &&
+        node.block?.children.some(
+          (child) =>
+            child.type === 'Declaration' && child.property === 'initial-value'
+        )
+      )
+        out.definitions.push({ name: node.prelude.trim(), value: '' });
       if (node.block) scanCss(node.block.children, lineAt, out);
     } else {
       scanCss(node.block.children, lineAt, out);
@@ -106,7 +122,7 @@ function scanCss(
   }
 }
 
-/** An inline `style` text: `a: b; --c: d`. Interpolations stand in as `0`. */
+/** An inline `style` text: `a: b; --c: d`, interpolations marked. */
 function scanInlineStyle(text: string, line: number, out: Scan) {
   for (const part of text.split(';')) {
     const colon = part.indexOf(':');
@@ -145,16 +161,14 @@ function cookedOf(quasi: unknown): string {
     return '';
   return typeof value.cooked === 'string' ? value.cooked : '';
 }
-/** Markup parts as text, interpolations as `0`; null for a lone expression. */
+/** Markup parts as text, interpolations marked; null when nothing is text. */
 function textOf(parts: unknown): string | null {
   if (!Array.isArray(parts)) return null;
-  return parts
-    .map((p) =>
-      isNode(p) && p.type === 'Text' && typeof p.data === 'string'
-        ? p.data
-        : '0'
-    )
-    .join('');
+  const texts = parts.map((p) =>
+    isNode(p) && p.type === 'Text' && typeof p.data === 'string' ? p.data : null
+  );
+  if (texts.every((text) => text === null)) return null;
+  return texts.map((text) => text ?? INTERPOLATION).join('');
 }
 
 /** A markup attribute or directive: a property written as text, or set from script. */
@@ -454,6 +468,25 @@ type T = { '--n': string };`,
       [
         'a.svelte:3 --brand-from-directive is optional: read it with a fallback',
         'a.svelte:3 --brand-from-script is optional: read it with a fallback',
+      ].sort()
+    );
+  });
+
+  test('a value that is only interpolation is set from script; @property with an initial value is written', () => {
+    const files = {
+      'a.svelte': `<Child --brand-quoted="{v}" />
+<div style="--brand-inline: {v}"></div>
+<style>
+  @property --brand-registered { syntax: '<length>'; inherits: true; initial-value: 0px; }
+  @property --unregistered-value { syntax: '*'; inherits: true; }
+  a { color: var(--brand-quoted); top: var(--brand-inline); left: var(--brand-registered); bottom: var(--unregistered-value); }
+</style>`,
+    };
+    expect(violations(files).sort()).toEqual(
+      [
+        'a.svelte:6 --brand-inline is optional: read it with a fallback',
+        'a.svelte:6 --brand-quoted is optional: read it with a fallback',
+        'a.svelte:6 --unregistered-value',
       ].sort()
     );
   });

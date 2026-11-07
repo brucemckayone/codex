@@ -29,7 +29,8 @@ const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 /**
  * A component's rules. `nested` also reads rules nested inside rules (`&:hover`),
- * each with the selectors around it in `parents`.
+ * each with the selectors around it in `parents`; an at-rule nested in a rule
+ * contributes its own declarations as a rule `&`.
  */
 export function componentRules(
   path: string,
@@ -51,22 +52,33 @@ function rulesOf(
   nested = false
 ): CssRule[] {
   const rules: CssRule[] = [];
+  /** A block's declarations as the cascade keeps them: last wins, but not over `!important`. */
+  const declsOf = (block: CssNode[]) => {
+    const decls = new Map<string, string>();
+    for (const d of block) {
+      if (d.type !== 'Declaration') continue;
+      const value = squash(d.value ?? '');
+      const kept = decls.get(d.property ?? '');
+      if (kept?.endsWith('!important') && !value.endsWith('!important'))
+        continue;
+      decls.set(d.property ?? '', value);
+    }
+    return decls;
+  };
   const visit = (children: CssNode[], within: string[], parents: string[]) => {
     for (const node of children) {
       if (node.type === 'Atrule') {
-        visit(
-          node.block?.children ?? [],
-          [...within, `@${node.name} ${squash(String(node.prelude))}`],
-          parents
-        );
+        const at = [...within, `@${node.name} ${squash(String(node.prelude))}`];
+        // Nested in a rule, an at-rule's own declarations belong to that rule.
+        const decls = declsOf(node.block?.children ?? []);
+        if (parents.length > 0 && decls.size > 0)
+          rules.push({ selector: '&', decls, within: at, parents });
+        visit(node.block?.children ?? [], at, parents);
       } else if (node.type === 'Rule' && typeof node.prelude === 'object') {
         const selector = squash(
           source.slice(node.prelude.start, node.prelude.end)
         );
-        const decls = new Map<string, string>();
-        for (const d of node.block?.children ?? [])
-          if (d.type === 'Declaration')
-            decls.set(d.property ?? '', squash(d.value ?? ''));
+        const decls = declsOf(node.block?.children ?? []);
         rules.push({ selector, decls, within, parents });
         if (nested)
           visit(node.block?.children ?? [], within, [...parents, selector]);
