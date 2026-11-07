@@ -54,10 +54,13 @@ vi.mock('$app/server', () => ({
 const remote = (await import('./content.remote')) as unknown as {
   saveContent: (input: Record<string, unknown>) => Promise<unknown>;
   createContentDraft: (input: Record<string, unknown>) => Promise<unknown>;
+  deleteContent: (id: string) => Promise<unknown>;
 };
 
 const ID = '5e000000-0000-4000-8000-000000000001';
 const ORG = '6e000000-0000-4000-8000-000000000002';
+const STAGED_COVER = 'https://cdn.example/stage/lg.webp';
+const KEPT_COVER = 'https://cdn.example/stored/lg.webp';
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -112,6 +115,15 @@ describe('saveContent', () => {
     expect(request?.body).toEqual({ title: 'New title' });
   });
 
+  // The PATCH may keep the stored cover instead of a stage it cannot take;
+  // only the row knows which, so a sent cover comes back as the row has it.
+  it('a sent cover comes back as the row kept it', async () => {
+    worker(json(200, { data: { id: ID, thumbnailUrl: KEPT_COVER } }));
+    await expect(
+      remote.saveContent({ id: ID, patch: { thumbnailUrl: STAGED_COVER } })
+    ).resolves.toEqual({ thumbnailUrl: KEPT_COVER });
+  });
+
   it('a refusal reaches the browser with its status, code and message', async () => {
     worker(
       refused(
@@ -130,6 +142,33 @@ describe('saveContent', () => {
         message: 'This article needs something to read before it can be live.',
       },
     });
+  });
+});
+
+// The live editor's Delete reads a piece already gone as done, so the
+// piece's own not-found must reach it: the class code says any 404.
+describe('deleteContent (Codex-a6ofh.2.5)', () => {
+  it('a piece already gone reaches the browser by its own code', async () => {
+    worker(
+      json(404, {
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Content not found',
+          details: { contentId: ID, code: 'CONTENT_NOT_FOUND' },
+        },
+      })
+    );
+    const err = await rejection(remote.deleteContent(ID));
+    expect(err).toMatchObject({
+      status: 404,
+      body: { code: 'CONTENT_NOT_FOUND' },
+    });
+  });
+
+  it('any other 404 keeps its class code', async () => {
+    worker(refused(404, 'NOT_FOUND', 'Not found'));
+    const err = await rejection(remote.deleteContent(ID));
+    expect(err).toMatchObject({ status: 404, body: { code: 'NOT_FOUND' } });
   });
 });
 
@@ -162,6 +201,17 @@ describe('saveContent with a slug the title gives', () => {
       })
     ).resolves.toEqual({ slug: 'winter-light' });
     expect(api.sent()).toHaveLength(1);
+  });
+
+  it('a sent cover comes back as the row kept it here too', async () => {
+    worker(json(200, { data: { id: ID, thumbnailUrl: KEPT_COVER } }));
+    await expect(
+      remote.saveContent({
+        id: ID,
+        patch: { slug: 'winter-light', thumbnailUrl: STAGED_COVER },
+        slugFollowsTitle: true,
+      })
+    ).resolves.toEqual({ slug: 'winter-light', thumbnailUrl: KEPT_COVER });
   });
 
   it('a slug the creator typed is theirs: taken, it is refused at once', async () => {

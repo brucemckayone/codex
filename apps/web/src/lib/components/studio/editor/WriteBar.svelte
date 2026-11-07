@@ -20,10 +20,11 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { Badge, Button } from '$lib/components/ui';
-  import { ArrowLeftIcon, CheckIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
+  import { CheckIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import { TYPE_WORD } from './canvas-text';
   import type { DraftSession } from './draft-session.svelte';
+  import EditorBackLink from './EditorBackLink.svelte';
   import type { EditorContentType } from './editor-url';
 
   interface Props {
@@ -84,12 +85,10 @@
 </script>
 
 <header class="write-bar">
-  <a class="write-back" href={backHref}>
-    <ArrowLeftIcon size={16} />
-    <span class="write-back-label">
-      {step === 'publish' ? m.studio_editor_back_to_writing() : m.studio_editor_back()}
-    </span>
-  </a>
+  <EditorBackLink
+    href={backHref}
+    label={step === 'publish' ? m.studio_editor_back_to_writing() : m.studio_editor_back()}
+  />
 
   <div class="write-state">
     {#if session.contentId !== null}
@@ -161,28 +160,6 @@
     padding: var(--space-3) var(--space-4);
     border-block-end: var(--border-width) var(--border-style) var(--color-border);
     background: var(--color-surface);
-  }
-
-  .write-back {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    padding: var(--space-1);
-    border-radius: var(--radius-sm);
-    color: var(--color-text-secondary);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    text-decoration: none;
-    transition: var(--transition-colors);
-  }
-
-  .write-back:hover {
-    color: var(--color-text);
-  }
-
-  .write-back:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
   }
 
   .write-state {
@@ -267,13 +244,12 @@
     border-block-start: var(--border-width) var(--border-style) var(--color-border);
   }
 
-  /* Phone (W8a): the label and Next go; the foot of the page has Next. */
+  /* Phone (W8a): the step labels and Next go (the back link hides its own); the foot of the page has Next. */
   .write-next {
     display: none;
   }
 
   @media (--below-md) {
-    .write-back-label,
     .write-step-label {
       position: absolute;
       inline-size: 1px;

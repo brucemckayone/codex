@@ -12,9 +12,9 @@
   @prop {EditorContentType} contentType - The piece's type
   @prop {string} authorName - Who it is by, on the meta line
   @prop {number | null} durationSeconds - The chosen media's length, once known
-  @prop {string | null} thumbnailUrl - The saved cover
   @prop {(busy: boolean, failed: boolean) => void} [oncoverbusy] - A cover is going up or coming off; failed once that ended in a problem
   @prop {(pending: boolean, failed: boolean) => void} [onmediapending] - A file in the slot has no media row yet; failed once its upload failed before it had one
+  @prop {boolean} [live] - A piece that has been live (Codex-a6ofh.2.5, mockup W5b): its cover is staged for Update through the session, only ready media is offered, and its locked link shows under the title
 -->
 <script lang="ts">
   import { CONTENT_DESCRIPTION_MAX, CONTENT_TITLE_MAX, hasArticleBody } from '@codex/validation';
@@ -35,13 +35,25 @@
     contentType: EditorContentType;
     authorName: string;
     durationSeconds: number | null;
-    thumbnailUrl: string | null;
     oncoverbusy?: (busy: boolean, failed: boolean) => void;
     onmediapending?: (pending: boolean, failed: boolean) => void;
+    live?: boolean;
   }
 
-  const { session, contentType, authorName, durationSeconds, thumbnailUrl, oncoverbusy, onmediapending }: Props =
-    $props();
+  const {
+    session,
+    contentType,
+    authorName,
+    durationSeconds,
+    oncoverbusy,
+    onmediapending,
+    live = false,
+  }: Props = $props();
+
+  /** A live piece's cover is the session's, staged for Update; a draft's upload writes the row. */
+  function stageCover(next: string | null) {
+    session.set('thumbnailUrl', next);
+  }
 
   const TYPE = { video: m.content_type_video, audio: m.content_type_audio, written: m.content_type_article };
 
@@ -88,10 +100,18 @@
       value={session.values.mediaItemId}
       onchange={(id) => session.set('mediaItemId', id)}
       onpending={onmediapending}
+      readyOnly={live}
     />
   {/if}
   {#if contentType !== 'video'}
-    <CoverLine contentId={session.contentId} {contentType} {thumbnailUrl} onbusy={oncoverbusy} />
+    <!-- A draft never sets the session's cover, so it is the saved one there. -->
+    <CoverLine
+      contentId={session.contentId}
+      {contentType}
+      thumbnailUrl={session.values.thumbnailUrl}
+      onstaged={live ? stageCover : undefined}
+      onbusy={oncoverbusy}
+    />
   {/if}
 
   <div class="canvas-header">
@@ -105,6 +125,15 @@
       oninput={setTitle}
       onkeydown={titleKeydown}
     ></textarea>
+
+    {#if live}
+      <p class="canvas-link">
+        <LockIcon size={14} />
+        <span>{m.studio_live_link_path({ slug: session.values.slug })}</span>
+        <span aria-hidden="true">·</span>
+        <span>{m.studio_live_link_stays()}</span>
+      </p>
+    {/if}
 
     <div class="canvas-meta" role="group" aria-label={m.studio_editor_meta_label()}>
       <span>{TYPE[contentType]()}</span>
@@ -138,7 +167,10 @@
 
   <div class="canvas-held">
     <LockIcon size={16} />
-    <span><b>{m.studio_editor_price_held_lead()}</b> {m.studio_editor_price_held_rest()}</span>
+    <span>
+      <b>{m.studio_editor_price_held_lead()}</b>
+      {live ? m.studio_live_price_held_rest() : m.studio_editor_price_held_rest()}
+    </span>
   </div>
 
   {#if showBody}
@@ -239,6 +271,17 @@
 
   .canvas-duration {
     font-variant-numeric: tabular-nums;
+  }
+
+  .canvas-link {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
   }
 
   .canvas-auto {

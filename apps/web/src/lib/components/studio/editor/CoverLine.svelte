@@ -6,23 +6,30 @@
   On the Publish step it is any piece's, a video's too (mockup W4), whose
   card shows the video's own poster until an image is chosen, so removing
   one there reads "Use the video's poster". It needs the row to upload to, so
-  until the draft exists it says what to do first. The upload writes the row
-  itself, which only a draft may take here: a piece that has been live keeps
-  its cover for Update (Codex-a6ofh.2.5).
+  until the draft exists it says what to do first. A draft's upload writes
+  the row itself. A piece that has been live (`onstaged`) keeps its cover for
+  Update (Codex-a6ofh.2.5): its host holds the cover, a new one is readied
+  without touching the row, and removing one only clears it there, for
+  Update to send.
 
   @prop {string | null} contentId - The draft's row; null until its first save
   @prop {EditorContentType} contentType - Which copy it says
-  @prop {string | null} thumbnailUrl - The saved cover
+  @prop {string | null} thumbnailUrl - The saved cover; a staging host's own
   @prop {boolean} [image] - Show the cover here; false where the host shows it (the Publish step's card)
-  @prop {string | null | undefined} [changed] - Bindable: a cover set (its URL) or removed (null) here; undefined until then
+  @prop {(next: string | null) => void} [onstaged] - A piece that has been live: nothing here writes the row, and each cover readied (its URL) or removed (null) goes to the host, which shows it as `thumbnailUrl`
+  @prop {string | null | undefined} [changed] - Bindable: a draft's cover set (its URL) or removed (null) here; undefined until then
   @prop {(busy: boolean, failed: boolean) => void} [onbusy] - A cover is being readied, sent or removed, from the moment one is picked; failed once that ended in a problem, said here
 -->
 <script lang="ts">
-  import { CONTENT_THUMBNAIL_MAX_BYTES, CONTENT_THUMBNAIL_MIME_TYPES } from '@codex/validation';
+  import {
+    CONTENT_THUMBNAIL_MAX_BYTES,
+    CONTENT_THUMBNAIL_MAX_MB,
+    CONTENT_THUMBNAIL_MIME_TYPES,
+  } from '@codex/validation';
   import { tick } from 'svelte';
   import { Button } from '$lib/components/ui';
   import { ImageIcon, PlusIcon } from '$lib/components/ui/Icon';
-  import { deleteThumbnailCommand, uploadThumbnailForm } from '$lib/remote/content.remote';
+  import { deleteThumbnailCommand, stageThumbnailForm, uploadThumbnailForm } from '$lib/remote/content.remote';
   import { isReadOutage } from '$lib/remote/query-result';
   import { getThumbnailSrcset } from '$lib/utils/image';
   import { shrinkPhotoInput } from '$lib/utils/shrink-photo';
@@ -36,6 +43,7 @@
     contentType: EditorContentType;
     thumbnailUrl: string | null;
     image?: boolean;
+    onstaged?: (next: string | null) => void;
     changed?: string | null | undefined;
     onbusy?: (busy: boolean, failed: boolean) => void;
   }
@@ -45,9 +53,16 @@
     contentType,
     thumbnailUrl,
     image = true,
+    onstaged,
     changed = $bindable(undefined),
     onbusy,
   }: Props = $props();
+
+  /** A cover set or removed here: the staging host's to hold, else held here (and by a binding host). */
+  function setCover(next: string | null) {
+    if (onstaged) onstaged(next);
+    else changed = next;
+  }
 
   /** What the upload takes (`uploadThumbnailSchema`). */
   const COVER_TYPES: readonly string[] = CONTENT_THUMBNAIL_MIME_TYPES;
@@ -78,6 +93,9 @@
   const busy = $derived(preparing || uploading || removing);
   let problem = $state<string | null>(null);
   $effect(() => onbusy?.(busy, !busy && problem !== null));
+  // Gone (a host started its fields again): nothing here is on its way any
+  // more, so its host is not left waiting.
+  $effect(() => () => onbusy?.(false, false));
   let fileInput = $state<HTMLInputElement | null>(null);
   let coverEl = $state<HTMLElement | null>(null);
   /** Focus was on the cover when the creator started this change. */
@@ -101,12 +119,21 @@
     }
   }
 
+  const hintId = $props.id();
+  const whyId = `${hintId}-why`;
+
   /**
-   * One upload form per piece (`.for`), never the module-wide one, whose last
-   * result outlives the page. Each submission is read in its own callback, so
-   * no earlier result replays here.
+   * One upload form per cover line (`.for`), never the module-wide one, whose
+   * last result outlives the page. Keyed by this line, not by the piece: kit
+   * hands one instance per key, which only one `<form>` may take, and a live
+   * piece shows two lines at once (its page and its Settings). A line made
+   * again (Discard) gets a form of its own, so no earlier result replays
+   * here; each submission is read in its own callback too. A stage answers
+   * as an upload does.
    */
-  const coverForm = $derived(contentId ? uploadThumbnailForm.for(contentId) : null);
+  const coverForm = $derived(
+    contentId ? (onstaged ? stageThumbnailForm : uploadThumbnailForm).for(`${contentId}:${hintId}`) : null
+  );
   const coverAttrs = $derived(
     coverForm?.enhance(async ({ form, submit }) => {
       uploading = true;
@@ -116,7 +143,7 @@
         await submit();
         const result = coverForm.result;
         if (result?.success && result.thumbnailUrl) {
-          changed = result.thumbnailUrl;
+          setCover(result.thumbnailUrl);
         } else {
           // A refusal's reason is written for the creator (the remote sends
           // one only for a 4xx); an outage is logged as one. No result is a
@@ -158,7 +185,7 @@
         return;
       }
       if (file.size > CONTENT_THUMBNAIL_MAX_BYTES) {
-        problem = m.studio_editor_cover_too_big();
+        problem = m.studio_editor_cover_too_big({ size: CONTENT_THUMBNAIL_MAX_MB });
         input.value = '';
         return;
       }
@@ -173,11 +200,18 @@
   async function removeCover() {
     if (!contentId) return;
     noteFocus();
+    if (onstaged) {
+      // Update sends it; the saved cover stays until then.
+      onstaged(null);
+      problem = null;
+      void keepFocus();
+      return;
+    }
     removing = true;
     problem = null;
     try {
       await deleteThumbnailCommand(contentId);
-      changed = null;
+      setCover(null);
     } catch (err) {
       logger.error('studio_editor.cover_remove_failed', { contentId, ...describeThrown(err) });
       problem = m.studio_editor_cover_remove_failed();
@@ -186,9 +220,6 @@
       void keepFocus();
     }
   }
-
-  const hintId = $props.id();
-  const whyId = `${hintId}-why`;
 </script>
 
 <div class="cover" bind:this={coverEl}>

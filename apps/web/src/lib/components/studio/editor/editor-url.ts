@@ -36,25 +36,43 @@ export function readEditorStep(url: URL): 'write' | 'publish' {
   return url.searchParams.get('step') === 'publish' ? 'publish' : 'write';
 }
 
-/** What an edit address opens in the editor: its step, and the piece's type. */
+/** A piece that has been live opens its tabs (Codex-a6ofh.2.5): Page, or Settings. */
+export type LiveTab = 'page' | 'settings';
+
+/** The address's tab, swapped in place as the creator switches (`replaceState`). */
+export const LIVE_TAB_PARAM = 'tab';
+
+/** The tab an edit address asks for: the page unless it says Settings. */
+export function readLiveTab(url: URL): LiveTab {
+  return url.searchParams.get(LIVE_TAB_PARAM) === 'settings'
+    ? 'settings'
+    : 'page';
+}
+
+/** What an edit address opens in the editor. */
 export interface EditorView {
-  step: 'write' | 'publish';
   contentType: EditorContentType;
+  /** A draft's step; Write for a piece that has been live. */
+  step: 'write' | 'publish';
+  /** A piece that has been live opens its tabs, at this one; null for a draft's steps. */
+  liveTab: LiveTab | null;
 }
 
 /**
- * The editor step an edit address opens, or null for the old form: a piece
- * that has been live keeps it until its Page and Settings tabs
- * (Codex-a6ofh.2.5), its changes waiting for Update, and so does a type the
- * editor does not know. Both studios' edit routes ask here.
+ * What an edit address opens: a draft's step, a live piece's tab (its
+ * changes waiting for Update), or null for the old form, which a type the
+ * editor does not know keeps. Both studios' edit routes ask here.
  */
 export function editorView(
   piece: PublicationState & { contentType: string },
   url: URL
 ): EditorView | null {
-  if (hasBeenLive(piece)) return null;
   const contentType = editorContentType(piece.contentType);
-  return contentType ? { step: readEditorStep(url), contentType } : null;
+  if (!contentType) return null;
+  if (hasBeenLive(piece)) {
+    return { contentType, step: 'write', liveTab: readLiveTab(url) };
+  }
+  return { contentType, step: readEditorStep(url), liveTab: null };
 }
 
 /**

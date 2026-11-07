@@ -39,6 +39,8 @@ function facts(
       tags: [],
       featured: false,
       access: { kind: 'free', priceCents: 0, tierIds: [] },
+      thumbnailUrl: null,
+      shaderPreset: null,
       ...values,
     },
     needsTitle: false,

@@ -108,6 +108,14 @@ vi.mock('$app/server', () => ({
   })),
 }));
 
+type CoverForm = (input: {
+  contentId: string;
+  thumbnail: File;
+}) => Promise<
+  | { success: true; thumbnailUrl: string }
+  | { success: false; status: number; error: string }
+>;
+
 const { logger } = await import('$lib/observability');
 const remote = (await import('./content.remote')) as unknown as {
   getContent: (id: string) => Promise<unknown>;
@@ -116,13 +124,8 @@ const remote = (await import('./content.remote')) as unknown as {
     id: string;
     patch: Record<string, unknown>;
   }) => Promise<unknown>;
-  uploadThumbnailForm: (input: {
-    contentId: string;
-    thumbnail: File;
-  }) => Promise<
-    | { success: true; thumbnailUrl: string }
-    | { success: false; status: number; error: string }
-  >;
+  uploadThumbnailForm: CoverForm;
+  stageThumbnailForm: CoverForm;
 };
 
 const CONTENT_ID = '55555555-5555-4555-8555-555555555555';
@@ -221,10 +224,31 @@ describe('getContent', () => {
   });
 });
 
-describe('uploadThumbnailForm', () => {
+/**
+ * Both cover forms answer alike: the upload a draft's cover takes, and the
+ * stage a live piece's waits in for Update (Codex-a6ofh.2.5). Each posts to
+ * its own route.
+ */
+describe.each([
+  ['uploadThumbnailForm', '/thumbnail'],
+  ['stageThumbnailForm', '/thumbnail/stage'],
+] as const)('%s', (name, route) => {
+  const send = (input: Parameters<CoverForm>[0]) => remote[name](input);
+
+  it('posts the file to its own route', async () => {
+    const fetch = workerAnswers(200, '');
+    await send({ contentId: CONTENT_ID, thumbnail: cover() });
+    const posts = fetch.mock.calls
+      .filter(([, init]) => (init?.method ?? 'GET').toUpperCase() === 'POST')
+      .map(([url]) => String(url));
+    expect(posts).toEqual([
+      expect.stringMatching(new RegExp(`/api/content/${CONTENT_ID}${route}$`)),
+    ]);
+  });
+
   it("a refusal keeps the worker's words and its status", async () => {
     workerAnswers(422, 'This image is too large to process.');
-    const result = await remote.uploadThumbnailForm({
+    const result = await send({
       contentId: CONTENT_ID,
       thumbnail: cover(),
     });
@@ -237,7 +261,7 @@ describe('uploadThumbnailForm', () => {
 
   it('an outage never shows its message, and says it was one', async () => {
     workerAnswers(500, 'R2 put failed: socket hang up');
-    const result = await remote.uploadThumbnailForm({
+    const result = await send({
       contentId: CONTENT_ID,
       thumbnail: cover(),
     });
@@ -252,7 +276,7 @@ describe('uploadThumbnailForm', () => {
 
   it('a refusal is the creator’s to read, not an outage to log', async () => {
     workerAnswers(422, 'This image is too large to process.');
-    await remote.uploadThumbnailForm({
+    await send({
       contentId: CONTENT_ID,
       thumbnail: cover(),
     });
@@ -262,7 +286,7 @@ describe('uploadThumbnailForm', () => {
   // The studio's one rule (`isReadOutage`), as the cover line reads it.
   it('a timeout is an outage, not a refusal', async () => {
     workerAnswers(408, 'Request to content timed out', [200, '']);
-    const result = await remote.uploadThumbnailForm({
+    const result = await send({
       contentId: CONTENT_ID,
       thumbnail: cover(),
     });
@@ -276,102 +300,102 @@ describe('uploadThumbnailForm', () => {
       expect.objectContaining({ status: 408 })
     );
   });
-});
 
-describe('uploadThumbnailForm · what goes back with the answer', () => {
-  it('a saved cover is never failed by the read after it', async () => {
-    workerAnswers(200, '', [500, 'connection to Neon failed']);
-    const result = await remote.uploadThumbnailForm({
-      contentId: CONTENT_ID,
-      thumbnail: cover(),
-    });
-    expect(result).toEqual({
-      success: true,
-      thumbnailUrl: 'https://cdn.test/c.webp',
-    });
-    await expect(sentBack()).resolves.toBeDefined();
-    expect(refreshes.size).toBe(0);
-    // The warning that kit will re-run the page's loads instead.
-    expect(logger.error).toHaveBeenCalledWith(
-      'content.thumbnail_reread_failed',
-      expect.objectContaining({ status: 500 })
-    );
-  });
-
-  it('a read refused after the upload is a warning, not an outage', async () => {
-    workerAnswers(200, '', [404, NOT_YOURS]);
-    await remote.uploadThumbnailForm({
-      contentId: CONTENT_ID,
-      thumbnail: cover(),
-    });
-    expect(logger.warn).toHaveBeenCalledWith(
-      'content.thumbnail_reread_failed',
-      expect.objectContaining({ status: 404 })
-    );
-    expect(logger.error).not.toHaveBeenCalled();
-  });
-
-  it('the piece goes back with a saved cover, read once, so kit re-runs no loads', async () => {
-    const fetch = workerAnswers(200, '');
-    await remote.uploadThumbnailForm({
-      contentId: CONTENT_ID,
-      thumbnail: cover(),
-    });
-    expect(refreshes.size).toBe(1);
-    await expect(sentBack()).resolves.toEqual([
-      expect.objectContaining({ id: CONTENT_ID }),
-    ]);
-    // Settle kit's beat: a query called before its read would read again.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(reads(fetch)).toBe(1);
-  });
-
-  it('and with a failed one too', async () => {
-    const fetch = workerAnswers(500, 'R2 put failed', [200, '']);
-    const result = await remote.uploadThumbnailForm({
-      contentId: CONTENT_ID,
-      thumbnail: cover(),
-    });
-    expect(result).toMatchObject({ success: false, status: 500 });
-    expect(refreshes.size).toBe(1);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(reads(fetch)).toBe(1);
-  });
-
-  it('a read that hangs holds the answer back 5s at most, not a page read’s 10', async () => {
-    vi.useFakeTimers();
-    try {
-      const hangs = (init?: RequestInit) =>
-        new Promise<Response>((_, reject) =>
-          init?.signal?.addEventListener('abort', () =>
-            reject(new DOMException('aborted', 'AbortError'))
-          )
-        );
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(async (_url: unknown, init?: RequestInit) =>
-          (init?.method ?? 'GET').toUpperCase() === 'GET'
-            ? hangs(init)
-            : envelope(200, '')
-        )
-      );
-      let answered = false;
-      const upload = remote
-        .uploadThumbnailForm({ contentId: CONTENT_ID, thumbnail: cover() })
-        .then((result) => {
-          answered = true;
-          return result;
-        });
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(answered).toBe(true);
-      await expect(upload).resolves.toMatchObject({ success: true });
+  describe('what goes back with the answer', () => {
+    it('a saved cover is never failed by the read after it', async () => {
+      workerAnswers(200, '', [500, 'connection to Neon failed']);
+      const result = await send({
+        contentId: CONTENT_ID,
+        thumbnail: cover(),
+      });
+      expect(result).toEqual({
+        success: true,
+        thumbnailUrl: 'https://cdn.test/c.webp',
+      });
+      await expect(sentBack()).resolves.toBeDefined();
+      expect(refreshes.size).toBe(0);
+      // The warning that kit will re-run the page's loads instead.
       expect(logger.error).toHaveBeenCalledWith(
         'content.thumbnail_reread_failed',
-        expect.objectContaining({ status: 408 })
+        expect.objectContaining({ status: 500 })
       );
-    } finally {
-      vi.useRealTimers();
-    }
+    });
+
+    it('a read refused after the upload is a warning, not an outage', async () => {
+      workerAnswers(200, '', [404, NOT_YOURS]);
+      await send({
+        contentId: CONTENT_ID,
+        thumbnail: cover(),
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        'content.thumbnail_reread_failed',
+        expect.objectContaining({ status: 404 })
+      );
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it('the piece goes back with a saved cover, read once, so kit re-runs no loads', async () => {
+      const fetch = workerAnswers(200, '');
+      await send({
+        contentId: CONTENT_ID,
+        thumbnail: cover(),
+      });
+      expect(refreshes.size).toBe(1);
+      await expect(sentBack()).resolves.toEqual([
+        expect.objectContaining({ id: CONTENT_ID }),
+      ]);
+      // Settle kit's beat: a query called before its read would read again.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(reads(fetch)).toBe(1);
+    });
+
+    it('and with a failed one too', async () => {
+      const fetch = workerAnswers(500, 'R2 put failed', [200, '']);
+      const result = await send({
+        contentId: CONTENT_ID,
+        thumbnail: cover(),
+      });
+      expect(result).toMatchObject({ success: false, status: 500 });
+      expect(refreshes.size).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(reads(fetch)).toBe(1);
+    });
+
+    it('a read that hangs holds the answer back 5s at most, not a page read’s 10', async () => {
+      vi.useFakeTimers();
+      try {
+        const hangs = (init?: RequestInit) =>
+          new Promise<Response>((_, reject) =>
+            init?.signal?.addEventListener('abort', () =>
+              reject(new DOMException('aborted', 'AbortError'))
+            )
+          );
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (_url: unknown, init?: RequestInit) =>
+            (init?.method ?? 'GET').toUpperCase() === 'GET'
+              ? hangs(init)
+              : envelope(200, '')
+          )
+        );
+        let answered = false;
+        const upload = send({ contentId: CONTENT_ID, thumbnail: cover() }).then(
+          (result) => {
+            answered = true;
+            return result;
+          }
+        );
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(answered).toBe(true);
+        await expect(upload).resolves.toMatchObject({ success: true });
+        expect(logger.error).toHaveBeenCalledWith(
+          'content.thumbnail_reread_failed',
+          expect.objectContaining({ status: 408 })
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
 

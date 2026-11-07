@@ -250,7 +250,8 @@ describe('the org edit page · a read per arrival', () => {
     expect(probe('publish')).toBe('R2');
   });
 
-  test('a piece that has been live keeps the form at either step, until its tabs', async () => {
+  // Codex-a6ofh.2.5: its Page and Settings tabs, never a draft's steps.
+  test('a piece that has been live opens its tabs at either step, each on its own read', async () => {
     render();
     answer(0, {
       ...piece('L1'),
@@ -258,7 +259,7 @@ describe('the org edit page · a read per arrival', () => {
       publishedAt: '2026-11-01T09:00:00Z',
     });
     await settle();
-    expect(probe('form')).toBe('L1');
+    expect(probe('live-page')).toBe('L1');
     go('publish');
     await settle();
     answer(1, {
@@ -267,8 +268,8 @@ describe('the org edit page · a read per arrival', () => {
       publishedAt: '2026-11-01T09:00:00Z',
     });
     await settle();
-    expect(probe('form')).toBe('L2');
-    expect(mounts).toEqual(['form:L1', 'form:L2']);
+    expect(probe('live-page')).toBe('L2');
+    expect(mounts).toEqual(['live-page:L1', 'live-page:L2']);
   });
 });
 

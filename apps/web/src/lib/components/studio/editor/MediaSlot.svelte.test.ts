@@ -4,6 +4,7 @@
  * there, and a dropped file going up through the studio's queue.
  */
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import * as m from '$paraglide/messages';
 import {
   flushSync,
   mount,
@@ -93,7 +94,7 @@ let component: ReturnType<typeof mount> | null = null;
 const onchange = vi.fn();
 const props = $state<{ value: string | null }>({ value: null });
 
-function render(init: Partial<typeof props> = {}) {
+function render(init: Partial<typeof props> = {}, readyOnly = false) {
   Object.assign(props, { value: null }, init);
   component = mount(MediaSlot, {
     target: document.body,
@@ -103,6 +104,7 @@ function render(init: Partial<typeof props> = {}) {
         return props.value;
       },
       onchange,
+      readyOnly,
     },
   });
   flushSync();
@@ -172,6 +174,47 @@ describe('MediaSlot · empty', () => {
     flushSync();
     expect(add).toHaveBeenCalledOnce();
     expect(text()).toContain('Uploading clip.mp4 · keep writing');
+  });
+});
+
+describe('MediaSlot · a piece that has been live (Codex-a6ofh.2.5)', () => {
+  // Its media must be ready to play: a file dropped here would put one
+  // still processing under a live piece.
+  test('offers no Upload, and says where a file dropped on it goes instead of taking it', () => {
+    render({}, true);
+    expect(button(m.studio_editor_media_upload())).toBeUndefined();
+    expect(text()).toContain(m.studio_live_media_hint());
+
+    drop([new File(['x'], 'clip.mp4', { type: 'video/mp4' })]);
+
+    expect(add).not.toHaveBeenCalled();
+    expect(text()).not.toContain('Uploading clip.mp4');
+    expect(text()).toContain(m.studio_live_media_dropped());
+  });
+
+  // A live video or audio piece has its media, so a drop lands on its player.
+  test('says so over the chosen media too, until the creator next chooses', () => {
+    library.items = [
+      {
+        id: MEDIA_ID,
+        title: 'Svelte runes deep dive',
+        mediaType: 'video',
+        status: 'ready',
+        createdAt: new Date().toISOString(),
+        thumbnailUrl: null,
+        durationSeconds: 1660,
+      },
+    ];
+    render({ value: MEDIA_ID }, true);
+
+    drop([new File(['x'], 'clip.mp4', { type: 'video/mp4' })]);
+    expect(add).not.toHaveBeenCalled();
+    expect(text()).toContain(m.studio_live_media_dropped());
+
+    button('Remove Svelte runes deep dive')?.click();
+    flushSync();
+    expect(onchange).toHaveBeenCalledWith(null);
+    expect(text()).not.toContain(m.studio_live_media_dropped());
   });
 });
 

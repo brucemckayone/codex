@@ -29,7 +29,7 @@
   import * as m from '$paraglide/messages';
   import { logReadFailure } from '../media-library/log-read-failure';
   import { savedDraftValues } from './canvas-text';
-  import { createDraftSession, settleWithin } from './draft-session.svelte';
+  import { askToLeaveByConfirm, createDraftSession, type LeaveAnswer, settleWithin } from './draft-session.svelte';
   import {
     CONTENT_LIST_HREF,
     type EditorContentType,
@@ -61,6 +61,21 @@
       workingTitle,
       onCreated: (id, { editorOpen }) => {
         if (editorOpen) replaceState(editHref(id), { editorDraftId: id });
+      },
+      askToLeave: (reason) => {
+        const answer = askToLeaveByConfirm(reason);
+        // The creator's answer stands for a move held here too: Stay drops
+        // it, and Leave lets the move the session sends through, never held
+        // to be asked about again. Stay holds for the move asked about only,
+        // whose guard here runs next when the session asked at once.
+        heldMove = null;
+        answered = answer;
+        if (answer === 'stay') {
+          queueMicrotask(() => {
+            if (answered === 'stay') answered = null;
+          });
+        }
+        return answer;
       },
     })
   );
@@ -153,11 +168,17 @@
    * or an upload that failed, a file cancelled before its row), it is
    * dropped: the creator stays where that is said. Leaving the editor is
    * never held: an upload carries on in the tray. The draft session's own
-   * hold, for unsaved words, runs beside this one; a held move it sends on
-   * is held here again if still waiting.
+   * hold, for unsaved words, runs beside this one, and when it asks, the
+   * creator's answer decides this one too (`askToLeave`).
    */
   let heldMove = $state.raw<{ url: URL; delta: number | null } | null>(null);
+  /** The creator's last answer to the session, until the move it decides comes by. */
+  let answered: LeaveAnswer | null = null;
   beforeNavigate((navigation) => {
+    if (answered !== null) {
+      answered = null;
+      return;
+    }
     const to = navigation.to?.url;
     const id = session.contentId;
     if (!to || id === null || (!coverBusy && !mediaPending)) return;
@@ -219,7 +240,6 @@
       {contentType}
       {authorName}
       durationSeconds={chosenMedia?.durationSeconds ?? null}
-      thumbnailUrl={content?.thumbnailUrl ?? null}
       oncoverbusy={(busy, failed) => {
         coverBusy = busy;
         if (failed) heldMove = null;

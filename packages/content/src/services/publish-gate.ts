@@ -12,8 +12,8 @@
 import {
   CONTENT_TYPES,
   MEDIA_STATUS,
-  ORGANIZATION_ROLES,
   ORGANIZATION_STATUS,
+  ORGANIZATION_TEAM_ROLES,
   PRICE_LIMITS,
   requiresPayoutsToPublish,
 } from '@codex/constants';
@@ -45,18 +45,6 @@ import {
 } from '../errors';
 import type { Content, DatabaseTransaction, MediaItem } from '../types';
 import { hasAnyTick } from './content-tier-access';
-
-/**
- * The org roles that may file content into an org's catalogue (Codex-ocal6):
- * the team. `subscriber` and `member` are the org's audience: they can watch
- * its content, never publish into it. The same set as the "Team only" access
- * rule (`MANAGEMENT_ROLES` in @codex/access access-decision.ts).
- */
-const MANAGEMENT_ROLES: string[] = [
-  ORGANIZATION_ROLES.OWNER,
-  ORGANIZATION_ROLES.ADMIN,
-  ORGANIZATION_ROLES.CREATOR,
-];
 
 /** What the gate reads of a content row, loaded under the row's lock. */
 type PublishableRow = Pick<
@@ -307,7 +295,7 @@ export async function assertCanFileInOrg(
         eq(organizationMemberships.organizationId, organizationId),
         eq(organizationMemberships.userId, userId),
         eq(organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE),
-        inArray(organizationMemberships.role, MANAGEMENT_ROLES),
+        inArray(organizationMemberships.role, ORGANIZATION_TEAM_ROLES),
         isNull(organizations.deletedAt)
       )
     )

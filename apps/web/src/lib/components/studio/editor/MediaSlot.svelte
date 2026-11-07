@@ -17,6 +17,7 @@
   @prop {string | null} value - The chosen media id
   @prop {(mediaId: string | null) => void} onchange - The creator chose, removed, or an upload got its id
   @prop {(pending: boolean, failed: boolean) => void} [onpending] - A file here has no media row yet, so nothing else would attach it; failed once a file here ended without its media: its upload failed, or it was cancelled before it had a row
+  @prop {boolean} [readyOnly] - A piece that has been live: only media ready to play is offered, and nothing is uploaded here, so there is no Upload, and a file dropped on it is told to go through the library (Codex-a6ofh.2.5)
 -->
 <script lang="ts">
   import type { Attachment } from 'svelte/attachments';
@@ -38,9 +39,10 @@
     value: string | null;
     onchange: (mediaId: string | null) => void;
     onpending?: (pending: boolean, failed: boolean) => void;
+    readyOnly?: boolean;
   }
 
-  const { mediaType, value, onchange, onpending }: Props = $props();
+  const { mediaType, value, onchange, onpending, readyOnly = false }: Props = $props();
 
   /**
    * The canvas column's width: 58rem once the screen holds it, else the
@@ -75,12 +77,27 @@
     };
   }
 
-  /** The stage takes a dropped file as the dialog's Upload row would. */
+  /**
+   * A file was dropped on a live piece's slot, which uploads nothing: said,
+   * never ignored, over a chosen player too, until the creator next chooses
+   * (a Discard remounts the slot).
+   */
+  let droppedOnLive = $state(false);
+  function choose(mediaId: string | null): void {
+    droppedOnLive = false;
+    onchange(mediaId);
+  }
+
+  /**
+   * The stage takes a dropped file as the dialog's Upload row would. A live
+   * piece's still catches it (the browser would otherwise open the file in
+   * place of the editor) and says where it goes instead.
+   */
   function dropTarget(field: PickerField): Attachment<HTMLElement> {
     return (node) => {
       const over = (event: DragEvent) => {
         event.preventDefault();
-        dragging = true;
+        if (!readyOnly) dragging = true;
       };
       const leave = (event: DragEvent) => {
         if (!(event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) dragging = false;
@@ -89,7 +106,9 @@
         event.preventDefault();
         dragging = false;
         const file = event.dataTransfer?.files[0];
-        if (file) field.upload(file);
+        if (!file) return;
+        if (readyOnly) droppedOnLive = true;
+        else field.upload(file);
       };
       node.addEventListener('dragover', over);
       node.addEventListener('dragleave', leave);
@@ -106,9 +125,9 @@
 
 <MediaPickerDialog
   {value}
-  {onchange}
+  onchange={choose}
   mediaTypes={[mediaType]}
-  allowProcessing
+  allowProcessing={!readyOnly}
   ariaLabel={ADD[mediaType]()}
   field={stage}
 />
@@ -275,15 +294,17 @@
             {#if mediaType === 'video'}<FilmIcon size={32} />{:else}<MusicIcon size={32} />{/if}
           </span>
           <p class="slot-heading">{dragging ? m.studio_editor_media_drop() : ADD[mediaType]()}</p>
-          <p class="slot-hint">{m.studio_editor_media_hint()}</p>
+          <p class="slot-hint">{readyOnly ? m.studio_live_media_hint() : m.studio_editor_media_hint()}</p>
           <div class="slot-actions">
             <Button id={field.triggerId} type="button" size="sm" onclick={field.open}>
               {m.studio_editor_media_choose()}
             </Button>
-            <Button type="button" size="sm" variant="secondary" onclick={field.chooseFile} {@attach field.keepsFocus}>
-              <UploadIcon size={16} />
-              {m.studio_editor_media_upload()}
-            </Button>
+            {#if !readyOnly}
+              <Button type="button" size="sm" variant="secondary" onclick={field.chooseFile} {@attach field.keepsFocus}>
+                <UploadIcon size={16} />
+                {m.studio_editor_media_upload()}
+              </Button>
+            {/if}
           </div>
         </div>
       {/if}
@@ -291,6 +312,8 @@
 
     {#if field.uploadNote}
       <p class="slot-note" role="alert">{field.uploadNote}</p>
+    {:else if droppedOnLive}
+      <p class="slot-note" role="alert">{m.studio_live_media_dropped()}</p>
     {/if}
     <!-- Mounted while anything is chosen, so a change of words is announced
          and a focused status outlives its item reaching ready. -->

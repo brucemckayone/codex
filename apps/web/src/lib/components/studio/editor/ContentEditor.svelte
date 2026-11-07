@@ -4,7 +4,9 @@
   The content editor (Codex-a6ofh.2.3): one shared page for both studios, the
   org's and the personal one. Each route keeps its own read and hands this the
   piece, or null for a new one. Step 1, Write, is `WriteStep`; step 2,
-  Publish, is `PublishStep` (Codex-a6ofh.2.4), for a draft already saved.
+  Publish, is `PublishStep` (Codex-a6ofh.2.4), for a draft already saved. A
+  piece that has been live opens `LiveEditor` (Codex-a6ofh.2.5), its Page
+  and Settings tabs.
 
   Each visit gets its own draft session. SvelteKit keeps a route's component
   across a move inside the route (/new to /new, one piece's edit to
@@ -17,6 +19,7 @@
   @prop {string | null} [initialMediaId] - A new piece's media, from "Create content from this"
   @prop {string} authorName - Who it is by, on the meta line
   @prop {'write' | 'publish'} [step] - The step the address asks for (`editorView`)
+  @prop {LiveTab | null} [liveTab] - A piece that has been live: the tab the address asks for (`editorView`)
   @prop {string | null} [orgSlug] - The org's slug, for the Publish step's address
   @prop {string | null} [creatorUsername] - A personal piece's address, on the Publish step
 -->
@@ -26,18 +29,20 @@
   import { page } from '$app/state';
   import { Button, ErrorBoundary } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
-  import { editHref } from './editor-url';
+  import { editHref, type LiveTab } from './editor-url';
   import { editorVisit } from './editor-visit.svelte';
+  import LiveEditor from './LiveEditor.svelte';
   import PublishStep from './PublishStep.svelte';
   import WriteStep from './WriteStep.svelte';
 
   interface Props extends ComponentProps<typeof WriteStep> {
     step?: 'write' | 'publish';
+    liveTab?: LiveTab | null;
     orgSlug?: string | null;
     creatorUsername?: string | null;
   }
 
-  const { step = 'write', orgSlug = null, creatorUsername = null, ...props }: Props = $props();
+  const { step = 'write', liveTab = null, orgSlug = null, creatorUsername = null, ...props }: Props = $props();
 
   const visit = editorVisit();
 
@@ -66,12 +71,27 @@
     visit.key;
     return untrack(() => step);
   });
+  /** A live piece's first tab, read once per visit too: the editor swaps it in place from there. */
+  const visitTab = $derived.by(() => {
+    visit.key;
+    return untrack(() => liveTab);
+  });
 </script>
 
 {#if !restoredDraft}
   {#key visit.key}
     <ErrorBoundary>
-      {#if visitStep === 'publish' && props.content}
+      {#if visitTab !== null && props.content}
+        <LiveEditor
+          content={props.content}
+          contentType={props.contentType}
+          organizationId={props.organizationId}
+          {orgSlug}
+          {creatorUsername}
+          authorName={props.authorName}
+          tab={visitTab}
+        />
+      {:else if visitStep === 'publish' && props.content}
         <PublishStep
           content={props.content}
           contentType={props.contentType}

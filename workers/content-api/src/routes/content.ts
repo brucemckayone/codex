@@ -42,7 +42,11 @@ import {
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
 import type { Logger, ObservabilityClient } from '@codex/observability';
-import type { CheckSlugResponse, HonoEnv } from '@codex/shared-types';
+import type {
+  CheckSlugResponse,
+  ContentPortalUses,
+  HonoEnv,
+} from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import {
   invalidateOrgSlugCache,
@@ -300,6 +304,29 @@ app.get(
 );
 
 /**
+ * GET /api/content/:id/portals
+ * The portals the creator's own piece is a practice in, draft portals too,
+ * for its editor (Codex-a6ofh.2.5). A read of its own, so the piece's read
+ * stays lean and this loads only where it is shown. Empty for a piece that
+ * is not the caller's.
+ *
+ * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {ContentPortalUses}
+ */
+app.get(
+  '/:id/portals',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<ContentPortalUses> =>
+      ctx.services.courseJourney.getContentPortalUses(
+        ctx.input.params.id,
+        ctx.user.id
+      ),
+  })
+);
+
+/**
  * PATCH /api/content/:id
  * Update content
  *
@@ -546,6 +573,19 @@ app.delete(
 );
 
 /**
+ * The cover file both thumbnail routes take, so an upload and a stage never
+ * refuse differently (Codex-a6ofh.2.5). The studio checks the same size
+ * before sending (`CONTENT_THUMBNAIL_MAX_BYTES`).
+ */
+const THUMBNAIL_FILES = {
+  thumbnail: {
+    required: true,
+    maxSize: MAX_IMAGE_SIZE_BYTES,
+    allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
+  },
+} as const;
+
+/**
  * POST /api/content/:id/thumbnail
  * Upload and process content thumbnail
  *
@@ -558,13 +598,7 @@ app.post(
   multipartProcedure({
     policy: { auth: 'required', roles: ['creator', 'admin'] },
     input: { params: createIdParamsSchema() },
-    files: {
-      thumbnail: {
-        required: true,
-        maxSize: MAX_IMAGE_SIZE_BYTES,
-        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
-      },
-    },
+    files: THUMBNAIL_FILES,
     handler: async (ctx) => {
       // Verify content exists and is owned by user
       const content = await ctx.services.content.get(
@@ -595,6 +629,57 @@ app.post(
             ctx.obs
           )
         );
+
+      return {
+        thumbnailUrl: result.url,
+        size: result.size,
+        mimeType: result.mimeType,
+      };
+    },
+  })
+);
+
+/**
+ * POST /api/content/:id/thumbnail/stage
+ * Ready a cover for a piece that has been live, without applying it
+ * (Codex-a6ofh.2.5): its changes wait for Update, which sends the URL this
+ * returns as `thumbnailUrl`. Nothing on the row or in public changes, so no
+ * cache version is bumped. A piece holds one stage at a time (a new one
+ * retires the last), and one never applied is reclaimed by the sweep.
+ *
+ * `rateLimit: 'strict'` (20/min), not the upload's `'api'`: every stage
+ * leaves files for the sweep, where an upload deletes the folder it replaced.
+ *
+ * Security: Creator/Admin only, must own content
+ * Content-Type: multipart/form-data
+ * Form field: thumbnail (file)
+ */
+app.post(
+  '/:id/thumbnail/stage',
+  multipartProcedure({
+    policy: {
+      auth: 'required',
+      roles: ['creator', 'admin'],
+      rateLimit: 'strict',
+    },
+    input: { params: createIdParamsSchema() },
+    files: THUMBNAIL_FILES,
+    handler: async (ctx) => {
+      const content = await ctx.services.content.get(
+        ctx.input.params.id,
+        ctx.user.id
+      );
+      if (!content) {
+        throw new ContentNotFoundError(ctx.input.params.id);
+      }
+
+      const result = await ctx.services.imageProcessing.stageContentThumbnail(
+        ctx.input.params.id,
+        ctx.user.id,
+        new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
+          type: ctx.files.thumbnail.type,
+        })
+      );
 
       return {
         thumbnailUrl: result.url,

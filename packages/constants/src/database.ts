@@ -25,6 +25,18 @@ export const ORGANIZATION_ROLES = {
   MEMBER: 'member',
 } as const;
 
+/**
+ * The org's team: the roles that make and run its catalogue. `subscriber`
+ * and `member` are its audience. Read with an active membership: re-joining
+ * as an audience member reactivates a departed creator's row with an
+ * audience role, so status alone never proves someone is on the team.
+ */
+export const ORGANIZATION_TEAM_ROLES: readonly string[] = [
+  ORGANIZATION_ROLES.OWNER,
+  ORGANIZATION_ROLES.ADMIN,
+  ORGANIZATION_ROLES.CREATOR,
+];
+
 export const ORGANIZATION_STATUS = {
   ACTIVE: 'active',
   INACTIVE: 'inactive',

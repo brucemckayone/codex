@@ -23,7 +23,9 @@
  *
  * LEAVING. A move inside the app waits for the save instead of asking, as the
  * page builder's does; if the save fails, the creator is asked. A piece that
- * has been live asks before its changes are dropped. Closing the tab asks
+ * has been live asks before its changes are dropped: Update them, discard
+ * them, or stay. The page may ask in its own dialog (`askToLeave`); the
+ * browser's confirm() asks otherwise. Closing the tab asks
  * while anything is unsaved, which for a draft is the moment between a
  * keystroke and its save landing (the mockup's "no leave warning while
  * drafting, because nothing can be lost"). Closing the editor in place saves what is
@@ -95,6 +97,36 @@ export interface DraftValues {
   tags: string[];
   featured: boolean;
   access: DraftAccess;
+  /**
+   * The cover. A draft's upload writes the row itself, so only a piece that
+   * has been live sets it here: a cover staged for Update, or null to remove
+   * it (Codex-a6ofh.2.5).
+   */
+  thumbnailUrl: string | null;
+  /** An audio piece's immersive shader; null for the default. */
+  shaderPreset: string | null;
+}
+
+/**
+ * Why leaving asks: a piece that has been live has changes not updated, or a
+ * draft's save failed, needs a title, or has not finished.
+ */
+export type LeaveReason = 'live' | 'failed' | 'untitled' | 'slow';
+
+/** `update`: send the changes first, then go (asked for `live` only). */
+export type LeaveAnswer = 'update' | 'leave' | 'stay';
+
+/** The browser's own question for each reason; the editor's dialog asks a draft's in them too. */
+export const LEAVE_WORDS: Record<LeaveReason, () => string> = {
+  live: m.studio_content_draft_confirm_leave_live,
+  failed: m.studio_content_draft_confirm_leave,
+  untitled: m.studio_content_draft_confirm_leave_untitled,
+  slow: m.studio_content_draft_confirm_leave_slow,
+};
+
+/** The browser's confirm(), as a page with no dialog of its own asks. */
+export function askToLeaveByConfirm(reason: LeaveReason): LeaveAnswer {
+  return confirm(LEAVE_WORDS[reason]()) ? 'leave' : 'stay';
 }
 
 export interface DraftSessionOptions {
@@ -121,6 +153,23 @@ export interface DraftSessionOptions {
    * list the piece or keep its id, so it is never made twice.
    */
   onCreated?: (id: string, context: { editorOpen: boolean }) => void;
+  /**
+   * Ask before a move drops what is unsaved. An answer given at once lets a
+   * Leave go as it was; a promise holds the move, which goes on (by its
+   * address, or as the Back or Forward it was) once answered. Defaults to
+   * the browser's confirm(), which never answers `update`.
+   */
+  askToLeave?: (reason: LeaveReason) => LeaveAnswer | Promise<LeaveAnswer>;
+  /**
+   * Something the page is still sending that the session would set when it
+   * lands (a live piece's staged cover, a category): while true, a move
+   * waits for it and then goes on, and closing the tab asks. Read in a
+   * reactive scope, so the move goes on as it turns false. If it fails, the
+   * page calls {@link DraftSession.stay}: the creator stays where that is
+   * said. While it waits the page says so, with Stay and Leave now
+   * ({@link DraftSession.leaveNow}).
+   */
+  holdWhile?: () => boolean;
 }
 
 /** What Publish came to. `unsent`: it stopped at its save, and nothing was sent to publish. */
@@ -142,7 +191,20 @@ export interface DraftSession {
   readonly errorMessage: string | undefined;
   /** A piece that has been live, with changes waiting for Update. */
   readonly hasUnpublishedChanges: boolean;
+  /** How many fields a save would send: the live bar's "2 changes not live yet". */
+  readonly changeCount: number;
   set<K extends keyof DraftValues>(key: K, value: DraftValues[K]): void;
+  /**
+   * Put every field back as the server holds it (an Update still on the
+   * wire counts as held). A piece that has been live only: a draft's
+   * changes are saved as they come.
+   */
+  discard(): void;
+  /**
+   * Go, with nothing left to keep (the piece was deleted): every field put
+   * back, and the move neither asks nor waits for what is on its way.
+   */
+  leave(to: string): Promise<void>;
   /** Save now: Update, or Publish's save before it publishes. */
   flush(): Promise<AutosaveSaveResult>;
   /**
@@ -162,6 +224,16 @@ export interface DraftSession {
   takeHeldMove(): URL | null;
   /** A move is waiting for Publish (`takeHeldMove`). */
   readonly holdingMove: boolean;
+  /** A move is waiting for what the page is still sending (`holdWhile`). */
+  readonly leavingWhenSent: boolean;
+  /** That move is dropped: what it waited for failed, or the creator stays. */
+  stay(): void;
+  /**
+   * That move goes now, without what it waited for: past the hold, asking
+   * about any other changes as a move does; a value landing once the editor
+   * has closed is the creator's to have left.
+   */
+  leaveNow(): Promise<void>;
   retry(): void;
 }
 
@@ -175,6 +247,8 @@ const EMPTY: DraftValues = {
   tags: [],
   featured: false,
   access: { kind: 'free', priceCents: 0, tierIds: null },
+  thumbnailUrl: null,
+  shaderPreset: null,
 };
 
 /** Two values of a field are the same: a list or a group by what it holds. */
@@ -240,6 +314,7 @@ function titleNeeded(): AutosaveSaveResult {
 
 export function createDraftSession(options: DraftSessionOptions): DraftSession {
   const { contentType, organizationId } = options;
+  const ask = options.askToLeave ?? askToLeaveByConfirm;
   /** A throwing page getter reads as live: nothing autosaves, leaving asks. */
   function readLive(): boolean {
     try {
@@ -299,6 +374,22 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   let pendingLeave: URL | null = null;
   /** Where a move asked for while Publish was out goes, once its caller says. */
   let heldMove = $state.raw<URL | null>(null);
+  /** A move asked for while the page was still sending something (`holdWhile`). */
+  let busyMove = $state.raw<{ to: URL; delta: number | null } | null>(null);
+  /**
+   * Where the creator is going without what is on its way (Leave now, or
+   * the piece deleted); null when they are not. Only a move there passes
+   * the hold, the one a question about the other changes sends on too.
+   * Every way of staying clears it, and so does nothing being on its way any
+   * more, so no later move, nor a later upload, inherits it. A value landing
+   * once the editor has closed is theirs to have left, never news.
+   */
+  let goingWithout: string | null = null;
+  const stayAfterAll = (): void => {
+    goingWithout = null;
+  };
+  /** Leave questions asked so far: an answer knows whether a newer one took over. */
+  let questions = 0;
   let unmounted = false;
   /** Unmounted and its last save done: the controller is disposed. */
   let closed = false;
@@ -319,9 +410,21 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       (key) => !same(values[key], held[key]) && !(key === 'title' && needsTitle)
     );
   };
-  const isDirty = $derived(sendableKeys().length > 0);
+  /** Read once per change, however many count it (the bar, the dialog, the autosave). */
+  const toSend = $derived(sendableKeys());
+  const isDirty = $derived(toSend.length > 0);
   /** Not yet held by the server: still to send, or sent and not landed. */
   const unsaved = (): boolean => isDirty || sending !== null;
+
+  /** The page's getter, kept apart: a throw lets moves go, never stops them. */
+  function holding(): boolean {
+    try {
+      return options.holdWhile?.() ?? false;
+    } catch (err) {
+      logger.error('studio_editor.hold_while_failed', describeThrown(err));
+      return false;
+    }
+  }
 
   /** The page's getter, kept apart: its failure is not the save's. */
   function mediaTitle(): string | undefined {
@@ -436,8 +539,28 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         });
         // The slug the save made free, in place of the one sent.
         const freed = saved?.slug;
-        baseline = { ...baseline, ...sent, ...(freed && { slug: freed }) };
+        // The cover the row kept, when not the one sent: a staged cover too
+        // old to take (Codex-a6ofh.2.5). Shown as kept, and said, never
+        // taken for live.
+        const kept =
+          saved?.thumbnailUrl !== undefined &&
+          saved.thumbnailUrl !== sent.thumbnailUrl
+            ? { thumbnailUrl: saved.thumbnailUrl }
+            : null;
+        baseline = {
+          ...baseline,
+          ...sent,
+          ...(freed && { slug: freed }),
+          ...kept,
+        };
         if (freed && values.slug === sent.slug) values.slug = freed;
+        if (kept) {
+          if (values.thumbnailUrl === sent.thumbnailUrl) {
+            values.thumbnailUrl = kept.thumbnailUrl;
+          }
+          logger.warn('studio_editor.cover_not_taken', { contentId });
+          toast.warning(m.studio_live_cover_not_taken());
+        }
       }
     } catch (err) {
       return failure(err);
@@ -465,13 +588,44 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       heldMove = navigation.to?.url ?? heldMove;
       return;
     }
-    // Its unsent changes are Update's to keep, so ask before dropping them,
-    // as the page builder does (Codex-a6ofh.2.5 brings the editor's own
-    // dialog). An Update still on the wire is waited for, like a save.
+    // Something the page is still sending would land after the editor closed
+    // and be lost: the move waits for it, then goes on, asking as any does.
+    // Unless the creator has said to go without it.
+    const passing =
+      goingWithout !== null && navigation.to?.url.href === goingWithout;
+    if (!passing && holding()) {
+      const to = navigation.to?.url;
+      if (!to) return;
+      navigation.cancel();
+      busyMove = {
+        to,
+        delta:
+          navigation.type === 'popstate' ? (navigation.delta ?? null) : null,
+      };
+      return;
+    }
+    // Its unsent changes are Update's to keep, so ask before dropping them:
+    // Update them, discard them, or stay (Codex-a6ofh.2.5). Leave at once
+    // lets the move go as it was. An Update still on the wire is waited
+    // for, like a save.
     if (isLive() && sending === null) {
-      if (isDirty && !confirm(m.studio_content_draft_confirm_leave_live())) {
-        navigation.cancel();
+      const to = navigation.to?.url;
+      if (!isDirty || !to) return;
+      const asked = ++questions;
+      const answer = ask('live');
+      // Answered at once (the browser's confirm()): Leave lets it go as it was.
+      if (answer === 'leave') return;
+      navigation.cancel();
+      if (answer === 'stay') {
+        stayAfterAll();
+        return;
       }
+      const delta =
+        navigation.type === 'popstate' ? (navigation.delta ?? null) : null;
+      void answerLiveLeave(answer, { to, delta }, asked).catch((err) => {
+        if (asked === questions) stayAfterAll();
+        logger.error('studio_editor.leave_answer_failed', describeThrown(err));
+      });
       return;
     }
     if (!unsaved()) return;
@@ -482,7 +636,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     pendingLeave = target;
     if (waiting) return;
     void settleWithin(autosave.flush())
-      .then((result) => {
+      .then(async (result) => {
         const to = pendingLeave;
         pendingLeave = null;
         // Closed in place while the save was out: no move to make.
@@ -499,18 +653,24 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         const leftForUpdate =
           (result.ok || result.code === 'SAVE_SLOW') && isDirty && isLive();
         if (!result.ok || leftForUpdate) {
-          let ask = m.studio_content_draft_confirm_leave();
-          if (leftForUpdate) ask = m.studio_content_draft_confirm_leave_live();
-          else if (result.code === 'TITLE_NEEDED') {
-            ask = m.studio_content_draft_confirm_leave_untitled();
-          } else if (result.code === 'SAVE_SLOW') {
-            // Still out, not refused: the bar behind says "Saving…".
-            ask = m.studio_content_draft_confirm_leave_slow();
+          let reason: LeaveReason = 'failed';
+          if (leftForUpdate) reason = 'live';
+          else if (result.code === 'TITLE_NEEDED') reason = 'untitled';
+          // Still out, not refused: the bar behind says "Saving…".
+          else if (result.code === 'SAVE_SLOW') reason = 'slow';
+          const asked = ++questions;
+          const answer = await ask(reason);
+          if (!(await goesOn(answer))) {
+            if (asked === questions) stayAfterAll();
+            return;
           }
-          if (!confirm(ask)) return;
-          // A slow save is left running, not given up: its failure is still
-          // told, and closing the tab still asks while it is out.
-          if (result.code !== 'SAVE_SLOW') abandoned = true;
+          if (answer === 'leave') {
+            // The live dialog's Discard, as when nothing was out.
+            if (reason === 'live') discardChanges();
+            // A slow save is left running, not given up: its failure is
+            // still told, and closing the tab still asks while it is out.
+            else if (result.code !== 'SAVE_SLOW') abandoned = true;
+          }
         }
         leaving = true;
         void goto(to)
@@ -523,18 +683,104 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
             if (unmounted) return;
             leaving = false;
             abandoned = false;
+            stayAfterAll();
           });
       })
       .catch((err) => {
         pendingLeave = null;
+        stayAfterAll();
         logger.error('studio_editor.leave_save_failed', describeThrown(err));
       });
   });
   // Closing the tab while Publish is out asks too: a reload could read the
-  // piece as a draft before the publish lands.
+  // piece as a draft before the publish lands. So does closing it while the
+  // page is still sending something.
   const stopUnloadGuard = guardUnload(
-    () => (unsaved() && !abandoned) || publishRun !== null
+    () => (unsaved() && !abandoned) || publishRun !== null || holding()
   );
+
+  // A move held for what the page was sending goes on once it has landed. If
+  // it failed, the page has dropped the move (`stay`), so this never sends
+  // the creator away from where that is said.
+  $effect(() => {
+    const move = busyMove;
+    if (!move || holding()) return;
+    busyMove = null;
+    untrack(() => {
+      void sendOn(move);
+    });
+  });
+  // Nothing left on its way: nothing to go without, so a later upload holds
+  // a move again, even one to where Leave now was going.
+  $effect(() => {
+    if (!holding()) stayAfterAll();
+  });
+  /** A held move, as it was: a Back or Forward as one, anything else by its address. */
+  async function sendOn(move: {
+    to: URL;
+    delta: number | null;
+  }): Promise<void> {
+    if (move.delta !== null) {
+      history.go(move.delta);
+      return;
+    }
+    await goto(move.to).catch((err) =>
+      logger.warn('studio_editor.leave_failed', describeThrown(err))
+    );
+  }
+
+  /**
+   * Whether a held move goes on, as the creator answered. Update goes once
+   * it is sent and nothing new was typed meanwhile; a refusal is the bar's
+   * to say, and the creator stays.
+   */
+  async function goesOn(answer: LeaveAnswer): Promise<boolean> {
+    if (answer === 'stay' || unmounted) return false;
+    if (answer === 'leave') return true;
+    const result = await settleWithin(autosave.flush());
+    return result.ok && !isDirty && !unmounted;
+  }
+
+  /**
+   * A move held while a piece that has been live asked, sent on as
+   * answered: Update first, or discard (the dialog's word, so the changes
+   * go whether or not the move then does). Once nothing is unsent the guard
+   * lets it through, so a Back or Forward goes on as one, without a flag
+   * that could outlive it. `asked` is the question's number: a Stay given
+   * after a newer question was asked is the page closing the old one, not
+   * the creator staying, so the move the newer one asks about keeps its pass.
+   */
+  async function answerLiveLeave(
+    answer: LeaveAnswer | Promise<LeaveAnswer>,
+    move: { to: URL; delta: number | null },
+    asked: number
+  ): Promise<void> {
+    const given = await answer;
+    if (!(await goesOn(given))) {
+      if (asked === questions) stayAfterAll();
+      return;
+    }
+    if (given === 'leave') discardChanges();
+    await sendOn(move);
+  }
+
+  /**
+   * Each field back as the server will hold it, a list or a group copied
+   * anew. Every one that differs: an emptied title too, which Update never
+   * sends.
+   */
+  function discardChanges(): void {
+    const held = landing();
+    for (const key of Object.keys(values) as (keyof DraftValues)[]) {
+      if (!same(values[key], held[key])) restore(key, held[key]);
+    }
+  }
+  function restore<K extends keyof DraftValues>(
+    key: K,
+    value: DraftValues[K]
+  ): void {
+    values[key] = structuredClone(value);
+  }
 
   // Publish failed and the page reports a draft again. What was typed during
   // it waited (a live piece schedules nothing), so schedule it now: on that
@@ -717,7 +963,37 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     get hasUnpublishedChanges() {
       return autosave.hasUnpublishedChanges;
     },
+    get changeCount() {
+      return toSend.length;
+    },
+    discard() {
+      if (!isLive()) return;
+      discardChanges();
+    },
+    async leave(to) {
+      discardChanges();
+      leaving = true;
+      goingWithout = to;
+      try {
+        await goto(to);
+      } finally {
+        // Still mounted: something else stopped the move, so guard again.
+        if (!unmounted) {
+          leaving = false;
+          stayAfterAll();
+        }
+      }
+    },
     set(key, value) {
+      // Landed after the creator went without it: theirs to have left.
+      if (unmounted && goingWithout !== null) {
+        values[key] = value;
+        logger.info('studio_editor.set_after_leave_dropped', {
+          contentId,
+          key,
+        });
+        return;
+      }
       // A page's late callback (an upload finishing) once nothing will save
       // it: the editor has closed and its last save is done, or the piece
       // has been live and only an Update (or nothing) is out. A draft's
@@ -788,6 +1064,20 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     },
     get holdingMove() {
       return heldMove !== null;
+    },
+    get leavingWhenSent() {
+      return busyMove !== null;
+    },
+    stay() {
+      busyMove = null;
+      stayAfterAll();
+    },
+    async leaveNow() {
+      const move = busyMove;
+      if (!move) return;
+      busyMove = null;
+      goingWithout = move.to.href;
+      await sendOn(move);
     },
     retry: autosave.retry,
   };

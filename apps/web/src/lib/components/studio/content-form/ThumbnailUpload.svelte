@@ -19,7 +19,11 @@
     saved thumbnail is a frame of (Codex-tqvmx): warned about until another is chosen
 -->
 <script lang="ts">
-  import { CONTENT_THUMBNAIL_MAX_BYTES, CONTENT_THUMBNAIL_MIME_TYPES } from '@codex/validation';
+  import {
+    CONTENT_THUMBNAIL_MAX_BYTES,
+    CONTENT_THUMBNAIL_MAX_MB,
+    CONTENT_THUMBNAIL_MIME_TYPES,
+  } from '@codex/validation';
   import { untrack } from 'svelte';
   import * as m from '$paraglide/messages';
   import { ImageIcon, UploadIcon } from '$lib/components/ui/Icon';
@@ -82,7 +86,7 @@
       return 'Thumbnail must be PNG, JPEG, or WebP';
     }
     if (file.size > MAX_SIZE_BYTES) {
-      return 'File must be less than 10MB';
+      return `File must be less than ${CONTENT_THUMBNAIL_MAX_MB}MB`;
     }
     return null;
   }
@@ -232,7 +236,7 @@
       >
         <UploadIcon size={32} />
         <span class="drop-text">Drop image or click to upload</span>
-        <span class="drop-hint">PNG, JPEG, or WebP. Max 10MB.</span>
+        <span class="drop-hint">PNG, JPEG, or WebP. Max {CONTENT_THUMBNAIL_MAX_MB}MB.</span>
         {#if mediaThumbnailUrl}
           <div class="drop-actions">
             <Button type="button" variant="secondary" size="sm" onclick={(e: MouseEvent) => { e.stopPropagation(); useMediaThumbnail(); }}>

@@ -54,5 +54,7 @@ export function savedDraftValues(content: ContentWithRelations): DraftValues {
       // Absent is "not read", never "in no plan" (`includedInTierIds`).
       tierIds: content.includedInTierIds ?? null,
     },
+    thumbnailUrl: content.thumbnailUrl ?? null,
+    shaderPreset: content.shaderPreset ?? null,
   };
 }

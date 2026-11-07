@@ -10,9 +10,10 @@
  * - Typed error handling
  */
 
-import { PUBLISH_REFUSAL_CODES } from '@codex/constants';
+import { ERROR_CODES, PUBLISH_REFUSAL_CODES } from '@codex/constants';
 import {
   CONTENT_THUMBNAIL_MAX_BYTES,
+  CONTENT_THUMBNAIL_MAX_MB,
   CONTENT_THUMBNAIL_MIME_TYPES,
   checkContentSlugSchema,
   contentDraftSchema,
@@ -138,6 +139,16 @@ export const getContent = query(z.string().uuid(), async (id) => {
   // A 4xx keeps its status (a piece deleted, or not theirs), so the studio
   // can tell it from an outage (Codex-a6ofh.2.3); a 5xx stays kit's 500.
   return forwardClientErrors(() => api.content.get(id));
+});
+
+/**
+ * The portals the creator's own piece is a practice in (Codex-a6ofh.2.5):
+ * read only where the live editor shows them, so the piece's read stays lean.
+ */
+export const getContentPortals = query(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return forwardClientErrors(() => api.content.portals(id));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -319,7 +330,10 @@ function defaultStudioListArgs(organizationId: string | null) {
 }
 
 /**
- * Delete content by ID
+ * Delete content by ID. A refusal keeps its status and words
+ * ({@link forwardClientErrors}): a lapsed sign-in or a piece already gone is
+ * not an outage. A piece already gone says so by its own code
+ * (`CONTENT_NOT_FOUND`), which the editor treats as done; a 404 alone is not.
  *
  * Usage:
  * ```typescript
@@ -329,7 +343,9 @@ function defaultStudioListArgs(organizationId: string | null) {
 export const deleteContent = command(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.content.delete(id);
+  return forwardClientErrors(() => api.content.delete(id), {
+    detailCodes: [ERROR_CODES.CONTENT_NOT_FOUND],
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -400,8 +416,11 @@ async function withFreeSlug<T>(
  *
  * A command, not {@link updateContentForm}: drafts autosave a moment after the
  * creator stops typing, and the form refreshes `listContent` on every save.
- * This refreshes nothing, and sends back only a slug it chose: the editor
- * already holds what it saved, and the row would carry the whole body again.
+ * This refreshes nothing, and sends back only a slug it chose and, when a
+ * cover was sent, the cover the row kept: the editor already holds what it
+ * saved, and the row would carry the whole body again. A live piece's staged
+ * cover too old to take leaves the stored one (Codex-a6ofh.2.5), which the
+ * editor then says.
  * A refusal keeps its message and code through {@link forwardClientErrors},
  * a publish rule's own code too: a save to live content refuses a new gap as
  * a publish would. A live piece's Update sends its changes the same way.
@@ -419,17 +438,20 @@ export const saveContent = command(
   async ({ id, patch, slugFollowsTitle }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
+    const coverKept = (saved: { thumbnailUrl: string | null }) =>
+      patch.thumbnailUrl !== undefined
+        ? { thumbnailUrl: saved.thumbnailUrl }
+        : {};
     return forwardClientErrors(
-      async (): Promise<{ slug?: string }> => {
+      async (): Promise<{ slug?: string; thumbnailUrl?: string | null }> => {
         const { slug } = patch;
         if (!slugFollowsTitle || !slug) {
-          await api.content.update(id, patch);
-          return {};
+          return coverKept(await api.content.update(id, patch));
         }
         const saved = await withFreeSlug(slug, (free) =>
           api.content.update(id, { ...patch, slug: free })
         );
-        return { slug: saved.slug };
+        return { slug: saved.slug, ...coverKept(saved.result) };
       },
       { detailCodes: PUBLISH_REFUSAL_CODES }
     );
@@ -661,12 +683,99 @@ const uploadThumbnailSchema = z.object({
     )
     .refine(
       (file) => file.size <= CONTENT_THUMBNAIL_MAX_BYTES,
-      'File must be less than 10MB'
+      `File must be less than ${CONTENT_THUMBNAIL_MAX_MB}MB`
     ),
 });
 
 /** How long the piece's read after a cover upload may take (`sendPieceBack`). */
 const PIECE_REREAD_TIMEOUT_MS = 5000;
+
+type ServerApi = ReturnType<typeof createServerApi>;
+
+/**
+ * The piece's own read goes back with a cover form's answer, success or
+ * failure (`refreshes`), so kit never falls back to re-running every load on
+ * the page, whose failure would swap the editor for the error page mid-edit
+ * (Codex-a6ofh.2.3). Kit re-runs them after any form answer that refreshes
+ * nothing, so a stage, which changes nothing, sends the piece back too. It
+ * is read here and `set`, never `refresh()`ed: kit keeps a refresh's own
+ * promise and awaits it again for the response, so a failed one would fail
+ * an upload already saved. If the read fails, nothing is recorded and kit
+ * re-runs the loads, as it did before. The creator's answer waits on it, so
+ * it gets less time than a page read.
+ */
+async function sendPieceBack(api: ServerApi, contentId: string) {
+  try {
+    // Read, THEN call the query: kit starts a query's own read a beat after
+    // it is called unless a `set` came first, so calling it before this
+    // await would read the piece twice.
+    const piece = await api.content.get(contentId, {
+      timeoutMs: PIECE_REREAD_TIMEOUT_MS,
+    });
+    getContent(contentId).set(piece);
+  } catch (error) {
+    const fields = {
+      contentId,
+      status: remoteErrorStatus(error),
+      ...describeThrown(error),
+    };
+    // An outage here is the warning that kit re-runs the page's loads.
+    if (isReadOutage(error)) {
+      logger.error('content.thumbnail_reread_failed', fields);
+    } else {
+      logger.warn('content.thumbnail_reread_failed', fields);
+    }
+  }
+}
+
+/**
+ * A cover form's handler: `send` puts the file in place, and the answer is
+ * the same either way.
+ */
+function coverUpload(
+  send: (
+    api: ServerApi,
+    contentId: string,
+    file: File
+  ) => Promise<{ thumbnailUrl: string }>,
+  staged: boolean
+) {
+  return async ({
+    contentId,
+    thumbnail,
+  }: z.infer<typeof uploadThumbnailSchema>) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    let thumbnailUrl: string;
+    try {
+      ({ thumbnailUrl } = await send(api, contentId, thumbnail));
+    } catch (error) {
+      // A refusal is written for the creator; anything else is an outage
+      // (the studio's one rule counts a timeout and a rate limit as one),
+      // whose message (a fetch error, a stack) never reaches them, so it is
+      // logged here. The status lets the studio log it as one too.
+      const status = ApiError.isApiError(error) ? error.status : 500;
+      const refused = ApiError.isApiError(error) && !isReadOutage(error);
+      if (!refused) {
+        logger.error('content.thumbnail_upload_failed', {
+          contentId,
+          status,
+          staged,
+          ...describeThrown(error),
+        });
+      }
+      await sendPieceBack(api, contentId);
+      return {
+        success: false as const,
+        status,
+        error: refused ? error.message : 'Failed to upload thumbnail',
+      };
+    }
+    await sendPieceBack(api, contentId);
+    return { success: true as const, thumbnailUrl };
+  };
+}
 
 /**
  * Upload content thumbnail
@@ -685,72 +794,17 @@ const PIECE_REREAD_TIMEOUT_MS = 5000;
  */
 export const uploadThumbnailForm = form(
   uploadThumbnailSchema,
-  async ({ contentId, thumbnail }) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
+  coverUpload((api, id, file) => api.content.uploadThumbnail(id, file), false)
+);
 
-    // The piece's own read goes back with the answer, success or failure
-    // (`refreshes`), so kit never falls back to re-running every load on the
-    // page, whose failure would swap the editor for the error page mid-edit
-    // (Codex-a6ofh.2.3). It is read here and `set`, never `refresh()`ed: kit
-    // keeps a refresh's own promise and awaits it again for the response, so
-    // a failed one would fail an upload already saved. If the read fails,
-    // nothing is recorded and kit re-runs the loads, as it did before. The
-    // creator's answer waits on it, so it gets less time than a page read.
-    const sendPieceBack = async () => {
-      try {
-        // Read, THEN call the query: kit starts a query's own read a beat
-        // after it is called unless a `set` came first, so calling it before
-        // this await would read the piece twice.
-        const piece = await api.content.get(contentId, {
-          timeoutMs: PIECE_REREAD_TIMEOUT_MS,
-        });
-        getContent(contentId).set(piece);
-      } catch (error) {
-        const fields = {
-          contentId,
-          status: remoteErrorStatus(error),
-          ...describeThrown(error),
-        };
-        // An outage here is the warning that kit re-runs the page's loads.
-        if (isReadOutage(error)) {
-          logger.error('content.thumbnail_reread_failed', fields);
-        } else {
-          logger.warn('content.thumbnail_reread_failed', fields);
-        }
-      }
-    };
-
-    let thumbnailUrl: string;
-    try {
-      ({ thumbnailUrl } = await api.content.uploadThumbnail(
-        contentId,
-        thumbnail
-      ));
-    } catch (error) {
-      // A refusal is written for the creator; anything else is an outage
-      // (the studio's one rule counts a timeout and a rate limit as one),
-      // whose message (a fetch error, a stack) never reaches them, so it is
-      // logged here. The status lets the studio log it as one too.
-      const status = ApiError.isApiError(error) ? error.status : 500;
-      const refused = ApiError.isApiError(error) && !isReadOutage(error);
-      if (!refused) {
-        logger.error('content.thumbnail_upload_failed', {
-          contentId,
-          status,
-          ...describeThrown(error),
-        });
-      }
-      await sendPieceBack();
-      return {
-        success: false as const,
-        status,
-        error: refused ? error.message : 'Failed to upload thumbnail',
-      };
-    }
-    await sendPieceBack();
-    return { success: true as const, thumbnailUrl };
-  }
+/**
+ * Ready a cover for a piece that has been live, without applying it
+ * (Codex-a6ofh.2.5): its changes wait for Update, which sends the URL this
+ * answers with as `thumbnailUrl`. The row and the public pages are untouched.
+ */
+export const stageThumbnailForm = form(
+  uploadThumbnailSchema,
+  coverUpload((api, id, file) => api.content.stageThumbnail(id, file), true)
 );
 
 /**

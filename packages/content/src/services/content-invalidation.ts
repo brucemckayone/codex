@@ -63,7 +63,7 @@ import {
 } from '@codex/cache';
 import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
-  ORGANIZATION_ROLES,
+  ORGANIZATION_TEAM_ROLES,
   PURCHASE_STATUS,
 } from '@codex/constants';
 import type { Database } from '@codex/database';
@@ -470,12 +470,6 @@ interface ResolveArgs {
 async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
   const { db, contentId, organizationId, includeFollowers } = args;
 
-  const MANAGEMENT_ROLES: string[] = [
-    ORGANIZATION_ROLES.OWNER,
-    ORGANIZATION_ROLES.ADMIN,
-    ORGANIZATION_ROLES.CREATOR,
-  ];
-
   const emptyUserRows: Promise<Array<{ userId: string }>> = Promise.resolve([]);
 
   const purchasePromise = db.query.purchases
@@ -509,7 +503,7 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
         where: and(
           eq(organizationMemberships.organizationId, organizationId),
           eq(organizationMemberships.status, 'active'),
-          inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+          inArray(organizationMemberships.role, ORGANIZATION_TEAM_ROLES)
         ),
         columns: { userId: true },
       })

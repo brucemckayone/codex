@@ -194,6 +194,10 @@ vi.mock('$lib/components/editor/RichTextEditor.svelte', async () => ({
 vi.mock('./PublishStep.svelte', async () => ({
   default: (await import('./__fixtures__/PublishStepProbe.svelte')).default,
 }));
+// So has a live piece's editor (LiveEditor.svelte.test.ts).
+vi.mock('./LiveEditor.svelte', async () => ({
+  default: (await import('./__fixtures__/LiveEditorProbe.svelte')).default,
+}));
 
 const ContentEditor = (await import('./ContentEditor.svelte')).default;
 
@@ -712,6 +716,51 @@ describe('ContentEditor · a move into step 2 waits as Next does', () => {
     go.mockRestore();
   });
 
+  // The session asks about unsaved words; its answer decides the move held
+  // here for the cover too (the E2.3 seam, closed in Codex-a6ofh.2.5).
+  test('a move held for the cover is dropped when the creator stays after a failed save', async () => {
+    const removal = removingCover();
+    remotes.saveContent.mockRejectedValue(new TypeError('Failed to fetch'));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    type('Title', 'Unsaved words');
+    move(PUBLISH, vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(confirm).toHaveBeenCalledTimes(1);
+
+    removal.ok();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(go).not.toHaveBeenCalled();
+    expect(held()).toBe('');
+    expect(confirm).toHaveBeenCalledTimes(1);
+    go.mockRestore();
+  });
+
+  test('Leave after a failed save goes, never held for the cover to be asked about again', async () => {
+    removingCover();
+    remotes.saveContent.mockRejectedValue(new TypeError('Failed to fetch'));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    // The session's own move comes by every guard, as SvelteKit's would.
+    const cancel = vi.fn();
+    nav.goto.mockImplementationOnce(async (to: unknown) => {
+      for (const guard of nav.guards) {
+        guard({
+          to: { url: new URL(String(to)) },
+          type: 'goto',
+          willUnload: false,
+          cancel,
+        });
+      }
+    });
+    type('Title', 'Unsaved words');
+    move(PUBLISH, vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(nav.goto).toHaveBeenCalledTimes(1);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
   test('leaving the editor is never held: the upload carries on in the tray', () => {
     render({ content: draft({}) });
     drop(new File(['x'], 'winter-light.mp4', { type: 'video/mp4' }));
@@ -798,6 +847,21 @@ describe('ContentEditor · which step', () => {
       document.querySelector('[data-probe="publish-step"]')?.textContent
     ).toBe('c1');
     expect(field('Title')).toBeNull();
+  });
+
+  test('a piece that has been live opens its tabs, at the one the address asks for', () => {
+    render({
+      content: draft({
+        status: 'published',
+        publishedAt: new Date('2026-11-01T09:00:00.000Z'),
+      }),
+      step: 'write',
+      liveTab: 'settings',
+    });
+    const probe = document.querySelector('[data-probe="live-editor"]');
+    expect(probe?.textContent).toBe('c1');
+    expect(probe?.getAttribute('data-tab')).toBe('settings');
+    expect(document.querySelector('[data-probe="publish-step"]')).toBeNull();
   });
 
   test('Write is the step otherwise, and for a piece not yet saved', () => {

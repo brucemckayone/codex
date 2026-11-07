@@ -77,6 +77,7 @@ import type {
   BrandingSettingsResponse,
   CheckSlugResponse,
   ContactSettingsResponse,
+  ContentPortalUses,
   CourseOffer,
   FeatureSettingsResponse,
   MediaLibrarySummary,
@@ -778,6 +779,27 @@ export function createServerApi(
     return `${path}?${q}`;
   }
 
+  type ContentCoverUpload = {
+    thumbnailUrl: string;
+    size: number;
+    mimeType: string;
+  };
+  /** A content cover on to the content-api: applied (`thumbnail`), or staged for Update. */
+  function sendContentCover(
+    id: string,
+    file: File,
+    path: 'thumbnail' | 'thumbnail/stage'
+  ): Promise<ContentCoverUpload> {
+    return forwardMultipartUpload<ContentCoverUpload>({
+      url: `${serverApiUrl(platform, 'content')}/api/content/${id}/${path}`,
+      fieldName: 'thumbnail',
+      file,
+      fallbackFilename: 'thumbnail',
+      sessionCookie,
+      failureMessage: 'Thumbnail upload failed',
+    });
+  }
+
   return {
     /**
      * Low-level fetch method (for backward compatibility)
@@ -1063,6 +1085,13 @@ export function createServerApi(
         }),
 
       /**
+       * The portals the creator's own piece is a practice in, draft portals
+       * too (Codex-a6ofh.2.5): the live editor's "Also in the portal" line.
+       */
+      portals: (id: string) =>
+        request<ContentPortalUses>('content', `/api/content/${id}/portals`),
+
+      /**
        * List content with pagination and filtering
        *
        * Query parameters (from ContentQueryInput):
@@ -1170,22 +1199,15 @@ export function createServerApi(
        * header says it exists to stop a third path reintroducing. It also
        * masked the worker's real error behind a fixed string.
        */
-      uploadThumbnail: (
-        id: string,
-        file: File
-      ): Promise<{ thumbnailUrl: string; size: number; mimeType: string }> =>
-        forwardMultipartUpload<{
-          thumbnailUrl: string;
-          size: number;
-          mimeType: string;
-        }>({
-          url: `${serverApiUrl(platform, 'content')}/api/content/${id}/thumbnail`,
-          fieldName: 'thumbnail',
-          file,
-          fallbackFilename: 'thumbnail',
-          sessionCookie,
-          failureMessage: 'Thumbnail upload failed',
-        }),
+      uploadThumbnail: (id: string, file: File) =>
+        sendContentCover(id, file, 'thumbnail'),
+
+      /**
+       * Ready a cover for a piece that has been live, without applying it
+       * (Codex-a6ofh.2.5): Update sends the URL this returns.
+       */
+      stageThumbnail: (id: string, file: File) =>
+        sendContentCover(id, file, 'thumbnail/stage'),
 
       /**
        * Delete content thumbnail

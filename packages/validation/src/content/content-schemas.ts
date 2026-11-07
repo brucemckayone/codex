@@ -12,6 +12,7 @@ import {
   VISIBILITY,
 } from '@codex/constants';
 import { z } from 'zod';
+import { MAX_IMAGE_SIZE_BYTES } from '../image';
 import {
   createOptionalTextSchema,
   createSanitizedStringSchema,
@@ -373,7 +374,18 @@ export const CONTENT_THUMBNAIL_MIME_TYPES = [
   MIME_TYPES.IMAGE.WEBP,
 ] as const;
 
-export const CONTENT_THUMBNAIL_MAX_BYTES = 10 * 1024 * 1024;
+/**
+ * The largest cover the upload takes: the content-api thumbnail routes' own
+ * `maxSize`, so a field never offers what the route refuses (Codex-a6ofh.2.5).
+ * It was 10 MB here against the route's 5, and a shrunk photo between the two
+ * passed every studio check only to be refused by the worker.
+ */
+export const CONTENT_THUMBNAIL_MAX_BYTES = MAX_IMAGE_SIZE_BYTES;
+
+/** The same limit in whole megabytes, for the words that state it, so they never drift from it. */
+export const CONTENT_THUMBNAIL_MAX_MB = Math.round(
+  CONTENT_THUMBNAIL_MAX_BYTES / (1024 * 1024)
+);
 
 /**
  * Base content schema (without refinements)

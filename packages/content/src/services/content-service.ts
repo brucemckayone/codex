@@ -28,6 +28,7 @@ import {
 import {
   isUniqueViolationOf,
   MEDIA_ITEM_RESPONSE_COLUMNS,
+  messageForLog,
   paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
@@ -40,9 +41,11 @@ import {
   organizations,
 } from '@codex/database/schema';
 import {
+  claimStagedCover,
   type ImageProcessingResult,
   ImageProcessingService,
   ownContentThumbnailFolder,
+  stagedCoverRefusal,
 } from '@codex/image-processing';
 import { READABLE_ORGANIZATION_COLUMNS } from '@codex/organization';
 import type { ServiceConfig } from '@codex/service-errors';
@@ -760,6 +763,9 @@ export class ContentService extends BaseService {
     let previousThumbnailUrl: string | null = null;
     let previousSlug: string | null = null;
     let wasLive = false;
+    // `as`: assigned in the callback, which TS cannot see, so it would stay
+    // narrowed to `null` after it.
+    let refusedFolder = null as string | null;
 
     try {
       const result = await this.db.transaction(async (tx) => {
@@ -845,16 +851,22 @@ export class ContentService extends BaseService {
         // upload. One the payload sends that differs from the row's names an
         // upload since replaced, whose files are deleted, so a stale form
         // re-sending it would point the row at a 404. The stored thumbnail
-        // stays (Codex-kk9nv.5).
+        // stays (Codex-kk9nv.5). Unless it is a cover staged for this piece's
+        // Update (Codex-a6ofh.2.5), which this PATCH takes, so it applies
+        // once; a stage taken before, replaced or too old is not one.
         const sentThumbnailUrl = restValidated.thumbnailUrl;
+        const sentOwnFolder =
+          sentThumbnailUrl != null && sentThumbnailUrl !== existing.thumbnailUrl
+            ? ownContentThumbnailFolder(
+                sentThumbnailUrl,
+                { creatorId, contentId: id },
+                this.r2PublicUrlBase
+              )
+            : null;
         const keepStoredThumbnail =
-          sentThumbnailUrl != null &&
-          sentThumbnailUrl !== existing.thumbnailUrl &&
-          ownContentThumbnailFolder(
-            sentThumbnailUrl,
-            { creatorId, contentId: id },
-            this.r2PublicUrlBase
-          ) !== null;
+          sentOwnFolder !== null &&
+          !(await claimStagedCover(tx, id, sentOwnFolder));
+        if (keepStoredThumbnail) refusedFolder = sentOwnFolder;
 
         // Codex-up7bx: the tier gate is only valid on org-scoped content —
         // subscription_tiers is org-scoped. Determine the org the row will have
@@ -1233,6 +1245,21 @@ export class ContentService extends BaseService {
         }
       }
 
+      if (refusedFolder) {
+        // Once committed: a PATCH that rolled back kept nothing. Why, read
+        // after it and best-effort: the log's, so it never fails the Update.
+        // The answer carries the cover kept, for the editor to say so.
+        const reason = await stagedCoverRefusal(
+          this.db,
+          id,
+          refusedFolder
+        ).catch((err: unknown) => `unread: ${messageForLog(err)}`);
+        this.obs.warn(
+          'Sent cover was not a stage this piece could take; stored cover kept',
+          // The folder's name, never its path: that starts with a user id.
+          { contentId: id, folder: refusedFolder.split('/').at(-1), reason }
+        );
+      }
       const thumbnailMoved = previousThumbnailUrl !== result.thumbnailUrl;
       const [wired] = await withTierWire(this.db, [result]);
       return {

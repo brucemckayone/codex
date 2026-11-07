@@ -428,7 +428,7 @@ describe('PublishStep · Publish', () => {
 describe('PublishStep · the bar and the card', () => {
   test('the bar goes back to writing, Write reads as done, and there is no Next', () => {
     render();
-    const back = document.querySelector<HTMLAnchorElement>('.write-back');
+    const back = document.querySelector<HTMLAnchorElement>('.editor-back');
     expect(back?.getAttribute('href')).toBe('/studio/content/c1/edit');
     expect(back?.textContent).toContain(m.studio_editor_back_to_writing());
     expect(
@@ -516,7 +516,7 @@ describe('PublishStep · the bar and the card', () => {
 
 /** Open "Where it appears". */
 function openFold() {
-  document.querySelector<HTMLButtonElement>('.publish-fold')?.click();
+  document.querySelector<HTMLButtonElement>('.settings-fold')?.click();
   flushSync();
 }
 function typeSlug(value: string) {
@@ -584,7 +584,7 @@ describe('PublishStep · a read it checks by fails', () => {
   test("categories, unread, are said in the fold's summary and logged", () => {
     categories.failure = outage;
     render(draft({ categoryIds: ['cat-1'] } as never));
-    expect(document.querySelector('.publish-summary')?.textContent).toContain(
+    expect(document.querySelector('.settings-summary')?.textContent).toContain(
       m.studio_publish_where_categories_unread()
     );
     expect(told.error).toHaveBeenCalledWith(
@@ -599,7 +599,7 @@ describe('PublishStep · a read it checks by fails', () => {
 describe('PublishStep · the slug and the fold', () => {
   test('the fold is found by its heading', () => {
     render();
-    const trigger = document.querySelector('.publish-fold');
+    const trigger = document.querySelector('.settings-fold');
     expect(trigger?.parentElement?.tagName).toBe('H2');
   });
 

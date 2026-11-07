@@ -3,8 +3,8 @@
 
   A draft opens in the shared content editor: Write (Codex-a6ofh.2.3), or
   Publish at `?step=publish` (Codex-a6ofh.2.4). A piece that has been live
-  keeps today's form, its changes waiting for Update, until its Page and
-  Settings tabs (Codex-a6ofh.2.5).
+  opens its Page and Settings tabs, its changes waiting for Update
+  (Codex-a6ofh.2.5). A type the editor does not know keeps the old form.
 -->
 <script lang="ts">
   import { page } from '$app/state';
@@ -31,6 +31,7 @@
   <ContentEditor
     content={data.content}
     step={view.step}
+    liveTab={view.liveTab}
     contentType={view.contentType}
     organizationId={data.organizationId}
     orgSlug={data.orgSlug}

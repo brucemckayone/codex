@@ -440,6 +440,203 @@ describe('ImageProcessingService', () => {
     });
   });
 
+  // A live piece's cover waits for Update (Codex-a6ofh.2.5).
+  describe('stageContentThumbnail', () => {
+    const EARLIER = 'user-1/content-thumbnails/content-1/1600x900-0badc0de';
+    /** The earlier stage's rows, as a retire hands them over. */
+    const earlierRows = () =>
+      folderFiles(EARLIER).map((r2Key, i) => ({ id: `orphan-${i}`, r2Key }));
+
+    function staging({
+      recordStagedCover = vi.fn().mockResolvedValue([]),
+      retireStagedCovers = vi.fn().mockResolvedValue([]),
+      markReplacedStagesDeleted = vi.fn().mockResolvedValue(undefined),
+    } = {}) {
+      const recordOrphanedFiles = vi.fn().mockResolvedValue([]);
+      const staged = new ImageProcessingService({
+        db: { ...testMockDb, query: mockDbQuery } as unknown as Database,
+        environment: 'test',
+        r2Service: testMockR2Service,
+        r2PublicUrlBase: 'https://test.r2.dev',
+        orphanedFileService: {
+          recordStagedCover,
+          retireStagedCovers,
+          markReplacedStagesDeleted,
+          recordOrphanedFiles,
+        } as unknown as OrphanedFileService,
+      });
+      return {
+        staged,
+        recordStagedCover,
+        retireStagedCovers,
+        markReplacedStagesDeleted,
+        recordOrphanedFiles,
+      };
+    }
+
+    const stageOne = (staged: ImageProcessingService) =>
+      staged.stageContentThumbnail(
+        'content-1',
+        'user-1',
+        createTestImageFile('image/png', 'cover.png')
+      );
+
+    /** What the service warns of, watched. */
+    const warned = (staged: ImageProcessingService) =>
+      vi.spyOn(
+        (
+          staged as unknown as {
+            obs: Record<'warn', (...args: unknown[]) => void>;
+          }
+        ).obs,
+        'warn'
+      );
+
+    beforeEach(() => {
+      vi.mocked(processor.processStillVariants).mockReturnValue(
+        pageVariants({}, 1200, 900)
+      );
+    });
+
+    it('makes the folder and records it as a stage, but never writes the row or deletes the cover it has', async () => {
+      const { staged, recordStagedCover, retireStagedCovers } = staging();
+
+      const result = await stageOne(staged);
+
+      const folder = newFolderOf(
+        testMockR2Service,
+        'user-1/content-thumbnails/content-1',
+        { width: 1200, height: 900 }
+      );
+      expect(result.url).toBe(`https://test.r2.dev/${folder}/lg.webp`);
+      expect(recordStagedCover).toHaveBeenCalledWith(
+        'content-1',
+        folderFiles(folder),
+        expect.any(Date)
+      );
+      // The stages it replaces are the ones from before its own record.
+      const stagedAt = recordStagedCover.mock.calls[0]?.[2];
+      expect(retireStagedCovers).toHaveBeenCalledWith('content-1', stagedAt);
+      expect(testMockDb.update).not.toHaveBeenCalled();
+      expect(deleteKeys(testMockR2Service)).toEqual([]);
+    });
+
+    it("deletes the files of the piece's earlier stages it retires, then marks them", async () => {
+      const { staged, markReplacedStagesDeleted, recordOrphanedFiles } =
+        staging({
+          retireStagedCovers: vi.fn().mockResolvedValue(earlierRows()),
+        });
+
+      await stageOne(staged);
+
+      expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(EARLIER));
+      expect(markReplacedStagesDeleted).toHaveBeenCalledWith(
+        'content-1',
+        earlierRows().map((row) => row.id)
+      );
+      // Already the sweep's rows: nothing new to record.
+      expect(recordOrphanedFiles).not.toHaveBeenCalled();
+    });
+
+    // Committed or not, nothing is lost: a stage it left is still a stage,
+    // and one it replaced is the sweep's at once. So nothing is deleted here.
+    it('still answers when the retire fails, and deletes nothing', async () => {
+      const { staged, markReplacedStagesDeleted, recordOrphanedFiles } =
+        staging({
+          retireStagedCovers: vi.fn().mockRejectedValue(new Error('timeout')),
+        });
+      const warn = warned(staged);
+
+      const result = await stageOne(staged);
+
+      expect(result.url).toMatch(/\/lg\.webp$/);
+      expect(deleteKeys(testMockR2Service)).toEqual([]);
+      expect(markReplacedStagesDeleted).not.toHaveBeenCalled();
+      expect(recordOrphanedFiles).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        'Earlier staged covers not retired; left for the sweep',
+        expect.objectContaining({ error: 'timeout' })
+      );
+    });
+
+    // Its row says deleted only once its file is gone; the rest wait in the
+    // sweep, which deletes them again.
+    it('marks only the rows whose files it deleted', async () => {
+      const [first, ...rest] = earlierRows();
+      vi.mocked(testMockR2Service.delete).mockImplementation(async (key) => {
+        if (key === first?.r2Key) throw new Error('r2 down');
+      });
+      const { staged, markReplacedStagesDeleted, recordOrphanedFiles } =
+        staging({
+          retireStagedCovers: vi.fn().mockResolvedValue(earlierRows()),
+        });
+      const warn = warned(staged);
+
+      const result = await stageOne(staged);
+
+      expect(result.url).toMatch(/\/lg\.webp$/);
+      expect(markReplacedStagesDeleted).toHaveBeenCalledWith(
+        'content-1',
+        rest.map((row) => row.id)
+      );
+      expect(recordOrphanedFiles).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        'Earlier staged covers: files not deleted; left for the sweep',
+        expect.objectContaining({ failed: 1, error: 'r2 down' })
+      );
+    });
+
+    it('still answers when the mark fails: the files are gone, and the sweep marks the rows', async () => {
+      const { staged } = staging({
+        retireStagedCovers: vi.fn().mockResolvedValue(earlierRows()),
+        markReplacedStagesDeleted: vi
+          .fn()
+          .mockRejectedValue(new Error('db down')),
+      });
+      const warn = warned(staged);
+
+      const result = await stageOne(staged);
+
+      expect(result.url).toMatch(/\/lg\.webp$/);
+      expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(EARLIER));
+      expect(warn).toHaveBeenCalledWith(
+        'Earlier staged covers deleted; rows left for the sweep',
+        expect.objectContaining({ error: 'db down' })
+      );
+    });
+
+    it('is refused without the orphan service, before anything is uploaded', async () => {
+      await expect(
+        service.stageContentThumbnail(
+          'content-1',
+          'user-1',
+          createTestImageFile('image/png', 'cover.png')
+        )
+      ).rejects.toMatchObject({ code: 'INTERNAL_ERROR' });
+      expect(testMockR2Service.put).not.toHaveBeenCalled();
+    });
+
+    it('deletes the folder again when it cannot be recorded, so none is left untracked', async () => {
+      const { staged } = staging({
+        recordStagedCover: vi.fn().mockRejectedValue(new Error('db down')),
+      });
+
+      await expect(
+        staged.stageContentThumbnail(
+          'content-1',
+          'user-1',
+          createTestImageFile('image/png', 'cover.png')
+        )
+      ).rejects.toThrow('db down');
+      const folder = newFolderOf(
+        testMockR2Service,
+        'user-1/content-thumbnails/content-1',
+        { width: 1200, height: 900 }
+      );
+      expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
+    });
+  });
+
   describe('processCategoryCover', () => {
     it('uploads four sizes under the category-namespaced base key and returns it', async () => {
       const file = createTestImageFile('image/png', 'cover.png');

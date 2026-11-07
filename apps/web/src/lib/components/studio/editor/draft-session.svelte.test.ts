@@ -20,8 +20,10 @@ const nav = vi.hoisted(() => ({
 }));
 const told = vi.hoisted(() => ({
   toastAdd: vi.fn(),
+  toastWarning: vi.fn(),
   logError: vi.fn(),
   logWarn: vi.fn(),
+  logInfo: vi.fn(),
 }));
 
 vi.mock('$lib/remote/content.remote', () => remotes);
@@ -32,10 +34,10 @@ vi.mock('$app/navigation', () => ({
   goto: (...args: unknown[]) => nav.goto(...args),
 }));
 vi.mock('$lib/components/ui/Toast/toast-store', () => ({
-  toast: { add: told.toastAdd },
+  toast: { add: told.toastAdd, warning: told.toastWarning },
 }));
 vi.mock('$lib/observability', () => ({
-  logger: { error: told.logError, warn: told.logWarn },
+  logger: { error: told.logError, warn: told.logWarn, info: told.logInfo },
 }));
 
 const { createDraftSession } = await import('./draft-session.svelte');
@@ -55,6 +57,8 @@ const SAVED_VALUES: DraftValues = {
   tags: ['svelte'],
   featured: false,
   access: { kind: 'free', priceCents: 0, tierIds: [] },
+  thumbnailUrl: null,
+  shaderPreset: null,
 };
 const DRAFT: PublicationState = { status: 'draft', publishedAt: null };
 const LIVE: PublicationState = {
@@ -105,8 +109,8 @@ function close(): void {
 }
 
 /** An in-app link click, as SvelteKit's beforeNavigate would see it. */
-function navigate(cancel = vi.fn()) {
-  const to = new URL('http://studio-alpha.lvh.me:3000/studio/content');
+function navigate(cancel = vi.fn(), path = '/studio/content') {
+  const to = new URL(path, 'http://studio-alpha.lvh.me:3000');
   nav.guards[0]?.({ willUnload: false, to: { url: to }, cancel });
   return { to, cancel };
 }
@@ -1656,5 +1660,642 @@ describe('publish', () => {
     second.answer.ok();
     await again;
     expect(session.takeHeldMove()).toBeNull();
+  });
+});
+
+describe('a piece that has been live: Discard, its count, and leaving (Codex-a6ofh.2.5)', () => {
+  /** A dialog's question, answered when the test says. */
+  function dialog() {
+    const asked: string[] = [];
+    let answer: (given: 'update' | 'leave' | 'stay') => void = () => {};
+    const askToLeave = vi.fn((reason: string) => {
+      asked.push(reason);
+      return new Promise<'update' | 'leave' | 'stay'>((resolve) => {
+        answer = resolve;
+      });
+    });
+    return {
+      askToLeave,
+      asked,
+      answer: (given: 'update' | 'leave' | 'stay') => answer(given),
+    };
+  }
+
+  it('counts each field Update would send', () => {
+    publication = LIVE;
+    const session = start();
+    expect(session.changeCount).toBe(0);
+    session.set('title', 'Renamed');
+    session.set('tags', ['svelte', 'runes']);
+    expect(session.changeCount).toBe(2);
+    session.set('title', SAVED_VALUES.title);
+    expect(session.changeCount).toBe(1);
+  });
+
+  it('Discard puts every field back, an emptied title too, and sends nothing', async () => {
+    publication = LIVE;
+    const session = start();
+    session.set('title', '');
+    session.set('tags', ['changed']);
+    session.set('thumbnailUrl', 'https://cdn.test/staged/lg.webp');
+
+    session.discard();
+
+    expect(session.values.title).toBe(SAVED_VALUES.title);
+    expect(session.values.tags).toEqual(SAVED_VALUES.tags);
+    expect(session.values.thumbnailUrl).toBeNull();
+    expect(session.isDirty).toBe(false);
+    await settle();
+    expect(remotes.saveContent).not.toHaveBeenCalled();
+  });
+
+  it('Discard keeps what an Update on the wire already sent', async () => {
+    const out = Promise.withResolvers<undefined>();
+    remotes.saveContent.mockReturnValueOnce(out.promise);
+    publication = LIVE;
+    const session = start();
+    session.set('title', 'Sent in the Update');
+    void session.flush();
+    session.set('description', 'Typed during it');
+
+    session.discard();
+
+    expect(session.values.title).toBe('Sent in the Update');
+    expect(session.values.description).toBe(SAVED_VALUES.description);
+    out.resolve(undefined);
+    await settle();
+  });
+
+  it("a draft's Discard does nothing: its changes save as they come", () => {
+    const session = start();
+    session.set('title', 'Autosaving');
+    session.discard();
+    expect(session.values.title).toBe('Autosaving');
+  });
+
+  it('a cover staged on a live piece goes with its Update', async () => {
+    publication = LIVE;
+    const session = start();
+    session.set('thumbnailUrl', 'https://cdn.test/staged/lg.webp');
+    await session.flush();
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: { thumbnailUrl: 'https://cdn.test/staged/lg.webp' },
+    });
+  });
+
+  it('a staged cover the server did not take shows the one it kept, and says so', async () => {
+    // Too old to take: the row keeps its cover, and the answer says which.
+    remotes.saveContent.mockResolvedValueOnce({
+      thumbnailUrl: 'https://cdn.test/kept/lg.webp',
+    });
+    publication = LIVE;
+    const session = start();
+    session.set('thumbnailUrl', 'https://cdn.test/staged/lg.webp');
+    session.set('title', 'Renamed');
+
+    const result = await session.flush();
+
+    // The rest of the Update landed; the cover is the one kept, never the
+    // one sent taken for live, and nothing is left to send.
+    expect(result.ok).toBe(true);
+    expect(session.values.thumbnailUrl).toBe('https://cdn.test/kept/lg.webp');
+    expect(session.isDirty).toBe(false);
+    expect(told.toastWarning).toHaveBeenCalledWith(
+      m.studio_live_cover_not_taken()
+    );
+  });
+
+  it('a move while the page is still sending something waits for it, then goes on and asks', async () => {
+    publication = LIVE;
+    const asking = dialog();
+    let busy = $state(true);
+    const session = start({
+      askToLeave: asking.askToLeave,
+      holdWhile: () => busy,
+    });
+    const { to, cancel } = navigate();
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(asking.asked).toEqual([]);
+    expect(unload()).toBe(true);
+
+    // The cover lands, then the page stops waiting: the move goes on.
+    session.set('thumbnailUrl', 'https://cdn.test/staged/lg.webp');
+    busy = false;
+    flushSync();
+    await settle();
+    expect(nav.goto).toHaveBeenCalledWith(to);
+    // Sent on, the guard sees what landed and asks as any move does.
+    navigate();
+    expect(asking.asked).toEqual(['live']);
+  });
+
+  it('a move held for something that then fails is dropped: the creator stays where that is said', async () => {
+    publication = LIVE;
+    let busy = $state(true);
+    const session = start({ holdWhile: () => busy });
+    navigate();
+    expect(session.leavingWhenSent).toBe(true);
+
+    // The cover failed: the page drops the move as it stops waiting.
+    session.stay();
+    busy = false;
+    flushSync();
+    await settle();
+
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(session.leavingWhenSent).toBe(false);
+  });
+
+  it('Leave now goes without what is on its way, and the question about the rest never holds it again', async () => {
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({
+      askToLeave: asking.askToLeave,
+      holdWhile: () => true,
+    });
+    session.set('title', 'Not updated yet');
+    const { to } = navigate();
+    const cancels: ReturnType<typeof vi.fn>[] = [];
+    // Each move it sends reaches the guards, as kit's would; the last one
+    // to go closes the editor, as a navigation's end does.
+    nav.goto
+      .mockImplementationOnce(async () => {
+        cancels.push(navigate().cancel);
+      })
+      .mockImplementationOnce(async () => {
+        cancels.push(navigate().cancel);
+        close();
+      });
+
+    await session.leaveNow();
+    // Asked about the title, once, and never held for the cover.
+    expect(asking.asked).toEqual(['live']);
+    asking.answer('leave');
+    await settle();
+    session.set('thumbnailUrl', 'https://cdn.test/staged/lg.webp');
+
+    expect(nav.goto).toHaveBeenCalledTimes(2);
+    expect(nav.goto).toHaveBeenLastCalledWith(to);
+    expect(cancels[0]).toHaveBeenCalled();
+    expect(cancels[1]).not.toHaveBeenCalled();
+    expect(asking.asked).toEqual(['live']);
+    // Landing after it went: the creator's to have left.
+    expect(told.toastAdd).not.toHaveBeenCalled();
+    expect(told.logError).not.toHaveBeenCalled();
+  });
+
+  it('…and staying at that question counts what is on its way again', async () => {
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({
+      askToLeave: asking.askToLeave,
+      holdWhile: () => true,
+    });
+    session.set('title', 'Not updated yet');
+    navigate();
+    nav.goto.mockImplementationOnce(async () => {
+      navigate();
+    });
+
+    await session.leaveNow();
+    asking.answer('stay');
+    await settle();
+    const { cancel } = navigate();
+
+    // Held again: the cover is still on its way, and the creator stayed.
+    expect(cancel).toHaveBeenCalled();
+    expect(session.leavingWhenSent).toBe(true);
+  });
+
+  it('…and so does staying when an Update that was out fails', async () => {
+    const out = Promise.withResolvers<undefined>();
+    remotes.saveContent.mockReturnValueOnce(out.promise);
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({
+      askToLeave: asking.askToLeave,
+      holdWhile: () => true,
+    });
+    session.set('title', 'In the Update');
+    void session.flush();
+    navigate();
+    nav.goto.mockImplementationOnce(async () => {
+      navigate();
+    });
+
+    // Leave now's move waits for the Update on the wire, which fails.
+    await session.leaveNow();
+    out.reject(new Error('down'));
+    await settle();
+    expect(asking.asked).toEqual(['failed']);
+    asking.answer('stay');
+    await settle();
+    const { cancel } = navigate();
+
+    // Held for the cover again, not asked about the Update a second time.
+    expect(cancel).toHaveBeenCalled();
+    expect(session.leavingWhenSent).toBe(true);
+    expect(asking.asked).toEqual(['failed']);
+  });
+
+  it('Leave now lets only its own move past: another, asked meanwhile, waits for what is on its way', async () => {
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({
+      askToLeave: asking.askToLeave,
+      holdWhile: () => true,
+    });
+    session.set('title', 'Not updated yet');
+    navigate();
+    nav.goto.mockImplementationOnce(async () => {
+      navigate();
+    });
+
+    await session.leaveNow();
+    expect(asking.asked).toEqual(['live']);
+    // A Back to somewhere else while that question is open.
+    const { cancel } = navigate(vi.fn(), '/studio/media');
+
+    expect(cancel).toHaveBeenCalled();
+    expect(session.leavingWhenSent).toBe(true);
+    expect(asking.asked).toEqual(['live']);
+  });
+
+  // Each way of staying ends Leave now's pass: the cover is still on its
+  // way, and a later move there must wait for it again.
+  describe('after Leave now, staying holds the next move again', () => {
+    function leavingNow(overrides: Partial<Options> = {}) {
+      publication = LIVE;
+      const session = start({ holdWhile: () => true, ...overrides });
+      navigate();
+      return session;
+    }
+    const heldAgain = (session: Session) => {
+      const { cancel } = navigate();
+      expect(cancel).toHaveBeenCalled();
+      expect(session.leavingWhenSent).toBe(true);
+    };
+
+    it('when the question is answered Stay at once (the browser’s confirm)', async () => {
+      const askToLeave = vi.fn(() => 'stay' as const);
+      const session = leavingNow({ askToLeave });
+      session.set('title', 'Not updated yet');
+      nav.goto.mockImplementationOnce(async () => {
+        navigate();
+      });
+
+      await session.leaveNow();
+
+      expect(askToLeave).toHaveBeenCalledTimes(1);
+      heldAgain(session);
+      expect(askToLeave).toHaveBeenCalledTimes(1);
+    });
+
+    it('when its move, sent once the Update landed, is stopped on the way', async () => {
+      const out = Promise.withResolvers<undefined>();
+      remotes.saveContent.mockReturnValueOnce(out.promise);
+      const session = leavingNow();
+      session.set('title', 'In the Update');
+      void session.flush();
+      nav.goto
+        .mockImplementationOnce(async () => {
+          navigate();
+        })
+        // Stopped, not arrived: the editor is still here.
+        .mockResolvedValueOnce(undefined);
+
+      await session.leaveNow();
+      out.resolve(undefined);
+      await settle();
+
+      expect(nav.goto).toHaveBeenCalledTimes(2);
+      heldAgain(session);
+    });
+
+    it('when asking about the failed Update fails itself', async () => {
+      const out = Promise.withResolvers<undefined>();
+      remotes.saveContent.mockReturnValueOnce(out.promise);
+      const askToLeave = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('dialog gone'));
+      const session = leavingNow({ askToLeave });
+      session.set('title', 'In the Update');
+      void session.flush();
+      nav.goto.mockImplementationOnce(async () => {
+        navigate();
+      });
+
+      await session.leaveNow();
+      out.reject(new Error('down'));
+      await settle();
+
+      expect(told.logError).toHaveBeenCalledWith(
+        'studio_editor.leave_save_failed',
+        expect.anything()
+      );
+      heldAgain(session);
+    });
+
+    it('when asking about the other changes fails itself', async () => {
+      const askToLeave = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('dialog gone'));
+      const session = leavingNow({ askToLeave });
+      session.set('title', 'Not updated yet');
+      nav.goto.mockImplementationOnce(async () => {
+        navigate();
+      });
+
+      await session.leaveNow();
+      await settle();
+
+      expect(told.logError).toHaveBeenCalledWith(
+        'studio_editor.leave_answer_failed',
+        expect.anything()
+      );
+      heldAgain(session);
+    });
+
+    it('when the creator presses Stay in the bar', async () => {
+      const session = leavingNow();
+      // Nothing to ask about, so its move goes through, and is stopped.
+      nav.goto.mockImplementationOnce(async () => {
+        navigate();
+      });
+      await session.leaveNow();
+      // A move elsewhere waits for the cover; the creator stays.
+      navigate(vi.fn(), '/studio/media');
+      expect(session.leavingWhenSent).toBe(true);
+
+      session.stay();
+
+      heldAgain(session);
+    });
+  });
+
+  it('a question the page closes for a newer one leaves the pass to the move that one asks about', async () => {
+    publication = LIVE;
+    // As LiveEditor's dialog: a newer question answers the open one Stay.
+    const open: ((given: 'update' | 'leave' | 'stay') => void)[] = [];
+    const askToLeave = vi.fn(() => {
+      open.at(-1)?.('stay');
+      return new Promise<'update' | 'leave' | 'stay'>((resolve) => {
+        open.push(resolve);
+      });
+    });
+    const session = start({ askToLeave, holdWhile: () => true });
+    session.set('title', 'Not updated yet');
+    navigate();
+    nav.goto.mockImplementationOnce(async () => {
+      navigate();
+    });
+    await session.leaveNow();
+    // A Back to the same list while that question is open: asked again.
+    navigate();
+    await settle();
+    expect(askToLeave).toHaveBeenCalledTimes(2);
+
+    const last = vi.fn();
+    nav.goto.mockImplementationOnce(async () => {
+      navigate(last);
+    });
+    open.at(-1)?.('leave');
+    await settle();
+
+    // Discarded and sent on, never held again for the cover.
+    expect(nav.goto).toHaveBeenCalledTimes(2);
+    expect(last).not.toHaveBeenCalled();
+    expect(session.leavingWhenSent).toBe(false);
+  });
+
+  it('…and so does the question about a failed Update, closed for a newer one', async () => {
+    const out = Promise.withResolvers<undefined>();
+    remotes.saveContent.mockReturnValueOnce(out.promise);
+    publication = LIVE;
+    const open: ((given: 'update' | 'leave' | 'stay') => void)[] = [];
+    const askToLeave = vi.fn(() => {
+      open.at(-1)?.('stay');
+      return new Promise<'update' | 'leave' | 'stay'>((resolve) => {
+        open.push(resolve);
+      });
+    });
+    const session = start({ askToLeave, holdWhile: () => true });
+    session.set('title', 'In the Update');
+    void session.flush();
+    navigate();
+    nav.goto.mockImplementationOnce(async () => {
+      navigate();
+    });
+    await session.leaveNow();
+    out.reject(new Error('down'));
+    await settle();
+    expect(askToLeave).toHaveBeenLastCalledWith('failed');
+    // A Back to the same list while that question is open: asked anew.
+    navigate();
+    await settle();
+    expect(askToLeave).toHaveBeenCalledTimes(2);
+
+    const last = vi.fn();
+    nav.goto.mockImplementationOnce(async () => {
+      navigate(last);
+    });
+    open.at(-1)?.('leave');
+    await settle();
+
+    expect(last).not.toHaveBeenCalled();
+    expect(session.leavingWhenSent).toBe(false);
+  });
+
+  it('a pass ends once nothing is on its way: a later upload holds a move there again', async () => {
+    publication = LIVE;
+    let busy = $state(true);
+    const session = start({ holdWhile: () => busy });
+    navigate();
+    // Nothing to ask about: its move goes through, and is stopped.
+    nav.goto.mockImplementationOnce(async () => {
+      navigate();
+    });
+    await session.leaveNow();
+
+    // The cover lands; later another is chosen.
+    busy = false;
+    flushSync();
+    busy = true;
+    flushSync();
+    const { cancel } = navigate();
+
+    expect(cancel).toHaveBeenCalled();
+    expect(session.leavingWhenSent).toBe(true);
+  });
+
+  it('a leave() that is stopped leaves no pass: a value lost after a later close is still told', async () => {
+    publication = LIVE;
+    const session = start();
+    // Stopped, not arrived: the editor is still here.
+    await session.leave('/studio/content');
+    close();
+
+    session.set('thumbnailUrl', 'https://cdn.test/staged/lg.webp');
+
+    expect(told.toastAdd).toHaveBeenCalled();
+  });
+
+  it('after leave(), a value landing late is no news: nothing is left to keep it', async () => {
+    publication = LIVE;
+    const session = start();
+    nav.goto.mockImplementationOnce(async () => close());
+
+    await session.leave('/studio/content');
+    session.set('thumbnailUrl', 'https://cdn.test/staged/lg.webp');
+
+    expect(told.toastAdd).not.toHaveBeenCalled();
+    expect(told.logError).not.toHaveBeenCalled();
+    expect(told.logInfo).toHaveBeenCalledWith(
+      'studio_editor.set_after_leave_dropped',
+      { contentId: ID, key: 'thumbnailUrl' }
+    );
+  });
+
+  it('leave() goes without a question or a wait: nothing is left to keep', async () => {
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({
+      askToLeave: asking.askToLeave,
+      holdWhile: () => true,
+    });
+    session.set('title', 'Never sent');
+
+    const going = session.leave('/studio/content');
+    // The move leave() makes passes the guard.
+    const { cancel } = navigate();
+    await going;
+
+    expect(nav.goto).toHaveBeenCalledWith('/studio/content');
+    expect(cancel).not.toHaveBeenCalled();
+    expect(asking.asked).toEqual([]);
+    expect(session.values.title).toBe(SAVED_VALUES.title);
+    expect(remotes.saveContent).not.toHaveBeenCalled();
+  });
+
+  it('leaving asks the page, holds the move, and Stay keeps the changes', async () => {
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({ askToLeave: asking.askToLeave });
+    session.set('title', 'Not updated yet');
+    const { cancel } = navigate();
+
+    expect(asking.asked).toEqual(['live']);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    asking.answer('stay');
+    await settle();
+
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(session.values.title).toBe('Not updated yet');
+  });
+
+  it('Discard drops the changes, sends nothing, and goes on', async () => {
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({ askToLeave: asking.askToLeave });
+    session.set('title', 'Not updated yet');
+    const { to } = navigate();
+    asking.answer('leave');
+    await settle();
+
+    expect(remotes.saveContent).not.toHaveBeenCalled();
+    expect(session.isDirty).toBe(false);
+    expect(nav.goto).toHaveBeenCalledWith(to);
+    // Nothing unsent: the move it sent on passes the guard.
+    const again = vi.fn();
+    nav.guards[0]?.({ willUnload: false, to: { url: to }, cancel: again });
+    expect(again).not.toHaveBeenCalled();
+  });
+
+  it('Update sends the changes, then goes on', async () => {
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({ askToLeave: asking.askToLeave });
+    session.set('title', 'Updated on the way out');
+    const { to } = navigate();
+    asking.answer('update');
+    await settle();
+
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: { title: 'Updated on the way out' },
+    });
+    expect(nav.goto).toHaveBeenCalledWith(to);
+  });
+
+  it('a refused Update stays, keeping the changes for the bar to say', async () => {
+    remotes.saveContent.mockRejectedValueOnce(offline());
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({ askToLeave: asking.askToLeave });
+    session.set('title', 'Refused on the way out');
+    navigate();
+    asking.answer('update');
+    await settle();
+
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(session.status).toBe('error');
+    expect(session.values.title).toBe('Refused on the way out');
+  });
+
+  it('a Back answered Discard goes back as one, not by address', async () => {
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    publication = LIVE;
+    const asking = dialog();
+    const session = start({ askToLeave: asking.askToLeave });
+    session.set('title', 'Not updated yet');
+    const to = new URL('http://studio-alpha.lvh.me:3000/studio/content');
+    nav.guards[0]?.({
+      willUnload: false,
+      type: 'popstate',
+      delta: -1,
+      to: { url: to },
+      cancel: vi.fn(),
+    });
+    asking.answer('leave');
+    await settle();
+
+    expect(go).toHaveBeenCalledWith(-1);
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(session.isDirty).toBe(false);
+  });
+
+  it("a draft's failed save asks the page too, and Leave goes as abandoned", async () => {
+    // Every save fails, the close's last quiet try too: only an abandoned
+    // leave goes untold.
+    remotes.saveContent.mockRejectedValue(offline());
+    const asking = dialog();
+    const session = start({ askToLeave: asking.askToLeave });
+    session.set('title', 'Never saved');
+    const { to } = navigate();
+    await settle();
+
+    expect(asking.asked).toEqual(['failed']);
+    // The next page takes over: the editor closes during the move.
+    nav.goto.mockImplementationOnce(async () => close());
+    asking.answer('leave');
+    await settle();
+    expect(nav.goto).toHaveBeenCalledWith(to);
+    // Left by choice: its last quiet try fails too, and nothing is toasted.
+    expect(told.toastAdd).not.toHaveBeenCalled();
+  });
+
+  it("a draft's question answered Stay keeps the creator there", async () => {
+    remotes.saveContent.mockRejectedValueOnce(offline());
+    const asking = dialog();
+    const session = start({ askToLeave: asking.askToLeave });
+    session.set('title', 'Never saved');
+    navigate();
+    await settle();
+    asking.answer('stay');
+    await settle();
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(unload()).toBe(true);
   });
 });

@@ -5,6 +5,7 @@ import {
   editorView,
   publishStepHref,
   readEditorStep,
+  readLiveTab,
   readNewContent,
 } from './editor-url';
 
@@ -79,6 +80,7 @@ describe('editorView', () => {
     expect(editorView(draft, edit())).toEqual({
       step: 'write',
       contentType: 'audio',
+      liveTab: null,
     });
   });
 
@@ -86,21 +88,32 @@ describe('editorView', () => {
     expect(editorView(draft, edit('?step=publish'))).toEqual({
       step: 'publish',
       contentType: 'audio',
+      liveTab: null,
     });
   });
 
-  it('keeps a piece that has been live on the form, unpublished or not, at either step', () => {
+  // Codex-a6ofh.2.5: a piece that has been live opens its tabs, never a
+  // draft's steps, unpublished or not (its buyers keep it).
+  it('opens a piece that has been live on its Page tab, unpublished or not, whatever step is asked', () => {
     for (const search of ['', '?step=publish']) {
-      expect(
-        editorView({ ...draft, status: 'published' }, edit(search))
-      ).toBeNull();
-      expect(
-        editorView(
-          { ...draft, publishedAt: '2026-10-01T00:00:00Z' },
-          edit(search)
-        )
-      ).toBeNull();
+      for (const piece of [
+        { ...draft, status: 'published' },
+        { ...draft, publishedAt: '2026-10-01T00:00:00Z' },
+      ]) {
+        expect(editorView(piece, edit(search))).toEqual({
+          step: 'write',
+          contentType: 'audio',
+          liveTab: 'page',
+        });
+      }
     }
+  });
+
+  it('opens Settings when the address says so', () => {
+    expect(
+      editorView({ ...draft, status: 'published' }, edit('?tab=settings'))
+    ).toEqual({ step: 'write', contentType: 'audio', liveTab: 'settings' });
+    expect(readLiveTab(edit('?tab=nonsense'))).toBe('page');
   });
 
   it('keeps a type the editor does not know on the form', () => {

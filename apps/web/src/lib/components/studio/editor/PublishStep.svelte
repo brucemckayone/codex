@@ -32,37 +32,21 @@
   import { goto } from '$app/navigation';
   import { navigating } from '$app/state';
   import { describeThrown } from '$lib/client-log';
-  import { mediaStatus } from '$lib/client/media-status.svelte';
   import { Button } from '$lib/components/ui';
-  import * as Accordion from '$lib/components/ui/Accordion';
-  import ContentCard from '$lib/components/ui/ContentCard/ContentCard.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import { getCategories } from '$lib/remote/categories.remote';
   import { publishContent } from '$lib/remote/content.remote';
-  import { getMediaItem } from '$lib/remote/media.remote';
-  import type { QueryResult } from '$lib/remote/query-result';
-  import { remoteErrorStatus } from '$lib/remote/query-result';
-  import { getMyConnectStatus, listTiers } from '$lib/remote/subscription.remote';
   import { logger } from '$lib/observability';
-  import type { ContentWithRelations, SubscriptionTier } from '$lib/types';
-  import { deriveConnectState } from '$lib/utils/bank-payouts';
-  import { connectQueryState, payoutSetupHref } from '$lib/utils/connect-readiness';
-  import { accessGroupToFlags, type ContentAccessKind } from '$lib/utils/content-access';
+  import type { ContentWithRelations } from '$lib/types';
+  import { accessGroupToFlags } from '$lib/utils/content-access';
   import { formatPrice } from '$lib/utils/format';
-  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import * as m from '$paraglide/messages';
-  import AccessSection from '../content-form/AccessSection.svelte';
-  import OrganizeSection from '../content-form/OrganizeSection.svelte';
-  import SlugField from '../content-form/SlugField.svelte';
-  import { logReadFailure } from '../media-library/log-read-failure';
-  import { watchMediaItem } from '../media-library/watch-media-item.svelte';
-  import { selectFromTier, toggleTierId } from '../plan-picker/select-from-tier';
   import { savedDraftValues, TYPE_WORD } from './canvas-text';
-  import CoverLine from './CoverLine.svelte';
   import { createDraftSession, type DraftValues } from './draft-session.svelte';
+  import EditorSection from './EditorSection.svelte';
   import { CONTENT_LIST_HREF, type EditorContentType, editHref } from './editor-url';
-  import { priceText, withKind, withPrice } from './publish-access';
   import { asPublishGap, gapRow, type PublishGap, publishGaps, refusalPutRightBy } from './publish-gaps';
+  import { createPublishReads } from './publish-reads.svelte';
+  import PublishSettings from './PublishSettings.svelte';
   import WriteBar from './WriteBar.svelte';
 
   interface Props {
@@ -97,78 +81,17 @@
     session.set(key, value);
   }
 
-  // ── Who can watch ──────────────────────────────────────────────────────
-  // Payouts gate the kinds that earn (`deriveConnectState` reads the two
-  // flags the server checks). Ready until known, as the old form assumed, so
-  // a set-up creator never sees those kinds flash off; the server judges. A
-  // read that failed is never "ready": the checklist says it couldn't check.
-  const connectStatus = getMyConnectStatus();
-  const connectRead = $derived(connectQueryState(connectStatus));
-  const connectReady = $derived(
-    connectRead.kind === 'ok' ? deriveConnectState(connectRead.status) === 'enabled' : true
-  );
-  const connectUnread = $derived(connectRead.kind === 'failed');
-  $effect(() => {
-    if (connectStatus.error != null) logReadFailure('studio_publish.connect_unread', connectStatus.error);
-  });
-  /** A failure shows through the query's `.error`, logged above. */
-  function rereadConnect() {
-    connectStatus.refresh().catch(() => undefined);
-  }
-  const payoutsHref = $derived(payoutSetupHref(organizationId !== null));
+  // Payouts, the org's plans and the media: what the checklist and the
+  // settings are judged by.
+  const reads = createPublishReads({ values, content: () => content, organizationId: () => organizationId });
 
-  // The org's active plans (the options). Plans never read are not "none":
-  // the picker is disabled and no set is sent (AccessSection's rule).
-  const tiersQuery = $derived(organizationId ? listTiers(organizationId) : null);
-  const tiersRead = $derived(connectQueryState(tiersQuery as QueryResult<SubscriptionTier[]> | null));
-  const orgTiers = $derived<SubscriptionTier[]>(tiersRead.kind === 'ok' ? tiersRead.status : []);
-  $effect(() => {
-    if (tiersQuery?.error != null) {
-      logReadFailure('studio_publish.tiers_unread', tiersQuery.error, { organizationId });
-    }
-  });
-  /** A failure shows through the query's `.error`, logged above. */
-  function rereadTiers() {
-    tiersQuery?.refresh().catch(() => undefined);
-  }
-  const tiersState = $derived.by((): 'loading' | 'loaded' | 'failed' => {
-    if (!organizationId) return 'loaded';
-    if (tiersRead.kind === 'failed') return 'failed';
-    if (tiersRead.kind === 'loading') return 'loading';
-    return access.tierIds !== null ? 'loaded' : 'failed';
-  });
-
-  /** The price as typed; the session holds it in pence. */
-  let typedPrice = $state(untrack(() => priceText(session.values.access.priceCents)));
-
-  function changeKind(kind: string) {
-    // AccessSection's options are the five kinds.
-    const next = withKind(access, kind as ContentAccessKind);
-    if (next.priceCents !== access.priceCents) typedPrice = priceText(next.priceCents);
-    change('access', next);
-  }
-
-  function changePrice(text: string) {
-    typedPrice = text;
-    change('access', withPrice(access, text));
-  }
-
-  function toggleTier(tierId: string) {
-    change('access', { ...access, tierIds: toggleTierId(access.tierIds ?? [], tierId) });
-  }
-
-  function selectTiersFrom(tierId: string) {
-    change('access', { ...access, tierIds: selectFromTier(access.tierIds ?? [], tierId, orgTiers) });
-  }
-
-  /** What a save sends for the access group: what the card and the button read. */
+  /** What a save sends for the access group: what the button reads. */
   const flags = $derived(accessGroupToFlags(access, organizationId));
   const forSale = $derived(flags.isPurchasable && (flags.priceCents ?? 0) > 0);
 
   // ── How it looks in lists ──────────────────────────────────────────────
-  /** A cover set or removed here (CoverLine's, bound); undefined until then, so the saved one shows. */
+  /** A cover set or removed here (the cover line's); undefined until then, so the saved one shows. */
   let coverSet = $state<string | null | undefined>(undefined);
-  const cover = $derived(coverSet === undefined ? content.thumbnailUrl : coverSet);
   /** A cover set or removed here: a refusal for a deleted frame no longer holds. */
   function setCover(next: string | null | undefined) {
     coverSet = next;
@@ -178,69 +101,6 @@
   let coverBusy = $state(false);
   /** Its saved cover is a frame of a video since deleted (Codex-tqvmx), until another is set. */
   const coverDeleted = $derived(coverSet === undefined && content.thumbnailFrame?.deletedAt != null);
-
-  // The media, read again here and watched while it is on its way, so the
-  // checklist says how far it has got and Publish opens once it is ready.
-  const mediaId = $derived(values.mediaItemId);
-  const mediaQuery = $derived(mediaId ? getMediaItem(mediaId) : null);
-  watchMediaItem(() => mediaQuery);
-  const mediaRow = $derived(
-    mediaQuery?.current ?? (mediaId !== null && content.mediaItemId === mediaId ? content.mediaItem : null) ?? null
-  );
-  /** Deleted, or no longer theirs: the read says so. */
-  const mediaGone = $derived(remoteErrorStatus(mediaQuery?.error) === 404);
-  /** Never read: the arrival's status is not taken for the media's now. */
-  const mediaUnread = $derived(!mediaGone && mediaQuery?.error != null && mediaQuery.current === undefined);
-  // The watch's settled refresh leaves its failure here too.
-  $effect(() => {
-    const error = mediaQuery?.error;
-    if (error == null) return;
-    logReadFailure(mediaGone ? 'studio_publish.media_gone' : 'studio_publish.media_unread', error, { mediaId });
-  });
-  /** A failure shows through the query's `.error`, logged above. */
-  function rereadMedia() {
-    mediaQuery?.refresh().catch(() => undefined);
-  }
-  const media = $derived.by(() => {
-    if (!mediaId || mediaUnread) return null;
-    if (mediaGone) return { status: mediaRow?.status ?? 'ready', deleted: true, progress: null };
-    if (!mediaRow) return null;
-    const live = mediaStatus.items.get(mediaId);
-    return {
-      status: live?.lifecycle ?? mediaRow.status,
-      deleted: mediaRow.deletedAt != null,
-      progress: live?.progress ?? mediaRow.transcodingProgress ?? null,
-    };
-  });
-
-  const cardType = $derived(contentType === 'written' ? 'article' : contentType);
-  // The media's poster comes with its own read (the row's media has none).
-  const cardThumbnail = $derived(getDisplayThumbnail({ thumbnailUrl: cover, mediaItem: mediaQuery?.current ?? null }));
-
-  // ── Where it appears ───────────────────────────────────────────────────
-  // Names only for a piece filed under some: OrganizeSection reads the same
-  // query (cached by org) once the fold opens.
-  const categoriesQuery = $derived(
-    organizationId && values.categoryIds.length > 0 ? getCategories(organizationId) : null
-  );
-  /** The fold's one line: its categories (an org's), and whether it is on the homepage. */
-  const whereSummary = $derived.by(() => {
-    const parts: string[] = [];
-    const categories = categoriesQuery?.current;
-    if (categoriesQuery?.error != null && !categories) parts.push(m.studio_publish_where_categories_unread());
-    else if (organizationId && (categories || values.categoryIds.length === 0)) {
-      const names = (categories ?? []).filter((c) => values.categoryIds.includes(c.id)).map((c) => c.name);
-      parts.push(names.length > 0 ? names.join(', ') : m.studio_publish_where_no_categories());
-    }
-    parts.push(values.featured ? m.studio_publish_where_featured() : m.studio_publish_where_not_featured());
-    return parts.join(' · ');
-  });
-
-  $effect(() => {
-    if (categoriesQuery?.error != null) {
-      logReadFailure('studio_publish.categories_unread', categoriesQuery.error, { organizationId });
-    }
-  });
 
   /** What is typed in the slug field is not a slug: Publish would send the last one that was. */
   let slugInvalid = $state(false);
@@ -253,9 +113,9 @@
       contentType,
       values,
       needsTitle: session.needsTitle,
-      media,
+      media: reads.media,
       coverDeleted,
-      connectReady,
+      connectReady: reads.connectReady,
       organizationId,
     })
   );
@@ -281,7 +141,7 @@
   const rows = $derived.by(() => {
     const extra = refusal?.gap;
     const listed = extra && !gaps.includes(extra) ? [...gaps, extra] : gaps;
-    return listed.map((gap) => gapRow(gap, { contentType, media }));
+    return listed.map((gap) => gapRow(gap, { contentType, media: reads.media }));
   });
 
   let publishing = $state(false);
@@ -293,7 +153,7 @@
   );
   const blocked = $derived(gaps.length > 0 || coverBusy || categoryBusy || slugInvalid);
   /** Nothing is missing, and nothing it checks by went unread. */
-  const ready = $derived(rows.length === 0 && !slugInvalid && !mediaUnread && !connectUnread);
+  const ready = $derived(rows.length === 0 && !slugInvalid && !reads.mediaUnread && !reads.connectUnread);
   /**
    * The checklist's one live region: the wait, the all-clear, or (heard
    * only) how much is left, so a row going (the media ready) is told.
@@ -303,8 +163,8 @@
     if (waitHint) return waitHint;
     if (ready) return m.studio_publish_gaps_none();
     if (left > 0) return m.studio_publish_gaps_left({ count: left });
-    if (mediaUnread) return m.studio_publish_media_unread({ type: TYPE_WORD[contentType]() });
-    return connectUnread ? m.studio_publish_connect_unread() : '';
+    if (reads.mediaUnread) return m.studio_publish_media_unread({ type: TYPE_WORD[contentType]() });
+    return reads.connectUnread ? m.studio_publish_connect_unread() : '';
   });
   /** What Publish is doing, outside what it holds still, so it is heard and keeps focus. */
   const progressWords = $derived.by(() => {
@@ -388,107 +248,25 @@
         <p class="publish-intro">{m.studio_publish_intro()}</p>
       </header>
 
-      <section class="publish-section" aria-labelledby="{gapsId}-who">
-        <h2 class="publish-heading" id="{gapsId}-who">
-          <span class="publish-ordinal" aria-hidden="true">1</span>
-          {m.studio_publish_who()}
-        </h2>
-        <AccessSection
-          {organizationId}
-          layout="row"
-          tiers={orgTiers}
-          {tiersState}
-          onRetryTiers={rereadTiers}
-          accessTypeVal={access.kind}
-          priceVal={typedPrice}
-          selectedTierIds={access.tierIds ?? []}
-          {connectReady}
-          onAccessChange={changeKind}
-          onPriceChange={changePrice}
-          onTierToggle={toggleTier}
-          onSelectFromTier={selectTiersFrom}
-        />
-      </section>
+      <PublishSettings
+        {session}
+        {reads}
+        {content}
+        {contentType}
+        {organizationId}
+        {orgSlug}
+        {creatorUsername}
+        {authorName}
+        onchange={change}
+        savedCover={content.thumbnailUrl}
+        coverChanged={coverSet}
+        oncoverchange={setCover}
+        oncoverbusy={(busy) => (coverBusy = busy)}
+        oncategorybusy={(busy) => (categoryBusy = busy)}
+        onslugcheck={(invalid) => (slugInvalid = invalid)}
+      />
 
-      <section class="publish-section" aria-labelledby="{gapsId}-card">
-        <h2 class="publish-heading" id="{gapsId}-card">
-          <span class="publish-ordinal" aria-hidden="true">2</span>
-          {m.studio_publish_card()}
-        </h2>
-        <div class="publish-card">
-          <!-- A picture of the card it becomes: its words are on this page already. -->
-          <div class="publish-card-preview" inert>
-            <ContentCard
-              variant="grid"
-              id={content.id}
-              title={values.title}
-              thumbnail={cardThumbnail}
-              contentType={cardType}
-              duration={mediaRow?.durationSeconds ?? null}
-              creator={{ displayName: authorName }}
-              price={flags.priceCents == null ? null : { amount: flags.priceCents, currency: 'GBP' }}
-              contentAccessType={access.kind}
-            />
-          </div>
-          <div class="publish-card-words">
-            <p class="publish-hint">{m.studio_publish_card_hint()}</p>
-            <CoverLine
-              contentId={content.id}
-              {contentType}
-              thumbnailUrl={content.thumbnailUrl}
-              image={false}
-              bind:changed={() => coverSet, setCover}
-              onbusy={(busy) => (coverBusy = busy)}
-            />
-          </div>
-        </div>
-      </section>
-
-      <section class="publish-section" aria-labelledby="{gapsId}-where">
-        <Accordion.Root>
-          <Accordion.Item value="where">
-            <Accordion.Trigger class="publish-fold" level={2}>
-              <span class="publish-fold-words">
-                <span class="publish-heading" id="{gapsId}-where">
-                  <span class="publish-ordinal" aria-hidden="true">3</span>
-                  {m.studio_publish_where()}
-                  <span class="publish-optional">{m.studio_publish_optional()}</span>
-                </span>
-                <span class="publish-summary">{whereSummary}</span>
-              </span>
-            </Accordion.Trigger>
-            <Accordion.Content>
-              <div class="publish-where">
-                <OrganizeSection
-                  {organizationId}
-                  tags={values.tags}
-                  featured={values.featured}
-                  selectedCategoryIds={values.categoryIds}
-                  onTagsChange={(tags) => change('tags', tags)}
-                  onFeaturedChange={(featured) => change('featured', featured)}
-                  onCategoryChange={(ids) => change('categoryIds', ids)}
-                  onbusy={(busy) => (categoryBusy = busy)}
-                />
-                <SlugField
-                  value={values.slug}
-                  onchange={(slug) => change('slug', slug)}
-                  oninvalid={(invalid) => (slugInvalid = invalid)}
-                  {orgSlug}
-                  {creatorUsername}
-                  {organizationId}
-                  contentId={content.id}
-                />
-              </div>
-            </Accordion.Content>
-          </Accordion.Item>
-        </Accordion.Root>
-      </section>
-
-      <section class="publish-section" aria-labelledby="{gapsId}-gaps">
-        <h2 class="publish-heading" id="{gapsId}-gaps">
-          <span class="publish-ordinal" aria-hidden="true">4</span>
-          {m.studio_publish_gaps()}
-        </h2>
+      <EditorSection headingId="{gapsId}-gaps" ordinal={4} title={m.studio_publish_gaps()}>
         <div class="publish-gaps" id={gapsId} tabindex="-1" bind:this={gapsEl}>
           {#if !ready}
             <ul class="publish-gap-list">
@@ -498,7 +276,7 @@
                   {#if row.fix === 'write'}
                     <a class="publish-gap-fix" href={writeHref}>{m.studio_publish_gap_fix_on_write()}</a>
                   {:else if row.fix === 'payouts'}
-                    <a class="publish-gap-fix" href={payoutsHref}>{m.studio_content_form_access_payouts_link()}</a>
+                    <a class="publish-gap-fix" href={reads.payoutsHref}>{m.studio_content_form_access_payouts_link()}</a>
                   {/if}
                 </li>
               {/each}
@@ -510,16 +288,16 @@
                   </button>
                 </li>
               {/if}
-              {#if mediaUnread}
+              {#if reads.mediaUnread}
                 <li class="publish-gap publish-gap--unread">
                   <span>{m.studio_publish_media_unread({ type: TYPE_WORD[contentType]() })}</span>
-                  <button type="button" class="publish-gap-fix" onclick={rereadMedia}>{m.common_try_again()}</button>
+                  <button type="button" class="publish-gap-fix" onclick={reads.rereadMedia}>{m.common_try_again()}</button>
                 </li>
               {/if}
-              {#if connectUnread}
+              {#if reads.connectUnread}
                 <li class="publish-gap publish-gap--unread">
                   <span>{m.studio_publish_connect_unread()}</span>
-                  <button type="button" class="publish-gap-fix" onclick={rereadConnect}>
+                  <button type="button" class="publish-gap-fix" onclick={reads.rereadConnect}>
                     {m.common_try_again()}
                   </button>
                 </li>
@@ -539,7 +317,7 @@
             <p class="publish-refusal" role="alert">{refusalWords}</p>
           {/if}
         </div>
-      </section>
+      </EditorSection>
     </div>
 
     <div class="publish-foot">
@@ -597,93 +375,6 @@
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-  }
-
-  .publish-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding-block-start: var(--space-6);
-    border-block-start: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .publish-heading {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    margin: 0;
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-  }
-
-  .publish-ordinal {
-    display: inline-grid;
-    place-items: center;
-    inline-size: var(--space-6);
-    block-size: var(--space-6);
-    border-radius: var(--radius-full);
-    background: var(--color-surface-tertiary);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    color: var(--color-text-secondary);
-  }
-
-  .publish-optional {
-    font-size: var(--text-xs);
-    font-weight: var(--font-normal);
-    color: var(--color-text-secondary);
-  }
-
-  .publish-card {
-    display: grid;
-    gap: var(--space-4);
-  }
-
-  .publish-card-preview {
-    max-inline-size: 18rem;
-  }
-
-  .publish-card-words {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  @media (--breakpoint-md) {
-    .publish-card {
-      grid-template-columns: 18rem minmax(0, 1fr);
-      align-items: start;
-    }
-  }
-
-  /* The fold's trigger: the heading over its summary, the chevron at the end. */
-  .publish-section :global(.publish-fold) {
-    justify-content: space-between;
-    gap: var(--space-3);
-    padding-inline: 0;
-    text-align: start;
-  }
-
-  .publish-fold-words {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-1);
-  }
-
-  .publish-summary {
-    font-size: var(--text-sm);
-    font-weight: var(--font-normal);
-    color: var(--color-text-secondary);
-  }
-
-  .publish-where {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-6);
-    padding-block: var(--space-2);
   }
 
   .publish-gaps {
