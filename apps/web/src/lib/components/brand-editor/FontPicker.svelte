@@ -87,6 +87,10 @@
   } = createSelect<string>({
     forceVisible: true,
     portal: 'body',
+    // A select leaves the page free to scroll, like a menu (owner, 2026-11-07,
+    // Codex-9e06g). Melt's default lock does not hold where base.css clips the
+    // body's overflow: the page scrolled behind it and shifted 15px on open.
+    preventScroll: false,
     positioning: {
       placement: 'bottom',
       sameWidth: true,

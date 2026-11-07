@@ -170,6 +170,37 @@ describe('FontPicker', () => {
     expect(vi.mocked(previewFont)).not.toHaveBeenCalled();
   });
 
+  // Codex-9e06g: a guard against Melt's default body lock coming back. An
+  // omitted option falls back to Melt's default and locks, so this fails; it
+  // cannot tell `false` from an explicit `undefined`, which Melt reads as
+  // falsy too. Opened from the keyboard: the test DOM cannot drive Melt's
+  // pointerdown path.
+  test('opening it never locks the page', () => {
+    component = mount(FontPicker, {
+      target: document.body,
+      props: {
+        mode: 'body',
+        label: 'Body font',
+        value: '',
+        onValueChange: vi.fn(),
+      },
+    });
+    flushSync();
+    const trigger = document.querySelector<HTMLElement>('[role="combobox"]');
+    trigger?.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    flushSync();
+
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(document.body.hasAttribute('data-melt-scroll-lock')).toBe(false);
+    expect(document.body.style.overflow).toBe('');
+  });
+
   test('renders chevron icon on trigger', () => {
     component = mount(FontPicker, {
       target: document.body,
