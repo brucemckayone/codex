@@ -33,15 +33,11 @@ const SRC = dirname(dirname(STYLES));
  * dark page. There the brand engine's halo, held to 3.06:1 against the
  * ground, carries the focus instead (3.67 to 3.85:1, measured in Chromium
  * and WebKit). Moving one to `data-field-box` means taking it off this list.
- *
- * SearchPill takes its halo away too, so on those brands it has no cue that
- * holds (Codex-zvyox).
  */
 const INTERACTIVE_BORDER = new Set([
   'lib/components/ui/FilterBar/FilterBar.svelte',
   'lib/components/studio/content-list/ContentListCommandBar.svelte',
   'lib/components/studio/media-library/MediaLibraryToolbar.svelte',
-  'lib/components/ui/SearchPill/SearchPill.svelte',
 ]);
 
 /** Inputs that take no text, so draw no field. */
@@ -465,8 +461,8 @@ describe('every borderless field keeps a focus cue that holds 3:1 (Codex-c5prp)'
     ).toEqual(['box']);
     // One field, drawn in a <form> or a <label>: a snippet rendered twice.
     expect(cues('lib/components/ui/SearchPill/SearchPill.svelte')).toEqual([
-      'none',
-      'none',
+      'box',
+      'box',
     ]);
     expect(cues('lib/components/ui/FilterBar/FilterBar.svelte')).toEqual([
       'none',
