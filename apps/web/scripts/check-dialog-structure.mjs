@@ -292,7 +292,7 @@ const DIALOG_ATTR_RE = new RegExp(
   String.raw`\[\s*(?:` +
     [
       String.raw`data-melt-dialog-[\w-]*`,
-      String.raw`aria-modal`,
+      'aria-modal',
       String.raw`role\s*[~|^$*]?=\s*['"]?(?:alert)?dialog(?![\w-])`,
       String.raw`data-(?:flush|sheet|floating)(?![\w-])`,
       valued('data-layout', 'dialog|drawer|floating'),
@@ -1202,11 +1202,10 @@ function checkToolbarHasBody(node, { bindings, snippets, report }) {
   const parts = [];
   let unknown = false;
   const collect = (fragment) => {
-    for (const child of directChildren(
-      fragment,
-      snippets,
-      () => (unknown = true)
-    )) {
+    const onUnknown = () => {
+      unknown = true;
+    };
+    for (const child of directChildren(fragment, snippets, onUnknown)) {
       const part = partOf(child, bindings);
       parts.push({ part, child });
       if (part === 'Form') collect(child.fragment);
@@ -1943,7 +1942,6 @@ function splitTop(text, isSplit) {
 }
 
 const selectorList = (prelude) => splitTop(prelude, (c) => c === ',');
-const compounds = (selector) => splitTop(selector, (c) => /[\s>+~]/.test(c));
 const squash = (text) => text.replace(/\s+/g, ' ').trim();
 
 /** The index just past the `)` that closes the `(` at `open`, or -1. */
@@ -2364,11 +2362,14 @@ function collectHandles(ast, bindings, file, handles, source) {
         if (attr.value === true) continue;
         for (const { id, prefix, suffix } of idShapes(attr, consts)) {
           if (id) handles.ids.set(id, owner);
-          else if (prefix)
-            (handles.idPrefixes ??= []).push({ prefix, ...owner });
+          else if (prefix) {
+            handles.idPrefixes ??= [];
+            handles.idPrefixes.push({ prefix, ...owner });
+          } else if (suffix) {
+            handles.idSuffixes ??= [];
+            handles.idSuffixes.push({ suffix, ...owner });
+          }
           // An id that is all expression (`{listId}`) is known by nothing.
-          else if (suffix)
-            (handles.idSuffixes ??= []).push({ suffix, ...owner });
         }
       } else if (landsOnElement(attr.name)) {
         const list = handles.attrs.get(attr.name) ?? [];

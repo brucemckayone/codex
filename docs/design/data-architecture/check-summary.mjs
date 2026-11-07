@@ -408,33 +408,31 @@ for (const [what, scope, re] of MUST) {
 // No fixed cap: a hard limit would be arbitrary and would fight a genuinely dense table.
 // The test is RELATIVE — an outlier against its own table's median — so it self-calibrates
 // and only fires when one cell is out of step with the others around it.
-{
-  for (const t of dec.match(/<table[\s\S]*?<\/table>/g) || []) {
-    const lens = [...t.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)]
-      .map(
-        (m) =>
-          strip(m[1].replace(/<span class="tiny">[\s\S]*?<\/span>/g, '')).trim()
-            .length
+for (const t of dec.match(/<table[\s\S]*?<\/table>/g) || []) {
+  const lens = [...t.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)]
+    .map(
+      (m) =>
+        strip(m[1].replace(/<span class="tiny">[\s\S]*?<\/span>/g, '')).trim()
+          .length
+    )
+    .filter((n) => n > 40);
+  if (lens.length < 4) continue;
+  const sorted = [...lens].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const worst = sorted[sorted.length - 1];
+  // 4x the median AND over 700 characters: either alone produces false positives on a
+  // table of short cells with one legitimately detailed row.
+  if (worst > median * 4 && worst > 700) {
+    const cell = [...t.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)]
+      .map((m) =>
+        strip(m[1].replace(/<span class="tiny">[\s\S]*?<\/span>/g, '')).trim()
       )
-      .filter((n) => n > 40);
-    if (lens.length < 4) continue;
-    const sorted = [...lens].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    const worst = sorted[sorted.length - 1];
-    // 4x the median AND over 700 characters: either alone produces false positives on a
-    // table of short cells with one legitimately detailed row.
-    if (worst > median * 4 && worst > 700) {
-      const cell = [...t.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)]
-        .map((m) =>
-          strip(m[1].replace(/<span class="tiny">[\s\S]*?<\/span>/g, '')).trim()
-        )
-        .find((c) => c.length === worst);
-      fail(
-        'proportion',
-        `a cell has ${worst} chars of MAIN text against a median of ${median} in its own table — ` +
-          `move what explains how you got there into a .tiny aside: "${(cell || '').slice(0, 70)}…"`
-      );
-    }
+      .find((c) => c.length === worst);
+    fail(
+      'proportion',
+      `a cell has ${worst} chars of MAIN text against a median of ${median} in its own table — ` +
+        `move what explains how you got there into a .tiny aside: "${(cell || '').slice(0, 70)}…"`
+    );
   }
 }
 
@@ -633,7 +631,7 @@ const isCitation = (text, at, len) => {
 for (const [re_, why] of SUPERSEDED) {
   const g = new RegExp(
     re_.source,
-    re_.flags.includes('g') ? re_.flags : re_.flags + 'g'
+    re_.flags.includes('g') ? re_.flags : `${re_.flags}g`
   );
   for (const m of decText.matchAll(g)) {
     if (isCitation(decText, m.index, m[0].length)) continue;
@@ -753,7 +751,7 @@ if (!/class="rev">v\d+/.test(ref))
 
 if (problems.length) {
   console.error(`✗ ${problems.length} problem(s):`);
-  for (const p of problems) console.error('  ' + p);
+  for (const p of problems) console.error(`  ${p}`);
   process.exit(1);
 }
 console.log(

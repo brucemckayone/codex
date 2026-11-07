@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// This file's guidance text quotes source code that holds `${…}` (an sql``
+// template, a cookie string), so those plain strings are meant literally.
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: the strings quote source code
 /**
  * Data-access contract drift gate (Codex-ea1hd, WP9).
  *
@@ -1747,7 +1750,7 @@ function main() {
     for (const v of clock.violations) {
       console.error(`  ${v.file}:${v.line}: ${v.token}  |  ${v.text}`);
     }
-    console.error('\n' + formatNonDeterministicSqlGuidance());
+    console.error(`\n${formatNonDeterministicSqlGuidance()}`);
   }
 
   if (sink.violations.length > 0) {
@@ -1758,7 +1761,7 @@ function main() {
     for (const v of sink.violations) {
       console.error(`  ${v.file}:${v.line}: ${v.reason}  |  ${v.text}`);
     }
-    console.error('\n' + formatCacheWaitUntilGuidance());
+    console.error(`\n${formatCacheWaitUntilGuidance()}`);
   }
 
   if (failed) {

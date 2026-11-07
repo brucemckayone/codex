@@ -252,11 +252,11 @@ test('does NOT treat an exported string that merely NAMES an editor path as a de
   // and their appearing in a violation list would be a real false alarm.
   writeFixture(
     'lib/page-builder/tokens.ts',
-    [
+    `${[
       "export const banned = '$lib/components/page-builder';",
       "export const note = 'see ../components/brand-editor for the editor';",
       "export const v = 'plain';",
-    ].join('\n') + '\n'
+    ].join('\n')}\n`
   );
   assert.deepEqual(scanFixture().violations, []);
 });

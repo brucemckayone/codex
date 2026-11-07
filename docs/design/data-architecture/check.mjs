@@ -122,11 +122,14 @@ for (const m of h.matchAll(
   /<svg[^>]*viewBox="0 0 (\d+) (\d+)"[^>]*>([\s\S]*?)<\/svg>/g
 )) {
   const [vbW, vbH, body] = [+m[1], +m[2], m[3]];
-  const title = (body.match(/<title[^>]*>([^<]{0,40})/) || [, 'svg'])[1];
+  const title = (body.match(/<title[^>]*>([^<]{0,40})/) || [
+    undefined,
+    'svg',
+  ])[1];
 
   // class -> font-size, from the SVG's own <style> block
   const size = {};
-  const st = (body.match(/<style>([\s\S]*?)<\/style>/) || [, ''])[1];
+  const st = (body.match(/<style>([\s\S]*?)<\/style>/) || [undefined, ''])[1];
   for (const r of st.matchAll(/\.(\w+)\s*\{[^}]*?(\d+(?:\.\d+)?)px/g))
     size[r[1]] = +r[2];
 
@@ -134,7 +137,7 @@ for (const m of h.matchAll(
     /<text\s+x="(\d+)"\s+y="(\d+)"([^>]*)>([^<]+)<\/text>/g
   )) {
     const [x, y, attrs, text] = [+t[1], +t[2], t[3], t[4]];
-    const cls = (attrs.match(/class="(\w+)"/) || [, ''])[1];
+    const cls = (attrs.match(/class="(\w+)"/) || [undefined, ''])[1];
     const fs = size[cls] ?? 10; // default to the commonest size
     const w = text.length * 0.6 * fs;
     const endAnchored = /text-anchor="end"/.test(attrs);
@@ -209,7 +212,7 @@ for (const m of h.matchAll(
   for (const m of h.matchAll(/<h3 id="s([\w-]+?)-[\w]+">([\w]+)\./g)) {
     const label = m[2];
     const parent = parentOf(m.index);
-    if (parent && parent.num && label !== parent.num)
+    if (parent?.num && label !== parent.num)
       note(
         'labels',
         `subsection labelled ${label}.x sits inside section ${parent.num} ` +
@@ -578,8 +581,8 @@ for (const k of KEYS)
   );
   const prefixes = [...new Set(heads.map((x) => x.split('-')[0]))];
   for (const pre of prefixes) {
-    const t = toc.filter((x) => x.startsWith(pre + '-'));
-    const hd = heads.filter((x) => x.startsWith(pre + '-'));
+    const t = toc.filter((x) => x.startsWith(`${pre}-`));
+    const hd = heads.filter((x) => x.startsWith(`${pre}-`));
     const missing = hd.filter((x) => !t.includes(x));
     const extra = t.filter((x) => !hd.includes(x));
     if (missing.length)
@@ -1092,7 +1095,7 @@ for (const [stale, live_, allowed] of [
 
 if (fail.length) {
   console.error(
-    `✗ ${fail.length} problem(s):\n` + fail.map((f) => '  ' + f).join('\n')
+    `✗ ${fail.length} problem(s):\n${fail.map((f) => `  ${f}`).join('\n')}`
   );
   process.exit(1);
 }

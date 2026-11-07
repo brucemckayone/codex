@@ -110,7 +110,8 @@ export function parseMachineVerbose(text) {
 export function countErrors(errors) {
   const counts = {};
   for (const e of errors) {
-    const byCode = (counts[e.filename] ??= {});
+    counts[e.filename] ??= {};
+    const byCode = counts[e.filename];
     const key = codeKey(e);
     byCode[key] = (byCode[key] ?? 0) + 1;
   }

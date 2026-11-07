@@ -37,10 +37,10 @@ import { test } from 'node:test';
 
 import {
   collectSetupOrderViolations,
-  parseWorkflowJobs,
-  workflowFiles,
   PNPM_SETUP,
+  parseWorkflowJobs,
   SETUP_NODE,
+  workflowFiles,
 } from './check-workflow-setup-order.mjs';
 
 /** The shape of deploy-production.yml immediately before PR #510 fixed it. */

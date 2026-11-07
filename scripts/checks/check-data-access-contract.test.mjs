@@ -1,3 +1,6 @@
+// The fixtures are TypeScript source written as plain strings, so a `${…}`
+// in one is code for the gate to scan, not a template this file forgot.
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: fixture strings are source code
 /**
  * Self-test for the data-access contract drift gate (Codex-ea1hd, WP9).
  *

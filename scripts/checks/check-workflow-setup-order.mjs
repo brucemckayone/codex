@@ -76,7 +76,7 @@
  * Reusable-workflow jobs (`uses:` at JOB level, no `steps:`) are not steps
  * either; testing.yml calls static_analysis.yml that way.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
