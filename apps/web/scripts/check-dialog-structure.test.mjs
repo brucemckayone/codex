@@ -2116,7 +2116,7 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
   );
   assert.match(
     result.violations[0].detail,
-    /<Dialog\.Content>'s maxHeight is not a literal, so nothing in CI can see it is a CSS length .*; write a literal length, or a conditional of literal lengths$/
+    /<Dialog\.Content>'s maxHeight is not a literal, so the source can't show it is a CSS length, and svelte-check sees one only where the CssLength type reaches .*; write a literal length, or a conditional of literal lengths$/
   );
 });
 

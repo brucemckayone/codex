@@ -108,8 +108,12 @@
  *                  wrapper component would bring the forked drawer back.
  *                  So with Content's maxWidth / maxHeight: a value with no
  *                  literal (a wrapper forwarding its `maxHeight?: string`)
- *                  can't be seen to be a length, and no CI job type-checks
- *                  a .svelte file, so it fails.
+ *                  can't be seen to be a length here. CI's svelte-check
+ *                  (check:svelte-baseline) sees one only where the
+ *                  CssLength type reaches it (not through a cast, an `any`
+ *                  or an untyped prop), and its baseline can hide a new
+ *                  error that replaces a fixed one in the same (file,
+ *                  code). This check reads the source, so it fails.
  *   part-attr      Outside ui/Dialog/, no page sets a part's own attributes:
  *                  the data attributes the parts set themselves (their CSS
  *                  reads them: `data-layout="drawer"` on Body is
@@ -133,7 +137,11 @@
  *                  default it is undefined and `undefined !== ''`. So does a
  *                  pair that chooses under one test (`aria-labelledby={h ?
  *                  id : undefined} aria-label={h ? undefined : label}`). Its
- *                  Name type requires one, but CI type-checks no .svelte.
+ *                  Name type requires one, but CI's svelte-check
+ *                  (check:svelte-baseline) enforces it only where the type
+ *                  reaches (not through a cast, an `any`, an untyped prop
+ *                  or a spread), and its baseline can hide a swap within
+ *                  one (file, code); this check reads the source.
  *                  Not followed, so counted as names: a member of a rest
  *                  prop (`rest.label`), an alias (`const name = label`, a
  *                  $derived one), an optional call (`label?.trim()`), and
@@ -878,11 +886,12 @@ function nameVerdict(attr, props) {
 
 /**
  * popover-name: a Popover panel outside ui/Popover/ carries aria-label or
- * aria-labelledby on its tag. Its Name type requires one, but no CI job
- * type-checks a .svelte file. A literal, a call or a member names it; an
- * empty text, an undefined, null or '' literal, or a {...spread} does not,
- * and a prop with no default or an empty one (a wrapper's `label?: string`,
- * `title = ''`) is unproven.
+ * aria-labelledby on its tag. Its Name type requires one, but CI's
+ * svelte-check sees that only where the type reaches, and its baseline can
+ * hide a swap within one (file, code). A literal, a call or a member names
+ * it; an empty text, an undefined, null or '' literal, or a {...spread} does
+ * not, and a prop with no default or an empty one (a wrapper's
+ * `label?: string`, `title = ''`) is unproven.
  */
 /**
  * aria-label and aria-labelledby that each choose under the SAME test
@@ -1675,7 +1684,7 @@ function checkPartAttributes(fragment, bindings, report) {
         report(
           attr.start,
           'part-dynamic',
-          `${describe(node)}'s ${attr.name} is not a literal, so nothing in CI can see it is a CSS length (a wrapper's string prop brings back ${attr.name}="none"); write a literal length, or a conditional of literal lengths`
+          `${describe(node)}'s ${attr.name} is not a literal, so the source can't show it is a CSS length, and svelte-check sees one only where the CssLength type reaches (a wrapper's string prop, cast or baselined, brings back ${attr.name}="none"); write a literal length, or a conditional of literal lengths`
         );
       } else if (
         (attr.type === 'Attribute' && attr.name === 'style') ||
@@ -1720,8 +1729,10 @@ const MAX_SIZE_COMBINATIONS = 16;
  * What a maxHeight / maxWidth tells a source check, or null when every value
  * it can take is a CSS length: `{ bad }`, the first whole value that is not
  * one, as written; or `{ opaque: true }` when a value it can take has no
- * literal at all (a prop, a variable, a call), which no CI job checks: tsc
- * never reads a .svelte file. Each whole value is judged on its own: a
+ * literal at all (a prop, a variable, a call), which only svelte-check could
+ * judge, and only where the CssLength type reaches it (not through a cast, an
+ * `any` or an untyped prop; its baseline can also hide a swap within one
+ * (file, code)). Each whole value is judged on its own: a
  * conditional's branches, `&&`'s right side, both sides of `||` and `??`.
  * A falsy value (null, false, '', and 0 for maxHeight) leaves the default
  * cap: the part caps max-height only on a truthy value, and '' removes
