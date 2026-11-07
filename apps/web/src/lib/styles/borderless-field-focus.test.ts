@@ -459,6 +459,40 @@ describe('every borderless field keeps a focus cue that holds 3:1 (Codex-c5prp)'
     ).toEqual(['border-color: var(--color-border-focus)']);
   });
 
+  it('an engine without :has() keeps the cue through :focus-within', () => {
+    // Such an engine drops the `:has()` rule whole, and SearchPill and the
+    // three studio search boxes, which turn their halo off, would show none.
+    const source = readFileSync(join(STYLES, 'base.css'), 'utf8');
+    type At = {
+      type: string;
+      name?: string;
+      prelude: string | { start: number; end: number };
+      block?: { children: At[] } | null;
+      property?: string;
+      value?: string;
+    };
+    const fallback = (parseCss(source).children as unknown as At[]).filter(
+      (r) =>
+        r.type === 'Atrule' &&
+        r.name === 'supports' &&
+        r.prelude === 'not selector(:has(*))'
+    );
+    expect(fallback).toHaveLength(1);
+    expect(
+      (fallback[0].block?.children ?? []).map((r) => [
+        typeof r.prelude === 'string'
+          ? r.prelude
+          : source.slice(r.prelude.start, r.prelude.end),
+        r.block?.children.map((d) => `${d.property}: ${d.value}`),
+      ])
+    ).toEqual([
+      [
+        '[data-field-box][data-field-box]:focus-within',
+        ['border-color: var(--color-border-focus)'],
+      ],
+    ]);
+  });
+
   it('no component draws a borderless field with only the halo', () => {
     const left = found.flatMap((f) =>
       uncued(f.source).map((field) => `${f.file}: ${field}`)
