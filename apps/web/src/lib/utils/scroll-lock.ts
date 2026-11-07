@@ -127,19 +127,26 @@ function fixBody(body: HTMLElement): () => void {
   };
 }
 
-/** Run every restore, the last style set first; one that throws is rethrown once the rest have run. */
+/**
+ * Run every restore, the last style set first. Once the rest have run, one
+ * that threw is rethrown as it was; several, together in an AggregateError,
+ * so no failure hides behind the first.
+ */
 function restoreAll(undo: (() => void)[]): void {
-  let failed = false;
-  let failure: unknown;
+  const failures: unknown[] = [];
   for (const restore of undo.reverse()) {
     try {
       restore();
     } catch (error) {
-      if (!failed) failure = error;
-      failed = true;
+      failures.push(error);
     }
   }
-  if (failed) throw failure;
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1)
+    throw new AggregateError(
+      failures,
+      `${failures.length} scroll-lock restores failed`
+    );
 }
 
 /** Set one inline style; what it returns puts back exactly what was there. */

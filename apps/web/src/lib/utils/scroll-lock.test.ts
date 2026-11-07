@@ -219,6 +219,37 @@ describe('lockScroll', () => {
     expect(html.style.cssText).toBe('');
   });
 
+  // The first failure alone hid every other: a second broken restore went
+  // unreported (review q6qjb NIT 5).
+  it('a release where several restores throw reports every one of them', () => {
+    const hold = lockScroll();
+    // The first two restores (the gutter, then overflow) do their work, then throw.
+    const remove = html.style.removeProperty.bind(html.style);
+    const first = new Error('gutter restore failed');
+    const second = new Error('overflow restore failed');
+    vi.spyOn(html.style, 'removeProperty')
+      .mockImplementationOnce((property) => {
+        remove(property);
+        throw first;
+      })
+      .mockImplementationOnce((property) => {
+        remove(property);
+        throw second;
+      });
+
+    let thrown: unknown;
+    try {
+      hold();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as AggregateError).errors).toEqual([first, second]);
+    expect(locked()).toBe(false);
+    expect(html.style.cssText).toBe('');
+  });
+
   it('on iOS a <body> restore that throws still puts the rest back, and the scroll', () => {
     platform.ios = true;
     Object.defineProperty(window, 'scrollY', {
