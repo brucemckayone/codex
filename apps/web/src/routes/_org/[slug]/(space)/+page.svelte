@@ -1675,8 +1675,9 @@
     text-align: center;
   }
 
-  /* 192px × density × Scale, but never more than 45% of the first screen, so
-     a high Scale cannot push the title and actions below it. */
+  /* 192px × density × Scale from md up (--space-32 below md), never more
+     than 45% of the screen height, so a high Scale cannot push the actions
+     and stats below the first screen. */
   :global([data-hero-layout="logo-hero"]) .hero__logo {
     --_logo-base: var(--space-48);
     max-height: 45vh;

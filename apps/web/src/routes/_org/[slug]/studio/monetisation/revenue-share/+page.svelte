@@ -1175,7 +1175,7 @@
 
   .revenue-share-page__search {
     min-width: 0;
-    /* A `ch` measure, not a spacing step — the scale stops at --space-32 (128px),
+    /* A `ch` measure, not a spacing step — the scale stops at --space-48 (192px),
        too narrow for a name field, and inventing a token for one input is worse
        than sizing it in the unit that tracks its own text. */
     inline-size: min(100%, 26ch);

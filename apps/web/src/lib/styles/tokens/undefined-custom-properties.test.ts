@@ -3,129 +3,405 @@
  * No `var()` without a fallback names a property nothing defines
  * (Codex-1g5lh.6). An undefined custom property is guaranteed-invalid, and a
  * declaration that reads one with no fallback is invalid at computed-value
- * time: `height: calc(var(--space-48) * …)` fell back to `height: auto`, so
- * the logo-hero desktop logo sat at its intrinsic 26px whatever the Scale
- * dial said, and a whole `transition` shorthand naming `--duration-default`
- * was dropped, not just its duration. No browser reports either.
+ * time. `--_logo-base: var(--space-48)` made the logo-hero base invalid, so
+ * `height: calc(var(--_logo-base) * …)` fell back to `height: auto` and the
+ * desktop logo sat at its intrinsic 26px whatever the Scale dial said. A
+ * `transition` naming `--duration-default` was dropped whole. No browser
+ * reports either.
  *
- * Defined means one of: a declaration in CSS or an inline style
- * (`--x: …`), a Svelte `style:--x=` directive or `--x=` component prop, an
- * object key (`'--x': …`), `setProperty('--x', …)`, `@property --x`, or a
- * `--brand-{key}` / `--brand-{key}-dark` the brand editor writes at runtime
- * (BRAND_PREFIX_KEYS). A reference with a fallback is never checked.
+ * Every region is read by its own parser, never by a regex over raw text:
+ * CSS (stylesheets and `<style>`) by Svelte's CSS parser, markup and component
+ * scripts by Svelte's, `.ts` by TypeScript's. So a `/*` in an HTML comment, a
+ * glob or a URL hides nothing. A regex-stripped first version blanked 145
+ * lines of PageHeader.svelte behind `studio/*` in its doc comment.
+ *
+ * Defined means one of: a custom-property declaration (but not
+ * `--x: initial`, which is the invalid value) in CSS or an inline `style`,
+ * `@property --x`, a Svelte `style:--x` directive or `--x=` component prop,
+ * an object key `'--x': …`, `setProperty('--x', …)`, or `--x:` written into a
+ * string or template (an inline style built in script).
+ *
+ * The brand editor's runtime inputs (`--brand-{key}` and `--brand-{key}-dark`
+ * for BRAND_PREFIX_KEYS) exist only on an org that saved that override, so
+ * they are OPTIONAL: read bare, outside a custom property, one fails. A custom
+ * property whose every definition reads an optional name bare is optional in
+ * turn, and so on.
+ *
+ * Out of scope: WHERE a name is defined. A name declared only under
+ * `[data-org-brand]` counts as defined even where a component reads it on a
+ * platform route; no static check knows where a component renders.
+ * spacing-lockstep.test.ts guards that for the spacing scale.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { type AST, parse, parseCss } from 'svelte/compiler';
+import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
 import { BRAND_PREFIX_KEYS } from '$lib/brand-editor/css-injection';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = join(here, '../../..');
 
+/** Tests, stories, harnesses and mocks set whatever properties they like. */
+const TEST_ONLY =
+  /\.(test|spec)\.ts$|\.d\.ts$|\.stories\.svelte$|\.test\.svelte$|\.test\.svelte\.ts$|\.mock\.svelte\.ts$/;
+
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
-    if (name === 'node_modules' || name.startsWith('.')) return [];
+    if (name === 'node_modules' || name === '__tests__' || name.startsWith('.'))
+      return [];
     const path = join(dir, name);
     if (statSync(path).isDirectory()) return sourceFiles(path);
-    if (/\.(test|spec)\.ts$|\.d\.ts$/.test(name)) return [];
-    return /\.(css|svelte|ts|html)$/.test(name) ? [path] : [];
+    if (TEST_ONLY.test(name)) return [];
+    return /\.(css|svelte|ts)$/.test(name) ? [path] : [];
   });
 }
 
-/**
- * The text with its comments blanked to spaces, so a name a comment mentions
- * is neither a reference nor a definition and line numbers still hold. A `//`
- * counts only after whitespace or a line start, which leaves `https://` alone.
- */
-function withoutComments(text: string): string {
-  const blank = (comment: string) => comment.replace(/[^\n]/g, ' ');
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/<!--[\s\S]*?-->/g, blank)
-    .replace(
-      /(^|\s)\/\/[^\n]*/g,
-      (comment, lead: string) => `${lead}${blank(comment.slice(lead.length))}`
-    );
+interface Scan {
+  /** A null value: defined outside a CSS declaration, unconditionally. */
+  definitions: { name: string; value: string | null }[];
+  /** Bare reads, and the custom property whose value holds each, if any. */
+  reads: { name: string; line: number; into: string | null }[];
 }
 
-/** Every `var(--name)` with no fallback, with its 1-based line. */
-function references(text: string): { name: string; line: number }[] {
-  return [...text.matchAll(/var\(\s*(--[\w-]+)\s*\)/g)].map((match) => ({
-    name: match[1],
-    line: text.slice(0, match.index).split('\n').length,
-  }));
+/** The names a text reads with no fallback; an empty fallback is none. */
+function bareVars(text: string): string[] {
+  return [...text.matchAll(/\bvar\(\s*(--[\w-]+)\s*(?:,\s*)?/gi)]
+    .filter((m) => text[(m.index ?? 0) + m[0].length] === ')')
+    .map((m) => m[1]);
 }
 
-function definitions(text: string): string[] {
-  return [
-    ...text.matchAll(/(?<![\w-])(--[\w-]+)['"]?\s*[:=](?!=)/g),
-    ...text.matchAll(/setProperty\(\s*['"`](--[\w-]+)['"`]/g),
-    ...text.matchAll(/@property\s+(--[\w-]+)/g),
-  ].map((match) => match[1]);
+/** A declaration of `name` with `value`, and the bare reads in that value. */
+function declare(name: string, value: string, line: number, out: Scan) {
+  const custom = name.startsWith('--');
+  if (custom && value.trim() !== 'initial')
+    out.definitions.push({ name, value });
+  for (const read of bareVars(value))
+    out.reads.push({ name: read, line, into: custom ? name : null });
 }
 
-const runtimeBrandInputs = [...BRAND_PREFIX_KEYS].flatMap((key) => [
+type CssNode = AST.CSS.Rule | AST.CSS.Atrule | AST.CSS.Declaration;
+
+function scanCss(
+  nodes: ReadonlyArray<CssNode>,
+  lineAt: (offset: number) => number,
+  out: Scan
+): void {
+  for (const node of nodes) {
+    if (node.type === 'Declaration') {
+      declare(node.property, node.value, lineAt(node.start), out);
+    } else if (node.type === 'Atrule') {
+      if (node.name === 'property')
+        out.definitions.push({ name: node.prelude.trim(), value: null });
+      if (node.block) scanCss(node.block.children, lineAt, out);
+    } else {
+      scanCss(node.block.children, lineAt, out);
+    }
+  }
+}
+
+/** An inline `style` text: `a: b; --c: d`. Interpolations stand in as `0`. */
+function scanInlineStyle(text: string, line: number, out: Scan) {
+  for (const part of text.split(';')) {
+    const colon = part.indexOf(':');
+    if (colon > 0)
+      declare(part.slice(0, colon).trim(), part.slice(colon + 1), line, out);
+  }
+}
+
+/** A string or template in script: bare reads, and `--x:` written into it. */
+function scanScriptText(text: string, line: number, out: Scan) {
+  for (const read of bareVars(text))
+    out.reads.push({ name: read, line, into: null });
+  for (const m of text.matchAll(/(?<![\w-])(--[\w-]+)\s*:/g))
+    out.definitions.push({ name: m[1], value: null });
+}
+
+type Node = { type: string; start: number } & Record<string, unknown>;
+const isNode = (value: unknown): value is Node =>
+  typeof value === 'object' &&
+  value !== null &&
+  'type' in value &&
+  typeof value.type === 'string';
+const stringOf = (value: unknown) =>
+  isNode(value) && value.type === 'Literal' && typeof value.value === 'string'
+    ? value.value
+    : null;
+/** A template literal quasi's text. */
+function cookedOf(quasi: unknown): string {
+  if (!isNode(quasi)) return '';
+  const { value } = quasi;
+  if (typeof value !== 'object' || value === null || !('cooked' in value))
+    return '';
+  return typeof value.cooked === 'string' ? value.cooked : '';
+}
+/** Markup attribute parts as text, interpolations as `0`. */
+const textOf = (parts: unknown) =>
+  Array.isArray(parts)
+    ? parts
+        .map((p) =>
+          isNode(p) && p.type === 'Text' && typeof p.data === 'string'
+            ? p.data
+            : '0'
+        )
+        .join('')
+    : '';
+
+/** Svelte markup and its scripts (ESTree), at any depth. */
+function scanTree(
+  value: unknown,
+  lineAt: (offset: number) => number,
+  out: Scan
+): void {
+  if (typeof value !== 'object' || value === null) return;
+  if (Array.isArray(value)) {
+    for (const item of value) scanTree(item, lineAt, out);
+    return;
+  }
+  if (isNode(value)) visit(value, lineAt, out);
+  for (const [key, child] of Object.entries(value))
+    if (key !== 'metadata') scanTree(child, lineAt, out);
+}
+
+function visit(node: Node, lineAt: (offset: number) => number, out: Scan) {
+  const line = lineAt(node.start);
+  const name = typeof node.name === 'string' ? node.name : '';
+  switch (node.type) {
+    case 'Attribute':
+      if (name.startsWith('--')) out.definitions.push({ name, value: null });
+      if (name === 'style') scanInlineStyle(textOf(node.value), line, out);
+      break;
+    case 'StyleDirective':
+      if (name.startsWith('--')) out.definitions.push({ name, value: null });
+      for (const read of bareVars(textOf(node.value)))
+        out.reads.push({
+          name: read,
+          line,
+          into: name.startsWith('--') ? name : null,
+        });
+      break;
+    case 'Literal':
+      if (typeof node.value === 'string') scanScriptText(node.value, line, out);
+      break;
+    case 'TemplateLiteral':
+      if (Array.isArray(node.quasis))
+        scanScriptText(node.quasis.map(cookedOf).join('0'), line, out);
+      break;
+    case 'Property': {
+      const key = stringOf(node.key);
+      if (key?.startsWith('--'))
+        out.definitions.push({ name: key, value: null });
+      break;
+    }
+    case 'CallExpression': {
+      const callee = node.callee;
+      const first = Array.isArray(node.arguments) ? node.arguments[0] : null;
+      const property =
+        isNode(callee) && callee.type === 'MemberExpression'
+          ? callee.property
+          : null;
+      const arg = stringOf(first);
+      if (
+        isNode(property) &&
+        property.name === 'setProperty' &&
+        arg?.startsWith('--')
+      )
+        out.definitions.push({ name: arg, value: null });
+      break;
+    }
+  }
+}
+
+function scanTs(file: string, text: string, out: Scan) {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest);
+  const lineOf = (node: ts.Node) =>
+    sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  const walk = (node: ts.Node): void => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+      scanScriptText(node.text, lineOf(node), out);
+    else if (ts.isTemplateExpression(node))
+      scanScriptText(
+        [node.head.text, ...node.templateSpans.map((s) => s.literal.text)].join(
+          '0'
+        ),
+        lineOf(node),
+        out
+      );
+    if (
+      ts.isPropertyAssignment(node) &&
+      ts.isStringLiteral(node.name) &&
+      node.name.text.startsWith('--')
+    )
+      out.definitions.push({ name: node.name.text, value: null });
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'setProperty'
+    ) {
+      const arg = node.arguments[0];
+      if (arg && ts.isStringLiteralLike(arg) && arg.text.startsWith('--'))
+        out.definitions.push({ name: arg.text, value: null });
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(sf);
+}
+
+function scanFile(file: string, text: string): Scan {
+  const out: Scan = { definitions: [], reads: [] };
+  // Line starts, so an offset's line is a binary search, not a re-split.
+  const starts = [0];
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1))
+    starts.push(i + 1);
+  const lineAt = (offset: number) => {
+    let low = 0;
+    let high = starts.length - 1;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if (starts[mid] <= offset) low = mid;
+      else high = mid - 1;
+    }
+    return low + 1;
+  };
+  try {
+    if (file.endsWith('.css')) scanCss(parseCss(text).children, lineAt, out);
+    else if (file.endsWith('.svelte')) {
+      const ast = parse(text, { modern: true });
+      if (ast.css) scanCss(ast.css.children, lineAt, out);
+      for (const part of [ast.fragment, ast.instance, ast.module])
+        scanTree(part, lineAt, out);
+    } else scanTs(file, text, out);
+  } catch (error) {
+    throw new Error(`${file} did not parse: ${String(error)}`);
+  }
+  return out;
+}
+
+const RUNTIME_INPUTS = [...BRAND_PREFIX_KEYS].flatMap((key) => [
   `--brand-${key}`,
   `--brand-${key}-dark`,
 ]);
 
-function undefinedReferences(files: Record<string, string>): string[] {
-  const texts = Object.entries(files).map(
-    ([file, text]) => [file, withoutComments(text)] as const
+function violations(files: Record<string, string>): string[] {
+  const scans = Object.entries(files).map(
+    ([file, text]) => [file, scanFile(file, text)] as const
   );
-  const defined = new Set([
-    ...runtimeBrandInputs,
-    ...texts.flatMap(([, text]) => definitions(text)),
-  ]);
-  return texts.flatMap(([file, text]) =>
-    references(text)
-      .filter(({ name }) => !defined.has(name))
-      .map(({ name, line }) => `${file}:${line} ${name}`)
+  const definitions = new Map<string, (string | null)[]>();
+  for (const [, scan] of scans)
+    for (const { name, value } of scan.definitions)
+      definitions.set(name, [...(definitions.get(name) ?? []), value]);
+  const optional = new Set(RUNTIME_INPUTS.filter((n) => !definitions.has(n)));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [name, values] of definitions)
+      if (
+        !optional.has(name) &&
+        values.every(
+          (v) => v !== null && bareVars(v).some((r) => optional.has(r))
+        )
+      ) {
+        optional.add(name);
+        grew = true;
+      }
+  }
+  return scans.flatMap(([file, scan]) =>
+    scan.reads.flatMap(({ name, line, into }) => {
+      if (optional.has(name))
+        return into
+          ? []
+          : [`${file}:${line} ${name} is optional: read it with a fallback`];
+      return definitions.has(name) ? [] : [`${file}:${line} ${name}`];
+    })
   );
 }
+
+const KEY = [...BRAND_PREFIX_KEYS][0];
 
 describe('custom property references', () => {
   test('the check flags an undefined name and nothing else', () => {
     expect(
-      undefinedReferences({
+      violations({
         'a.css': `a {
   --x: 1px;
   width: var(--x);
   height: var(--missing);
   top: var(--missing, 0);
   /* left: var(--in-a-comment); */
-  margin: var(--brand-${[...BRAND_PREFIX_KEYS][0]});
+  margin: var(--x,);
+  padding: VAR(--shouting);
 }`,
       })
-    ).toEqual(['a.css:4 --missing']);
+    ).toEqual(['a.css:4 --missing', 'a.css:8 --shouting']);
+  });
+
+  test('an empty fallback is no fallback', () => {
+    expect(violations({ 'a.css': 'a { width: var(--gone, ); }' })).toEqual([
+      'a.css:1 --gone',
+    ]);
   });
 
   test('a definition counts in every form the codebase writes one', () => {
     const forms = {
-      'a.svelte': `<div style:--a={v} style="--b: 1px" ></div>
+      'a.svelte': `<div style:--a={v} style="--b: 1px"></div>
 <Child --c="2px" />
-<script>el.style.setProperty('--d', v); const s = { '--e': v };</script>
-<style>@property --f { syntax: '<length>'; inherits: false; initial-value: 0; }</style>`,
-      'b.css': `.logo--large:hover { width: var(--large); }
-a { x: var(--a) var(--b) var(--c) var(--d) var(--e) var(--f); }`,
+<script lang="ts">el.style.setProperty('--d', v); const s = { '--e': v }; const t = \`--f: \${v}\`;</script>
+<style>@property --g { syntax: '<length>'; inherits: false; initial-value: 0px; }</style>`,
+      'b.ts': `el.style.setProperty('--h', v); export const s = { '--i': v };`,
+      'c.css': `a { x: var(--a) var(--b) var(--c) var(--d) var(--e) var(--f) var(--g) var(--h) var(--i); }`,
     };
-    // `.logo--large:hover` is a BEM modifier, not a definition of `--large`.
-    expect(undefinedReferences(forms)).toEqual(['b.css:1 --large']);
+    expect(violations(forms)).toEqual([]);
   });
 
-  test('a comment marker inside a URL is not a comment', () => {
+  test('text that only looks like a definition is not one', () => {
+    const lookalikes = {
+      'a.css': `@container style(--j: 1) { a { width: 0; } }
+a { --k: initial; }
+.logo--large:hover { width: 0; }`,
+      'b.ts': `switch (p) { case '--l': break; }
+const q = p ? '--m' : '';
+type T = { '--n': string };`,
+      'c.css':
+        'b { x: var(--j) var(--k) var(--large) var(--l) var(--m) var(--n); }',
+    };
+    expect(violations(lookalikes)).toEqual(
+      ['--j', '--k', '--large', '--l', '--m', '--n'].map((n) => `c.css:1 ${n}`)
+    );
+  });
+
+  test('a comment marker inside other text hides nothing after it', () => {
+    const traps = {
+      'a.svelte': `<!-- @component studio/* layouts -->
+<p>and // or</p>
+<script lang="ts">const g = import.meta.glob('./blocks/*.svelte'); const h = '<!--';</script>
+<style>a { background: url(/img/*.png); width: var(--after-traps); }</style>`,
+    };
+    expect(violations(traps)).toEqual(['a.svelte:4 --after-traps']);
+  });
+
+  test('a runtime brand input is optional: read bare, it needs a fallback, through every property built on it', () => {
     expect(
-      withoutComments('a { background: url(https://x.test/a.png); }')
-    ).toContain('https://x.test/a.png');
+      violations({
+        'a.css': `a {
+  opacity: var(--brand-${KEY});
+  --w: var(--brand-${KEY});
+  width: var(--w);
+  height: var(--w, 1px);
+}`,
+      })
+    ).toEqual([
+      `a.css:2 --brand-${KEY} is optional: read it with a fallback`,
+      'a.css:4 --w is optional: read it with a fallback',
+    ]);
   });
 
-  test('none is undefined anywhere under src', () => {
+  test('none is undefined, and no optional input is read bare, anywhere under src', () => {
     const files = sourceFiles(src);
     expect(files.length).toBeGreaterThan(500);
     const texts = Object.fromEntries(
       files.map((file) => [relative(src, file), readFileSync(file, 'utf8')])
     );
-    expect(undefinedReferences(texts)).toEqual([]);
-  });
+    // Parses every product file (~1,300) with its own parser.
+    expect(violations(texts)).toEqual([]);
+  }, 60_000);
 });

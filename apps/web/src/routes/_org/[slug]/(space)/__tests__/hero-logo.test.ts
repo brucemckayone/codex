@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type AST, parse } from 'svelte/compiler';
 import { describe, expect, test } from 'vitest';
+import { type CssRule, readRules } from './page-css';
 
 /**
  * The org home hero logo keeps its own shape, and the logo-hero layout sizes
@@ -14,67 +15,101 @@ import { describe, expect, test } from 'vitest';
  * undefined `--space-48`, so on desktop it was a fixed 26px, and once
  * defined, Scale 4 made it 768px tall, off the first screen. Measured in a
  * browser at 1440×900 and 390×844; this pins the CSS that measurement
- * depends on. Svelte's own parser drops comments, so prose cannot satisfy it.
+ * depends on, across every rule that reaches the logo (nested, in @media,
+ * or under a parent rule). Svelte's own parser drops comments, so prose
+ * cannot satisfy it.
  */
 
 const source = readFileSync(
   join(import.meta.dirname, '..', '+page.svelte'),
   'utf8'
 );
+const rules = readRules(source);
 
-/** Each rule's declarations, by selector; a later declaration wins. */
-function rulesOf(): Map<string, Map<string, string>> {
-  const css = parse(source, { modern: true }).css;
-  if (!css) throw new Error('the page has no <style> block');
-  const rules = new Map<string, Map<string, string>>();
-  const walk = (
-    nodes: ReadonlyArray<AST.CSS.Rule | AST.CSS.Atrule | AST.CSS.Declaration>,
-    within: string
-  ) => {
-    for (const node of nodes) {
-      if (node.type === 'Atrule') {
-        if (node.block)
-          walk(node.block.children, `@${node.name} ${node.prelude} `);
-      } else if (node.type === 'Rule') {
-        const selector = `${within}${source.slice(node.prelude.start, node.prelude.end).replace(/\s+/g, ' ').trim()}`;
-        const decls = rules.get(selector) ?? new Map<string, string>();
-        for (const child of node.block.children)
-          if (child.type === 'Declaration')
-            decls.set(child.property, child.value.trim());
-        rules.set(selector, decls);
-      }
-    }
-  };
-  walk(css.children, '');
-  return rules;
+const LOGO_HERO = '[data-hero-layout="logo-hero"]';
+const LOGO = /\.hero__logo(?![\w-])/;
+const TITLE = /\.hero__title(?![\w-])/;
+
+/** The rule's own selector and every rule and at-rule around it. */
+const chain = (rule: CssRule) => [...rule.within, rule.selector];
+const reaches = (rule: CssRule, target: RegExp) =>
+  chain(rule).some((s) => target.test(s));
+const inLogoHero = (rule: CssRule) =>
+  chain(rule).some((s) => s.includes(LOGO_HERO));
+const top = (selector: string) =>
+  rules.filter((r) => r.within.length === 0 && r.selector === selector);
+
+const logoRules = rules.filter((r) => reaches(r, LOGO));
+
+/** Every element in the page's markup, at any depth. */
+function elements(node: unknown): AST.RegularElement[] {
+  if (typeof node !== 'object' || node === null) return [];
+  if (Array.isArray(node)) return node.flatMap(elements);
+  const own =
+    'type' in node && node.type === 'RegularElement'
+      ? [node as AST.RegularElement]
+      : [];
+  return [
+    ...own,
+    ...Object.entries(node)
+      .filter(([key]) => key !== 'metadata')
+      .flatMap(([, child]) => elements(child)),
+  ];
 }
 
-const rules = rulesOf();
-const LOGO_HERO = ':global([data-hero-layout="logo-hero"])';
-
 describe('the hero logo', () => {
-  test('is sized by height and drawn at its own shape inside its box', () => {
-    const logo = rules.get('.hero__logo');
-    expect(logo?.get('height')).toBe(
+  test('is sized by height and drawn at its own shape by every rule that reaches it', () => {
+    const base = top('.hero__logo');
+    expect(base).toHaveLength(1);
+    expect(base[0].decls.get('height')).toBe(
       'calc(var(--_logo-base) * var(--brand-hero-logo-scale, 1))'
     );
-    expect(logo?.get('object-fit')).toBe('contain');
-  });
-
-  test('in logo-hero is 192px × density at Scale 1, never past 45% of the first screen', () => {
-    const logo = rules.get(`${LOGO_HERO} .hero__logo`);
-    expect(logo?.get('--_logo-base')).toBe('var(--space-48)');
-    expect(logo?.get('max-height')).toBe('45svh');
-  });
-
-  test('in logo-hero sits under a centred title, as the centered layout does', () => {
-    expect(rules.get(`${LOGO_HERO} .hero__title`)?.get('text-align')).toBe(
-      'center'
+    expect(base[0].decls.get('object-fit')).toBe('contain');
+    const fits = logoRules.flatMap((r) =>
+      r.decls.has('object-fit') ? [r.decls.get('object-fit')] : []
     );
-    expect(
-      rules
-        .get(':global([data-hero-layout="centered"]) .hero__title')
-        ?.get('text-align')
-    ).toBe('center');
+    expect(new Set(fits)).toEqual(new Set(['contain']));
+  });
+
+  test('carries no inline style that could outrank its rules', () => {
+    const logos = elements(parse(source, { modern: true }).fragment).filter(
+      (el) =>
+        el.name === 'img' &&
+        el.attributes.some(
+          (a) =>
+            a.type === 'Attribute' &&
+            a.name === 'class' &&
+            Array.isArray(a.value) &&
+            a.value.some(
+              (p) =>
+                p.type === 'Text' && p.data.split(/\s+/).includes('hero__logo')
+            )
+        )
+    );
+    expect(logos).toHaveLength(1);
+    const styling = logos[0].attributes.filter(
+      (a) =>
+        a.type === 'StyleDirective' ||
+        (a.type === 'Attribute' && a.name === 'style')
+    );
+    expect(styling).toEqual([]);
+  });
+
+  test('in logo-hero is 192px × density from md up, capped at 45% of the screen height', () => {
+    const own = top(`:global(${LOGO_HERO}) .hero__logo`);
+    expect(own).toHaveLength(1);
+    expect(own[0].decls.get('--_logo-base')).toBe('var(--space-48)');
+    expect(own[0].decls.get('max-height')).toBe('45svh');
+    // No other rule lifts, moves or adds a cap.
+    expect(logoRules.filter((r) => r.decls.has('max-height'))).toEqual(own);
+  });
+
+  test('in logo-hero sits under a centred title', () => {
+    const aligns = rules
+      .filter((r) => inLogoHero(r) && reaches(r, TITLE))
+      .flatMap((r) =>
+        r.decls.has('text-align') ? [r.decls.get('text-align')] : []
+      );
+    expect(aligns).toEqual(['center']);
   });
 });

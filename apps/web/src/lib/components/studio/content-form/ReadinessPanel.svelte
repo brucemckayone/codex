@@ -171,8 +171,8 @@
 
   .check-row[data-met] .check-icon {
     color: var(--color-surface);
-    background: var(--color-success);
-    border-color: var(--color-success);
+    background: var(--color-status-success-text);
+    border-color: var(--color-status-success-text);
   }
 
   .check-label {
