@@ -168,55 +168,16 @@ into the subscribers-only switch (`is_tier_gated`) plus one tick per tier
 migrations first and redeploys content-api later. In between, the OLD
 content-api still saves films, and it writes only the old column. A film saved
 as "Subscribers" in that window has the switch off and no ticks, and the new
-workers read it as **free to anyone signed in**. Production had 1 tier and 0
-gated films on 2026-10-29, so expect nothing; the check below proves it.
+workers read it as **free to anyone signed in**. The parity check for that
+window (formerly R12) ran on 2026-10-31 after the deploy: check A = 0, check
+B = 0/0, check C = 0. It is done.
 
-Both steps use one read-only script. It runs in a `READ ONLY` transaction and
-prints counts and content ids only. It loads no env file, so pass the
-production connection string in the shell (Neon console → Connection details),
-never from a file:
-
-    DB_METHOD=PRODUCTION DATABASE_URL='<production url>' pnpm --filter @codex/database audit:plan-access
-
-### R12 — after the deploy: the plan-access parity check
-
-Run it once, after the production deploy has finished and before anyone saves a
-film's access in the new Studio. Expect **check A = 0** and **check B = 0**;
-the exit code is 1 only when A is not 0.
-
-- **Check A** (legacy tier set, switch off): the window shape above. The fix is
-  `0120`'s own backfill, steps 6 then 5, each scoped to `NOT is_tier_gated` so
-  it touches only these rows. The script prints the same statements. Run them
-  in the Neon SQL Editor, in one transaction, in this order (the INSERT finds
-  its rows by the switch still being off), then run the script again:
-
-  ```sql
-  BEGIN;
-  INSERT INTO content_tier_access (content_id, tier_id, organization_id)
-  SELECT c.id, t.id, c.organization_id
-    FROM content c
-    JOIN subscription_tiers x ON x.id = c.included_in_tier_id
-    JOIN subscription_tiers t ON t.organization_id = c.organization_id
-                             AND t.deleted_at IS NULL
-                             AND t.sort_order >= x.sort_order
-   WHERE c.organization_id IS NOT NULL
-     AND NOT c.is_tier_gated
-  ON CONFLICT DO NOTHING;
-  UPDATE content SET is_tier_gated = true
-   WHERE included_in_tier_id IS NOT NULL
-     AND NOT is_tier_gated;
-  COMMIT;
-  ```
-
-  Never run `0120`'s step 6 unscoped once the new Studio is in use: it would
-  add every dearer tier to each bundle ("Basic, Premium") a creator has saved.
-  Both statements are idempotent.
-- **Check B** (ticks differ from the ladder `0120` would give): straight after
-  the deploy, a `ticked_not_ladder` row is an old-Studio edit in the window
-  that narrowed or cleared the tier. Its ticks still open the old set. Open the
-  film in the new Studio and save the tiers the creator wants. Once creators
-  use the new Studio, bundles, "keep" deletes and tier reorders make B non-zero
-  by design, so B is only meaningful on this first run.
+R13 uses a read-only script, `audit:plan-access`. It runs in a `READ ONLY`
+transaction and prints counts and content ids only. It loads no env file, so
+pass the production connection string in the shell (Neon console → Connection
+details), never from a file. Never run `0120`'s step 6 unscoped now that the
+new Studio is in use: it would add every dearer tier to each bundle ("Basic,
+Premium") a creator has saved.
 
 ### R13 — before any workers rollback
 
@@ -411,10 +372,12 @@ ROLLBACK;
 ### R17 — the first hourly price-moves run
 
 ecom-api's hourly cron runs the price-moves step, except on the 08:00 London
-run, which the bank payout has to itself. After the first run, read its `Price moves: run finished` log line:
-with no price saved since the deploy, it reads all zeros. Look for any
-`Price moves: a step of the run failed` or `payouts-sweep cron could not run
-the price moves` error.
+run, which the bank payout has to itself. A run with nothing to do logs
+nothing: `Price moves: run finished` appears only when a run claimed,
+restarted or reopened at least one move. So with no price saved since the
+deploy, expect no `Price moves` line at all (confirmed on production's 12:00Z
+run, 2026-11-06). Either way, look for any `Price moves: a step of the run
+failed` or `payouts-sweep cron could not run the price moves` error.
 
 ### Rollback
 
