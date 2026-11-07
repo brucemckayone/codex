@@ -161,7 +161,7 @@
   /* Dark mode */
   :global([data-theme='dark']) .activity-icon.event-purchase {
     background-color: color-mix(in srgb, var(--color-success-700) 20%, transparent);
-    color: var(--color-success-400, var(--color-success-700));
+    color: var(--color-success);
   }
 
   :global([data-theme='dark']) .activity-icon.event-publish {

@@ -1124,10 +1124,15 @@
     display: inline-flex;
   }
 
+  /* Sized by height; the reset's `max-width: 100%` caps the width, and a
+     capped box is narrower than the logo's own proportions. `contain` draws
+     the logo inside that box at its own shape: without it a wide logo
+     stretched once the Scale dial outgrew the column (Codex-1g5lh.6). */
   .hero__logo {
     --_logo-base: var(--space-14);
     height: calc(var(--_logo-base) * var(--brand-hero-logo-scale, 1));
     width: auto;
+    object-fit: contain;
   }
 
   .hero__title {
@@ -1661,13 +1666,21 @@
     align-items: center;
   }
 
+  :global([data-hero-layout="logo-hero"]) .hero__title {
+    text-align: center;
+  }
+
   :global([data-hero-layout="logo-hero"]) .hero__content {
     align-items: center;
     text-align: center;
   }
 
+  /* 192px × density × Scale, but never more than 45% of the first screen, so
+     a high Scale cannot push the title and actions below it. */
   :global([data-hero-layout="logo-hero"]) .hero__logo {
     --_logo-base: var(--space-48);
+    max-height: 45vh;
+    max-height: 45svh;
   }
 
   :global([data-hero-layout="logo-hero"]) .hero__description {

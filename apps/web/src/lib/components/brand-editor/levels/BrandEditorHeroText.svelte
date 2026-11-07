@@ -201,7 +201,7 @@
   .hero-text__error {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-error-500);
+    color: var(--color-error-700);
   }
 
   .hero-text__actions {

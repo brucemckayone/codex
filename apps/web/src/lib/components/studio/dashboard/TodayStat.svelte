@@ -198,12 +198,12 @@
 
   .stat-change[data-direction='up'] {
     color: var(--color-success-700);
-    background: color-mix(in srgb, var(--color-success-500) 10%, var(--color-surface));
+    background: color-mix(in srgb, var(--color-success) 10%, var(--color-surface));
   }
 
   .stat-change[data-direction='down'] {
-    color: var(--color-error-700, var(--color-error-500));
-    background: color-mix(in srgb, var(--color-error-500) 10%, var(--color-surface));
+    color: var(--color-error-700);
+    background: color-mix(in srgb, var(--color-error) 10%, var(--color-surface));
   }
 
   .change-arrow {

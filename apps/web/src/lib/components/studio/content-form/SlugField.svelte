@@ -152,7 +152,7 @@
 
   .field-input[aria-invalid='true'],
   .field-input.input-error {
-    border-color: var(--color-error-500);
+    border-color: var(--color-error);
   }
 
   .field-error {

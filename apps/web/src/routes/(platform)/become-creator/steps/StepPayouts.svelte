@@ -143,7 +143,7 @@
     padding: var(--space-4);
     border-radius: var(--radius-lg);
     background-color: var(--color-surface-secondary);
-    border: var(--border-width) var(--border-style) var(--color-success-500);
+    border: var(--border-width) var(--border-style) var(--color-success);
   }
 
   .connected__title {
