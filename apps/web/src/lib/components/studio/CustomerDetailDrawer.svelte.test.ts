@@ -412,3 +412,91 @@ describe('revoke', () => {
     expect(drawer()).toBeTruthy();
   });
 });
+
+// The confirmed revoke takes its grant's Revoke away, and that button opened
+// the confirm. Focus goes to the next live grant's Revoke, else the previous
+// one's, else Grant access, never back to the top of the drawer
+// (Codex-p10nx). A cancel takes nothing away, so focus goes home.
+describe('focus after a revoke', () => {
+  const revokeButton = (grant: CustomerGrant) =>
+    button(row(grant.contentTitle), m.studio_customers_grants_revoke());
+
+  async function revoke(grant: CustomerGrant, after: CustomerGrant[]) {
+    refreshGrants.mockImplementation(async () => setGrants(grantsPage(after)));
+    mountDrawer();
+    await vi.waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    revokeButton(grant)?.focus();
+    revokeButton(grant)?.click();
+    flushSync();
+    const dialog = confirmDialog();
+    if (!dialog) throw new Error('confirm did not open');
+    await focusIn(dialog);
+    button(dialog, m.studio_customers_grants_revoke_confirm())?.click();
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+  }
+  /** Focus moves into an opening dialog a moment after it opens. */
+  const focusIn = (dialog: HTMLElement) =>
+    vi.waitFor(() =>
+      expect(dialog.contains(document.activeElement)).toBe(true)
+    );
+  const gone = (grant: CustomerGrant) => ({
+    ...grant,
+    revokedAt: '2026-11-07T12:00:00.000Z',
+    revokedByName: 'Sam Owner',
+  });
+
+  test("the next live grant's Revoke", async () => {
+    setGrants(grantsPage([SLEEP, MOBILITY, CORE]));
+    await revoke(SLEEP, [MOBILITY, gone(SLEEP), CORE]);
+
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(MOBILITY))
+    );
+  });
+
+  test("the previous one's, when the last live grant went", async () => {
+    setGrants(grantsPage([SLEEP, MOBILITY, CORE]));
+    await revoke(MOBILITY, [SLEEP, gone(MOBILITY), CORE]);
+
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(SLEEP))
+    );
+  });
+
+  test('Grant access, when no live grant is left', async () => {
+    setGrants(grantsPage([SLEEP]));
+    await revoke(SLEEP, [gone(SLEEP)]);
+
+    const grantAccess = button(
+      drawer() as HTMLElement,
+      m.studio_customers_drawer_grant_access()
+    );
+    await vi.waitFor(() => expect(document.activeElement).toBe(grantAccess));
+  });
+
+  test('a cancel, even after a revoke, gives focus back to the Revoke that opened the confirm', async () => {
+    const YOGA = {
+      ...MOBILITY,
+      id: `${MOBILITY.id.slice(0, -1)}4`,
+      contentTitle: 'Yoga Basics',
+    };
+    setGrants(grantsPage([SLEEP, MOBILITY, YOGA]));
+    await revoke(SLEEP, [MOBILITY, YOGA, gone(SLEEP)]);
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(MOBILITY))
+    );
+
+    revokeButton(YOGA)?.focus();
+    revokeButton(YOGA)?.click();
+    flushSync();
+    const dialog = confirmDialog() as HTMLElement;
+    await focusIn(dialog);
+    button(dialog, m.common_cancel())?.click();
+    flushSync();
+
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(YOGA))
+    );
+  });
+});
