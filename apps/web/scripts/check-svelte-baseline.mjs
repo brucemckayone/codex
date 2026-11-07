@@ -21,6 +21,11 @@
  * churn the baseline. Warnings are not baselined (svelte-check's own exit code
  * ignores them too).
  *
+ * Residue, by design of the key: "only shrinks" holds for the COUNTS, not for
+ * each error. A change that fixes one error and adds another with the same
+ * (file, code) leaves the count unchanged, so the gate can't tell them apart
+ * and passes it.
+ *
  * It fails closed: svelte-check that crashes, prints no COMPLETED line,
  * checks no file, or reports a different error total from the lines it
  * printed, fails rather than passing on nothing.
@@ -28,9 +33,13 @@
  * Shrinking it: fix the error, then run
  *   pnpm --filter web run check:svelte-baseline --prune
  * which lowers (or removes) the stale entries and writes nothing else. Never
- * add an entry by hand to get past a new error; fix the error. The one honest
- * reason to raise the baseline is a svelte-check or TypeScript upgrade that
- * reports existing code differently, and that change shows in the JSON diff.
+ * add an entry by hand to get past a new error; fix the error. Two hand edits
+ * are honest, and each shows in the JSON diff:
+ *   - a svelte-check or TypeScript upgrade that reports existing code
+ *     differently: change the counts it changes;
+ *   - a rename or move of a file with baselined errors, which the gate sees
+ *     as all NEW under the new path and STALE under the old one: move the
+ *     key, with its counts unchanged, in the same commit as the rename.
  *
  * Usage (from apps/web, after `svelte-kit sync` and the paraglide compile):
  *   node scripts/check-svelte-baseline.mjs [--prune] [--input <log>] [--baseline <json>]

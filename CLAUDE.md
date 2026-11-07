@@ -193,7 +193,11 @@ comments. The reasoning for its settings lives here.
   `apps/web/scripts/svelte-check-baseline.json`: the baseline only shrinks. To
   shrink it, fix the error and run
   `pnpm --filter web run check:svelte-baseline --prune`. Never add an entry to
-  get past a new error.
+  get past a new error. Two hand edits are honest: a svelte-check or
+  TypeScript upgrade that reports existing code differently, and a rename or
+  move of a file with baselined errors (move its key, counts unchanged, in
+  the same commit). It counts, so it can't see a fix and a new error of the
+  same (file, code) in one change: the count stays the same.
 - **`.fallowrc.json` is also comment-free strict JSON**, so its reasoning lives
   here too.
   - **Never suppress a class member by name in `usedClassMembers`.** A name
