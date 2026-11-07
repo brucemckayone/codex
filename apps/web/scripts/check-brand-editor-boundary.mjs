@@ -81,9 +81,9 @@
  * Exported (`collectViolations`) so the accompanying node:test suite can point
  * the same scan at fixture roots; `main()` runs only as the CLI entrypoint.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -272,7 +272,20 @@ function main() {
   );
 }
 
-// Run only as the CLI entrypoint — never when imported (e.g. by the test suite).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+/**
+ * Whether this file is the process's entry, so the test suite can import it
+ * without running main(). Compared as real paths: Node resolves
+ * import.meta.url through symlinks but not argv[1], so a plain comparison
+ * skipped main() under a symlinked path (macOS /tmp, a symlinked checkout)
+ * and exited 0 having checked nothing (Codex-noyrq).
+ */
+function isEntrypoint() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
 }
+
+if (isEntrypoint()) main();

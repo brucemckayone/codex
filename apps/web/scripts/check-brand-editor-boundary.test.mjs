@@ -14,10 +14,12 @@
  * roots. The real repo tree is never touched.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { collectViolations } from './check-brand-editor-boundary.mjs';
 
@@ -293,4 +295,15 @@ test('reports filesScanned=0 when nothing matches (main() fails closed on this)'
   });
   assert.equal(violations.length, 0);
   assert.equal(filesScanned, 0);
+});
+
+test('RUNS when started through a symlink, rather than exiting 0 unchecked (Codex-noyrq)', () => {
+  // Node resolves import.meta.url through the link but not argv[1], so the old
+  // entry check skipped main() and exited 0 with no output. main() scans the
+  // real tree, so either verdict is fine here: the point is that it ran.
+  const link = join(root, 'linked-gate.mjs');
+  symlinkSync(fileURLToPath(new URL('./check-brand-editor-boundary.mjs', import.meta.url)), link);
+
+  const result = spawnSync(process.execPath, [link], { encoding: 'utf8' });
+  assert.match(`${result.stdout}${result.stderr}`, /OK: no static editor imports|violation\(s\)\. Public route\/lib files/);
 });
