@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// This file's guidance text quotes source code that holds `${…}` (an sql``
-// template, a cookie string), so those plain strings are meant literally.
-// biome-ignore-all lint/suspicious/noTemplateCurlyInString: the strings quote source code
 /**
  * Data-access contract drift gate (Codex-ea1hd, WP9).
  *
@@ -1421,6 +1418,7 @@ export function formatNonDeterministicSqlGuidance() {
     '  query text is identical on every request and Hyperdrive can cache it:',
     '',
     '    const asOf = new Date();',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the guidance quotes an sql`` template as text
     '    sql`... AND ${table.periodEnd} > ${asOf}`',
     '',
     '  WHY A PARAMETER AND NOT NOW(): Hyperdrive decides cacheability by TEXT-MATCHING',
