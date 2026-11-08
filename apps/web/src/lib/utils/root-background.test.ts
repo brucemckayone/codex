@@ -1,11 +1,12 @@
 /**
- * `followLayoutBackground`: <html> carries the org layout's background, and
- * takes it again whenever something changes it under the layout's own
- * state. jsdom resolves no custom properties, so the layout's computed
- * background is stubbed: each test sets what the browser would compute
- * after a change, then makes the change. Whether the strip beside a dialog
- * really shows it was measured in Chromium with a classic scrollbar, in the
- * real layout inside a real PreviewFrame.
+ * `followLayoutBackground`: <html> carries the org layout's background (its
+ * `--color-background` token, once the layout is transparent), and takes it
+ * again whenever something changes it under the layout's own state. jsdom
+ * resolves no custom properties, so the layout's computed background and
+ * token are stubbed: each test sets what the browser would compute after a
+ * change, then makes the change. Whether the strip beside a dialog really
+ * shows it was measured in Chromium and WebKit with a classic scrollbar, in
+ * the real layout inside a real PreviewFrame and in the real studio layout.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { followLayoutBackground } from './root-background';
@@ -16,7 +17,9 @@ const html = document.documentElement;
 
 let frames = new Map<number, FrameRequestCallback>();
 let nextFrame = 1;
+const CLEAR = 'rgba(0, 0, 0, 0)';
 let paint = LIGHT;
+let token = LIGHT;
 let layout: HTMLElement;
 let stop: () => void = () => {};
 
@@ -35,12 +38,18 @@ beforeEach(() => {
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
   vi.spyOn(window, 'getComputedStyle').mockImplementation(
-    () => ({ backgroundColor: paint }) as CSSStyleDeclaration
+    () =>
+      ({
+        backgroundColor: paint,
+        getPropertyValue: (name: string) =>
+          name === '--color-background' ? token : '',
+      }) as CSSStyleDeclaration
   );
   layout = document.createElement('div');
   layout.className = 'org-layout';
   document.body.appendChild(layout);
   paint = LIGHT;
+  token = LIGHT;
 });
 
 afterEach(() => {
@@ -90,12 +99,55 @@ describe('followLayoutBackground', () => {
     expect(html.style.backgroundColor).toBe(DARK);
   });
 
-  // A page loaded in the studio has no copy: its layout is transparent.
-  it('leaves <html> its own background once the layout is transparent (the studio)', async () => {
+  // The studio's layout is transparent: its surfaces mix the token over
+  // <html>. With no copy, the strip showed the platform's background beside
+  // the org's (review fu-focus-2).
+  it("copies the layout's --color-background once the layout is transparent (the studio)", async () => {
     stop = followLayoutBackground(layout);
     await settle();
 
-    paint = 'rgba(0, 0, 0, 0)';
+    paint = CLEAR;
+    token = DARK;
+    layout.classList.add('org-layout--studio');
+    await settle();
+
+    expect(html.style.backgroundColor).toBe(DARK);
+  });
+
+  it('copies it on a page loaded in the studio', async () => {
+    paint = CLEAR;
+    token = DARK;
+    layout.classList.add('org-layout--studio');
+    stop = followLayoutBackground(layout);
+    await settle();
+
+    expect(html.style.backgroundColor).toBe(DARK);
+  });
+
+  it('takes the token again on a theme toggle in the studio', async () => {
+    paint = CLEAR;
+    stop = followLayoutBackground(layout);
+    await settle();
+    expect(html.style.backgroundColor).toBe(LIGHT);
+
+    token = DARK;
+    html.setAttribute('data-theme', 'dark');
+    await settle();
+
+    expect(html.style.backgroundColor).toBe(DARK);
+  });
+
+  // <html> ignores a value it can't parse, so the old copy stood.
+  it.each([
+    ['no token', ''],
+    ['a token <html> cannot parse', 'not-a-colour'],
+  ])('leaves no stale copy with %s', async (_, value) => {
+    stop = followLayoutBackground(layout);
+    await settle();
+    expect(html.style.backgroundColor).toBe(LIGHT);
+
+    paint = CLEAR;
+    token = value;
     layout.classList.add('org-layout--studio');
     await settle();
 

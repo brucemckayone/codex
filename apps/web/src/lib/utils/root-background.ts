@@ -17,9 +17,16 @@
  *   classes. The studio's layout is transparent.
  *
  * So the copy is taken again whenever one of those attributes changes, at
- * most once a frame. A transparent layout (the studio) leaves <html> its
- * own background, as a page loaded there has. What it returns stops
- * following and removes the copy.
+ * most once a frame.
+ *
+ * A transparent layout (the studio) paints nothing itself. Its surfaces
+ * mix the layout's `--color-background` over what lies under them, <html>
+ * included, so <html> takes that token. With no copy, the strip showed the
+ * platform's background beside a studio tinted by the org, and 4% of it
+ * bled into the studio's own surfaces (review fu-focus-2). The token
+ * follows `data-editing-theme` and the theme, which are watched already.
+ *
+ * What it returns stops following and removes the copy.
  */
 export function followLayoutBackground(layout: HTMLElement): () => void {
   const root = document.documentElement;
@@ -28,9 +35,16 @@ export function followLayoutBackground(layout: HTMLElement): () => void {
     cancelAnimationFrame(frame);
     // A frame later, once the change has been styled.
     frame = requestAnimationFrame(() => {
-      const bg = getComputedStyle(layout).backgroundColor;
-      if (bg && bg !== 'rgba(0, 0, 0, 0)') root.style.backgroundColor = bg;
-      else root.style.removeProperty('background-color');
+      const style = getComputedStyle(layout);
+      const own = style.backgroundColor;
+      const bg =
+        own && own !== 'rgba(0, 0, 0, 0)'
+          ? own
+          : style.getPropertyValue('--color-background').trim();
+      // Off first: <html> ignores a value it can't parse, which would leave
+      // the last copy standing.
+      root.style.removeProperty('background-color');
+      if (bg) root.style.backgroundColor = bg;
     });
   };
   const observer = new MutationObserver(sample);
