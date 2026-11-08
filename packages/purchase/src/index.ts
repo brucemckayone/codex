@@ -32,6 +32,10 @@
  * // { platformFeeCents: 300, organizationFeeCents: 0, creatorPayoutCents: 2699 }
  */
 
+// The clawback's wait for a won chargeback to settle: the webhook logs it at
+// warn, not as an alert (Codex-2hxff.70). ecom-api reads it from here, not
+// @codex/payments.
+export { WinSettlingError } from '@codex/payments';
 // Re-export validation schemas for convenience
 export {
   type CreateCheckoutInput,
@@ -165,6 +169,7 @@ export type {
   NewPurchaseInput,
   PaymentIntentCharge,
   Purchase,
+  PurchaseItemLink,
   PurchaseListItem,
   PurchaseWithItem,
   SaleListItem,

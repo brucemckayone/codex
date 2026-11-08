@@ -375,6 +375,7 @@ import type {
   LateWinRestoreOutcome,
   PaymentIntentCharge,
   Purchase,
+  PurchaseItemLink,
   PurchaseListItem,
   PurchaseWithItem,
   SaleListItem,
@@ -638,6 +639,66 @@ function selfHealedSale(metadata: Stripe.Metadata): {
         },
       }
     : null;
+}
+
+/** A row's soft delete, as `findItemLink` reads it. */
+interface Live {
+  deletedAt: Date | null;
+}
+
+/**
+ * A content item's page (`findItemLink`): on its org as it is now, or, for
+ * personal content, on its creator's profile. Null when it has none.
+ */
+function contentItemLink(
+  item: Live & {
+    id: string;
+    slug: string;
+    organization: (Live & { slug: string }) | null;
+    creator: (Live & { username: string | null }) | null;
+  }
+): PurchaseItemLink | null {
+  const { organization, creator } = item;
+  if (item.deletedAt) return null;
+  if (organization) {
+    if (organization.deletedAt) return null;
+    return {
+      kind: 'org_content',
+      contentId: item.id,
+      slug: item.slug,
+      organizationSlug: organization.slug,
+    };
+  }
+  if (!creator?.username || creator.deletedAt) return null;
+  return {
+    kind: 'personal_content',
+    contentId: item.id,
+    slug: item.slug,
+    creatorUsername: creator.username,
+  };
+}
+
+/**
+ * A course's dashboard on its org (`findItemLink`). Null when it has none:
+ * the dashboard finds only a published course (`getCourseBySlug`), so one
+ * archived or back in draft would be a 404.
+ */
+function courseItemLink(
+  course: Live & {
+    id: string;
+    slug: string;
+    status: string;
+    organization: Live & { slug: string };
+  }
+): PurchaseItemLink | null {
+  if (course.deletedAt || course.organization.deletedAt) return null;
+  if (course.status !== CONTENT_STATUS.PUBLISHED) return null;
+  return {
+    kind: 'course',
+    courseId: course.id,
+    slug: course.slug,
+    organizationSlug: course.organization.slug,
+  };
 }
 
 /**
@@ -1012,6 +1073,48 @@ export class PurchaseService extends BaseService {
       return claimed.length > 0;
     } catch (error) {
       this.handleError(error, 'claimReceipt');
+    }
+  }
+
+  /**
+   * Where the purchase's item lives, for an email's link to it (Codex-0u7kb):
+   * the receipt's "Access Content" button, and the late win's access-restored
+   * email's (Codex-2hxff.70). Keyed by the purchase; the item, its org and
+   * its creator are the purchase's own. The pages look an item up
+   * by its slug, so a link built from the id was a 404.
+   *
+   * Org content links to its org as it is now, not the sale's: that is where
+   * its page is. Null when there is no page to link to: no such purchase; its
+   * item or that item's org is deleted; a course is not published; personal
+   * content's creator is deleted or has no username. The caller links
+   * somewhere that exists.
+   */
+  async findItemLink(purchaseId: string): Promise<PurchaseItemLink | null> {
+    try {
+      const row = await this.db.query.purchases.findFirst({
+        where: eq(purchases.id, purchaseId),
+        columns: { id: true },
+        with: {
+          content: {
+            columns: { id: true, slug: true, deletedAt: true },
+            with: {
+              organization: { columns: { slug: true, deletedAt: true } },
+              creator: { columns: { username: true, deletedAt: true } },
+            },
+          },
+          course: {
+            columns: { id: true, slug: true, status: true, deletedAt: true },
+            with: {
+              organization: { columns: { slug: true, deletedAt: true } },
+            },
+          },
+        },
+      });
+      if (row?.content) return contentItemLink(row.content);
+      if (row?.course) return courseItemLink(row.course);
+      return null;
+    } catch (error) {
+      this.handleError(error, 'findItemLink');
     }
   }
 
@@ -3776,24 +3879,20 @@ export class PurchaseService extends BaseService {
 
   /**
    * The facts of the `purchase-access-restored` email (late-win data design
-   * §7): the item and its page, as the receipt links it, what was paid and
-   * when. Null when the item's row cannot be read (soft deletes keep it), so
-   * no email goes out unnamed.
+   * §7): the item, what was paid and when. Its link is the caller's, read by
+   * the purchase id (`findItemLink`, Codex-0u7kb). Null when the item's row
+   * cannot be read (soft deletes keep it), so no email goes out unnamed.
    */
   private async accessRestoredEmail(
     purchase: Purchase
   ): Promise<LateWinRestore['email']> {
     const contentTitle = await this.itemTitle(purchase);
     if (contentTitle === null) return null;
-    const isCourse = purchase.courseId !== null;
     return {
       contentTitle,
       amountCents: purchase.amountPaidCents,
       paidAt: toIso(purchase.purchasedAt ?? purchase.createdAt),
-      itemPath: isCourse
-        ? `/courses/${purchase.courseId}`
-        : `/content/${purchase.contentId}`,
-      isCourse,
+      isCourse: purchase.courseId !== null,
     };
   }
 
@@ -4241,9 +4340,10 @@ export class PurchaseService extends BaseService {
    *   in full. A refund that fails later is support's, as any failed refund.
    *   One found failed, or canceled by Stripe, is done too, but alerted at
    *   error: the buyer got nothing. A failed one is clawed back from the
-   *   creators like any failed refund, and stays so until support settles
-   *   it in the Failed refunds queue; a canceled one takes nothing, and
-   *   support settles it by hand.
+   *   creators like any failed refund, and stays taken: support settles the
+   *   buyer's refund in Failed refunds as refunded elsewhere, which keeps it
+   *   ("creators re-paid" is refused for a late win's refund, owner decision
+   *   6). A canceled one takes nothing, and support settles it by hand.
    *
    * A late-won duplicate payment is refunded the same way when its loss ran
    * (owner decisions 2026-11-05 and 2026-11-08): the loss left it refunded,
@@ -4310,11 +4410,13 @@ export class PurchaseService extends BaseService {
       }
       if (status === 'failed') {
         // Settled, and clawed back above like any failed refund: Stripe
-        // returned the money to the platform, so the creators' share stands
-        // taken until support settles it in Failed refunds, which lists it
-        // (owner decision 2026-10-19, "Hold it for support"). Only a
-        // `canceled` one takes nothing. The buyer got nothing either way, so
-        // it is alerted as `canceled` is, not logged as a refund made.
+        // returned the money to the platform (owner decision 2026-10-19,
+        // "Hold it for support"). The creators' share stays taken: support
+        // settles the buyer's refund in Failed refunds, which lists it, as
+        // refunded elsewhere, which keeps it ("creators re-paid" is refused
+        // for a late win's refund, owner decision 6). Only a `canceled` one
+        // takes nothing. The buyer got nothing either way, so it is alerted
+        // as `canceled` is, not logged as a refund made.
         this.obs.error(
           'Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds',
           {

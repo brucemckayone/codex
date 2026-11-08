@@ -37,6 +37,7 @@ import type { ObservabilityClient } from '@codex/observability';
 import {
   LateWinRefundRefusedError,
   type LateWinRefundStep,
+  type LateWinRestore,
   type PurchaseService,
   STANDING_REFUND_STATUSES,
   supportRequesterOf,
@@ -55,7 +56,11 @@ import {
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
-import { isTransientError } from '../utils/error-classification';
+import {
+  describeRootCause,
+  isTransientError,
+} from '../utils/error-classification';
+import { purchaseItemUrl, webAppOrigin } from '../utils/item-link';
 
 /** The reasons a refund or a dispute writes into the streaming block. */
 type PaymentBlockReason = Extract<
@@ -699,7 +704,10 @@ export interface DisputeDeps {
    * through its request, the reconcile's through the scheduled handler.
    */
   mail: (params: SendEmailToWorkerParams) => void;
-  /** The web app's origin, for an email's link; unset only when misconfigured. */
+  /**
+   * `WEB_APP_URL`, the web app's origin an email's links are built on
+   * (`webAppOrigin`); unset or not a URL only when misconfigured.
+   */
   webAppUrl: string | undefined;
 }
 
@@ -1015,7 +1023,10 @@ type RecordedDispute = NonNullable<
  *    it"). After the re-pay, so the refund comes off the held re-pay rows.
  *    One Stripe has pending waits, unmarked, for its settling.
  * 5. The outcome is marked, then logged at info (Q6: ids and counts only).
- * 6. A buyer whose access came back is told, once (Q5).
+ * 6. A buyer whose access came back is told, once (Q5). The email, with its
+ *    link, is made ready BEFORE the mark: once the mark commits, nothing
+ *    comes back for it (a redelivery and the hourly run stop at the record),
+ *    so from the mark to the send only the email's claim is awaited.
  */
 async function undoLateWin(
   dispute: Stripe.Dispute,
@@ -1049,6 +1060,14 @@ async function undoLateWin(
     return 'acted';
   }
 
+  // Its link is read here, not between the mark and the claim: a request
+  // cancelled during the read then leaves the whole undo to be retried,
+  // where after the mark it would lose the email for good.
+  const notice =
+    restored?.outcome === 'restored'
+      ? await accessRestoredNotice(deps, charge, restored)
+      : null;
+
   await purchase.markDisputeOutcomeApplied(dispute.id, { status: 'won' });
   obs?.info('Late win: loss undone', {
     disputeId: dispute.id,
@@ -1063,24 +1082,7 @@ async function undoLateWin(
     refund,
   });
 
-  if (restored?.outcome === 'restored') {
-    if (restored.email) {
-      await tellBuyerAccessIsBack(deps, charge, dispute.id, {
-        userId: restored.userId,
-        email: restored.email,
-      });
-    } else {
-      // The outcome is marked: nothing comes back to send it (Q5).
-      obs?.warn(
-        "Late win: the buyer's access-restored email was not sent: the item's title could not be read",
-        {
-          errorId: crypto.randomUUID(),
-          disputeId: dispute.id,
-          userId: restored.userId,
-        }
-      );
-    }
-  }
+  if (notice) await tellBuyerAccessIsBack(deps, dispute.id, notice);
   return 'acted';
 }
 
@@ -1133,9 +1135,9 @@ async function refundFirstPayment(
  * The late win's refund Stripe did not make, alerted at error (owner
  * decision 2026-10-23, "Retry hourly, alert") with what Stripe answered: its
  * code, type and HTTP status, each null when Stripe gave none, never its
- * message (owner, 2026-11-08). Only a `StripeInvalidRequestError` reads as
- * refused; anything else (an outage, a rate limit, a key without the right)
- * as could not be refunded.
+ * message (owner, 2026-11-08). It reads as refused only when the error is
+ * (`refused`, the rule its own message reads too); anything else (an
+ * outage, a rate limit, a key without the right) as could not be refunded.
  */
 function alertLateWinRefundNotMade(
   obs: ObservabilityClient | undefined,
@@ -1148,7 +1150,7 @@ function alertLateWinRefundNotMade(
     stripeStatusCode: error.context?.stripeStatusCode ?? null,
   };
   obs?.error(
-    answered.stripeType === 'StripeInvalidRequestError'
+    error.refused
       ? 'Late win: Stripe refused the refund of a payment the buyer made twice (bought again, or a duplicate). Nothing is marked; it is retried hourly'
       : 'Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded. Nothing is marked; it is retried hourly',
     { errorId: crypto.randomUUID(), ...ids, ...answered }
@@ -1156,46 +1158,99 @@ function alertLateWinRefundNotMade(
 }
 
 /**
- * The buyer whose access came back is told, once (Q5; design §7), in the
- * refund email's shape: its address and name are the charge's billing ones.
- * Claimed on `buyer_told_at` first, so a redelivery or the hourly retry never
- * sends a second; sent after the outcome is marked, so it never runs ahead of
- * the undo. One that cannot be sent is not retried: the claim stays. Nothing
- * comes back for one dropped here either, so each drop is logged with ids,
- * never the address: no address on the charge at warn, a failed claim at
- * error.
+ * The late win's access-restored email for its buyer, made ready before the
+ * outcome is marked (`accessRestoredNotice`): ready to send, or why not.
+ */
+type AccessRestoredNotice = { userId: string } & (
+  | { mail: SendEmailToWorkerParams }
+  | { notSent: 'no_title' | 'no_address' | 'no_web_app' }
+);
+
+/**
+ * The access-restored email (Q5; design §7), in the refund email's shape:
+ * its address and name are the charge's billing ones. Its button opens the
+ * item's own page, or the buyer's library when it has none
+ * (`purchaseItemUrl`, Codex-0u7kb). That link is the one read here, and only
+ * for an email that would go: one with a title, an address and a
+ * `WEB_APP_URL` that is a URL. It never rejects, so it never stops the undo.
+ */
+async function accessRestoredNotice(
+  deps: DisputeDeps,
+  charge: Stripe.Charge,
+  restored: LateWinRestore
+): Promise<AccessRestoredNotice> {
+  const { userId, email } = restored;
+  if (!email) return { userId, notSent: 'no_title' };
+  const to = charge.billing_details?.email || charge.receipt_email;
+  if (!to) return { userId, notSent: 'no_address' };
+  const webApp = webAppOrigin(deps.webAppUrl);
+  if (!webApp) return { userId, notSent: 'no_web_app' };
+  const itemUrl = await purchaseItemUrl(
+    deps.purchase,
+    restored.purchaseId,
+    webApp,
+    deps.obs
+  );
+  return {
+    userId,
+    mail: accessRestoredMail({
+      to,
+      name: charge.billing_details?.name,
+      userId,
+      email,
+      itemUrl,
+    }),
+  };
+}
+
+/** The `purchase-access-restored` email's send, from its facts and link. */
+function accessRestoredMail(facts: {
+  to: string;
+  name: string | null | undefined;
+  userId: string;
+  email: NonNullable<LateWinRestore['email']>;
+  itemUrl: string;
+}): SendEmailToWorkerParams {
+  const { email } = facts;
+  return {
+    to: facts.to,
+    templateName: 'purchase-access-restored',
+    category: 'transactional',
+    userId: facts.userId,
+    data: {
+      userName: facts.name || 'there',
+      contentTitle: email.contentTitle,
+      accessSentence: email.isCourse
+        ? 'so the course is open to you again.'
+        : "so it's back in your library and ready to watch.",
+      amount: `£${(email.amountCents / 100).toFixed(2)}`,
+      paidOn: new Date(email.paidAt).toLocaleDateString('en-GB', {
+        timeZone: 'Europe/London',
+      }),
+      itemUrl: facts.itemUrl,
+      buttonLabel: email.isCourse ? 'Go to the course' : 'Watch now',
+    },
+  };
+}
+
+/**
+ * The buyer whose access came back is told, once (Q5; design §7). Claimed on
+ * `buyer_told_at` first, so a redelivery or the hourly retry never sends a
+ * second; sent after the outcome is marked, so it never runs ahead of the
+ * undo. Nothing is awaited between the claim and handing the email to the
+ * mailer, whose `waitUntil` keeps it past the response: a request cancelled
+ * in that gap would spend the claim with nothing sent. One that cannot be
+ * sent is not retried: the outcome is marked. Nothing comes back for one
+ * dropped here either, so each drop is logged with ids, never the address.
  */
 async function tellBuyerAccessIsBack(
   deps: DisputeDeps,
-  charge: Stripe.Charge,
   disputeId: string,
-  restored: {
-    userId: string;
-    email: NonNullable<
-      NonNullable<
-        Awaited<ReturnType<PurchaseService['restoreAfterLateWin']>>
-      >['email']
-    >;
-  }
+  notice: AccessRestoredNotice
 ): Promise<void> {
-  const { obs, webAppUrl } = deps;
-  const to = charge.billing_details?.email || charge.receipt_email;
-  if (!to) {
-    obs?.warn(
-      "Late win: the buyer's access-restored email was not sent: the charge has no email address",
-      {
-        errorId: crypto.randomUUID(),
-        disputeId,
-        userId: restored.userId,
-      }
-    );
-    return;
-  }
-  if (!webAppUrl) {
-    obs?.error(
-      "WEB_APP_URL is not set: the late win's access-restored email has no working link, so it was not sent",
-      { errorId: crypto.randomUUID(), disputeId }
-    );
+  const { obs } = deps;
+  if ('notSent' in notice) {
+    logAccessRestoredNotSent(obs, disputeId, notice.userId, notice.notSent);
     return;
   }
   try {
@@ -1208,32 +1263,48 @@ async function tellBuyerAccessIsBack(
       {
         errorId: crypto.randomUUID(),
         disputeId,
-        userId: restored.userId,
+        userId: notice.userId,
         error: error instanceof Error ? error.message : String(error),
+        // The service's wrap says only "An unexpected error occurred".
+        cause: describeRootCause(error),
       }
     );
     return;
   }
-  const { email } = restored;
-  deps.mail({
-    to,
-    templateName: 'purchase-access-restored',
-    category: 'transactional',
-    userId: restored.userId,
-    data: {
-      userName: charge.billing_details?.name || 'there',
-      contentTitle: email.contentTitle,
-      accessSentence: email.isCourse
-        ? 'so the course is open to you again.'
-        : "so it's back in your library and ready to watch.",
-      amount: `£${(email.amountCents / 100).toFixed(2)}`,
-      paidOn: new Date(email.paidAt).toLocaleDateString('en-GB', {
-        timeZone: 'Europe/London',
-      }),
-      itemUrl: `${webAppUrl}${email.itemPath}`,
-      buttonLabel: email.isCourse ? 'Go to the course' : 'Watch now',
-    },
-  });
+  deps.mail(notice.mail);
+}
+
+/**
+ * An access-restored email that is not sent, logged once the outcome is
+ * marked: no title or no address at warn, a `WEB_APP_URL` that is unset or
+ * not a URL at error, since every such email is lost until it is set.
+ */
+function logAccessRestoredNotSent(
+  obs: ObservabilityClient | undefined,
+  disputeId: string,
+  userId: string,
+  reason: Extract<AccessRestoredNotice, { notSent: unknown }>['notSent']
+): void {
+  switch (reason) {
+    case 'no_title':
+      obs?.warn(
+        "Late win: the buyer's access-restored email was not sent: the item's title could not be read",
+        { errorId: crypto.randomUUID(), disputeId, userId }
+      );
+      return;
+    case 'no_address':
+      obs?.warn(
+        "Late win: the buyer's access-restored email was not sent: the charge has no email address",
+        { errorId: crypto.randomUUID(), disputeId, userId }
+      );
+      return;
+    case 'no_web_app':
+      obs?.error(
+        "WEB_APP_URL is unset or not a URL: the late win's access-restored email has no working link, so it was not sent",
+        { errorId: crypto.randomUUID(), disputeId }
+      );
+      return;
+  }
 }
 
 /**

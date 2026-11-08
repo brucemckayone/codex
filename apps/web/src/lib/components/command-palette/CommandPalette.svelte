@@ -166,7 +166,7 @@
     onkeydown={handleKeydown}
   >
     <Dialog.Toolbar>
-      <div class="palette__input-wrapper">
+      <div class="palette__input-wrapper" data-field-box>
         <SearchIcon size={18} class="palette__search-icon" />
         <input
           type="text"

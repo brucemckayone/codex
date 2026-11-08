@@ -29,6 +29,7 @@
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { getPricingFaq, updatePricingFaq } from '$lib/remote/branding.remote';
   import type { PricingFaqItem } from '@codex/validation';
+  import { survivingFocus } from '$lib/utils/surviving-focus';
 
   let { data } = $props();
 
@@ -49,6 +50,20 @@
   // just promised to keep.
   let deleteOpen = $state(false);
   let deleteTarget = $state<PricingFaqItem | null>(null);
+  // Where the deleted question stood, set as it goes: its row, and the
+  // Delete that opened the dialog, are gone before the close, so focus
+  // goes to what survives it (Codex-p10nx).
+  let deletedAt = $state<number | null>(null);
+
+  /** The next question's Delete, else the previous one's, else Add. */
+  function deleteFocus(): HTMLElement | null {
+    if (deletedAt === null) return null;
+    return survivingFocus(
+      [...document.querySelectorAll('[data-faq-delete]')],
+      deletedAt,
+      document.querySelector('[data-faq-add]')
+    );
+  }
 
   onMount(async () => {
     try {
@@ -104,12 +119,14 @@
 
   function askDelete(item: PricingFaqItem) {
     deleteTarget = item;
+    deletedAt = null;
     deleteOpen = true;
   }
 
   function confirmDelete() {
     if (!deleteTarget) return;
     const id = deleteTarget.id;
+    deletedAt = items.findIndex((i) => i.id === id);
     items = items
       .filter((i) => i.id !== id)
       .map((i, idx) => ({ ...i, order: idx }));
@@ -173,7 +190,7 @@
         <ExternalLinkIcon size={14} />
       </a>
       {#if items.length > 0}
-        <Button variant="secondary" size="sm" onclick={addItem}>
+        <Button variant="secondary" size="sm" onclick={addItem} data-faq-add>
           <PlusIcon size={14} />
           {m.monetisation_faq_add_item()}
         </Button>
@@ -202,7 +219,7 @@
         description={m.monetisation_faq_empty_description()}
       >
         {#snippet action()}
-          <Button onclick={addItem}>
+          <Button onclick={addItem} data-faq-add>
             <PlusIcon size={14} />
             {m.monetisation_faq_add_first()}
           </Button>
@@ -249,6 +266,7 @@
               class="icon-btn icon-btn--danger"
               onclick={() => askDelete(item)}
               aria-label={m.monetisation_faq_delete_aria({ question: item.question })}
+              data-faq-delete
             >
               <TrashIcon size={14} />
             </button>
@@ -320,7 +338,10 @@
 </Dialog.Root>
 
 <!-- Delete confirmation -->
-<Dialog.Root bind:open={deleteOpen}>
+<Dialog.Root
+  bind:open={deleteOpen}
+  closeFocus={deletedAt === null ? undefined : deleteFocus}
+>
   <Dialog.Content size="sm">
     <Dialog.Header>
       <Dialog.Title>{m.monetisation_faq_delete_title()}</Dialog.Title>

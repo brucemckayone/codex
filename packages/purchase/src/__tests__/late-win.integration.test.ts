@@ -457,7 +457,6 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
           contentTitle: expect.any(String),
           amountCents: 1000,
           paidAt: expect.any(String),
-          itemPath: `/content/${sale.contentId}`,
           isCourse: false,
         },
       });
@@ -499,7 +498,6 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
         outcome: 'restored',
         email: {
           contentTitle: 'Late Win Course',
-          itemPath: `/courses/${sale.courseId}`,
           isCourse: true,
         },
       });
