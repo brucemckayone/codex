@@ -1397,6 +1397,7 @@ describe('handleCheckoutCompleted', () => {
     it.each([
       ['unset', undefined],
       ['not a URL', 'revelations.studio'],
+      ['host:port with no scheme', 'lvh.me:3000'],
     ])('WEB_APP_URL %s: alerted with ids, nothing claimed, no receipt; the delivery succeeds', async (_case, webAppUrl) => {
       const { context, mock } = createContext({ WEB_APP_URL: webAppUrl });
 

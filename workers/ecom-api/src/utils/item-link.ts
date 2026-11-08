@@ -24,16 +24,28 @@ import { describeRootCause } from './error-classification';
 
 /**
  * The web app's origin, from `WEB_APP_URL`: the platform host every link is
- * built on, so each comes out absolute. Null when it is unset or not a URL;
- * the caller then has no working link to send.
+ * built on, so each comes out absolute. Null unless it is an http(s) URL
+ * with a host; the caller then has no working link to send. That `new URL`
+ * parses it is not enough: a schemeless `lvh.me:3000` parses, as protocol
+ * `lvh.me:` with no host, and every link built on it would be broken.
  */
 export function webAppOrigin(webAppUrl: string | undefined): URL | null {
   if (!webAppUrl) return null;
+  let url: URL;
   try {
-    return new URL(webAppUrl);
+    url = new URL(webAppUrl);
   } catch {
     return null;
   }
+  return isWebOrigin(url) ? url : null;
+}
+
+/** An http(s) URL with a host. */
+function isWebOrigin(url: URL): boolean {
+  return (
+    (url.protocol === 'http:' || url.protocol === 'https:') &&
+    url.hostname !== ''
+  );
 }
 
 /**

@@ -240,6 +240,12 @@ describe('webAppOrigin', () => {
     ['unset', undefined],
     ['empty', ''],
     ['not a URL', 'revelations.studio'],
+    // `new URL` parses these, as protocol 'lvh.me:' (or 'revelations.studio:')
+    // with an empty hostname: links built on them are broken.
+    ['host:port with no scheme', 'lvh.me:3000'],
+    ['host:port with no scheme (production)', 'revelations.studio:443'],
+    // A host, but no web scheme.
+    ['not http(s)', 'ftp://revelations.studio'],
   ])('%s: null, so no link is built on it', (_case, value) => {
     expect(webAppOrigin(value)).toBeNull();
   });
