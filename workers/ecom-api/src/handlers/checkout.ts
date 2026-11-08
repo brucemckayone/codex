@@ -371,31 +371,36 @@ export async function completeCheckoutSession(
     const webApp = customerEmail
       ? receiptWebApp(deps.env, purchase.id, obs)
       : null;
-    if (
-      customerEmail &&
-      webApp &&
-      (await claimReceipt(purchaseService, purchase.id, obs))
-    ) {
-      sendEmailToWorker(deps.env, deps.executionCtx, {
-        to: customerEmail,
-        toName: customerName,
-        templateName: 'purchase-receipt',
-        category: 'transactional',
-        userId: sale.customerId,
-        data: {
-          userName: customerName,
-          contentTitle: sale.receipt.title,
-          priceFormatted: `£${(sale.amountCents / 100).toFixed(2)}`,
-          purchaseDate: new Date().toLocaleDateString('en-GB'),
-          // The item's own page (Codex-0u7kb), or the library when it has none.
-          contentUrl: await purchaseItemUrl(
-            purchaseService,
-            purchase.id,
-            webApp,
-            obs
-          ),
-        },
-      });
+    if (customerEmail && webApp) {
+      // The item's own page (Codex-0u7kb), or the library when it has none.
+      // Read BEFORE the claim: once the claim commits, nothing may be awaited
+      // until sendEmailToWorker hands the send to waitUntil. A request
+      // cancelled in that gap (Stripe timing out, the buyer leaving the
+      // success page) spends the claim with nothing sent, and every
+      // redelivery finds it claimed. The price is one read per delivery, not
+      // per purchase. It never rejects.
+      const contentUrl = await purchaseItemUrl(
+        purchaseService,
+        purchase.id,
+        webApp,
+        obs
+      );
+      if (await claimReceipt(purchaseService, purchase.id, obs)) {
+        sendEmailToWorker(deps.env, deps.executionCtx, {
+          to: customerEmail,
+          toName: customerName,
+          templateName: 'purchase-receipt',
+          category: 'transactional',
+          userId: sale.customerId,
+          data: {
+            userName: customerName,
+            contentTitle: sale.receipt.title,
+            priceFormatted: `£${(sale.amountCents / 100).toFixed(2)}`,
+            purchaseDate: new Date().toLocaleDateString('en-GB'),
+            contentUrl,
+          },
+        });
+      }
     }
     return { kind: 'completed', purchase, failure };
   });

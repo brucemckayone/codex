@@ -1108,13 +1108,14 @@ describe('handleCheckoutCompleted', () => {
       expect(receipts()).toHaveLength(1);
     });
 
-    it('with no buyer email, nothing is claimed, so nothing is used up', async () => {
+    it('with no buyer email, nothing is read or claimed, so nothing is used up', async () => {
       await handleCheckoutCompleted(
         paidBy(sessions[0][1], null),
         mockStripe,
         createContext().context
       );
 
+      expect(mockFindItemLink).not.toHaveBeenCalled();
       expect(mockClaimReceipt).not.toHaveBeenCalled();
       expect(sendEmailToWorker).not.toHaveBeenCalled();
     });
@@ -1311,17 +1312,48 @@ describe('handleCheckoutCompleted', () => {
       expect(new URL(sent).host).not.toBe('lvh.me:3000');
     });
 
-    it('the item is looked up once, by the delivery that claims the receipt', async () => {
+    // Once the claim commits, nothing may be awaited until the send is handed
+    // to waitUntil, so the link is read first, by every delivery that would
+    // send one; only the first claim sends.
+    it('the link is read before the claim, on each delivery that would send a receipt', async () => {
       const event = paidFor(contentSale);
 
       await handleCheckoutCompleted(event, mockStripe, createContext().context);
       await handleCheckoutCompleted(event, mockStripe, createContext().context);
 
+      expect(mockFindItemLink).toHaveBeenCalledTimes(2);
       expect(mockClaimReceipt).toHaveBeenCalledTimes(2);
-      expect(mockFindItemLink).toHaveBeenCalledTimes(1);
+      const reads = mockFindItemLink.mock.invocationCallOrder;
+      const claims = mockClaimReceipt.mock.invocationCallOrder;
+      expect(reads[0]).toBeLessThan(claims[0] ?? 0);
+      expect(reads[1]).toBeLessThan(claims[1] ?? 0);
       expect(receiptLink()).toBe(
         'http://studio-alpha.lvh.me:3000/content/breathwork-basics'
       );
+    });
+
+    it('a request cancelled once the claim commits still hands its receipt to the mailer', async () => {
+      // The cancellation: from the claim on, no read ever returns.
+      let claimed = false;
+      mockClaimReceipt.mockImplementationOnce(async () => {
+        claimed = true;
+        return true;
+      });
+      mockFindItemLink.mockImplementation(() =>
+        claimed ? new Promise(() => {}) : Promise.resolve(orgContent)
+      );
+
+      const delivery = handleCheckoutCompleted(
+        paidFor(contentSale),
+        mockStripe,
+        createContext().context
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(receiptLink()).toBe(
+        'http://studio-alpha.lvh.me:3000/content/breathwork-basics'
+      );
+      await delivery;
     });
 
     it('an item with no page: the library on the platform, with a warn of ids', async () => {
@@ -1337,8 +1369,8 @@ describe('handleCheckoutCompleted', () => {
       );
     });
 
-    // The receipt is claimed by now, so a redelivery could not send it: the
-    // library link is the buyer's only receipt, and the delivery succeeds.
+    // A failed lookup costs the buyer the item's own page, never the
+    // receipt: the library link goes, and the delivery succeeds.
     it('a failed lookup: the library link; the delivery neither throws nor retries', async () => {
       mockFindItemLink.mockRejectedValueOnce(
         Object.assign(new Error('Connection terminated'), {
