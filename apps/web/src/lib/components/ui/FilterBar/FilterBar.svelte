@@ -349,7 +349,7 @@
 
   /* Its focus cue is base.css's `[data-field-box]` rule: the border turns
      --color-border-focus, which an org brand holds to 3:1 against its
-     ground. This rule drew it in --color-interactive, the brand's colour as
+     ground. It was drawn in --color-interactive, the brand's colour as
      picked: 1.47:1 for a pale yellow brand, 1.83:1 for a navy one on a dark
      page (Codex-c5prp). */
 

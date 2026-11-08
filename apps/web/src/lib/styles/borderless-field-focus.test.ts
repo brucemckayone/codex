@@ -15,6 +15,8 @@
  * draws borderless must sit in a box marked `data-field-box`, whose border
  * base.css turns --color-border-focus, or the component must draw its own
  * ring for it (an outline on focus), or its own border in a focus token.
+ * A box's own focus rule outranks base.css's, so a marked box may set no
+ * other border colour on focus.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
@@ -265,17 +267,34 @@ const OWN_CUE = (d: Declared): boolean =>
     (/^border(-[a-z]+)?(-color)?$/.test(d.property) &&
       FOCUS_TOKEN.test(d.value)));
 
+/** A rule that holds only while the element it styles, or one around it, has focus. */
+const ON_FOCUS = (d: Declared): boolean => d.compounds.some((c) => c.focus);
+
+/** `border`, or one side of it: top, right, bottom, left, block or inline. */
+const SIDE = '(-(top|right|bottom|left)|-(block|inline)(-(start|end))?)?';
+const BORDER = new RegExp(`^border${SIDE}$`);
+const BORDER_COLOUR = new RegExp(`^border${SIDE}(-color)?$`);
+
 /**
- * A rule that draws a border on the element it styles, on some side: what
- * base.css's `[data-field-box]` rule can colour. A border set to none, 0,
- * hidden or transparent draws nothing to colour.
+ * A rule that draws a border on the element it styles, on some side, at
+ * rest: what base.css's `[data-field-box]` rule can colour. A border set to
+ * none, 0, hidden or transparent draws nothing to colour, and one drawn only
+ * on focus is not there at rest.
  */
 const DRAWS_BORDER = (d: Declared): boolean =>
-  /^border(-(top|right|bottom|left)|-(block|inline)(-(start|end))?)?$/.test(
-    d.property
-  ) &&
+  !ON_FOCUS(d) &&
+  BORDER.test(d.property) &&
   !/^(none|0(px)?|hidden)(\s|$)/.test(d.value) &&
   !/\btransparent\b/.test(d.value);
+
+/**
+ * A focus-state rule that sets a border's colour, to anything but a focus
+ * token. On a box it outranks base.css's rule: `.box:focus-within` compiles
+ * to (0,3,0), the `[data-field-box]:has(…)` rule is (0,2,1). So the box shows
+ * that colour, and the mark changes nothing.
+ */
+const RECOLOURS_ON_FOCUS = (d: Declared): boolean =>
+  ON_FOCUS(d) && BORDER_COLOUR.test(d.property) && !FOCUS_TOKEN.test(d.value);
 
 type Cue = 'box' | 'own' | 'none';
 
@@ -297,12 +316,16 @@ function census(source: string): { field: string; cue: Cue }[] {
     const boxes = chain.map((_, i) => chain.slice(0, i + 1));
     // base.css's rule is `[data-field-box]:has(… :focus)`: it reaches a box
     // AROUND the field, never the field itself, and only colours a border
-    // that box draws.
-    const box = around.some(
-      (el, i) =>
+    // that box draws at rest. A rule of the box's own that recolours its
+    // border on focus outranks it: that box is read by the own-cue test below.
+    const box = around.some((el, i) => {
+      const onBox = (d: Declared) => styles(d, around.slice(0, i + 1));
+      return (
         el.attrs.has('data-field-box') &&
-        css.some((d) => DRAWS_BORDER(d) && styles(d, around.slice(0, i + 1)))
-    );
+        css.some((d) => DRAWS_BORDER(d) && onBox(d)) &&
+        !css.some((d) => RECOLOURS_ON_FOCUS(d) && onBox(d))
+      );
+    });
     out.push({
       field: `<${field.name} class="${[...field.classes].join(' ')}">`,
       cue: box
@@ -347,9 +370,20 @@ describe('the gate reads a component as the browser draws it', () => {
   });
 
   it('passes it in a box marked data-field-box', () => {
+    const marked = (focus = '') =>
+      `<div class="row" data-field-box><input class="field" /></div>${style.replace('</style>', `${focus}</style>`)}`;
+    expect(uncued(marked())).toEqual([]);
+    // The box's own focus rule may add a ring, or keep its border in a focus token.
     expect(
       uncued(
-        `<div class="row" data-field-box><input class="field" /></div>${style}`
+        marked(
+          '.row:focus-within { box-shadow: 0 0 0 3px var(--color-focus-ring); }'
+        )
+      )
+    ).toEqual([]);
+    expect(
+      uncued(
+        marked('.row:focus-within { border-color: var(--color-border-focus); }')
       )
     ).toEqual([]);
   });
@@ -373,6 +407,24 @@ describe('the gate reads a component as the browser draws it', () => {
         `<div class="row" data-field-box><input class="field" /></div>${style.replace('.row { border-bottom: 1px solid var(--color-border); }', '.row { border: none; }')}`
       )
     ).toEqual(['<input class="field">']);
+    // On a box that recolours its own border on focus: `.row:focus-within`
+    // compiles to (0,3,0) and outranks base.css's (0,2,1). The three studio
+    // search boxes and SearchPill drew --color-interactive this way.
+    expect(
+      uncued(
+        `<div class="row" data-field-box><input class="field" /></div>${style.replace('</style>', '.row:focus-within { border-color: var(--color-interactive); }</style>')}`
+      )
+    ).toEqual(['<input class="field">']);
+    // On a box whose only border is drawn on focus: none at rest to colour.
+    const focusOnly = (token: string) =>
+      `<div class="row" data-field-box><input class="field" /></div>${style.replace('.row { border-bottom: 1px solid var(--color-border); }', `.row:focus-within { border-bottom: 1px solid var(${token}); }`)}`;
+    expect(uncued(focusOnly('--color-interactive'))).toEqual([
+      '<input class="field">',
+    ]);
+    // Drawn in a focus token, that border is the component's own cue, not the mark's.
+    expect(census(focusOnly('--color-border-focus')).map((f) => f.cue)).toEqual(
+      ['own']
+    );
   });
 
   it('follows a snippet to where it is rendered', () => {
@@ -460,8 +512,9 @@ describe('every borderless field keeps a focus cue that holds 3:1 (Codex-c5prp)'
   });
 
   it('an engine without :has() keeps the cue through :focus-within', () => {
-    // Such an engine drops the `:has()` rule whole, and SearchPill and the
-    // three studio search boxes, which turn their halo off, would show none.
+    // Such an engine drops the `:has()` rule whole: SearchPill, which turns
+    // its halo off, would show no cue, and the three studio search boxes only
+    // the 1.46:1 halo.
     const source = readFileSync(join(STYLES, 'base.css'), 'utf8');
     type At = {
       type: string;
