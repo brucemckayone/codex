@@ -670,6 +670,31 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     );
   });
 
+  // L6 (owner, "Refund it"): a late-won duplicate whose original purchase was
+  // refunded since is refunded too, and its buyer holds nothing. processRefund
+  // returns it as the purchase late-win test pins: accessEnded, a duplicate,
+  // no late-win note.
+  it('a late-won duplicate whose original was refunded since: the access has ended, never "You still have" (Codex-2hxff.70, L6)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: true,
+      itemTitle: 'Winter Light',
+      duplicatePayment: true,
+      lateWinKeptThrough: null,
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Winter Light',
+        accessNote: 'Your access to Winter Light has ended.',
+      }),
+    ]);
+    expect(emails()[0]?.accessNote).not.toContain('You still have');
+  });
+
   it('the late-win note dates the purchase as a London day, with a three-letter month', async () => {
     mockProcessRefund.mockResolvedValueOnce({
       userId: 'u',

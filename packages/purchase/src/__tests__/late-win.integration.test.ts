@@ -1285,6 +1285,21 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
         refundAmountCents: 1000,
         stripeRefundId: refundId,
       });
+
+      // Its charge.refunded: nothing else grants the item, so the access has
+      // ended, and the refund email must say so, never "You still have".
+      await service.markDisputeOutcomeApplied(disputeId, { status: 'won' });
+      expect(
+        await service.processRefund(duplicate.paymentIntentId, {
+          charge: duplicate.charge,
+          stripeRefundId: refundId,
+          refundAmountCents: 1000,
+        })
+      ).toMatchObject({
+        accessEnded: true,
+        duplicatePayment: true,
+        lateWinKeptThrough: null,
+      });
     });
 
     it("a pending duplicate the loss never got to is the sweep's: none before the sweep refunds it; after, the late win's refund meets charge_already_refunded and is done, so it is refunded exactly once", async () => {
