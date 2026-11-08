@@ -585,8 +585,29 @@ export async function reverseCharge(
 }
 
 /**
+ * A chargeback won and its outcome not yet applied: its creators' pay-back is
+ * still being written (Codex-2hxff.70; late-win data design §4.7). A normal
+ * win's moments before its re-pay, and a late win's undo, alike. The one rule
+ * for both halves of §4.7: support refuses a refund meanwhile
+ * (`CHARGEBACK_SETTLING`, by this row check) and a refund's clawback waits
+ * for it (`waitForWinToSettle`, by `settlingWinSql`), so the two never
+ * disagree.
+ */
+export function isSettlingWin(dispute: {
+  status: string;
+  outcomeAppliedAt: Date | null;
+}): boolean {
+  return dispute.status === 'won' && dispute.outcomeAppliedAt === null;
+}
+
+/** `isSettlingWin` in SQL, on `disputes`. */
+function settlingWinSql(): SQL {
+  return sql`(${disputes.status} = 'won' AND ${disputes.outcomeAppliedAt} IS NULL)`;
+}
+
+/**
  * A refund is not clawed back while a chargeback on its charge is won and its
- * outcome not yet applied (Codex-2hxff.70; late-win data design §4.7). The
+ * outcome not yet applied (`isSettlingWin`; late-win data design §4.7). The
  * win's re-pay must run first: refunds are shared before chargebacks
  * (`inClawbackOrder`), so a refund clawed back while the dispute's steps
  * still stand, nothing re-paid, would take each share a second time. After
@@ -604,8 +625,7 @@ async function waitForWinToSettle(
 ): Promise<void> {
   const conditions: SQL[] = [
     eq(disputes.stripeChargeId, chargeId),
-    eq(disputes.status, 'won'),
-    isNull(disputes.outcomeAppliedAt),
+    settlingWinSql(),
   ];
   if (settlingDisputeId) {
     conditions.push(ne(disputes.stripeDisputeId, settlingDisputeId));

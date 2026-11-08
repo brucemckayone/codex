@@ -99,6 +99,7 @@ import {
   feeLevelKey,
   feeRiseStartAfter,
   type GbpBalance,
+  isSettlingWin,
   issueRefund as issueStripeRefund,
   type LevelFees,
   layerLevelFees,
@@ -231,7 +232,6 @@ import {
   debtErrorLabel,
   debtStanding,
   type HistoryContext,
-  isSettlingDispute,
   previewLabel,
   refundFailureLabel,
   refundHolds,
@@ -1156,7 +1156,7 @@ export class SupportService extends BaseService {
         respondBy,
         lostOn: toIso(row.lostAppliedAt),
         lateWonOn: toIso(row.lateWonAt),
-        settling: isSettlingDispute(row),
+        settling: isSettlingWin(row),
       });
     }
     return result;

@@ -14,6 +14,7 @@ import {
   type ClawbackPlanMethod,
   DEBT_INVOICE_AFTER_DAYS,
   debtRule,
+  isSettlingWin,
   MAX_CLAWBACK_ATTEMPTS,
   PAYEE_PAID_RESOLUTIONS,
   STRIPE_WRITE_OFF_AFTER_DAYS,
@@ -147,25 +148,16 @@ const BLOCKING_DISPUTE_STATUSES: readonly string[] = [
 ];
 
 /**
- * A chargeback won and its outcome not yet applied: the creators' pay-back
- * is still being written, so a refund now would race it (late-win data
- * design §4.7). A normal win's moments before its re-pay, and a late win's
- * undo, alike; the hourly reconcile retries one that failed.
- */
-export function isSettlingDispute(dispute: {
-  status: string;
-  outcomeAppliedAt: Date | null;
-}): boolean {
-  return dispute.status === 'won' && dispute.outcomeAppliedAt === null;
-}
-
-/**
  * What a charge's disputes say about refunding it now. The detail, the
  * preview and the refund route all read it, so the page and the route
  * never disagree:
  *
  * - `blocking`: an open or lost chargeback's status (`CHARGE_HAS_CHARGEBACK`);
- * - `settling`: a won one not yet applied (`CHARGEBACK_SETTLING`);
+ * - `settling`: a won one not yet applied (`CHARGEBACK_SETTLING`): the
+ *   creators' pay-back is still being written, so a refund now would race
+ *   it (late-win data design §4.7). By @codex/payments' `isSettlingWin`, the
+ *   rule a refund's clawback waits on too; the hourly reconcile retries a
+ *   win that failed;
  * - `lateWon`: one won after it was lost (`late_won_at`). Owner Q7 ("Lift
  *   the limit for it", Codex-2hxff.70): such a payment stays refundable
  *   past the 14-day window, taken back from the creators like any refund.
@@ -181,7 +173,7 @@ export function refundHolds(
     blocking:
       rows.find((row) => BLOCKING_DISPUTE_STATUSES.includes(row.status))
         ?.status ?? null,
-    settling: rows.some(isSettlingDispute),
+    settling: rows.some(isSettlingWin),
     lateWon: rows.some((row) => row.lateWonAt !== null),
   };
 }

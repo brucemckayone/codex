@@ -5,7 +5,7 @@
  */
 
 import type { PayoutReversal } from '@codex/database/schema';
-import { MAX_CLAWBACK_ATTEMPTS } from '@codex/payments';
+import { isSettlingWin, MAX_CLAWBACK_ATTEMPTS } from '@codex/payments';
 import { describe, expect, it } from 'vitest';
 import {
   type CreditView,
@@ -16,7 +16,6 @@ import {
   debtErrorLabel,
   debtStanding,
   type HistoryContext,
-  isSettlingDispute,
   previewLabel,
   refundFailureLabel,
   refundHolds,
@@ -337,10 +336,10 @@ describe('refundHolds: what a charge’s disputes say about a refund now (late-w
   const AT = new Date('2026-12-14T09:00:00Z');
 
   it('a won chargeback not yet applied is settling; once applied it is not', () => {
-    expect(isSettlingDispute(row('won'))).toBe(true);
-    expect(isSettlingDispute(row('won', AT))).toBe(false);
+    expect(isSettlingWin(row('won'))).toBe(true);
+    expect(isSettlingWin(row('won', AT))).toBe(false);
     for (const status of ['lost', 'needs_response', 'warning_closed']) {
-      expect(isSettlingDispute(row(status))).toBe(false);
+      expect(isSettlingWin(row(status))).toBe(false);
     }
     expect(refundHolds([row('won', AT), row('won')]).settling).toBe(true);
     expect(refundHolds([row('won', AT)]).settling).toBe(false);

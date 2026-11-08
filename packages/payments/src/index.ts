@@ -23,6 +23,7 @@ export {
   type ClawbackRefund,
   type ClawbackSource,
   failedRefundRepayBlock,
+  isSettlingWin,
   listChargeRefunds,
   listClawableRefunds,
   loadClawbackCauses,
