@@ -198,6 +198,17 @@
 
   // ── Content picker ───────────────────────────────────────────────────────────
   let pickerOpen = $state(false);
+  // Set as the picker adds a practice. Adding one selects it, and the
+  // stage inspector's Add practice that opened the picker goes with the
+  // stage view: focus fell to the page. It goes to the new practice
+  // instead, from either Add (Codex-p10nx).
+  let addedPracticeKey = $state<string | null>(null);
+  const addedPracticeFocus = (): HTMLElement | null =>
+    addedPracticeKey === null
+      ? null
+      : document.querySelector<HTMLElement>(
+          `[data-practice-select="${CSS.escape(addedPracticeKey)}"]`
+        );
   let pickerStageKey = $state<string | null>(null);
   let pickerReplaceKey = $state<string | null>(null);
   let pickerSearch = $state('');
@@ -238,6 +249,7 @@
   function openAddPractice(stageKey: string): void {
     pickerStageKey = stageKey;
     pickerReplaceKey = null;
+    addedPracticeKey = null;
     pickerSearch = '';
     pickerType = '';
     pickerOpen = true;
@@ -245,6 +257,7 @@
   function openReplacePractice(stageKey: string, practiceKey: string): void {
     pickerStageKey = stageKey;
     pickerReplaceKey = practiceKey;
+    addedPracticeKey = null;
     pickerSearch = '';
     pickerType = '';
     pickerOpen = true;
@@ -284,6 +297,7 @@
       };
       stage.practices.push(practice);
       sel = { stageKey: stage.key, practiceKey: practice.key };
+      addedPracticeKey = practice.key;
     }
     markDirty();
     pickerOpen = false;
@@ -521,6 +535,7 @@
                       type="button"
                       class="prow__select"
                       aria-pressed={isPracticeSel}
+                      data-practice-select={practice.key}
                       onclick={() =>
                         (sel = { stageKey: stage.key, practiceKey: practice.key })}
                     >
@@ -710,13 +725,16 @@
 </div>
 
 <!-- ── Content-library picker ── -->
-<Dialog.Root bind:open={pickerOpen}>
+<Dialog.Root
+  bind:open={pickerOpen}
+  closeFocus={addedPracticeKey === null ? undefined : addedPracticeFocus}
+>
   <Dialog.Content size="md" class="picker">
     <Dialog.Header>
       <Dialog.Title>Choose from your library</Dialog.Title>
     </Dialog.Header>
     <Dialog.Toolbar direction="column">
-      <div class="picker__search">
+      <div class="picker__search" data-field-box>
         <SearchIcon size={16} />
         <input
           type="search"

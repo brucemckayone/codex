@@ -2,6 +2,7 @@
 	import { type CreateDropdownMenuProps, createDropdownMenu } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { untrack } from 'svelte';
+	import { returnsToTrigger } from './close-focus';
 	import { setCtx } from './ctx.js';
 
 	type Props = Omit<CreateDropdownMenuProps, 'open' | 'onOpenChange'> & {
@@ -47,18 +48,11 @@
 
 	const builder = createDropdownMenu({
 		defaultOpen: untrack(() => defaultOpen),
-		// Melt's default gives the trigger focus at every close, whatever has
-		// it by then. An item that opens a dialog has handed focus to the
-		// dialog a millisecond before: the trigger, behind the overlay, took
-		// it, focus-trap pulled it back without preventScroll, and a
-		// Body-less confirm opened scrolled down to its Footer (Codex-vlphc
-		// review G5-C-L1). So the trigger takes focus back only from the
-		// menu, or from nowhere; anywhere else keeps it.
+		// The trigger takes focus back only from the menu, or from nowhere;
+		// anywhere else keeps it (see returnsToTrigger).
 		closeFocus: (trigger) => {
-			const active = document.activeElement;
 			const menu = menuId ? document.getElementById(menuId) : null;
-			const fromMenu = !active || active === document.body || !!menu?.contains(active);
-			return fromMenu ? (trigger ?? null) : null;
+			return returnsToTrigger(document.activeElement, menu) ? (trigger ?? null) : null;
 		},
 		onOpenChange: ({ next }) => {
 			if (open !== next) {

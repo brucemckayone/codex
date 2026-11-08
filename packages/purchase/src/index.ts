@@ -165,6 +165,7 @@ export type {
   NewPurchaseInput,
   PaymentIntentCharge,
   Purchase,
+  PurchaseItemLink,
   PurchaseListItem,
   PurchaseWithItem,
   SaleListItem,

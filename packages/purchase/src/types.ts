@@ -330,3 +330,33 @@ export interface LateWinRestore {
  * Stripe, or done.
  */
 export type LateWinRefundStep = 'none' | 'pending' | 'done';
+
+/**
+ * Where a purchase's item lives on the web app, as the URL builders need it
+ * (`PurchaseService.findItemLink`, Codex-0u7kb). The pages look an item up by
+ * its slug, so the slug is always the real one, never the id.
+ *
+ * - `org_content`: on its org's subdomain, `/content/{slug}`.
+ * - `personal_content`: no org; on the creators host,
+ *   `/@{creatorUsername}/content/{slug}`.
+ * - `course`: on its org's subdomain, `/journeys/{slug}/…`.
+ */
+export type PurchaseItemLink =
+  | {
+      kind: 'org_content';
+      contentId: string;
+      slug: string;
+      organizationSlug: string;
+    }
+  | {
+      kind: 'personal_content';
+      contentId: string;
+      slug: string;
+      creatorUsername: string;
+    }
+  | {
+      kind: 'course';
+      courseId: string;
+      slug: string;
+      organizationSlug: string;
+    };
