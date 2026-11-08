@@ -1001,25 +1001,44 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
       expect(stripe.refunds.create).toHaveBeenCalledOnce();
     });
 
-    it('refused: a typed, retryable error with Stripe’s code and ids only; nothing is written, and the retry asks Stripe under the same key', async () => {
+    it('refused, or Stripe out of reach: a typed, retryable error with ids and what Stripe answered (code, type, status), never its message; nothing is written, and the retry asks Stripe under the same key', async () => {
       const { first, disputeId, service } = await reboughtLateWin();
-      vi.mocked(stripe.refunds.create).mockRejectedValueOnce(
-        Object.assign(new Error('Insufficient platform balance'), {
-          type: 'StripeInvalidRequestError',
-          code: 'balance_insufficient',
-        })
-      );
+      vi.mocked(stripe.refunds.create)
+        .mockRejectedValueOnce(
+          Object.assign(new Error('Insufficient platform balance'), {
+            type: 'StripeInvalidRequestError',
+            code: 'balance_insufficient',
+            statusCode: 400,
+          })
+        )
+        .mockRejectedValueOnce(
+          Object.assign(new Error('An error occurred with our connection'), {
+            type: 'StripeConnectionError',
+          })
+        );
+      const attempt = () =>
+        service
+          .refundFirstPaymentAfterLateWin(disputeId, first.charge, 'test')
+          .catch((error: unknown) => error);
 
-      const refused = await service
-        .refundFirstPaymentAfterLateWin(disputeId, first.charge, 'test')
-        .catch((error: unknown) => error);
-
+      const refused = await attempt();
       expect(refused).toBeInstanceOf(LateWinRefundRefusedError);
       expect(refused).toBeInstanceOf(ServiceUnavailableError);
       expect((refused as LateWinRefundRefusedError).context).toEqual({
         disputeId,
         purchaseId: first.purchaseId,
         stripeCode: 'balance_insufficient',
+        stripeType: 'StripeInvalidRequestError',
+        stripeStatusCode: 400,
+      });
+      const unreached = await attempt();
+      expect(unreached).toBeInstanceOf(LateWinRefundRefusedError);
+      expect((unreached as LateWinRefundRefusedError).context).toEqual({
+        disputeId,
+        purchaseId: first.purchaseId,
+        stripeCode: null,
+        stripeType: 'StripeConnectionError',
+        stripeStatusCode: null,
       });
       expect((await readDispute(disputeId)).lateWinRefundId).toBeNull();
 
@@ -1039,6 +1058,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
         .calls as unknown as Array<[unknown, { idempotencyKey?: string }?]>;
       const keys = calls.map(([, options]) => options?.idempotencyKey);
       expect(keys).toEqual([
+        `late_win_refund_${disputeId}`,
         `late_win_refund_${disputeId}`,
         `late_win_refund_${disputeId}`,
       ]);
@@ -1442,6 +1462,56 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
           refundId,
           status: 'canceled',
         }
+      );
+    });
+
+    it('failed: a pending refund later found failed counts as settled and is done, but is alerted at error with ids, as in Failed refunds, and never logged as clawed back', async () => {
+      const { first, disputeId, service } = await reboughtLateWin();
+      const refundId = `re_lw_failed_${uid()}`;
+      stripeMakesRefund(refundId, 'pending');
+      stripeListsRefunds({
+        [first.charge.id]: [{ id: refundId, status: 'pending' }],
+      });
+      const obs = (
+        service as unknown as {
+          obs: {
+            error: (message: string, meta?: object) => void;
+            info: (message: string, meta?: object) => void;
+          };
+        }
+      ).obs;
+      const alerts = vi.spyOn(obs, 'error');
+      const notes = vi.spyOn(obs, 'info');
+      const step = () =>
+        service.refundFirstPaymentAfterLateWin(disputeId, first.charge, 'test');
+
+      expect(await step()).toBe('pending');
+      // It failed at Stripe; the next hourly run records it so.
+      stripeListsRefunds({
+        [first.charge.id]: [{ id: refundId, status: 'failed' }],
+      });
+      expect(await step()).toBe('done');
+
+      expect(stripe.refunds.create).toHaveBeenCalledOnce();
+      expect(
+        await db
+          .select({ status: refunds.status })
+          .from(refunds)
+          .where(eq(refunds.stripeRefundId, refundId))
+      ).toEqual([{ status: 'failed' }]);
+      expect(alerts).toHaveBeenCalledExactlyOnceWith(
+        'Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds',
+        {
+          errorId: expect.any(String),
+          disputeId,
+          purchaseId: first.purchaseId,
+          refundId,
+          status: 'failed',
+        }
+      );
+      expect(notes).not.toHaveBeenCalledWith(
+        "Late win: the payment's refund is clawed back",
+        expect.anything()
       );
     });
   });

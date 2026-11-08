@@ -192,6 +192,26 @@ const REFUND_STATUSES: ReadonlySet<string> = new Set<RefundStatus>([
   'canceled',
 ]);
 
+/**
+ * What a Stripe error says it is, for an alert: its `type` (a refusal is
+ * `StripeInvalidRequestError`; an outage, a rate limit or a key without the
+ * right is another) and its HTTP `statusCode`, each null when absent. Never
+ * its message.
+ */
+function stripeErrorKind(error: unknown): {
+  stripeType: string | null;
+  stripeStatusCode: number | null;
+} {
+  const { type, statusCode } = (error ?? {}) as {
+    type?: unknown;
+    statusCode?: unknown;
+  };
+  return {
+    stripeType: typeof type === 'string' ? type : null,
+    stripeStatusCode: typeof statusCode === 'number' ? statusCode : null,
+  };
+}
+
 /** A status the `refunds` table admits (its CHECK). */
 function isRefundStatus(status: string | null): status is RefundStatus {
   return status !== null && REFUND_STATUSES.has(status);
@@ -4214,12 +4234,14 @@ export class PurchaseService extends BaseService {
    *   holds it through that purchase, or the payment was refunded some
    *   other way;
    * - `pending`: Stripe has not settled the refund. Do not mark the outcome:
-   *   the re-pay rows stay held, and the next delivery or hourly run finishes
-   *   it (owner decision Q1 for refunds);
+   *   the re-pay rows stay held, and the hourly reconcile's next run
+   *   finishes it (owner decision Q1 for refunds). Its `refund.updated`
+   *   cannot: that clawback waits for this win to settle;
    * - `done`: refunded and clawed back, or the charge was already refunded
    *   in full. A refund that fails later is support's, as any failed refund.
-   *   One Stripe canceled is done too, but alerted at error: the buyer got
-   *   nothing, and support settles it by hand.
+   *   One found failed, or canceled by Stripe, is done too, but alerted at
+   *   error: the buyer got nothing. A failed one is in the Failed refunds
+   *   queue; a canceled one support settles by hand.
    *
    * A late-won duplicate payment is refunded the same way when its loss ran
    * (owner decisions 2026-11-05 and 2026-11-08): the loss left it refunded,
@@ -4229,8 +4251,8 @@ export class PurchaseService extends BaseService {
    * and after, the late win's refund meets `charge_already_refunded`. Exactly
    * one refund either way.
    *
-   * @throws {LateWinRefundRefusedError} Stripe refused the refund. It is
-   *   retried, and the caller alerts with `stripeCode`.
+   * @throws {LateWinRefundRefusedError} Stripe did not make the refund. It
+   *   is retried, and the caller alerts with Stripe's code, type and status.
    */
   async refundFirstPaymentAfterLateWin(
     stripeDisputeId: string,
@@ -4284,6 +4306,22 @@ export class PurchaseService extends BaseService {
         );
         return 'done';
       }
+      if (status === 'failed') {
+        // Settled, and it took nothing from the creators (a failed refund is
+        // not clawable), but the buyer got nothing: alerted as `canceled` is,
+        // and never logged as clawed back. The Failed refunds queue lists it.
+        this.obs.error(
+          'Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds',
+          {
+            errorId: crypto.randomUUID(),
+            disputeId: stripeDisputeId,
+            purchaseId: purchase.id,
+            refundId,
+            status,
+          }
+        );
+        return 'done';
+      }
       this.obs.info("Late win: the payment's refund is clawed back", {
         disputeId: stripeDisputeId,
         purchaseId: purchase.id,
@@ -4322,8 +4360,8 @@ export class PurchaseService extends BaseService {
   /**
    * Ask Stripe for the late win's refund of the payment, and write its id
    * once (`late_win_refund_id IS NULL`). Undefined, and no refund, unless
-   * the loss refunded the payment (`refundedByTheLoss`). A refusal is a
-   * `LateWinRefundRefusedError`.
+   * the loss refunded the payment (`refundedByTheLoss`). A refund Stripe does
+   * not make, refused or not, is a `LateWinRefundRefusedError`.
    */
   private async issueLateWinRefund(
     dispute: Dispute,
@@ -4350,6 +4388,7 @@ export class PurchaseService extends BaseService {
           disputeId: stripeDisputeId,
           purchaseId: purchase.id,
           stripeCode: stripeErrorCode(error) ?? null,
+          ...stripeErrorKind(error),
         },
         { cause: error }
       );

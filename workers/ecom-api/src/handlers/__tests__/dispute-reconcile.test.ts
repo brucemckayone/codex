@@ -19,7 +19,10 @@
  * services' own behaviour is covered by their integration suites.
  */
 
-import type { PurchaseService } from '@codex/purchase';
+import {
+  LateWinRefundRefusedError,
+  type PurchaseService,
+} from '@codex/purchase';
 import type { SubscriptionService } from '@codex/subscription';
 import type Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
@@ -967,6 +970,61 @@ describe('runDisputeReconcile', () => {
       expect(result).toMatchObject({ fromEvents: 1, acted: 1, failed: 0 });
     });
 
+    it("a late win whose refund Stripe could not make is alerted with the innermost error, not only the wrap's words, and left unapplied for the next run", async () => {
+      const { rows, purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_undoing',
+          status: 'won',
+          lateWonAt: APPLIED,
+          outcomeAppliedAt: null,
+        },
+      ]);
+      purchase.restoreAfterLateWin.mockResolvedValueOnce({
+        outcome: 'rebought',
+        userId: 'user_1',
+        orgId: 'org_1',
+        purchaseId: 'purchase_1',
+        email: null,
+      });
+      purchase.refundFirstPaymentAfterLateWin.mockRejectedValueOnce(
+        new LateWinRefundRefusedError(
+          {
+            disputeId: 'dp_undoing',
+            purchaseId: 'purchase_1',
+            stripeCode: null,
+            stripeType: 'StripeConnectionError',
+            stripeStatusCode: null,
+          },
+          {
+            cause: Object.assign(new Error('connection reset (test)'), {
+              code: 'ECONNRESET',
+            }),
+          }
+        )
+      );
+      const stripe = stripeStub({ disputes: [dispute('dp_undoing', 'won')] });
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      const result = await run();
+
+      expect(result).toMatchObject({ fromRows: 1, acted: 0, failed: 1 });
+      expect(obs.error).toHaveBeenCalledWith(
+        'A dispute could not be settled by the hourly reconcile; the next run retries it',
+        {
+          errorId: expect.any(String),
+          disputeId: 'dp_undoing',
+          status: 'won',
+          error: expect.any(String),
+          cause: {
+            name: 'Error',
+            message: 'connection reset (test)',
+            code: 'ECONNRESET',
+          },
+        }
+      );
+      expect(rows.get('dp_undoing')?.outcomeAppliedAt).toBeNull();
+    });
+
     it('source 1 leaves alone a late win already applied, undone or settled by hand (release step R18), and an applied loss its event still calls lost', async () => {
       const { purchase } = ledger([
         {
@@ -1146,7 +1204,7 @@ describe('runDisputeReconcile', () => {
       expect(result).toMatchObject({ fromLostRows: 0, failed: 1 });
     });
 
-    it('the 08:00 London run (lateWins off) does no late-win work: no lost-row read, no Stripe list, and source 1 leaves applied losses alone', async () => {
+    it('the 08:00 London run (lateWins off) finds no new late wins: no lost-row read, no Stripe list, and source 1 leaves applied losses alone', async () => {
       const { rows, purchase } = ledger([lostRow('dp_late')]);
       const stripe = stripeStub({
         events: [event(dispute('dp_late', 'won'))],

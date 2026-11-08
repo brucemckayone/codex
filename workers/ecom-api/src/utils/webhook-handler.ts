@@ -6,6 +6,7 @@
  */
 
 import { isForeignStripeEnvironment } from '@codex/constants';
+import { LateWinRefundRefusedError } from '@codex/purchase';
 import { UnsupportedCurrencyError } from '@codex/service-errors';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
@@ -109,13 +110,18 @@ export function createWebhookHandler(
       const cause = describeRootCause(error);
 
       if (isTransientError(error)) {
-        // Transient failure — return 500 so Stripe retries with exponential backoff
-        obs?.error(`${eventType} webhook transient error (will retry)`, {
-          error: err.message,
-          cause,
-          eventType: event.type,
-          eventId: event.id,
-        });
+        // Transient failure — return 500 so Stripe retries with exponential
+        // backoff. A late win's refund that Stripe did not make is alerted
+        // already, once per attempt, with what Stripe answered
+        // (Codex-2hxff.70): a second alert here would only repeat it.
+        if (!(error instanceof LateWinRefundRefusedError)) {
+          obs?.error(`${eventType} webhook transient error (will retry)`, {
+            error: err.message,
+            cause,
+            eventType: event.type,
+            eventId: event.id,
+          });
+        }
         return c.json({ error: 'Temporary failure' }, 500);
       }
 

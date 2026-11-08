@@ -10,6 +10,7 @@
  * - Successful handling → 200 with { received: true }
  */
 
+import { LateWinRefundRefusedError } from '@codex/purchase';
 import {
   BaseService,
   NotFoundError,
@@ -116,6 +117,35 @@ describe('createWebhookHandler', () => {
         expect.stringContaining('transient error'),
         expect.anything()
       );
+    });
+
+    it("a late win's refund Stripe did not make → 500, with no second alert: its own step alerted it once already (Codex-2hxff.70)", async () => {
+      const handler = createWebhookHandler('Test', async () => {
+        throw new LateWinRefundRefusedError(
+          {
+            disputeId: 'dp_late',
+            purchaseId: 'purchase_late',
+            stripeCode: 'balance_insufficient',
+            stripeType: 'StripeInvalidRequestError',
+            stripeStatusCode: 400,
+          },
+          { cause: new Error('Insufficient platform balance (test)') }
+        );
+      });
+      const { context, mock } = createContext();
+      let responseStatus: number | undefined;
+      (mock as unknown as Record<string, unknown>).json = vi
+        .fn()
+        .mockImplementation((_body: unknown, status?: number) => {
+          responseStatus = status;
+          return new Response(JSON.stringify(_body), { status: status ?? 200 });
+        });
+
+      await handler(context);
+
+      // Still a 500: Stripe redelivers, and the reconcile retries hourly.
+      expect(responseStatus).toBe(500);
+      expect(mock._obs.error).not.toHaveBeenCalled();
     });
   });
 

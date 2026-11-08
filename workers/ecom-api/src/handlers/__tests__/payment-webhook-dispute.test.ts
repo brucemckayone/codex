@@ -1228,7 +1228,7 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(bundle.mock._obs.error).not.toHaveBeenCalled();
     });
 
-    it("a refund Stripe refuses is alerted at error with Stripe's code on every try, rethrown, and nothing is marked", async () => {
+    it("a refund Stripe refuses is alerted at error with Stripe's code, type and status on every try, rethrown, and nothing is marked", async () => {
       for (let attempt = 0; attempt < 2; attempt++) {
         recordedLateWin();
         restoredAs('rebought');
@@ -1236,6 +1236,8 @@ describe('handlePaymentWebhook — disputes', () => {
           disputeId: 'dp_test_dispute',
           purchaseId: 'purchase_late',
           stripeCode: 'charge_disputed',
+          stripeType: 'StripeInvalidRequestError',
+          stripeStatusCode: 400,
         });
         purchase.refundFirstPaymentAfterLateWin?.mockRejectedValueOnce(refusal);
         const bundle = buildContext({ WEB_APP_URL: WEB });
@@ -1245,40 +1247,55 @@ describe('handlePaymentWebhook — disputes', () => {
         ).rejects.toBe(refusal);
 
         expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
-          expect.stringContaining('Stripe refused the refund'),
+          'Late win: Stripe refused the refund of a payment the buyer made twice (bought again, or a duplicate). Nothing is marked; it is retried hourly',
           {
             errorId: expect.any(String),
             disputeId: 'dp_test_dispute',
             purchaseId: 'purchase_late',
             stripeCode: 'charge_disputed',
+            stripeType: 'StripeInvalidRequestError',
+            stripeStatusCode: 400,
           }
         );
       }
       expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
     });
 
-    it('a refusal Stripe gave no code for is still alerted, with stripeCode null', async () => {
-      recordedLateWin();
-      restoredAs('rebought');
-      const refusal = new LateWinRefundRefusedError({
-        disputeId: 'dp_test_dispute',
-        purchaseId: 'purchase_late',
-        stripeCode: null,
-      });
-      purchase.refundFirstPaymentAfterLateWin?.mockRejectedValueOnce(refusal);
-      const bundle = buildContext({ WEB_APP_URL: WEB });
-
-      await expect(
-        handlePaymentWebhook(wonEvent(), mockStripe, bundle.context)
-      ).rejects.toBe(refusal);
-
-      expect(bundle.mock._obs.error).toHaveBeenCalledWith(
-        expect.stringContaining('Stripe refused the refund'),
-        expect.objectContaining({
+    it('a refund Stripe could not be asked for (an outage, a rate limit, a key without the right) is alerted as could not be refunded, never as refused, with what Stripe answered', async () => {
+      for (const [stripeType, stripeStatusCode] of [
+        ['StripeConnectionError', null],
+        ['StripeAPIError', 500],
+        ['StripePermissionError', 403],
+        [null, null],
+      ] as const) {
+        recordedLateWin();
+        restoredAs('rebought');
+        const failure = new LateWinRefundRefusedError({
           disputeId: 'dp_test_dispute',
+          purchaseId: 'purchase_late',
           stripeCode: null,
-        })
-      );
+          stripeType,
+          stripeStatusCode,
+        });
+        purchase.refundFirstPaymentAfterLateWin?.mockRejectedValueOnce(failure);
+        const bundle = buildContext({ WEB_APP_URL: WEB });
+
+        await expect(
+          handlePaymentWebhook(wonEvent(), mockStripe, bundle.context)
+        ).rejects.toBe(failure);
+
+        expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+          'Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded. Nothing is marked; it is retried hourly',
+          {
+            errorId: expect.any(String),
+            disputeId: 'dp_test_dispute',
+            purchaseId: 'purchase_late',
+            stripeCode: null,
+            stripeType,
+            stripeStatusCode,
+          }
+        );
+      }
       expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
     });
 
@@ -1295,10 +1312,15 @@ describe('handlePaymentWebhook — disputes', () => {
         handlePaymentWebhook(wonEvent(), mockStripe, bundle.context)
       ).rejects.toBe(other);
 
-      expect(bundle.mock._obs.error).not.toHaveBeenCalledWith(
-        expect.stringContaining('Stripe refused the refund'),
-        expect.anything()
-      );
+      for (const alert of [
+        'Stripe refused the refund',
+        'could not be refunded',
+      ]) {
+        expect(bundle.mock._obs.error).not.toHaveBeenCalledWith(
+          expect.stringContaining(alert),
+          expect.anything()
+        );
+      }
       expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
     });
 

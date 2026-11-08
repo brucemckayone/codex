@@ -36,8 +36,9 @@
  *    the other's disputes too: only our rows are acted on.
  *
  * The 08:00 London run, which pays the banks and has no subrequests to spare,
- * does no late-win work (`lateWins: false`): no source 3, and source 1 leaves
- * applied losses alone. The next hour's run picks them up.
+ * finds no new late wins (`lateWins: false`): no source 3, and source 1 leaves
+ * applied losses alone. The next hour's run picks them up. Source 2 still
+ * retries a late win already being undone, as it retries any unapplied row.
  *
  * A dispute is acted on when we have no row, when its record would move to a
  * later stage (inquiry, then chargeback, then closed), when it is final and
@@ -62,6 +63,7 @@ import {
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
 import type Stripe from 'stripe';
+import { describeRootCause } from '../utils/error-classification';
 import {
   type AccessEffects,
   type DisputeDeps,
@@ -166,6 +168,9 @@ export async function runDisputeReconcile(
       }
     } catch (error) {
       result.failed++;
+      // A service's wrap names only itself (a late win's refund reads
+      // "refused" whatever Stripe answered): the innermost error says what
+      // went wrong, as the webhook's own alert logs it.
       obs.error(
         'A dispute could not be settled by the hourly reconcile; the next run retries it',
         {
@@ -173,6 +178,7 @@ export async function runDisputeReconcile(
           disputeId,
           status: live.status,
           error: error instanceof Error ? error.message : String(error),
+          cause: describeRootCause(error),
         }
       );
     }

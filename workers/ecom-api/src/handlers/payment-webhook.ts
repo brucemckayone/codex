@@ -1090,11 +1090,14 @@ async function restoreSubscriptionAfterWin(
 /**
  * The late win's refund of a payment the buyer made twice: the first payment
  * of a buyer who bought the item again (Q1; design §4.5), or a duplicate
- * payment (owner, "Refund it"). A refusal is alerted at error on every try,
- * with Stripe's code or null when Stripe gave none (owner decision 2026-10-23,
- * "Retry hourly, alert"), then rethrown: nothing is marked, so its re-pay rows
- * stay held and the reconcile tries it again. Any other error is rethrown
- * without this alert.
+ * payment (owner, "Refund it"). A refund Stripe did not make is alerted at
+ * error on every try (owner decision 2026-10-23, "Retry hourly, alert"),
+ * with what Stripe answered: its code, type and HTTP status, each null when
+ * Stripe gave none, never its message. Only a `StripeInvalidRequestError`
+ * reads as refused; anything else (an outage, a rate limit, a key without the
+ * right) as could not be refunded. Then rethrown: nothing is marked, so its
+ * re-pay rows stay held and the reconcile tries it again. Any other error is
+ * rethrown without this alert.
  */
 async function refundFirstPayment(
   deps: DisputeDeps,
@@ -1110,13 +1113,18 @@ async function refundFirstPayment(
     );
   } catch (error) {
     if (error instanceof LateWinRefundRefusedError) {
+      const stripeType = error.context?.stripeType ?? null;
       deps.obs?.error(
-        'Late win: Stripe refused the refund of a payment the buyer made twice (bought again, or a duplicate). Nothing is marked; it is retried hourly',
+        stripeType === 'StripeInvalidRequestError'
+          ? 'Late win: Stripe refused the refund of a payment the buyer made twice (bought again, or a duplicate). Nothing is marked; it is retried hourly'
+          : 'Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded. Nothing is marked; it is retried hourly',
         {
           errorId: crypto.randomUUID(),
           disputeId,
           purchaseId,
           stripeCode: error.context?.stripeCode ?? null,
+          stripeType,
+          stripeStatusCode: error.context?.stripeStatusCode ?? null,
         }
       );
     }

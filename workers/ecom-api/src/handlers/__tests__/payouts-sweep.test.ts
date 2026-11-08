@@ -611,7 +611,7 @@ describe('ecom-api payouts-sweep handler', () => {
     );
   });
 
-  it('the 08:00 London run does no late-win work; any other hour re-checks our lost disputes (Codex-2hxff.70)', async () => {
+  it('the 08:00 London run finds no new late wins; any other hour re-checks our lost disputes (Codex-2hxff.70)', async () => {
     /** Thu 14 Jan 2027, 08:00 and 09:00 London (GMT). */
     const LONDON_EIGHT = Date.UTC(2027, 0, 14, 8);
     const LONDON_NINE = Date.UTC(2027, 0, 14, 9);
