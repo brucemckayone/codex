@@ -24923,6 +24923,14 @@ export const support_amount_full = (params) => `${params.amount} · refunded in 
 
 
 /**
+ * @param {{ amount: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_outside_stripe = (params) => `${params.amount} · refunded outside Stripe on ${params.date}`
+
+
+/**
  * @param {{ date: NonNullable<unknown>, left: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -26047,7 +26055,7 @@ export const support_blocked_nothing = () => `Nothing is left to refund on this 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_blocked_chargeback_settling_lead = () => `This payment's chargeback was just decided for us, and the creators are being paid back.`
+export const support_blocked_chargeback_settling_lead = () => `This payment's chargeback was decided for us, and the creators are still being paid back.`
 
 
 /**
@@ -26055,7 +26063,23 @@ export const support_blocked_chargeback_settling_lead = () => `This payment's ch
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_blocked_chargeback_settling_body = () => `Try the refund again in an hour.`
+export const support_blocked_chargeback_settling_body = () => `Refunds wait until that finishes. A step that fails is retried every hour, and one that keeps failing is settled by hand.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_refunded_outside_stripe_lead = (params) => `Refunded outside Stripe on ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_refunded_outside_stripe_body = () => `Don't refund this charge here.`
 
 
 /**
@@ -26336,6 +26360,14 @@ export const support_outcome_refused_other = () => `Nothing was refunded and not
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_outcome_chargeback_lead = () => `This charge has a chargeback, so it can't be refunded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_refunded_outside_stripe_lead = () => `This charge was refunded outside Stripe.`
 
 
 /**
@@ -27403,6 +27435,22 @@ export const support_repay_needs_person_body = () => `Part of what the refund to
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_late_win_lead = () => `This refund pays back a buyer who paid twice, so the creators can't be re-paid for it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_late_win_body = () => `Refund the buyer another way, then mark it refunded another way.`
+
+
+/**
  * @param {{ buyer: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -27488,6 +27536,14 @@ export const support_repay_off_later_refunds = () => `Re-pay is off: a later ref
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_repay_off_needs_person = () => `Re-pay is off: this one needs settling by hand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_late_win = () => `Re-pay is off: this refund pays back a buyer who paid twice. Settle it another way.`
 
 
 /**
