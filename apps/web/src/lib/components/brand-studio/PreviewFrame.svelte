@@ -54,6 +54,9 @@
   // loaded state — no state-mutating effect needed to reset the skeleton.
   let loadedSrc = $state<string | null>(null);
   const loaded = $derived(loadedSrc === src);
+  // Counts loads: a link followed inside the frame loads a new document
+  // under the same `src`.
+  let loads = $state(0);
 
   /**
    * Reach into the same-origin framed document and stamp the theme, mirroring
@@ -71,6 +74,7 @@
 
   function handleLoad(): void {
     loadedSrc = src;
+    loads += 1;
     applyPreviewTheme();
     const win = frameEl?.contentWindow;
     if (win && frameEl) {
@@ -86,6 +90,37 @@
   $effect(() => {
     void theme;
     if (loaded) applyPreviewTheme();
+  });
+
+  // The framed page's own background, on this iframe too. A dialog in the
+  // preview holds the framed page still and keeps its scrollbar's gutter,
+  // and Chromium leaves a frame's gutter unpainted: the strip beside the
+  // dialog showed this element's background, the studio's surface, in
+  // whichever theme the preview was in (Codex-q6qjb). The page keeps its
+  // <html> background matched to its own (followLayoutBackground), and
+  // this follows <html>.
+  $effect(() => {
+    void loads;
+    const el = frameEl;
+    const view = el?.contentWindow;
+    const root = el?.contentDocument?.documentElement;
+    if (!el || !view || !root) return;
+    const paint = () => {
+      const bg = view.getComputedStyle(root).backgroundColor;
+      if (bg && bg !== 'rgba(0, 0, 0, 0)') el.style.backgroundColor = bg;
+      else el.style.removeProperty('background-color');
+    };
+    // The frame's own observer, which goes with the document it watches.
+    const observer = new (view as Window & typeof globalThis).MutationObserver(paint);
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter: ['style', 'data-theme', 'class'],
+    });
+    paint();
+    return () => {
+      observer.disconnect();
+      el.style.removeProperty('background-color');
+    };
   });
 </script>
 

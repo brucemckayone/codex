@@ -35,7 +35,7 @@
   import { followingStore } from '$lib/client/following.svelte';
   import { getFollowingStatus } from '$lib/remote/org.remote';
   import * as m from '$paraglide/messages';
-  import { themeState } from '$lib/theme.svelte';
+  import { followLayoutBackground } from '$lib/utils/root-background';
 
   interface Props {
     data: LayoutData;
@@ -326,34 +326,18 @@
 
   // Sync org background to html element so scrollbar gutter area matches.
   // Without this, the scrollbar track shows the root light background on dark org brands.
-  // Tracks brandBackground (from server data), brandEditor.pending?.backgroundColor
-  // (live editor changes), the theme (a toggle flips --color-background under the
-  // same brand) and the brand editor's preview theme (data-editing-theme on
-  // .org-layout flips it too) so it re-runs when any of them changes.
+  // followLayoutBackground takes the copy again whenever the DOM under it
+  // changes: the theme on <html> (a toggle, or PreviewFrame's stamp on a
+  // framed page), the editor's preview theme and edits on .org-layout, and a
+  // studio/public class flip. This effect re-runs it when the brand or the
+  // editor's pending colour changes.
   $effect(() => {
     if (!browser) return;
-    // Track reactive deps: server brand bg + editor pending bg + theme + preview theme
-    const serverBg = brandBackground;
-    const editorBg = brandEditor.pending?.backgroundColor;
-    void themeState.theme;
-    void brandEditor.editingTheme;
-    // Read the actual computed color after CSS derivation
-    const layout = document.querySelector('.org-layout');
+    void brandBackground;
+    void brandEditor.pending?.backgroundColor;
+    const layout = document.querySelector<HTMLElement>('.org-layout');
     if (!layout) return;
-    // Use requestAnimationFrame to ensure CSS has been applied
-    const raf = requestAnimationFrame(() => {
-      const bg = getComputedStyle(layout).backgroundColor;
-      if (bg && bg !== 'rgba(0, 0, 0, 0)') {
-        document.documentElement.style.backgroundColor = bg;
-      }
-    });
-    // Suppress unused var warnings — these are tracked for reactivity
-    void serverBg;
-    void editorBg;
-    return () => {
-      cancelAnimationFrame(raf);
-      document.documentElement.style.removeProperty('background-color');
-    };
+    return followLayoutBackground(layout);
   });
 
   onMount(() => {

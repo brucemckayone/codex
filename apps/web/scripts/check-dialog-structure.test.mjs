@@ -12,17 +12,35 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { ALLOWLIST, collectViolations, LENGTH_UNITS, MATH_FUNCTIONS, PART_DATA_ATTRS } from './check-dialog-structure.mjs';
+import {
+  ALLOWLIST,
+  collectViolations,
+  LENGTH_UNITS,
+  MATH_FUNCTIONS,
+  PART_DATA_ATTRS,
+} from './check-dialog-structure.mjs';
 
-const GATE = fileURLToPath(new URL('./check-dialog-structure.mjs', import.meta.url));
+const GATE = fileURLToPath(
+  new URL('./check-dialog-structure.mjs', import.meta.url)
+);
 // The real parts, for the tests that pin the gate's tables to them.
-const REAL_DIALOG_DIR = fileURLToPath(new URL('../src/lib/components/ui/Dialog/', import.meta.url));
+const REAL_DIALOG_DIR = fileURLToPath(
+  new URL('../src/lib/components/ui/Dialog/', import.meta.url)
+);
 
 const DIALOG_INDEX = `import Root from './Dialog.svelte';
 import Body from './DialogBody.svelte';
@@ -58,7 +76,11 @@ function writeFixture(relPath, content) {
 }
 
 function scan(allowlist = []) {
-  return collectViolations({ srcRoot: join(root, 'src'), cwd: root, allowlist });
+  return collectViolations({
+    srcRoot: join(root, 'src'),
+    cwd: root,
+    allowlist,
+  });
 }
 
 /** `rule@line` for each violation, the shape the assertions compare. */
@@ -115,7 +137,10 @@ test('PASSES the shared shapes: Header/Body/Footer, Dialog.Form, a drawer, block
 
   const result = scan();
   assert.deepEqual(summary(result), []);
-  assert.ok(result.filesScanned >= 2, 'sanity: the scan must visit the fixture files');
+  assert.ok(
+    result.filesScanned >= 2,
+    'sanity: the scan must visit the fixture files'
+  );
 });
 
 // --- content-child / form-child -----------------------------------------
@@ -139,7 +164,10 @@ test('CATCHES the tier-form shape: a raw <form> between Content and Body', () =>
   const result = scan();
   assert.deepEqual(summary(result), ['content-child@8']);
   assert.equal(result.violations[0].file, 'src/routes/tier/+page.svelte');
-  assert.match(result.violations[0].detail, /<form> is a direct child of Dialog\.Content/);
+  assert.match(
+    result.violations[0].detail,
+    /<form> is a direct child of Dialog\.Content/
+  );
 });
 
 test('CATCHES a Dialog.Form whose direct child is not Body or Footer', () => {
@@ -218,7 +246,10 @@ test('CATCHES a Dialog.Body outside Content and Form: in Header, Toolbar, Body, 
 {/snippet}
 `
   );
-  writeFixture('src/lib/components/BodyOnly.svelte', `${IMPORT}<Dialog.Body>a Body with no panel</Dialog.Body>\n`);
+  writeFixture(
+    'src/lib/components/BodyOnly.svelte',
+    `${IMPORT}<Dialog.Body>a Body with no panel</Dialog.Body>\n`
+  );
 
   const result = scan();
   assert.deepEqual(
@@ -232,7 +263,10 @@ test('CATCHES a Dialog.Body outside Content and Form: in Header, Toolbar, Body, 
       'src/routes/place/+page.svelte body-place@9',
     ]
   );
-  assert.match(result.violations.find((v) => v.line === 8).detail, /sits in Dialog\.Toolbar; only Dialog\.Content or Dialog\.Form/);
+  assert.match(
+    result.violations.find((v) => v.line === 8).detail,
+    /sits in Dialog\.Toolbar; only Dialog\.Content or Dialog\.Form/
+  );
 });
 
 test('ALLOWS a Body in Content or Form, through blocks, and from a local snippet rendered there', () => {
@@ -283,7 +317,10 @@ test('CATCHES a Toolbar in a panel with no Body, in Content or in its Form', () 
 
   const result = scan();
   assert.deepEqual(summary(result), ['toolbar-body@8', 'toolbar-body@14']);
-  assert.match(result.violations[0].detail, /never scrolls \(flex: none\) and this panel has no Dialog\.Body/);
+  assert.match(
+    result.violations[0].detail,
+    /never scrolls \(flex: none\) and this panel has no Dialog\.Body/
+  );
 });
 
 test('ALLOWS a Toolbar beside a Body, in Content or in its Form', () => {
@@ -321,7 +358,10 @@ test('CATCHES a Dialog.Form outside Content: in Header, Toolbar, Body, Footer, a
 </Dialog.Root>
 `
   );
-  writeFixture('src/lib/components/FormOnly.svelte', `${IMPORT}<Dialog.Form><Dialog.Body>x</Dialog.Body></Dialog.Form>\n`);
+  writeFixture(
+    'src/lib/components/FormOnly.svelte',
+    `${IMPORT}<Dialog.Form><Dialog.Body>x</Dialog.Body></Dialog.Form>\n`
+  );
 
   const result = scan();
   assert.deepEqual(
@@ -335,7 +375,10 @@ test('CATCHES a Dialog.Form outside Content: in Header, Toolbar, Body, Footer, a
       'src/routes/form-place/+page.svelte form-place@9',
     ]
   );
-  assert.match(result.violations.find((v) => v.line === 7).detail, /<Dialog\.Form> sits in Dialog\.Header; only Dialog\.Content may hold it/);
+  assert.match(
+    result.violations.find((v) => v.line === 7).detail,
+    /<Dialog\.Form> sits in Dialog\.Header; only Dialog\.Content may hold it/
+  );
 });
 
 test('ALLOWS a Form in Content, through blocks, and from a local snippet rendered there', () => {
@@ -373,8 +416,16 @@ test('CATCHES a rendered snippet whose name is bound again: a second snippet, a 
 
   const result = scan();
   // Each shadow resolves, by name, to a snippet that passes; only the name rule sees them.
-  assert.deepEqual(summary(result), ['snippet-name@5', 'snippet-name@7', 'snippet-name@8', 'snippet-name@10']);
-  assert.match(result.violations[0].detail, /\{#snippet body\(\)\} shares its name with another binding/);
+  assert.deepEqual(summary(result), [
+    'snippet-name@5',
+    'snippet-name@7',
+    'snippet-name@8',
+    'snippet-name@10',
+  ]);
+  assert.match(
+    result.violations[0].detail,
+    /\{#snippet body\(\)\} shares its name with another binding/
+  );
 });
 
 test('ALLOWS unique snippet names, a shadowed name never {@render}ed, and a file without the Dialog', () => {
@@ -393,7 +444,10 @@ test('ALLOWS unique snippet names, a shadowed name never {@render}ed, and a file
 <Dialog.Root><Dialog.Content>{@render body()}</Dialog.Content></Dialog.Root>
 `
   );
-  writeFixture('src/routes/no-dialog/+page.svelte', '{#snippet a()}x{/snippet}\n<div>{#snippet a()}y{/snippet}{@render a()}</div>\n');
+  writeFixture(
+    'src/routes/no-dialog/+page.svelte',
+    '{#snippet a()}x{/snippet}\n<div>{#snippet a()}y{/snippet}{@render a()}</div>\n'
+  );
   // Type-only imports bind no part, so this file uses no Dialog either.
   writeFixture(
     'src/routes/types-only/+page.svelte',
@@ -425,10 +479,13 @@ test("CATCHES what a <svelte:boundary>'s failed or pending snippet renders in it
   const result = scan();
   // The raw div, at its snippet; then the pending render this check can't follow.
   assert.deepEqual(summary(result), ['content-child@5', 'content-child@8']);
-  assert.match(result.violations[1].detail, /renders what this check cannot see/);
+  assert.match(
+    result.violations[1].detail,
+    /renders what this check cannot see/
+  );
 });
 
-test("ALLOWS a boundary whose failed snippet renders a Body, by shorthand or inline", () => {
+test('ALLOWS a boundary whose failed snippet renders a Body, by shorthand or inline', () => {
   writeFixture(
     'src/routes/boundary-ok/+page.svelte',
     `${IMPORT}
@@ -462,7 +519,11 @@ test('RESOLVES another namespace alias, a named import, a part file and a relati
 `
   );
 
-  assert.deepEqual(summary(scan()), ['content-child@7', 'content-child@8', 'content-child@9']);
+  assert.deepEqual(summary(scan()), [
+    'content-child@7',
+    'content-child@8',
+    'content-child@9',
+  ]);
 });
 
 test('FAILS LOUDLY on a script-side alias and on a re-export of the module', () => {
@@ -476,7 +537,10 @@ test('FAILS LOUDLY on a script-side alias and on a re-export of the module', () 
 <Panel><div>hidden from a tag-only check</div></Panel>
 `
   );
-  writeFixture('src/lib/barrel.ts', "export * as Dialog from '$lib/components/ui/Dialog';\n");
+  writeFixture(
+    'src/lib/barrel.ts',
+    "export * as Dialog from '$lib/components/ui/Dialog';\n"
+  );
 
   const result = scan();
   assert.deepEqual(
@@ -499,11 +563,19 @@ test('CATCHES every value read of a Dialog binding, <svelte:component>, a traili
 <Thing part={Dialog} />
 `
   );
-  writeFixture('src/lib/kit.ts', "import * as D from './components/ui/Dialog';\nexport { D as Dialog };\n");
-  writeFixture('src/lib/lazy.js', "export const load = () => import('$lib/components/ui/Dialog/DialogBody.svelte');\n");
+  writeFixture(
+    'src/lib/kit.ts',
+    "import * as D from './components/ui/Dialog';\nexport { D as Dialog };\n"
+  );
+  writeFixture(
+    'src/lib/lazy.js',
+    "export const load = () => import('$lib/components/ui/Dialog/DialogBody.svelte');\n"
+  );
 
   assert.deepEqual(
-    scan().violations.map((v) => `${v.file} ${v.rule}@${v.line}`).sort(),
+    scan()
+      .violations.map((v) => `${v.file} ${v.rule}@${v.line}`)
+      .sort(),
     [
       'src/lib/kit.ts alias@1',
       'src/lib/lazy.js alias@1',
@@ -552,13 +624,19 @@ test('ALLOWS a type, a member or key of the same name, tag use, type-only import
     "import * as Dialog from '$lib/components/ui/Dialog';\nHTMLDialogElement.prototype.showModal = () => {};\nexpect(Dialog.Content).toBeDefined();\n";
   writeFixture('src/lib/components/studio/x.svelte.test.ts', testSource);
   writeFixture('src/lib/components/studio/y.spec.ts', testSource);
-  writeFixture('src/lib/other.ts', "import { x } from '$lib/components/ui/Card';\nexport const ui = '$lib/components/ui/Dialog';\n");
+  writeFixture(
+    'src/lib/other.ts',
+    "import { x } from '$lib/components/ui/Card';\nexport const ui = '$lib/components/ui/Dialog';\n"
+  );
 
   assert.deepEqual(summary(scan()), []);
 });
 
 test('CATCHES a ui/ barrel, { default as X }, import() in a .svelte, .mjs/.mts/.cjs/.cts files, and reads under as/satisfies/!', () => {
-  writeFixture('src/lib/components/ui/Feedback/parts.ts', "import * as Dialog from '../Dialog';\nexport { Dialog };\n");
+  writeFixture(
+    'src/lib/components/ui/Feedback/parts.ts',
+    "import * as Dialog from '../Dialog';\nexport { Dialog };\n"
+  );
   writeFixture(
     'src/routes/default-as/+page.svelte',
     `<script lang="ts">
@@ -580,10 +658,22 @@ test('CATCHES a ui/ barrel, { default as X }, import() in a .svelte, .mjs/.mts/.
 </script>
 `
   );
-  writeFixture('src/lib/a.mjs', "export * as Dialog from '$lib/components/ui/Dialog';\n");
-  writeFixture('src/lib/b.mts', "import { Body } from '$lib/components/ui/Dialog';\nexport { Body };\n");
-  writeFixture('src/lib/c.cjs', 'const open = (d) => d.showModal();\nmodule.exports = { open };\n');
-  writeFixture('src/lib/d.cts', "import * as Melt from '@melt-ui/svelte';\nexport const d = Melt.createDialog();\n");
+  writeFixture(
+    'src/lib/a.mjs',
+    "export * as Dialog from '$lib/components/ui/Dialog';\n"
+  );
+  writeFixture(
+    'src/lib/b.mts',
+    "import { Body } from '$lib/components/ui/Dialog';\nexport { Body };\n"
+  );
+  writeFixture(
+    'src/lib/c.cjs',
+    'const open = (d) => d.showModal();\nmodule.exports = { open };\n'
+  );
+  writeFixture(
+    'src/lib/d.cts',
+    "import * as Melt from '@melt-ui/svelte';\nexport const d = Melt.createDialog();\n"
+  );
 
   const result = scan();
   assert.deepEqual(
@@ -603,22 +693,34 @@ test('CATCHES a ui/ barrel, { default as X }, import() in a .svelte, .mjs/.mts/.
       'src/routes/ts-reads/+page.svelte alias@5',
     ]
   );
-  assert.match(result.violations.find((v) => v.file === 'src/lib/a.mjs').detail, /import it from \$lib\/components\/ui\/Dialog directly/);
+  assert.match(
+    result.violations.find((v) => v.file === 'src/lib/a.mjs').detail,
+    /import it from \$lib\/components\/ui\/Dialog directly/
+  );
 });
 
 test('FAILS LOUDLY on a .svelte file that does not parse', () => {
   writeFixture('src/routes/broken/+page.svelte', `${IMPORT}<div>{#if}</div>\n`);
 
-  assert.deepEqual(summary(scan()).map((s) => s.split('@')[0]), ['parse']);
+  assert.deepEqual(
+    summary(scan()).map((s) => s.split('@')[0]),
+    ['parse']
+  );
 });
 
 test('FAILS LOUDLY on a .css file that does not parse, at its own line', () => {
-  writeFixture('src/lib/styles/broken.css', '.a { color: red; }\n}\n.dialog-body { flex: none; }\n');
+  writeFixture(
+    'src/lib/styles/broken.css',
+    '.a { color: red; }\n}\n.dialog-body { flex: none; }\n'
+  );
 
   const result = scan();
   assert.deepEqual(summary(result), ['parse@2']);
   // Svelte's parser is stricter than browsers (`:lang("en")`): say whose rule it is.
-  assert.match(result.violations[0].detail, /svelte's CSS parser rejects this .*rewrite the construct/);
+  assert.match(
+    result.violations[0].detail,
+    /svelte's CSS parser rejects this .*rewrite the construct/
+  );
 });
 
 test('THROWS when the Dialog barrel is missing, rather than scanning blind', () => {
@@ -648,7 +750,10 @@ test('CATCHES :global() styling of the Dialog outside ui/Dialog/, in every form'
 </style>
 `
   );
-  writeFixture('src/lib/styles/app.css', '/* .dialog-content in a comment */\n.dialog-overlay { opacity: 0; }\n');
+  writeFixture(
+    'src/lib/styles/app.css',
+    '/* .dialog-content in a comment */\n.dialog-overlay { opacity: 0; }\n'
+  );
 
   const result = scan();
   assert.deepEqual(
@@ -663,7 +768,7 @@ test('CATCHES :global() styling of the Dialog outside ui/Dialog/, in every form'
   );
 });
 
-test('ALLOWS spacing on .dialog-form plus the page\'s own class', () => {
+test("ALLOWS spacing on .dialog-form plus the page's own class", () => {
   writeFixture(
     'src/routes/tier/+page.svelte',
     `<p>x</p>
@@ -696,7 +801,10 @@ test('CATCHES any property on .dialog-form.<own-class> other than gap, padding a
 </style>
 `
   );
-  writeFixture('src/lib/styles/forms.css', '.dialog-form.y { flex-direction: row; }\n');
+  writeFixture(
+    'src/lib/styles/forms.css',
+    '.dialog-form.y { flex-direction: row; }\n'
+  );
 
   const result = scan();
   assert.deepEqual(
@@ -710,9 +818,15 @@ test('CATCHES any property on .dialog-form.<own-class> other than gap, padding a
       'src/routes/tier/+page.svelte global-style@8',
     ]
   );
-  assert.match(result.violations[1].detail, /sets display on \.dialog-form; only gap, padding and margin may change/);
+  assert.match(
+    result.violations[1].detail,
+    /sets display on \.dialog-form; only gap, padding and margin may change/
+  );
   assert.match(result.violations[2].detail, /sets overflow-y, min-height on/);
-  assert.match(result.violations[4].detail, /sets position, max-height, height on/);
+  assert.match(
+    result.violations[4].detail,
+    /sets position, max-height, height on/
+  );
 });
 
 test('CATCHES a spacing value on .dialog-form.<own-class> other than 0, a space token or a calc() of those', () => {
@@ -728,7 +842,10 @@ test('CATCHES a spacing value on .dialog-form.<own-class> other than 0, a space 
 </style>
 `
   );
-  writeFixture('src/lib/styles/forms.css', '.dialog-form.x { margin-top: var(--other-token); }\n');
+  writeFixture(
+    'src/lib/styles/forms.css',
+    '.dialog-form.x { margin-top: var(--other-token); }\n'
+  );
 
   const result = scan();
   assert.deepEqual(
@@ -778,7 +895,10 @@ test('CATCHES .dialog-form styled bare, inside a combinator, or around a descend
     ]
   );
   for (const v of result.violations) {
-    assert.match(v.detail, /style a Dialog\.Form only as \.dialog-form\.<your-class>/);
+    assert.match(
+      v.detail,
+      /style a Dialog\.Form only as \.dialog-form\.<your-class>/
+    );
   }
 });
 
@@ -829,8 +949,14 @@ test("CATCHES the Dialog's attributes in a global rule, and global rules nested 
       'src/routes/attrs/+page.svelte global-style@9',
     ]
   );
-  assert.match(result.violations.find((v) => v.line === 5).detail, /through \[role='dialog'\]/);
-  assert.match(result.violations.find((v) => v.line === 12).detail, /sets display on \.dialog-form/);
+  assert.match(
+    result.violations.find((v) => v.line === 5).detail,
+    /through \[role='dialog'\]/
+  );
+  assert.match(
+    result.violations.find((v) => v.line === 12).detail,
+    /sets display on \.dialog-form/
+  );
 });
 
 test("ALLOWS other components' data attributes, and nested spacing on .dialog-form.<own>", () => {
@@ -851,7 +977,10 @@ test("ALLOWS other components' data attributes, and nested spacing on .dialog-fo
 </style>
 `
   );
-  writeFixture('src/lib/styles/page.css', ".card[data-layout='grid'] {\n  display: grid;\n  &:hover { color: red; }\n}\n");
+  writeFixture(
+    'src/lib/styles/page.css',
+    ".card[data-layout='grid'] {\n  display: grid;\n  &:hover { color: red; }\n}\n"
+  );
 
   assert.deepEqual(summary(scan()), []);
 });
@@ -914,8 +1043,13 @@ test('CATCHES the Dialog reached through a [class] test, an @scope prelude, a CS
       'src/routes/m3/+page.svelte global-style@8',
     ]
   );
-  const at = (file, line) => result.violations.find((v) => v.file.endsWith(file) && v.line === line).detail;
-  assert.match(at('m3.css', 2), /restyles the Dialog's \.dialog-content; style your own element inside the part/);
+  const at = (file, line) =>
+    result.violations.find((v) => v.file.endsWith(file) && v.line === line)
+      .detail;
+  assert.match(
+    at('m3.css', 2),
+    /restyles the Dialog's \.dialog-content; style your own element inside the part/
+  );
   // `:scope` reads as the scope's root.
   assert.match(at('m3.css', 5), /^\.dialog-body:not\(#_\) restyles/);
   assert.match(at('m3.css', 11), /restyles the Dialog's \.dialog-footer/);
@@ -950,14 +1084,24 @@ test("CATCHES a component's svelte-<hash> scoping class in a global selector, in
 </style>
 `
   );
-  writeFixture('src/lib/styles/hash.css', '.svelte-1vhe744 > div { overflow: visible; }\n');
+  writeFixture(
+    'src/lib/styles/hash.css',
+    '.svelte-1vhe744 > div { overflow: visible; }\n'
+  );
 
   const result = scan();
   assert.deepEqual(
     result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
-    ['src/lib/styles/hash.css global-style@1', 'src/routes/hash/+page.svelte global-style@3', 'src/routes/hash/+page.svelte global-style@4']
+    [
+      'src/lib/styles/hash.css global-style@1',
+      'src/routes/hash/+page.svelte global-style@3',
+      'src/routes/hash/+page.svelte global-style@4',
+    ]
   );
-  assert.match(result.violations[1].detail, /names \.svelte-1vhe744, another component's scoping class/);
+  assert.match(
+    result.violations[1].detail,
+    /names \.svelte-1vhe744, another component's scoping class/
+  );
 });
 
 test('ALLOWS a class that only contains svelte-, a hyphenated svelte- name, and the hash inside ui/Dialog/', () => {
@@ -970,7 +1114,10 @@ test('ALLOWS a class that only contains svelte-, a hyphenated svelte- name, and 
 </style>
 `
   );
-  writeFixture('src/lib/components/ui/Dialog/DialogBody.svelte', '<div class="dialog-body"><slot /></div>\n<style>\n  :global(.svelte-1vhe744) { flex: none; }\n</style>\n');
+  writeFixture(
+    'src/lib/components/ui/Dialog/DialogBody.svelte',
+    '<div class="dialog-body"><slot /></div>\n<style>\n  :global(.svelte-1vhe744) { flex: none; }\n</style>\n'
+  );
 
   assert.deepEqual(summary(scan()), []);
 });
@@ -1013,8 +1160,14 @@ test('CATCHES a class a page hands a Dialog part, restyled through :global', () 
     'part-class@19',
     'part-class@22',
   ]);
-  assert.match(result.violations[1].detail, /restyles Dialog\.Content through its class \.my-drawer/);
-  assert.match(result.violations[3].detail, /Dialog\.Body through its class \.is-narrow/);
+  assert.match(
+    result.violations[1].detail,
+    /restyles Dialog\.Content through its class \.my-drawer/
+  );
+  assert.match(
+    result.violations[3].detail,
+    /Dialog\.Body through its class \.is-narrow/
+  );
   // A same-file hit names the page's own fix, and Footer's own prop.
   assert.match(
     result.violations[4].detail,
@@ -1075,10 +1228,25 @@ test('CATCHES a walk from a part class to an element no class names, and class:/
   );
 
   const result = scan();
-  assert.deepEqual(summary(result), ['part-class@13', 'part-class@14', 'part-class@15', 'part-class@16', 'part-class@17']);
-  assert.match(result.violations[0].detail, /walks from Dialog\.Content's class \.panel to an element no class names/);
-  assert.match(result.violations[1].detail, /inside Dialog\.Toolbar \(a part takes props, not utility classes; Toolbar's direction="row" \| "column"\)/);
-  assert.match(result.violations[3].detail, /Dialog\.Body through its class \.tall/);
+  assert.deepEqual(summary(result), [
+    'part-class@13',
+    'part-class@14',
+    'part-class@15',
+    'part-class@16',
+    'part-class@17',
+  ]);
+  assert.match(
+    result.violations[0].detail,
+    /walks from Dialog\.Content's class \.panel to an element no class names/
+  );
+  assert.match(
+    result.violations[1].detail,
+    /inside Dialog\.Toolbar \(a part takes props, not utility classes; Toolbar's direction="row" \| "column"\)/
+  );
+  assert.match(
+    result.violations[3].detail,
+    /Dialog\.Body through its class \.tall/
+  );
 });
 
 test('ALLOWS a walk from a part class to a classed element, a scoped subject, and a walk from a page class', () => {
@@ -1102,7 +1270,7 @@ test('ALLOWS a walk from a part class to a classed element, a scoped subject, an
   assert.deepEqual(summary(scan()), []);
 });
 
-test("CATCHES an expression-valued handle under ANY value test, a div/form/* subject, and a sibling walk from any part", () => {
+test('CATCHES an expression-valued handle under ANY value test, a div/form/* subject, and a sibling walk from any part', () => {
   writeFixture(
     'src/routes/state/+page.svelte',
     `${IMPORT}
@@ -1142,9 +1310,18 @@ test("CATCHES an expression-valued handle under ANY value test, a div/form/* sub
     'part-class@22',
     'part-class@23',
   ]);
-  assert.match(result.violations[0].detail, /restyles Dialog\.Body through its attribute \[data-x\]/);
-  assert.match(result.violations[3].detail, /walks from Dialog\.Header's class \.my-head to an element no class names/);
-  assert.match(result.violations[6].detail, /walks from Dialog\.Form's class \.my-form/);
+  assert.match(
+    result.violations[0].detail,
+    /restyles Dialog\.Body through its attribute \[data-x\]/
+  );
+  assert.match(
+    result.violations[3].detail,
+    /walks from Dialog\.Header's class \.my-head to an element no class names/
+  );
+  assert.match(
+    result.violations[6].detail,
+    /walks from Dialog\.Form's class \.my-form/
+  );
 });
 
 test('ALLOWS a subject of an element type no part renders, and a child or descendant walk from a Body, Header, Footer or Toolbar', () => {
@@ -1209,16 +1386,32 @@ ${rules}
 test("CATCHES a class a part's class expression can result in: a branch, an object's key, &&'s right side", () => {
   writeFixture(
     'src/routes/classes/+page.svelte',
-    CLASS_EXPR_PAGE(['  :global(.is-list) { flex: none; }', '  :global(.roomy) { flex: none; }', '  :global(.toned) { flex: none; }'].join('\n'))
+    CLASS_EXPR_PAGE(
+      [
+        '  :global(.is-list) { flex: none; }',
+        '  :global(.roomy) { flex: none; }',
+        '  :global(.toned) { flex: none; }',
+      ].join('\n')
+    )
   );
 
-  assert.deepEqual(summary(scan()), ['part-class@14', 'part-class@15', 'part-class@16']);
+  assert.deepEqual(summary(scan()), [
+    'part-class@14',
+    'part-class@15',
+    'part-class@16',
+  ]);
 });
 
 test("ALLOWS a literal no part's class can result in: a conditional's test, an object's value, &&'s left side", () => {
   writeFixture(
     'src/routes/classes/+page.svelte',
-    CLASS_EXPR_PAGE(['  :global(.grid) { display: grid; }', '  :global(.flex) { display: flex; }', '  :global(.warm) { color: red; }'].join('\n'))
+    CLASS_EXPR_PAGE(
+      [
+        '  :global(.grid) { display: grid; }',
+        '  :global(.flex) { display: flex; }',
+        '  :global(.warm) { color: red; }',
+      ].join('\n')
+    )
   );
 
   assert.deepEqual(summary(scan()), []);
@@ -1296,19 +1489,38 @@ test("CATCHES a part's class, id or attribute restyled from ANOTHER file, and na
     /^Dialog\.Body's class \.studio-drawer__body is restyled from src\/lib\/styles\/studio\.css:1 \(.*\); put it on your own element inside Dialog\.Body .*, or rename it$/
   );
   // An attribute can't be renamed out of the rule's way; an id can.
-  const attrEcho = echoes.find((v) => v.detail.includes('studio.css:3 ')).detail;
-  assert.match(attrEcho, /\(a part takes props, not hooks for page CSS; Content's props/);
+  const attrEcho = echoes.find((v) =>
+    v.detail.includes('studio.css:3 ')
+  ).detail;
+  assert.match(
+    attrEcho,
+    /\(a part takes props, not hooks for page CSS; Content's props/
+  );
   assert.doesNotMatch(attrEcho, /rename/);
-  assert.match(echoes.find((v) => v.detail.includes('studio.css:2 ')).detail, /not hooks for page CSS\), or rename it$/);
-  const at = (file, line) => result.violations.find((v) => v.file.endsWith(file) && v.line === line).detail;
+  assert.match(
+    echoes.find((v) => v.detail.includes('studio.css:2 ')).detail,
+    /not hooks for page CSS\), or rename it$/
+  );
+  const at = (file, line) =>
+    result.violations.find((v) => v.file.endsWith(file) && v.line === line)
+      .detail;
   assert.match(
     at('studio.css', 1),
     /restyles Dialog\.Body through its class \.studio-drawer__body \(src\/routes\/tier\/\+page\.svelte:7 hands it to Dialog\.Body\); in src\/routes\/tier\/\+page\.svelte, put it on your own element inside Dialog\.Body .*, or here give this selector's subject a class of its own$/
   );
   assert.match(at('studio.css', 2), /through its id #tier-body/);
-  assert.match(at('studio.css', 3), /Dialog\.Content through its attribute \[data-testid\]/);
-  assert.match(at('studio.css', 5), /walks from Dialog\.Content's class \.tier-panel .* to an element no class names/);
-  assert.match(at('studio.css', 6), /walks from Dialog\.Body's class \.studio-drawer__body/);
+  assert.match(
+    at('studio.css', 3),
+    /Dialog\.Content through its attribute \[data-testid\]/
+  );
+  assert.match(
+    at('studio.css', 5),
+    /walks from Dialog\.Content's class \.tier-panel .* to an element no class names/
+  );
+  assert.match(
+    at('studio.css', 6),
+    /walks from Dialog\.Body's class \.studio-drawer__body/
+  );
 });
 
 test("ALLOWS a part's handle as an ancestor of a classed element, another value, an own class, and a SCOPED compound naming it", () => {
@@ -1371,17 +1583,33 @@ test('CATCHES an id an expression builds, under any test its leading text can me
 
   const result = scan();
   assert.deepEqual(
-    result.violations.filter((v) => v.file.endsWith('tier.css')).map((v) => `${v.rule}@${v.line}`),
-    ['part-class@1', 'part-class@2', 'part-class@3', 'part-class@4', 'part-class@5']
+    result.violations
+      .filter((v) => v.file.endsWith('tier.css'))
+      .map((v) => `${v.rule}@${v.line}`),
+    [
+      'part-class@1',
+      'part-class@2',
+      'part-class@3',
+      'part-class@4',
+      'part-class@5',
+    ]
   );
-  assert.match(result.violations[0].detail, /restyles Dialog\.Body through its id tier-body-…/);
+  assert.match(
+    result.violations[0].detail,
+    /restyles Dialog\.Body through its id tier-body-…/
+  );
 });
 
 test('ALLOWS an id test that leading text can never meet, and another id', () => {
   writeFixture('src/routes/tier/+page.svelte', BUILT_ID_PAGE);
   writeFixture(
     'src/lib/styles/tier.css',
-    ["[id^='tier-head-'] { flex: none; }", '#tier-head-3 { flex: none; }', "[id='tier-body'] { flex: none; }", ''].join('\n')
+    [
+      "[id^='tier-head-'] { flex: none; }",
+      '#tier-head-3 { flex: none; }',
+      "[id='tier-body'] { flex: none; }",
+      '',
+    ].join('\n')
   );
 
   assert.deepEqual(summary(scan()), []);
@@ -1430,10 +1658,15 @@ test('CATCHES an id known by its trailing text, and an id of literals or same-fi
 
   const result = scan();
   assert.deepEqual(
-    result.violations.filter((v) => v.file.endsWith('layout.css')).map((v) => `${v.rule}@${v.line}`),
+    result.violations
+      .filter((v) => v.file.endsWith('layout.css'))
+      .map((v) => `${v.rule}@${v.line}`),
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((line) => `part-class@${line}`)
   );
-  assert.match(result.violations[0].detail, /restyles Dialog\.Body through its id …-results/);
+  assert.match(
+    result.violations[0].detail,
+    /restyles Dialog\.Body through its id …-results/
+  );
 });
 
 test('CATCHES an id built inside one expression: a template, a string +, a const of either, its prefix side, under as', () => {
@@ -1456,7 +1689,7 @@ test('CATCHES an id built inside one expression: a template, a string +, a const
   writeFixture(
     'src/lib/styles/built.css',
     [
-      "[id$='-alpha'] { overflow: visible; }",
+      '#a-alpha { overflow: visible; }',
       '#tier-bravo { flex: none; }',
       '#a-kilo { flex: none; }',
       '#india-1 { flex: none; }',
@@ -1467,8 +1700,59 @@ test('CATCHES an id built inside one expression: a template, a string +, a const
 
   const result = scan();
   assert.deepEqual(
-    result.violations.filter((v) => v.file.endsWith('built.css')).map((v) => `${v.rule}@${v.line}`),
+    result.violations
+      .filter((v) => v.file.endsWith('built.css'))
+      .map((v) => `${v.rule}@${v.line}`),
     [1, 2, 3, 4, 5].map((line) => `part-class@${line}`)
+  );
+});
+
+test('CATCHES an id built through a const or $derived +, a chain of +, a $derived const, and each branch of a choice', () => {
+  // Review c7 (G7 LOW 3). Only #-tests, so no handle answers another's line.
+  writeFixture(
+    'src/routes/chain/+page.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { tier, kind, open }: { tier: { id: string }; kind: string; open: boolean } = $props();
+  const uid = $props.id();
+  const PREFIX = 'kilo-';
+  const NOV = $derived('nov-');
+  const MIKE_ID = $derived(\`\${uid}-mike\`);
+</script>
+<Dialog.Root><Dialog.Content><Dialog.Body id={PREFIX + tier.id}>a</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={'lima-' + kind + tier.id}>b</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={MIKE_ID}>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={open ? \`\${uid}-sierra\` : undefined}>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={open ? 'tier-papa' : 'tier-quebec'}>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={kind ?? 'tier-romeo'}>f</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={NOV + tier.id}>g</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={('oscar-' as string) + tier.id}>h</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={(open ? 'tier-tango' : undefined) as string | undefined}>i</Dialog.Body></Dialog.Content></Dialog.Root>
+`
+  );
+  writeFixture(
+    'src/lib/styles/chain.css',
+    [
+      '#kilo-1 { flex: none; }',
+      '#lima-a1 { flex: none; }',
+      '#x-mike { flex: none; }',
+      '#a-sierra { flex: none; }',
+      '#tier-papa { flex: none; }',
+      '#tier-quebec { flex: none; }',
+      '#tier-romeo { flex: none; }',
+      '#nov-1 { flex: none; }',
+      '#oscar-1 { flex: none; }',
+      '#tier-tango { flex: none; }',
+      '',
+    ].join('\n')
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations
+      .filter((v) => v.file.endsWith('chain.css'))
+      .map((v) => `${v.rule}@${v.line}`),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((line) => `part-class@${line}`)
   );
 });
 
@@ -1531,7 +1815,10 @@ test("CATCHES an @scope in a .svelte whose root is a part's handle, through a gl
   const result = scan();
   // Svelte emits an @scope prelude as written, unscoped: its root is global.
   assert.deepEqual(summary(result), ['part-class@11']);
-  assert.match(result.violations[0].detail, /walks from Dialog\.Content's class \.tier-panel to an element no class names/);
+  assert.match(
+    result.violations[0].detail,
+    /walks from Dialog\.Content's class \.tier-panel to an element no class names/
+  );
 });
 
 test("ALLOWS a scoped rule inside a part's @scope, and a global rule inside a page's", () => {
@@ -1557,7 +1844,7 @@ test("ALLOWS a scoped rule inside a part's @scope, and a global rule inside a pa
   assert.deepEqual(summary(scan()), []);
 });
 
-test('CATCHES the Form class without .dialog-form, and today\'s drawer patterns', () => {
+test("CATCHES the Form class without .dialog-form, and today's drawer patterns", () => {
   writeFixture(
     'src/routes/tier/+page.svelte',
     `${IMPORT}
@@ -1643,8 +1930,16 @@ test('CATCHES an inline style or style: directive on a part that draws the panel
   );
 
   const result = scan();
-  assert.deepEqual(summary(result), ['part-style@6', 'part-style@7', 'part-style@8', 'part-style@9']);
-  assert.match(result.violations[2].detail, /<Dialog\.Body> takes an inline style/);
+  assert.deepEqual(summary(result), [
+    'part-style@6',
+    'part-style@7',
+    'part-style@8',
+    'part-style@9',
+  ]);
+  assert.match(
+    result.violations[2].detail,
+    /<Dialog\.Body> takes an inline style/
+  );
 });
 
 test("ALLOWS Content's size props, a styled Title, a styled page element, and the parts' own files", () => {
@@ -1667,22 +1962,26 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
 <Dialog.Root><Dialog.Content maxHeight={\`\${\`40\`}rem\`} maxWidth={\`\${-48}rem\`}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={false} maxWidth={\`min(\${tall ? 90 : 60}dvw, 40rem)\`}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${a ? (b ? 1 : 2) : c ? 3 : 4}\${d ? (e ? 5 : 6) : f ? 7 : 8}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={''} maxWidth={''}><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={0}><Dialog.Body>m</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={tall ? '48rem' : ''} maxWidth={\`\${wide ? '40rem' : ''}\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight=""><Dialog.Body>o</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   // A wrapper inside ui/Dialog/ may forward the props: its own file is the part's.
   writeFixture(
     'src/lib/components/ui/Dialog/DialogHarness.svelte',
-    "<script lang=\"ts\">\n  import * as Dialog from './index';\n  let { maxHeight, maxWidth } = $props();\n</script>\n<Dialog.Root><Dialog.Content {maxHeight} {maxWidth}><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>\n"
+    '<script lang="ts">\n  import * as Dialog from \'./index\';\n  let { maxHeight, maxWidth } = $props();\n</script>\n<Dialog.Root><Dialog.Content {maxHeight} {maxWidth}><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>\n'
   );
   writeFixture(
     'src/lib/components/ui/Dialog/Dialog.stories.svelte',
-    "<script lang=\"ts\">\n  import * as Dialog from './index';\n</script>\n<Dialog.Root><Dialog.Content><Dialog.Body style=\"min-height: 0\" {...{}}>story</Dialog.Body></Dialog.Content></Dialog.Root>\n"
+    '<script lang="ts">\n  import * as Dialog from \'./index\';\n</script>\n<Dialog.Root><Dialog.Content><Dialog.Body style="min-height: 0" {...{}}>story</Dialog.Body></Dialog.Content></Dialog.Root>\n'
   );
 
   assert.deepEqual(summary(scan()), []);
 });
 
-test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a keyword, a unitless number, a bare prop", () => {
+test('CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a keyword, a unitless number, a bare prop', () => {
   writeFixture(
     'src/routes/size/+page.svelte',
     `<script lang="ts">
@@ -1703,6 +2002,8 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
 <Dialog.Root><Dialog.Content maxHeight={\`\${tall ? '' : 40}rem\`}><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight="{tall ? 'auto' : 40}rem"><Dialog.Body>m</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${'' && 48}rem\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={0}><Dialog.Body>o</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${tall ? '' : 'none'}\`}><Dialog.Body>p</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
 
@@ -1723,17 +2024,52 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
     'part-style@16',
     'part-style@17',
     'part-style@18',
+    'part-style@19',
+    'part-style@20',
   ]);
-  assert.match(result.violations[9].detail, /maxHeight="true" is not a CSS length/);
+  assert.match(
+    result.violations[9].detail,
+    /maxHeight="true" is not a CSS length/
+  );
+  // max-width={0} is `max-width: 0`; a template's '' is falsy, so its 'none' is the one shown (review c7, G7 NIT 9).
+  assert.match(
+    result.violations[14].detail,
+    /maxWidth="0" is not a CSS length/
+  );
+  assert.match(
+    result.violations[15].detail,
+    /maxHeight="none" is not a CSS length/
+  );
   // A template's literal choices are each tested, as rendered (review c6, G6-G-L3).
-  assert.match(result.violations[10].detail, /maxHeight="nonerem" is not a CSS length/);
-  assert.match(result.violations[12].detail, /maxHeight="autorem" is not a CSS length/);
-  assert.match(result.violations[0].detail, /<Dialog\.Content> maxHeight="none" is not a CSS length, so the panel loses its cap/);
-  assert.match(result.violations[3].detail, /maxHeight="90" is not a CSS length/);
-  assert.match(result.violations[4].detail, /maxWidth="none" is not a CSS length/);
+  assert.match(
+    result.violations[10].detail,
+    /maxHeight="nonerem" is not a CSS length/
+  );
+  assert.match(
+    result.violations[12].detail,
+    /maxHeight="autorem" is not a CSS length/
+  );
+  assert.match(
+    result.violations[0].detail,
+    /<Dialog\.Content> maxHeight="none" is not a CSS length, so the panel loses its cap/
+  );
+  assert.match(
+    result.violations[3].detail,
+    /maxHeight="90" is not a CSS length/
+  );
+  assert.match(
+    result.violations[4].detail,
+    /maxWidth="none" is not a CSS length/
+  );
   // A template is shown as written, its expressions as {…}.
-  assert.match(result.violations[6].detail, /maxWidth="\{…\}" is not a CSS length/);
-  assert.match(result.violations[7].detail, /maxHeight="\{…\} none" is not a CSS length/);
+  assert.match(
+    result.violations[6].detail,
+    /maxWidth="\{…\}" is not a CSS length/
+  );
+  assert.match(
+    result.violations[7].detail,
+    /maxHeight="\{…\} none" is not a CSS length/
+  );
 });
 
 test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's forwarded prop, a variable, a member, a call", () => {
@@ -1761,20 +2097,26 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
 <Dialog.Root><Dialog.Content maxHeight={\`\${-rows}rem\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${\`\${rows}\`}rem\`}><Dialog.Body>o</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${a ? (b ? 1 : 2) : c ? 3 : 4}\${d ? (e ? 5 : 6) : f ? 7 : 8}\${g ? 1 : 2}rem\`}><Dialog.Body>p</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${a===1?1:a===2?2:a===3?3:a===4?4:a===5?5:a===6?6:a===7?7:a===8?8:a===9?9:a===10?10:a===11?11:a===12?12:a===13?13:a===14?14:a===15?15:a===16?16:17}rem\`}><Dialog.Body>q</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
-  writeFixture('src/routes/big/+page.svelte', `<script lang="ts">\n  import BigDialog from '$lib/components/BigDialog.svelte';\n</script>\n<BigDialog maxHeight="none" />\n`);
+  writeFixture(
+    'src/routes/big/+page.svelte',
+    `<script lang="ts">\n  import BigDialog from '$lib/components/BigDialog.svelte';\n</script>\n<BigDialog maxHeight="none" />\n`
+  );
 
   const result = scan();
   // @12-16: a template whose `${}` is no literal is "NaNrem" while its prop is unset (review c5).
   assert.deepEqual(
     summary(result),
-    // @21: more than 16 combinations of literal choices counts as unknown.
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].map((line) => `part-dynamic@${line}`)
+    // @21-22: more than 16 combinations of literal choices counts as unknown, 17 included.
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map(
+      (line) => `part-dynamic@${line}`
+    )
   );
   assert.match(
     result.violations[0].detail,
-    /<Dialog\.Content>'s maxHeight is not a literal, so nothing in CI can see it is a CSS length .*; write a literal length, or a conditional of literal lengths$/
+    /<Dialog\.Content>'s maxHeight is not a literal, so the source can't show it is a CSS length, and svelte-check sees one only where the CssLength type reaches .*; write a literal length, or a conditional of literal lengths$/
   );
 });
 
@@ -1800,9 +2142,17 @@ test('CATCHES a spread, or a class held in a variable, a prop or an interpolatio
   );
 
   const result = scan();
-  assert.deepEqual(summary(result), ['part-dynamic@9', 'part-dynamic@10', 'part-dynamic@11', 'part-dynamic@12']);
+  assert.deepEqual(summary(result), [
+    'part-dynamic@9',
+    'part-dynamic@10',
+    'part-dynamic@11',
+    'part-dynamic@12',
+  ]);
   assert.match(result.violations[0].detail, /takes a \{\.\.\.spread\}/);
-  assert.match(result.violations[2].detail, /<Dialog\.Body>'s class is not a literal/);
+  assert.match(
+    result.violations[2].detail,
+    /<Dialog\.Body>'s class is not a literal/
+  );
 });
 
 test('ALLOWS literal classes in every spelling, a computed Title class, and a spread on a page element', () => {
@@ -1836,7 +2186,11 @@ test('CATCHES a <style> element in markup and an {@html} that writes one', () =>
 `
   );
 
-  assert.deepEqual(summary(scan()), ['markup-style@1', 'markup-style@2', 'markup-style@3']);
+  assert.deepEqual(summary(scan()), [
+    'markup-style@1',
+    'markup-style@2',
+    'markup-style@3',
+  ]);
 });
 
 test("ALLOWS the component's own <style>, other head tags, and {@html} without a <style>", () => {
@@ -1858,7 +2212,7 @@ test("ALLOWS the component's own <style>, other head tags, and {@html} without a
   assert.deepEqual(summary(scan()), []);
 });
 
-test("CATCHES an {@html} of a same-file const that holds a <style> or a <dialog>", () => {
+test('CATCHES an {@html} of a same-file const that holds a <style> or a <dialog>', () => {
   writeFixture(
     'src/routes/markup/+page.svelte',
     `<script lang="ts">
@@ -1900,14 +2254,25 @@ test('CATCHES a string naming a Dialog class as a selector: in script, a markup 
 <div {@attach (node) => { node.closest('.dialog-content').style.maxHeight = 'none'; }}>x</div>
 `
   );
-  writeFixture('src/lib/dom/find.ts', "export const findBody = () => document.querySelector('.dialog-body');\n");
+  writeFixture(
+    'src/lib/dom/find.ts',
+    "export const findBody = () => document.querySelector('.dialog-body');\n"
+  );
 
   const result = scan();
   assert.deepEqual(
     result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
-    ['src/lib/dom/find.ts script-select@1', 'src/routes/script/+page.svelte script-select@2', 'src/routes/script/+page.svelte script-select@3', 'src/routes/script/+page.svelte script-select@6']
+    [
+      'src/lib/dom/find.ts script-select@1',
+      'src/routes/script/+page.svelte script-select@2',
+      'src/routes/script/+page.svelte script-select@3',
+      'src/routes/script/+page.svelte script-select@6',
+    ]
   );
-  assert.match(result.violations[3].detail, /a string names the Dialog's \.dialog-content as a selector, so script can find the part/);
+  assert.match(
+    result.violations[3].detail,
+    /a string names the Dialog's \.dialog-content as a selector, so script can find the part/
+  );
 });
 
 test("ALLOWS a Dialog class name without its dot, a longer class, a comment, page text, and the parts' own files", () => {
@@ -1922,18 +2287,27 @@ test("ALLOWS a Dialog class name without its dot, a longer class, a comment, pag
 <p>Style .dialog-body only in ui/Dialog.</p>
 `
   );
-  writeFixture('src/lib/dom/find.ts', "/* querySelector('.dialog-body') */\nexport const cls = 'dialog-body';\n");
-  writeFixture('src/lib/components/ui/Dialog/scroll-lock.ts', "export const find = (n: Element) => n.closest('.dialog-body');\n");
+  writeFixture(
+    'src/lib/dom/find.ts',
+    "/* querySelector('.dialog-body') */\nexport const cls = 'dialog-body';\n"
+  );
+  writeFixture(
+    'src/lib/components/ui/Dialog/scroll-lock.ts',
+    "export const find = (n: Element) => n.closest('.dialog-body');\n"
+  );
   writeFixture(
     'src/lib/components/ui/Dialog/DialogBody.svelte',
-    "<script lang=\"ts\">\n  const sel = '.dialog-footer';\n</script>\n<div class=\"dialog-body\"><slot /></div>\n"
+    '<script lang="ts">\n  const sel = \'.dialog-footer\';\n</script>\n<div class="dialog-body"><slot /></div>\n'
   );
 
   assert.deepEqual(summary(scan()), []);
 });
 
 test("CATCHES a selector string in a tests folder other than src/tests/, and a page's scroll through a part", () => {
-  writeFixture('src/lib/tests/find.ts', "export const body = () => document.querySelector('.dialog-body');\n");
+  writeFixture(
+    'src/lib/tests/find.ts',
+    "export const body = () => document.querySelector('.dialog-body');\n"
+  );
   writeFixture(
     'src/routes/err/+page.svelte',
     `<script lang="ts">
@@ -1947,16 +2321,25 @@ test("CATCHES a selector string in a tests folder other than src/tests/, and a p
   const result = scan();
   assert.deepEqual(
     result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
-    ['src/lib/tests/find.ts script-select@1', 'src/routes/err/+page.svelte script-select@3']
+    [
+      'src/lib/tests/find.ts script-select@1',
+      'src/routes/err/+page.svelte script-select@3',
+    ]
   );
-  assert.match(result.violations[1].detail, /\(to bring something into view, call scrollIntoView\(\) on your own element\)$/);
+  assert.match(
+    result.violations[1].detail,
+    /\(to bring something into view, call scrollIntoView\(\) on your own element\)$/
+  );
 });
 
 test('ALLOWS a selector string in src/tests/ and in a story, which drive the parts and never ship', () => {
-  writeFixture('src/tests/utils/dialog.ts', "export const dialogBody = () => document.querySelector<HTMLElement>('.dialog-body');\n");
+  writeFixture(
+    'src/tests/utils/dialog.ts',
+    "export const dialogBody = () => document.querySelector<HTMLElement>('.dialog-body');\n"
+  );
   writeFixture(
     'src/tests/fixtures/Dialogs.svelte',
-    "<script lang=\"ts\">\n  const body = () => document.querySelector('.dialog-body');\n</script>\n<p>x</p>\n"
+    '<script lang="ts">\n  const body = () => document.querySelector(\'.dialog-body\');\n</script>\n<p>x</p>\n'
   );
   writeFixture(
     'src/lib/components/studio/Thing.stories.svelte',
@@ -1989,8 +2372,15 @@ test('CATCHES a class conditional or fallback that can hand a part a variable', 
   );
 
   const result = scan();
-  assert.deepEqual(summary(result), ['part-dynamic@7', 'part-dynamic@8', 'part-dynamic@9']);
-  assert.match(result.violations[0].detail, /write the class as a literal, or a conditional of literals/);
+  assert.deepEqual(summary(result), [
+    'part-dynamic@7',
+    'part-dynamic@8',
+    'part-dynamic@9',
+  ]);
+  assert.match(
+    result.violations[0].detail,
+    /write the class as a literal, or a conditional of literals/
+  );
 });
 
 test('ALLOWS undefined in a class: a conditional to undefined, and undefined itself', () => {
@@ -2027,7 +2417,10 @@ test('CATCHES an {@attach} on a part that draws the panel', () => {
 
   const result = scan();
   assert.deepEqual(summary(result), ['part-dynamic@6', 'part-dynamic@7']);
-  assert.match(result.violations[1].detail, /takes an \{@attach\}, which gets the part's element/);
+  assert.match(
+    result.violations[1].detail,
+    /takes an \{@attach\}, which gets the part's element/
+  );
 });
 
 test('ALLOWS an {@attach} on the Title and on a page element inside a part', () => {
@@ -2065,12 +2458,31 @@ test("CATCHES a page setting a part's own data attributes, or a dialog role / ar
 
   const result = scan();
   // The shared parts' role is part-attr's, not own-dialog's.
-  assert.deepEqual(summary(result), ['part-attr@6', 'part-attr@6', 'part-attr@7', 'part-attr@8', 'part-attr@9', 'part-attr@10']);
-  assert.match(result.violations[0].detail, /sets role="alertdialog"; .*for an alert dialog, use Dialog\.Root's role="alertdialog"/);
-  assert.match(result.violations[4].detail, /<Dialog\.Body> sets data-layout, which the part sets itself and its CSS reads/);
+  assert.deepEqual(summary(result), [
+    'part-attr@6',
+    'part-attr@6',
+    'part-attr@7',
+    'part-attr@8',
+    'part-attr@9',
+    'part-attr@10',
+  ]);
+  assert.match(
+    result.violations[0].detail,
+    /sets role="alertdialog"; .*for an alert dialog, use Dialog\.Root's role="alertdialog"/
+  );
+  assert.match(
+    result.violations[4].detail,
+    /<Dialog\.Body> sets data-layout, which the part sets itself and its CSS reads/
+  );
   // Each names the prop that replaces it.
-  assert.match(result.violations[3].detail, /data-direction, .*Toolbar's direction="row" \| "column"/);
-  assert.match(result.violations[5].detail, /data-align, .*Footer's align="end" \| "between"/);
+  assert.match(
+    result.violations[3].detail,
+    /data-direction, .*Toolbar's direction="row" \| "column"/
+  );
+  assert.match(
+    result.violations[5].detail,
+    /data-align, .*Footer's align="end" \| "between"/
+  );
 });
 
 test("ALLOWS Root's role, a test id and other roles on a part, a page element's data attributes, and Popover roles", () => {
@@ -2098,11 +2510,23 @@ test("ALLOWS Root's role, a test id and other roles on a part, a page element's 
 test('PART_DATA_ATTRS holds every data attribute the real parts set', () => {
   const dir = REAL_DIALOG_DIR;
   const set = new Set();
-  for (const file of readdirSync(dir).filter((name) => /^Dialog\w*\.svelte$/.test(name))) {
-    for (const m of readFileSync(join(dir, file), 'utf8').matchAll(/\s(data-[a-z-]+)=/g)) set.add(m[1]);
+  for (const file of readdirSync(dir).filter((name) =>
+    /^Dialog\w*\.svelte$/.test(name)
+  )) {
+    for (const m of readFileSync(join(dir, file), 'utf8').matchAll(
+      /\s(data-[a-z-]+)=/g
+    ))
+      set.add(m[1]);
   }
-  assert.ok(set.size >= 10, `read only ${set.size} data attributes from the parts`);
-  assert.deepEqual([...set].filter((name) => !PART_DATA_ATTRS.has(name)), [], 'a part sets a data attribute part-attr does not know');
+  assert.ok(
+    set.size >= 10,
+    `read only ${set.size} data attributes from the parts`
+  );
+  assert.deepEqual(
+    [...set].filter((name) => !PART_DATA_ATTRS.has(name)),
+    [],
+    'a part sets a data attribute part-attr does not know'
+  );
 });
 
 test("LENGTH_UNITS and MATH_FUNCTIONS are the CssLength type's own lists (ui/Dialog/css-length.ts)", () => {
@@ -2128,16 +2552,38 @@ const sizesPage = (values) =>
 test('ALLOWS every unit and math function the CssLength type takes, and a token', () => {
   writeFixture(
     'src/routes/units/+page.svelte',
-    sizesPage([...LENGTH_UNITS.map((u) => `12${u}`), '0.5rem', ...MATH_FUNCTIONS.map((f) => `${f}(100dvh - 2rem)`), 'var(--container-sm)'])
+    sizesPage([
+      ...LENGTH_UNITS.map((u) => `12${u}`),
+      '0.5rem',
+      ...MATH_FUNCTIONS.map((f) => `${f}(100dvh - 2rem)`),
+      'var(--container-sm)',
+    ])
   );
 
   assert.deepEqual(summary(scan()), []);
 });
 
 test('CATCHES a unit, a spelling or a function the CssLength type does not take', () => {
-  writeFixture('src/routes/units/+page.svelte', sizesPage(['30lh', '2in', '10PX', 'var(x)', 'fit-content(20rem)', 'attr(data-h)']));
+  writeFixture(
+    'src/routes/units/+page.svelte',
+    sizesPage([
+      '30lh',
+      '2in',
+      '10PX',
+      'var(x)',
+      'fit-content(20rem)',
+      'attr(data-h)',
+    ])
+  );
 
-  assert.deepEqual(summary(scan()), ['part-style@5', 'part-style@6', 'part-style@7', 'part-style@8', 'part-style@9', 'part-style@10']);
+  assert.deepEqual(summary(scan()), [
+    'part-style@5',
+    'part-style@6',
+    'part-style@7',
+    'part-style@8',
+    'part-style@9',
+    'part-style@10',
+  ]);
 });
 
 // --- popover-name --------------------------------------------------------
@@ -2177,8 +2623,14 @@ test('CATCHES a Popover.Content with no name: bare, an empty label, through the 
     'popover-name@17',
     'popover-name@18',
   ]);
-  assert.match(result.violations[0].detail, /^<Popover\.Content> has no name: .*; give it aria-label, or aria-labelledby pointing at its heading$/);
-  assert.match(result.violations[7].detail, /; a \{\.\.\.spread\} cannot be read, so write it on the tag$/);
+  assert.match(
+    result.violations[0].detail,
+    /^<Popover\.Content> has no name: .*; give it aria-label, or aria-labelledby pointing at its heading$/
+  );
+  assert.match(
+    result.violations[7].detail,
+    /; a \{\.\.\.spread\} cannot be read, so write it on the tag$/
+  );
 });
 
 test("CATCHES a Popover.Content whose name can be unset: a prop with no default, undefined, null or '', and the panel through UI.Popover or an alias", () => {
@@ -2187,7 +2639,7 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
     `<script lang="ts">
   import * as Popover from '$lib/components/ui/Popover';
   import * as UI from '$lib/components/ui';
-  let { label, labelledby, wide, title = '', heading = undefined, hint = null }: Props = $props();
+  let { label, labelledby, wide, title = '', heading = undefined, hint = null, tpl = \`\`, bound = $bindable(), boundEmpty = $bindable('') }: Props = $props();
   const Alias = Popover.Content;
   const Panel = UI.Popover;
 </script>
@@ -2206,23 +2658,53 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
 <Popover.Content aria-label={label ?? ''}>m</Popover.Content>
 <Popover.Content aria-label={\`\${label}\`}>n</Popover.Content>
 <Popover.Content aria-label={label as string}>o</Popover.Content>
+<Popover.Content aria-label={\`\`}>p</Popover.Content>
+<Popover.Content aria-label={tpl}>q</Popover.Content>
+<Popover.Content aria-label={bound}>r</Popover.Content>
+<Popover.Content aria-label={boundEmpty}>s</Popover.Content>
+<Popover.Content aria-label={title ? heading : 'Info'}>t</Popover.Content>
+<Popover.Content aria-label={!title ? title : 'Info'}>u</Popover.Content>
+<Popover.Content aria-label={title === '' ? title : 'Info'}>v</Popover.Content>
+<Popover.Content aria-labelledby={wide ? 'h-id' : undefined} aria-label={title ? undefined : 'Info'}>w</Popover.Content>
+<Popover.Content aria-labelledby={wide ? 'h-id' : undefined} aria-label={wide ? undefined : undefined}>x</Popover.Content>
+<Popover.Content aria-label={title !== 'x' ? title : 'Info'}>y</Popover.Content>
+<Popover.Content aria-label={label !== '' ? label : 'Info'}>z1</Popover.Content>
+<Popover.Content aria-label={label != '' ? label : 'Info'}>z2</Popover.Content>
+<Popover.Content aria-label={label === '' ? 'Info' : label}>z3</Popover.Content>
+<Popover.Content aria-label={heading !== '' ? heading : 'Info'}>z4</Popover.Content>
+<Popover.Content aria-label={hint != '' ? hint : 'Info'}>z5</Popover.Content>
+<Popover.Content aria-label={!(label === '') ? label : 'Info'}>z6</Popover.Content>
 `
   );
 
   const result = scan();
   // @16-18: an empty default is no name either (review c6, G6-G-L1).
+  // @23-26: nor an empty template, or `$bindable()` (review c7, G7 NIT 5).
+  // @27-29, @32: a test proves only its own name, in its own branch, and only against '' (review c7, G7 LOW 2).
+  // @33-38: and a '' test proves nothing of a prop with no default, or one of undefined or null (review fu-ci, LOW 1).
+  // @30-31: a pair needs one test, and a name in each branch (review c7, G7 LOW 4).
   // @5-6: the alias rule, so a panel can't leave the tags popover-name reads.
   assert.deepEqual(summary(result), [
-    ...[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map((line) => `popover-name@${line}`),
+    ...[
+      8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+      27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
+    ].map((line) => `popover-name@${line}`),
     'alias@5',
     'alias@6',
   ]);
   assert.match(
     result.violations[0].detail,
-    /^<Popover\.Content>'s name comes from a prop with no default or an empty one, .*; give the prop a non-empty default, or write the name on the tag$/
+    /^<Popover\.Content>'s name comes from a prop with no default or an empty one, .*; give the prop a non-empty default, write a fallback \(`label \|\| m\.x\(\)`\), or write the name on the tag$/
   );
   assert.match(result.violations[3].detail, /^<Popover\.Content> has no name/);
-  assert.match(result.violations[16].detail, /'UI\.Popover' is read as a value; use the Popover's parts as tags only/);
+  assert.match(
+    result.violations.find((v) => v.line === 31).detail,
+    /^<Popover\.Content> has no name/
+  );
+  assert.match(
+    result.violations.find((v) => v.rule === 'alias' && v.line === 6).detail,
+    /'UI\.Popover' is read as a value; use the Popover's parts as tags only/
+  );
 });
 
 test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a default), the other Popover parts, another Content, and ui/Popover's own files", () => {
@@ -2234,7 +2716,8 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
   import * as Dialog from '$lib/components/ui/Dialog';
   import * as UI from '$lib/components/ui';
   import { m } from '$lib/paraglide/messages';
-  let { label = 'Details', copy, wide, title, empty = '' } = $props();
+  import { defaultLabel } from '$lib/copy';
+  let { label = 'Details', copy, wide, title, empty = '', bound = $bindable('Info'), desc = m.media_uses_where_title(), named = defaultLabel(), blank = $bindable(''), tplBlank = \`\`, typedBlank = '' as string } = $props();
   let open = $state(true);
   const Btn = UI.Button;
 </script>
@@ -2252,6 +2735,20 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
 <Popover.Content aria-label={\`Uses of \${title}\`}>h2</Popover.Content>
 <Popover.Content aria-label={empty || 'Info'}>h3</Popover.Content>
 <Popover.Content aria-label={open && 'Info'}>h4</Popover.Content>
+<Popover.Content aria-label={empty ? empty : m.media_uses_where_title()}>h5</Popover.Content>
+<Popover.Content aria-label={empty.length ? empty : 'Info'}>h6</Popover.Content>
+<Popover.Content aria-label={empty !== '' ? empty : 'Info'}>h7</Popover.Content>
+<Popover.Content aria-label={'' != empty ? empty : 'Info'}>h8</Popover.Content>
+<Popover.Content aria-label={!!empty ? empty : 'Info'}>h9</Popover.Content>
+<Popover.Content aria-label={!empty ? 'Info' : empty}>h10</Popover.Content>
+<Popover.Content aria-label={empty === '' ? 'Info' : empty}>h11</Popover.Content>
+<Popover.Content aria-labelledby={empty ? 'range-heading' : undefined} aria-label={empty ? undefined : label}>h12</Popover.Content>
+<Popover.Content aria-label={bound}>h13</Popover.Content>
+<Popover.Content aria-label={desc}>h14</Popover.Content>
+<Popover.Content aria-label={named}>h15</Popover.Content>
+<Popover.Content aria-label={blank !== '' ? blank : 'Info'}>h16</Popover.Content>
+<Popover.Content aria-label={tplBlank !== '' ? tplBlank : 'Info'}>h17</Popover.Content>
+<Popover.Content aria-label={typedBlank !== '' ? typedBlank : 'Info'}>h18</Popover.Content>
 <UI.Popover.Content aria-label="Pick">i</UI.Popover.Content>
 <UI.Button>j</UI.Button>
 <UI.Card.Content>j2</UI.Card.Content>
@@ -2261,7 +2758,7 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
   );
   writeFixture(
     'src/lib/components/ui/Popover/Popover.stories.svelte',
-    "<script lang=\"ts\">\n  import * as Popover from './index';\n</script>\n<Popover.Content>story</Popover.Content>\n"
+    '<script lang="ts">\n  import * as Popover from \'./index\';\n</script>\n<Popover.Content>story</Popover.Content>\n'
   );
 
   assert.deepEqual(summary(scan()), []);
@@ -2292,26 +2789,42 @@ export const load = () => import('$lib/components/ui');
 `
   );
   // ui/ is no exemption: only the ui barrel and ui/Popover/ may hand it on.
-  writeFixture('src/lib/components/ui/Menu/parts.ts', "export { Content as MenuPanel } from '../Popover';\n");
+  writeFixture(
+    'src/lib/components/ui/Menu/parts.ts',
+    "export { Content as MenuPanel } from '../Popover';\n"
+  );
 
   const result = scan();
   // @menus:4-6: the ui barrel hands on its Popover too (review c6, G6-G-L4).
-  assert.deepEqual(result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`).sort(), [
-    'src/lib/components/Aliased.svelte alias@4',
-    'src/lib/components/Aliased.svelte alias@5',
-    'src/lib/components/Aliased.svelte alias@6',
-    'src/lib/components/menus/index.ts alias@1',
-    'src/lib/components/menus/index.ts alias@2',
-    'src/lib/components/menus/index.ts alias@3',
-    'src/lib/components/menus/index.ts alias@4',
-    'src/lib/components/menus/index.ts alias@5',
-    'src/lib/components/menus/index.ts alias@6',
-    'src/lib/components/ui/Menu/parts.ts alias@1',
-  ]);
-  const at = (file, line) => result.violations.find((v) => v.file === file && v.line === line).detail;
-  assert.match(at('src/lib/components/Aliased.svelte', 4), /^'UI' is read as a value; use the Popover's parts as tags only/);
-  assert.match(at('src/lib/components/menus/index.ts', 1), /^a \.ts\/\.js file re-exports the Popover \('\$lib\/components\/ui\/Popover'\), .*popover-name can't follow/);
-  assert.match(at('src/lib/components/menus/index.ts', 3), /^a \.ts\/\.js file imports the Popover \('\.\.\/ui\/Popover\/index\.js'\)/);
+  assert.deepEqual(
+    result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`).sort(),
+    [
+      'src/lib/components/Aliased.svelte alias@4',
+      'src/lib/components/Aliased.svelte alias@5',
+      'src/lib/components/Aliased.svelte alias@6',
+      'src/lib/components/menus/index.ts alias@1',
+      'src/lib/components/menus/index.ts alias@2',
+      'src/lib/components/menus/index.ts alias@3',
+      'src/lib/components/menus/index.ts alias@4',
+      'src/lib/components/menus/index.ts alias@5',
+      'src/lib/components/menus/index.ts alias@6',
+      'src/lib/components/ui/Menu/parts.ts alias@1',
+    ]
+  );
+  const at = (file, line) =>
+    result.violations.find((v) => v.file === file && v.line === line).detail;
+  assert.match(
+    at('src/lib/components/Aliased.svelte', 4),
+    /^'UI' is read as a value; use the Popover's parts as tags only/
+  );
+  assert.match(
+    at('src/lib/components/menus/index.ts', 1),
+    /^a \.ts\/\.js file re-exports the Popover \('\$lib\/components\/ui\/Popover'\), .*popover-name can't follow/
+  );
+  assert.match(
+    at('src/lib/components/menus/index.ts', 3),
+    /^a \.ts\/\.js file imports the Popover \('\.\.\/ui\/Popover\/index\.js'\)/
+  );
 });
 
 test("ALLOWS what hands on no panel: the Popover's ctx.ts, type-only imports, a plain UI.Member, the ui barrel's other names, and the ui barrel itself", () => {
@@ -2340,10 +2853,67 @@ export const tip = (p: PopoverProps, c: typeof Content) => [getCtx(), Button, to
 export type Load = typeof import('$lib/components/ui/Popover');
 `
   );
-  writeFixture('src/lib/components/ui/index.ts', "export * as Popover from './Popover/index';\nexport { default as Button } from './Button.svelte';\n");
-  writeFixture('src/lib/components/ui/Popover/ctx.ts', "export * from './index';\n");
+  writeFixture(
+    'src/lib/components/ui/index.ts',
+    "export * as Popover from './Popover/index';\nexport { default as Button } from './Button.svelte';\n"
+  );
+  writeFixture(
+    'src/lib/components/ui/Popover/ctx.ts',
+    "export const POPOVER_CTX = Symbol('popover');\n"
+  );
+  writeFixture(
+    'src/lib/components/ui/Popover/index.ts',
+    "export { default as Content } from './PopoverContent.svelte';\nexport { POPOVER_CTX } from './ctx';\n"
+  );
 
   assert.deepEqual(summary(scan()), []);
+});
+
+test("CATCHES the Popover handed on from inside ui/: a .ts in ui/Popover/ but its index, and the ui barrel's flat, star or part export", () => {
+  // Review c7 (G7 LOW 1): only these two homes are followed, so only they may.
+  writeFixture(
+    'src/lib/components/ui/Popover/ctx.ts',
+    "export * from './index';\n"
+  );
+  writeFixture(
+    'src/lib/components/ui/Popover/parts.ts',
+    "export { Content as Panel, Root } from './index';\n"
+  );
+  writeFixture(
+    'src/lib/components/ui/index.ts',
+    [
+      "export * as Popover from './Popover/index';",
+      "export { PopoverContent, Content as PopoverPanel } from './Popover/index';",
+      "export * from './Popover';",
+      "export { default as Tip } from './Popover/PopoverContent.svelte';",
+      "export * as Popover from './Popover/PopoverContent.svelte';",
+      "export * as Popover from './Popover';",
+      '',
+    ].join('\n')
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`).sort(),
+    [
+      'src/lib/components/ui/Popover/ctx.ts alias@1',
+      'src/lib/components/ui/Popover/parts.ts alias@1',
+      'src/lib/components/ui/index.ts alias@2',
+      'src/lib/components/ui/index.ts alias@3',
+      'src/lib/components/ui/index.ts alias@4',
+      'src/lib/components/ui/index.ts alias@5',
+    ]
+  );
+  const at = (file, line) =>
+    result.violations.find((v) => v.file === file && v.line === line).detail;
+  assert.match(
+    at('src/lib/components/ui/index.ts', 2),
+    /^the ui barrel hands the Popover on \('\.\/Popover\/index'\) under a name popover-name can't follow; export it only as `export \* as Popover from '\.\/Popover\/index'`$/
+  );
+  assert.match(
+    at('src/lib/components/ui/Popover/ctx.ts', 1),
+    /^a \.ts\/\.js file re-exports the Popover \('\.\/index'\)/
+  );
 });
 
 // --- own-dialog ----------------------------------------------------------
@@ -2362,9 +2932,18 @@ test('CATCHES role="dialog" and aria-modal outside ui/Dialog/ and ui/Popover/, a
 `
   );
   // Elsewhere in ui/ is no exemption: a hand-built modal there hides as well.
-  writeFixture('src/lib/components/ui/Modal/Modal.svelte', '<div role="dialog" aria-modal="true"></div>\n');
-  writeFixture('src/lib/components/ui/Popover/PopoverContent.svelte', '<div role="dialog" aria-modal="true"></div>\n');
-  writeFixture('src/lib/components/ui/Dialog/DialogContent.svelte', '<div role="dialog" aria-modal="true"></div>\n');
+  writeFixture(
+    'src/lib/components/ui/Modal/Modal.svelte',
+    '<div role="dialog" aria-modal="true"></div>\n'
+  );
+  writeFixture(
+    'src/lib/components/ui/Popover/PopoverContent.svelte',
+    '<div role="dialog" aria-modal="true"></div>\n'
+  );
+  writeFixture(
+    'src/lib/components/ui/Dialog/DialogContent.svelte',
+    '<div role="dialog" aria-modal="true"></div>\n'
+  );
 
   assert.deepEqual(
     scan().violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
@@ -2401,7 +2980,9 @@ test("CATCHES a native <dialog>, .showModal(), the popover attribute, Melt's own
   );
 
   assert.deepEqual(
-    scan().violations.map((v) => `${v.file} ${v.rule}@${v.line}`).sort(),
+    scan()
+      .violations.map((v) => `${v.file} ${v.rule}@${v.line}`)
+      .sort(),
     [
       'src/lib/native.ts own-dialog@1',
       'src/lib/native.ts own-dialog@2',
@@ -2436,11 +3017,11 @@ test('ALLOWS a showModal feature check, other roles, type-only and other Melt im
   );
   writeFixture(
     'src/lib/components/ui/Popover/Popover.svelte',
-    "<script lang=\"ts\">\n  import { createPopover } from '@melt-ui/svelte';\n</script>\n<div role=\"dialog\" popover></div>\n"
+    '<script lang="ts">\n  import { createPopover } from \'@melt-ui/svelte\';\n</script>\n<div role="dialog" popover></div>\n'
   );
   writeFixture(
     'src/lib/components/ui/Dialog/DialogNative.svelte',
-    "<script lang=\"ts\">\n  import { createDialog } from '@melt-ui/svelte';\n  let d: HTMLDialogElement;\n</script>\n<dialog bind:this={d} onclick={() => d.showModal()}></dialog>\n"
+    '<script lang="ts">\n  import { createDialog } from \'@melt-ui/svelte\';\n  let d: HTMLDialogElement;\n</script>\n<dialog bind:this={d} onclick={() => d.showModal()}></dialog>\n'
   );
 
   assert.deepEqual(summary(scan()), []);
@@ -2486,7 +3067,10 @@ test('CATCHES a namespace Melt builder, a role object for a spread, {@html} and 
       'src/routes/own2/+page.svelte own-dialog@7',
     ]
   );
-  assert.match(result.violations.find((v) => v.line === 13).detail, /sets the popover attribute, a hand-built popover; use the shared Popover/);
+  assert.match(
+    result.violations.find((v) => v.line === 13).detail,
+    /sets the popover attribute, a hand-built popover; use the shared Popover/
+  );
 });
 
 test("ALLOWS another Melt builder, typeof and 'in' feature checks, a role whose TEST names dialog, and other roles in objects and types", () => {
@@ -2528,8 +3112,18 @@ test('the ALLOWLIST waives a file for one rule only, and reports an entry that m
   );
 
   const allowlist = [
-    { file: 'src/routes/known/+page.svelte', rule: 'content-child', expect: 1, reason: 'known' },
-    { file: 'src/routes/fixed/+page.svelte', rule: 'content-child', expect: 1, reason: 'already fixed' },
+    {
+      file: 'src/routes/known/+page.svelte',
+      rule: 'content-child',
+      expect: 1,
+      reason: 'known',
+    },
+    {
+      file: 'src/routes/fixed/+page.svelte',
+      rule: 'content-child',
+      expect: 1,
+      reason: 'already fixed',
+    },
   ];
   const result = scan(allowlist);
 
@@ -2551,46 +3145,90 @@ test('an ALLOWLIST entry waives exactly its `expect` count: more, fewer or unpin
 </Dialog.Root>
 `
   );
-  const entry = { file: 'src/routes/known/+page.svelte', rule: 'content-child', reason: 'known' };
-  const miscount = (expect) => scan([{ ...entry, expect }]).miscounted.map((a) => `${a.expect}->${a.found}`);
+  const entry = {
+    file: 'src/routes/known/+page.svelte',
+    rule: 'content-child',
+    reason: 'known',
+  };
+  const miscount = (expect) =>
+    scan([{ ...entry, expect }]).miscounted.map(
+      (a) => `${a.expect}->${a.found}`
+    );
 
   const exact = scan([{ ...entry, expect: 2 }]);
-  assert.deepEqual([exact.violations, exact.stale, exact.miscounted, exact.allowlisted], [[], [], [], 2]);
-  assert.deepEqual(miscount(1), ['1->2'], 'a new violation must not hide behind a known one');
-  assert.deepEqual(miscount(3), ['3->2'], 'a fixed violation must not keep its waiver');
-  assert.deepEqual(miscount(undefined), ['undefined->2'], 'an entry must state its count');
+  assert.deepEqual(
+    [exact.violations, exact.stale, exact.miscounted, exact.allowlisted],
+    [[], [], [], 2]
+  );
+  assert.deepEqual(
+    miscount(1),
+    ['1->2'],
+    'a new violation must not hide behind a known one'
+  );
+  assert.deepEqual(
+    miscount(3),
+    ['3->2'],
+    'a fixed violation must not keep its waiver'
+  );
+  assert.deepEqual(
+    miscount(undefined),
+    ['undefined->2'],
+    'an entry must state its count'
+  );
 });
 
 test('every real ALLOWLIST entry is pinned to a count and gives a reason', () => {
   for (const a of ALLOWLIST) {
-    assert.ok(Number.isInteger(a.expect) && a.expect > 0, `${a.file} ${a.rule}: expect must be a positive integer`);
-    assert.ok(a.reason.trim().length > 20, `${a.file} ${a.rule}: give an owner-visible reason`);
+    assert.ok(
+      Number.isInteger(a.expect) && a.expect > 0,
+      `${a.file} ${a.rule}: expect must be a positive integer`
+    );
+    assert.ok(
+      a.reason.trim().length > 20,
+      `${a.file} ${a.rule}: give an owner-visible reason`
+    );
   }
 });
 
 // --- CLI -----------------------------------------------------------------
 
-const runGate = (...args) => spawnSync(process.execPath, args, { encoding: 'utf8' });
+const runGate = (...args) =>
+  spawnSync(process.execPath, args, { encoding: 'utf8' });
 
 test('the CLI exits 1 on a tree with a violation and 0 on a clean one (--root)', () => {
-  writeFixture('src/routes/bad/+page.svelte', `${IMPORT}<Dialog.Root><Dialog.Content><div><Dialog.Body>x</Dialog.Body></div></Dialog.Content></Dialog.Root>\n`);
+  writeFixture(
+    'src/routes/bad/+page.svelte',
+    `${IMPORT}<Dialog.Root><Dialog.Content><div><Dialog.Body>x</Dialog.Body></div></Dialog.Content></Dialog.Root>\n`
+  );
   const bad = runGate(GATE, '--root', root);
   assert.equal(bad.status, 1, bad.stderr);
-  assert.match(bad.stderr, /src\/routes\/bad\/\+page\.svelte:4 content-child: <div> is a direct child of Dialog\.Content/);
+  assert.match(
+    bad.stderr,
+    /src\/routes\/bad\/\+page\.svelte:4 content-child: <div> is a direct child of Dialog\.Content/
+  );
 
   rmSync(join(root, 'src/routes/bad'), { recursive: true });
-  writeFixture('src/routes/good/+page.svelte', `${IMPORT}<Dialog.Root><Dialog.Content><Dialog.Body>x</Dialog.Body></Dialog.Content></Dialog.Root>\n`);
+  writeFixture(
+    'src/routes/good/+page.svelte',
+    `${IMPORT}<Dialog.Root><Dialog.Content><Dialog.Body>x</Dialog.Body></Dialog.Content></Dialog.Root>\n`
+  );
   const good = runGate(GATE, '--root', root);
   assert.equal(good.status, 0, good.stderr);
   // The fixture tree has none of the real tree's known exceptions.
-  assert.match(good.stdout, /^OK: every Dialog in 2 file\(s\) .*\(0 known violation\(s\) allowlisted, in 0 entries\)/);
+  assert.match(
+    good.stdout,
+    /^OK: every Dialog in 2 file\(s\) .*\(0 known violation\(s\) allowlisted, in 0 entries\)/
+  );
 
   const missing = runGate(GATE, '--root');
   assert.equal(missing.status, 2, missing.stderr);
 });
 
 test('the CLI takes --root=<dir>, and exits 2 on an empty --root= or any unknown argument', () => {
-  writeFixture('src/routes/bad/+page.svelte', `${IMPORT}<Dialog.Root><Dialog.Content><div><Dialog.Body>x</Dialog.Body></div></Dialog.Content></Dialog.Root>\n`);
+  writeFixture(
+    'src/routes/bad/+page.svelte',
+    `${IMPORT}<Dialog.Root><Dialog.Content><div><Dialog.Body>x</Dialog.Body></div></Dialog.Content></Dialog.Root>\n`
+  );
   const bad = runGate(GATE, `--root=${root}`);
   assert.equal(bad.status, 1, bad.stderr);
   assert.match(bad.stderr, /src\/routes\/bad\/\+page\.svelte:4 content-child/);
@@ -2607,7 +3245,10 @@ test('the CLI takes --root=<dir>, and exits 2 on an empty --root= or any unknown
 test('runs main() when started through a symlinked path', () => {
   const link = join(root, 'gate-link.mjs');
   symlinkSync(GATE, link);
-  writeFixture('src/routes/good/+page.svelte', `${IMPORT}<Dialog.Root><Dialog.Content><Dialog.Body>x</Dialog.Body></Dialog.Content></Dialog.Root>\n`);
+  writeFixture(
+    'src/routes/good/+page.svelte',
+    `${IMPORT}<Dialog.Root><Dialog.Content><Dialog.Body>x</Dialog.Body></Dialog.Content></Dialog.Root>\n`
+  );
   const run = runGate(link, '--root', root);
 
   // main() ran and passed, rather than exiting 0 unchecked with no output.

@@ -17,6 +17,7 @@
   @prop {(open: boolean) => void} [onOpenChange] - Callback when open state changes
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import type { CustomerDetails } from '@codex/admin';
   import * as Dialog from '$lib/components/ui/Dialog';
   import { Button, Skeleton } from '$lib/components/ui';
@@ -32,6 +33,7 @@
     revokeCustomerGrant,
   } from '$lib/remote/admin.remote';
   import type { CustomerGrant } from '$lib/types';
+  import { survivingFocus } from '$lib/utils/surviving-focus';
   import GrantAccessDialog from './GrantAccessDialog.svelte';
 
   interface Props {
@@ -63,25 +65,57 @@
   let revokeTarget = $state.raw<CustomerGrant | null>(null);
   let revokeDialogOpen = $state(false);
   let revokeFailedId = $state<string | null>(null);
+  // The revoked grant's place among the live ones, set as the revoke lands.
+  // The confirm closes on the refreshed list, which has taken that grant's
+  // Revoke away, and focus fell to the drawer's first control at the top of
+  // its scroll (Codex-p10nx).
+  let revokedIndex = $state<number | null>(null);
 
+  /** The next live grant's Revoke, else the previous one's, else Grant access. */
+  function revokeFocus(): HTMLElement | null {
+    if (revokedIndex === null) return null;
+    return survivingFocus(
+      [...document.querySelectorAll('[data-grant-revoke]')],
+      revokedIndex,
+      document.querySelector('[data-grant-access]')
+    );
+  }
+
+  // Loads once per open, customer and org, and reads nothing else. Run
+  // tracked, the loads made this effect depend on the queries' own state
+  // (making or awaiting one reads its promise), so the grants refresh
+  // after a revoke re-ran it: the drawer fell back to its loading state at
+  // the top of its scroll, and the revoke's confirm was rebuilt
+  // mid-request, its focus gone and its buttons live again (Codex-p10nx).
   $effect(() => {
-    if (open && customerId) {
-      loadCustomer(customerId);
-      grantsQuery = getCustomerGrants({ customerId, organizationId: orgId });
-    }
+    if (!open || !customerId) return;
+    const id = customerId;
+    const organizationId = orgId;
+    untrack(() => {
+      loadCustomer(id);
+      grantsQuery = getCustomerGrants({ customerId: id, organizationId });
+    });
   });
 
+  // Bumped by each load and by the close, so only the newest load's answer
+  // lands. Open A, close it, open B: A's late answer showed A in B's drawer,
+  // its `finally` ended B's loading early, and Grant Access then granted to
+  // A while the grants list and Revoke acted on B (Codex-uhhka).
+  let loadRun = 0;
+
   async function loadCustomer(id: string) {
+    const run = ++loadRun;
     loading = true;
     error = null;
     customer = null;
 
     try {
-      customer = await getCustomerDetail({ customerId: id, organizationId: orgId });
+      const details = await getCustomerDetail({ customerId: id, organizationId: orgId });
+      if (run === loadRun) customer = details;
     } catch {
-      error = m.studio_customers_drawer_error();
+      if (run === loadRun) error = m.studio_customers_drawer_error();
     } finally {
-      loading = false;
+      if (run === loadRun) loading = false;
     }
   }
 
@@ -89,6 +123,9 @@
     open = isOpen;
     onOpenChange?.(isOpen);
     if (!isOpen) {
+      // The close drops a load still running, and its loading state.
+      loadRun += 1;
+      loading = false;
       customer = null;
       error = null;
       grantDialogOpen = false;
@@ -116,6 +153,7 @@
   function askRevoke(grant: CustomerGrant) {
     revokeTarget = grant;
     revokeFailedId = null;
+    revokedIndex = null;
     revokeDialogOpen = true;
   }
 
@@ -135,6 +173,11 @@
       revokeFailedId = grant.id;
       return;
     }
+    // Only while the confirm that asked is still the open one. The confirm
+    // can be dismissed while it runs, and another grant's opened since: its
+    // Cancel then sent focus to this grant's place, not home.
+    if (revokeDialogOpen && revokeTarget?.id === grant.id)
+      revokedIndex = grants?.findIndex((g) => g.id === grant.id) ?? 0;
     await refreshGrants();
   }
 
@@ -374,6 +417,7 @@
                       class="grant-revoke"
                       aria-label={m.studio_customers_grants_revoke_label({ title: grant.contentTitle })}
                       onclick={() => askRevoke(grant)}
+                      data-grant-revoke
                     >
                       {m.studio_customers_grants_revoke()}
                     </Button>
@@ -390,7 +434,7 @@
         <Button variant="secondary" onclick={() => handleOpenChange(false)}>
           {m.common_cancel()}
         </Button>
-        <Button variant="primary" onclick={() => { grantDialogOpen = true; }}>
+        <Button variant="primary" onclick={() => { grantDialogOpen = true; }} data-grant-access>
           {m.studio_customers_drawer_grant_access()}
         </Button>
       </Dialog.Footer>
@@ -419,6 +463,7 @@
     variant="destructive"
     awaitConfirm
     onConfirm={confirmRevoke}
+    closeFocus={revokedIndex === null ? undefined : revokeFocus}
   />
 {/if}
 
