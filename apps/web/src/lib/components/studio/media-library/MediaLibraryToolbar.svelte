@@ -121,7 +121,7 @@
 {/snippet}
 
 <div class="toolbar">
-  <div class="toolbar-search">
+  <div class="toolbar-search" data-field-box>
     <span class="search-icon" aria-hidden="true"><SearchIcon size={16} /></span>
     <input
       bind:this={searchInput}
@@ -288,8 +288,11 @@
     transition: var(--transition-colors);
   }
 
+  /* The border's focus cue is base.css's `[data-field-box]` rule:
+     --color-border-focus, which an org brand holds to 3:1 against its ground.
+     It was --color-interactive, the brand's colour as picked: 1.47:1 for a
+     pale yellow brand, 1.83:1 for a navy one on a dark page (Codex-c5prp). */
   .toolbar-search:focus-within {
-    border-color: var(--color-interactive);
     box-shadow: 0 0 0 var(--border-width-thick) var(--color-focus-ring, var(--color-focus));
   }
 

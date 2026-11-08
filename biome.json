@@ -46,11 +46,11 @@
   },
   "files": {
     "includes": [
-      "**/packages/**/*.{ts,js,json}",
-      "**/workers/**/*.{ts,js,json}",
-      "**/apps/**/*.{ts,js,json}",
-      "**/config/**/*.{ts,js,json}",
-      "**/*.{ts,js,json}",
+      "**/packages/**/*.{ts,js,mjs,mts,cjs,cts,json}",
+      "**/workers/**/*.{ts,js,mjs,mts,cjs,cts,json}",
+      "**/apps/**/*.{ts,js,mjs,mts,cjs,cts,json}",
+      "**/config/**/*.{ts,js,mjs,mts,cjs,cts,json}",
+      "**/*.{ts,js,mjs,mts,cjs,cts,json}",
       "!**/.obsidian",
       "!**/.obsidian",
       "!**/node_modules",

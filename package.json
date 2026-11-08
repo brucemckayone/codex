@@ -116,7 +116,7 @@
   "author": "",
   "license": "ISC",
   "lint-staged": {
-    "*.{js,ts,json,svelte}": "biome check --write --no-errors-on-unmatched",
+    "*.{js,mjs,cjs,ts,mts,cts,json,svelte}": "biome check --write --no-errors-on-unmatched",
     "infrastructure/runpod/**/*.py": "uvx black"
   },
   "packageManager": "pnpm@10.18.3",
