@@ -91,16 +91,23 @@ export const disputes = pgTable(
      */
     buyerToldAt: timestamp('buyer_told_at', { withTimezone: true }),
     /**
-     * When support settled this charge by hand and the buyer is refunded
-     * outside Stripe (docs/payments/operations.md, "Settling a late-win
-     * refund Stripe won't make"; owner decision 2026-11-08, "Block it in
-     * code"). From then on the charge is never refunded through Stripe:
-     * support's refund route refuses it (`REFUNDED_OUTSIDE_STRIPE`). Two
-     * writers: that runbook step, in the transaction that marks the outcome,
-     * and support settling the late win's own failed refund as refunded
-     * elsewhere when Stripe's standing refunds don't cover the charge, in the
-     * transaction that resolves it (`settleRefundedElsewhere`, @codex/admin).
-     * Neither overwrites a date already set.
+     * When the buyer was refunded outside Stripe (owner decision 2026-11-08,
+     * "Block it in code"). From then on the charge is never refunded through
+     * Stripe: support's refund route refuses it (`REFUNDED_OUTSIDE_STRIPE`).
+     * Three writers:
+     * - the runbook step that settles the charge by hand
+     *   (docs/payments/operations.md, "Settling a late-win refund Stripe
+     *   won't make"), in the transaction that marks the outcome;
+     * - support settling the late win's own failed refund as refunded
+     *   elsewhere when Stripe's standing refunds don't cover the charge, in
+     *   the transaction that resolves it (`settleRefundedElsewhere`,
+     *   @codex/admin);
+     * - a manual UPDATE, with the owner's OK, for a buyer refunded another
+     *   way that the settle never saw (docs/payments/release-checklist.md,
+     *   R19 (b)).
+     * No date is overwritten. The runbook step runs only on a charge with no
+     * refund recorded, so it never meets a set date; the other two guard
+     * with `IS NULL`.
      */
     refundedOutsideStripeAt: timestamp('refunded_outside_stripe_at', {
       withTimezone: true,

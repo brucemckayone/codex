@@ -376,7 +376,7 @@ and `closesAt` keeps the 14-day date, which has passed. Anything that reads
 
 **Refunded outside Stripe** (owner decision 2026-11-08, "Block it in code"). A
 charge whose buyer was refunded outside Stripe has `refunded_outside_stripe_at`
-set, and is never refunded through Stripe again. Two things set it:
+set, and is never refunded through Stripe again. Three things set it:
 
 - a charge settled by hand
   ([below](#settling-a-late-win-refund-stripe-wont-make));
@@ -385,9 +385,15 @@ set, and is never refunded through Stripe again. Two things set it:
   didn't refund it again through Stripe first). Without the mark the charge
   would stay refundable for good, since Stripe doesn't count the failed refund
   and the late win lifts the 14-day window. That is owner decision 5's rule,
-  applied in review cycle 2.
+  applied in review cycle 2;
+- by hand, with the owner's OK, for a buyer refunded another way that the
+  settle never saw: a canceled late-win refund (below), or one settled while
+  rolled back
+  ([R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone)).
 
-Neither overwrites a date already set. The form shows the block; the preview
+No date is ever overwritten. The runbook step runs only on a charge with no
+refund recorded, so it never meets a set date, and the other two guard with
+`refunded_outside_stripe_at IS NULL`. The form shows the block; the preview
 and the route refuse it with 422 `REFUNDED_OUTSIDE_STRIPE`, whatever the window
 says, and nothing lifts its window. The detail's `refundable.blocked` is
 `refunded_outside_stripe`, with `refundedOutsideStripeOn`, and the charge
@@ -402,7 +408,7 @@ with an `errorId`, unless it says otherwise:
 |---|---|---|
 | Late win: Stripe refused the refund of a payment the buyer made twice… / Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded… | The late win's refund of a first payment (a buyer who bought it again) or of a duplicate payment wasn't made. "Refused": Stripe refused the request itself (`stripeType` `StripeInvalidRequestError`). "Could not be refunded": anything else, such as an outage, a rate limit or a key without refund rights. `stripeCode`, `stripeType` and `stripeStatusCode` say which; each is empty when Stripe gave none. Nothing is marked, the creators' pay-back stays held, and it is retried: on each of Stripe's redeliveries, then every hour, one alert per try. Stripe replays an answer for 24 hours under the same idempotency key, so a cause that clears (a low balance, a fixed key) is only tried again a day after the first answer | Read the three fields. A "could not be refunded" usually clears by itself once the outage passes or the key is fixed. One Stripe will never make: settle it by hand ([below](#settling-a-late-win-refund-stripe-wont-make)). **Never refund the buyer another way first** |
 | Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds | The late win's refund was made, but Stripe reports it `failed` (`refundId`, `status`). The late win counts as settled and its outcome is marked. As with any failed refund, its clawback stands: the creators gave the first payment back off their held re-pay rows. The buyer has not been refunded | Refund the buyer another way, or first refund it again through Stripe on the charge page, then settle the refund in Failed refunds as refunded elsewhere. Settled after a refund another way, the charge is marked refunded outside Stripe and the charge page blocks any further Stripe refund: Stripe doesn't count the failed refund and the late win lifts the 14-day window, so it would otherwise offer the whole amount again, for good ([above](#late-wins)). So a Stripe refund comes first or not at all. "Re-pay payees" (creators re-paid) is refused for it, 422 `LATE_WIN_REFUND_NOT_REPAYABLE` (owner decision 2026-11-08, "Block it in code"): the buyer is still owed this money, so its clawback stands |
-| Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand | Settled as for a failed refund, but the Failed refunds queue lists only `failed` ones, so this alert is how support finds it (owner decision 2026-11-05). It took nothing from the creators | Settle it with the owner; the buyer has not been refunded |
+| Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand | Settled as for a failed refund, but the Failed refunds queue lists only `failed` ones, so this alert is how support finds it (owner decision 2026-11-05). It took nothing from the creators | Settle it with the owner; the buyer has not been refunded. If the owner refunds the buyer another way, record it with the UPDATE in [R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone): a canceled refund never reaches Failed refunds, so nothing else marks the charge refunded outside Stripe, and the charge page would offer a Stripe refund again for good |
 | A won dispute was reported lost: nothing changed, check it in Stripe | Stripe now says lost a dispute we hold as won. Nothing was changed | Check the dispute in Stripe's Dashboard |
 | The hourly late-win check read its page limit of Stripe's disputes | More than 300 disputes since our oldest lost one: the older ones weren't re-checked this run | None by itself; if it repeats, the check needs a wider limit |
 | The hourly late-win check could not read a page of Stripe's disputes / could not re-check lost disputes for a late win | A Stripe or database read failed; the next run retries | None unless it repeats |
