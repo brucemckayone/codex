@@ -95,8 +95,12 @@ export const disputes = pgTable(
      * outside Stripe (docs/payments/operations.md, "Settling a late-win
      * refund Stripe won't make"; owner decision 2026-11-08, "Block it in
      * code"). From then on the charge is never refunded through Stripe:
-     * support's refund route refuses it (`REFUNDED_OUTSIDE_STRIPE`). Only that
-     * runbook step writes it, in the transaction that marks the outcome.
+     * support's refund route refuses it (`REFUNDED_OUTSIDE_STRIPE`). Two
+     * writers: that runbook step, in the transaction that marks the outcome,
+     * and support settling the late win's own failed refund as refunded
+     * elsewhere when Stripe's standing refunds don't cover the charge, in the
+     * transaction that resolves it (`settleRefundedElsewhere`, @codex/admin).
+     * Neither overwrites a date already set.
      */
     refundedOutsideStripeAt: timestamp('refunded_outside_stripe_at', {
       withTimezone: true,

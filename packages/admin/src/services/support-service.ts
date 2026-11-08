@@ -2526,7 +2526,9 @@ export class SupportService extends BaseService {
   // ==========================================================================
 
   /**
-   * Settle a failed refund. `refunded_elsewhere` only resolves the row.
+   * Settle a failed refund. `refunded_elsewhere` resolves the row; for a
+   * late win's own refund it also marks the charge refunded outside Stripe
+   * (`lateWinRefundedOutsideStripe`).
    * `creators_repaid` is one transaction with the refund row locked: what its
    * clawback took is paid back (`repayFailedRefund`), a failed FULL purchase
    * refund gives the buyer access back, then the row is resolved. A late
@@ -2567,34 +2569,77 @@ export class SupportService extends BaseService {
     note: string | null,
     resolvedByUserId: string
   ): Promise<FailedRefundSettlement> {
-    const [row] = await this.db
-      .update(refunds)
-      .set({
-        resolution: 'refunded_elsewhere',
-        resolvedAt: new Date(),
-        resolvedByUserId,
-        resolutionNote: note,
-      })
-      .where(
-        and(
-          eq(refunds.id, refundId),
-          eq(refunds.status, 'failed'),
-          isNull(refunds.resolvedAt)
-        )
-      )
-      .returning();
-    const settled =
-      row ??
-      (await this.alreadySettledRefund(
-        this.db,
-        refundId,
-        'refunded_elsewhere'
-      ));
+    const [found] = await this.db
+      .select()
+      .from(refunds)
+      .where(eq(refunds.id, refundId))
+      .limit(1);
+    if (!found || found.status !== 'failed') {
+      throw new NotFoundError('No failed refund with this id', { refundId });
+    }
+    // Asks Stripe, so before the transaction. A repeat asks nothing.
+    const outsideStripe = found.resolvedAt
+      ? null
+      : await this.lateWinRefundedOutsideStripe(found);
+    const outcome = await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(refunds)
+        .where(eq(refunds.id, refundId))
+        .for('update');
+      if (!row || row.status !== 'failed') {
+        throw new NotFoundError('No failed refund with this id', { refundId });
+      }
+      if (row.resolvedAt) {
+        const settled = await this.alreadySettledRefund(
+          tx,
+          refundId,
+          'refunded_elsewhere'
+        );
+        return { row: settled, marked: false };
+      }
+      const now = new Date();
+      const [resolved] = await tx
+        .update(refunds)
+        .set({
+          resolution: 'refunded_elsewhere',
+          resolvedAt: now,
+          resolvedByUserId,
+          resolutionNote: note,
+        })
+        .where(and(eq(refunds.id, refundId), isNull(refunds.resolvedAt)))
+        .returning();
+      // The row is locked and was checked above (silent F7, as below).
+      if (!resolved) {
+        throw new InternalServiceError(
+          'The failed refund could not be marked settled'
+        );
+      }
+      const marked = outsideStripe
+        ? await this.markRefundedOutsideStripe(
+            tx,
+            outsideStripe,
+            row.stripeChargeId,
+            now
+          )
+        : false;
+      return { row: resolved, marked };
+    });
+    if (outcome.marked) {
+      this.obs.info(
+        "A late win's refund was settled as refunded elsewhere, so its charge is refunded outside Stripe",
+        {
+          refundId,
+          disputeId: outsideStripe,
+          chargeId: found.stripeChargeId,
+        }
+      );
+    }
     return {
       settled: {
         refundId,
         resolution: 'refunded_elsewhere',
-        resolvedAt: (settled.resolvedAt ?? new Date()).toISOString(),
+        resolvedAt: (outcome.row.resolvedAt ?? new Date()).toISOString(),
         repaid: [],
         accessRestored: false,
         accessNotRestoredReason: null,
@@ -2602,6 +2647,75 @@ export class SupportService extends BaseService {
       },
       restoredAccess: null,
     };
+  }
+
+  /**
+   * The late win to mark refunded outside Stripe as support settles this
+   * failed refund as refunded elsewhere, or null (owner decision 5's rule,
+   * applied in review cycle 2, finding 2). It is the late win's own refund,
+   * by our record or by Stripe's metadata (`lateWinDisputeMarked`), and the
+   * charge's standing refunds at Stripe don't cover the charge. Then the
+   * buyer was refunded another way, and without the mark the charge would
+   * stay refundable through Stripe for good: Stripe doesn't count the failed
+   * refund, and the late win lifts the 14-day window (Q7). Standing refunds
+   * that cover it mean support refunded it again through Stripe: nothing is
+   * left to refund, so nothing is marked.
+   */
+  private async lateWinRefundedOutsideStripe(refund: {
+    stripeRefundId: string;
+    stripeChargeId: string;
+  }): Promise<string | null> {
+    const listed = await listChargeRefunds(this.stripe, refund.stripeChargeId);
+    const disputeId =
+      (await this.lateWinDisputeRecorded(this.db, refund.stripeRefundId)) ??
+      lateWinDisputeMarked(listed, refund.stripeRefundId);
+    if (!disputeId) return null;
+    const charge = await this.retrieveCharge(refund.stripeChargeId, false);
+    return standingCents(listed) >= charge.amount ? null : disputeId;
+  }
+
+  /**
+   * Set the late win's `refunded_outside_stripe_at`, in the settlement's
+   * transaction; a date already set is kept. The dispute must be on the
+   * refund's charge. Anything else is a broken record, so the settlement
+   * rolls back rather than leave the charge refundable through Stripe.
+   */
+  private async markRefundedOutsideStripe(
+    tx: Tx,
+    stripeDisputeId: string,
+    chargeId: string,
+    now: Date
+  ): Promise<boolean> {
+    const [marked] = await tx
+      .update(disputes)
+      .set({ refundedOutsideStripeAt: now })
+      .where(
+        and(
+          eq(disputes.stripeDisputeId, stripeDisputeId),
+          eq(disputes.stripeChargeId, chargeId),
+          isNull(disputes.refundedOutsideStripeAt)
+        )
+      )
+      // `.returning({ id })` doesn't type-check on this client's union.
+      .returning();
+    if (marked) return true;
+    const [held] = await tx
+      .select({ id: disputes.id })
+      .from(disputes)
+      .where(
+        and(
+          eq(disputes.stripeDisputeId, stripeDisputeId),
+          eq(disputes.stripeChargeId, chargeId)
+        )
+      )
+      .limit(1);
+    if (!held) {
+      throw new InternalServiceError(
+        "The late win's dispute is not on its refund's charge",
+        { stripeDisputeId, chargeId }
+      );
+    }
+    return false;
   }
 
   private async settleCreatorsRepaid(

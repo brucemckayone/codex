@@ -486,10 +486,16 @@ metadata still names a refund whose record was never written. Both are checked
 before the re-pay reads anything else at Stripe, so a refusal writes nothing.
 Our record is read once more in the settle's transaction, which only narrows
 the window for a late win that records its id meanwhile; the metadata is what
-closes it. Support refunds the buyer
-another way, or again through Stripe on the charge page, then settles it as
-refunded elsewhere. Any other failed refund of the same charge is settled as
-above.
+closes it. Support refunds the buyer another way, or first refunds it again
+through Stripe on the charge page, then settles it as refunded elsewhere.
+Settled after a refund another way, the late win's dispute is marked
+`refunded_outside_stripe_at` in the same transaction, unless Stripe's standing
+refunds already cover the charge or a date is already set. The charge page then
+blocks any further Stripe refund (`REFUNDED_OUTSIDE_STRIPE`;
+[operations](operations.md#late-wins)): Stripe doesn't count the failed refund
+and the late win lifts the 14-day window, so it would otherwise offer the whole
+amount again with no end. Any other failed refund of the same charge is settled
+as above.
 
 A purchase it refunded in part stops counting it: `refund.updated` restates
 the purchase's refunded amount, id and reason from the refunds still standing
@@ -681,8 +687,9 @@ dispute event records it, then acts on the status the record has.
     counts as settled, but the buyer got nothing: it is alerted at error for
     support to settle by hand (owner decision 2026-11-05). A failed one is
     also in the Failed refunds queue, and its clawback stands, as any failed
-    refund's does. It is settled only as refunded elsewhere: "creators
-    re-paid" is refused for it ([above](#refunds));
+    refund's does. It is settled only as refunded elsewhere, which then
+    blocks a Stripe refund of the charge: "creators re-paid" is refused for
+    it ([above](#refunds));
   - a refund Stripe won't make is retried every hour and alerted each time,
     and support settles it by hand
     ([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)):
