@@ -4,7 +4,7 @@
  * svelte's own parser (which drops the comments between declarations; those
  * inside a value are stripped here). Imported by tests only.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse, parseCss } from 'svelte/compiler';
 
@@ -54,13 +54,15 @@ export function cssRules(source: string): CssRule[] {
 
 /**
  * The text of every file under `src` whose name ends in `extension`, read
- * from disk: under vitest a `?raw` CSS import is an empty string.
+ * from disk: under vitest a `?raw` CSS import is an empty string. Only files:
+ * a route's directory can carry the extension too (`routes/sitemap.xml/`).
  */
 export function sourceTexts(extension: string): string[] {
   const src = join(import.meta.dirname, '..', '..', '..', '..');
   return readdirSync(src, { recursive: true, encoding: 'utf8' })
-    .filter((path) => path.endsWith(extension))
-    .map((path) => readFileSync(join(src, path), 'utf8'));
+    .map((path) => join(src, path))
+    .filter((path) => path.endsWith(extension) && statSync(path).isFile())
+    .map((path) => readFileSync(path, 'utf8'));
 }
 
 function rulesOf(

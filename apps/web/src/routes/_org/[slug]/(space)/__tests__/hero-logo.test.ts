@@ -5,8 +5,7 @@ import { type AST, parse, parseCss } from 'svelte/compiler';
 import { describe, expect, test } from 'vitest';
 import {
   BRAND_PREFIX_KEYS,
-  darkTokenOverridesToCssVars,
-  tokenOverridesToCssVars,
+  tokenOverrideStyle,
 } from '$lib/brand-editor/css-injection';
 import {
   type CssRule,
@@ -80,14 +79,21 @@ const BRAND_INPUTS = new Set(['--brand-density', '--brand-hero-logo-scale']);
 /** What scales an element and everything drawn inside it. */
 const SCALES = /^(?:-webkit-)?(?:scale|zoom|transform|translate|rotate)$/;
 const KEYFRAMES_AT = /^@(?:-webkit-)?keyframes (?:-global-)?(.+)$/i;
+/** A flattened math function: it makes a number, a length or an angle. */
+const MATH = '(?:calc|min|max|clamp|round|abs|sign|mod|rem)#';
 /** The functions an animation's timings are written with; any other may hold its name. */
-const TIMING_FN =
-  /^(?:calc|min|max|clamp|round|abs|sign|mod|rem|cubic-bezier|steps|linear)#$/i;
+const TIMING_FN = new RegExp(
+  `^(?:${MATH}|(?:cubic-bezier|steps|linear)#)$`,
+  'i'
+);
 /** A flattened value's substitutions (`var()`, `if()`, a custom function): they may hold anything. */
 const SUBSTITUTED = /(?:^|[^\w-])(?:var|env|attr|if|--[\w-]+)#/i;
+/** One flattened substitution. */
+const SUBSTITUTION = /^(?:var|env|attr|if|--[\w-]+)#$/i;
 /** An angle, or a math function that can make one. */
-const ANGLE =
-  /^(?:[-+]?[\d.]+(?:deg|g?rad|turn)|(?:calc|min|max|clamp|round|abs|sign|mod|rem)#)$/i;
+const ANGLE = new RegExp(`^(?:[-+]?[\\d.]+(?:deg|g?rad|turn)|${MATH})$`, 'i');
+/** The axis of a turn in the plane: unwritten, `z`, or `0 0 n`. */
+const PLANE_AXIS = new RegExp(`^(?:z|0 0 (?:[-+]?[\\d.]+|${MATH}))?$`, 'i');
 /** The animation shorthand's words that are not a keyframes name. */
 const ANIMATION_WORDS = new Set([
   'none',
@@ -209,20 +215,33 @@ function flatten(value: string): string {
  */
 function unscaled(property: string, value: string): boolean {
   const flat = flatten(inPlane(withoutImportant(value))).trim();
-  // A substitution may hold a third, depth, value, or another axis.
+  if (property === 'rotate') return turnsInPlane(flat);
+  // A substitution may hold a third, depth, value, or a scale.
   if (SUBSTITUTED.test(flat)) return false;
   if (property === 'translate') return flat.split(/\s+/).length <= 2;
-  // Turning in the plane keeps the shape; about any other axis it squashes.
-  // The axis and the angle come in either order.
-  if (property === 'rotate') {
-    const parts = flat.split(/\s+/);
-    const angle = parts.findIndex((part) => ANGLE.test(part));
-    const axis = parts.filter((_, i) => i !== angle).join(' ');
-    return (
-      /^none$/i.test(flat) || (angle >= 0 && /^(?:z|0 0 \S+)?$/i.test(axis))
-    );
-  }
-  return /^(?:1|none|(?:(?:translate[xy]?|rotatez?)#\s*)+)$/i.test(flat);
+  return /^(?:1|none|initial|unset|(?:(?:translate[xy]?|rotatez?)#\s*)+)$/i.test(
+    flat
+  );
+}
+
+/**
+ * Whether a flattened `rotate` turns in the plane, which keeps the shape;
+ * about any other axis it squashes. The angle is the first word or the last,
+ * so each end that can be one is read as it, and every reading must leave the
+ * plane's axis. Once that axis is written out, a substitution can only be the
+ * angle; alone, it may hold any axis.
+ */
+function turnsInPlane(flat: string): boolean {
+  if (/^(?:none|initial|unset)$/i.test(flat)) return true;
+  const parts = flat.split(/\s+/);
+  const readings = [...new Set([0, parts.length - 1])].flatMap((at) => {
+    const angle = parts[at] ?? '';
+    const axis = parts.filter((_, i) => i !== at).join(' ');
+    const isAngle =
+      ANGLE.test(angle) || (SUBSTITUTION.test(angle) && axis !== '');
+    return isAngle ? [axis] : [];
+  });
+  return readings.length > 0 && readings.every((axis) => PLANE_AXIS.test(axis));
 }
 
 /** A value without a trailing `!important`. */
@@ -414,21 +433,25 @@ function glued(before: string | undefined, after: string | undefined): boolean {
   );
 }
 
-/** Whether a class expression can only give the classes `literals` finds. */
-function onlyLiterals(node: Expression): boolean {
+/**
+ * Whether a class expression can only give the classes `literals` finds.
+ * `stringified`: it sits in a template literal, which writes every value out.
+ */
+function onlyLiterals(node: Expression, stringified = false): boolean {
+  const inner = (e: Expression) => onlyLiterals(e, stringified);
   switch (node.type) {
     case 'Literal':
       return true;
     case 'Identifier':
-      // `undefined` adds no class.
-      return node.name === 'undefined';
+      // `undefined` adds no class, unless a template literal writes it out.
+      return !stringified && node.name === 'undefined';
     case 'TemplateLiteral': {
       // Text that runs into an expression makes a class no literal holds.
       const text = (i: number) => node.quasis[i]?.value.cooked ?? '';
       const last = node.expressions.length - 1;
       return node.expressions.every(
         (expression, i) =>
-          onlyLiterals(expression) &&
+          onlyLiterals(expression, true) &&
           !glued(
             i === 0 && text(0) === '' ? undefined : text(i),
             i === last && text(i + 1) === '' ? undefined : text(i + 1)
@@ -436,16 +459,13 @@ function onlyLiterals(node: Expression): boolean {
       );
     }
     case 'ConditionalExpression':
-      return onlyLiterals(node.consequent) && onlyLiterals(node.alternate);
+      return inner(node.consequent) && inner(node.alternate);
     case 'LogicalExpression':
       // `a && 'x'` gives 'x' or a falsy value, which adds no class.
-      return (
-        (node.operator === '&&' || onlyLiterals(node.left)) &&
-        onlyLiterals(node.right)
-      );
+      return (node.operator === '&&' || inner(node.left)) && inner(node.right);
     case 'ArrayExpression':
       return node.elements.every(
-        (e) => e === null || (e.type !== 'SpreadElement' && onlyLiterals(e))
+        (e) => e === null || (e.type !== 'SpreadElement' && inner(e))
       );
     case 'ObjectExpression':
       return node.properties.every((p) => p.type === 'Property' && !p.computed);
@@ -490,9 +510,10 @@ function handedOver(
  * Markup as a static DOM: every branch, every conditional class. A snippet in
  * `snippets` renders where `{@render}` places it, not where it is defined, and
  * `<svelte:head>` renders off the page. What it cannot read about an element
- * goes in `unread`: a class, id or hero layout from script, a class that runs
- * into an expression, an attribute that hands it to script, a tag from
- * script, `{@html}`.
+ * goes in `unread`: a class or id from script, a class that runs into an
+ * expression, an attribute that hands it to script, a tag from script,
+ * `{@html}`. An element whose hero layout comes from script goes in
+ * `layoutFromScript`, for the caller to mark unless it is the org layout's.
  */
 function build(
   nodes: ReadonlyArray<unknown>,
@@ -577,7 +598,7 @@ function build(
         );
         if (a.name === 'id' && fromScript.length > 0)
           unread.set(dom, 'id from script');
-        if (a.name === 'class' && !fromScript.every(onlyLiterals))
+        if (a.name === 'class' && !fromScript.every((e) => onlyLiterals(e)))
           unread.set(dom, 'class from script');
         if (a.name === 'class' && runsIn)
           unread.set(dom, 'class runs into an expression');
@@ -625,10 +646,30 @@ function literalTag(el: AST.SvelteElement): string | null {
     : null;
 }
 
-const markup = (path: string) =>
-  parse(readFileSync(path, 'utf8'), { modern: true }).fragment;
-const page = markup(PAGE);
-const layout = markup(LAYOUT);
+const LAYOUT_SOURCE = readFileSync(LAYOUT, 'utf8');
+const layoutRoot = parse(LAYOUT_SOURCE, { modern: true });
+const page = parse(readFileSync(PAGE, 'utf8'), { modern: true }).fragment;
+const layout = layoutRoot.fragment;
+
+type Declarator = {
+  type: 'VariableDeclarator';
+  id: { name?: unknown };
+  init: { start: number; end: number } | null;
+};
+
+/** What the layout's script initialises `name` to, as written, spacing squashed. */
+function initializerOf(name: string): string | undefined {
+  const declarator = nodesOf(layoutRoot.instance).find(
+    (node) =>
+      node.type === 'VariableDeclarator' &&
+      (node as Declarator).id.name === name
+  ) as Declarator | undefined;
+  if (!declarator?.init) return undefined;
+  return LAYOUT_SOURCE.slice(declarator.init.start, declarator.init.end)
+    .replace(/\s+/g, ' ')
+    .replace(/\(\s/g, '(')
+    .replace(/\s\)/g, ')');
+}
 build(
   layout.nodes,
   document.body,
@@ -830,6 +871,13 @@ describe('the hero logo', () => {
     expect(unscaled('transform', 'rotate3d(0, 1, 0, 3deg)')).toBe(false);
     expect(unscaled('translate', 'if(media(width > 0): 0 0 50px)')).toBe(false);
     expect(unscaled('rotate', 'if(media(width > 0): y 60deg)')).toBe(false);
+    // Only an end is the angle: a math function in the middle is an axis.
+    expect(unscaled('rotate', 'calc(1) 0 0 60deg')).toBe(false);
+    expect(unscaled('rotate', '0 calc(1) 0 60deg')).toBe(false);
+    expect(unscaled('rotate', '0 0 1 3deg')).toBe(true);
+    expect(unscaled('rotate', 'z var(--tilt)')).toBe(true);
+    expect(unscaled('rotate', 'var(--tilt)')).toBe(false);
+    expect(unscaled('rotate', 'initial')).toBe(true);
   });
 
   test('every rule that can reach it sits in an at-rule a browser applies', () => {
@@ -905,7 +953,8 @@ describe('the hero logo', () => {
         .filter((text) => /@property/i.test(text))
         .map((text) => parse(text, { modern: true }).css?.children ?? []),
     ].flatMap(registrations);
-    // The components' registrations are read: a block's, and the page's.
+    // Each kind is read: a kit sheet's, a block's, and the page's.
+    expect(registered).toContain('--_atmos-floor');
     expect(registered).toContain('--_benefit-figure-col');
     expect(registered).toContain('--_hero-ink');
     expect(registered.filter((name) => DIAL_INPUTS.test(name))).toEqual([]);
@@ -921,28 +970,32 @@ describe('the hero logo', () => {
           (DIAL_INPUTS.test(name) && !BRAND_INPUTS.has(name))
       );
     expect(carried).toEqual([]);
-    // Its one style from script joins what the two mappers make of the org's
-    // token overrides: `--brand-` and a brand key, or `--color-` and any key.
+    // Its one style from script is the org's token overrides as
+    // `tokenOverrideStyle` writes them, and nothing else: `--brand-` and a
+    // brand key, or `--color-` and any key. (Entries that are not
+    // well-formed are Codex-403d3.)
     const fromScript = (wrapper && scriptStyles.get(wrapper)) || [];
     expect(
       fromScript.map((e) => (e.type === 'Identifier' ? e.name : e.type))
     ).toEqual(['serverTokenOverrideStyle']);
+    expect(initializerOf('serverTokenOverrideStyle')).toBe(
+      '$derived(brandEditor.isClosed ? tokenOverrideStyle(serverTokenOverrides, serverDarkTokenOverrides) : undefined)'
+    );
     const overrides = Object.fromEntries(
       [...BRAND_PREFIX_KEYS, 'space-48', 'density'].map((key) => [key, '1'])
     );
-    const injected = Object.keys({
-      ...tokenOverridesToCssVars(overrides),
-      ...darkTokenOverridesToCssVars(overrides),
-    });
+    const injected = (tokenOverrideStyle(overrides, overrides) ?? '')
+      .split(';')
+      .map((declaration) =>
+        declaration.slice(0, declaration.indexOf(':')).trim()
+      );
     expect(injected).toContain('--brand-hero-logo-scale');
     expect(
       injected.filter((name) => !/^--(?:brand|color)-/.test(name))
     ).toEqual([]);
     expect(
       injected.filter(
-        (name) =>
-          (DIAL_INPUTS.test(name) || SCALES.test(name)) &&
-          !BRAND_INPUTS.has(name)
+        (name) => DIAL_INPUTS.test(name) && !BRAND_INPUTS.has(name)
       )
     ).toEqual([]);
     expect(
