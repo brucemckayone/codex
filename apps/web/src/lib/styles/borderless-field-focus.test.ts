@@ -512,8 +512,9 @@ describe('every borderless field keeps a focus cue that holds 3:1 (Codex-c5prp)'
   });
 
   it('an engine without :has() keeps the cue through :focus-within', () => {
-    // Such an engine drops the `:has()` rule whole, and SearchPill and the
-    // three studio search boxes, which turn their halo off, would show none.
+    // Such an engine drops the `:has()` rule whole: SearchPill, which turns
+    // its halo off, would show no cue, and the three studio search boxes only
+    // the 1.46:1 halo.
     const source = readFileSync(join(STYLES, 'base.css'), 'utf8');
     type At = {
       type: string;
