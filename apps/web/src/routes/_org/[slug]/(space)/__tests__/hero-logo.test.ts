@@ -92,8 +92,12 @@ const SUBSTITUTED = /(?:^|[^\w-])(?:var|env|attr|if|--[\w-]+)#/i;
 const SUBSTITUTION = /^(?:var|env|attr|if|--[\w-]+)#$/i;
 /** An angle, or a math function that can make one. */
 const ANGLE = new RegExp(`^(?:[-+]?[\\d.]+(?:deg|g?rad|turn)|${MATH})$`, 'i');
+/** A number, exponent and all. */
+const NUMBER = '[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:e[-+]?\\d+)?';
 /** The axis of a turn in the plane: unwritten, `z`, or `0 0 n`. */
-const PLANE_AXIS = new RegExp(`^(?:z|0 0 (?:[-+]?[\\d.]+|${MATH}))?$`, 'i');
+const PLANE_AXIS = new RegExp(`^(?:z|0 0 (?:${NUMBER}|${MATH}))?$`, 'i');
+/** A number with a unit: never part of an axis. */
+const DIMENSION = /^[-+]?[\d.]+[a-z%]+$/i;
 /** The animation shorthand's words that are not a keyframes name. */
 const ANIMATION_WORDS = new Set([
   'none',
@@ -227,19 +231,26 @@ function unscaled(property: string, value: string): boolean {
 /**
  * Whether a flattened `rotate` turns in the plane, which keeps the shape;
  * about any other axis it squashes. The angle is the first word or the last,
- * so each end that can be one is read as it, and every reading must leave the
- * plane's axis. Once that axis is written out, a substitution can only be the
- * angle; alone, it may hold any axis.
+ * so each end that can be one is read as it, and every reading a browser
+ * could make must leave the plane's axis. A reading whose rest cannot be an
+ * axis at all (a unit in it, or a word count but 0, 1 or 3) is not one. Once
+ * that axis is written out, a substitution can only be the angle; alone, it
+ * may hold any axis.
  */
 function turnsInPlane(flat: string): boolean {
   if (/^(?:none|initial|unset)$/i.test(flat)) return true;
   const parts = flat.split(/\s+/);
   const readings = [...new Set([0, parts.length - 1])].flatMap((at) => {
     const angle = parts[at] ?? '';
-    const axis = parts.filter((_, i) => i !== at).join(' ');
+    const rest = parts.filter((_, i) => i !== at);
+    if (
+      ![0, 1, 3].includes(rest.length) ||
+      rest.some((word) => DIMENSION.test(word))
+    )
+      return [];
     const isAngle =
-      ANGLE.test(angle) || (SUBSTITUTION.test(angle) && axis !== '');
-    return isAngle ? [axis] : [];
+      ANGLE.test(angle) || (SUBSTITUTION.test(angle) && rest.length > 0);
+    return isAngle ? [rest.join(' ')] : [];
   });
   return readings.length > 0 && readings.every((axis) => PLANE_AXIS.test(axis));
 }
@@ -434,24 +445,37 @@ function glued(before: string | undefined, after: string | undefined): boolean {
 }
 
 /**
- * Whether a class expression can only give the classes `literals` finds.
- * `stringified`: it sits in a template literal, which writes every value out.
+ * How Svelte writes a class value out (svelte/src/internal). A bare
+ * `class={…}` goes through `clsx`, which drops every falsy value and `true`. A
+ * quoted attribute's expression goes through `stringify` or `to_class`, which
+ * drop only `null` and `undefined`. One in a template literal is written as
+ * JavaScript writes it, `undefined` and all.
  */
-function onlyLiterals(node: Expression, stringified = false): boolean {
-  const inner = (e: Expression) => onlyLiterals(e, stringified);
+type Writes = 'clsx' | 'stringify' | 'template';
+
+/** Whether a value that is not a string adds no class where it is written. */
+function writesNothing(value: unknown, writes: Writes): boolean {
+  if (value === null || value === undefined) return writes !== 'template';
+  return writes === 'clsx' && typeof value === 'boolean';
+}
+
+/** Whether a class expression can only give the classes `literals` finds. */
+function onlyLiterals(node: Expression, writes: Writes): boolean {
+  const inner = (e: Expression) => onlyLiterals(e, writes);
   switch (node.type) {
     case 'Literal':
-      return true;
+      return (
+        typeof node.value === 'string' || writesNothing(node.value, writes)
+      );
     case 'Identifier':
-      // `undefined` adds no class, unless a template literal writes it out.
-      return !stringified && node.name === 'undefined';
+      return node.name === 'undefined' && writesNothing(undefined, writes);
     case 'TemplateLiteral': {
       // Text that runs into an expression makes a class no literal holds.
       const text = (i: number) => node.quasis[i]?.value.cooked ?? '';
       const last = node.expressions.length - 1;
       return node.expressions.every(
         (expression, i) =>
-          onlyLiterals(expression, true) &&
+          onlyLiterals(expression, 'template') &&
           !glued(
             i === 0 && text(0) === '' ? undefined : text(i),
             i === last && text(i + 1) === '' ? undefined : text(i + 1)
@@ -461,18 +485,29 @@ function onlyLiterals(node: Expression, stringified = false): boolean {
     case 'ConditionalExpression':
       return inner(node.consequent) && inner(node.alternate);
     case 'LogicalExpression':
-      // `a && 'x'` gives 'x' or a falsy value, which adds no class.
-      return (node.operator === '&&' || inner(node.left)) && inner(node.right);
+      // `a && 'x'` gives 'x' or a falsy `a`: `clsx` drops it, the others write it.
+      return (
+        ((node.operator === '&&' && writes === 'clsx') || inner(node.left)) &&
+        inner(node.right)
+      );
+    // Only `clsx` reads an array or an object as classes, and drops a
+    // boolean; the others write `a,b`, `[object Object]`, `true`.
     case 'ArrayExpression':
-      return node.elements.every(
-        (e) => e === null || (e.type !== 'SpreadElement' && inner(e))
+      return (
+        writes === 'clsx' &&
+        node.elements.every(
+          (e) => e === null || (e.type !== 'SpreadElement' && inner(e))
+        )
       );
     case 'ObjectExpression':
-      return node.properties.every((p) => p.type === 'Property' && !p.computed);
+      return (
+        writes === 'clsx' &&
+        node.properties.every((p) => p.type === 'Property' && !p.computed)
+      );
     case 'UnaryExpression':
-      return node.operator === '!';
+      return writes === 'clsx' && node.operator === '!';
     case 'BinaryExpression':
-      return node.operator !== '+';
+      return writes === 'clsx' && node.operator !== '+';
     default:
       return false;
   }
@@ -598,7 +633,12 @@ function build(
         );
         if (a.name === 'id' && fromScript.length > 0)
           unread.set(dom, 'id from script');
-        if (a.name === 'class' && !fromScript.every((e) => onlyLiterals(e)))
+        // A quoted value is written out; a bare `class={…}` goes through clsx.
+        const writes = Array.isArray(a.value) ? 'stringify' : 'clsx';
+        if (
+          a.name === 'class' &&
+          !fromScript.every((e) => onlyLiterals(e, writes))
+        )
           unread.set(dom, 'class from script');
         if (a.name === 'class' && runsIn)
           unread.set(dom, 'class runs into an expression');
@@ -878,6 +918,10 @@ describe('the hero logo', () => {
     expect(unscaled('rotate', 'z var(--tilt)')).toBe(true);
     expect(unscaled('rotate', 'var(--tilt)')).toBe(false);
     expect(unscaled('rotate', 'initial')).toBe(true);
+    // A reading that leaves a unit in the axis is not one a browser makes.
+    expect(unscaled('rotate', '60deg 0 0 calc(1)')).toBe(true);
+    expect(unscaled('rotate', 'calc(1deg) 0 0 calc(1)')).toBe(false);
+    expect(unscaled('rotate', '0 0 1e3 60deg')).toBe(true);
   });
 
   test('every rule that can reach it sits in an at-rule a browser applies', () => {
