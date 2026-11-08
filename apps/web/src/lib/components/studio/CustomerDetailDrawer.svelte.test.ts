@@ -511,4 +511,65 @@ describe('focus after a revoke', () => {
     expect(getCustomerDetail).toHaveBeenCalledTimes(1);
     expect(getCustomerGrants).toHaveBeenCalledTimes(1);
   });
+
+  // A busy confirm can be dismissed (ConfirmDialog's session counter). The
+  // revoke's answer marked the confirm open WHEN IT LANDED, another grant's,
+  // so that one's Cancel sent focus to the revoked grant's place, not home
+  // (review fu-focus-2).
+  test("an Escape during a revoke, then another grant's confirm: its Cancel still goes home", async () => {
+    const YOGA = {
+      ...MOBILITY,
+      id: `${MOBILITY.id.slice(0, -1)}4`,
+      contentTitle: 'Yoga Basics',
+    };
+    const PILATES = {
+      ...MOBILITY,
+      id: `${MOBILITY.id.slice(0, -1)}5`,
+      contentTitle: 'Pilates Flow',
+    };
+    setGrants(grantsPage([SLEEP, MOBILITY, YOGA, PILATES]));
+    refreshGrants.mockImplementation(async () =>
+      setGrants(grantsPage([SLEEP, MOBILITY, PILATES, gone(YOGA)]))
+    );
+    const answer = deferred<null>();
+    revokeCustomerGrant.mockReturnValue(answer.promise);
+    mountDrawer();
+    await vi.waitFor(() => expect(rows()).toHaveLength(4));
+
+    // Yoga's revoke starts, and its confirm is dismissed while it runs.
+    revokeButton(YOGA)?.focus();
+    revokeButton(YOGA)?.click();
+    flushSync();
+    const first = confirmDialog() as HTMLElement;
+    await focusIn(first);
+    button(first, m.studio_customers_grants_revoke_confirm())?.click();
+    flushSync();
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    flushSync();
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+    // Home first, as the close takes it there a moment later.
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(YOGA))
+    );
+
+    // Mobility's confirm opens, and then Yoga's revoke answers.
+    revokeButton(MOBILITY)?.focus();
+    revokeButton(MOBILITY)?.click();
+    flushSync();
+    const second = confirmDialog() as HTMLElement;
+    await focusIn(second);
+    answer.resolve(null);
+    await vi.waitFor(() =>
+      expect(row(YOGA.contentTitle).dataset.state).toBe('revoked')
+    );
+
+    button(second, m.common_cancel())?.click();
+    flushSync();
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(MOBILITY))
+    );
+  });
 });

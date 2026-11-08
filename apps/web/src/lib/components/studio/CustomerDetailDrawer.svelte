@@ -162,7 +162,11 @@
       revokeFailedId = grant.id;
       return;
     }
-    revokedIndex = grants?.findIndex((g) => g.id === grant.id) ?? 0;
+    // Only while the confirm that asked is still the open one. The confirm
+    // can be dismissed while it runs, and another grant's opened since: its
+    // Cancel then sent focus to this grant's place, not home.
+    if (revokeDialogOpen && revokeTarget?.id === grant.id)
+      revokedIndex = grants?.findIndex((g) => g.id === grant.id) ?? 0;
     await refreshGrants();
   }
 
