@@ -42,7 +42,11 @@ export function componentRules(
 
 /** The same, for a plain `.css` sheet (a Style's, or the kit's own). */
 export function sheetRules(path: string): CssRule[] {
-  const source = readFileSync(path, 'utf8');
+  return cssRules(readFileSync(path, 'utf8'));
+}
+
+/** The same, for a sheet's text. */
+export function cssRules(source: string): CssRule[] {
   return rulesOf(source, parseCss(source).children);
 }
 
@@ -54,7 +58,8 @@ function rulesOf(
   const rules: CssRule[] = [];
   /**
    * A block's declarations as the cascade keeps them: last wins, but not over
-   * `!important`. Property names are case-insensitive, custom ones aside.
+   * `!important`. Property names are case-insensitive, custom ones aside, and
+   * a value's comments are dropped (the parser keeps them).
    */
   const declsOf = (block: CssNode[]) => {
     const decls = new Map<string, string>();
@@ -66,7 +71,7 @@ function rulesOf(
       const property = written.startsWith('--')
         ? written
         : written.toLowerCase();
-      const value = squash(d.value ?? '');
+      const value = squash((d.value ?? '').replace(/\/\*[\s\S]*?\*\//g, ''));
       if (important(decls.get(property)) && !important(value)) continue;
       decls.set(property, value);
     }

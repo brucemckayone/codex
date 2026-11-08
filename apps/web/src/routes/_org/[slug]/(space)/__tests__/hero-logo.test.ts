@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest';
 import {
   type CssRule,
   componentRules,
+  cssRules,
 } from '$lib/page-builder/kit/blocks/testing';
 
 /**
@@ -25,27 +26,35 @@ import {
  * the document, not by reading selector text. The org layout's markup is
  * built into it as a static DOM, every branch and every conditional class at
  * once, with the page's markup at its `{@render children()}` and each
- * rendered snippet inlined where it renders. Each rule's selector,
- * `:global()` unwrapped, is matched under every hero layout, and whatever a
- * static DOM cannot decide counts as met: hover and focus, `:not()` (unless
- * it tests only the hero layout), position (`:nth-*`, `:first-child`,
- * `:empty`), `+` adjacency, and every attribute but the hero layout (the
- * layout's `data-hero-hide-*` flags, `data-theme`). The check may
- * over-match; it must never under-match.
+ * rendered snippet inlined where it renders. Each rule of the page and the
+ * layout, `:global()` unwrapped, is matched under every hero layout, and
+ * whatever a static DOM cannot decide counts as met: every pseudo-class but
+ * `:is`, `:where` and `:root` (states, position, `:dir`, `:lang`, `:target`,
+ * `:checked`, and `:has()`, since a component renders what it looks for), `:not()` unless it tests only the hero layout, `+`
+ * adjacency, and every attribute but the hero layout (the layout's
+ * `data-hero-hide-*` flags, `data-theme`). The check may over-match; it must
+ * never under-match.
  *
  * A rule that can reach the image may set its size and shape only to the
  * dial's height, `width: auto`, `object-fit: contain` and the one cap, in
- * its own declarations and in the frames of any animation it runs; paint
- * (filters, radius, transitions) is free. No rule that reaches the image or
- * an element around it may redefine what that height reads, and none may
- * scale an element around it. Not modelled: the root layout's markup, a
- * pseudo-element (its box is never the image's) and what a component
- * renders; a rule that needs one of them is not checked.
+ * its own declarations and in the frames of any animation it runs (the
+ * page's, the layout's or a global sheet's); paint (filters, radius,
+ * transitions) is free. Nothing on the image or around it may redefine or
+ * register what that height reads, or scale what it sits in, and nothing
+ * between the image and the org layout (which carries the brand's inputs)
+ * may set an inline style. Not modelled: the root layout's markup, global
+ * sheets' rules (the reset's `img` rule among them), a pseudo-element (its
+ * box is never the image's) and what a component renders; a rule that needs
+ * one of them is not checked.
  */
 
 const PAGE = join(import.meta.dirname, '..', '+page.svelte');
 const LAYOUT = join(import.meta.dirname, '..', '..', '+layout.svelte');
-const rules = componentRules(PAGE, { nested: true });
+// The layout's own rules reach the page through `.org-layout` and `.org-main`.
+const rules = [
+  ...componentRules(PAGE, { nested: true }),
+  ...componentRules(LAYOUT, { nested: true }),
+];
 
 const HEIGHT = 'calc(var(--_logo-base) * var(--brand-hero-logo-scale, 1))';
 const LOGO_HERO_RULE = ':global([data-hero-layout="logo-hero"]) .hero__logo';
@@ -56,28 +65,63 @@ const SHAPE =
 const DIAL_INPUTS =
   /^--(?:brand-hero-logo-scale|space-[\w-]+|brand-density(?:-scale)?)$/;
 /** What scales an element and everything drawn inside it. */
-const SCALES = /^(?:-webkit-)?(?:scale|zoom|transform)$/;
-/** A value that leaves an element's scale alone: the hero's entrances only move. */
-const UNSCALED =
-  /^(?:1|none|(?:translate(?:x|y|z|3d)?\((?:[^()]|\([^()]*\))*\)\s*)+)$/i;
+const SCALES = /^(?:-webkit-)?(?:scale|zoom|transform|translate)$/;
+const KEYFRAMES_AT = /^@(?:-webkit-)?keyframes (?:-global-)?(.+)$/;
+/** The animation shorthand's words that are not a keyframes name. */
+const ANIMATION_WORDS = new Set([
+  'none',
+  'normal',
+  'reverse',
+  'alternate',
+  'alternate-reverse',
+  'forwards',
+  'backwards',
+  'both',
+  'running',
+  'paused',
+  'infinite',
+  'linear',
+  'ease',
+  'ease-in',
+  'ease-out',
+  'ease-in-out',
+  'step-start',
+  'step-end',
+  'initial',
+  'inherit',
+  'unset',
+  'revert',
+]);
 const MATCHABLE_AT =
   /^@(?:media|container|supports|layer|starting-style)(?: |$)/;
-/** Interaction states, longest name first so `:focus` never takes `:focus-visible`. */
-const STATE = /:(?:focus-visible|focus-within|focus|hover|active)(?![\w-])/g;
-const LAYOUT_ATTRIBUTE = /\[\s*data-hero-layout\b[^\]]*\]/g;
+/**
+ * The pseudo-classes a static DOM decides: every other one counts as met.
+ * `:has()` is not among them: a component renders descendants this DOM
+ * never holds.
+ */
+const DECIDED = new Set(['is', 'where', 'root']);
+/** Pseudo-elements, the single-colon spellings too: a box of their own. */
+const PSEUDO_ELEMENT = /::|:(?:before|after|first-line|first-letter)(?![\w-])/i;
+const LAYOUT_ATTRIBUTE = /\[\s*data-hero-layout(?![\w-])[^\]]*\]/g;
 
-/** A selector list's members, split on top-level commas only. */
+/** A selector list's members, split on top-level commas only, quotes skipped. */
 function members(list: string): string[] {
   const out: string[] = [];
   let depth = 0;
+  let quote = '';
   let current = '';
   for (const char of list) {
-    if (char === '(' || char === '[') depth++;
-    if (char === ')' || char === ']') depth--;
-    if (char === ',' && depth === 0) {
+    if (quote) {
+      if (char === quote) quote = '';
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === '(' || char === '[') depth++;
+    else if (char === ')' || char === ']') depth--;
+    else if (char === ',' && depth === 0) {
       out.push(current.trim());
       current = '';
-    } else current += char;
+      continue;
+    }
+    current += char;
   }
   return [...out, current.trim()];
 }
@@ -87,6 +131,24 @@ const nest = (outer: string, inner: string) =>
   inner.includes('&')
     ? inner.replaceAll('&', `:is(${outer})`)
     : `${outer} ${inner}`;
+
+/** The index just past the `)` that closes the `(` at `open`, quotes skipped. */
+function closing(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const char = text[i];
+    if (char === '"' || char === "'") {
+      const end = text.indexOf(char, i + 1);
+      if (end < 0) break;
+      i = end;
+      continue;
+    }
+    if (char === '(') depth++;
+    if (char === ')') depth--;
+    if (depth === 0) return i + 1;
+  }
+  throw new Error(`unbalanced parentheses in "${text}"`);
+}
 
 /** Each `:name(…)` in a selector, replaced by what `swap` makes of its argument. */
 function swapCalls(
@@ -103,17 +165,31 @@ function swapCalls(
       i++;
       continue;
     }
-    let depth = 0;
-    let end = i + head.length - 1;
-    do {
-      if (selector[end] === '(') depth++;
-      if (selector[end] === ')') depth--;
-      end++;
-    } while (depth > 0 && end < selector.length);
+    const end = closing(selector, i + head.length - 1);
     out += swap(selector.slice(i + head.length, end - 1));
     i = end;
   }
   return out;
+}
+
+/** A value with every parenthesised argument, however nested, as `#`. */
+function flatten(value: string): string {
+  let flat = value;
+  for (let last = ''; last !== flat; ) {
+    last = flat;
+    flat = flat.replace(/\([^()]*\)/g, '#');
+  }
+  return flat;
+}
+
+/**
+ * A value that leaves an element's scale alone: a move in the plane (the
+ * hero's entrances). A move in depth draws larger under a `perspective`.
+ */
+function unscaled(property: string, value: string): boolean {
+  const flat = flatten(value).trim();
+  if (property === 'translate') return flat.split(/\s+/).length <= 2;
+  return /^(?:1|none|(?:translate[xy]?#\s*)+)$/i.test(flat);
 }
 
 const MET = ':is(*)';
@@ -130,23 +206,21 @@ function undecided(selector: string): string {
     .trim();
   out = swapCalls(out, 'not', (inner) =>
     testsOnlyTheLayout(inner) ? `:not(${inner})` : MET
+  ).replace(/\[[^\]]*\]/g, (attribute) =>
+    /^\[\s*data-hero-layout(?![\w-])/.test(attribute) ? attribute : MET
   );
-  for (const name of [
-    'nth-child',
-    'nth-last-child',
-    'nth-of-type',
-    'nth-last-of-type',
-  ])
-    out = swapCalls(out, name, () => MET);
+  // States, position, direction, language, targets, form states: none of
+  // them is in the markup.
+  const called = new Set(
+    [...out.matchAll(/:([a-z-]+)\(/gi)].map((match) => match[1])
+  );
+  for (const name of called)
+    if (name !== 'not' && !DECIDED.has(name.toLowerCase()))
+      out = swapCalls(out, name, () => MET);
   return (
     out
-      .replace(
-        /:(?:(?:first|last|only)-(?:child|of-type)|empty)(?![\w-])/g,
-        MET
-      )
-      .replace(STATE, MET)
-      .replace(/\[[^\]]*\]/g, (attribute) =>
-        /^\[\s*data-hero-layout\b/.test(attribute) ? attribute : MET
+      .replace(/:([a-z-]+)(?![\w(-])/gi, (pseudo, name: string) =>
+        DECIDED.has(name.toLowerCase()) ? pseudo : MET
       )
       .replace(/\s*\+\s*/g, ' ~ ')
       .trim() || '*'
@@ -162,7 +236,7 @@ function selectorsOf(rule: CssRule): string[] {
   let full = members(first);
   for (const list of rest)
     full = full.flatMap((outer) => members(list).map((i) => nest(outer, i)));
-  return full.filter((s) => !s.includes('::')).map(undecided);
+  return full.filter((s) => !PSEUDO_ELEMENT.test(s)).map(undecided);
 }
 
 type Loose = {
@@ -227,6 +301,7 @@ function renderedSnippets(
   return new Map([...bodies].filter(([name]) => rendered.has(name)));
 }
 
+/** The snippet a `{@render}` calls, when it names one. */
 function calleeOf(tag: AST.RenderTag): string | null {
   const call =
     tag.expression.type === 'ChainExpression'
@@ -281,7 +356,12 @@ function build(
         if (a.name === 'class') {
           for (const c of [...text.split(/\s+/), ...literals(parts)])
             if (/^[\w-]+$/.test(c)) dom.classList.add(c);
-        } else if (/^[\w-]+$/.test(a.name)) dom.setAttribute(a.name, text);
+        } else if (a.name === 'style')
+          dom.setAttribute(
+            'style',
+            `${dom.getAttribute('style') ?? ''}${text}`
+          );
+        else if (/^[\w-]+$/.test(a.name)) dom.setAttribute(a.name, text);
       }
       build(el.fragment.nodes, dom, snippets);
       continue;
@@ -330,8 +410,21 @@ function matches(el: Element, selector: string, rule: CssRule): boolean {
   }
 }
 
+/** Every stylesheet under `$lib`: global, so its keyframes run anywhere. */
+const SHEETS = import.meta.glob<string>('$lib/**/*.css', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+const keyframes = new Map<string, CssRule[]>();
+for (const rule of [...rules, ...Object.values(SHEETS).flatMap(cssRules)])
+  for (const at of rule.within) {
+    const name = KEYFRAMES_AT.exec(at)?.[1];
+    if (name) keyframes.set(name, [...(keyframes.get(name) ?? []), rule]);
+  }
+
 const candidates = rules
-  .filter((rule) => !rule.within.some((at) => at.startsWith('@keyframes')))
+  .filter((rule) => !rule.within.some((at) => KEYFRAMES_AT.test(at)))
   .map((rule) => ({ rule, selectors: selectorsOf(rule) }));
 
 /** The rules that can reach `el` under any of `layouts`. */
@@ -350,20 +443,46 @@ function reaching(
     .map(({ rule }) => rule);
 }
 
-/** The frames of the `@keyframes` a rule's animations run. */
+/**
+ * The frames of the `@keyframes` a rule's animations run, in this page, the
+ * layout or a global sheet. A name it cannot find, or one held in `var()`,
+ * fails rather than counting as no frames; a shorthand's other `var()`s are
+ * its timings.
+ */
 function framesOf(rule: CssRule): CssRule[] {
-  const names = new Set(
-    `${rule.decls.get('animation') ?? ''} ${rule.decls.get('animation-name') ?? ''}`.split(
-      /[\s,]+/
-    )
+  const names = [
+    'animation',
+    'animation-name',
+    '-webkit-animation',
+    '-webkit-animation-name',
+  ].flatMap((property) =>
+    flatten(rule.decls.get(property) ?? '')
+      .split(',')
+      .flatMap((layer) => {
+        const words = layer
+          .trim()
+          .split(/\s+/)
+          .filter(
+            (word) =>
+              word !== '' &&
+              !ANIMATION_WORDS.has(word.toLowerCase()) &&
+              !/^[-+]?[\d.]/.test(word) &&
+              !/^(?:cubic-bezier|steps|linear)#$/i.test(word)
+          );
+        const named = words.filter((word) => !/^var#$/i.test(word));
+        if (words.length > 0 && named.length === 0)
+          throw new Error(`${where(rule)} names its frames in var(): ${layer}`);
+        return named;
+      })
   );
-  return rules.filter((r) =>
-    r.within.some(
-      (at) =>
-        at.startsWith('@keyframes ') &&
-        names.has(at.slice('@keyframes '.length))
-    )
-  );
+  return names.flatMap((name) => {
+    const frames = keyframes.get(name);
+    if (!frames)
+      throw new Error(
+        `${where(rule)} runs frames this test cannot read: ${name}`
+      );
+    return frames;
+  });
 }
 
 const logoRules = reaching(logo, HERO_LAYOUTS);
@@ -372,6 +491,7 @@ for (let el = logo?.parentElement; el; el = el.parentElement) around.push(el);
 
 describe('the hero logo', () => {
   test('the page renders inside the org layout, with the image and the title', () => {
+    expect(logo).not.toBeNull();
     expect(logo?.closest('.org-layout .org-main')).not.toBeNull();
     expect(title).not.toBeNull();
     expect(HERO_LAYOUTS).toContain('logo-hero');
@@ -387,6 +507,15 @@ describe('the hero logo', () => {
     expect(
       undecided(':global(:not([data-hero-layout="split"])) .hero__title')
     ).toBe(':not([data-hero-layout="split"]) .hero__title');
+    expect(
+      undecided(':root:lang(ar) .a:dir(rtl):target:scope:enabled:has(:checked)')
+    ).toBe(':root:is(*) .a:is(*):is(*):is(*):is(*):is(*)');
+    expect(undecided('.a:not([data-x="("]) .b')).toBe('.a:is(*) .b');
+    expect(unscaled('transform', 'translateY(calc(-1 * var(--space-1)))')).toBe(
+      true
+    );
+    expect(unscaled('transform', 'translateZ(50px)')).toBe(false);
+    expect(unscaled('translate', '0 0 50px')).toBe(false);
   });
 
   test('every rule that can reach it sits in an at-rule a browser applies', () => {
@@ -436,11 +565,32 @@ describe('the hero logo', () => {
         [...r.decls]
           .filter(
             ([property, value]) =>
-              SCALES.test(property) && !UNSCALED.test(value)
+              SCALES.test(property) && !unscaled(property, value)
           )
           .map(([property, value]) => `${where(r)} { ${property}: ${value} }`)
       );
     expect([...new Set(scaled)]).toEqual([]);
+  });
+
+  test('nothing registers what its height reads, and nothing around it carries an inline style', () => {
+    // A registered initial value replaces every fallback; `inherits: false`
+    // cuts the dial off at the element that sets it.
+    const registered = [PAGE, LAYOUT].flatMap((path) =>
+      (parse(readFileSync(path, 'utf8'), { modern: true }).css?.children ?? [])
+        .filter((node) => node.type === 'Atrule' && node.name === 'property')
+        .map((node) => (node.type === 'Atrule' ? node.prelude.trim() : ''))
+        .filter((name) => DIAL_INPUTS.test(name))
+    );
+    expect(registered).toEqual([]);
+    // The org layout carries the brand's inputs, the dial among them; nothing
+    // between it and the image may set a style of its own.
+    expect(
+      around
+        .filter((el) => el !== wrapper && el.getAttribute('style') !== null)
+        .map(
+          (el) => `${el.tagName.toLowerCase()}.${[...el.classList].join('.')}`
+        )
+    ).toEqual([]);
   });
 
   test('takes its base from the spacing scale, 192px × density in logo-hero from md up', () => {

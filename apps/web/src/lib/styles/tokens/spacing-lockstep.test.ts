@@ -65,6 +65,18 @@ function scale(file: keyof typeof SCALE_BLOCK): Rung[] {
   ) => {
     for (const node of nodes) {
       if (node.type === 'Atrule') {
+        // A registered initial value stands in wherever the block does not
+        // reach, and replaces every fallback: a declaration of its own.
+        const registered = node.prelude.trim();
+        if (
+          node.name === 'property' &&
+          (registered.startsWith('--space-') || UNIT.includes(registered))
+        )
+          found.push({
+            name: registered,
+            formula: '@property',
+            where: [...where, '@property'].join(' > '),
+          });
         if (node.block)
           walk(node.block.children, [
             ...where,
