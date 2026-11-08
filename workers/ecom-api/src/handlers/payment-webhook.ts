@@ -273,22 +273,38 @@ function purchaseNote(
   // The purchase's own title: a charge carries none of ours.
   const contentTitle =
     purchase?.itemTitle || charge.metadata?.contentTitle || 'Content';
-  // A second payment for an item the buyer owned was refunded automatically
-  // (Codex-2hxff.14): say why, and that the first purchase stands. First, so
-  // a late-won duplicate's refund reads it too: it refunds the second
-  // payment, never the first. A late win refunds the FIRST payment of a
-  // buyer who bought it again (Codex-2hxff.70, Q1): the purchase they made
-  // since stands.
-  const accessNote = !purchase
-    ? ''
-    : purchase.duplicatePayment
-      ? `You still have ${contentTitle}. This refunds a second payment for it.`
-      : purchase.lateWinKeptThrough
-        ? `You still have ${contentTitle} through your purchase on ${londonShortDate(purchase.lateWinKeptThrough.purchasedAt)}. This refunds your first payment for it.`
-        : purchase.accessEnded
-          ? `Your access to ${contentTitle} has ended.`
-          : `You keep access to ${contentTitle}.`;
-  return { contentTitle, accessNote };
+  return {
+    contentTitle,
+    accessNote: purchase ? purchaseAccessNote(purchase, contentTitle) : '',
+  };
+}
+
+/**
+ * What a purchase's refund email says about the buyer's access.
+ *
+ * - A second payment for an item the buyer owned was refunded automatically
+ *   (Codex-2hxff.14): say why, and that the first purchase stands. First, so
+ *   a late-won duplicate's refund reads it too: it refunds the second
+ *   payment, never the first. Only while the buyer still holds the item: a
+ *   late-won duplicate whose original was refunded since is refunded too
+ *   (owner, "Refund it"), and its buyer holds nothing, so its access has
+ *   ended.
+ * - A late win refunds the FIRST payment of a buyer who bought it again
+ *   (Codex-2hxff.70, Q1): the purchase they made since stands.
+ */
+function purchaseAccessNote(
+  purchase: RefundedPurchase,
+  contentTitle: string
+): string {
+  if (purchase.duplicatePayment && !purchase.accessEnded) {
+    return `You still have ${contentTitle}. This refunds a second payment for it.`;
+  }
+  if (purchase.lateWinKeptThrough) {
+    return `You still have ${contentTitle} through your purchase on ${londonShortDate(purchase.lateWinKeptThrough.purchasedAt)}. This refunds your first payment for it.`;
+  }
+  return purchase.accessEnded
+    ? `Your access to ${contentTitle} has ended.`
+    : `You keep access to ${contentTitle}.`;
 }
 
 const SHORT_MONTHS = [
