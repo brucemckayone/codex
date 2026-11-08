@@ -226,6 +226,7 @@ describe('handlePaymentWebhook — disputes', () => {
         .mockResolvedValue({ repaid: 0, cancelled: 0, debtsClosed: 0 }),
       refundFirstPaymentAfterLateWin: vi.fn().mockResolvedValue('none'),
       claimLateWinBuyerEmail: vi.fn().mockResolvedValue(true),
+      findItemLink: vi.fn().mockResolvedValue(null),
     };
 
     // The registry's services, as the composition root hands them over.
@@ -993,8 +994,26 @@ describe('handlePaymentWebhook — disputes', () => {
       contentTitle: 'Winter Light',
       amountCents: 2400,
       paidAt: '2026-09-03T10:15:00.000Z',
-      itemPath: '/hollow-oak/winter-light',
       isCourse: false,
+    };
+    // Where `findItemLink` finds each kind of item (Codex-0u7kb).
+    const WINTER_LIGHT_PAGE = {
+      kind: 'org_content',
+      contentId: 'content_wl',
+      slug: 'winter-light',
+      organizationSlug: 'hollow-oak',
+    };
+    const FIELD_NOTES_PAGE = {
+      kind: 'personal_content',
+      contentId: 'content_fn',
+      slug: 'field-notes',
+      creatorUsername: 'alex-creator',
+    };
+    const COLOUR_GRADING_PAGE = {
+      kind: 'course',
+      courseId: 'course_cg',
+      slug: 'colour-grading',
+      organizationSlug: 'northlight',
     };
 
     function recordedLateWin(extra: Record<string, unknown> = {}) {
@@ -1062,25 +1081,44 @@ describe('handlePaymentWebhook — disputes', () => {
         calls.push('claim');
         return true;
       });
+      purchase.findItemLink?.mockImplementation(async () => {
+        calls.push('link');
+        return WINTER_LIGHT_PAGE;
+      });
       vi.mocked(sendEmailToWorker).mockImplementation(() => {
         calls.push('send');
       });
     });
 
-    it('undoes the loss in order: the buyer, the subscription, the money, then the outcome; then the buyer is told, once', async () => {
+    /** The one access-restored email sent, and its link. */
+    function emailLink(): unknown {
+      const emails = sent().filter(
+        (email) => email.templateName === 'purchase-access-restored'
+      );
+      expect(emails).toHaveLength(1);
+      return emails[0]?.data.itemUrl;
+    }
+
+    it("undoes the loss in order: the buyer, the subscription, the money, the email's link, then the outcome; then the buyer is told, once", async () => {
       recordedLateWin();
       restoredAs('restored', WINTER_LIGHT);
 
       const bundle = await deliver();
 
+      // The link is read before the mark: from the mark to the send, only
+      // the email's claim is awaited.
       expect(calls).toEqual([
         'restore purchase',
         'restore',
         'repay',
+        'link',
         'mark',
         'claim',
         'send',
       ]);
+      expect(purchase.findItemLink).toHaveBeenCalledExactlyOnceWith(
+        'purchase_late'
+      );
       expect(purchase.restoreAfterLateWin).toHaveBeenCalledWith(
         'dp_test_dispute'
       );
@@ -1127,22 +1165,25 @@ describe('handlePaymentWebhook — disputes', () => {
             accessSentence: "so it's back in your library and ready to watch.",
             amount: '£24.00',
             paidOn: '03/09/2026',
-            itemUrl: 'https://revelations.studio/hollow-oak/winter-light',
+            itemUrl:
+              'https://hollow-oak.revelations.studio/content/winter-light',
             buttonLabel: 'Watch now',
           },
         }
       );
     });
 
+    const COLOUR_GRADING = {
+      contentTitle: 'Colour Grading Masterclass',
+      amountCents: 9900,
+      paidAt: '2026-09-02T08:00:00.000Z',
+      isCourse: true,
+    };
+
     it("a course's email names the course in its sentence and its button", async () => {
       recordedLateWin();
-      restoredAs('restored', {
-        contentTitle: 'Colour Grading Masterclass',
-        amountCents: 9900,
-        paidAt: '2026-09-02T08:00:00.000Z',
-        itemPath: '/northlight/courses/colour-grading',
-        isCourse: true,
-      });
+      restoredAs('restored', COLOUR_GRADING);
+      purchase.findItemLink?.mockResolvedValueOnce(COLOUR_GRADING_PAGE);
 
       await deliver();
 
@@ -1153,6 +1194,156 @@ describe('handlePaymentWebhook — disputes', () => {
         paidOn: '02/09/2026',
         buttonLabel: 'Go to the course',
       });
+    });
+
+    // ── the email's button (Codex-0u7kb's link, review C1): the item's own
+    // page, found by the purchase, as the receipt links it.
+
+    it.each([
+      [
+        'org content',
+        WINTER_LIGHT,
+        WINTER_LIGHT_PAGE,
+        'https://hollow-oak.revelations.studio/content/winter-light',
+      ],
+      [
+        'personal content',
+        WINTER_LIGHT,
+        FIELD_NOTES_PAGE,
+        'https://creators.revelations.studio/@alex-creator/content/field-notes',
+      ],
+      [
+        'a course (its journey dashboard)',
+        COLOUR_GRADING,
+        COLOUR_GRADING_PAGE,
+        'https://northlight.revelations.studio/journeys/colour-grading/dashboard',
+      ],
+    ])("%s: the button opens the item's own page", async (_kind, email, page, expected) => {
+      recordedLateWin();
+      restoredAs('restored', email);
+      purchase.findItemLink?.mockResolvedValueOnce(page);
+
+      await deliver();
+
+      expect(purchase.findItemLink).toHaveBeenCalledExactlyOnceWith(
+        'purchase_late'
+      );
+      expect(emailLink()).toBe(expected);
+    });
+
+    it('in development: the same pages on the dev host', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+
+      await deliver(buildContext({ WEB_APP_URL: 'http://lvh.me:3000' }));
+
+      expect(emailLink()).toBe(
+        'http://hollow-oak.lvh.me:3000/content/winter-light'
+      );
+    });
+
+    // The old link, pinned as WRONG so it cannot come back: the platform
+    // host has no `/content/<id>` or `/courses/<id>` route.
+    it.each([
+      ['content', WINTER_LIGHT, WINTER_LIGHT_PAGE, '/content/content_wl'],
+      ['course', COLOUR_GRADING, COLOUR_GRADING_PAGE, '/courses/course_cg'],
+    ])('a %s email never links the item id on the platform host', async (_kind, email, page, oldPath) => {
+      recordedLateWin();
+      restoredAs('restored', email);
+      purchase.findItemLink?.mockResolvedValueOnce(page);
+
+      await deliver();
+
+      const link = String(emailLink());
+      expect(link).not.toBe(`${WEB}${oldPath}`);
+      expect(new URL(link).host).not.toBe(new URL(WEB).host);
+    });
+
+    it('an item with no page: the button opens the library on the platform, with a warn of ids, and the email still goes', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      purchase.findItemLink?.mockResolvedValueOnce(null);
+
+      const bundle = await deliver();
+
+      expect(emailLink()).toBe('https://revelations.studio/library');
+      expect(bundle.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+        "A purchase's item has no page to link to, so its email links the library",
+        { purchaseId: 'purchase_late' }
+      );
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+    });
+
+    it('a lookup that fails: the library link, alerted with an errorId; the undo is neither failed nor retried', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      purchase.findItemLink?.mockRejectedValueOnce(
+        Object.assign(new Error('Connection terminated'), {
+          code: 'ECONNRESET',
+        })
+      );
+
+      const bundle = await deliver();
+
+      expect(emailLink()).toBe('https://revelations.studio/library');
+      expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+        "A purchase's item page could not be looked up, so its email links the library",
+        expect.objectContaining({
+          errorId: expect.any(String),
+          purchaseId: 'purchase_late',
+        })
+      );
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+    });
+
+    // Once the outcome is marked nothing comes back for the email (the next
+    // delivery stops at the record), so a request cancelled from the mark on
+    // must still have handed it to the mailer: from the mark, no read
+    // returns.
+    it('a request cancelled once the outcome is marked still hands its email to the mailer', async () => {
+      let marked = false;
+      purchase.markDisputeOutcomeApplied?.mockImplementationOnce(async () => {
+        marked = true;
+      });
+      purchase.findItemLink?.mockImplementation(() =>
+        marked ? new Promise(() => {}) : Promise.resolve(WINTER_LIGHT_PAGE)
+      );
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      const bundle = buildContext({ WEB_APP_URL: WEB });
+
+      const delivery = handlePaymentWebhook(
+        wonEvent(),
+        mockStripe,
+        bundle.context
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(marked).toBe(true);
+      expect(emailLink()).toBe(
+        'https://hollow-oak.revelations.studio/content/winter-light'
+      );
+      await delivery;
+    });
+
+    it('no read where no email would be sent: bought again, a duplicate, refunds standing, another dispute, or a pending refund', async () => {
+      for (const outcome of [
+        'rebought',
+        'duplicate',
+        'still_refunded',
+        'dispute_holds',
+      ]) {
+        recordedLateWin();
+        restoredAs(outcome);
+        await deliver();
+      }
+      recordedLateWin();
+      restoredAs('rebought');
+      purchase.refundFirstPaymentAfterLateWin?.mockResolvedValueOnce('pending');
+      await deliver();
+
+      expect(purchase.findItemLink).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
     });
 
     it('bought again: the first payment is refunded after the re-pay, for this dispute and charge, then marked; nobody is emailed (Q1)', async () => {
@@ -1352,7 +1543,7 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(sendEmailToWorker).not.toHaveBeenCalled();
     });
 
-    it('no address on the charge, or no WEB_APP_URL: nothing is claimed or sent, and the loss is still undone; each drop is logged with ids', async () => {
+    it('no address on the charge: nothing is read, claimed or sent, and the loss is still undone; logged at warn with ids', async () => {
       recordedLateWin();
       restoredAs('restored', WINTER_LIGHT);
       mockRetrieve.mockResolvedValueOnce({
@@ -1363,16 +1554,14 @@ describe('handlePaymentWebhook — disputes', () => {
         billing_details: { email: null, name: null },
         receipt_email: null,
       });
-      const noAddress = await deliver();
 
-      recordedLateWin();
-      restoredAs('restored', WINTER_LIGHT);
-      const unconfigured = await deliver(buildContext());
+      const bundle = await deliver();
 
-      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledTimes(2);
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+      expect(purchase.findItemLink).not.toHaveBeenCalled();
       expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
       expect(sendEmailToWorker).not.toHaveBeenCalled();
-      expect(noAddress.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+      expect(bundle.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
         "Late win: the buyer's access-restored email was not sent: the charge has no email address",
         {
           errorId: expect.any(String),
@@ -1380,19 +1569,36 @@ describe('handlePaymentWebhook — disputes', () => {
           userId: 'user_late',
         }
       );
-      expect(unconfigured.mock._obs.error).toHaveBeenCalledWith(
-        expect.stringContaining('WEB_APP_URL is not set'),
+    });
+
+    it.each([
+      ['unset', undefined],
+      ['not a URL', 'revelations.studio'],
+      ['host:port with no scheme', 'lvh.me:3000'],
+    ])('WEB_APP_URL %s: alerted with ids; nothing is read, claimed or sent, and the loss is still undone', async (_case, webAppUrl) => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+
+      const bundle = await deliver(buildContext({ WEB_APP_URL: webAppUrl }));
+
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+      expect(purchase.findItemLink).not.toHaveBeenCalled();
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+        "WEB_APP_URL is unset or not a URL: the late win's access-restored email has no working link, so it was not sent",
         { errorId: expect.any(String), disputeId: 'dp_test_dispute' }
       );
     });
 
-    it('an item whose title cannot be read: the loss is undone and nothing is sent, logged at warn with ids', async () => {
+    it('an item whose title cannot be read: the loss is undone and nothing is read or sent, logged at warn with ids', async () => {
       recordedLateWin();
       restoredAs('restored', null);
 
       const bundle = await deliver();
 
       expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+      expect(purchase.findItemLink).not.toHaveBeenCalled();
       expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
       expect(sendEmailToWorker).not.toHaveBeenCalled();
       expect(bundle.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
