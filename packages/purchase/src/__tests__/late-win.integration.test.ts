@@ -1031,6 +1031,10 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
         stripeType: 'StripeInvalidRequestError',
         stripeStatusCode: 400,
       });
+      // Only a refusal says "refused"; never Stripe's own words.
+      expect((refused as LateWinRefundRefusedError).message).toBe(
+        "The late win's refund of the payment was refused; it is retried"
+      );
       const unreached = await attempt();
       expect(unreached).toBeInstanceOf(LateWinRefundRefusedError);
       expect((unreached as LateWinRefundRefusedError).context).toEqual({
@@ -1040,6 +1044,9 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
         stripeType: 'StripeConnectionError',
         stripeStatusCode: null,
       });
+      expect((unreached as LateWinRefundRefusedError).message).toBe(
+        "The late win's refund of the payment could not be made; it is retried"
+      );
       expect((await readDispute(disputeId)).lateWinRefundId).toBeNull();
 
       const refundId = `re_lw_retry_${uid()}`;

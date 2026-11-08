@@ -199,8 +199,10 @@ export class CheckoutNotRecordedError extends ServiceError {
  * 2026-10-23, "Retry hourly, alert"). Nothing logs it here: the caller alerts
  * each time. Its context is ids and what Stripe answered, never its message:
  * the error's `code`, its `type` (a refusal is `StripeInvalidRequestError`)
- * and its HTTP `statusCode`, each null when Stripe gave none. The Stripe
- * error stays on `cause`.
+ * and its HTTP `statusCode`, each null when Stripe gave none. Its own message
+ * follows the alert's rule: "refused" only for a refusal, "could not be made"
+ * for anything else, and never Stripe's words. The Stripe error stays on
+ * `cause`.
  */
 export class LateWinRefundRefusedError extends ServiceUnavailableError {
   constructor(
@@ -214,7 +216,9 @@ export class LateWinRefundRefusedError extends ServiceUnavailableError {
     options?: ErrorOptions
   ) {
     super(
-      "The late win's refund of the payment was refused; it is retried",
+      context.stripeType === 'StripeInvalidRequestError'
+        ? "The late win's refund of the payment was refused; it is retried"
+        : "The late win's refund of the payment could not be made; it is retried",
       context,
       options
     );
