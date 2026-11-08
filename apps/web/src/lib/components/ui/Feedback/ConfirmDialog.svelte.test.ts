@@ -2,8 +2,8 @@
  * ConfirmDialog — the two opt-ins added for the Remove dialog
  * (Codex-2hxff.64), and the default every existing caller relies on.
  *
- * Existing callers (ContentForm, studio categories, studio journeys, the
- * stories) pass async `onConfirm` handlers and expect the dialog to close the
+ * Existing callers (studio categories, studio journeys, the stories) pass
+ * async `onConfirm` handlers and expect the dialog to close the
  * moment Confirm is pressed. That must stay true unless a caller opts in with
  * `awaitConfirm`.
  */

@@ -28,7 +28,7 @@ export interface DraftProgress {
   left: GapRow[];
 }
 
-/** A draft's progress, or null for a type the editor does not know (it keeps the old form). */
+/** A draft's progress, or null for a type the editor does not know (it cannot be opened). */
 export function draftProgress(
   row: ContentWithRelations,
   payouts: PayoutsRead

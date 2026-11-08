@@ -6,7 +6,7 @@
   …), a narrative title + metadata cluster, and inline status + actions.
 
   Designed to replace generic-SaaS table rows with a rhythm that matches
-  ContentForm's FormSection + TodayStat editorial vocabulary.
+  TodayStat's editorial vocabulary.
 
   @prop ordinal  Two-digit zero-padded row number ("02"..)
   @prop item     The content item

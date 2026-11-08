@@ -202,7 +202,7 @@
     flex-direction: column;
     gap: var(--space-5);
     inline-size: 100%;
-    max-inline-size: 960px;
+    max-inline-size: var(--container-content);
     margin-inline: auto;
     padding: var(--space-6) var(--space-4) var(--space-16);
   }

@@ -2,9 +2,8 @@
  * The org studio's edit page reads the piece afresh on every arrival at a
  * step, and mounts that step only on its own read (Codex-a6ofh.2.3 review).
  *
- * The form seeds itself once and saves every field it holds, and the Write
- * step's session starts from its read: one made before the other step's
- * saves would put them back. A step must never mount on an earlier
+ * Each step's session starts from its read and saves what it holds: one
+ * made before the other step's saves would put them back. A step must never mount on an earlier
  * arrival's read, even one for the same step, and a read that answers late
  * must never count for a later arrival.
  */
@@ -80,9 +79,6 @@ vi.mock('$lib/remote/content.remote', () => ({
 
 vi.mock('$lib/components/studio/editor/ContentEditor.svelte', async () => ({
   default: (await import('./EditorProbe.svelte')).default,
-}));
-vi.mock('$lib/components/studio/ContentForm.svelte', async () => ({
-  default: (await import('./FormProbe.svelte')).default,
 }));
 const told = vi.hoisted(() => ({ warn: vi.fn(), error: vi.fn() }));
 vi.mock('$lib/observability', () => ({
@@ -333,5 +329,39 @@ describe('the org edit page · a read that fails', () => {
     answer(1, piece('R1'));
     await settle();
     expect(probe('editor')).toBe('R1');
+  });
+});
+
+// Codex-a6ofh.2.10: the old form is gone, so a type the editor does not
+// know (none the database allows) is said plainly, and logged.
+describe('the org edit page · a type the editor does not know', () => {
+  test('says it cannot be opened, mounts no editor, and logs the type', async () => {
+    render();
+    answer(0, { ...piece('P1'), contentType: 'podcast' });
+    await settle();
+    expect(mounts).toEqual([]);
+    const alert = document.querySelector('.unknown-type[role="alert"]');
+    expect(alert?.textContent).toBe(
+      'This piece can’t be opened in the editor.'
+    );
+    expect(told.error).toHaveBeenCalledWith(
+      'studio_content_edit.unknown_type',
+      {
+        contentId: 'c1',
+        contentType: 'podcast',
+      }
+    );
+  });
+
+  test('a known type never says so', async () => {
+    render();
+    answer(0, piece('R1'));
+    await settle();
+    expect(probe('editor')).toBe('R1');
+    expect(document.querySelector('.unknown-type')).toBeNull();
+    expect(told.error).not.toHaveBeenCalledWith(
+      'studio_content_edit.unknown_type',
+      expect.anything()
+    );
   });
 });

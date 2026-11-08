@@ -123,7 +123,7 @@
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-3);
-    max-inline-size: 960px;
+    max-inline-size: var(--container-content);
     margin: var(--space-8) auto;
     padding: var(--space-6);
     border: var(--border-width) var(--border-style) var(--color-border);

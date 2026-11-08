@@ -200,7 +200,6 @@
 <EditorSection headingId="{ids}-who" ordinal={1} title={m.studio_publish_who()}>
   <AccessSection
     {organizationId}
-    layout="row"
     tiers={reads.orgTiers}
     tiersState={reads.tiersState}
     onRetryTiers={reads.rereadTiers}

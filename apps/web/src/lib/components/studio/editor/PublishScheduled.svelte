@@ -257,6 +257,6 @@
   .schedule-problem {
     margin: var(--space-2) 0 0;
     font-size: var(--text-sm);
-    color: var(--color-error-700);
+    color: var(--color-status-error-text);
   }
 </style>

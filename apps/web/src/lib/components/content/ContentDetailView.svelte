@@ -1564,7 +1564,7 @@
 <style>
   .content-detail {
     width: 100%;
-    max-width: 960px;
+    max-width: var(--container-content);
     margin: 0 auto;
     padding: var(--space-4) var(--space-4) var(--space-8);
   }

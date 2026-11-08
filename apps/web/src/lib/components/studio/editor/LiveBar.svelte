@@ -155,7 +155,7 @@
   }
 
   .live-error {
-    color: var(--color-error-700);
+    color: var(--color-status-error-text);
   }
 
   /* Phone (W8): the tabs take their own row (the back link hides its words itself). */

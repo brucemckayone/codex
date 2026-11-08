@@ -1,9 +1,9 @@
 <!--
   @component Studio Content List Page
 
-  Editorial content index for Studio creators. Mirrors the vocabulary
-  established by ContentForm (sticky command bar, mono ordinals, narrative
-  metadata) and the Dashboard (backdrop-blur, brand-tinted accents, restrained
+  Editorial content index for Studio creators. Mirrors the studio's
+  vocabulary (sticky command bar, mono ordinals, narrative metadata) and the
+  Dashboard (backdrop-blur, brand-tinted accents, restrained
   asymmetry). Replaces the generic `<PageHeader>` + `<Table>` treatment.
 
   Layout (top to bottom):

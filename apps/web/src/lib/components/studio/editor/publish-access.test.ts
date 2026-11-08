@@ -1,6 +1,6 @@
 /**
- * The Publish step's access group (Codex-a6ofh.2.4): the old form's rules,
- * on the one value the draft session saves.
+ * The Publish step's access group (Codex-a6ofh.2.4): its rules, on the one
+ * value the draft session saves.
  */
 import { describe, expect, it } from 'vitest';
 import type { DraftAccess } from './draft-session.svelte';

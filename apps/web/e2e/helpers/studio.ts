@@ -11,7 +11,7 @@ import {
   orgFixture,
   parseCookieString,
 } from '@codex/test-utils/e2e';
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { aliasSessionCookies } from './auth-cookies';
 
 const BASE_PORT = 5173;
@@ -183,4 +183,59 @@ export async function cleanupSharedStudioAuth(
   if (shared) {
     await authFixture.logout(shared.cookie).catch(() => {});
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The content editor (Codex-a6ofh.2): Write, then Publish
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** An edit address: `/studio/content/<uuid>/edit`, with any step after it. */
+const EDIT_PATH = /\/studio\/content\/([0-9a-f-]{36})\/edit(?:\?|$)/;
+
+/**
+ * Open a new piece of `type` on the Write step and give it a title. The
+ * first thing added makes its row, and the address moves (in place) to its
+ * edit page. Returns the new piece's id.
+ */
+export async function startDraft(
+  page: Page,
+  orgSlug: string,
+  type: 'video' | 'audio' | 'written',
+  title: string
+): Promise<string> {
+  await navigateToStudioPage(page, orgSlug, `/content/new?type=${type}`);
+  const titleBox = page.getByRole('textbox', { name: 'Title', exact: true });
+  await expect(titleBox).toBeVisible({ timeout: 30_000 });
+  await titleBox.fill(title);
+  await expect(page).toHaveURL(EDIT_PATH, { timeout: 30_000 });
+  const id = EDIT_PATH.exec(page.url())?.[1];
+  if (!id) throw new Error(`No piece id in ${page.url()}`);
+  return id;
+}
+
+/**
+ * Wait for the autosave of a change just made. The bar says "Saving…"
+ * through its 1.5 s debounce, so it is seen before the save, then "Saved
+ * just now" once the save has landed. A navigation sooner would be held by
+ * the editor's leave guard.
+ */
+export async function waitForEditorSave(page: Page): Promise<void> {
+  const words = page.locator('.write-words');
+  await expect(words).toHaveText('Saving…');
+  await expect(words).toHaveText('Saved just now', { timeout: 30_000 });
+}
+
+/**
+ * Next: publish, from the Write step (the wide bar's button; a phone has
+ * its own at the foot). Waits for the Publish step's access choice, which
+ * mounts on its own read of the piece.
+ */
+export async function goToPublishStep(page: Page): Promise<void> {
+  await page
+    .getByRole('button', { name: 'Next: publish', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\?step=publish$/, { timeout: 30_000 });
+  await expect(page.getByRole('radiogroup', { name: 'Access' })).toBeVisible({
+    timeout: 30_000,
+  });
 }

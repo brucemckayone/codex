@@ -31,7 +31,6 @@ import { isReadOutage, remoteErrorStatus } from '$lib/remote/query-result';
 import { createServerApi } from '$lib/server/api';
 import { ApiError } from '$lib/server/errors';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
-import { accessSelectionToFlags } from '$lib/utils/content-access';
 import {
   contentSlugFromTitle,
   freeSlugCandidates,
@@ -309,27 +308,6 @@ export const getContentBatch = query.batch(z.string().uuid(), async (ids) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Default studio list shape — matches the query the post-redirect page mounts
- * with when no URL params are present (apps/web/src/routes/_org/[slug]/studio/content/+page.svelte).
- * Used by mutations below to refresh the canonical landing cache shape via
- * SvelteKit single-flight refresh, so the list lands on fresh data.
- *
- * Filtered / paginated shapes (search, status, page > 1) are NOT refreshed
- * here — they'd require client-side `submit().updates(...)` from each shape's
- * call site, and the realistic post-mutation flow returns to defaults anyway.
- */
-function defaultStudioListArgs(organizationId: string | null) {
-  if (!organizationId) return null;
-  return {
-    organizationId,
-    page: 1,
-    limit: 20,
-    sortBy: 'updatedAt' as const,
-    sortOrder: 'desc' as const,
-  };
-}
-
-/**
  * Delete content by ID. A refusal keeps its status and words
  * ({@link forwardClientErrors}): a lapsed sign-in or a piece already gone is
  * not an outage. A piece already gone says so by its own code
@@ -487,9 +465,8 @@ async function withFreeSlug<T>(
 /**
  * Save the fields the editor changed, and only those, as a PATCH.
  *
- * A command, not {@link updateContentForm}: drafts autosave a moment after the
- * creator stops typing, and the form refreshes `listContent` on every save.
- * This refreshes nothing, and sends back only a slug it chose and, when a
+ * A command: drafts autosave a moment after the creator stops typing, so a
+ * save refreshes no list. It sends back only a slug it chose and, when a
  * cover was sent, the cover the row kept: the editor already holds what it
  * saved, and the row would carry the whole body again. A live piece's staged
  * cover too old to take leaves the stored one (Codex-a6ofh.2.5), which the
@@ -551,193 +528,6 @@ export const createContentDraft = command(contentDraftSchema, async (draft) => {
     return { id: result.id, slug };
   });
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Content Form (progressive enhancement)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Helper: missing/empty strings → null for optional fields from FormData */
-const optionalString = z
-  .string()
-  .optional()
-  .default('')
-  .transform((v) => (v === '' ? null : v));
-
-/** Helper: missing/empty string → null for optional UUID fields */
-const optionalUuid = z
-  .string()
-  .optional()
-  .default('')
-  .transform((v) => (v === '' ? null : v))
-  .pipe(z.string().uuid().nullable());
-
-/**
- * Helper: form checkbox/switch → boolean. HTML checkboxes only submit a value
- * when checked, so "on"/"true" → true; missing/empty → false.
- */
-const formBoolean = z
-  .string()
-  .optional()
-  .default('')
-  .transform((v) => v === 'true' || v === 'on');
-
-/**
- * Shared base schema for create/update content forms.
- *
- * The create form uses this directly. The update form extends it with a
- * `contentId` field. Keeping the field definitions (including the non-trivial
- * `price` and `tags` transforms) in one place prevents silent drift between
- * the two forms.
- */
-const contentBaseFormSchema = z.object({
-  organizationId: optionalUuid,
-  title: z.string().min(1, 'Title is required'),
-  slug: z.string().min(1, 'Slug is required'),
-  description: optionalString,
-  contentType: z.enum(['video', 'audio', 'written']),
-  mediaItemId: optionalUuid,
-  contentBody: optionalString,
-  accessType: z
-    .enum(['free', 'paid', 'followers', 'subscribers', 'team'])
-    .default('free'),
-  price: z.string().transform((v) => {
-    const parsed = parseFloat(v || '0');
-    return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
-  }),
-  category: optionalString,
-  // Category taxonomy membership (WP-5). Serialized as a JSON array of category
-  // UUIDs in a hidden input (rendered by CategorySelect). The new source of
-  // truth for classification; the legacy free-text `category` is no longer
-  // edited via the form.
-  //
-  // ABSENT (undefined) vs PRESENT-BUT-EMPTY are deliberately distinct — and NOT
-  // collapsed to a default. The picker only renders (so the field is only
-  // present) for ORG content; personal content submits no `categoryIds` at all.
-  //   - field absent          → `undefined` → ContentService leaves tags untouched
-  //   - field present (org)    → parsed array (possibly `[]` = clear the set)
-  //   - malformed / non-array → `undefined` (degrade to the safe "untouched")
-  categoryIds: z
-    .string()
-    .optional()
-    .transform((v) => {
-      if (v === undefined) return undefined;
-      try {
-        const parsed = JSON.parse(v);
-        return Array.isArray(parsed) ? (parsed as string[]) : undefined;
-      } catch {
-        return undefined;
-      }
-    })
-    .pipe(z.array(z.string().uuid()).max(20).optional()),
-  tags: z
-    .string()
-    .optional()
-    .default('[]')
-    .transform((v) => {
-      try {
-        return JSON.parse(v) as string[];
-      } catch {
-        return [];
-      }
-    })
-    .pipe(z.array(z.string().trim().max(50)).max(20)),
-  thumbnailUrl: optionalString,
-  // The tiers that include the item (Codex-2hxff.91): a JSON array of tier
-  // ids in a hidden input, parsed exactly like `categoryIds`, and a TOTAL set
-  // when present. The editor renders the input only when the creator touched
-  // the tier picker or the access kind in this session (owner decision U4), and
-  // never when the tier list failed to load, so:
-  //   - field absent          → `undefined` → the server leaves the ticks alone
-  //   - field present          → the exact set (`[]` = in no tier)
-  //   - malformed / non-array → `undefined` (degrade to the safe "untouched")
-  // An absent field must never read as `[]`: that would take the item out of
-  // every tier the editor did not manage to load.
-  includedTierIds: z
-    .string()
-    .optional()
-    .transform((v) => {
-      if (v === undefined) return undefined;
-      try {
-        const parsed = JSON.parse(v);
-        return Array.isArray(parsed) ? (parsed as string[]) : undefined;
-      } catch {
-        return undefined;
-      }
-    })
-    .pipe(z.array(z.string().uuid()).max(50).optional()),
-  shaderPreset: optionalString,
-  featured: formBoolean,
-});
-
-const createContentFormSchema = contentBaseFormSchema;
-
-/**
- * Create content form (progressive enhancement)
- *
- * Sends data to POST /api/content. Price input is in dollars,
- * transformed to cents by the schema.
- */
-export const createContentForm = form(
-  createContentFormSchema,
-  async ({
-    organizationId,
-    title,
-    slug,
-    description,
-    contentType,
-    mediaItemId,
-    contentBody,
-    accessType,
-    price,
-    category,
-    categoryIds,
-    tags,
-    thumbnailUrl,
-    includedTierIds,
-    shaderPreset,
-    featured,
-  }) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-
-    try {
-      const result = await api.content.create({
-        title,
-        slug,
-        description,
-        contentType,
-        mediaItemId,
-        contentBody,
-        organizationId,
-        ...accessSelectionToFlags(
-          accessType,
-          price,
-          includedTierIds,
-          organizationId
-        ),
-        category,
-        categoryIds,
-        tags,
-        thumbnailUrl,
-        shaderPreset,
-        featured,
-      });
-
-      // Single-flight refresh: ship fresh list data with the form response so
-      // the post-redirect /studio/content page lands on already-fresh cache.
-      const listArgs = defaultStudioListArgs(organizationId);
-      if (listArgs) void listContent(listArgs).refresh();
-
-      return { success: true as const, contentId: result.id };
-    } catch (error) {
-      return {
-        success: false as const,
-        error:
-          error instanceof Error ? error.message : 'Failed to create content',
-      };
-    }
-  }
-);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Content Thumbnail Upload (file upload via form)
@@ -889,80 +679,5 @@ export const deleteThumbnailCommand = command(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     return api.content.deleteThumbnail(contentId);
-  }
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Content Update Form (progressive enhancement)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const updateContentFormSchema = contentBaseFormSchema.extend({
-  contentId: z.string().uuid(),
-});
-
-/**
- * Update content form (progressive enhancement)
- *
- * Sends data to PATCH /api/content/:id.
- */
-export const updateContentForm = form(
-  updateContentFormSchema,
-  async ({
-    contentId,
-    organizationId,
-    title,
-    slug,
-    description,
-    contentType,
-    mediaItemId,
-    contentBody,
-    accessType,
-    price,
-    category,
-    categoryIds,
-    tags,
-    thumbnailUrl,
-    includedTierIds,
-    shaderPreset,
-    featured,
-  }) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-
-    try {
-      const result = await api.content.update(contentId, {
-        title,
-        slug,
-        description,
-        contentType,
-        mediaItemId,
-        contentBody,
-        organizationId,
-        ...accessSelectionToFlags(
-          accessType,
-          price,
-          includedTierIds,
-          organizationId
-        ),
-        category,
-        categoryIds,
-        tags,
-        thumbnailUrl,
-        shaderPreset,
-        featured,
-      });
-
-      // Single-flight refresh: keep the studio list cache fresh after edits.
-      const listArgs = defaultStudioListArgs(organizationId);
-      if (listArgs) void listContent(listArgs).refresh();
-
-      return { success: true as const, data: result };
-    } catch (error) {
-      return {
-        success: false as const,
-        error:
-          error instanceof Error ? error.message : 'Failed to update content',
-      };
-    }
   }
 );

@@ -93,9 +93,9 @@
 
   // Narrative strapline — plain-text lede lifted from the description.
   //
-  // `description` is authored with RichTextEditor (ContentDetails.svelte), which
+  // `description` is authored with RichTextEditor (WriteCanvas.svelte), which
   // serialises the TipTap doc via `JSON.stringify(editor.getJSON())` — so rows
-  // saved by the current form hold a JSON *string*, while older rows hold plain
+  // saved by the editor hold a JSON *string*, while older rows hold plain
   // text. `extractPlainText` walks the doc's node tree for the JSON shape and
   // returns its input unchanged for anything that isn't a TipTap doc, so both
   // shapes read as prose and neither throws. This is the same helper the public

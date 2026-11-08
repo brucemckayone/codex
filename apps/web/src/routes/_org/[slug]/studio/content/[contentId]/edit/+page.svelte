@@ -4,8 +4,9 @@
   A draft opens in the shared content editor: Write (Codex-a6ofh.2.3), or
   Publish at `?step=publish` (Codex-a6ofh.2.4). A piece that has been live
   opens its Page and Settings tabs, its changes waiting for Update
-  (Codex-a6ofh.2.5). A type the editor does not know keeps the old form.
-  Fetches content client-side to avoid __data.json round-trips.
+  (Codex-a6ofh.2.5). A type the editor does not know (none the database
+  allows) is said as such. Fetches content client-side to avoid
+  __data.json round-trips.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
@@ -14,10 +15,10 @@
   import { page } from '$app/state';
   import { getContent } from '$lib/remote/content.remote';
   import { isReadOutage, readFreshQuery, remoteErrorStatus } from '$lib/remote/query-result';
-  import { Button, ErrorBoundary } from '$lib/components/ui';
+  import { Button } from '$lib/components/ui';
   import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
-  import ContentForm from '$lib/components/studio/ContentForm.svelte';
   import ContentEditor from '$lib/components/studio/editor/ContentEditor.svelte';
+  import UnknownTypeNotice from '$lib/components/studio/editor/UnknownTypeNotice.svelte';
   import { editorView, readEditorStep } from '$lib/components/studio/editor/editor-url';
   import { logReadFailure } from '$lib/components/studio/media-library/log-read-failure';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
@@ -166,30 +167,14 @@
         </Button>
       </div>
     {:else if !ready || !content}
-      <div class="form-skeleton">
-        <div class="form-skeleton-main">
-          <Skeleton width="60%" height="var(--space-10)" />
-          <Skeleton width="100%" height="var(--space-32)" />
-          <div class="form-skeleton-row">
-            <Skeleton width="45%" height="var(--space-10)" />
-            <Skeleton width="45%" height="var(--space-10)" />
-          </div>
-          <Skeleton width="100%" height="var(--space-24)" />
-        </div>
-        <div class="form-skeleton-sidebar">
-          <Skeleton width="100%" height="var(--space-10)" />
-          <Skeleton width="100%" height="var(--space-10)" />
-          <Skeleton width="60%" height="var(--space-8)" />
-        </div>
+      <!-- The editor's shape (the Write canvas's column): its title, media and words. -->
+      <div class="editor-skeleton">
+        <Skeleton width="60%" height="var(--space-10)" />
+        <Skeleton width="100%" height="var(--space-32)" />
+        <Skeleton width="100%" height="var(--space-24)" />
       </div>
     {:else}
-      <ErrorBoundary>
-        <ContentForm
-          {content}
-          organizationId={data.org.id}
-          orgSlug={data.org.slug}
-        />
-      </ErrorBoundary>
+      <UnknownTypeNotice contentId={content.id} contentType={content.contentType} />
     {/if}
   </div>
 {/if}
@@ -201,37 +186,14 @@
     gap: var(--space-4);
   }
 
-  .form-skeleton {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-6);
-  }
-
-  @media (--breakpoint-md) {
-    .form-skeleton {
-      grid-template-columns: 2fr 1fr;
-    }
-  }
-
-  .form-skeleton-main {
+  /* The Write canvas's column (WriteCanvas: 960px). */
+  .editor-skeleton {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-  }
-
-  .form-skeleton-row {
-    display: flex;
-    gap: var(--space-4);
-  }
-
-  .form-skeleton-sidebar {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding: var(--space-4);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
+    inline-size: 100%;
+    max-inline-size: var(--container-content);
+    margin-inline: auto;
   }
 
   .error-text {
@@ -240,7 +202,7 @@
     align-items: center;
     gap: var(--space-3);
     margin: 0;
-    color: var(--color-error-700);
+    color: var(--color-status-error-text);
     font-size: var(--text-sm);
     padding: var(--space-8);
     text-align: center;

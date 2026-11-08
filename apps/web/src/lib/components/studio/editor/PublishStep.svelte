@@ -708,7 +708,7 @@
   .publish-refusal {
     margin: 0;
     font-size: var(--text-sm);
-    color: var(--color-error-700);
+    color: var(--color-status-error-text);
   }
 
   /* No box of its own: what it holds lays out as the step's own children. */

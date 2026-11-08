@@ -178,7 +178,7 @@
     color: inherit;
     transition: background-color var(--duration-fast) var(--ease-out),
                 transform var(--duration-fast) var(--ease-out);
-    /* subtle 1px lift on hover — ContentForm ordinal rhythm */
+    /* subtle 1px lift on hover */
     border-left: var(--space-0-5) solid transparent;
   }
 

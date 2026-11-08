@@ -2,7 +2,7 @@
   @component StudioDashboard
 
   Editorial studio dashboard. Production-grade creator-first surface built
-  to the house style established by ContentForm (numbered ordinals,
+  to the studio's house style (numbered ordinals,
   backdrop-filter command bar, brand-tinted OKLCH accents, focus rail).
 
   Layout (from top):

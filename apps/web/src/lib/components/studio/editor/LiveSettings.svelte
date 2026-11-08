@@ -5,7 +5,7 @@
   step's sections (`PublishSettings`), whose changes wait for Update like
   the page's, then what only a live piece has. An audio piece's full-screen
   background goes with Update too. Unpublish (or Publish again) and Delete
-  act at once, as the old form's did: they are not changes to the piece.
+  act at once: they are not changes to the piece.
 
   Mounted the first time Settings opens, so its reads wait for that.
 

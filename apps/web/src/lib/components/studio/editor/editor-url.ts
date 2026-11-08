@@ -18,7 +18,7 @@ const EDITOR_TYPES: readonly EditorContentType[] = Object.values(CONTENT_TYPES);
 
 export const CONTENT_LIST_HREF = '/studio/content';
 
-/** A row's type as the canvas knows it, or null: such a piece keeps the old form. */
+/** A row's type as the canvas knows it, or null: such a piece cannot be opened (`UnknownTypeNotice`). */
 export function editorContentType(value: string): EditorContentType | null {
   return EDITOR_TYPES.find((type) => type === value) ?? null;
 }
@@ -82,8 +82,8 @@ export interface EditorView {
 
 /**
  * What an edit address opens: a draft's step, a live piece's tab (its
- * changes waiting for Update), or null for the old form, which a type the
- * editor does not know keeps. Both studios' edit routes ask here.
+ * changes waiting for Update), or null for a type the editor does not know,
+ * which the edit route says it cannot open. Both studios' edit routes ask here.
  */
 export function editorView(
   piece: PublicationState & { contentType: string },

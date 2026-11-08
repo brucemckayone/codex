@@ -13,49 +13,35 @@
   optional: in no tier the item is simply for sale.
 
   NOT LOADED IS NOT EMPTY. While the org's tier list is loading or after it
-  failed, or when the item's own ticks never arrived, the picker is disabled
-  and the hidden `includedTierIds` input is not rendered, so a save leaves the
-  stored ticks exactly as they are (the course builder's rule, F7 in the
-  mockup). A new item cannot pick Subscribers until the list loads. The host
-  decides when the input is rendered at all (`sendTierIds`, owner decision
-  U4); this component never sends a set it was not given.
+  failed, or when the item's own ticks never arrived, the picker is disabled,
+  so the stored ticks stay exactly as they are (the course builder's rule, F7
+  in the mockup). Subscribers cannot be newly picked until the list loads.
 
-  OUTSIDE A FORM (Codex-a6ofh.2.4). The Publish step uses it with no `form`:
-  it renders no hidden inputs, takes the org from `organizationId` and the
-  price through `onPriceChange`, and its host saves the choice itself. The
-  rules above are the same either way. `layout="row"` lays the options out
-  as one short row (mockup w4) instead of tall cards, each with a few words
-  under its name instead of a sentence.
+  The Publish step's (Codex-a6ofh.2.4): the options sit in one short row
+  (mockup w4), each with a few words under its name, and wrap as chips on a
+  phone (mockup w8b). Its host holds the choice and saves it.
 
-  @prop form               Active form instance; absent on the Publish step
-  @prop organizationId     The piece's org; null for personal content (without a form)
-  @prop onPriceChange      The price as typed, in pounds (without a form)
-  @prop layout             `cards` (default) or `row`
+  @prop organizationId     The piece's org; null for personal content
+  @prop onPriceChange      The price as typed, in pounds
   @prop tiers              The org's ACTIVE tiers (the options); `[]` until loaded
   @prop tiersState         Whether the options AND the item's ticks are loaded
   @prop selectedTierIds    The item's whole set, inactive tiers included
-  @prop sendTierIds        Render the hidden `includedTierIds` input
 -->
 <script lang="ts">
   import { PRICE_LIMITS } from '@codex/constants';
   import { Alert, Button } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import * as m from '$paraglide/messages';
-  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
   import type { SubscriptionTier } from '$lib/types';
-  import { GlobeIcon, CreditCardIcon, CoinsIcon, UsersIcon, LockIcon } from '$lib/components/ui/Icon';
+  import { LockIcon } from '$lib/components/ui/Icon';
   import PlanPicker from '$lib/components/studio/plan-picker/PlanPicker.svelte';
   import PlanGuidanceNote from '$lib/components/studio/plan-picker/PlanGuidanceNote.svelte';
   import { itemGaps, joinNames } from '$lib/components/studio/plan-picker/select-from-tier';
   import { payoutSetupHref } from '$lib/utils/connect-readiness';
 
-  type ContentForm = typeof createContentForm | typeof updateContentForm;
-
   interface Props {
-    form?: ContentForm;
-    organizationId?: string | null;
-    onPriceChange?: (text: string) => void;
-    layout?: 'cards' | 'row';
+    organizationId: string | null;
+    onPriceChange: (text: string) => void;
     tiers: SubscriptionTier[];
     /**
      * `loaded` only when the org's tier list AND the item's own ticks are
@@ -64,15 +50,9 @@
     tiersState: 'loading' | 'loaded' | 'failed';
     /** Re-read the tier list (the failed state's Retry). */
     onRetryTiers?: () => void;
-    /** A new item (create mode): a failed list keeps Subscribers unavailable. */
-    isNew?: boolean;
     accessTypeVal: string;
     priceVal: string;
     selectedTierIds: readonly string[];
-    /** Render the hidden `includedTierIds` input (the full set). With a form only. */
-    sendTierIds?: boolean;
-    /** The hidden `visibility` input's value. With a form only. */
-    derivedVisibility?: string;
     onAccessChange: (value: string) => void;
     onTierToggle: (tierId: string) => void;
     onSelectFromTier: (tierId: string) => void;
@@ -81,26 +61,21 @@
      * false, the monetised access options (paid / subscribers) are disabled
      * with a "set up payouts" prompt — mirroring the authoritative backend
      * gate (ContentService.publish throws for monetised content without a
-     * payout-ready account). Defaults true so the form never blocks before
+     * payout-ready account). Defaults true so nothing is blocked before
      * status resolves.
      */
     connectReady?: boolean;
   }
 
   const {
-    form,
     organizationId,
     onPriceChange,
-    layout = 'cards',
     tiers,
     tiersState,
     onRetryTiers,
-    isNew = false,
     accessTypeVal,
     priceVal,
     selectedTierIds,
-    sendTierIds = false,
-    derivedVisibility = '',
     onAccessChange,
     onTierToggle,
     onSelectFromTier,
@@ -111,9 +86,7 @@
   const priceNum = $derived(parseFloat(priceVal || '0') || 0);
   const belowMinimum = $derived(Math.round(priceNum * 100) < PRICE_LIMITS.MIN_CENTS);
 
-  const hasOrg = $derived(
-    organizationId !== undefined ? organizationId !== null : !!form?.fields.organizationId?.value()
-  );
+  const hasOrg = $derived(organizationId !== null);
   const tiersLoaded = $derived(tiersState === 'loaded');
   const hasTiers = $derived(tiersLoaded && tiers.length > 0);
   const isSubscribers = $derived(accessTypeVal === 'subscribers');
@@ -133,12 +106,9 @@
 
   interface AccessOption {
     value: string;
+    /** Its name, and a few words under it. */
     label: string;
-    description: string;
-    /** The row layout's: its name and a few words. */
-    rowLabel?: string;
     short: string;
-    icon: typeof GlobeIcon;
     disabled?: boolean;
   }
 
@@ -147,17 +117,12 @@
       {
         value: 'free',
         label: m.studio_content_form_access_free(),
-        description: m.studio_content_form_access_free_desc(),
         short: m.studio_content_form_access_free_short(),
-        icon: GlobeIcon,
       },
       {
         value: 'paid',
-        label: m.studio_content_form_access_paid(),
-        description: m.studio_content_form_access_paid_desc(),
-        rowLabel: m.studio_content_form_access_paid_row(),
+        label: m.studio_content_form_access_paid_row(),
         short: m.studio_content_form_access_paid_short(),
-        icon: CreditCardIcon,
         // Monetised — requires a payout-ready Connect account.
         disabled: !connectReady,
       },
@@ -166,18 +131,14 @@
       out.push({
         value: 'followers',
         label: m.studio_content_form_access_followers(),
-        description: m.studio_content_form_access_followers_desc(),
         short: m.studio_content_form_access_followers_short(),
-        icon: UsersIcon,
       });
     }
     if (showSubscribersCard) {
       out.push({
         value: 'subscribers',
         label: m.studio_content_form_access_subscribers(),
-        description: m.studio_content_form_access_subscribers_desc(),
         short: m.studio_content_form_access_subscribers_short(),
-        icon: CoinsIcon,
         // Monetised — requires a payout-ready Connect account. And it can't
         // be newly picked over a tier list that didn't load.
         disabled: !connectReady || subscribersUnavailable,
@@ -187,9 +148,7 @@
       out.push({
         value: 'team',
         label: m.studio_content_form_access_team(),
-        description: m.studio_content_form_access_team_desc(),
         short: m.studio_content_form_access_team_short(),
-        icon: LockIcon,
       });
     }
     return out;
@@ -218,33 +177,29 @@
 
   /** "Pro doesn't include this film, but Basic does." — one per dearer tier. */
   const gaps = $derived(tiersLoaded ? itemGaps(selectedTierIds, tiers) : []);
-
-  /** The "Tiers that include this" value, for the hidden input. */
-  const tierIdsValue = $derived(JSON.stringify([...selectedTierIds]));
 </script>
 
-{#if form}
-  <!-- Hidden inputs mirrored for form submit -->
-  <input type="hidden" name="accessType" value={accessTypeVal} />
-  <input type="hidden" name="visibility" value={derivedVisibility} />
-  <!-- Only when the host says the set may be sent (touched this session, and
-       loaded): an absent field leaves the stored ticks alone. -->
-  {#if sendTierIds && tiersLoaded && showPrice}
-    <input type="hidden" name="includedTierIds" value={tierIdsValue} />
-  {/if}
-  {#if !showPrice}
-    <input type="hidden" name="price" value={priceVal} />
-  {/if}
-{/if}
+<!-- The plans could not be read: said where the choice needs them, with Retry. -->
+{#snippet tiersFailed(testid: string)}
+  <Alert variant="error" data-testid={testid}>
+    <span class="alert-row">
+      <span>{m.plan_picker_load_failed()}</span>
+      {#if onRetryTiers}
+        <Button variant="secondary" size="sm" type="button" onclick={onRetryTiers}>
+          {m.plan_picker_retry()}
+        </Button>
+      {/if}
+    </span>
+  </Alert>
+{/snippet}
 
-<div class="access-root" data-layout={layout}>
+<div class="access-root">
   <div
     class="access-grid"
     role="radiogroup"
     aria-label={m.studio_content_form_access_label()}
   >
     {#each options as option (option.value)}
-      {@const Icon = option.icon}
       <label
         class="access-card"
         data-selected={accessTypeVal === option.value || undefined}
@@ -259,12 +214,9 @@
           onchange={() => onAccessChange(option.value)}
           class="sr-only"
         />
-        <span class="access-icon" aria-hidden="true">
-          <Icon size={18} />
-        </span>
         <span class="access-text">
-          <span class="access-label">{layout === 'row' ? (option.rowLabel ?? option.label) : option.label}</span>
-          <span class="access-desc">{layout === 'row' ? option.short : option.description}</span>
+          <span class="access-label">{option.label}</span>
+          <span class="access-desc">{option.short}</span>
         </span>
         <span class="access-check" aria-hidden="true"></span>
       </label>
@@ -282,16 +234,7 @@
 
   {#if hasOrg && tiersState === 'failed' && !showTier}
     <!-- The Subscribers card is disabled above; say why, with Retry. -->
-    <Alert variant="error" data-testid="tiers-failed-new">
-      <span class="alert-row">
-        <span>{isNew ? m.plan_picker_load_failed_new() : m.plan_picker_load_failed()}</span>
-        {#if onRetryTiers}
-          <Button variant="secondary" size="sm" type="button" onclick={onRetryTiers}>
-            {m.plan_picker_retry()}
-          </Button>
-        {/if}
-      </span>
-    </Alert>
+    {@render tiersFailed('tiers-failed-new')}
   {/if}
 
   {#if showPrice}
@@ -304,26 +247,15 @@
         </label>
         <div class="price-wrapper">
           <span class="price-prefix" aria-hidden="true">&pound;</span>
-          {#if form}
-            <input
-              {...form.fields.price.as('text')}
-              id="price"
-              class="field-input price-input"
-              min="0"
-              step="0.01"
-              placeholder={m.studio_content_form_price_placeholder()}
-            />
-          {:else}
-            <input
-              id="price"
-              type="text"
-              inputmode="decimal"
-              class="field-input price-input"
-              value={priceVal}
-              oninput={(event) => onPriceChange?.(event.currentTarget.value)}
-              placeholder={m.studio_content_form_price_placeholder()}
-            />
-          {/if}
+          <input
+            id="price"
+            type="text"
+            inputmode="decimal"
+            class="field-input price-input"
+            value={priceVal}
+            oninput={(event) => onPriceChange(event.currentTarget.value)}
+            placeholder={m.studio_content_form_price_placeholder()}
+          />
         </div>
         {#if accessTypeVal === 'paid' && belowMinimum}
           <span class="field-warning">Paid content requires a price of at least &pound;1.00</span>
@@ -341,16 +273,7 @@
         <div class="cond-field" data-testid="tier-field">
           <span class="cond-label" id="tier-field-label">{fieldLabel}</span>
           {#if tiersState === 'failed'}
-            <Alert variant="error" data-testid="tiers-failed">
-              <span class="alert-row">
-                <span>{m.plan_picker_load_failed()}</span>
-                {#if onRetryTiers}
-                  <Button variant="secondary" size="sm" type="button" onclick={onRetryTiers}>
-                    {m.plan_picker_retry()}
-                  </Button>
-                {/if}
-              </span>
-            </Alert>
+            {@render tiersFailed('tiers-failed')}
           {:else if tiersState === 'loading'}
             <div class="tier-skeleton" aria-hidden="true">
               <Skeleton width="100%" height="var(--space-9)" />
@@ -424,62 +347,30 @@
     gap: var(--space-3);
   }
 
-  @media (--breakpoint-sm) {
-    .access-grid { grid-template-columns: repeat(2, 1fr); }
-  }
-  @media (--breakpoint-xl) {
-    .access-grid { grid-template-columns: repeat(3, 1fr); }
-  }
-
   /* One short row (mockup w4): every option side by side, its line under it. */
   @media (--breakpoint-sm) {
-    .access-root[data-layout='row'] .access-grid {
+    .access-grid {
       grid-template-columns: none;
       grid-auto-flow: column;
       grid-auto-columns: minmax(0, 1fr);
     }
   }
 
-  .access-root[data-layout='row'] .access-card {
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding: var(--space-3);
-  }
-
-  .access-root[data-layout='row'] .access-icon {
-    display: none;
-  }
-
-  /* A phone (mockup w8b): the options wrap as chips, each its name alone (its words still heard). */
+  /* A phone (mockup w8b): the options wrap as chips. */
   @media (--below-sm) {
-    .access-root[data-layout='row'] .access-grid {
+    .access-grid {
       display: flex;
       flex-wrap: wrap;
       gap: var(--space-2);
-    }
-
-    .access-root[data-layout='row'] .access-card {
-      align-items: center;
-      gap: var(--space-2);
-      padding: var(--space-2) var(--space-3);
-      border-radius: var(--radius-full);
-    }
-
-    .access-root[data-layout='row'] .access-desc {
-      position: absolute;
-      inline-size: 1px;
-      block-size: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
-      white-space: nowrap;
     }
   }
 
   .access-card {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: var(--space-3);
     align-items: flex-start;
-    padding: var(--space-4);
+    padding: var(--space-3);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
     cursor: pointer;
@@ -493,6 +384,25 @@
   .access-card:hover {
     border-color: color-mix(in srgb, var(--color-interactive) 50%, var(--color-border));
     transform: translateY(calc(-1 * var(--border-width)));
+  }
+
+  /* A phone's chip: its name alone, its words still heard. */
+  @media (--below-sm) {
+    .access-card {
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-full);
+    }
+
+    .access-desc {
+      position: absolute;
+      inline-size: 1px;
+      block-size: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -530,23 +440,6 @@
     color: var(--color-link);
     font-weight: var(--font-medium);
     text-decoration: underline;
-  }
-
-  .access-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-8);
-    height: var(--space-8);
-    border-radius: var(--radius-md);
-    background-color: var(--color-surface-secondary);
-    color: var(--color-text-secondary);
-    transition: var(--transition-colors);
-  }
-
-  .access-card[data-selected] .access-icon {
-    background-color: color-mix(in srgb, var(--color-interactive) 15%, transparent);
-    color: var(--color-link);
   }
 
   .access-text {
@@ -667,7 +560,7 @@
 
   .field-warning {
     font-size: var(--text-xs);
-    color: var(--color-warning-600);
+    color: var(--color-status-warning-text);
   }
 
   .picker-summary {

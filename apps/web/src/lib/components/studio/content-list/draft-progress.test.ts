@@ -65,7 +65,7 @@ describe('draftProgress: Write', () => {
     expect(written?.ready).toBe(true);
   });
 
-  it('a type the editor does not know has no progress: it keeps the old form', () => {
+  it('a type the editor does not know has no progress', () => {
     expect(
       draftProgress(draftRow({ contentType: 'podcast' }), 'ready')
     ).toBeNull();

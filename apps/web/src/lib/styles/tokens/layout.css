@@ -45,6 +45,12 @@
    * than a fallback nobody could find. */
   --container-drawer: 24rem;  /* 384px */
 
+  /* A piece's own column: the content page (ContentDetailView's
+   * `.content-detail`) and the studio editor's Write canvas, which is laid
+   * out like it so a creator writes in the shape readers see
+   * (Codex-a6ofh.2.3). One token, so the two cannot drift apart. */
+  --container-content: 60rem; /* 960px */
+
   /* ========================================
    * CONTROL WIDTHS
    * ========================================

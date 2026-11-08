@@ -9,15 +9,12 @@
 
   This is the container half: it owns the remote fetch of the org's categories
   and the create-on-the-fly mutation, and delegates the pure picker UI to
-  CategorySelect (which also renders the hidden `categoryIds` form field).
+  CategorySelect. Its host holds the values and saves them.
 
-  @prop form                 Active form instance; absent where the values are
-                             saved without one (the editor's Publish step), so
-                             no hidden inputs render
   @prop organizationId       Org space UUID, or null for personal content
-  @prop tags                 Tag array (uplifted so it survives in hidden input)
-  @prop featured             Feature flag (uplifted)
-  @prop selectedCategoryIds  Selected category ids (uplifted)
+  @prop tags                 Tag array
+  @prop featured             Feature flag
+  @prop selectedCategoryIds  Selected category ids
   @prop onTagsChange
   @prop onFeaturedChange
   @prop onCategoryChange
@@ -34,18 +31,11 @@
     getCategories,
     createCategoryInline,
   } from '$lib/remote/categories.remote';
-  import type {
-    createContentForm,
-    updateContentForm,
-  } from '$lib/remote/content.remote';
   import { logger } from '$lib/observability';
   import * as m from '$paraglide/messages';
   import { logReadFailure } from '../media-library/log-read-failure';
 
-  type ContentForm = typeof createContentForm | typeof updateContentForm;
-
   interface Props {
-    form?: ContentForm;
     organizationId: string | null;
     tags: string[];
     featured: boolean;
@@ -57,7 +47,6 @@
   }
 
   const {
-    form,
     organizationId,
     tags,
     featured,
@@ -129,17 +118,7 @@
   }
 </script>
 
-<!-- Hidden inputs (tags + featured). The `categoryIds` hidden field is rendered
-     by CategorySelect; `category` is legacy — echoed back unchanged so existing
-     values round-trip while the taxonomy (categoryIds) becomes the source of
-     truth. -->
-{#if form}
-  <input type="hidden" name="tags" value={JSON.stringify(tags)} />
-  <input type="hidden" name="featured" value={featured ? 'true' : ''} />
-  <input type="hidden" name="category" value={form.fields.category?.value() ?? ''} />
-{/if}
-
-<div class="organize-grid" class:single={!organizationId}>
+<div class={['organize-grid', { single: !organizationId }]}>
   {#if organizationId}
     <div class="organize-field">
       {#if categoriesFailed}

@@ -1,8 +1,7 @@
 /**
  * The Publish step's "Who can watch" (Codex-a6ofh.2.4) as the draft session
  * holds it: one group, so a save sends the kind, the price and the plans
- * together (the schema's refines read them together). The rules are the
- * old form's (ContentForm), which the step replaces for a draft.
+ * together (the schema's refines read them together).
  */
 import type { ContentAccessKind } from '$lib/utils/content-access';
 import type { DraftAccess } from './draft-session.svelte';

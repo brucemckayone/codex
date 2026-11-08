@@ -8615,31 +8615,7 @@ export const branding_error = () => `Failed to update branding.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_create_title = () => `Create Content`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_edit_title = () => `Edit Content`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_title_label = () => `Title`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_title_placeholder = () => `Enter content title`
 
 
 /**
@@ -8687,30 +8663,6 @@ export const studio_content_form_slug_taken = () => `This slug is already taken`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_description_label = () => `Description`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_description_placeholder = () => `Describe your content...`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_content_type_label = () => `Content Type`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_visibility_label = () => `Visibility`
 
 
@@ -8743,38 +8695,6 @@ export const studio_content_form_price_help = () => `Leave at £0.00 for free co
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_submit_create = () => `Create Content`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_submit_update = () => `Save Changes`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_submitting = () => `Saving...`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_delete = () => `Delete Content`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_delete_confirm_title = () => `Delete Content`
 
 
@@ -8784,22 +8704,6 @@ export const studio_content_form_delete_confirm_title = () => `Delete Content`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_delete_confirm_description = () => `Are you sure you want to delete this content? This action cannot be undone.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_create_success = () => `Content created successfully`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_update_success = () => `Content updated successfully`
 
 
 /**
@@ -8848,22 +8752,6 @@ export const studio_content_form_publish = () => `Publish`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_unpublish = () => `Unpublish`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_publishing = () => `Publishing...`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_unpublishing = () => `Unpublishing...`
 
 
 /**
@@ -8943,30 +8831,6 @@ export const studio_content_form_visibility_purchased_only = () => `Purchased On
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_type_video = () => `Video`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_type_audio = () => `Audio`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_type_article = () => `Article`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_back_to_content = () => `Back to Content`
 
 
@@ -8976,14 +8840,6 @@ export const studio_content_form_back_to_content = () => `Back to Content`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_body_label = () => `Content Body`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_body_placeholder = () => `Start writing...`
 
 
 /**
@@ -9007,79 +8863,7 @@ export const studio_content_form_body_required = () => `Content body is required
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_section_details = () => `Details`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_section_media = () => `Media`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_section_media_desc = () => `Select the media file for this content.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_media_deleted_title = () => `This draft’s media was deleted.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_media_deleted_body = () => `Choose another media item before you publish. Until then, this draft has nothing to play.`
-
-
-/**
- * @param {{ date: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_media_deleted_on = (params) => `Deleted from your library on ${params.date}`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_thumbnail_frame_deleted_title = () => `This thumbnail is a frame of a deleted video.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_thumbnail_frame_deleted_body = () => `Choose another thumbnail before you publish. The frame stops showing 30 days after its video was deleted.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_media_hint = () => `No ready media available. Upload files in the Media library first.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_thumbnail_uploaded = () => `Thumbnail uploaded`
 
 
 /**
@@ -10311,14 +10095,6 @@ export const media_bulk_rate_limited = (params) => `Too many deletes in a row. W
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_section_body = () => `Body`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_section_body_desc = () => `Write or paste your content body.`
 
 
@@ -10383,23 +10159,7 @@ export const studio_content_form_access_free = () => `Free`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_access_free_desc = () => `Anyone can access this content for free`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_access_paid = () => `One-time purchase`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_access_paid_desc = () => `Viewers pay a one-time price to access`
 
 
 /**
@@ -10415,14 +10175,6 @@ export const studio_content_form_access_subscribers = () => `Subscribers`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_access_subscribers_desc = () => `Available to subscribers on the tiers you tick`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_access_followers = () => `Followers`
 
 
@@ -10431,23 +10183,7 @@ export const studio_content_form_access_followers = () => `Followers`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_access_followers_desc = () => `Must follow your organisation (free)`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_access_team = () => `Team only`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_access_team_desc = () => `Only team members (owners, admins, creators)`
 
 
 /**
@@ -10559,30 +10295,6 @@ export const studio_content_form_access_tiers_optional_label = () => `Also inclu
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_ready_tier_ticked = () => `At least one tier ticked`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_ready_media_deleted = () => `Choose another media item: the last one was deleted`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_ready_thumbnail_frame_deleted = () => `Choose another thumbnail: its video was deleted`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const plan_picker_and_above = () => `and above`
 
 
@@ -10648,14 +10360,6 @@ export const plan_picker_closed_body = () => `No tier is ticked, so only people 
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const plan_picker_load_failed = () => `We couldn't load your tiers, so this film's tiers can't be changed right now. Saving keeps them as they are.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const plan_picker_load_failed_new = () => `We couldn't load your tiers, so this film can't be made subscribers-only yet.`
 
 
 /**
@@ -12800,6 +12504,14 @@ export const studio_editor_reload = () => `Reload the page`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_editor_not_found = () => `This piece was deleted, or isn’t yours to edit.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_unknown_type = () => `This piece can’t be opened in the editor.`
 
 
 /**

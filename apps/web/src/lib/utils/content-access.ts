@@ -8,8 +8,8 @@
  * `access-context` / `subscription-context`).
  *
  * This module covers the DISPLAY concern, and its write-boundary inverse
- * ({@link accessSelectionToFlags}, shared by the studio's form and its Publish
- * step, Codex-a6ofh.2.4): badges, meta chips, and the
+ * ({@link accessGroupToFlags}, which the studio's Publish step saves
+ * through, Codex-a6ofh.2.4): badges, meta chips, and the
  * `contentAccessType` prop forwarded to `PriceBadge` want ONE exclusive label,
  * not the flag set. {@link deriveContentAccessKind} collapses the flags back to
  * that single kind so the presentation components keep their existing
@@ -81,7 +81,7 @@ export function deriveContentAccessKind(
 }
 
 /**
- * Translate the studio access-editor's single-select `accessType` (+ price +
+ * Translate the studio access editor's choice (its one kind, the price and
  * the tiers ticked) into the SPEC §6.1 policy flags the content API expects.
  * The write-boundary inverse of `deriveContentAccessKind`.
  *
@@ -91,7 +91,8 @@ export function deriveContentAccessKind(
  * empty set is a legal save: the editor shows the "Closed to subscribers"
  * warning instead of refusing (owner decision U2).
  *
- * `includedTierIds` is `undefined` when the editor did not send the field
+ * The choice is held as one group (the editor's `DraftAccess`,
+ * Codex-a6ofh.2.4). Its `tierIds` is `null` when the plans were never read
  * (untouched this session, or the tier list failed to load): the set is then
  * left out of the payload and the server keeps the ticks. For a paid item the
  * switch follows the set, so it is left out too: guessing it would either
@@ -103,10 +104,12 @@ export function deriveContentAccessKind(
  * A subscribers selection there still sends the switch, which the server
  * refuses ("orgless content cannot be tier-gated"): refused, never free.
  */
-export function accessSelectionToFlags(
-  accessType: ContentAccessKind,
-  priceCents: number,
-  includedTierIds: string[] | undefined,
+export function accessGroupToFlags(
+  access: {
+    kind: ContentAccessKind;
+    priceCents: number;
+    tierIds: string[] | null;
+  },
   organizationId: string | null | undefined
 ): {
   isFree: boolean;
@@ -117,8 +120,9 @@ export function accessSelectionToFlags(
   isFollowerGated: boolean;
   isTeamOnly: boolean;
 } {
-  const ids = organizationId ? includedTierIds : undefined;
-  switch (accessType) {
+  const { priceCents } = access;
+  const ids = organizationId ? (access.tierIds ?? undefined) : undefined;
+  switch (access.kind) {
     case 'paid':
       // Purchasable; may also be included in tiers (hybrid). In no tier it is
       // simply for sale, not closed.
@@ -177,25 +181,4 @@ export function accessSelectionToFlags(
         isTeamOnly: false,
       };
   }
-}
-
-/**
- * The flags a save sends for an access choice held as one group (the
- * editor's `DraftAccess`, Codex-a6ofh.2.4): plans never read (`null`) are
- * left out, so the server keeps its ticks.
- */
-export function accessGroupToFlags(
-  access: {
-    kind: ContentAccessKind;
-    priceCents: number;
-    tierIds: string[] | null;
-  },
-  organizationId: string | null | undefined
-): ReturnType<typeof accessSelectionToFlags> {
-  return accessSelectionToFlags(
-    access.kind,
-    access.priceCents,
-    access.tierIds ?? undefined,
-    organizationId
-  );
 }

@@ -2,20 +2,17 @@
   @component SlugField
 
   Slug input with prominent URL preview bar and real-time availability check.
-  It never moves the slug itself (Codex-a6ofh.2.4). The old form edits only
-  a piece that has been live (`editorView`), whose address must not move
-  under its links. Before that, the draft session makes the slug follow the
-  title.
+  It never moves the slug itself (Codex-a6ofh.2.4): the draft session makes
+  the slug follow the title until the piece has been live.
 
-  Without a form (the editor's Publish step) the host holds the slug: this
-  shows it and hands on a slug typed here once it is one the API takes, so a
-  half-typed `my-` is never saved. The host is told while what is on screen
-  is not one (`oninvalid`), so it never publishes the last good one instead.
+  The host holds the slug: this shows it and hands on a slug typed here once
+  it is one the API takes, so a half-typed `my-` is never saved. The host is
+  told while what is on screen is not one (`oninvalid`), so it never
+  publishes the last good one instead.
 
-  @prop {ContentForm} [form] - The active form instance; absent on the Publish step
-  @prop {string} [value] - The slug, without a form
-  @prop {(slug: string) => void} [onchange] - A valid slug typed here, without a form
-  @prop {(invalid: boolean) => void} [oninvalid] - What is on screen is not a slug the API takes, without a form
+  @prop {string} value - The slug
+  @prop {(slug: string) => void} onchange - A valid slug typed here
+  @prop {(invalid: boolean) => void} [oninvalid] - What is on screen is not a slug the API takes
   @prop {string | null} orgSlug - Organization slug for URL preview (null for personal content)
   @prop {string | null} [creatorUsername] - Creator username for personal content URL preview
   @prop {string | null} [organizationId] - Organization ID for slug scope
@@ -26,16 +23,12 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { checkContentSlug } from '$lib/remote/content.remote';
-  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
   import { pieceHref } from '../editor/editor-url';
   import { logReadFailure } from '../media-library/log-read-failure';
 
-  type ContentForm = typeof createContentForm | typeof updateContentForm;
-
   interface Props {
-    form?: ContentForm;
-    value?: string;
-    onchange?: (slug: string) => void;
+    value: string;
+    onchange: (slug: string) => void;
     oninvalid?: (invalid: boolean) => void;
     orgSlug: string | null;
     creatorUsername?: string | null;
@@ -44,8 +37,7 @@
   }
 
   const {
-    form,
-    value = '',
+    value,
     onchange,
     oninvalid,
     orgSlug,
@@ -65,13 +57,11 @@
   let checkRequestId = 0;
 
   /**
-   * What the field shows without a form: the host's slug, or what is typed
-   * over it until the host's slug moves (a valid one handed on, or a title it
-   * follows).
+   * What the field shows: the host's slug, or what is typed over it until the
+   * host's slug moves (a valid one handed on, or a title it follows).
    */
   let typed = $derived(value);
-  const slugValue = $derived(form ? (form.fields.slug.value() ?? '') : typed);
-  const misshapen = $derived(!form && typed !== value && !isContentSlug(typed));
+  const misshapen = $derived(typed !== value && !isContentSlug(typed));
   // Gone (a fold closed over it): what was typed goes too, so the host's
   // slug stands again.
   $effect(() => {
@@ -82,7 +72,7 @@
   function typedSlug(text: string) {
     const slug = text.trim().toLowerCase();
     typed = slug;
-    if (isContentSlug(slug)) onchange?.(slug);
+    if (isContentSlug(slug)) onchange(slug);
   }
 
   /** Where the piece will live, as visitors reach it: the real host, never a guess. */
@@ -100,7 +90,7 @@
   // Debounced slug availability check.
   // The returned teardown clears the timer before each re-run and on unmount.
   $effect(() => {
-    const slug = slugValue;
+    const slug = typed;
     // Before the guard: a check still out for an earlier slug must never
     // answer for one that is not checked at all.
     const thisRequestId = ++checkRequestId;
@@ -143,32 +133,18 @@
   <label class="field-label" for="slug">
     {m.studio_content_form_slug_label()}
   </label>
-  {#if form}
-    <input
-      {...form.fields.slug.as('text')}
-      id="slug"
-      class="field-input"
-      class:input-error={slugCheckStatus === 'taken'}
-      placeholder={m.studio_content_form_slug_placeholder()}
-    />
-    {#each form.fields.slug.issues() as issue (issue)}
-      <p class="field-error">{issue.message}</p>
-    {/each}
-  {:else}
-    <input
-      id="slug"
-      type="text"
-      class="field-input"
-      class:input-error={slugCheckStatus === 'taken' || misshapen}
-      value={slugValue}
-      aria-invalid={misshapen || undefined}
-      aria-describedby={misshapen ? 'slug-shape' : undefined}
-      oninput={(event) => typedSlug(event.currentTarget.value)}
-      placeholder={m.studio_content_form_slug_placeholder()}
-    />
-    {#if misshapen}
-      <p id="slug-shape" class="field-error">{m.studio_content_form_slug_shape()}</p>
-    {/if}
+  <input
+    id="slug"
+    type="text"
+    class={['field-input', { 'input-error': slugCheckStatus === 'taken' || misshapen }]}
+    value={typed}
+    aria-invalid={misshapen || undefined}
+    aria-describedby={misshapen ? 'slug-shape' : undefined}
+    oninput={(event) => typedSlug(event.currentTarget.value)}
+    placeholder={m.studio_content_form_slug_placeholder()}
+  />
+  {#if misshapen}
+    <p id="slug-shape" class="field-error">{m.studio_content_form_slug_shape()}</p>
   {/if}
   {#if slugCheckStatus === 'checking'}
     <p class="slug-status slug-checking">{m.studio_content_form_slug_checking()}</p>
@@ -179,9 +155,9 @@
   {:else if slugCheckStatus === 'error'}
     <p class="slug-status slug-unchecked">{m.studio_content_form_slug_check_failed()}</p>
   {/if}
-  {#if slugValue && urlPrefix}
+  {#if typed && urlPrefix}
     <div class="url-preview">
-      <span class="url-prefix">{urlPrefix}</span><span class="url-slug">{slugValue}</span>
+      <span class="url-prefix">{urlPrefix}</span><span class="url-slug">{typed}</span>
     </div>
   {/if}
 </div>
@@ -219,12 +195,12 @@
 
   .field-input[aria-invalid='true'],
   .field-input.input-error {
-    border-color: var(--color-error-500);
+    border-color: var(--color-status-error-border);
   }
 
   .field-error {
     font-size: var(--text-xs);
-    color: var(--color-error-600);
+    color: var(--color-status-error-text);
     margin: 0;
   }
 
@@ -238,11 +214,11 @@
   }
 
   .slug-available {
-    color: var(--color-success-600);
+    color: var(--color-status-success-text);
   }
 
   .slug-taken {
-    color: var(--color-error-600);
+    color: var(--color-status-error-text);
   }
 
   .slug-unchecked {

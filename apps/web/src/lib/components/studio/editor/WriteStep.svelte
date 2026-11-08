@@ -276,7 +276,7 @@
 
   /* In the canvas column (WriteCanvas's 960px), over the slot. */
   .editor-note {
-    max-inline-size: 960px;
+    max-inline-size: var(--container-content);
     margin: var(--space-6) auto 0;
     padding-inline: var(--space-4);
     font-size: var(--text-sm);

@@ -1,7 +1,8 @@
 /**
  * Shared publish/unpublish toggle helper.
  *
- * Encapsulates the API call + toast pattern used by ContentForm and ContentTable.
+ * Encapsulates the API call + toast pattern used by ContentTable, the content
+ * list and a live piece's Settings.
  * Each caller handles its own optimistic UI independently.
  */
 

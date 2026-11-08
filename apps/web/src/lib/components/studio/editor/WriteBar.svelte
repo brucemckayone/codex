@@ -184,7 +184,7 @@
   }
 
   .write-error {
-    color: var(--color-error-700);
+    color: var(--color-status-error-text);
   }
 
   /* Empty, out of the row (no gap) but still in the tree, so its words are heard when they come. */

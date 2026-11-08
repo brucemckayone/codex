@@ -2,7 +2,7 @@
   @component ContentListCommandBar
 
   Sticky editorial command bar for the Studio content list. Mirrors
-  ContentFormCommandBar / DashboardCommandBar vocabulary: backdrop-blur,
+  DashboardCommandBar's vocabulary: backdrop-blur,
   breadcrumb eyebrow, mono ordinal ratio, narrative lede, status segmented
   control, search field, the page's actions.
 
