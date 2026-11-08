@@ -383,6 +383,28 @@ describe('DropdownMenuTrigger', () => {
       document.querySelector('[data-testid="dropdown-content"]')
     );
   });
+
+  // The menu's aria-labelledby names the trigger's id, and Melt's keyboard
+  // open and a dialog's way back to this button find the menu through its
+  // aria-controls (review fu-focus-2, as Content's id in review c6).
+  test("keeps Melt's id and aria-controls whatever a page passes, so the menu and its button still name each other", () => {
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: {
+        open: true,
+        triggerAttrs: { id: 'page-trigger', 'aria-controls': 'page-menu' },
+      },
+    });
+
+    flushSync();
+
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    const content = document.querySelector('[data-testid="dropdown-content"]');
+    expect(trigger?.id).not.toBe('page-trigger');
+    expect(trigger?.getAttribute('aria-controls')).not.toBe('page-menu');
+    expect(trigger?.getAttribute('aria-controls')).toBe(content?.id);
+    expect(content?.getAttribute('aria-labelledby')).toBe(trigger?.id);
+  });
 });
 
 describe('DropdownMenuContent', () => {
