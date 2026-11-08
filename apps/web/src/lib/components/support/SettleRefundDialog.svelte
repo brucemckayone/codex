@@ -15,7 +15,10 @@
   chargeback or refund that took the payees' shares too refuses re-paying
   for good, since it would pay them twice: support settles it by hand, or as
   refunded another way. So does a clawback step only a person can read
-  (`REFUND_CLAWBACK_NEEDS_PERSON`): support settles it by hand. Whether re-paying gives the buyer access back is the
+  (`REFUND_CLAWBACK_NEEDS_PERSON`): support settles it by hand. A late win's own
+  refund of the payment (`LATE_WIN_REFUND_NOT_REPAYABLE`, owner decision 6) is
+  never re-paid: it pays back a buyer who paid twice, so support refunds the
+  buyer another way and marks it so. Whether re-paying gives the buyer access back is the
   server's prediction (`accessRestoreBlockedReason`, the restore's own rule,
   nothing locked), so the dialog says what it predicts and the confirmation
   says what happened (`accessNotRestoredReason`).
@@ -76,6 +79,7 @@
     | 'blocked_chargeback'
     | 'blocked_later_refunds'
     | 'needs_person'
+    | 'late_win_refund'
     | 'session_ended'
     | 'failed'
     | null
@@ -85,7 +89,8 @@
   const refusedForGood = $derived(
     problem === 'blocked_chargeback' ||
       problem === 'blocked_later_refunds' ||
-      problem === 'needs_person'
+      problem === 'needs_person' ||
+      problem === 'late_win_refund'
   );
 
   const noteId = $props.id();
@@ -215,6 +220,10 @@
         // Retrying never helps either: Re-pay stays off for the session.
         markRepayBlocked(settling.refundId, 'needs_person');
         problem = 'needs_person';
+      } else if (answer.detailsCode === 'LATE_WIN_REFUND_NOT_REPAYABLE') {
+        // A late win's own refund: never re-paid, so Re-pay stays off too.
+        markRepayBlocked(settling.refundId, 'late_win_refund');
+        problem = 'late_win_refund';
       } else if (answer.status === 400 && noteRequired) {
         noteMissing = true;
       } else if (answer.status === 401 || answer.status === 403) {
@@ -317,6 +326,11 @@
               <p>
                 <strong>{m.support_repay_needs_person_lead()}</strong>
                 {m.support_repay_needs_person_body()}
+              </p>
+            {:else if problem === 'late_win_refund'}
+              <p>
+                <strong>{m.support_repay_late_win_lead()}</strong>
+                {m.support_repay_late_win_body()}
               </p>
             {:else if problem === 'session_ended'}
               <p>
