@@ -82,12 +82,44 @@ describe("the org layout's <html> background", () => {
     expect(reads('brandEditor.pending.backgroundColor')).toBe(true);
   });
 
+  // A write is an assignment to <html>'s style or to one of its properties
+  // (`.x` or `['x']`), or a setProperty or removeProperty call on it,
+  // through document.documentElement or a local name for it or its style
+  // (review fu-focus-2).
   it('has no other writer in the layout', () => {
-    const writes = nodes.filter(
-      (n) =>
-        n.type === 'AssignmentExpression' &&
-        chain(n.left as Node).startsWith('document.documentElement.style')
-    );
+    const html = new Set(['document.documentElement']);
+    const style = new Set<string>();
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const name of html) style.add(`${name}.style`);
+      for (const n of nodes) {
+        if (n.type !== 'VariableDeclarator') continue;
+        const id = n.id as Node;
+        const init = chain(n.init as Node);
+        if (id.type !== 'Identifier' || !init) continue;
+        const into = html.has(init) ? html : style.has(init) ? style : null;
+        if (into && !into.has(String(id.name))) {
+          into.add(String(id.name));
+          grew = true;
+        }
+      }
+    }
+    const onStyle = (node: Node | undefined) =>
+      style.has(chain(node)) ||
+      (node?.type === 'MemberExpression' &&
+        style.has(chain(node.object as Node)));
+    const writes = nodes.filter((n) => {
+      if (n.type === 'AssignmentExpression') return onStyle(n.left as Node);
+      if (n.type !== 'CallExpression') return false;
+      const callee = n.callee as Node;
+      return (
+        callee.type === 'MemberExpression' &&
+        ['setProperty', 'removeProperty'].includes(
+          chain(callee.property as Node)
+        ) &&
+        style.has(chain(callee.object as Node))
+      );
+    });
     expect(writes).toEqual([]);
   });
 });
