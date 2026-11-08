@@ -103,9 +103,11 @@ const TRIGGER = 'dispute reconcile';
  * - a late win's refund that Stripe did not make: its own step alerted it at
  *   error (payment-webhook.ts `refundFirstPayment`), with what Stripe
  *   answered, so a second alert would only repeat it;
- * - a clawback waiting for ANOTHER won chargeback on the charge to settle
- *   (`WinSettlingError`, which names that dispute): waiting is not a fault
- *   (late-win data design §11), and the next run retries it.
+ * - a clawback waiting for a won chargeback on the charge to settle
+ *   (`WinSettlingError`, which names it as `settlingDisputeId`): another
+ *   dispute's, or this one's own, when the reconcile re-runs an unfinished
+ *   loss a late win overtook (S1's race). Waiting is not a fault (late-win
+ *   data design §11), and the next run retries it.
  *
  * Any other failure is alerted at error with an errorId and the innermost
  * error (`describeRootCause`), since a service's wrap names only itself.
@@ -153,7 +155,7 @@ function settleWarning(
   if (error instanceof WinSettlingError) {
     return {
       message:
-        "A dispute's settle waits for another won chargeback on its charge to settle; the next run retries it",
+        "A dispute's settle waits for a won chargeback on its charge to settle; the next run retries it",
       fields: {
         disputeId,
         chargeId: error.context?.chargeId ?? null,

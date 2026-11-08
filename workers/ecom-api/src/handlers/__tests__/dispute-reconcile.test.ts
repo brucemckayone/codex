@@ -985,10 +985,10 @@ describe('runDisputeReconcile', () => {
       'A dispute could not be settled by the hourly reconcile; the next run retries it';
     const STOPPED_AT_REFUND =
       "A late win's settle stopped at its refund, which the refund step has already alerted; the next run retries it";
-    const WAITS_FOR_ANOTHER_WIN =
-      "A dispute's settle waits for another won chargeback on its charge to settle; the next run retries it";
+    const WAITS_FOR_A_WIN =
+      "A dispute's settle waits for a won chargeback on its charge to settle; the next run retries it";
 
-    it('a settle that waits for ANOTHER won chargeback on its charge is one warn with ids, no error; the row is left unapplied for the next run (§11)', async () => {
+    it('a settle that waits for a won chargeback on its charge is one warn with ids, no error; the row is left unapplied for the next run (§11)', async () => {
       const { rows, purchase } = undoingRow();
       purchase.repayWonDispute.mockRejectedValueOnce(
         new WinSettlingError({
@@ -1003,7 +1003,7 @@ describe('runDisputeReconcile', () => {
 
       expect(result).toMatchObject({ fromRows: 1, acted: 0, failed: 1 });
       expect(obs.error).not.toHaveBeenCalled();
-      expect(obs.warn).toHaveBeenCalledExactlyOnceWith(WAITS_FOR_ANOTHER_WIN, {
+      expect(obs.warn).toHaveBeenCalledExactlyOnceWith(WAITS_FOR_A_WIN, {
         disputeId: 'dp_undoing',
         chargeId: 'ch_dp_undoing',
         settlingDisputeId: 'dp_other_win',
@@ -1077,7 +1077,7 @@ describe('runDisputeReconcile', () => {
           code: 'ECONNRESET',
         },
       });
-      for (const warn of [STOPPED_AT_REFUND, WAITS_FOR_ANOTHER_WIN]) {
+      for (const warn of [STOPPED_AT_REFUND, WAITS_FOR_A_WIN]) {
         expect(obs.warn).not.toHaveBeenCalledWith(warn, expect.anything());
       }
       expect(rows.get('dp_undoing')?.outcomeAppliedAt).toBeNull();
