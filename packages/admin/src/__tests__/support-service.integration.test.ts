@@ -2693,6 +2693,55 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           });
         });
 
+        /** Stripe can't be reached: every read the settle could make throws. */
+        function stripeUnreachable() {
+          const down = Object.assign(new Error('Stripe is unreachable'), {
+            type: 'StripeConnectionError',
+          });
+          for (const read of [
+            fake.stripe.refunds.list,
+            fake.stripe.charges.retrieve,
+          ]) {
+            vi.mocked(read).mockRejectedValue(down);
+            vi.mocked(read).mockClear();
+          }
+        }
+
+        it("an ordinary failed refund settles while Stripe is unreachable: its charge has no late win, so Stripe isn't asked", async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const failed = await failedRefund(charge, 1000);
+          stripeUnreachable();
+
+          const settled = await settleElsewhere(failed.id);
+
+          expect(settled.settled.resolution).toBe('refunded_elsewhere');
+          expect(await refundRow(failed.id)).toMatchObject({
+            resolution: 'refunded_elsewhere',
+            resolvedByUserId: supportId,
+          });
+          expect(fake.stripe.refunds.list).not.toHaveBeenCalled();
+          expect(fake.stripe.charges.retrieve).not.toHaveBeenCalled();
+        });
+
+        it("on a late win's charge it fails closed while Stripe is unreachable: the refund stays open and nothing is marked", async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const disputeId = await lateWinThatRefunded(charge, null);
+          const failed = await failedRefund(charge, 1000, {
+            codex_late_win_dispute: disputeId,
+          });
+          stripeUnreachable();
+
+          const error = await failureOf(settleElsewhere(failed.id));
+
+          expect(error.statusCode).toBe(500);
+          expect(fake.stripe.refunds.list).toHaveBeenCalled();
+          expect(await refundRow(failed.id)).toMatchObject({
+            resolution: null,
+            resolvedAt: null,
+          });
+          expect(await markOf(disputeId)).toBeNull();
+        });
+
         it('keeps a date already set', async () => {
           const charge = await purchaseCharge(30 * DAY);
           const failed = await failedRefund(charge, 1000);
@@ -2713,6 +2762,9 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
 
         it("a late win's dispute not on the refund's charge rolls the settlement back: the refund stays open", async () => {
           const charge = await purchaseCharge(30 * DAY);
+          // The charge has a late win of its own, so Stripe is asked, but
+          // the refund's metadata names another charge's.
+          await lateWinThatRefunded(charge, null);
           const other = await purchaseCharge(30 * DAY);
           const elsewhere = await lateWinThatRefunded(other, null);
           const failed = await failedRefund(charge, 1000, {

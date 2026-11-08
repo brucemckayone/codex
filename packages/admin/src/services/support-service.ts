@@ -2648,10 +2648,18 @@ export class SupportService extends BaseService {
     stripeRefundId: string;
     stripeChargeId: string;
   }): Promise<string | null> {
+    const recorded = await this.lateWinDisputeRecorded(
+      this.db,
+      refund.stripeRefundId
+    );
+    // Stripe is asked only on a late win's charge (`chargeHasLateWin`), so
+    // any other charge's settle never waits on it.
+    if (!recorded && !(await this.chargeHasLateWin(refund.stripeChargeId))) {
+      return null;
+    }
     const listed = await listChargeRefunds(this.stripe, refund.stripeChargeId);
     const disputeId =
-      (await this.lateWinDisputeRecorded(this.db, refund.stripeRefundId)) ??
-      lateWinDisputeMarked(listed, refund.stripeRefundId);
+      recorded ?? lateWinDisputeMarked(listed, refund.stripeRefundId);
     if (!disputeId) return null;
     const charge = await this.retrieveCharge(refund.stripeChargeId, false);
     return standingCents(listed) >= charge.amount ? null : disputeId;
@@ -2716,13 +2724,7 @@ export class SupportService extends BaseService {
       // first, then the refund's own metadata at Stripe: the late win writes
       // our record only after Stripe made the refund, so it can be missing.
       await this.refuseLateWinRefund(this.db, found.stripeRefundId);
-      this.refuseIfLateWin(
-        found.stripeRefundId,
-        lateWinDisputeMarked(
-          await listChargeRefunds(this.stripe, found.stripeChargeId),
-          found.stripeRefundId
-        )
-      );
+      await this.refuseIfMarkedLateWin(found);
       prepared = await this.prepareRepay(
         found.stripeRefundId,
         found.stripeChargeId
@@ -2909,6 +2911,46 @@ export class SupportService extends BaseService {
       reason: 'late_win_refund',
     });
     throw new LateWinRefundNotRepayableError(stripeDisputeId);
+  }
+
+  /**
+   * Refuse the re-pay by the refund's own metadata at Stripe. Asked only on
+   * a late win's charge (`chargeHasLateWin`).
+   */
+  private async refuseIfMarkedLateWin(refund: {
+    stripeRefundId: string;
+    stripeChargeId: string;
+  }): Promise<void> {
+    if (!(await this.chargeHasLateWin(refund.stripeChargeId))) return;
+    this.refuseIfLateWin(
+      refund.stripeRefundId,
+      lateWinDisputeMarked(
+        await listChargeRefunds(this.stripe, refund.stripeChargeId),
+        refund.stripeRefundId
+      )
+    );
+  }
+
+  /**
+   * Does the charge have a late win (`late_won_at`)? Only then can one of
+   * its refunds be a late win's own: the late win records `late_won_at` on
+   * the dispute (`recordLateWin`) before its undo makes the refund, so the
+   * gate never hides a refund whose `late_win_refund_id` write was lost
+   * (review cycle 2, finding 1). It is what keeps Stripe out of every other
+   * charge's settle.
+   */
+  private async chargeHasLateWin(chargeId: string): Promise<boolean> {
+    const [lateWin] = await this.db
+      .select({ id: disputes.id })
+      .from(disputes)
+      .where(
+        and(
+          eq(disputes.stripeChargeId, chargeId),
+          isNotNull(disputes.lateWonAt)
+        )
+      )
+      .limit(1);
+    return lateWin !== undefined;
   }
 
   /** The late win whose own refund this is, by our record, or null. */

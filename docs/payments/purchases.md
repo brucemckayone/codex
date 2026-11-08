@@ -482,8 +482,13 @@ owed it and its clawback stands. "Creators re-paid" refuses it with 422
 (`disputes.late_win_refund_id`) or by the refund's own metadata at Stripe
 (`codex_late_win_dispute`). The late win writes the metadata in the same call
 that makes the refund, and our record only after Stripe answers, so the
-metadata still names a refund whose record was never written. Both are checked
-before the re-pay reads anything else at Stripe, so a refusal writes nothing.
+metadata still names a refund whose record was never written. Stripe is asked
+for the metadata only when the refund's charge has a late win (`late_won_at`),
+which the late win records before it makes its refund. So "refunded
+elsewhere" on any other charge never reads Stripe, and goes through while
+Stripe is unreachable; on a late win's charge it fails until Stripe answers.
+Both are checked before the re-pay reads anything else at Stripe, so a
+refusal writes nothing.
 Our record is read once more in the settle's transaction, which only narrows
 the window for a late win that records its id meanwhile; the metadata is what
 closes it. Support refunds the buyer another way, or first refunds it again
