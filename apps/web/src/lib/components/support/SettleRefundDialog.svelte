@@ -71,19 +71,19 @@
     closeFocus,
   }: Props = $props();
 
-  let note = $state('');
-  let busy = $state(false);
   /** A refusal the dialog stays open for: later, another way, or again. */
-  let problem = $state<
+  type Problem =
     | 'clawback_running'
     | 'blocked_chargeback'
     | 'blocked_later_refunds'
     | 'needs_person'
     | 'late_win_refund'
     | 'session_ended'
-    | 'failed'
-    | null
-  >(null);
+    | 'failed';
+
+  let note = $state('');
+  let busy = $state(false);
+  let problem = $state<Problem | null>(null);
   let noteMissing = $state(false);
   /** Refused for good: Submit is off, and nothing is said of what re-paying would do. */
   const refusedForGood = $derived(
@@ -154,6 +154,41 @@
         return m.support_access_kept_no_purchase();
       default:
         return m.support_access_kept_other({ buyer: name });
+    }
+  }
+
+  /** What a refusal says: a lead in bold, when it has one, then why. */
+  function problemText(kind: Problem): { lead: string | null; body: string } {
+    switch (kind) {
+      case 'clawback_running':
+        return { lead: null, body: m.support_settle_clawback_running() };
+      case 'blocked_chargeback':
+        return {
+          lead: m.support_repay_blocked_lead(),
+          body: m.support_repay_blocked_chargeback(),
+        };
+      case 'blocked_later_refunds':
+        return {
+          lead: m.support_repay_blocked_lead(),
+          body: m.support_repay_blocked_later_refunds(),
+        };
+      case 'needs_person':
+        return {
+          lead: m.support_repay_needs_person_lead(),
+          body: m.support_repay_needs_person_body(),
+        };
+      case 'late_win_refund':
+        return {
+          lead: m.support_repay_late_win_lead(),
+          body: m.support_repay_late_win_body(),
+        };
+      case 'session_ended':
+        return {
+          lead: m.support_outcome_signed_out_lead(),
+          body: m.support_settle_session_ended(),
+        };
+      default:
+        return { lead: null, body: m.support_settle_failed() };
     }
   }
 
@@ -299,6 +334,7 @@
           />
         </div>
         {#if problem}
+          {@const said = problemText(problem)}
           <Alert
             variant={problem === 'clawback_running'
               ? 'info'
@@ -310,36 +346,10 @@
             data-testid="settle-problem"
             data-problem={problem}
           >
-            {#if problem === 'clawback_running'}
-              <p>{m.support_settle_clawback_running()}</p>
-            {:else if problem === 'blocked_chargeback'}
-              <p>
-                <strong>{m.support_repay_blocked_lead()}</strong>
-                {m.support_repay_blocked_chargeback()}
-              </p>
-            {:else if problem === 'blocked_later_refunds'}
-              <p>
-                <strong>{m.support_repay_blocked_lead()}</strong>
-                {m.support_repay_blocked_later_refunds()}
-              </p>
-            {:else if problem === 'needs_person'}
-              <p>
-                <strong>{m.support_repay_needs_person_lead()}</strong>
-                {m.support_repay_needs_person_body()}
-              </p>
-            {:else if problem === 'late_win_refund'}
-              <p>
-                <strong>{m.support_repay_late_win_lead()}</strong>
-                {m.support_repay_late_win_body()}
-              </p>
-            {:else if problem === 'session_ended'}
-              <p>
-                <strong>{m.support_outcome_signed_out_lead()}</strong>
-                {m.support_settle_session_ended()}
-              </p>
-            {:else}
-              <p>{m.support_settle_failed()}</p>
-            {/if}
+            <p>
+              {#if said.lead}<strong>{said.lead}</strong>{/if}
+              {said.body}
+            </p>
           </Alert>
         {/if}
       </Dialog.Body>
