@@ -99,8 +99,8 @@ export const disputes = pgTable(
      *   (docs/payments/operations.md, "Settling a late-win refund Stripe
      *   won't make"), in the transaction that marks the outcome;
      * - support settling the late win's own failed refund as refunded
-     *   elsewhere when Stripe's standing refunds don't cover the charge, in
-     *   the transaction that resolves it (`settleRefundedElsewhere`,
+     *   elsewhere when the charge's succeeded Stripe refunds don't cover
+     *   it, in the transaction that resolves it (`settleRefundedElsewhere`,
      *   @codex/admin);
      * - a manual UPDATE, with the owner's OK, for a buyer refunded another
      *   way that the settle never saw (docs/payments/release-checklist.md,

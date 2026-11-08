@@ -381,11 +381,14 @@ set, and is never refunded through Stripe again. Three things set it:
 - a charge settled by hand
   ([below](#settling-a-late-win-refund-stripe-wont-make));
 - the late win's own failed refund settled in Failed refunds as refunded
-  elsewhere, when Stripe's standing refunds don't cover the charge (support
-  didn't refund it again through Stripe first). Without the mark the charge
-  would stay refundable for good, since Stripe doesn't count the failed refund
-  and the late win lifts the 14-day window. That is owner decision 5's rule,
-  applied in review cycle 2;
+  elsewhere, unless the charge's SUCCEEDED Stripe refunds already cover it
+  (support refunded it again through Stripe first). Without the mark the
+  charge would stay refundable for good, since Stripe doesn't count the failed
+  refund and the late win lifts the 14-day window. That is owner decision 5's
+  rule, applied in review cycle 2. A re-refund still pending doesn't count, so
+  the charge is marked: if it then fails, the charge is already blocked; if it
+  succeeds, the buyer was refunded once, through Stripe, and only the charge
+  card's "refunded outside Stripe on {date}" is then slightly off;
 - by hand, with the owner's OK, for a buyer refunded another way that the
   settle never saw: a canceled late-win refund (below), or one settled while
   rolled back

@@ -2671,6 +2671,54 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           ).toMatchObject({ maxCents: 0, blocked: 'nothing_left' });
         });
 
+        it("a re-refund still pending at the settle doesn't cover it: the charge is marked (review cycle 3)", async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const failed = await failedRefund(charge, 1000);
+          const disputeId = await lateWinThatRefunded(
+            charge,
+            failed.stripeRefundId
+          );
+          stripeRefund(charge.chargeId, 1000, { status: 'pending' });
+
+          await settleElsewhere(failed.id);
+
+          expect(await markOf(disputeId)).toBeInstanceOf(Date);
+          expect(
+            (await service.getChargeDetail(charge.chargeId)).refundable.blocked
+          ).toBe('refunded_outside_stripe');
+        });
+
+        it('and if that re-refund then fails, the charge stays blocked: the route refuses it', async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const failed = await failedRefund(charge, 1000);
+          await lateWinThatRefunded(charge, failed.stripeRefundId);
+          const reRefund = stripeRefund(charge.chargeId, 1000, {
+            status: 'pending',
+          });
+
+          await settleElsewhere(failed.id);
+          // Stripe fails it after the settle: neither refund stands now.
+          (reRefund as unknown as { status: string }).status = 'failed';
+
+          const detail = await service.getChargeDetail(charge.chargeId);
+          expect(detail.refundable).toMatchObject({
+            maxCents: 1000,
+            blocked: 'refunded_outside_stripe',
+          });
+          const route = await failureOf(
+            service.issueRefund(
+              charge.chargeId,
+              refundInput(100, detail.refundCount),
+              supportId
+            )
+          );
+          expect(route.statusCode).toBe(422);
+          expect(route.context).toMatchObject({
+            code: 'REFUNDED_OUTSIDE_STRIPE',
+          });
+          expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
+        });
+
         it("another failed refund of a late-won charge leaves the mark alone: only the late win's own refund writes it", async () => {
           const charge = await purchaseCharge(30 * DAY);
           const failed = await failedRefund(charge, 1000);

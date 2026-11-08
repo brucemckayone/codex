@@ -344,9 +344,16 @@ function supportRefundKey(
 
 /** The refunds that count against the charge: made and not undone. */
 function standingCents(listed: readonly Stripe.Refund[]): number {
-  const standing: readonly string[] = STANDING_REFUND_STATUSES;
+  return refundedCentsIn(listed, STANDING_REFUND_STATUSES);
+}
+
+/** What the listed refunds in any of these statuses add up to. */
+function refundedCentsIn(
+  listed: readonly Stripe.Refund[],
+  statuses: readonly string[]
+): number {
   return listed
-    .filter((refund) => standing.includes(refund.status ?? ''))
+    .filter((refund) => statuses.includes(refund.status ?? ''))
     .reduce((sum, refund) => sum + refund.amount, 0);
 }
 
@@ -2637,12 +2644,16 @@ export class SupportService extends BaseService {
    * failed refund as refunded elsewhere, or null (owner decision 5's rule,
    * applied in review cycle 2, finding 2). It is the late win's own refund,
    * by our record or by Stripe's metadata (`lateWinDisputeMarked`), and the
-   * charge's standing refunds at Stripe don't cover the charge. Then the
+   * charge's SUCCEEDED refunds at Stripe don't cover the charge. Then the
    * buyer was refunded another way, and without the mark the charge would
    * stay refundable through Stripe for good: Stripe doesn't count the failed
-   * refund, and the late win lifts the 14-day window (Q7). Standing refunds
+   * refund, and the late win lifts the 14-day window (Q7). Succeeded refunds
    * that cover it mean support refunded it again through Stripe: nothing is
-   * left to refund, so nothing is marked.
+   * left to refund, so nothing is marked. A re-refund still pending (or
+   * requires_action) doesn't count here, unlike for `maxCents`: if it then
+   * failed, it would be a new failed refund with no late-win metadata, and
+   * nothing would ever mark the charge. Marked while it is pending, the
+   * charge is blocked either way (review cycle 3, scoping LOW).
    */
   private async lateWinRefundedOutsideStripe(refund: {
     stripeRefundId: string;
@@ -2662,7 +2673,9 @@ export class SupportService extends BaseService {
       recorded ?? lateWinDisputeMarked(listed, refund.stripeRefundId);
     if (!disputeId) return null;
     const charge = await this.retrieveCharge(refund.stripeChargeId, false);
-    return standingCents(listed) >= charge.amount ? null : disputeId;
+    return refundedCentsIn(listed, ['succeeded']) >= charge.amount
+      ? null
+      : disputeId;
   }
 
   /**

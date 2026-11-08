@@ -494,8 +494,11 @@ the window for a late win that records its id meanwhile; the metadata is what
 closes it. Support refunds the buyer another way, or first refunds it again
 through Stripe on the charge page, then settles it as refunded elsewhere.
 Settled after a refund another way, the late win's dispute is marked
-`refunded_outside_stripe_at` in the same transaction, unless Stripe's standing
-refunds already cover the charge or a date is already set. The charge page then
+`refunded_outside_stripe_at` in the same transaction, unless the charge's
+succeeded Stripe refunds already cover it or a date is already set. A re-refund
+still pending doesn't count, so the charge is marked: if it then fails, the
+charge is already blocked; if it succeeds, only the charge card's "refunded
+outside Stripe" wording is slightly off. The charge page then
 blocks any further Stripe refund (`REFUNDED_OUTSIDE_STRIPE`;
 [operations](operations.md#late-wins)): Stripe doesn't count the failed refund
 and the late win lifts the 14-day window, so it would otherwise offer the whole
