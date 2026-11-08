@@ -4240,8 +4240,10 @@ export class PurchaseService extends BaseService {
    * - `done`: refunded and clawed back, or the charge was already refunded
    *   in full. A refund that fails later is support's, as any failed refund.
    *   One found failed, or canceled by Stripe, is done too, but alerted at
-   *   error: the buyer got nothing. A failed one is in the Failed refunds
-   *   queue; a canceled one support settles by hand.
+   *   error: the buyer got nothing. A failed one is clawed back from the
+   *   creators like any failed refund, and stays so until support settles
+   *   it in the Failed refunds queue; a canceled one takes nothing, and
+   *   support settles it by hand.
    *
    * A late-won duplicate payment is refunded the same way when its loss ran
    * (owner decisions 2026-11-05 and 2026-11-08): the loss left it refunded,
@@ -4307,9 +4309,12 @@ export class PurchaseService extends BaseService {
         return 'done';
       }
       if (status === 'failed') {
-        // Settled, and it took nothing from the creators (a failed refund is
-        // not clawable), but the buyer got nothing: alerted as `canceled` is,
-        // and never logged as clawed back. The Failed refunds queue lists it.
+        // Settled, and clawed back above like any failed refund: Stripe
+        // returned the money to the platform, so the creators' share stands
+        // taken until support settles it in Failed refunds, which lists it
+        // (owner decision 2026-10-19, "Hold it for support"). Only a
+        // `canceled` one takes nothing. The buyer got nothing either way, so
+        // it is alerted as `canceled` is, not logged as a refund made.
         this.obs.error(
           'Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds',
           {

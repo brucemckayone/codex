@@ -1472,7 +1472,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
       );
     });
 
-    it('failed: a pending refund later found failed counts as settled and is done, but is alerted at error with ids, as in Failed refunds, and never logged as clawed back', async () => {
+    it('failed: a pending refund later found failed counts as settled and is done, but is alerted at error with ids, as in Failed refunds, never with the info line of a refund made', async () => {
       const { first, disputeId, service } = await reboughtLateWin();
       const refundId = `re_lw_failed_${uid()}`;
       stripeMakesRefund(refundId, 'pending');
