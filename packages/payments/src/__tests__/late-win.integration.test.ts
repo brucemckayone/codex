@@ -51,6 +51,7 @@ import {
   type ClawbackCharge,
   type ClawbackDeps,
   type ClawbackRefund,
+  retryFailedClawbacks,
   reverseCharge,
 } from '../clawback';
 import { isDrainablePayout } from '../payout-ledger';
@@ -427,6 +428,106 @@ describe('a late win in the clawback engine (Codex-2hxff.70)', () => {
 
     await applyWin(disputeId);
     await expect(run(charge, [outside, refund(200)])).resolves.toBeUndefined();
+  });
+
+  // ── the hourly retry meets the wait (§11) ─────────────────────────────
+
+  const RETRY_WAITS =
+    'Retrying a failed clawback waits for a won chargeback on its charge to settle; the next run tries again';
+
+  /**
+   * The hourly retry of one failed refund step on the creator's slice, the
+   * oldest failure there is, so a limit of 1 takes this charge alone. The
+   * step is removed after, so the next test's oldest is its own.
+   */
+  async function retryOneFailedStep(
+    creatorId: string,
+    re: ClawbackRefund
+  ): Promise<Awaited<ReturnType<typeof retryFailedClawbacks>>> {
+    const [step] = await db
+      .insert(payoutReversals)
+      .values({
+        payoutId: creatorId,
+        causeType: 'refund',
+        causeId: re.id,
+        amountCents: 230,
+        kind: 'transfer_reversal',
+        status: 'failed',
+        attempt: 0,
+        updatedAt: new Date('1999-01-01T00:00:00Z'),
+      })
+      .returning({ id: payoutReversals.id });
+    try {
+      obs.error.mockClear();
+      obs.warn.mockClear();
+      return await retryFailedClawbacks(deps, {
+        olderThanMinutes: 15,
+        limit: 1,
+      });
+    } finally {
+      if (step) {
+        await db.delete(payoutReversals).where(eq(payoutReversals.id, step.id));
+      }
+    }
+  }
+
+  it('the hourly retry of a failed step on a charge whose win is settling: one warn with ids, no error, and it stays failing (§11)', async () => {
+    const charge = newCharge();
+    const creator = await slice(charge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+    });
+    const disputeId = await openDispute(charge);
+    await run(charge);
+    await db
+      .update(disputes)
+      .set({ status: 'won' })
+      .where(eq(disputes.stripeDisputeId, disputeId));
+    const re = refund(300);
+    vi.mocked(stripe.charges.retrieve).mockResolvedValue({
+      id: charge.id,
+      amount: charge.amountCents,
+    } as never);
+    vi.mocked(stripe.refunds.list).mockResolvedValue({
+      object: 'list',
+      data: [
+        { id: re.id, amount: 300, status: 'succeeded', created: re.createdAt },
+      ],
+      has_more: false,
+    } as never);
+
+    const result = await retryOneFailedStep(creator.id, re);
+
+    expect(result).toEqual({ charges: 1, retried: 0, stillFailing: 1 });
+    expect(obs.error).not.toHaveBeenCalled();
+    expect(obs.warn).toHaveBeenCalledExactlyOnceWith(RETRY_WAITS, {
+      chargeId: charge.id,
+      disputeId,
+    });
+  });
+
+  it('any other failure of the hourly retry is still alerted at error, with an errorId', async () => {
+    const charge = newCharge();
+    const creator = await slice(charge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+    });
+    vi.mocked(stripe.charges.retrieve).mockRejectedValue(
+      new Error('Stripe is unreachable (test)')
+    );
+
+    const result = await retryOneFailedStep(creator.id, refund(300));
+
+    expect(result).toEqual({ charges: 1, retried: 0, stillFailing: 1 });
+    expect(obs.error).toHaveBeenCalledExactlyOnceWith(
+      'Retrying a failed clawback failed; the next run tries again',
+      {
+        errorId: expect.any(String),
+        chargeId: charge.id,
+        error: 'Stripe is unreachable (test)',
+      }
+    );
+    expect(obs.warn).not.toHaveBeenCalled();
   });
 
   // ── re-pay first, then the refund (§4.5) ──────────────────────────────
