@@ -1039,7 +1039,9 @@ async function undoLateWin(
       ? await refundFirstPayment(deps, dispute.id, charge, recorded.purchaseId)
       : 'none';
   if (refund === 'pending') {
-    // Waiting is not a fault (§11): refund.updated or the next run ends it.
+    // Waiting is not a fault (§11): only the hourly reconcile's next run ends
+    // it. The refund's own `refund.updated` cannot: its clawback waits for
+    // this win to settle, so it is retried until the outcome is marked.
     obs?.info(
       'Late win: its refund is pending at Stripe; the outcome is marked once it settles',
       { disputeId: dispute.id, purchaseId: recorded.purchaseId }
@@ -1061,11 +1063,23 @@ async function undoLateWin(
     refund,
   });
 
-  if (restored?.outcome === 'restored' && restored.email) {
-    await tellBuyerAccessIsBack(deps, charge, dispute.id, {
-      userId: restored.userId,
-      email: restored.email,
-    });
+  if (restored?.outcome === 'restored') {
+    if (restored.email) {
+      await tellBuyerAccessIsBack(deps, charge, dispute.id, {
+        userId: restored.userId,
+        email: restored.email,
+      });
+    } else {
+      // The outcome is marked: nothing comes back to send it (Q5).
+      obs?.warn(
+        "Late win: the buyer's access-restored email was not sent: the item's title could not be read",
+        {
+          errorId: crypto.randomUUID(),
+          disputeId: dispute.id,
+          userId: restored.userId,
+        }
+      );
+    }
   }
   return 'acted';
 }
@@ -1137,7 +1151,10 @@ async function refundFirstPayment(
  * refund email's shape: its address and name are the charge's billing ones.
  * Claimed on `buyer_told_at` first, so a redelivery or the hourly retry never
  * sends a second; sent after the outcome is marked, so it never runs ahead of
- * the undo. One that cannot be sent is not retried: the claim stays.
+ * the undo. One that cannot be sent is not retried: the claim stays. Nothing
+ * comes back for one dropped here either, so each drop is logged with ids,
+ * never the address: no address on the charge at warn, a failed claim at
+ * error.
  */
 async function tellBuyerAccessIsBack(
   deps: DisputeDeps,
@@ -1154,7 +1171,17 @@ async function tellBuyerAccessIsBack(
 ): Promise<void> {
   const { obs, webAppUrl } = deps;
   const to = charge.billing_details?.email || charge.receipt_email;
-  if (!to) return;
+  if (!to) {
+    obs?.warn(
+      "Late win: the buyer's access-restored email was not sent: the charge has no email address",
+      {
+        errorId: crypto.randomUUID(),
+        disputeId,
+        userId: restored.userId,
+      }
+    );
+    return;
+  }
   if (!webAppUrl) {
     obs?.error(
       "WEB_APP_URL is not set: the late win's access-restored email has no working link, so it was not sent",
@@ -1165,10 +1192,14 @@ async function tellBuyerAccessIsBack(
   try {
     if (!(await deps.purchase.claimLateWinBuyerEmail(disputeId))) return;
   } catch (error) {
-    obs?.warn(
-      "Late win: the buyer's access-restored email could not be claimed, so it was not sent",
+    // Rethrowing cannot help: a redelivery or the hourly run stops at the
+    // outcome marked above, so the buyer is never told.
+    obs?.error(
+      "Late win: the buyer's access-restored email could not be claimed, so it was not sent, and it is not retried",
       {
+        errorId: crypto.randomUUID(),
         disputeId,
+        userId: restored.userId,
         error: error instanceof Error ? error.message : String(error),
       }
     );

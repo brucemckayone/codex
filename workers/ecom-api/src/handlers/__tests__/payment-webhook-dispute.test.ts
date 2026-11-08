@@ -1212,7 +1212,7 @@ describe('handlePaymentWebhook — disputes', () => {
       );
     });
 
-    it('nothing is marked while the refund is pending at Stripe: its re-pay rows stay held for the next delivery or run', async () => {
+    it("nothing is marked while the refund is pending at Stripe: its re-pay rows stay held for the hourly reconcile's next run", async () => {
       recordedLateWin();
       restoredAs('rebought');
       purchase.refundFirstPaymentAfterLateWin?.mockResolvedValueOnce('pending');
@@ -1352,7 +1352,7 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(sendEmailToWorker).not.toHaveBeenCalled();
     });
 
-    it('no address on the charge, or no WEB_APP_URL: nothing is claimed or sent, and the loss is still undone', async () => {
+    it('no address on the charge, or no WEB_APP_URL: nothing is claimed or sent, and the loss is still undone; each drop is logged with ids', async () => {
       recordedLateWin();
       restoredAs('restored', WINTER_LIGHT);
       mockRetrieve.mockResolvedValueOnce({
@@ -1363,7 +1363,7 @@ describe('handlePaymentWebhook — disputes', () => {
         billing_details: { email: null, name: null },
         receipt_email: null,
       });
-      await deliver();
+      const noAddress = await deliver();
 
       recordedLateWin();
       restoredAs('restored', WINTER_LIGHT);
@@ -1372,10 +1372,64 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledTimes(2);
       expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
       expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(noAddress.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+        "Late win: the buyer's access-restored email was not sent: the charge has no email address",
+        {
+          errorId: expect.any(String),
+          disputeId: 'dp_test_dispute',
+          userId: 'user_late',
+        }
+      );
       expect(unconfigured.mock._obs.error).toHaveBeenCalledWith(
         expect.stringContaining('WEB_APP_URL is not set'),
         { errorId: expect.any(String), disputeId: 'dp_test_dispute' }
       );
+    });
+
+    it('an item whose title cannot be read: the loss is undone and nothing is sent, logged at warn with ids', async () => {
+      recordedLateWin();
+      restoredAs('restored', null);
+
+      const bundle = await deliver();
+
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+        "Late win: the buyer's access-restored email was not sent: the item's title could not be read",
+        {
+          errorId: expect.any(String),
+          disputeId: 'dp_test_dispute',
+          userId: 'user_late',
+        }
+      );
+      expect(bundle.mock._obs.error).not.toHaveBeenCalled();
+    });
+
+    it('a claim that fails is alerted at error with ids, never the address: the outcome is marked, so nothing retries the email', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      purchase.claimLateWinBuyerEmail?.mockRejectedValueOnce(
+        new Error('connection reset (test)')
+      );
+
+      const bundle = await deliver();
+
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+        "Late win: the buyer's access-restored email could not be claimed, so it was not sent, and it is not retried",
+        {
+          errorId: expect.any(String),
+          disputeId: 'dp_test_dispute',
+          userId: 'user_late',
+          error: 'connection reset (test)',
+        }
+      );
+      expect(JSON.stringify(bundle.mock._obs.error.mock.calls)).not.toContain(
+        'ellen@example.com'
+      );
+      expect(bundle.mock._obs.warn).not.toHaveBeenCalled();
     });
 
     it("a subscription invoice's late win: no purchase; the subscription is restored as a win restores it, re-paid, marked, and not emailed (Q2)", async () => {
