@@ -4340,9 +4340,10 @@ export class PurchaseService extends BaseService {
    *   in full. A refund that fails later is support's, as any failed refund.
    *   One found failed, or canceled by Stripe, is done too, but alerted at
    *   error: the buyer got nothing. A failed one is clawed back from the
-   *   creators like any failed refund, and stays so until support settles
-   *   it in the Failed refunds queue; a canceled one takes nothing, and
-   *   support settles it by hand.
+   *   creators like any failed refund, and stays taken: support settles the
+   *   buyer's refund in Failed refunds as refunded elsewhere, which keeps it
+   *   ("creators re-paid" is refused for a late win's refund, owner decision
+   *   6). A canceled one takes nothing, and support settles it by hand.
    *
    * A late-won duplicate payment is refunded the same way when its loss ran
    * (owner decisions 2026-11-05 and 2026-11-08): the loss left it refunded,
@@ -4409,11 +4410,13 @@ export class PurchaseService extends BaseService {
       }
       if (status === 'failed') {
         // Settled, and clawed back above like any failed refund: Stripe
-        // returned the money to the platform, so the creators' share stands
-        // taken until support settles it in Failed refunds, which lists it
-        // (owner decision 2026-10-19, "Hold it for support"). Only a
-        // `canceled` one takes nothing. The buyer got nothing either way, so
-        // it is alerted as `canceled` is, not logged as a refund made.
+        // returned the money to the platform (owner decision 2026-10-19,
+        // "Hold it for support"). The creators' share stays taken: support
+        // settles the buyer's refund in Failed refunds, which lists it, as
+        // refunded elsewhere, which keeps it ("creators re-paid" is refused
+        // for a late win's refund, owner decision 6). Only a `canceled` one
+        // takes nothing. The buyer got nothing either way, so it is alerted
+        // as `canceled` is, not logged as a refund made.
         this.obs.error(
           'Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds',
           {
