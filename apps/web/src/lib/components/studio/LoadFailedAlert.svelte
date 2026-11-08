@@ -18,12 +18,17 @@
   - A Retry that loads it moves focus to a status line that says so, because
     the alert unmounts with the focused button inside it.
   - The outcome is judged on the query the page holds once Retry has run,
-    which is not always the one it refreshed (see `heldRead`).
+    which is not always the one it refreshed (see `heldRead`). With no value
+    and no error (the page let the query go), it claims nothing.
+  - Focus moves only if it is still where Retry left it.
 
   MOUNT IT UNCONDITIONALLY, beside the list it stands in for. It renders
   nothing visible until `query` fails, and its status line has to persist for
   the "loaded" announcement to be heard. The page decides what to hide, from
-  `connectQueryState(query).kind === 'failed'`.
+  `connectQueryState(query).kind === 'failed'`. During a Retry that reads
+  `loading`, because kit hands the page a new query (see `heldRead`). A page
+  that keeps its failed layout until the Retry settles binds `retrying` and
+  treats `failed || retrying` as failed.
 
   The raw error is never rendered: the page logs it.
 -->
@@ -49,64 +54,96 @@
     againMessage: string;
     /** "… loaded." for the status line a successful Retry focuses. */
     loadedMessage: string;
+    /** True while a Retry runs. Bind it to keep a failed layout until then. */
+    retrying?: boolean;
     'data-testid'?: string;
   }
 
-  const {
+  let {
     query,
     message,
     againMessage,
     loadedMessage,
+    retrying = $bindable(false),
     'data-testid': testId,
   }: Props = $props();
 
   const failed = $derived(connectQueryState(query).kind === 'failed');
 
-  let retrying = $state(false);
   /** Outcome of the last Retry, for the copy and for where focus goes. */
   let outcome = $state<'ok' | 'failed' | null>(null);
   let alertNode = $state<HTMLElement | null>(null);
   let statusNode = $state<HTMLElement | null>(null);
 
   /**
-   * The outcome is read from the query, not from whether `refresh()` threw:
-   * a failure stays on the query's own `.error` (kit clears it only on
-   * success), which keeps this alert mounted.
+   * The outcome is read from the query the page holds, not from whether a
+   * read rejected: a failure stays on that query's own `.error` (kit clears
+   * it only on success).
    */
   async function retry() {
     if (retrying || !query) return;
     retrying = true;
     try {
-      await query.refresh();
-    } catch {
-      // Kept on `query.error`; see above.
+      await heldRead(query);
+    } finally {
+      retrying = false;
     }
-    await heldRead();
-    outcome = failed ? 'failed' : 'ok';
-    retrying = false;
+    outcome = outcomeOf(connectQueryState(query).kind);
     await tick();
-    (outcome === 'ok' ? statusNode : alertNode)?.focus();
+    if (!focusUnmoved()) return;
+    if (outcome === 'ok') statusNode?.focus();
+    if (outcome === 'failed') alertNode?.focus();
   }
 
   /**
-   * Waits for the read of the query the page holds NOW, while it is loading.
+   * Refreshes `refreshed`, then waits for the read of the query the page holds.
    *
-   * Pages derive their query (`$derived(getX(id))`), and kit drops a FAILED
-   * query from its cache (2.55, `create_remote_function`). So `refresh()`
-   * re-runs the page's derivation, which is handed a NEW query, still
-   * loading, with a read of its own; the refreshed one settles separately.
-   * Judged at that point, a Retry that failed again counted as a success:
-   * the first message stayed and focus went to an empty status line
-   * (Codex-zskbp).
+   * Pages derive their query (`$derived(getX(id))`), and kit drops a query
+   * whose first read FAILED from its cache (2.55, `create_remote_function`).
+   * So `refresh()` re-runs the page's derivation, which is handed a NEW query,
+   * still loading, with a read of its own. The refreshed query fetches again
+   * as well, and that result is discarded: a Retry sends two reads, which is
+   * kit's doing. Waiting on the refreshed query judged the Retry on the wrong
+   * read: a repeat failure counted as a success, and a slow stray fetch kept
+   * "Retrying…" beside the page that had loaded (Codex-zskbp).
    */
-  async function heldRead() {
+  async function heldRead(refreshed: NonNullable<Props['query']>) {
+    const reread = refreshed.refresh();
+    // The page's derivation is read lazily, so this is already the new query.
     const held = query;
-    if (!held?.loading) return;
-    try {
-      await held;
-    } catch {
-      // Kept on `held.error`, which `failed` reads.
+    if (held !== refreshed) {
+      void reread.catch(() => {
+        // The stray fetch of a query the page let go: nobody reads its result.
+      });
     }
+    try {
+      await (held === refreshed ? reread : held);
+    } catch {
+      // Kept on the held query's `.error`, which the outcome reads.
+    }
+  }
+
+  /**
+   * "ok" only for a value and "failed" only for an error. With neither, the
+   * page let the query go (a refused thread passes `null`) or it is still
+   * loading, and a claim either way would be wrong.
+   */
+  function outcomeOf(
+    kind: ReturnType<typeof connectQueryState>['kind']
+  ): 'ok' | 'failed' | null {
+    if (kind === 'ok') return 'ok';
+    if (kind === 'failed') return 'failed';
+    return null;
+  }
+
+  /**
+   * Focus is where Retry left it: on its button, or on <body> after the
+   * alert unmounted with it. Anywhere else, the creator has moved on.
+   */
+  function focusUnmoved(): boolean {
+    const active = document.activeElement;
+    if (active === null || active === document.body) return true;
+    return alertNode?.contains(active) ?? false;
   }
 </script>
 

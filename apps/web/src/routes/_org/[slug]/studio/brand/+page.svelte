@@ -30,6 +30,8 @@
   import { getPublicContent } from '$lib/remote/content.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+  import { logger } from '$lib/observability';
+  import { queryErrorMessage } from '$lib/remote/query-result';
   import { connectQueryState } from '$lib/utils/connect-readiness';
   import {
     BrandStudioLayout,
@@ -66,6 +68,19 @@
   const brandFailed = $derived(
     connectQueryState(brandingQuery).kind === 'failed'
   );
+  // A Retry hands this page a new query that reads as loading until it
+  // settles (see LoadFailedAlert), so the rail keeps its failed shape until
+  // then instead of flipping to skeleton rows above the alert.
+  let brandRetrying = $state(false);
+
+  $effect(() => {
+    if (brandFailed) {
+      logger.error('studio/brand: branding failed to load', {
+        organizationId: orgId,
+        reason: queryErrorMessage(brandingQuery?.error),
+      });
+    }
+  });
 
   // One published content slug for the canvas' Detail/Player previews. Studio
   // is ssr=false, so this reactive remote query resolves client-side. When the
@@ -408,13 +423,14 @@
         </div>
       </div>
     {:else}
-      <BrandStudioRailPending failed={brandFailed} />
+      <BrandStudioRailPending failed={brandFailed || brandRetrying} />
     {/if}
     <!-- Mounted unconditionally (see LoadFailedAlert): its status line has to
          outlive the pending rail to announce a Retry that loads. -->
     <div class="brand-load-failed">
       <LoadFailedAlert
         query={brandingQuery}
+        bind:retrying={brandRetrying}
         message={m.branding_load_failed()}
         againMessage={m.branding_load_failed_again()}
         loadedMessage={m.branding_load_retry_ok()}

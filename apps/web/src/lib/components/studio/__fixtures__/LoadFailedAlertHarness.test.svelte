@@ -1,15 +1,36 @@
 <!--
   Test-only harness: LoadFailedAlert as a page mounts it, with the query
-  DERIVED from its remote function, as every caller does. Named
-  `*.test.svelte` (a fixture) so the vitest include globs never collect it.
+  DERIVED from its remote function, as every caller does. With `refuseStatus`
+  it lets the query go on that status, as the negotiation thread passes
+  `threadRefused ? null : threadQuery`. The input stands for anywhere else on
+  the page. Named `*.test.svelte` (a fixture) so the vitest include globs
+  never collect it.
 -->
 <script lang="ts">
   import LoadFailedAlert from '../LoadFailedAlert.svelte';
   import type { KitQuery } from './kit-query.mock.svelte';
 
-  const { remote }: { remote: KitQuery<unknown> } = $props();
+  interface Props {
+    remote: KitQuery<unknown>;
+    refuseStatus?: number;
+  }
 
-  const query = $derived(remote.get());
+  const { remote, refuseStatus }: Props = $props();
+
+  function statusOf(error: unknown): number | undefined {
+    if (error && typeof error === 'object' && 'status' in error) {
+      return typeof error.status === 'number' ? error.status : undefined;
+    }
+    return undefined;
+  }
+
+  const query = $derived.by(() => {
+    const held = remote.get();
+    if (refuseStatus !== undefined && statusOf(held.error) === refuseStatus) {
+      return null;
+    }
+    return held;
+  });
 </script>
 
 <LoadFailedAlert
@@ -19,3 +40,4 @@
   loadedMessage="It loaded."
   data-testid="load-error"
 />
+<input data-testid="elsewhere" aria-label="Elsewhere" />

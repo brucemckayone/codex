@@ -13,6 +13,7 @@
 
 import type { BrandingSettingsResponse } from '@codex/shared-types';
 import { HERO_LAYOUTS } from '@codex/validation';
+import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -43,7 +44,10 @@ export const getBrandingSettings = query(
     const api = createServerApi(platform, cookies);
 
     const settings = await api.org.getSettings(orgId);
-    return settings?.branding ?? null;
+    // A missing branding object is a failed read, not a brand still loading:
+    // the studio would otherwise sit on its skeletons with nothing to retry.
+    if (!settings?.branding) error(502, 'Branding settings were not returned');
+    return settings.branding;
   }
 );
 

@@ -139,8 +139,10 @@
   // loading / failed / ok for each read. `failed` is its own state: the
   // `?? []` defaults below only fill the gap while a read is loading or
   // failed, and the template never renders a failed read as an empty one.
-  // `connectQueryState` keeps a value through a refresh and `failed` through
-  // a Retry, so neither flips the page back to skeletons.
+  // `connectQueryState` keeps a value through a refresh. A Retry is another
+  // matter: kit hands the page a NEW query for a failed read, which reads
+  // `loading` (skeletons, under the still-shown alert) until it settles; see
+  // LoadFailedAlert's `heldRead`.
   const agreementsState = $derived(connectQueryState(agreementsQuery));
   const pendingState = $derived(connectQueryState(pendingProposalsQuery));
   const membersState = $derived(connectQueryState(membersQuery));
