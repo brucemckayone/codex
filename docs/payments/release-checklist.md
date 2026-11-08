@@ -441,9 +441,12 @@ see its subscribers after the roll forward.
 
 ## A late win undoes a lost chargeback (migrations `0126` and `0127`)
 
-`0126` adds four nullable columns and three CHECKs to `disputes`, and the
-`purchase-access-restored` email (`Codex-2hxff.70`;
-[dispute record](dispute-record.md)). `0127` adds one more nullable column,
+`0126` adds four nullable columns and three CHECKs to `disputes`
+(`Codex-2hxff.70`; [dispute record](dispute-record.md)). It is plain
+drizzle-kit DDL. The buyer's `purchase-access-restored` email is in no
+migration: the deploy's template seed (`db:seed:templates`, which runs right
+after `db:migrate` and before any worker deploys) inserts it, as it does every
+new template, and skips one that already exists. `0127` adds one more nullable column,
 `refunded_outside_stripe_at`: a charge whose buyer support refunded outside
 Stripe, which its refund route then refuses
 ([operations](operations.md#late-wins)). Both
