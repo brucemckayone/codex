@@ -231,3 +231,76 @@ describe('focus after a tier is deleted', () => {
     );
   });
 });
+
+// The dialog stays while its request runs, as its Cancel does. Closed by an
+// Escape then, focus went back to the tier's Delete, which the refresh then
+// removed: the body. And the answer read the dialog's tier after the await,
+// so a second tier's dialog took the first one's answer (review fu-focus-2).
+describe('while the delete runs', () => {
+  const pressEscape = () => {
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    flushSync();
+  };
+
+  /** Presses Delete in the tier's dialog; its request answers on `answer()`. */
+  async function startDelete(
+    target: SubscriptionTier,
+    after: SubscriptionTier[]
+  ) {
+    let answer!: (result: { success: true }) => void;
+    deleteTier.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        })
+    );
+    vi.mocked(invalidateAll).mockImplementation(async () => {
+      land(tiersSlot(), after);
+      flushSync();
+    });
+    const panel = await openDelete(target);
+    buttonIn(panel, m.monetisation_tiers_delete())?.click();
+    flushSync();
+    expect(deleteTier).toHaveBeenCalledTimes(1);
+    return { panel, answer: () => answer({ success: true }) };
+  }
+
+  test('an Escape leaves the dialog open, and focus still goes to what survives', async () => {
+    mountPage([LITE, BASIC, PRO]);
+    const { panel, answer } = await startDelete(BASIC, [LITE, PRO]);
+
+    pressEscape();
+    expect(dialog()).toBe(panel);
+
+    answer();
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(deleteButton('Pro'))
+    );
+    expect(deleteButton('Basic')).toBeNull();
+  });
+
+  // jsdom lets a press reach the page behind the open dialog, which in the
+  // browser its overlay takes. It stands in for anything that changes the
+  // dialog's tier while the request runs.
+  test("an Escape, then another tier's Delete: the answer is the first tier's", async () => {
+    mountPage([LITE, BASIC, PRO]);
+    const { answer } = await startDelete(BASIC, [LITE, PRO]);
+
+    pressEscape();
+    deleteButton('Pro')?.click();
+    flushSync();
+
+    answer();
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(deleteTier).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deleteTier).mock.calls[0]?.[0]).toMatchObject({
+      tierId: BASIC.id,
+    });
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(deleteButton('Pro'))
+    );
+  });
+});

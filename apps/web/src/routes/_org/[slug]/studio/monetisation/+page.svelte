@@ -1243,7 +1243,11 @@
   }
 
   async function handleDeleteTier() {
-    if (!deletingTier || !deleteReady) return;
+    // The tier this request is for. Nothing after the await reads
+    // `deletingTier`: that is the dialog's, and names whichever tier it
+    // shows when the answer lands (Codex-p10nx review).
+    const tier = deletingTier;
+    if (!tier || !deleteReady) return;
     // The choice goes only when something is only in this tier, and only as
     // the creator made it. With nothing only-here a bare delete is sent; if
     // something became only-here meanwhile, the worker refuses it.
@@ -1256,11 +1260,11 @@
     deleteLoading = true;
     deleteError = '';
     try {
-      const result = await deleteTier({ orgId, tierId: deletingTier.id, choice });
+      const result = await deleteTier({ orgId, tierId: tier.id, choice });
       if (result.success) {
         deletedTier = {
-          id: deletingTier.id,
-          at: tiers.findIndex((t) => t.id === deletingTier?.id),
+          id: tier.id,
+          at: tiers.findIndex((t) => t.id === tier.id),
         };
         deleteDialogOpen = false;
         deletingTier = null;
@@ -1271,7 +1275,7 @@
       if (result.detailsCode === 'TIER_HAS_ONLY_ITEMS') {
         // The preview went stale: ask again, from a FRESH read only.
         deleteError = m.monetisation_tier_delete_only_here_changed({
-          name: deletingTier.name,
+          name: tier.name,
         });
         deleteChoice = null;
         deleteMoveTo = [];
@@ -1281,7 +1285,7 @@
         // Someone subscribed since the check: say so, and the fresh read
         // shows the refusal up front.
         deleteError = m.monetisation_tier_delete_subscribed_meanwhile({
-          name: deletingTier.name,
+          name: tier.name,
         });
         impactStale = true;
         retryImpact();
@@ -2138,10 +2142,13 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Delete Tier Dialog -->
+<!-- Delete Tier Dialog. Not dismissible while its request runs, as Cancel
+     isn't: closed then, focus went back to a Delete the refresh removed,
+     and a second tier's dialog could take the first one's answer. -->
 <Dialog.Root
   bind:open={deleteDialogOpen}
   closeFocus={deletedTier ? tierDeleteFocus : undefined}
+  dismissible={!deleteLoading}
 >
   <Dialog.Content size="sm">
     <Dialog.Header>
