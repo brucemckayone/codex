@@ -63,7 +63,7 @@ import {
   lateTransferOf,
   PAYOUT_ATTEMPT_LEASE_MINUTES,
 } from './payout-ledger';
-import { settlingWinSql } from './settling-win';
+import { settlingWinSql, WinSettlingError } from './settling-win';
 
 interface ClawbackLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
@@ -512,9 +512,9 @@ type StepResult = { failure?: unknown };
  * refused is left `failed` without rejecting (see `reverseTransfer`); the
  * hourly retry takes it.
  *
- * It waits, with a `ServiceUnavailableError`, while a chargeback on the
- * charge is won and not yet applied (`waitForWinToSettle`), unless the
- * caller is that win's own settlement.
+ * It waits, with a `WinSettlingError` (a `ServiceUnavailableError`), while
+ * a chargeback on the charge is won and not yet applied
+ * (`waitForWinToSettle`), unless the caller is that win's own settlement.
  */
 export async function reverseCharge(
   deps: ClawbackDeps,
@@ -595,8 +595,10 @@ export async function reverseCharge(
  * win's undo can take an hour or more (its own refund may be pending at
  * Stripe), and a normal win has the same short window.
  *
- * A `ServiceUnavailableError`: Stripe redelivers, and the hourly retry tries
- * again. The win's own settlement names its dispute and is let through.
+ * A `WinSettlingError`, a `ServiceUnavailableError`: Stripe redelivers, and
+ * the hourly retry tries again; the webhook logs it at warn, since waiting
+ * is not a fault. The win's own settlement names its dispute and is let
+ * through.
  */
 async function waitForWinToSettle(
   db: Client,
@@ -616,10 +618,7 @@ async function waitForWinToSettle(
     .where(and(...conditions))
     .limit(1);
   if (settling) {
-    throw new ServiceUnavailableError(
-      "A chargeback on this charge was just won and is being paid back; the refund's clawback waits for it",
-      { chargeId, disputeId: settling.id }
-    );
+    throw new WinSettlingError({ chargeId, disputeId: settling.id });
   }
 }
 

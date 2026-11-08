@@ -7,7 +7,7 @@
 
 import { isForeignStripeEnvironment } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
-import { LateWinRefundRefusedError } from '@codex/purchase';
+import { LateWinRefundRefusedError, WinSettlingError } from '@codex/purchase';
 import { UnsupportedCurrencyError } from '@codex/service-errors';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
@@ -159,18 +159,36 @@ export function createWebhookHandler(
 }
 
 /**
- * A transient failure's alert, at error: Stripe redelivers it. Not for a late
- * win's refund that Stripe did not make: its own step alerted it already,
- * once per attempt, with what Stripe answered (Codex-2hxff.70), and a second
- * alert here would only repeat it.
+ * A transient failure's alert, at error: Stripe redelivers it. Two are not
+ * alerted here (Codex-2hxff.70):
+ *
+ * - a late win's refund that Stripe did not make: its own step alerted it
+ *   already, once per attempt, with what Stripe answered, and a second alert
+ *   would only repeat it;
+ * - a refund's clawback waiting for a won chargeback on its charge to settle
+ *   (`WinSettlingError`): waiting is not a fault (late-win data design §11),
+ *   so it is a warn with ids, no errorId. A late win's own refund meets it on
+ *   every delivery until the win's outcome is marked.
  */
 function alertTransientFailure(
   obs: ObservabilityClient | undefined,
   message: string,
   error: unknown,
-  fields: Record<string, unknown>
+  fields: { eventType: string; eventId: string } & Record<string, unknown>
 ): void {
   if (error instanceof LateWinRefundRefusedError) return;
+  if (error instanceof WinSettlingError) {
+    obs?.warn(
+      "A refund's clawback waits for a won chargeback on its charge to settle; Stripe redelivers the event",
+      {
+        chargeId: error.context?.chargeId ?? null,
+        disputeId: error.context?.disputeId ?? null,
+        eventType: fields.eventType,
+        eventId: fields.eventId,
+      }
+    );
+    return;
+  }
   obs?.error(message, fields);
 }
 

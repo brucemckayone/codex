@@ -55,6 +55,7 @@ import {
 } from '../clawback';
 import { isDrainablePayout } from '../payout-ledger';
 import { repayDispute } from '../repay';
+import { WinSettlingError } from '../settling-win';
 
 const uid = () => crypto.randomUUID().slice(0, 8);
 
@@ -405,6 +406,9 @@ describe('a late win in the clawback engine (Codex-2hxff.70)', () => {
 
     const waited = await run(charge, [outside]).catch((error) => error);
 
+    // Its own error, so the webhook logs it at warn, not as an alert (§11);
+    // still a ServiceUnavailableError, so it is retried.
+    expect(waited).toBeInstanceOf(WinSettlingError);
     expect(waited).toBeInstanceOf(ServiceUnavailableError);
     expect((waited as ServiceUnavailableError).context).toEqual({
       chargeId: charge.id,

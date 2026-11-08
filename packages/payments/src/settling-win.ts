@@ -18,7 +18,25 @@
  */
 
 import { disputes } from '@codex/database/schema';
+import { ServiceUnavailableError } from '@codex/service-errors';
 import { type SQL, sql } from 'drizzle-orm';
+
+/**
+ * A refund's clawback waiting for a won chargeback on its charge to settle
+ * (clawback.ts `waitForWinToSettle`). Still a `ServiceUnavailableError`, so
+ * it is transient: the webhook answers 500, Stripe redelivers, and the
+ * hourly retry tries again. But waiting is not a fault (late-win data design
+ * §11): the webhook logs it at warn, not as an alert. A late win's own
+ * refund meets it on every delivery until its outcome is marked.
+ */
+export class WinSettlingError extends ServiceUnavailableError {
+  constructor(context: { chargeId: string; disputeId: string }) {
+    super(
+      "A chargeback on this charge was just won and is being paid back; the refund's clawback waits for it",
+      context
+    );
+  }
+}
 
 /** The rule on a dispute row already read. */
 export function isSettlingWin(dispute: {

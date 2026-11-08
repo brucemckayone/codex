@@ -6,6 +6,7 @@
  * - Permanent errors (return 200, acknowledged)
  */
 
+import { WinSettlingError } from '@codex/purchase';
 import {
   ConflictError,
   InternalServiceError,
@@ -259,6 +260,17 @@ describe('isTransientError', () => {
         { cause: new ServiceUnavailableError('payout in flight') }
       );
       expect(isTransientError(incomplete)).toBe(true);
+    });
+
+    // Logged at warn, not alerted, but still a 500 so Stripe redelivers
+    // (Codex-2hxff.70; late-win data design §11).
+    it("a refund's clawback waiting for a won chargeback to settle is transient", () => {
+      const waiting = new WinSettlingError({
+        chargeId: 'ch_wait',
+        disputeId: 'dp_wait',
+      });
+      expect(waiting).toBeInstanceOf(ServiceUnavailableError);
+      expect(isTransientError(waiting)).toBe(true);
     });
   });
 
