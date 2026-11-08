@@ -407,8 +407,11 @@ could not be settled by the hourly reconcile; the next run retries it"
 (`disputeId`, `status`, `error`, and `cause`: the innermost error's name,
 message and code, which for a Stripe failure is Stripe's own message), and is
 retried every hour. A refund Stripe didn't make is the exception: its own
-alert above has already fired, so the reconcile logs one warning with its ids
-instead of a second error. A
+alert above has already fired, so the reconcile logs one warning instead of a
+second error, "A late win's settle stopped at its refund, which the refund
+step has already alerted; the next run retries it" (`disputeId`, `purchaseId`,
+`chargeId`, no `errorId`). So each try raises one error, by the webhook or the
+hourly run alike. A
 late win settled by hand before the release is recorded as applied by
 [release step R18](release-checklist.md#r18--lost-chargebacks-already-settled-by-hand),
 so nothing runs again for it.
