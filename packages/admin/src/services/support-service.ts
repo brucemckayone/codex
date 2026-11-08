@@ -174,6 +174,7 @@ import {
   ChargebackSettlingError,
   ChargeChangedError,
   ChargeHasChargebackError,
+  LateWinRefundNotRepayableError,
   NothingLeftToRefundError,
   RefundAmountTooLargeError,
   RefundedOutsideStripeError,
@@ -2506,8 +2507,10 @@ export class SupportService extends BaseService {
    * Settle a failed refund. `refunded_elsewhere` only resolves the row.
    * `creators_repaid` is one transaction with the refund row locked: what its
    * clawback took is paid back (`repayFailedRefund`), a failed FULL purchase
-   * refund gives the buyer access back, then the row is resolved. A repeat of
-   * the same resolution returns the row as it stands; another is a 409.
+   * refund gives the buyer access back, then the row is resolved. A late
+   * win's own refund is never `creators_repaid` (`refuseLateWinRefund`). A
+   * repeat of the same resolution returns the row as it stands; another is a
+   * 409.
    */
   async resolveFailedRefund(
     refundId: string,
@@ -2596,6 +2599,9 @@ export class SupportService extends BaseService {
     let purchaseId = found.purchaseId;
     let prepared: PreparedRepay | undefined;
     if (!found.resolvedAt) {
+      // Before Stripe is read: the pre-step below writes the steps that
+      // landed, and a late win's refund is refused without them.
+      await this.refuseLateWinRefund(this.db, found.stripeRefundId);
       prepared = await this.prepareRepay(
         found.stripeRefundId,
         found.stripeChargeId
@@ -2636,6 +2642,9 @@ export class SupportService extends BaseService {
           'The failed refund was not prepared for its settlement'
         );
       }
+      // Again under the lock, before anything is written: the late win may
+      // have recorded its refund's id since the check above.
+      await this.refuseLateWinRefund(tx, row.stripeRefundId);
       const now = new Date();
       // Re-checks the whole later-cause guard under the lock, and cancels the
       // pre-step's unlanded steps here, so a refusal leaves them as they were
@@ -2753,6 +2762,32 @@ export class SupportService extends BaseService {
       },
       restoredAccess: restored && outcome.access ? outcome.access : null,
     };
+  }
+
+  /**
+   * A late win's own refund of the payment (`disputes.late_win_refund_id`) is
+   * never settled `creators_repaid` (`LATE_WIN_REFUND_NOT_REPAYABLE`, 422;
+   * owner decision 6, 2026-11-08, "Block it in code"): it pays back a buyer
+   * who paid twice, so its clawback stands. `refunded_elsewhere` is still
+   * allowed for it.
+   */
+  private async refuseLateWinRefund(
+    db: DatabaseClient | Tx,
+    stripeRefundId: string
+  ): Promise<void> {
+    const [lateWin] = await db
+      .select({ stripeDisputeId: disputes.stripeDisputeId })
+      .from(disputes)
+      .where(eq(disputes.lateWinRefundId, stripeRefundId))
+      .limit(1);
+    if (lateWin) {
+      this.obs.info('A creators_repaid settlement was refused', {
+        stripeRefundId,
+        disputeId: lateWin.stripeDisputeId,
+        reason: 'late_win_refund',
+      });
+      throw new LateWinRefundNotRepayableError(lateWin.stripeDisputeId);
+    }
   }
 
   /**

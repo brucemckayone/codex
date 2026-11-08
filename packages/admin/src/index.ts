@@ -167,6 +167,7 @@ export {
   ForbiddenError,
   InternalServiceError,
   isAdminServiceError,
+  LateWinRefundNotRepayableError,
   MediaDeletedError,
   NotFoundError,
   NothingLeftToRefundError,

@@ -2387,6 +2387,161 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
     });
 
+    describe('a late win\'s own refund (owner decision 6, 2026-11-08, "Block it in code")', () => {
+      const NOT_REPAYABLE =
+        "This refund pays back a buyer who paid twice, so the creators can't be re-paid for it. Refund the buyer another way, then settle it as refunded elsewhere.";
+
+      /** A late win, undone, whose own refund of the payment is `refundId`. */
+      async function lateWinThatRefunded(
+        charge: Awaited<ReturnType<typeof purchaseCharge>>,
+        refundId: string | null
+      ) {
+        const won = await lateWin(charge.chargeId, charge.purchase.id, {
+          undone: true,
+        });
+        await db
+          .update(disputes)
+          .set({ lateWinRefundId: refundId })
+          .where(eq(disputes.stripeDisputeId, won.id));
+        return won.id;
+      }
+
+      /** Every clawback step of the refund, as it stands. */
+      const stepsOf = async (stripeRefundId: string) =>
+        (
+          await db
+            .select()
+            .from(payoutReversals)
+            .where(eq(payoutReversals.causeId, stripeRefundId))
+        ).sort((a, b) => a.id.localeCompare(b.id));
+
+      const refundRow = async (id: string) =>
+        takeFirst(await db.select().from(refunds).where(eq(refunds.id, id)));
+
+      it('refuses creators_repaid (422) before Stripe is read, and writes nothing', async () => {
+        const charge = await purchaseCharge();
+        const failed = await failedRefund(charge, 1000);
+        const disputeId = await lateWinThatRefunded(
+          charge,
+          failed.stripeRefundId
+        );
+        const row = await refundRow(failed.id);
+        const steps = await stepsOf(failed.stripeRefundId);
+        expect(steps.length).toBeGreaterThan(0);
+        vi.mocked(fake.stripe.charges.retrieve).mockClear();
+        vi.mocked(fake.stripe.refunds.list).mockClear();
+
+        const error = await failureOf(
+          service.resolveFailedRefund(
+            failed.id,
+            { resolution: 'creators_repaid', note: 'Re-pay' },
+            supportId
+          )
+        );
+
+        expect(error.statusCode).toBe(422);
+        expect(error.message).toBe(NOT_REPAYABLE);
+        expect(error.context).toEqual({
+          code: 'LATE_WIN_REFUND_NOT_REPAYABLE',
+          disputeId,
+        });
+        expect(fake.stripe.charges.retrieve).not.toHaveBeenCalled();
+        expect(fake.stripe.refunds.list).not.toHaveBeenCalled();
+        expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
+        expect(await refundRow(failed.id)).toEqual(row);
+        expect(await stepsOf(failed.stripeRefundId)).toEqual(steps);
+      });
+
+      it('refuses it under the lock when the late win records its refund while the settle reads Stripe, and writes nothing', async () => {
+        const charge = await purchaseCharge();
+        const failed = await failedRefund(charge, 1000);
+        const disputeId = await lateWinThatRefunded(charge, null);
+        const row = await refundRow(failed.id);
+        const steps = await stepsOf(failed.stripeRefundId);
+        // The settle's first Stripe read is the charge, after its first
+        // check: the late win writes its refund's id meanwhile.
+        vi.mocked(fake.stripe.charges.retrieve).mockImplementationOnce((async (
+          id: string
+        ) => {
+          await db
+            .update(disputes)
+            .set({ lateWinRefundId: failed.stripeRefundId })
+            .where(eq(disputes.stripeDisputeId, disputeId));
+          return fake.charges.get(id);
+        }) as never);
+
+        const error = await failureOf(
+          service.resolveFailedRefund(
+            failed.id,
+            { resolution: 'creators_repaid', note: 'Re-pay' },
+            supportId
+          )
+        );
+
+        expect(fake.stripe.charges.retrieve).toHaveBeenCalled();
+        expect(error.statusCode).toBe(422);
+        expect(error.context).toEqual({
+          code: 'LATE_WIN_REFUND_NOT_REPAYABLE',
+          disputeId,
+        });
+        expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
+        expect(await refundRow(failed.id)).toEqual(row);
+        expect(await stepsOf(failed.stripeRefundId)).toEqual(steps);
+      });
+
+      it('still settles it refunded_elsewhere, and its clawback stands', async () => {
+        const charge = await purchaseCharge();
+        const failed = await failedRefund(charge, 1000);
+        await lateWinThatRefunded(charge, failed.stripeRefundId);
+        const steps = await stepsOf(failed.stripeRefundId);
+
+        const settled = await service.resolveFailedRefund(
+          failed.id,
+          { resolution: 'refunded_elsewhere', note: 'Bank transfer' },
+          supportId
+        );
+
+        expect(settled.settled).toMatchObject({
+          resolution: 'refunded_elsewhere',
+          repaid: [],
+        });
+        expect(await refundRow(failed.id)).toMatchObject({
+          resolution: 'refunded_elsewhere',
+          resolvedByUserId: supportId,
+          resolutionNote: 'Bank transfer',
+        });
+        expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
+        expect(await stepsOf(failed.stripeRefundId)).toEqual(steps);
+      });
+
+      it("still re-pays another failed refund of a late-won charge: only the late win's own refund is refused", async () => {
+        const charge = await purchaseCharge();
+        // Support's own refund of the payment, after the late win: the late
+        // win's refund, if it made one, is another.
+        const failed = await failedRefund(charge, 1000);
+        await lateWinThatRefunded(charge, `re_sup${uid()}`);
+
+        const settled = await service.resolveFailedRefund(
+          failed.id,
+          { resolution: 'creators_repaid', note: 'Re-pay' },
+          supportId
+        );
+        for (const row of settled.settled.repaid) {
+          created.payoutIds.push(row.payoutId);
+        }
+
+        expect(
+          settled.settled.repaid
+            .map((row) => row.amountCents)
+            .sort((a, b) => a - b)
+        ).toEqual([135, 765]);
+        expect(await refundRow(failed.id)).toMatchObject({
+          resolution: 'creators_repaid',
+          resolvedByUserId: supportId,
+        });
+      });
+    });
+
     /** The creator's step of a failed refund, as a dead delivery left it. */
     async function abandonCreatorStep(
       charge: Awaited<ReturnType<typeof purchaseCharge>>,

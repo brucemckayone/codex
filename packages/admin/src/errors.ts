@@ -270,3 +270,23 @@ export class AlreadySettledError extends ConflictError {
     });
   }
 }
+
+/**
+ * A "creators re-paid" settlement of a failed refund that a late win made
+ * (`disputes.late_win_refund_id`; owner decision 6, 2026-11-08, "Block it in
+ * code"). That refund pays back a buyer who paid twice, so the buyer is
+ * still owed it, and what its clawback took from the creators stays taken:
+ * re-paying them, then refunding the buyer, would pay the same money out
+ * twice. It is refused for good. Support refunds the buyer another way and
+ * settles it as refunded elsewhere, or refunds the charge again through
+ * Stripe (docs/payments/operations.md, "Failed refunds"). The context is
+ * the dispute's Stripe id only.
+ */
+export class LateWinRefundNotRepayableError extends BusinessLogicError {
+  constructor(stripeDisputeId: string) {
+    super(
+      "This refund pays back a buyer who paid twice, so the creators can't be re-paid for it. Refund the buyer another way, then settle it as refunded elsewhere.",
+      { code: 'LATE_WIN_REFUND_NOT_REPAYABLE', disputeId: stripeDisputeId }
+    );
+  }
+}
