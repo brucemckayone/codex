@@ -64,7 +64,7 @@ import {
   DISPUTE_INQUIRY_STATUSES,
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
-import { LateWinRefundRefusedError } from '@codex/purchase';
+import { LateWinRefundRefusedError, WinSettlingError } from '@codex/purchase';
 import type Stripe from 'stripe';
 import { describeRootCause } from '../utils/error-classification';
 import {
@@ -97,13 +97,18 @@ export const LATE_WIN_MAX_PAGES = 3;
 const TRIGGER = 'dispute reconcile';
 
 /**
- * A dispute the reconcile could not settle, logged once. A late win's refund
- * that Stripe did not make is alerted at error by its own step
- * (payment-webhook.ts `refundFirstPayment`), with what Stripe answered, so a
- * second alert here would only repeat it (Codex-2hxff.70): one warn, ids
- * only. Any other failure is alerted at error with an errorId and the
- * innermost error (`describeRootCause`), since a service's wrap names only
- * itself.
+ * A dispute the reconcile could not settle, logged once. Two are a warn with
+ * ids only, no errorId (Codex-2hxff.70):
+ *
+ * - a late win's refund that Stripe did not make: its own step alerted it at
+ *   error (payment-webhook.ts `refundFirstPayment`), with what Stripe
+ *   answered, so a second alert would only repeat it;
+ * - a clawback waiting for ANOTHER won chargeback on the charge to settle
+ *   (`WinSettlingError`, which names that dispute): waiting is not a fault
+ *   (late-win data design §11), and the next run retries it.
+ *
+ * Any other failure is alerted at error with an errorId and the innermost
+ * error (`describeRootCause`), since a service's wrap names only itself.
  */
 function logUnsettled(
   obs: ObservabilityClient,
@@ -111,18 +116,9 @@ function logUnsettled(
   live: Stripe.Dispute,
   error: unknown
 ): void {
-  if (error instanceof LateWinRefundRefusedError) {
-    obs.warn(
-      "A late win's settle stopped at its refund, which the refund step has already alerted; the next run retries it",
-      {
-        disputeId,
-        purchaseId: error.context?.purchaseId ?? null,
-        chargeId:
-          typeof live.charge === 'string'
-            ? live.charge
-            : (live.charge?.id ?? null),
-      }
-    );
+  const warning = settleWarning(disputeId, live, error);
+  if (warning) {
+    obs.warn(warning.message, warning.fields);
     return;
   }
   obs.error(
@@ -135,6 +131,44 @@ function logUnsettled(
       cause: describeRootCause(error),
     }
   );
+}
+
+/** `logUnsettled`'s two warns, ids only; undefined for a failure to alert. */
+function settleWarning(
+  disputeId: string,
+  live: Stripe.Dispute,
+  error: unknown
+): { message: string; fields: Record<string, unknown> } | undefined {
+  if (error instanceof LateWinRefundRefusedError) {
+    return {
+      message:
+        "A late win's settle stopped at its refund, which the refund step has already alerted; the next run retries it",
+      fields: {
+        disputeId,
+        purchaseId: error.context?.purchaseId ?? null,
+        chargeId: chargeIdOf(live),
+      },
+    };
+  }
+  if (error instanceof WinSettlingError) {
+    return {
+      message:
+        "A dispute's settle waits for another won chargeback on its charge to settle; the next run retries it",
+      fields: {
+        disputeId,
+        chargeId: error.context?.chargeId ?? null,
+        settlingDisputeId: error.context?.disputeId ?? null,
+      },
+    };
+  }
+  return undefined;
+}
+
+/** The dispute's charge id, whether Stripe expanded the charge or not. */
+function chargeIdOf(live: Stripe.Dispute): string | null {
+  return typeof live.charge === 'string'
+    ? live.charge
+    : (live.charge?.id ?? null);
 }
 
 export interface DisputeReconcileDeps extends DisputeDeps {

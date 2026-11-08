@@ -1953,17 +1953,37 @@ export async function retryFailedClawbacks(
       retried++;
     } catch (error) {
       stillFailing++;
-      deps.obs.error(
-        'Retrying a failed clawback failed; the next run tries again',
-        {
-          errorId: crypto.randomUUID(),
-          chargeId: target.chargeId,
-          error: error instanceof Error ? error.message : String(error),
-        }
-      );
+      logRetryFailed(deps.obs, target.chargeId, error);
     }
   }
   return { charges: targets.length, retried, stillFailing };
+}
+
+/**
+ * A charge whose failed steps the hourly retry could not finish, still
+ * failing. A refund's clawback waiting for a won chargeback on the charge to
+ * settle (`WinSettlingError`) is not a fault (late-win data design §11): its
+ * step's attempt and age do not move, so an alert would repeat every hour
+ * until the win's outcome is marked. It is a warn with ids, no errorId. Any
+ * other failure is alerted at error.
+ */
+function logRetryFailed(
+  obs: ClawbackLogger,
+  chargeId: string,
+  error: unknown
+): void {
+  if (error instanceof WinSettlingError) {
+    obs.warn(
+      'Retrying a failed clawback waits for a won chargeback on its charge to settle; the next run tries again',
+      { chargeId, disputeId: error.context?.disputeId ?? null }
+    );
+    return;
+  }
+  obs.error('Retrying a failed clawback failed; the next run tries again', {
+    errorId: crypto.randomUUID(),
+    chargeId,
+    error: error instanceof Error ? error.message : String(error),
+  });
 }
 
 /**

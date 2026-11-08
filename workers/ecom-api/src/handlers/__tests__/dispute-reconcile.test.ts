@@ -22,6 +22,7 @@
 import {
   LateWinRefundRefusedError,
   type PurchaseService,
+  WinSettlingError,
 } from '@codex/purchase';
 import type { SubscriptionService } from '@codex/subscription';
 import type Stripe from 'stripe';
@@ -984,6 +985,31 @@ describe('runDisputeReconcile', () => {
       'A dispute could not be settled by the hourly reconcile; the next run retries it';
     const STOPPED_AT_REFUND =
       "A late win's settle stopped at its refund, which the refund step has already alerted; the next run retries it";
+    const WAITS_FOR_ANOTHER_WIN =
+      "A dispute's settle waits for another won chargeback on its charge to settle; the next run retries it";
+
+    it('a settle that waits for ANOTHER won chargeback on its charge is one warn with ids, no error; the row is left unapplied for the next run (§11)', async () => {
+      const { rows, purchase } = undoingRow();
+      purchase.repayWonDispute.mockRejectedValueOnce(
+        new WinSettlingError({
+          chargeId: 'ch_dp_undoing',
+          disputeId: 'dp_other_win',
+        })
+      );
+      const stripe = stripeStub({ disputes: [dispute('dp_undoing', 'won')] });
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      const result = await run();
+
+      expect(result).toMatchObject({ fromRows: 1, acted: 0, failed: 1 });
+      expect(obs.error).not.toHaveBeenCalled();
+      expect(obs.warn).toHaveBeenCalledExactlyOnceWith(WAITS_FOR_ANOTHER_WIN, {
+        disputeId: 'dp_undoing',
+        chargeId: 'ch_dp_undoing',
+        settlingDisputeId: 'dp_other_win',
+      });
+      expect(rows.get('dp_undoing')?.outcomeAppliedAt).toBeNull();
+    });
 
     it('a late win whose refund Stripe could not make alerts ONCE per attempt, from its refund step; the settle adds one warn with ids only, and the row is left unapplied', async () => {
       const { rows, purchase } = undoingRow();
@@ -1051,10 +1077,9 @@ describe('runDisputeReconcile', () => {
           code: 'ECONNRESET',
         },
       });
-      expect(obs.warn).not.toHaveBeenCalledWith(
-        STOPPED_AT_REFUND,
-        expect.anything()
-      );
+      for (const warn of [STOPPED_AT_REFUND, WAITS_FOR_ANOTHER_WIN]) {
+        expect(obs.warn).not.toHaveBeenCalledWith(warn, expect.anything());
+      }
       expect(rows.get('dp_undoing')?.outcomeAppliedAt).toBeNull();
     });
 
