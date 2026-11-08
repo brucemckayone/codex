@@ -1105,13 +1105,9 @@ async function restoreSubscriptionAfterWin(
  * The late win's refund of a payment the buyer made twice: the first payment
  * of a buyer who bought the item again (Q1; design §4.5), or a duplicate
  * payment (owner, "Refund it"). A refund Stripe did not make is alerted at
- * error on every try (owner decision 2026-10-23, "Retry hourly, alert"),
- * with what Stripe answered: its code, type and HTTP status, each null when
- * Stripe gave none, never its message. Only a `StripeInvalidRequestError`
- * reads as refused; anything else (an outage, a rate limit, a key without the
- * right) as could not be refunded. Then rethrown: nothing is marked, so its
- * re-pay rows stay held and the reconcile tries it again. Any other error is
- * rethrown without this alert.
+ * error on every try (`alertLateWinRefundNotMade`), then rethrown: nothing is
+ * marked, so its re-pay rows stay held and the reconcile tries it again. Any
+ * other error is rethrown without that alert.
  */
 async function refundFirstPayment(
   deps: DisputeDeps,
@@ -1127,23 +1123,36 @@ async function refundFirstPayment(
     );
   } catch (error) {
     if (error instanceof LateWinRefundRefusedError) {
-      const stripeType = error.context?.stripeType ?? null;
-      deps.obs?.error(
-        stripeType === 'StripeInvalidRequestError'
-          ? 'Late win: Stripe refused the refund of a payment the buyer made twice (bought again, or a duplicate). Nothing is marked; it is retried hourly'
-          : 'Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded. Nothing is marked; it is retried hourly',
-        {
-          errorId: crypto.randomUUID(),
-          disputeId,
-          purchaseId,
-          stripeCode: error.context?.stripeCode ?? null,
-          stripeType,
-          stripeStatusCode: error.context?.stripeStatusCode ?? null,
-        }
-      );
+      alertLateWinRefundNotMade(deps.obs, { disputeId, purchaseId }, error);
     }
     throw error;
   }
+}
+
+/**
+ * The late win's refund Stripe did not make, alerted at error (owner
+ * decision 2026-10-23, "Retry hourly, alert") with what Stripe answered: its
+ * code, type and HTTP status, each null when Stripe gave none, never its
+ * message (owner, 2026-11-08). Only a `StripeInvalidRequestError` reads as
+ * refused; anything else (an outage, a rate limit, a key without the right)
+ * as could not be refunded.
+ */
+function alertLateWinRefundNotMade(
+  obs: ObservabilityClient | undefined,
+  ids: { disputeId: string; purchaseId: string | null },
+  error: LateWinRefundRefusedError
+): void {
+  const answered = {
+    stripeCode: error.context?.stripeCode ?? null,
+    stripeType: error.context?.stripeType ?? null,
+    stripeStatusCode: error.context?.stripeStatusCode ?? null,
+  };
+  obs?.error(
+    answered.stripeType === 'StripeInvalidRequestError'
+      ? 'Late win: Stripe refused the refund of a payment the buyer made twice (bought again, or a duplicate). Nothing is marked; it is retried hourly'
+      : 'Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded. Nothing is marked; it is retried hourly',
+    { errorId: crypto.randomUUID(), ...ids, ...answered }
+  );
 }
 
 /**

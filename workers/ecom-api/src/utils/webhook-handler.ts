@@ -6,6 +6,7 @@
  */
 
 import { isForeignStripeEnvironment } from '@codex/constants';
+import type { ObservabilityClient } from '@codex/observability';
 import { LateWinRefundRefusedError } from '@codex/purchase';
 import { UnsupportedCurrencyError } from '@codex/service-errors';
 import type { Context } from 'hono';
@@ -110,18 +111,18 @@ export function createWebhookHandler(
       const cause = describeRootCause(error);
 
       if (isTransientError(error)) {
-        // Transient failure — return 500 so Stripe retries with exponential
-        // backoff. A late win's refund that Stripe did not make is alerted
-        // already, once per attempt, with what Stripe answered
-        // (Codex-2hxff.70): a second alert here would only repeat it.
-        if (!(error instanceof LateWinRefundRefusedError)) {
-          obs?.error(`${eventType} webhook transient error (will retry)`, {
+        // Transient failure — return 500 so Stripe retries with exponential backoff
+        alertTransientFailure(
+          obs,
+          `${eventType} webhook transient error (will retry)`,
+          error,
+          {
             error: err.message,
             cause,
             eventType: event.type,
             eventId: event.id,
-          });
-        }
+          }
+        );
         return c.json({ error: 'Temporary failure' }, 500);
       }
 
@@ -155,6 +156,22 @@ export function createWebhookHandler(
       return c.json({ received: true }, 200);
     }
   };
+}
+
+/**
+ * A transient failure's alert, at error: Stripe redelivers it. Not for a late
+ * win's refund that Stripe did not make: its own step alerted it already,
+ * once per attempt, with what Stripe answered (Codex-2hxff.70), and a second
+ * alert here would only repeat it.
+ */
+function alertTransientFailure(
+  obs: ObservabilityClient | undefined,
+  message: string,
+  error: unknown,
+  fields: Record<string, unknown>
+): void {
+  if (error instanceof LateWinRefundRefusedError) return;
+  obs?.error(message, fields);
 }
 
 /** The UnsupportedCurrencyError behind `error`, through any `cause` wraps. */
