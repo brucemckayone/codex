@@ -22,7 +22,7 @@
   import * as Tabs from '$lib/components/ui/Tabs';
   import * as m from '$paraglide/messages';
   import type { DraftSession } from './draft-session.svelte';
-  import EditorBackLink from './EditorBackLink.svelte';
+  import EditorBarLink from './EditorBarLink.svelte';
   import { CONTENT_LIST_HREF } from './editor-url';
 
   interface Props {
@@ -60,7 +60,7 @@
 </script>
 
 <header class="live-bar">
-  <EditorBackLink href={CONTENT_LIST_HREF} label={m.studio_editor_back()} />
+  <EditorBarLink href={CONTENT_LIST_HREF} label={m.studio_editor_back()} />
 
   <div class="live-state">
     <Badge variant={published ? 'success' : 'neutral'} class="live-pill">

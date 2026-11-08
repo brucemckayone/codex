@@ -11,6 +11,15 @@ import * as m from '$paraglide/messages';
 import type { DraftValues } from './draft-session.svelte';
 import type { EditorContentType } from './editor-url';
 
+/**
+ * A poster's rendered width in the piece's column (`--container-content`,
+ * less its gutters), in the editor and its preview alike: 58rem once the
+ * screen holds it, else the viewport less the studio rail and the gutters.
+ * Plain lengths only: a `min()` here reads as 100vw on older Safari.
+ */
+export const CANVAS_POSTER_SIZES =
+  '(min-width: 68rem) 58rem, (min-width: 64rem) calc(100vw - 10rem), calc(100vw - 2rem)';
+
 /** The type in a sentence: "New video · not saved yet". */
 export const TYPE_WORD: Record<EditorContentType, () => string> = {
   video: m.studio_editor_type_video,

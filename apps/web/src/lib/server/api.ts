@@ -2985,10 +2985,15 @@ export function createServerApi(
         request<MediaLibrarySummary>('content', '/api/media/summary'),
 
       /**
-       * Get a single media item by ID
+       * Get a single media item by ID. It carries its poster's CDN URL, or
+       * null with none, as the list rows do (the route resolves
+       * `thumbnailKey`, Codex-a6ofh.1.8).
        */
       get: (id: string) =>
-        request<MediaItemWithRelations>('content', `/api/media/${id}`),
+        request<MediaItemWithRelations & { thumbnailUrl: string | null }>(
+          'content',
+          `/api/media/${id}`
+        ),
 
       /**
        * Update media item metadata

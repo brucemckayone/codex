@@ -4,6 +4,7 @@ import {
   editorContentType,
   editorView,
   newContentHref,
+  previewHref,
   publishStepHref,
   readEditorStep,
   readLiveTab,
@@ -62,6 +63,21 @@ describe('the editor addresses', () => {
   it('edits and publishes under the content list both studios serve', () => {
     expect(editHref('c1')).toBe('/studio/content/c1/edit');
     expect(publishStepHref('c1')).toBe('/studio/content/c1/edit?step=publish');
+  });
+
+  it('previews from the step it was opened on, so Back to editing returns there', () => {
+    expect(previewHref('c1')).toBe('/studio/content/c1/preview');
+    expect(previewHref('c1', 'publish')).toBe(
+      '/studio/content/c1/preview?step=publish'
+    );
+    expect(
+      readEditorStep(
+        new URL(`https://studio.test${previewHref('c1', 'publish')}`)
+      )
+    ).toBe('publish');
+    expect(
+      readEditorStep(new URL(`https://studio.test${previewHref('c1')}`))
+    ).toBe('write');
   });
 
   it('reads the step: Write unless it says Publish', () => {

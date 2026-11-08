@@ -239,3 +239,23 @@ export async function goToPublishStep(page: Page): Promise<void> {
     timeout: 30_000,
   });
 }
+
+/**
+ * Choose who can watch it on the Publish step, by its visible card: the
+ * radio itself is visually hidden. Never a forced check: the move to
+ * Publish from a new draft plays the root layout's view transition, and
+ * until it ends every click lands on the transition (the page reads as
+ * `<html>`), so a forced click is lost. Clicking the card waits until it
+ * takes the click; the radio must then be chosen.
+ */
+export async function chooseAccess(page: Page, name: RegExp): Promise<void> {
+  const access = page.getByRole('radiogroup', { name: 'Access' });
+  const radio = access.getByRole('radio', { name });
+  await expect(radio).toBeEnabled({ timeout: 15_000 });
+  // `has` is queried inside each label, so it must not start at the group.
+  await access
+    .locator('label')
+    .filter({ has: page.getByRole('radio', { name }) })
+    .click();
+  await expect(radio).toBeChecked();
+}

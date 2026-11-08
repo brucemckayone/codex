@@ -53,6 +53,18 @@ export function publishStepHref(contentId: string): string {
   return `${editHref(contentId)}?step=publish`;
 }
 
+/**
+ * The piece as visitors will see it (Codex-a6ofh.2.11), from the step it was
+ * opened on: a preview opened from Publish goes back to Publish.
+ */
+export function previewHref(
+  contentId: string,
+  step: 'write' | 'publish' = 'write'
+): string {
+  const href = `${CONTENT_LIST_HREF}/${contentId}/preview`;
+  return step === 'publish' ? `${href}?step=publish` : href;
+}
+
 /** The step an edit address asks for: Write unless it says Publish. */
 export function readEditorStep(url: URL): 'write' | 'publish' {
   return url.searchParams.get('step') === 'publish' ? 'publish' : 'write';

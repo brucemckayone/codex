@@ -12519,6 +12519,70 @@ export const studio_editor_unknown_type = () => `This piece can’t be opened in
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_preview_button = () => `Preview as a visitor`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_preview_region = () => `Preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_preview_draft = () => `Preview · not live yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_preview_live = () => `Preview · this is live`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_preview_back = () => `Back to editing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_preview_title_suffix = () => `Preview`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_preview_media_none = (params) => `There’s no ${params.type} yet. Add it while writing, and it plays here.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_preview_media_preparing = (params) => `The ${params.type} is still being prepared. It plays here once it’s ready.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_editor_read_failed = () => `Couldn’t load this piece.`
 
 

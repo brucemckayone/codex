@@ -514,7 +514,7 @@ describe('PublishStep · Publish', () => {
 describe('PublishStep · the bar and the card', () => {
   test('the bar goes back to writing, Write reads as done, and there is no Next', () => {
     render();
-    const back = document.querySelector<HTMLAnchorElement>('.editor-back');
+    const back = document.querySelector<HTMLAnchorElement>('.editor-bar-link');
     expect(back?.getAttribute('href')).toBe('/studio/content/c1/edit');
     expect(back?.textContent).toContain(m.studio_editor_back_to_writing());
     expect(

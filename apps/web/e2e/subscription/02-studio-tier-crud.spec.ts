@@ -1,5 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 import {
+  chooseAccess,
   goToPublishStep,
   navigateToStudioPage,
   startDraft,
@@ -276,9 +277,7 @@ test.describe('Studio Tier CRUD', () => {
     // The Subscribers option is the subscribers-only switch; the shared tier
     // picker (Codex-2hxff.91) says which tiers. Studio Alpha's Connect is
     // active and it has tiers (seeded, plus 2.a's), so it can be chosen.
-    const subscribers = page.getByRole('radio', { name: /^Subscribers/ });
-    await expect(subscribers).toBeEnabled({ timeout: 15_000 });
-    await subscribers.check({ force: true });
+    await chooseAccess(page, /^Subscribers/);
     await waitForEditorSave(page);
 
     // With nothing ticked the item is CLOSED to subscribers, and says so.

@@ -14,10 +14,10 @@
   import * as m from '$paraglide/messages';
   import { page } from '$app/state';
   import { getContent } from '$lib/remote/content.remote';
-  import { isReadOutage, readFreshQuery, remoteErrorStatus } from '$lib/remote/query-result';
-  import { Button } from '$lib/components/ui';
+  import { readFreshQuery } from '$lib/remote/query-result';
   import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
   import ContentEditor from '$lib/components/studio/editor/ContentEditor.svelte';
+  import PieceReadProblem, { readProblem } from '$lib/components/studio/editor/PieceReadProblem.svelte';
   import UnknownTypeNotice from '$lib/components/studio/editor/UnknownTypeNotice.svelte';
   import { editorView, readEditorStep } from '$lib/components/studio/editor/editor-url';
   import { logReadFailure } from '$lib/components/studio/media-library/log-read-failure';
@@ -35,11 +35,6 @@
     return getContent(contentId);
   });
   const content = $derived(contentQuery.current ?? null);
-  const error = $derived(contentQuery.error);
-  /** The session ended (the studio's guard runs on loads, not on this read): a sign-in, then back here. */
-  const signedOut = $derived(remoteErrorStatus(error) === 401);
-  /** Refused (deleted, not theirs, a bad link): final. Only an outage offers Try again. */
-  const gone = $derived(error != null && !signedOut && !isReadOutage(error));
 
   const view = $derived(content ? editorView(content, page.url) : null);
 
@@ -103,6 +98,15 @@
     answered !== null && answered.seq === awaited && answered.arrival === arrival && content !== null
   );
   const failed = $derived(refused !== null && refused.seq === awaited && refused.arrival === arrival);
+  /**
+   * A refusal or an ended session shows as soon as the query has one; an
+   * outage only once this arrival's own read has failed (`readProblem`).
+   */
+  const problem = $derived.by(() => {
+    const kind = readProblem(contentQuery.error);
+    if (kind === 'signed-out' || kind === 'gone') return kind;
+    return failed ? 'outage' : null;
+  });
 
   function tryAgain() {
     refocusOnFail = true;
@@ -152,20 +156,13 @@
   <div class="edit-page">
     <Breadcrumb items={breadcrumbs} />
 
-    {#if signedOut}
-      <div class="error-text" role="alert">
-        <p>{m.studio_editor_signed_out()}</p>
-        <a class="sign-in" href={signInHref}>{m.common_sign_in()}</a>
-      </div>
-    {:else if gone}
-      <p class="error-text" role="alert">{m.studio_editor_not_found()}</p>
-    {:else if failed}
-      <div class="error-text read-failed" role="alert">
-        <p>{m.studio_editor_read_failed()}</p>
-        <Button type="button" size="sm" variant="secondary" onclick={tryAgain} {@attach refocusHere}>
-          {m.common_try_again()}
-        </Button>
-      </div>
+    {#if problem}
+      <PieceReadProblem
+        {problem}
+        {signInHref}
+        ontryagain={tryAgain}
+        refocus={refocusHere}
+      />
     {:else if !ready || !content}
       <!-- The editor's shape (the Write canvas's column): its title, media and words. -->
       <div class="editor-skeleton">
@@ -194,32 +191,5 @@
     inline-size: 100%;
     max-inline-size: var(--container-content);
     margin-inline: auto;
-  }
-
-  .error-text {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-3);
-    margin: 0;
-    color: var(--color-status-error-text);
-    font-size: var(--text-sm);
-    padding: var(--space-8);
-    text-align: center;
-  }
-
-  .error-text p {
-    margin: 0;
-  }
-
-  .sign-in {
-    color: var(--color-interactive);
-    font-weight: var(--font-medium);
-  }
-
-  .sign-in:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
-    border-radius: var(--radius-sm);
   }
 </style>

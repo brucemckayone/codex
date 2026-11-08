@@ -20,6 +20,8 @@
   @prop {string} titleSuffix - Suffix for the page title
   @prop {Snippet} [creatorAttribution] - Custom creator attribution line
   @prop {Snippet} [purchaseForm] - Purchase form with use:enhance
+  @prop {boolean} [preview] - The studio's preview of the creator's own piece: no progress, nothing for search engines
+  @prop {Snippet} [player] - Played in the player's place (the preview's own); the content players never mount
 -->
 <script lang="ts">
   import {
@@ -225,6 +227,19 @@
     contentBodyUnavailable?: boolean;
     creatorAttribution?: Snippet;
     purchaseForm?: Snippet;
+    /**
+     * The studio's preview of the creator's own piece, perhaps a draft
+     * (Codex-a6ofh.2.11). It saves no reading progress, and gives search
+     * engines nothing: noindex, no share tags, no structured data, and no
+     * canonical address (a draft has none).
+     */
+    preview?: boolean;
+    /**
+     * Played in the player's place: the preview's own player, on the
+     * creator's preview token. VideoPlayer and AudioPlayer, which save
+     * progress under the piece and renew through its stream, never mount.
+     */
+    player?: Snippet;
   }
 
   const {
@@ -258,6 +273,8 @@
     contentBodyUnavailable = false,
     creatorAttribution,
     purchaseForm,
+    preview = false,
+    player,
   }: Props = $props();
 
   // Show the overlay only when the user lost access they previously had —
@@ -519,7 +536,8 @@
    * announce on every change without being disruptive. Codex-jo819 O3.
    */
   const accessAnnouncement = $derived.by<string>(() => {
-    if (accessLoading) return '';
+    // A preview's access never changes: nothing to announce.
+    if (accessLoading || preview) return '';
     if (disputeReason) return 'Access paused.';
     if (accessState.status === 'unlocked') return 'Content unlocked.';
     if (accessState.status === 'preview') return 'Preview playing.';
@@ -694,7 +712,8 @@
   let AudioPlayer = $state<AudioPlayerModule | null>(null);
 
   $effect(() => {
-    if (!browser) return;
+    // A player was handed in: the content players are never needed.
+    if (!browser || player) return;
     if (content.contentType === 'video' && !VideoPlayer) {
       void import('$lib/components/VideoPlayer/VideoPlayer.svelte').then(
         (mod) => { VideoPlayer = mod.default; }
@@ -743,7 +762,8 @@
 
   $effect(() => {
     if (!browser) return;
-    if (!isArticleContent || !hasAccess) return;
+    // A preview is the creator reading their own piece, not progress.
+    if (!isArticleContent || !hasAccess || preview) return;
     if (!articleBodyEl) return;
     if (estimatedReadSeconds <= 0) return;
 
@@ -889,41 +909,47 @@
 
 <svelte:head>
   <title>{content.title} | {titleSuffix}</title>
-  <link rel="canonical" href={canonicalUrl} />
-  <meta property="og:title" content={content.title} />
-  {#if description}
-    <meta name="description" content={description} />
-    <meta property="og:description" content={description} />
-  {/if}
-  <meta property="og:type" content={ogType} />
-  <meta property="og:url" content={canonicalUrl} />
-  {#if thumbnailUrl}
-    <meta property="og:image" content={shareImage?.url} />
-    {#if shareImage?.width && shareImage.height}
-      <meta property="og:image:width" content={String(shareImage.width)} />
-      <meta property="og:image:height" content={String(shareImage.height)} />
+  {#if preview}
+    <meta name="robots" content="noindex" />
+  {:else}
+    <link rel="canonical" href={canonicalUrl} />
+    <meta property="og:title" content={content.title} />
+    {#if description}
+      <meta name="description" content={description} />
+      <meta property="og:description" content={description} />
     {/if}
-  {/if}
-  {#if heroPreload}
-    <!-- LCP: the video poster or the audio picture, preloaded so the
-         above-fold paint is faster (heroPreload says which file). -->
-    <link
-      rel="preload"
-      as="image"
-      href={heroPreload.href}
-      imagesrcset={heroPreload.srcset}
-      imagesizes={heroPreload.sizes}
-      fetchpriority="high"
-    />
-  {/if}
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content={content.title} />
-  {#if description}
-    <meta name="twitter:description" content={description} />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:url" content={canonicalUrl} />
+    {#if thumbnailUrl}
+      <meta property="og:image" content={shareImage?.url} />
+      {#if shareImage?.width && shareImage.height}
+        <meta property="og:image:width" content={String(shareImage.width)} />
+        <meta property="og:image:height" content={String(shareImage.height)} />
+      {/if}
+    {/if}
+    {#if heroPreload}
+      <!-- LCP: the video poster or the audio picture, preloaded so the
+           above-fold paint is faster (heroPreload says which file). -->
+      <link
+        rel="preload"
+        as="image"
+        href={heroPreload.href}
+        imagesrcset={heroPreload.srcset}
+        imagesizes={heroPreload.sizes}
+        fetchpriority="high"
+      />
+    {/if}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={content.title} />
+    {#if description}
+      <meta name="twitter:description" content={description} />
+    {/if}
   {/if}
 </svelte:head>
 
-<StructuredData data={contentSchema} />
+{#if !preview}
+  <StructuredData data={contentSchema} />
+{/if}
 
 <!--
   The thumbnail where it is the page's picture. Over a video it is the one
@@ -999,7 +1025,9 @@
   <!-- Video Player / Preview — renders FIRST (hero position) -->
   {#if content.contentType === 'video'}
   <div class="content-detail__player" class:content-detail__player--cinema={cinemaMode} data-content-type="video" tabindex="-1">
-    {#if showRevokedOverlay}
+    {#if player}
+      {@render player()}
+    {:else if showRevokedOverlay}
       <!-- Revoked overlay sits over the poster / preview so the user sees
            "why" without losing the thumbnail context (Codex-zdf2u). -->
       {#if thumbnailUrl}
@@ -1112,7 +1140,8 @@
             purchased={withdrawnHeld.by === 'purchase'}
             included={withdrawnHeld.by !== 'purchase'}
           />
-        {:else if hasAccess && isPaid}
+        {:else if hasAccess && isPaid && !preview}
+          <!-- The creator previewing their own piece bought nothing. -->
           <PriceBadge amount={priceCents} purchased={true} />
         {/if}
       </div>
@@ -1146,7 +1175,9 @@
     -->
     {#if content.contentType === 'audio'}
       <div class="content-detail__player content-detail__player--audio" data-content-type="audio" tabindex="-1">
-        {#if showRevokedOverlay}
+        {#if player}
+          {@render player()}
+        {:else if showRevokedOverlay}
           <div class="content-detail__audio-locked">
             {#if thumbnailUrl}
               {@render thumbnailImage(true)}

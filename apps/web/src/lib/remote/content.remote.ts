@@ -26,9 +26,11 @@ import {
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { describeThrown } from '$lib/client-log';
+import { hasStoredText, renderContentBody } from '$lib/editor/render';
 import { logger } from '$lib/observability';
 import { isReadOutage, remoteErrorStatus } from '$lib/remote/query-result';
 import { createServerApi } from '$lib/server/api';
+import { withoutRawBody } from '$lib/server/content-detail';
 import { ApiError } from '$lib/server/errors';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
 import {
@@ -149,6 +151,64 @@ export const getContentPortals = query(z.string().uuid(), async (id) => {
   const api = createServerApi(platform, cookies);
   return forwardClientErrors(() => api.content.portals(id));
 });
+
+/**
+ * The creator's own piece as visitors will see it, for the studio's preview
+ * (Codex-a6ofh.2.11): a draft too, which the public page cannot show (it
+ * reads published pieces only). The read is creator-scoped, so another
+ * creator's id is a 404, kept like `getContent`'s. The body is rendered here
+ * as the public page renders it, and the raw body is not sent with it.
+ * Stored text that rendered to nothing is said (`contentBodyUnavailable`),
+ * never shown as no body (Codex-uuz1g).
+ */
+export const getContentPreview = query(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  const content = await forwardClientErrors(() => api.content.get(id));
+  const media = content.mediaItem ?? null;
+  // A piece with no cover of its own shows its media's poster, as the public
+  // read resolves it and the creator's read does not. A deleted file's poster
+  // is never read: the preview says it was deleted.
+  const posterless =
+    !content.thumbnailUrl && media?.thumbnailKey != null && !media.deletedAt;
+  const [contentBodyHtml, mediaPoster] = await Promise.all([
+    renderContentBody(content, {
+      contentId: content.id,
+      surface: 'studio-preview',
+    }),
+    posterless && media ? mediaPosterUrl(api, media.id, content.id) : null,
+  ]);
+  return {
+    content: {
+      ...withoutRawBody(content),
+      mediaItem: media ? { ...media, thumbnailUrl: mediaPoster } : null,
+    },
+    contentBodyHtml,
+    contentBodyUnavailable: hasStoredText(content) && contentBodyHtml == null,
+  };
+});
+
+/**
+ * The media's own poster, for a preview with no cover of its own. It only
+ * decorates the player, so a read that fails is logged and the preview
+ * shows none, as a piece with no poster does.
+ */
+async function mediaPosterUrl(
+  api: ReturnType<typeof createServerApi>,
+  mediaId: string,
+  contentId: string
+): Promise<string | null> {
+  try {
+    return (await api.media.get(mediaId)).thumbnailUrl;
+  } catch (error) {
+    logger.warn('studio_content_preview.poster_read_failed', {
+      contentId,
+      mediaId,
+      ...describeThrown(error),
+    });
+    return null;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Content by Slug Query (for SEO-friendly URLs)

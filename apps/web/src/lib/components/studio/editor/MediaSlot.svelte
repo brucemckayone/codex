@@ -33,6 +33,7 @@
   import type { PickerField } from '../media-library/picker-state';
   import { tileReason } from '../media-library/tile-copy';
   import { tilePill } from '../media-library/tile-state';
+  import { CANVAS_POSTER_SIZES } from './canvas-text';
 
   interface Props {
     mediaType: 'video' | 'audio';
@@ -43,13 +44,6 @@
   }
 
   const { mediaType, value, onchange, onpending, readyOnly = false }: Props = $props();
-
-  /**
-   * The canvas column's width: 58rem once the screen holds it, else the
-   * viewport less the studio rail and the gutters. Plain lengths only: a
-   * `min()` here reads as 100vw on older Safari.
-   */
-  const POSTER_SIZES = '(min-width: 68rem) 58rem, (min-width: 64rem) calc(100vw - 10rem), calc(100vw - 2rem)';
 
   const ADD = { video: m.studio_editor_media_add_video, audio: m.studio_editor_media_add_audio };
   const PREPARING = { video: m.studio_editor_media_preparing_video, audio: m.studio_editor_media_preparing_audio };
@@ -228,7 +222,7 @@
               {mediaType}
               title={item.title}
               poster={item.thumbnailUrl ?? null}
-              sizes={POSTER_SIZES}
+              sizes={CANVAS_POSTER_SIZES}
             />
           {:else if view.kind === 'failed' || view.kind === 'stopped'}
             <div class="slot-message" role="alert">
@@ -246,7 +240,7 @@
                 class="slot-poster"
                 src={item.thumbnailUrl}
                 srcset={getThumbnailSrcset(item.thumbnailUrl) || undefined}
-                sizes={POSTER_SIZES}
+                sizes={CANVAS_POSTER_SIZES}
                 alt=""
               />
             {/if}

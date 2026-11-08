@@ -16,15 +16,16 @@
   @prop {boolean} [advancing] - Next was pressed and is saving first
   @prop {string | null} [nextHint] - Why Next can't go yet, for a screen reader; null when it can
   @prop {boolean} [holding] - A move to step 2 is waiting for the same thing: the reason is said aloud and shown
+  @prop {string | null} [previewHref] - The draft as visitors will see it (Codex-a6ofh.2.11): offered once the draft exists
 -->
 <script lang="ts">
   import { tick } from 'svelte';
   import { Badge, Button } from '$lib/components/ui';
-  import { CheckIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
+  import { CheckIcon, ChevronRightIcon, EyeIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import { TYPE_WORD } from './canvas-text';
   import type { DraftSession } from './draft-session.svelte';
-  import EditorBackLink from './EditorBackLink.svelte';
+  import EditorBarLink from './EditorBarLink.svelte';
   import type { EditorContentType } from './editor-url';
 
   interface Props {
@@ -36,6 +37,7 @@
     advancing?: boolean;
     nextHint?: string | null;
     holding?: boolean;
+    previewHref?: string | null;
   }
 
   const {
@@ -47,6 +49,7 @@
     advancing = false,
     nextHint = null,
     holding = false,
+    previewHref = null,
   }: Props = $props();
 
   /** How long a save reads as "just now". */
@@ -84,8 +87,8 @@
   }
 </script>
 
-<header class="write-bar">
-  <EditorBackLink
+<header class="write-bar" data-preview={previewHref ? '' : undefined}>
+  <EditorBarLink
     href={backHref}
     label={step === 'publish' ? m.studio_editor_back_to_writing() : m.studio_editor_back()}
   />
@@ -128,24 +131,31 @@
     </li>
   </ol>
 
-  {#if step === 'write'}
-    <div class="write-next">
-      <Button
-        type="button"
-        size="sm"
-        disabled={nextHint !== null}
-        loading={advancing}
-        aria-describedby={nextHint === null ? undefined : nextHintId}
-        onclick={onnext}
-      >
-        {m.studio_editor_next()}
-        <ChevronRightIcon size={16} />
-      </Button>
-      {#if nextHint !== null}
-        <span id={nextHintId} class="sr-only">{nextHint}</span>
-      {/if}
-    </div>
-  {/if}
+  <div class="write-actions">
+    {#if previewHref}
+      <!-- Mockup w4: on both steps. Leaving saves first (the session's guard),
+           so the preview shows the latest words. -->
+      <EditorBarLink href={previewHref} label={m.studio_preview_button()} icon={EyeIcon} />
+    {/if}
+    {#if step === 'write'}
+      <div class="write-next">
+        <Button
+          type="button"
+          size="sm"
+          disabled={nextHint !== null}
+          loading={advancing}
+          aria-describedby={nextHint === null ? undefined : nextHintId}
+          onclick={onnext}
+        >
+          {m.studio_editor_next()}
+          <ChevronRightIcon size={16} />
+        </Button>
+        {#if nextHint !== null}
+          <span id={nextHintId} class="sr-only">{nextHint}</span>
+        {/if}
+      </div>
+    {/if}
+  </div>
 </header>
 
 <style>
@@ -244,9 +254,19 @@
     border-block-start: var(--border-width) var(--border-style) var(--color-border);
   }
 
-  /* Phone (W8a): the step labels and Next go (the back link hides its own); the foot of the page has Next. */
+  /* Phone (W8a): the step labels and Next go (the bar's links hide their own
+     words, keeping their icons); the foot of the page has Next. The actions
+     add no box of their own, so a hidden Next takes no room. */
+  .write-actions {
+    display: contents;
+  }
+
   .write-next {
     display: none;
+  }
+
+  .write-bar[data-preview] {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
   }
 
   @media (--below-md) {
@@ -261,13 +281,20 @@
   }
 
   @media (--breakpoint-md) {
-    .write-bar {
+    .write-bar,
+    .write-bar[data-preview] {
       grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+    }
+
+    .write-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      grid-column: 5;
     }
 
     .write-next {
       display: block;
-      grid-column: 5;
     }
 
     .write-state {

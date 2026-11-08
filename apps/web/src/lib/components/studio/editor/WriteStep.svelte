@@ -32,8 +32,9 @@
   import { askToLeaveByConfirm, createDraftSession, type LeaveAnswer, settleWithin } from './draft-session.svelte';
   import {
     CONTENT_LIST_HREF,
-    type EditorContentType,
     editHref,
+    type EditorContentType,
+    previewHref,
     publishStepHref,
     readEditorStep,
   } from './editor-url';
@@ -230,7 +231,16 @@
 </script>
 
 <div class="editor" bind:this={editorEl}>
-  <WriteBar {session} {contentType} backHref={CONTENT_LIST_HREF} onnext={next} {advancing} {nextHint} holding={heldMove !== null} />
+  <WriteBar
+    {session}
+    {contentType}
+    backHref={CONTENT_LIST_HREF}
+    onnext={next}
+    {advancing}
+    {nextHint}
+    holding={heldMove !== null}
+    previewHref={session.contentId === null ? null : previewHref(session.contentId)}
+  />
   <div class="editor-canvas" inert={advancing}>
     {#if showRefused}
       <p class="editor-note" role="status">{m.media_picker_chosen_gone()}</p>

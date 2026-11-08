@@ -44,7 +44,7 @@
   import { savedDraftValues, TYPE_WORD } from './canvas-text';
   import { createDraftSession, type DraftValues } from './draft-session.svelte';
   import EditorSection from './EditorSection.svelte';
-  import { CONTENT_LIST_HREF, type EditorContentType, editHref, pieceHref } from './editor-url';
+  import { CONTENT_LIST_HREF, type EditorContentType, editHref, pieceHref, previewHref } from './editor-url';
   import {
     asPublishGap,
     earnsByFlags,
@@ -457,7 +457,13 @@
      back included; only the foot, which says what is happening, is not. -->
 <div class="editor">
   <div class="publish-held" inert={held}>
-    <WriteBar {session} {contentType} step="publish" backHref={writeHref} />
+    <WriteBar
+      {session}
+      {contentType}
+      step="publish"
+      backHref={writeHref}
+      previewHref={session.contentId === null ? null : previewHref(session.contentId, 'publish')}
+    />
   </div>
 
   <div class="publish">

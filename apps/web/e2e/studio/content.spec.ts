@@ -1,6 +1,7 @@
 import { expect } from '@playwright/test';
 import { test } from '../fixtures/auth';
 import {
+  chooseAccess,
   cleanupSharedStudioAuth,
   goToPublishStep,
   injectSharedStudioAuth,
@@ -285,13 +286,14 @@ test.describe('Studio Content - Publish', () => {
     await goToPublishStep(page);
 
     // Free: nothing else is needed, and no payouts are.
-    await page.getByRole('radio', { name: /^Free/ }).check({ force: true });
+    await chooseAccess(page, /^Free/);
     await page.getByRole('button', { name: 'Publish', exact: true }).click();
 
-    // Live, it is listed with the creator's other pieces.
-    await expect(page.getByText(`“${title}” is live.`)).toBeVisible({
-      timeout: 30_000,
-    });
+    // Live, it is listed with the creator's other pieces. The toast says
+    // so (it outlasts the step, whose own line says it too until it goes).
+    await expect(
+      page.getByRole('alert', { name: `“${title}” is live.` })
+    ).toBeVisible({ timeout: 30_000 });
     await expect(page).toHaveURL(/\/studio\/content$/, { timeout: 30_000 });
     await expect(page.getByText(title).first()).toBeVisible({
       timeout: 15_000,
