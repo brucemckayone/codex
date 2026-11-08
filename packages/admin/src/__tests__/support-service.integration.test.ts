@@ -1959,7 +1959,8 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
    */
   async function failedRefund(
     charge: Awaited<ReturnType<typeof purchaseCharge>>,
-    amountCents: number
+    amountCents: number,
+    metadata: Record<string, string> = {}
   ) {
     const refund = { id: `re_sup${uid()}`, amountCents, createdAt: 1 };
     created.stripeRefundIds.push(refund.id);
@@ -1976,7 +1977,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         reason: 'requested_by_customer',
         failure_reason: 'expired_or_canceled_card',
         created: nowSeconds() - 120,
-        metadata: {},
+        metadata,
       } as unknown as Stripe.Refund,
     ]);
     const deps: ClawbackDeps = {
@@ -2452,6 +2453,37 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         expect(await stepsOf(failed.stripeRefundId)).toEqual(steps);
       });
 
+      it("refuses it by the refund's own metadata at Stripe when our record never got the late win's refund, and writes nothing (review cycle 2, finding 1)", async () => {
+        const charge = await purchaseCharge();
+        // The late win made the refund, then its write of the id failed.
+        const disputeId = await lateWinThatRefunded(charge, null);
+        const failed = await failedRefund(charge, 1000, {
+          codex_late_win_dispute: disputeId,
+        });
+        const row = await refundRow(failed.id);
+        const steps = await stepsOf(failed.stripeRefundId);
+        vi.mocked(fake.stripe.charges.retrieve).mockClear();
+
+        const error = await failureOf(
+          service.resolveFailedRefund(
+            failed.id,
+            { resolution: 'creators_repaid', note: 'Re-pay' },
+            supportId
+          )
+        );
+
+        expect(error.statusCode).toBe(422);
+        expect(error.context).toEqual({
+          code: 'LATE_WIN_REFUND_NOT_REPAYABLE',
+          disputeId,
+        });
+        // Refused before the re-pay's own reads of Stripe.
+        expect(fake.stripe.charges.retrieve).not.toHaveBeenCalled();
+        expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
+        expect(await refundRow(failed.id)).toEqual(row);
+        expect(await stepsOf(failed.stripeRefundId)).toEqual(steps);
+      });
+
       it('refuses it under the lock when the late win records its refund while the settle reads Stripe, and writes nothing', async () => {
         const charge = await purchaseCharge();
         const failed = await failedRefund(charge, 1000);
@@ -2516,10 +2548,19 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
 
       it("still re-pays another failed refund of a late-won charge: only the late win's own refund is refused", async () => {
         const charge = await purchaseCharge();
-        // Support's own refund of the payment, after the late win: the late
-        // win's refund, if it made one, is another.
+        // Support's own refund of the payment, after the late win's: that one
+        // is another, marked at Stripe and in our record.
         const failed = await failedRefund(charge, 1000);
-        await lateWinThatRefunded(charge, `re_sup${uid()}`);
+        const disputeId = await lateWinThatRefunded(charge, null);
+        const lateWinRefund = stripeRefund(charge.chargeId, 100, {
+          created: nowSeconds() - 600,
+          reason: 'duplicate',
+          metadata: { codex_late_win_dispute: disputeId },
+        });
+        await db
+          .update(disputes)
+          .set({ lateWinRefundId: lateWinRefund.id })
+          .where(eq(disputes.stripeDisputeId, disputeId));
 
         const settled = await service.resolveFailedRefund(
           failed.id,
@@ -2538,6 +2579,206 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         expect(await refundRow(failed.id)).toMatchObject({
           resolution: 'creators_repaid',
           resolvedByUserId: supportId,
+        });
+      });
+
+      describe('settled refunded elsewhere, the charge is refunded outside Stripe (review cycle 2, finding 2)', () => {
+        const markOf = async (stripeDisputeId: string) =>
+          takeFirst(
+            await db
+              .select({ at: disputes.refundedOutsideStripeAt })
+              .from(disputes)
+              .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+          ).at;
+
+        const settleElsewhere = (refundId: string) =>
+          service.resolveFailedRefund(
+            refundId,
+            { resolution: 'refunded_elsewhere', note: 'Bank transfer' },
+            supportId
+          );
+
+        it('with no new Stripe refund: the mark is written with the resolution, the detail blocks the charge and the route refuses it', async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const failed = await failedRefund(charge, 1000);
+          const disputeId = await lateWinThatRefunded(
+            charge,
+            failed.stripeRefundId
+          );
+          // The gap: Q7 keeps the window open for good, and Stripe doesn't
+          // count the failed refund, so all of it is on offer.
+          const before = await service.getChargeDetail(charge.chargeId);
+          expect(before.refundable).toMatchObject({
+            maxCents: 1000,
+            blocked: null,
+          });
+
+          await settleElsewhere(failed.id);
+
+          const at = await markOf(disputeId);
+          expect(at).toBeInstanceOf(Date);
+          expect(at).toEqual((await refundRow(failed.id)).resolvedAt);
+          const detail = await service.getChargeDetail(charge.chargeId);
+          expect(detail.refundable).toEqual({
+            maxCents: 1000,
+            blocked: 'refunded_outside_stripe',
+            refundedOutsideStripeOn: at?.toISOString(),
+          });
+          // As the form would send it: the failed refund is listed.
+          const route = await failureOf(
+            service.issueRefund(
+              charge.chargeId,
+              refundInput(100, detail.refundCount),
+              supportId
+            )
+          );
+          expect(route.statusCode).toBe(422);
+          expect(route.context).toMatchObject({
+            code: 'REFUNDED_OUTSIDE_STRIPE',
+          });
+          expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
+        });
+
+        it("knows the late win's refund by Stripe's metadata when our record never got it", async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const disputeId = await lateWinThatRefunded(charge, null);
+          const failed = await failedRefund(charge, 1000, {
+            codex_late_win_dispute: disputeId,
+          });
+
+          await settleElsewhere(failed.id);
+
+          expect(await markOf(disputeId)).toBeInstanceOf(Date);
+          expect(
+            (await service.getChargeDetail(charge.chargeId)).refundable.blocked
+          ).toBe('refunded_outside_stripe');
+        });
+
+        it('after support refunded it again through Stripe: nothing is left to refund, so nothing is marked', async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const failed = await failedRefund(charge, 1000);
+          const disputeId = await lateWinThatRefunded(
+            charge,
+            failed.stripeRefundId
+          );
+          stripeRefund(charge.chargeId, 1000);
+
+          await settleElsewhere(failed.id);
+
+          expect(await markOf(disputeId)).toBeNull();
+          expect(
+            (await service.getChargeDetail(charge.chargeId)).refundable
+          ).toMatchObject({ maxCents: 0, blocked: 'nothing_left' });
+        });
+
+        it("another failed refund of a late-won charge leaves the mark alone: only the late win's own refund writes it", async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const failed = await failedRefund(charge, 1000);
+          const disputeId = await lateWinThatRefunded(charge, null);
+          const lateWinRefund = stripeRefund(charge.chargeId, 100, {
+            created: nowSeconds() - 600,
+            reason: 'duplicate',
+            metadata: { codex_late_win_dispute: disputeId },
+          });
+          await db
+            .update(disputes)
+            .set({ lateWinRefundId: lateWinRefund.id })
+            .where(eq(disputes.stripeDisputeId, disputeId));
+
+          await settleElsewhere(failed.id);
+
+          expect(await markOf(disputeId)).toBeNull();
+          expect(await refundRow(failed.id)).toMatchObject({
+            resolution: 'refunded_elsewhere',
+          });
+        });
+
+        /** Stripe can't be reached: every read the settle could make throws. */
+        function stripeUnreachable() {
+          const down = Object.assign(new Error('Stripe is unreachable'), {
+            type: 'StripeConnectionError',
+          });
+          for (const read of [
+            fake.stripe.refunds.list,
+            fake.stripe.charges.retrieve,
+          ]) {
+            vi.mocked(read).mockRejectedValue(down);
+            vi.mocked(read).mockClear();
+          }
+        }
+
+        it("an ordinary failed refund settles while Stripe is unreachable: its charge has no late win, so Stripe isn't asked", async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const failed = await failedRefund(charge, 1000);
+          stripeUnreachable();
+
+          const settled = await settleElsewhere(failed.id);
+
+          expect(settled.settled.resolution).toBe('refunded_elsewhere');
+          expect(await refundRow(failed.id)).toMatchObject({
+            resolution: 'refunded_elsewhere',
+            resolvedByUserId: supportId,
+          });
+          expect(fake.stripe.refunds.list).not.toHaveBeenCalled();
+          expect(fake.stripe.charges.retrieve).not.toHaveBeenCalled();
+        });
+
+        it("on a late win's charge it fails closed while Stripe is unreachable: the refund stays open and nothing is marked", async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const disputeId = await lateWinThatRefunded(charge, null);
+          const failed = await failedRefund(charge, 1000, {
+            codex_late_win_dispute: disputeId,
+          });
+          stripeUnreachable();
+
+          const error = await failureOf(settleElsewhere(failed.id));
+
+          expect(error.statusCode).toBe(500);
+          expect(fake.stripe.refunds.list).toHaveBeenCalled();
+          expect(await refundRow(failed.id)).toMatchObject({
+            resolution: null,
+            resolvedAt: null,
+          });
+          expect(await markOf(disputeId)).toBeNull();
+        });
+
+        it('keeps a date already set', async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          const failed = await failedRefund(charge, 1000);
+          const disputeId = await lateWinThatRefunded(
+            charge,
+            failed.stripeRefundId
+          );
+          const earlier = new Date(Date.now() - 60 * 60_000);
+          await db
+            .update(disputes)
+            .set({ refundedOutsideStripeAt: earlier })
+            .where(eq(disputes.stripeDisputeId, disputeId));
+
+          await settleElsewhere(failed.id);
+
+          expect(await markOf(disputeId)).toEqual(earlier);
+        });
+
+        it("a late win's dispute not on the refund's charge rolls the settlement back: the refund stays open", async () => {
+          const charge = await purchaseCharge(30 * DAY);
+          // The charge has a late win of its own, so Stripe is asked, but
+          // the refund's metadata names another charge's.
+          await lateWinThatRefunded(charge, null);
+          const other = await purchaseCharge(30 * DAY);
+          const elsewhere = await lateWinThatRefunded(other, null);
+          const failed = await failedRefund(charge, 1000, {
+            codex_late_win_dispute: elsewhere,
+          });
+
+          const error = await failureOf(settleElsewhere(failed.id));
+
+          expect(error.statusCode).toBe(500);
+          expect(await refundRow(failed.id)).toMatchObject({
+            resolution: null,
+            resolvedAt: null,
+          });
+          expect(await markOf(elsewhere)).toBeNull();
         });
       });
     });

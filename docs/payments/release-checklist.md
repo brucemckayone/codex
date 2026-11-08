@@ -444,17 +444,18 @@ see its subscribers after the roll forward.
 `0126` adds four nullable columns and three CHECKs to `disputes`, and the
 `purchase-access-restored` email (`Codex-2hxff.70`;
 [dispute record](dispute-record.md)). `0127` adds one more nullable column,
-`refunded_outside_stripe_at`: a charge support settled by hand, which its
-refund route then refuses
-([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)). Both
+`refunded_outside_stripe_at`: a charge whose buyer support refunded outside
+Stripe, which its refund route then refuses
+([operations](operations.md#late-wins)). Both
 are additive and run before the workers deploy. The old workers never read the
 columns, and they still only alert a late win and leave its row `lost`, which
-every CHECK allows. No backfill: nothing sets the new column until a person
-settles a case. Both stay on a rollback, but list the late wins still being
+every CHECK allows. No backfill: nothing sets the new column until support
+settles a case, by hand or by settling a late win's own failed refund as
+refunded elsewhere. Both stay on a rollback, but list the late wins still being
 undone first ([R19](#r19--before-any-workers-rollback-late-wins-still-being-undone)).
 The old support route doesn't read `refunded_outside_stripe_at`, so a charge
-settled by hand is refundable through Stripe again while rolled back: don't
-refund one then.
+refunded outside Stripe is refundable through Stripe again while rolled back:
+don't refund one then. R19 lists them.
 
 ### R18 — lost chargebacks already settled by hand
 
@@ -485,7 +486,9 @@ alert.
 For any that Stripe shows as won and that was already put right by hand, mark
 it won and applied, so neither the old workers nor the new ones act on it
 again. This one writes: run it only with the owner's OK, with the ids from the
-list:
+list. Run it between :20 and :50 past the hour, as the operations step does:
+the old workers' hourly retry of an unfinished loss takes no lock, so a write
+while it runs could let it finish the loss on a row that is now won.
 
 ```sql
 BEGIN;
@@ -498,7 +501,8 @@ RETURNING stripe_dispute_id, status, outcome_applied_at;
 COMMIT;
 ```
 
-It returns one line per id. Each row is now an applied win:
+It returns one line per id. A missing line means the id was mistyped or is no
+longer lost: check it before going on. Each row is now an applied win:
 
 - **Every CHECK allows it, `0126`'s included.** It writes only columns that
   exist today, and `0126`'s three CHECKs test only its new columns, which
@@ -508,7 +512,9 @@ It returns one line per id. Each row is now an applied win:
   on the old workers and the new.
 - **A row whose loss never finished** (`outcome_applied_at` empty in the list)
   gets an applied time a second before the write. It then still reads as
-  settled by hand, not by the undo. Marking it won also releases the sale's
+  settled by hand, not by the undo, and (b) leaves its `lost_applied_at`
+  empty, as for any loss that never finished, so support shows no made-up
+  "lost on" date. Marking it won also releases the sale's
   unpaid payouts that its unfinished loss was holding, and the next payout run
   pays them, as for any win. Check first that the hand settlement didn't pay
   those creators some other way.
@@ -521,7 +527,12 @@ races it, because the row stays applied:
 BEGIN;
 UPDATE disputes
    SET late_won_at = now(),
-       lost_applied_at = outcome_applied_at,
+       -- In the ARRAY: each id whose outcome_applied_at was EMPTY in (a)'s
+       -- list (its loss never finished). ARRAY[]::text[] when there are none.
+       lost_applied_at = CASE
+         WHEN stripe_dispute_id = ANY (ARRAY['du_…']::text[]) THEN NULL
+         ELSE outcome_applied_at
+       END,
        updated_at = now()
  WHERE stripe_dispute_id IN ('du_…')
    AND status = 'won' AND late_won_at IS NULL
@@ -576,12 +587,32 @@ SELECT d.stripe_dispute_id, d.stripe_charge_id, d.purchase_id,
 ROLLBACK;
 ```
 
-At 0, a workers rollback is exact for late wins. Otherwise, prefer a forward
-fix. Each listed row has a step that is retried every hour and alerted
-([operations](operations.md#late-wins)). Fix its cause and let the next run
-finish it, or settle a refund Stripe won't make
+Keep this list for support too: the charges whose buyer was refunded outside
+Stripe. The old charge page doesn't block them, so while rolled back none of
+them is ever refunded through Stripe:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT stripe_dispute_id, stripe_charge_id, refunded_outside_stripe_at
+  FROM disputes
+ WHERE refunded_outside_stripe_at IS NOT NULL;
+ROLLBACK;
+```
+
+At 0 late wins still being undone, a workers rollback is exact for them.
+Otherwise, prefer a forward fix. Each listed row has a step that is retried
+every hour and alerted ([operations](operations.md#late-wins)). Fix its cause
+and let the next run finish it, or settle a refund Stripe won't make
 ([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)), then
 list again.
+
+**A row whose last alert is the refund not made** ("Late win: Stripe refused
+the refund of a payment the buyer made twice…" or "Late win: a payment the
+buyer made twice (bought again, or a duplicate) could not be refunded…") **MUST
+be settled with that operations step BEFORE any rollback.** It can't be
+settled after: the step's first check needs the outcome empty. And once the
+old workers mark it applied, the held re-pay is released and the next payout
+run pays the creators back the first payment, with nothing to take it back.
 
 If the workers must roll back anyway, **keep the list first.** Once the old
 workers mark a row applied, it looks exactly like a late win the new workers
@@ -593,6 +624,6 @@ undid, and it can't be found again. Then wait until each row shows
 | A subscription or a course subscription | Nothing: the old workers settle it as the new ones would |
 | `purchase_status` is `completed` | Nothing: the buyer already has it back. They aren't sent the "access is back" email |
 | `purchase_status` is `pending` (a duplicate payment the loss never got to) | Nothing: the hourly duplicate sweep refunds it |
-| `late_win_refund_id` set | Nothing, once Stripe shows that refund succeeded: its `charge.refunded` takes it back from the creators. If a payout run paid their re-pay first, it leaves a `slice_repaid` debt for support, as any refund of a re-paid sale does |
-| `refunded`, `late_win_refund_id` empty, and `bought_again` true or `duplicate_of_purchase_id` set | The buyer paid twice. Refund this charge in full: from Stripe's Dashboard while rolled back (the old charge page keeps the 14-day limit), or from the charge page once rolled forward (a late win has no limit there). Its `charge.refunded` takes it back from the creators, as in the row above |
+| `late_win_refund_id` set | Nothing, once Stripe shows that refund succeeded: its `charge.refunded` takes it back from the creators. If a payout run paid their re-pay first, it leaves a `slice_repaid` debt for support, as any refund of a re-paid sale does. If it fails or is canceled instead, the buyer is still owed it: refund them another way. Settle a failed one in Failed refunds as refunded elsewhere, **never** "Re-pay payees": the old admin doesn't refuse it, and the old alert even suggests it. A canceled one paid nothing out and took nothing back, so there is nothing to settle. The old admin doesn't mark either charge refunded outside Stripe, so never refund it through Stripe afterwards |
+| `refunded`, `late_win_refund_id` empty, and `bought_again` true or `duplicate_of_purchase_id` set | The buyer paid twice. Refund what is left of the charge: from Stripe's Dashboard while rolled back (the old charge page keeps the 14-day limit), or from the charge page once rolled forward (a late win has no limit there). Its `charge.refunded` takes it back from the creators, as in the row above |
 | `refunded`, and neither | The undo never gave the buyer the item back. Unless the charge's refunds cover what was paid (check in Stripe), give it back by hand, with the owner's OK: content with a [support grant](access.md#support-grants), and a course as the owner decides |

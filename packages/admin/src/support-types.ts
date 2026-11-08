@@ -158,9 +158,11 @@ export interface ChargeDetail {
     maxCents: number;
     blocked: RefundBlock | null;
     /**
-     * When support settled the charge by hand and the buyer was refunded
-     * outside Stripe (`disputes.refunded_outside_stripe_at`); null otherwise.
-     * Stripe lists no refund for it, so `refundedCents` doesn't count it.
+     * When the buyer was refunded outside Stripe
+     * (`disputes.refunded_outside_stripe_at`): support settled the charge by
+     * hand, or settled the late win's own failed refund as refunded
+     * elsewhere. Null otherwise. Stripe lists no standing refund for it, so
+     * `refundedCents` doesn't count it.
      */
     refundedOutsideStripeOn: string | null;
   };

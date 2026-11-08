@@ -41,7 +41,7 @@ It is shaped like `refunds`.
 | `lost_applied_at` | the loss's `outcome_applied_at`, kept when the late win clears that column; null when the loss never finished. Support's "lost on …" |
 | `late_win_refund_id` | the `re_…` refund the late win made of a first payment, for a buyer who had bought the item again (§10) |
 | `buyer_told_at` | the buyer's "access is back" email was claimed, before it was sent, so it goes once |
-| `refunded_outside_stripe_at` | (0127) when support settled the charge by hand and the buyer is refunded outside Stripe ([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)). From then on, support's refund route refuses the charge (`REFUNDED_OUTSIDE_STRIPE`; owner decision 2026-11-08, "Block it in code"). Only that runbook step writes it |
+| `refunded_outside_stripe_at` | (0127) when the buyer was refunded outside Stripe. From then on, support's refund route refuses the charge (`REFUNDED_OUTSIDE_STRIPE`; owner decision 2026-11-08, "Block it in code"). Two writers: the runbook step that settles the charge by hand ([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)), and support settling the late win's own failed refund as refunded elsewhere while Stripe's standing refunds don't cover the charge ([purchases](purchases.md#refunds)). Neither overwrites a set date |
 
 Checks (0126), none of which can be NULL: `late_won_at` is set only on a `won` row, and `late_win_refund_id` and `lost_applied_at` only on a late win.
 
