@@ -160,8 +160,8 @@ export interface ChargeDetail {
     /**
      * When the buyer was refunded outside Stripe
      * (`disputes.refunded_outside_stripe_at`): support settled the charge by
-     * hand, or settled the late win's own failed refund as refunded
-     * elsewhere. Null otherwise. Stripe lists no standing refund for it, so
+     * hand, settled the late win's own failed refund as refunded elsewhere,
+     * or recorded a refund another way by hand (R19 (b)). Null otherwise. Stripe lists no standing refund for it, so
      * `refundedCents` doesn't count it.
      */
     refundedOutsideStripeOn: string | null;

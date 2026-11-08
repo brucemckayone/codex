@@ -165,8 +165,9 @@ export class ChargebackSettlingError extends BusinessLogicError {
  * The buyer of this charge was refunded outside Stripe
  * (`disputes.refunded_outside_stripe_at`): support settled a late-win refund
  * Stripe won't make by hand (docs/payments/operations.md, "Settling a
- * late-win refund Stripe won't make"), or settled the late win's own failed
- * refund as refunded elsewhere. A refund through Stripe now would pay the
+ * late-win refund Stripe won't make"), settled the late win's own failed
+ * refund as refunded elsewhere, or recorded a refund another way by hand
+ * (release-checklist.md, R19 (b)). A refund through Stripe now would pay the
  * buyer twice, so it is refused for good (owner decision 2026-11-08, "Block
  * it in code").
  */

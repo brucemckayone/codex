@@ -363,9 +363,12 @@ alike. It promises no time, since a refund Stripe won't make outlasts any
 (review cycle 1, M3). It usually lasts seconds; about an hour
 while a step is retried. That includes the wait for the late win's own refund
 while it is pending at Stripe, which only the next hourly run finishes. Until
-then a `refund.updated` for that refund is answered 500 and logged as a
-transient error, as expected. A refund Stripe won't make holds it until support
-settles it (below).
+then a `refund.updated` or `charge.refunded` for that refund is answered 500,
+so Stripe redelivers it, and logged as a warning with no `errorId`, not an
+error (`WinSettlingError`): "A refund's clawback waits for a won chargeback on
+its charge to settle; Stripe redelivers the event" (`chargeId`, `disputeId`,
+`eventType`, `eventId`). That is expected. A refund Stripe won't make holds it
+until support settles it (below).
 
 **No 14-day limit** (owner Q7, "Lift the limit for it"). A late-won payment
 stays refundable from the charge page whenever the buyer asks, and the refund
@@ -376,18 +379,27 @@ and `closesAt` keeps the 14-day date, which has passed. Anything that reads
 
 **Refunded outside Stripe** (owner decision 2026-11-08, "Block it in code"). A
 charge whose buyer was refunded outside Stripe has `refunded_outside_stripe_at`
-set, and is never refunded through Stripe again. Two things set it:
+set, and is never refunded through Stripe again. Three things set it:
 
 - a charge settled by hand
   ([below](#settling-a-late-win-refund-stripe-wont-make));
 - the late win's own failed refund settled in Failed refunds as refunded
-  elsewhere, when Stripe's standing refunds don't cover the charge (support
-  didn't refund it again through Stripe first). Without the mark the charge
-  would stay refundable for good, since Stripe doesn't count the failed refund
-  and the late win lifts the 14-day window. That is owner decision 5's rule,
-  applied in review cycle 2.
+  elsewhere, unless the charge's SUCCEEDED Stripe refunds already cover it
+  (support refunded it again through Stripe first). Without the mark the
+  charge would stay refundable for good, since Stripe doesn't count the failed
+  refund and the late win lifts the 14-day window. That is owner decision 5's
+  rule, applied in review cycle 2. A re-refund still pending doesn't count, so
+  the charge is marked: if it then fails, the charge is already blocked; if it
+  succeeds, the buyer was refunded once, through Stripe, and only the charge
+  card's "refunded outside Stripe on {date}" is then slightly off;
+- by hand, with the owner's OK, for a buyer refunded another way that the
+  settle never saw: a canceled late-win refund (below), or one settled while
+  rolled back
+  ([R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone)).
 
-Neither overwrites a date already set. The form shows the block; the preview
+No date is ever overwritten. The runbook step runs only on a charge with no
+refund recorded, so it never meets a set date, and the other two guard with
+`refunded_outside_stripe_at IS NULL`. The form shows the block; the preview
 and the route refuse it with 422 `REFUNDED_OUTSIDE_STRIPE`, whatever the window
 says, and nothing lifts its window. The detail's `refundable.blocked` is
 `refunded_outside_stripe`, with `refundedOutsideStripeOn`, and the charge
@@ -402,12 +414,12 @@ with an `errorId`, unless it says otherwise:
 |---|---|---|
 | Late win: Stripe refused the refund of a payment the buyer made twice… / Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded… | The late win's refund of a first payment (a buyer who bought it again) or of a duplicate payment wasn't made. "Refused": Stripe refused the request itself (`stripeType` `StripeInvalidRequestError`). "Could not be refunded": anything else, such as an outage, a rate limit or a key without refund rights. `stripeCode`, `stripeType` and `stripeStatusCode` say which; each is empty when Stripe gave none. Nothing is marked, the creators' pay-back stays held, and it is retried: on each of Stripe's redeliveries, then every hour, one alert per try. Stripe replays an answer for 24 hours under the same idempotency key, so a cause that clears (a low balance, a fixed key) is only tried again a day after the first answer | Read the three fields. A "could not be refunded" usually clears by itself once the outage passes or the key is fixed. One Stripe will never make: settle it by hand ([below](#settling-a-late-win-refund-stripe-wont-make)). **Never refund the buyer another way first** |
 | Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds | The late win's refund was made, but Stripe reports it `failed` (`refundId`, `status`). The late win counts as settled and its outcome is marked. As with any failed refund, its clawback stands: the creators gave the first payment back off their held re-pay rows. The buyer has not been refunded | Refund the buyer another way, or first refund it again through Stripe on the charge page, then settle the refund in Failed refunds as refunded elsewhere. Settled after a refund another way, the charge is marked refunded outside Stripe and the charge page blocks any further Stripe refund: Stripe doesn't count the failed refund and the late win lifts the 14-day window, so it would otherwise offer the whole amount again, for good ([above](#late-wins)). So a Stripe refund comes first or not at all. "Re-pay payees" (creators re-paid) is refused for it, 422 `LATE_WIN_REFUND_NOT_REPAYABLE` (owner decision 2026-11-08, "Block it in code"): the buyer is still owed this money, so its clawback stands |
-| Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand | Settled as for a failed refund, but the Failed refunds queue lists only `failed` ones, so this alert is how support finds it (owner decision 2026-11-05). It took nothing from the creators | Settle it with the owner; the buyer has not been refunded |
+| Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand | Settled as for a failed refund, but the Failed refunds queue lists only `failed` ones, so this alert is how support finds it (owner decision 2026-11-05). It took nothing from the creators | Settle it with the owner; the buyer has not been refunded. If the owner refunds the buyer another way, record it with the UPDATE in [R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone): a canceled refund never reaches Failed refunds, so nothing else marks the charge refunded outside Stripe, and the charge page would offer a Stripe refund again for good |
 | A won dispute was reported lost: nothing changed, check it in Stripe | Stripe now says lost a dispute we hold as won. Nothing was changed | Check the dispute in Stripe's Dashboard |
 | The hourly late-win check read its page limit of Stripe's disputes | More than 300 disputes since our oldest lost one: the older ones weren't re-checked this run | None by itself; if it repeats, the check needs a wider limit |
 | The hourly late-win check could not read a page of Stripe's disputes / could not re-check lost disputes for a late win | A Stripe or database read failed; the next run retries | None unless it repeats |
-| WEB_APP_URL is not set: the late win's access-restored email… | The buyer's email had no working link, so it wasn't sent | Set `WEB_APP_URL` on ecom-api |
-| Late win: the buyer's access-restored email could not be claimed, so it was not sent, and it is not retried | The send-once claim's database write failed, after the outcome was marked, so nothing comes back to it (`disputeId`, `userId`). Their access is back | None for the money. Tell the buyer another way, if you want them told |
+| WEB_APP_URL is unset or not a URL: the late win's access-restored email has no working link, so it was not sent | `WEB_APP_URL` on ecom-api is unset, or isn't an http(s) URL with a host, so the email would have no working link. Not sent, and not retried (`disputeId`); their access is back | Set `WEB_APP_URL` on ecom-api to the web app's address. Tell the buyer another way, if you want them told |
+| Late win: the buyer's access-restored email could not be claimed, so it was not sent, and it is not retried | The send-once claim's database write failed, after the outcome was marked, so nothing comes back to it (`disputeId`, `userId`, `error`, and `cause`: the innermost error's name, message and code). Their access is back | None for the money. Tell the buyer another way, if you want them told |
 | Late win: the buyer's access-restored email was not sent: the charge has no email address (warning) | The charge has no billing or receipt address. Not retried; their access is back (`disputeId`, `userId`, never an address) | As above |
 | Late win: the buyer's access-restored email was not sent: the item's title could not be read (warning) | The item's title couldn't be read for the email. Not retried; their access is back (`disputeId`, `userId`) | As above |
 | Dispute lost run found it no longer lost (a late win overtook it): its outcome is left for the late win to mark (warning, no `errorId`) | A retry of an unfinished loss ran while the dispute was won late. It marked nothing, so the late win's undo still restores, re-pays and refunds | None |
@@ -421,8 +433,21 @@ alert above has already fired, so the reconcile logs one warning instead of a
 second error, "A late win's settle stopped at its refund, which the refund
 step has already alerted; the next run retries it" (`disputeId`, `purchaseId`,
 `chargeId`, no `errorId`). So each try raises one error, by the webhook or the
-hourly run alike. A
-late win settled by hand before the release is recorded as applied by
+hourly run alike.
+
+Two hourly warnings are expected while a win settles, each with no `errorId`,
+and need nothing done. The hourly retry of a failed clawback whose charge has
+a won chargeback still settling logs "Retrying a failed clawback waits for a
+won chargeback on its charge to settle; the next run tries again" (`chargeId`,
+`disputeId`), in place of its "Retrying a failed clawback failed; the next run
+tries again" error. The reconcile, settling a dispute while another won
+chargeback on the same charge is still settling, logs "A dispute's settle
+waits for another won chargeback on its charge to settle; the next run retries
+it" (`disputeId`, `chargeId`, `settlingDisputeId`), in place of its error
+above. Either one that keeps coming back means the other win isn't settling:
+look at that dispute's own alerts.
+
+A late win settled by hand before the release is recorded as applied by
 [release step R18](release-checklist.md#r18--lost-chargebacks-already-settled-by-hand),
 so nothing runs again for it.
 

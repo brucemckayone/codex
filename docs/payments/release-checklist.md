@@ -450,8 +450,8 @@ Stripe, which its refund route then refuses
 are additive and run before the workers deploy. The old workers never read the
 columns, and they still only alert a late win and leave its row `lost`, which
 every CHECK allows. No backfill: nothing sets the new column until support
-settles a case, by hand or by settling a late win's own failed refund as
-refunded elsewhere. Both stay on a rollback, but list the late wins still being
+settles a case, by hand, by settling a late win's own failed refund as
+refunded elsewhere, or with R19's UPDATE for one refunded another way. Both stay on a rollback, but list the late wins still being
 undone first ([R19](#r19--before-any-workers-rollback-late-wins-still-being-undone)).
 The old support route doesn't read `refunded_outside_stripe_at`, so a charge
 refunded outside Stripe is refundable through Stripe again while rolled back:
@@ -612,7 +612,36 @@ buyer made twice (bought again, or a duplicate) could not be refunded…") **MUS
 be settled with that operations step BEFORE any rollback.** It can't be
 settled after: the step's first check needs the outcome empty. And once the
 old workers mark it applied, the held re-pay is released and the next payout
-run pays the creators back the first payment, with nothing to take it back.
+run pays the creators back the first payment, with nothing to take it back. A
+case the step stops (STOP) is the owner's to settle before the rollback; until
+then, don't roll back.
+
+**A late win's failed refund is settled with the NEW admin, or not until the
+roll forward.** The new admin's "refunded elsewhere" marks the charge refunded
+outside Stripe; the old one marks nothing, and once a refund is settled
+nothing marks it later. So before any rollback, list them:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT r.stripe_refund_id, r.stripe_charge_id, d.stripe_dispute_id,
+       COALESCE(d.late_win_refund_id = r.stripe_refund_id, false)
+         AS recorded_as_the_late_wins
+  FROM refunds r
+  JOIN disputes d ON d.stripe_charge_id = r.stripe_charge_id
+                 AND d.late_won_at IS NOT NULL
+ WHERE r.status = 'failed' AND r.resolved_at IS NULL
+ ORDER BY r.stripe_charge_id, r.stripe_refund_id;
+ROLLBACK;
+```
+
+It lists every open failed refund on a late win's charge, not only the one
+our record names: the late win's own refund may carry only Stripe's metadata
+(`codex_late_win_dispute`) when our record's write was lost. Settle each as
+the late-win alert row says ([operations](operations.md#late-wins)). One still
+open at the rollback stays open until the roll forward: refund the buyer
+another way meanwhile if need be, but don't settle it in the old admin, and
+never with "Re-pay payees". One settled while rolled back anyway is recorded
+with (b) below.
 
 If the workers must roll back anyway, **keep the list first.** Once the old
 workers mark a row applied, it looks exactly like a late win the new workers
@@ -624,6 +653,27 @@ undid, and it can't be found again. Then wait until each row shows
 | A subscription or a course subscription | Nothing: the old workers settle it as the new ones would |
 | `purchase_status` is `completed` | Nothing: the buyer already has it back. They aren't sent the "access is back" email |
 | `purchase_status` is `pending` (a duplicate payment the loss never got to) | Nothing: the hourly duplicate sweep refunds it |
-| `late_win_refund_id` set | Nothing, once Stripe shows that refund succeeded: its `charge.refunded` takes it back from the creators. If a payout run paid their re-pay first, it leaves a `slice_repaid` debt for support, as any refund of a re-paid sale does. If it fails or is canceled instead, the buyer is still owed it: refund them another way. Settle a failed one in Failed refunds as refunded elsewhere, **never** "Re-pay payees": the old admin doesn't refuse it, and the old alert even suggests it. A canceled one paid nothing out and took nothing back, so there is nothing to settle. The old admin doesn't mark either charge refunded outside Stripe, so never refund it through Stripe afterwards |
+| `late_win_refund_id` set | Nothing, once Stripe shows that refund succeeded: its `charge.refunded` takes it back from the creators. If a payout run paid their re-pay first, it leaves a `slice_repaid` debt for support, as any refund of a re-paid sale does. If it fails or is canceled instead, the buyer is still owed it: refund them another way. Settle a failed one in Failed refunds as refunded elsewhere, **never** "Re-pay payees": the old admin doesn't refuse it, and the old alert even suggests it. A canceled one paid nothing out and took nothing back, so there is nothing to settle. The old admin doesn't mark either charge refunded outside Stripe: record it with (b) after the roll forward, and never refund it through Stripe before then |
 | `refunded`, `late_win_refund_id` empty, and `bought_again` true or `duplicate_of_purchase_id` set | The buyer paid twice. Refund what is left of the charge: from Stripe's Dashboard while rolled back (the old charge page keeps the 14-day limit), or from the charge page once rolled forward (a late win has no limit there). Its `charge.refunded` takes it back from the creators, as in the row above |
 | `refunded`, and neither | The undo never gave the buyer the item back. Unless the charge's refunds cover what was paid (check in Stripe), give it back by hand, with the owner's OK: content with a [support grant](access.md#support-grants), and a course as the owner decides |
+
+**(b) After the roll forward**, with the owner's OK for each case, mark every
+charge whose buyer was refunded another way while rolled back: a late-win
+refund that failed or was canceled (row 4), or one the old admin settled.
+Nothing else marks it: the new admin marks only a refund it settles itself, so
+the charge page would offer a Stripe refund again, with no end date.
+
+```sql
+BEGIN;
+UPDATE disputes
+   SET refunded_outside_stripe_at = now(),
+       updated_at = now()
+ WHERE stripe_dispute_id IN ('du_…')
+   AND late_won_at IS NOT NULL
+   AND refunded_outside_stripe_at IS NULL
+RETURNING stripe_dispute_id, refunded_outside_stripe_at;
+COMMIT;
+```
+
+It returns one line per id. A missing line means the id was mistyped, isn't a
+late win, or is already marked: check it before going on.
