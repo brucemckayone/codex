@@ -11,7 +11,8 @@
  * on, and that each comes back exactly.
  */
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const platform = vi.hoisted(() => ({ ios: false }));
@@ -26,6 +27,13 @@ const LOCKED = 'data-melt-scroll-lock';
 const html = document.documentElement;
 const body = document.body;
 const locked = () => body.hasAttribute(LOCKED);
+
+// On iOS the lock replaces both offsets while it holds the page (Codex-8v12c).
+// What window had before any test, put back after each.
+const OFFSETS = ['pageXOffset', 'pageYOffset'] as const;
+const offsets = () =>
+  OFFSETS.map((name) => Object.getOwnPropertyDescriptor(window, name));
+const NATIVE_OFFSETS = offsets();
 
 /** A classic scrollbar `width` px wide: innerWidth less the root's clientWidth. */
 function scrollbar(width: number) {
@@ -59,6 +67,11 @@ describe('lockScroll', () => {
     Reflect.deleteProperty(html, 'clientWidth');
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
     Object.defineProperty(window, 'scrollX', { configurable: true, value: 0 });
+    OFFSETS.forEach((name, i) => {
+      const native = NATIVE_OFFSETS[i];
+      if (native) Object.defineProperty(window, name, native);
+      else Reflect.deleteProperty(window, name);
+    });
   });
 
   it('holds the viewport on the first hold and lets go on the last', () => {
@@ -186,35 +199,36 @@ describe('lockScroll', () => {
     });
     Object.defineProperty(window, 'scrollX', { configurable: true, value: 40 });
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
-    const own = Object.getOwnPropertyDescriptor(window, 'pageYOffset');
 
     const hold = lockScroll();
     expect({ x: pageXOffset, y: pageYOffset }).toEqual({ x: 40, y: 600 });
     hold();
 
-    expect(Object.getOwnPropertyDescriptor(window, 'pageYOffset')).toEqual(own);
+    expect(offsets()).toEqual(NATIVE_OFFSETS);
   });
 
   it('off iOS the page offsets are left as they are', () => {
-    const own = Object.getOwnPropertyDescriptor(window, 'pageYOffset');
     const hold = lockScroll();
-    expect(Object.getOwnPropertyDescriptor(window, 'pageYOffset')).toEqual(own);
+    expect(offsets()).toEqual(NATIVE_OFFSETS);
     hold();
   });
 
   // The fix above rests on this: if SvelteKit ever saves from something
   // else (scrollY), the held offsets stop reaching it.
   it('SvelteKit still saves a page’s place from pageXOffset and pageYOffset', () => {
-    // vitest runs from apps/web.
+    // Found from this file, not the working directory: a run started at the
+    // repo root has no node_modules/@sveltejs/kit there. Not as
+    // `new URL(…, import.meta.url)`: Vite rewrites that form into an http://
+    // asset URL for the browser-like environment.
     const utils = readFileSync(
       resolve(
-        process.cwd(),
-        'node_modules/@sveltejs/kit/src/runtime/client/utils.js'
+        dirname(fileURLToPath(import.meta.url)),
+        '../../../node_modules/@sveltejs/kit/src/runtime/client/utils.js'
       ),
       'utf8'
     );
     expect(utils).toMatch(
-      /function scroll_state\(\) \{\s*return \{\s*x: pageXOffset,\s*y: pageYOffset\s*\};/
+      /function scroll_state\(\) \{\s*return \{\s*x: pageXOffset,\s*y: pageYOffset,?\s*\};/
     );
   });
 
@@ -318,6 +332,7 @@ describe('lockScroll', () => {
     expect(locked()).toBe(false);
     expect(body.style.cssText).toBe('');
     expect(html.style.cssText).toBe('');
+    expect(offsets()).toEqual(NATIVE_OFFSETS);
     expect(scrollTo).toHaveBeenCalledWith({
       left: 0,
       top: 600,
