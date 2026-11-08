@@ -69,7 +69,7 @@ function scale(file: keyof typeof SCALE_BLOCK): Rung[] {
         // reach, and replaces every fallback: a declaration of its own.
         const registered = node.prelude.replace(/\/\*[\s\S]*?\*\//g, '').trim();
         if (
-          node.name === 'property' &&
+          node.name.toLowerCase() === 'property' &&
           (registered.startsWith('--space-') || UNIT.includes(registered))
         )
           found.push({

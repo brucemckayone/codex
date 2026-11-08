@@ -53,14 +53,14 @@ export function cssRules(source: string): CssRule[] {
 }
 
 /**
- * The text of every stylesheet under `$lib`, all global, read from disk: under
- * vitest a `?raw` CSS import is an empty string.
+ * The text of every file under `src` whose name ends in `extension`, read
+ * from disk: under vitest a `?raw` CSS import is an empty string.
  */
-export function libSheets(): string[] {
-  const lib = join(import.meta.dirname, '..', '..', '..');
-  return readdirSync(lib, { recursive: true, encoding: 'utf8' })
-    .filter((path) => path.endsWith('.css'))
-    .map((path) => readFileSync(join(lib, path), 'utf8'));
+export function sourceTexts(extension: string): string[] {
+  const src = join(import.meta.dirname, '..', '..', '..', '..');
+  return readdirSync(src, { recursive: true, encoding: 'utf8' })
+    .filter((path) => path.endsWith(extension))
+    .map((path) => readFileSync(join(src, path), 'utf8'));
 }
 
 function rulesOf(

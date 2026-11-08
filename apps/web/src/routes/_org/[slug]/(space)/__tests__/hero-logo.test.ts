@@ -4,10 +4,15 @@ import { HERO_LAYOUTS } from '@codex/validation';
 import { type AST, parse, parseCss } from 'svelte/compiler';
 import { describe, expect, test } from 'vitest';
 import {
+  BRAND_PREFIX_KEYS,
+  darkTokenOverridesToCssVars,
+  tokenOverridesToCssVars,
+} from '$lib/brand-editor/css-injection';
+import {
   type CssRule,
   componentRules,
   cssRules,
-  libSheets,
+  sourceTexts,
 } from '$lib/page-builder/kit/blocks/testing';
 
 /**
@@ -43,10 +48,15 @@ import {
  * transitions) is free. Nothing on the image or around it may redefine or
  * register what that height reads, or scale what it sits in, and nothing
  * between the image and the org layout (which carries the brand's inputs)
- * may set an inline style. Not modelled: the root layout's markup, global
- * sheets' rules (the reset's `img` rule among them), a pseudo-element (its
- * box is never the image's) and what a component renders; a rule that needs
- * one of them is not checked.
+ * may set an inline style. Markup the builder cannot read fails where a
+ * selector reaches the image or the title through it, and markup that can
+ * write global CSS (`<style>`, `{@html}`, a tag from script) fails anywhere.
+ * Not modelled: the root layout's markup, global sheets' rules (the reset's
+ * `img` rule among them), a pseudo-element (its box is never the image's),
+ * what a component renders, script that reaches the DOM by itself (a query,
+ * an event handler, `CSS.registerProperty`), a stylesheet `<link>` (the
+ * layout's one loads Google Fonts' faces) and a `var()` that holds a whole
+ * animation layer; a rule that needs one of them is not checked.
  */
 
 const PAGE = join(import.meta.dirname, '..', '+page.svelte');
@@ -69,7 +79,15 @@ const DIAL_INPUTS =
 const BRAND_INPUTS = new Set(['--brand-density', '--brand-hero-logo-scale']);
 /** What scales an element and everything drawn inside it. */
 const SCALES = /^(?:-webkit-)?(?:scale|zoom|transform|translate|rotate)$/;
-const KEYFRAMES_AT = /^@(?:-webkit-)?keyframes (?:-global-)?(.+)$/;
+const KEYFRAMES_AT = /^@(?:-webkit-)?keyframes (?:-global-)?(.+)$/i;
+/** The functions an animation's timings are written with; any other may hold its name. */
+const TIMING_FN =
+  /^(?:calc|min|max|clamp|round|abs|sign|mod|rem|cubic-bezier|steps|linear)#$/i;
+/** A flattened value's substitutions (`var()`, `if()`, a custom function): they may hold anything. */
+const SUBSTITUTED = /(?:^|[^\w-])(?:var|env|attr|if|--[\w-]+)#/i;
+/** An angle, or a math function that can make one. */
+const ANGLE =
+  /^(?:[-+]?[\d.]+(?:deg|g?rad|turn)|(?:calc|min|max|clamp|round|abs|sign|mod|rem)#)$/i;
 /** The animation shorthand's words that are not a keyframes name. */
 const ANIMATION_WORDS = new Set([
   'none',
@@ -96,7 +114,7 @@ const ANIMATION_WORDS = new Set([
   'revert',
 ]);
 const MATCHABLE_AT =
-  /^@(?:media|container|supports|layer|starting-style)(?: |$)/;
+  /^@(?:media|container|supports|layer|starting-style)(?: |$)/i;
 /**
  * The pseudo-classes a static DOM decides: every other one counts as met.
  * `:has()` is not among them: a component renders descendants this DOM
@@ -191,14 +209,19 @@ function flatten(value: string): string {
  */
 function unscaled(property: string, value: string): boolean {
   const flat = flatten(inPlane(withoutImportant(value))).trim();
-  // A variable may hold a third, depth, value.
-  if (property === 'translate')
-    return flat.split(/\s+/).length <= 2 && !/(?:var|env|attr)#/i.test(flat);
+  // A substitution may hold a third, depth, value, or another axis.
+  if (SUBSTITUTED.test(flat)) return false;
+  if (property === 'translate') return flat.split(/\s+/).length <= 2;
   // Turning in the plane keeps the shape; about any other axis it squashes.
-  if (property === 'rotate')
-    return /^(?:none|z\s+\S+|0\s+0\s+1\s+\S+|(?!(?:var|env|attr)#)\S+)$/i.test(
-      flat
+  // The axis and the angle come in either order.
+  if (property === 'rotate') {
+    const parts = flat.split(/\s+/);
+    const angle = parts.findIndex((part) => ANGLE.test(part));
+    const axis = parts.filter((_, i) => i !== angle).join(' ');
+    return (
+      /^none$/i.test(flat) || (angle >= 0 && /^(?:z|0 0 \S+)?$/i.test(axis))
     );
+  }
   return /^(?:1|none|(?:(?:translate[xy]?|rotatez?)#\s*)+)$/i.test(flat);
 }
 
@@ -206,18 +229,48 @@ function unscaled(property: string, value: string): boolean {
 const withoutImportant = (value: string) =>
   value.replace(/\s*!\s*important\s*$/i, '');
 
-/** `translateZ(0)` and `translate3d(x, y, 0)` as the moves in the plane they are. */
-function inPlane(value: string): string {
-  let out = value.replace(/translateZ\(\s*0(?:px)?\s*\)/gi, 'translate(0)');
-  const head = /translate3d\(/i;
+/** Each `name(…)` in a value as `swap` rewrites its arguments, up to the first it cannot. */
+function rewriteCalls(
+  value: string,
+  name: string,
+  swap: (args: string[]) => string | null
+): string {
+  let out = value;
+  const head = new RegExp(`${name}\\(`, 'i');
   for (let match = head.exec(out); match; match = head.exec(out)) {
     const open = match.index + match[0].length - 1;
     const end = closing(out, open);
-    const args = members(out.slice(open + 1, end - 1));
-    if (args.length !== 3 || !/^0(?:px)?$/.test(args[2])) break;
-    out = `${out.slice(0, match.index)}translate(${args[0]}, ${args[1]})${out.slice(end)}`;
+    const swapped = swap(members(out.slice(open + 1, end - 1)));
+    if (swapped === null) break;
+    out = `${out.slice(0, match.index)}${swapped}${out.slice(end)}`;
   }
   return out;
+}
+
+/**
+ * `translateZ(0)`, `translate3d(x, y, 0)` and `rotate3d(0, 0, n, θ)` as the
+ * moves in the plane they are.
+ */
+function inPlane(value: string): string {
+  const moved = rewriteCalls(
+    value.replace(/translateZ\(\s*0(?:px)?\s*\)/gi, 'translate(0)'),
+    'translate3d',
+    ([x, y, z, ...rest]) =>
+      rest.length === 0 && z !== undefined && /^0(?:px)?$/.test(z)
+        ? `translate(${x}, ${y})`
+        : null
+  );
+  return rewriteCalls(moved, 'rotate3d', ([x, y, z, angle, ...rest]) =>
+    rest.length === 0 &&
+    angle !== undefined &&
+    x === '0' &&
+    y === '0' &&
+    z !== undefined &&
+    /^[-+]?[\d.]+$/.test(z) &&
+    Number(z) !== 0
+      ? `rotate(${angle})`
+      : null
+  );
 }
 
 const MET = ':is(*)';
@@ -302,31 +355,41 @@ function literals(node: unknown): string[] {
   return [...classesIn(node), ...Object.values(node).flatMap(literals)];
 }
 
+type MarkupNode = { type: string; start?: number };
+
+/** Every node of parsed markup at any depth, its expressions' nodes too. */
+function nodesOf(root: unknown): MarkupNode[] {
+  if (typeof root !== 'object' || root === null) return [];
+  if (Array.isArray(root)) return root.flatMap(nodesOf);
+  const own =
+    'type' in root && typeof root.type === 'string' ? [root as MarkupNode] : [];
+  return [
+    ...own,
+    ...Object.entries(root).flatMap(([key, value]) =>
+      key === 'metadata' ? [] : nodesOf(value)
+    ),
+  ];
+}
+
 /** The snippets a file renders with `{@render name()}`, by name. */
 function renderedSnippets(
   fragment: AST.Fragment
 ): Map<string, ReadonlyArray<unknown>> {
-  const bodies = new Map<string, ReadonlyArray<unknown>>();
-  const rendered = new Set<string>();
-  const walk = (node: unknown): void => {
-    if (typeof node !== 'object' || node === null) return;
-    if (Array.isArray(node)) {
-      for (const child of node) walk(child);
-      return;
-    }
-    if ('type' in node && node.type === 'SnippetBlock') {
+  const nodes = nodesOf(fragment.nodes);
+  const rendered = new Set(
+    nodes.flatMap((node) =>
+      node.type === 'RenderTag' ? [calleeOf(node as AST.RenderTag)] : []
+    )
+  );
+  return new Map(
+    nodes.flatMap((node) => {
+      if (node.type !== 'SnippetBlock') return [];
       const block = node as AST.SnippetBlock;
-      bodies.set(block.expression.name, block.body.nodes);
-    }
-    if ('type' in node && node.type === 'RenderTag') {
-      const name = calleeOf(node as AST.RenderTag);
-      if (name) rendered.add(name);
-    }
-    for (const [key, value] of Object.entries(node))
-      if (key !== 'metadata') walk(value);
-  };
-  walk(fragment.nodes);
-  return new Map([...bodies].filter(([name]) => rendered.has(name)));
+      return rendered.has(block.expression.name)
+        ? [[block.expression.name, block.body.nodes] as const]
+        : [];
+    })
+  );
 }
 
 /** The snippet a `{@render}` calls, when it names one. */
@@ -340,13 +403,38 @@ function calleeOf(tag: AST.RenderTag): string | null {
 
 type Expression = AST.ExpressionTag['expression'];
 
+/**
+ * Whether the text beside an expression runs into it, so the two make one
+ * class (`hero__logo--{size}`, `{a}{b}`); `undefined` is the value's edge.
+ */
+function glued(before: string | undefined, after: string | undefined): boolean {
+  return (
+    (before !== undefined && !/\s$/.test(before)) ||
+    (after !== undefined && !/^\s/.test(after))
+  );
+}
+
 /** Whether a class expression can only give the classes `literals` finds. */
 function onlyLiterals(node: Expression): boolean {
   switch (node.type) {
     case 'Literal':
       return true;
-    case 'TemplateLiteral':
-      return node.expressions.every(onlyLiterals);
+    case 'Identifier':
+      // `undefined` adds no class.
+      return node.name === 'undefined';
+    case 'TemplateLiteral': {
+      // Text that runs into an expression makes a class no literal holds.
+      const text = (i: number) => node.quasis[i]?.value.cooked ?? '';
+      const last = node.expressions.length - 1;
+      return node.expressions.every(
+        (expression, i) =>
+          onlyLiterals(expression) &&
+          !glued(
+            i === 0 && text(0) === '' ? undefined : text(i),
+            i === last && text(i + 1) === '' ? undefined : text(i + 1)
+          )
+      );
+    }
     case 'ConditionalExpression':
       return onlyLiterals(node.consequent) && onlyLiterals(node.alternate);
     case 'LogicalExpression':
@@ -372,14 +460,39 @@ function onlyLiterals(node: Expression): boolean {
 
 /** What the builder could not read about an element, by element. */
 const unread = new Map<Element, string>();
-/** Each `<style>` written in markup: global CSS this test never reads. */
-const markupStyles: string[] = [];
+/** The elements whose hero layout comes from script. */
+const layoutFromScript: Element[] = [];
+/** The expressions each element's `style` attribute is built from. */
+const scriptStyles = new Map<Element, Expression[]>();
+
+/** Why an attribute hands its element to script, which may restyle it. */
+function handedOver(
+  a: AST.RegularElement['attributes'][number]
+): string | null {
+  switch (a.type) {
+    case 'SpreadAttribute':
+      return '{...spread}';
+    case 'AttachTag':
+      return '{@attach}';
+    case 'UseDirective':
+      return `use:${a.name}`;
+    case 'TransitionDirective':
+    case 'AnimateDirective':
+      return `${a.type} ${a.name}`;
+    case 'BindDirective':
+      return a.name === 'this' ? 'bind:this' : null;
+    default:
+      return null;
+  }
+}
 
 /**
  * Markup as a static DOM: every branch, every conditional class. A snippet in
- * `snippets` renders where `{@render}` places it, not where it is defined.
- * What it cannot read (a class or id from script, a spread, an action, a tag
- * from script, `{@html}`) goes in `unread`.
+ * `snippets` renders where `{@render}` places it, not where it is defined, and
+ * `<svelte:head>` renders off the page. What it cannot read about an element
+ * goes in `unread`: a class, id or hero layout from script, a class that runs
+ * into an expression, an attribute that hands it to script, a tag from
+ * script, `{@html}`.
  */
 function build(
   nodes: ReadonlyArray<unknown>,
@@ -407,15 +520,33 @@ function build(
       unread.set(parent, '{@html}');
       continue;
     }
+    if (node.type === 'SvelteHead') {
+      // No selector reaches the image through the document's head.
+      build(
+        (node as AST.SvelteHead).fragment.nodes,
+        document.createElement('head'),
+        snippets
+      );
+      continue;
+    }
+    if (node.type === 'SvelteBody' || node.type === 'SvelteDocument') {
+      const target =
+        node.type === 'SvelteBody' ? document.body : document.documentElement;
+      for (const a of (node as AST.SvelteBody | AST.SvelteDocument)
+        .attributes) {
+        const why = handedOver(a);
+        if (why) unread.set(target, why);
+      }
+      continue;
+    }
     if (node.type === 'RegularElement' || node.type === 'SvelteElement') {
       const el = node as AST.RegularElement | AST.SvelteElement;
       const tag = el.type === 'RegularElement' ? el.name : literalTag(el);
-      if (tag === 'style') markupStyles.push(`<style> at offset ${el.start}`);
       const dom = parent.appendChild(document.createElement(tag ?? 'div'));
       if (tag === null) unread.set(dom, '<svelte:element> tag from script');
       for (const a of el.attributes) {
-        if (a.type === 'SpreadAttribute') unread.set(dom, '{...spread}');
-        if (a.type === 'UseDirective') unread.set(dom, `use:${a.name}`);
+        const why = handedOver(a);
+        if (why) unread.set(dom, why);
         if (a.type === 'ClassDirective') dom.classList.add(a.name);
         if (a.type === 'StyleDirective')
           dom.setAttribute(
@@ -429,10 +560,31 @@ function build(
             ? [p.expression]
             : []
         );
+        const textAt = (i: number) => {
+          const part = parts[i];
+          return typeof part === 'object' && part.type === 'Text'
+            ? part.data
+            : '';
+        };
+        const runsIn = parts.some(
+          (part, i) =>
+            typeof part === 'object' &&
+            part.type === 'ExpressionTag' &&
+            glued(
+              i === 0 ? undefined : textAt(i - 1),
+              i === parts.length - 1 ? undefined : textAt(i + 1)
+            )
+        );
         if (a.name === 'id' && fromScript.length > 0)
           unread.set(dom, 'id from script');
         if (a.name === 'class' && !fromScript.every(onlyLiterals))
           unread.set(dom, 'class from script');
+        if (a.name === 'class' && runsIn)
+          unread.set(dom, 'class runs into an expression');
+        if (a.name === 'data-hero-layout' && fromScript.length > 0)
+          layoutFromScript.push(dom);
+        if (a.name === 'style' && fromScript.length > 0)
+          scriptStyles.set(dom, fromScript);
         const text = parts
           .map((p) =>
             typeof p === 'object' && p.type === 'Text' ? p.data : ''
@@ -487,6 +639,10 @@ build(
   ])
 );
 const wrapper = document.querySelector('.org-layout');
+// Only the org layout's hero layout is driven: one from script elsewhere is
+// a condition this DOM cannot decide.
+for (const el of layoutFromScript)
+  if (el !== wrapper) unread.set(el, 'hero layout from script');
 const logo = document.querySelector('img.hero__logo');
 const title = document.querySelector('.hero__title');
 
@@ -504,8 +660,35 @@ function matches(el: Element, selector: string, rule: CssRule): boolean {
   }
 }
 
-/** Every stylesheet under `$lib`: global, so its keyframes and registrations reach any page. */
-const SHEETS = libSheets();
+/** What a node is when it can write a stylesheet this test never reads. */
+function writesCss(node: MarkupNode): string | null {
+  if (node.type === 'HtmlTag') return '{@html}';
+  if (
+    node.type === 'RegularElement' &&
+    (node as AST.RegularElement).name.toLowerCase() === 'style'
+  )
+    return '<style>';
+  if (node.type !== 'SvelteElement') return null;
+  const tag = literalTag(node as AST.SvelteElement);
+  if (tag === null) return '<svelte:element> tag from script';
+  return tag.toLowerCase() === 'style' ? '<style>' : null;
+}
+
+/** Markup in the page or the layout that can write global CSS, by file. */
+const globalCss = (
+  [
+    ['+page.svelte', page],
+    ['+layout.svelte', layout],
+  ] as const
+).flatMap(([file, fragment]) =>
+  nodesOf(fragment).flatMap((node) => {
+    const what = writesCss(node);
+    return what ? [`${file}: ${what} at offset ${node.start}`] : [];
+  })
+);
+
+/** Every stylesheet under `src`: global, so its keyframes and registrations reach any page. */
+const SHEETS = sourceTexts('.css');
 const keyframes = new Map<string, CssRule[]>();
 for (const rule of [...rules, ...SHEETS.flatMap(cssRules)])
   for (const at of rule.within) {
@@ -535,9 +718,10 @@ function reaching(
 
 /**
  * The frames of the `@keyframes` a rule's animations run, in this page, the
- * layout or a global sheet. A name it cannot find, or one held in `var()`,
- * fails rather than counting as no frames; a shorthand's other `var()`s are
- * its timings.
+ * layout or a global sheet. A name it cannot find, a layer whose name a
+ * function may hold (`var()`, `attr()`, `if()`), and the parent's frames
+ * taken by `inherit` fail rather than counting as no frames; a layer's math
+ * and easing functions are its timings.
  */
 function framesOf(rule: CssRule): CssRule[] {
   const names = [
@@ -545,29 +729,33 @@ function framesOf(rule: CssRule): CssRule[] {
     'animation-name',
     '-webkit-animation',
     '-webkit-animation-name',
-  ].flatMap((property) =>
-    flatten(withoutImportant(rule.decls.get(property) ?? ''))
-      .split(',')
-      .flatMap((layer) => {
-        // A keyword names frames only when frames carry that name.
-        const words = layer
-          .trim()
-          .split(/\s+/)
-          .filter(
-            (word) =>
-              word !== '' &&
-              (keyframes.has(word) ||
-                !ANIMATION_WORDS.has(word.toLowerCase())) &&
-              !/^[-+]?[\d.]/.test(word)
-          );
-        // A function is a timing (`calc()`, `steps()`); a name never is one.
-        // Only a `var()` can hold the name.
-        const named = words.filter((word) => !word.endsWith('#'));
-        if (named.length === 0 && words.some((word) => /^var#$/i.test(word)))
-          throw new Error(`${where(rule)} names its frames in var(): ${layer}`);
-        return named;
-      })
-  );
+  ].flatMap((property) => {
+    const value = flatten(withoutImportant(rule.decls.get(property) ?? ''));
+    if (value.trim().toLowerCase() === 'inherit')
+      throw new Error(`${where(rule)} runs its parent's frames: ${property}`);
+    return value.split(',').flatMap((layer) => {
+      // A keyword names frames only when frames carry that name.
+      const words = layer
+        .trim()
+        .split(/\s+/)
+        .filter(
+          (word) =>
+            word !== '' &&
+            (keyframes.has(word) || !ANIMATION_WORDS.has(word.toLowerCase())) &&
+            !/^[-+]?[\d.]/.test(word)
+        );
+      // A name is never a function; any function but a timing may hold one.
+      const idents = words.filter((word) => !word.endsWith('#'));
+      if (
+        idents.length === 0 &&
+        words.some((word) => word.endsWith('#') && !TIMING_FN.test(word))
+      )
+        throw new Error(
+          `${where(rule)} may name its frames in a function: ${layer}`
+        );
+      return idents;
+    });
+  });
   return names.flatMap((name) => {
     const frames = keyframes.get(name);
     if (!frames)
@@ -585,7 +773,7 @@ function registrations(
   return nodes.flatMap((node) => {
     if (node.type === 'Declaration') return [];
     const own =
-      node.type === 'Atrule' && node.name === 'property'
+      node.type === 'Atrule' && node.name.toLowerCase() === 'property'
         ? [node.prelude.replace(/\/\*[\s\S]*?\*\//g, '').trim()]
         : [];
     return [...own, ...registrations(node.block?.children ?? [])];
@@ -635,6 +823,13 @@ describe('the hero logo', () => {
     expect(unscaled('transform', 'none !important')).toBe(true);
     expect(unscaled('rotate', '3deg')).toBe(true);
     expect(unscaled('rotate', 'y 60deg')).toBe(false);
+    expect(unscaled('rotate', '3deg z')).toBe(true);
+    expect(unscaled('rotate', '3deg 0 0 1')).toBe(true);
+    expect(unscaled('rotate', '60deg y')).toBe(false);
+    expect(unscaled('transform', 'rotate3d(0, 0, 1, 3deg)')).toBe(true);
+    expect(unscaled('transform', 'rotate3d(0, 1, 0, 3deg)')).toBe(false);
+    expect(unscaled('translate', 'if(media(width > 0): 0 0 50px)')).toBe(false);
+    expect(unscaled('rotate', 'if(media(width > 0): y 60deg)')).toBe(false);
   });
 
   test('every rule that can reach it sits in an at-rule a browser applies', () => {
@@ -702,18 +897,18 @@ describe('the hero logo', () => {
 
   test('nothing registers what its height reads, and nothing around it carries an inline style', () => {
     // A registered initial value replaces every fallback; `inherits: false`
-    // cuts the dial off at the element that sets it.
-    const sheets = [
-      ...[PAGE, LAYOUT].map(
-        (path) =>
-          parse(readFileSync(path, 'utf8'), { modern: true }).css?.children ??
-          []
-      ),
+    // cuts the dial off at the element that sets it. Svelte leaves
+    // `@property` unscoped, so a component's registration is global too.
+    const registered = [
       ...SHEETS.map((text) => parseCss(text).children),
-    ];
-    expect(
-      sheets.flatMap(registrations).filter((name) => DIAL_INPUTS.test(name))
-    ).toEqual([]);
+      ...sourceTexts('.svelte')
+        .filter((text) => /@property/i.test(text))
+        .map((text) => parse(text, { modern: true }).css?.children ?? []),
+    ].flatMap(registrations);
+    // The components' registrations are read: a block's, and the page's.
+    expect(registered).toContain('--_benefit-figure-col');
+    expect(registered).toContain('--_hero-ink');
+    expect(registered.filter((name) => DIAL_INPUTS.test(name))).toEqual([]);
     // The org layout carries the brand's inputs, the dial among them, and
     // nothing that scales; nothing between it and the image may set a style
     // of its own.
@@ -726,6 +921,30 @@ describe('the hero logo', () => {
           (DIAL_INPUTS.test(name) && !BRAND_INPUTS.has(name))
       );
     expect(carried).toEqual([]);
+    // Its one style from script joins what the two mappers make of the org's
+    // token overrides: `--brand-` and a brand key, or `--color-` and any key.
+    const fromScript = (wrapper && scriptStyles.get(wrapper)) || [];
+    expect(
+      fromScript.map((e) => (e.type === 'Identifier' ? e.name : e.type))
+    ).toEqual(['serverTokenOverrideStyle']);
+    const overrides = Object.fromEntries(
+      [...BRAND_PREFIX_KEYS, 'space-48', 'density'].map((key) => [key, '1'])
+    );
+    const injected = Object.keys({
+      ...tokenOverridesToCssVars(overrides),
+      ...darkTokenOverridesToCssVars(overrides),
+    });
+    expect(injected).toContain('--brand-hero-logo-scale');
+    expect(
+      injected.filter((name) => !/^--(?:brand|color)-/.test(name))
+    ).toEqual([]);
+    expect(
+      injected.filter(
+        (name) =>
+          (DIAL_INPUTS.test(name) || SCALES.test(name)) &&
+          !BRAND_INPUTS.has(name)
+      )
+    ).toEqual([]);
     expect(
       around
         .filter((el) => el !== wrapper && el.getAttribute('style') !== null)
@@ -750,7 +969,8 @@ describe('the hero logo', () => {
         return why ? [`${named(el)}: ${why}`] : [];
       })
     ).toEqual([]);
-    expect(markupStyles).toEqual([]);
+    // CSS the markup writes reaches the image from wherever it is written.
+    expect(globalCss).toEqual([]);
   });
 
   test('takes its base from the spacing scale, 192px × density in logo-hero from md up', () => {
