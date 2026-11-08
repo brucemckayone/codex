@@ -387,9 +387,9 @@ set, and is never refunded through Stripe again. Two things set it:
   and the late win lifts the 14-day window. That is owner decision 5's rule,
   applied in review cycle 2.
 
-Neither overwrites a date already set. The form, the preview and the route
-refuse it with 422 `REFUNDED_OUTSIDE_STRIPE`, whatever the window says, and
-nothing lifts its window. The detail's `refundable.blocked` is
+Neither overwrites a date already set. The form shows the block; the preview
+and the route refuse it with 422 `REFUNDED_OUTSIDE_STRIPE`, whatever the window
+says, and nothing lifts its window. The detail's `refundable.blocked` is
 `refunded_outside_stripe`, with `refundedOutsideStripeOn`, and the charge
 card's amount reads "refunded outside Stripe on {date}", since Stripe lists no
 standing refund for it.
