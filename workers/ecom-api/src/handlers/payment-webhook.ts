@@ -1190,24 +1190,42 @@ async function accessRestoredNotice(
   );
   return {
     userId,
-    mail: {
+    mail: accessRestoredMail({
       to,
-      templateName: 'purchase-access-restored',
-      category: 'transactional',
+      name: charge.billing_details?.name,
       userId,
-      data: {
-        userName: charge.billing_details?.name || 'there',
-        contentTitle: email.contentTitle,
-        accessSentence: email.isCourse
-          ? 'so the course is open to you again.'
-          : "so it's back in your library and ready to watch.",
-        amount: `£${(email.amountCents / 100).toFixed(2)}`,
-        paidOn: new Date(email.paidAt).toLocaleDateString('en-GB', {
-          timeZone: 'Europe/London',
-        }),
-        itemUrl,
-        buttonLabel: email.isCourse ? 'Go to the course' : 'Watch now',
-      },
+      email,
+      itemUrl,
+    }),
+  };
+}
+
+/** The `purchase-access-restored` email's send, from its facts and link. */
+function accessRestoredMail(facts: {
+  to: string;
+  name: string | null | undefined;
+  userId: string;
+  email: NonNullable<LateWinRestore['email']>;
+  itemUrl: string;
+}): SendEmailToWorkerParams {
+  const { email } = facts;
+  return {
+    to: facts.to,
+    templateName: 'purchase-access-restored',
+    category: 'transactional',
+    userId: facts.userId,
+    data: {
+      userName: facts.name || 'there',
+      contentTitle: email.contentTitle,
+      accessSentence: email.isCourse
+        ? 'so the course is open to you again.'
+        : "so it's back in your library and ready to watch.",
+      amount: `£${(email.amountCents / 100).toFixed(2)}`,
+      paidOn: new Date(email.paidAt).toLocaleDateString('en-GB', {
+        timeZone: 'Europe/London',
+      }),
+      itemUrl: facts.itemUrl,
+      buttonLabel: email.isCourse ? 'Go to the course' : 'Watch now',
     },
   };
 }
