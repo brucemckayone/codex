@@ -262,7 +262,9 @@ describe("DialogToolbar's cap", () => {
   // A later rule of the same weight (a `[data-direction='column']` one,
   // say) setting any of these, or a shorthand of one, would undo the cap
   // or the band with every test above green (review c6). So the rules that
-  // set one are exactly these, each setting exactly these.
+  // set one are exactly these, each setting exactly these. A logical name
+  // shares its physical twin's cascade slot, so each -y and -top longhand
+  // comes with its -block one (review fu-focus-2).
   it('sets the cap and the band only in that rule', () => {
     const BAND = [
       '--toolbar-ring',
@@ -270,8 +272,10 @@ describe("DialogToolbar's cap", () => {
       'max-block-size',
       'overflow',
       'overflow-y',
+      'overflow-block',
       'overscroll-behavior',
       'overscroll-behavior-y',
+      'overscroll-behavior-block',
       'margin',
       'margin-block',
       'margin-block-start',

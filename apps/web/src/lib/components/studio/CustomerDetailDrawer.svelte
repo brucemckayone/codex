@@ -97,17 +97,25 @@
     });
   });
 
+  // Bumped by each load and by the close, so only the newest load's answer
+  // lands. Open A, close it, open B: A's late answer showed A in B's drawer,
+  // its `finally` ended B's loading early, and Grant Access then granted to
+  // A while the grants list and Revoke acted on B (Codex-uhhka).
+  let loadRun = 0;
+
   async function loadCustomer(id: string) {
+    const run = ++loadRun;
     loading = true;
     error = null;
     customer = null;
 
     try {
-      customer = await getCustomerDetail({ customerId: id, organizationId: orgId });
+      const details = await getCustomerDetail({ customerId: id, organizationId: orgId });
+      if (run === loadRun) customer = details;
     } catch {
-      error = m.studio_customers_drawer_error();
+      if (run === loadRun) error = m.studio_customers_drawer_error();
     } finally {
-      loading = false;
+      if (run === loadRun) loading = false;
     }
   }
 
@@ -115,6 +123,9 @@
     open = isOpen;
     onOpenChange?.(isOpen);
     if (!isOpen) {
+      // The close drops a load still running, and its loading state.
+      loadRun += 1;
+      loading = false;
       customer = null;
       error = null;
       grantDialogOpen = false;
@@ -162,7 +173,11 @@
       revokeFailedId = grant.id;
       return;
     }
-    revokedIndex = grants?.findIndex((g) => g.id === grant.id) ?? 0;
+    // Only while the confirm that asked is still the open one. The confirm
+    // can be dismissed while it runs, and another grant's opened since: its
+    // Cancel then sent focus to this grant's place, not home.
+    if (revokeDialogOpen && revokeTarget?.id === grant.id)
+      revokedIndex = grants?.findIndex((g) => g.id === grant.id) ?? 0;
     await refreshGrants();
   }
 

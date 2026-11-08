@@ -28,13 +28,16 @@ vi.mock(
   '$lib/remote/admin.remote',
   () => import('./__fixtures__/admin-remote.mock.svelte')
 );
-vi.mock('$lib/remote/content.remote', () => ({
-  listContent: vi.fn(async () => ({ items: [] })),
-}));
+// The picker GrantAccessDialog holds reads it, so a grant can be made.
+vi.mock(
+  '$lib/remote/content.remote',
+  () => import('./__fixtures__/content-remote.mock.svelte')
+);
 
 import {
   getCustomerDetail,
   getCustomerGrants,
+  grantContentAccess,
   grantsPage,
   refreshGrants,
   reset,
@@ -42,6 +45,11 @@ import {
   setGrants,
   setGrantsError,
 } from './__fixtures__/admin-remote.mock.svelte';
+import {
+  contentItem,
+  reset as resetContent,
+  setContent,
+} from './__fixtures__/content-remote.mock.svelte';
 import CustomerDetailDrawer from './CustomerDetailDrawer.svelte';
 
 const ORG_ID = '00000000-0000-4000-8000-000000000001';
@@ -97,10 +105,12 @@ const MOBILITY: CustomerGrant = {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 let component: ReturnType<typeof mount> | null = null;
@@ -155,6 +165,7 @@ const clean = (el: Element | null | undefined) =>
 
 beforeEach(() => {
   reset();
+  resetContent();
   getCustomerDetail.mockResolvedValue(ELLIE);
 });
 
@@ -220,6 +231,125 @@ describe('loading', () => {
     expect(clean(grantsSection())).not.toContain(
       m.studio_customers_grants_empty()
     );
+  });
+});
+
+// Ellie's drawer opens, an Escape closes it before her details land, and
+// the page opens Tom's. Ellie's late answer wrote her into Tom's drawer,
+// ended his loading early, and pointed Grant Access at her (Codex-uhhka).
+// Both orders of the two answers.
+describe("a second customer, opened before the first one's details land", () => {
+  const TOM: CustomerDetails = {
+    ...ELLIE,
+    userId: 'tom',
+    email: 'tom.reed@example.com',
+    name: 'Tom Reed',
+  };
+  const PAID = contentItem('c-paid', 'Kettlebell Foundations', {
+    priceCents: 1500,
+  });
+  let answers: Record<string, ReturnType<typeof deferred<CustomerDetails>>>;
+
+  const profileName = () => clean(drawer()?.querySelector('.profile-name'));
+  /** The answers' continuations, and what they render. */
+  const settle = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+  };
+
+  async function openEllieThenTom() {
+    answers = { ellie: deferred(), tom: deferred() };
+    getCustomerDetail.mockImplementation(
+      ({ customerId }: { customerId: string }) => answers[customerId].promise
+    );
+    const props = $state({
+      open: true,
+      customerId: ELLIE.userId as string | null,
+      orgId: ORG_ID,
+    });
+    component = mount(CustomerDetailDrawer, { target: document.body, props });
+    flushSync();
+
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    flushSync();
+    props.open = false;
+    flushSync();
+    await vi.waitFor(() => expect(drawer()).toBeNull());
+
+    props.customerId = TOM.userId;
+    props.open = true;
+    flushSync();
+    expect(getCustomerDetail).toHaveBeenCalledTimes(2);
+    expect(drawer()?.querySelector('.drawer-loading')).toBeTruthy();
+  }
+
+  /** Grant Access grants to `who`, the customer the drawer shows. */
+  async function grantGoesTo(who: CustomerDetails) {
+    setContent([PAID]);
+    button(
+      drawer() as HTMLElement,
+      m.studio_customers_drawer_grant_access()
+    )?.click();
+    flushSync();
+    document.querySelector<HTMLButtonElement>('button.select-trigger')?.click();
+    flushSync();
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((o) => clean(o) === PAID.title)
+      ?.click();
+    flushSync();
+    [...document.querySelectorAll<HTMLButtonElement>('button[type="submit"]')]
+      .find((b) => clean(b) === m.studio_customers_grant_confirm())
+      ?.click();
+    flushSync();
+
+    await vi.waitFor(() => expect(grantContentAccess).toHaveBeenCalledTimes(1));
+    expect(grantContentAccess).toHaveBeenCalledWith({
+      customerId: who.userId,
+      contentId: PAID.id,
+      organizationId: ORG_ID,
+    });
+  }
+
+  test("the first answer, landing while the second loads, is dropped: Tom's drawer keeps loading", async () => {
+    await openEllieThenTom();
+
+    answers.ellie.resolve(ELLIE);
+    await settle();
+    expect(drawer()?.querySelector('.drawer-loading')).toBeTruthy();
+    expect(clean(drawer())).not.toContain(ELLIE.email);
+
+    answers.tom.resolve(TOM);
+    await vi.waitFor(() => expect(profileName()).toBe('Tom Reed'));
+    expect(clean(drawer())).not.toContain(ELLIE.email);
+    await grantGoesTo(TOM);
+  });
+
+  test('the first answer, landing after the second, is dropped: the drawer stays on Tom', async () => {
+    await openEllieThenTom();
+
+    answers.tom.resolve(TOM);
+    await vi.waitFor(() => expect(profileName()).toBe('Tom Reed'));
+    answers.ellie.resolve(ELLIE);
+    await settle();
+
+    expect(profileName()).toBe('Tom Reed');
+    expect(clean(drawer())).not.toContain(ELLIE.email);
+    await grantGoesTo(TOM);
+  });
+
+  test("the first load's failure, landing while the second loads, shows no error", async () => {
+    await openEllieThenTom();
+
+    answers.ellie.promise.catch(() => {});
+    answers.ellie.reject(new Error('load failed'));
+    await settle();
+    expect(drawer()?.querySelector('.drawer-error')).toBeNull();
+    expect(drawer()?.querySelector('.drawer-loading')).toBeTruthy();
+
+    answers.tom.resolve(TOM);
+    await vi.waitFor(() => expect(profileName()).toBe('Tom Reed'));
   });
 });
 
@@ -510,5 +640,66 @@ describe('focus after a revoke', () => {
     expect(refreshGrants).toHaveBeenCalledTimes(1);
     expect(getCustomerDetail).toHaveBeenCalledTimes(1);
     expect(getCustomerGrants).toHaveBeenCalledTimes(1);
+  });
+
+  // A busy confirm can be dismissed (ConfirmDialog's session counter). The
+  // revoke's answer marked the confirm open WHEN IT LANDED, another grant's,
+  // so that one's Cancel sent focus to the revoked grant's place, not home
+  // (review fu-focus-2).
+  test("an Escape during a revoke, then another grant's confirm: its Cancel still goes home", async () => {
+    const YOGA = {
+      ...MOBILITY,
+      id: `${MOBILITY.id.slice(0, -1)}4`,
+      contentTitle: 'Yoga Basics',
+    };
+    const PILATES = {
+      ...MOBILITY,
+      id: `${MOBILITY.id.slice(0, -1)}5`,
+      contentTitle: 'Pilates Flow',
+    };
+    setGrants(grantsPage([SLEEP, MOBILITY, YOGA, PILATES]));
+    refreshGrants.mockImplementation(async () =>
+      setGrants(grantsPage([SLEEP, MOBILITY, PILATES, gone(YOGA)]))
+    );
+    const answer = deferred<null>();
+    revokeCustomerGrant.mockReturnValue(answer.promise);
+    mountDrawer();
+    await vi.waitFor(() => expect(rows()).toHaveLength(4));
+
+    // Yoga's revoke starts, and its confirm is dismissed while it runs.
+    revokeButton(YOGA)?.focus();
+    revokeButton(YOGA)?.click();
+    flushSync();
+    const first = confirmDialog() as HTMLElement;
+    await focusIn(first);
+    button(first, m.studio_customers_grants_revoke_confirm())?.click();
+    flushSync();
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    flushSync();
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+    // Home first, as the close takes it there a moment later.
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(YOGA))
+    );
+
+    // Mobility's confirm opens, and then Yoga's revoke answers.
+    revokeButton(MOBILITY)?.focus();
+    revokeButton(MOBILITY)?.click();
+    flushSync();
+    const second = confirmDialog() as HTMLElement;
+    await focusIn(second);
+    answer.resolve(null);
+    await vi.waitFor(() =>
+      expect(row(YOGA.contentTitle).dataset.state).toBe('revoked')
+    );
+
+    button(second, m.common_cancel())?.click();
+    flushSync();
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(MOBILITY))
+    );
   });
 });

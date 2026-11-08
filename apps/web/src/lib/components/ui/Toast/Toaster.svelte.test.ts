@@ -373,6 +373,7 @@ describe('Toaster · action', () => {
 
 type CssNode = {
   type: string;
+  name?: string;
   property?: string;
   value?: string;
   prelude?: { start: number; end: number } | string;
@@ -384,10 +385,12 @@ type CssNode = {
 // the toasts moved 15px right while it was open (Codex-vlphc review G4-U4).
 describe('Toaster · scroll lock', () => {
   // Read with svelte's own parser, which drops the comments. Every rule
-  // that names `.toaster` counts, in an at-rule too, and every property
-  // that sets its right edge: a later `right`, an `inset`, an
-  // `inset-inline` or `inset-inline-end`, or a `.toaster:not(...)` rule
-  // would win over the padded one (review G5-C-N2, c6).
+  // that names `.toaster` counts, in an at-rule too, and so does every rule
+  // or at-rule nested in one (`&:not(...)`, `@media`), whose own prelude
+  // needn't name it. And every property that sets its right edge: a later
+  // `right`, an `inset`, an `inset-inline` or `inset-inline-end`, or a
+  // `.toaster:not(...)` rule would win over the padded one (review G5-C-N2,
+  // c6, fu-focus-2).
   test('the toasts’ right edge adds the padding the scroll lock publishes', () => {
     const source = readFileSync(
       join(import.meta.dirname, 'Toaster.svelte'),
@@ -395,24 +398,34 @@ describe('Toaster · scroll lock', () => {
     );
     const EDGE = ['right', 'inset', 'inset-inline', 'inset-inline-end'];
     const edges: string[] = [];
-    const visit = (nodes: CssNode[]) => {
+    /** `within`: the path of the `.toaster` rule these nodes are nested in. */
+    const visit = (nodes: CssNode[], within: string | null) => {
       for (const node of nodes) {
-        const selector =
+        const own =
           node.type === 'Rule' && typeof node.prelude === 'object'
             ? source.slice(node.prelude.start, node.prelude.end).trim()
-            : '';
-        if (/\.toaster(?![\w-])/.test(selector))
+            : node.type === 'Atrule'
+              ? `@${node.name} ${String(node.prelude ?? '').trim()}`
+              : '';
+        const path =
+          within !== null
+            ? `${within} ${own}`
+            : /\.toaster(?![\w-])/.test(own)
+              ? own
+              : null;
+        if (path !== null)
           for (const d of node.block?.children ?? [])
             if (d.type === 'Declaration' && EDGE.includes(d.property ?? ''))
               edges.push(
-                `${selector} { ${d.property}: ${(d.value ?? '').replace(/\s+/g, ' ').trim()} }`
+                `${path} { ${d.property}: ${(d.value ?? '').replace(/\s+/g, ' ').trim()} }`
               );
-        visit(node.block?.children ?? []);
+        visit(node.block?.children ?? [], path);
       }
     };
     visit(
       (parse(source, { modern: true }).css?.children ??
-        []) as unknown as CssNode[]
+        []) as unknown as CssNode[],
+      null
     );
 
     expect(edges).toEqual([
