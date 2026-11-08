@@ -200,6 +200,7 @@
       {:else if filter.type === 'search'}
         <form
           class="filter-bar__search"
+          data-field-box
           onsubmit={(e) => { e.preventDefault(); handleSearchSubmit(filter); }}
         >
           <label class="filter-bar__sr-only" for="filter-bar-search-{filter.key}">
@@ -346,9 +347,11 @@
     transition: var(--transition-colors);
   }
 
-  .filter-bar__search:focus-within {
-    border-color: var(--color-interactive);
-  }
+  /* Its focus cue is base.css's `[data-field-box]` rule: the border turns
+     --color-border-focus, which an org brand holds to 3:1 against its
+     ground. This rule drew it in --color-interactive, the brand's colour as
+     picked: 1.47:1 for a pale yellow brand, 1.83:1 for a navy one on a dark
+     page (Codex-c5prp). */
 
   .filter-bar__search-input {
     flex: 1;

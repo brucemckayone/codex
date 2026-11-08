@@ -25,21 +25,6 @@ import { describe, expect, it } from 'vitest';
 const STYLES = dirname(fileURLToPath(import.meta.url));
 const SRC = dirname(dirname(STYLES));
 
-/**
- * Borderless fields that pass today only because of where they are drawn,
- * not because they carry a cue that holds. Each draws its box's border in
- * --color-interactive, the brand's colour as picked: 4.93 to 5.75:1 on the
- * platform, but 1.47:1 on a pale yellow brand and 1.83:1 on a navy one on a
- * dark page. There the brand engine's halo, held to 3.06:1 against the
- * ground, carries the focus instead (3.67 to 3.85:1, measured in Chromium
- * and WebKit). Moving one to `data-field-box` means taking it off this list.
- */
-const INTERACTIVE_BORDER = new Set([
-  'lib/components/ui/FilterBar/FilterBar.svelte',
-  'lib/components/studio/content-list/ContentListCommandBar.svelte',
-  'lib/components/studio/media-library/MediaLibraryToolbar.svelte',
-]);
-
 /** Inputs that take no text, so draw no field. */
 const NOT_A_FIELD = new Set([
   'hidden',
@@ -280,6 +265,18 @@ const OWN_CUE = (d: Declared): boolean =>
     (/^border(-[a-z]+)?(-color)?$/.test(d.property) &&
       FOCUS_TOKEN.test(d.value)));
 
+/**
+ * A rule that draws a border on the element it styles, on some side: what
+ * base.css's `[data-field-box]` rule can colour. A border set to none, 0,
+ * hidden or transparent draws nothing to colour.
+ */
+const DRAWS_BORDER = (d: Declared): boolean =>
+  /^border(-(top|right|bottom|left)|-(block|inline)(-(start|end))?)?$/.test(
+    d.property
+  ) &&
+  !/^(none|0(px)?|hidden)(\s|$)/.test(d.value) &&
+  !/\btransparent\b/.test(d.value);
+
 type Cue = 'box' | 'own' | 'none';
 
 /** Every borderless text field in one component, and the cue it keeps. */
@@ -298,9 +295,17 @@ function census(source: string): { field: string; cue: Cue }[] {
     const chain = [...around, field];
     if (!css.some((d) => BORDERLESS(d) && styles(d, chain))) continue;
     const boxes = chain.map((_, i) => chain.slice(0, i + 1));
+    // base.css's rule is `[data-field-box]:has(… :focus)`: it reaches a box
+    // AROUND the field, never the field itself, and only colours a border
+    // that box draws.
+    const box = around.some(
+      (el, i) =>
+        el.attrs.has('data-field-box') &&
+        css.some((d) => DRAWS_BORDER(d) && styles(d, around.slice(0, i + 1)))
+    );
     out.push({
       field: `<${field.name} class="${[...field.classes].join(' ')}">`,
-      cue: chain.some((el) => el.attrs.has('data-field-box'))
+      cue: box
         ? 'box'
         : css.some((d) => OWN_CUE(d) && boxes.some((c) => styles(d, c)))
           ? 'own'
@@ -347,6 +352,27 @@ describe('the gate reads a component as the browser draws it', () => {
         `<div class="row" data-field-box><input class="field" /></div>${style}`
       )
     ).toEqual([]);
+  });
+
+  it('does not pass a mark the base.css rule cannot reach or colour', () => {
+    // On the field itself: `:has()` only matches a box around it.
+    expect(
+      uncued(
+        `<div class="row"><input class="field" data-field-box /></div>${style}`
+      )
+    ).toEqual(['<input class="field">']);
+    // On a box around it that draws no border.
+    expect(
+      uncued(
+        `<section data-field-box><div class="row"><input class="field" /></div></section>${style}`
+      )
+    ).toEqual(['<input class="field">']);
+    // On a box whose border is turned off.
+    expect(
+      uncued(
+        `<div class="row" data-field-box><input class="field" /></div>${style.replace('.row { border-bottom: 1px solid var(--color-border); }', '.row { border: none; }')}`
+      )
+    ).toEqual(['<input class="field">']);
   });
 
   it('follows a snippet to where it is rendered', () => {
@@ -433,16 +459,45 @@ describe('every borderless field keeps a focus cue that holds 3:1 (Codex-c5prp)'
     ).toEqual(['border-color: var(--color-border-focus)']);
   });
 
-  it('no component draws a borderless field with only the halo', () => {
-    const left = found
-      .filter((f) => !INTERACTIVE_BORDER.has(f.file))
-      .flatMap((f) => uncued(f.source).map((field) => `${f.file}: ${field}`));
-    expect(left).toEqual([]);
+  it('an engine without :has() keeps the cue through :focus-within', () => {
+    // Such an engine drops the `:has()` rule whole, and SearchPill and the
+    // three studio search boxes, which turn their halo off, would show none.
+    const source = readFileSync(join(STYLES, 'base.css'), 'utf8');
+    type At = {
+      type: string;
+      name?: string;
+      prelude: string | { start: number; end: number };
+      block?: { children: At[] } | null;
+      property?: string;
+      value?: string;
+    };
+    const fallback = (parseCss(source).children as unknown as At[]).filter(
+      (r) =>
+        r.type === 'Atrule' &&
+        r.name === 'supports' &&
+        r.prelude === 'not selector(:has(*))'
+    );
+    expect(fallback).toHaveLength(1);
+    expect(
+      (fallback[0].block?.children ?? []).map((r) => [
+        typeof r.prelude === 'string'
+          ? r.prelude
+          : source.slice(r.prelude.start, r.prelude.end),
+        r.block?.children.map((d) => `${d.property}: ${d.value}`),
+      ])
+    ).toEqual([
+      [
+        '[data-field-box][data-field-box]:focus-within',
+        ['border-color: var(--color-border-focus)'],
+      ],
+    ]);
   });
 
-  it('every field on the --color-interactive list is still drawn that way', () => {
-    for (const file of INTERACTIVE_BORDER)
-      expect(cues(file), file).toContain('none');
+  it('no component draws a borderless field with only the halo', () => {
+    const left = found.flatMap((f) =>
+      uncued(f.source).map((field) => `${f.file}: ${field}`)
+    );
+    expect(left).toEqual([]);
   });
 
   it('still reads every borderless field the census of 2026-11-07 found', () => {
@@ -465,14 +520,14 @@ describe('every borderless field keeps a focus cue that holds 3:1 (Codex-c5prp)'
       'box',
     ]);
     expect(cues('lib/components/ui/FilterBar/FilterBar.svelte')).toEqual([
-      'none',
+      'box',
     ]);
     expect(
       cues('lib/components/studio/content-list/ContentListCommandBar.svelte')
-    ).toEqual(['none']);
+    ).toEqual(['box']);
     expect(
       cues('lib/components/studio/media-library/MediaLibraryToolbar.svelte')
-    ).toEqual(['none']);
+    ).toEqual(['box']);
     expect(
       cues('lib/components/brand-editor/color-picker/ColorInput.svelte')
     ).toEqual(['own']);

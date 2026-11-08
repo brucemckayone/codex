@@ -304,6 +304,13 @@ select:focus {
   border-color: var(--color-border-focus);
 }
 
+/* Without `:has()` the rule above is dropped whole; doubled, this outranks the box's (0,2,0) border. */
+@supports not selector(:has(*)) {
+  [data-field-box][data-field-box]:focus-within {
+    border-color: var(--color-border-focus);
+  }
+}
+
 input:disabled,
 textarea:disabled,
 select:disabled {
