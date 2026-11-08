@@ -105,9 +105,13 @@ function ledger(
       },
     ])
   );
-  const markApplied = async (id: string) => {
+  // Marked only while the row still has the status acted on (§4.8).
+  const markApplied = async (id: string, acted: { status: string }) => {
     const row = rows.get(id);
-    if (row && !row.outcomeAppliedAt) row.outcomeAppliedAt = new Date();
+    if (row && row.status !== acted.status) return 'moved';
+    if (!row || row.outcomeAppliedAt) return 'already_marked';
+    row.outcomeAppliedAt = new Date();
+    return 'marked';
   };
   const purchase = {
     findDisputeRecords: vi.fn(async (ids: string[]) =>
@@ -176,7 +180,9 @@ function ledger(
       }
     ),
     markDisputeOutcomeApplied: vi.fn(markApplied),
-    settleWonDispute: vi.fn(markApplied),
+    settleWonDispute: vi.fn(async (id: string) => {
+      await markApplied(id, { status: 'won' });
+    }),
     processDispute: vi.fn().mockResolvedValue({
       userId: 'user_1',
       orgId: 'org_1',
@@ -412,7 +418,9 @@ describe('runDisputeReconcile', () => {
     await run();
 
     expect(rows.get('dp_inq')?.status).toBe('warning_closed');
-    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_inq');
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_inq', {
+      status: 'warning_closed',
+    });
     expect(
       subscription.reverseSubscriptionPayoutsForCharge
     ).not.toHaveBeenCalled();
@@ -563,7 +571,9 @@ describe('runDisputeReconcile', () => {
 
     await reconcile({ purchase, stripe }).run();
 
-    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_tie');
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_tie', {
+      status: 'warning_closed',
+    });
   });
 
   it('a lost dispute whose outcome step failed, older than the window, is applied once; a second run does nothing', async () => {
@@ -642,7 +652,9 @@ describe('runDisputeReconcile', () => {
 
     const result = await reconcile({ purchase, stripe }).run();
 
-    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_b');
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_b', {
+      status: 'warning_closed',
+    });
     expect(result).toEqual({
       fromEvents: 2,
       fromRows: 0,
@@ -722,7 +734,9 @@ describe('runDisputeReconcile', () => {
       ),
       expect.objectContaining({ errorId: expect.any(String), page: 0 })
     );
-    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_row');
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_row', {
+      status: 'warning_closed',
+    });
   });
 
   it('a final, unapplied row is retried whatever its age, even one written an hour ago', async () => {
@@ -781,7 +795,9 @@ describe('runDisputeReconcile', () => {
         disputeId: 'dp_gone',
       })
     );
-    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_next');
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_next', {
+      status: 'warning_closed',
+    });
     expect(result).toMatchObject({ acted: 1, failed: 1 });
   });
 
@@ -807,7 +823,9 @@ describe('runDisputeReconcile', () => {
         error: 'database unavailable (test)',
       })
     );
-    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_row2');
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_row2', {
+      status: 'warning_closed',
+    });
   });
 
   describe("paging through Stripe's events", () => {
@@ -839,8 +857,12 @@ describe('runDisputeReconcile', () => {
       expect(stripe.events.list.mock.calls[1]?.[0]).toMatchObject({
         starting_after: 'evt_dp_p1',
       });
-      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_p1');
-      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_p2');
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_p1', {
+        status: 'warning_closed',
+      });
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_p2', {
+        status: 'warning_closed',
+      });
       expect(result.fromEvents).toBe(2);
     });
 
@@ -885,7 +907,8 @@ describe('runDisputeReconcile', () => {
         expect.objectContaining({ errorId: expect.any(String), page: 1 })
       );
       expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
-        'dp_first'
+        'dp_first',
+        { status: 'warning_closed' }
       );
     });
   });

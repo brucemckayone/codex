@@ -794,7 +794,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
     await record('needs_response');
     await record('lost');
     await service.processLostDispute(seeded.paymentIntentId, 1000, disputeId);
-    await service.markDisputeOutcomeApplied(disputeId);
+    await service.markDisputeOutcomeApplied(disputeId, { status: 'lost' });
     const applied = (await record('lost'))?.outcomeAppliedAt;
     expect(applied).not.toBeNull();
 
@@ -840,7 +840,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
     createdDisputeIds.push(disputeId);
     const service = makeService();
     await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
-    await service.markDisputeOutcomeApplied(disputeId);
+    await service.markDisputeOutcomeApplied(disputeId, { status: 'lost' });
     // The loss was applied long ago.
     await db
       .update(disputes)

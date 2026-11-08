@@ -943,7 +943,24 @@ export async function processDispute(
     if (endedSubscription) {
       await subscription.cancelForLostDispute(disputeInput);
     }
-    await purchase.markDisputeOutcomeApplied(dispute.id);
+    // Marked as lost only: a late win recorded since this run read the row
+    // is the undo's to mark (§4.8), and marked here it would never run.
+    const marked = await purchase.markDisputeOutcomeApplied(dispute.id, {
+      status: 'lost',
+    });
+    if (marked === 'moved') {
+      obs?.warn(
+        'Dispute lost run found it no longer lost (a late win overtook it): its outcome is left for the late win to mark',
+        {
+          disputeId: dispute.id,
+          chargeId,
+          purchaseId: recorded.purchaseId,
+          subscriptionId: recorded.subscriptionId,
+          courseSubscriptionId: recorded.courseSubscriptionId,
+        }
+      );
+      return 'acted';
+    }
     obs?.info('Dispute lost: purchase refunded, held slices cancelled', {
       disputeId: dispute.id,
       chargeId,
@@ -963,7 +980,7 @@ export async function processDispute(
         courseSubscriptionId: recorded.courseSubscriptionId,
       });
     }
-    await purchase.markDisputeOutcomeApplied(dispute.id);
+    await purchase.markDisputeOutcomeApplied(dispute.id, { status });
   }
   obs?.info('Dispute inquiry recorded', {
     disputeId: dispute.id,
@@ -1030,7 +1047,7 @@ async function undoLateWin(
     return 'acted';
   }
 
-  await purchase.markDisputeOutcomeApplied(dispute.id);
+  await purchase.markDisputeOutcomeApplied(dispute.id, { status: 'won' });
   obs?.info('Late win: loss undone', {
     disputeId: dispute.id,
     chargeId: charge.id,
@@ -1237,8 +1254,11 @@ function blockSubscriber(
   }
 }
 
-function isOneOf(status: string, statuses: readonly string[]): boolean {
-  return statuses.includes(status);
+function isOneOf<Status extends string>(
+  status: string,
+  statuses: readonly Status[]
+): status is Status {
+  return (statuses as readonly string[]).includes(status);
 }
 
 export async function handlePaymentWebhook(

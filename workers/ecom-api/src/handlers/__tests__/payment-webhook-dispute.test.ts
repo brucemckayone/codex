@@ -383,7 +383,8 @@ describe('handlePaymentWebhook — disputes', () => {
     );
 
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
-      'dp_test_dispute'
+      'dp_test_dispute',
+      { status: 'warning_closed' }
     );
     expect(mockReverseSubscription).not.toHaveBeenCalled();
   });
@@ -476,8 +477,57 @@ describe('handlePaymentWebhook — disputes', () => {
     ).toBeGreaterThan(
       purchase.clawBackPurchaseCharge?.mock.invocationCallOrder[0] ?? Infinity
     );
+    // Marked as lost only: a late win recorded meanwhile is not marked (§4.8).
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledExactlyOnceWith(
+      'dp_test_dispute',
+      { status: 'lost' }
+    );
     // A dispute that opened already lost never paused access: block it now.
     expect(mockRevoke).toHaveBeenCalledWith('user_lost', 'org_lost', 'refund');
+    expect(bundle.mock._obs.warn).not.toHaveBeenCalled();
+    expect(bundle.mock._obs.info).toHaveBeenCalledWith(
+      'Dispute lost: purchase refunded, held slices cancelled',
+      { disputeId: 'dp_test_dispute', chargeId: 'ch_test' }
+    );
+  });
+
+  it('lost, but a late win overtook the run: nothing is marked, and it is logged at warn with ids, not as a loss applied (§4.8)', async () => {
+    recordedAs('lost', {
+      purchaseId: 'purchase_lost',
+      subscriptionId: null,
+      courseSubscriptionId: null,
+    });
+    purchase.markDisputeOutcomeApplied?.mockResolvedValueOnce('moved');
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      {
+        ...createDisputeEvent({ status: 'lost' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      } as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledExactlyOnceWith(
+      'dp_test_dispute',
+      { status: 'lost' }
+    );
+    expect(bundle.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+      'Dispute lost run found it no longer lost (a late win overtook it): its outcome is left for the late win to mark',
+      {
+        disputeId: 'dp_test_dispute',
+        chargeId: 'ch_test',
+        purchaseId: 'purchase_lost',
+        subscriptionId: null,
+        courseSubscriptionId: null,
+      }
+    );
+    expect(bundle.mock._obs.info).not.toHaveBeenCalledWith(
+      'Dispute lost: purchase refunded, held slices cancelled',
+      expect.anything()
+    );
+    expect(bundle.mock._obs.error).not.toHaveBeenCalled();
   });
 
   it('an outcome already applied stops at the record: a redelivered won or lost does nothing more', async () => {
@@ -513,7 +563,8 @@ describe('handlePaymentWebhook — disputes', () => {
     );
     expect(purchase.repayWonDispute).toHaveBeenCalledWith('dp_test_dispute');
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
-      'dp_test_dispute'
+      'dp_test_dispute',
+      { status: 'won' }
     );
     // The normal win's restore and settle (re-pay plus mark) do not run.
     expect(purchase.restoreDisputedPurchase).not.toHaveBeenCalled();
@@ -890,7 +941,8 @@ describe('handlePaymentWebhook — disputes', () => {
       'dp_test_dispute'
     );
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
-      'dp_test_dispute'
+      'dp_test_dispute',
+      { status: 'prevented' }
     );
     expect(purchase.restoreDisputedPurchase).not.toHaveBeenCalled();
     expect(purchase.settleWonDispute).not.toHaveBeenCalled();
@@ -925,7 +977,8 @@ describe('handlePaymentWebhook — disputes', () => {
       }
     );
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
-      'dp_test_dispute'
+      'dp_test_dispute',
+      { status: 'prevented' }
     );
     expect(purchase.settleWonDispute).not.toHaveBeenCalled();
   });

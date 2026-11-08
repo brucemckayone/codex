@@ -4183,7 +4183,7 @@ export class PurchaseService extends BaseService {
   async settleWonDispute(stripeDisputeId: string): Promise<void> {
     try {
       await this.repayWonDispute(stripeDisputeId);
-      await this.markDisputeOutcomeApplied(stripeDisputeId);
+      await this.markDisputeOutcomeApplied(stripeDisputeId, { status: 'won' });
     } catch (error) {
       this.handleError(error, 'settleWonDispute');
     }
@@ -4504,14 +4504,25 @@ export class PurchaseService extends BaseService {
   /**
    * A final status has been acted on: a redelivery stops at the record.
    *
+   * Only while the dispute still has `status`, the one the caller acted on
+   * (late-win data design §4.8). A loss run that a late win overtook (the
+   * reconcile re-running an unfinished loss while the `won` event records
+   * the late win) would otherwise mark the LATE WIN applied mid-undo, and
+   * its restore, re-pay and refund would never run. `moved`: the dispute's
+   * status is no longer `status`, so nothing is marked and the step that
+   * now owns it marks it. `already_marked`: another run marked it first.
+   *
    * Never earlier than a late win's `late_won_at`, whichever worker's clock
    * runs the mark: the buyer's email claim reads an outcome applied before
    * the late win as one settled by hand (R18) and refuses it.
    */
-  async markDisputeOutcomeApplied(stripeDisputeId: string): Promise<void> {
+  async markDisputeOutcomeApplied(
+    stripeDisputeId: string,
+    acted: { status: (typeof DISPUTE_CLOSED_STATUSES)[number] }
+  ): Promise<'marked' | 'already_marked' | 'moved'> {
     try {
       const now = new Date();
-      await this.db
+      const [marked] = await this.db
         .update(disputes)
         .set({
           outcomeAppliedAt: sql`GREATEST(${now}, ${disputes.lateWonAt})`,
@@ -4519,9 +4530,20 @@ export class PurchaseService extends BaseService {
         .where(
           and(
             eq(disputes.stripeDisputeId, stripeDisputeId),
+            eq(disputes.status, acted.status),
             isNull(disputes.outcomeAppliedAt)
           )
-        );
+        )
+        .returning();
+      if (marked) return 'marked';
+      const [current] = await this.db
+        .select({ status: disputes.status })
+        .from(disputes)
+        .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+        .limit(1);
+      return current && current.status !== acted.status
+        ? 'moved'
+        : 'already_marked';
     } catch (error) {
       this.handleError(error, 'markDisputeOutcomeApplied');
     }

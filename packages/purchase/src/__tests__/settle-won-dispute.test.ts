@@ -32,7 +32,8 @@ function serviceWith(db: Record<string, unknown>): PurchaseService {
  * guard (`repayWonDispute`): the dispute is won and not yet applied.
  */
 function markingDb() {
-  const where = vi.fn().mockResolvedValue(undefined);
+  const returning = vi.fn().mockResolvedValue([{ status: 'won' }]);
+  const where = vi.fn(() => ({ returning }));
   const set = vi.fn(() => ({ where }));
   const won = [{ status: 'won', outcomeAppliedAt: null }];
   const limit = vi.fn().mockResolvedValue(won);

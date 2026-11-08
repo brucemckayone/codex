@@ -317,7 +317,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
         amountCents,
         disputeId
       );
-      await service.markDisputeOutcomeApplied(disputeId);
+      await service.markDisputeOutcomeApplied(disputeId, { status: 'lost' });
     }
     return disputeId;
   }
@@ -353,7 +353,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
     });
     await record(first, disputeId, 'lost');
     await service.processLostDispute(first.paymentIntentId, 1000, disputeId);
-    await service.markDisputeOutcomeApplied(disputeId);
+    await service.markDisputeOutcomeApplied(disputeId, { status: 'lost' });
     await contentSale(first);
     return { slice, disputeId };
   }
@@ -793,6 +793,76 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
     expect((await grantOf(sale.purchaseId)).revokedAt).toBeNull();
   });
 
+  it("the loss's mark after a late win marks nothing: the late win stays unapplied, and its undo still restores the buyer and re-pays the creator", async () => {
+    const first = await contentSale();
+    const service = makeService();
+    // The creator's paid slice, reversed when the chargeback opened.
+    const slice = takeFirst(
+      await db
+        .insert(payouts)
+        .values({
+          purchaseId: first.purchaseId,
+          organizationId: orgId,
+          userId: creatorId,
+          payoutType: 'creator_payout',
+          amountCents: 765,
+          status: 'paid',
+          sourceType: 'purchase',
+          stripeChargeId: first.charge.id,
+          stripeTransferId: `tr_lw_${uid()}`,
+          resolvedAt: new Date(),
+        })
+        .returning()
+    );
+    const disputeId = newDisputeId();
+    await record(first, disputeId, 'needs_response');
+    await service.clawBackPurchaseCharge(first.paymentIntentId, first.charge);
+    await service.processDispute(first.paymentIntentId, {
+      stripeDisputeId: disputeId,
+    });
+    // A run of the loss reads the row lost and starts…
+    expect((await record(first, disputeId, 'lost'))?.status).toBe('lost');
+    // …the late win's `won` event records the late win meanwhile…
+    expect(await record(first, disputeId, 'won')).toMatchObject({
+      status: 'won',
+      outcomeAppliedAt: null,
+      lostAppliedAt: null,
+    });
+    // …and the loss run carries on to its mark: nothing to refund or cut.
+    await service.processLostDispute(first.paymentIntentId, 1000, disputeId);
+    await service.clawBackPurchaseCharge(first.paymentIntentId, first.charge);
+    expect(
+      await service.markDisputeOutcomeApplied(disputeId, { status: 'lost' })
+    ).toBe('moved');
+
+    expect(await readDispute(disputeId)).toMatchObject({
+      status: 'won',
+      outcomeAppliedAt: null,
+    });
+    // The undo is not shut out: the buyer back, the reversed slice re-paid.
+    expect((await service.restoreAfterLateWin(disputeId))?.outcome).toBe(
+      'restored'
+    );
+    const repaid = await service.repayWonDispute(disputeId);
+    expect(repaid.repaid).toBe(1);
+    const [step] = await db
+      .select()
+      .from(payoutReversals)
+      .where(
+        and(
+          eq(payoutReversals.payoutId, slice.id),
+          eq(payoutReversals.causeId, disputeId)
+        )
+      );
+    expect(step?.repaidByPayoutId).not.toBeNull();
+    expect(
+      await service.markDisputeOutcomeApplied(disputeId, { status: 'won' })
+    ).toBe('marked');
+    expect(
+      await service.markDisputeOutcomeApplied(disputeId, { status: 'won' })
+    ).toBe('already_marked');
+  });
+
   // ── the first payment's refund (Q1; §4.5) ─────────────────────────────
 
   describe('refundFirstPaymentAfterLateWin', () => {
@@ -875,7 +945,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
       expect(stripe.refunds.create).toHaveBeenCalledOnce();
 
       // Its charge.refunded, after the mark: the refund email's late-win note.
-      await service.markDisputeOutcomeApplied(disputeId);
+      await service.markDisputeOutcomeApplied(disputeId, { status: 'won' });
       const refunded = await service.processRefund(first.paymentIntentId, {
         charge: first.charge,
         stripeRefundId: refundId,
@@ -1076,7 +1146,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
 
       // Its charge.refunded: the email's duplicate note ("a second payment"),
       // never the late win's "your first payment".
-      await service.markDisputeOutcomeApplied(disputeId);
+      await service.markDisputeOutcomeApplied(disputeId, { status: 'won' });
       expect(
         await service.processRefund(duplicate.paymentIntentId, {
           charge: duplicate.charge,
@@ -1256,7 +1326,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
     await record(sale, disputeId, 'won');
     await service.restoreAfterLateWin(disputeId);
     // The webhook marks the outcome, then claims.
-    await service.markDisputeOutcomeApplied(disputeId);
+    await service.markDisputeOutcomeApplied(disputeId, { status: 'won' });
 
     expect(await service.claimLateWinBuyerEmail(disputeId)).toBe(true);
     expect(await service.claimLateWinBuyerEmail(disputeId)).toBe(false);
@@ -1281,7 +1351,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
       .set({ lateWonAt: ahead })
       .where(eq(disputes.stripeDisputeId, disputeId));
     await service.restoreAfterLateWin(disputeId);
-    await service.markDisputeOutcomeApplied(disputeId);
+    await service.markDisputeOutcomeApplied(disputeId, { status: 'won' });
 
     expect((await readDispute(disputeId)).outcomeAppliedAt?.getTime()).toBe(
       ahead.getTime()
@@ -1293,7 +1363,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
     const normalId = newDisputeId();
     await record(normal, normalId, 'needs_response');
     await record(normal, normalId, 'won');
-    await service.markDisputeOutcomeApplied(normalId);
+    await service.markDisputeOutcomeApplied(normalId, { status: 'won' });
     expect((await readDispute(normalId)).outcomeAppliedAt).toBeInstanceOf(Date);
   });
 
