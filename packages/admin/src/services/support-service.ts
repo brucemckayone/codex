@@ -2569,35 +2569,18 @@ export class SupportService extends BaseService {
     note: string | null,
     resolvedByUserId: string
   ): Promise<FailedRefundSettlement> {
-    const [found] = await this.db
-      .select()
-      .from(refunds)
-      .where(eq(refunds.id, refundId))
-      .limit(1);
-    if (!found || found.status !== 'failed') {
-      throw new NotFoundError('No failed refund with this id', { refundId });
-    }
+    const found = await this.failedRefundRow(this.db, refundId);
     // Asks Stripe, so before the transaction. A repeat asks nothing.
     const outsideStripe = found.resolvedAt
       ? null
       : await this.lateWinRefundedOutsideStripe(found);
     const outcome = await this.db.transaction(async (tx) => {
-      const [row] = await tx
-        .select()
-        .from(refunds)
-        .where(eq(refunds.id, refundId))
-        .for('update');
-      if (!row || row.status !== 'failed') {
-        throw new NotFoundError('No failed refund with this id', { refundId });
-      }
-      if (row.resolvedAt) {
-        const settled = await this.alreadySettledRefund(
-          tx,
-          refundId,
-          'refunded_elsewhere'
-        );
-        return { row: settled, marked: false };
-      }
+      const { row, settled } = await this.lockForSettling(
+        tx,
+        refundId,
+        'refunded_elsewhere'
+      );
+      if (settled) return { row: settled, marked: false };
       const now = new Date();
       const [resolved] = await tx
         .update(refunds)
@@ -2723,14 +2706,7 @@ export class SupportService extends BaseService {
     note: string,
     resolvedByUserId: string
   ): Promise<FailedRefundSettlement> {
-    const [found] = await this.db
-      .select()
-      .from(refunds)
-      .where(eq(refunds.id, refundId))
-      .limit(1);
-    if (!found || found.status !== 'failed') {
-      throw new NotFoundError('No failed refund with this id', { refundId });
-    }
+    const found = await this.failedRefundRow(this.db, refundId);
     // A repeat returns what the first settlement did: no guard, no Stripe.
     let purchaseId = found.purchaseId;
     let prepared: PreparedRepay | undefined;
@@ -2759,20 +2735,12 @@ export class SupportService extends BaseService {
     }
 
     const outcome = await this.db.transaction(async (tx) => {
-      const [row] = await tx
-        .select()
-        .from(refunds)
-        .where(eq(refunds.id, refundId))
-        .for('update');
-      if (!row || row.status !== 'failed') {
-        throw new NotFoundError('No failed refund with this id', { refundId });
-      }
-      if (row.resolvedAt) {
-        const settled = await this.alreadySettledRefund(
-          tx,
-          refundId,
-          'creators_repaid'
-        );
+      const { row, settled } = await this.lockForSettling(
+        tx,
+        refundId,
+        'creators_repaid'
+      );
+      if (settled) {
         return {
           row: settled,
           repaid: null,
@@ -3079,19 +3047,51 @@ export class SupportService extends BaseService {
    * The guarded settle found nothing to change: no failed refund (404), one
    * settled another way (409), or the same settlement repeated (its row).
    */
+  /**
+   * The failed refund locked in the settlement's transaction, with what
+   * settled it when it is settled already (`alreadySettledRefund`: the
+   * same resolution returns the row, another is a 409).
+   */
+  private async lockForSettling(
+    tx: Tx,
+    refundId: string,
+    resolution: string
+  ): Promise<{
+    row: typeof refunds.$inferSelect;
+    settled: typeof refunds.$inferSelect | null;
+  }> {
+    const row = await this.failedRefundRow(tx, refundId, { lock: true });
+    return {
+      row,
+      settled: row.resolvedAt
+        ? await this.alreadySettledRefund(tx, refundId, resolution)
+        : null,
+    };
+  }
+
+  /**
+   * The failed refund a settlement acts on, read (`lock`: FOR UPDATE, in
+   * the settlement's transaction), or a 404 for any other refund.
+   */
+  private async failedRefundRow(
+    db: DatabaseClient | Tx,
+    refundId: string,
+    { lock = false }: { lock?: boolean } = {}
+  ): Promise<typeof refunds.$inferSelect> {
+    const query = db.select().from(refunds).where(eq(refunds.id, refundId));
+    const [row] = lock ? await query.for('update') : await query.limit(1);
+    if (!row || row.status !== 'failed') {
+      throw new NotFoundError('No failed refund with this id', { refundId });
+    }
+    return row;
+  }
+
   private async alreadySettledRefund(
     db: DatabaseClient | Tx,
     refundId: string,
     resolution: string
   ): Promise<typeof refunds.$inferSelect> {
-    const [row] = await db
-      .select()
-      .from(refunds)
-      .where(eq(refunds.id, refundId))
-      .limit(1);
-    if (!row || row.status !== 'failed') {
-      throw new NotFoundError('No failed refund with this id', { refundId });
-    }
+    const row = await this.failedRefundRow(db, refundId);
     if (row.resolution !== resolution) {
       throw new AlreadySettledError(row.resolution ?? 'unknown');
     }
