@@ -203,7 +203,13 @@ guards).
    delivery or the success page. A later one finds it claimed and sends
    nothing. A purchase refunded in full before its checkout is recorded
    gets none, and a claim that fails transiently returns 500 so Stripe
-   redelivers. A creator whose slice went pending is emailed to finish payouts
+   redelivers. The receipt's link opens the item's own page, by its slug
+   (`PurchaseService.findItemLink`, `Codex-0u7kb`): org content on its org's
+   subdomain, personal content on the creators host, a course on its journey
+   dashboard. An item with no page (deleted, or a creator with no username),
+   or a lookup that fails, links the buyer's library instead, logged at warn.
+   With no `WEB_APP_URL` nothing is claimed or sent, logged at error with the
+   purchase id. A creator whose slice went pending is emailed to finish payouts
    setup — **gap**: `Codex-2hxff.7`.
 
 **Errors.** A transient failure (database connection, Stripe outage) returns

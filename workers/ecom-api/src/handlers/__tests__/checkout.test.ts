@@ -87,7 +87,9 @@ function createContext(
   mock: MockHonoContext<StripeWebhookEnv['Bindings']>;
 } {
   const mock = createMockHonoContext<StripeWebhookEnv['Bindings']>({
-    env: envOverrides,
+    // The web app's origin, as wrangler.jsonc's test env sets it: the
+    // receipt's link is built on it (Codex-0u7kb).
+    env: { WEB_APP_URL: 'http://lvh.me:3000', ...envOverrides },
   });
   return {
     context: mock as unknown as Context<StripeWebhookEnv>,
@@ -116,6 +118,7 @@ describe('handleCheckoutCompleted', () => {
   let mockCompletePurchase: ReturnType<typeof vi.fn>;
   let mockMarkCheckoutSessionCompleted: ReturnType<typeof vi.fn>;
   let mockClaimReceipt: ReturnType<typeof vi.fn>;
+  let mockFindItemLink: ReturnType<typeof vi.fn>;
   let mockRelease: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -139,6 +142,14 @@ describe('handleCheckoutCompleted', () => {
       receiptsClaimed.add(purchaseId);
       return true;
     });
+    // Where the purchase's item lives. Its joins have their own test in
+    // @codex/purchase (purchase-item-link.integration.test.ts).
+    mockFindItemLink = vi.fn().mockResolvedValue({
+      kind: 'org_content',
+      contentId: 'content_456',
+      slug: 'breathwork-basics',
+      organizationSlug: 'studio-alpha',
+    });
     mockRelease = vi.fn();
 
     // The registry's services, as the composition root hands them over.
@@ -149,6 +160,7 @@ describe('handleCheckoutCompleted', () => {
           completeCoursePurchase: mockCompletePurchase,
           markCheckoutSessionCompleted: mockMarkCheckoutSessionCompleted,
           claimReceipt: mockClaimReceipt,
+          findItemLink: mockFindItemLink,
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -1180,6 +1192,189 @@ describe('handleCheckoutCompleted', () => {
       expect(JSON.stringify(mock._obs.error.mock.calls)).not.toContain(
         'Failed query'
       );
+    });
+  });
+
+  // Codex-0u7kb: the receipt's "Access Content" button opened a 404 for every
+  // buyer: `/content/{id}` (or `/courses/{id}`) on the platform host, which
+  // has neither route. It links the item's own page, found by the purchase.
+  // The URL shapes per environment are pinned in utils/__tests__/item-link.
+  describe("the receipt's link (Codex-0u7kb)", () => {
+    const contentSale = { customerId: 'user_123', contentId: 'content_456' };
+    const courseSale = {
+      kind: 'course',
+      customerId: 'user_123',
+      courseId: 'c_1',
+    };
+    const orgContent = {
+      kind: 'org_content',
+      contentId: 'content_456',
+      slug: 'breathwork-basics',
+      organizationSlug: 'studio-alpha',
+    };
+    const personalContent = {
+      kind: 'personal_content',
+      contentId: 'content_456',
+      slug: 'field-notes',
+      creatorUsername: 'alex-creator',
+    };
+    const course = {
+      kind: 'course',
+      courseId: 'c_1',
+      slug: 'rootwork',
+      organizationSlug: 'studio-alpha',
+    };
+
+    function paidFor(metadata: Record<string, string>): Stripe.Event {
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_link',
+        paymentIntentId: 'pi_link',
+        metadata,
+      }) as unknown as Stripe.Event;
+      (event.data.object as Stripe.Checkout.Session).customer_details = {
+        email: 'buyer@example.com',
+        name: 'Buyer',
+      } as Stripe.Checkout.Session.CustomerDetails;
+      return event;
+    }
+
+    /** The one receipt sent, and its link. */
+    function receiptLink(): unknown {
+      const receipts = vi
+        .mocked(sendEmailToWorker)
+        .mock.calls.filter(
+          ([, , email]) => email.templateName === 'purchase-receipt'
+        );
+      expect(receipts).toHaveLength(1);
+      return receipts[0]?.[2].data.contentUrl;
+    }
+
+    it.each([
+      [
+        'org content',
+        contentSale,
+        orgContent,
+        'http://studio-alpha.lvh.me:3000/content/breathwork-basics',
+      ],
+      [
+        'personal content',
+        contentSale,
+        personalContent,
+        'http://creators.lvh.me:3000/@alex-creator/content/field-notes',
+      ],
+      [
+        'a course',
+        courseSale,
+        course,
+        'http://studio-alpha.lvh.me:3000/journeys/rootwork/dashboard',
+      ],
+    ])("%s: the item's own page, found by the purchase", async (_kind, sale, link, expected) => {
+      mockFindItemLink.mockResolvedValueOnce(link);
+
+      await handleCheckoutCompleted(
+        paidFor(sale),
+        mockStripe,
+        createContext().context
+      );
+
+      expect(mockFindItemLink).toHaveBeenCalledWith('purchase_123');
+      expect(receiptLink()).toBe(expected);
+    });
+
+    it("in production: the org's own subdomain, over https", async () => {
+      await handleCheckoutCompleted(
+        paidFor(contentSale),
+        mockStripe,
+        createContext({ WEB_APP_URL: 'https://revelations.studio' }).context
+      );
+
+      expect(receiptLink()).toBe(
+        'https://studio-alpha.revelations.studio/content/breathwork-basics'
+      );
+    });
+
+    // The old link, pinned as WRONG so it cannot come back.
+    it.each([
+      ['content', contentSale, orgContent, '/content/content_456'],
+      ['course', courseSale, course, '/courses/c_1'],
+    ])('a %s receipt never links the item id on the platform host', async (_kind, sale, link, oldPath) => {
+      mockFindItemLink.mockResolvedValueOnce(link);
+
+      await handleCheckoutCompleted(
+        paidFor(sale),
+        mockStripe,
+        createContext().context
+      );
+
+      const sent = String(receiptLink());
+      expect(sent).not.toBe(`http://lvh.me:3000${oldPath}`);
+      expect(new URL(sent).host).not.toBe('lvh.me:3000');
+    });
+
+    it('the item is looked up once, by the delivery that claims the receipt', async () => {
+      const event = paidFor(contentSale);
+
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+
+      expect(mockClaimReceipt).toHaveBeenCalledTimes(2);
+      expect(mockFindItemLink).toHaveBeenCalledTimes(1);
+      expect(receiptLink()).toBe(
+        'http://studio-alpha.lvh.me:3000/content/breathwork-basics'
+      );
+    });
+
+    it('an item with no page: the library on the platform, with a warn of ids', async () => {
+      mockFindItemLink.mockResolvedValueOnce(null);
+      const { context, mock } = createContext();
+
+      await handleCheckoutCompleted(paidFor(contentSale), mockStripe, context);
+
+      expect(receiptLink()).toBe('http://lvh.me:3000/library');
+      expect(mock._obs.warn).toHaveBeenCalledWith(
+        "A purchase's item has no page to link to, so its email links the library",
+        { purchaseId: 'purchase_123' }
+      );
+    });
+
+    // The receipt is claimed by now, so a redelivery could not send it: the
+    // library link is the buyer's only receipt, and the delivery succeeds.
+    it('a failed lookup: the library link; the delivery neither throws nor retries', async () => {
+      mockFindItemLink.mockRejectedValueOnce(
+        Object.assign(new Error('Connection terminated'), {
+          code: 'ECONNRESET',
+        })
+      );
+
+      await expect(
+        handleCheckoutCompleted(
+          paidFor(contentSale),
+          mockStripe,
+          createContext().context
+        )
+      ).resolves.toBeUndefined();
+
+      expect(receiptLink()).toBe('http://lvh.me:3000/library');
+    });
+
+    it.each([
+      ['unset', undefined],
+      ['not a URL', 'revelations.studio'],
+    ])('WEB_APP_URL %s: alerted with ids, nothing claimed, no receipt; the delivery succeeds', async (_case, webAppUrl) => {
+      const { context, mock } = createContext({ WEB_APP_URL: webAppUrl });
+
+      await expect(
+        handleCheckoutCompleted(paidFor(contentSale), mockStripe, context)
+      ).resolves.toBeUndefined();
+
+      expect(mockCompletePurchase).toHaveBeenCalledOnce();
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'WEB_APP_URL is unset or not a URL: the purchase receipt has no working link, so it was not sent',
+        { errorId: expect.any(String), purchaseId: 'purchase_123' }
+      );
+      expect(mockClaimReceipt).not.toHaveBeenCalled();
+      expect(mockFindItemLink).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
     });
   });
 });
