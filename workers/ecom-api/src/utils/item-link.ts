@@ -69,10 +69,15 @@ function itemPageUrl(webApp: URL, item: PurchaseItemLink): string {
 }
 
 /**
- * The link to a purchase's item: its own page. When that page cannot be
- * found, or the lookup fails, the buyer's library on the platform instead (a
- * route that exists), with a warn line of ids. Never
- * rejects: a completed purchase is never failed over its email's link.
+ * The link to a purchase's item: its own page. When there is none, or the
+ * lookup fails, the buyer's library on the platform instead (a route that
+ * exists). Never rejects: a completed purchase is never failed over its
+ * email's link.
+ *
+ * No page is expected (a deleted item) and is a warn. A failed lookup is an
+ * error with an errorId: it may be an outage, or a fault in our own code (a
+ * service without `findItemLink` threw a TypeError here and stayed green),
+ * and either way every buyer's link would quietly become the library's.
  */
 export async function purchaseItemUrl(
   purchaseService: Pick<PurchaseService, 'findItemLink'>,
@@ -88,9 +93,10 @@ export async function purchaseItemUrl(
       { purchaseId }
     );
   } catch (error) {
-    obs?.warn(
+    obs?.error(
       "A purchase's item page could not be looked up, so its email links the library",
       {
+        errorId: crypto.randomUUID(),
         purchaseId,
         error: error instanceof Error ? error.message : String(error),
         cause: describeRootCause(error),

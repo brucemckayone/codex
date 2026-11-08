@@ -14,7 +14,7 @@
  */
 
 import type { ObservabilityClient } from '@codex/observability';
-import type { PurchaseItemLink } from '@codex/purchase';
+import type { PurchaseItemLink, PurchaseService } from '@codex/purchase';
 import { wrapError } from '@codex/service-errors';
 import { createMockObservability } from '@codex/test-utils';
 import { parseHost } from '@codex/urls';
@@ -180,7 +180,7 @@ describe('purchaseItemUrl', () => {
     );
   });
 
-  it('a failed lookup: the library, with a warn of ids and the root cause; it never rejects', async () => {
+  it('a failed lookup: the library, with an error line of ids and the root cause; it never rejects', async () => {
     const { obs, client } = obsMock();
     const outage = Object.assign(new Error('Connection terminated'), {
       code: 'ECONNRESET',
@@ -200,11 +200,36 @@ describe('purchaseItemUrl', () => {
     );
 
     expect(url).toBe('https://revelations.studio/library');
-    expect(obs.warn).toHaveBeenCalledWith(
+    expect(obs.error).toHaveBeenCalledWith(
       "A purchase's item page could not be looked up, so its email links the library",
       expect.objectContaining({
+        errorId: expect.any(String),
         purchaseId: PURCHASE_ID,
         cause: expect.objectContaining({ code: 'ECONNRESET' }),
+      })
+    );
+    expect(obs.warn).not.toHaveBeenCalled();
+  });
+
+  // The fault the review found: a service without the method threw a
+  // TypeError here, and every receipt linked the library with no alert.
+  it('a fault in our own code: the same error line, naming the fault; it never rejects', async () => {
+    const { obs, client } = obsMock();
+
+    const url = await purchaseItemUrl(
+      {} as Pick<PurchaseService, 'findItemLink'>,
+      PURCHASE_ID,
+      origin('https://revelations.studio'),
+      client
+    );
+
+    expect(url).toBe('https://revelations.studio/library');
+    expect(obs.error).toHaveBeenCalledWith(
+      "A purchase's item page could not be looked up, so its email links the library",
+      expect.objectContaining({
+        errorId: expect.any(String),
+        purchaseId: PURCHASE_ID,
+        error: expect.stringContaining('findItemLink'),
       })
     );
   });

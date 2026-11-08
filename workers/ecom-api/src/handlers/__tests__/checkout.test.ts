@@ -1378,15 +1378,20 @@ describe('handleCheckoutCompleted', () => {
         })
       );
 
+      const { context, mock } = createContext();
+
       await expect(
-        handleCheckoutCompleted(
-          paidFor(contentSale),
-          mockStripe,
-          createContext().context
-        )
+        handleCheckoutCompleted(paidFor(contentSale), mockStripe, context)
       ).resolves.toBeUndefined();
 
       expect(receiptLink()).toBe('http://lvh.me:3000/library');
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        "A purchase's item page could not be looked up, so its email links the library",
+        expect.objectContaining({
+          errorId: expect.any(String),
+          purchaseId: 'purchase_123',
+        })
+      );
     });
 
     it.each([
