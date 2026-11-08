@@ -1751,6 +1751,44 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(route.context).toMatchObject({ code: 'REFUNDED_OUTSIDE_STRIPE' });
       expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
     });
+
+    it("an invoice's late win settled by hand lifts nothing on the search's invoice path either", async () => {
+      const invoice = await invoiceCharge(30 * DAY);
+      // The search dates an invoice from its slices: paid 30 days ago.
+      await db
+        .update(payouts)
+        .set({ createdAt: new Date((nowSeconds() - 30 * DAY) * 1000) })
+        .where(eq(payouts.stripeChargeId, invoice.chargeId));
+      const id = await dispute(invoice.chargeId, 'won');
+      await applyOutcome(id);
+      const at = new Date(Date.now() - 30_000);
+      await db
+        .update(disputes)
+        .set({
+          subscriptionId: invoice.subscription.id,
+          lateWonAt: new Date(Date.now() - 2 * 60_000),
+          lostAppliedAt: new Date(Date.now() - 20 * DAY * 1000),
+          refundedOutsideStripeAt: at,
+        })
+        .where(eq(disputes.stripeDisputeId, id));
+
+      const found = (
+        await service.searchCharges({
+          lookup: invoice.subscription.stripeSubscriptionId,
+          page: 1,
+          limit: 20,
+        })
+      ).items.find((row) => row.chargeId === invoice.chargeId);
+      const detail = await service.getChargeDetail(invoice.chargeId);
+
+      expect(found?.window).toMatchObject({
+        isOpen: false,
+        liftedByLateWin: false,
+      });
+      expect(detail.window.liftedByLateWin).toBe(false);
+      expect(detail.refundable.blocked).toBe('refunded_outside_stripe');
+      expect(detail.refundable.refundedOutsideStripeOn).toBe(at.toISOString());
+    });
   });
 
   describe('previewRefund', () => {
