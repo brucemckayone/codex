@@ -663,7 +663,8 @@ dispute event records it, then acts on the status the record has.
   - a refund Stripe cancels, or one already failed when the undo reads it,
     counts as settled, but the buyer got nothing: it is alerted at error for
     support to settle by hand (owner decision 2026-11-05). A failed one is
-    also in the Failed refunds queue;
+    also in the Failed refunds queue, and its clawback stands, as any failed
+    refund's does;
   - a refund Stripe won't make is retried every hour and alerted each time,
     and support settles it by hand
     ([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)):

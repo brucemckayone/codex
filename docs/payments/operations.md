@@ -390,15 +390,25 @@ with an `errorId`, unless it says otherwise:
 
 | Alert | What it means | What to do |
 |---|---|---|
-| Late win: Stripe refused the refund of a payment the buyer made twice… | The refund for a buyer who bought it again, or of a duplicate payment, wasn't made: Stripe's code, error type and HTTP status say why. Nothing is marked, the creators' pay-back stays held, and it is retried hourly, alerting each time. Stripe replays a refusal for 24 hours under the same idempotency key, so a cause that clears (a low balance, a fixed key) is only tried again a day after the first refusal | Look the charge up in Stripe. If it will never be refunded there, settle it by hand ([below](#settling-a-late-win-refund-stripe-wont-make)). **Never refund the buyer another way first** |
+| Late win: Stripe refused the refund of a payment the buyer made twice… / Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded… | The late win's refund of a first payment (a buyer who bought it again) or of a duplicate payment wasn't made. "Refused": Stripe refused the request itself (`stripeType` `StripeInvalidRequestError`). "Could not be refunded": anything else, such as an outage, a rate limit or a key without refund rights. `stripeCode`, `stripeType` and `stripeStatusCode` say which; each is empty when Stripe gave none. Nothing is marked, the creators' pay-back stays held, and it is retried: on each of Stripe's redeliveries, then every hour, one alert per try. Stripe replays an answer for 24 hours under the same idempotency key, so a cause that clears (a low balance, a fixed key) is only tried again a day after the first answer | Read the three fields. A "could not be refunded" usually clears by itself once the outage passes or the key is fixed. One Stripe will never make: settle it by hand ([below](#settling-a-late-win-refund-stripe-wont-make)). **Never refund the buyer another way first** |
+| Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds | The late win's refund was made, but Stripe reports it `failed` (`refundId`, `status`). The late win counts as settled and its outcome is marked. As with any failed refund, its clawback stands: the creators gave the first payment back off their held re-pay rows. The buyer has not been refunded | Refund the buyer another way, then settle the refund in Failed refunds as refunded elsewhere |
+| Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand | Settled as for a failed refund, but the Failed refunds queue lists only `failed` ones, so this alert is how support finds it (owner decision 2026-11-05). It took nothing from the creators | Settle it with the owner; the buyer has not been refunded |
 | A won dispute was reported lost: nothing changed, check it in Stripe | Stripe now says lost a dispute we hold as won. Nothing was changed | Check the dispute in Stripe's Dashboard |
 | The hourly late-win check read its page limit of Stripe's disputes | More than 300 disputes since our oldest lost one: the older ones weren't re-checked this run | None by itself; if it repeats, the check needs a wider limit |
 | The hourly late-win check could not read a page of Stripe's disputes / could not re-check lost disputes for a late win | A Stripe or database read failed; the next run retries | None unless it repeats |
 | WEB_APP_URL is not set: the late win's access-restored email… | The buyer's email had no working link, so it wasn't sent | Set `WEB_APP_URL` on ecom-api |
-| Late win: the buyer's access-restored email could not be claimed (warning) | The email wasn't sent and won't be retried; their access is back | None |
+| Late win: the buyer's access-restored email could not be claimed, so it was not sent, and it is not retried | The send-once claim's database write failed, after the outcome was marked, so nothing comes back to it (`disputeId`, `userId`). Their access is back | None for the money. Tell the buyer another way, if you want them told |
+| Late win: the buyer's access-restored email was not sent: the charge has no email address (warning) | The charge has no billing or receipt address. Not retried; their access is back (`disputeId`, `userId`, never an address) | As above |
+| Late win: the buyer's access-restored email was not sent: the item's title could not be read (warning) | The item's title couldn't be read for the email. Not retried; their access is back (`disputeId`, `userId`) | As above |
+| Dispute lost run found it no longer lost (a late win overtook it): its outcome is left for the late win to mark (warning, no `errorId`) | A retry of an unfinished loss ran while the dispute was won late. It marked nothing, so the late win's undo still restores, re-pays and refunds | None |
 
 A late-win step that fails otherwise raises the reconcile's existing "A dispute
-could not be settled by the hourly reconcile", and is retried every hour. A
+could not be settled by the hourly reconcile; the next run retries it"
+(`disputeId`, `status`, `error`, and `cause`: the innermost error's name,
+message and code, which for a Stripe failure is Stripe's own message), and is
+retried every hour. A refund Stripe didn't make is the exception: its own
+alert above has already fired, so the reconcile logs one warning with its ids
+instead of a second error. A
 late win settled by hand before the release is recorded as applied by
 [release step R18](release-checklist.md#r18--lost-chargebacks-already-settled-by-hand),
 so nothing runs again for it.
