@@ -90,6 +90,17 @@ export const disputes = pgTable(
      * before it is sent, so a redelivery never sends a second one.
      */
     buyerToldAt: timestamp('buyer_told_at', { withTimezone: true }),
+    /**
+     * When support settled this charge by hand and the buyer is refunded
+     * outside Stripe (docs/payments/operations.md, "Settling a late-win
+     * refund Stripe won't make"; owner decision 2026-11-08, "Block it in
+     * code"). From then on the charge is never refunded through Stripe:
+     * support's refund route refuses it (`REFUNDED_OUTSIDE_STRIPE`). Only that
+     * runbook step writes it, in the transaction that marks the outcome.
+     */
+    refundedOutsideStripeAt: timestamp('refunded_outside_stripe_at', {
+      withTimezone: true,
+    }),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

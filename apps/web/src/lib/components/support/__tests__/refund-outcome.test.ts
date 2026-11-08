@@ -72,6 +72,11 @@ describe('refundOutcomeOf', () => {
       { code: 'BUSINESS_LOGIC_ERROR' },
       { kind: 'chargeback_settling' },
     ],
+    [
+      'REFUNDED_OUTSIDE_STRIPE',
+      { code: 'BUSINESS_LOGIC_ERROR' },
+      { kind: 'refunded_outside_stripe' },
+    ],
     ['NOTHING_LEFT_TO_REFUND', {}, { kind: 'nothing_left' }],
     [
       'REFUND_AMOUNT_TOO_LARGE',
@@ -152,6 +157,7 @@ describe('what reloads after an outcome', () => {
       'chargeback',
       'nothing_left',
       'too_large',
+      'refunded_outside_stripe',
     ] as const;
     for (const kind of kinds) {
       expect(reloadsCharge({ kind } as never), kind).toBe(true);

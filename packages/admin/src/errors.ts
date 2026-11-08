@@ -147,13 +147,35 @@ export class ChargeHasChargebackError extends BusinessLogicError {
 /**
  * A chargeback on this charge was won and the creators' pay-back is not yet
  * applied (Codex-2hxff.70; late-win data design §4.7, §6): a refund now
- * would race it. The hourly reconcile applies it, so this clears by itself.
+ * would race it. The hourly reconcile applies it, and retries a step that
+ * failed every hour; one Stripe will never make is settled by hand
+ * (docs/payments/operations.md). So the message promises no time (review
+ * cycle 1, M3).
  */
 export class ChargebackSettlingError extends BusinessLogicError {
   constructor() {
     super(
-      "This payment's chargeback was just decided for us, and the creators are being paid back. Try the refund again in an hour.",
+      "This payment's chargeback was decided for us, and the creators are still being paid back. Refunds wait until that finishes; a step that fails is retried every hour.",
       { code: 'CHARGEBACK_SETTLING' }
+    );
+  }
+}
+
+/**
+ * Support settled this charge by hand and refunded the buyer outside Stripe
+ * (`disputes.refunded_outside_stripe_at`; docs/payments/operations.md,
+ * "Settling a late-win refund Stripe won't make"). A refund through Stripe
+ * now would pay the buyer twice, so it is refused for good (owner decision
+ * 2026-11-08, "Block it in code").
+ */
+export class RefundedOutsideStripeError extends BusinessLogicError {
+  constructor(refundedAt: Date) {
+    super(
+      "This payment was refunded outside Stripe, so it can't be refunded here.",
+      {
+        code: 'REFUNDED_OUTSIDE_STRIPE',
+        refundedOutsideStripeAt: refundedAt.toISOString(),
+      }
     );
   }
 }
@@ -246,5 +268,25 @@ export class AlreadySettledError extends ConflictError {
       code: 'ALREADY_SETTLED',
       resolution,
     });
+  }
+}
+
+/**
+ * A "creators re-paid" settlement of a failed refund that a late win made
+ * (`disputes.late_win_refund_id`; owner decision 6, 2026-11-08, "Block it in
+ * code"). That refund pays back a buyer who paid twice, so the buyer is
+ * still owed it, and what its clawback took from the creators stays taken:
+ * re-paying them, then refunding the buyer, would pay the same money out
+ * twice. It is refused for good. Support refunds the buyer another way and
+ * settles it as refunded elsewhere, or refunds the charge again through
+ * Stripe (docs/payments/operations.md, "Failed refunds"). The context is
+ * the dispute's Stripe id only.
+ */
+export class LateWinRefundNotRepayableError extends BusinessLogicError {
+  constructor(stripeDisputeId: string) {
+    super(
+      "This refund pays back a buyer who paid twice, so the creators can't be re-paid for it. Refund the buyer another way, then settle it as refunded elsewhere.",
+      { code: 'LATE_WIN_REFUND_NOT_REPAYABLE', disputeId: stripeDisputeId }
+    );
   }
 }

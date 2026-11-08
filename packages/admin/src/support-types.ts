@@ -83,9 +83,13 @@ export interface ChargeSummary {
 /**
  * Why the form cannot refund this charge now. `chargeback_settling`: a
  * chargeback on it was won and the creators' pay-back is not yet applied
- * (Codex-2hxff.70), so a refund would race it.
+ * (Codex-2hxff.70), so a refund would race it. `refunded_outside_stripe`:
+ * support settled it by hand and refunded the buyer outside Stripe, so it is
+ * never refunded through Stripe again (owner decision 2026-11-08); it comes
+ * first, whatever the window says.
  */
 export type RefundBlock =
+  | 'refunded_outside_stripe'
   | 'window_closed'
   | 'chargeback'
   | 'chargeback_settling'
@@ -153,6 +157,12 @@ export interface ChargeDetail {
     /** The charge less its pending, waiting and succeeded refunds. */
     maxCents: number;
     blocked: RefundBlock | null;
+    /**
+     * When support settled the charge by hand and the buyer was refunded
+     * outside Stripe (`disputes.refunded_outside_stripe_at`); null otherwise.
+     * Stripe lists no refund for it, so `refundedCents` doesn't count it.
+     */
+    refundedOutsideStripeOn: string | null;
   };
   /**
    * How many refunds Stripe lists on the charge, in any status. The form

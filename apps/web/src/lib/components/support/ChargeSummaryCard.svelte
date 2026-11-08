@@ -37,6 +37,12 @@
 
   const amountLine = $derived.by(() => {
     const amount = formatPrice(charge.amountCents);
+    // Stripe lists no refund for a charge settled by hand (owner decision
+    // 2026-11-08), so "nothing refunded" would mislead.
+    const outsideStripe = detail.refundable.refundedOutsideStripeOn;
+    if (outsideStripe) {
+      return m.support_amount_outside_stripe({ amount, date: formatDay(outsideStripe) });
+    }
     if (charge.refundedCents <= 0) return m.support_amount_none({ amount });
     if (charge.refundedCents >= charge.amountCents) {
       return m.support_amount_full({ amount });

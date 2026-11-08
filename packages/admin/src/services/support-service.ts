@@ -175,8 +175,10 @@ import {
   ChargebackSettlingError,
   ChargeChangedError,
   ChargeHasChargebackError,
+  LateWinRefundNotRepayableError,
   NothingLeftToRefundError,
   RefundAmountTooLargeError,
+  RefundedOutsideStripeError,
   RefundInFlightError,
   RefundKeySpentError,
   RefundWindowClosedError,
@@ -206,6 +208,7 @@ import type {
   PriceMovePlan,
   PriceMoveRetried,
   QueueCause,
+  RefundBlock,
   RefundPreview,
   RefundRequester,
   RefundRow,
@@ -468,6 +471,40 @@ function buyerOf(row: {
     email: row.email,
     deleted: row.deletedAt !== null,
   };
+}
+
+/**
+ * Why the form can't refund the charge, in the refund route's order, so the
+ * form and the route agree. Refunded outside Stripe comes first: nothing
+ * lifts it, the window included (owner decision 2026-11-08).
+ */
+function refundBlockOf(input: {
+  outsideStripe: Date | null;
+  windowOpen: boolean;
+  holds: { blocking: string | null; settling: boolean };
+  maxCents: number;
+}): RefundBlock | null {
+  if (input.outsideStripe) return 'refunded_outside_stripe';
+  if (!input.windowOpen) return 'window_closed';
+  if (input.holds.blocking) return 'chargeback';
+  if (input.holds.settling) return 'chargeback_settling';
+  return input.maxCents === 0 ? 'nothing_left' : null;
+}
+
+/**
+ * When support settled the charge by hand and refunded the buyer outside
+ * Stripe (`refunded_outside_stripe_at`, docs/payments/operations.md): the
+ * earliest of its disputes', or null. A charge with one is never refunded
+ * through Stripe again (owner decision 2026-11-08, "Block it in code").
+ */
+function refundedOutsideStripeAt(
+  rows: ReadonlyArray<{ refundedOutsideStripeAt: Date | null }>
+): Date | null {
+  let earliest: Date | null = null;
+  for (const { refundedOutsideStripeAt: at } of rows) {
+    if (at && (!earliest || at < earliest)) earliest = at;
+  }
+  return earliest;
 }
 
 function billingInterval(value: string | null): 'month' | 'year' | null {
@@ -761,9 +798,10 @@ export class SupportService extends BaseService {
           >`(SELECT ${disputes.status} FROM ${disputes} WHERE ${disputes.purchaseId} = ${purchases.id} ORDER BY ${disputes.stripeCreatedAt} DESC LIMIT 1)`.as(
             'dispute_status'
           ),
-          // Owner Q7: a late-won payment has no 14-day window.
+          // Owner Q7: a late-won payment has no 14-day window, unless it
+          // was refunded outside Stripe (owner decision 2026-11-08).
           lateWon:
-            sql<boolean>`EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.purchaseId} = ${purchases.id} AND ${disputes.lateWonAt} IS NOT NULL)`.as(
+            sql<boolean>`EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.purchaseId} = ${purchases.id} AND ${disputes.lateWonAt} IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.purchaseId} = ${purchases.id} AND ${disputes.refundedOutsideStripeAt} IS NOT NULL)`.as(
               'late_won'
             ),
         })
@@ -834,7 +872,7 @@ export class SupportService extends BaseService {
           'dispute_status'
         ),
         lateWon:
-          sql<boolean>`EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.stripeChargeId} = ${payouts.stripeChargeId} AND ${disputes.lateWonAt} IS NOT NULL)`.as(
+          sql<boolean>`EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.stripeChargeId} = ${payouts.stripeChargeId} AND ${disputes.lateWonAt} IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.stripeChargeId} = ${payouts.stripeChargeId} AND ${disputes.refundedOutsideStripeAt} IS NOT NULL)`.as(
             'late_won'
           ),
       })
@@ -924,7 +962,12 @@ export class SupportService extends BaseService {
       const refundedCents = standingCents(listed);
       const maxCents = Math.max(0, charge.amount - refundedCents);
       const holds = refundHolds(disputeRows);
-      const window = this.windowView(charge.created, now, holds.lateWon);
+      const outsideStripe = refundedOutsideStripeAt(disputeRows);
+      const window = this.windowView(
+        charge.created,
+        now,
+        holds.lateWon && outsideStripe === null
+      );
       const sourceDetail: ChargeDetailSource =
         view.source.type === 'purchase'
           ? view.source
@@ -953,16 +996,13 @@ export class SupportService extends BaseService {
         window,
         refundable: {
           maxCents,
-          // The refund route's order, so the form and the route agree.
-          blocked: !window.isOpen
-            ? 'window_closed'
-            : holds.blocking
-              ? 'chargeback'
-              : holds.settling
-                ? 'chargeback_settling'
-                : maxCents === 0
-                  ? 'nothing_left'
-                  : null,
+          blocked: refundBlockOf({
+            outsideStripe,
+            windowOpen: window.isOpen,
+            holds,
+            maxCents,
+          }),
+          refundedOutsideStripeOn: toIso(outsideStripe),
         },
         refundCount: listed.length,
         slices,
@@ -990,7 +1030,8 @@ export class SupportService extends BaseService {
 
   /**
    * The 14-day window. A late-won payment's is lifted once it has closed
-   * (owner Q7): open, its closing date kept.
+   * (owner Q7): open, its closing date kept. The callers pass `lateWon`
+   * false for a charge refunded outside Stripe, which nothing lifts.
    */
   private windowView(
     createdSeconds: number,
@@ -1184,6 +1225,9 @@ export class SupportService extends BaseService {
         this.refundHoldsOf(chargeId),
       ]);
       // As the detail's block reads, before the amount it would refuse.
+      if (holds.refundedOutsideStripeAt) {
+        throw new RefundedOutsideStripeError(holds.refundedOutsideStripeAt);
+      }
       if (holds.settling) throw new ChargebackSettlingError();
       const refunded = standingCents(listed);
       this.assertAmountFits(amountCents, charge.amount - refunded);
@@ -1251,19 +1295,25 @@ export class SupportService extends BaseService {
     if (amountCents > leftCents) throw new RefundAmountTooLargeError(leftCents);
   }
 
-  /** `refundHolds` over the charge's disputes as they stand now. */
+  /**
+   * `refundHolds` over the charge's disputes as they stand now, and when the
+   * charge was refunded outside Stripe, if it was.
+   */
   private async refundHoldsOf(chargeId: string) {
-    return refundHolds(
-      await this.db
-        .select({
-          status: disputes.status,
-          outcomeAppliedAt: disputes.outcomeAppliedAt,
-          lateWonAt: disputes.lateWonAt,
-        })
-        .from(disputes)
-        .where(eq(disputes.stripeChargeId, chargeId))
-        .orderBy(asc(disputes.stripeCreatedAt), asc(disputes.stripeDisputeId))
-    );
+    const rows = await this.db
+      .select({
+        status: disputes.status,
+        outcomeAppliedAt: disputes.outcomeAppliedAt,
+        lateWonAt: disputes.lateWonAt,
+        refundedOutsideStripeAt: disputes.refundedOutsideStripeAt,
+      })
+      .from(disputes)
+      .where(eq(disputes.stripeChargeId, chargeId))
+      .orderBy(asc(disputes.stripeCreatedAt), asc(disputes.stripeDisputeId));
+    return {
+      ...refundHolds(rows),
+      refundedOutsideStripeAt: refundedOutsideStripeAt(rows),
+    };
   }
 
   // ==========================================================================
@@ -1276,9 +1326,11 @@ export class SupportService extends BaseService {
    * 1. list the charge's refunds;
    * 2. one already carrying this decision's key is returned, `replayed`;
    * 3. a count that moved since the page loaded stops it (`CHARGE_CHANGED`);
-   * 4. the window (server clock, Stripe's `charge.created`; a late-won
-   *    payment has none, owner Q7), the chargeback block (the dispute's
-   *    CURRENT status), a won chargeback still settling, and the amount cap;
+   * 4. a charge settled by hand and refunded outside Stripe (never again
+   *    here, owner decision 2026-11-08), the window (server clock, Stripe's
+   *    `charge.created`; a late-won payment has none, owner Q7), the
+   *    chargeback block (the dispute's CURRENT status), a won chargeback
+   *    still settling, and the amount cap;
    * 5. `refunds.create`, with the key and who asked; when Stripe does not
    *    make it, `refundNotMade` says why.
    *
@@ -1309,6 +1361,11 @@ export class SupportService extends BaseService {
 
       const charge = await readCharge();
       const holds = await this.refundHoldsOf(chargeId);
+      // Settled by hand (owner decision 2026-11-08): never through Stripe,
+      // whatever the window or a late win says.
+      if (holds.refundedOutsideStripeAt) {
+        throw new RefundedOutsideStripeError(holds.refundedOutsideStripeAt);
+      }
       const window = refundWindow(charge.created, new Date());
       if (!window.isOpen && !holds.lateWon) {
         throw new RefundWindowClosedError(window.closesAt);
@@ -2450,8 +2507,10 @@ export class SupportService extends BaseService {
    * Settle a failed refund. `refunded_elsewhere` only resolves the row.
    * `creators_repaid` is one transaction with the refund row locked: what its
    * clawback took is paid back (`repayFailedRefund`), a failed FULL purchase
-   * refund gives the buyer access back, then the row is resolved. A repeat of
-   * the same resolution returns the row as it stands; another is a 409.
+   * refund gives the buyer access back, then the row is resolved. A late
+   * win's own refund is never `creators_repaid` (`refuseLateWinRefund`). A
+   * repeat of the same resolution returns the row as it stands; another is a
+   * 409.
    */
   async resolveFailedRefund(
     refundId: string,
@@ -2540,6 +2599,9 @@ export class SupportService extends BaseService {
     let purchaseId = found.purchaseId;
     let prepared: PreparedRepay | undefined;
     if (!found.resolvedAt) {
+      // Before Stripe is read: the pre-step below writes the steps that
+      // landed, and a late win's refund is refused without them.
+      await this.refuseLateWinRefund(this.db, found.stripeRefundId);
       prepared = await this.prepareRepay(
         found.stripeRefundId,
         found.stripeChargeId
@@ -2580,6 +2642,9 @@ export class SupportService extends BaseService {
           'The failed refund was not prepared for its settlement'
         );
       }
+      // Again under the lock, before anything is written: the late win may
+      // have recorded its refund's id since the check above.
+      await this.refuseLateWinRefund(tx, row.stripeRefundId);
       const now = new Date();
       // Re-checks the whole later-cause guard under the lock, and cancels the
       // pre-step's unlanded steps here, so a refusal leaves them as they were
@@ -2697,6 +2762,32 @@ export class SupportService extends BaseService {
       },
       restoredAccess: restored && outcome.access ? outcome.access : null,
     };
+  }
+
+  /**
+   * A late win's own refund of the payment (`disputes.late_win_refund_id`) is
+   * never settled `creators_repaid` (`LATE_WIN_REFUND_NOT_REPAYABLE`, 422;
+   * owner decision 6, 2026-11-08, "Block it in code"): it pays back a buyer
+   * who paid twice, so its clawback stands. `refunded_elsewhere` is still
+   * allowed for it.
+   */
+  private async refuseLateWinRefund(
+    db: DatabaseClient | Tx,
+    stripeRefundId: string
+  ): Promise<void> {
+    const [lateWin] = await db
+      .select({ stripeDisputeId: disputes.stripeDisputeId })
+      .from(disputes)
+      .where(eq(disputes.lateWinRefundId, stripeRefundId))
+      .limit(1);
+    if (lateWin) {
+      this.obs.info('A creators_repaid settlement was refused', {
+        stripeRefundId,
+        disputeId: lateWin.stripeDisputeId,
+        reason: 'late_win_refund',
+      });
+      throw new LateWinRefundNotRepayableError(lateWin.stripeDisputeId);
+    }
   }
 
   /**

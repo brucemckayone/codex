@@ -32,6 +32,11 @@ export type RefundOutcome =
   | { kind: 'chargeback'; disputeStatus: string | null }
   /** A won chargeback is still paying the creators back (Codex-2hxff.70). */
   | { kind: 'chargeback_settling' }
+  /**
+   * Support settled the charge by hand and refunded the buyer outside Stripe
+   * since the page loaded (owner decision 2026-11-08): the reload shows when.
+   */
+  | { kind: 'refunded_outside_stripe' }
   | { kind: 'nothing_left' }
   | { kind: 'too_large'; maxCents: number | null }
   /**
@@ -81,6 +86,8 @@ export function refundOutcomeOf(
       return { kind: 'chargeback', disputeStatus: answer.disputeStatus };
     case 'CHARGEBACK_SETTLING':
       return { kind: 'chargeback_settling' };
+    case 'REFUNDED_OUTSIDE_STRIPE':
+      return { kind: 'refunded_outside_stripe' };
     case 'NOTHING_LEFT_TO_REFUND':
       return { kind: 'nothing_left' };
     case 'REFUND_AMOUNT_TOO_LARGE':

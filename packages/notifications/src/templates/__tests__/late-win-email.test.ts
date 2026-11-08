@@ -127,14 +127,30 @@ describe('purchase-access-restored (late win, Q5)', () => {
     expect(text.content).toContain(`Go to the course: ${COURSE.itemUrl}`);
   });
 
-  it('has the mockup’s subject', () => {
-    expect(
-      renderTemplate({
-        template: TEMPLATE.subject,
-        data: ITEM,
-        allowedTokens: getAllowedTokens(NAME),
-        stripTags: true,
-      }).content
-    ).toBe('Your access to Winter Light is back');
+  // The owner's subject (C2, 2026-11-08, "Leave the title out"): the platform
+  // name, as refund-processed has it. A subject is rendered with stripTags,
+  // which throws on a `<` or `>` in any value, and the buyer's email is
+  // claimed before it is sent, so a title in the subject could lose it.
+  const subjectOf = (data: Record<string, string>) =>
+    renderTemplate({
+      template: TEMPLATE.subject,
+      data: { ...BRAND, ...data },
+      allowedTokens: getAllowedTokens(NAME),
+      stripTags: true,
+    }).content;
+
+  it('has the platform name in its subject, not the title', () => {
+    expect(subjectOf(ITEM)).toBe('Your access is back - Revelations');
+    expect(TEMPLATE.subject).not.toContain('{{contentTitle}}');
+  });
+
+  it('sends a title with < or > in it: the subject renders, the body escapes it', () => {
+    const titled = { ...ITEM, contentTitle: 'Before > After <Part 2>' };
+    expect(subjectOf(titled)).toBe('Your access is back - Revelations');
+    const { html, text } = render(titled);
+    expect(html.content).toContain(
+      '<strong>Before &gt; After &lt;Part 2&gt;</strong>'
+    );
+    expect(text.content).toContain('Item: Before > After <Part 2>');
   });
 });

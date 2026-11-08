@@ -439,21 +439,34 @@ see its subscribers after the roll forward.
 
 ---
 
-## A late win undoes a lost chargeback (migration `0126`)
+## A late win undoes a lost chargeback (migrations `0126` and `0127`)
 
 `0126` adds four nullable columns and three CHECKs to `disputes`, and the
 `purchase-access-restored` email (`Codex-2hxff.70`;
-[dispute record](dispute-record.md)). It is additive and runs before the
-workers deploy. The old workers never read the columns, and they still only
-alert a late win and leave its row `lost`, which every CHECK allows. No
-backfill. `0126` stays on a rollback.
+[dispute record](dispute-record.md)). `0127` adds one more nullable column,
+`refunded_outside_stripe_at`: a charge support settled by hand, which its
+refund route then refuses
+([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)). Both
+are additive and run before the workers deploy. The old workers never read the
+columns, and they still only alert a late win and leave its row `lost`, which
+every CHECK allows. No backfill: nothing sets the new column until a person
+settles a case. Both stay on a rollback, but list the late wins still being
+undone first ([R19](#r19--before-any-workers-rollback-late-wins-still-being-undone)).
+The old support route doesn't read `refunded_outside_stripe_at`, so a charge
+settled by hand is refundable through Stripe again while rolled back: don't
+refund one then.
 
-### R18 — before the deploy: lost chargebacks already settled by hand
+### R18 — lost chargebacks already settled by hand
 
 From this release the hourly reconcile undoes any lost dispute that Stripe
 now shows as won, including one alerted under the old "alert only" rule that
-a person has already put right by hand. Before deploying, list the rows it
-could pick up and check each in Stripe:
+a person has already put right by hand. Its first run comes within the hour
+of the deploy, and the deploy migrates and starts the new workers in one job,
+so such a row must stop being `lost` before the deploy. `0126`'s columns don't
+exist until the deploy, so R18 has two parts.
+
+**(a) Before the deploy.** List the rows the reconcile could pick up and check
+each in Stripe:
 
 ```sql
 BEGIN TRANSACTION READ ONLY;
@@ -469,12 +482,117 @@ ROLLBACK;
 **Expect none:** production runs on Stripe test keys and has had no late-win
 alert.
 
-For any that Stripe shows as won and that was already put right by hand,
-record it as an applied late win, so nothing runs twice. This one writes: run
-it only with the owner's OK, in one transaction, with the ids from the list:
+For any that Stripe shows as won and that was already put right by hand, mark
+it won and applied, so neither the old workers nor the new ones act on it
+again. This one writes: run it only with the owner's OK, with the ids from the
+list:
 
 ```sql
+BEGIN;
 UPDATE disputes
-   SET status = 'won', late_won_at = now(), lost_applied_at = outcome_applied_at
- WHERE stripe_dispute_id IN ('du_…') AND status = 'lost';
+   SET status = 'won',
+       outcome_applied_at = COALESCE(outcome_applied_at, now() - interval '1 second'),
+       updated_at = now()
+ WHERE stripe_dispute_id IN ('du_…') AND status = 'lost'
+RETURNING stripe_dispute_id, status, outcome_applied_at;
+COMMIT;
 ```
+
+It returns one line per id. Each row is now an applied win:
+
+- **Every CHECK allows it, `0126`'s included.** It writes only columns that
+  exist today, and `0126`'s three CHECKs test only its new columns, which
+  arrive empty.
+- **Nothing acts on it.** The webhook stops at an applied outcome, the hourly
+  retry takes only unapplied rows, and the late-win check reads only lost ones,
+  on the old workers and the new.
+- **A row whose loss never finished** (`outcome_applied_at` empty in the list)
+  gets an applied time a second before the write. It then still reads as
+  settled by hand, not by the undo. Marking it won also releases the sale's
+  unpaid payouts that its unfinished loss was holding, and the next payout run
+  pays them, as for any win. Check first that the hand settlement didn't pay
+  those creators some other way.
+
+**(b) After the deploy**, at any time, record the same rows as late wins. This
+adds support's history ("Won late") and the lifted refund limit (Q7). Nothing
+races it, because the row stays applied:
+
+```sql
+BEGIN;
+UPDATE disputes
+   SET late_won_at = now(),
+       lost_applied_at = outcome_applied_at,
+       updated_at = now()
+ WHERE stripe_dispute_id IN ('du_…')
+   AND status = 'won' AND late_won_at IS NULL
+   AND outcome_applied_at IS NOT NULL
+RETURNING stripe_dispute_id, outcome_applied_at, late_won_at, lost_applied_at;
+COMMIT;
+```
+
+Then check that each is an applied late win settled by hand. Every column
+should read `t`:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT stripe_dispute_id, status,
+       outcome_applied_at < late_won_at AS applied_before_the_late_win,
+       (late_won_at IS NULL OR status = 'won') AS check_late_won_status,
+       (late_win_refund_id IS NULL OR late_won_at IS NOT NULL) AS check_late_win_refund,
+       (lost_applied_at IS NULL OR late_won_at IS NOT NULL) AS check_lost_applied
+  FROM disputes
+ WHERE stripe_dispute_id IN ('du_…');
+ROLLBACK;
+```
+
+`applied_before_the_late_win` is what keeps the buyer's "access is back" email
+from being sent for it ([dispute record](dispute-record.md#an-applied-late-win)).
+
+### R19 — before any workers rollback: late wins still being undone
+
+A late win that the new workers have already undone stays undone. A late win
+still being undone does not (won, `late_won_at` set, its outcome not yet
+applied). Within the hour, the old workers' hourly retry finishes it as a plain
+win: it re-pays the creators and marks it applied, but it leaves a refunded
+purchase refunded, and it never refunds a payment the buyer made twice. After
+the roll forward, nothing revisits it, because it is applied. So before any
+workers rollback, list them:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT d.stripe_dispute_id, d.stripe_charge_id, d.purchase_id,
+       d.subscription_id, d.course_subscription_id, d.late_won_at,
+       d.late_win_refund_id, pu.status AS purchase_status,
+       pu.duplicate_of_purchase_id,
+       EXISTS (SELECT 1 FROM purchases o
+                WHERE o.customer_id = pu.customer_id AND o.id <> pu.id
+                  AND o.status = 'completed'
+                  AND (o.content_id = pu.content_id
+                       OR o.course_id = pu.course_id)) AS bought_again
+  FROM disputes d
+  LEFT JOIN purchases pu ON pu.id = d.purchase_id
+ WHERE d.late_won_at IS NOT NULL AND d.outcome_applied_at IS NULL
+ ORDER BY d.late_won_at;
+ROLLBACK;
+```
+
+At 0, a workers rollback is exact for late wins. Otherwise, prefer a forward
+fix. Each listed row has a step that is retried every hour and alerted
+([operations](operations.md#late-wins)). Fix its cause and let the next run
+finish it, or settle a refund Stripe won't make
+([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)), then
+list again.
+
+If the workers must roll back anyway, **keep the list first.** Once the old
+workers mark a row applied, it looks exactly like a late win the new workers
+undid, and it can't be found again. Then wait until each row shows
+`outcome_applied_at` set, and act on it:
+
+| The row | What to do |
+|---|---|
+| A subscription or a course subscription | Nothing: the old workers settle it as the new ones would |
+| `purchase_status` is `completed` | Nothing: the buyer already has it back. They aren't sent the "access is back" email |
+| `purchase_status` is `pending` (a duplicate payment the loss never got to) | Nothing: the hourly duplicate sweep refunds it |
+| `late_win_refund_id` set | Nothing, once Stripe shows that refund succeeded: its `charge.refunded` takes it back from the creators. If a payout run paid their re-pay first, it leaves a `slice_repaid` debt for support, as any refund of a re-paid sale does |
+| `refunded`, `late_win_refund_id` empty, and `bought_again` true or `duplicate_of_purchase_id` set | The buyer paid twice. Refund this charge in full: from Stripe's Dashboard while rolled back (the old charge page keeps the 14-day limit), or from the charge page once rolled forward (a late win has no limit there). Its `charge.refunded` takes it back from the creators, as in the row above |
+| `refunded`, and neither | The undo never gave the buyer the item back. Unless the charge's refunds cover what was paid (check in Stripe), give it back by hand, with the owner's OK: content with a [support grant](access.md#support-grants), and a course as the owner decides |
