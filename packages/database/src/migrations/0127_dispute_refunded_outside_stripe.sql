@@ -1,0 +1,1 @@
+ALTER TABLE "disputes" ADD COLUMN "refunded_outside_stripe_at" timestamp with time zone;
