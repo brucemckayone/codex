@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { mediaTypeEnum } from '../content/content-schemas';
 import {
   createSanitizedStringSchema,
   urlSchema,
@@ -358,6 +359,30 @@ export const transcodingFailedDataSchema = z.object({
   retryUrl: z.string().url(),
 });
 
+/**
+ * Publish when ready (Codex-a6ofh.2.8), to the piece's creator: it went live
+ * when its file finished processing. `mediaKind` names the file ("video" or
+ * "audio") in the sentence.
+ */
+export const contentLiveDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  mediaKind: mediaTypeEnum,
+  contentUrl: z.string().url(),
+});
+
+/**
+ * Publish when ready, to the piece's creator: it couldn't go live, and why.
+ * `reason` is one sentence, written for the creator; `editUrl` opens its
+ * Publish step.
+ */
+export const contentNotLiveDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  reason: z.string().min(1),
+  editUrl: z.string().url(),
+});
+
 /** To the platform support mailbox (Codex-l2c48.6, .10): `details` is preformatted lines. */
 export const transcodingOwnerAlertDataSchema = z.object({
   headline: z.string(),
@@ -571,6 +596,9 @@ export const templateDataSchemas = {
   'transcoding-complete': transcodingCompleteDataSchema,
   'transcoding-failed': transcodingFailedDataSchema,
   'transcoding-owner-alert': transcodingOwnerAlertDataSchema,
+  // Publish when ready (Codex-a6ofh.2.8)
+  'content-live': contentLiveDataSchema,
+  'content-not-live': contentNotLiveDataSchema,
   // Creator
   'new-sale': newSaleDataSchema,
   'connect-account-status': connectAccountStatusDataSchema,

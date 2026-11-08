@@ -19,14 +19,19 @@ import {
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
+  ERROR_CODES,
   hasBeenLive,
   isMediaOnItsWay,
   isPublicContent,
+  isPublishBlockedReason,
+  isTerminalTranscodeFailure,
   MEDIA_STATUS,
   MEDIA_TYPES,
   PAGINATION,
+  type PublishBlockedReason,
 } from '@codex/constants';
 import {
+  isLockNotAvailable,
   isUniqueViolationOf,
   MEDIA_ITEM_RESPONSE_COLUMNS,
   messageForLog,
@@ -50,7 +55,12 @@ import {
 } from '@codex/image-processing';
 import { READABLE_ORGANIZATION_COLUMNS } from '@codex/organization';
 import type { ServiceConfig } from '@codex/service-errors';
-import { BaseService, ValidationError } from '@codex/service-errors';
+import {
+  BaseService,
+  isServiceError,
+  ServiceUnavailableError,
+  ValidationError,
+} from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import {
   playedMediaItemId,
@@ -100,6 +110,11 @@ import type {
   PublicContentOrganization,
   PublicContentRow,
   PublicMediaItemSource,
+  ScheduleSettlement,
+  SettledDraft,
+  SettleOptions,
+  SettleOutcome,
+  StoppedDraft,
 } from '../types';
 import {
   assertTiersInOrg,
@@ -199,6 +214,100 @@ function noLongerScheduledOn(
     (row.publishRequestedAt === null ||
       row.mediaItemId !== fromSchedule.mediaItemId)
   );
+}
+
+/** Drafts one media-ready call settles; the maintenance run takes the rest. */
+const SETTLE_BATCH = 50;
+
+/**
+ * A settle's write gave up a lock held elsewhere (`lock_timeout`): nothing
+ * was written, the draft keeps waiting, and the next run tries again. A 503,
+ * so it is kept, not read as a refusal its creator must fix. `lockedOn` is
+ * the table it waited on, when Postgres names it: a go-live locks the
+ * draft's media, the membership and the thumbnail's media as well as the
+ * draft. Unnamed for a waiter queued behind another on the same row, or for
+ * a table lock (a migration's).
+ */
+class ScheduledRowLockedError extends ServiceUnavailableError {
+  readonly lockedOn: string | undefined;
+  constructor(contentId: string | undefined, cause: unknown) {
+    super(
+      'A scheduled draft is locked; the next run tries again',
+      { ...(contentId ? { contentId } : {}) },
+      { cause }
+    );
+    this.lockedOn = lockedRelation(cause);
+  }
+}
+
+/**
+ * The table a given-up lock waited on, from Postgres's `where` (`while
+ * locking tuple (0,1) in relation "media_items"`), through Drizzle's
+ * wrapper. Only the name: the field can carry statement text. It runs as
+ * a lock error is caught, so it never throws: an error it cannot read names
+ * no table.
+ */
+function lockedRelation(error: unknown): string | undefined {
+  try {
+    let at = error;
+    for (let hop = 0; hop < 3; hop++) {
+      if (typeof at !== 'object' || at === null) return undefined;
+      const { where, cause } = at as { where?: unknown; cause?: unknown };
+      if (typeof where === 'string') {
+        return /in relation "([^"]+)"/.exec(where)?.[1];
+      }
+      at = cause;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A given-up lock's log fields (the table it waited on); none otherwise. */
+const lockFields = (error: unknown) =>
+  error instanceof ScheduledRowLockedError ? { lockedOn: error.lockedOn } : {};
+
+/**
+ * No draft is started past this. The route settles in the 30 s Workers gives
+ * background work after a response, shared with its emails and cache bumps.
+ */
+const SETTLE_BUDGET_MS = 10_000;
+
+/**
+ * `and()` arguments for a creator's drafts still scheduled on a media item:
+ * both predicates of idx_content_publish_requested_media, and the scope.
+ * Spread into the `and()`, never held in one, which is typed `SQL | undefined`.
+ */
+function waitingOn(mediaItemId: string, creatorId: string): SQL[] {
+  return [
+    eq(content.mediaItemId, mediaItemId),
+    scopedNotDeleted(content, creatorId),
+    isNotNull(content.publishRequestedAt),
+  ];
+}
+
+/** The SET that ends a draft's wait, keeping why for its editor. */
+function stoppedWaiting(reason: PublishBlockedReason) {
+  return {
+    publishRequestedAt: null,
+    publishBlockedReason: reason,
+    updatedAt: new Date(),
+  };
+}
+
+/**
+ * Why a scheduled draft stops waiting, from what its go-live refused with: a
+ * publish refusal the creator must fix (`details.code`). Null for anything a
+ * later run may get past: an unexpected error, or media no longer ready (a
+ * new transcode claimed it), which leaves the schedule waiting on it.
+ */
+function stoppingReason(error: unknown): PublishBlockedReason | null {
+  if (!isServiceError(error) || error.statusCode >= 500) return null;
+  const code = error.context?.code;
+  return isPublishBlockedReason(code) && code !== ERROR_CODES.MEDIA_NOT_READY
+    ? code
+    : null;
 }
 
 /**
@@ -1455,8 +1564,37 @@ export class ContentService extends BaseService {
     creatorId: string,
     options: PublishOptions = {}
   ): Promise<Content & ContentTierWire> {
+    const { row } = await this.publishAndReport(id, creatorId, options);
     try {
+      const [wired] = await withTierWire(this.db, [row]);
+      return wired ?? { ...row, includedInTierIds: [], includedInTierId: null };
+    } catch (error) {
+      this.handleError(error, 'publish');
+    }
+  }
+
+  /**
+   * `publish` without its tier wire, and whether THIS call put the row live:
+   * true only when its own transaction wrote the go-live columns under the
+   * row lock, so of two callers racing one draft (the media-ready webhook and
+   * the maintenance run) exactly one hears it (Codex-a6ofh.2.8). An
+   * already-live row, a schedule, or a trigger that came too late, is false.
+   */
+  private async publishAndReport(
+    id: string,
+    creatorId: string,
+    options: PublishOptions
+  ): Promise<{ row: Content; wentLive: boolean }> {
+    try {
+      let wentLive = false;
       const result = await this.db.transaction(async (tx) => {
+        // A scheduled go-live gives up any one lock it waits 5 s on (each of
+        // its row, media, membership and thumbnail locks), for the next run:
+        // a lock held elsewhere must not run a settle past the 30 s its
+        // background work gets, cutting off what it had not told.
+        if (options.fromSchedule) {
+          await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+        }
         // The row first, locked FOR NO KEY UPDATE, then its media below (FOR
         // KEY SHARE, or FOR SHARE to publish when ready): the order update()
         // takes them in. Publish takes no tier
@@ -1531,6 +1669,7 @@ export class ContentService extends BaseService {
           throw new ContentNotFoundError(id);
         }
 
+        wentLive = !scheduling;
         return written;
       });
 
@@ -1549,11 +1688,13 @@ export class ContentService extends BaseService {
         }
       }
 
-      const [wired] = await withTierWire(this.db, [result]);
-      return (
-        wired ?? { ...result, includedInTierIds: [], includedInTierId: null }
-      );
+      return { row: result, wentLive };
     } catch (error) {
+      // A scheduled go-live that gave up its lock is expected: kept for the
+      // next run, a typed 503, never logged as an unhandled error.
+      if (options.fromSchedule && isLockNotAvailable(error)) {
+        throw new ScheduledRowLockedError(id, error);
+      }
       this.handleError(error, 'publish');
     }
   }
@@ -1608,6 +1749,373 @@ export class ContentService extends BaseService {
     } catch (error) {
       this.handleError(error, 'cancelPublishRequest');
     }
+  }
+
+  /**
+   * Settle every draft scheduled to publish when this media item is ready
+   * (Codex-a6ofh.2.8), by the media's state NOW, so a late, repeated or
+   * concurrent call can neither publish nor clear the wrong thing:
+   * - ready: each goes live through every publish rule again (`fromSchedule`,
+   *   under the row's lock); one a rule refuses stops waiting, the refusal's
+   *   code kept as its reason;
+   * - deleted: each stops waiting with MEDIA_DELETED, and no email (owner);
+   * - failed for good (`isTerminalTranscodeFailure`): MEDIA_FAILED;
+   * - on its way, or a failure that may still be retried: nothing.
+   *
+   * A worker operation keyed by a media id (content-api's media-ready route,
+   * and after a media delete), so every read is scoped to the MEDIA's
+   * creator: the gate never schedules a draft on another creator's file.
+   * At most SETTLE_BATCH drafts, and none started after `budgetMs`; the
+   * maintenance run settles the rest. Never call it while a transaction that
+   * wrote the media row is still open.
+   *
+   * Never throws once it has written: a draft that went live or stopped no
+   * longer reads as waiting, so a later call can't announce it. Everything
+   * its creator is told is read BEFORE the first write, each draft is handed
+   * to `onSettled` as its write commits (so work cut off later loses nothing
+   * already told), and every step after a write is guarded and logged. A
+   * throw means nothing was written.
+   */
+  async settleScheduledForMedia(
+    mediaItemId: string,
+    options: SettleOptions = {}
+  ): Promise<ScheduleSettlement> {
+    try {
+      const settlement: ScheduleSettlement = {
+        wentLive: [],
+        stopped: [],
+        retryLater: 0,
+        more: false,
+        liveOrgIds: [],
+      };
+      const [media] = await this.db
+        .select({
+          creatorId: mediaItems.creatorId,
+          status: mediaItems.status,
+          deletedAt: mediaItems.deletedAt,
+          transcodingErrorCode: mediaItems.transcodingErrorCode,
+          transcodingAttempts: mediaItems.transcodingAttempts,
+        })
+        .from(mediaItems)
+        .where(eq(mediaItems.id, mediaItemId));
+      if (!media) return settlement;
+      // Nothing will make this media ready: every draft waiting on it stops.
+      const never = media.deletedAt
+        ? ERROR_CODES.MEDIA_DELETED
+        : isTerminalTranscodeFailure(media)
+          ? ERROR_CODES.MEDIA_FAILED
+          : null;
+      if (!never && media.status !== MEDIA_STATUS.READY) return settlement;
+
+      const { drafts: waiting, more } = await this.waitingDrafts(
+        mediaItemId,
+        media.creatorId
+      );
+      settlement.more = more;
+
+      if (never) {
+        if (waiting.length === 0) return settlement;
+        // One write; only a draft still waiting matches, so a second caller
+        // matches none. Nothing after it can fail.
+        let stopped: Content[];
+        try {
+          stopped = await this.writeStop(
+            never,
+            waiting.map((draft) => draft.id),
+            mediaItemId,
+            media.creatorId
+          );
+        } catch (error) {
+          if (!(error instanceof ScheduledRowLockedError)) throw error;
+          // Nothing written, and expected: the maintenance run reads this
+          // file again, as it does every file that will never be ready.
+          settlement.retryLater = waiting.length;
+          this.obs.warn('Drafts on a file never to be ready are locked; kept', {
+            mediaItemId,
+            reason: never,
+            left: waiting.length,
+            ...lockFields(error),
+          });
+          return settlement;
+        }
+        const read = new Map(waiting.map((draft) => [draft.id, draft]));
+        for (const row of stopped) {
+          const draft = read.get(row.id);
+          if (!draft) continue;
+          const told = {
+            ...(await this.settledFrom(draft, row)),
+            reason: never,
+          };
+          settlement.stopped.push(told);
+          this.tell(options, { kind: 'stopped', draft: told });
+        }
+        return settlement;
+      }
+
+      const stopBy = Date.now() + (options.budgetMs ?? SETTLE_BUDGET_MS);
+      for (const [index, draft] of waiting.entries()) {
+        if (Date.now() >= stopBy) {
+          // Still waiting: the next run settles them.
+          settlement.retryLater += waiting.length - index;
+          this.obs.warn('Settle out of time; the rest wait for the next run', {
+            mediaItemId,
+            left: waiting.length - index,
+          });
+          break;
+        }
+        // Only the go-live is classified here: what follows a write that
+        // committed must never be read as the write having failed.
+        let published: { row: Content; wentLive: boolean };
+        try {
+          published = await this.publishAndReport(draft.id, media.creatorId, {
+            fromSchedule: { mediaItemId },
+          });
+        } catch (error) {
+          const stopped = await this.stopRefused(
+            error,
+            draft,
+            mediaItemId,
+            media.creatorId
+          );
+          if (stopped === 'kept') settlement.retryLater++;
+          else if (stopped) {
+            settlement.stopped.push(stopped);
+            this.tell(options, { kind: 'stopped', draft: stopped });
+          }
+          continue;
+        }
+        if (published.wentLive) {
+          const told = await this.settledFrom(draft, published.row);
+          settlement.wentLive.push(told);
+          this.tell(options, { kind: 'live', draft: told });
+        }
+      }
+
+      // A file that went ready changes every live list showing it, not only
+      // the drafts it just published (Codex-1szw2). Lost, those lists wait
+      // for their TTL; the route still refreshes the go-lives' own orgs.
+      try {
+        const liveOrgs = await this.db
+          .selectDistinct({ organizationId: content.organizationId })
+          .from(content)
+          .where(
+            and(
+              eq(content.mediaItemId, mediaItemId),
+              scopedNotDeleted(content, media.creatorId),
+              eq(content.status, CONTENT_STATUS.PUBLISHED),
+              isNotNull(content.organizationId)
+            )
+          );
+        settlement.liveOrgIds = liveOrgs.flatMap((row) =>
+          row.organizationId ? [row.organizationId] : []
+        );
+      } catch (error) {
+        this.obs.error('Orgs showing a ready file not read; not refreshed', {
+          mediaItemId,
+          error: messageForLog(error),
+        });
+      }
+      return settlement;
+    } catch (error) {
+      this.handleError(error, 'settleScheduledForMedia');
+    }
+  }
+
+  /**
+   * What a scheduled draft's failed go-live means. Deleted since the read:
+   * nothing (null). A refusal its creator must fix: it stops waiting, if it
+   * still is (a cancel or a swap that committed meanwhile wins). Anything
+   * else, or a stop that could not be written: 'kept', for the next run.
+   * Never throws.
+   */
+  private async stopRefused(
+    error: unknown,
+    draft: SettledDraft,
+    mediaItemId: string,
+    creatorId: string
+  ): Promise<StoppedDraft | 'kept' | null> {
+    if (
+      isServiceError(error) &&
+      error.context?.code === ERROR_CODES.CONTENT_NOT_FOUND
+    ) {
+      return null;
+    }
+    const reason = stoppingReason(error);
+    if (reason === null) {
+      const log = {
+        contentId: draft.id,
+        mediaItemId,
+        error: messageForLog(error),
+      };
+      // A 4xx with no reason its creator can be told refuses again every
+      // run, and the editor shows it waiting: a gate this trigger can't name.
+      if (
+        isServiceError(error) &&
+        error.statusCode < 500 &&
+        error.context?.code !== ERROR_CODES.MEDIA_NOT_READY
+      ) {
+        this.obs.error('A scheduled draft was refused for no known reason', {
+          ...log,
+          statusCode: error.statusCode,
+          code: error.code,
+        });
+      } else {
+        this.obs.warn('A scheduled draft could not be settled; kept', {
+          ...log,
+          ...lockFields(error),
+        });
+      }
+      return 'kept';
+    }
+    let stopped: Content | undefined;
+    try {
+      [stopped] = await this.writeStop(
+        reason,
+        [draft.id],
+        mediaItemId,
+        creatorId
+      );
+    } catch (stopError) {
+      // Nothing written: the next run is refused again and stops it then.
+      // A lock held elsewhere is expected; anything else would fail the
+      // same way every run, its creator never told.
+      const log = {
+        contentId: draft.id,
+        mediaItemId,
+        reason,
+        error: messageForLog(stopError),
+      };
+      if (stopError instanceof ScheduledRowLockedError) {
+        this.obs.warn('A refused draft could not be stopped; kept', {
+          ...log,
+          ...lockFields(stopError),
+        });
+      } else {
+        this.obs.error('A refused draft could not be stopped; kept', log);
+      }
+      return 'kept';
+    }
+    return stopped
+      ? { ...(await this.settledFrom(draft, stopped)), reason }
+      : null;
+  }
+
+  /**
+   * The write that ends the wait of the drafts `ids`, those of them still
+   * the creator's and still scheduled on the media: scoped here, never by
+   * the caller. It gives up any one row lock it waits 5 s on as a typed 503,
+   * as a scheduled go-live does, so it is never left queued for good.
+   */
+  private async writeStop(
+    reason: PublishBlockedReason,
+    ids: string[],
+    mediaItemId: string,
+    creatorId: string
+  ): Promise<Content[]> {
+    if (ids.length === 0) return [];
+    try {
+      return await this.db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+        return tx
+          .update(content)
+          .set(stoppedWaiting(reason))
+          .where(
+            and(inArray(content.id, ids), ...waitingOn(mediaItemId, creatorId))
+          )
+          .returning();
+      });
+    } catch (error) {
+      if (isLockNotAvailable(error)) {
+        throw new ScheduledRowLockedError(
+          ids.length === 1 ? ids[0] : undefined,
+          error
+        );
+      }
+      throw error;
+    }
+  }
+
+  /** Hands one settled draft to the caller as its write commits. Never throws. */
+  private tell(options: SettleOptions, outcome: SettleOutcome): void {
+    try {
+      options.onSettled?.(outcome);
+    } catch (error) {
+      this.obs.error('A settled draft was not announced', {
+        contentId: outcome.draft.id,
+        kind: outcome.kind,
+        error: messageForLog(error),
+      });
+    }
+  }
+
+  /**
+   * A settled draft as its creator is told: the details read before the
+   * write, refreshed from the row the write returned. An org it moved to
+   * since that read gets one guarded slug read; failing that, no slug, and
+   * the route sends that draft no link rather than a wrong one. Never throws.
+   */
+  private async settledFrom(
+    read: SettledDraft,
+    row: Pick<Content, 'title' | 'slug' | 'organizationId'>
+  ): Promise<SettledDraft> {
+    const refreshed = {
+      ...read,
+      title: row.title,
+      slug: row.slug,
+      organizationId: row.organizationId,
+    };
+    if (row.organizationId === read.organizationId) return refreshed;
+    if (!row.organizationId) return { ...refreshed, organizationSlug: null };
+    try {
+      const [org] = await this.db
+        .select({ slug: organizations.slug })
+        .from(organizations)
+        .where(eq(organizations.id, row.organizationId));
+      return { ...refreshed, organizationSlug: org?.slug ?? null };
+    } catch (error) {
+      this.obs.error('Org slug of a settled draft not read; no link sent', {
+        contentId: read.id,
+        organizationId: row.organizationId,
+        error: messageForLog(error),
+      });
+      return { ...refreshed, organizationSlug: null };
+    }
+  }
+
+  /**
+   * The creator's drafts still scheduled on the media, with everything their
+   * emails and cache bumps need, oldest ask first, at most SETTLE_BATCH, and
+   * whether more wait (one row over the cap tells).
+   */
+  private async waitingDrafts(
+    mediaItemId: string,
+    creatorId: string
+  ): Promise<{ drafts: SettledDraft[]; more: boolean }> {
+    const rows = await this.db.query.content.findMany({
+      where: and(...waitingOn(mediaItemId, creatorId)),
+      orderBy: asc(content.publishRequestedAt),
+      limit: SETTLE_BATCH + 1,
+      columns: {
+        id: true,
+        title: true,
+        slug: true,
+        contentType: true,
+        organizationId: true,
+      },
+      with: {
+        creator: {
+          columns: { id: true, name: true, email: true, username: true },
+        },
+        organization: { columns: { slug: true } },
+      },
+    });
+    return {
+      drafts: rows.slice(0, SETTLE_BATCH).map(({ organization, ...row }) => ({
+        ...row,
+        organizationSlug: organization?.slug ?? null,
+      })),
+      more: rows.length > SETTLE_BATCH,
+    };
   }
 
   /**

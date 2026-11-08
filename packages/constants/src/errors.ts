@@ -31,6 +31,10 @@ export const ERROR_CODES = {
   // A cancel of a publish-when-ready schedule that came too late: the piece
   // went live first (Codex-a6ofh.2.7), so the editor says that, not "cancelled".
   CONTENT_ALREADY_LIVE: 'CONTENT_ALREADY_LIVE',
+  // A publish-when-ready schedule cleared because its media failed for good
+  // (Codex-a6ofh.2.8). Stored as `content.publish_blocked_reason`; no
+  // publish ever refuses with it.
+  MEDIA_FAILED: 'MEDIA_FAILED',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   NOT_FOUND: 'NOT_FOUND',
@@ -60,6 +64,24 @@ export const PUBLISH_REFUSAL_CODES = [
 ] as const;
 
 export type PublishRefusalCode = (typeof PUBLISH_REFUSAL_CODES)[number];
+
+/**
+ * Every reason a publish-when-ready schedule can end without going live, as
+ * `content.publish_blocked_reason` stores it (Codex-a6ofh.2.8): a refusal
+ * the go-live re-check returned, or the media failing for good.
+ */
+export const PUBLISH_BLOCKED_REASONS = [
+  ...PUBLISH_REFUSAL_CODES,
+  ERROR_CODES.MEDIA_FAILED,
+] as const;
+
+export type PublishBlockedReason = (typeof PUBLISH_BLOCKED_REASONS)[number];
+
+export function isPublishBlockedReason(
+  code: unknown
+): code is PublishBlockedReason {
+  return (PUBLISH_BLOCKED_REASONS as readonly unknown[]).includes(code);
+}
 
 export const STATUS_CODES = {
   BAD_REQUEST: 400,

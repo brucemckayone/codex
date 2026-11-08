@@ -809,6 +809,14 @@ export const sortOrderEnum = z.enum(['asc', 'desc']);
 export const TOPIC_SLUG_MAX = 120;
 
 /**
+ * POST /internal/content/media-ready (worker HMAC, Codex-a6ofh.2.8): a media
+ * item changed, so settle the drafts scheduled on it by its state now. The
+ * body names the item only: content-api reads what happened to it itself.
+ */
+export const mediaReadyBodySchema = z.object({ mediaItemId: uuidSchema });
+export type MediaReadyBody = z.infer<typeof mediaReadyBodySchema>;
+
+/**
  * POST /api/content/:id/publish's query (Codex-a6ofh.2.7, Publish when
  * ready). `whenReady=true` schedules the publish while its media is still on
  * its way; absent or `false` publishes now.

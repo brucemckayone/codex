@@ -101,7 +101,8 @@ function resolveEnvName(
   return 'production';
 }
 
-function isEnvName(value: string): value is EnvName {
+/** Whether a runtime `ENVIRONMENT` string names an env this package routes. */
+export function isEnvName(value: string): value is EnvName {
   return (
     value === 'production' ||
     value === 'staging' ||

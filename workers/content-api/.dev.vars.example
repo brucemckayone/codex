@@ -17,6 +17,10 @@ R2_BUCKET_MEDIA=codex-media-test
 STRIPE_SECRET_KEY=sk_test_YOUR_TEST_KEY_HERE
 STRIPE_WEBHOOK_SECRET_BOOKING=whsec_YOUR_BOOKING_WEBHOOK_SECRET
 
+# Worker-to-worker HMAC: signs the media-api hop, and checks media-api's call
+# to /internal/content/media-ready. Must match media-api's .dev.vars.
+WORKER_SHARED_SECRET=test-worker-shared-secret
+
 # Local CDN override — serves Miniflare R2 files via dev-cdn worker (port 4100)
 # Run `pnpm dev:dev-cdn` alongside this worker for media/thumbnails to load on reload
 R2_PUBLIC_URL_BASE=http://localhost:4100

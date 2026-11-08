@@ -101,6 +101,33 @@ export function isForeignKeyViolation(error: unknown): boolean {
 }
 
 /**
+ * Check if error is a lock that was given up: not granted within the
+ * transaction's `lock_timeout` (or under NOWAIT).
+ * Postgres error code: 55P03
+ *
+ * Checks both the error itself and its cause (for DrizzleQueryError wrapping)
+ */
+export function isLockNotAvailable(error: unknown): boolean {
+  if (
+    isPostgresError(error) &&
+    error.code === POSTGRES_ERROR_CODES.LOCK_NOT_AVAILABLE
+  ) {
+    return true;
+  }
+
+  // Check if the error has a cause (Drizzle wraps Postgres errors)
+  if (error instanceof Error && 'cause' in error) {
+    const cause = (error as { cause: unknown }).cause;
+    return (
+      isPostgresError(cause) &&
+      cause.code === POSTGRES_ERROR_CODES.LOCK_NOT_AVAILABLE
+    );
+  }
+
+  return false;
+}
+
+/**
  * Check if error is a not-null violation
  * Postgres error code: 23502
  *

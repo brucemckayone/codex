@@ -95,6 +95,7 @@ import categoriesSrc from '../categories.ts?raw';
 import contentSrc from '../content.ts?raw';
 import contentAccess from '../content-access';
 import contentAccessSrc from '../content-access.ts?raw';
+import internalSrc from '../internal.ts?raw';
 import journeyInsightsSrc from '../journey-insights.ts?raw';
 import journeys from '../journeys';
 import journeysSrc from '../journeys.ts?raw';
@@ -1017,6 +1018,8 @@ const MOUNTED_ROUTE_SOURCES: ReadonlyArray<readonly [string, string]> = [
   ['content-access.ts', contentAccessSrc],
   ['journey-insights.ts', journeyInsightsSrc],
   ['journeys.ts', journeysSrc],
+  // Worker HMAC routes (Codex-a6ofh.2.8): no session, so no carve-out.
+  ['internal.ts', internalSrc],
 ];
 
 /**

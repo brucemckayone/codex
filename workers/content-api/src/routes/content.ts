@@ -16,11 +16,9 @@
  * - POST   /api/content/:id/thumbnail - Upload content thumbnail
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
 import { AUTH_ROLES, CONTENT_STATUS } from '@codex/constants';
 import type {
   CancelPublishRequestResponse,
-  ContentInvalidationReason,
   ContentResponse,
   CreateContentResponse,
   DeleteContentResponse,
@@ -34,15 +32,12 @@ import {
   contentBrowseQuerySchema,
   contentQuerySchema,
   createContentSchema,
-  invalidateContentAccess,
   updateContentSchema,
 } from '@codex/content';
-import { createDbClient } from '@codex/database';
 import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
-import type { Logger, ObservabilityClient } from '@codex/observability';
 import type {
   CheckSlugResponse,
   ContentPortalUses,
@@ -53,127 +48,18 @@ import {
   publishContentQuerySchema,
 } from '@codex/validation';
 import {
-  invalidateOrgSlugCache,
   multipartProcedure,
   PaginatedResult,
   procedure,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { cleanupContentThumbnailOnDelete } from './content-cleanup';
+import {
+  afterContentPublished,
+  bumpOrgContentVersion,
+  fanContentInvalidation,
+} from './content-invalidation';
 import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
-
-/**
- * Bump the org content version in KV after publish/unpublish/delete.
- * Also invalidates the org's public caches (info, stats, creators) since
- * content changes affect creator contentCount and org stats.
- * Fire-and-forget via waitUntil — does not block the response, and never
- * throws: the thumbnail route calls it from a `.finally()`, where a throw
- * would replace the upload's own error.
- */
-function bumpOrgContentVersion(
-  env: HonoEnv['Bindings'],
-  executionCtx: ExecutionContext,
-  organizationId: string | null | undefined,
-  obs?: ObservabilityClient
-): void {
-  if (!organizationId || !env.CACHE_KV) return;
-  // Given `obs`, because the cache swallows a failed invalidation and logs it
-  // only through its own client: the `.catch` below never sees one.
-  const cache = new VersionedCache({
-    kv: env.CACHE_KV,
-    waitUntil: (promise) => executionCtx.waitUntil(promise),
-    obs,
-  });
-  // Invalidate slug-keyed cache (stats, creators, public info) — shared
-  // helper resolves orgId → slug and swallows transient failures. Started in
-  // a promise of its own, so a client that cannot be built (missing config)
-  // lands in the `.catch` below instead of throwing to the caller, and the
-  // other bumps still run.
-  const bySlug = Promise.resolve().then(() =>
-    invalidateOrgSlugCache({
-      db: createDbClient(env),
-      cache,
-      orgId: organizationId,
-      logger: obs,
-    })
-  );
-  executionCtx.waitUntil(
-    Promise.all([
-      // Invalidate org content collection version
-      cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
-      bySlug,
-      // Invalidate the public topic list: publish/unpublish/delete changes the
-      // set of categories with ≥1 published item, so a cached "Browse by topic"
-      // list could otherwise show empty or missing topics until TTL.
-      cache.invalidate(CacheType.CATEGORIES(organizationId)),
-      // Invalidate the public portal (journey) rails for the same reason
-      // (Codex-72k55): each card's `practiceCount`/`stageCount` counts only
-      // practices whose content is PUBLISHED, so publishing or unpublishing one
-      // practice changes cards that name no content at all. Without this bump a
-      // portal advertises "8 practices" while only 7 are reachable.
-      cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
-    ]).catch((err: unknown) => {
-      obs?.warn('Cache invalidation failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    })
-  );
-}
-
-/**
- * Fan per-user library cache invalidation after a content mutation.
- *
- * Codex-c01do — content mutations (update-access-config, unpublish, delete,
- * publish) previously bumped ONLY catalogue version keys. The per-user
- * library cache (`COLLECTION_USER_LIBRARY`) was untouched, so library UI
- * showed stale accessType flags until the next visibility-change staleness
- * roundtrip. Access decisions at click time are always live (server-side)
- * — this is UX drift, not a security bug — but per feedback_dont_defer_cache_issues
- * we close the gap proactively.
- *
- * Fire-and-forget: the whole block is wrapped in `waitUntil` so the route
- * response is never blocked on KV writes.
- */
-function fanContentInvalidation(
-  env: HonoEnv['Bindings'],
-  executionCtx: ExecutionContext,
-  contentId: string,
-  organizationId: string | null | undefined,
-  reason: ContentInvalidationReason,
-  obs?: Logger,
-  options: { includeFollowers?: boolean } = {}
-): void {
-  if (!env.CACHE_KV) return;
-  const cache = new VersionedCache({
-    kv: env.CACHE_KV,
-    waitUntil: (promise) => executionCtx.waitUntil(promise),
-  });
-  const db = createDbClient(env);
-  const waitUntil = executionCtx.waitUntil.bind(executionCtx);
-
-  // Wrap the whole fanout in waitUntil so the DB `resolveAffectedUsers`
-  // query does not block the response. The helper internally hands each
-  // per-user KV bump to waitUntil as well.
-  executionCtx.waitUntil(
-    invalidateContentAccess({
-      db,
-      cache,
-      waitUntil,
-      contentId,
-      organizationId: organizationId ?? null,
-      reason,
-      logger: obs,
-      includeFollowers: options.includeFollowers ?? false,
-    }).catch((err: unknown) => {
-      obs?.warn('content-invalidation: fanout failed', {
-        contentId,
-        organizationId,
-        reason,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    })
-  );
-}
 
 const app = new Hono<HonoEnv>();
 
@@ -453,22 +339,7 @@ app.post(
       // A schedule changed nothing public: no version to bump, no library
       // to fan out to.
       if (result.status !== CONTENT_STATUS.PUBLISHED) return result;
-      bumpOrgContentVersion(
-        ctx.env,
-        ctx.executionCtx,
-        result.organizationId,
-        ctx.obs
-      );
-      // Fan per-user library invalidation (Codex-c01do). A publish adds the
-      // item to subscribers'/members' libraries — they need a fresh view.
-      fanContentInvalidation(
-        ctx.env,
-        ctx.executionCtx,
-        result.id,
-        result.organizationId,
-        'content_published',
-        ctx.obs
-      );
+      afterContentPublished(ctx.env, ctx.executionCtx, result, ctx.obs);
 
       // TODO: Send new-content-published email to subscribers
       // Requires a subscriber query (users with contentAccess in this org).
