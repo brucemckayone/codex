@@ -439,15 +439,22 @@ see its subscribers after the roll forward.
 
 ---
 
-## A late win undoes a lost chargeback (migration `0126`)
+## A late win undoes a lost chargeback (migrations `0126` and `0127`)
 
 `0126` adds four nullable columns and three CHECKs to `disputes`, and the
 `purchase-access-restored` email (`Codex-2hxff.70`;
-[dispute record](dispute-record.md)). It is additive and runs before the
-workers deploy. The old workers never read the columns, and they still only
-alert a late win and leave its row `lost`, which every CHECK allows. No
-backfill. `0126` stays on a rollback, but list the late wins still being
+[dispute record](dispute-record.md)). `0127` adds one more nullable column,
+`refunded_outside_stripe_at`: a charge support settled by hand, which its
+refund route then refuses
+([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)). Both
+are additive and run before the workers deploy. The old workers never read the
+columns, and they still only alert a late win and leave its row `lost`, which
+every CHECK allows. No backfill: nothing sets the new column until a person
+settles a case. Both stay on a rollback, but list the late wins still being
 undone first ([R19](#r19--before-any-workers-rollback-late-wins-still-being-undone)).
+The old support route doesn't read `refunded_outside_stripe_at`, so a charge
+settled by hand is refundable through Stripe again while rolled back: don't
+refund one then.
 
 ### R18 — lost chargebacks already settled by hand
 
@@ -572,7 +579,9 @@ ROLLBACK;
 At 0, a workers rollback is exact for late wins. Otherwise, prefer a forward
 fix. Each listed row has a step that is retried every hour and alerted
 ([operations](operations.md#late-wins)). Fix its cause and let the next run
-finish it, then list again.
+finish it, or settle a refund Stripe won't make
+([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)), then
+list again.
 
 If the workers must roll back anyway, **keep the list first.** Once the old
 workers mark a row applied, it looks exactly like a late win the new workers

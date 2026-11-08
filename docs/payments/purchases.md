@@ -666,7 +666,9 @@ dispute event records it, then acts on the status the record has.
     also in the Failed refunds queue;
   - a refund Stripe won't make is retried every hour and alerted each time,
     and support settles it by hand
-    ([operations](operations.md#late-wins));
+    ([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)):
+    the buyer is refunded another way, and the charge is never refunded
+    through Stripe after that;
   - a restored buyer is emailed once that their access is back (Q5).
 
   A re-run of the unfinished loss reads the dispute under a share lock first
