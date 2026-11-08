@@ -474,6 +474,17 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
   4. **The platform fee's share is cancelled** and the fee slice is `paid`
      again, with no re-pay row: the money is back in the platform's balance.
 
+**A late win's own refund is never re-paid** (owner decision 2026-11-08,
+"Block it in code"). A failed refund a late win made
+(`disputes.late_win_refund_id`; see [Disputes](#disputes)) pays back a buyer
+who paid twice, so the buyer is still owed it and its clawback stands.
+"Creators re-paid" refuses it with 422 `LATE_WIN_REFUND_NOT_REPAYABLE`
+(`refuseLateWinRefund`). The check runs before Stripe is read and again under
+the refund row's lock, so a refusal writes nothing. Support refunds the buyer
+another way, or again through Stripe on the charge page, then settles it as
+refunded elsewhere. Any other failed refund of the same charge is settled as
+above.
+
 A purchase it refunded in part stops counting it: `refund.updated` restates
 the purchase's refunded amount, id and reason from the refunds still standing
 (`restateStandingRefunds`, owner decision 2026-10-24), so Sales and its stats
@@ -664,7 +675,8 @@ dispute event records it, then acts on the status the record has.
     counts as settled, but the buyer got nothing: it is alerted at error for
     support to settle by hand (owner decision 2026-11-05). A failed one is
     also in the Failed refunds queue, and its clawback stands, as any failed
-    refund's does;
+    refund's does. It is settled only as refunded elsewhere: "creators
+    re-paid" is refused for it ([above](#refunds));
   - a refund Stripe won't make is retried every hour and alerted each time,
     and support settles it by hand
     ([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)):
