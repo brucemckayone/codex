@@ -366,6 +366,11 @@ describe('handleCheckoutCompleted', () => {
         paymentStatus: 'paid',
         metadata,
       }) as unknown as Stripe.Event;
+      // A buyer email, so a receipt or its link's read could happen.
+      (event.data.object as Stripe.Checkout.Session).customer_details = {
+        email: 'buyer@example.com',
+        name: 'Buyer',
+      } as Stripe.Checkout.Session.CustomerDetails;
       const { context, mock } = createContext();
       const executionCtx = attachExecutionCtx(mock);
 
@@ -373,6 +378,8 @@ describe('handleCheckoutCompleted', () => {
 
       expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith('cs_dup');
       expect(executionCtx.waitUntil).not.toHaveBeenCalled();
+      expect(mockFindItemLink).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
       expect(mock._obs.warn).toHaveBeenCalledWith(
         'Duplicate payment refunded instead of completed',
         expect.objectContaining({ purchaseId: 'purchase_dup' })
@@ -999,6 +1006,7 @@ describe('handleCheckoutCompleted', () => {
         'cs_after_commit_transient'
       );
       expect(executionCtx.waitUntil).toHaveBeenCalled();
+      expect(mockFindItemLink).not.toHaveBeenCalled();
       expect(sendEmailToWorker).not.toHaveBeenCalled();
 
       // The redelivery: the clawback finishes, and the receipt goes once. It

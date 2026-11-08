@@ -211,8 +211,9 @@ guards).
    no longer published, or a creator with no username) links the buyer's
    library instead, logged at warn; a lookup that fails does too, logged at
    error with an errorId. With no `WEB_APP_URL` nothing is claimed or sent,
-   logged at error with the purchase id. A creator whose slice went pending is emailed to finish payouts
-   setup — **gap**: `Codex-2hxff.7`.
+   logged at error with the purchase id.
+   A creator whose slice went pending is emailed to finish payouts setup —
+   **gap**: `Codex-2hxff.7`.
 
 **Errors.** A transient failure (database connection, Stripe outage) returns
 500 and Stripe retries. A failure writing the slices after the purchase has
