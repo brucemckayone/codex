@@ -18,10 +18,10 @@
  * Defined means one of: a custom-property declaration (but not
  * `--x: initial`, which is the invalid value) in CSS or an inline `style`,
  * `@property --x` with an `initial-value`, a Svelte `style:--x` directive or
- * `--x=` component prop
- * (whose text value, like any attribute's, is read for bare references too),
- * an object key `'--x': …`, `setProperty('--x', …)`, or `--x:` written into a
- * string or template (an inline style built in script).
+ * `--x=` component prop (whose text value, like any attribute's, is read for
+ * bare references too), an object key `'--x': …`, `setProperty('--x', …)`,
+ * or `--x:` written into a string or template (an inline style built in
+ * script).
  *
  * A brand INPUT is a `--brand-*` name that no stylesheet or markup writes as
  * text, only script: the brand editor's runtime overrides (`--brand-{key}`

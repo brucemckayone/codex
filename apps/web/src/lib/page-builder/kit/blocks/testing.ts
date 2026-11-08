@@ -52,16 +52,23 @@ function rulesOf(
   nested = false
 ): CssRule[] {
   const rules: CssRule[] = [];
-  /** A block's declarations as the cascade keeps them: last wins, but not over `!important`. */
+  /**
+   * A block's declarations as the cascade keeps them: last wins, but not over
+   * `!important`. Property names are case-insensitive, custom ones aside.
+   */
   const declsOf = (block: CssNode[]) => {
     const decls = new Map<string, string>();
+    const important = (value: string | undefined) =>
+      /!\s*important$/i.test(value ?? '');
     for (const d of block) {
       if (d.type !== 'Declaration') continue;
+      const written = d.property ?? '';
+      const property = written.startsWith('--')
+        ? written
+        : written.toLowerCase();
       const value = squash(d.value ?? '');
-      const kept = decls.get(d.property ?? '');
-      if (kept?.endsWith('!important') && !value.endsWith('!important'))
-        continue;
-      decls.set(d.property ?? '', value);
+      if (important(decls.get(property)) && !important(value)) continue;
+      decls.set(property, value);
     }
     return decls;
   };

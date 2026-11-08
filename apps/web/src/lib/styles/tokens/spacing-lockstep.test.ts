@@ -36,7 +36,8 @@ interface Rung {
   where: string;
 }
 
-const UNIT = ['--space-unit', '--brand-density-scale'];
+/** The unit, and the density it is built from. */
+const UNIT = ['--space-unit', '--brand-density-scale', '--brand-density'];
 
 /**
  * The one formula a rung's name allows: `--space-N` is N units, `--space-N-5`
@@ -114,6 +115,13 @@ describe('spacing scale', () => {
     // At :root the scale is the default; a value there would rescale every
     // platform route.
     expect(formula('spacing.css', '--brand-density-scale')).toBeUndefined();
+    // The density itself is the org layout's input, set only when the org
+    // has one: declared in either sheet, it would stand in for every org
+    // without one, or reset the org's own.
+    for (const file of Object.keys(SCALE_BLOCK) as (keyof typeof SCALE_BLOCK)[])
+      expect(scale(file).filter((r) => r.name === '--brand-density')).toEqual(
+        []
+      );
     expect(formula('org-brand.css', '--brand-density-scale')).toBe(
       'var(--brand-density, 1)'
     );
