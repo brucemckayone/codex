@@ -497,8 +497,11 @@ Settled after a refund another way, the late win's dispute is marked
 `refunded_outside_stripe_at` in the same transaction, unless the charge's
 succeeded Stripe refunds already cover it or a date is already set. A re-refund
 still pending doesn't count, so the charge is marked: if it then fails, the
-charge is already blocked; if it succeeds, only the charge card's "refunded
-outside Stripe" wording is slightly off. The charge page then
+charge is already blocked; if it succeeds, the charge reads "refunded outside
+Stripe" although Stripe refunded it: on the charge card's amount line, and in
+the form's block, which shows that in place of "Nothing is left to refund on
+this charge." No money is at stake, since nothing is left to refund either
+way. The charge page then
 blocks any further Stripe refund (`REFUNDED_OUTSIDE_STRIPE`;
 [operations](operations.md#late-wins)): Stripe doesn't count the failed refund
 and the late win lifts the 14-day window, so it would otherwise offer the whole

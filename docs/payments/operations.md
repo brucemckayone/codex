@@ -390,8 +390,12 @@ set, and is never refunded through Stripe again. Three things set it:
   refund and the late win lifts the 14-day window. That is owner decision 5's
   rule, applied in review cycle 2. A re-refund still pending doesn't count, so
   the charge is marked: if it then fails, the charge is already blocked; if it
-  succeeds, the buyer was refunded once, through Stripe, and only the charge
-  card's "refunded outside Stripe on {date}" is then slightly off;
+  succeeds, the buyer was refunded once, through Stripe, yet the charge reads
+  "refunded outside Stripe". The charge card's amount line says so, and so does
+  the form's block, which shows "Refunded outside Stripe on {date}. Don't
+  refund this charge here." in place of "Nothing is left to refund on this
+  charge." (`refundBlockOf` puts it first). No money is at stake: nothing is
+  left to refund either way;
 - by hand, with the owner's OK, for a buyer refunded another way that the
   settle never saw: a canceled late-win refund (below), or one settled while
   rolled back
@@ -440,12 +444,13 @@ and need nothing done. The hourly retry of a failed clawback whose charge has
 a won chargeback still settling logs "Retrying a failed clawback waits for a
 won chargeback on its charge to settle; the next run tries again" (`chargeId`,
 `disputeId`), in place of its "Retrying a failed clawback failed; the next run
-tries again" error. The reconcile, settling a dispute while another won
-chargeback on the same charge is still settling, logs "A dispute's settle
-waits for another won chargeback on its charge to settle; the next run retries
-it" (`disputeId`, `chargeId`, `settlingDisputeId`), in place of its error
-above. Either one that keeps coming back means the other win isn't settling:
-look at that dispute's own alerts.
+tries again" error. The reconcile, settling a dispute while a won chargeback
+on the same charge is still settling, logs "A dispute's settle waits for a won
+chargeback on its charge to settle; the next run retries it" (`disputeId`,
+`chargeId`, `settlingDisputeId`), in place of its error above.
+`settlingDisputeId` can equal `disputeId`: in S1's race the win it waits for
+can be its own. Either one that keeps coming back means the win it waits for
+isn't settling: look at that dispute's own alerts.
 
 A late win settled by hand before the release is recorded as applied by
 [release step R18](release-checklist.md#r18--lost-chargebacks-already-settled-by-hand),
