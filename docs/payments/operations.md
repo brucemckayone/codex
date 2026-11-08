@@ -358,8 +358,12 @@ each step's kind. While the creators are being paid back (`settling`: won, its
 outcome not yet applied, a normal win's included), refunds are refused with 422
 `CHARGEBACK_SETTLING`, "This payment's chargeback was just decided for us, and
 the creators are being paid back. Try the refund again in an hour.", on the
-form, the preview and the route alike. It usually lasts seconds; at most an hour
-while a step is retried.
+form, the preview and the route alike. It usually lasts seconds; about an hour
+while a step is retried. That includes the wait for the late win's own refund
+while it is pending at Stripe, which only the next hourly run finishes. Until
+then a `refund.updated` for that refund is answered 500 and logged as a
+transient error, as expected. A refund Stripe won't make holds it until support
+settles it (below).
 
 **No 14-day limit** (owner Q7, "Lift the limit for it"). A late-won payment
 stays refundable from the charge page whenever the buyer asks, and the refund

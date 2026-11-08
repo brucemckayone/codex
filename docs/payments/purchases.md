@@ -655,13 +655,18 @@ dispute event records it, then acts on the status the record has.
     decision Q1), after the re-pay, so each share comes off its held re-pay
     row and the creators net nothing for that payment. The refund email says
     they keep the item through their later purchase;
-  - a duplicate payment whose loss ran is refunded the same way, on its own
-    disputed charge (owner decision 2026-11-05). Its refund email is the
-    duplicate one ("a second payment"). One the loss never got to is still
-    pending, and the hourly duplicate sweep refunds it;
-  - a refund Stripe cancels counts as settled, but the buyer got nothing:
-    it is alerted at error for support to settle by hand (owner decision
-    2026-11-05);
+  - a duplicate payment the loss refunded is refunded the same way, on its
+    own disputed charge, even when the purchase it repeats was refunded
+    since (owner decisions 2026-11-05 and 2026-11-08). Its refund email is
+    the duplicate one ("a second payment"). One the loss never got to is
+    still pending, and the hourly duplicate sweep refunds it;
+  - a refund Stripe cancels, or one already failed when the undo reads it,
+    counts as settled, but the buyer got nothing: it is alerted at error for
+    support to settle by hand (owner decision 2026-11-05). A failed one is
+    also in the Failed refunds queue;
+  - a refund Stripe won't make is retried every hour and alerted each time,
+    and support settles it by hand
+    ([operations](operations.md#late-wins));
   - a restored buyer is emailed once that their access is back (Q5).
 
   A re-run of the unfinished loss reads the dispute under a share lock first
