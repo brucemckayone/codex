@@ -21,9 +21,9 @@
   CHARGE_CHANGED if it moved) and is guarded against a double click: one call
   per submit. The server's idempotency key makes a repeat harmless anyway.
 
-  A blocked charge (window closed, a chargeback, a won chargeback still
-  paying the creators back, nothing left) shows the reason in place of the
-  form; the server refuses all four too.
+  A blocked charge (refunded outside Stripe, window closed, a chargeback, a
+  won chargeback still paying the creators back, nothing left) shows the
+  reason in place of the form; the server refuses all five too.
 
   A preview the route REFUSES (a 4xx: the amount no longer fits, nothing is
   left) means the charge moved since it loaded, so trying again can never
@@ -375,6 +375,18 @@
     body: string;
   } {
     switch (block) {
+      // Settled by hand: the buyer was refunded another way, so a refund
+      // here would pay them twice (owner decision 2026-11-08).
+      case 'refunded_outside_stripe': {
+        const on = detail.refundable.refundedOutsideStripeOn;
+        return {
+          variant: 'warning',
+          lead: on
+            ? m.support_blocked_refunded_outside_stripe_lead({ date: formatDay(on) })
+            : m.support_outcome_refunded_outside_stripe_lead(),
+          body: m.support_blocked_refunded_outside_stripe_body(),
+        };
+      }
       case 'window_closed':
         return {
           variant: 'warning',

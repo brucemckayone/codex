@@ -65,6 +65,22 @@ describe('The charge', () => {
     expect(text()).toContain('pi_3QeT8xLk2vRb09aZ');
   });
 
+  test('a charge settled by hand: the amount says it was refunded outside Stripe, never "nothing refunded"', () => {
+    render(ChargeSummaryCard, {
+      detail: chargeDetail({
+        charge: { ...chargeDetail().charge, refundedCents: 0 },
+        refundable: {
+          maxCents: 2400,
+          blocked: 'refunded_outside_stripe',
+          refundedOutsideStripeOn: '2026-11-08T14:00:00.000Z',
+        },
+      }),
+      now: NOW,
+    });
+    expect(text()).toContain('£24.00 · refunded outside Stripe on 8 Nov 2026');
+    expect(text()).not.toContain(m.support_amount_none({ amount: '£24.00' }));
+  });
+
   test('a window a late win lifted (Q7): no time limit, and never its passed date', () => {
     render(ChargeSummaryCard, {
       detail: chargeDetail({ window: LIFTED_WINDOW }),

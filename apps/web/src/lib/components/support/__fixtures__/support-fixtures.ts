@@ -132,7 +132,11 @@ export function chargeDetail(
       isOpen: true,
       liftedByLateWin: false,
     },
-    refundable: { maxCents: 2000, blocked: null },
+    refundable: {
+      maxCents: 2000,
+      blocked: null,
+      refundedOutsideStripeOn: null,
+    },
     refundCount: 1,
     slices: SLICES,
     // What the server works out for SLICES: £3.24 + £0.36 + £0.40, and 10%.
