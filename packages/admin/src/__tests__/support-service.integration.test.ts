@@ -1959,7 +1959,8 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
    */
   async function failedRefund(
     charge: Awaited<ReturnType<typeof purchaseCharge>>,
-    amountCents: number
+    amountCents: number,
+    metadata: Record<string, string> = {}
   ) {
     const refund = { id: `re_sup${uid()}`, amountCents, createdAt: 1 };
     created.stripeRefundIds.push(refund.id);
@@ -1976,7 +1977,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         reason: 'requested_by_customer',
         failure_reason: 'expired_or_canceled_card',
         created: nowSeconds() - 120,
-        metadata: {},
+        metadata,
       } as unknown as Stripe.Refund,
     ]);
     const deps: ClawbackDeps = {
@@ -2452,6 +2453,37 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         expect(await stepsOf(failed.stripeRefundId)).toEqual(steps);
       });
 
+      it("refuses it by the refund's own metadata at Stripe when our record never got the late win's refund, and writes nothing (review cycle 2, finding 1)", async () => {
+        const charge = await purchaseCharge();
+        // The late win made the refund, then its write of the id failed.
+        const disputeId = await lateWinThatRefunded(charge, null);
+        const failed = await failedRefund(charge, 1000, {
+          codex_late_win_dispute: disputeId,
+        });
+        const row = await refundRow(failed.id);
+        const steps = await stepsOf(failed.stripeRefundId);
+        vi.mocked(fake.stripe.charges.retrieve).mockClear();
+
+        const error = await failureOf(
+          service.resolveFailedRefund(
+            failed.id,
+            { resolution: 'creators_repaid', note: 'Re-pay' },
+            supportId
+          )
+        );
+
+        expect(error.statusCode).toBe(422);
+        expect(error.context).toEqual({
+          code: 'LATE_WIN_REFUND_NOT_REPAYABLE',
+          disputeId,
+        });
+        // Refused before the re-pay's own reads of Stripe.
+        expect(fake.stripe.charges.retrieve).not.toHaveBeenCalled();
+        expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
+        expect(await refundRow(failed.id)).toEqual(row);
+        expect(await stepsOf(failed.stripeRefundId)).toEqual(steps);
+      });
+
       it('refuses it under the lock when the late win records its refund while the settle reads Stripe, and writes nothing', async () => {
         const charge = await purchaseCharge();
         const failed = await failedRefund(charge, 1000);
@@ -2516,10 +2548,19 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
 
       it("still re-pays another failed refund of a late-won charge: only the late win's own refund is refused", async () => {
         const charge = await purchaseCharge();
-        // Support's own refund of the payment, after the late win: the late
-        // win's refund, if it made one, is another.
+        // Support's own refund of the payment, after the late win's: that one
+        // is another, marked at Stripe and in our record.
         const failed = await failedRefund(charge, 1000);
-        await lateWinThatRefunded(charge, `re_sup${uid()}`);
+        const disputeId = await lateWinThatRefunded(charge, null);
+        const lateWinRefund = stripeRefund(charge.chargeId, 100, {
+          created: nowSeconds() - 600,
+          reason: 'duplicate',
+          metadata: { codex_late_win_dispute: disputeId },
+        });
+        await db
+          .update(disputes)
+          .set({ lateWinRefundId: lateWinRefund.id })
+          .where(eq(disputes.stripeDisputeId, disputeId));
 
         const settled = await service.resolveFailedRefund(
           failed.id,

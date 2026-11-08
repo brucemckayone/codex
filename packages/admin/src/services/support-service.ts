@@ -350,6 +350,28 @@ function standingCents(listed: readonly Stripe.Refund[]): number {
     .reduce((sum, refund) => sum + refund.amount, 0);
 }
 
+/**
+ * The metadata key a late win's own refund carries: its dispute's Stripe id,
+ * written in the same call that makes the refund (`issueLateWinRefund`,
+ * `@codex/purchase`). Keep the two in step.
+ */
+const LATE_WIN_REFUND_METADATA = 'codex_late_win_dispute';
+
+/**
+ * The dispute a late win made this refund for, by the refund's own metadata
+ * at Stripe, or null. Unlike `disputes.late_win_refund_id`, which is written
+ * only after Stripe answers, it can never be missing from a refund the late
+ * win made (review cycle 2, finding 1).
+ */
+function lateWinDisputeMarked(
+  listed: readonly Stripe.Refund[],
+  stripeRefundId: string
+): string | null {
+  const value = listed.find((refund) => refund.id === stripeRefundId)
+    ?.metadata?.[LATE_WIN_REFUND_METADATA];
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
 function stripeSeconds(seconds: number): string {
   return new Date(seconds * 1000).toISOString();
 }
@@ -2599,9 +2621,18 @@ export class SupportService extends BaseService {
     let purchaseId = found.purchaseId;
     let prepared: PreparedRepay | undefined;
     if (!found.resolvedAt) {
-      // Before Stripe is read: the pre-step below writes the steps that
-      // landed, and a late win's refund is refused without them.
+      // Before the re-pay reads Stripe: its pre-step writes the steps that
+      // landed, and a late win's refund is refused without them. Our record
+      // first, then the refund's own metadata at Stripe: the late win writes
+      // our record only after Stripe made the refund, so it can be missing.
       await this.refuseLateWinRefund(this.db, found.stripeRefundId);
+      this.refuseIfLateWin(
+        found.stripeRefundId,
+        lateWinDisputeMarked(
+          await listChargeRefunds(this.stripe, found.stripeChargeId),
+          found.stripeRefundId
+        )
+      );
       prepared = await this.prepareRepay(
         found.stripeRefundId,
         found.stripeChargeId
@@ -2642,8 +2673,10 @@ export class SupportService extends BaseService {
           'The failed refund was not prepared for its settlement'
         );
       }
-      // Again under the lock, before anything is written: the late win may
-      // have recorded its refund's id since the check above.
+      // Our record again, before anything is written, in case the late win
+      // recorded its refund's id since the check above. This only narrows
+      // that window: the late win takes no lock on this row. The refund's
+      // metadata, read above, is what a late win's refund always carries.
       await this.refuseLateWinRefund(tx, row.stripeRefundId);
       const now = new Date();
       // Re-checks the whole later-cause guard under the lock, and cancels the
@@ -2769,25 +2802,44 @@ export class SupportService extends BaseService {
    * never settled `creators_repaid` (`LATE_WIN_REFUND_NOT_REPAYABLE`, 422;
    * owner decision 6, 2026-11-08, "Block it in code"): it pays back a buyer
    * who paid twice, so its clawback stands. `refunded_elsewhere` is still
-   * allowed for it.
+   * allowed for it. This is the check by our record; `lateWinDisputeMarked`
+   * is the one by Stripe's.
    */
   private async refuseLateWinRefund(
     db: DatabaseClient | Tx,
     stripeRefundId: string
   ): Promise<void> {
+    this.refuseIfLateWin(
+      stripeRefundId,
+      await this.lateWinDisputeRecorded(db, stripeRefundId)
+    );
+  }
+
+  /** Refuse the re-pay when the refund is the named late win's own. */
+  private refuseIfLateWin(
+    stripeRefundId: string,
+    stripeDisputeId: string | null
+  ): void {
+    if (!stripeDisputeId) return;
+    this.obs.info('A creators_repaid settlement was refused', {
+      stripeRefundId,
+      disputeId: stripeDisputeId,
+      reason: 'late_win_refund',
+    });
+    throw new LateWinRefundNotRepayableError(stripeDisputeId);
+  }
+
+  /** The late win whose own refund this is, by our record, or null. */
+  private async lateWinDisputeRecorded(
+    db: DatabaseClient | Tx,
+    stripeRefundId: string
+  ): Promise<string | null> {
     const [lateWin] = await db
       .select({ stripeDisputeId: disputes.stripeDisputeId })
       .from(disputes)
       .where(eq(disputes.lateWinRefundId, stripeRefundId))
       .limit(1);
-    if (lateWin) {
-      this.obs.info('A creators_repaid settlement was refused', {
-        stripeRefundId,
-        disputeId: lateWin.stripeDisputeId,
-        reason: 'late_win_refund',
-      });
-      throw new LateWinRefundNotRepayableError(lateWin.stripeDisputeId);
-    }
+    return lateWin?.stripeDisputeId ?? null;
   }
 
   /**

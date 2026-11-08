@@ -475,12 +475,18 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
      again, with no re-pay row: the money is back in the platform's balance.
 
 **A late win's own refund is never re-paid** (owner decision 2026-11-08,
-"Block it in code"). A failed refund a late win made
-(`disputes.late_win_refund_id`; see [Disputes](#disputes)) pays back a buyer
-who paid twice, so the buyer is still owed it and its clawback stands.
-"Creators re-paid" refuses it with 422 `LATE_WIN_REFUND_NOT_REPAYABLE`
-(`refuseLateWinRefund`). The check runs before Stripe is read and again under
-the refund row's lock, so a refusal writes nothing. Support refunds the buyer
+"Block it in code"). A failed refund a late win made (see
+[Disputes](#disputes)) pays back a buyer who paid twice, so the buyer is still
+owed it and its clawback stands. "Creators re-paid" refuses it with 422
+`LATE_WIN_REFUND_NOT_REPAYABLE`. It is known by our record
+(`disputes.late_win_refund_id`) or by the refund's own metadata at Stripe
+(`codex_late_win_dispute`). The late win writes the metadata in the same call
+that makes the refund, and our record only after Stripe answers, so the
+metadata still names a refund whose record was never written. Both are checked
+before the re-pay reads anything else at Stripe, so a refusal writes nothing.
+Our record is read once more in the settle's transaction, which only narrows
+the window for a late win that records its id meanwhile; the metadata is what
+closes it. Support refunds the buyer
 another way, or again through Stripe on the charge page, then settles it as
 refunded elsewhere. Any other failed refund of the same charge is settled as
 above.
