@@ -578,15 +578,21 @@ function contentItemLink(
   };
 }
 
-/** A course's page on its org (`findItemLink`). Null when it has none. */
+/**
+ * A course's dashboard on its org (`findItemLink`). Null when it has none:
+ * the dashboard finds only a published course (`getCourseBySlug`), so one
+ * archived or back in draft would be a 404.
+ */
 function courseItemLink(
   course: Live & {
     id: string;
     slug: string;
+    status: string;
     organization: Live & { slug: string };
   }
 ): PurchaseItemLink | null {
   if (course.deletedAt || course.organization.deletedAt) return null;
+  if (course.status !== CONTENT_STATUS.PUBLISHED) return null;
   return {
     kind: 'course',
     courseId: course.id,
@@ -977,9 +983,10 @@ export class PurchaseService extends BaseService {
    * by its slug, so a link built from the id was a 404.
    *
    * Org content links to its org as it is now, not the sale's: that is where
-   * its page is. Null when there is no page to link to: no such purchase, or
-   * its item or that item's org is deleted, or personal content's creator is
-   * deleted or has no username. The caller links somewhere that exists.
+   * its page is. Null when there is no page to link to: no such purchase; its
+   * item or that item's org is deleted; a course is not published; personal
+   * content's creator is deleted or has no username. The caller links
+   * somewhere that exists.
    */
   async findItemLink(purchaseId: string): Promise<PurchaseItemLink | null> {
     try {
@@ -995,7 +1002,7 @@ export class PurchaseService extends BaseService {
             },
           },
           course: {
-            columns: { id: true, slug: true, deletedAt: true },
+            columns: { id: true, slug: true, status: true, deletedAt: true },
             with: {
               organization: { columns: { slug: true, deletedAt: true } },
             },

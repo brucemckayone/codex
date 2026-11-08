@@ -206,8 +206,9 @@ guards).
    redelivers. The receipt's link opens the item's own page, by its slug
    (`PurchaseService.findItemLink`, `Codex-0u7kb`): org content on its org's
    subdomain, personal content on the creators host, a course on its journey
-   dashboard. An item with no page (deleted, or a creator with no username),
-   or a lookup that fails, links the buyer's library instead, logged at warn.
+   dashboard. An item with no page (deleted, a course no longer published, or
+   a creator with no username), or a lookup that fails, links the buyer's
+   library instead, logged at warn.
    With no `WEB_APP_URL` nothing is claimed or sent, logged at error with the
    purchase id. A creator whose slice went pending is emailed to finish payouts
    setup — **gap**: `Codex-2hxff.7`.

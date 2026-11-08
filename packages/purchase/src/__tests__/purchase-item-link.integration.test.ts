@@ -249,6 +249,18 @@ describe('PurchaseService.findItemLink (Codex-0u7kb)', () => {
       expect(await service.findItemLink(purchase.id)).toBeNull();
     });
 
+    // Its dashboard finds only a published course, so it would be a 404.
+    it('a course no longer published (archived)', async () => {
+      const org = await seedOrg();
+      const course = await seedCourse(org.id, {
+        status: 'archived',
+        offSaleAt: new Date(),
+      });
+      const purchase = await seedPurchase({ courseId: course.id }, org.id);
+
+      expect(await service.findItemLink(purchase.id)).toBeNull();
+    });
+
     it('a deleted course', async () => {
       const org = await seedOrg();
       const course = await seedCourse(org.id, { deletedAt: new Date() });
