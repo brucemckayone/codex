@@ -58,7 +58,10 @@ vi.mock('@codex/access', () => ({
 
 import { AccessRevocation } from '@codex/access';
 import { LateWinRefundRefusedError } from '@codex/purchase';
-import { BusinessLogicError } from '@codex/service-errors';
+import {
+  BusinessLogicError,
+  InternalServiceError,
+} from '@codex/service-errors';
 import { invalidateForUser } from '@codex/subscription';
 import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import { handlePaymentWebhook } from '../payment-webhook';
@@ -1612,11 +1615,17 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(bundle.mock._obs.error).not.toHaveBeenCalled();
     });
 
-    it('a claim that fails is alerted at error with ids, never the address: the outcome is marked, so nothing retries the email', async () => {
+    it('a claim that fails is alerted at error with ids and its root cause, never the address: the outcome is marked, so nothing retries the email', async () => {
       recordedLateWin();
       restoredAs('restored', WINTER_LIGHT);
+      // As the service's handleError wraps it: a generic message, the
+      // driver's error underneath.
       purchase.claimLateWinBuyerEmail?.mockRejectedValueOnce(
-        new Error('connection reset (test)')
+        new InternalServiceError('An unexpected error occurred', undefined, {
+          cause: Object.assign(new Error('connection reset (test)'), {
+            code: 'ECONNRESET',
+          }),
+        })
       );
 
       const bundle = await deliver();
@@ -1629,7 +1638,12 @@ describe('handlePaymentWebhook — disputes', () => {
           errorId: expect.any(String),
           disputeId: 'dp_test_dispute',
           userId: 'user_late',
-          error: 'connection reset (test)',
+          error: 'An unexpected error occurred',
+          cause: {
+            name: 'Error',
+            message: 'connection reset (test)',
+            code: 'ECONNRESET',
+          },
         }
       );
       expect(JSON.stringify(bundle.mock._obs.error.mock.calls)).not.toContain(

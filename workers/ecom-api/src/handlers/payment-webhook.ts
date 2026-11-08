@@ -56,7 +56,10 @@ import {
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
-import { isTransientError } from '../utils/error-classification';
+import {
+  describeRootCause,
+  isTransientError,
+} from '../utils/error-classification';
 import { purchaseItemUrl, webAppOrigin } from '../utils/item-link';
 
 /** The reasons a refund or a dispute writes into the streaming block. */
@@ -1262,6 +1265,8 @@ async function tellBuyerAccessIsBack(
         disputeId,
         userId: notice.userId,
         error: error instanceof Error ? error.message : String(error),
+        // The service's wrap says only "An unexpected error occurred".
+        cause: describeRootCause(error),
       }
     );
     return;
