@@ -28,19 +28,30 @@ import {
 import LoadFailedAlertHarness from './__fixtures__/LoadFailedAlertHarness.test.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
+/** The harness's props, reactive so a test can change what the page refuses. */
+let harness: { remote: KitQuery<unknown>; refuseStatus?: number } | null = null;
 
 afterEach(() => {
   if (component) unmount(component);
   component = null;
+  harness = null;
   document.body.innerHTML = '';
 });
 
-function mountFailed(refuseStatus?: number): KitQuery<unknown> {
+function mountHarness(refuseStatus?: number): KitQuery<unknown> {
   const remote = kitQuery<unknown>();
+  const props = $state({ remote, refuseStatus });
+  harness = props;
   component = mount(LoadFailedAlertHarness, {
     target: document.body,
-    props: { remote, refuseStatus },
+    props,
   });
+  flushSync();
+  return remote;
+}
+
+function mountFailed(refuseStatus?: number): KitQuery<unknown> {
+  const remote = mountHarness(refuseStatus);
   remote.fail();
   flushSync();
   return remote;
@@ -50,6 +61,7 @@ const alert = () => document.querySelector('[data-testid="load-error"]');
 const retryButton = () =>
   alert()?.querySelector('button') as HTMLButtonElement | null;
 const status = () => document.querySelector('[role="status"]');
+const messageNode = () => alert()?.querySelector('.load-failed__message');
 const elsewhere = () =>
   document.querySelector('[data-testid="elsewhere"]') as HTMLInputElement;
 const LOADED = { items: [] };
@@ -74,7 +86,7 @@ async function retryOntoNewQuery(
   retryButton()?.click();
   await settle();
 
-  expect(refreshed.refresh).toHaveBeenCalledTimes(1);
+  expect(remote.refreshes(refreshed)).toBe(1);
   expect(remote.held()).not.toBe(refreshed);
   expect(remote.held().loading).toBe(true);
   // Kit fetches the refreshed query again too; that stray read is pending.
@@ -95,8 +107,11 @@ describe('Retry, when the page is handed a new query', () => {
 
   test('a read that fails again says so, focuses the alert, and offers Retry again', async () => {
     const remote = mountFailed();
-    await retryOntoNewQuery(remote);
+    const { refreshed } = await retryOntoNewQuery(remote);
 
+    // Both reads fail, as they do when the network is down. The stray one
+    // has no reader: unhandled, it would fail this run.
+    remote.fail(undefined, refreshed);
     remote.fail();
     await settle();
 
@@ -160,8 +175,8 @@ describe('Retry, when the page is handed a new query', () => {
     retryButton()?.click();
     await settle();
 
-    expect(refreshed.refresh).toHaveBeenCalledTimes(1);
-    expect(remote.held().refresh).not.toHaveBeenCalled();
+    expect(remote.refreshes(refreshed)).toBe(1);
+    expect(remote.refreshes(remote.held())).toBe(0);
   });
 
   test('when the page lets the query go mid-Retry, it claims nothing', async () => {
@@ -176,6 +191,22 @@ describe('Retry, when the page is handed a new query', () => {
     expect(document.activeElement).not.toBe(status());
   });
 
+  test('a Retry that claimed nothing leaves no stale "still" behind', async () => {
+    const remote = mountFailed(403);
+    await retryOntoNewQuery(remote);
+    remote.fail({ status: 403, body: { message: 'Forbidden' } });
+    await settle();
+    expect(alert()).toBeNull();
+
+    // The page stops refusing, so the held query's failure shows again: as a
+    // first failure, since no Retry of it has failed.
+    if (harness) harness.refuseStatus = undefined;
+    flushSync();
+
+    expect(alert()?.textContent).toContain("We couldn't load it.");
+    expect(alert()?.textContent).not.toContain("We still couldn't");
+  });
+
   test('does not take focus from where the creator moved it', async () => {
     const remote = mountFailed();
     await retryOntoNewQuery(remote);
@@ -185,6 +216,57 @@ describe('Retry, when the page is handed a new query', () => {
     await settle();
 
     expect(document.activeElement).toBe(elsewhere());
+    expect(status()?.textContent?.trim()).toBe('It loaded.');
+  });
+
+  test('with focus moved, a repeat failure leaves it there and re-reads the message', async () => {
+    const remote = mountFailed();
+    await retryOntoNewQuery(remote);
+    remote.fail();
+    await settle();
+    const before = messageNode();
+
+    await retryOntoNewQuery(remote);
+    elsewhere().focus();
+    remote.fail();
+    await settle();
+
+    expect(document.activeElement).toBe(elsewhere());
+    // Same text as before, so `role="alert"` reads it out only if it is
+    // inserted again.
+    expect(messageNode()?.textContent).toContain("We still couldn't load it.");
+    expect(messageNode()).not.toBe(before);
+  });
+});
+
+describe('Retry, when the page keeps its query', () => {
+  test("waits for that query's own read, in place", async () => {
+    const remote = mountHarness();
+    const query = remote.held();
+    // The page refreshed it before its first read settled, so kit keeps it
+    // in its cache when that read fails, and a Retry re-reads it in place.
+    void query.refresh().catch(() => {});
+    remote.fail();
+    flushSync();
+    expect(alert()).not.toBeNull();
+
+    retryButton()?.focus();
+    retryButton()?.click();
+    await settle();
+    expect(remote.held()).toBe(query);
+    expect(retryButton()?.textContent?.trim()).toBe(
+      m.money_setup_load_failed_retrying()
+    );
+
+    remote.fail();
+    await settle();
+    expect(alert()?.textContent).toContain("We still couldn't load it.");
+
+    retryButton()?.click();
+    await settle();
+    remote.land(LOADED);
+    await settle();
+    expect(alert()).toBeNull();
     expect(status()?.textContent?.trim()).toBe('It loaded.');
   });
 });

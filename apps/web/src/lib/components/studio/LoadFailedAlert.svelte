@@ -72,6 +72,8 @@
 
   /** Outcome of the last Retry, for the copy and for where focus goes. */
   let outcome = $state<'ok' | 'failed' | null>(null);
+  /** Repeat failures announced without a focus move; keys the message. */
+  let repeats = $state(0);
   let alertNode = $state<HTMLElement | null>(null);
   let statusNode = $state<HTMLElement | null>(null);
 
@@ -82,6 +84,7 @@
    */
   async function retry() {
     if (retrying || !query) return;
+    const before = outcome;
     retrying = true;
     try {
       await heldRead(query);
@@ -90,9 +93,14 @@
     }
     outcome = outcomeOf(connectQueryState(query).kind);
     await tick();
-    if (!focusUnmoved()) return;
-    if (outcome === 'ok') statusNode?.focus();
-    if (outcome === 'failed') alertNode?.focus();
+    if (focusUnmoved()) {
+      if (outcome === 'ok') statusNode?.focus();
+      if (outcome === 'failed') alertNode?.focus();
+    } else if (outcome === 'failed' && before === 'failed') {
+      // Focus stays where the creator moved it, and the text is unchanged, so
+      // `role="alert"` would say nothing: re-insert it so it is read out.
+      repeats += 1;
+    }
   }
 
   /**
@@ -162,9 +170,11 @@
   <div bind:this={alertNode} class="load-failed" tabindex="-1">
     <Alert variant="error" data-testid={testId} aria-busy={retrying}>
       <div class="load-failed__row">
-        <p class="load-failed__message">
-          {outcome === 'failed' ? againMessage : message}
-        </p>
+        {#key repeats}
+          <p class="load-failed__message">
+            {outcome === 'failed' ? againMessage : message}
+          </p>
+        {/key}
         <Button variant="secondary" size="sm" onclick={retry}>
           {retrying
             ? m.money_setup_load_failed_retrying()

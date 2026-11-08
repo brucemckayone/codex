@@ -22,16 +22,24 @@
  * named. So a test can settle a dropped query's stray fetch before or after
  * the held query's read.
  *
- * Not modelled: kit makes the new query when the page next reads its
- * derivation, and this double makes it inside `refresh()`. A page reads the
- * same query either way.
+ * A refresh's read has no handler, as kit's has none: one that fails with
+ * nobody awaiting it is an unhandled rejection, which fails the run. Only a
+ * query's first read is handled here, as kit's cache handles it.
+ *
+ * Not modelled:
+ * - Kit makes the new query when the page next reads its derivation; this
+ *   double makes it inside `refresh()`. A page reads the same query either way.
+ * - Only a query's LATEST read settles here. In kit an earlier read can settle
+ *   first and apply its result while a later one is pending; that needs two
+ *   reads of one query in flight, which a Retry never starts.
+ * - Kit hands over a new query only while the page's derivation still tracks
+ *   the dropped one; this double does whenever the page holds it.
  *
  * A `.svelte.ts` module (runes compiled), NOT a `*.test.*` file, so it is
  * never collected as a suite.
  */
 
 import { tick } from 'svelte';
-import { type Mock, vi } from 'vitest';
 
 /** The shape SvelteKit rejects a remote query with: `{ status, body }`. */
 const httpError = (status = 500) => ({
@@ -43,7 +51,7 @@ export interface KitRead<T> extends PromiseLike<T | undefined> {
   current: T | undefined;
   error: unknown;
   loading: boolean;
-  refresh: Mock<() => Promise<void>>;
+  refresh(): Promise<void>;
 }
 
 export interface KitQuery<T> {
@@ -55,6 +63,12 @@ export interface KitQuery<T> {
   land(value: T, query?: KitRead<T>): void;
   /** The latest read of `query` (the held one by default) fails. */
   fail(error?: unknown, query?: KitRead<T>): void;
+  /**
+   * How many times `query` was refreshed. Counted here, not by a `vi.fn`:
+   * a spy attaches handlers to the promises it returns, which would hide
+   * the unhandled rejection of a refresh nobody reads.
+   */
+  refreshes(query: KitRead<T>): number;
 }
 
 interface Read {
@@ -77,8 +91,6 @@ function newRead(): Read {
     resolve = res;
     reject = rej;
   });
-  // A read nobody awaits may fail; that is not an unhandled rejection.
-  promise.catch(() => {});
   return { promise, resolve, reject };
 }
 
@@ -86,6 +98,7 @@ export function kitQuery<T>(): KitQuery<T> {
   const cache = $state({ generation: 0 });
   const readsOf = new WeakMap<KitRead<T>, Reads>();
   const dropped = new WeakSet<KitRead<T>>();
+  const refreshCount = new WeakMap<KitRead<T>, number>();
 
   function reads(query: KitRead<T>): Reads {
     const found = readsOf.get(query);
@@ -98,7 +111,7 @@ export function kitQuery<T>(): KitQuery<T> {
       current: undefined,
       error: undefined,
       loading: true,
-      refresh: vi.fn(() => refresh(query)),
+      refresh: () => refresh(query),
       // biome-ignore lint/suspicious/noThenProperty: a kit Query is thenable, and this double models it
       then: (onFulfilled, onRejected) =>
         reads(query)
@@ -109,6 +122,8 @@ export function kitQuery<T>(): KitQuery<T> {
           .then(onFulfilled, onRejected),
     });
     const first = newRead();
+    // Kit's cache handles a first read (the `.catch` that drops the query).
+    first.promise.catch(() => {});
     readsOf.set(query, { pending: [first], latest: first, first });
     return query;
   }
@@ -116,6 +131,7 @@ export function kitQuery<T>(): KitQuery<T> {
   let held = makeQuery();
 
   function refresh(query: KitRead<T>): Promise<void> {
+    refreshCount.set(query, (refreshCount.get(query) ?? 0) + 1);
     const own = reads(query);
     const read = newRead();
     own.pending.push(read);
@@ -146,6 +162,7 @@ export function kitQuery<T>(): KitQuery<T> {
       return held;
     },
     held: () => held,
+    refreshes: (query) => refreshCount.get(query) ?? 0,
     land(value, query = held) {
       const read = settle(query);
       query.current = value;

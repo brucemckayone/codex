@@ -24,17 +24,16 @@
     return undefined;
   }
 
-  const query = $derived.by(() => {
-    const held = remote.get();
-    if (refuseStatus !== undefined && statusOf(held.error) === refuseStatus) {
-      return null;
-    }
-    return held;
-  });
+  // Shaped as the negotiation thread is: the query derived on its own, the
+  // refusal derived from its error, and the prop choosing between them.
+  const held = $derived(remote.get());
+  const refused = $derived(
+    refuseStatus !== undefined && statusOf(held.error) === refuseStatus
+  );
 </script>
 
 <LoadFailedAlert
-  {query}
+  query={refused ? null : held}
   message="We couldn't load it."
   againMessage="We still couldn't load it."
   loadedMessage="It loaded."

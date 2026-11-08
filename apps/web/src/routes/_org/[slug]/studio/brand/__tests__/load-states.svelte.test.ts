@@ -210,7 +210,7 @@ describe('a failed branding read', () => {
 
     expect(logger.error).toHaveBeenCalledWith(
       'studio/brand: branding failed to load',
-      { organizationId: ORG.id, reason: 'Internal Error' }
+      { organizationId: ORG.id, status: 500, reason: 'Internal Error' }
     );
   });
 });

@@ -31,7 +31,7 @@
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
   import { logger } from '$lib/observability';
-  import { queryErrorMessage } from '$lib/remote/query-result';
+  import { queryErrorMessage, remoteErrorStatus } from '$lib/remote/query-result';
   import { connectQueryState } from '$lib/utils/connect-readiness';
   import {
     BrandStudioLayout,
@@ -77,6 +77,7 @@
     if (brandFailed) {
       logger.error('studio/brand: branding failed to load', {
         organizationId: orgId,
+        status: remoteErrorStatus(brandingQuery?.error),
         reason: queryErrorMessage(brandingQuery?.error),
       });
     }
