@@ -363,9 +363,12 @@ alike. It promises no time, since a refund Stripe won't make outlasts any
 (review cycle 1, M3). It usually lasts seconds; about an hour
 while a step is retried. That includes the wait for the late win's own refund
 while it is pending at Stripe, which only the next hourly run finishes. Until
-then a `refund.updated` for that refund is answered 500 and logged as a
-transient error, as expected. A refund Stripe won't make holds it until support
-settles it (below).
+then a `refund.updated` or `charge.refunded` for that refund is answered 500,
+so Stripe redelivers it, and logged as a warning with no `errorId`, not an
+error (`WinSettlingError`): "A refund's clawback waits for a won chargeback on
+its charge to settle; Stripe redelivers the event" (`chargeId`, `disputeId`,
+`eventType`, `eventId`). That is expected. A refund Stripe won't make holds it
+until support settles it (below).
 
 **No 14-day limit** (owner Q7, "Lift the limit for it"). A late-won payment
 stays refundable from the charge page whenever the buyer asks, and the refund
@@ -415,8 +418,8 @@ with an `errorId`, unless it says otherwise:
 | A won dispute was reported lost: nothing changed, check it in Stripe | Stripe now says lost a dispute we hold as won. Nothing was changed | Check the dispute in Stripe's Dashboard |
 | The hourly late-win check read its page limit of Stripe's disputes | More than 300 disputes since our oldest lost one: the older ones weren't re-checked this run | None by itself; if it repeats, the check needs a wider limit |
 | The hourly late-win check could not read a page of Stripe's disputes / could not re-check lost disputes for a late win | A Stripe or database read failed; the next run retries | None unless it repeats |
-| WEB_APP_URL is not set: the late win's access-restored email… | The buyer's email had no working link, so it wasn't sent | Set `WEB_APP_URL` on ecom-api |
-| Late win: the buyer's access-restored email could not be claimed, so it was not sent, and it is not retried | The send-once claim's database write failed, after the outcome was marked, so nothing comes back to it (`disputeId`, `userId`). Their access is back | None for the money. Tell the buyer another way, if you want them told |
+| WEB_APP_URL is unset or not a URL: the late win's access-restored email has no working link, so it was not sent | `WEB_APP_URL` on ecom-api is unset, or isn't an http(s) URL with a host, so the email would have no working link. Not sent, and not retried (`disputeId`); their access is back | Set `WEB_APP_URL` on ecom-api to the web app's address. Tell the buyer another way, if you want them told |
+| Late win: the buyer's access-restored email could not be claimed, so it was not sent, and it is not retried | The send-once claim's database write failed, after the outcome was marked, so nothing comes back to it (`disputeId`, `userId`, `error`, and `cause`: the innermost error's name, message and code). Their access is back | None for the money. Tell the buyer another way, if you want them told |
 | Late win: the buyer's access-restored email was not sent: the charge has no email address (warning) | The charge has no billing or receipt address. Not retried; their access is back (`disputeId`, `userId`, never an address) | As above |
 | Late win: the buyer's access-restored email was not sent: the item's title could not be read (warning) | The item's title couldn't be read for the email. Not retried; their access is back (`disputeId`, `userId`) | As above |
 | Dispute lost run found it no longer lost (a late win overtook it): its outcome is left for the late win to mark (warning, no `errorId`) | A retry of an unfinished loss ran while the dispute was won late. It marked nothing, so the late win's undo still restores, re-pays and refunds | None |
@@ -430,8 +433,21 @@ alert above has already fired, so the reconcile logs one warning instead of a
 second error, "A late win's settle stopped at its refund, which the refund
 step has already alerted; the next run retries it" (`disputeId`, `purchaseId`,
 `chargeId`, no `errorId`). So each try raises one error, by the webhook or the
-hourly run alike. A
-late win settled by hand before the release is recorded as applied by
+hourly run alike.
+
+Two hourly warnings are expected while a win settles, each with no `errorId`,
+and need nothing done. The hourly retry of a failed clawback whose charge has
+a won chargeback still settling logs "Retrying a failed clawback waits for a
+won chargeback on its charge to settle; the next run tries again" (`chargeId`,
+`disputeId`), in place of its "Retrying a failed clawback failed; the next run
+tries again" error. The reconcile, settling a dispute while another won
+chargeback on the same charge is still settling, logs "A dispute's settle
+waits for another won chargeback on its charge to settle; the next run retries
+it" (`disputeId`, `chargeId`, `settlingDisputeId`), in place of its error
+above. Either one that keeps coming back means the other win isn't settling:
+look at that dispute's own alerts.
+
+A late win settled by hand before the release is recorded as applied by
 [release step R18](release-checklist.md#r18--lost-chargebacks-already-settled-by-hand),
 so nothing runs again for it.
 
