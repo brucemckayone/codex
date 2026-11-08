@@ -4505,6 +4505,8 @@ export class PurchaseService extends BaseService {
             )
           )
         )
+        // The whole row: `.returning({ id })` does not type-check on the
+        // `Database | DatabaseWs` union (TS2554), only on a transaction.
         .returning();
       return claimed.length > 0;
     } catch (error) {
