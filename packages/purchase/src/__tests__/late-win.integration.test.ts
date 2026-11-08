@@ -1521,6 +1521,109 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
         expect.anything()
       );
     });
+
+    it("failed, after the creator was paid: done and alerted, and the creator's share of the first payment IS clawed back and stays so, as any failed refund (Hold it for support); a canceled one, its contrast, takes nothing", async () => {
+      const service = makeService();
+      const alerts = vi.spyOn(
+        (
+          service as unknown as {
+            obs: { error: (message: string, meta?: object) => void };
+          }
+        ).obs,
+        'error'
+      );
+      /**
+       * A sale whose creator was paid, lost with its outcome applied, bought
+       * again, then won late and re-paid; its late-win refund Stripe reports
+       * as `status`. What its slice, the slice's held re-pay row and the
+       * refund's own steps are afterwards.
+       */
+      async function lateWinRefundEnds(status: 'failed' | 'canceled') {
+        const first = await contentSale();
+        const { slice, disputeId } = await lostAfterAPaidSlice(first, service);
+        await record(first, disputeId, 'won');
+        expect((await service.restoreAfterLateWin(disputeId))?.outcome).toBe(
+          'rebought'
+        );
+        expect((await service.repayWonDispute(disputeId)).repaid).toBe(1);
+        const [repaidStep] = await db
+          .select({ repayId: payoutReversals.repaidByPayoutId })
+          .from(payoutReversals)
+          .where(
+            and(
+              eq(payoutReversals.payoutId, slice.id),
+              eq(payoutReversals.causeId, disputeId)
+            )
+          );
+        const repayId = repaidStep?.repayId;
+        if (!repayId) throw new Error('the win wrote no re-pay row');
+        const refundId = `re_lw_${status}_paid_${uid()}`;
+        stripeMakesRefund(refundId, status);
+        stripeListsRefunds({ [first.charge.id]: [{ id: refundId, status }] });
+
+        const run = () =>
+          service.refundFirstPaymentAfterLateWin(
+            disputeId,
+            first.charge,
+            'test'
+          );
+        const ledger = async () => ({
+          repay: takeFirst(
+            await db.select().from(payouts).where(eq(payouts.id, repayId))
+          ),
+          refundSteps: await db
+            .select()
+            .from(payoutReversals)
+            .where(eq(payoutReversals.causeId, refundId)),
+        });
+        return { run, ledger, disputeId, refundId, repayId };
+      }
+
+      // Failed: the refund's share of the slice comes off its held re-pay
+      // row, which is cancelled: the creator is not paid back for the first
+      // payment while the buyer is owed it (Failed refunds).
+      const failed = await lateWinRefundEnds('failed');
+      expect(await failed.run()).toBe('done');
+      expect(alerts).toHaveBeenCalledWith(
+        'Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds',
+        expect.objectContaining({
+          disputeId: failed.disputeId,
+          refundId: failed.refundId,
+          status: 'failed',
+        })
+      );
+      const clawedBack = await failed.ledger();
+      expect(clawedBack.repay).toMatchObject({
+        status: 'cancelled_by_refund',
+        amountCents: 765,
+        stripeTransferId: null,
+      });
+      expect(clawedBack.refundSteps).toMatchObject([
+        {
+          payoutId: failed.repayId,
+          causeType: 'refund',
+          kind: 'cancellation',
+          status: 'done',
+          amountCents: 765,
+        },
+      ]);
+      // It stands: a re-run and the outcome's mark change nothing.
+      expect(await failed.run()).toBe('done');
+      await service.markDisputeOutcomeApplied(failed.disputeId, {
+        status: 'won',
+      });
+      expect(await failed.ledger()).toEqual(clawedBack);
+
+      // Canceled, its contrast: the held re-pay row is untouched.
+      const canceled = await lateWinRefundEnds('canceled');
+      expect(await canceled.run()).toBe('done');
+      const untouched = await canceled.ledger();
+      expect(untouched.repay).toMatchObject({
+        status: 'pending',
+        amountCents: 765,
+      });
+      expect(untouched.refundSteps).toEqual([]);
+    });
   });
 
   // ── the buyer's email claim (§7) ──────────────────────────────────────
