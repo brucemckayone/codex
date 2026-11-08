@@ -4210,8 +4210,9 @@ export class PurchaseService extends BaseService {
    *
    * - `none`: nothing to refund. It is not a late win being undone, it has
    *   no purchase, or the loss did not refund the payment
-   *   (`refundedByTheLoss`): the buyer holds no other completed purchase of
-   *   the item, or the payment was refunded some other way;
+   *   (`refundedByTheLoss`): a buyer who bought the item again no longer
+   *   holds it through that purchase, or the payment was refunded some
+   *   other way;
    * - `pending`: Stripe has not settled the refund. Do not mark the outcome:
    *   the re-pay rows stay held, and the next delivery or hourly run finishes
    *   it (owner decision Q1 for refunds);
@@ -4221,10 +4222,12 @@ export class PurchaseService extends BaseService {
    *   nothing, and support settles it by hand.
    *
    * A late-won duplicate payment is refunded the same way when its loss ran
-   * (owner decision 2026-11-05): the loss left it refunded, and the buyer
-   * holds the purchase it repeats. It pays no one, so nothing is clawed back.
-   * One the loss never got to is the duplicate sweep's, before and after the
-   * sweep refunds it: exactly one refund either way.
+   * (owner decisions 2026-11-05 and 2026-11-08): the loss left it refunded,
+   * whether or not the buyer still holds the purchase it repeats. It pays no
+   * one, so nothing is clawed back. One the loss never got to is the
+   * duplicate sweep's: before the sweep refunds it there is nothing to do,
+   * and after, the late win's refund meets `charge_already_refunded`. Exactly
+   * one refund either way.
    *
    * @throws {LateWinRefundRefusedError} Stripe refused the refund. It is
    *   retried, and the caller alerts with `stripeCode`.
@@ -4328,7 +4331,7 @@ export class PurchaseService extends BaseService {
     charge: ClawbackCharge,
     environment: string
   ): Promise<Pick<IssueRefundResult, 'refundId' | 'status'> | undefined> {
-    if (!(await this.refundedByTheLoss(dispute, purchase, charge.id))) {
+    if (!(await this.refundedByTheLoss(purchase, charge.id))) {
       return undefined;
     }
     const { stripeDisputeId } = dispute;
@@ -4370,35 +4373,37 @@ export class PurchaseService extends BaseService {
    * one refunded any other way already has its money (B's review of
    * Codex-2hxff.70). All of:
    *
-   * - it is refunded, and the buyer holds the item through another completed
-   *   purchase: one they bought since, or the one a duplicate repeats;
-   * - the loss ran: `lost_applied_at` is set. A duplicate the loss never got
-   *   to is still pending at the late win, and the hourly duplicate sweep
-   *   refunds it; once it has, it is refunded here too, before its
-   *   `charge.refunded` is recorded, and only this tells the two apart;
+   * - it is refunded. A loss whose outcome was never marked (its later steps
+   *   failed, so `lost_applied_at` is null) refunded it all the same. A
+   *   duplicate the loss never got to is still pending at the late win, and
+   *   the hourly duplicate sweep refunds it. Once the sweep has, and before
+   *   its `charge.refunded` is recorded, it reads as refunded here too: the
+   *   late win's refund then finds the charge refunded in full
+   *   (`charge_already_refunded`, which `issueRefund` counts as done), so it
+   *   is refunded exactly once either way;
    * - the refunds that stand on the charge do not cover what was paid. A
    *   payment refunded in full before the chargeback was lost (the loss found
    *   it refunded, and wrote nothing) has its money back already. One refunded
    *   in part is owed what the loss took: the remainder, which is what the
-   *   refund asks for.
+   *   refund asks for;
+   * - the buyer bought the item again: they hold it through another
+   *   completed purchase, one bought since. A duplicate payment never
+   *   granted the item, so it is refunded whether or not the purchase it
+   *   repeats still stands (owner decision 2026-11-08, "Refund it"): a buyer
+   *   whose original was refunded since holds nothing, and paid once.
    */
   private async refundedByTheLoss(
-    dispute: Pick<Dispute, 'lostAppliedAt'>,
     purchase: Purchase,
     chargeId: string
   ): Promise<boolean> {
-    if (
-      purchase.status !== PURCHASE_STATUS.REFUNDED ||
-      dispute.lostAppliedAt === null
-    ) {
-      return false;
-    }
+    if (purchase.status !== PURCHASE_STATUS.REFUNDED) return false;
     const { refundAmountCents } = await this.standingRefundFields(
       this.db,
       purchase.id,
       chargeId
     );
     if ((refundAmountCents ?? 0) >= purchase.amountPaidCents) return false;
+    if (isDuplicatePayment(purchase)) return true;
     return this.keepsItemElsewhere(this.db, purchase);
   }
 

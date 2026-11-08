@@ -1061,6 +1061,53 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
       expect(stripe.refunds.create).not.toHaveBeenCalled();
     });
 
+    it('a loss that refunded the payment but never marked its outcome still owes a buyer who bought again their first payment: refunded exactly once', async () => {
+      const first = await contentSale();
+      const service = makeService();
+      // The loss refunds the purchase, then a later step fails (a clawback,
+      // say): the outcome is never marked, so the late win copies a null
+      // into lost_applied_at.
+      const disputeId = await loseIt(first, { finished: false });
+      await service.processLostDispute(first.paymentIntentId, 1000, disputeId);
+      const second = await contentSale(first);
+      await record(first, disputeId, 'won');
+      expect(await readDispute(disputeId)).toMatchObject({
+        status: 'won',
+        lostAppliedAt: null,
+        outcomeAppliedAt: null,
+      });
+      expect((await service.restoreAfterLateWin(disputeId))?.outcome).toBe(
+        'rebought'
+      );
+      await service.repayWonDispute(disputeId);
+      const refundId = `re_lw_unmarked_${uid()}`;
+      stripeMakesRefund(refundId, 'succeeded');
+      stripeListsRefunds({
+        [first.charge.id]: [{ id: refundId, status: 'succeeded' }],
+      });
+      const step = () =>
+        service.refundFirstPaymentAfterLateWin(disputeId, first.charge, 'test');
+
+      expect(await step()).toBe('done');
+      // A retry before the outcome is marked reads the refund already made.
+      expect(await step()).toBe('done');
+
+      expect(stripe.refunds.create).toHaveBeenCalledOnce();
+      expect(stripe.refunds.create).toHaveBeenCalledWith(
+        expect.objectContaining({ charge: first.charge.id }),
+        { idempotencyKey: `late_win_refund_${disputeId}` }
+      );
+      expect((await readDispute(disputeId)).lateWinRefundId).toBe(refundId);
+      expect(await readPurchase(first.purchaseId)).toMatchObject({
+        status: 'refunded',
+        refundAmountCents: 1000,
+        stripeRefundId: refundId,
+      });
+      expect(await readPurchase(second.purchaseId)).toMatchObject({
+        status: 'completed',
+      });
+    });
+
     /** A pending duplicate of `owned`'s purchase, on a payment of its own. */
     async function duplicateOf(owned: Sale, createdAt?: Date): Promise<Sale> {
       const payment = newPayment();
@@ -1160,7 +1207,62 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
       });
     });
 
-    it("a pending duplicate the loss never got to is the sweep's: none before and after the sweep refunds it, so it is refunded exactly once", async () => {
+    it('a late-won duplicate whose original purchase was refunded since is refunded too (owner, "Refund it"): the buyer holds nothing, and paid once', async () => {
+      const owned = await contentSale();
+      const duplicate = await duplicateOf(owned);
+      const disputeId = await loseIt(duplicate);
+      const service = makeService();
+      // Support refunds the original in full since, as charge.refunded
+      // records it: nothing grants the item any more.
+      const original = `re_lw_original_${uid()}`;
+      stripeListsRefunds({
+        [owned.charge.id]: [{ id: original, status: 'succeeded' }],
+      });
+      await service.recordChargeRefunds({
+        id: owned.charge.id,
+        paymentIntentId: owned.paymentIntentId,
+      });
+      await service.processRefund(owned.paymentIntentId, {
+        charge: owned.charge,
+        stripeRefundId: original,
+        refundAmountCents: 1000,
+      });
+      expect(await readPurchase(owned.purchaseId)).toMatchObject({
+        status: 'refunded',
+      });
+
+      await record(duplicate, disputeId, 'won');
+      expect((await service.restoreAfterLateWin(disputeId))?.outcome).toBe(
+        'duplicate'
+      );
+      await service.repayWonDispute(disputeId);
+      const refundId = `re_lw_dup_alone_${uid()}`;
+      stripeMakesRefund(refundId, 'succeeded');
+      stripeListsRefunds({
+        [duplicate.charge.id]: [{ id: refundId, status: 'succeeded' }],
+      });
+
+      expect(
+        await service.refundFirstPaymentAfterLateWin(
+          disputeId,
+          duplicate.charge,
+          'test'
+        )
+      ).toBe('done');
+      expect(stripe.refunds.create).toHaveBeenCalledOnce();
+      expect(stripe.refunds.create).toHaveBeenCalledWith(
+        expect.objectContaining({ charge: duplicate.charge.id }),
+        { idempotencyKey: `late_win_refund_${disputeId}` }
+      );
+      expect((await readDispute(disputeId)).lateWinRefundId).toBe(refundId);
+      expect(await readPurchase(duplicate.purchaseId)).toMatchObject({
+        status: 'refunded',
+        refundAmountCents: 1000,
+        stripeRefundId: refundId,
+      });
+    });
+
+    it("a pending duplicate the loss never got to is the sweep's: none before the sweep refunds it; after, the late win's refund meets charge_already_refunded and is done, so it is refunded exactly once", async () => {
       const owned = await contentSale();
       // Created long ago, so the sweep below reaches this row and no other.
       const duplicate = await duplicateOf(owned, SWEEP_ONLY_THIS_FILE.created);
@@ -1178,7 +1280,9 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
           'test'
         );
 
+      // Still pending: nothing to refund yet.
       expect(await step()).toBe('none');
+      expect(stripe.refunds.create).not.toHaveBeenCalled();
 
       const swept = `re_lw_sweep_${uid()}`;
       stripeMakesRefund(swept, 'succeeded');
@@ -1194,15 +1298,40 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
       });
 
       // Refunded now, by the sweep and not the loss, and its charge.refunded
-      // is not recorded yet: only the dispute row (the loss never ran) can
-      // tell. A retry of the late win's undo lands in exactly this window.
-      expect(await step()).toBe('none');
-      expect(stripe.refunds.create).toHaveBeenCalledOnce();
-      expect(stripe.refunds.create).toHaveBeenCalledWith(
-        expect.objectContaining({ payment_intent: duplicate.paymentIntentId }),
-        { idempotencyKey: `refund_duplicate_${duplicate.paymentIntentId}` }
+      // is not recorded yet. A retry of the late win's undo lands in exactly
+      // this window: its refund asks Stripe, which answers that the charge is
+      // refunded in full already, and that is done.
+      vi.mocked(stripe.refunds.create).mockRejectedValueOnce(
+        Object.assign(new Error('Charge has already been refunded (test)'), {
+          type: 'StripeInvalidRequestError',
+          code: 'charge_already_refunded',
+          statusCode: 400,
+        })
       );
+      stripeListsRefunds({
+        [duplicate.charge.id]: [{ id: swept, status: 'succeeded' }],
+      });
+      expect(await step()).toBe('done');
+
+      // Two asks, and one refund: the sweep's.
+      const calls = vi.mocked(stripe.refunds.create).mock
+        .calls as unknown as Array<[unknown, { idempotencyKey?: string }?]>;
+      expect(calls.map(([, options]) => options?.idempotencyKey)).toEqual([
+        `refund_duplicate_${duplicate.paymentIntentId}`,
+        `late_win_refund_${disputeId}`,
+      ]);
+      expect(
+        await db
+          .select({ id: refunds.stripeRefundId })
+          .from(refunds)
+          .where(eq(refunds.stripeChargeId, duplicate.charge.id))
+      ).toEqual([{ id: swept }]);
       expect((await readDispute(disputeId)).lateWinRefundId).toBeNull();
+      expect(await readPurchase(duplicate.purchaseId)).toMatchObject({
+        status: 'refunded',
+        refundAmountCents: 1000,
+        stripeRefundId: swept,
+      });
     });
 
     it('a payment refunded in full before its chargeback was lost is not refunded again when the chargeback is won late: none', async () => {
