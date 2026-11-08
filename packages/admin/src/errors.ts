@@ -280,10 +280,10 @@ export class AlreadySettledError extends ConflictError {
  * it in code"). That refund pays back a buyer who paid twice, so the buyer is
  * still owed it, and what its clawback took from the creators stays taken:
  * re-paying them, then refunding the buyer, would pay the same money out
- * twice. It is refused for good. Support refunds the buyer another way and
- * settles it as refunded elsewhere, or refunds the charge again through
- * Stripe (docs/payments/operations.md, "Failed refunds"). The context is
- * the dispute's Stripe id only.
+ * twice. It is refused for good. Support refunds the buyer another way, or
+ * first refunds the charge again through Stripe, then settles it as refunded
+ * elsewhere (docs/payments/purchases.md#refunds). The context is the dispute's
+ * Stripe id only.
  */
 export class LateWinRefundNotRepayableError extends BusinessLogicError {
   constructor(stripeDisputeId: string) {
