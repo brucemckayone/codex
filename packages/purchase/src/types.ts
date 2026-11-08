@@ -312,14 +312,13 @@ export interface LateWinRestore {
   purchaseId: string;
   /**
    * The `purchase-access-restored` email's facts, on `restored` only; null
-   * otherwise. `paidAt` is the purchase date (ISO). `itemPath` is the item's
-   * page, as the receipt links it (`/content/:id`, `/courses/:id`).
+   * otherwise. `paidAt` is the purchase date (ISO). Its link is the caller's
+   * to read, by `purchaseId` (`findItemLink`, as the receipt's is).
    */
   email: {
     contentTitle: string;
     amountCents: number;
     paidAt: string;
-    itemPath: string;
     isCourse: boolean;
   } | null;
 }

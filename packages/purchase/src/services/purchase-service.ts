@@ -1078,8 +1078,9 @@ export class PurchaseService extends BaseService {
 
   /**
    * Where the purchase's item lives, for an email's link to it (Codex-0u7kb):
-   * the receipt's "Access Content" button. Keyed by the purchase; the item,
-   * its org and its creator are the purchase's own. The pages look an item up
+   * the receipt's "Access Content" button, and the late win's access-restored
+   * email's (Codex-2hxff.70). Keyed by the purchase; the item, its org and
+   * its creator are the purchase's own. The pages look an item up
    * by its slug, so a link built from the id was a 404.
    *
    * Org content links to its org as it is now, not the sale's: that is where
@@ -3878,24 +3879,20 @@ export class PurchaseService extends BaseService {
 
   /**
    * The facts of the `purchase-access-restored` email (late-win data design
-   * §7): the item and its page, as the receipt links it, what was paid and
-   * when. Null when the item's row cannot be read (soft deletes keep it), so
-   * no email goes out unnamed.
+   * §7): the item, what was paid and when. Its link is the caller's, read by
+   * the purchase id (`findItemLink`, Codex-0u7kb). Null when the item's row
+   * cannot be read (soft deletes keep it), so no email goes out unnamed.
    */
   private async accessRestoredEmail(
     purchase: Purchase
   ): Promise<LateWinRestore['email']> {
     const contentTitle = await this.itemTitle(purchase);
     if (contentTitle === null) return null;
-    const isCourse = purchase.courseId !== null;
     return {
       contentTitle,
       amountCents: purchase.amountPaidCents,
       paidAt: toIso(purchase.purchasedAt ?? purchase.createdAt),
-      itemPath: isCourse
-        ? `/courses/${purchase.courseId}`
-        : `/content/${purchase.contentId}`,
-      isCourse,
+      isCourse: purchase.courseId !== null,
     };
   }
 
