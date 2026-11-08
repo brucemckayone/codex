@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
   createRawSnippet,
@@ -93,5 +95,18 @@ describe('DialogBody', () => {
       .split(/\s+/)
       .filter((c) => c && !c.startsWith('svelte-'));
     expect(classes).toEqual(['dialog-body']);
+  });
+
+  // jsdom applies no component CSS, so the rule is read from the source.
+  // MediaPickerDialog's list relies on both (Codex-vlphc review c1, N1).
+  test('Body scrolls, and a scroll that reaches its end stops there', () => {
+    const source = readFileSync(
+      join(import.meta.dirname, 'DialogBody.svelte'),
+      'utf8'
+    );
+    const rule = /\.dialog-body \{([^}]*)\}/.exec(source)?.[1] ?? '';
+
+    expect(rule).toMatch(/overflow-y: auto;/);
+    expect(rule).toMatch(/overscroll-behavior-y: contain;/);
   });
 });

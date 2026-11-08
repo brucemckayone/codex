@@ -10,9 +10,12 @@ jobs:
   static-analysis:
     name: Lint, Format & Type Check
     runs-on: ubuntu-latest
-    # About 2x the p95 of 40 green runs (4.5 min). It lives here because a job
-    # that calls a reusable workflow (`uses:`) cannot set it (Codex-j7x4u).
-    timeout-minutes: 15
+    # About 2x the p95 of 40 green runs (4.5 min) was 15. The svelte-check
+    # step (Codex-3ckzk) then took a 20-minute timeout of its own, which a
+    # 15-minute job would cut short, so the job allows the two together. Set
+    # both from CI's measured p95 once there is one. It lives here because a
+    # job that calls a reusable workflow (`uses:`) cannot set it (Codex-j7x4u).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
@@ -89,6 +92,22 @@ jobs:
       - name: Public-bundle editor import boundary check
         run: pnpm --filter web run check:brand-boundary
 
+      # Codex-vlphc.1 (epic Codex-2yvc8): every modal is built from the
+      # shared Dialog parts. Dialog.Content clips at 85vh and only
+      # Dialog.Body scrolls, so a page's own wrapper between the two hid the
+      # tier and FAQ dialogs' buttons on a short screen, and e2e could not
+      # see it (Playwright scrolls in code). The gate parses every .svelte
+      # file and fails on a non-part child of Content or Form, a :global()
+      # restyle of the Dialog, or a hand-rolled role="dialog". Its allowlist
+      # empties as the epic lands. See
+      # apps/web/scripts/check-dialog-structure.mjs for the full rule.
+      # Self-test first, as for the boundary gate above.
+      - name: Dialog structure gate self-test
+        run: pnpm --filter web run check:dialog-structure:test
+
+      - name: Dialog structure gate (shared Dialog parts only)
+        run: pnpm --filter web run check:dialog-structure
+
       # Codex-ea1hd WP9: the data-access contract drift gate.
       #
       # Two grep-based rules over packages/*/src, workers/*/src and apps/*/src:
@@ -128,3 +147,29 @@ jobs:
         env:
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
+      # Codex-3ckzk: svelte-check against a committed baseline.
+      #
+      # The typecheck above is tsc, which never reads a .svelte file, so a type
+      # error inside a component, or a type-level guard written for its
+      # consumers (Dialog.Content's CssLength-typed maxHeight), failed no job.
+      # svelte-check reads them, but the tree carries a standing set of errors.
+      # So the gate counts svelte-check's errors per (file, code) and compares
+      # them with apps/web/scripts/svelte-check-baseline.json: a NEW error
+      # fails, and so does a STALE entry (an error fixed but still listed), so
+      # the baseline only shrinks. The script's header says how to shrink it.
+      #
+      # After the typecheck on purpose: svelte-check resolves the workspace
+      # packages through their dist/ types, which turbo's ^build has just
+      # written, and reads the paraglide output compiled above. The gate's own
+      # `svelte-kit sync` writes the route types.
+      #
+      # Self-test first, as for the gates above.
+      - name: svelte-check baseline gate self-test
+        run: pnpm --filter web run check:svelte-baseline:test
+
+      # 20 minutes until CI's own runs give a p95: a local run took 273-1039 s
+      # under load, and a step that times out reads like a failure.
+      - name: svelte-check (no error beyond the baseline)
+        run: pnpm --filter web run check:svelte-baseline
+        timeout-minutes: 20

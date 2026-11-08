@@ -1,0 +1,64 @@
+{
+  "errors": {
+    "src/lib/components/AccessRevokedOverlay/AccessRevokedOverlay.svelte": {
+      "TS2339": 1
+    },
+    "src/lib/components/AudioPlayer/AudioPlayer.svelte": {
+      "TS2339": 4,
+      "TS5097": 1
+    },
+    "src/lib/components/VideoPlayer/VideoPlayer.svelte": {
+      "TS5097": 1
+    },
+    "src/lib/components/library/LibraryPageView.svelte": {
+      "TS2322": 4
+    },
+    "src/lib/components/studio/ActivityFeed.svelte": {
+      "TS2305": 2
+    },
+    "src/lib/components/studio/ContentForm.svelte": {
+      "TS2322": 1,
+      "TS2339": 1,
+      "TS2353": 1,
+      "TS2551": 2
+    },
+    "src/lib/components/studio/CustomerTable.svelte": {
+      "TS2305": 1
+    },
+    "src/lib/components/subscription/SubscribeButton.svelte": {
+      "TS2339": 2
+    },
+    "src/lib/components/ui/Accordion/Accordion.svelte": {
+      "TS2345": 1
+    },
+    "src/lib/components/ui/Feedback/ErrorBoundary/ErrorBoundary.svelte": {
+      "TS2345": 1
+    },
+    "src/lib/components/ui/PageHeader/PageHeader.svelte.test.ts": {
+      "TS2741": 1
+    },
+    "src/lib/components/ui/Select/Select.svelte": {
+      "TS2322": 1
+    },
+    "src/routes/(platform)/account/subscriptions/+page.svelte": {
+      "TS2339": 3
+    },
+    "src/routes/(platform)/become-creator/+page.svelte": {
+      "TS2322": 1
+    },
+    "src/routes/_org/[slug]/(space)/pricing/+page.svelte": {
+      "TS2322": 1,
+      "TS2339": 2,
+      "TS2345": 1
+    },
+    "src/routes/_org/[slug]/studio/categories/__tests__/serial-topic-entry.svelte.test.ts": {
+      "TS2322": 1
+    },
+    "src/routes/_org/[slug]/studio/customers/+page.svelte": {
+      "TS2305": 1
+    },
+    "src/routes/unsubscribe/[token]/+page.svelte": {
+      "TS2339": 2
+    }
+  }
+}

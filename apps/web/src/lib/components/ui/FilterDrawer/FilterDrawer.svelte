@@ -3,9 +3,10 @@
 
   Generic chrome for a "Filters & Sort" drawer. Right-edge panel at `sm` and
   up; bottom sheet below it (the `--below-sm` breakpoint, matched in JS by
-  MOBILE_QUERY so CSS and behaviour flip together). Owns the responsive geometry,
-  slide animations, grip handle, header, body, footer, prefers-reduced-motion,
-  and the hybrid commit model:
+  MOBILE_QUERY so CSS and behaviour flip together). The panel, its slide and
+  its phone sheet are Dialog.Content's `variant="drawer" floating sheet`; this
+  owns the grip handle, the title row, the two footer actions and the hybrid
+  commit model:
 
     • Desktop — live: each setter flushes to parent immediately.
     • Mobile  — staged: local snapshot; flush on Apply, discard on Cancel
@@ -226,15 +227,21 @@
   });
 </script>
 
+<!--
+  The glass rail and its phone sheet are Dialog.Content's `floating sheet`
+  drawer, with the Dialog's own Header and Body. The head and body rules this
+  drawer once declared lost to those parts on specificity and never applied
+  (measured against HEAD, Codex-vlphc.3), so the parts' defaults ARE its look.
+-->
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-  <Dialog.Content class="filter-drawer">
-    <Dialog.Header class="filter-drawer__head">
+  <Dialog.Content variant="drawer" floating sheet class="filter-drawer">
+    <Dialog.Header>
       <span class="filter-drawer__grip" aria-hidden="true"></span>
       <div class="filter-drawer__head-inner">
         <span class="filter-drawer__head-glyph" aria-hidden="true">
           <SlidersIcon size={18} />
         </span>
-        <Dialog.Title>{title}</Dialog.Title>
+        <Dialog.Title class="filter-drawer__title">{title}</Dialog.Title>
         {#if activeCount > 0}
           <span
             class="filter-drawer__badge"
@@ -246,11 +253,11 @@
       </div>
     </Dialog.Header>
 
-    <Dialog.Body class="filter-drawer__body">
+    <Dialog.Body>
       {@render sections(sectionContext)}
     </Dialog.Body>
 
-    <Dialog.Footer class="filter-drawer__foot">
+    <Dialog.Footer align="between">
       <button type="button" class="filter-drawer__clear" onclick={clearAllInDrawer}>
         {clearLabel}
       </button>
@@ -267,32 +274,6 @@
 
 <style>
   /* ── Animations ─────────────────────────────────────────────────── */
-  @keyframes filter-drawer-slide-in-right {
-    0% {
-      transform: translateX(100%);
-      opacity: 0;
-    }
-    60% {
-      opacity: 1;
-    }
-    100% {
-      transform: translateX(0);
-      opacity: 1;
-    }
-  }
-  @keyframes filter-drawer-slide-in-bottom {
-    0% {
-      transform: translateY(100%);
-      opacity: 0;
-    }
-    60% {
-      opacity: 1;
-    }
-    100% {
-      transform: translateY(0);
-      opacity: 1;
-    }
-  }
   @keyframes filter-drawer-tap {
     0% {
       transform: scale(1);
@@ -305,73 +286,10 @@
     }
   }
 
-  /* ── Desktop: floating-glass right-edge panel ──────────────────────
-     SPECIFICITY: the doubled `[data-size][data-size]` qualifier is
-     load-bearing, not decoration. DialogContent's own rule is
-     `.dialog-content[data-size='md']`, which Svelte's scoping hash lifts to
-     `.dialog-content[data-size='md'].svelte-<hash>` = (0,3,0) — outranking a
-     plain `:global(.dialog-content.filter-drawer)` at (0,2,0). The panel
-     therefore rendered at the 42rem modal width instead of the 24rem rail this
-     rule asks for: ~350px of dead space under the last section, a 622px sweep
-     between each sort label and its check glyph, and 87% of the viewport
-     covered at 768px.
-
-     A single `[data-size]` was NOT enough: Svelte adds no hash to a wholly
-     `:global()` selector, so `:global(.dialog-content.filter-drawer[data-size])`
-     is also (0,3,0) — a TIE, resolved only by stylesheet order, which happened
-     to favour this rule because FilterDrawer imports Dialog and so DialogContent
-     is emitted first. Any chunking change that reversed that order would have
-     silently restored the 42rem width with no build error and no failing test.
-     Repeating the attribute takes this rule to (0,4,0) so it wins on
-     specificity, as claimed, independent of emission order. */
-  :global(.dialog-content.filter-drawer[data-size][data-size]) {
-    position: fixed;
-    top: var(--space-3);
-    right: var(--space-3);
-    bottom: var(--space-3);
-    left: auto;
-    max-width: var(--container-drawer);
-    width: calc(100% - var(--space-6));
-    height: auto;
-    max-height: calc(100dvh - var(--space-6));
-    background: var(--material-glass);
-    backdrop-filter: blur(var(--blur-xl));
-    -webkit-backdrop-filter: blur(var(--blur-xl));
-    border: var(--border-width) var(--border-style) var(--material-glass-border);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-xl);
-    display: flex;
-    flex-direction: column;
-    padding: 0;
-    overflow: hidden; /* clip head/foot hairlines to the rounded panel */
-    animation: filter-drawer-slide-in-right var(--duration-slow) var(--ease-smooth) both;
-  }
-
-  /* ── Mobile: floating-glass bottom sheet ───────────────────────────
-     Same doubled-attribute (0,4,0) qualifier as the desktop rule above, for
-     the same reason — see that comment. */
-  @media (--below-sm) {
-    :global(.dialog-content.filter-drawer[data-size][data-size]) {
-      top: auto;
-      left: var(--space-2);
-      right: var(--space-2);
-      bottom: var(--space-2);
-      max-width: none;
-      width: auto;
-      height: auto;
-      max-height: 85dvh;
-      border-radius: var(--radius-xl);
-      animation: filter-drawer-slide-in-bottom var(--duration-slow) var(--ease-spring) both;
-    }
-  }
-
   /* ── Reduced motion ─────────────────────────────────────────────── */
   /* !important required: animation shorthand sets 8 sub-properties at once;
      only !important overrides it from a media query. */
   @media (prefers-reduced-motion: reduce) {
-    :global(.dialog-content.filter-drawer) {
-      animation: none !important;
-    }
     :global(.filter-drawer__option),
     :global(.filter-drawer__pill) {
       animation: none !important;
@@ -394,19 +312,6 @@
   }
 
   /* ── Header ─────────────────────────────────────────────────────── */
-  :global(.filter-drawer__head) {
-    padding: var(--space-5) var(--space-6) var(--space-4);
-    padding-inline-end: var(--space-12);
-    border-bottom: var(--border-width) var(--border-style) var(--color-border);
-    background: transparent;
-  }
-  @media (--below-sm) {
-    :global(.filter-drawer__head) {
-      padding-block-start: max(var(--space-1), env(safe-area-inset-top, 0));
-      padding-inline: var(--space-5);
-      padding-block-end: var(--space-3);
-    }
-  }
   .filter-drawer__head-inner {
     display: flex;
     align-items: center;
@@ -420,7 +325,9 @@
     color: var(--color-text-secondary);
     flex: 0 0 auto;
   }
-  :global(.filter-drawer__head .dialog-title) {
+  /* Through this drawer's own row: Dialog.Title's `.dialog-title` is
+     (0,2,0) with its scoping class, and this is (0,3,0). */
+  .filter-drawer__head-inner :global(.filter-drawer__title) {
     font-size: var(--text-lg);
     font-weight: var(--font-semibold);
     letter-spacing: -0.01em;
@@ -445,24 +352,6 @@
     font-weight: var(--font-semibold);
     line-height: 1;
     font-variant-numeric: tabular-nums;
-  }
-
-  /* ── Body ───────────────────────────────────────────────────────── */
-  :global(.filter-drawer__body) {
-    flex: 1 1 auto;
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
-    padding: var(--space-5) var(--space-5) var(--space-6);
-    display: flex;
-    flex-direction: column;
-    gap: 0; /* dividers do the spacing work, mirroring MobileBottomSheet */
-    background: transparent;
-  }
-  @media (--below-sm) {
-    :global(.filter-drawer__body) {
-      padding-inline: var(--space-4);
-      padding-block-start: var(--space-4);
-    }
   }
 
   /* Class hooks exposed to consumers via the `sections` snippet. They
@@ -658,23 +547,6 @@
   }
 
   /* ── Footer ─────────────────────────────────────────────────────── */
-  :global(.dialog-footer.filter-drawer__foot) {
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-5);
-    background: transparent;
-    border-top: var(--border-width) var(--border-style) var(--color-border);
-  }
-  @media (--below-sm) {
-    :global(.dialog-footer.filter-drawer__foot) {
-      padding-inline: var(--space-4);
-      padding-block-end: max(var(--space-3), env(safe-area-inset-bottom, 0));
-    }
-  }
-
   .filter-drawer__clear {
     display: inline-flex;
     align-items: center;

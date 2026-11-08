@@ -91,6 +91,7 @@
   import { getOrgSettings } from '$lib/remote/org.remote';
   import { formatDate, formatPrice, formatSentenceDate } from '$lib/utils/format';
   import { randomUuid } from '$lib/utils/random-uuid';
+  import { survivingFocus } from '$lib/utils/surviving-focus';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
   import {
     type ConnectQueryState,
@@ -490,6 +491,25 @@
   let deleteDialogOpen = $state(false);
   let editingTier = $state<SubscriptionTier | null>(null);
   let deletingTier = $state<SubscriptionTier | null>(null);
+  // Set as a delete succeeds, before the dialog closes: the removed row's
+  // Delete can't take focus back, so the close sends it to what survives
+  // (Codex-p10nx). `at` is the row's place in the list.
+  let deletedTier = $state<{ id: string; at: number } | null>(null);
+
+  /** The next tier's Delete, else the previous one's, else Create, else the heading. */
+  function tierDeleteFocus(): HTMLElement | null {
+    if (!deletedTier) return null;
+    const removed = deletedTier;
+    const left = [
+      ...document.querySelectorAll<HTMLElement>('[data-tier-delete]'),
+    ].filter((el) => el.dataset.tierDelete !== removed.id);
+    return survivingFocus(
+      left,
+      removed.at,
+      document.querySelector('[data-tier-create]'),
+      document.querySelector('[data-tiers-heading]')
+    );
+  }
 
   // Tier form state
   let tierName = $state('');
@@ -987,6 +1007,7 @@
 
   function openDeleteTier(tier: SubscriptionTier) {
     deletingTier = tier;
+    deletedTier = null;
     deleteError = '';
     deleteChoice = null;
     deleteMoveTo = [];
@@ -1222,7 +1243,11 @@
   }
 
   async function handleDeleteTier() {
-    if (!deletingTier || !deleteReady) return;
+    // The tier this request is for. Nothing after the await reads
+    // `deletingTier`: that is the dialog's, and names whichever tier it
+    // shows when the answer lands (Codex-p10nx review).
+    const tier = deletingTier;
+    if (!tier || !deleteReady) return;
     // The choice goes only when something is only in this tier, and only as
     // the creator made it. With nothing only-here a bare delete is sent; if
     // something became only-here meanwhile, the worker refuses it.
@@ -1235,8 +1260,12 @@
     deleteLoading = true;
     deleteError = '';
     try {
-      const result = await deleteTier({ orgId, tierId: deletingTier.id, choice });
+      const result = await deleteTier({ orgId, tierId: tier.id, choice });
       if (result.success) {
+        deletedTier = {
+          id: tier.id,
+          at: tiers.findIndex((t) => t.id === tier.id),
+        };
         deleteDialogOpen = false;
         deletingTier = null;
         await invalidateAll();
@@ -1246,7 +1275,7 @@
       if (result.detailsCode === 'TIER_HAS_ONLY_ITEMS') {
         // The preview went stale: ask again, from a FRESH read only.
         deleteError = m.monetisation_tier_delete_only_here_changed({
-          name: deletingTier.name,
+          name: tier.name,
         });
         deleteChoice = null;
         deleteMoveTo = [];
@@ -1256,7 +1285,7 @@
         // Someone subscribed since the check: say so, and the fresh read
         // shows the refusal up front.
         deleteError = m.monetisation_tier_delete_subscribed_meanwhile({
-          name: deletingTier.name,
+          name: tier.name,
         });
         impactStale = true;
         retryImpact();
@@ -1676,13 +1705,20 @@
     <Card.Header>
       <div class="card-header-row">
         <div>
-          <Card.Title level={3}>{m.monetisation_tiers_title()}</Card.Title>
+          <Card.Title level={3} tabindex={-1} data-tiers-heading>
+            {m.monetisation_tiers_title()}
+          </Card.Title>
           <Card.Description>{m.monetisation_tiers_description()}</Card.Description>
         </div>
         <!-- Hidden while the tiers failed to load: a "first" tier made over a
              list nobody has seen can be a duplicate. -->
         {#if !tiersFailed}
-          <Button onclick={openCreateTier} size="sm" disabled={dataLoading || !connectReady}>
+          <Button
+            onclick={openCreateTier}
+            size="sm"
+            disabled={dataLoading || !connectReady}
+            data-tier-create
+          >
             <PlusIcon size={14} />
             {m.monetisation_tiers_create()}
           </Button>
@@ -1844,6 +1880,7 @@
                   size="sm"
                   onclick={() => openDeleteTier(tier)}
                   aria-label={m.monetisation_tiers_delete_aria({ name: tier.name })}
+                  data-tier-delete={tier.id}
                 >
                   <TrashIcon size={14} />
                 </Button>
@@ -1917,7 +1954,7 @@
       </Dialog.Title>
     </Dialog.Header>
 
-    <form class="tier-form" onsubmit={(e) => { e.preventDefault(); handleTierSubmit(); }}>
+    <Dialog.Form class="tier-form" onsubmit={(e) => { e.preventDefault(); handleTierSubmit(); }}>
       <Dialog.Body>
         <div class="form-field">
           <Label for="tier-name">{m.monetisation_tier_name()}</Label>
@@ -2101,12 +2138,18 @@
           {m.monetisation_save()}
         </Button>
       </Dialog.Footer>
-    </form>
+    </Dialog.Form>
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Delete Tier Dialog -->
-<Dialog.Root bind:open={deleteDialogOpen}>
+<!-- Delete Tier Dialog. Not dismissible while its request runs, as Cancel
+     isn't: closed then, focus went back to a Delete the refresh removed,
+     and a second tier's dialog could take the first one's answer. -->
+<Dialog.Root
+  bind:open={deleteDialogOpen}
+  closeFocus={deletedTier ? tierDeleteFocus : undefined}
+  dismissible={!deleteLoading}
+>
   <Dialog.Content size="sm">
     <Dialog.Header>
       <Dialog.Title>{m.monetisation_tiers_delete()}</Dialog.Title>
@@ -2776,10 +2819,8 @@
     flex-shrink: 0;
   }
 
-  /* Tier form */
-  .tier-form {
-    display: flex;
-    flex-direction: column;
+  /* Tier form: Dialog.Form renders the <form>, so only :global reaches it. Spacing only. */
+  :global(.dialog-form.tier-form) {
     gap: var(--space-4);
     padding: var(--space-4);
   }

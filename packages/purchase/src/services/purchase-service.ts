@@ -275,6 +275,7 @@ import type {
   CompletePurchaseMetadata,
   PaymentIntentCharge,
   Purchase,
+  PurchaseItemLink,
   PurchaseListItem,
   PurchaseWithItem,
   SaleListItem,
@@ -538,6 +539,66 @@ function selfHealedSale(metadata: Stripe.Metadata): {
         },
       }
     : null;
+}
+
+/** A row's soft delete, as `findItemLink` reads it. */
+interface Live {
+  deletedAt: Date | null;
+}
+
+/**
+ * A content item's page (`findItemLink`): on its org as it is now, or, for
+ * personal content, on its creator's profile. Null when it has none.
+ */
+function contentItemLink(
+  item: Live & {
+    id: string;
+    slug: string;
+    organization: (Live & { slug: string }) | null;
+    creator: (Live & { username: string | null }) | null;
+  }
+): PurchaseItemLink | null {
+  const { organization, creator } = item;
+  if (item.deletedAt) return null;
+  if (organization) {
+    if (organization.deletedAt) return null;
+    return {
+      kind: 'org_content',
+      contentId: item.id,
+      slug: item.slug,
+      organizationSlug: organization.slug,
+    };
+  }
+  if (!creator?.username || creator.deletedAt) return null;
+  return {
+    kind: 'personal_content',
+    contentId: item.id,
+    slug: item.slug,
+    creatorUsername: creator.username,
+  };
+}
+
+/**
+ * A course's dashboard on its org (`findItemLink`). Null when it has none:
+ * the dashboard finds only a published course (`getCourseBySlug`), so one
+ * archived or back in draft would be a 404.
+ */
+function courseItemLink(
+  course: Live & {
+    id: string;
+    slug: string;
+    status: string;
+    organization: Live & { slug: string };
+  }
+): PurchaseItemLink | null {
+  if (course.deletedAt || course.organization.deletedAt) return null;
+  if (course.status !== CONTENT_STATUS.PUBLISHED) return null;
+  return {
+    kind: 'course',
+    courseId: course.id,
+    slug: course.slug,
+    organizationSlug: course.organization.slug,
+  };
 }
 
 /**
@@ -912,6 +973,47 @@ export class PurchaseService extends BaseService {
       return claimed.length > 0;
     } catch (error) {
       this.handleError(error, 'claimReceipt');
+    }
+  }
+
+  /**
+   * Where the purchase's item lives, for an email's link to it (Codex-0u7kb):
+   * the receipt's "Access Content" button. Keyed by the purchase; the item,
+   * its org and its creator are the purchase's own. The pages look an item up
+   * by its slug, so a link built from the id was a 404.
+   *
+   * Org content links to its org as it is now, not the sale's: that is where
+   * its page is. Null when there is no page to link to: no such purchase; its
+   * item or that item's org is deleted; a course is not published; personal
+   * content's creator is deleted or has no username. The caller links
+   * somewhere that exists.
+   */
+  async findItemLink(purchaseId: string): Promise<PurchaseItemLink | null> {
+    try {
+      const row = await this.db.query.purchases.findFirst({
+        where: eq(purchases.id, purchaseId),
+        columns: { id: true },
+        with: {
+          content: {
+            columns: { id: true, slug: true, deletedAt: true },
+            with: {
+              organization: { columns: { slug: true, deletedAt: true } },
+              creator: { columns: { username: true, deletedAt: true } },
+            },
+          },
+          course: {
+            columns: { id: true, slug: true, status: true, deletedAt: true },
+            with: {
+              organization: { columns: { slug: true, deletedAt: true } },
+            },
+          },
+        },
+      });
+      if (row?.content) return contentItemLink(row.content);
+      if (row?.course) return courseItemLink(row.course);
+      return null;
+    } catch (error) {
+      this.handleError(error, 'findItemLink');
     }
   }
 

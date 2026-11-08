@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse } from 'svelte/compiler';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
   flushSync,
@@ -365,5 +368,68 @@ describe('Toaster · action', () => {
     const [plain, withAction] = entries();
     expect(plain.closeDelay).toBe(5000);
     expect(withAction.closeDelay).toBe(0);
+  });
+});
+
+type CssNode = {
+  type: string;
+  name?: string;
+  property?: string;
+  value?: string;
+  prelude?: { start: number; end: number } | string;
+  block?: { children: CssNode[] } | null;
+};
+
+// jsdom applies no component CSS, so the rule is read from the source. In
+// WebKit a dialog's scroll lock widens the viewport by the scrollbar, and
+// the toasts moved 15px right while it was open (Codex-vlphc review G4-U4).
+describe('Toaster · scroll lock', () => {
+  // Read with svelte's own parser, which drops the comments. Every rule
+  // that names `.toaster` counts, in an at-rule too, and so does every rule
+  // or at-rule nested in one (`&:not(...)`, `@media`), whose own prelude
+  // needn't name it. And every property that sets its right edge: a later
+  // `right`, an `inset`, an `inset-inline` or `inset-inline-end`, or a
+  // `.toaster:not(...)` rule would win over the padded one (review G5-C-N2,
+  // c6, fu-focus-2).
+  test('the toasts’ right edge adds the padding the scroll lock publishes', () => {
+    const source = readFileSync(
+      join(import.meta.dirname, 'Toaster.svelte'),
+      'utf8'
+    );
+    const EDGE = ['right', 'inset', 'inset-inline', 'inset-inline-end'];
+    const edges: string[] = [];
+    /** `within`: the path of the `.toaster` rule these nodes are nested in. */
+    const visit = (nodes: CssNode[], within: string | null) => {
+      for (const node of nodes) {
+        const own =
+          node.type === 'Rule' && typeof node.prelude === 'object'
+            ? source.slice(node.prelude.start, node.prelude.end).trim()
+            : node.type === 'Atrule'
+              ? `@${node.name} ${String(node.prelude ?? '').trim()}`
+              : '';
+        const path =
+          within !== null
+            ? `${within} ${own}`
+            : /\.toaster(?![\w-])/.test(own)
+              ? own
+              : null;
+        if (path !== null)
+          for (const d of node.block?.children ?? [])
+            if (d.type === 'Declaration' && EDGE.includes(d.property ?? ''))
+              edges.push(
+                `${path} { ${d.property}: ${(d.value ?? '').replace(/\s+/g, ' ').trim()} }`
+              );
+        visit(node.block?.children ?? [], path);
+      }
+    };
+    visit(
+      (parse(source, { modern: true }).css?.children ??
+        []) as unknown as CssNode[],
+      null
+    );
+
+    expect(edges).toEqual([
+      '.toaster { right: calc(var(--space-4) + var(--scroll-lock-pad, 0px)) }',
+    ]);
   });
 });

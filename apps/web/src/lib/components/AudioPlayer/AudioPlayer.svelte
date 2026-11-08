@@ -27,6 +27,7 @@
   import WaveformShader from './WaveformShader.svelte';
   import { getThumbnailUrl } from '$lib/utils/image';
   import ImmersiveShaderPlayer from './ImmersiveShaderPlayer.svelte';
+  import { canShowImmersive } from './immersive-support';
 
   import type Hls from 'hls.js';
   import type { AudioAnalysis, AudioAnalyserHandle } from './audio-analyser';
@@ -165,6 +166,17 @@
   // fall back to 'nebula' so every audio piece is immersive-capable — all 25
   // presets are audio-reactive, so there's no UX reason to hide the entry.
   let showImmersive = $state(false);
+  // The button that opened it, from the press: it gets focus back.
+  let immersiveOpener = $state.raw<HTMLElement | null>(null);
+  // Gone from the page: a full screen granted after this takes the page back out.
+  let destroyed = false;
+  // Offered only where it can open: the player is a modal `<dialog>`, which
+  // Safari before 15.4 cannot show. True until hydrated, so the server's
+  // markup and every browser that can show it never change.
+  let immersiveOffered = $state(true);
+  $effect(() => {
+    immersiveOffered = canShowImmersive();
+  });
   const resolvedShaderPreset = $derived(
     shaderPreset && shaderPreset !== 'none' ? shaderPreset : 'nebula'
   );
@@ -829,6 +841,7 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     // Flush against the id the element's media actually belongs to, not
     // whatever the props answer with at teardown time.
     tracker.detach(initializedContentId);
@@ -1018,23 +1031,41 @@
             </div>
           </div>
 
-          <!-- Immersive mode — always available; falls back to 'nebula' when
-               content has no preset assigned. -->
-          <button
-            type="button"
-            class="audio-player__btn audio-player__btn--immersive"
-            onclick={() => {
-              showImmersive = true;
-              // Fullscreen API requires fresh transient activation — must be
-              // requested synchronously from a user gesture, not from the
-              // overlay's onMount (which runs after several awaits).
-              document.documentElement.requestFullscreen().catch(() => {});
-            }}
-            aria-label="Enter immersive mode"
-            title="Immersive shader mode"
-          >
-            <MaximizeIcon size={18} />
-          </button>
+          <!-- Immersive mode — wherever it can open; falls back to 'nebula'
+               when content has no preset assigned. -->
+          {#if immersiveOffered}
+            <button
+              type="button"
+              class="audio-player__btn audio-player__btn--immersive"
+              onclick={(e) => {
+                immersiveOpener = e.currentTarget;
+                showImmersive = true;
+                // Fullscreen API requires fresh transient activation — must be
+                // requested synchronously from a user gesture, not from the
+                // overlay's onMount (which runs after several awaits). The
+                // page goes full screen a moment later: a player already gone
+                // by then (its showModal() threw, Escape came first, or this
+                // whole player left the page, as a Back does) takes it back
+                // out, or the page stays full screen with no player.
+                // Where the page has no unprefixed Fullscreen API (iPhone
+                // Safari; Safari 15.4–16.3 on macOS and iPadOS, which has
+                // showModal but only webkitRequestFullscreen) the player
+                // opens in the window, and nothing here may throw.
+                document.documentElement.requestFullscreen?.().then(
+                  () => {
+                    if ((!showImmersive || destroyed) && document.fullscreenElement) {
+                      document.exitFullscreen().catch(() => {});
+                    }
+                  },
+                  () => {}
+                );
+              }}
+              aria-label="Enter immersive mode"
+              title="Immersive shader mode"
+            >
+              <MaximizeIcon size={18} />
+            </button>
+          {/if}
         </div>
       </div>
     </WaveformShader>
@@ -1105,6 +1136,7 @@
     audioElement={audioEl}
     shaderPreset={resolvedShaderPreset}
     {title}
+    opener={immersiveOpener}
     onclose={() => { showImmersive = false; }}
   />
 {/if}

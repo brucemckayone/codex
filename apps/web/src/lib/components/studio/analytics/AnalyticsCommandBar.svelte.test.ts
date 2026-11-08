@@ -151,3 +151,41 @@ describe('AnalyticsCommandBar presets', () => {
     );
   });
 });
+
+// Each range popover is a dialog (PopoverContent's role), so each needs a
+// name: its own heading, by aria-labelledby (Codex-vlphc.4, review M3).
+describe('AnalyticsCommandBar range popovers', () => {
+  function dialogNamed(
+    trigger: Element | null | undefined
+  ): string | undefined {
+    if (!(trigger instanceof HTMLElement)) throw new Error('no trigger');
+    trigger.click();
+    flushSync();
+    const dialog = document.querySelector('[role="dialog"]');
+    const id = dialog?.getAttribute('aria-labelledby');
+    return id ? document.getElementById(id)?.textContent?.trim() : undefined;
+  }
+
+  test('the custom range is named by its heading', () => {
+    mountBar({ startDate: '2026-10-01', endDate: '2026-10-20' });
+
+    const name = dialogNamed(
+      document.querySelector('.bar-filters [aria-haspopup="dialog"]')
+    );
+
+    expect(name).toBe(m.analytics_cmd_custom_range_heading());
+  });
+
+  test('the compare range is named by its heading', () => {
+    mountBar({
+      startDate: '2026-10-01',
+      endDate: '2026-10-20',
+      compareFrom: '2026-09-01',
+      compareTo: '2026-09-20',
+    });
+
+    const name = dialogNamed(document.querySelector('.compare-custom-link'));
+
+    expect(name).toBe(m.analytics_cmd_compare_custom_heading());
+  });
+});

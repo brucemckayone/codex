@@ -2,9 +2,6 @@
 	import { AUTH_ROLES } from '@codex/constants';
 	import type { LayoutUser } from '$lib/types';
 	import { page } from '$app/state';
-	import { browser } from '$app/environment';
-	import { fade, fly } from 'svelte/transition';
-	import { cubicOut } from 'svelte/easing';
 	import { buildPlatformUrl } from '$lib/utils/subdomain';
 	import { useStudioAccess } from '$lib/utils/studio-access.svelte';
 	import { getInitials } from '$lib/utils/format';
@@ -22,6 +19,7 @@
 	import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
 	import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
 	import ThemeToggle from '$lib/components/ui/ThemeToggle/ThemeToggle.svelte';
+	import * as Dialog from '$lib/components/ui/Dialog';
 	import * as m from '$paraglide/messages';
 
 	interface Props {
@@ -31,21 +29,6 @@
 	}
 
 	let { open = $bindable(false), variant, user }: Props = $props();
-
-	// ── Reduced-motion preference (WCAG 2.3.3) ────────────────
-	// Svelte JS transitions bypass CSS media queries, so we must gate
-	// the fly translate reactively. Fade is kept (opacity is not motion).
-	let prefersReducedMotion = $state(false);
-	$effect(() => {
-		if (!browser) return;
-		const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-		prefersReducedMotion = mq.matches;
-		const handler = (e: MediaQueryListEvent) => {
-			prefersReducedMotion = e.matches;
-		};
-		mq.addEventListener('change', handler);
-		return () => mq.removeEventListener('change', handler);
-	});
 
 	const studioAccess = useStudioAccess(() => ({ user, url: page.url }));
 	const showSupport = $derived(
@@ -63,192 +46,189 @@
 		}
 	});
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape' && open) {
-			open = false;
-		}
-	}
-
 	// ── Drag-to-dismiss ───────────────────────────────────────
-	let sheetEl: HTMLDivElement | undefined = $state();
+	// A pull down closes the sheet, but only a pull that starts with the
+	// sheet at its top. Scrolled down, the same finger movement scrolls the
+	// list back up, and it used to close the sheet instead (Codex-vlphc.4).
+	let dragged: HTMLElement | null = null;
 	let startY = 0;
 	let currentY = 0;
-	let dragging = false;
 
-	function handleTouchStart(e: TouchEvent) {
-		startY = e.touches[0].clientY;
-		dragging = true;
+	// Whether anything from the touched element up to the panel is scrolled.
+	function scrolledDown(from: EventTarget | null, panel: HTMLElement): boolean {
+		for (let el = from instanceof Element ? from : null; el && el !== panel; el = el.parentElement) {
+			if (el.scrollTop > 0) return true;
+		}
+		return panel.scrollTop > 0;
+	}
+
+	// currentY starts where the touch does, so a tap that follows a drag
+	// never reads the drag's last position as its own.
+	function handleTouchStart(e: TouchEvent & { currentTarget: HTMLElement }) {
+		startY = currentY = e.touches[0].clientY;
+		dragged = scrolledDown(e.target, e.currentTarget) ? null : e.currentTarget;
 	}
 
 	function handleTouchMove(e: TouchEvent) {
-		if (!dragging || !sheetEl) return;
+		if (!dragged) return;
 		currentY = e.touches[0].clientY;
 		const delta = currentY - startY;
 		if (delta > 0) {
-			sheetEl.style.transform = `translateY(${delta}px)`;
+			dragged.style.transform = `translateY(${delta}px)`;
 		}
 	}
 
+	// A sheet closed by a pull, reopened before it has dropped away: Svelte
+	// resumes that same panel, which would still carry the pull's offset.
+	let released: HTMLElement | null = null;
+	$effect(() => {
+		if (!open || !released) return;
+		released.style.transform = '';
+		released = null;
+	});
+
+	// Past 100px the sheet closes from where the finger let go: it keeps the
+	// pull's offset, and the rise runs on down from there (Svelte's fly adds
+	// to the transform it finds). Cleared at once, it jumped back up first.
 	function handleTouchEnd() {
-		dragging = false;
-		const delta = currentY - startY;
-		if (delta > 100) {
+		if (!dragged) return;
+		if (currentY - startY > 100) {
+			released = dragged;
 			open = false;
+		} else {
+			dragged.style.transform = '';
 		}
-		if (sheetEl) sheetEl.style.transform = '';
+		dragged = null;
+	}
+
+	// The system took the touch (an iOS gesture, an alert): the pull is
+	// abandoned, so the sheet goes back where it was and stays open.
+	function handleTouchCancel() {
+		if (!dragged) return;
+		dragged.style.transform = '';
+		dragged = null;
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-{#if open}
-	<!-- Backdrop -->
-	<div
-		class="sheet-backdrop"
-		role="presentation"
-		onclick={() => {
-			open = false;
-		}}
-		transition:fade={{ duration: 200 }}
-	></div>
-
-	<!-- Sheet -->
-	<div
-		bind:this={sheetEl}
-		class="sheet"
-		role="dialog"
-		tabindex="-1"
+<Dialog.Root bind:open>
+	<Dialog.Content
+		placement="bottom"
+		surface="glass"
+		overlay="dim"
+		motion="rise"
+		flush
+		closeButton={false}
 		aria-label="More options"
-		transition:fly={{
-			y: prefersReducedMotion ? 0 : 400,
-			duration: prefersReducedMotion ? 0 : 300,
-			easing: cubicOut,
-		}}
 		ontouchstart={handleTouchStart}
 		ontouchmove={handleTouchMove}
 		ontouchend={handleTouchEnd}
+		ontouchcancel={handleTouchCancel}
 	>
-		<!-- Drag handle -->
-		<div class="sheet__handle-area">
-			<div class="sheet__handle"></div>
-		</div>
-
-		<!-- Nav links (overflow items not in bottom bar) -->
-		<div class="sheet__section">
-			{#if variant === 'org'}
-				<a
-					href="/creators"
-					class="sheet__link"
-					onclick={() => {
-						open = false;
-					}}
-				>
-					<UsersIcon size={20} />
-					<span>{m.sidebar_creators()}</span>
-				</a>
-			{/if}
-			<a
-				href="/pricing"
-				class="sheet__link"
-				onclick={() => {
-					open = false;
-				}}
-			>
-				<TagIcon size={20} />
-				<span>{m.sidebar_pricing()}</span>
-			</a>
-			{#if studioAccess.canAccessStudio}
-				<a
-					href={studioAccess.studioHref}
-					class="sheet__link"
-					onclick={() => {
-						open = false;
-					}}
-				>
-					<LayoutDashboardIcon size={20} />
-					<span>{m.nav_studio()}</span>
-				</a>
-			{/if}
-		</div>
-
-		<div class="sheet__divider"></div>
-
-		<!-- Auth section -->
-		<div class="sheet__section">
-			{#if user}
-				<div class="sheet__user">
-					<Avatar class="sheet__avatar">
-						{#if user.image}
-							<AvatarImage src={user.image} alt={user.name} />
-						{/if}
-						<AvatarFallback>{getInitials(user.name)}</AvatarFallback>
-					</Avatar>
-					<div class="sheet__user-info">
-						<span class="sheet__user-name">{user.name}</span>
-						<span class="sheet__user-email">{user.email}</span>
-					</div>
+		<Dialog.Body>
+			<div class="sheet__content">
+				<!-- Drag handle -->
+				<div class="sheet__handle-area">
+					<div class="sheet__handle"></div>
 				</div>
-				<a href={buildPlatformUrl(page.url, '/account')} class="sheet__link">
-					<UserIcon size={20} />
-					<span>{m.nav_account()}</span>
-				</a>
-				<!-- Platform support (/admin), for the platform owner only: the
-				     phone's place for the rail's Support item, so the bottom
-				     bar doesn't change. -->
-				{#if showSupport}
-					<a href="/admin" class="sheet__link">
-						<LifeBuoyIcon size={20} />
-						<span>{m.support_nav_label()}</span>
+
+				<!-- Nav links (overflow items not in bottom bar) -->
+				<div class="sheet__section">
+					{#if variant === 'org'}
+						<a
+							href="/creators"
+							class="sheet__link"
+							onclick={() => {
+								open = false;
+							}}
+						>
+							<UsersIcon size={20} />
+							<span>{m.sidebar_creators()}</span>
+						</a>
+					{/if}
+					<a
+						href="/pricing"
+						class="sheet__link"
+						onclick={() => {
+							open = false;
+						}}
+					>
+						<TagIcon size={20} />
+						<span>{m.sidebar_pricing()}</span>
 					</a>
-				{/if}
-				<button class="sheet__link sheet__link--danger" onclick={() => submitFormPost('/logout')}>
-					<LogInIcon size={20} />
-					<span>{m.nav_log_out()}</span>
-				</button>
-			{:else}
-				<a href="/login" class="sheet__link">
-					<LogInIcon size={20} />
-					<span>{m.common_sign_in()}</span>
-				</a>
-				<a href="/register" class="sheet__link sheet__link--primary">
-					<UserPlusIcon size={20} />
-					<span>{m.nav_register()}</span>
-				</a>
-			{/if}
-		</div>
+					{#if studioAccess.canAccessStudio}
+						<a
+							href={studioAccess.studioHref}
+							class="sheet__link"
+							onclick={() => {
+								open = false;
+							}}
+						>
+							<LayoutDashboardIcon size={20} />
+							<span>{m.nav_studio()}</span>
+						</a>
+					{/if}
+				</div>
 
-		<div class="sheet__divider"></div>
+				<div class="sheet__divider"></div>
 
-		<div class="sheet__section sheet__theme">
-			<ThemeToggle showLabel size={20} />
-		</div>
-	</div>
-{/if}
+				<!-- Auth section -->
+				<div class="sheet__section">
+					{#if user}
+						<div class="sheet__user">
+							<Avatar class="sheet__avatar">
+								{#if user.image}
+									<AvatarImage src={user.image} alt={user.name} />
+								{/if}
+								<AvatarFallback>{getInitials(user.name)}</AvatarFallback>
+							</Avatar>
+							<div class="sheet__user-info">
+								<span class="sheet__user-name">{user.name}</span>
+								<span class="sheet__user-email">{user.email}</span>
+							</div>
+						</div>
+						<a href={buildPlatformUrl(page.url, '/account')} class="sheet__link">
+							<UserIcon size={20} />
+							<span>{m.nav_account()}</span>
+						</a>
+						<!-- Platform support (/admin), for the platform owner only: the
+						     phone's place for the rail's Support item, so the bottom
+						     bar doesn't change. -->
+						{#if showSupport}
+							<a href="/admin" class="sheet__link">
+								<LifeBuoyIcon size={20} />
+								<span>{m.support_nav_label()}</span>
+							</a>
+						{/if}
+						<button class="sheet__link sheet__link--danger" onclick={() => submitFormPost('/logout')}>
+							<LogInIcon size={20} />
+							<span>{m.nav_log_out()}</span>
+						</button>
+					{:else}
+						<a href="/login" class="sheet__link">
+							<LogInIcon size={20} />
+							<span>{m.common_sign_in()}</span>
+						</a>
+						<a href="/register" class="sheet__link sheet__link--primary">
+							<UserPlusIcon size={20} />
+							<span>{m.nav_register()}</span>
+						</a>
+					{/if}
+				</div>
+
+				<div class="sheet__divider"></div>
+
+				<div class="sheet__section sheet__theme">
+					<ThemeToggle showLabel size={20} />
+				</div>
+			</div>
+		</Dialog.Body>
+	</Dialog.Content>
+</Dialog.Root>
 
 <style>
-	.sheet-backdrop {
-		position: fixed;
-		inset: 0;
-		background: color-mix(in srgb, var(--color-overlay) 50%, transparent);
-		z-index: var(--z-modal-backdrop);
-	}
-
-	.sheet {
-		position: fixed;
-		bottom: var(--space-2);
-		left: var(--space-2);
-		right: var(--space-2);
-		max-height: 70vh;
-		background: var(--material-glass);
-		backdrop-filter: blur(var(--blur-xl));
-		-webkit-backdrop-filter: blur(var(--blur-xl));
-		border: var(--border-width) var(--border-style) var(--material-glass-border);
-		border-radius: var(--radius-xl);
-		box-shadow: var(--shadow-xl);
-		z-index: var(--z-modal);
-		padding: 0 var(--space-4) var(--space-4);
-		padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
-		overflow-y: auto;
+	/* The sheet's one padded column; Dialog.Body around it scrolls. */
+	.sheet__content {
+		padding: 0 var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
 		touch-action: pan-y;
 	}
 

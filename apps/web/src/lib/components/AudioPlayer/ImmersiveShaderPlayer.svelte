@@ -10,10 +10,11 @@
   @prop {HTMLAudioElement} audioElement - The audio element to analyse
   @prop {string} shaderPreset - Shader preset ID to render
   @prop {() => void} onclose - Called when user exits immersive mode
+  @prop {HTMLElement | null} opener - What opened it; focus goes back there as it closes
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import type { Action } from 'svelte/action';
+  import type { Attachment } from 'svelte/attachments';
   import { createAudioAnalyser, type AudioAnalyserHandle } from './audio-analyser';
   import { loadRenderer } from '$lib/components/ui/ShaderHero/load-renderer';
   import { getShaderConfig, type ShaderPresetId, type ShaderConfig } from '$lib/components/ui/ShaderHero/shader-config';
@@ -24,6 +25,9 @@
     createMediaKeyboardHandler,
     MediaLiveRegion,
   } from '$lib/components/media-a11y';
+  import { describeThrown } from '$lib/client-log';
+  import { logger } from '$lib/observability';
+  import { lockScroll } from '$lib/utils/scroll-lock';
 
   interface Props {
     audioElement: HTMLAudioElement;
@@ -31,9 +35,15 @@
     onclose: () => void;
     /** Content title — threads through to `aria-label` on the overlay landmark. */
     title?: string;
+    /**
+     * What opened it, from the open event, so focus goes back there as it
+     * closes. Never `activeElement`: a click or a tap in WebKit (Safari,
+     * every iOS browser) focuses no button, so that is <body>.
+     */
+    opener?: HTMLElement | null;
   }
 
-  const { audioElement, shaderPreset, onclose, title = '' }: Props = $props();
+  const { audioElement, shaderPreset, onclose, title = '', opener = null }: Props = $props();
 
   // Renderer/analyser failures currently exit via `onclose()`. Track a surfaced
   // error so the live region can announce it before the overlay unmounts.
@@ -41,7 +51,7 @@
   let rendererReady = $state(false);
 
   let canvasEl: HTMLCanvasElement | undefined = $state();
-  let overlayEl: HTMLDivElement | undefined = $state();
+  let overlayEl: HTMLDialogElement | undefined = $state();
   let gl: WebGL2RenderingContext | null = null;
   let renderer: ShaderRenderer | null = null;
   let analyser: AudioAnalyserHandle | null = null;
@@ -289,29 +299,55 @@
   const seekProgress = $derived(duration > 0 ? (currentTime / duration) * 100 : 0);
 
   /**
-   * Portal action — moves the element to document.body so it escapes
-   * the org-main stacking context (created by view-transition-name).
+   * Opens as a native modal `<dialog>`, as GalleryLightbox does: the top
+   * layer lifts it over the org-main stacking context (view-transition-name),
+   * and the page behind goes inert, so Tab stays inside (Codex-vlphc.4).
+   *
+   * Moved to <body> first, as the portal it replaces did, so it inherits
+   * exactly what it always has. The root (focusable, `tabindex="-1"`) takes
+   * focus, so the overlay's keyboard shortcuts are heard at once (ref 05
+   * §"Media elements" §9), and the page holds still until it goes: the
+   * app's one counted scroll lock, which a dialog holds too.
+   *
+   * A `showModal()` that throws (an `InvalidStateError`; no `showModal` at
+   * all is never offered, see `immersive-support.ts`) takes the player away and
+   * says it has closed, or it would stay mounted over a page it never
+   * covered; the page was never held. Thrown from here, with no boundary
+   * above, it would halt the page's updates, so it is logged, never rethrown.
+   *
+   * Going, it closes BEFORE focus returns to its opener: an element behind an
+   * open modal cannot take focus.
    */
-  const portal: Action = (node) => {
+  const modal: Attachment<HTMLDialogElement> = (node) => {
     document.body.appendChild(node);
-    return {
-      destroy() {
-        node.remove();
-      },
+    try {
+      node.showModal();
+    } catch (error) {
+      if (node.open) node.close();
+      node.remove();
+      logger.warn('immersive.open_failed', describeThrown(error));
+      onclose();
+      return;
+    }
+    const unlock = lockScroll();
+    node.focus();
+    return () => {
+      unlock();
+      if (node.open) node.close();
+      node.remove();
+      opener?.focus({ preventScroll: true });
     };
   };
 
   /**
-   * Auto-focus the portal root on mount (ref 05 §"Media elements" §9). Because
-   * the overlay is portaled under `document.body`, `wrapperEl?.contains(activeEl)`
-   * can never succeed — so we opt out of containment check and lean on focus
-   * being inside the overlay.
+   * A close request the keys never saw (Android's back gesture): closed here,
+   * the same way out as Escape. Let through, the dialog would shut itself
+   * while the player stayed mounted, and the page stayed locked.
    */
-  $effect(() => {
-    if (overlayEl) {
-      requestAnimationFrame(() => overlayEl?.focus());
-    }
-  });
+  function handleCancel(e: Event) {
+    e.preventDefault();
+    onclose();
+  }
 
   /**
    * Scoped keyboard handler for the portal overlay (ref 05 §"Media elements" §3
@@ -380,10 +416,14 @@
 </script>
 
 <!--
-  Portaled dialog (ref 05 §"Media elements" §9) — keydown lives on the portal
-  node itself and auto-focus on mount makes keyboard shortcuts reachable.
-  role="dialog" + aria-modal (instead of role="application") reflects the
-  modal nature: Escape closes and focus is trapped on mount.
+  A native modal dialog (ref 05 §"Media elements" §9): keydown lives on the
+  dialog itself, which takes focus as it opens, so the keyboard shortcuts are
+  reachable. `showModal()` gives it the dialog role and makes it modal: the
+  page behind is inert, so focus cannot leave, and Escape closes it.
+
+  `tabindex="-1"` and its `focus()` are deliberate, not `autofocus`: Chromium
+  focuses no dialog that has autofocus itself, so the Exit button would take
+  focus and Enter would exit at once.
 -->
 <!--
   a11y_no_noninteractive_element_interactions is intentional: the overlay gets
@@ -392,16 +432,15 @@
   suppress a11y_click_events_have_key_events.
 -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div
+<dialog
   class="immersive"
   bind:this={overlayEl}
-  use:portal
+  {@attach modal}
   tabindex="-1"
   onpointermove={handlePointerMove}
   onclick={handleClick}
   onkeydown={handleKey}
-  role="dialog"
-  aria-modal="true"
+  oncancel={handleCancel}
   aria-label={title ? `Immersive audio shader — ${title}` : 'Immersive audio shader player'}
 >
   <canvas bind:this={canvasEl} class="immersive__canvas"></canvas>
@@ -472,17 +511,31 @@
       </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <style>
+  /* The whole screen. The top layer stacks it, so it needs no z-index; the
+     resets undo the dialog's own box (border, padding, centred, capped). */
   .immersive {
     position: fixed;
     inset: 0;
-    z-index: var(--z-modal, 50);
+    inline-size: 100%;
+    block-size: 100%;
+    max-inline-size: none;
+    max-block-size: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    color: inherit;
     background: var(--color-neutral-950, #000);
     cursor: none;
     /* Remove programmatic-focus outline; :focus-visible below handles real keyboard focus. */
     outline: none;
+  }
+
+  .immersive::backdrop {
+    background: transparent;
   }
 
   .immersive:focus-visible {
