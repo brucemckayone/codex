@@ -219,6 +219,25 @@ describe('Retry, when the page is handed a new query', () => {
     expect(status()?.textContent?.trim()).toBe('It loaded.');
   });
 
+  test('with focus unmoved, a repeat failure focuses the alert and does not re-insert it', async () => {
+    const remote = mountFailed();
+    await retryOntoNewQuery(remote);
+    remote.fail();
+    await settle();
+    const before = messageNode();
+
+    await retryOntoNewQuery(remote);
+    remote.fail();
+    await settle();
+
+    // Focusing the alert reads it out; inserting it again as well would read
+    // it twice.
+    expect(document.activeElement?.classList.contains('load-failed')).toBe(
+      true
+    );
+    expect(messageNode()).toBe(before);
+  });
+
   test('with focus moved, a repeat failure leaves it there and re-reads the message', async () => {
     const remote = mountFailed();
     await retryOntoNewQuery(remote);
