@@ -8,6 +8,7 @@ import {
   hasBeenLive,
   type PublicationState,
 } from '@codex/constants';
+import { buildContentUrl, buildCreatorContentUrl } from '$lib/utils/subdomain';
 import { readNewContentMedia } from '../media-library/library-url';
 
 export type EditorContentType =
@@ -20,6 +21,27 @@ export const CONTENT_LIST_HREF = '/studio/content';
 /** A row's type as the canvas knows it, or null: such a piece keeps the old form. */
 export function editorContentType(value: string): EditorContentType | null {
   return EDITOR_TYPES.find((type) => type === value) ?? null;
+}
+
+/**
+ * Where a piece lives, as visitors reach it: its org's address, or its
+ * creator's for a personal piece; null with neither. The slug field's
+ * preview and the Publish step's View both read it, so they never disagree.
+ */
+export function pieceHref(
+  currentUrl: URL,
+  owner: { orgSlug: string | null; creatorUsername: string | null },
+  piece: { slug: string; id: string }
+): string | null {
+  if (owner.orgSlug) {
+    return buildContentUrl(currentUrl, {
+      ...piece,
+      organizationSlug: owner.orgSlug,
+    });
+  }
+  return owner.creatorUsername
+    ? buildCreatorContentUrl(currentUrl, owner.creatorUsername, piece)
+    : null;
 }
 
 export function editHref(contentId: string): string {

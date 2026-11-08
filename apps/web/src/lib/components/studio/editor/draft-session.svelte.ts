@@ -40,7 +40,11 @@
  * guard and its own teardown.
  */
 
-import { hasBeenLive, type PublicationState } from '@codex/constants';
+import {
+  CONTENT_STATUS,
+  hasBeenLive,
+  type PublicationState,
+} from '@codex/constants';
 import { type CreateContentInput, extractPlainText } from '@codex/validation';
 import { untrack } from 'svelte';
 import { beforeNavigate, goto } from '$app/navigation';
@@ -175,6 +179,27 @@ export interface DraftSessionOptions {
 /** What Publish came to. `unsent`: it stopped at its save, and nothing was sent to publish. */
 export interface PublishResult extends AutosaveSaveResult {
   unsent?: boolean;
+  /**
+   * Sent and accepted: whether it went live. A publish when ready whose media
+   * is still on its way is accepted as a draft, scheduled (Codex-a6ofh.2.9).
+   */
+  live?: boolean;
+  /** The row the publish answered with, when it was sent and accepted. */
+  row?: unknown;
+}
+
+/**
+ * Whether a publish's answer is the piece live: anything but a draft. An
+ * answer with no row reads as live, as every publish did before a schedule
+ * could answer a draft.
+ */
+export function answeredLive(row: unknown): boolean {
+  return !(
+    typeof row === 'object' &&
+    row !== null &&
+    'status' in row &&
+    row.status === CONTENT_STATUS.DRAFT
+  );
 }
 
 export interface DraftSession {
@@ -212,8 +237,9 @@ export interface DraftSession {
    * live from this moment, so a save armed before is dropped, never sent to
    * a piece going live; then it saves what is on screen, riding any save
    * already out, and calls `send`. If either fails it is a draft again, and
-   * what was typed meanwhile saves as a draft's does. A second call while
-   * one runs joins it.
+   * what was typed meanwhile saves as a draft's does; so it is too when
+   * `send` answers a draft (scheduled, publish when ready: `live` false). A
+   * second call while one runs joins it.
    */
   publish(send: (id: string) => Promise<unknown>): Promise<PublishResult>;
   /**
@@ -865,10 +891,12 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         };
       }
       if (!saved.ok) return { ...saved, unsent: true };
-      await send(id);
+      const row = await send(id);
+      // Scheduled, it is still a draft: edits go on saving into it.
+      if (!answeredLive(row)) return { ok: true, live: false, row };
       wentLive = true;
       lastLive = true;
-      return { ok: true };
+      return { ok: true, live: true, row };
     } catch (err) {
       return failure(err, 'publish');
     } finally {

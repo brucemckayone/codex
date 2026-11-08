@@ -11799,6 +11799,262 @@ export const studio_publish_live = (params) => `“${params.title}” is live.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gaps_when_ready = () => `Everything else is set.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_button_when_ready = () => `Publish when ready`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_button_when_ready_price = (params) => `Publish when ready · ${params.price}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduling = () => `Scheduling it…`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_preparing_when_ready = (params) => `The ${params.type} is still being prepared. Publish when ready, and it goes live by itself the moment it’s ready.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown>, pct: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_preparing_pct_when_ready = (params) => `The ${params.type} is still being prepared (${params.pct}%). Publish when ready, and it goes live by itself the moment it’s ready.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_uploading_when_ready = (params) => `The ${params.type} is still uploading. Publish when ready, and it goes live by itself the moment it’s ready.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_heading = () => `Goes live when ready`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_body = (params) => `Scheduled. It goes live by itself as soon as the ${params.type} is ready. Price, payouts and the link are already checked. Edits you make before then go live with it.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown>, pct: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_body_pct = (params) => `Scheduled. It goes live by itself as soon as the ${params.type} is ready (${params.pct}% now). Price, payouts and the link are already checked. Edits you make before then go live with it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_cancel = () => `Cancel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_cancel_label = () => `Cancel publish when ready`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_cancelled = () => `Cancelled. It’s an ordinary draft again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_ended = () => `No longer scheduled. It’s an ordinary draft again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_cancel_failed = () => `That didn’t cancel. Try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_close = () => `You can close this. We’ll email you when it’s live.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_keep_open = () => `Keep this tab open until the upload finishes. After that, you can close it.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_toast = (params) => `${params.title} is scheduled. It goes live by itself when the ${params.type} is ready.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_still_waiting = () => `Not live yet. Check again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_cancel_refused = () => `That didn’t cancel. Reload the page to see where it stands.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_done = () => `Done`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_settling = (params) => `The ${params.type} is ready, so it should be live in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_check_again = () => `Check again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_unread = () => `We couldn’t check just now. Try again in a moment.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_ready = (params) => `The ${params.type} is ready.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_live_unread = () => `We couldn’t load its link just now. Check again, or find it in your content list.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_media_failed = (params) => `The ${params.type} couldn’t be prepared, so it isn’t live yet. Try again, and the schedule carries on, or choose another ${params.type}.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_scheduled_choose_media = (params) => `Choose another ${params.type}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_view = () => `View`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_blocked = () => `It didn’t go live, so it’s still a draft. Nothing was lost.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_blocked_media_failed = (params) => `The ${params.type} couldn’t be processed. Choose another.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_blocked_other = () => `Something changed after you asked. Check the settings below, then publish again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_live_badge = () => `Live`
 
 

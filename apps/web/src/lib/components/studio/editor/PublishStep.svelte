@@ -30,11 +30,11 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { goto } from '$app/navigation';
-  import { navigating } from '$app/state';
+  import { navigating, page } from '$app/state';
   import { describeThrown } from '$lib/client-log';
   import { Button } from '$lib/components/ui';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import { publishContent } from '$lib/remote/content.remote';
+  import { publishContent, publishContentWhenReady } from '$lib/remote/content.remote';
   import { logger } from '$lib/observability';
   import type { ContentWithRelations } from '$lib/types';
   import { accessGroupToFlags } from '$lib/utils/content-access';
@@ -44,16 +44,19 @@
   import { savedDraftValues, TYPE_WORD } from './canvas-text';
   import { createDraftSession, type DraftValues } from './draft-session.svelte';
   import EditorSection from './EditorSection.svelte';
-  import { CONTENT_LIST_HREF, type EditorContentType, editHref } from './editor-url';
+  import { CONTENT_LIST_HREF, type EditorContentType, editHref, pieceHref } from './editor-url';
   import {
     asPublishGap,
     earnsByFlags,
     gapRow,
     type PublishGap,
     publishGaps,
+    blockedRow,
     refusalPutRightBy,
   } from './publish-gaps';
   import { createPublishReads } from './publish-reads.svelte';
+  import { createPublishSchedule } from './publish-schedule.svelte';
+  import PublishScheduled from './PublishScheduled.svelte';
   import PublishSettings from './PublishSettings.svelte';
   import WriteBar from './WriteBar.svelte';
 
@@ -68,12 +71,30 @@
 
   const { content, contentType, organizationId, orgSlug, creatorUsername = null, authorName }: Props = $props();
 
+  // Publish when ready (Codex-a6ofh.2.9): the piece's publish as last read,
+  // which a publish, a cancel or a read after the media settles moves on.
+  // Its media is read only from its effect, once `reads` exists.
+  const schedule = untrack(() =>
+    createPublishSchedule({
+      contentId: content.id,
+      initial: {
+        status: content.status,
+        publishedAt: content.publishedAt,
+        publishRequestedAt: content.publishRequestedAt ?? null,
+        publishBlockedReason: content.publishBlockedReason ?? null,
+        slug: content.slug ?? null,
+      },
+      media: () => reads.media,
+    })
+  );
+
   // One session per mount (ContentEditor keys it per visit): the props it is
-  // started from are this visit's read.
+  // started from are this visit's read. Whether it has been live is the
+  // schedule's latest read: a go-live seen here stops its draft saves.
   const session = untrack(() =>
     createDraftSession({
       saved: { id: content.id, values: savedDraftValues(content) },
-      publication: () => ({ status: content.status, publishedAt: content.publishedAt }),
+      publication: () => schedule.publication,
       contentType,
       organizationId,
     })
@@ -155,11 +176,21 @@
   let publishing = $state(false);
   /** It went live: held still until the next page takes over. */
   let done = $state(false);
-  const held = $derived(publishing || done);
+  /** Live, as Publish or as the schedule saw it land: held still, its way on offered. */
+  const held = $derived(publishing || done || schedule.live);
   const waitHint = $derived(
     coverBusy ? m.studio_editor_next_needs_cover() : categoryBusy ? m.studio_publish_wait_category() : null
   );
-  const blocked = $derived(gaps.length > 0 || coverBusy || categoryBusy || slugInvalid);
+  /**
+   * The media stands in the way, and it is on its way: Publish when ready
+   * schedules past it (Codex-a6ofh.2.9). Its row and the button both say so,
+   * and it is offered once it is all that is left, every other rule checked now.
+   */
+  const mediaWaits = $derived(gaps.includes('MEDIA_NOT_READY') && reads.media?.onItsWay === true);
+  const whenReady = $derived(mediaWaits && gaps.length === 1);
+  const blocked = $derived((gaps.length > 0 && !whenReady) || coverBusy || categoryBusy || slugInvalid);
+  /** Scheduled, the wait is the banner's to say: the checklist lists only what else is missing. */
+  const listedRows = $derived(schedule.scheduled ? rows.filter((row) => row.gap !== 'MEDIA_NOT_READY') : rows);
   /**
    * Payouts, for a piece that earns: a free piece does not wait on them, as
    * the server's gate does not look (`assertCreatorCanBePaid`). Not read yet,
@@ -168,10 +199,10 @@
   const earns = $derived(earnsByFlags(flags));
   const payoutsUnread = $derived(reads.connectUnread && earns);
   const payoutsPending = $derived(reads.connectLoading && earns);
+  /** Payouts, where they count, are read and set. */
+  const payoutsKnown = $derived(!payoutsUnread && !payoutsPending);
   /** Nothing is missing, and nothing it checks by went unread or is unread yet. */
-  const ready = $derived(
-    rows.length === 0 && !slugInvalid && !reads.mediaUnread && !payoutsUnread && !payoutsPending
-  );
+  const ready = $derived(listedRows.length === 0 && !slugInvalid && !reads.mediaUnread && payoutsKnown);
   /**
    * A payouts Try again's outcome, said on its own line whatever else is
    * left: the checklist's status line leads with how much is left.
@@ -203,9 +234,16 @@
    * The checklist's one live region: the wait, the all-clear, or (heard
    * only) how much is left, so a row going (the media ready) is told.
    */
-  const left = $derived(rows.length + Number(slugInvalid));
+  const left = $derived(listedRows.length + Number(slugInvalid));
+  /**
+   * Scheduled, the checklist shows only while something else is left or a
+   * read failed. Payouts still loading are not: the schedule was checked
+   * against them already.
+   */
+  const checklistShown = $derived(!schedule.scheduled || left > 0 || reads.mediaUnread || payoutsUnread);
   const statusWords = $derived.by(() => {
     if (waitHint) return waitHint;
+    if (whenReady && payoutsKnown) return m.studio_publish_gaps_when_ready();
     if (ready) return m.studio_publish_gaps_none();
     if (left > 0) return m.studio_publish_gaps_left({ count: left });
     if (reads.mediaUnread) return m.studio_publish_media_unread({ type: TYPE_WORD[contentType]() });
@@ -216,12 +254,109 @@
   const progressWords = $derived.by(() => {
     if (done) return m.studio_publish_live({ title: values.title.trim() });
     if (!publishing) return '';
-    return session.holdingMove ? m.studio_publish_publishing_then_move() : m.studio_publish_publishing();
+    if (session.holdingMove) return m.studio_publish_publishing_then_move();
+    return whenReady ? m.studio_publish_scheduling() : m.studio_publish_publishing();
   });
   let progressEl = $state<HTMLElement | null>(null);
-  const publishWords = $derived(
-    forSale ? m.studio_publish_button_price({ price: formatPrice(flags.priceCents) }) : m.studio_publish_button()
+  const publishWords = $derived.by(() => {
+    if (mediaWaits) {
+      return forSale
+        ? m.studio_publish_button_when_ready_price({ price: formatPrice(flags.priceCents) })
+        : m.studio_publish_button_when_ready();
+    }
+    return forSale ? m.studio_publish_button_price({ price: formatPrice(flags.priceCents) }) : m.studio_publish_button();
+  });
+  /** Where it lives, once it is live: by its slug as saved, which a refused slug save never was. */
+  const viewHref = $derived(
+    schedule.live && schedule.slug !== null
+      ? pieceHref(page.url, { orgSlug, creatorUsername }, { slug: schedule.slug, id: content.id })
+      : null
   );
+  /** Scheduled, whether the tab can close: one making an upload stops it, and says so. */
+  const closeWords = $derived.by(() => {
+    if (!schedule.scheduled) return null;
+    return reads.media?.uploadingHere ? m.studio_publish_scheduled_keep_open() : m.studio_publish_scheduled_close();
+  });
+  let scheduleEl = $state<HTMLElement | null>(null);
+  /**
+   * The step's one live region for the schedule: each change of what the
+   * banner shows is said here, as the banner's own Alerts are furniture (a
+   * newly mounted live region is heard unreliably, and focus already on the
+   * banner says nothing when it moves there again).
+   */
+  let scheduleNotice = $state('');
+  /** An action in the banner settled: focus, if its control went, goes back to the banner. */
+  function refocusBanner() {
+    void tick().then(() => focusIfLost(scheduleEl, null, { preventScroll: true }));
+  }
+  /**
+   * What a change to `view` says, in the banner's own lead words; empty when
+   * the banner's own alert already says it (reads that ran out unanswered).
+   */
+  function viewWords(view: NonNullable<typeof schedule.view>): string {
+    const type = TYPE_WORD[contentType]();
+    switch (view) {
+      case 'live':
+        return m.studio_publish_live({ title: values.title.trim() });
+      case 'blocked':
+        // Why, and where it is put right, as the banner says it.
+        return schedule.blockedReason === null
+          ? m.studio_publish_blocked()
+          : `${m.studio_publish_blocked()} ${blockedRow(schedule.blockedReason, contentType).words}`;
+      case 'gone':
+        return m.studio_publish_gap_media_deleted({ type });
+      case 'failed':
+        return reads.media?.canRetry
+          ? m.studio_publish_scheduled_media_failed({ type })
+          : m.studio_publish_blocked_media_failed({ type });
+      case 'stale':
+        return schedule.readFailed ? '' : m.studio_publish_scheduled_settling({ type });
+      case 'waiting':
+        return m.studio_publish_scheduled_heading();
+    }
+  }
+  // What the banner shows changed (a read saw it go live, or not; the media
+  // failed, or a retry set it going; a cancel landed, here or elsewhere, or
+  // lost to the go-live): it is said, and focus, if the control the creator
+  // was on went with the old view or was held still, goes to the banner
+  // without scrolling. Ended, focus goes to the checklist, which lists the
+  // wait again.
+  let seenView = untrack(() => schedule.view);
+  $effect(() => {
+    const view = schedule.view;
+    if (view === seenView) return;
+    const was = seenView;
+    seenView = view;
+    if (view !== null) {
+      // Empty words still replace the old view's: they no longer hold.
+      scheduleNotice = viewWords(view);
+      refocusBanner();
+      return;
+    }
+    if (was === 'live' || was === 'blocked') return;
+    scheduleNotice = schedule.cancelledHere
+      ? m.studio_publish_scheduled_cancelled()
+      : m.studio_publish_scheduled_ended();
+    void tick().then(() => focusIfLost(gapsEl, null, { preventScroll: true }));
+  });
+  // Gone or failed, the reads running out adds Check again without a change
+  // of view: said, unless the banner's alert already says the reads failed.
+  let seenStale = untrack(() => schedule.stale);
+  $effect(() => {
+    const stale = schedule.stale;
+    if (stale === seenStale) return;
+    seenStale = stale;
+    const view = untrack(() => schedule.view);
+    if (stale && (view === 'gone' || view === 'failed') && !untrack(() => schedule.readFailed)) {
+      scheduleNotice = m.studio_publish_scheduled_still_waiting();
+    }
+  });
+  // A read that could not be made, while scheduled: what the region last
+  // said from a read ("in a moment", "not live yet") is not known now, and
+  // the banner's read alert is the one voice.
+  $effect(() => {
+    if (schedule.readFailed && untrack(() => schedule.scheduled)) scheduleNotice = '';
+  });
   const gapsId = $props.id();
   let gapsEl = $state<HTMLElement | null>(null);
 
@@ -250,33 +385,71 @@
     if (held || blocked || navigating.to !== null) return;
     publishing = true;
     refusal = null;
+    // A cancel said earlier is old news once it is asked to publish again.
+    scheduleNotice = '';
     // The button goes busy, so focus goes where the progress is said.
     void tick().then(() => progressEl?.focus());
     try {
-      const result = await session.publish(publishContent);
+      const result = await session.publish(whenReady ? publishContentWhenReady : publishContent);
       const heldMove = session.takeHeldMove();
-      if (result.ok) {
+      if (result.ok && result.live !== false) {
         done = true;
         toast.success(m.studio_publish_live({ title: values.title.trim() }));
         if (!gone) leave(heldMove ?? CONTENT_LIST_HREF);
         return;
       }
-      const message = result.message ?? m.studio_editor_publish_failed();
-      if (gone) {
-        toast.error(message);
-        return;
+      if (result.ok) {
+        if (await showScheduled(result.row, heldMove)) return;
+        // Accepted, yet neither live nor scheduled: no server of this
+        // version answers so. Said as a failure, never as nothing.
+        logger.error('studio_publish.unexpected_answer', { contentId: content.id });
+        if (!refuse({ gap: null, message: m.studio_editor_publish_failed(), unsent: false, slow: false })) return;
+      } else {
+        const said = refuse({
+          gap: asPublishGap(result.code),
+          message: result.message ?? m.studio_editor_publish_failed(),
+          unsent: result.unsent === true,
+          slow: result.code === 'SAVE_SLOW',
+        });
+        if (!said) return;
       }
-      refusal = {
-        gap: asPublishGap(result.code),
-        message,
-        unsent: result.unsent === true,
-        slow: result.code === 'SAVE_SLOW',
-      };
     } finally {
       publishing = false;
     }
     await tick();
     gapsEl?.focus();
+  }
+
+  /**
+   * A publish answered scheduled: a draft still, its edits saving. A move
+   * asked for meanwhile is the creator's last word, told on the way out, as
+   * is a step that closed; else the banner says it, and focus goes there.
+   * False for an answer that is not scheduled.
+   */
+  async function showScheduled(row: unknown, heldMove: URL | null): Promise<boolean> {
+    schedule.adopt(row);
+    if (!schedule.scheduled) return false;
+    if (gone || heldMove) {
+      toast.success(m.studio_publish_scheduled_toast({ title: values.title.trim(), type: TYPE_WORD[contentType]() }));
+      if (!gone && heldMove) leave(heldMove);
+      return true;
+    }
+    await tick();
+    scheduleEl?.focus();
+    return true;
+  }
+
+  /**
+   * A refusal, said in the checklist, which focus goes to after; or, the
+   * step closed meanwhile, as a toast. False then: nothing is left to focus.
+   */
+  function refuse(said: NonNullable<typeof refusal>): boolean {
+    if (gone) {
+      toast.error(said.message);
+      return false;
+    }
+    refusal = said;
+    return true;
   }
 </script>
 
@@ -293,6 +466,28 @@
         <h1 class="publish-title">{values.title}</h1>
         <p class="publish-intro">{m.studio_publish_intro()}</p>
       </header>
+    </div>
+
+    <!-- Never held: once it is live, its View and the foot's Done are the way on. -->
+    {#if schedule.phase !== null}
+      <div class="publish-schedule" tabindex="-1" bind:this={scheduleEl}>
+        <PublishScheduled
+          {schedule}
+          {contentType}
+          title={values.title}
+          media={reads.media}
+          mediaId={values.mediaItemId}
+          {viewHref}
+          {writeHref}
+          payoutsHref={reads.payoutsHref}
+          refocus={refocusBanner}
+          onretried={reads.rereadMedia}
+        />
+      </div>
+    {/if}
+    <p class="sr-only" role="status">{scheduleNotice}</p>
+
+    <div class="publish-held" inert={held}>
 
       <PublishSettings
         {session}
@@ -312,11 +507,12 @@
         onslugcheck={(invalid) => (slugInvalid = invalid)}
       />
 
+      {#if checklistShown}
       <EditorSection headingId="{gapsId}-gaps" ordinal={4} title={m.studio_publish_gaps()}>
         <div class="publish-gaps" id={gapsId} tabindex="-1" bind:this={gapsEl}>
           {#if !ready}
             <ul class="publish-gap-list">
-              {#each rows as row (row.gap)}
+              {#each listedRows as row (row.gap)}
                 <li class="publish-gap">
                   <span>{row.words}</span>
                   {#if row.fix === 'write'}
@@ -375,21 +571,31 @@
           {/if}
         </div>
       </EditorSection>
+      {/if}
     </div>
 
     <div class="publish-foot">
       <p class={['publish-progress', { 'sr-only': !held }]} role="status" tabindex="-1" bind:this={progressEl}>
         {progressWords}
       </p>
-      <Button
-        type="button"
-        disabled={blocked || navigating.to !== null}
-        loading={held}
-        aria-describedby={blocked ? gapsId : undefined}
-        onclick={publish}
-      >
-        {publishWords}
-      </Button>
+      {#if schedule.scheduled || schedule.live}
+        {#if closeWords}
+          <p class="publish-close">{closeWords}</p>
+        {/if}
+        <Button type="button" variant={schedule.live ? 'primary' : 'secondary'} onclick={() => leave(CONTENT_LIST_HREF)}>
+          {m.studio_publish_done()}
+        </Button>
+      {:else}
+        <Button
+          type="button"
+          disabled={blocked || navigating.to !== null}
+          loading={held}
+          aria-describedby={blocked ? gapsId : undefined}
+          onclick={publish}
+        >
+          {publishWords}
+        </Button>
+      {/if}
     </div>
   </div>
 </div>
@@ -428,7 +634,8 @@
   }
 
   .publish-intro,
-  .publish-hint {
+  .publish-hint,
+  .publish-close {
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
@@ -515,6 +722,12 @@
     align-items: center;
     justify-content: flex-end;
     gap: var(--space-2) var(--space-4);
+  }
+
+  .publish-schedule:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-1);
+    border-radius: var(--radius-md);
   }
 
   .publish-progress {

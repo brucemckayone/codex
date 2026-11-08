@@ -373,6 +373,79 @@ export const publishContent = command(z.string().uuid(), async (id) => {
 });
 
 /**
+ * A piece's publish fields and its saved address: all the Publish step reads
+ * of a publish when ready, a cancel or a check (Codex-a6ofh.2.9), so only
+ * these go back.
+ */
+function publishFields(row: {
+  status: string;
+  publishedAt: Date | string | null;
+  publishRequestedAt: Date | string | null;
+  publishBlockedReason: string | null;
+  slug: string | null;
+}) {
+  return {
+    status: row.status,
+    publishedAt: row.publishedAt,
+    publishRequestedAt: row.publishRequestedAt,
+    publishBlockedReason: row.publishBlockedReason,
+    // Its address as saved, for View once it is live.
+    slug: row.slug,
+  };
+}
+
+/**
+ * Publish when ready (Codex-a6ofh.2.9): as {@link publishContent}, but media
+ * still on its way schedules the go-live instead of refusing. Every other
+ * rule is checked now, and refuses by the same codes. Ready media goes live
+ * at once; otherwise it comes back a draft with `publishRequestedAt` set, so
+ * the caller reads its `status` to know which.
+ */
+export const publishContentWhenReady = command(
+  z.string().uuid(),
+  async (id) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const row = await forwardClientErrors(
+      () => api.content.publish(id, { whenReady: true }),
+      { detailCodes: PUBLISH_REFUSAL_CODES }
+    );
+    return publishFields(row);
+  }
+);
+
+/**
+ * Where a piece's publish stands (Codex-a6ofh.2.9): its status and its
+ * publish-when-ready fields, read fresh. The Publish step reads it after the
+ * media settles, to see the go-live land, without refreshing the page's own
+ * read of the piece (a background refresh of that is a trap: it can swap in
+ * the error page). Only these fields go back.
+ */
+export const readPublishState = command(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return publishFields(await forwardClientErrors(() => api.content.get(id)));
+});
+
+/** Its own code, so the step can tell "it went live first" from a failure. */
+const CANCEL_REFUSAL_CODES = [ERROR_CODES.CONTENT_ALREADY_LIVE] as const;
+
+/**
+ * Cancel a publish-when-ready schedule (Codex-a6ofh.2.9): DELETE
+ * /api/content/:id/publish-request. The draft stays a draft. Refused with
+ * CONTENT_ALREADY_LIVE when the piece went live first.
+ */
+export const cancelPublishRequest = command(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  const row = await forwardClientErrors(
+    () => api.content.cancelPublishRequest(id),
+    { detailCodes: CANCEL_REFUSAL_CODES }
+  );
+  return publishFields(row);
+});
+
+/**
  * Unpublish content (published -> draft)
  *
  * Calls POST /api/content/:id/unpublish.

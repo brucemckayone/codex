@@ -27,7 +27,7 @@
   import * as m from '$paraglide/messages';
   import { checkContentSlug } from '$lib/remote/content.remote';
   import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
-  import { buildContentUrl, buildCreatorContentUrl } from '$lib/utils/subdomain';
+  import { pieceHref } from '../editor/editor-url';
   import { logReadFailure } from '../media-library/log-read-failure';
 
   type ContentForm = typeof createContentForm | typeof updateContentForm;
@@ -87,12 +87,11 @@
 
   /** Where the piece will live, as visitors reach it: the real host, never a guess. */
   const urlPrefix = $derived.by(() => {
-    const draft = { slug: 'x', id: contentId ?? 'x' };
-    const href = orgSlug
-      ? buildContentUrl(page.url, { ...draft, organizationSlug: orgSlug })
-      : creatorUsername
-        ? buildCreatorContentUrl(page.url, creatorUsername, draft)
-        : null;
+    const href = pieceHref(
+      page.url,
+      { orgSlug, creatorUsername: creatorUsername ?? null },
+      { slug: 'x', id: contentId ?? 'x' }
+    );
     if (href === null) return null;
     const at = new URL(href, page.url);
     return `${at.host}${at.pathname.slice(0, -1)}`;

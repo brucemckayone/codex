@@ -8,6 +8,7 @@ import * as m from '$paraglide/messages';
 import type { DraftValues } from './draft-session.svelte';
 import {
   asPublishGap,
+  blockedRow,
   gapRow,
   type PublishFacts,
   publishGaps,
@@ -250,5 +251,70 @@ describe('gapRow', () => {
     expect(gapRow('PRICE_REQUIRED', VIDEO).words).toBe(
       m.studio_publish_gap_price({ price: '£1.00' })
     );
+  });
+
+  // Publish when ready (Codex-a6ofh.2.9): on its way, the row says it can go
+  // live by itself, not that it must be waited for.
+  it('media on its way says Publish when ready puts it live by itself', () => {
+    expect(
+      gapRow('MEDIA_NOT_READY', {
+        contentType: 'video',
+        media: { status: 'transcoding', progress: 64, onItsWay: true },
+      }).words
+    ).toBe(
+      m.studio_publish_gap_preparing_pct_when_ready({ type: 'video', pct: 64 })
+    );
+    expect(
+      gapRow('MEDIA_NOT_READY', {
+        contentType: 'video',
+        media: { status: 'uploaded', progress: null, onItsWay: true },
+      }).words
+    ).toBe(m.studio_publish_gap_preparing_when_ready({ type: 'video' }));
+    expect(
+      gapRow('MEDIA_NOT_READY', {
+        contentType: 'audio',
+        media: { status: 'uploading', progress: null, onItsWay: true },
+      }).words
+    ).toBe(m.studio_publish_gap_uploading_when_ready({ type: 'audio' }));
+  });
+
+  it('a stopped upload is not on its way: it says it must be waited for', () => {
+    expect(
+      gapRow('MEDIA_NOT_READY', {
+        contentType: 'video',
+        media: { status: 'uploading', progress: null, onItsWay: false },
+      }).words
+    ).toBe(m.studio_publish_gap_uploading({ type: 'video' }));
+  });
+});
+
+describe('blockedRow', () => {
+  it('a refusal reads as its own checklist row, with the same fix', () => {
+    expect(blockedRow('CREATOR_CONNECT_REQUIRED', 'video')).toEqual({
+      words: m.studio_publish_gap_payouts(),
+      fix: 'payouts',
+    });
+    expect(blockedRow('TIER_REQUIRED_TO_PUBLISH', 'video')).toEqual({
+      words: m.studio_publish_gap_tier(),
+      fix: null,
+    });
+    expect(blockedRow('MEDIA_DELETED', 'audio')).toEqual({
+      words: m.studio_publish_gap_media_deleted({ type: 'audio' }),
+      fix: 'write',
+    });
+  });
+
+  it('the media failing for good says so, put right on the Write step', () => {
+    expect(blockedRow('MEDIA_FAILED', 'video')).toEqual({
+      words: m.studio_publish_blocked_media_failed({ type: 'video' }),
+      fix: 'write',
+    });
+  });
+
+  it('a code it has no words for says to check the settings', () => {
+    expect(blockedRow('SOMETHING_NEW', 'video')).toEqual({
+      words: m.studio_publish_blocked_other(),
+      fix: null,
+    });
   });
 });

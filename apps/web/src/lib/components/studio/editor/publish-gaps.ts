@@ -7,6 +7,7 @@
  * still on the org's team is the server's alone to say.
  */
 import {
+  ERROR_CODES,
   MEDIA_STATUS,
   PRICE_LIMITS,
   PUBLISH_REFUSAL_CODES,
@@ -133,19 +134,44 @@ export interface GapRow {
   fix: 'write' | 'payouts' | null;
 }
 
+/** The media as a gap row reads it; null while it is not known. */
+type GapMedia = {
+  status: string;
+  progress: number | null;
+  onItsWay?: boolean;
+} | null;
+
+/**
+ * Media not ready, and not failed: uploading, or being prepared (with its %
+ * once known). On its way, it can be published when ready, and the words say so.
+ */
+function mediaWaitWords(type: string, media: GapMedia): string {
+  const later = media?.onItsWay === true;
+  if (media?.status === MEDIA_STATUS.UPLOADING) {
+    return later
+      ? m.studio_publish_gap_uploading_when_ready({ type })
+      : m.studio_publish_gap_uploading({ type });
+  }
+  const pct = media?.progress ?? null;
+  if (pct === null) {
+    return later
+      ? m.studio_publish_gap_preparing_when_ready({ type })
+      : m.studio_publish_gap_preparing({ type });
+  }
+  return later
+    ? m.studio_publish_gap_preparing_pct_when_ready({ type, pct })
+    : m.studio_publish_gap_preparing_pct({ type, pct });
+}
+
 /**
  * The checklist's words for a gap. Media not yet ready says how far it has
  * got (`progress`, the transcode's %, while it is known), or that it failed.
+ * On its way (`onItsWay`), it says Publish when ready puts it live by itself
+ * (Codex-a6ofh.2.9).
  */
 export function gapRow(
   gap: PublishGap,
-  {
-    contentType,
-    media,
-  }: {
-    contentType: EditorContentType;
-    media: { status: string; progress: number | null } | null;
-  }
+  { contentType, media }: { contentType: EditorContentType; media: GapMedia }
 ): GapRow {
   const type = TYPE_WORD[contentType]();
   switch (gap) {
@@ -154,28 +180,13 @@ export function gapRow(
     case 'MEDIA_REQUIRED':
       return { gap, words: m.studio_publish_gap_media({ type }), fix: 'write' };
     case 'MEDIA_NOT_READY':
-      if (media?.status === MEDIA_STATUS.FAILED) {
-        return {
-          gap,
-          words: m.studio_publish_gap_media_failed({ type }),
-          fix: 'write',
-        };
-      }
-      if (media?.status === MEDIA_STATUS.UPLOADING) {
-        return {
-          gap,
-          words: m.studio_publish_gap_uploading({ type }),
-          fix: null,
-        };
-      }
-      return {
-        gap,
-        words:
-          media?.progress == null
-            ? m.studio_publish_gap_preparing({ type })
-            : m.studio_publish_gap_preparing_pct({ type, pct: media.progress }),
-        fix: null,
-      };
+      return media?.status === MEDIA_STATUS.FAILED
+        ? {
+            gap,
+            words: m.studio_publish_gap_media_failed({ type }),
+            fix: 'write',
+          }
+        : { gap, words: mediaWaitWords(type, media), fix: null };
     case 'MEDIA_DELETED':
       return {
         gap,
@@ -201,4 +212,30 @@ export function gapRow(
     case 'NOT_ON_ORG_TEAM':
       return { gap, words: m.studio_publish_gap_team(), fix: null };
   }
+}
+
+/**
+ * Why a scheduled attempt didn't go live (`publish_blocked_reason`,
+ * Codex-a6ofh.2.8), as the step says it: the refusal's own checklist words
+ * and fix, so a reason reads as its gap does. The media failing for good has
+ * no gap of its own. A code this has no words for says to check the settings.
+ */
+export function blockedRow(
+  reason: string,
+  contentType: EditorContentType
+): Pick<GapRow, 'words' | 'fix'> {
+  if (reason === ERROR_CODES.MEDIA_FAILED) {
+    return {
+      words: m.studio_publish_blocked_media_failed({
+        type: TYPE_WORD[contentType](),
+      }),
+      fix: 'write',
+    };
+  }
+  const gap = asPublishGap(reason);
+  if (gap === null || gap === 'MEDIA_NOT_READY') {
+    return { words: m.studio_publish_blocked_other(), fix: null };
+  }
+  const { words, fix } = gapRow(gap, { contentType, media: null });
+  return { words, fix };
 }

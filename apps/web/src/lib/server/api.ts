@@ -1167,12 +1167,27 @@ export function createServerApi(
         }),
 
       /**
-       * Publish content (draft -> published)
+       * Publish content (draft -> published). `whenReady`: media still on
+       * its way schedules instead of refusing, and the draft comes back
+       * still a draft with `publishRequestedAt` set (Codex-a6ofh.2.7).
        */
-      publish: (id: string) =>
-        request<ContentWithRelations>('content', `/api/content/${id}/publish`, {
-          method: 'POST',
-        }),
+      publish: (id: string, options: { whenReady?: boolean } = {}) =>
+        request<ContentWithRelations>(
+          'content',
+          `/api/content/${id}/publish${options.whenReady ? '?whenReady=true' : ''}`,
+          { method: 'POST' }
+        ),
+
+      /**
+       * Cancel a publish-when-ready schedule, and any reason a scheduled
+       * attempt didn't go live. 409 CONTENT_ALREADY_LIVE: it went live first.
+       */
+      cancelPublishRequest: (id: string) =>
+        request<ContentWithRelations>(
+          'content',
+          `/api/content/${id}/publish-request`,
+          { method: 'DELETE' }
+        ),
 
       /**
        * Unpublish content (published -> draft)

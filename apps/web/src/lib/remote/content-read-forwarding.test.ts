@@ -120,6 +120,9 @@ const { logger } = await import('$lib/observability');
 const remote = (await import('./content.remote')) as unknown as {
   getContent: (id: string) => Promise<unknown>;
   publishContent: (id: string) => Promise<unknown>;
+  publishContentWhenReady: (id: string) => Promise<unknown>;
+  cancelPublishRequest: (id: string) => Promise<unknown>;
+  readPublishState: (id: string) => Promise<unknown>;
   saveContent: (input: {
     id: string;
     patch: Record<string, unknown>;
@@ -463,5 +466,107 @@ describe('a publish refusal keeps its own code', () => {
       remote.saveContent({ id: CONTENT_ID, patch: { title: 'Winter light' } })
     );
     expect(err).toMatchObject({ body: { code: 'THUMBNAIL_MEDIA_DELETED' } });
+  });
+});
+
+/** A fetch that answers `status` with `body`, and records what it was asked. */
+function answersWith(status: number, body: unknown) {
+  const fetch = vi.fn(
+    async (_url: unknown, _init?: { method?: string }) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      })
+  );
+  vi.stubGlobal('fetch', fetch);
+  return fetch;
+}
+const asked = (fetch: ReturnType<typeof answersWith>) => {
+  const [url, init] = fetch.mock.calls[0] ?? [];
+  return { url: String(url), method: init?.method ?? 'GET' };
+};
+
+// Publish when ready (Codex-a6ofh.2.9).
+describe('publish when ready', () => {
+  it('publishContentWhenReady asks with whenReady, and keeps a refusal’s code', async () => {
+    const fetch = answersWith(422, {
+      error: {
+        code: 'BUSINESS_LOGIC_ERROR',
+        message: 'Refused.',
+        details: { code: 'TIER_REQUIRED_TO_PUBLISH' },
+      },
+    });
+    const err = await rejection(remote.publishContentWhenReady(CONTENT_ID));
+    expect(asked(fetch)).toMatchObject({ method: 'POST' });
+    expect(asked(fetch).url).toContain(
+      `/api/content/${CONTENT_ID}/publish?whenReady=true`
+    );
+    expect(err).toMatchObject({
+      status: 422,
+      body: { code: 'TIER_REQUIRED_TO_PUBLISH' },
+    });
+  });
+
+  it('cancelPublishRequest deletes the request, and keeps "it went live first"', async () => {
+    const fetch = answersWith(409, {
+      error: {
+        code: 'CONFLICT',
+        message: 'This is already live, so there is no publish to cancel.',
+        details: { code: 'CONTENT_ALREADY_LIVE', contentId: CONTENT_ID },
+      },
+    });
+    const err = await rejection(remote.cancelPublishRequest(CONTENT_ID));
+    expect(asked(fetch)).toMatchObject({ method: 'DELETE' });
+    expect(asked(fetch).url).toContain(
+      `/api/content/${CONTENT_ID}/publish-request`
+    );
+    expect(err).toMatchObject({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE' },
+    });
+    expect((err as { body: object }).body).not.toHaveProperty('contentId');
+  });
+
+  it('readPublishState sends back only where the publish stands', async () => {
+    answersWith(200, {
+      data: {
+        id: CONTENT_ID,
+        title: 'Winter light',
+        status: 'draft',
+        publishedAt: null,
+        publishRequestedAt: '2026-11-08T10:00:00.000Z',
+        publishBlockedReason: null,
+        slug: 'winter-light',
+        contentBody: '<p>secret draft</p>',
+      },
+    });
+    await expect(remote.readPublishState(CONTENT_ID)).resolves.toEqual({
+      status: 'draft',
+      publishedAt: null,
+      publishRequestedAt: '2026-11-08T10:00:00.000Z',
+      publishBlockedReason: null,
+      slug: 'winter-light',
+    });
+  });
+
+  it('publishContentWhenReady sends back only where the publish stands, too', async () => {
+    answersWith(200, {
+      data: {
+        id: CONTENT_ID,
+        status: 'draft',
+        publishedAt: null,
+        publishRequestedAt: '2026-11-08T10:00:00.000Z',
+        publishBlockedReason: null,
+        slug: 'winter-light',
+        contentBody: '<p>secret draft</p>',
+      },
+    });
+    await expect(remote.publishContentWhenReady(CONTENT_ID)).resolves.toEqual({
+      status: 'draft',
+      publishedAt: null,
+      publishRequestedAt: '2026-11-08T10:00:00.000Z',
+      publishBlockedReason: null,
+      slug: 'winter-light',
+    });
   });
 });

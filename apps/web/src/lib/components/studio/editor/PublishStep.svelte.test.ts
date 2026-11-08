@@ -5,6 +5,7 @@
  * sends anyway is listed by its code, or said in its own words.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { uploadQueue } from '$lib/client/upload-queue.svelte';
 import {
   ACTIVE_ACCOUNT,
   land,
@@ -18,6 +19,7 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { REREAD_DELAYS_MS } from './publish-schedule.svelte';
 
 const MEDIA_ID = '6b000000-0000-4000-8000-000000000001';
 
@@ -25,6 +27,9 @@ const remotes = vi.hoisted(() => ({
   saveContent: vi.fn(),
   createContentDraft: vi.fn(),
   publishContent: vi.fn(),
+  publishContentWhenReady: vi.fn(),
+  cancelPublishRequest: vi.fn(),
+  readPublishState: vi.fn(),
   deleteThumbnailCommand: vi.fn(),
   checkContentSlug: vi.fn(),
 }));
@@ -58,16 +63,42 @@ vi.mock('$lib/remote/media.remote', () => ({
         },
 }));
 const watched = vi.hoisted(() => ({ ids: [] as string[] }));
-vi.mock('$lib/client/media-status.svelte', () => ({
-  mediaStatus: {
-    items: new Map(),
-    connection: 'idle',
-    register: (subscriber: { listed: () => Map<string, string> }) => {
-      watched.ids.push(...subscriber.listed().keys());
-      return () => {};
+/**
+ * The live status client's items: reactive, as the real one's are, so a test
+ * can move the media on (it went ready, it failed) and the step follows.
+ */
+const live = vi.hoisted(() => ({
+  items: new Map<
+    string,
+    {
+      lifecycle?: string;
+      progress?: number | null;
+      errorCode?: string | null;
+      attemptsLeft?: number;
+      upload?: { here: boolean; pct: number | null } | null;
+    }
+  >(),
+}));
+vi.mock('$lib/client/media-status.svelte', async () => {
+  const { SvelteMap } = await import('svelte/reactivity');
+  live.items = new SvelteMap();
+  return {
+    mediaStatus: {
+      items: live.items,
+      connection: 'idle',
+      register: (subscriber: { listed: () => Map<string, string> }) => {
+        watched.ids.push(...subscriber.listed().keys());
+        return () => {};
+      },
+      resume: () => {},
     },
-    resume: () => {},
-  },
+  };
+});
+const retry = vi.hoisted(() => ({
+  media: vi.fn(async (_mediaId: string) => {}),
+}));
+vi.mock('../media-library/media-retry', () => ({
+  retryMediaTranscoding: (mediaId: string) => retry.media(mediaId),
 }));
 
 const connect = vi.hoisted(() => ({
@@ -265,6 +296,7 @@ beforeEach(() => {
   nav.goto.mockResolvedValue(undefined);
   remotes.saveContent.mockResolvedValue({});
   remotes.publishContent.mockResolvedValue({});
+  remotes.publishContentWhenReady.mockResolvedValue({});
   remotes.checkContentSlug.mockResolvedValue({ available: true });
 });
 
@@ -273,6 +305,7 @@ afterEach(() => {
   component = null;
   document.body.innerHTML = '';
   watched.ids.length = 0;
+  live.items.clear();
   nav.guards.length = 0;
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -297,19 +330,38 @@ describe('PublishStep · what is missing', () => {
     expect(nav.goto).toHaveBeenCalledWith('/studio/content');
   });
 
-  test('media on its way says how far it has got, is watched, and Publish waits', () => {
+  // Publish when ready (Codex-a6ofh.2.9): the wait no longer blocks it.
+  test('media on its way says how far it has got, is watched, and can be published when ready', () => {
     media.item = {
       id: MEDIA_ID,
       status: 'transcoding',
       transcodingProgress: 64,
       title: 'Winter Light',
+      createdAt: new Date(),
     };
     render();
     expect(text()).toContain(
-      m.studio_publish_gap_preparing_pct({ type: 'video', pct: 64 })
+      m.studio_publish_gap_preparing_pct_when_ready({ type: 'video', pct: 64 })
+    );
+    expect(publishButton()?.textContent?.trim()).toBe(
+      m.studio_publish_button_when_ready()
+    );
+    expect(publishButton()?.disabled).toBe(false);
+    expect(watched.ids).toEqual([MEDIA_ID]);
+  });
+
+  test('a failed file is not on its way: Publish waits, and the way back is listed', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'failed',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    render();
+    expect(text()).toContain(
+      m.studio_publish_gap_media_failed({ type: 'video' })
     );
     expect(publishButton()?.disabled).toBe(true);
-    expect(watched.ids).toEqual([MEDIA_ID]);
   });
 
   test('media gone (deleted, or not theirs) is listed, with the way back to writing', () => {
@@ -872,7 +924,8 @@ describe('PublishStep · creating a category', () => {
 
 describe('PublishStep · what it tells, and when', () => {
   test('one live region is always there: how much is left, then the all-clear', () => {
-    media.item = { id: MEDIA_ID, status: 'transcoding' };
+    // Failed, so not on its way: a gap Publish when ready does not wait out.
+    media.item = { id: MEDIA_ID, status: 'failed' };
     render();
     const status = document.querySelector('[role="status"].publish-status');
     expect(status?.textContent?.trim()).toBe(
@@ -1032,7 +1085,9 @@ describe('PublishStep · leaving', () => {
     const heldParts = [
       ...document.querySelectorAll<HTMLElement>('.publish-held'),
     ];
-    expect(heldParts).toHaveLength(2);
+    // The bar, the head, and the settings with the checklist: the banner of a
+    // schedule sits between the last two, never held (Codex-a6ofh.2.9).
+    expect(heldParts).toHaveLength(3);
     expect(heldParts.every((part) => part.inert)).toBe(true);
     // The foot is not held: it says what is happening, and has focus.
     const progress = document.querySelector<HTMLElement>('.publish-progress');
@@ -1091,5 +1146,1010 @@ describe('PublishStep · leaving', () => {
       expect.objectContaining({ contentId: 'c1' })
     );
     expect(assign).toHaveBeenCalledWith('/studio/content');
+  });
+});
+
+describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
+  const ASKED_AT = new Date('2026-11-08T10:00:00Z');
+  const scheduled = (fields: Partial<ContentWithRelations> = {}) =>
+    draft({
+      publishRequestedAt: ASKED_AT,
+      publishBlockedReason: null,
+      ...fields,
+    });
+  const wentLive = () => ({
+    status: 'published',
+    publishedAt: new Date(),
+    publishRequestedAt: null,
+    publishBlockedReason: null,
+    slug: 'runes-explained',
+  });
+  const gapsFocused = () =>
+    document.activeElement?.classList.contains('publish-gaps') === true;
+  function onItsWay() {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'transcoding',
+      transcodingProgress: 64,
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+  }
+  /** The media moves on, as the live status client hears it. */
+  function mediaNow(
+    lifecycle: string,
+    fields: {
+      errorCode?: string | null;
+      attemptsLeft?: number;
+      progress?: number | null;
+    } = {}
+  ) {
+    live.items.set(MEDIA_ID, {
+      lifecycle,
+      progress: null,
+      errorCode: null,
+      attemptsLeft: 2,
+      ...fields,
+    });
+    flushSync();
+  }
+  const [FIRST_READ_MS, SECOND_READ_MS] = REREAD_DELAYS_MS;
+  const ALL_READS_MS = REREAD_DELAYS_MS.reduce((sum, ms) => sum + ms, 0);
+  const banner = () => document.querySelector<HTMLElement>('.publish-schedule');
+  const bannerText = () => banner()?.textContent ?? '';
+  /** What the step's quiet live regions hold, the schedule's one among them. */
+  const notice = () =>
+    [...document.querySelectorAll('.sr-only[role="status"]')]
+      .map((el) => el.textContent ?? '')
+      .join(' ');
+  const checkAgain = () =>
+    [...(banner()?.querySelectorAll('button') ?? [])].find((button) =>
+      button.textContent?.includes(m.studio_publish_scheduled_check_again())
+    );
+  const cancelButton = () =>
+    banner()?.querySelector<HTMLButtonElement>(
+      `button[aria-label="${m.studio_publish_scheduled_cancel_label()}"]`
+    );
+  const lostToGoLive = {
+    status: 409,
+    body: { code: 'CONTENT_ALREADY_LIVE', message: 'Already live.' },
+  };
+
+  test('only the media in the way: Publish when ready schedules it, and the step says so', async () => {
+    onItsWay();
+    remotes.publishContentWhenReady.mockResolvedValue(scheduled());
+    render();
+    expect(text()).toContain(m.studio_publish_gaps_when_ready());
+
+    publishButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(remotes.publishContentWhenReady).toHaveBeenCalledWith('c1');
+    expect(remotes.publishContent).not.toHaveBeenCalled();
+    expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+    expect(bannerText()).toContain(
+      m.studio_publish_scheduled_body_pct({ type: 'video', pct: 64 })
+    );
+    expect(document.activeElement).toBe(banner());
+    expect(text()).toContain(m.studio_publish_scheduled_close());
+    expect(publishButton()?.textContent?.trim()).toBe(m.studio_publish_done());
+    // Still a draft: not "is live", and the creator is not sent away.
+    expect(toasts.success).not.toHaveBeenCalled();
+    expect(nav.goto).not.toHaveBeenCalled();
+  });
+
+  test('a scheduled draft keeps saving its edits, which go live with it', async () => {
+    onItsWay();
+    remotes.publishContentWhenReady.mockResolvedValue(scheduled());
+    render();
+    publishButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    remotes.saveContent.mockClear();
+
+    choose('followers');
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    expect(remotes.saveContent).toHaveBeenCalled();
+  });
+
+  test('another rule still missing blocks it: the button says what it does once that is set', () => {
+    onItsWay();
+    render(draft({ isFree: false, isPurchasable: true, priceCents: null }));
+    expect(publishButton()?.disabled).toBe(true);
+    // As the media row does: it publishes when ready once the rest is set.
+    expect(publishButton()?.textContent?.trim()).toBe(
+      m.studio_publish_button_when_ready()
+    );
+    expect(text()).toContain(
+      m.studio_publish_gap_preparing_pct_when_ready({ type: 'video', pct: 64 })
+    );
+    expect(text()).not.toContain(m.studio_publish_gaps_when_ready());
+  });
+
+  test('arriving scheduled: the banner says it, and Cancel makes it an ordinary draft', async () => {
+    onItsWay();
+    remotes.cancelPublishRequest.mockResolvedValue(draft());
+    render(scheduled());
+    expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+    // The wait is the banner's to say: nothing else to list.
+    expect(text()).not.toContain(
+      m.studio_publish_gap_preparing_pct_when_ready({ type: 'video', pct: 64 })
+    );
+
+    const cancel = banner()?.querySelector('button');
+    expect(cancel?.getAttribute('aria-label')).toBe(
+      m.studio_publish_scheduled_cancel_label()
+    );
+    cancel?.focus();
+    cancel?.click();
+    await vi.advanceTimersByTimeAsync(20);
+    expect(remotes.cancelPublishRequest).toHaveBeenCalledWith('c1');
+    expect(banner()).toBeNull();
+    expect(text()).toContain(m.studio_publish_scheduled_cancelled());
+    // Its Cancel went with the banner: focus goes to the checklist.
+    expect(gapsFocused()).toBe(true);
+    expect(publishButton()?.textContent?.trim()).toBe(
+      m.studio_publish_button_when_ready()
+    );
+  });
+
+  test('a cancel that lost to the go-live shows it live at once, and reads the rest', async () => {
+    onItsWay();
+    remotes.cancelPublishRequest.mockRejectedValue({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'Already live.' },
+    });
+    // The read never answers: the refusal alone says it is live.
+    remotes.readPublishState.mockReturnValue(new Promise(() => {}));
+    render(scheduled());
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(remotes.readPublishState).toHaveBeenCalledWith('c1');
+    expect(bannerText()).toContain(
+      m.studio_publish_live({ title: 'Svelte runes deep dive' })
+    );
+    expect(text()).not.toContain(m.studio_publish_scheduled_cancel_failed());
+    // Its saved address is not known yet, and a route finds a piece by its
+    // slug only: no View until the read brings it, never a link by id.
+    expect(banner()?.querySelector('a')).toBeNull();
+  });
+
+  test('a cancel lost to the go-live whose read fails says so, and Check again brings View', async () => {
+    onItsWay();
+    remotes.cancelPublishRequest.mockRejectedValue({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'Already live.' },
+    });
+    remotes.readPublishState.mockRejectedValueOnce({ status: 503 });
+    render(scheduled());
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).toContain(
+      m.studio_publish_live({ title: 'Svelte runes deep dive' })
+    );
+    expect(text()).toContain(m.studio_publish_live_unread());
+    expect(banner()?.querySelector('a')).toBeNull();
+    expect(told.error).toHaveBeenCalledWith(
+      'studio_publish.schedule_unread',
+      expect.objectContaining({ contentId: 'c1' })
+    );
+
+    const check = Promise.withResolvers<unknown>();
+    remotes.readPublishState.mockReturnValueOnce(check.promise);
+    expect(checkAgain()).toBeDefined();
+    checkAgain()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    // Pressed, it stays while it reads: busy, not gone from under focus.
+    expect(checkAgain()).toBeDefined();
+    check.resolve(wentLive());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/content/runes-explained'
+    );
+    expect(text()).not.toContain(m.studio_publish_live_unread());
+    expect(checkAgain()).toBeUndefined();
+  });
+
+  test('a cancel lost to a go-live a read already brought keeps View, and reads no more', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(wentLive());
+    const sent = Promise.withResolvers<unknown>();
+    remotes.cancelPublishRequest.mockReturnValueOnce(sent.promise);
+    render(scheduled());
+    mediaNow('ready');
+    cancelButton()?.click();
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS);
+    const view = () => banner()?.querySelector('a')?.getAttribute('href');
+    expect(view()).toBe('/content/runes-explained');
+    sent.reject(lostToGoLive);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(view()).toBe('/content/runes-explained');
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(1);
+  });
+
+  test('a Check again that fails after a newer answer landed says nothing of it', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    const check = Promise.withResolvers<unknown>();
+    remotes.readPublishState
+      .mockReturnValueOnce(check.promise)
+      .mockResolvedValueOnce(wentLive());
+    remotes.cancelPublishRequest.mockRejectedValue(lostToGoLive);
+    checkAgain()?.click();
+    cancelButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    const view = () => banner()?.querySelector('a')?.getAttribute('href');
+    expect(view()).toBe('/content/runes-explained');
+    check.reject({ status: 503 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).not.toContain(m.studio_publish_live_unread());
+    expect(text()).not.toContain(m.studio_publish_scheduled_unread());
+    expect(view()).toBe('/content/runes-explained');
+  });
+
+  test('an older read that lands live after a lost cancel brings View, whatever failed meanwhile', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    const check = Promise.withResolvers<unknown>();
+    remotes.readPublishState
+      .mockReturnValueOnce(check.promise)
+      .mockRejectedValueOnce({ status: 503 });
+    remotes.cancelPublishRequest.mockRejectedValue(lostToGoLive);
+    checkAgain()?.click();
+    cancelButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    // The read after the refusal failed, but the check sent before it is
+    // still out: live, no View yet, and its Check again busy, saying
+    // nothing until that check settles.
+    expect(bannerText()).toContain(
+      m.studio_publish_live({ title: 'Svelte runes deep dive' })
+    );
+    expect(told.error).toHaveBeenCalledWith(
+      'studio_publish.schedule_unread',
+      expect.objectContaining({ contentId: 'c1' })
+    );
+    expect(banner()?.querySelector('a')).toBeNull();
+    expect(checkAgain()?.getAttribute('aria-busy')).toBe('true');
+    expect(text()).not.toContain(m.studio_publish_live_unread());
+    // That check answers live, with its address.
+    check.resolve(wentLive());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/content/runes-explained'
+    );
+    expect(text()).not.toContain(m.studio_publish_live_unread());
+  });
+
+  test('after a lost cancel, the newer read stands over an older one that filled in the link', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    const check = Promise.withResolvers<unknown>();
+    const after = Promise.withResolvers<unknown>();
+    remotes.readPublishState
+      .mockReturnValueOnce(check.promise)
+      .mockReturnValueOnce(after.promise);
+    remotes.cancelPublishRequest.mockRejectedValue(lostToGoLive);
+    checkAgain()?.click();
+    cancelButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    const view = () => banner()?.querySelector('a')?.getAttribute('href');
+    // The older check lands first: it fills in the link.
+    check.resolve(wentLive());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(view()).toBe('/content/runes-explained');
+    // The read sent after the refusal is newer: it stands.
+    after.resolve({ ...wentLive(), slug: 'runes-renamed' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(view()).toBe('/content/runes-renamed');
+  });
+
+  test('after a lost cancel, an older read that brought the link leaves a failed newer one unsaid', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    const check = Promise.withResolvers<unknown>();
+    const after = Promise.withResolvers<unknown>();
+    remotes.readPublishState
+      .mockReturnValueOnce(check.promise)
+      .mockReturnValueOnce(after.promise);
+    remotes.cancelPublishRequest.mockRejectedValue(lostToGoLive);
+    checkAgain()?.click();
+    cancelButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    check.resolve(wentLive());
+    await vi.advanceTimersByTimeAsync(0);
+    after.reject({ status: 503 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/content/runes-explained'
+    );
+    expect(text()).not.toContain(m.studio_publish_live_unread());
+    // Unsaid, as nothing waits on it, but still recorded.
+    expect(told.error).toHaveBeenCalledWith(
+      'studio_publish.schedule_unread',
+      expect.objectContaining({ contentId: 'c1' })
+    );
+  });
+
+  test('a Check again that fails says nothing once an older read brought the link', async () => {
+    onItsWay();
+    const loopRead = Promise.withResolvers<unknown>();
+    const check = Promise.withResolvers<unknown>();
+    remotes.readPublishState
+      .mockReturnValueOnce(loopRead.promise)
+      .mockRejectedValueOnce({ status: 503 })
+      .mockReturnValueOnce(check.promise);
+    remotes.cancelPublishRequest.mockRejectedValue(lostToGoLive);
+    render(scheduled());
+    mediaNow('ready');
+    // The first read after the media settles goes out, and stays out.
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS);
+    cancelButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    // Lost to the go-live, and the read for its link failed: said.
+    expect(text()).toContain(m.studio_publish_live_unread());
+    checkAgain()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    // The older read lands live, with its link.
+    loopRead.resolve(wentLive());
+    await vi.advanceTimersByTimeAsync(0);
+    const view = () => banner()?.querySelector('a')?.getAttribute('href');
+    expect(view()).toBe('/content/runes-explained');
+    check.reject({ status: 503 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).not.toContain(m.studio_publish_live_unread());
+    expect(view()).toBe('/content/runes-explained');
+  });
+
+  test('…and when that older check fails too, the link that could not load is said', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    const check = Promise.withResolvers<unknown>();
+    remotes.readPublishState
+      .mockReturnValueOnce(check.promise)
+      .mockRejectedValueOnce({ status: 503 });
+    remotes.cancelPublishRequest.mockRejectedValue(lostToGoLive);
+    checkAgain()?.click();
+    cancelButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    check.reject({ status: 503 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_live_unread());
+    expect(checkAgain()).toBeDefined();
+    expect(banner()?.querySelector('a')).toBeNull();
+  });
+
+  test('Check again after reads that answered keeps "in a moment" while it reads', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    const settling = m.studio_publish_scheduled_settling({ type: 'video' });
+    expect(bannerText()).toContain(settling);
+    const check = Promise.withResolvers<unknown>();
+    remotes.readPublishState.mockReturnValueOnce(check.promise);
+    checkAgain()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).toContain(settling);
+    check.resolve(scheduled());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).toContain(settling);
+    expect(text()).toContain(m.studio_publish_scheduled_still_waiting());
+  });
+
+  test('a cancel that fails says so, and it stays scheduled', async () => {
+    onItsWay();
+    remotes.cancelPublishRequest.mockRejectedValue({ status: 503 });
+    render(scheduled());
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+    expect(text()).toContain(m.studio_publish_scheduled_cancel_failed());
+    expect(told.error).toHaveBeenCalledWith(
+      'studio_publish.cancel_failed',
+      expect.objectContaining({ contentId: 'c1' })
+    );
+  });
+
+  test('the media goes ready: read again until it is live, then View and Done', async () => {
+    onItsWay();
+    remotes.readPublishState
+      .mockResolvedValueOnce(scheduled())
+      .mockResolvedValueOnce(wentLive());
+    render(scheduled());
+    mediaNow('ready');
+
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(1);
+    expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+    await vi.advanceTimersByTimeAsync(SECOND_READ_MS);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(2);
+    expect(bannerText()).toContain(
+      m.studio_publish_live({ title: 'Svelte runes deep dive' })
+    );
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/content/runes-explained'
+    );
+    // Live: no more reads.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(2);
+
+    publishButton()?.click();
+    expect(publishButton()?.textContent?.trim()).toBe(m.studio_publish_done());
+    expect(nav.goto).toHaveBeenCalledWith('/studio/content');
+  });
+
+  test('ready but not seen live after three reads: Check again, and no reads of its own after', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(3);
+    expect(bannerText()).toContain(
+      m.studio_publish_scheduled_settling({ type: 'video' })
+    );
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(3);
+
+    remotes.readPublishState.mockResolvedValue(wentLive());
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(4);
+    expect(bannerText()).toContain(
+      m.studio_publish_live({ title: 'Svelte runes deep dive' })
+    );
+  });
+
+  test('a check that cannot read says so, and offers Check again still', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+
+    remotes.readPublishState.mockRejectedValue({ status: 503 });
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_scheduled_unread());
+    expect(bannerText()).toContain(m.studio_publish_scheduled_check_again());
+  });
+
+  test('the media failing while scheduled offers Try again, and the schedule carries on', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('failed');
+    expect(bannerText()).toContain(
+      m.studio_publish_scheduled_media_failed({ type: 'video' })
+    );
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/studio/content/c1/edit'
+    );
+
+    media.refresh.mockClear();
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(retry.media).toHaveBeenCalledWith(MEDIA_ID);
+    // Its read still says failed, so nothing watches it: it is read again.
+    expect(media.refresh).toHaveBeenCalled();
+    expect(remotes.cancelPublishRequest).not.toHaveBeenCalled();
+    // Cancel is still there, as it is in every scheduled state.
+    expect(
+      banner()?.querySelector(
+        `button[aria-label="${m.studio_publish_scheduled_cancel_label()}"]`
+      )
+    ).not.toBeNull();
+  });
+
+  test('a failure no Try again can cure: no Try again, only another file, and it reads for the outcome', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(
+      draft({ publishBlockedReason: 'MEDIA_FAILED' })
+    );
+    render(scheduled());
+    mediaNow('failed', { errorCode: 'UPLOAD_INCOMPLETE' });
+    expect(bannerText()).toContain(
+      m.studio_publish_blocked_media_failed({ type: 'video' })
+    );
+    expect(bannerText()).not.toContain(m.common_try_again());
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/studio/content/c1/edit'
+    );
+
+    // The server clears the schedule: the read sees it didn't go live.
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(1);
+    expect(bannerText()).toContain(m.studio_publish_blocked());
+  });
+
+  test('a failure a Try again can cure is not read for: the server keeps the schedule', async () => {
+    onItsWay();
+    render(scheduled());
+    mediaNow('failed');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS * 2);
+    expect(remotes.readPublishState).not.toHaveBeenCalled();
+  });
+
+  test('the reads start once: a media read that changes nothing does not start them again', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS - 500);
+    // The watcher hears the same "ready" again, as a new object.
+    mediaNow('ready', { progress: 100 });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(3);
+  });
+
+  test('Check again goes once the media is on its way again, and the reads start over when it settles', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    expect(bannerText()).toContain(m.studio_publish_scheduled_check_again());
+
+    mediaNow('transcoding');
+    expect(bannerText()).not.toContain(
+      m.studio_publish_scheduled_check_again()
+    );
+    expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(4);
+    expect(bannerText()).not.toContain(
+      m.studio_publish_scheduled_check_again()
+    );
+  });
+
+  test('a piece for sale says its price on Publish when ready, as the mockup does', () => {
+    onItsWay();
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+    expect(publishButton()?.textContent?.trim()).toBe(
+      m.studio_publish_button_when_ready_price({ price: '£12.00' })
+    );
+  });
+
+  test('gone while scheduled: never "when it is ready", only another file or Cancel', async () => {
+    media.item = null;
+    render(scheduled());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).toContain(
+      m.studio_publish_gap_media_deleted({ type: 'video' })
+    );
+    expect(bannerText()).not.toContain(m.studio_publish_scheduled_heading());
+    expect(
+      banner()?.querySelector(
+        `button[aria-label="${m.studio_publish_scheduled_cancel_label()}"]`
+      )
+    ).not.toBeNull();
+  });
+
+  test('reads that never answer say so, not "it should be live in a moment" alone', async () => {
+    onItsWay();
+    remotes.readPublishState.mockRejectedValue({ status: 503 });
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    expect(remotes.readPublishState).toHaveBeenCalledTimes(3);
+    expect(text()).toContain(m.studio_publish_scheduled_unread());
+    // One voice, and no claim it cannot back: not "live in a moment".
+    const settling = m.studio_publish_scheduled_settling({ type: 'video' });
+    expect(notice()).not.toContain(settling);
+    expect(bannerText()).not.toContain(settling);
+    expect(bannerText()).toContain(
+      m.studio_publish_scheduled_ready({ type: 'video' })
+    );
+    // Checking again, it still claims nothing it cannot back.
+    const check = Promise.withResolvers<unknown>();
+    remotes.readPublishState.mockReturnValueOnce(check.promise);
+    checkAgain()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).not.toContain(settling);
+    check.reject({ status: 503 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(told.error).toHaveBeenCalledWith(
+      'studio_publish.schedule_unread',
+      expect.objectContaining({ contentId: 'c1' })
+    );
+  });
+
+  test('Check again that finds it still waiting says so, and Cancel is offered', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    expect(text()).not.toContain(m.studio_publish_scheduled_still_waiting());
+
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_scheduled_still_waiting());
+    expect(
+      banner()?.querySelector(
+        `button[aria-label="${m.studio_publish_scheduled_cancel_label()}"]`
+      )
+    ).not.toBeNull();
+  });
+
+  test('Check again that sees it live moves focus to the banner, and View uses the saved address', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+
+    remotes.readPublishState.mockResolvedValue({
+      ...wentLive(),
+      slug: 'saved-slug',
+    });
+    const check = banner()?.querySelector('button');
+    check?.focus();
+    check?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(document.activeElement).toBe(banner());
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/content/saved-slug'
+    );
+  });
+
+  test('a cancel the server refuses says so without "try again", and reads where it stands', async () => {
+    onItsWay();
+    remotes.cancelPublishRequest.mockRejectedValue({
+      status: 403,
+      body: { code: 'FORBIDDEN', message: 'No.' },
+    });
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_scheduled_cancel_refused());
+    expect(remotes.readPublishState).toHaveBeenCalledWith('c1');
+    expect(told.warn).toHaveBeenCalledWith(
+      'studio_publish.cancel_failed',
+      expect.objectContaining({ contentId: 'c1' })
+    );
+  });
+
+  test('a cancel answered with something that is not the piece is said, and read again', async () => {
+    onItsWay();
+    remotes.cancelPublishRequest.mockResolvedValue({});
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_scheduled_cancel_refused());
+    expect(remotes.readPublishState).toHaveBeenCalledWith('c1');
+    expect(told.error).toHaveBeenCalledWith(
+      'studio_publish.unexpected_answer',
+      expect.objectContaining({ contentId: 'c1' })
+    );
+  });
+
+  test('a cancel that failed stays said when the media settles', async () => {
+    onItsWay();
+    remotes.cancelPublishRequest.mockRejectedValue({ status: 503 });
+    remotes.readPublishState.mockReturnValue(new Promise(() => {}));
+    render(scheduled());
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_scheduled_cancel_failed());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_scheduled_cancel_failed());
+  });
+
+  test('a change of view is said in the step’s one live region', async () => {
+    onItsWay();
+    render(scheduled());
+    const region = () =>
+      [...document.querySelectorAll('.sr-only[role="status"]')]
+        .map((el) => el.textContent ?? '')
+        .join(' ');
+    mediaNow('failed');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(region()).toContain(
+      m.studio_publish_scheduled_media_failed({ type: 'video' })
+    );
+    mediaNow('transcoding');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(region()).toContain(m.studio_publish_scheduled_heading());
+    // The banner's own Alerts are furniture: no live region mounts with them.
+    expect(
+      banner()?.querySelector('[role="status"]:not(.schedule-note)')
+    ).toBeNull();
+  });
+
+  test('a schedule that did not go live says why in the live region', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(
+      draft({ publishBlockedReason: 'CREATOR_CONNECT_REQUIRED' })
+    );
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS);
+    const region = [...document.querySelectorAll('.sr-only[role="status"]')]
+      .map((el) => el.textContent ?? '')
+      .join(' ');
+    expect(region).toContain(m.studio_publish_blocked());
+    expect(region).toContain(m.studio_publish_gap_payouts());
+  });
+
+  test('a check that fails while a cancel failure shows is said by its own line', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    remotes.cancelPublishRequest.mockRejectedValue({ status: 503 });
+    banner()
+      ?.querySelector<HTMLButtonElement>(
+        `button[aria-label="${m.studio_publish_scheduled_cancel_label()}"]`
+      )
+      ?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_scheduled_cancel_failed());
+
+    remotes.readPublishState.mockRejectedValue({ status: 503 });
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_scheduled_cancel_failed());
+    expect(text()).toContain(m.studio_publish_scheduled_unread());
+  });
+
+  test('gone, with reads that answered still scheduled: Check again is said as it appears', async () => {
+    media.item = null;
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    expect(bannerText()).toContain(m.studio_publish_scheduled_check_again());
+    const region = [...document.querySelectorAll('.sr-only[role="status"]')]
+      .map((el) => el.textContent ?? '')
+      .join(' ');
+    expect(region).toContain(m.studio_publish_scheduled_still_waiting());
+  });
+
+  test('a cancel lost to the go-live is logged', async () => {
+    onItsWay();
+    remotes.cancelPublishRequest.mockRejectedValue({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'Already live.' },
+    });
+    remotes.readPublishState.mockResolvedValue(wentLive());
+    render(scheduled());
+    banner()?.querySelector('button')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(told.warn).toHaveBeenCalledWith(
+      'studio_publish.cancel_lost_to_go_live',
+      expect.objectContaining({ contentId: 'c1' })
+    );
+    expect(document.activeElement).toBe(banner());
+    // The read brought its saved address: View.
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/content/runes-explained'
+    );
+  });
+
+  test('an answer neither live nor scheduled is said as a failure, and logged', async () => {
+    onItsWay();
+    remotes.publishContentWhenReady.mockResolvedValue(draft());
+    render();
+    publishButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(banner()).toBeNull();
+    expect(text()).toContain(m.studio_editor_publish_failed());
+    expect(told.error).toHaveBeenCalledWith(
+      'studio_publish.unexpected_answer',
+      expect.objectContaining({ contentId: 'c1' })
+    );
+  });
+
+  test('scheduled while a move was asked for: told on the way out', async () => {
+    onItsWay();
+    const sent = Promise.withResolvers<unknown>();
+    remotes.publishContentWhenReady.mockReturnValueOnce(sent.promise);
+    render();
+    publishButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    for (const guard of nav.guards) {
+      guard({
+        willUnload: false,
+        to: { url: new URL('https://alpha.lvh.me/studio/media') },
+        cancel: vi.fn(),
+      });
+    }
+    sent.resolve(scheduled());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toasts.success).toHaveBeenCalledWith(
+      m.studio_publish_scheduled_toast({
+        title: 'Svelte runes deep dive',
+        type: 'video',
+      })
+    );
+    expect(nav.goto).toHaveBeenCalled();
+  });
+
+  test('a retry that sets the media going moves focus from the gone Try again to the banner', async () => {
+    onItsWay();
+    render(scheduled());
+    mediaNow('failed');
+    const again = banner()?.querySelector<HTMLButtonElement>('button');
+    expect(again?.textContent?.trim()).toBe(m.common_try_again());
+    again?.focus();
+    again?.click();
+    await vi.advanceTimersByTimeAsync(0);
+
+    mediaNow('transcoding');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+    expect(document.activeElement).toBe(banner());
+  });
+
+  test('a schedule cancelled elsewhere is said when a read sees it, and focus goes to the checklist', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(draft());
+    render(scheduled());
+    mediaNow('ready');
+    const check = document.querySelector<HTMLElement>('.publish-schedule');
+    check?.focus();
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(banner()).toBeNull();
+    // Not cancelled here: said without claiming a cancel.
+    expect(text()).toContain(m.studio_publish_scheduled_ended());
+    expect(text()).not.toContain(m.studio_publish_scheduled_cancelled());
+    expect(gapsFocused()).toBe(true);
+    // The media is ready now: an ordinary Publish.
+    expect(publishButton()?.textContent?.trim()).toBe(
+      m.studio_publish_button()
+    );
+  });
+
+  test('gone, with reads that never answered: the unread words come with Check again', async () => {
+    media.item = null;
+    remotes.readPublishState.mockRejectedValue({ status: 503 });
+    render(scheduled());
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    expect(text()).toContain(m.studio_publish_scheduled_unread());
+    expect(bannerText()).toContain(m.studio_publish_scheduled_check_again());
+    // The read alert is the one voice: not "Not live yet" as well.
+    expect(notice()).not.toContain(m.studio_publish_scheduled_still_waiting());
+  });
+
+  test('a Check again that fails takes "in a moment" back out of the live region', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(scheduled());
+    render(scheduled());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    const settling = m.studio_publish_scheduled_settling({ type: 'video' });
+    expect(notice()).toContain(settling);
+    remotes.readPublishState.mockRejectedValueOnce({ status: 503 });
+    checkAgain()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text()).toContain(m.studio_publish_scheduled_unread());
+    expect(notice()).not.toContain(settling);
+    expect(bannerText()).not.toContain(settling);
+  });
+
+  test('reads that run out unanswered leave no old words in the live region', async () => {
+    onItsWay();
+    remotes.readPublishState.mockRejectedValue({ status: 503 });
+    render(scheduled());
+    mediaNow('failed');
+    await vi.advanceTimersByTimeAsync(0);
+    mediaNow('transcoding');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(notice()).toContain(m.studio_publish_scheduled_heading());
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(ALL_READS_MS);
+    expect(text()).toContain(m.studio_publish_scheduled_unread());
+    expect(notice()).not.toContain(m.studio_publish_scheduled_heading());
+  });
+
+  test('the cancel and read alerts are there, empty, before anything goes wrong', () => {
+    onItsWay();
+    render(scheduled());
+    const alerts = [...(banner()?.querySelectorAll('[role="alert"]') ?? [])];
+    expect(alerts).toHaveLength(2);
+    expect(alerts.every((el) => el.textContent?.trim() === '')).toBe(true);
+  });
+
+  test('a go-live seen while typing in the settings moves focus off the field it held still', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(wentLive());
+    render(scheduled());
+    const field = document.querySelector<HTMLInputElement>(
+      '.publish input[type="radio"]'
+    );
+    field?.focus();
+    expect(document.activeElement).toBe(field);
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS);
+    expect(bannerText()).toContain(
+      m.studio_publish_live({ title: 'Svelte runes deep dive' })
+    );
+    // The banner's view moved: focus follows a tick later (a frame, in
+    // async mode).
+    await vi.advanceTimersByTimeAsync(20);
+    expect(document.activeElement).toBe(banner());
+  });
+
+  test("uploading from this tab's own queue: keep it open, whatever the socket has heard", () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    uploadQueue.items = [
+      { key: 'k1', id: MEDIA_ID, status: 'uploading', progress: 30 } as never,
+    ];
+    try {
+      render(scheduled());
+      expect(text()).toContain(m.studio_publish_scheduled_keep_open());
+    } finally {
+      uploadQueue.items = [];
+    }
+  });
+
+  test('uploading from this tab: the foot says to keep it open, not that it can close', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: true, pct: 30 },
+    });
+    render(scheduled());
+    expect(text()).toContain(m.studio_publish_scheduled_keep_open());
+    expect(text()).not.toContain(m.studio_publish_scheduled_close());
+  });
+
+  test("didn't go live: why, and where it is put right, with no Dismiss (owner)", () => {
+    render(draft({ publishBlockedReason: 'CREATOR_CONNECT_REQUIRED' }));
+    expect(bannerText()).toContain(m.studio_publish_blocked());
+    expect(bannerText()).toContain(m.studio_publish_gap_payouts());
+    expect(banner()?.querySelector('a')?.textContent?.trim()).toBe(
+      m.studio_content_form_access_payouts_link()
+    );
+    expect(banner()?.querySelector('button')).toBeNull();
+    // Publish again is offered: it clears the reason.
+    expect(publishButton()?.textContent?.trim()).toBe(
+      m.studio_publish_button()
+    );
+  });
+
+  test("didn't go live as the file failed for good: says so, and the way back to writing", () => {
+    render(draft({ publishBlockedReason: 'MEDIA_FAILED' }));
+    expect(bannerText()).toContain(
+      m.studio_publish_blocked_media_failed({ type: 'video' })
+    );
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/studio/content/c1/edit'
+    );
   });
 });

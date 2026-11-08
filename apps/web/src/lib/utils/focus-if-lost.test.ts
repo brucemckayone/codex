@@ -53,6 +53,28 @@ describe('focusIfLost', () => {
     expect(document.activeElement).toBe(field);
   });
 
+  it('takes focus from a control a region made inert, not yet moved by the browser', () => {
+    const target = make('p');
+    const held = make('div');
+    const field = document.createElement('input');
+    held.appendChild(field);
+    field.focus();
+    held.inert = true;
+
+    focusIfLost(target);
+    expect(document.activeElement).toBe(target);
+  });
+
+  it('takes focus from a control that was disabled under it', () => {
+    const target = make('p');
+    const pressed = make('button') as HTMLButtonElement;
+    pressed.focus();
+    pressed.disabled = true;
+
+    focusIfLost(target);
+    expect(document.activeElement).toBe(target);
+  });
+
   it('a target that went is nothing to focus', () => {
     expect(() => focusIfLost(null)).not.toThrow();
   });

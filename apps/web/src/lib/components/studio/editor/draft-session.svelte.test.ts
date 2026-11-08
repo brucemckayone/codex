@@ -40,7 +40,9 @@ vi.mock('$lib/observability', () => ({
   logger: { error: told.logError, warn: told.logWarn, info: told.logInfo },
 }));
 
-const { createDraftSession } = await import('./draft-session.svelte');
+const { answeredLive, createDraftSession } = await import(
+  './draft-session.svelte'
+);
 type Options = Parameters<typeof createDraftSession>[0];
 type Session = ReturnType<typeof createDraftSession>;
 
@@ -1453,12 +1455,16 @@ describe('publish', () => {
   function pendingSend() {
     const answer = {
       ok: () => {},
+      /** Accepted as a draft: publish when ready scheduled it. */
+      draft: () => {},
       fail: (_reason: unknown) => {},
     };
     const send = vi.fn(
       () =>
         new Promise((resolve, reject) => {
           answer.ok = () => resolve({});
+          answer.draft = () =>
+            resolve({ status: 'draft', publishRequestedAt: new Date() });
           answer.fail = reject;
         })
     );
@@ -1470,7 +1476,7 @@ describe('publish', () => {
     session.set('title', 'Runes, all three');
     const send = vi.fn().mockResolvedValue({});
     const result = await session.publish(send);
-    expect(result).toEqual({ ok: true });
+    expect(result).toMatchObject({ ok: true, live: true });
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
       patch: { title: 'Runes, all three' },
@@ -1479,6 +1485,32 @@ describe('publish', () => {
     expect(remotes.saveContent.mock.invocationCallOrder[0]).toBeLessThan(
       send.mock.invocationCallOrder[0] ?? 0
     );
+  });
+
+  // Publish when ready (Codex-a6ofh.2.9): a schedule answers a draft, so the
+  // piece is not live, and what was typed while it was out saves as a draft's.
+  it('a send that answers a draft (scheduled) is not live, and edits go on saving', async () => {
+    const session = start();
+    const { send, answer } = pendingSend();
+    const run = session.publish(send);
+    await settle();
+    session.set('tags', ['typed-while-out']);
+    await afterDebounce();
+    expect(remotes.saveContent).not.toHaveBeenCalled();
+    answer.draft();
+    await expect(run).resolves.toMatchObject({ ok: true, live: false });
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: { tags: ['typed-while-out'] },
+    });
+  });
+
+  it('answeredLive: only a draft answer is not live; no row reads as live', () => {
+    expect(answeredLive({ status: 'draft' })).toBe(false);
+    expect(answeredLive({ status: 'published' })).toBe(true);
+    expect(answeredLive({})).toBe(true);
+    expect(answeredLive(undefined)).toBe(true);
   });
 
   it('a timer that fires while Publish is out sends nothing to the piece going live', async () => {
@@ -1490,7 +1522,7 @@ describe('publish', () => {
     await afterDebounce();
     expect(remotes.saveContent).not.toHaveBeenCalled();
     answer.ok();
-    await expect(run).resolves.toEqual({ ok: true });
+    await expect(run).resolves.toMatchObject({ ok: true, live: true });
     await afterDebounce();
     expect(remotes.saveContent).not.toHaveBeenCalled();
     // Live now: the words wait for Update.
@@ -1576,7 +1608,7 @@ describe('publish', () => {
     expect(nav.goto).not.toHaveBeenCalled();
 
     answer.ok();
-    await expect(run).resolves.toEqual({ ok: true });
+    await expect(run).resolves.toMatchObject({ ok: true, live: true });
     expect(session.takeHeldMove()).toEqual(to);
     expect(session.takeHeldMove()).toBeNull();
     expect(nav.goto).not.toHaveBeenCalled();
@@ -1600,7 +1632,7 @@ describe('publish', () => {
     expect(send).toHaveBeenCalled();
 
     answer.ok();
-    await expect(run).resolves.toEqual({ ok: true });
+    await expect(run).resolves.toMatchObject({ ok: true, live: true });
     expect(session.takeHeldMove()).toEqual(to);
     expect(nav.goto).not.toHaveBeenCalled();
   });

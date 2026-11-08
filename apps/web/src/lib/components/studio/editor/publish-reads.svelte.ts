@@ -9,7 +9,9 @@
  * watches the media while it is on its way.
  */
 
+import { isMediaOnItsWay, MEDIA_STATUS } from '@codex/constants';
 import { mediaStatus } from '$lib/client/media-status.svelte';
+import { uploadQueue } from '$lib/client/upload-queue.svelte';
 import { getMediaItem } from '$lib/remote/media.remote';
 import { type QueryResult, remoteErrorStatus } from '$lib/remote/query-result';
 import { listTiers } from '$lib/remote/subscription.remote';
@@ -19,6 +21,7 @@ import {
   payoutSetupHref,
 } from '$lib/utils/connect-readiness';
 import { logReadFailure } from '../media-library/log-read-failure';
+import { describeTile } from '../media-library/tile-state';
 import { watchMediaItem } from '../media-library/watch-media-item.svelte';
 import { createPayoutsRead } from '../payouts-read.svelte';
 import type { DraftValues } from './draft-session.svelte';
@@ -36,9 +39,42 @@ interface PublishMedia {
   status: string;
   deleted: boolean;
   progress: number | null;
+  /**
+   * Still uploading (not stalled), uploaded or transcoding: what the server
+   * schedules a publish when ready for (`isMediaOnItsWay`, Codex-a6ofh.2.7).
+   */
+  onItsWay: boolean;
+  /**
+   * Failed, and a Try again can still get it there: the tile's rule
+   * (`describeTile`), which is the server's `isTerminalTranscodeFailure`
+   * turned round.
+   */
+  canRetry: boolean;
+  /** Uploading from this tab: closing it stops the upload. */
+  uploadingHere: boolean;
 }
 
 export type PublishReads = ReturnType<typeof createPublishReads>;
+
+/**
+ * This tab is sending its bytes: by its own queue first, as the status
+ * socket hears of an upload only while it is open, then by the socket's
+ * word for one this tab began.
+ */
+function uploadingHere(
+  mediaId: string,
+  status: string,
+  live: { upload?: { here: boolean } | null } | undefined
+): boolean {
+  const queued = uploadQueue.items.some(
+    (item) =>
+      item.id === mediaId &&
+      (item.status === 'uploading' || item.status === 'completing')
+  );
+  return (
+    queued || (status === MEDIA_STATUS.UPLOADING && live?.upload?.here === true)
+  );
+}
 
 export function createPublishReads(options: PublishReadsOptions) {
   const { values } = options;
@@ -105,14 +141,25 @@ export function createPublishReads(options: PublishReadsOptions) {
         status: mediaRow?.status ?? 'ready',
         deleted: true,
         progress: null,
+        onItsWay: false,
+        canRetry: false,
+        uploadingHere: false,
       };
     }
     if (!mediaRow) return null;
     const live = mediaStatus.items.get(mediaId);
+    const status = live?.lifecycle ?? mediaRow.status;
+    const deleted = mediaRow.deletedAt != null;
+    const failure =
+      status === MEDIA_STATUS.FAILED ? describeTile(mediaRow, live, 0) : null;
     return {
-      status: live?.lifecycle ?? mediaRow.status,
-      deleted: mediaRow.deletedAt != null,
+      status,
+      deleted,
       progress: live?.progress ?? mediaRow.transcodingProgress ?? null,
+      onItsWay:
+        !deleted && isMediaOnItsWay({ status, createdAt: mediaRow.createdAt }),
+      canRetry: !deleted && failure?.kind === 'failed' && failure.canRetry,
+      uploadingHere: !deleted && uploadingHere(mediaId, status, live),
     };
   });
 
