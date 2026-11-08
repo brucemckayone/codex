@@ -63,6 +63,7 @@ import {
   lateTransferOf,
   PAYOUT_ATTEMPT_LEASE_MINUTES,
 } from './payout-ledger';
+import { settlingWinSql } from './settling-win';
 
 interface ClawbackLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
@@ -582,27 +583,6 @@ export async function reverseCharge(
       }
     );
   }
-}
-
-/**
- * A chargeback won and its outcome not yet applied: its creators' pay-back is
- * still being written (Codex-2hxff.70; late-win data design §4.7). A normal
- * win's moments before its re-pay, and a late win's undo, alike. The one rule
- * for both halves of §4.7: support refuses a refund meanwhile
- * (`CHARGEBACK_SETTLING`, by this row check) and a refund's clawback waits
- * for it (`waitForWinToSettle`, by `settlingWinSql`), so the two never
- * disagree.
- */
-export function isSettlingWin(dispute: {
-  status: string;
-  outcomeAppliedAt: Date | null;
-}): boolean {
-  return dispute.status === 'won' && dispute.outcomeAppliedAt === null;
-}
-
-/** `isSettlingWin` in SQL, on `disputes`. */
-function settlingWinSql(): SQL {
-  return sql`(${disputes.status} = 'won' AND ${disputes.outcomeAppliedAt} IS NULL)`;
 }
 
 /**
