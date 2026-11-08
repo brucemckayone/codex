@@ -29,9 +29,12 @@
   import { getBrandingSettings, updateBrandingCommand } from '$lib/remote/branding.remote';
   import { getPublicContent } from '$lib/remote/content.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
   import {
     BrandStudioLayout,
     BrandStudioRail,
+    BrandStudioRailPending,
     BrandStudioCanvas,
     BrandStudioGuided,
     type BrandStudioMode,
@@ -52,6 +55,17 @@
   // Load current branding — the same remote query the old settings/branding
   // page used, so the save/load contract is unchanged.
   const brandingQuery = $derived(orgId ? getBrandingSettings(orgId) : null);
+
+  // The rail is live only once the editor store holds a brand (Codex-zskbp).
+  // Until `open()` runs below, `brandEditor.pending` is null and the store
+  // drops every edit, so the rail would take input that changes nothing. The
+  // gate keys on the store, not on the query: a resolved query opens the store
+  // one effect later. A failed read shows "couldn't load" with Retry instead of
+  // the editor; the canvas stays, showing the saved brand.
+  const editorOpen = $derived(brandEditor.pending !== null);
+  const brandFailed = $derived(
+    connectQueryState(brandingQuery).kind === 'failed'
+  );
 
   // One published content slug for the canvas' Detail/Player previews. Studio
   // is ssr=false, so this reactive remote query resolves client-side. When the
@@ -349,48 +363,63 @@
 
 <BrandStudioLayout {railCollapsed} {fullscreen} onToggleRail={toggleRail}>
   {#snippet rail()}
-    <div class="brand-mode">
-      <div class="brand-mode__toggle" role="group" aria-label="Editor mode">
-        <button
-          type="button"
-          class="brand-mode__btn"
-          class:is-active={mode === 'guided'}
-          aria-pressed={mode === 'guided'}
-          onclick={() => setMode('guided')}
-        >
-          Guided
-        </button>
-        <button
-          type="button"
-          class="brand-mode__btn"
-          class:is-active={mode === 'advanced'}
-          aria-pressed={mode === 'advanced'}
-          onclick={() => setMode('advanced')}
-        >
-          Advanced
-        </button>
-      </div>
+    {#if editorOpen}
+      <div class="brand-mode">
+        <div class="brand-mode__toggle" role="group" aria-label="Editor mode">
+          <button
+            type="button"
+            class="brand-mode__btn"
+            class:is-active={mode === 'guided'}
+            aria-pressed={mode === 'guided'}
+            onclick={() => setMode('guided')}
+          >
+            Guided
+          </button>
+          <button
+            type="button"
+            class="brand-mode__btn"
+            class:is-active={mode === 'advanced'}
+            aria-pressed={mode === 'advanced'}
+            onclick={() => setMode('advanced')}
+          >
+            Advanced
+          </button>
+        </div>
 
-      <div class="brand-mode__view">
-        {#if mode === 'guided'}
-          <BrandStudioGuided
-            {saving}
-            isDirty={brandEditor.isDirty}
-            onsave={handleSave}
-            onopenfulleditor={() => setMode('advanced')}
-            orgName={data.org?.name ?? ''}
-          />
-        {:else}
-          <BrandStudioRail
-            {saving}
-            isDirty={brandEditor.isDirty}
-            onsave={handleSave}
-            orgName={data.org?.name ?? ''}
-            orgDescription={data.org?.description ?? null}
-            onpreviewreload={handleHeroPreviewReload}
-          />
-        {/if}
+        <div class="brand-mode__view">
+          {#if mode === 'guided'}
+            <BrandStudioGuided
+              {saving}
+              isDirty={brandEditor.isDirty}
+              onsave={handleSave}
+              onopenfulleditor={() => setMode('advanced')}
+              orgName={data.org?.name ?? ''}
+            />
+          {:else}
+            <BrandStudioRail
+              {saving}
+              isDirty={brandEditor.isDirty}
+              onsave={handleSave}
+              orgName={data.org?.name ?? ''}
+              orgDescription={data.org?.description ?? null}
+              onpreviewreload={handleHeroPreviewReload}
+            />
+          {/if}
+        </div>
       </div>
+    {:else}
+      <BrandStudioRailPending failed={brandFailed} />
+    {/if}
+    <!-- Mounted unconditionally (see LoadFailedAlert): its status line has to
+         outlive the pending rail to announce a Retry that loads. -->
+    <div class="brand-load-failed">
+      <LoadFailedAlert
+        query={brandingQuery}
+        message={m.branding_load_failed()}
+        againMessage={m.branding_load_failed_again()}
+        loadedMessage={m.branding_load_retry_ok()}
+        data-testid="brand-load-error"
+      />
     </div>
   {/snippet}
   {#snippet canvas()}
@@ -467,5 +496,17 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
+  }
+
+  /* The rail's gutter for the load alert. Its foot is padded only while the
+     alert shows (on a phone the rail ends just below it): once the editor
+     opens, the alert's sr-only status line is all that is left, and this
+     wrapper takes no height under the rail's footer. */
+  .brand-load-failed {
+    padding-inline: var(--space-4);
+  }
+
+  .brand-load-failed:has(:global(.load-failed)) {
+    padding-block-end: var(--space-4);
   }
 </style>

@@ -17,6 +17,8 @@
     the alert, so a repeat of identical text is still read out.
   - A Retry that loads it moves focus to a status line that says so, because
     the alert unmounts with the focused button inside it.
+  - The outcome is judged on the query the page holds once Retry has run,
+    which is not always the one it refreshed (see `heldRead`).
 
   MOUNT IT UNCONDITIONALLY, beside the list it stands in for. It renders
   nothing visible until `query` fails, and its status line has to persist for
@@ -33,8 +35,14 @@
   import { connectQueryState } from '$lib/utils/connect-readiness';
 
   interface Props {
-    /** The list's remote query. `null` while it isn't being made. */
-    query: (QueryResult<unknown> & { refresh: () => Promise<unknown> }) | null;
+    /**
+     * The list's remote query. `null` while it isn't being made. A kit query
+     * is a promise of its read, which `heldRead` awaits.
+     */
+    query:
+      | (QueryResult<unknown> &
+          PromiseLike<unknown> & { refresh: () => Promise<unknown> })
+      | null;
     /** "We couldn't load your …." */
     message: string;
     /** "We still couldn't load your …." after a Retry that failed. */
@@ -73,10 +81,32 @@
     } catch {
       // Kept on `query.error`; see above.
     }
+    await heldRead();
     outcome = failed ? 'failed' : 'ok';
     retrying = false;
     await tick();
     (outcome === 'ok' ? statusNode : alertNode)?.focus();
+  }
+
+  /**
+   * Waits for the read of the query the page holds NOW, while it is loading.
+   *
+   * Pages derive their query (`$derived(getX(id))`), and kit drops a FAILED
+   * query from its cache (2.55, `create_remote_function`). So `refresh()`
+   * re-runs the page's derivation, which is handed a NEW query, still
+   * loading, with a read of its own; the refreshed one settles separately.
+   * Judged at that point, a Retry that failed again counted as a success:
+   * the first message stayed and focus went to an empty status line
+   * (Codex-zskbp).
+   */
+  async function heldRead() {
+    const held = query;
+    if (!held?.loading) return;
+    try {
+      await held;
+    } catch {
+      // Kept on `held.error`, which `failed` reads.
+    }
   }
 </script>
 
@@ -89,7 +119,9 @@
 >
   {outcome === 'ok' && !failed ? loadedMessage : ''}
 </p>
-{#if failed}
+<!-- Kept while a Retry runs: the page can be handed a new query that is still
+     loading (see heldRead), and unmounting would drop the focused button. -->
+{#if failed || retrying}
   <div bind:this={alertNode} class="load-failed" tabindex="-1">
     <Alert variant="error" data-testid={testId} aria-busy={retrying}>
       <div class="load-failed__row">
