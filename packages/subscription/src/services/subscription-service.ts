@@ -6942,7 +6942,12 @@ export class SubscriptionService extends BaseService {
    *     which only a lost chargeback writes): the day its cancellation was
    *     done.
    * Each side is scoped by the row it describes, as `takenBackFor` is: the
-   * share by its own payee or organisation, the re-pay row by its own.
+   * share by its own payee or organisation, the re-pay row by its own. An
+   * organisation's re-pay row also needs its share in the organisation:
+   * `paysBack`'s title is read through the share's sale. A re-pay copies its
+   * share's organisation (@codex/payments `insertRepayRow`), so this drops
+   * nothing, but it no longer rests on that alone. Not a payee's: a re-homed
+   * re-pay's payee can differ from its share's.
    */
   private async disputeLinesFor(
     scope: { userId: string } | { organizationId: string },
@@ -6969,7 +6974,7 @@ export class SubscriptionService extends BaseService {
     const repayScope =
       'userId' in scope
         ? eq(repay.userId, scope.userId)
-        : eq(repay.organizationId, scope.organizationId);
+        : sql`(${eq(repay.organizationId, scope.organizationId)} AND ${eq(payouts.organizationId, scope.organizationId)})`;
     const onShare = sql<boolean>`(${inArray(payoutReversals.payoutId, ids)} AND ${shareScope})`;
     const onRepay = sql<boolean>`(${inArray(payoutReversals.repaidByPayoutId, ids)} AND ${repayScope})`;
     const steps = await this.db

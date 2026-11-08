@@ -469,6 +469,38 @@ describe('the payout lists after a won chargeback', () => {
     expect(own.paidBack.size).toBe(1);
   });
 
+  it("an organisation's pay-back line needs its share in the organisation too: a re-pay row linked to another organisation's share names nothing (defence in depth)", async () => {
+    const theirOrg = await organisation();
+    const ourOrg = await organisation();
+    const maya = await person();
+    const sale = await wonLateSale(theirOrg, maya, 'Their Sale');
+    const theirShareValues = reversedShare(theirOrg, maya, sale);
+    const theirShare = await row(theirShareValues);
+    // A re-pay row in our organisation, linked to their share: no writer
+    // makes one (a re-pay copies its share's organisation), so by hand.
+    const ourRepay = await repayOf(theirShareValues, {
+      organizationId: ourOrg,
+    });
+    await step(theirShare, sale.disputeId, { repaidByPayoutId: ourRepay });
+    const reader = service() as unknown as {
+      disputeLinesFor(
+        scope: { userId: string } | { organizationId: string },
+        rows: Array<{ id: string; status: string }>
+      ): Promise<{ paysBack: Map<string, unknown> }>;
+    };
+    const ours = [{ id: ourRepay, status: 'pending' }];
+
+    const lines = await reader.disputeLinesFor(
+      { organizationId: ourOrg },
+      ours
+    );
+    expect(lines.paysBack.size).toBe(0);
+    // The payee's scope is the re-pay row's own, as before: a re-homed
+    // re-pay's payee can differ from its share's.
+    const payee = await reader.disputeLinesFor({ userId: maya }, ours);
+    expect(payee.paysBack.get(ourRepay)).toMatchObject({ title: 'Their Sale' });
+  });
+
   it('Org Payouts: a reversed row says when it was taken back and why, refund or chargeback, late win or not (P0, P1)', async () => {
     const orgId = await organisation();
     const hannah = await person();
