@@ -472,8 +472,8 @@ SQL Editor, with the dispute's id (`du_…`, from the alert) in place of `du_…
    (:00) has passed. `outcome_applied_at` and `refunded_outside_stripe_at`
    must be set, `late_win_refund_id` still empty, and every re-pay row
    `cancelled_by_refund` with no transfer. In Stripe, the charge must still have
-   no refund, and no "Late win: Stripe refused…" alert can have named the
-   dispute since step 2. If `late_win_refund_id` is set, or Stripe shows a
+   no refund, and no late-win refund alert (either wording above) can have
+   named the dispute since step 2. If `late_win_refund_id` is set, or Stripe shows a
    refund, a run already in flight refunded the buyer after all. **Don't refund
    them another way**, and take it to the owner. That refund's clawback finds
    the re-pay rows cancelled and records `slice_repaid` debts for a person.
