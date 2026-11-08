@@ -1163,7 +1163,11 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         item: { kind: 'content', id: item.id, deleted: false },
       });
       expect(detail.buyer.userId).toBe(buyerId);
-      expect(detail.refundable).toEqual({ maxCents: 700, blocked: null });
+      expect(detail.refundable).toEqual({
+        maxCents: 700,
+        blocked: null,
+        refundedOutsideStripeOn: null,
+      });
       expect(detail.refundCount).toBe(2);
       expect(detail.window.isOpen).toBe(true);
       expect(detail.slices.map((row) => row.payoutType)).toEqual([
@@ -1354,7 +1358,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         expect(error.statusCode).toBe(422);
         expect(error.context).toEqual({ code: 'CHARGEBACK_SETTLING' });
         expect(error.message).toBe(
-          "This payment's chargeback was just decided for us, and the creators are being paid back. Try the refund again in an hour."
+          "This payment's chargeback was decided for us, and the creators are still being paid back. Refunds wait until that finishes; a step that fails is retried every hour."
         );
       }
       expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
@@ -1564,7 +1568,11 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         isOpen: true,
         liftedByLateWin: true,
       });
-      expect(detail.refundable).toEqual({ maxCents: 1000, blocked: null });
+      expect(detail.refundable).toEqual({
+        maxCents: 1000,
+        blocked: null,
+        refundedOutsideStripeOn: null,
+      });
       expect(found.items).toEqual([
         expect.objectContaining({
           chargeId,
@@ -1671,6 +1679,77 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       });
       expect(detail.window.liftedByLateWin).toBe(true);
       expect(detail.refundable.blocked).toBeNull();
+    });
+  });
+
+  describe('a charge settled by hand and refunded outside Stripe (owner decision 2026-11-08)', () => {
+    /**
+     * operations.md's settle of a late-win refund Stripe won't make: the
+     * late win marked applied, and `refunded_outside_stripe_at` written with
+     * it. The buyer is refunded another way, so Stripe never refunds it.
+     */
+    async function settledByHand(chargeId: string, purchaseId: string) {
+      const late = await lateWin(chargeId, purchaseId, { undone: true });
+      const at = new Date(Date.now() - 30_000);
+      await db
+        .update(disputes)
+        .set({ refundedOutsideStripeAt: at })
+        .where(eq(disputes.stripeDisputeId, late.id));
+      return at;
+    }
+
+    it('past the 14 days: the late win lifts nothing, and the detail, the preview and the route all refuse it; nothing reaches Stripe', async () => {
+      const { chargeId, purchase } = await purchaseCharge(30 * DAY);
+      const at = await settledByHand(chargeId, purchase.id);
+
+      const detail = await service.getChargeDetail(chargeId);
+      const found = await service.searchCharges({
+        lookup: purchase.id,
+        page: 1,
+        limit: 20,
+      });
+      const preview = await failureOf(service.previewRefund(chargeId, 100));
+      const route = await failureOf(
+        service.issueRefund(chargeId, refundInput(100), supportId)
+      );
+
+      expect(detail.refundable).toEqual({
+        maxCents: 1000,
+        blocked: 'refunded_outside_stripe',
+        refundedOutsideStripeOn: at.toISOString(),
+      });
+      expect(detail.window).toMatchObject({
+        isOpen: false,
+        liftedByLateWin: false,
+      });
+      expect(found.items[0]?.window).toMatchObject({
+        isOpen: false,
+        liftedByLateWin: false,
+      });
+      for (const error of [preview, route]) {
+        expect(error.statusCode).toBe(422);
+        expect(error.context).toEqual({
+          code: 'REFUNDED_OUTSIDE_STRIPE',
+          refundedOutsideStripeAt: at.toISOString(),
+        });
+      }
+      expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
+    });
+
+    it('inside the 14 days it still comes first: the open window offers nothing, and the route refuses', async () => {
+      const { chargeId, purchase } = await purchaseCharge();
+      const at = await settledByHand(chargeId, purchase.id);
+
+      const detail = await service.getChargeDetail(chargeId);
+      const route = await failureOf(
+        service.issueRefund(chargeId, refundInput(100), supportId)
+      );
+
+      expect(detail.window.isOpen).toBe(true);
+      expect(detail.refundable.blocked).toBe('refunded_outside_stripe');
+      expect(detail.refundable.refundedOutsideStripeOn).toBe(at.toISOString());
+      expect(route.context).toMatchObject({ code: 'REFUNDED_OUTSIDE_STRIPE' });
+      expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
     });
   });
 

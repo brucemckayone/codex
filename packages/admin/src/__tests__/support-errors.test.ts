@@ -9,10 +9,12 @@
 
 import { mapErrorToResponse } from '@codex/service-errors';
 import { describe, expect, it } from 'vitest';
-import { ChargebackSettlingError } from '../errors';
+import { ChargebackSettlingError, RefundedOutsideStripeError } from '../errors';
 
 describe('ChargebackSettlingError', () => {
-  it("is a 422 whose details carry CHARGEBACK_SETTLING, with the design's message word for word", () => {
+  // The design's message promised "an hour", which a refund Stripe won't
+  // make outlasts; review cycle 1 (M3) reworded it to stay true.
+  it('is a 422 whose details carry CHARGEBACK_SETTLING, and promises no time', () => {
     expect(
       mapErrorToResponse(new ChargebackSettlingError(), { logError: false })
     ).toEqual({
@@ -21,8 +23,34 @@ describe('ChargebackSettlingError', () => {
         error: {
           code: 'BUSINESS_LOGIC_ERROR',
           message:
-            "This payment's chargeback was just decided for us, and the creators are being paid back. Try the refund again in an hour.",
+            "This payment's chargeback was decided for us, and the creators are still being paid back. Refunds wait until that finishes; a step that fails is retried every hour.",
           details: { code: 'CHARGEBACK_SETTLING' },
+        },
+      },
+    });
+  });
+});
+
+describe('RefundedOutsideStripeError', () => {
+  // A charge support settled by hand (owner decision 2026-11-08, "Block it
+  // in code"): its details carry the code and the date, nothing else.
+  it('is a 422 whose details carry REFUNDED_OUTSIDE_STRIPE and when', () => {
+    const at = new Date('2026-11-08T14:00:00.000Z');
+    expect(
+      mapErrorToResponse(new RefundedOutsideStripeError(at), {
+        logError: false,
+      })
+    ).toEqual({
+      statusCode: 422,
+      response: {
+        error: {
+          code: 'BUSINESS_LOGIC_ERROR',
+          message:
+            "This payment was refunded outside Stripe, so it can't be refunded here.",
+          details: {
+            code: 'REFUNDED_OUTSIDE_STRIPE',
+            refundedOutsideStripeAt: '2026-11-08T14:00:00.000Z',
+          },
         },
       },
     });

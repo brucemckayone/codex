@@ -171,6 +171,7 @@ export {
   NotFoundError,
   NothingLeftToRefundError,
   RefundAmountTooLargeError,
+  RefundedOutsideStripeError,
   RefundInFlightError,
   RefundKeySpentError,
   RefundWindowClosedError,
