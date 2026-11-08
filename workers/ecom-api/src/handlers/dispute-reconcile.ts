@@ -53,7 +53,9 @@
  * development share one Stripe sandbox).
  *
  * Never throws: each source, each page of events and each dispute fails on its
- * own, and is logged at error with an errorId.
+ * own, and is logged at error with an errorId. A late win's refund that Stripe
+ * did not make is the one exception: its own step alerts it at error, and the
+ * reconcile adds a warn, so each attempt alerts once.
  */
 
 import {
@@ -62,6 +64,7 @@ import {
   DISPUTE_INQUIRY_STATUSES,
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
+import { LateWinRefundRefusedError } from '@codex/purchase';
 import type Stripe from 'stripe';
 import { describeRootCause } from '../utils/error-classification';
 import {
@@ -92,6 +95,47 @@ export const LATE_WIN_PAGE_SIZE = 100;
 export const LATE_WIN_MAX_PAGES = 3;
 
 const TRIGGER = 'dispute reconcile';
+
+/**
+ * A dispute the reconcile could not settle, logged once. A late win's refund
+ * that Stripe did not make is alerted at error by its own step
+ * (payment-webhook.ts `refundFirstPayment`), with what Stripe answered, so a
+ * second alert here would only repeat it (Codex-2hxff.70): one warn, ids
+ * only. Any other failure is alerted at error with an errorId and the
+ * innermost error (`describeRootCause`), since a service's wrap names only
+ * itself.
+ */
+function logUnsettled(
+  obs: ObservabilityClient,
+  disputeId: string,
+  live: Stripe.Dispute,
+  error: unknown
+): void {
+  if (error instanceof LateWinRefundRefusedError) {
+    obs.warn(
+      "A late win's settle stopped at its refund, which the refund step has already alerted; the next run retries it",
+      {
+        disputeId,
+        purchaseId: error.context?.purchaseId ?? null,
+        chargeId:
+          typeof live.charge === 'string'
+            ? live.charge
+            : (live.charge?.id ?? null),
+      }
+    );
+    return;
+  }
+  obs.error(
+    'A dispute could not be settled by the hourly reconcile; the next run retries it',
+    {
+      errorId: crypto.randomUUID(),
+      disputeId,
+      status: live.status,
+      error: error instanceof Error ? error.message : String(error),
+      cause: describeRootCause(error),
+    }
+  );
+}
 
 export interface DisputeReconcileDeps extends DisputeDeps {
   obs: ObservabilityClient;
@@ -168,19 +212,7 @@ export async function runDisputeReconcile(
       }
     } catch (error) {
       result.failed++;
-      // A service's wrap names only itself (a late win's refund reads
-      // "refused" whatever Stripe answered): the innermost error says what
-      // went wrong, as the webhook's own alert logs it.
-      obs.error(
-        'A dispute could not be settled by the hourly reconcile; the next run retries it',
-        {
-          errorId: crypto.randomUUID(),
-          disputeId,
-          status: live.status,
-          error: error instanceof Error ? error.message : String(error),
-          cause: describeRootCause(error),
-        }
-      );
+      logUnsettled(obs, disputeId, live, error);
     }
   };
 

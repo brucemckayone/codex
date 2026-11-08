@@ -970,8 +970,9 @@ describe('runDisputeReconcile', () => {
       expect(result).toMatchObject({ fromEvents: 1, acted: 1, failed: 0 });
     });
 
-    it("a late win whose refund Stripe could not make is alerted with the innermost error, not only the wrap's words, and left unapplied for the next run", async () => {
-      const { rows, purchase } = ledger([
+    /** A late win being undone, as source 2 retries it. */
+    const undoingRow = () =>
+      ledger([
         {
           stripeDisputeId: 'dp_undoing',
           status: 'won',
@@ -979,6 +980,13 @@ describe('runDisputeReconcile', () => {
           outcomeAppliedAt: null,
         },
       ]);
+    const UNSETTLED =
+      'A dispute could not be settled by the hourly reconcile; the next run retries it';
+    const STOPPED_AT_REFUND =
+      "A late win's settle stopped at its refund, which the refund step has already alerted; the next run retries it";
+
+    it('a late win whose refund Stripe could not make alerts ONCE per attempt, from its refund step; the settle adds one warn with ids only, and the row is left unapplied', async () => {
+      const { rows, purchase } = undoingRow();
       purchase.restoreAfterLateWin.mockResolvedValueOnce({
         outcome: 'rebought',
         userId: 'user_1',
@@ -995,11 +1003,7 @@ describe('runDisputeReconcile', () => {
             stripeType: 'StripeConnectionError',
             stripeStatusCode: null,
           },
-          {
-            cause: Object.assign(new Error('connection reset (test)'), {
-              code: 'ECONNRESET',
-            }),
-          }
+          { cause: new Error('connection reset (test)') }
         )
       );
       const stripe = stripeStub({ disputes: [dispute('dp_undoing', 'won')] });
@@ -1008,19 +1012,48 @@ describe('runDisputeReconcile', () => {
       const result = await run();
 
       expect(result).toMatchObject({ fromRows: 1, acted: 0, failed: 1 });
-      expect(obs.error).toHaveBeenCalledWith(
-        'A dispute could not be settled by the hourly reconcile; the next run retries it',
-        {
-          errorId: expect.any(String),
-          disputeId: 'dp_undoing',
-          status: 'won',
-          error: expect.any(String),
-          cause: {
-            name: 'Error',
-            message: 'connection reset (test)',
+      // The step's alert is the only error: never the settle's as well.
+      expect(obs.error).toHaveBeenCalledExactlyOnceWith(
+        'Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded. Nothing is marked; it is retried hourly',
+        expect.objectContaining({ errorId: expect.any(String) })
+      );
+      expect(obs.warn).toHaveBeenCalledExactlyOnceWith(STOPPED_AT_REFUND, {
+        disputeId: 'dp_undoing',
+        purchaseId: 'purchase_1',
+        chargeId: 'ch_dp_undoing',
+      });
+      expect(rows.get('dp_undoing')?.outcomeAppliedAt).toBeNull();
+    });
+
+    it("any other failure of a late win's settle is still alerted at error, with the innermost error, not only the wrap's words", async () => {
+      const { rows, purchase } = undoingRow();
+      purchase.repayWonDispute.mockRejectedValueOnce(
+        new Error('An unexpected error occurred (test)', {
+          cause: Object.assign(new Error('connection reset (test)'), {
             code: 'ECONNRESET',
-          },
-        }
+          }),
+        })
+      );
+      const stripe = stripeStub({ disputes: [dispute('dp_undoing', 'won')] });
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      const result = await run();
+
+      expect(result).toMatchObject({ fromRows: 1, acted: 0, failed: 1 });
+      expect(obs.error).toHaveBeenCalledExactlyOnceWith(UNSETTLED, {
+        errorId: expect.any(String),
+        disputeId: 'dp_undoing',
+        status: 'won',
+        error: 'An unexpected error occurred (test)',
+        cause: {
+          name: 'Error',
+          message: 'connection reset (test)',
+          code: 'ECONNRESET',
+        },
+      });
+      expect(obs.warn).not.toHaveBeenCalledWith(
+        STOPPED_AT_REFUND,
+        expect.anything()
       );
       expect(rows.get('dp_undoing')?.outcomeAppliedAt).toBeNull();
     });
