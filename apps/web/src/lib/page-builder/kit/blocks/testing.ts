@@ -1,9 +1,11 @@
 /**
  * Reads a block component's style block, or a kit sheet, for the source
  * tests: each rule with its declarations and the at-rules it sits in, through
- * svelte's own parser (which drops the comments). Imported by tests only.
+ * svelte's own parser (which drops the comments between declarations; those
+ * inside a value are stripped here). Imported by tests only.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parse, parseCss } from 'svelte/compiler';
 
 type CssNode = {
@@ -48,6 +50,17 @@ export function sheetRules(path: string): CssRule[] {
 /** The same, for a sheet's text. */
 export function cssRules(source: string): CssRule[] {
   return rulesOf(source, parseCss(source).children);
+}
+
+/**
+ * The text of every stylesheet under `$lib`, all global, read from disk: under
+ * vitest a `?raw` CSS import is an empty string.
+ */
+export function libSheets(): string[] {
+  const lib = join(import.meta.dirname, '..', '..', '..');
+  return readdirSync(lib, { recursive: true, encoding: 'utf8' })
+    .filter((path) => path.endsWith('.css'))
+    .map((path) => readFileSync(join(lib, path), 'utf8'));
 }
 
 function rulesOf(

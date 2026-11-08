@@ -67,7 +67,7 @@ function scale(file: keyof typeof SCALE_BLOCK): Rung[] {
       if (node.type === 'Atrule') {
         // A registered initial value stands in wherever the block does not
         // reach, and replaces every fallback: a declaration of its own.
-        const registered = node.prelude.trim();
+        const registered = node.prelude.replace(/\/\*[\s\S]*?\*\//g, '').trim();
         if (
           node.name === 'property' &&
           (registered.startsWith('--space-') || UNIT.includes(registered))
