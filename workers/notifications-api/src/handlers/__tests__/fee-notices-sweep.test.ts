@@ -38,6 +38,7 @@ import {
   affectedPayees,
   dbFeeVersionReader,
   feeRiseStartAfter,
+  lockFeeLevel,
   lockFeeNotices,
   queueSmallerFeeNotices,
   readFeeVersionsByLevel,
@@ -2017,14 +2018,16 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     try {
       const cancel = registry.feeConfig.cancelChange(changeId, admin.id);
       await waitingOnLock('%INSERT INTO "fee_change_notices"%cancelled%');
-      // A run starts in the middle of the cancel, and gets as far as its
-      // dates step, which waits for the cancel.
-      const morning = run(changeId, NOV_4, mailer);
-      await waitingOnLock('%from "fee_changes"%for update%');
+      // A run starts in the middle of the cancel and ends inside it: its
+      // joiners wait past the bound and are put off, so the change is not
+      // dated this run either (commerce delta4), and nothing waits on it.
+      expect(await run(changeId, NOV_4, mailer)).toMatchObject({
+        sent: 0,
+        deferred: 1,
+      });
       release();
       await holder;
       await cancel;
-      await morning;
     } finally {
       release();
       await closeRegistry();
@@ -2439,14 +2442,15 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       );
       await waitingOnLock('%INSERT INTO "fee_change_notices"%smaller%');
       // A run in the middle of the cut: Yan's notice is locked, so passed by.
-      // It gets as far as its dates step, which waits for the cut (its
-      // inserts hold the change row).
-      const morning = run(changeId, new Date(), during);
-      await waitingOnLock('%from "fee_changes"%for update%');
+      // It ends inside the cut: its joiners wait past the bound and are put
+      // off, so the change is not dated this run either (commerce delta4).
+      expect(await run(changeId, new Date(), during)).toMatchObject({
+        sent: 0,
+        deferred: 1,
+      });
       release();
       await holder;
       await cut;
-      expect(await morning).toMatchObject({ sent: 0 });
     } finally {
       release();
       await closeRegistry();
@@ -2766,5 +2770,312 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     expect(JSON.stringify(mailFor(next, jo.id)[0]?.data)).toContain(
       formatPercent(1300)
     );
+  });
+
+  // ── Review final, commerce delta4 + silent delta3: no date past a skipped
+  // joiners step, and every lock a part waits for bounded ─────────────────
+
+  /** The tests' own bound on a run: one that hangs fails, never stalls. */
+  const RUN_BOUND_MS = 30_000;
+
+  /** `running`'s result, or a failure once RUN_BOUND_MS pass without one. */
+  async function within<T>(running: Promise<T>, what: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        running,
+        new Promise<never>((_, fail) => {
+          timer = setTimeout(
+            () => fail(new Error(`${what} did not end in ${RUN_BOUND_MS} ms`)),
+            RUN_BOUND_MS
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  type HeldTx = Parameters<Parameters<DatabaseWs['transaction']>[0]>[0];
+
+  /**
+   * A second connection that takes `lock` and holds it, uncommitted, as an
+   * edit stuck open would; `done` lets go (rolls back), once.
+   */
+  async function heldOpen(lock: (tx: HeldTx) => Promise<unknown>) {
+    let release = () => {};
+    const released = new Promise<void>((go) => {
+      release = go;
+    });
+    let holding = () => {};
+    const held = new Promise<void>((go) => {
+      holding = go;
+    });
+    const holder = db
+      .transaction(async (tx) => {
+        await lock(tx);
+        holding();
+        await released;
+        tx.rollback();
+      })
+      .catch(() => {});
+    await Promise.race([held, holder]);
+    let ended: Promise<void> | undefined;
+    return {
+      done: () => {
+        ended ??= (async () => {
+          release();
+          await holder;
+        })();
+        return ended;
+      },
+    };
+  }
+
+  it('a rise whose joiners step was put off is not dated that run: the set-aside person affected again is back the next morning, and the 30 days count from them (commerce delta4)', async () => {
+    const quin = await person('Quin Told');
+    const pia = await person('Pia Back');
+    const rae = await person('Rae Late');
+    const admin = await person('Ari Admin');
+    const org = await organisation(quin.id, pia.id, rae.id);
+    const changeId = await rise(org);
+    const today = Date.now();
+    const refused: FeeNoticeDelivery = { accepted: false, status: 422 };
+    // Two mornings ago Quin was told; Pia's and Rae's emails were refused.
+    await run(
+      changeId,
+      new Date(today - 50 * HOUR),
+      mailerAnswering({ [pia.id]: refused, [rae.id]: refused })
+    );
+    // Yesterday Pia had left, so she was set aside; Rae was refused again.
+    await db
+      .delete(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, org),
+          eq(organizationMemberships.userId, pia.id)
+        )
+      );
+    await run(
+      changeId,
+      new Date(today - 26 * HOUR),
+      mailerAnswering({ [rae.id]: refused })
+    );
+    expect(await kindOf(changeId, pia.id, 'announce')).toMatchObject({
+      state: 'not_needed',
+    });
+    // Pia is back: the rise affects her again.
+    await join(org, pia.id);
+
+    // This morning a cut is held open past the joiners' wait, then ends
+    // just before the claim; Rae is told, so the rise is otherwise ready.
+    const cut = await cutHeldOpen(changeId, org, admin.id, quin.id);
+    let morning: Awaited<ReturnType<typeof runFeeNoticesSweep>> | undefined;
+    try {
+      morning = await within(
+        runFeeNoticesSweep({
+          db: beforeClaim(() => cut.done()),
+          obs,
+          environment: 'development',
+          workerSecret: 'unused',
+          notificationsUrl: 'http://unused.test',
+          now: new Date(today),
+          mailer: mailerAnswering(),
+          templateExists: async () => true,
+          onlyChanges: [changeId],
+        }),
+        'the morning with the cut'
+      );
+    } finally {
+      await cut.done();
+    }
+    expect(morning).toMatchObject({ dated: 0, deferred: 1, errors: 0 });
+    expect(await kindOf(changeId, rae.id, 'announce')).toMatchObject({
+      state: 'sent',
+    });
+    expect(await kindOf(changeId, pia.id, 'announce')).toMatchObject({
+      state: 'not_needed',
+    });
+    expect((await changeOf(changeId))?.effectiveFrom).toBeNull();
+    expect(obsLog.info).toHaveBeenCalledWith(
+      'fee step: a rise is dated no sooner than the next morning: its joiners step was put off or failed',
+      { changeId }
+    );
+
+    // The next morning Pia is back on the list and told, and the 30 days
+    // count from her.
+    const nextMorning = new Date(today + 22 * HOUR);
+    const next = mailerAnswering();
+    expect(await run(changeId, nextMorning, next)).toMatchObject({
+      dated: 1,
+      deferred: 0,
+    });
+    expect(mailFor(next, pia.id)).toHaveLength(1);
+    expect(await kindOf(changeId, pia.id, 'announce')).toMatchObject({
+      state: 'sent',
+      acceptedAt: nextMorning,
+    });
+    expect((await changeOf(changeId))?.effectiveFrom).toEqual(
+      feeRiseStartAfter(nextMorning)
+    );
+  });
+
+  it('joiners put off on a rise that starts before the next run are an error, to tell them by hand (commerce delta4)', async () => {
+    const uma = await person('Uma Told');
+    const jo = await person('Jo Joiner');
+    const { org, changeId } = await toldThenJoined(uma.id, jo.id);
+    // Dated to start before the next morning's run.
+    const now = new Date();
+    const startsOn = new Date(now.getTime() + 12 * HOUR);
+    await db
+      .update(feeChanges)
+      .set({ effectiveFrom: startsOn })
+      .where(eq(feeChanges.id, changeId));
+    // A save at the level stuck open past the joiners' wait.
+    const level = await heldOpen((tx) =>
+      lockFeeLevel(tx, { scope: 'org', organizationId: org })
+    );
+    try {
+      expect(
+        await within(run(changeId, now, mailerAnswering()), 'the run')
+      ).toMatchObject({ joinersAdded: 0, deferred: 1, errors: 0 });
+    } finally {
+      await level.done();
+    }
+
+    const errors = obsLog.error.mock.calls.filter(
+      ([message, context]) =>
+        String(message).startsWith(
+          'fee step: a fee rise that starts before the next run was being edited past the wait'
+        ) && (context as { changeId?: string }).changeId === changeId
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.[1]).toEqual({
+      errorId: expect.any(String),
+      changeId,
+      effectiveFrom: startsOn.toISOString(),
+      waitedMs: 5_000,
+    });
+    expect(obsLog.warn).not.toHaveBeenCalledWith(
+      'fee step: a fee rise was being edited past the wait; its joiners are added the next morning',
+      { changeId, waitedMs: 5_000 }
+    );
+    expect(await kindOf(changeId, jo.id, 'announce')).toBeUndefined();
+  });
+
+  it('every lock a later part waits for is bounded: a list, a date and an old row each held past the wait are put off, and the run still reaches its alert and its summary (silent delta3)', async () => {
+    // A rise not yet listed, its row held as an edit's first lock holds it.
+    const wen = await person('Wen Unlisted');
+    const unlisted = await rise(await organisation(wen.id));
+    // A waiting rise: Quin told, Val refused, so the alert names Val.
+    const quin = await person('Quin Told');
+    const val = await person('Val Refused');
+    const admin = await person('Ari Admin');
+    const org = await organisation(quin.id, val.id);
+    const waiting = await rise(org);
+    await run(
+      waiting,
+      new Date(Date.now() - 26 * HOUR),
+      mailerAnswering({ [val.id]: { accepted: false, status: 422 } })
+    );
+    // A rise started elsewhere, its old fee row not yet written.
+    const startedOrg = await organisation();
+    const [began] = await db
+      .insert(feeChanges)
+      .values({
+        scope: 'org',
+        organizationId: startedOrg,
+        kind: 'rise',
+        firstRunAt: new Date(Date.now() - 40 * 24 * HOUR),
+        listedCount: 0,
+        effectiveFrom: new Date(Date.now() - HOUR),
+      })
+      .returning({ id: feeChanges.id });
+    if (!began) throw new Error('started rise not inserted');
+    await db.insert(feeConfigVersions).values({
+      changeId: began.id,
+      scope: 'org',
+      orgFeePercent: 1500,
+    });
+    const onlyChanges = [unlisted, waiting, began.id];
+    const alertsBefore = alertsNaming(val.id).length;
+
+    const list = await heldOpen((tx) =>
+      lockFeeNotices(tx, { changeId: unlisted })
+    );
+    const level = await heldOpen((tx) =>
+      lockFeeLevel(tx, { scope: 'org', organizationId: startedOrg })
+    );
+    // The waiting rise's cut starts once its joiners are done, and sticks.
+    let cut: { done: () => Promise<void> } | undefined;
+    const running = runFeeNoticesSweep({
+      db: beforeClaim(async () => {
+        cut = await cutHeldOpen(waiting, org, admin.id, quin.id);
+      }),
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      mailer: mailerAnswering(),
+      templateExists: async () => true,
+      onlyChanges,
+    });
+    let result: Awaited<typeof running> | undefined;
+    try {
+      result = await within(running, 'the run with three parts held');
+    } finally {
+      // A run that hung ends once they let go, before the next test; a cut
+      // it only reaches on the way is let go after.
+      await list.done();
+      await level.done();
+      await cut?.done();
+      await running;
+      await cut?.done();
+    }
+
+    expect(result).toMatchObject({
+      listsMade: 0,
+      dated: 0,
+      mirrored: 0,
+      deferred: 3,
+      errors: 0,
+    });
+    for (const [message, context] of [
+      [
+        'fee step: a fee rise was being edited past the wait; its list is made the next morning',
+        { changeId: unlisted },
+      ],
+      [
+        'fee step: a fee rise was being edited past the wait; it is dated the next morning at the earliest',
+        { changeId: waiting },
+      ],
+      [
+        'fee step: a fee level was being edited past the wait; its old fee row is written the next morning',
+        { scope: 'org', organizationId: startedOrg },
+      ],
+    ] as const) {
+      expect(obsLog.warn).toHaveBeenCalledWith(message, {
+        ...context,
+        waitedMs: 5_000,
+      });
+    }
+    // The alert ran, and so did the summary, with what was put off.
+    expect(alertsNaming(val.id).length).toBe(alertsBefore + 1);
+    expect(obsLog.info).toHaveBeenCalledWith('fee step completed', result);
+
+    // Nothing is left half-done: the next morning does all three.
+    expect(
+      await runFeeNoticesSweep({
+        db,
+        obs,
+        environment: 'development',
+        workerSecret: 'unused',
+        notificationsUrl: 'http://unused.test',
+        now: new Date(Date.now() + 22 * HOUR),
+        mailer: mailerAnswering(),
+        templateExists: async () => true,
+        onlyChanges,
+      })
+    ).toMatchObject({ listsMade: 1, mirrored: 1, deferred: 0, errors: 0 });
   });
 });
