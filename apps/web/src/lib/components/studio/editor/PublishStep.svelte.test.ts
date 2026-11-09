@@ -19,6 +19,7 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { takeLiveHandoff } from './live-handoff';
 import { REREAD_DELAYS_MS } from './publish-schedule.svelte';
 
 const MEDIA_ID = '6b000000-0000-4000-8000-000000000001';
@@ -162,6 +163,8 @@ type Move = {
 };
 const nav = vi.hoisted(() => ({
   goto: vi.fn(),
+  // kit's: it refreshes the route's reads, never this step's schedule row.
+  invalidateAll: vi.fn(async () => {}),
   guards: [] as ((move: Move) => void)[],
 }));
 vi.mock('$app/navigation', () => ({
@@ -169,6 +172,7 @@ vi.mock('$app/navigation', () => ({
   afterNavigate: () => {},
   replaceState: () => {},
   goto: (...args: unknown[]) => nav.goto(...args),
+  invalidateAll: () => nav.invalidateAll(),
 }));
 /** A move kit already has under way: `to` while it loads. */
 const moving = vi.hoisted(() => ({ to: null as unknown }));
@@ -1389,6 +1393,11 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
     const back = document.querySelector('a[href="/studio/content/c1/edit"]');
     expect(back).not.toBeNull();
     expect(insideInert(back)).toBe(false);
+    // Frozen, the notice is the one voice: the schedule's region says
+    // nothing of the banner that went (the round-4 review).
+    expect(notice()).not.toContain(
+      m.studio_publish_live({ title: 'Svelte runes deep dive' })
+    );
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
     expect(remotes.saveContent).not.toHaveBeenCalled();
   });
@@ -2235,5 +2244,44 @@ describe('PublishStep · it went live by another way', () => {
     );
     expect(open).not.toBeUndefined();
     expect(insideInert(open)).toBe(false);
+  });
+
+  // The page's refresh never moves this step's read (the schedule's row):
+  // the move changes the step, which reads again, so it is not gated on
+  // that read (the round-4 review; round 3's gate failed every press here).
+  test('Open it to update opens it from Publish, with the changes', async () => {
+    const was = location.href;
+    history.replaceState(null, '', '/studio/content/c1/edit?step=publish');
+    try {
+      render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+      remotes.readPublishState.mockResolvedValue({
+        status: 'published',
+        publishedAt: new Date(),
+        publishRequestedAt: null,
+        publishBlockedReason: null,
+        slug: 'runes-explained',
+      });
+      remotes.saveContent.mockRejectedValueOnce({
+        status: 409,
+        body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+      });
+      choose('free');
+      await vi.advanceTimersByTimeAsync(SETTLE_MS);
+
+      [...document.querySelectorAll('button')]
+        .find((b) => b.textContent?.includes(m.studio_editor_open_live()))
+        ?.click();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(nav.goto).toHaveBeenCalledWith('/studio/content/c1/edit', {
+        replaceState: false,
+      });
+      expect(text()).not.toContain(m.studio_editor_open_live_failed());
+      expect(takeLiveHandoff('c1')).toMatchObject({
+        changes: expect.objectContaining({ access: expect.anything() }),
+      });
+    } finally {
+      history.replaceState(null, '', was);
+    }
   });
 });

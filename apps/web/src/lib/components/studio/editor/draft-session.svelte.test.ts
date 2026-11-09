@@ -413,12 +413,30 @@ describe('a piece that has been live', () => {
     expect(session.hasUnpublishedChanges).toBe(true);
   });
 
-  it('publishing while the editor is open stops the autosave', async () => {
+  // A draft's page read is never what stops its autosave: a cover's form
+  // re-reads the page, say, with nothing unsent. What is typed next still
+  // goes, as a draft's save, and the server's refusal freezes the screen
+  // (the round-4 review). Its own Publish stopping it: 'a timer that fires
+  // while Publish is out', under publish.
+  it("a page read that turns live with nothing unsent: the next change still autosaves as a draft's, and is refused", async () => {
     const session = start();
     publication = LIVE;
-    session.set('title', 'Typed after Publish');
+    flushSync();
+    expect(session.wentLiveElsewhere).toBe(false);
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+    });
+
+    session.set('title', 'Typed after it read live');
     await afterDebounce();
-    expect(remotes.saveContent).not.toHaveBeenCalled();
+
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      asDraft: true,
+      patch: { title: 'Typed after it read live' },
+    });
+    expect(session.wentLiveElsewhere).toBe(true);
   });
 
   // Typed while Publish was out: the save was armed before it went live.
@@ -1580,6 +1598,55 @@ describe('publish', () => {
     );
   });
 
+  // Live now: what was typed while it published is Update's, and an editor
+  // that closed never sends it (the round-4 review).
+  it('closed while it publishes, what was typed meanwhile is never sent as an Update', async () => {
+    const session = start();
+    session.set('title', 'Runes');
+    const { send, answer } = pendingSend();
+    const run = session.publish(send);
+    await settle();
+    expect(send).toHaveBeenCalledWith(ID);
+    session.set('tags', ['typed-while-out']);
+    close();
+    await settle();
+
+    answer.ok();
+    await run;
+    await settle();
+
+    expect(remotes.saveContent).toHaveBeenCalledTimes(1);
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.closed_with_unsent_changes',
+      expect.objectContaining({ keys: ['tags'] })
+    );
+  });
+
+  // A Publish still out is seen through by the teardown, never disposed
+  // under: answered scheduled (a draft still), what was typed while it was
+  // out saves as a draft's once it settles (the round-4 review).
+  it('closed while a publish when ready is out, what was typed meanwhile saves once it is scheduled', async () => {
+    const session = start();
+    session.set('title', 'Runes');
+    const { send, answer } = pendingSend();
+    const run = session.publish(send);
+    await settle();
+    expect(send).toHaveBeenCalledWith(ID);
+    session.set('tags', ['typed-while-out']);
+    close();
+    await settle();
+
+    answer.draft();
+    await run;
+    await settle();
+
+    expect(remotes.saveContent).toHaveBeenLastCalledWith({
+      id: ID,
+      asDraft: true,
+      patch: { tags: ['typed-while-out'] },
+    });
+  });
+
   it('a second Publish while one runs joins it', async () => {
     const session = start();
     const { send, answer } = pendingSend();
@@ -2372,8 +2439,11 @@ describe('it went live by another way', () => {
     slug: contentSlugFromTitle('Runes', 'video'),
   };
 
-  async function wentLive(values: DraftValues = SAVED_VALUES) {
-    const session = start({ saved: { id: ID, values } });
+  async function wentLive(
+    values: DraftValues = SAVED_VALUES,
+    extra: Partial<Options> = {}
+  ) {
+    const session = start({ saved: { id: ID, values }, ...extra });
     remotes.saveContent.mockRejectedValueOnce(refusedAsLive);
     session.set('description', 'Half-typed');
     await afterDebounce();
@@ -2563,7 +2633,8 @@ describe('it went live by another way', () => {
   // kit's invalidateAll resolves when its refresh failed: a move then would
   // open the draft editor again, the changes gone (the round-3 review).
   it('a page whose refresh still reads a draft stays: no move, nothing handed off', async () => {
-    const session = await wentLive();
+    // Write, on the edit route: the move stays on this address.
+    const session = await wentLive(SAVED_VALUES, { openLiveInPlace: true });
     nav.invalidateAll.mockResolvedValueOnce(undefined);
 
     await session.openLive();
@@ -2576,6 +2647,23 @@ describe('it went live by another way', () => {
       'studio_editor.open_live_reread_failed',
       { contentId: ID, stage: 'page' }
     );
+  });
+
+  // From Publish the step changes, and from a new piece the route: that
+  // move reads again, and this page's read (the schedule's row; none) is
+  // not the one it opens on, so it is not gated on it (the round-4 review:
+  // round 3's gate failed every press there).
+  it('not in place, it moves on its own read, whatever this page reads', async () => {
+    const session = await wentLive();
+    nav.invalidateAll.mockResolvedValueOnce(undefined);
+
+    await session.openLive();
+
+    expect(nav.goto).toHaveBeenCalledTimes(1);
+    expect(session.openLiveProblem).toBeNull();
+    expect(takeLiveHandoff(ID)).toEqual({
+      changes: { description: 'Half-typed' },
+    });
   });
 
   // Publish to the edit address changes the step, which reads again: a move
@@ -2671,7 +2759,9 @@ describe('it went live by another way', () => {
     );
   });
 
-  it('closed while it read: no move of its own, nothing handed off', async () => {
+  // Closed in place while it read (an error page): no move of its own, but
+  // the changes wait for the live editor, said (the round-4 review).
+  it('closed while it read: no move of its own; the changes wait, said', async () => {
     const session = await wentLive();
     const reading = Promise.withResolvers<{
       status: string;
@@ -2685,9 +2775,33 @@ describe('it went live by another way', () => {
     await opened;
 
     expect(nav.goto).not.toHaveBeenCalled();
-    expect(takeLiveHandoff(ID)).toBeNull();
     // Nor does it have the page it went to read again: that page is not its.
     expect(nav.invalidateAll).not.toHaveBeenCalled();
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.open_live_page_replaced',
+      { contentId: ID, keys: ['description'] }
+    );
+    expect(takeLiveHandoff(ID)).toEqual({
+      changes: { description: 'Half-typed' },
+    });
+  });
+
+  it('left on purpose while it read: nothing is carried', async () => {
+    const session = await wentLive();
+    const reading = Promise.withResolvers<{
+      status: string;
+      publishedAt: string;
+    }>();
+    remotes.readPublishState.mockReturnValueOnce(reading.promise);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const opened = session.openLive();
+    navigate();
+    close();
+    reading.resolve({ status: 'published', publishedAt: '2026-11-09' });
+    await opened;
+
+    expect(takeLiveHandoff(ID)).toBeNull();
   });
 
   it('carried to the live editor, its close leaves no trace of dropped changes', async () => {

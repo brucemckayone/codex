@@ -509,7 +509,10 @@
         />
       </div>
     {/if}
-    <p class="sr-only" role="status">{scheduleNotice}</p>
+    <!-- Frozen, the notice is the one voice: the banner this speaks for is gone. -->
+    {#if !frozen}
+      <p class="sr-only" role="status">{scheduleNotice}</p>
+    {/if}
 
     <div class="publish-held" inert={held || frozen}>
 

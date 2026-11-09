@@ -19,6 +19,7 @@ const remotes = vi.hoisted(() => ({
   saveContent: vi.fn(),
   createContentDraft: vi.fn(),
   deleteThumbnailCommand: vi.fn(),
+  readPublishState: vi.fn(),
 }));
 // The cover's upload form, one per piece. A test sends it by hand with the
 // callback the cover line gave `enhance`, and answers it in `result`.
@@ -165,6 +166,8 @@ type Move = {
 const nav = vi.hoisted(() => ({
   replaceState: vi.fn(),
   goto: vi.fn(),
+  // kit's: it resolves even when a refresh in it failed.
+  invalidateAll: vi.fn(async () => {}),
   guards: [] as ((move: Move) => void)[],
   /** What runs once a move lands: the visit turns over. */
   arrived: [] as ((landed: { type: string; to: object | null }) => void)[],
@@ -188,6 +191,7 @@ vi.mock('$app/navigation', () => ({
   ) => nav.arrived.push(then),
   replaceState: (...args: unknown[]) => nav.replaceState(...args),
   goto: (...args: unknown[]) => nav.goto(...args),
+  invalidateAll: () => nav.invalidateAll(),
 }));
 vi.mock('$lib/components/ui/Toast/toast-store', () => ({
   toast: { add: vi.fn() },
@@ -893,6 +897,38 @@ describe('ContentEditor · it went live by another way', () => {
     );
     expect(open).not.toBeUndefined();
     expect(insideInert(open)).toBe(false);
+  });
+
+  // On the edit route Write's move stays on its address, so the editor it
+  // opens is built from the route's read: one still a draft's after its
+  // refresh (which kit's invalidateAll does not report) keeps the creator
+  // here, said (the round-3 and round-4 reviews).
+  test("Open from Write waits for the route's read to say live", async () => {
+    remotes.readPublishState.mockResolvedValueOnce({
+      status: 'published',
+      publishedAt: new Date(),
+      publishRequestedAt: null,
+      publishBlockedReason: null,
+      slug: 'runes',
+    });
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+    });
+    render({ content: draft({}) });
+    type('Title', 'Runes, properly');
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    flushSync();
+
+    [...document.querySelectorAll('button')]
+      .find((node) => node.textContent?.includes(m.studio_editor_open_live()))
+      ?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(remotes.readPublishState).toHaveBeenCalled();
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(text()).toContain(m.studio_editor_open_live_failed());
   });
 
   // Next's save came back refused as live: the step froze, and focus is the

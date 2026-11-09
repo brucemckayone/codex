@@ -152,16 +152,23 @@ export interface DraftSessionOptions {
    */
   carried?: Partial<DraftValues> | null;
   /**
-   * The piece's status and publishedAt, read each time they matter, so a
-   * Publish or Unpublish while the editor is open changes what it does. A
-   * new piece is `{ status: 'draft', publishedAt: null }`. Report the piece
-   * as published from the moment Publish is sent, and back if it fails, as
-   * the page builder's setLive does: a save armed before then is dropped,
-   * not sent to a piece going live. Never flip it and close the editor in
-   * the same synchronous block: the session goes by what it last saw while
-   * mounted.
+   * The piece's status and publishedAt as the page reads it. A new piece is
+   * `{ status: 'draft', publishedAt: null }`. Read as having been live when
+   * the session starts, its saves are Updates (the live editor's). A draft's
+   * session never lets it decide what is sent or whether to autosave: only
+   * its own Publish sends without asDraft, and the server judges the rest
+   * (the round-3 and round-4 reviews). Seen turning live under changes not
+   * sent, the draft went live under its editor. The session goes by what it
+   * last saw while mounted.
    */
   publication: () => PublicationState;
+  /**
+   * "Open it to update" stays on this page's address (Write, on the edit
+   * route), so the editor it opens is built from this page's read: the move
+   * waits for that read to say live. Unset where the move changes step or
+   * route (Publish; a new piece, whose page has no read), which reads again.
+   */
+  openLiveInPlace?: boolean;
   contentType: CreateContentInput['contentType'];
   organizationId: string | null;
   /** A title for a new row when none is typed yet: the chosen media's own. */
@@ -413,6 +420,14 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     wentLive ||
     liveElsewhere ||
     (unmounted ? lastLive : readLive());
+  /**
+   * Live by this session's own facts: it opened live, its own Publish is out
+   * or put it live, or the server refused a draft's save. Never the page's
+   * read: what a draft sends, and whether it autosaves, are the server's to
+   * judge (the round-4 review).
+   */
+  const ownLive = (): boolean =>
+    startedLive || publishing || wentLive || liveElsewhere;
   const initial = options.saved?.values ?? EMPTY;
   // A copy: the baseline must never share a list the screen changes. Changes
   // carried from the draft editor start unsaved, against the row.
@@ -623,7 +638,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     // Made free if another piece holds it: no one chose it.
     const slugFollowsTitle = sent.slug !== undefined && slugFollows;
     sending = sent;
-    sendingUpdate = startedLive || publishing || wentLive;
+    sendingUpdate = ownLive();
     try {
       if (contentId === null) {
         const created = await createContentDraft({
@@ -695,7 +710,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
 
   const autosave = createAutosave({
     isDirty: () => isDirty,
-    isPublished: isLive,
+    isPublished: ownLive,
     save,
   });
 
@@ -1032,6 +1047,9 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       if (!published.ok && published.unsent && published.code !== 'SAVE_SLOW') {
         return published;
       }
+      // Live now: what was typed while it published is Update's, never
+      // sent from an editor that closed (the round-4 review).
+      if (ownLive() && sending === null) return { ok: true };
     }
     let result = await autosave.flush();
     while (result.ok && sending !== null) result = await autosave.flush();
@@ -1061,7 +1079,11 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       try {
         // A piece that has been live starts no save here, but one already
         // on the wire (its Update) is seen through.
-        if (!unsaved() || (isLive() && sending === null)) {
+        // A Publish still out is seen through, by drain, as its saves go.
+        if (
+          publishRun === null &&
+          (!unsaved() || (isLive() && sending === null))
+        ) {
           // The page's to guard (Codex-a6ofh.2.5); a trace if it did not.
           // Changes carried to the live editor were not dropped.
           if (isDirty && !handedOff) {
@@ -1158,16 +1180,28 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         openProblem = readProblem(err) ?? 'outage';
         return;
       }
-      // Closed while it read (Back, the rail): no move of its own to make.
-      if (unmounted) return;
-      handOffToLive(
-        id,
-        Object.fromEntries(
-          sendableKeys()
-            .filter((key) => key !== 'slug')
-            .map((key) => [key, $state.snapshot(values[key])])
-        )
-      );
+      const carry = () =>
+        handOffToLive(
+          id,
+          Object.fromEntries(
+            sendableKeys()
+              .filter((key) => key !== 'slug')
+              .map((key) => [key, $state.snapshot(values[key])])
+          )
+        );
+      // Closed while it read: no move of its own to make. Left on purpose
+      // (Back, the rail, answered Leave), its changes were the creator's to
+      // drop; closed by something else (an error page), they wait, said.
+      if (unmounted) {
+        if (leftChanges || !isDirty) return;
+        carry();
+        logger.warn('studio_editor.open_live_page_replaced', {
+          contentId: id,
+          keys: sendableKeys(),
+        });
+        return;
+      }
+      carry();
       try {
         // The route's own read (a query, or a load) takes that answer: a move
         // to the same address reads nothing new of itself.
@@ -1187,10 +1221,12 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           });
           return;
         }
-        // The next editor is built from the page's read, and invalidateAll
-        // resolves even when its refresh failed: a move on a read still a
-        // draft's would open the draft editor again, the changes gone.
-        if (!readLive()) {
+        // In place (Write, on the edit route), the next editor is built from
+        // this page's read, and invalidateAll resolves even when its refresh
+        // failed: a move on a read still a draft's would open the draft
+        // editor again, the changes gone. From Publish or a new piece the
+        // move changes step or route, which reads again (the round-4 review).
+        if (options.openLiveInPlace === true && !readLive()) {
           withdrawLiveHandoff(id);
           openProblem = 'outage';
           logger.error('studio_editor.open_live_reread_failed', {

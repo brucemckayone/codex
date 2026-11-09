@@ -58,6 +58,9 @@
     createDraftSession({
       saved: content ? { id: content.id, values: savedDraftValues(content) } : null,
       publication: () => ({ status: content?.status ?? 'draft', publishedAt: content?.publishedAt ?? null }),
+      // On the edit route, Open stays on this address and the next editor is
+      // built from this page's read; a new piece's move changes route.
+      openLiveInPlace: content !== null,
       contentType,
       organizationId,
       workingTitle,
