@@ -1430,7 +1430,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       obsLog.info.mock.calls.filter(
         ([message, context]) =>
           String(message).startsWith(
-            'fee step: a notice started a new round'
+            'fee step: a notice changed while its email was in flight'
           ) && (context as { feeNoticeId?: string }).feeNoticeId === roundOne.id
       )
     ).toHaveLength(1);
@@ -1466,5 +1466,94 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       state: 'sent',
       acceptedAt: NOV_4,
     });
+  });
+
+  /**
+   * A rise cancelled by the owner (the real route's write, through the
+   * registry) while the step's email to `who` is in flight; the email then
+   * gets `answer`.
+   */
+  async function cancelledInFlight(
+    who: { id: string },
+    answer: FeeNoticeDelivery
+  ) {
+    const admin = await person('Ari Admin');
+    const changeId = await rise(await organisation(who.id));
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    try {
+      await run(
+        changeId,
+        NOV_3,
+        vi.fn(async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+          if (params.userId === who.id) {
+            await registry.feeConfig.cancelChange(changeId, admin.id);
+          }
+          return answer;
+        })
+      );
+    } finally {
+      await closeRegistry();
+    }
+    expect((await changeOf(changeId))?.voidReason).toBe('cancelled');
+    const rows = await db
+      .select()
+      .from(feeChangeNotices)
+      .where(
+        and(
+          eq(feeChangeNotices.changeId, changeId),
+          eq(feeChangeNotices.userId, who.id)
+        )
+      );
+    return {
+      changeId,
+      announce: rows.find((n) => n.kind === 'announce'),
+      cancelled: rows.find((n) => n.kind === 'cancelled'),
+    };
+  }
+
+  it('a rise cancelled while its email is in flight: the email counts as told, and that person is emailed it is off', async () => {
+    const pia = await person('Pia Inflight');
+    const { changeId, announce, cancelled } = await cancelledInFlight(pia, {
+      accepted: true,
+    });
+
+    // As if it was sent before the cancel: told, with what they were told.
+    expect(announce).toMatchObject({ state: 'sent', acceptedAt: NOV_3 });
+    expect(announce?.afterValues).not.toEqual([]);
+    // And so emailed that it's off, with those same figures and date.
+    expect(cancelled).toMatchObject({
+      state: 'due',
+      onList: false,
+      roles: announce?.roles,
+      beforeValues: announce?.beforeValues,
+      afterValues: announce?.afterValues,
+      quotedFrom: announce?.quotedFrom,
+    });
+    expect(obsLog.info).toHaveBeenCalledWith(
+      'fee step: a fee rise was voided while its email was in flight; recorded as sent',
+      {
+        feeNoticeId: announce?.id,
+        changeId,
+        cancelledNoticeAdded: true,
+      }
+    );
+
+    const nextMorning = mailerAnswering();
+    await run(changeId, NOV_4, nextMorning);
+    expect(mailFor(nextMorning, pia.id).map((p) => p.templateName)).toEqual([
+      'fee-change-cancelled',
+    ]);
+  });
+
+  it('a rise cancelled while its email is refused: nobody was told, so the notice stays set aside and no "it’s off" email is queued', async () => {
+    const rob = await person('Rob Refused');
+    const { announce, cancelled } = await cancelledInFlight(rob, {
+      accepted: false,
+      status: 400,
+    });
+    expect(announce).toMatchObject({ state: 'not_needed', acceptedAt: null });
+    expect(cancelled).toBeUndefined();
   });
 });

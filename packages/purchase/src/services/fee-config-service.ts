@@ -1213,6 +1213,8 @@ async function insertVersion(
  * says so), everyone already told about it is emailed that it's off (F2,
  * `fee-change-cancelled`, sent by the next daily run). The cancelled notice
  * keeps what they were told (roles, values, the date named) for its email.
+ * notifications-api's fee step applies the same rule to someone whose email
+ * was in flight as the rise was voided (`tellOfVoid`): change both together.
  */
 async function voidPending(
   tx: Tx,

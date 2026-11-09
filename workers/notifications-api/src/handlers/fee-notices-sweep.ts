@@ -55,6 +55,7 @@ import {
   lte,
   messageForLog,
   or,
+  type SQL,
   sql,
 } from '@codex/database';
 import {
@@ -885,37 +886,89 @@ async function withFollowUpReads(
 }
 
 /**
- * What a send did, written on the round it claimed. A rise made smaller
- * while the send was in flight starts the row a new round
- * (`queueSmallerNotices`: a new created_at, untried), and this email carried
- * the figure read before that, so it must not count for the new round
- * (Codex-2hxff.104). The check is in the UPDATE's WHERE, not a read before
- * it: an UPDATE that meets the cut's lock waits, then tests the committed
- * row, so no write slips between the check and this one. created_at holds
- * microseconds (the column's now() default) and the claim read it to the
- * millisecond, so both sides are compared at that.
+ * What a send did, written on the round it claimed while that row is still
+ * open (`due`, `failed` or `unknown`). Two writes can move it while the
+ * email is in flight:
+ *   - a rise made smaller starts it a new round (`queueSmallerNotices`: a
+ *     new created_at, untried). This email carried the figure read before
+ *     that, so nothing is recorded on the new round (Codex-2hxff.104);
+ *   - a rise voided sets it `not_needed` (`voidPending`). An email that went
+ *     is recorded `sent` all the same, as a row already sent when the void
+ *     arrived, and its person gets voidPending's "it's off" email
+ *     (`tellOfVoid`). One that didn't go stays `not_needed`, as a row still
+ *     waiting does.
+ * Each check is in an UPDATE's WHERE, not a read before it: an UPDATE that
+ * meets the other write's lock waits, then tests the committed row.
+ * created_at holds microseconds (the column's now() default) and the claim
+ * read it to the millisecond, so both sides are compared at that.
  */
 async function record(
   ctx: SweepContext,
   notice: Claimed,
   set: Partial<FeeChangeNoticeRow>
 ): Promise<void> {
-  const written = await ctx.db
-    .update(feeChangeNotices)
-    .set({ ...set, updatedAt: ctx.now })
-    .where(
-      and(
-        eq(feeChangeNotices.id, notice.id),
-        sql`date_trunc('milliseconds', ${feeChangeNotices.createdAt}) = ${notice.createdAt}::timestamptz`
-      )
-    )
-    .returning({ id: feeChangeNotices.id });
-  if (written.length === 0) {
-    ctx.obs.info(
-      'fee step: a notice started a new round while its email was in flight; that round goes on the next morning',
-      { feeNoticeId: notice.id, changeId: notice.changeId }
-    );
+  const ours = [
+    eq(feeChangeNotices.id, notice.id),
+    sql`date_trunc('milliseconds', ${feeChangeNotices.createdAt}) = ${notice.createdAt}::timestamptz`,
+  ];
+  const writeIf = async (state: SQL): Promise<boolean> => {
+    const written = await ctx.db
+      .update(feeChangeNotices)
+      .set({ ...set, updatedAt: ctx.now })
+      .where(and(...ours, state))
+      .returning({ id: feeChangeNotices.id });
+    return written.length > 0;
+  };
+  if (
+    await writeIf(inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES]))
+  ) {
+    return;
   }
+  const ids = { feeNoticeId: notice.id, changeId: notice.changeId };
+  if (
+    set.state === 'sent' &&
+    (await writeIf(eq(feeChangeNotices.state, 'not_needed')))
+  ) {
+    ctx.obs.info(
+      'fee step: a fee rise was voided while its email was in flight; recorded as sent',
+      { ...ids, cancelledNoticeAdded: await tellOfVoid(ctx, notice) }
+    );
+    return;
+  }
+  ctx.obs.info(
+    'fee step: a notice changed while its email was in flight; this send is not recorded on it',
+    ids
+  );
+}
+
+/**
+ * voidPending's rule for the "it's off" email (F2), for one person whose
+ * email went while the rise was being voided: everyone told of a rise that
+ * is called off is emailed, with what they were told, unless a bigger rise
+ * replaced it (whose own email says so). The same statement as
+ * voidPending's, narrowed to this person; one it already queued is kept. It
+ * runs after the write above, so it reads the void as committed.
+ */
+async function tellOfVoid(
+  ctx: SweepContext,
+  notice: Claimed
+): Promise<boolean> {
+  const added = await ctx.db.execute(sql`
+    INSERT INTO ${feeChangeNotices}
+      (change_id, user_id, kind, on_list, roles, before_values, after_values, quoted_from, state)
+    SELECT n.change_id, n.user_id, 'cancelled', false, n.roles, n.before_values, n.after_values, n.quoted_from, 'due'
+    FROM ${feeChangeNotices} n
+    JOIN ${feeChanges} c ON c.id = n.change_id
+    WHERE n.change_id = ${notice.changeId}
+      AND n.user_id = ${notice.userId}
+      AND n.kind = 'announce'
+      AND n.state IN ('sent', 'told_another_way')
+      AND c.voided_at IS NOT NULL
+      AND c.void_reason <> 'replaced_by_bigger'
+    ON CONFLICT (change_id, user_id, kind) DO NOTHING
+    RETURNING id
+  `);
+  return added.rows.length > 0;
 }
 
 interface Recipient {
