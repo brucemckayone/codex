@@ -19,7 +19,12 @@
  * notification-touching; positive AND negative paths are covered.
  */
 
+import { env } from 'cloudflare:test';
 import type { AgreementWithShare } from '@codex/agreements';
+import { createDbClient, inArray } from '@codex/database';
+import { emailAuditLogs } from '@codex/database/schema';
+import type { Bindings } from '@codex/shared-types';
+import { templateDataSchemas } from '@codex/validation';
 import { describe, expect, it, vi } from 'vitest';
 import type { RunAgreementExpiringSweepDeps } from '../agreement-expiring-sweep';
 import { runAgreementExpiringSweep } from '../agreement-expiring-sweep';
@@ -110,6 +115,9 @@ vi.mock('@codex/agreements', async () => {
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 
+/** An empty email log: no side was sent on an earlier morning. */
+const nothingSent = async () => false;
+
 function buildObs() {
   const calls: Array<{ level: string; msg: string; ctx?: unknown }> = [];
   return {
@@ -166,6 +174,7 @@ describe('runAgreementExpiringSweep', () => {
     const result = await runAgreementExpiringSweep({
       // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
       db: {} as any,
+      alreadySent: nothingSent,
       obs,
       environment: 'test',
       workerSecret: 'unused',
@@ -221,6 +230,7 @@ describe('runAgreementExpiringSweep', () => {
     const result = await runAgreementExpiringSweep({
       // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
       db: {} as any,
+      alreadySent: nothingSent,
       obs,
       environment: 'test',
       workerSecret: 'unused',
@@ -286,6 +296,7 @@ describe('runAgreementExpiringSweep', () => {
     const result = await runAgreementExpiringSweep({
       // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
       db: {} as any,
+      alreadySent: nothingSent,
       obs,
       environment: 'test',
       workerSecret: 'unused',
@@ -339,6 +350,7 @@ describe('runAgreementExpiringSweep', () => {
     await runAgreementExpiringSweep({
       // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
       db: {} as any,
+      alreadySent: nothingSent,
       obs,
       environment: 'test',
       workerSecret: 'unused',
@@ -388,6 +400,7 @@ describe('runAgreementExpiringSweep', () => {
       await runAgreementExpiringSweep({
         // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
         db: {} as any,
+        alreadySent: nothingSent,
         obs: buildObs().obs,
         environment,
         workerSecret: 'unused',
@@ -450,6 +463,7 @@ describe('runAgreementExpiringSweep', () => {
     const result = await runAgreementExpiringSweep({
       // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
       db: {} as any,
+      alreadySent: nothingSent,
       obs,
       environment: 'test',
       workerSecret: 'unused',
@@ -508,6 +522,7 @@ describe('runAgreementExpiringSweep', () => {
       result = await runAgreementExpiringSweep({
         // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
         db: {} as any,
+        alreadySent: nothingSent,
         obs,
         environment: 'test',
         workerSecret: 'test-secret',
@@ -544,6 +559,7 @@ describe('runAgreementExpiringSweep', () => {
     const result = await runAgreementExpiringSweep({
       // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
       db: {} as any,
+      alreadySent: nothingSent,
       obs,
       environment: 'test',
       workerSecret: 'unused',
@@ -569,5 +585,302 @@ describe('runAgreementExpiringSweep', () => {
         msg: 'agreement-expiring-soon: the send budget ran out; the rest go tomorrow',
       })
     );
+  });
+
+  // ─── A half-sent row (final review #4) ──────────────────────────────────
+  //
+  // The creator's email goes first. When the owner's then fails, or times
+  // out, the row stays unmarked; the next morning must send the owner's
+  // alone, never the creator's again.
+
+  describe('a row whose second email failed', () => {
+    const timeout = () =>
+      new DOMException(
+        'The operation was aborted due to timeout',
+        'TimeoutError'
+      );
+
+    /**
+     * The email log, as the send path keeps it: a send that reached
+     * notifications-api is in it, under the agreement id and side its data
+     * carries.
+     */
+    function emailLog() {
+      const sent: string[] = [];
+      const key = (to: string, agreementId: unknown, side: unknown) =>
+        `${to}|${agreementId}|${side}`;
+      return {
+        record: (p: Parameters<MailerFn>[0]) => {
+          sent.push(key(p.to, p.data.agreementId, p.data.side));
+        },
+        alreadySent: async (a: {
+          to: string;
+          agreementId: string;
+          side: string;
+        }) => sent.includes(key(a.to, a.agreementId, a.side)),
+      };
+    }
+
+    function oneRow() {
+      resetState();
+      sharedMockState.enrichedCandidates = [candidate('agr-half')];
+      sharedMockState.ownerLookup = async () => ({
+        id: 'owner-half',
+        email: 'owner-half@example.test',
+        name: 'Owner',
+      });
+    }
+
+    async function morning(log: ReturnType<typeof emailLog>, mailer: MailerFn) {
+      const { obs, calls } = buildObs();
+      const sends = vi.fn<MailerFn>(mailer);
+      const result = await runAgreementExpiringSweep({
+        // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
+        db: {} as any,
+        alreadySent: log.alreadySent,
+        obs,
+        environment: 'test',
+        workerSecret: 'unused',
+        notificationsUrl: 'http://notifications.test',
+        mailer: sends,
+      });
+      return { result, calls, to: sends.mock.calls.map((c) => c[0].to) };
+    }
+
+    it.each([
+      ['fails', () => new Error('notifications-api 503')],
+      ['times out before it reaches the log', timeout],
+    ])('the owner email %s: the next morning sends the owner email alone', async (_case, failure) => {
+      oneRow();
+      const log = emailLog();
+
+      const first = await morning(log, async (p) => {
+        if (p.to === 'owner-half@example.test') throw failure();
+        log.record(p);
+      });
+      expect(first.to).toEqual([
+        'creator-agr-half@example.test',
+        'owner-half@example.test',
+      ]);
+      expect(first.result).toMatchObject({ emailsSent: 1, errors: 1 });
+      expect(sharedMockState.markedIds).toEqual([]);
+      // The log says the creator's email already went.
+      expect(first.calls).toContainEqual(
+        expect.objectContaining({
+          level: 'error',
+          msg: 'agreement-expiring-soon per-row dispatch failed',
+          ctx: expect.objectContaining({
+            agreementId: 'agr-half',
+            creatorEmailSent: true,
+          }),
+        })
+      );
+
+      const second = await morning(log, async (p) => log.record(p));
+      expect(second.to).toEqual(['owner-half@example.test']);
+      expect(second.result).toMatchObject({
+        emailsSent: 1,
+        emailsAlreadySent: 1,
+        errors: 0,
+        agreementsMarked: 1,
+      });
+      expect(sharedMockState.markedIds).toEqual(['agr-half']);
+    });
+
+    it('an owner email that timed out after it reached the log is not sent again', async () => {
+      oneRow();
+      const log = emailLog();
+
+      await morning(log, async (p) => {
+        log.record(p);
+        if (p.to === 'owner-half@example.test') throw timeout();
+      });
+      const second = await morning(log, async (p) => log.record(p));
+
+      expect(second.to).toEqual([]);
+      expect(second.result).toMatchObject({
+        emailsSent: 0,
+        emailsAlreadySent: 2,
+        agreementsMarked: 1,
+      });
+    });
+
+    it('both emails fail: the next morning sends both', async () => {
+      oneRow();
+      const log = emailLog();
+
+      const first = await morning(log, async () => {
+        throw new Error('notifications-api 503');
+      });
+      // The creator's failed, so the owner's was never tried.
+      expect(first.to).toEqual(['creator-agr-half@example.test']);
+      expect(first.calls).toContainEqual(
+        expect.objectContaining({
+          level: 'error',
+          ctx: expect.objectContaining({ creatorEmailSent: false }),
+        })
+      );
+
+      const second = await morning(log, async (p) => log.record(p));
+      expect(second.to).toEqual([
+        'creator-agr-half@example.test',
+        'owner-half@example.test',
+      ]);
+      expect(second.result).toMatchObject({
+        emailsSent: 2,
+        emailsAlreadySent: 0,
+        agreementsMarked: 1,
+      });
+    });
+
+    it('each email carries its agreement and side, which the template drops before the render', async () => {
+      oneRow();
+      const log = emailLog();
+      const sends: Parameters<MailerFn>[0][] = [];
+      await morning(log, async (p) => {
+        sends.push(p);
+      });
+
+      expect(sends.map((p) => [p.data.agreementId, p.data.side])).toEqual([
+        ['agr-half', 'creator'],
+        ['agr-half', 'owner'],
+      ]);
+      // The send path keeps the data verbatim as the log's metadata, then
+      // renders from `validateTemplateData`, which is this schema's parse:
+      // its output drops keys it does not name, so neither reaches the email.
+      for (const { data } of sends) {
+        const rendered =
+          templateDataSchemas['agreement-expiring-soon'].parse(data);
+        const { agreementId: _agreementId, side: _side, ...fields } = data;
+        expect(rendered).toEqual(fields);
+      }
+    });
+
+    // The default lookup, against the real email log.
+    it('the email log is read by recipient, agreement and side, never by a prefix', async () => {
+      oneRow();
+      const db = createDbClient(env as unknown as Bindings);
+      const agreementId = `agr-log-${crypto.randomUUID()}`;
+      sharedMockState.enrichedCandidates = [
+        {
+          ...candidate('agr-half'),
+          agreement: mockAgreement({
+            id: agreementId,
+            organizationId: 'org-agr-half',
+            createdAt: new Date(Date.now() - 60 * 60 * 1000),
+          }),
+        },
+      ];
+      const entry = (
+        recipientEmail: string,
+        metadata: Record<string, string>,
+        status: 'success' | 'failed'
+      ) => ({
+        templateName: 'agreement-expiring-soon',
+        recipientEmail,
+        status,
+        metadata: JSON.stringify({ recipientName: 'X', ...metadata }),
+      });
+      const rows = await db
+        .insert(emailAuditLogs)
+        .values([
+          // The creator's went: not sent again.
+          entry(
+            'creator-agr-half@example.test',
+            { agreementId, side: 'creator' },
+            'success'
+          ),
+          // Another agreement whose id this one's is a prefix of.
+          entry(
+            'owner-half@example.test',
+            { agreementId: `${agreementId}0`, side: 'owner' },
+            'success'
+          ),
+          // The owner's, failed: still to send.
+          entry(
+            'owner-half@example.test',
+            { agreementId, side: 'owner' },
+            'failed'
+          ),
+        ])
+        .returning({ id: emailAuditLogs.id });
+
+      try {
+        const mailer = vi.fn<MailerFn>(async () => undefined);
+        const result = await runAgreementExpiringSweep({
+          db,
+          obs: buildObs().obs,
+          environment: 'test',
+          workerSecret: 'unused',
+          notificationsUrl: 'http://notifications.test',
+          mailer,
+        });
+
+        expect(mailer.mock.calls.map((c) => c[0].to)).toEqual([
+          'owner-half@example.test',
+        ]);
+        expect(result).toMatchObject({ emailsAlreadySent: 1, errors: 0 });
+      } finally {
+        await db.delete(emailAuditLogs).where(
+          inArray(
+            emailAuditLogs.id,
+            rows.map((r) => r.id)
+          )
+        );
+      }
+    });
+
+    it('one person on both sides: their creator email does not stand for their owner email', async () => {
+      oneRow();
+      const db = createDbClient(env as unknown as Bindings);
+      const agreementId = `agr-log-${crypto.randomUUID()}`;
+      const both = 'both-sides@example.test';
+      sharedMockState.enrichedCandidates = [
+        {
+          ...candidate('agr-half'),
+          creator: { id: 'both-1', email: both, name: 'Both' },
+          agreement: mockAgreement({
+            id: agreementId,
+            organizationId: 'org-agr-half',
+            createdAt: new Date(Date.now() - 60 * 60 * 1000),
+          }),
+        },
+      ];
+      sharedMockState.ownerLookup = async () => ({
+        id: 'both-1',
+        email: both,
+        name: 'Both',
+      });
+      const rows = await db
+        .insert(emailAuditLogs)
+        .values({
+          templateName: 'agreement-expiring-soon',
+          recipientEmail: both,
+          status: 'success',
+          metadata: JSON.stringify({ agreementId, side: 'creator' }),
+        })
+        .returning({ id: emailAuditLogs.id });
+
+      try {
+        const mailer = vi.fn<MailerFn>(async () => undefined);
+        await runAgreementExpiringSweep({
+          db,
+          obs: buildObs().obs,
+          environment: 'test',
+          workerSecret: 'unused',
+          notificationsUrl: 'http://notifications.test',
+          mailer,
+        });
+
+        expect(mailer.mock.calls.map((c) => c[0].data.side)).toEqual(['owner']);
+      } finally {
+        await db.delete(emailAuditLogs).where(
+          inArray(
+            emailAuditLogs.id,
+            rows.map((r) => r.id)
+          )
+        );
+      }
+    });
   });
 });
