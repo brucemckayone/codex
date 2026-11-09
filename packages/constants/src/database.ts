@@ -15,6 +15,8 @@ export const POSTGRES_ERROR_CODES = {
   FOREIGN_KEY_VIOLATION: '23503',
   NOT_NULL_VIOLATION: '23502',
   CHECK_VIOLATION: '23514',
+  /** A lock wait ran past `lock_timeout` (or a NOWAIT lock was taken). */
+  LOCK_NOT_AVAILABLE: '55P03',
 } as const;
 
 export const ORGANIZATION_ROLES = {

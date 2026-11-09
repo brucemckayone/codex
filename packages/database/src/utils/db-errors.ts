@@ -75,6 +75,22 @@ export function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
+ * Check if error is a lock wait that ran past `lock_timeout`
+ * Postgres error code: 55P03
+ *
+ * Checks both the error itself and its cause (for DrizzleQueryError wrapping)
+ */
+export function isLockNotAvailable(error: unknown): boolean {
+  const code = POSTGRES_ERROR_CODES.LOCK_NOT_AVAILABLE;
+  if (isPostgresError(error) && error.code === code) return true;
+  if (error instanceof Error && 'cause' in error) {
+    const cause = (error as { cause: unknown }).cause;
+    return isPostgresError(cause) && cause.code === code;
+  }
+  return false;
+}
+
+/**
  * Check if error is a foreign key violation
  * Postgres error code: 23503
  *

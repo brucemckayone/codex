@@ -51,6 +51,7 @@ import {
   eq,
   gte,
   inArray,
+  isLockNotAvailable,
   isNull,
   lt,
   lte,
@@ -66,6 +67,7 @@ import {
   type FeeNoticeReason,
   type FeeNoticeRole,
   type FeeNoticeRoleValues,
+  type FeeNoticeValues,
   feeChangeNotices,
   feeChanges,
   feeConfigOrg,
@@ -124,6 +126,13 @@ const ALERT_NAMED = 50;
 const LIST_BATCH = 500;
 /** Sends in flight at once. */
 const SEND_CONCURRENCY = 8;
+/**
+ * How long the joiners step waits for an open edit of a rise (its level's
+ * lock): an edit commits in milliseconds, so this is only ever reached by a
+ * stuck one, whose change then gets its joiners the next morning. Short
+ * beside the send budget the steps after it need.
+ */
+const JOINERS_LOCK_WAIT_MS = 5_000;
 /**
  * The owner's rule is to alert only when a person is needed. An `unknown`
  * send (a 5xx or a timeout: it may have gone, and each morning checks the
@@ -249,10 +258,26 @@ interface SweepContext {
   orgNames: Map<string, { name: string; slug: string }>;
   onlyChanges: readonly string[] | null;
   alertNamed: number;
-  /** Notices whose send threw this run, and the changes of those not named. */
+  /**
+   * Notices whose send threw this run, and those not named, counted by how
+   * they failed, each with its changes.
+   */
   noticeFailures: number;
-  foldedChangeIds: Set<string>;
+  folded: Map<NoticeFailure, { notices: number; changeIds: Set<string> }>;
 }
+
+/**
+ * How a notice failed, kept for the ones past the named few: what each needs
+ * from support differs (review final silent-delta2).
+ * - `failed`: nothing went this time; the next run tries it again.
+ * - `went`: it went, but its record failed; the next run finds it in the
+ *   email log.
+ * - `mayHaveGone`: no answer came, and its record failed; the next run
+ *   checks the email log.
+ * - `figuresUnread`: it went, or may have, but whether its rise was cut since
+ *   could not be read; check its change by hand for a smaller email owed.
+ */
+type NoticeFailure = 'failed' | 'went' | 'mayHaveGone' | 'figuresUnread';
 
 /** `onlyChanges` as a filter on `fee_changes`; none in production. */
 function scope(ctx: SweepContext) {
@@ -508,11 +533,14 @@ async function currentPayeesOf(
 /**
  * S2: an email that carried figures read before the rise was made smaller
  * names a bigger figure than the rise now holds, so its person is owed the
- * smaller email (Q2 (A)). The backstop to the cut's lock (`lockFeeNotices`):
- * that lock holds only the notices there when the cut took it, so a joiner
- * added while a cut was open can be claimed then and sent the earlier
- * figure, and it is this check that tells them. A cut that saw the notice
- * tried has queued its email itself, so the queue here adds nothing then.
+ * smaller email (Q2 (A)). A backstop only. Every cut locks the change's
+ * notices before it queues (`lockFeeNotices`), so the claim passes them by
+ * while it is open, and one claimed before it is read as tried and queued
+ * by the cut itself. No notice is made while a cut is open, so none escapes
+ * that lock: a list waits on the change row the cut holds, and a joiner on
+ * the level's lock (`addChangeJoiners`). This check finds nothing then, and
+ * queues nothing; it stays for an insert path that one day skips those
+ * locks.
  */
 async function figuresMovedSince(
   ctx: SweepContext,
@@ -525,18 +553,29 @@ async function figuresMovedSince(
 }
 
 /**
+ * Every field of a role's values, in the one order `figuresOf` reads them.
+ * Typed against `FeeNoticeValues`, so a field added there and not here is a
+ * type error, never a figure the compare skips (review final silent-delta2).
+ */
+const FEE_NOTICE_FIGURES = {
+  platformFeePercent: true,
+  orgFeePercent: true,
+  minPlatformFeeCents: true,
+  minTransferCents: true,
+} as const satisfies Record<keyof FeeNoticeValues, true>;
+const FEE_NOTICE_FIGURE_KEYS = Object.keys(
+  FEE_NOTICE_FIGURES
+) as (keyof FeeNoticeValues)[];
+
+/**
  * A person's figures as one comparable string, by role: the members read
  * has no order, so two roles can come back either way round (review final
- * silent L3), and each role's values are read field by field, never by an
- * object's key order.
+ * silent L3), and each role's values are read field by field
+ * (`FEE_NOTICE_FIGURES`), never by an object's key order.
  */
 function figuresOf(values: FeeNoticeRoleValues[]): string {
-  const fields = (v: FeeNoticeRoleValues['oneOff']) => [
-    v.platformFeePercent,
-    v.orgFeePercent,
-    v.minPlatformFeeCents,
-    v.minTransferCents,
-  ];
+  const fields = (v: FeeNoticeValues) =>
+    FEE_NOTICE_FIGURE_KEYS.map((key) => v[key]);
   return values
     .map((v) =>
       [
@@ -562,68 +601,15 @@ async function addJoiners(
   for (const change of changes) {
     if (listedThisRun.has(change.id)) continue;
     try {
-      const affected = await payeesOf(ctx, change);
-      const existing = await ctx.db
-        .select({
-          id: feeChangeNotices.id,
-          userId: feeChangeNotices.userId,
-          state: feeChangeNotices.state,
-        })
-        .from(feeChangeNotices)
-        .where(
-          and(
-            eq(feeChangeNotices.changeId, change.id),
-            eq(feeChangeNotices.kind, 'announce')
-          )
-        );
-      const known = new Map(existing.map((n) => [n.userId, n]));
-      const joiners = [...affected.values()].filter(
-        (p) => !known.has(p.userId)
-      );
-      const added = await insertNotices(
-        ctx.db,
-        change.id,
-        joiners,
-        false,
-        ctx.now
-      );
-      ctx.result.joinersAdded += added;
-
-      const gone = existing
-        .filter(
-          (n) =>
-            (FEE_NOTICE_OPEN_STATES as readonly string[]).includes(n.state) &&
-            !affected.has(n.userId)
-        )
-        .map((n) => n.id);
-      if (gone.length > 0) {
-        await ctx.db
-          .update(feeChangeNotices)
-          .set({ state: 'not_needed', updatedAt: ctx.now })
-          .where(
-            and(
-              inArray(feeChangeNotices.id, gone),
-              inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES])
-            )
-          );
-        ctx.result.notNeeded += gone.length;
-      }
-      // Affected again after being set aside: back to due.
-      const back = existing
-        .filter((n) => n.state === 'not_needed' && affected.has(n.userId))
-        .map((n) => n.id);
-      if (back.length > 0) {
-        await ctx.db
-          .update(feeChangeNotices)
-          .set({ state: 'due', attempts: 0, updatedAt: ctx.now })
-          .where(
-            and(
-              inArray(feeChangeNotices.id, back),
-              eq(feeChangeNotices.state, 'not_needed')
-            )
-          );
-      }
+      await ctx.db.transaction((tx) => addChangeJoiners(ctx, tx, change));
     } catch (error) {
+      if (isLockNotAvailable(error)) {
+        ctx.obs.warn(
+          'fee step: a fee rise was being edited past the wait; its joiners are added the next morning',
+          { changeId: change.id, waitedMs: JOINERS_LOCK_WAIT_MS }
+        );
+        continue;
+      }
       ctx.result.errors += 1;
       ctx.obs.error('fee step: joiners could not be added for a change', {
         errorId: crypto.randomUUID(),
@@ -631,6 +617,84 @@ async function addJoiners(
         error: messageForLog(error),
       });
     }
+  }
+}
+
+/**
+ * One change's joiners, set aside and back, under its level's lock
+ * (`lockFeeLevel`), which every edit of the rise (a cut, a void) holds for
+ * its whole transaction (review final, commerce confirm NIT). So a joiner
+ * waits for an open edit, then its figures are read as that edit left them,
+ * and it is inserted before the next edit's `lockFeeNotices` can pass it
+ * by: an edit open while a joiner was added can't leave them the earlier
+ * figure. The wait is bounded (JOINERS_LOCK_WAIT_MS, `lock_timeout`, which
+ * covers every lock this transaction takes): a stuck edit puts this
+ * change's joiners off to the next morning, and never the send budget the
+ * steps after this one need. The level lock comes first, before any
+ * notice row, as an edit takes it before `lockFeeNotices`.
+ */
+async function addChangeJoiners(
+  ctx: SweepContext,
+  tx: SweepTx,
+  change: FeeChangeRow
+): Promise<void> {
+  await tx.execute(
+    sql.raw(`SET LOCAL lock_timeout = '${JOINERS_LOCK_WAIT_MS}ms'`)
+  );
+  await lockFeeLevel(tx, levelOfChange(change));
+  // Read after the lock: an edit that held it has committed.
+  const affected = await currentPayeesOf(ctx, change);
+  const existing = await tx
+    .select({
+      id: feeChangeNotices.id,
+      userId: feeChangeNotices.userId,
+      state: feeChangeNotices.state,
+    })
+    .from(feeChangeNotices)
+    .where(
+      and(
+        eq(feeChangeNotices.changeId, change.id),
+        eq(feeChangeNotices.kind, 'announce')
+      )
+    );
+  const known = new Map(existing.map((n) => [n.userId, n]));
+  const joiners = [...affected.values()].filter((p) => !known.has(p.userId));
+  const added = await insertNotices(tx, change.id, joiners, false, ctx.now);
+  ctx.result.joinersAdded += added;
+
+  const gone = existing
+    .filter(
+      (n) =>
+        (FEE_NOTICE_OPEN_STATES as readonly string[]).includes(n.state) &&
+        !affected.has(n.userId)
+    )
+    .map((n) => n.id);
+  if (gone.length > 0) {
+    await tx
+      .update(feeChangeNotices)
+      .set({ state: 'not_needed', updatedAt: ctx.now })
+      .where(
+        and(
+          inArray(feeChangeNotices.id, gone),
+          inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES])
+        )
+      );
+    ctx.result.notNeeded += gone.length;
+  }
+  // Affected again after being set aside: back to due.
+  const back = existing
+    .filter((n) => n.state === 'not_needed' && affected.has(n.userId))
+    .map((n) => n.id);
+  if (back.length > 0) {
+    await tx
+      .update(feeChangeNotices)
+      .set({ state: 'due', attempts: 0, updatedAt: ctx.now })
+      .where(
+        and(
+          inArray(feeChangeNotices.id, back),
+          eq(feeChangeNotices.state, 'not_needed')
+        )
+      );
   }
 }
 
@@ -857,6 +921,18 @@ function levelsOf(scope: {
     }
   }
   return levels;
+}
+
+/**
+ * The level a change was saved on: the last of its scope's levels (its
+ * scope CHECK guarantees the keys).
+ */
+function levelOfChange(change: FeeChangeRow): FeeLevel {
+  const levels = levelsOf({
+    organizationId: change.scope === 'platform' ? null : change.organizationId,
+    creatorId: change.scope === 'creator' ? change.creatorId : null,
+  });
+  return levels[levels.length - 1] ?? { scope: 'platform' };
 }
 
 /** A role's fees in force now. */
@@ -1227,13 +1303,12 @@ async function sendOne(
   if (notice.prevAttemptedAt !== null && email) {
     const at = await foundSent(ctx, notice, email);
     if (at) {
-      // Its figures need no check here: at any cut since it went, it was
-      // `unknown` or tried, and the cut, which locks the change's notices
-      // before it queues (`lockFeeNotices`), read it so and queued its
-      // smaller email itself. The claim passes a locked notice by, so none
-      // is claimed unseen while a cut is open. The one exception is a
-      // joiner added while a cut was open, whose run then dies before its
-      // record; S2's post-send check covers every run that records.
+      // Its figures need no check here: every cut since it went found it
+      // `unknown` or tried, and queued its smaller email itself. A cut locks
+      // the change's notices before it queues (`lockFeeNotices`), so the
+      // claim passes them by while it is open, and no notice is made while
+      // a cut is open (a list waits on the change row, a joiner on the
+      // level's lock), so none escapes that lock.
       const found = await record(ctx, notice, {
         state: 'sent',
         acceptedAt: at,
@@ -1356,6 +1431,7 @@ async function sendOne(
       noticeFailed(
         ctx,
         notice,
+        'figuresUnread',
         'fee step: a fee email went, or may have, but whether its rise was cut since could not be read; check this change by hand for a smaller email owed',
         error,
         went
@@ -1368,6 +1444,7 @@ async function sendOne(
     noticeFailed(
       ctx,
       notice,
+      outcome.state === 'sent' ? 'went' : 'mayHaveGone',
       'fee step: a fee email went, or may have, but its record failed; the next run looks for it in the email log before sending again',
       error,
       went
@@ -1438,10 +1515,13 @@ async function recordOutcome(
  * One notice failed: named one by one up to ALERT_NAMED, the rest folded
  * into one end alert with their count (`alertFoldedFailures`), so one cause
  * reaching every notice is never thousands of lines (review cycle 2, L4).
+ * A folded one keeps how it failed and its change, so the end alert still
+ * says which changes need a by-hand check (review final silent-delta2).
  */
 function noticeFailed(
   ctx: SweepContext,
   notice: Claimed,
+  kind: NoticeFailure,
   message: string,
   error: unknown,
   context: Record<string, string> = {}
@@ -1449,7 +1529,13 @@ function noticeFailed(
   ctx.result.errors += 1;
   ctx.noticeFailures += 1;
   if (ctx.noticeFailures > ctx.alertNamed) {
-    ctx.foldedChangeIds.add(notice.changeId);
+    let folded = ctx.folded.get(kind);
+    if (!folded) {
+      folded = { notices: 0, changeIds: new Set() };
+      ctx.folded.set(kind, folded);
+    }
+    folded.notices += 1;
+    folded.changeIds.add(notice.changeId);
     return;
   }
   ctx.obs.error(message, {
@@ -1560,7 +1646,13 @@ async function sendDue(ctx: SweepContext): Promise<void> {
         try {
           await sendOne(ctx, notice, changes, people, reads);
         } catch (error) {
-          noticeFailed(ctx, notice, 'fee step: one notice failed', error);
+          noticeFailed(
+            ctx,
+            notice,
+            'failed',
+            'fee step: one notice failed',
+            error
+          );
         }
       })
     );
@@ -1571,15 +1663,31 @@ async function sendDue(ctx: SweepContext): Promise<void> {
  * One cause (a database blip, say) fails every notice it reaches: the first
  * ALERT_NAMED are named one by one and the rest fold into this one error
  * with their count, as the price-moves step does (review cycle 2, L4).
+ * The folded are counted by how they failed (`NoticeFailure`), each kind
+ * with its changes: a database outage mid-run is when this fires, and
+ * `byKind.figuresUnread` names the changes to check by hand for a smaller
+ * email owed (review final silent-delta2). `changes` beside a kind's ids
+ * shows when the list was cut short.
  */
 async function alertFoldedFailures(ctx: SweepContext): Promise<void> {
   const notNamed = ctx.noticeFailures - ctx.alertNamed;
   if (notNamed <= 0) return;
+  const changeIds = new Set<string>();
+  const byKind: Record<string, object> = {};
+  for (const [kind, folded] of ctx.folded) {
+    for (const id of folded.changeIds) changeIds.add(id);
+    byKind[kind] = {
+      notices: folded.notices,
+      changes: folded.changeIds.size,
+      changeIds: [...folded.changeIds].slice(0, ALERT_NAMED),
+    };
+  }
   ctx.obs.error('fee step: more notices failed than are named one by one', {
     errorId: crypto.randomUUID(),
     failed: ctx.noticeFailures,
     notNamed,
-    changeIds: [...ctx.foldedChangeIds].slice(0, ALERT_NAMED),
+    changeIds: [...changeIds].slice(0, ALERT_NAMED),
+    byKind,
   });
 }
 
@@ -1887,7 +1995,7 @@ export async function runFeeNoticesSweep(
       onlyChanges: deps.onlyChanges ?? null,
       alertNamed: deps.alertNamed ?? ALERT_NAMED,
       noticeFailures: 0,
-      foldedChangeIds: new Set(),
+      folded: new Map(),
     };
     let listedThisRun: Set<string> = new Set();
     // Each part is isolated: one failing never stops the others.

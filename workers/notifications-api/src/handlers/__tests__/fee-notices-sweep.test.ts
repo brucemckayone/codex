@@ -18,6 +18,7 @@ import {
   type DatabaseWs,
   eq,
   inArray,
+  type SQL,
   sql,
   TEST_SEND_METADATA,
 } from '@codex/database';
@@ -44,6 +45,7 @@ import {
 } from '@codex/payments';
 import type { Bindings } from '@codex/shared-types';
 import { createServiceRegistry } from '@codex/worker-utils';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import {
   afterAll,
   afterEach,
@@ -723,6 +725,135 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       failed: 4,
       notNamed: 2,
     });
+  });
+
+  /** How a notice can fail, as the end alert counts the ones not named. */
+  const FAILURE_KINDS = [
+    'failed',
+    'went',
+    'mayHaveGone',
+    'figuresUnread',
+  ] as const;
+  type FailureKind = (typeof FAILURE_KINDS)[number];
+  type FoldedKind = { notices: number; changes: number; changeIds: string[] };
+
+  it('past the named fifty, the end alert counts the rest by how they failed, each kind with its changes, so support knows which to check by hand (review final silent-delta2)', async () => {
+    // Two rises, 29 people each: 58 notices, each failing once. The first
+    // 50 failures are named one by one, and the last 8 fold.
+    const changeOf = new Map<string, string>();
+    for (const org of ['A', 'B']) {
+      const ids: string[] = [];
+      for (let i = 0; i < 29; i += 1) {
+        ids.push((await person(`Fold ${org}${i}`)).id);
+      }
+      const changeId = await rise(await organisation(...ids));
+      for (const id of ids) changeOf.set(id, changeId);
+    }
+    const changeIds = [...new Set(changeOf.values())];
+
+    // Each send fails as its turn says: a refusal whose record fails ("one
+    // notice failed"), an accepted or an unanswered send whose record fails,
+    // or an accepted send whose figure read fails. The sends go one at a
+    // time, a turn ending once its record has settled, so each fault is met
+    // by its own notice and the failures come in turn order.
+    const answers: Record<FailureKind, FeeNoticeDelivery> = {
+      failed: { accepted: false, status: 422 },
+      went: { accepted: true },
+      mayHaveGone: { accepted: false, error: 'the send timed out' },
+      figuresUnread: { accepted: true },
+    };
+    const faults = faultyClient();
+    let endTurn: (() => void) | undefined;
+    const client = new Proxy(faults.client, {
+      get(inner, key) {
+        const value = Reflect.get(inner, key, inner);
+        if (key !== 'transaction') return value;
+        const transaction: DatabaseWs['transaction'] = async (work, config) => {
+          try {
+            return await (value as DatabaseWs['transaction'])(work, config);
+          } finally {
+            // Once the failure it ends in is logged.
+            const end = endTurn;
+            endTurn = undefined;
+            if (end) setTimeout(end, 0);
+          }
+        };
+        return transaction;
+      },
+    });
+    let turns = 0;
+    let lastTurn: Promise<void> = Promise.resolve();
+    const caused = new Map<FailureKind, Set<string>>();
+    const mailer = vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        const before = lastTurn;
+        let end = () => {};
+        lastTurn = new Promise((resolve) => {
+          end = resolve;
+        });
+        await before;
+        const kind = FAILURE_KINDS[turns % FAILURE_KINDS.length]!;
+        turns += 1;
+        if (turns > 50) {
+          const ids = caused.get(kind) ?? new Set<string>();
+          ids.add(changeOf.get(params.userId) ?? 'unknown change');
+          caused.set(kind, ids);
+        }
+        endTurn = end;
+        faults.arm(kind === 'figuresUnread' ? 'select' : 'transaction');
+        return answers[kind];
+      }
+    );
+
+    const result = await runFeeNoticesSweep({
+      db: client,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_3,
+      mailer,
+      templateExists: async () => true,
+      onlyChanges: changeIds,
+    });
+
+    expect(turns).toBe(58);
+    expect(result).toMatchObject({ listed: 58, errors: 58 });
+    const named = changeIds.flatMap((id) => [
+      ...errorsFor(id, 'fee step: one notice failed'),
+      ...errorsFor(id, 'fee step: a fee email went, or may have'),
+    ]);
+    expect(named).toHaveLength(50);
+    const alerts = obsLog.error.mock.calls.filter(
+      ([message, context]) =>
+        String(message).startsWith('fee step: more notices failed') &&
+        changeIds.some((id) =>
+          (context as { changeIds: string[] }).changeIds.includes(id)
+        )
+    );
+    expect(alerts).toHaveLength(1);
+    const alert = alerts[0]?.[1] as {
+      failed: number;
+      notNamed: number;
+      byKind?: Record<string, FoldedKind>;
+    };
+    expect(alert).toMatchObject({ failed: 58, notNamed: 8 });
+    // Turns 51 to 58 fold: two of each kind, each named with its changes.
+    const sortedIds = (byKind: Record<string, FoldedKind>) =>
+      Object.fromEntries(
+        Object.entries(byKind).map(([kind, folded]) => [
+          kind,
+          { ...folded, changeIds: [...folded.changeIds].sort() },
+        ])
+      );
+    expect(sortedIds(alert.byKind ?? {})).toEqual(
+      Object.fromEntries(
+        FAILURE_KINDS.map((kind) => {
+          const ids = [...(caused.get(kind) ?? [])].sort();
+          return [kind, { notices: 2, changes: ids.length, changeIds: ids }];
+        })
+      )
+    );
   });
 
   /**
@@ -1965,6 +2096,28 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     return { admin, org, changeId };
   }
 
+  /** The step's own client, running `then` once just before its claim. */
+  function beforeClaim(then: () => Promise<void>): DatabaseWs {
+    const dialect = new PgDialect();
+    let fired = false;
+    return new Proxy(db, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'execute') {
+          return typeof value === 'function' ? value.bind(target) : value;
+        }
+        const execute = async (query: SQL) => {
+          if (!fired && dialect.sqlToQuery(query).sql.includes('SKIP LOCKED')) {
+            fired = true;
+            await then();
+          }
+          return target.execute(query);
+        };
+        return execute;
+      },
+    });
+  }
+
   /** The step's next read of who a rise affects runs `then` once it has read. */
   function afterNextPayeeRead(then: () => Promise<void>) {
     let fired = false;
@@ -2031,18 +2184,28 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     const { registry, cleanup: closeRegistry } = await createServiceRegistry(
       env as unknown as Bindings
     );
-    // The joiners step reads the figures; the rise is made smaller; then
-    // the claim, and the sends.
-    afterNextPayeeRead(async () => {
-      await registry.feeConfig.updateOrgFees(
-        org,
-        { orgFeePercent: 1300 },
-        admin.id
-      );
-    });
+    // The joiners step reads the figures and adds Jo; the rise is made
+    // smaller; then the claim, and the sends. (The joiners step holds the
+    // level's lock while it reads, so the cut lands after it.)
     const morning = mailerAnswering();
     try {
-      await run(changeId, new Date(), morning);
+      await runFeeNoticesSweep({
+        db: beforeClaim(async () => {
+          await registry.feeConfig.updateOrgFees(
+            org,
+            { orgFeePercent: 1300 },
+            admin.id
+          );
+        }),
+        obs,
+        environment: 'development',
+        workerSecret: 'unused',
+        notificationsUrl: 'http://unused.test',
+        now: new Date(),
+        mailer: morning,
+        templateExists: async () => true,
+        onlyChanges: [changeId],
+      });
     } finally {
       await closeRegistry();
     }
@@ -2064,7 +2227,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     expect(await kindOf(changeId, jo.id, 'smaller')).toBeUndefined();
   });
 
-  it('a joiner added while a cut is open: the cut never saw them, so the email they were sent with the earlier figure owes the smaller one the next morning (S2, the lock’s backstop)', async () => {
+  it('the post-send check, as a backstop: a joiner added while an edit that skipped the level’s lock was open is still told the new figure the next morning (S2)', async () => {
     const uma = await person('Uma Told');
     const jo = await person('Jo Joiner');
     const { changeId } = await toldThenJoined(uma.id, jo.id);
@@ -2078,9 +2241,10 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     });
     let holder: Promise<void> = Promise.resolve();
     // A cut as the purchase service makes one (the version superseded, a
-    // new one, the notices locked, the smaller emails queued), on another
-    // connection, held open from just after the joiners step's read, so Jo
-    // joins after its lock and its queue.
+    // new one, the notices locked, the smaller emails queued), but WITHOUT
+    // the level's lock a real cut takes first, on another connection, held
+    // open from just after the joiners step's read: so Jo joins after its
+    // lock and its queue, the case only the post-send check catches.
     afterNextPayeeRead(async () => {
       holder = db.transaction(async (tx) => {
         try {
@@ -2445,5 +2609,162 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     expect(announce).toMatchObject({ state: 'sent' });
     expect(announce?.afterValues).toHaveLength(2);
     expect(await kindOf(changeId, pat.id, 'smaller')).toBeUndefined();
+  });
+
+  // ── Review final, commerce confirm NIT: joiners wait for an open cut ─────
+
+  /**
+   * A cut through the real purchase path, held open after its locks: a
+   * second connection holds Uma's smaller row, uncommitted, so the cut's
+   * queue waits on it. Returns the release and the cut's end.
+   */
+  async function cutHeldOpen(
+    changeId: string,
+    org: string,
+    admin: string,
+    told: string
+  ) {
+    const announce = await kindOf(changeId, told, 'announce');
+    let release = () => {};
+    const released = new Promise<void>((go) => {
+      release = go;
+    });
+    let holding = () => {};
+    const held = new Promise<void>((go) => {
+      holding = go;
+    });
+    const holder = db
+      .transaction(async (tx) => {
+        await tx.insert(feeChangeNotices).values({
+          changeId,
+          userId: told,
+          kind: 'smaller',
+          onList: false,
+          roles: announce?.roles ?? [],
+          beforeValues: [],
+          afterValues: [],
+        });
+        holding();
+        await released;
+        tx.rollback();
+      })
+      .catch(() => {});
+    await held;
+    const { registry, cleanup } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    const cut = registry.feeConfig.updateOrgFees(
+      org,
+      { orgFeePercent: 1300 },
+      admin
+    );
+    await waitingOnLock('%INSERT INTO "fee_change_notices"%smaller%');
+    // Ends once, however many times it is asked.
+    let ended: Promise<void> | undefined;
+    return {
+      done: () => {
+        ended ??= (async () => {
+          release();
+          await holder;
+          await cut.finally(cleanup);
+        })();
+        return ended;
+      },
+    };
+  }
+
+  /**
+   * 'waiting' once a query matching `pattern` waits on a lock, or 'settled'
+   * when `settled` ends first.
+   */
+  async function lockWaitOr(
+    pattern: string,
+    settled: Promise<unknown>
+  ): Promise<'waiting' | 'settled'> {
+    let done = false;
+    settled.then(
+      () => {
+        done = true;
+      },
+      () => {
+        done = true;
+      }
+    );
+    for (let i = 0; i < 400 && !done; i++) {
+      const found = await db.execute(
+        sql`SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock'
+              AND query ILIKE ${pattern}`
+      );
+      if ((found.rows[0] as { n: number }).n > 0) return 'waiting';
+      await new Promise((wake) => setTimeout(wake, 50));
+    }
+    if (done) return 'settled';
+    throw new Error(`no query like ${pattern} waited on a lock`);
+  }
+
+  const JOINERS_WAIT = '%pg_advisory_xact_lock%';
+
+  it('a joiner waits for an open cut, then is told its figure: never the one before it (commerce confirm NIT)', async () => {
+    const uma = await person('Uma Told');
+    const jo = await person('Jo Joiner');
+    const { admin, org, changeId } = await toldThenJoined(uma.id, jo.id);
+    const cut = await cutHeldOpen(changeId, org, admin.id, uma.id);
+    const morning = mailerAnswering();
+    let result: Awaited<ReturnType<typeof run>> | undefined;
+    let joinersWaited: 'waiting' | 'settled' | undefined;
+    try {
+      const running = run(changeId, new Date(), morning);
+      // The joiners step waits for the cut (without its lock, the run just
+      // ends, the cut still open).
+      joinersWaited = await lockWaitOr(JOINERS_WAIT, running);
+      await cut.done();
+      result = await running;
+    } finally {
+      await cut.done();
+    }
+
+    expect(result).toMatchObject({ joinersAdded: 1 });
+    const [first, ...more] = mailFor(morning, jo.id);
+    expect(more).toEqual([]);
+    expect(first?.data.feeNoticeId).toBe(
+      (await kindOf(changeId, jo.id, 'announce'))?.id
+    );
+    expect(JSON.stringify(first?.data)).toContain(formatPercent(1300));
+    // Told the new figure first, so owed no smaller email.
+    expect(await kindOf(changeId, jo.id, 'smaller')).toBeUndefined();
+    expect(joinersWaited).toBe('waiting');
+  });
+
+  it('a cut held past the wait puts that rise’s joiners off to the next morning, and the run goes on (commerce confirm NIT)', async () => {
+    const uma = await person('Uma Told');
+    const jo = await person('Jo Joiner');
+    const { admin, org, changeId } = await toldThenJoined(uma.id, jo.id);
+    const cut = await cutHeldOpen(changeId, org, admin.id, uma.id);
+    const morning = mailerAnswering();
+    try {
+      // Past the joiners step's bounded wait, the run goes on and ends, the
+      // cut still open (this rise is dated, so nothing after waits on it).
+      expect(await run(changeId, new Date(), morning)).toMatchObject({
+        joinersAdded: 0,
+        errors: 0,
+      });
+    } finally {
+      await cut.done();
+    }
+
+    expect(obsLog.warn).toHaveBeenCalledWith(
+      'fee step: a fee rise was being edited past the wait; its joiners are added the next morning',
+      { changeId, waitedMs: 5_000 }
+    );
+    expect(mailFor(morning, jo.id)).toEqual([]);
+    expect(await kindOf(changeId, jo.id, 'announce')).toBeUndefined();
+
+    // The next morning Jo joins, and is told the cut's figure.
+    const next = mailerAnswering();
+    await run(changeId, new Date(Date.now() + 13 * HOUR), next);
+    expect(JSON.stringify(mailFor(next, jo.id)[0]?.data)).toContain(
+      formatPercent(1300)
+    );
   });
 });
