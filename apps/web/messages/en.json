@@ -3395,6 +3395,7 @@
   "support_elsewhere_description": "Refund of {amount} for {title}, failed {date}",
   "support_elsewhere_body": "Use this once {buyer} has the {amount} back outside Stripe, for example by bank transfer. The payees' {taken} stays taken back. {buyer} isn't emailed.",
   "support_elsewhere_submit": "Mark as refunded",
+  "support_elsewhere_late_win_warning": "Make any Stripe refund first: once this is marked, the charge can't be refunded through Stripe.",
   "support_repay_title": "Re-pay the payees for {buyer}'s refund?",
   "support_repay_description": "{buyer} won't be refunded. The payees get back what this refund took.",
   "support_repay_body": "The payees get back the {taken} this refund took from them, as new payouts. The next payout run pays them, like any other. The platform fee's share stays with the platform.",

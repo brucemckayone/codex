@@ -247,6 +247,8 @@ export function failedRefund(
     takenFromPayeesCents: 2160,
     // Re-paying would give Daniel access back (the server's prediction).
     accessRestoreBlockedReason: null,
+    // An ordinary failed refund: not a late win's own.
+    isLateWinRefund: false,
     ...overrides,
   };
 }

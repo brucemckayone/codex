@@ -823,6 +823,43 @@ describe('Settling a failed refund', () => {
   });
 
   test.each([
+    ["a late win's own refund, another way", 'refunded_elsewhere', true, true],
+    ['an ordinary refund, another way', 'refunded_elsewhere', false, false],
+    ["a late win's own refund, re-paying", 'creators_repaid', true, false],
+  ] as const)('the "another way" warning shows only on a late win\'s own refund (Codex-ohlcx): %s', (_case, resolution, isLateWinRefund, warns) => {
+    renderDialog(resolution, failedRefund({ isLateWinRefund }));
+    const warning = document.querySelector(
+      '[data-testid="elsewhere-late-win-warning"]'
+    );
+    // The owner's approved words (2026-11-09), exactly.
+    const words =
+      "Make any Stripe refund first: once this is marked, the charge can't be refunded through Stripe.";
+    expect(m.support_elsewhere_late_win_warning()).toBe(words);
+    expect(warning !== null).toBe(warns);
+    expect(text().includes(words)).toBe(warns);
+    if (!warning) return;
+    expect(warning.getAttribute('data-variant')).toBe('warning');
+    // Under the body, before the confirm button.
+    const body = [...document.querySelectorAll('p')].find((p) =>
+      p.textContent?.includes(
+        m.support_elsewhere_body({
+          buyer: 'Daniel Price',
+          amount: '£24.00',
+          taken: '£21.60',
+        })
+      )
+    );
+    expect(body).toBeDefined();
+    expect(
+      body!.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      warning.compareDocumentPosition(submit()!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  test.each([
     ['chargeback', 'blocked_chargeback', m.support_repay_blocked_chargeback()],
     [
       'later_refunds',
