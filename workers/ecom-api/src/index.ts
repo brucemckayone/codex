@@ -88,12 +88,11 @@ app.use(
     optional: [
       'ENVIRONMENT',
       'WEB_APP_URL',
-      'API_URL',
-      // Customer webhook is a logging stub only.
+      // No API_URL: env.production declares none, and its one reader, a CORS
+      // exact-match origin, never matches an absent value (Codex-2hxff.24).
       // Dispute webhook is handled by handlePaymentWebhook (Codex-sxu5a) —
       // in production the endpoint has its own signing secret; in dev the
       // dev router forwards all `charge.*` events to the payment handler.
-      'STRIPE_WEBHOOK_SECRET_CUSTOMER',
       'STRIPE_WEBHOOK_SECRET_DISPUTE',
       // Optional at boot so a worker that never opens a portal still starts;
       // createPortalSession refuses without it (Codex-2hxff.4).
@@ -180,7 +179,8 @@ app.post(
 
 /**
  * Subscription events webhook
- * Handles: customer.subscription.*, invoice.*
+ * Handles: customer.subscription.*, invoice.*, product.updated, price.created,
+ * price.updated
  */
 app.post(
   '/webhooks/stripe/subscription',
@@ -196,16 +196,6 @@ app.post(
   '/webhooks/stripe/connect',
   verifyStripeSignature(),
   createWebhookHandler('Connect', handleConnectWebhook)
-);
-
-/**
- * Customer events webhook
- * Handles: customer.created, customer.updated, customer.deleted
- */
-app.post(
-  '/webhooks/stripe/customer',
-  verifyStripeSignature(),
-  createWebhookHandler('Customer')
 );
 
 /**

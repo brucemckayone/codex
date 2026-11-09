@@ -28,7 +28,6 @@ const WEBHOOK_SECRET_KEYS: Readonly<Record<string, WebhookSecretKey>> = {
   '/webhooks/stripe/payment': 'STRIPE_WEBHOOK_SECRET_PAYMENT',
   '/webhooks/stripe/subscription': 'STRIPE_WEBHOOK_SECRET_SUBSCRIPTION',
   '/webhooks/stripe/connect': 'STRIPE_WEBHOOK_SECRET_CONNECT',
-  '/webhooks/stripe/customer': 'STRIPE_WEBHOOK_SECRET_CUSTOMER',
   '/webhooks/stripe/booking': 'STRIPE_WEBHOOK_SECRET_BOOKING',
   '/webhooks/stripe/dispute': 'STRIPE_WEBHOOK_SECRET_DISPUTE',
   // Dev catch-all reuses the booking secret: in local dev, set every

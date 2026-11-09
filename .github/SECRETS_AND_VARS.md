@@ -60,7 +60,6 @@ This ensures:
 - `STRIPE_PORTAL_CONFIGURATION_ID` - ecom-api's locked Billing Portal configuration (bpc_*); without it the billing portal refuses to open. Uploaded only when set and a `bpc_` id (Codex-2hxff.41). Unset is a warning on the run, any other value an error and not sent; either way the deploy carries on and ecom-api keeps the value it already holds
 - `STRIPE_WEBHOOK_SECRET_BOOKING`
 - `STRIPE_WEBHOOK_SECRET_CONNECT`
-- `STRIPE_WEBHOOK_SECRET_CUSTOMER`
 - `STRIPE_WEBHOOK_SECRET_DISPUTE`
 - `STRIPE_WEBHOOK_SECRET_PAYMENT`
 - `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION`
@@ -85,7 +84,6 @@ This ensures:
 - `STRIPE_SECRET_KEY` - Test mode Stripe key (sk_test_*)
 - `STRIPE_WEBHOOK_SECRET_BOOKING`
 - `STRIPE_WEBHOOK_SECRET_CONNECT`
-- `STRIPE_WEBHOOK_SECRET_CUSTOMER`
 - `STRIPE_WEBHOOK_SECRET_DISPUTE`
 - `STRIPE_WEBHOOK_SECRET_PAYMENT`
 - `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION`
@@ -110,7 +108,6 @@ This ensures:
 - `STRIPE_SECRET_KEY` - Test mode Stripe key (sk_test_*)
 - `STRIPE_WEBHOOK_SECRET_BOOKING`
 - `STRIPE_WEBHOOK_SECRET_CONNECT`
-- `STRIPE_WEBHOOK_SECRET_CUSTOMER`
 - `STRIPE_WEBHOOK_SECRET_DISPUTE`
 - `STRIPE_WEBHOOK_SECRET_PAYMENT`
 - `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION`
