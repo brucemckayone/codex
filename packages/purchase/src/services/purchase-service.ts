@@ -53,7 +53,6 @@ import {
   entitlements,
   moneyNotices,
   payoutReversals,
-  payouts,
   purchases,
   type RefundStatus,
   refunds,
@@ -145,7 +144,11 @@ import {
   stripeErrorCode,
   toStripeTime,
 } from './checkout-reservations';
-import { STANDING_REFUND_STATUSES, settledElsewhere } from './counted-refunds';
+import {
+  refundsOfPurchase,
+  STANDING_REFUND_STATUSES,
+  settledElsewhere,
+} from './counted-refunds';
 import {
   writeContentPurchaseEntitlement,
   writeCoursePurchaseEntitlement,
@@ -5419,12 +5422,12 @@ export class PurchaseService extends BaseService {
 
     // A failed refund support settled as refunded elsewhere counts as
     // refunded (owner decision 2026-11-09; `settledElsewhere`, the rule
-    // support and the admin revenue share), on the purchase or, recorded
-    // without it (Codex-aa08z), on its charge, as `standingRefundFields`
-    // counts. Its own `sql`, nested in the field: a single-table select
-    // writes a field's top-level columns without their table, and
-    // `purchase_id = id` would then read the refund's own id.
-    const settledElsewhereCents = sql`(SELECT COALESCE(SUM(${refunds.amountCents}), 0) FROM ${refunds} WHERE ${settledElsewhere()} AND (${refunds.purchaseId} = ${purchases.id} OR (${refunds.purchaseId} IS NULL AND ${refunds.stripeChargeId} IN (SELECT ${payouts.stripeChargeId} FROM ${payouts} WHERE ${payouts.purchaseId} = ${purchases.id} AND ${payouts.stripeChargeId} IS NOT NULL))))`;
+    // support and the admin revenue share), tied to the purchase by the key
+    // the support search shares (`refundsOfPurchase`). Its own `sql`, nested
+    // in the field: a single-table select writes a field's top-level columns
+    // without their table, and `purchase_id = id` would then read the
+    // refund's own id.
+    const settledElsewhereCents = sql`(SELECT COALESCE(SUM(${refunds.amountCents}), 0) FROM ${refunds} WHERE ${settledElsewhere()} AND ${refundsOfPurchase()})`;
 
     const [agg] = await this.db
       .select({
