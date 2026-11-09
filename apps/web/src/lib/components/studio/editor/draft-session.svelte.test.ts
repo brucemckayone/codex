@@ -490,6 +490,33 @@ describe('a piece that has been live', () => {
     );
   });
 
+  // Slow, a draft's save is a draft's question ('slow': it is left running,
+  // and its failure still told), whatever the page reads (the round-6 review).
+  it('a clean flip, then a move whose save is slow: asked as slow, never as live', async () => {
+    const session = start();
+    publication = LIVE;
+    flushSync();
+    const out = Promise.withResolvers<never>();
+    remotes.saveContent.mockReturnValueOnce(out.promise);
+    session.set('description', 'Half-typed');
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    navigate();
+    session.set('description', 'Half-typed, and more while it waited');
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(confirm).toHaveBeenCalledWith(
+      m.studio_content_draft_confirm_leave_slow()
+    );
+    expect(confirm).not.toHaveBeenCalledWith(
+      m.studio_content_draft_confirm_leave_live()
+    );
+    // Settled, so the session can close: a save never answered keeps its
+    // unload guard on the window for every later test.
+    out.reject(offline());
+    await settle();
+  });
+
   // Typed while Publish was out: the save was armed before it went live.
   it('a save armed as a draft does not land on the piece once it is live', async () => {
     const session = start();
@@ -2932,6 +2959,67 @@ describe('it went live by another way', () => {
     expect(confirm).not.toHaveBeenCalledWith(
       m.studio_content_draft_confirm_leave()
     );
+  });
+
+  /** Frozen as a draft's save went: the page read turned live under changes, one of them on the wire. */
+  function frozenWithASaveOut() {
+    const out = Promise.withResolvers<never>();
+    remotes.saveContent.mockReturnValueOnce(out.promise);
+    const session = start();
+    session.set('title', 'Runes, renamed');
+    void session.flush();
+    session.set('description', 'Typed while it went');
+    publication = LIVE;
+    flushSync();
+    expect(session.wentLiveElsewhere).toBe(true);
+    return { session, out };
+  }
+
+  // Its fields are on no row until that save settles: the hand-off waits for
+  // it, so a refusal leaves them carried, never lost between the two (the
+  // round-6 review).
+  it('Open waits for a save still out, then carries what it was refused', async () => {
+    const { session, out } = frozenWithASaveOut();
+
+    const opened = session.openLive();
+    await settle();
+    expect(remotes.readPublishState).not.toHaveBeenCalled();
+    out.reject(refusedAsLive);
+    await opened;
+
+    expect(nav.goto).toHaveBeenCalledTimes(1);
+    expect(takeLiveHandoff(ID)).toEqual({
+      changes: {
+        title: 'Runes, renamed',
+        description: 'Typed while it went',
+      },
+    });
+  });
+
+  // Closed with that save on the wire, the teardown rides it, and how the
+  // close ended is that save's to say: one toast, no hand-off, no second
+  // trace (the round-6 review).
+  it('closed with a save out while Open waits: the save says how it ended, once', async () => {
+    const { session, out } = frozenWithASaveOut();
+
+    const opened = session.openLive();
+    await settle();
+    close();
+    out.reject(refusedAsLive);
+    await opened;
+    await settle();
+
+    expect(told.toastAdd).toHaveBeenCalledTimes(1);
+    expect(takeLiveHandoff(ID)).toBeNull();
+    expect(told.logWarn).not.toHaveBeenCalledWith(
+      'studio_editor.open_live_page_replaced',
+      expect.anything()
+    );
+    expect(
+      told.logWarn.mock.calls.filter(
+        ([event]) => event === 'studio_editor.closed_with_unsent_changes'
+      )
+    ).toHaveLength(0);
   });
 
   it('before it went live, Open it to update does nothing', async () => {

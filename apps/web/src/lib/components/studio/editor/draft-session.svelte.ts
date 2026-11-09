@@ -417,6 +417,12 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   let leftChanges = false;
   /** "Open it to update" is out: a close meanwhile is its to trace. */
   let openingLive = false;
+  /**
+   * The editor closed with a save on the wire, which the teardown rides:
+   * how the close ended is that save's to say, never an Open's as well.
+   * One owner per close (the round-6 review).
+   */
+  let drainingOnClose = false;
   /** The close's trace of changes left behind, said once. */
   let closeTraced = false;
   /** Closed with changes no save or hand-off took: one trace, never two that disagree (the round-5 review). */
@@ -809,8 +815,10 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         // Saved, but still dirty: the piece went live while the save was out,
         // and what was queued behind it waits for Update.
         // A slow Update is still going, but what was typed during it is not.
+        // By the session's own facts: a draft whose page reads live is asked
+        // as a draft (slow), and its refusal as live (the round-6 review).
         const leftForUpdate =
-          (result.ok || result.code === 'SAVE_SLOW') && isDirty && isLive();
+          (result.ok || result.code === 'SAVE_SLOW') && isDirty && ownLive();
         // Or the save found it live, here or before: its changes wait too.
         const refusedAsLive =
           !result.ok && result.code === ERROR_CODES.CONTENT_ALREADY_LIVE;
@@ -986,13 +994,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       toastClosedUnsaved();
     }
     if (!ok) tellClosedUnsaved();
-    else if (isDirty && isLive()) {
-      logger.warn('studio_editor.closed_with_unsent_changes', {
-        contentId,
-        keys: sendableKeys(),
-        abandoned,
-      });
-    }
+    else if (isDirty && isLive()) traceClosedUnsent();
   }
 
   let toldClosed = false;
@@ -1110,6 +1112,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           finish();
           return;
         }
+        drainingOnClose = true;
         void drain()
           .then((result) => reportClose(result.ok))
           .catch((err) => {
@@ -1136,6 +1139,16 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   async function openLiveOnce(id: string): Promise<boolean> {
     openProblem = null;
     leftChanges = false;
+    // A draft's save still out (it froze as that save went): its fields are
+    // on no row until it settles, so the hand-off waits for it, or they would
+    // be carried by neither (the round-6 review). Bounded, as a move is.
+    if (sending !== null) {
+      await settleWithin(autosave.flush());
+      if (sending !== null) {
+        openProblem = 'outage';
+        return false;
+      }
+    }
     // Where it stands, by a read whose failure is seen. kit's
     // invalidateAll() resolves even when a refresh in it fails (2.55), so
     // it cannot say the piece is live.
@@ -1173,7 +1186,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     // (Back, the rail, answered Leave), its changes were the creator's to
     // drop; closed by something else (an error page), they wait, said.
     if (unmounted) {
-      if (leftChanges || !isDirty) return false;
+      if (leftChanges || !isDirty || drainingOnClose) return false;
       carry();
       logger.warn('studio_editor.open_live_page_replaced', {
         contentId: id,
@@ -1188,7 +1201,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       await invalidateAll();
       if (unmounted) {
         // The creator left without them: theirs to have dropped.
-        if (leftChanges || !isDirty) {
+        if (leftChanges || !isDirty || drainingOnClose) {
           withdrawLiveHandoff(id);
           return false;
         }
@@ -1289,7 +1302,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       } finally {
         openingLive = false;
         // Closed while it was out, and nothing took them: said once, here.
-        if (unmounted && !keptOnClose) traceClosedUnsent();
+        if (unmounted && !keptOnClose && !drainingOnClose) traceClosedUnsent();
       }
     },
     discard() {

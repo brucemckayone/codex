@@ -12,6 +12,7 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { takeLiveHandoff } from './live-handoff';
 
 const MEDIA_ID = '6b000000-0000-4000-8000-000000000001';
 
@@ -960,11 +961,16 @@ describe('ContentEditor · it went live by another way', () => {
     await vi.advanceTimersByTimeAsync(0);
     flushSync();
 
-    expect(nav.goto).toHaveBeenCalledWith(
-      '/studio/content/c-new/edit',
-      expect.anything()
-    );
+    // Replaced: the first save already swapped this entry to the edit
+    // address in place, so Back never lands on a /new entry (the round-6
+    // review).
+    expect(nav.goto).toHaveBeenCalledWith('/studio/content/c-new/edit', {
+      replaceState: true,
+    });
     expect(text()).not.toContain(m.studio_editor_open_live_failed());
+    expect(takeLiveHandoff('c-new')).toMatchObject({
+      changes: { title: 'Runes, properly' },
+    });
   });
 
   // Next's save came back refused as live: the step froze, and focus is the
