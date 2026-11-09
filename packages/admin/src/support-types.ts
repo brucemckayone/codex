@@ -67,7 +67,10 @@ export interface ChargeSummary {
   organizationName: string | null;
   buyer: SupportBuyer;
   amountCents: number;
-  /** Refunds pending, waiting on the customer, or succeeded. */
+  /**
+   * Refunds pending, waiting on the customer, or succeeded, plus failed ones
+   * settled as refunded elsewhere (Codex-3xnta).
+   */
   refundedCents: number;
   paidAt: string;
   /** The charge's latest dispute; null for none, or an inquiry that closed. */
@@ -136,7 +139,10 @@ export interface ChargeDetail {
     id: string;
     paymentIntentId: string | null;
     amountCents: number;
-    /** Refunds pending, waiting on the customer, or succeeded. */
+    /**
+     * Refunds pending, waiting on the customer, or succeeded, plus failed
+     * ones settled as refunded elsewhere (Codex-3xnta).
+     */
     refundedCents: number;
     /** Stripe's `charge.created`. */
     paidAt: string;
@@ -154,7 +160,7 @@ export interface ChargeDetail {
   } | null;
   window: SupportRefundWindow;
   refundable: {
-    /** The charge less its pending, waiting and succeeded refunds. */
+    /** The charge less its `refundedCents`, never below 0. */
     maxCents: number;
     blocked: RefundBlock | null;
     /**
@@ -372,6 +378,13 @@ export interface RefundRow {
   /** When the buyer was emailed about it; null until the webhook records it. */
   notifiedAt: string | null;
   requestedBy: RefundRequester;
+  /**
+   * How support settled it in Failed refunds, from our record; null while it
+   * is open, and for a refund that didn't fail. A failed one settled
+   * `refunded_elsewhere` counts as refunded (Codex-3xnta), and the card says
+   * "Refunded another way" for it, not "Failed".
+   */
+  resolution: FailedRefundResolution | null;
 }
 
 /** One dispute of the charge, from `disputes`. */
@@ -508,6 +521,14 @@ export interface FailedRefundItem {
    * final word.
    */
   accessRestoreBlockedReason: AccessRestorePrediction | null;
+  /**
+   * A late win's own refund of the payment, by our record
+   * (`disputes.late_win_refund_id`), whose charge isn't yet marked refunded
+   * outside Stripe: settling it refunded elsewhere marks it, and blocks every
+   * later Stripe refund of the charge (Codex-ohlcx). Our record only: one
+   * known only from Stripe's metadata reads false, and is still settled.
+   */
+  isLateWinRefund: boolean;
 }
 
 /** A payee's role on a slice, as the queue labels it. */

@@ -15,6 +15,7 @@ import type {
   PayeeRole,
   QueueCause,
   RefundRequester,
+  RefundRow,
   Slice,
   SupportChargeKind,
   SupportPerson,
@@ -278,9 +279,21 @@ export function roleLabel(role: PayeeRole): string {
     : m.support_role_creator();
 }
 
-/** Stripe's refund status, as the refunds card shows it. */
-export function refundStatus(status: string): BadgeTreatment {
-  switch (status) {
+/**
+ * A refund's status, as the refunds card shows it: Stripe's, except a failed
+ * refund support settled as refunded elsewhere, which counts as refunded
+ * (Codex-3xnta) and so never reads "Failed".
+ */
+export function refundStatus(
+  refund: Pick<RefundRow, 'status' | 'resolution'>
+): BadgeTreatment {
+  if (
+    refund.status === 'failed' &&
+    refund.resolution === 'refunded_elsewhere'
+  ) {
+    return { label: m.support_action_elsewhere(), variant: 'neutral' };
+  }
+  switch (refund.status) {
     case 'pending':
       return { label: m.support_refund_pending(), variant: 'warning' };
     case 'requires_action':
@@ -292,7 +305,7 @@ export function refundStatus(status: string): BadgeTreatment {
     case 'canceled':
       return { label: m.support_refund_canceled(), variant: 'neutral' };
     default:
-      return { label: humanise(status), variant: 'neutral' };
+      return { label: humanise(refund.status), variant: 'neutral' };
   }
 }
 

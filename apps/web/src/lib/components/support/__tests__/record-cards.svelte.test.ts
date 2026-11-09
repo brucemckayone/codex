@@ -301,6 +301,46 @@ describe('Refunds on this charge', () => {
     expect(text()).toContain(m.support_refunds_none());
     expect(document.querySelector('table')).toBeNull();
   });
+
+  test('a failed refund settled refunded elsewhere reads "Refunded another way"; an open or re-paid one still reads "Failed" (Codex-3xnta)', () => {
+    const failed = {
+      status: 'failed',
+      failureReason: 'expired_or_canceled_card',
+      failureLabel: 'The card has expired or been cancelled',
+    };
+    render(RefundsCard, {
+      detail: chargeDetail({
+        refunds: [
+          refundRow({
+            id: 're_elsewhere',
+            ...failed,
+            resolution: 'refunded_elsewhere',
+          }),
+          refundRow({ id: 're_open', ...failed, resolution: null }),
+          refundRow({
+            id: 're_repaid',
+            ...failed,
+            resolution: 'creators_repaid',
+          }),
+        ],
+      }),
+    });
+    const badgeOf = (id: string) =>
+      document
+        .querySelector(`[data-testid="refund-row"][data-refund-id="${id}"]`)
+        ?.querySelector('.badge');
+    expect(badgeOf('re_elsewhere')?.textContent?.trim()).toBe(
+      m.support_action_elsewhere()
+    );
+    expect(m.support_action_elsewhere()).toBe('Refunded another way');
+    expect(badgeOf('re_elsewhere')?.getAttribute('data-variant')).toBe(
+      'neutral'
+    );
+    for (const id of ['re_open', 're_repaid']) {
+      expect(badgeOf(id)?.textContent?.trim()).toBe(m.support_refund_failed());
+      expect(badgeOf(id)?.getAttribute('data-variant')).toBe('error');
+    }
+  });
 });
 
 describe('Chargebacks', () => {

@@ -2582,6 +2582,45 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         });
       });
 
+      it("the queue says which open refund is a late win's own, on a charge not yet marked, by our record only (Codex-ohlcx)", async () => {
+        /** The queue's row for the refund, read page by page (oldest first). */
+        const queueRowOf = async (refundId: string) => {
+          for (let page = 1; ; page++) {
+            const list = await service.listFailedRefunds({ page, limit: 50 });
+            const row = list.items.find((item) => item.refundId === refundId);
+            if (row || page >= list.pagination.totalPages) return row;
+          }
+        };
+        const own = await purchaseCharge(30 * DAY);
+        const onOwn = await failedRefund(own, 1000);
+        await lateWinThatRefunded(own, onOwn.stripeRefundId);
+        // Its charge already marked refunded outside Stripe (by hand): a
+        // settle would mark nothing, so there is nothing to warn of.
+        const marked = await purchaseCharge(30 * DAY);
+        const onMarked = await failedRefund(marked, 1000);
+        const markedWin = await lateWinThatRefunded(
+          marked,
+          onMarked.stripeRefundId
+        );
+        await db
+          .update(disputes)
+          .set({ refundedOutsideStripeAt: new Date(Date.now() - 60_000) })
+          .where(eq(disputes.stripeDisputeId, markedWin));
+        const ordinary = await purchaseCharge(30 * DAY);
+        const onOrdinary = await failedRefund(ordinary, 1000);
+        // Known only by Stripe's metadata: no warning, by design.
+        const byMetadata = await purchaseCharge(30 * DAY);
+        const metadataWin = await lateWinThatRefunded(byMetadata, null);
+        const onMetadata = await failedRefund(byMetadata, 1000, {
+          codex_late_win_dispute: metadataWin,
+        });
+
+        expect((await queueRowOf(onOwn.id))?.isLateWinRefund).toBe(true);
+        expect((await queueRowOf(onMarked.id))?.isLateWinRefund).toBe(false);
+        expect((await queueRowOf(onOrdinary.id))?.isLateWinRefund).toBe(false);
+        expect((await queueRowOf(onMetadata.id))?.isLateWinRefund).toBe(false);
+      });
+
       describe('settled refunded elsewhere, the charge is refunded outside Stripe (review cycle 2, finding 2)', () => {
         const markOf = async (stripeDisputeId: string) =>
           takeFirst(
@@ -2619,8 +2658,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           expect(at).toBeInstanceOf(Date);
           expect(at).toEqual((await refundRow(failed.id)).resolvedAt);
           const detail = await service.getChargeDetail(charge.chargeId);
+          // Settled refunded elsewhere, it counts as refunded (Codex-3xnta),
+          // so nothing is left either; the block still comes first.
           expect(detail.refundable).toEqual({
-            maxCents: 1000,
+            maxCents: 0,
             blocked: 'refunded_outside_stripe',
             refundedOutsideStripeOn: at?.toISOString(),
           });
@@ -2634,6 +2675,12 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           );
           expect(route.statusCode).toBe(422);
           expect(route.context).toMatchObject({
+            code: 'REFUNDED_OUTSIDE_STRIPE',
+          });
+          const preview = await failureOf(
+            service.previewRefund(charge.chargeId, 100)
+          );
+          expect(preview.context).toMatchObject({
             code: 'REFUNDED_OUTSIDE_STRIPE',
           });
           expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
@@ -2701,8 +2748,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           (reRefund as unknown as { status: string }).status = 'failed';
 
           const detail = await service.getChargeDetail(charge.chargeId);
+          // The first refund, settled refunded elsewhere, still counts
+          // (Codex-3xnta); the failed re-refund doesn't.
           expect(detail.refundable).toMatchObject({
-            maxCents: 1000,
+            maxCents: 0,
             blocked: 'refunded_outside_stripe',
           });
           const route = await failureOf(
@@ -4002,6 +4051,250 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(plan.slices.map((row) => row.id).sort()).toEqual(
         [charge.fee.id, charge.org.id, charge.creator.id].sort()
       );
+    });
+  });
+
+  // ── settled refunded elsewhere counts as refunded (Codex-3xnta) ───────
+
+  describe('a failed refund settled as refunded elsewhere counts as refunded (owner decision 2026-11-09, Codex-3xnta)', () => {
+    const settleElsewhere = (refundId: string) =>
+      service.resolveFailedRefund(
+        refundId,
+        { resolution: 'refunded_elsewhere', note: 'Bank transfer' },
+        supportId
+      );
+
+    /** The search's row for a purchase. */
+    const searchRowOf = async (purchaseId: string) =>
+      (await service.searchCharges({ lookup: purchaseId, page: 1, limit: 20 }))
+        .items[0];
+
+    /**
+     * A refund failed at Stripe and in our record, with no clawback of its
+     * own, settled as `resolution` or still open.
+     */
+    async function recordedFailure(
+      chargeId: string,
+      amountCents: number,
+      resolution: 'refunded_elsewhere' | 'creators_repaid' | null,
+      purchaseId: string | null
+    ) {
+      const listed = stripeRefund(chargeId, amountCents, {
+        status: 'failed',
+        failure_reason: 'expired_or_canceled_card',
+      });
+      await db.insert(refunds).values({
+        stripeRefundId: listed.id,
+        stripeChargeId: chargeId,
+        purchaseId,
+        amountCents,
+        currency: 'gbp',
+        status: 'failed',
+        failureReason: 'expired_or_canceled_card',
+        stripeCreatedAt: new Date(),
+        resolution,
+        resolvedAt: resolution ? new Date() : null,
+      });
+    }
+
+    it("in part: the detail, the search, the preview and the route offer only the rest; access stays on Stripe's count", async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 400);
+      await settleElsewhere(failed.id);
+
+      const detail = await service.getChargeDetail(charge.chargeId);
+      expect(detail.charge.refundedCents).toBe(400);
+      expect(detail.refundable).toMatchObject({ maxCents: 600, blocked: null });
+      expect(await searchRowOf(charge.purchase.id)).toMatchObject({
+        chargeId: charge.chargeId,
+        refundedCents: 400,
+      });
+
+      const over = await failureOf(service.previewRefund(charge.chargeId, 601));
+      expect(over.context).toEqual({
+        code: 'REFUND_AMOUNT_TOO_LARGE',
+        maxCents: 600,
+      });
+      // The webhook decides access from Stripe's list, where the settled
+      // refund is still failed: the rest is not the whole charge there.
+      const rest = await service.previewRefund(charge.chargeId, 600);
+      expect(rest.access.kind).toBe('keeps');
+
+      const refused = await failureOf(
+        service.issueRefund(
+          charge.chargeId,
+          refundInput(601, detail.refundCount),
+          supportId
+        )
+      );
+      expect(refused.statusCode).toBe(400);
+      expect(refused.context).toEqual({
+        code: 'REFUND_AMOUNT_TOO_LARGE',
+        maxCents: 600,
+      });
+      expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
+
+      const made = await service.issueRefund(
+        charge.chargeId,
+        refundInput(600, detail.refundCount),
+        supportId
+      );
+      expect(made.refund.amountCents).toBe(600);
+    });
+
+    it('in full: nothing is left, and the preview and the route refuse any amount', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 1000);
+      await settleElsewhere(failed.id);
+
+      const detail = await service.getChargeDetail(charge.chargeId);
+      expect(detail.charge.refundedCents).toBe(1000);
+      expect(detail.refundable).toMatchObject({
+        maxCents: 0,
+        blocked: 'nothing_left',
+      });
+      expect(await searchRowOf(charge.purchase.id)).toMatchObject({
+        refundedCents: 1000,
+      });
+      const preview = await failureOf(
+        service.previewRefund(charge.chargeId, 1)
+      );
+      expect(preview.context).toEqual({ code: 'NOTHING_LEFT_TO_REFUND' });
+      const route = await failureOf(
+        service.issueRefund(
+          charge.chargeId,
+          refundInput(1, detail.refundCount),
+          supportId
+        )
+      );
+      expect(route.statusCode).toBe(422);
+      expect(route.context).toEqual({ code: 'NOTHING_LEFT_TO_REFUND' });
+      expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
+    });
+
+    it('a settle after the page loaded is counted: the route reads it again in its re-check', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 400);
+      // Not settled yet: a failed refund doesn't count (Codex-2hxff.28).
+      const detail = await service.getChargeDetail(charge.chargeId);
+      expect(detail.refundable.maxCents).toBe(1000);
+      await service.previewRefund(charge.chargeId, 1000);
+
+      await settleElsewhere(failed.id);
+
+      // The refund count is as the page saw it, so only the cap stops it.
+      const route = await failureOf(
+        service.issueRefund(
+          charge.chargeId,
+          refundInput(1000, detail.refundCount),
+          supportId
+        )
+      );
+      expect(route.context).toEqual({
+        code: 'REFUND_AMOUNT_TOO_LARGE',
+        maxCents: 600,
+      });
+      expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
+    });
+
+    it('only refunded elsewhere counts: an open failed refund and one whose payees were re-paid do not, on a purchase or an invoice', async () => {
+      const charge = await purchaseCharge();
+      await recordedFailure(charge.chargeId, 100, null, charge.purchase.id);
+      await recordedFailure(
+        charge.chargeId,
+        200,
+        'creators_repaid',
+        charge.purchase.id
+      );
+      await recordedFailure(
+        charge.chargeId,
+        300,
+        'refunded_elsewhere',
+        charge.purchase.id
+      );
+      const invoice = await invoiceCharge();
+      await recordedFailure(invoice.chargeId, 100, null, null);
+      await recordedFailure(invoice.chargeId, 200, 'creators_repaid', null);
+      await recordedFailure(invoice.chargeId, 300, 'refunded_elsewhere', null);
+
+      for (const chargeId of [charge.chargeId, invoice.chargeId]) {
+        const detail = await service.getChargeDetail(chargeId);
+        expect(detail.charge.refundedCents).toBe(300);
+        expect(detail.refundable.maxCents).toBe(700);
+        // Each refund row says how support settled it, from our record.
+        expect(
+          detail.refunds
+            .map((refund) => [refund.amountCents, refund.resolution])
+            .sort((a, b) => Number(a[0]) - Number(b[0]))
+        ).toEqual([
+          [100, null],
+          [200, 'creators_repaid'],
+          [300, 'refunded_elsewhere'],
+        ]);
+        const [row] = (
+          await service.searchCharges({ lookup: chargeId, page: 1, limit: 20 })
+        ).items;
+        expect(row).toMatchObject({ chargeId, refundedCents: 300 });
+      }
+    });
+
+    it('never counts a refund twice: only a failed refund holds a resolution, and our record never moves a failed one', async () => {
+      const charge = await purchaseCharge();
+      // The CHECK refuses a resolution on a refund that didn't fail.
+      for (const status of ['pending', 'requires_action', 'succeeded']) {
+        const error = await db
+          .insert(refunds)
+          .values({
+            stripeRefundId: `re_sup${uid()}`,
+            stripeChargeId: charge.chargeId,
+            purchaseId: charge.purchase.id,
+            amountCents: 100,
+            currency: 'gbp',
+            status,
+            stripeCreatedAt: new Date(),
+            resolution: 'refunded_elsewhere',
+            resolvedAt: new Date(),
+          })
+          .then(
+            () => null,
+            (refused: unknown) => refused
+          );
+        // The refused statement's SQLSTATE and constraint; drizzle wraps it.
+        const e = error as {
+          code?: string;
+          constraint?: string;
+          cause?: { code?: string; constraint?: string };
+        } | null;
+        expect(e?.code ?? e?.cause?.code).toBe('23514');
+        expect(e?.constraint ?? e?.cause?.constraint).toBe(
+          'check_refunds_resolution'
+        );
+      }
+
+      // A stale or wrong event can't turn the settled row into a standing
+      // one: `recordRefund` never moves a failed row.
+      const failed = await failedRefund(charge, 400);
+      await settleElsewhere(failed.id);
+      const listed = fake.refundsByCharge
+        .get(charge.chargeId)
+        ?.find((refund) => refund.id === failed.stripeRefundId);
+      (listed as unknown as { status: string }).status = 'succeeded';
+      await new PurchaseService(
+        { db, environment: 'test', ...createTestMoneyDeps() },
+        fake.stripe
+      ).recordChargeRefunds({
+        id: charge.chargeId,
+        paymentIntentId: charge.paymentIntentId,
+      });
+      const [row] = await db
+        .select({ status: refunds.status, resolution: refunds.resolution })
+        .from(refunds)
+        .where(eq(refunds.id, failed.id));
+      expect(row).toEqual({
+        status: 'failed',
+        resolution: 'refunded_elsewhere',
+      });
+      expect((await searchRowOf(charge.purchase.id))?.refundedCents).toBe(400);
     });
   });
 

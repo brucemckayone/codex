@@ -4,7 +4,9 @@
   Settle a failed refund, with a confirm (Codex-2hxff.28, mockup D3):
 
   - "Refunded another way" (`refunded_elsewhere`) only records it. The
-    payees' shares stay taken back, and the buyer isn't emailed.
+    payees' shares stay taken back, and the buyer isn't emailed. On a late
+    win's own refund (`isLateWinRefund`) it also blocks every later Stripe
+    refund of the charge, so the dialog warns first (Codex-ohlcx).
   - "Re-pay payees" (`creators_repaid`, Q5) pays back what the refund took,
     as new pending payouts, and gives a failed full purchase refund's buyer
     access back. A note is required: it is a money record (Q6).
@@ -301,6 +303,11 @@
       <Dialog.Body>
         {#if resolution === 'refunded_elsewhere'}
           <p class="text">{m.support_elsewhere_body({ buyer, amount, taken })}</p>
+          {#if item.isLateWinRefund}
+            <Alert variant="warning" data-testid="elsewhere-late-win-warning">
+              <p>{m.support_elsewhere_late_win_warning()}</p>
+            </Alert>
+          {/if}
         {:else}
           <p class="text">{m.support_repay_body({ taken })}</p>
           {#if restoresAccess}
