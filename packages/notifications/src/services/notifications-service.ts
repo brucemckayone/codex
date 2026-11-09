@@ -69,7 +69,19 @@ interface SendEmailParams {
   category?: EmailCategory;
   /** User ID for preference lookup (skip check if undefined) */
   userId?: string;
+  /**
+   * A template test send: the email renders with the caller's data, but
+   * the email log records only `{"testSend":true}`. Set by the test-send
+   * route alone, never from anything the caller sends. That data is the
+   * caller's own, and the sweeps read the log's metadata for their own
+   * bookkeeping keys (`agreementId`, `feeNoticeId`, `priceMoveId`), so a
+   * test send carrying them must never read as a real send.
+   */
+  testSend?: boolean;
 }
+
+/** A test send's whole audit metadata (see `SendEmailParams.testSend`). */
+const TEST_SEND_METADATA = { testSend: true } as const;
 
 export class NotificationsService extends BaseService {
   private readonly emailProvider: EmailProvider;
@@ -202,6 +214,9 @@ export class NotificationsService extends BaseService {
   async sendEmail(params: SendEmailParams): Promise<SendResult> {
     const { to, toName, templateName, data, organizationId, creatorId } =
       params;
+    // What the email log keeps of the data: all of it for a real send (the
+    // sweeps find their sends by it), only the marker for a test send.
+    const loggedData = params.testSend ? TEST_SEND_METADATA : data;
 
     // Defensive email validation (API layer also validates, but services should be defensive)
     const emailSchema = z.string().email();
@@ -239,7 +254,7 @@ export class NotificationsService extends BaseService {
           creatorId: creatorId || null,
           status: EMAIL_SEND_STATUS.SKIPPED,
           metadata: JSON.stringify({
-            ...data,
+            ...loggedData,
             skipReason: 'opted_out',
             category: params.category,
           }),
@@ -319,7 +334,7 @@ export class NotificationsService extends BaseService {
         organizationId: organizationId || null,
         creatorId: creatorId || null,
         status: EMAIL_SEND_STATUS.PENDING,
-        metadata: JSON.stringify(data),
+        metadata: JSON.stringify(loggedData),
       })
       .returning();
 

@@ -19,13 +19,20 @@
  * notification-touching; positive AND negative paths are covered.
  */
 
-import { env } from 'cloudflare:test';
+import {
+  createExecutionContext,
+  env,
+  waitOnExecutionContext,
+} from 'cloudflare:test';
 import type { AgreementWithShare } from '@codex/agreements';
-import { createDbClient, inArray } from '@codex/database';
-import { emailAuditLogs } from '@codex/database/schema';
+import { and, createDbClient, eq, inArray } from '@codex/database';
+import { emailAuditLogs, emailTemplates, users } from '@codex/database/schema';
+import { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
 import { templateDataSchemas } from '@codex/validation';
+import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
+import preview from '../../routes/preview';
 import type { RunAgreementExpiringSweepDeps } from '../agreement-expiring-sweep';
 import { runAgreementExpiringSweep } from '../agreement-expiring-sweep';
 import { SENDS_TIME_BUDGET_MS } from '../send-limits';
@@ -884,5 +891,138 @@ describe('runAgreementExpiringSweep', () => {
         );
       }
     });
+  });
+
+  // ─── A test send in the email log (final review, scoping-security) ───────
+  //
+  // POST /api/templates/:id/test-send lets a creator send their own template,
+  // under any name and with any data, to anyone. Its row must never read as
+  // this sweep's send: written through the real route and send path here.
+
+  it("a test send carrying an agreement's keys does not stand for the owner's email", async () => {
+    resetState();
+    const db = createDbClient(env as unknown as Bindings);
+    const tag = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
+    const senderId = `testsender${tag}`;
+    const ownerEmail = `owner-${tag}@example.test`;
+    const agreementId = `agr-forged-${crypto.randomUUID()}`;
+    await db.insert(users).values({
+      id: senderId,
+      name: 'Test Sender',
+      email: `${senderId}@example.test`,
+    });
+    const [template] = await db
+      .insert(emailTemplates)
+      .values({
+        name: 'agreement-expiring-soon',
+        scope: 'creator',
+        creatorId: senderId,
+        createdBy: senderId,
+        subject: 'Expiring soon',
+        htmlBody: '<p>Hi {{recipientName}}</p>',
+        textBody: 'Hi {{recipientName}}',
+      })
+      .returning({ id: emailTemplates.id });
+    if (!template) throw new Error('template not inserted');
+
+    try {
+      const app = new Hono<{ Variables: Record<string, unknown> }>();
+      app.use('*', async (c, next) => {
+        c.set('user', {
+          id: senderId,
+          email: `${senderId}@example.test`,
+          name: 'Test Sender',
+          role: 'creator',
+        });
+        c.set('session', { id: `sess_test_send_${tag}`, userId: senderId });
+        c.set('obs', new ObservabilityClient('notifications-api', 'test'));
+        await next();
+      });
+      app.route('/api/templates', preview);
+      const ec = createExecutionContext();
+      const response = await app.fetch(
+        new Request(
+          `http://notifications-api.test/api/templates/${template.id}/test-send`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              recipientEmail: ownerEmail,
+              data: {
+                recipientName: 'Owner',
+                orgName: 'Org',
+                otherPartyName: 'Creator',
+                revenueTypeLabel: 'subscription',
+                sharePercentDisplay: '30%',
+                termMonthsDisplay: '6 months',
+                expiryDate: '2026-12-01',
+                deepLinkUrl: 'https://org.revelations.studio/studio',
+                // Every key a sweep reads from the email log.
+                agreementId,
+                side: 'owner',
+                feeNoticeId: 'fee-notice-forged',
+                feeNoticeRound: '1',
+                priceMoveId: 'price-move-forged',
+              },
+            }),
+          }
+        ),
+        { ...env, USE_MOCK_EMAIL: 'true' } as unknown as typeof env,
+        ec
+      );
+      await waitOnExecutionContext(ec);
+      expect(response.status).toBe(200);
+
+      sharedMockState.enrichedCandidates = [
+        {
+          ...candidate('agr-forged'),
+          agreement: mockAgreement({
+            id: agreementId,
+            organizationId: 'org-agr-forged',
+            createdAt: new Date(Date.now() - 60 * 60 * 1000),
+          }),
+        },
+      ];
+      sharedMockState.ownerLookup = async () => ({
+        id: 'owner-forged',
+        email: ownerEmail,
+        name: 'Owner',
+      });
+      const mailer = vi.fn<MailerFn>(async () => undefined);
+      const result = await runAgreementExpiringSweep({
+        db,
+        obs: buildObs().obs,
+        environment: 'test',
+        workerSecret: 'unused',
+        notificationsUrl: 'http://notifications.test',
+        mailer,
+      });
+
+      // The owner's warning still goes: the test send is not it.
+      expect(mailer.mock.calls.map((c) => c[0].to)).toContain(ownerEmail);
+      expect(result.emailsAlreadySent).toBe(0);
+      // The real send path logged the test send, and only that it was one.
+      const logged = await db
+        .select({
+          status: emailAuditLogs.status,
+          metadata: emailAuditLogs.metadata,
+        })
+        .from(emailAuditLogs)
+        .where(
+          and(
+            eq(emailAuditLogs.recipientEmail, ownerEmail),
+            eq(emailAuditLogs.templateName, 'agreement-expiring-soon')
+          )
+        );
+      expect(logged).toEqual([
+        { status: 'success', metadata: '{"testSend":true}' },
+      ]);
+    } finally {
+      await db
+        .delete(emailAuditLogs)
+        .where(eq(emailAuditLogs.recipientEmail, ownerEmail));
+      await db.delete(emailTemplates).where(eq(emailTemplates.id, template.id));
+      await db.delete(users).where(eq(users.id, senderId));
+    }
   });
 });
