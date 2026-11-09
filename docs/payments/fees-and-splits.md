@@ -96,13 +96,18 @@ batch C1's decisions F1–F9 and Q1–Q5 (2026-10-30):
   even the same day, it tells again everyone its last smaller email told, or
   may have told, so two smaller emails can come a day apart; anyone it surely
   missed just gets the lower figure.
-- **Told, or may have been** (owner, 2026-11-09; one rule, `mayHaveTold` in
-  `fee-config-service.ts`, for all three above): the email was accepted, or
-  support marked them told another way; or it may have gone: it got no
-  answer, a run tried it (cut off after sending, or still sending), or it
-  failed and was retried in the last 12 hours, the time a run can hold a
-  notice. An email never tried has told nobody. Erring this way means some
-  people get one email more, never one fewer.
+- **Told, or may have been** (owner, 2026-11-09; one rule,
+  `feeNoticeMayHaveTold` in `@codex/payments`, for all three above): the
+  email was accepted, or support marked them told another way; or it may have
+  gone: it got no answer, a run tried it (cut off after sending, or still
+  sending), or it failed and was retried in the last 12 hours, the time a run
+  can hold a notice. An email never tried has told nobody. Erring this way
+  means some people get one email more, never one fewer.
+- A rise made smaller while the daily run is sending: the run reads the
+  figures again once it sees the edit (it looks after its claim and after
+  each send), so its later emails name the new figure. One already on its
+  way names the earlier one, and its person gets the smaller email the next
+  morning.
 - Someone who joins while a rise waits is told the same date, and never holds
   it (F8). Their failed email is still listed for support (Q4).
 - Each email names a date: the change's, or the earliest it can be, with a

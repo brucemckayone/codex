@@ -298,9 +298,9 @@ describe('FeeConfigService — classifying a write (real DB)', () => {
   });
 
   // ── Told, or may have been (owner, 2026-11-09) ──────────────────────────
-  // ONE rule (`mayHaveTold`) decides whom the first cut's smaller email, the
-  // second cut's restart and a cancel's "it's off" email reach. Each case is
-  // a notice as a morning can leave it.
+  // ONE rule (payments' `feeNoticeMayHaveTold`) decides whom the first cut's
+  // smaller email, the second cut's restart and a cancel's "it's off" email
+  // reach. Each case is a notice as a morning can leave it.
   const HOUR = 60 * 60 * 1000;
   const LEFT = [
     {

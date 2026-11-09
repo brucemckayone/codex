@@ -65,11 +65,13 @@ import {
   type FeeWriteOutcome,
   feeLevelKey,
   feeLevelWhere,
+  feeNoticeMayHaveTold,
   feeRiseStartAfter,
   layerLevelFees,
   lockFeeLevel,
   mirrorLegacyFeeRow,
   nextFeeNoticeRunAfter,
+  queueSmallerFeeNotices,
   readFeeVersions,
   resolveFeesAt,
   versionInForce,
@@ -82,18 +84,7 @@ import {
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import {
-  and,
-  desc,
-  eq,
-  gt,
-  inArray,
-  isNull,
-  ne,
-  or,
-  type SQL,
-  sql,
-} from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
@@ -1221,13 +1212,14 @@ async function insertVersion(
 /**
  * Void a waiting rise. Nobody still waits for it: its open notices become
  * `not_needed`. Unless a bigger rise replaces it (whose own announcement
- * says so), everyone it told, or may have told (`mayHaveTold`), is emailed
- * that it's off (F2, `fee-change-cancelled`, sent by the next daily run). The
- * cancelled notice keeps what they were told (roles, values, the date named)
- * for its email. It is queued before the open notices are closed, which
- * would hide which ones may have gone. notifications-api's fee step applies
- * the same rule to someone whose email was in flight as the rise was voided
- * (`tellOfVoid`): change both together.
+ * says so), everyone it told, or may have told (payments'
+ * `feeNoticeMayHaveTold`), is emailed that it's off (F2,
+ * `fee-change-cancelled`, sent by the next daily run). The cancelled notice
+ * keeps what they were told (roles, values, the date named) for its email.
+ * It is queued before the open notices are closed, which would hide which
+ * ones may have gone. For someone whose email was in flight as the rise was
+ * voided, notifications-api's fee step runs this insert narrowed to them
+ * (`tellOfVoid`), with what that email told.
  */
 async function voidPending(
   tx: Tx,
@@ -1256,7 +1248,7 @@ async function voidPending(
       FROM ${feeChangeNotices}
       WHERE change_id = ${changeId}
         AND kind = 'announce'
-        AND ${mayHaveTold(now)}
+        AND ${feeNoticeMayHaveTold(now)}
       ON CONFLICT (change_id, user_id, kind) DO NOTHING
     `);
   }
@@ -1273,72 +1265,17 @@ async function voidPending(
 }
 
 /**
- * How long a tried notice may still be held by a daily run: the run's claim
- * hands no notice tried this recently to another run (RECLAIM_AFTER_MS in
- * notifications-api's fee step; the two must stay equal).
- */
-const FEE_NOTICE_RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
-
-/**
- * THE rule for a notice whose email told, or MAY have told, its person
- * ("unconfirmed, retried, or failed mid-retry": owner, 2026-11-09). One
- * predicate for the three places that ask, so they can't drift: the first
- * cut's smaller emails and the second cut's restarts (`queueSmallerNotices`),
- * and the void's "it's off" emails (`voidPending`). A notice is told, or may
- * have been, when it is:
- *   - `sent` or `told_another_way`: told;
- *   - `unknown`: a send with no answer, which may have gone;
- *   - `due` after a try (attempts > 0): a run cut off after sending, or a
- *     send in flight now (the claim adds the try before it sends);
- *   - `failed`, tried within FEE_NOTICE_RECLAIM_AFTER_MS: the claim leaves a
- *     retried notice `failed` (it adds the try and stamps attempted_at with
- *     the run's clock), and one tried that recently may still be held by a
- *     run, its retry in flight with the earlier figure. A retry that already
- *     finished refused looks the same in the row, so it counts too: told
- *     twice rather than not at all.
- * Never tried (`due`, no attempts) is not told, nor is `not_needed`. The
- * columns are the table's own, so it reads the row a FROM names and an
- * ON CONFLICT DO UPDATE's existing row alike.
- */
-function mayHaveTold(now: Date): SQL {
-  const heldSince = new Date(now.getTime() - FEE_NOTICE_RECLAIM_AFTER_MS);
-  return sql`(${feeChangeNotices.state} IN ('sent', 'told_another_way', 'unknown')
-    OR (${feeChangeNotices.state} = 'due' AND ${feeChangeNotices.attempts} > 0)
-    OR (${feeChangeNotices.state} = 'failed' AND ${feeChangeNotices.attemptedAt} > ${heldSince}::timestamptz))`;
-}
-
-/**
- * Q2 (A): a waiting rise made smaller sends one short email to everyone its
- * announcement told, or may have told (`mayHaveTold`: an announcement in
- * flight carries the earlier figure). Someone told about an earlier smaller
- * figure is told again; someone surely not told yet simply gets the
- * announcement with the new figures. A smaller email told, or maybe told,
- * starts a new round at `now`: the daily step's email-log check is tied to
- * the round, so the last round's email can't count as this one's (review
- * cycle 3, N1; Codex-2hxff.104). So does one set aside (`not_needed`),
- * which would send nothing more. A smaller email that surely didn't go
- * (failed and done, or never tried) keeps its round: its next send carries
- * the new figure anyway.
+ * Q2 (A): the smaller email for everyone the waiting rise's announcement
+ * told, or may have told, and a new round for those told before; the rule
+ * and the statement are payments' `queueSmallerFeeNotices`, which the daily
+ * step also runs for one person it emailed with figures read before a cut.
  */
 async function queueSmallerNotices(
   tx: Tx,
   changeId: string,
   now: Date
 ): Promise<void> {
-  await tx.execute(sql`
-    INSERT INTO ${feeChangeNotices}
-      (change_id, user_id, kind, on_list, roles, before_values, after_values, state)
-    SELECT change_id, user_id, 'smaller', false, roles, '[]'::jsonb, '[]'::jsonb, 'due'
-    FROM ${feeChangeNotices}
-    WHERE change_id = ${changeId}
-      AND kind = 'announce'
-      AND ${mayHaveTold(now)}
-    ON CONFLICT (change_id, user_id, kind) DO UPDATE
-      SET state = 'due', attempts = 0, attempted_at = NULL, accepted_at = NULL,
-          last_reason = NULL, last_error = NULL, alert_error_id = NULL,
-          created_at = ${now}, updated_at = ${now}
-      WHERE ${mayHaveTold(now)} OR ${feeChangeNotices.state} = 'not_needed'
-  `);
+  await queueSmallerFeeNotices(tx, { changeId, now });
 }
 
 async function writeAudit(

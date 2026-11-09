@@ -70,6 +70,7 @@ import {
   feeConfigOrg,
   feeConfigOrgCreator,
   feeConfigPlatform,
+  feeConfigVersions,
   organizations,
   users,
 } from '@codex/database/schema';
@@ -81,6 +82,7 @@ import {
   dateRiseIfAllTold,
   dbFeeVersionReader,
   FEE_NOTICE_OPEN_STATES,
+  FEE_NOTICE_RECLAIM_AFTER_MS,
   type FeeLevel,
   type FeeVersionList,
   type FeeVersionReader,
@@ -89,6 +91,7 @@ import {
   lockFeeLevel,
   londonDate,
   mirrorLegacyFeeRow,
+  queueSmallerFeeNotices,
   readFeeVersions,
   readFeeVersionsByLevel,
   resolveFeesAt,
@@ -119,13 +122,6 @@ const ALERT_NAMED = 50;
 const LIST_BATCH = 500;
 /** Sends in flight at once. */
 const SEND_CONCURRENCY = 8;
-/**
- * A notice attempted this recently is not claimed again (overlapping runs).
- * @codex/purchase's FEE_NOTICE_RECLAIM_AFTER_MS mirrors it: a `failed` notice
- * tried this recently may be in flight, so it counts as maybe told
- * (`mayHaveTold`). Change both together.
- */
-const RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
 /**
  * The owner's rule is to alert only when a person is needed. An `unknown`
  * send (a 5xx or a timeout: it may have gone, and each morning checks the
@@ -216,6 +212,12 @@ export interface FeeNoticesSweepResult {
   dropped: number;
   /** Claims given back unsent: the send budget ran out. */
   givenBack: number;
+  /**
+   * Outcomes not written: the notice changed under its send (a new round,
+   * support told them another way, or a void closed it under a refusal).
+   * Every one is also a warning.
+   */
+  notRecorded: number;
   dated: number;
   /** Levels whose old fee row took a rise that has started. */
   mirrored: number;
@@ -237,6 +239,11 @@ interface SweepContext {
   result: FeeNoticesSweepResult;
   /** Each change's affected people, worked out once per run. */
   payees: Map<string, Promise<Map<string, AffectedPayee>>>;
+  /**
+   * The live version of each change when its figures were read, so a send
+   * can tell whether the rise was made smaller after (`figuresMovedSince`).
+   */
+  readVersions: Map<string, Promise<string | null>>;
   orgNames: Map<string, { name: string; slug: string }>;
   onlyChanges: readonly string[] | null;
   alertNamed: number;
@@ -421,24 +428,98 @@ function notStarted(now: Date) {
   );
 }
 
+/** The change's live version: a rise made smaller gets a new one. */
+async function liveVersionOf(
+  ctx: SweepContext,
+  changeId: string
+): Promise<string | null> {
+  const [live] = await ctx.db
+    .select({ id: feeConfigVersions.id })
+    .from(feeConfigVersions)
+    .where(
+      and(
+        eq(feeConfigVersions.changeId, changeId),
+        isNull(feeConfigVersions.supersededAt)
+      )
+    )
+    .limit(1);
+  return live?.id ?? null;
+}
+
+/** Each change's affected people, read once per run (`currentPayeesOf`). */
 function payeesOf(
   ctx: SweepContext,
   change: FeeChangeRow
 ): Promise<Map<string, AffectedPayee>> {
   let found = ctx.payees.get(change.id);
   if (!found) {
-    const reading = affectedPayees(ctx.db, change, ctx.now).then(
-      (list) => new Map(list.map((p) => [p.userId, p]))
-    );
+    // The version first, then the figures: a cut between the two reads as
+    // a move, and the figures, read after it, then compare equal.
+    const version = liveVersionOf(ctx, change.id);
+    const reading = version
+      .then(() => affectedPayees(ctx.db, change, ctx.now))
+      .then((list) => new Map(list.map((p) => [p.userId, p])));
     // A failed read is never kept: the next part reads again, rather than
     // every notice of the change failing on the one rejection.
     reading.catch(() => {
-      if (ctx.payees.get(change.id) === reading) ctx.payees.delete(change.id);
+      if (ctx.payees.get(change.id) === reading) {
+        ctx.payees.delete(change.id);
+        ctx.readVersions.delete(change.id);
+      }
     });
     ctx.payees.set(change.id, reading);
+    ctx.readVersions.set(change.id, version);
     found = reading;
   }
   return found;
+}
+
+/**
+ * The change's affected people as they stand now: the run's read, unless
+ * the rise was edited since (its live version moved), when it is read again
+ * for the rest of the run (review final S2). Asked after the claim, so a
+ * rise made smaller between the joiners step's read and the claim sends its
+ * new figure, never the earlier one; a cut after the claim finds those
+ * notices tried, so the cut itself queues their smaller emails
+ * (`feeNoticeMayHaveTold`).
+ */
+async function currentPayeesOf(
+  ctx: SweepContext,
+  change: FeeChangeRow
+): Promise<Map<string, AffectedPayee>> {
+  const read = ctx.readVersions.get(change.id);
+  if (read) {
+    const [readId, liveId] = await Promise.all([
+      read,
+      liveVersionOf(ctx, change.id),
+    ]);
+    // One send's check clears it once; the others share the fresh read.
+    if (readId !== liveId && ctx.readVersions.get(change.id) === read) {
+      ctx.payees.delete(change.id);
+      ctx.readVersions.delete(change.id);
+    }
+  }
+  return payeesOf(ctx, change);
+}
+
+/**
+ * S2: an email that carried figures read before the rise was made smaller
+ * names a bigger figure than the rise now holds, so its person is owed the
+ * smaller email (Q2 (A)). It catches what the read after the claim can't
+ * see: a cut whose transaction was still open then and committed during
+ * the send. A cut made after the claim has queued this one itself, so the
+ * queue here adds nothing for it.
+ */
+async function figuresMovedSince(
+  ctx: SweepContext,
+  change: FeeChangeRow,
+  userId: string,
+  toldAfter: FeeNoticeRoleValues[]
+): Promise<boolean> {
+  const now = (await currentPayeesOf(ctx, change)).get(userId);
+  return (
+    now !== undefined && JSON.stringify(now.after) !== JSON.stringify(toldAfter)
+  );
 }
 
 async function addJoiners(
@@ -548,7 +629,10 @@ async function claim(ctx: SweepContext): Promise<Claimed[]> {
     ctx.enabled.has(TEMPLATE_FOR[kind])
   );
   if (kinds.length === 0) return [];
-  const reclaimBefore = new Date(ctx.now.getTime() - RECLAIM_AFTER_MS);
+  // A notice tried this recently may still be held by a run.
+  const reclaimBefore = new Date(
+    ctx.now.getTime() - FEE_NOTICE_RECLAIM_AFTER_MS
+  );
   const result = await ctx.db.execute(sql`
     WITH picked AS (
       SELECT n.id, n.attempted_at AS prev_attempted_at
@@ -900,71 +984,115 @@ async function withFollowUpReads(
   }
 }
 
+type SweepTx = Parameters<Parameters<DatabaseWs['transaction']>[0]>[0];
+
+/**
+ * What `record` did with an outcome: written on the open round it claimed,
+ * written on a row a void closed while the email was in flight, or not
+ * written (the row moved on: a new round, or support told them).
+ */
+type Recorded = 'written' | 'voided' | 'not_recorded';
+
 /**
  * What a send did, written on the round it claimed while that row is still
  * open (`due`, `failed` or `unknown`). Two writes can move it while the
  * email is in flight:
- *   - a rise made smaller starts it a new round (`queueSmallerNotices`: a
+ *   - a rise made smaller starts it a new round (`queueSmallerFeeNotices`: a
  *     new created_at, untried). This email carried the figure read before
  *     that, so nothing is recorded on the new round (Codex-2hxff.104);
  *   - a rise voided sets it `not_needed` (`voidPending`). The row ends as
  *     voidPending leaves one that already had this outcome: an email that
  *     went is recorded `sent`, one with no answer stays `not_needed` with
  *     what it may have told, and both are owed the "it's off" email
- *     (`tellOfVoid`). One refused stays `not_needed`: nobody was told.
+ *     (`tellOfVoid`). One refused is not written: nobody was told.
  * Each check is in an UPDATE's WHERE, not a read before it: an UPDATE that
  * meets the other write's lock waits, then tests the committed row.
  * created_at holds microseconds (the column's now() default) and the claim
  * read it to the millisecond, so both sides are compared at that.
+ * `toldAgain` (`figuresMovedSince`) queues this person's smaller email with
+ * the write. One transaction holds the write and what it queues (review
+ * final S3): if either fails, neither lands, and the row stays as it was.
+ * Its row lock keeps a void out until both commit, so a smaller email is
+ * never queued for a rise already off.
  */
 async function record(
   ctx: SweepContext,
   notice: Claimed,
-  set: Partial<FeeChangeNoticeRow>
-): Promise<void> {
+  set: Partial<FeeChangeNoticeRow>,
+  toldAgain = false
+): Promise<Recorded> {
   const ours = [
     eq(feeChangeNotices.id, notice.id),
     sql`date_trunc('milliseconds', ${feeChangeNotices.createdAt}) = ${notice.createdAt}::timestamptz`,
   ];
-  const writeIf = async (
-    state: SQL,
-    values: Partial<FeeChangeNoticeRow> = set
-  ): Promise<boolean> => {
-    const written = await ctx.db
-      .update(feeChangeNotices)
-      .set({ ...values, updatedAt: ctx.now })
-      .where(and(...ours, state))
-      .returning({ id: feeChangeNotices.id });
-    return written.length > 0;
-  };
-  if (
-    await writeIf(inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES]))
-  ) {
-    return;
-  }
+  const done = await ctx.db.transaction(async (tx) => {
+    const writeIf = async (
+      state: SQL,
+      values: Partial<FeeChangeNoticeRow> = set
+    ): Promise<boolean> => {
+      const written = await tx
+        .update(feeChangeNotices)
+        .set({ ...values, updatedAt: ctx.now })
+        .where(and(...ours, state))
+        .returning({ id: feeChangeNotices.id });
+      return written.length > 0;
+    };
+    if (
+      await writeIf(
+        inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES])
+      )
+    ) {
+      if (toldAgain) {
+        await queueSmallerFeeNotices(tx, {
+          changeId: notice.changeId,
+          now: ctx.now,
+          userId: notice.userId,
+        });
+      }
+      return { recorded: 'written' as const };
+    }
+    const thisSendMayHaveTold = set.state === 'sent' || set.state === 'unknown';
+    if (
+      thisSendMayHaveTold &&
+      (await writeIf(
+        eq(feeChangeNotices.state, 'not_needed'),
+        set.state === 'sent' ? set : { ...set, state: 'not_needed' }
+      ))
+    ) {
+      return {
+        recorded: 'voided' as const,
+        cancelledNoticeQueued: await tellOfVoid(tx, ctx.now, notice),
+      };
+    }
+    return { recorded: 'not_recorded' as const };
+  });
   const ids = { feeNoticeId: notice.id, changeId: notice.changeId };
-  const mayHaveTold = set.state === 'sent' || set.state === 'unknown';
-  if (
-    mayHaveTold &&
-    (await writeIf(
-      eq(feeChangeNotices.state, 'not_needed'),
-      set.state === 'sent' ? set : { ...set, state: 'not_needed' }
-    ))
-  ) {
+  if (done.recorded === 'written') {
+    if (toldAgain) {
+      ctx.obs.info(
+        'fee step: a fee email named a figure the rise was cut from since; the smaller email is owed',
+        ids
+      );
+    }
+  } else if (done.recorded === 'voided') {
     ctx.obs.info(
       'fee step: a fee rise was voided while its email was in flight; the cancellation email is owed',
       {
         ...ids,
         outcome: set.state,
-        cancelledNoticeQueued: await tellOfVoid(ctx, notice),
+        cancelledNoticeQueued: done.cancelledNoticeQueued,
       }
     );
-    return;
+  } else {
+    // Expected only in a race with an edit; a run of them means the write
+    // itself no longer finds its rows (S5).
+    ctx.result.notRecorded += 1;
+    ctx.obs.warn(
+      'fee step: a notice changed while this run held it; this outcome is not recorded on it',
+      { errorId: crypto.randomUUID(), ...ids, outcome: set.state }
+    );
   }
-  ctx.obs.info(
-    'fee step: a notice changed while its email was in flight; this send is not recorded on it',
-    ids
-  );
+  return done.recorded;
 }
 
 /**
@@ -974,16 +1102,18 @@ async function record(
  * told, unless a bigger rise replaced it (whose own email says so). The same
  * statement as voidPending's, narrowed to this person; the send's outcome,
  * not the row's state, is what says they may have been told. voidPending
- * itself queues one for a notice in flight (`mayHaveTold`), but with what the
- * row held before this send; so one still untried takes what this email
- * told, and one already tried is kept. Either way there is one per person.
- * It runs after the write above, so it reads the void as committed.
+ * itself queues one for a notice in flight (`feeNoticeMayHaveTold`), but
+ * with what the row held before this send; so one still untried takes what
+ * this email told, and one already tried is kept. Either way there is one
+ * per person. It runs in `record`'s transaction, after its write, which
+ * waited for the void to commit, so it reads the void as committed.
  */
 async function tellOfVoid(
-  ctx: SweepContext,
+  tx: SweepTx,
+  now: Date,
   notice: Claimed
 ): Promise<boolean> {
-  const added = await ctx.db.execute(sql`
+  const added = await tx.execute(sql`
     INSERT INTO ${feeChangeNotices}
       (change_id, user_id, kind, on_list, roles, before_values, after_values, quoted_from, state)
     SELECT n.change_id, n.user_id, 'cancelled', false, n.roles, n.before_values, n.after_values, n.quoted_from, 'due'
@@ -997,7 +1127,7 @@ async function tellOfVoid(
     ON CONFLICT (change_id, user_id, kind) DO UPDATE
       SET roles = EXCLUDED.roles, before_values = EXCLUDED.before_values,
           after_values = EXCLUDED.after_values, quoted_from = EXCLUDED.quoted_from,
-          updated_at = ${ctx.now}::timestamptz
+          updated_at = ${now}::timestamptz
       WHERE ${feeChangeNotices}.state = 'due' AND ${feeChangeNotices}.attempts = 0
     RETURNING id
   `);
@@ -1039,7 +1169,8 @@ async function sendOne(
   if (!change) return;
   // 5. A follow-up holds nothing: after its tries it is dropped.
   if (notice.kind !== 'announce' && notice.attempts > FOLLOW_UP_TRIES) {
-    await record(ctx, notice, { state: 'not_needed' });
+    if ((await record(ctx, notice, { state: 'not_needed' })) === 'not_recorded')
+      return;
     ctx.result.dropped += 1;
     ctx.obs.warn('fee step: a follow-up email was dropped after its tries', {
       errorId: crypto.randomUUID(),
@@ -1055,13 +1186,15 @@ async function sendOne(
   if (notice.prevAttemptedAt !== null && email) {
     const at = await foundSent(ctx, notice, email);
     if (at) {
-      await record(ctx, notice, {
+      // Its figures need no check here: it was `unknown`, or tried, at any
+      // cut since it went, so the cut queued its smaller email itself.
+      const found = await record(ctx, notice, {
         state: 'sent',
         acceptedAt: at,
         lastReason: null,
         lastError: null,
       });
-      ctx.result.foundInLog += 1;
+      if (found !== 'not_recorded') ctx.result.foundInLog += 1;
       return;
     }
   }
@@ -1093,8 +1226,11 @@ async function sendOne(
     const payee = (await payeesOf(ctx, change)).get(notice.userId);
     if (!payee) {
       // Their own setting, or a role they left, shields them now.
-      await record(ctx, notice, { state: 'not_needed' });
-      ctx.result.notNeeded += 1;
+      if (
+        (await record(ctx, notice, { state: 'not_needed' })) !== 'not_recorded'
+      ) {
+        ctx.result.notNeeded += 1;
+      }
       return;
     }
     const names = await namesOf(ctx, payee.roles);
@@ -1150,33 +1286,53 @@ async function sendOne(
         )
     : 'no_address';
   const outcome = outcomeOf(delivery);
+  // One that went, or may have, with a figure the rise was cut from since
+  // is owed the smaller email (S2). A refusal told nothing.
+  const toldAgain =
+    told.afterValues !== undefined &&
+    outcome.state !== 'failed' &&
+    (await figuresMovedSince(ctx, change, notice.userId, told.afterValues));
   if (outcome.state === 'sent') {
-    await record(ctx, notice, {
-      ...told,
-      state: 'sent',
-      // The run's clock, as attempted_at: a run is minutes long, and the
-      // 30 days are counted to the next UK midnight anyway.
-      acceptedAt: ctx.now,
-      lastReason: null,
-      lastError: null,
-    });
-    ctx.result.sent += 1;
+    const sent = await record(
+      ctx,
+      notice,
+      {
+        ...told,
+        state: 'sent',
+        // The run's clock, as attempted_at: a run is minutes long, and the
+        // 30 days are counted to the next UK midnight anyway.
+        acceptedAt: ctx.now,
+        lastReason: null,
+        lastError: null,
+      },
+      toldAgain
+    );
+    if (sent !== 'not_recorded') ctx.result.sent += 1;
     return;
   }
   const errorId = crypto.randomUUID();
-  await record(ctx, notice, {
-    // One with no answer may have told them, so it keeps what: a void's
-    // "it's off" email quotes it (owner, 2026-11-09).
-    ...(outcome.state === 'unknown' ? told : {}),
-    state: outcome.state,
-    lastReason: outcome.reason,
-    lastError: outcome.error,
-    alertErrorId: errorId,
-  });
+  const recorded = await record(
+    ctx,
+    notice,
+    {
+      // One with no answer may have told them, so it keeps what: a void's
+      // "it's off" email quotes it (owner, 2026-11-09).
+      ...(outcome.state === 'unknown' ? told : {}),
+      state: outcome.state,
+      lastReason: outcome.reason,
+      lastError: outcome.error,
+      alertErrorId: errorId,
+    },
+    toldAgain
+  );
+  if (recorded === 'not_recorded') return;
   if (outcome.state === 'failed') ctx.result.failed += 1;
   else ctx.result.unknown += 1;
   ctx.obs.warn(
-    'fee step: a fee email was not accepted; it is tried again tomorrow',
+    // A void closed the row while it was in flight: never tried again (S6).
+    recorded === 'voided'
+      ? 'fee step: a fee email was not accepted, and its rise was voided meanwhile; it is not tried again'
+      : 'fee step: a fee email was not accepted; it is tried again tomorrow',
     {
       errorId,
       feeNoticeId: notice.id,
@@ -1236,7 +1392,7 @@ async function withoutUnreadChanges(
     const change = changes.get(changeId);
     if (!change) continue;
     try {
-      await payeesOf(ctx, change);
+      await currentPayeesOf(ctx, change);
     } catch (error) {
       unread.add(changeId);
       const ofChange = claimed.filter((n) => n.changeId === changeId);
@@ -1592,6 +1748,7 @@ export async function runFeeNoticesSweep(
     foundInLog: 0,
     dropped: 0,
     givenBack: 0,
+    notRecorded: 0,
     dated: 0,
     mirrored: 0,
     skippedTemplates: [],
@@ -1618,6 +1775,7 @@ export async function runFeeNoticesSweep(
       enabled: await enabledTemplates(deps, result),
       result,
       payees: new Map(),
+      readVersions: new Map(),
       orgNames: new Map(),
       onlyChanges: deps.onlyChanges ?? null,
       alertNamed: deps.alertNamed ?? ALERT_NAMED,
