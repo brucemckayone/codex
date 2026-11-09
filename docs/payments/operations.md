@@ -429,15 +429,19 @@ refunds as refunded elsewhere, a late win's or not, counts against its charge
 as if it had succeeded: in the charge page's refunded figure and what the form
 offers ("All that's left"), in the refund preview's cap, in the refund route's
 cap (read again in its re-check, so a settle after the page loaded counts),
-and in the search's refunded figure. What is left stays refundable within the
-14-day window. The preview's access line still counts Stripe's refunds only:
-the refund webhook decides access from Stripe's list, where the settled refund
-stays failed. Nothing is counted twice, since only a failed refund holds a
-resolution (`check_refunds_resolution`) and a failed refund is final at Stripe
-and in our record. On a late win's own refund the charge is blocked anyway
-(above), so the count changes nothing there. If support refunded it again
-through Stripe first, both count: the figure can pass the charge's amount, and
-the page shows it as refunded in full.
+and in the search's refunded figure. The charge page's refunds list reads it
+"Refunded another way", not "Failed". It also comes off the admin revenue
+figures (`taken`) and the studio Sales "Refunds" tile, by the same rule
+(`countsAgainstCharge`, `@codex/purchase`). What is left stays refundable
+within the 14-day window. The preview's access line still counts Stripe's
+refunds only: the refund webhook decides access from Stripe's list, where the
+settled refund stays failed. Each refund counts once, since only a failed
+refund holds a resolution (`check_refunds_resolution`), a failed refund is
+final at Stripe and in our record, and the charge page skips a recorded row
+Stripe's list shows standing. On a late win's own refund the charge is
+blocked anyway (above), so the count changes nothing there. If support
+refunded it again through Stripe first, both refunds count, so every figure is
+capped at the charge: the page reads it refunded in full, never more.
 
 **Alerts** (ids, codes and counts only; Q6). A late win that works logs
 "Late win: loss undone" at info and alerts nobody. Each of these is an error

@@ -23,6 +23,7 @@ import {
   entitlements,
   organizations,
   type Purchase,
+  payouts,
   purchases,
   refunds,
 } from '@codex/database/schema';
@@ -556,6 +557,90 @@ describe('support refunds: the purchase side', () => {
         refundReason: null,
       });
       expect(await refundedInSales()).toBe(before - 300);
+    });
+
+    /** Support settled the failed refund as refunded elsewhere. */
+    const settleElsewhere = (stripeRefundId: string) =>
+      db
+        .update(refunds)
+        .set({ resolution: 'refunded_elsewhere', resolvedAt: new Date() })
+        .where(eq(refunds.stripeRefundId, stripeRefundId));
+
+    it('a failed refund settled refunded elsewhere counts in Sales again, capped at what was paid (owner decision 2026-11-09)', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const bought = await purchase(buyer ?? '', (await item()).id);
+      const id = `re_spr${uid()}`;
+      created.stripeRefundIds.push(id);
+      await recordRefund(bought, id, 300, 'pending', 'duplicate', new Date());
+      await partRefunded(bought, 300, id, 'duplicate');
+      const before = await refundedInSales();
+      await recordRefund(bought, id, 300, 'failed', 'duplicate', new Date());
+      await service.restateStandingRefunds(
+        bought.stripePaymentIntentId,
+        chargeOf(bought)
+      );
+      expect(await refundedInSales()).toBe(before - 300);
+
+      await settleElsewhere(id);
+      expect(await refundedInSales()).toBe(before);
+
+      // Refunded again in full through Stripe as well: both count, so the
+      // purchase is capped at the £10 paid, never £13.
+      const again = `re_spr${uid()}`;
+      created.stripeRefundIds.push(again);
+      await recordRefund(
+        bought,
+        again,
+        1000,
+        'succeeded',
+        'requested_by_customer',
+        new Date()
+      );
+      await service.restateStandingRefunds(
+        bought.stripePaymentIntentId,
+        chargeOf(bought)
+      );
+      expect((await readState(bought)).purchase?.refundAmountCents).toBe(1000);
+      expect(await refundedInSales()).toBe(before - 300 + 1000);
+    });
+
+    it("a settled refund recorded without its purchase counts by the purchase's charge, as the restatement counts (Codex-aa08z)", async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const bought = await purchase(buyer ?? '', (await item()).id);
+      const before = await refundedInSales();
+      const id = `re_spr${uid()}`;
+      created.stripeRefundIds.push(id);
+      await db.insert(refunds).values({
+        stripeRefundId: id,
+        stripeChargeId: chargeOf(bought),
+        purchaseId: null,
+        amountCents: 200,
+        currency: 'gbp',
+        status: 'failed',
+        stripeCreatedAt: new Date(),
+        resolution: 'refunded_elsewhere',
+        resolvedAt: new Date(),
+      });
+      // The purchase's charge, as its ledger names it.
+      const [slice] = await db
+        .insert(payouts)
+        .values({
+          organizationId: orgId,
+          purchaseId: bought.id,
+          sourceType: 'purchase',
+          stripeChargeId: chargeOf(bought),
+          payoutType: 'platform_fee',
+          amountCents: 100,
+          status: 'paid',
+          resolvedAt: new Date(),
+        })
+        .returning();
+      try {
+        expect(await refundedInSales()).toBe(before + 200);
+      } finally {
+        // Payout rows feed global drains: never leave one behind.
+        if (slice) await db.delete(payouts).where(eq(payouts.id, slice.id));
+      }
     });
 
     it('a £3 refund of £10 that is canceled leaves nothing refunded, as a failed one (owner decision 2026-10-25)', async () => {

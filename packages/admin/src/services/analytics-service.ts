@@ -8,6 +8,7 @@
 
 import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
 import { dateWindow, schema, toIso } from '@codex/database';
+import { countsAgainstCharge } from '@codex/purchase';
 import { BaseService, NotFoundError } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
@@ -61,7 +62,6 @@ import {
   trailingDaysStart,
   zeroFillDays,
 } from './analytics-window';
-import { countsAgainstCharge } from './counted-refunds';
 
 const REVENUE_KINDS: readonly RevenueKind[] = [
   'one_off',

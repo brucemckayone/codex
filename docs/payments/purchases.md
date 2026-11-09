@@ -431,12 +431,17 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
   decision 2026-11-09, "Count it as refunded"; Codex-3xnta), as if it had
   succeeded: its amount comes off what the charge page, the refund preview and
   the refund route offer through Stripe (the route reads it again in its
-  re-check), and the search's refunded figure counts it. Any rest stays
-  refundable within the 14-day window. The preview's access line still counts
-  Stripe's refunds only, since the refund webhook decides access from Stripe's
-  list, where this refund stays failed. Nothing counts twice: only a failed
-  refund holds a resolution (`check_refunds_resolution`), and a failed refund
-  is final at Stripe and in our record (`recordRefund`);
+  re-check), and the search's refunded figure, the admin revenue `taken` and
+  the studio Sales "Refunds" tile all count it, by one rule
+  (`countsAgainstCharge` and `settledElsewhere`, `@codex/purchase`). Any rest
+  stays refundable within the 14-day window. The preview's access line still
+  counts Stripe's refunds only, since the refund webhook decides access from
+  Stripe's list, where this refund stays failed. Each refund counts once: only
+  a failed refund holds a resolution (`check_refunds_resolution`), a failed
+  refund is final at Stripe and in our record (`recordRefund`), and the charge
+  page skips a recorded row Stripe's list shows standing. Each figure is capped
+  at the charge, since a refund made again through Stripe and the settled one
+  can both count (the late-win runbook);
 - **creators re-paid**: the customer is not refunded, so the payees get back
   what the refund took (`repayFailedRefund`, `@codex/payments`). Each step of
   its clawback that took money from a payee, on a slice or on a re-pay row,
