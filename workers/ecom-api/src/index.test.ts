@@ -27,4 +27,25 @@ describe('Stripe Webhook Handler', () => {
       expect(env).toBeDefined();
     });
   });
+
+  // The log-only customer route and its secret were removed (Codex-2hxff.24).
+  // An unsigned POST to a live webhook route is refused by the signature
+  // check (400), so a 404 here means no route, not a refusal.
+  describe('Retired customer webhook route', () => {
+    const unsigned = { method: 'POST', body: '{}' };
+
+    it('is not served', async () => {
+      const live = await SELF.fetch(
+        'http://localhost/webhooks/stripe/subscription',
+        unsigned
+      );
+      expect(live.status).toBe(400);
+
+      const retired = await SELF.fetch(
+        'http://localhost/webhooks/stripe/customer',
+        unsigned
+      );
+      expect(retired.status).toBe(404);
+    });
+  });
 });

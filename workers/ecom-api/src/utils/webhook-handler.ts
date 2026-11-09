@@ -49,7 +49,9 @@ function ownMetadata(event: Stripe.Event): Stripe.Metadata | null {
  * Create a webhook handler with standard logging and error handling
  *
  * @param eventType - Type of webhook event (e.g., 'Payment', 'Subscription')
- * @param handler - Optional handler function for processing the event
+ * @param handler - Handler function for processing the event. Required: a
+ *   route that only logs and acknowledges is a stub to delete, not to mount
+ *   (the customer route was one, Codex-2hxff.24).
  * @returns Hono handler function
  *
  * @example
@@ -66,7 +68,7 @@ function ownMetadata(event: Stripe.Event): Stripe.Metadata | null {
  */
 export function createWebhookHandler(
   eventType: string,
-  handler?: WebhookHandler
+  handler: WebhookHandler
 ) {
   return async (c: Context<StripeWebhookEnv>) => {
     const obs = c.get('obs');
@@ -96,10 +98,7 @@ export function createWebhookHandler(
     }
 
     try {
-      // Execute custom handler if provided
-      if (handler) {
-        await handler(event, stripe, c);
-      }
+      await handler(event, stripe, c);
 
       return c.json({ received: true });
     } catch (error) {

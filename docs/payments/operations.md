@@ -61,10 +61,10 @@ signing secret.
 - The connect endpoint must be created as a **connected accounts** endpoint
   (`connect: true`). A platform-only endpoint never receives creators'
   `account.updated`. The scope cannot be changed after creation.
-- `/webhooks/stripe/customer` is a log-only stub with no handler, and its
-  endpoint is disabled. It is to be removed with its secret — **gap**:
-  `Codex-2hxff.24`. A Customer deleted in Stripe needs no webhook: checkout
-  clears the stale id and retries.
+- There is no customer endpoint. The log-only `/webhooks/stripe/customer` stub
+  and `STRIPE_WEBHOOK_SECRET_CUSTOMER` were removed (`Codex-2hxff.24`). A
+  Customer deleted in Stripe needs no webhook: checkout clears the stale id and
+  retries.
 - `/webhooks/stripe/dev` exists for local development only and returns 404 in
   production.
 
@@ -104,11 +104,10 @@ There is no event-id table; safety on redelivery comes from unique keys
 | `DATABASE_URL` | secret | |
 | `STRIPE_SECRET_KEY` | secret | Also needed by organization-api, which creates tier Products and Prices. The daily bank payout (`Codex-2hxff.29`) needs, on connected accounts, Balance read, Payouts write and Transfers read: list them if ecom-api ever moves to a restricted key |
 | `STRIPE_WEBHOOK_SECRET_BOOKING`, `_PAYMENT`, `_DISPUTE`, `_SUBSCRIPTION`, `_CONNECT` | secret | One per endpoint |
-| `STRIPE_WEBHOOK_SECRET_CUSTOMER` | secret | To be removed — **gap**: `Codex-2hxff.24` |
 | `STRIPE_PORTAL_CONFIGURATION_ID` | secret | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox. Optional at boot; without it the billing portal refuses to open. The deploy uploads it only when it is set and is a `bpc_` id; otherwise the run warns (unset) or errors (wrong shape) and keeps the current value (`Codex-2hxff.41`) |
 | `ENVIRONMENT` | var | `production` disables the dev webhook route |
 | `WEB_APP_URL` | var | Required — agreement emails need it — **gap**: `Codex-2hxff.7` (declared optional) |
-| `API_URL` | var | Must be declared under `env.production` — **gap**: `Codex-2hxff.24` |
+| `API_URL` | var | Local development and test only, as one CORS origin. Not declared under `env.production` and not checked at boot: production's browser origins come from `WEB_APP_URL` and the `*.revelations.studio` patterns (`Codex-2hxff.24`) |
 | `RATE_LIMIT_STRICT`, `RATE_LIMIT_API` | rate-limit bindings | A route's preset needs its binding, or it fails open |
 
 **Production secrets** are stored only in the GitHub environment `production`
@@ -750,8 +749,9 @@ it. An account already back on both settings is listed as
 
 - `stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev`, with
   every `STRIPE_WEBHOOK_SECRET_*` set to the secret the CLI prints. The dev route
-  dispatches each event to the right handler by type. It must route every event
-  production handles — **gap**: `Codex-2hxff.24` (no `product.*` or `price.*`).
+  dispatches each event to the right handler by type, and routes every event
+  production handles: `product.*` and `price.*` go to the subscription handler
+  (`Codex-2hxff.24`).
 - Hosted dev endpoints are created by `.github/scripts/setup-stripe-dev-webhooks.sh`.
   Its endpoint list mirrors the production table above: the same endpoints,
   events and connected-accounts scope. Change both together. The script creates

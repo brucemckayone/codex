@@ -82,14 +82,13 @@ Creates records for: the 8 worker subdomains (`auth.`, `content-api.`, …`.reve
 ### Step 5 — Stripe (TEST mode for launch) 🟩
 
 In the Stripe **test** dashboard:
-1. Register 6 webhook endpoints (all → `https://ecom-api.revelations.studio`):
+1. Register 5 webhook endpoints (all → `https://ecom-api.revelations.studio`), with the events in docs/payments/operations.md's endpoint table:
    - `/webhooks/stripe/payment`
    - `/webhooks/stripe/subscription`
    - `/webhooks/stripe/connect`  ← enable **"Listen to Connect events"** (`connect: true`) — see closed bead Codex-3jht
-   - `/webhooks/stripe/customer`
    - `/webhooks/stripe/booking`
    - `/webhooks/stripe/dispute`
-2. Capture each endpoint's `whsec_…` signing secret → the 6 `STRIPE_WEBHOOK_SECRET_*` secrets.
+2. Capture each endpoint's `whsec_…` signing secret → the 5 `STRIPE_WEBHOOK_SECRET_*` secrets. There is no customer endpoint (removed, Codex-2hxff.24).
 3. Ensure **Connect** is enabled (test) for creator payouts/transfers.
 4. Create/confirm the **locked Customer Portal** config ([[stripe-portal-lockdown]]: subscription cancel/pause/update disabled) → `STRIPE_PORTAL_CONFIGURATION_ID`.
 5. Use the **test** secret key for `STRIPE_SECRET_KEY` (`sk_test_…`).

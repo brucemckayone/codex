@@ -66,14 +66,6 @@ describe('createWebhookHandler', () => {
       // Response should be 200 with { received: true }
       expect(response).toBeDefined();
     });
-
-    it('should return 200 when no handler provided (stub endpoint)', async () => {
-      const handler = createWebhookHandler('Stub');
-      const { context } = createContext();
-
-      const response = await handler(context);
-      expect(response).toBeDefined();
-    });
   });
 
   describe('transient error handling', () => {

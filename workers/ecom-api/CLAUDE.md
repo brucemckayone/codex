@@ -40,7 +40,6 @@ handler.
 | `/webhooks/stripe/dispute` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | `handlePaymentWebhook` |
 | `/webhooks/stripe/subscription` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` (`handlers/subscription-webhook.ts`) |
 | `/webhooks/stripe/connect` | `STRIPE_WEBHOOK_SECRET_CONNECT` | `handleConnectWebhook` (`handlers/connect-webhook.ts`) |
-| `/webhooks/stripe/customer` | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | log-only stub, to be removed (`Codex-2hxff.24`) |
 | `/webhooks/stripe/dev` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `routeDevWebhook` — all events, by type; 404 outside development/staging |
 
 Local: `stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev`
