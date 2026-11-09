@@ -130,6 +130,11 @@ const main = async () => {
     for (const migration of pending) {
       try {
         console.log(`  📝 Applying: ${migration.name}`);
+        // A lock wait over 5 s fails the file, nothing is half-applied, re-run
+        // the deploy once the blocking transaction ends (Codex-vliwn). Per
+        // file: a file's own `RESET lock_timeout` (0111, 0122-0125) would
+        // leave every later file unbounded.
+        await client.query("SET lock_timeout = '5s'");
         await client.query(migration.sql);
         await client.query(
           'INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES ($1, $2)',
