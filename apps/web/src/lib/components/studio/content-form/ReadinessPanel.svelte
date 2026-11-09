@@ -63,8 +63,8 @@
   }
 
   .readiness-panel[data-complete] {
-    border-color: color-mix(in srgb, var(--color-success-500) 35%, var(--color-border));
-    background-color: color-mix(in srgb, var(--color-success-500) 3%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-success) 35%, var(--color-border));
+    background-color: color-mix(in srgb, var(--color-success) 3%, var(--color-surface));
   }
 
   .panel-header {
@@ -152,8 +152,8 @@
   }
 
   .check-row[data-met] {
-    color: var(--color-success-700);
-    background-color: color-mix(in srgb, var(--color-success-500) 8%, var(--color-surface-secondary));
+    color: var(--color-status-success-text);
+    background-color: color-mix(in srgb, var(--color-success) 8%, var(--color-surface-secondary));
   }
 
   .check-icon {
@@ -171,8 +171,8 @@
 
   .check-row[data-met] .check-icon {
     color: var(--color-surface);
-    background: var(--color-success-500);
-    border-color: var(--color-success-500);
+    background: var(--color-status-success-text);
+    border-color: var(--color-status-success-text);
   }
 
   .check-label {

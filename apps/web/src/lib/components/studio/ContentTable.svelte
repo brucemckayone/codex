@@ -244,8 +244,8 @@
     vertical-align: middle;
   }
 
-  .status-dot[data-status='published'] { background-color: var(--color-success-500); }
-  .status-dot[data-status='draft']     { background-color: var(--color-warning-400); }
+  .status-dot[data-status='published'] { background-color: var(--color-success); }
+  .status-dot[data-status='draft']     { background-color: var(--color-warning); }
   .status-dot[data-status='archived']  { background-color: var(--color-text-muted); }
 
   .status-text {

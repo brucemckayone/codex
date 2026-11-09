@@ -2,6 +2,10 @@
 :root {
   /* Brand-Configurable Font Stacks */
   --font-sans: var(--brand-font-body, 'Inter'), 'Inter-fallback', system-ui, -apple-system, sans-serif;
+  /* Shared cards read --font-body on platform routes too; org-brand.css
+     re-declares it under [data-org-brand]. Without this the read is invalid
+     outside an org (Codex-1g5lh.6). */
+  --font-body: var(--font-sans);
   --font-heading: var(--brand-font-heading, 'Inter'), 'Inter-fallback', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 

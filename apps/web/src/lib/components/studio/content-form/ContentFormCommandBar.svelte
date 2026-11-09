@@ -233,12 +233,12 @@
   .status-pill[data-status='published'] {
     color: var(--color-success-700);
     background: var(--color-success-50);
-    border-color: color-mix(in srgb, var(--color-success-500) 30%, transparent);
+    border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
   }
   .status-pill[data-status='draft'] {
     color: var(--color-warning-700);
     background: var(--color-warning-50);
-    border-color: color-mix(in srgb, var(--color-warning-500) 30%, transparent);
+    border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
   }
   .status-pill[data-status='archived'] {
     color: var(--color-text-secondary);

@@ -66,15 +66,15 @@
 <style>
   .danger-zone {
     border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-error-500) 25%, var(--color-border));
+      color-mix(in srgb, var(--color-error) 25%, var(--color-border));
     border-radius: var(--radius-lg);
-    background-color: color-mix(in srgb, var(--color-error-500) 2%, var(--color-surface));
+    background-color: color-mix(in srgb, var(--color-error) 2%, var(--color-surface));
     overflow: hidden;
     transition: border-color var(--duration-fast) var(--ease-out);
   }
 
   .danger-zone[data-expanded] {
-    border-color: color-mix(in srgb, var(--color-error-500) 50%, var(--color-border));
+    border-color: color-mix(in srgb, var(--color-error) 50%, var(--color-border));
   }
 
   .danger-trigger {
@@ -127,7 +127,7 @@
   .danger-body {
     padding: 0 var(--space-5) var(--space-5);
     border-top: var(--border-width) dashed
-      color-mix(in srgb, var(--color-error-500) 25%, var(--color-border));
+      color-mix(in srgb, var(--color-error) 25%, var(--color-border));
     animation: reveal var(--duration-normal) var(--ease-out);
   }
 

@@ -381,8 +381,8 @@
   }
 
   .overlay-btn-danger:hover {
-    background: var(--color-error-500);
-    border-color: var(--color-error-500);
+    background: var(--color-error);
+    border-color: var(--color-error);
   }
 
   /* ── Drop zone (file upload) ────────────────────────────────────── */
