@@ -83,13 +83,16 @@ app.post(
         throw new TemplateAccessDeniedError(ctx.input.params.id);
       }
 
-      // Use notification service to send email
+      // Use notification service to send email. A test send: the caller's
+      // data renders the email but never reaches the email log, where the
+      // sweeps would read its keys as one of their own sends.
       const result = await ctx.services.notifications.sendEmail({
         to: ctx.input.body.recipientEmail,
         templateName: template.name,
         data: ctx.input.body.data,
         organizationId: template.organizationId,
         creatorId: template.creatorId,
+        testSend: true,
       });
 
       return result;
