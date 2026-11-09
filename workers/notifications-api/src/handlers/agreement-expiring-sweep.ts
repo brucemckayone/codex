@@ -11,11 +11,19 @@
  * Per-row failures are logged + counted, but do NOT short-circuit the
  * sweep — the next row still gets a fair shot.
  *
+ * A row left unmarked is tried the next morning, one SIDE at a time: each
+ * email carries `agreementId` and `side` in its data, which the email log
+ * keeps, and a side the log shows sent (or in flight) is not sent again
+ * (`makeAlreadySent`, the fee step's `foundSent` pattern). So when the
+ * owner's email fails after the creator's went, the next morning sends the
+ * owner's alone, not the creator's again (final review #4).
+ *
  * Time (Codex-2hxff.100): each send waits SEND_TIMEOUT_MS at most, and no
  * row starts after SENDS_TIME_BUDGET_MS from the wake, so the money sweep
  * and the fee step after this one keep their time. A row is marked only
  * after its sends, so a row timed out or not reached is tried the next
- * morning.
+ * morning. A timed-out send may still have gone; if it reached the email
+ * log, that side is not sent again.
  *
  * Error handling: NEVER throws. The function is invoked from
  * `scheduled()` inside a `waitUntil` chain — if we throw, the cron
@@ -30,7 +38,17 @@ import {
   buildAgreementEmailLink,
   isEnvName,
 } from '@codex/agreements';
-import { createDbClient, type Database, messageForLog } from '@codex/database';
+import {
+  and,
+  createDbClient,
+  type Database,
+  eq,
+  gte,
+  inArray,
+  messageForLog,
+  sql,
+} from '@codex/database';
+import { emailAuditLogs } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
 import { workerFetch } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
@@ -46,6 +64,20 @@ import { SEND_TIMEOUT_MS, SENDS_TIME_BUDGET_MS } from './send-limits';
  * cycle to land before lapse.
  */
 const DEFAULT_DAYS_AHEAD = 30;
+
+const TEMPLATE = 'agreement-expiring-soon';
+
+/** Which party an agreement's expiry email is for. */
+type AgreementSide = 'creator' | 'owner';
+
+/** Is this side's email for this agreement already in the email log? */
+type AlreadySent = (args: {
+  to: string;
+  agreementId: string;
+  side: AgreementSide;
+  /** No email about the agreement can predate this. */
+  since: Date;
+}) => Promise<boolean>;
 
 export interface RunAgreementExpiringSweepDeps {
   /** Pre-constructed DB client (per-request HTTP client) */
@@ -88,11 +120,15 @@ export interface RunAgreementExpiringSweepDeps {
   wakeStartedAt?: number;
   /** Testing only. */
   sendTimeoutMs?: number;
+  /** The email-log lookup (testing only). Default: {@link makeAlreadySent}. */
+  alreadySent?: AlreadySent;
 }
 
 export interface ExpiringSweepResult {
   agreementsScanned: number;
   emailsSent: number;
+  /** Sides not sent again: the email log shows an earlier morning sent them. */
+  emailsAlreadySent: number;
   agreementsMarked: number;
   errors: number;
   /** The send budget ran out: the rows not reached go the next morning. */
@@ -205,7 +241,8 @@ function makeDefaultMailer(deps: {
     const body = JSON.stringify(params);
     const res = await workerFetch(
       url,
-      // A timeout rejects the fetch: the row is not marked, as on an error.
+      // A timeout rejects the fetch: the row is not marked, as on an error,
+      // and the next morning asks the email log whether that side went.
       { method: 'POST', body, signal: AbortSignal.timeout(deps.timeoutMs) },
       deps.workerSecret
     );
@@ -218,6 +255,42 @@ function makeDefaultMailer(deps: {
 }
 
 /**
+ * Is this side's email for this agreement already in the email log, sent or
+ * in flight? The fee step's `foundSent`: template, recipient and status,
+ * then the agreement id and the side in the row's metadata, each quoted
+ * with its key so no id matches as a prefix of another. The send path
+ * stores the email data verbatim as metadata, and the template's data
+ * schema drops both keys before the render, so they never reach the email.
+ *
+ * Bounded by the agreement's own creation (less a minute, as `foundSent`
+ * allows), before which no email about it can exist, so the
+ * (recipient_email, template_name, created_at) index scans a range.
+ *
+ * One-time transition: an email sent before this release carries no
+ * `agreementId`, so an agreement whose owner side failed before the deploy
+ * may email its creator once more, on the first morning after release.
+ */
+function makeAlreadySent(db: Database): AlreadySent {
+  return async ({ to, agreementId, side, since }) => {
+    const [row] = await db
+      .select({ id: emailAuditLogs.id })
+      .from(emailAuditLogs)
+      .where(
+        and(
+          eq(emailAuditLogs.templateName, TEMPLATE),
+          eq(emailAuditLogs.recipientEmail, to),
+          inArray(emailAuditLogs.status, ['success', 'pending']),
+          gte(emailAuditLogs.createdAt, since),
+          sql`strpos(${emailAuditLogs.metadata}, ${`"agreementId":"${agreementId}"`}) > 0`,
+          sql`strpos(${emailAuditLogs.metadata}, ${`"side":"${side}"`}) > 0`
+        )
+      )
+      .limit(1);
+    return row !== undefined;
+  };
+}
+
+/**
  * Run the sweep. Returns the aggregate counters; logs and swallows the
  * top-level error path so the cron invocation cannot crash.
  *
@@ -225,7 +298,8 @@ function makeDefaultMailer(deps: {
  *   1. find candidate agreements (active, expiring within `daysAhead`,
  *      not yet marked as sent)
  *   2. for each row: look up the first active owner, send TWO emails
- *      (creator + owner) via the mailer thunk, mark the row as sent
+ *      (creator + owner) via the mailer thunk, skipping a side the email
+ *      log shows an earlier morning sent, and mark the row as sent
  *   3. on per-row failure: log + count, continue to the next row
  *
  * If no active owner exists for an org (orphan), the creator-side
@@ -242,6 +316,7 @@ export async function runAgreementExpiringSweep(
   const result: ExpiringSweepResult = {
     agreementsScanned: 0,
     emailsSent: 0,
+    emailsAlreadySent: 0,
     agreementsMarked: 0,
     errors: 0,
     budgetSpent: false,
@@ -264,9 +339,42 @@ export async function runAgreementExpiringSweep(
         timeoutMs: deps.sendTimeoutMs ?? SEND_TIMEOUT_MS,
       });
 
+    const alreadySent = deps.alreadySent ?? makeAlreadySent(db);
+
+    /**
+     * One side's email, unless the email log shows an earlier morning sent
+     * it. Its data carries `agreementId` and `side`, which is how the log
+     * finds it then.
+     */
+    async function sendSide(
+      agreement: AgreementWithShare,
+      side: AgreementSide,
+      to: { id: string; email: string; name: string },
+      data: Record<string, string | number | boolean>
+    ): Promise<void> {
+      const since = new Date(agreement.createdAt.getTime() - 60 * 1000);
+      const agreementId = agreement.id;
+      if (await alreadySent({ to: to.email, agreementId, side, since })) {
+        result.emailsAlreadySent += 1;
+        return;
+      }
+      await mailer({
+        to: to.email,
+        toName: to.name,
+        templateName: TEMPLATE,
+        category: 'transactional',
+        userId: to.id,
+        organizationId: agreement.organizationId,
+        data: { ...data, agreementId, side },
+      });
+      result.emailsSent += 1;
+    }
+
     for (const row of candidates) {
-      // Before the row, never between its two emails: a row is whole or
-      // untouched, and an untouched one is still a candidate tomorrow.
+      // Before the row, never between its two emails, so the budget leaves
+      // no row half-sent. A row whose owner email fails after the creator's
+      // went is half-sent all the same: the next morning finds the
+      // creator's in the email log and sends the owner's alone.
       if (clock() >= sendsUntil) {
         result.budgetSpent = true;
         obs.warn(
@@ -275,20 +383,18 @@ export async function runAgreementExpiringSweep(
         );
         break;
       }
+      let creatorEmailSent = false;
       try {
         const ownerContact = await service.getFirstActiveOwnerContact(
           row.agreement.organizationId
         );
         // Creator-side email: counterparty is the owner (or a placeholder
         // when the org is orphaned).
-        await mailer({
-          to: row.creator.email,
-          toName: row.creator.name,
-          templateName: 'agreement-expiring-soon',
-          category: 'transactional',
-          userId: row.creator.id,
-          organizationId: row.agreement.organizationId,
-          data: buildEmailPayload({
+        await sendSide(
+          row.agreement,
+          'creator',
+          row.creator,
+          buildEmailPayload({
             recipientName: row.creator.name,
             otherPartyName: ownerContact?.name ?? 'The other party',
             orgName: row.orgName,
@@ -299,22 +405,19 @@ export async function runAgreementExpiringSweep(
               side: 'creator',
               proposalId: row.agreement.currentProposalId,
             }),
-          }),
-        });
-        result.emailsSent += 1;
+          })
+        );
+        creatorEmailSent = true;
 
         // Owner-side email — only when an active owner exists. Orphan
         // orgs (no active owner row) skip this branch but the creator
         // email + row marking still proceed.
         if (ownerContact) {
-          await mailer({
-            to: ownerContact.email,
-            toName: ownerContact.name,
-            templateName: 'agreement-expiring-soon',
-            category: 'transactional',
-            userId: ownerContact.id,
-            organizationId: row.agreement.organizationId,
-            data: buildEmailPayload({
+          await sendSide(
+            row.agreement,
+            'owner',
+            ownerContact,
+            buildEmailPayload({
               recipientName: ownerContact.name,
               otherPartyName: row.creator.name,
               orgName: row.orgName,
@@ -323,9 +426,8 @@ export async function runAgreementExpiringSweep(
                 side: 'owner',
                 orgSlug: row.orgSlug,
               }),
-            }),
-          });
-          result.emailsSent += 1;
+            })
+          );
         } else {
           obs.warn(
             'agreement-expiring-soon: no active owner for org, sent creator-side only',
@@ -340,6 +442,9 @@ export async function runAgreementExpiringSweep(
         obs.error('agreement-expiring-soon per-row dispatch failed', {
           agreementId: row.agreement.id,
           organizationId: row.agreement.organizationId,
+          // The creator's email went (this morning or an earlier one), so
+          // the next morning sends only the owner's.
+          creatorEmailSent,
           error: messageForLog(rowError),
         });
       }
