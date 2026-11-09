@@ -288,7 +288,7 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
   function notReturnedAlerts(errors: { mock: { calls: unknown[][] } }) {
     return errors.mock.calls
       .filter(([message]) =>
-        String(message).includes("cancelled duplicate's invoice")
+        String(message).includes("cancelled subscription's invoice")
       )
       .map(([, metadata]) => metadata);
   }

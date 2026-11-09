@@ -71,6 +71,11 @@ const main = async () => {
 
     console.log('🔄 Connecting to database...');
     client = new Client({ connectionString: dbUrl });
+    // A dropped connection also arrives as an 'error' event. Unheard, it
+    // crashes the process before the failed file rolls back and is reported.
+    client.on('error', (error) => {
+      console.warn(`    ⚠ Database connection error: ${error.message}`);
+    });
     await client.connect();
     console.log('✓ Database connection established\n');
 
@@ -152,8 +157,14 @@ const main = async () => {
         console.error(`    ✗ Failed: ${errorMsg}`);
         try {
           await client.query('ROLLBACK');
-        } catch (_rollbackError) {
-          // The connection is gone, and the server rolls back with it.
+        } catch (rollbackError) {
+          // Usually the connection is gone, and the server rolls back with
+          // it. Say so, then fail with the file's own error, not this one.
+          const rollbackMsg =
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : String(rollbackError);
+          console.warn(`    ⚠ Rollback failed too: ${rollbackMsg}`);
         }
         throw error;
       }

@@ -92,7 +92,7 @@ function params(stripe: Stripe, obs: { error: () => void; warn: () => void }) {
 }
 
 const NOT_RETURNED = expect.stringContaining(
-  "Customer credit paid a cancelled duplicate's invoice"
+  "Customer credit paid a cancelled subscription's invoice"
 );
 
 describe('isDuplicateSubscription', () => {

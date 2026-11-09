@@ -97,12 +97,14 @@ interface QueryClient {
 
 /**
  * Run the checks for the migrations about to be applied. Returns one line
- * per failed check; empty means every check passed.
+ * per failed check; empty means every check passed. A check skipped for
+ * missing columns says so through `log`.
  */
 export async function runMigrationPreflights(
   client: QueryClient,
   pendingMigrations: ReadonlyArray<string>,
-  preflights: ReadonlyArray<MigrationPreflight> = MIGRATION_PREFLIGHTS
+  preflights: ReadonlyArray<MigrationPreflight> = MIGRATION_PREFLIGHTS,
+  log: (line: string) => void = console.log
 ): Promise<string[]> {
   const failures: string[] = [];
   for (const check of preflights) {
@@ -115,14 +117,25 @@ export async function runMigrationPreflights(
       continue;
     }
     if (check.columns && check.columns.length > 0) {
+      // pg_attribute, not information_schema.columns: that view lists only
+      // the columns this role holds a privilege on, so it could hide one
+      // that exists and wrongly skip the check.
       const { rows: present } = await client.query(
-        `SELECT count(*)::int AS n FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name = $1
-            AND column_name = ANY($2)`,
-        [check.table, check.columns]
+        `SELECT attname FROM pg_attribute
+          WHERE attrelid = to_regclass($1) AND attname = ANY($2)
+            AND NOT attisdropped AND attnum > 0`,
+        [`public.${check.table}`, check.columns]
       );
-      if ((present[0] as { n: number } | undefined)?.n !== check.columns.length)
+      const found = new Set(
+        (present as Array<{ attname: string }>).map((row) => row.attname)
+      );
+      const missing = check.columns.filter((column) => !found.has(column));
+      if (missing.length > 0) {
+        log(
+          `  ⏭ Preflight skipped ${check.migration}: columns not there yet (${missing.join(', ')})`
+        );
         continue;
+      }
     }
     const { rows } = await client.query(check.sql);
     if (rows.length > 0) {
