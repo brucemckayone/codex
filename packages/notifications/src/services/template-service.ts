@@ -416,12 +416,18 @@ export class TemplateService extends BaseService {
   }
 
   /**
-   * Create a creator template
+   * Create a creator template. One that names an organisation needs the
+   * creator's ACTIVE membership of it: test sends render in that org's brand
+   * and log under it, so naming another org would send in its name
+   * (Codex-tgkgb).
    */
   async createCreatorTemplate(
     creatorId: string,
     input: CreateCreatorTemplateInput
   ): Promise<EmailTemplate> {
+    if (input.organizationId) {
+      await this.requireOrgMembership(input.organizationId, creatorId);
+    }
     try {
       const [template] = await this.db
         .insert(schema.emailTemplates)
@@ -456,13 +462,32 @@ export class TemplateService extends BaseService {
   }
 
   /**
-   * Update a creator template (must be owner)
+   * Update a creator template (must be owner). The update cannot move it to
+   * another org (`UpdateTemplateInput` has no `organizationId`), but one that
+   * names an org needs the creator's active membership of it still, as on
+   * create (Codex-tgkgb): a creator who left keeps no template in its name.
    */
   async updateCreatorTemplate(
     creatorId: string,
     templateId: string,
     input: UpdateTemplateInput
   ): Promise<EmailTemplate> {
+    const current = await this.db.query.emailTemplates.findFirst({
+      where: and(
+        eq(schema.emailTemplates.id, templateId),
+        eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
+        eq(schema.emailTemplates.creatorId, creatorId),
+        isNull(schema.emailTemplates.deletedAt)
+      ),
+      columns: { organizationId: true },
+    });
+    if (!current) {
+      throw new TemplateNotFoundError(templateId);
+    }
+    if (current.organizationId) {
+      await this.requireOrgMembership(current.organizationId, creatorId);
+    }
+
     const [updated] = await this.db
       .update(schema.emailTemplates)
       .set({
@@ -583,17 +608,7 @@ export class TemplateService extends BaseService {
       template.scope === TEMPLATE_SCOPES.ORGANIZATION &&
       template.organizationId
     ) {
-      const membership = await this.db.query.organizationMemberships.findFirst({
-        where: and(
-          eq(schema.organizationMemberships.userId, userId),
-          eq(
-            schema.organizationMemberships.organizationId,
-            template.organizationId
-          ),
-          eq(schema.organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE)
-        ),
-      });
-      return !!membership;
+      return this.isActiveOrgMember(template.organizationId, userId);
     }
 
     if (template.scope === TEMPLATE_SCOPES.CREATOR) {
@@ -608,12 +623,14 @@ export class TemplateService extends BaseService {
   // ===========================================================================
 
   /**
-   * Require active organization membership
+   * Is the user an ACTIVE member of the organisation? The one membership
+   * check for an org template's access and for a creator template that names
+   * an org.
    */
-  private async requireOrgMembership(
+  private async isActiveOrgMember(
     orgId: string,
     userId: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     const membership = await this.db.query.organizationMemberships.findFirst({
       where: and(
         eq(schema.organizationMemberships.userId, userId),
@@ -621,8 +638,17 @@ export class TemplateService extends BaseService {
         eq(schema.organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE)
       ),
     });
+    return !!membership;
+  }
 
-    if (!membership) {
+  /**
+   * Require active organization membership
+   */
+  private async requireOrgMembership(
+    orgId: string,
+    userId: string
+  ): Promise<void> {
+    if (!(await this.isActiveOrgMember(orgId, userId))) {
       throw new TemplateAccessDeniedError(orgId);
     }
   }
