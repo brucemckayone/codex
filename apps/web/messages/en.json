@@ -1556,6 +1556,8 @@
   "studio_publish_saved_press_again": "Your changes are saved. Press Publish to put it live.",
   "studio_publish_publishing": "Publishing…",
   "studio_publish_publishing_then_move": "Publishing. You’ll go on once it’s done.",
+  "studio_publish_opening_content": "Opening your content…",
+  "studio_publish_going_on": "Going on…",
   "studio_editor_publish_save_slow": "Still saving your changes. Try Publish again in a moment.",
   "studio_content_form_slug_check_failed": "Couldn’t check whether this slug is free.",
   "studio_content_form_categories_failed": "Couldn’t load the categories.",

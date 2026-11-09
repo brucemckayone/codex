@@ -174,10 +174,14 @@
   });
 
   let publishing = $state(false);
-  /** It went live: held still until the next page takes over. */
-  let done = $state(false);
+  /**
+   * It went live, and where it goes now: held still until the next page
+   * takes over. The toast alone says it is live, as it outlasts the step
+   * (Codex-a6ofh.2.12): said here too, it was seen and heard twice.
+   */
+  let done = $state<'list' | 'move' | null>(null);
   /** Live, as Publish or as the schedule saw it land: held still, its way on offered. */
-  const held = $derived(publishing || done || schedule.live);
+  const held = $derived(publishing || done !== null || schedule.live);
   const waitHint = $derived(
     coverBusy ? m.studio_editor_next_needs_cover() : categoryBusy ? m.studio_publish_wait_category() : null
   );
@@ -252,7 +256,8 @@
   });
   /** What Publish is doing, outside what it holds still, so it is heard and keeps focus. */
   const progressWords = $derived.by(() => {
-    if (done) return m.studio_publish_live({ title: values.title.trim() });
+    if (done === 'list') return m.studio_publish_opening_content();
+    if (done === 'move') return m.studio_publish_going_on();
     if (!publishing) return '';
     if (session.holdingMove) return m.studio_publish_publishing_then_move();
     return whenReady ? m.studio_publish_scheduling() : m.studio_publish_publishing();
@@ -393,7 +398,7 @@
       const result = await session.publish(whenReady ? publishContentWhenReady : publishContent);
       const heldMove = session.takeHeldMove();
       if (result.ok && result.live !== false) {
-        done = true;
+        done = heldMove ? 'move' : 'list';
         toast.success(m.studio_publish_live({ title: values.title.trim() }));
         if (!gone) leave(heldMove ?? CONTENT_LIST_HREF);
         return;

@@ -1073,6 +1073,10 @@ describe('PublishStep · leaving', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(nav.goto).toHaveBeenCalledTimes(1);
     expect(nav.goto).toHaveBeenCalledWith(to);
+    // Not to its content: it says only that it goes on.
+    expect(
+      document.querySelector('.publish-progress')?.textContent?.trim()
+    ).toBe(m.studio_publish_going_on());
   });
 
   test('while Publish is out, the whole step is held still, its way back included', async () => {
@@ -1097,9 +1101,13 @@ describe('PublishStep · leaving', () => {
 
     sent.resolve({});
     await vi.advanceTimersByTimeAsync(0);
-    // Live: still held while the next page loads.
+    // Live: still held while the next page loads, saying where it goes.
+    // The toast alone says it is live: never twice (Codex-a6ofh.2.12).
     expect(heldParts.every((part) => part.inert)).toBe(true);
     expect(progress?.textContent?.trim()).toBe(
+      m.studio_publish_opening_content()
+    );
+    expect(toasts.success).toHaveBeenCalledWith(
       m.studio_publish_live({ title: 'Svelte runes deep dive' })
     );
   });

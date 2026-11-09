@@ -12471,6 +12471,22 @@ export const studio_publish_publishing_then_move = () => `Publishing. You’ll g
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_opening_content = () => `Opening your content…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_going_on = () => `Going on…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_editor_publish_save_slow = () => `Still saving your changes. Try Publish again in a moment.`
 
 
