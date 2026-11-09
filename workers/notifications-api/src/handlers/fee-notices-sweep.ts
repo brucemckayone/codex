@@ -119,7 +119,12 @@ const ALERT_NAMED = 50;
 const LIST_BATCH = 500;
 /** Sends in flight at once. */
 const SEND_CONCURRENCY = 8;
-/** A notice attempted this recently is not claimed again (overlapping runs). */
+/**
+ * A notice attempted this recently is not claimed again (overlapping runs).
+ * @codex/purchase's FEE_NOTICE_RECLAIM_AFTER_MS mirrors it: a `failed` notice
+ * tried this recently may be in flight, so it counts as maybe told
+ * (`mayHaveTold`). Change both together.
+ */
 const RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
 /**
  * The owner's rule is to alert only when a person is needed. An `unknown`
@@ -624,7 +629,15 @@ async function claim(ctx: SweepContext): Promise<Claimed[]> {
  * have gone. The search starts at the notice's making, not its last try, so
  * a morning that failed before recording can't hide an earlier morning's
  * send (review cycle 2, L6); its feeNoticeId pins the row either way.
+ * A row told again keeps its id, so the log line must also be this ROUND's:
+ * each email carries the round's created_at (`feeNoticeRound`), and a line
+ * from an earlier round never counts, however close in time (review final
+ * M2). A line with no round at all was sent before rounds were carried, and
+ * is matched by id alone, as it always was.
  */
+/** The notice's round, as its emails carry it: created_at to the millisecond. */
+const roundOf = (notice: Claimed): string => notice.createdAt.toISOString();
+
 async function foundSent(
   ctx: SweepContext,
   notice: Claimed,
@@ -640,7 +653,9 @@ async function foundSent(
         eq(emailAuditLogs.recipientEmail, email),
         inArray(emailAuditLogs.status, ['success', 'pending']),
         gte(emailAuditLogs.createdAt, since),
-        sql`strpos(${emailAuditLogs.metadata}, ${`"feeNoticeId":"${notice.id}"`}) > 0`
+        sql`strpos(${emailAuditLogs.metadata}, ${`"feeNoticeId":"${notice.id}"`}) > 0`,
+        sql`(strpos(${emailAuditLogs.metadata}, ${`"feeNoticeRound":"${roundOf(notice)}"`}) > 0
+          OR strpos(${emailAuditLogs.metadata}, '"feeNoticeRound":') = 0)`
       )
     )
     .limit(1);
@@ -941,7 +956,7 @@ async function record(
       {
         ...ids,
         outcome: set.state,
-        cancelledNoticeAdded: await tellOfVoid(ctx, notice),
+        cancelledNoticeQueued: await tellOfVoid(ctx, notice),
       }
     );
     return;
@@ -958,9 +973,11 @@ async function record(
  * everyone a called-off rise may have told is emailed, with what they were
  * told, unless a bigger rise replaced it (whose own email says so). The same
  * statement as voidPending's, narrowed to this person; the send's outcome,
- * not the row's state, is what says they may have been told. One it already
- * queued is kept. It runs after the write above, so it reads the void as
- * committed.
+ * not the row's state, is what says they may have been told. voidPending
+ * itself queues one for a notice in flight (`mayHaveTold`), but with what the
+ * row held before this send; so one still untried takes what this email
+ * told, and one already tried is kept. Either way there is one per person.
+ * It runs after the write above, so it reads the void as committed.
  */
 async function tellOfVoid(
   ctx: SweepContext,
@@ -977,7 +994,11 @@ async function tellOfVoid(
       AND n.kind = 'announce'
       AND c.voided_at IS NOT NULL
       AND c.void_reason <> 'replaced_by_bigger'
-    ON CONFLICT (change_id, user_id, kind) DO NOTHING
+    ON CONFLICT (change_id, user_id, kind) DO UPDATE
+      SET roles = EXCLUDED.roles, before_values = EXCLUDED.before_values,
+          after_values = EXCLUDED.after_values, quoted_from = EXCLUDED.quoted_from,
+          updated_at = ${ctx.now}::timestamptz
+      WHERE ${feeChangeNotices}.state = 'due' AND ${feeChangeNotices}.attempts = 0
     RETURNING id
   `);
   return added.rows.length > 0;
@@ -1113,9 +1134,13 @@ async function sendOne(
           category: 'transactional',
           userId: notice.userId,
           organizationId: null,
-          // feeNoticeId is not a token: the data schema strips it before
-          // rendering, and the email log keeps it, for M1's check.
-          data: { ...data, feeNoticeId: notice.id },
+          // Neither is a token: the data schema strips them before
+          // rendering, and the email log keeps them, for M1's check.
+          data: {
+            ...data,
+            feeNoticeId: notice.id,
+            feeNoticeRound: roundOf(notice),
+          },
         })
         .catch(
           (error: unknown): FeeNoticeDelivery => ({

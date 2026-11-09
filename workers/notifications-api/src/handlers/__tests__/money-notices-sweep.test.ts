@@ -798,6 +798,7 @@ describe('runMoneyNoticesSweep', { timeout: 60_000 }, () => {
     const kim = await person('Kim Slow');
     await waitingRow(kim.id, hollowOak, 2500, DEC_2019);
     // notifications-api answering after 2 s, unless the request is aborted.
+    let aborted = false;
     const realFetch = globalThis.fetch;
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -811,12 +812,12 @@ describe('runMoneyNoticesSweep', { timeout: 60_000 }, () => {
             2_000
           );
           init?.signal?.addEventListener('abort', () => {
+            aborted = true;
             clearTimeout(answered);
             reject(init.signal?.reason);
           });
         });
       });
-    const started = Date.now();
     try {
       await runMoneyNoticesSweep({
         db,
@@ -831,7 +832,8 @@ describe('runMoneyNoticesSweep', { timeout: 60_000 }, () => {
     } finally {
       fetchSpy.mockRestore();
     }
-    expect(Date.now() - started).toBeLessThan(2_000);
+    // Cut off by its own timeout, not answered.
+    expect(aborted).toBe(true);
     const [notice] = await noticesOf(kim.id);
     expect(notice?.failedAt).not.toBeNull();
     expect(notice?.sentAt).toBeNull();

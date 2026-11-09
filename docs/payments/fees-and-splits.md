@@ -88,16 +88,21 @@ batch C1's decisions F1–F9 and Q1–Q5 (2026-10-30):
   started one must not block the next), and every write first takes a
   transaction lock on its level (`pg_advisory_xact_lock`), under which a
   dated rise that hasn't started counts as pending too. Saving again while one
-  is pending: back to today
-  cancels it (everyone told is emailed that it's off, and so is anyone whose
-  email got no answer: it may have gone); below today cancels it
-  and the cut applies at once; a **smaller** rise keeps its date and sends one
-  short email to everyone already told (Q2); a **bigger** one replaces it, says
-  so, and its 30 days start again (F2). Made smaller again, even the same day,
-  it tells again everyone its last smaller email may have reached, not only
-  those surely told (no answer yet, or a run cut off after sending), so two
-  smaller emails can come a day apart; anyone it surely missed just gets the
-  lower figure.
+  is pending: back to today cancels it (everyone its email told, or may have
+  told, is emailed that it's off); below today cancels it and the cut applies
+  at once; a **smaller** rise keeps its date and sends one short email to
+  everyone its announcement told, or may have told (Q2); a **bigger** one
+  replaces it, says so, and its 30 days start again (F2). Made smaller again,
+  even the same day, it tells again everyone its last smaller email told, or
+  may have told, so two smaller emails can come a day apart; anyone it surely
+  missed just gets the lower figure.
+- **Told, or may have been** (owner, 2026-11-09; one rule, `mayHaveTold` in
+  `fee-config-service.ts`, for all three above): the email was accepted, or
+  support marked them told another way; or it may have gone: it got no
+  answer, a run tried it (cut off after sending, or still sending), or it
+  failed and was retried in the last 12 hours, the time a run can hold a
+  notice. An email never tried has told nobody. Erring this way means some
+  people get one email more, never one fewer.
 - Someone who joins while a rise waits is told the same date, and never holds
   it (F8). Their failed email is still listed for support (Q4).
 - Each email names a date: the change's, or the earliest it can be, with a

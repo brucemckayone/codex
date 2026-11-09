@@ -82,7 +82,18 @@ import {
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  ne,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
@@ -1210,12 +1221,11 @@ async function insertVersion(
 /**
  * Void a waiting rise. Nobody still waits for it: its open notices become
  * `not_needed`. Unless a bigger rise replaces it (whose own announcement
- * says so), everyone it may have told is emailed that it's off (F2,
- * `fee-change-cancelled`, sent by the next daily run): told, or `unknown`,
- * an email with no answer that may have gone (owner, 2026-11-09). The
+ * says so), everyone it told, or may have told (`mayHaveTold`), is emailed
+ * that it's off (F2, `fee-change-cancelled`, sent by the next daily run). The
  * cancelled notice keeps what they were told (roles, values, the date named)
- * for its email. It is queued before the open notices are closed, which is
- * what still marks an `unknown` one. notifications-api's fee step applies
+ * for its email. It is queued before the open notices are closed, which
+ * would hide which ones may have gone. notifications-api's fee step applies
  * the same rule to someone whose email was in flight as the rise was voided
  * (`tellOfVoid`): change both together.
  */
@@ -1229,6 +1239,15 @@ async function voidPending(
     .update(feeChanges)
     .set({ voidedAt: now, voidReason: reason })
     .where(eq(feeChanges.id, changeId));
+  // Lock the notices before reading them (review final M3): a send's record()
+  // then waits for this void and takes its void branch (tellOfVoid), and the
+  // daily run's claim (SKIP LOCKED) passes them by, so no email is recorded
+  // between the read below and the close, unseen by both.
+  await tx.execute(sql`
+    SELECT id FROM ${feeChangeNotices}
+    WHERE change_id = ${changeId} AND kind <> 'cancelled'
+    FOR UPDATE
+  `);
   if (reason !== 'replaced_by_bigger') {
     await tx.execute(sql`
       INSERT INTO ${feeChangeNotices}
@@ -1237,7 +1256,7 @@ async function voidPending(
       FROM ${feeChangeNotices}
       WHERE change_id = ${changeId}
         AND kind = 'announce'
-        AND state IN ('sent', 'told_another_way', 'unknown')
+        AND ${mayHaveTold(now)}
       ON CONFLICT (change_id, user_id, kind) DO NOTHING
     `);
   }
@@ -1254,17 +1273,52 @@ async function voidPending(
 }
 
 /**
- * Q2 (A): a waiting rise made smaller sends one short email to everyone
- * already told. Someone told about an earlier smaller figure is told again;
- * someone not told yet simply gets the announcement with the new figures.
- * A row told again starts a new round at `now`: the daily step's email-log
- * check searches from created_at, so the last round's email can't count as
- * this one's (review cycle 3, N1). So does a row whose last email MAY have
- * gone, `unknown` or `due` after a try (a run cut off after sending, or a
- * send in flight now), or the next morning's check finds that email and
- * counts the earlier figure as this one (Codex-2hxff.104). A `failed` row
- * (its last email certainly did not go) and a `due` row never tried keep
- * their round: their next send carries the new figure anyway.
+ * How long a tried notice may still be held by a daily run: the run's claim
+ * hands no notice tried this recently to another run (RECLAIM_AFTER_MS in
+ * notifications-api's fee step; the two must stay equal).
+ */
+const FEE_NOTICE_RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * THE rule for a notice whose email told, or MAY have told, its person
+ * ("unconfirmed, retried, or failed mid-retry": owner, 2026-11-09). One
+ * predicate for the three places that ask, so they can't drift: the first
+ * cut's smaller emails and the second cut's restarts (`queueSmallerNotices`),
+ * and the void's "it's off" emails (`voidPending`). A notice is told, or may
+ * have been, when it is:
+ *   - `sent` or `told_another_way`: told;
+ *   - `unknown`: a send with no answer, which may have gone;
+ *   - `due` after a try (attempts > 0): a run cut off after sending, or a
+ *     send in flight now (the claim adds the try before it sends);
+ *   - `failed`, tried within FEE_NOTICE_RECLAIM_AFTER_MS: the claim leaves a
+ *     retried notice `failed` (it adds the try and stamps attempted_at with
+ *     the run's clock), and one tried that recently may still be held by a
+ *     run, its retry in flight with the earlier figure. A retry that already
+ *     finished refused looks the same in the row, so it counts too: told
+ *     twice rather than not at all.
+ * Never tried (`due`, no attempts) is not told, nor is `not_needed`. The
+ * columns are the table's own, so it reads the row a FROM names and an
+ * ON CONFLICT DO UPDATE's existing row alike.
+ */
+function mayHaveTold(now: Date): SQL {
+  const heldSince = new Date(now.getTime() - FEE_NOTICE_RECLAIM_AFTER_MS);
+  return sql`(${feeChangeNotices.state} IN ('sent', 'told_another_way', 'unknown')
+    OR (${feeChangeNotices.state} = 'due' AND ${feeChangeNotices.attempts} > 0)
+    OR (${feeChangeNotices.state} = 'failed' AND ${feeChangeNotices.attemptedAt} > ${heldSince}::timestamptz))`;
+}
+
+/**
+ * Q2 (A): a waiting rise made smaller sends one short email to everyone its
+ * announcement told, or may have told (`mayHaveTold`: an announcement in
+ * flight carries the earlier figure). Someone told about an earlier smaller
+ * figure is told again; someone surely not told yet simply gets the
+ * announcement with the new figures. A smaller email told, or maybe told,
+ * starts a new round at `now`: the daily step's email-log check is tied to
+ * the round, so the last round's email can't count as this one's (review
+ * cycle 3, N1; Codex-2hxff.104). So does one set aside (`not_needed`),
+ * which would send nothing more. A smaller email that surely didn't go
+ * (failed and done, or never tried) keeps its round: its next send carries
+ * the new figure anyway.
  */
 async function queueSmallerNotices(
   tx: Tx,
@@ -1278,13 +1332,12 @@ async function queueSmallerNotices(
     FROM ${feeChangeNotices}
     WHERE change_id = ${changeId}
       AND kind = 'announce'
-      AND state IN ('sent', 'told_another_way')
+      AND ${mayHaveTold(now)}
     ON CONFLICT (change_id, user_id, kind) DO UPDATE
       SET state = 'due', attempts = 0, attempted_at = NULL, accepted_at = NULL,
           last_reason = NULL, last_error = NULL, alert_error_id = NULL,
           created_at = ${now}, updated_at = ${now}
-      WHERE ${feeChangeNotices}.state <> 'failed'
-        AND NOT (${feeChangeNotices}.state = 'due' AND ${feeChangeNotices}.attempts = 0)
+      WHERE ${mayHaveTold(now)} OR ${feeChangeNotices.state} = 'not_needed'
   `);
 }
 
