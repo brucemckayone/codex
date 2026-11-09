@@ -425,10 +425,10 @@ export class TemplateService extends BaseService {
     creatorId: string,
     input: CreateCreatorTemplateInput
   ): Promise<EmailTemplate> {
-    if (input.organizationId) {
-      await this.requireOrgMembership(input.organizationId, creatorId);
-    }
     try {
+      if (input.organizationId) {
+        await this.requireOrgMembership(input.organizationId, creatorId);
+      }
       const [template] = await this.db
         .insert(schema.emailTemplates)
         .values({
@@ -452,12 +452,16 @@ export class TemplateService extends BaseService {
 
       return template;
     } catch (error) {
-      this.obs.error('Error creating creator template', {
-        error,
-        creatorId,
-        input,
-      });
-      throw error;
+      // A refusal is the caller's typed 403, not a fault: it passes through
+      // unlogged. Anything unexpected is logged here and wrapped.
+      if (!(error instanceof TemplateAccessDeniedError)) {
+        this.obs.error('Error creating creator template', {
+          error,
+          creatorId,
+          input,
+        });
+      }
+      this.handleError(error, 'createCreatorTemplate');
     }
   }
 
@@ -472,45 +476,51 @@ export class TemplateService extends BaseService {
     templateId: string,
     input: UpdateTemplateInput
   ): Promise<EmailTemplate> {
-    const current = await this.db.query.emailTemplates.findFirst({
-      where: and(
-        eq(schema.emailTemplates.id, templateId),
-        eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
-        eq(schema.emailTemplates.creatorId, creatorId),
-        isNull(schema.emailTemplates.deletedAt)
-      ),
-      columns: { organizationId: true },
-    });
-    if (!current) {
-      throw new TemplateNotFoundError(templateId);
-    }
-    if (current.organizationId) {
-      await this.requireOrgMembership(current.organizationId, creatorId);
-    }
-
-    const [updated] = await this.db
-      .update(schema.emailTemplates)
-      .set({
-        ...input,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
+    // The typed 404 and 403 pass through `handleError`; anything unexpected,
+    // a failed membership read included, is wrapped.
+    try {
+      const current = await this.db.query.emailTemplates.findFirst({
+        where: and(
           eq(schema.emailTemplates.id, templateId),
           eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
           eq(schema.emailTemplates.creatorId, creatorId),
           isNull(schema.emailTemplates.deletedAt)
+        ),
+        columns: { organizationId: true },
+      });
+      if (!current) {
+        throw new TemplateNotFoundError(templateId);
+      }
+      if (current.organizationId) {
+        await this.requireOrgMembership(current.organizationId, creatorId);
+      }
+
+      const [updated] = await this.db
+        .update(schema.emailTemplates)
+        .set({
+          ...input,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.emailTemplates.id, templateId),
+            eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
+            eq(schema.emailTemplates.creatorId, creatorId),
+            isNull(schema.emailTemplates.deletedAt)
+          )
         )
-      )
-      .returning();
+        .returning();
 
-    if (!updated) {
-      throw new TemplateNotFoundError(templateId);
+      if (!updated) {
+        throw new TemplateNotFoundError(templateId);
+      }
+
+      this.obs.info('Creator template updated', { templateId, creatorId });
+
+      return updated;
+    } catch (error) {
+      this.handleError(error, 'updateCreatorTemplate');
     }
-
-    this.obs.info('Creator template updated', { templateId, creatorId });
-
-    return updated;
   }
 
   /**
