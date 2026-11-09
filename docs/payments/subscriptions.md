@@ -657,7 +657,9 @@ hand at Stripe, in one metadata edit. First, if `codex_hold_pending_price_id`
 is set, write it and `codex_hold_pending_price_from` back as
 `codex_pending_price_id` and `codex_pending_price_from`, as Keep does
 (`keepMetadata`, `tier-move.ts`): they hold a price change the wait parked,
-and removing them drops that change with no alert. Then remove the other
+and removing them drops that change with no alert. If it isn't set, write
+`codex_pending_price_id` and `codex_pending_price_from` empty instead, as Keep
+does when nothing was parked. Then remove the other
 `codex_move_*` and `codex_hold_*` keys. Keep also puts such a member back
 into that price change's hourly step (`rejoinPriceChange`), which a hand
 edit can't, so tell the owner. The item
