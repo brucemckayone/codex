@@ -9,6 +9,10 @@
  * Only code counts: dollar-quoted bodies (the plpgsql BEGIN/END of 0004, 0113
  * and 0120, the `$tpl$` email copy), comments, string literals and quoted
  * identifiers are blanked first.
+ *
+ * Not handled: an SQL-standard function body (`BEGIN ATOMIC ... END`, PG14+)
+ * is read as statements, so its `END` is flagged. drizzle never writes one;
+ * a hand-written file that needs it should dollar-quote the body instead.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -73,7 +77,11 @@ function quotedEnd(sql: string, start: number): number {
 function spanEnd(sql: string, i: number): number {
   if (sql.startsWith('--', i)) return lineCommentEnd(sql, i);
   if (sql.startsWith('/*', i)) return blockCommentEnd(sql, i);
-  const dollar = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+  // A `$` inside a name (`a$b$c`) is part of the name, not a body's opening.
+  const inName = i > 0 && /[A-Za-z0-9_$]/.test(sql[i - 1] ?? '');
+  const dollar = inName
+    ? null
+    : /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
   if (dollar) return dollarBodyEnd(sql, i, dollar[0]);
   if (sql[i] === "'" || sql[i] === '"') return quotedEnd(sql, i);
   return -1;
@@ -94,6 +102,13 @@ function codeOnly(sql: string): string {
 const TRANSACTION_CONTROL =
   /^(BEGIN|COMMIT|ROLLBACK|END|ABORT|START\s+TRANSACTION|SAVEPOINT|RELEASE|PREPARE\s+TRANSACTION)\b/i;
 
+/**
+ * The CONCURRENTLY forms that refuse to run in a transaction block.
+ * REFRESH MATERIALIZED VIEW CONCURRENTLY is not one of them.
+ */
+const CONCURRENTLY_OUTSIDE_TRANSACTION =
+  /^(CREATE (UNIQUE )?INDEX|DROP INDEX|REINDEX)\b.*\bCONCURRENTLY\b|\bDETACH PARTITION\b.*\bCONCURRENTLY\b/i;
+
 /** The top-level statements in `sql` that the runner's transaction can't hold. */
 function forbiddenStatements(sql: string): string[] {
   return codeOnly(sql)
@@ -103,7 +118,7 @@ function forbiddenStatements(sql: string): string[] {
       (statement) =>
         TRANSACTION_CONTROL.test(statement) ||
         /^VACUUM\b/i.test(statement) ||
-        /\bCONCURRENTLY\b/i.test(statement)
+        CONCURRENTLY_OUTSIDE_TRANSACTION.test(statement)
     );
 }
 
@@ -119,6 +134,23 @@ describe('the migration-file scanner', () => {
       'CREATE INDEX CONCURRENTLY',
     ],
     ['a VACUUM', 'VACUUM "t";', 'VACUUM'],
+    [
+      'a unique CONCURRENTLY index',
+      'CREATE UNIQUE INDEX CONCURRENTLY "i" ON "t" ("c");',
+      'CREATE UNIQUE INDEX CONCURRENTLY',
+    ],
+    ['a CONCURRENTLY drop', 'DROP INDEX CONCURRENTLY "i";', 'DROP INDEX'],
+    ['a CONCURRENTLY reindex', 'REINDEX INDEX CONCURRENTLY "i";', 'REINDEX'],
+    [
+      'a CONCURRENTLY detach',
+      'ALTER TABLE "t" DETACH PARTITION "p" CONCURRENTLY;',
+      'DETACH PARTITION',
+    ],
+    [
+      'a COMMIT after a name holding `$`',
+      'ALTER TABLE t ADD a$b$c int;\nCOMMIT;\nSELECT 1 AS x$b$;',
+      'COMMIT',
+    ],
   ])('flags %s at the top level', (_name, sql, statement) => {
     expect(forbiddenStatements(sql)).toEqual([
       expect.stringContaining(statement),
@@ -137,6 +169,7 @@ describe('the migration-file scanner', () => {
     ['a comment', '-- COMMIT; then VACUUM;\nALTER TABLE t ADD c int;'],
     ['a block comment', '/* COMMIT; /* nested */ END; */ SELECT 1;'],
     ['a quoted name', 'ALTER TABLE "t" ADD "concurrently" int;'],
+    ['a CONCURRENTLY refresh', 'REFRESH MATERIALIZED VIEW CONCURRENTLY "mv";'],
   ])('leaves %s alone', (_name, sql) => {
     expect(forbiddenStatements(sql)).toEqual([]);
   });

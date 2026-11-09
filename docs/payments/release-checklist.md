@@ -685,7 +685,8 @@ late win, or is already marked: check it before going on.
 
 ## The email log index, a told-buyer CHECK and the payee pin's link (migration `0128`)
 
-`0128` is drizzle-kit DDL with one statement taken out. It holds:
+`0128` is drizzle-kit DDL with two hand edits, one statement taken out and
+one moved. It holds:
 
 - an index on `email_audit_logs (recipient_email, template_name, created_at)`,
   for the sweeps' "did this email go?" checks (`Codex-2hxff.102`). It is built
@@ -715,15 +716,21 @@ holds the whole schema, so renaming the file alone leaves the next `generate`
 re-emitting the other file's changes, and regenerating alone writes both hand
 edits out. Do both halves instead:
 
-1. Delete this file, its snapshot and its journal entry.
+1. Before bringing in the branch that holds the other `0128`, note this
+   branch's head: `PRE=$(git rev-parse HEAD)`. Steps 3 and 4 read this file
+   from `PRE`, because once the conflict below is resolved `HEAD` may no
+   longer hold it. Both branches add `meta/0128_snapshot.json` and a journal
+   entry, so the rebase or merge conflicts on `meta/0128_snapshot.json` and
+   `meta/_journal.json`: take the other branch's side of both, and delete this
+   file. Its snapshot and journal entry go with them.
 2. Run `pnpm --filter @codex/database db:gen:drizzle --name email_log_index_and_buyer_told_check`. It writes a correct snapshot on top of the other `0128`.
-3. Before overwriting, diff the regenerated `.sql` against ours, which step 1 deleted from disk: `diff <(git show HEAD:packages/database/src/migrations/0128_email_log_index_and_buyer_told_check.sql) packages/database/src/migrations/0129_email_log_index_and_buyer_told_check.sql`. The only differences may be the two hand edits; anything else means the two schemas overlap, so stop, and delete the files step 2 wrote.
-4. Overwrite the new `.sql` with this file's committed text (the same `git show`).
-5. Run `generate` once more: it must find no schema changes. If it writes a file, delete it and stop.
+3. Before overwriting, diff the regenerated `.sql` against ours: `diff <(git show "$PRE":packages/database/src/migrations/0128_email_log_index_and_buyer_told_check.sql) packages/database/src/migrations/0129_email_log_index_and_buyer_told_check.sql`. The only differences may be the two hand edits. Anything else means the two schemas overlap, so stop: delete the new `0129` `.sql` and snapshot, and restore the journal (`git checkout -- packages/database/src/migrations/meta/_journal.json`). Ours stays recoverable from `PRE`.
+4. Overwrite the new `.sql` with this file's committed text (`git show "$PRE":…0128_email_log_index_and_buyer_told_check.sql`).
+5. Run `generate` once more: it must find no schema changes. If it writes a file, delete it, restore the journal as in step 3, and stop.
 6. Carry the new name everywhere the old one is named:
    - the `migration` of the `MIGRATION_PREFLIGHTS` entry (its "names migrations that exist" test fails until you do);
    - the "0128" mentions in `migration-preflight.ts`, `dispute-late-win-checks.test.ts`, the guard tests' comments and this section;
-   - every local database that already applied the old name, since the runner records a file by its name and would run the renamed one again (its `CREATE INDEX` then fails, and that database's migrate is stuck): `UPDATE "__drizzle_migrations" SET hash = '0129_email_log_index_and_buyer_told_check.sql' WHERE hash = '0128_email_log_index_and_buyer_told_check.sql';`. Production and CI never ran the old name.
+   - every local database that already applied the old name, since the runner records a file by its name and would run the renamed one again (its `CREATE INDEX` then fails, and that database's migrate is stuck): `UPDATE "__drizzle_migrations" SET hash = '0129_email_log_index_and_buyer_told_check.sql' WHERE hash = '0128_email_log_index_and_buyer_told_check.sql';`. Production and CI never ran the old name; neither did the dev Neon database, unless `seed-dev-db` (manual dispatch only) was run from this branch.
 
 Two tests in `packages/database/scripts/__tests__/migration-preflight.test.ts`
 fail until both hand edits are back: no migration drops the pin column, and
