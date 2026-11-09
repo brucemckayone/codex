@@ -467,9 +467,10 @@
 </script>
 
 <!-- Held still while Publish runs and once it has gone live, the bar's way
-     back included; only the foot, which says what is happening, is not. -->
+     back included; only the foot, which says what is happening, is not.
+     Frozen, the foot is gone, so the bar's way back stays (owner, 2026-11-09). -->
 <div class="editor">
-  <div class="publish-held" inert={held}>
+  <div class="publish-held" inert={held && !frozen}>
     <WriteBar
       {session}
       {contentType}

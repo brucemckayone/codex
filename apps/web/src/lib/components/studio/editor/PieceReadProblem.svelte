@@ -6,33 +6,16 @@
   back here), the piece was refused (deleted, or not theirs: final), or the
   read could not be made (an outage: Try again). One alert, said at once.
 
-  @prop {ReadProblem} problem - Which it was (`readProblem`)
+  @prop {ReadProblem} problem - Which it was (`readProblem`, read-problem.ts)
   @prop {string} signInHref - A sign-in that comes back here
   @prop {() => void} ontryagain - An outage's Try again
   @prop {Attachment<HTMLElement>} [refocus] - On Try again as it mounts: a retry that failed again hands focus back to it
 -->
-<script module lang="ts">
-  import { isReadOutage, remoteErrorStatus } from '$lib/remote/query-result';
-
-  export type ReadProblem = 'signed-out' | 'gone' | 'outage';
-
-  /**
-   * Which problem a failed read is: 401 is a session that ended (the
-   * studio's guard runs on loads, not on this read); another 4xx a refusal,
-   * final (deleted, not theirs, a bad link); anything else an outage, the
-   * only one Try again can help.
-   */
-  export function readProblem(error: unknown): ReadProblem | null {
-    if (error == null) return null;
-    if (remoteErrorStatus(error) === 401) return 'signed-out';
-    return isReadOutage(error) ? 'outage' : 'gone';
-  }
-</script>
-
 <script lang="ts">
   import type { Attachment } from 'svelte/attachments';
   import { Button } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
+  import type { ReadProblem } from './read-problem';
 
   interface Props {
     problem: ReadProblem;

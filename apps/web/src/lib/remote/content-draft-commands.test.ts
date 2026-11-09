@@ -69,6 +69,15 @@ const json = (status: number, body: unknown) =>
   });
 const refused = (status: number, code: string, message: string) =>
   json(status, { error: { code, message } });
+/** Another piece holds `slug`: the worker's `SlugConflictError`, as it is sent. */
+const slugTaken = (slug: string) =>
+  json(409, {
+    error: {
+      code: 'CONFLICT',
+      message: 'Content with this slug already exists',
+      details: { slug },
+    },
+  });
 
 /** The worker answers each call in turn; every request is kept. */
 function worker(...answers: Response[]) {
@@ -213,11 +222,11 @@ describe('deleteContent (Codex-a6ofh.2.5)', () => {
 });
 
 describe('saveContent with a slug the title gives', () => {
-  const taken = () =>
-    refused(409, 'CONFLICT', 'Content with this slug already exists');
-
   it('a taken slug that follows the title tries -2, and says which took', async () => {
-    const api = worker(taken(), json(200, { data: { id: ID } }));
+    const api = worker(
+      slugTaken('winter-light'),
+      json(200, { data: { id: ID } })
+    );
     await expect(
       remote.saveContent({
         id: ID,
@@ -280,8 +289,27 @@ describe('saveContent with a slug the title gives', () => {
     expect(api.sent()).toHaveLength(1);
   });
 
+  // Only the 409 that says which slug is a slug clash: any other is refused
+  // whatever the slug (the round-3 review).
+  it('a 409 that names no slug goes once: no other slug is tried', async () => {
+    const api = worker(
+      refused(409, 'CONFLICT', 'Someone else changed this.'),
+      json(200, { data: { id: ID } })
+    );
+    const err = await rejection(
+      remote.saveContent({
+        id: ID,
+        patch: { title: 'Winter light', slug: 'winter-light' },
+        slugFollowsTitle: true,
+        asDraft: true,
+      })
+    );
+    expect(err).toMatchObject({ status: 409, body: { code: 'CONFLICT' } });
+    expect(api.sent()).toHaveLength(1);
+  });
+
   it('a slug the creator typed is theirs: taken, it is refused at once', async () => {
-    const api = worker(taken());
+    const api = worker(slugTaken('winter-light'));
     const err = await rejection(
       remote.saveContent({ id: ID, patch: { slug: 'winter-light' } })
     );
@@ -318,9 +346,11 @@ describe('createContentDraft', () => {
   });
 
   it('a taken slug tries -2, then -3', async () => {
-    const taken = () =>
-      refused(409, 'CONFLICT', 'Content with this slug already exists');
-    const api = worker(taken(), taken(), json(200, { data: { id: ID } }));
+    const api = worker(
+      slugTaken('cafe-notes-part-1'),
+      slugTaken('cafe-notes-part-1-2'),
+      json(200, { data: { id: ID } })
+    );
     await expect(remote.createContentDraft(draft)).resolves.toEqual({
       id: ID,
       slug: 'cafe-notes-part-1-3',
@@ -334,7 +364,7 @@ describe('createContentDraft', () => {
 
   it('gives up after six tries, the last with a random suffix, and says so', async () => {
     const answers = Array.from({ length: 6 }, () =>
-      refused(409, 'CONFLICT', 'Content with this slug already exists')
+      slugTaken('cafe-notes-part-1')
     );
     const api = worker(...answers);
     const err = await rejection(remote.createContentDraft(draft));

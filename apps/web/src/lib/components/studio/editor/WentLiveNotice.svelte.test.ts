@@ -12,17 +12,21 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import type { DraftSession } from './draft-session.svelte';
+import type { ReadProblem } from './read-problem';
 import WentLiveNotice from './WentLiveNotice.svelte';
 
-const state = $state({ wentLiveElsewhere: false, openLiveFailed: false });
+const state = $state<{
+  wentLiveElsewhere: boolean;
+  openLiveProblem: ReadProblem | null;
+}>({ wentLiveElsewhere: false, openLiveProblem: null });
 const openLive = vi.fn();
 
 const session = {
   get wentLiveElsewhere() {
     return state.wentLiveElsewhere;
   },
-  get openLiveFailed() {
-    return state.openLiveFailed;
+  get openLiveProblem() {
+    return state.openLiveProblem;
   },
   savedTitle: 'Runes deep dive',
   openLive,
@@ -49,7 +53,7 @@ afterEach(() => {
   component = null;
   document.body.innerHTML = '';
   state.wentLiveElsewhere = false;
-  state.openLiveFailed = false;
+  state.openLiveProblem = null;
   openLive.mockReset();
 });
 
@@ -94,36 +98,90 @@ describe('WentLiveNotice', () => {
     expect(openButton()?.getAttribute('aria-busy')).not.toBe('true');
   });
 
-  test('a press that could not open it says so, in the same alert', () => {
+  // Each by why: a try again can help an outage only (the round-3 review).
+  test.each([
+    ['outage', () => m.studio_editor_open_live_failed()],
+    ['signed-out', () => m.studio_content_draft_signed_out()],
+    ['gone', () => m.studio_editor_not_found()],
+  ] as const)('a press that could not open it (%s) says why, in the same alert', (problem, words) => {
     state.wentLiveElsewhere = true;
     render();
     const before = alertEl();
-    expect(alertEl()?.textContent).not.toContain(
-      m.studio_editor_open_live_failed()
-    );
+    expect(alertEl()?.textContent).not.toContain(words());
 
-    state.openLiveFailed = true;
+    state.openLiveProblem = problem;
     flushSync();
 
     expect(alertEl()).toBe(before);
-    expect(alertEl()?.textContent).toContain(
-      m.studio_editor_open_live_failed()
-    );
+    expect(alertEl()?.textContent).toContain(words());
   });
 
-  test('something still on its way holds Open, and says why', () => {
+  /** The text of every element the button names as its description. */
+  const description = (button: HTMLElement | undefined) =>
+    (button?.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .filter(Boolean)
+      .map((id) => document.getElementById(id)?.textContent ?? '');
+
+  // Focus moves to Open as the alert's words come, and a reader that cuts
+  // speech on a focus move would say only the button: its description
+  // carries the words (the round-3 review).
+  test("Open's description carries why it is here, and why it failed", () => {
+    state.wentLiveElsewhere = true;
+    render();
+    expect(description(openButton())).toEqual([
+      m.studio_editor_went_live_elsewhere({ title: 'Runes deep dive' }),
+    ]);
+
+    state.openLiveProblem = 'gone';
+    flushSync();
+    expect(description(openButton())).toEqual([
+      m.studio_editor_went_live_elsewhere({ title: 'Runes deep dive' }),
+      m.studio_editor_not_found(),
+    ]);
+  });
+
+  // In the freeze nothing else says why Open waits: it is said where it is
+  // seen, not to a screen reader only (the round-3 review).
+  test('something still on its way holds Open, and says why where it is seen', () => {
     state.wentLiveElsewhere = true;
     render({ waitFor: m.studio_editor_next_needs_cover() });
 
     const button = openButton();
     expect(button?.disabled).toBe(true);
-    const hintId = button?.getAttribute('aria-describedby');
-    expect(hintId).toBeTruthy();
-    expect(document.getElementById(hintId ?? '')?.textContent).toBe(
-      m.studio_editor_next_needs_cover()
+    expect(description(button)).toContain(m.studio_editor_next_needs_cover());
+    const hint = [...document.querySelectorAll('p')].find(
+      (p) => p.textContent === m.studio_editor_next_needs_cover()
     );
+    expect(hint).toBeDefined();
+    expect(hint?.closest('.sr-only')).toBeNull();
+    expect(hint?.classList.contains('sr-only')).toBe(false);
     button?.click();
     expect(openLive).not.toHaveBeenCalled();
+  });
+
+  // The button went busy, which drops focus: a press that did not open it
+  // hands focus back, for the next try (the round-3 review).
+  test('a press that could not open it hands focus back to Open', async () => {
+    state.wentLiveElsewhere = true;
+    openLive.mockImplementation(async () => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      state.openLiveProblem = 'outage';
+    });
+    render();
+    // The notice's own focus on arriving settles first: it is not the one
+    // this test is about.
+    await tick();
+    await tick();
+    openButton()?.focus();
+
+    openButton()?.click();
+    await vi.waitFor(() => expect(openLive).toHaveBeenCalled());
+    await tick();
+    await tick();
+    await tick();
+
+    expect(document.activeElement).toBe(openButton());
   });
 
   test('the step froze under the creator: focus that was in it comes to Open', async () => {

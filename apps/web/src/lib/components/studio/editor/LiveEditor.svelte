@@ -96,25 +96,30 @@
   const carriedLost = handoff !== null && 'expired' in handoff;
   /**
    * What the line under the bar says. Its words come once it is mounted (a
-   * status region put in with its words is not read out), and it says the
-   * carried changes until the first Update or Discard ends them, never about
-   * edits made here after.
+   * status region put in with its words is not read out). It says the
+   * carried changes until an Update lands or Discard ends them, and that they
+   * came too late until an Update lands (from then on the screen is not the
+   * piece as it was live); never about edits made here after. An Update out
+   * ends nothing: refused, its changes still wait.
    */
   let carriedSaid = $state<'waiting' | 'lost' | null>(null);
   let carriedEnded = false;
   $effect(() => {
+    if (carriedEnded || session.status === 'saving') return;
     if (carriedLost) {
-      carriedSaid = 'lost';
+      if (session.lastSavedAt === null) {
+        carriedSaid = 'lost';
+        return;
+      }
+    } else if (!carried) {
+      return;
+    } else if (session.isDirty) {
+      carriedSaid = 'waiting';
       return;
     }
-    if (!carried || carriedEnded) return;
-    if (session.isDirty) {
-      carriedSaid = 'waiting';
-    } else {
-      // Updated, discarded, or nothing carried differed from what is live.
-      carriedSaid = null;
-      carriedEnded = true;
-    }
+    // Updated, discarded, or nothing carried differed from what is live.
+    carriedSaid = null;
+    carriedEnded = true;
   });
   const carriedWords = $derived(
     carriedSaid === 'lost'

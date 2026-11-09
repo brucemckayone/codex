@@ -222,7 +222,8 @@
     } finally {
       advancing = false;
     }
-    if (!refused) return;
+    // Refused as live, the step froze: focus is the notice's to place.
+    if (!refused || session.wentLiveElsewhere) return;
     // Focus goes once the canvas is live again (an inert field takes none):
     // to the title it needs, or to the bar's words saying why it failed.
     await tick();

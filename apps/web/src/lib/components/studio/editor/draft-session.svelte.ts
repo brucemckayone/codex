@@ -50,6 +50,7 @@ import { type CreateContentInput, extractPlainText } from '@codex/validation';
 import { untrack } from 'svelte';
 import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
 import { describeThrown } from '$lib/client-log';
+import { logReadFailure } from '$lib/components/studio/media-library/log-read-failure';
 import { toast } from '$lib/components/ui/Toast/toast-store';
 import { logger } from '$lib/observability';
 import {
@@ -75,8 +76,9 @@ import {
 } from '$lib/utils/content-access';
 import { contentSlugFromTitle, isTitleSlug } from '$lib/utils/content-slug';
 import * as m from '$paraglide/messages';
-import { editHref } from './editor-url';
+import { editHref, readEditorStep } from './editor-url';
 import { handOffToLive, withdrawLiveHandoff } from './live-handoff';
+import { type ReadProblem, readProblem } from './read-problem';
 
 /**
  * Who can watch, and at what price: one value, sent as one group, as the
@@ -244,12 +246,17 @@ export interface DraftSession {
    * Open the piece in the live editor, carrying every change not on its row
    * (but its address: a live piece keeps its own), to wait for Update
    * (owner, 2026-11-09). Only once it {@link DraftSession.wentLiveElsewhere}.
-   * It reads where the piece stands first; if that read fails, the creator
-   * stays, changes and all, and {@link DraftSession.openLiveFailed} says so.
+   * It reads where the piece stands first, and moves only once the page
+   * reads it live too; if either fails, the creator stays, changes and all,
+   * and {@link DraftSession.openLiveProblem} says why.
    */
   openLive(): Promise<void>;
-  /** The last "Open it to update" could not open it: said by the notice, until the next try. */
-  readonly openLiveFailed: boolean;
+  /**
+   * Why the last "Open it to update" could not open it, said by the notice
+   * until the next try: signed out, the piece gone, or a failure a try
+   * again can help (`readProblem`); null when it did not fail.
+   */
+  readonly openLiveProblem: ReadProblem | null;
   set<K extends keyof DraftValues>(key: K, value: DraftValues[K]): void;
   /**
    * Put every field back as the server holds it (an Update still on the
@@ -384,15 +391,23 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   }
   /** As last seen while mounted. After a move, the page's state is the next route's. */
   let lastLive = readLive();
+  /**
+   * Opened on a piece that has been live: its saves are Updates. A draft's
+   * are never, but its own Publish's: a page read that says live is not the
+   * creator asking for an Update, so the server judges (the round-3 review).
+   */
+  const startedLive = lastLive;
   /** This session's own Publish is out, or it put the piece live. */
   let publishing = false;
   let wentLive = false;
   /** A draft's save found it live: see {@link DraftSession.wentLiveElsewhere}. */
   let liveElsewhere = $state(false);
-  /** See {@link DraftSession.openLiveFailed}. */
-  let openFailed = $state(false);
+  /** See {@link DraftSession.openLiveProblem}. */
+  let openProblem = $state<ReadProblem | null>(null);
   /** Its changes went to the live editor: closing this one drops nothing. */
   let handedOff = false;
+  /** The creator answered the live question with Leave: its changes are theirs to have dropped. */
+  let leftChanges = false;
   const isLive = (): boolean =>
     publishing ||
     wentLive ||
@@ -431,7 +446,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   }
   /** The save that is out, until it settles. */
   let sending = $state.raw<Partial<DraftValues> | null>(null);
-  /** That save is an Update (the piece read as live when it went). */
+  /** That save is an Update: the piece opened live, or this editor's own Publish sent it. */
   let sendingUpdate = false;
   /** What the server will hold once the save that is out lands. */
   const landing = (): DraftValues =>
@@ -608,7 +623,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     // Made free if another piece holds it: no one chose it.
     const slugFollowsTitle = sent.slug !== undefined && slugFollows;
     sending = sent;
-    sendingUpdate = isLive();
+    sendingUpdate = startedLive || publishing || wentLive;
     try {
       if (contentId === null) {
         const created = await createContentDraft({
@@ -630,10 +645,11 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           id: contentId,
           patch: toPatch(sent),
           ...(slugFollowsTitle && { slugFollowsTitle }),
-          // A draft's autosave says so: refused once it has been live.
-          // Update, and Publish's own save before it publishes (`publishing`
-          // counts as live), send without it: each is the creator asking for
-          // these values to go live, so a piece live already takes them.
+          // A draft's save says so: refused once it has been live, by
+          // whatever way it went (the server is the judge, never a read).
+          // Update, and Publish's own save before it publishes, send without
+          // it: each is the creator asking for these values to go live, so a
+          // piece live already takes them.
           ...(!sendingUpdate && { asDraft: true }),
         });
         // The slug the save made free, in place of the one sent.
@@ -720,7 +736,10 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       const asked = ++questions;
       const answer = ask('live');
       // Answered at once (the browser's confirm()): Leave lets it go as it was.
-      if (answer === 'leave') return;
+      if (answer === 'leave') {
+        leftChanges = true;
+        return;
+      }
       navigation.cancel();
       if (answer === 'stay') {
         stayAfterAll();
@@ -897,7 +916,21 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   $effect(() => {
     const live = readLive();
     const backToDraft = lastLive && !live;
+    const cameLive = !lastLive && live;
     lastLive = live;
+    // A draft's own read saw it go live (the schedule's on Publish, the
+    // page's on Write) with changes not sent: it went live under the editor,
+    // as a refused save would say, so they go to the live editor, never left
+    // here with no Update to send them (the round-3 review). Its own Publish
+    // is not that, nor is a read made while it was out.
+    if (cameLive) {
+      untrack(() => {
+        if (!publishing && !wentLive && !liveElsewhere && isDirty) {
+          wentLiveElsewhere();
+        }
+      });
+      return;
+    }
     if (!backToDraft) return;
     untrack(() => {
       // The save that is out now has a draft's follow-up behind it, so a
@@ -991,6 +1024,15 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
 
   /** Every chain still to settle, a joined flush's second one included. */
   async function drain(): Promise<AutosaveSaveResult> {
+    // A Publish still out sends what is on screen itself, behind the save it
+    // joined: wait for it, or the autosave is disposed under its last save
+    // (the round-3 review). What it could not send is what is left.
+    if (publishRun !== null) {
+      const published = await publishRun;
+      if (!published.ok && published.unsent && published.code !== 'SAVE_SLOW') {
+        return published;
+      }
+    }
     let result = await autosave.flush();
     while (result.ok && sending !== null) result = await autosave.flush();
     return result;
@@ -1084,28 +1126,36 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     get savedTitle() {
       return baseline.title.trim();
     },
-    get openLiveFailed() {
-      return openFailed;
+    get openLiveProblem() {
+      return openProblem;
     },
     async openLive() {
       if (!liveElsewhere || contentId === null) return;
       const id = contentId;
-      openFailed = false;
+      openProblem = null;
+      leftChanges = false;
       // Where it stands, by a read whose failure is seen. kit's
       // invalidateAll() resolves even when a refresh in it fails (2.55), so
-      // it cannot say the route now reads the piece as live, and a move on a
-      // stale read would open the draft editor again, the changes gone.
+      // it cannot say the piece is live.
       try {
         const state = await readPublishState(id);
         if (!hasBeenLive(state)) {
-          throw new Error(`read as ${state.status}, never live`);
+          // Refused as live, read as never live: our own contract broken.
+          logger.error('studio_editor.open_live_reread_failed', {
+            contentId: id,
+            status: state.status,
+            neverLive: true,
+          });
+          openProblem = 'outage';
+          return;
         }
       } catch (err) {
-        logger.error('studio_editor.open_live_reread_failed', {
+        // Signed out or gone is a refusal (a warning), and no try again
+        // helps; an outage is an error.
+        logReadFailure('studio_editor.open_live_reread_failed', err, {
           contentId: id,
-          ...describeThrown(err),
         });
-        openFailed = true;
+        openProblem = readProblem(err) ?? 'outage';
         return;
       }
       // Closed while it read (Back, the rail): no move of its own to make.
@@ -1123,20 +1173,47 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         // to the same address reads nothing new of itself.
         await invalidateAll();
         if (unmounted) {
-          // Something else took the screen meanwhile (an error page in its
-          // place): this move is not the creator's any more.
+          // The creator left without them: theirs to have dropped.
+          if (leftChanges || !isDirty) {
+            withdrawLiveHandoff(id);
+            return;
+          }
+          // Something else took the screen (an error page, as a load
+          // failed): the changes wait for the live editor's next mount, or
+          // are said as too late after their window, never dropped unsaid.
+          logger.warn('studio_editor.open_live_page_replaced', {
+            contentId: id,
+            keys: sendableKeys(),
+          });
+          return;
+        }
+        // The next editor is built from the page's read, and invalidateAll
+        // resolves even when its refresh failed: a move on a read still a
+        // draft's would open the draft editor again, the changes gone.
+        if (!readLive()) {
           withdrawLiveHandoff(id);
+          openProblem = 'outage';
+          logger.error('studio_editor.open_live_reread_failed', {
+            contentId: id,
+            stage: 'page',
+          });
           return;
         }
         handedOff = true;
         // Passed by the guard: the changes are carried, not dropped.
         leaving = true;
-        await goto(editHref(id));
+        // From Write, the address is the one it is on: replaced, so Back
+        // never lands on a same-address entry kit would rebuild from a read
+        // older than an Update since. From Publish the step changes, which
+        // reads again, so it is a move of its own.
+        await goto(editHref(id), {
+          replaceState: readEditorStep(new URL(location.href)) === 'write',
+        });
       } catch (err) {
         // The creator stays, the notice and its button with them.
         handedOff = false;
         withdrawLiveHandoff(id);
-        openFailed = true;
+        openProblem = 'outage';
         logger.error('studio_editor.open_live_failed', {
           contentId: id,
           ...describeThrown(err),

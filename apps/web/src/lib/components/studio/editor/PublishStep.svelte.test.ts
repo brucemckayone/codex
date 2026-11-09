@@ -312,6 +312,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Inert by the property, as Svelte sets it (jsdom reflects no attribute). */
+const insideInert = (node: Element | null | undefined) => {
+  for (let at = node ?? null; at; at = at.parentElement) {
+    if ((at as HTMLElement).inert) return true;
+  }
+  return false;
+};
+
 describe('PublishStep · what is missing', () => {
   test('a free video with ready media lists nothing, and Publish puts it live', async () => {
     render();
@@ -1362,6 +1370,29 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
     expect(checkAgain()).toBeUndefined();
   });
 
+  // The schedule's read is often the first to see it go live: a change typed
+  // and not sent yet goes to the live editor, as a refused save's would, and
+  // the step freezes with Back to writing still there (the round-3 review).
+  test('its read sees it live under a change not sent: it freezes, and Back to writing stays', async () => {
+    onItsWay();
+    remotes.readPublishState.mockResolvedValue(wentLive());
+    render(scheduled({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+    mediaNow('ready');
+    await vi.advanceTimersByTimeAsync(FIRST_READ_MS - 200);
+    // Typed, still in the autosave's wait as the read lands.
+    typePrice('15');
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(text()).toContain(
+      m.studio_editor_went_live_elsewhere({ title: 'Svelte runes deep dive' })
+    );
+    const back = document.querySelector('a[href="/studio/content/c1/edit"]');
+    expect(back).not.toBeNull();
+    expect(insideInert(back)).toBe(false);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    expect(remotes.saveContent).not.toHaveBeenCalled();
+  });
+
   test('a cancel lost to a go-live a read already brought keeps View, and reads no more', async () => {
     onItsWay();
     remotes.readPublishState.mockResolvedValue(wentLive());
@@ -2171,14 +2202,6 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
 // Owner, 2026-11-09: once it went live by another way, the step freezes. Its
 // settings can't touch the live piece (a cover would upload onto it), and its
 // checklist, intro and Publish, all a draft's, go: the notice is the way on.
-/** Inert by the property, as Svelte sets it (jsdom reflects no attribute). */
-const insideInert = (node: Element | null | undefined) => {
-  for (let at = node ?? null; at; at = at.parentElement) {
-    if ((at as HTMLElement).inert) return true;
-  }
-  return false;
-};
-
 describe('PublishStep · it went live by another way', () => {
   test('frozen: settings inert; no intro, checklist, Publish or Preview; the notice says so', async () => {
     render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));

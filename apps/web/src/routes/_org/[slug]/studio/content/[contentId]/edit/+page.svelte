@@ -17,7 +17,8 @@
   import { readFreshQuery } from '$lib/remote/query-result';
   import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
   import ContentEditor from '$lib/components/studio/editor/ContentEditor.svelte';
-  import PieceReadProblem, { readProblem } from '$lib/components/studio/editor/PieceReadProblem.svelte';
+  import PieceReadProblem from '$lib/components/studio/editor/PieceReadProblem.svelte';
+  import { readProblem } from '$lib/components/studio/editor/read-problem';
   import UnknownTypeNotice from '$lib/components/studio/editor/UnknownTypeNotice.svelte';
   import { editorView, readEditorStep } from '$lib/components/studio/editor/editor-url';
   import { logReadFailure } from '$lib/components/studio/media-library/log-read-failure';

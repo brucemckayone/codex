@@ -426,6 +426,48 @@ describe('LiveEditor · changes carried from writing', () => {
       m.studio_live_carried_lost()
     );
   });
+
+  // An Update out ends nothing: refused, the carried changes still wait,
+  // and the line still says where they came from (the round-3 review).
+  test('a refused Update leaves them waiting, still said', async () => {
+    const out = Promise.withResolvers<never>();
+    remotes.saveContent.mockReturnValueOnce(out.promise);
+    handOffToLive('c1', { title: 'Carried from writing' });
+    render();
+
+    click(m.studio_live_update());
+    await vi.advanceTimersByTimeAsync(0);
+    // Out: the line waits for how it lands.
+    expect(document.querySelector('.live-carried')?.textContent).toBe(
+      m.studio_live_carried()
+    );
+    out.reject({ status: 422, body: { message: 'That title is too long.' } });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(text()).toContain('That title is too long.');
+    expect(document.querySelector('.live-carried')?.textContent).toBe(
+      m.studio_live_carried()
+    );
+  });
+
+  // Once an Update has landed, the screen is not the piece as it was live:
+  // the too-late line ends then (the round-3 review).
+  test('the too-late line ends once an Update lands', async () => {
+    handOffToLive('c1', { title: 'Carried from writing' });
+    vi.advanceTimersByTime(LIVE_HANDOFF_FRESH_MS + 1);
+    render();
+    typeTitle('Retyped here');
+    flushSync();
+    expect(document.querySelector('.live-carried')?.textContent).toBe(
+      m.studio_live_carried_lost()
+    );
+
+    click(m.studio_live_update());
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(remotes.saveContent).toHaveBeenCalled();
+    expect(document.querySelector('.live-carried')?.textContent).toBe('');
+  });
 });
 
 describe('LiveEditor · changes wait for Update', () => {

@@ -894,6 +894,28 @@ describe('ContentEditor · it went live by another way', () => {
     expect(open).not.toBeUndefined();
     expect(insideInert(open)).toBe(false);
   });
+
+  // Next's save came back refused as live: the step froze, and focus is the
+  // notice's to place, never the bar's emptied words (the round-3 review).
+  test('Next refused as live: focus goes to Open it to update', async () => {
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+    });
+    render({ content: draft({}) });
+    type('Title', 'Runes, properly');
+    nextButton()?.focus();
+    nextButton()?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const open = [...document.querySelectorAll('button')].find((node) =>
+      node.textContent?.includes(m.studio_editor_open_live())
+    );
+    expect(open).not.toBeUndefined();
+    expect(document.activeElement).toBe(open);
+  });
 });
 
 describe('ContentEditor · which step', () => {

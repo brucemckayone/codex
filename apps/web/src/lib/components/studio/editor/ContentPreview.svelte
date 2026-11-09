@@ -37,7 +37,8 @@
   import { CANVAS_POSTER_SIZES, TYPE_WORD } from './canvas-text';
   import EditorBarLink from './EditorBarLink.svelte';
   import { editHref, publishStepHref, readEditorStep } from './editor-url';
-  import PieceReadProblem, { readProblem } from './PieceReadProblem.svelte';
+  import PieceReadProblem from './PieceReadProblem.svelte';
+  import { readProblem } from './read-problem';
 
   interface Props {
     contentId: string;
