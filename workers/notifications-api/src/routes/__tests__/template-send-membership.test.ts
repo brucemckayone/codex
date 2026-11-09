@@ -8,6 +8,8 @@
  *   template stays theirs to list and delete.
  * - An org's own templates: its team may list and preview them; only its
  *   owner or admin may test-send one. A paying subscriber gets none of it.
+ * - A test send of a creator template naming an org goes only to the
+ *   sender's own address; one naming no org goes anywhere, as before.
  *
  * The REAL template and preview routes with procedure() on a bare Hono app,
  * the session pre-set by a middleware, against the real database: the rule
@@ -179,16 +181,19 @@ async function call(
   return response;
 }
 
-/** A creator template naming `org`, as stored while the creator belonged. */
-async function stored(org: keyof typeof orgIds): Promise<string> {
+/**
+ * A creator template naming `org` (as stored while the creator belonged), or
+ * naming none.
+ */
+async function stored(org: keyof typeof orgIds | null): Promise<string> {
   const [row] = await db
     .insert(emailTemplates)
     .values({
-      name: `tpl-send-${org}-${crypto.randomUUID().slice(0, 8)}`,
+      name: `tpl-send-${org ?? 'none'}-${crypto.randomUUID().slice(0, 8)}`,
       scope: 'creator',
       creatorId: creator.id,
       createdBy: creator.id,
-      organizationId: orgIds[org],
+      organizationId: org ? orgIds[org] : null,
       subject: 'News from {{platformName}}',
       htmlBody: '<p>News from {{platformName}}</p>',
       textBody: 'News from {{platformName}}',
@@ -291,9 +296,48 @@ describe("an active member of the template's org", () => {
     expect(body.data.subject).toMatch(/^News from /);
   });
 
-  it('test-sends it', async () => {
+  // Owner decision 2026-11-09: in the org's brand, a creator template's
+  // test send (its only send) goes to the sender alone, never a mailing.
+  it('test-sends it to their own address, typed in any case with spaces round it', async () => {
     const id = await stored('member');
-    const to = recipient('member-send');
+    // Stored trimmed, as typed: the send goes to the address given.
+    const own = `${creator.id}@example.test`.toUpperCase();
+    recipients.push(own);
+
+    const response = await call('POST', `/api/templates/${id}/test-send`, {
+      recipientEmail: `  ${own}  `,
+      data: {},
+    });
+
+    expect(response.status).toBe(200);
+    expect(await auditRowsFor(own)).toEqual([
+      { status: 'success', metadata: '{"testSend":true}' },
+    ]);
+  });
+
+  it('is refused a test send to anyone else: nothing is sent, and nothing is logged', async () => {
+    const id = await stored('member');
+    const to = recipient('member-send-other');
+
+    const response = await call('POST', `/api/templates/${id}/test-send`, {
+      recipientEmail: to,
+      data: {},
+    });
+
+    // The log first: a send that went through would have written its row.
+    expect(await auditRowsFor(to)).toEqual([]);
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toBe(
+      'Test sends of an organization-branded template go only to your own email address'
+    );
+  });
+});
+
+describe('a creator template naming no org', () => {
+  it('test-sends to any address, as before', async () => {
+    const id = await stored(null);
+    const to = recipient('no-org-send');
 
     const response = await call('POST', `/api/templates/${id}/test-send`, {
       recipientEmail: to,

@@ -125,8 +125,8 @@ export const previewTemplateSchema = z.object({
 export type PreviewTemplateInput = z.infer<typeof previewTemplateSchema>;
 
 export const testSendTemplateSchema = z.object({
-  // Email address to send test to
-  recipientEmail: z.string().email('Invalid email address'),
+  // Email address to send test to, without the spaces round a pasted one
+  recipientEmail: z.string().trim().email('Invalid email address'),
   // Optional test data (limited to 50 keys)
   data: z
     .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))

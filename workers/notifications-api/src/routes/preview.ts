@@ -85,6 +85,14 @@ app.post(
         throw new TemplateAccessDeniedError(ctx.input.params.id);
       }
 
+      // An org-branded creator template goes only to the sender's own
+      // address: the signed-in user's, never one the body names.
+      ctx.services.templates.requireTestSendRecipient(
+        template,
+        ctx.input.body.recipientEmail,
+        ctx.user.email
+      );
+
       // Use notification service to send email. A test send: the caller's
       // data renders the email but never reaches the email log, where the
       // sweeps would read its keys as one of their own sends.
