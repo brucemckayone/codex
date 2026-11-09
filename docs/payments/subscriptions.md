@@ -246,12 +246,12 @@ owner: "Alert support").
   - a failed mark is a warning;
   - it never throws out of the handler.
 
-**A cancelled duplicate's credit is restored by hand** (`Codex-2hxff.98`,
+**A cancelled subscription's credit is paid back outside Stripe** (`Codex-2hxff.98`,
 owner: "Alert support"). Cancelling a duplicate, or an old subscription
 revived beside a newer one, refunds its card charge only. Putting the credit
 part back on the balance would re-open the leak above, so support gets one
 error per invoice after the card refund, "Customer credit paid a cancelled
-duplicate's invoice …", naming the invoice, the subscription, the org, the
+subscription's invoice …", naming the invoice, the subscription, the org, the
 user, `cause` (`duplicate` or `revived`), `creditNotReturnedCents` and
 `cardRefundedCents` (0 when the credit paid it all). Support pays the member
 that amount outside Stripe, by bank transfer for example, and the platform

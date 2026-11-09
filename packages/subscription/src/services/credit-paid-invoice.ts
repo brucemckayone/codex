@@ -123,7 +123,7 @@ export async function alertCreditNotReturned(
 
   await alertOncePerInvoice(deps, invoiceId, CREDIT_NOT_RETURNED_KEY, () =>
     deps.obs.error(
-      "Customer credit paid a cancelled subscription's invoice (a duplicate, or an old one revived beside a newer one): only the card part was refunded, and support must restore the credit by hand",
+      "Customer credit paid a cancelled subscription's invoice (a duplicate, or an old one revived beside a newer one): only the card part was refunded, and support must pay the member back outside Stripe",
       {
         errorId: crypto.randomUUID(),
         invoiceId,
