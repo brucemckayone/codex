@@ -130,6 +130,7 @@ import {
   type FeeConfigService,
   type PurchaseService,
   type RestoredRefundAccess,
+  refundsOfPurchase,
   STANDING_REFUND_STATUSES,
   settledElsewhere,
   settledElsewhereCentsIn,
@@ -857,9 +858,12 @@ export class SupportService extends BaseService {
           amountCents: sql<number>`${purchases.amountPaidCents}`.as(
             'amount_cents'
           ),
-          // Capped at the charge, as the detail is (review PAY-001).
+          // Tied to the purchase by the key Sales shares, so a refund
+          // recorded without its purchase counts here as on the charge's
+          // page (`refundsOfPurchase`). Capped at the charge, as the detail
+          // is (review PAY-001).
           refundedCents:
-            sql<number>`LEAST(${purchases.amountPaidCents}, (SELECT COALESCE(SUM(${refunds.amountCents}), 0)::int FROM ${refunds} WHERE ${refunds.purchaseId} = ${purchases.id} AND ${counted}))`.as(
+            sql<number>`LEAST(${purchases.amountPaidCents}, (SELECT COALESCE(SUM(${refunds.amountCents}), 0)::int FROM ${refunds} WHERE ${refundsOfPurchase()} AND ${counted}))`.as(
               'refunded_cents'
             ),
           paidAt:

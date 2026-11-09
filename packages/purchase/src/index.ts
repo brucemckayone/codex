@@ -90,6 +90,7 @@ export {
 // Which refunds count as the buyer's money back (Codex-3xnta)
 export {
   countsAgainstCharge,
+  refundsOfPurchase,
   STANDING_REFUND_STATUSES,
   settledElsewhere,
   settledElsewhereCentsIn,

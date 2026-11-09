@@ -4354,6 +4354,56 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         expect(row).toMatchObject({ chargeId, refundedCents: 1000 });
       }
     });
+
+    it("ties a refund recorded without its purchase to it by the purchase's charge: the search row, the charge page and Sales count it alike, once, capped (one key)", async () => {
+      const charge = await purchaseCharge();
+      const purchaseService = new PurchaseService(
+        { db, environment: 'test', ...createTestMoneyDeps() },
+        fake.stripe
+      );
+      const sales = async () =>
+        (await purchaseService.getSalesStats(orgId, {})).refundedCents;
+      const before = await sales();
+      // One linked to the purchase, and two recorded before it was (aa08z).
+      await recordedFailure(
+        charge.chargeId,
+        100,
+        'refunded_elsewhere',
+        charge.purchase.id
+      );
+      await recordedFailure(charge.chargeId, 300, 'refunded_elsewhere', null);
+      const standing = stripeRefund(charge.chargeId, 200);
+      await db.insert(refunds).values({
+        stripeRefundId: standing.id,
+        stripeChargeId: charge.chargeId,
+        purchaseId: null,
+        amountCents: 200,
+        currency: 'gbp',
+        status: 'succeeded',
+        stripeCreatedAt: new Date(),
+      });
+      // What the refund webhook does: Sales reads the standing one from it.
+      await purchaseService.restateStandingRefunds(
+        charge.paymentIntentId,
+        charge.chargeId
+      );
+
+      const figures = async () => ({
+        search: (await searchRowOf(charge.purchase.id))?.refundedCents,
+        detail: (await service.getChargeDetail(charge.chargeId)).charge
+          .refundedCents,
+        sales: (await sales()) - before,
+      });
+      expect(await figures()).toEqual({ search: 600, detail: 600, sales: 600 });
+
+      // Still capped at the charge, whichever key found the refunds.
+      await recordedFailure(charge.chargeId, 1000, 'refunded_elsewhere', null);
+      expect(await figures()).toEqual({
+        search: 1000,
+        detail: 1000,
+        sales: 1000,
+      });
+    });
   });
 
   // ── the requester round trip (Q3) ─────────────────────────────────────

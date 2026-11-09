@@ -19,10 +19,13 @@
  * one payment: the late-win runbook refunds a late win's failed refund again
  * through Stripe, then settles the failed one as refunded elsewhere. So every
  * reader clamps its total to what was paid (`LEAST`, `Math.min`).
+ *
+ * And every reader ties a refund to its payment by one key: a charge's
+ * readers by `stripe_charge_id`, a purchase's by `refundsOfPurchase`.
  */
 
 import type { RefundStatus } from '@codex/database/schema';
-import { refunds } from '@codex/database/schema';
+import { payouts, purchases, refunds } from '@codex/database/schema';
 import { eq, inArray, type SQL, sql } from 'drizzle-orm';
 
 /**
@@ -51,6 +54,26 @@ export function settledElsewhere(): SQL {
  */
 export function countsAgainstCharge(): SQL {
   return sql`(${inArray(refunds.status, [...STANDING_REFUND_STATUSES])} OR ${settledElsewhere()})`;
+}
+
+/**
+ * The outer query's purchase (`purchases`, unaliased) owns this refund
+ * (`refunds`, unaliased): by `purchase_id`, or, for a refund recorded without
+ * it (before the purchase existed, Codex-aa08z), by the purchase's charge.
+ * `purchases` holds no charge id, only its PaymentIntent, and `refunds` holds
+ * no PaymentIntent, so the charge is the one the purchase's ledger slices
+ * name (`payouts`), the same link the support search reads its charge id by.
+ * That is the charge the detail counts by `stripe_charge_id`, so a purchase's
+ * row and its charge's page count the same refunds. The same rule as
+ * `standingRefundFields`, which restates `purchases.refund_amount_cents`. A
+ * purchase with no slices (before the ledger) matches by `purchase_id` only.
+ *
+ * Its own `sql`: interpolated whole, its columns keep their table even in a
+ * single-table select (drizzle writes a field's TOP-LEVEL columns bare there,
+ * and `purchase_id = id` would then read the refund's own id).
+ */
+export function refundsOfPurchase(): SQL {
+  return sql`(${refunds.purchaseId} = ${purchases.id} OR (${refunds.purchaseId} IS NULL AND ${refunds.stripeChargeId} IN (SELECT ${payouts.stripeChargeId} FROM ${payouts} WHERE ${payouts.purchaseId} = ${purchases.id} AND ${payouts.stripeChargeId} IS NOT NULL)))`;
 }
 
 /** What the failed refunds settled as refunded elsewhere add up to, of rows already read. */
