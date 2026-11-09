@@ -520,4 +520,80 @@ describe('NotificationsService', () => {
       expect(parsedMetadata.foo).toBe('bar');
     });
   });
+
+  // Final review (scoping-security): the test-send route lets a creator or a
+  // team member send any template, with any data, to anyone. The sweeps find
+  // their own sends by keys in the email log's metadata, so a test send's
+  // data must never reach it: the log keeps only a marker.
+  describe('a test send and the email log', () => {
+    const fields = {
+      recipientName: 'Riley Stone',
+      orgName: 'Acme Studios',
+      otherPartyName: 'Sam Patel',
+      revenueTypeLabel: 'subscription',
+      sharePercentDisplay: '30%',
+      termMonthsDisplay: '6 months',
+      expiryDate: '2026-12-01',
+      deepLinkUrl: 'https://acme.revelations.studio/studio',
+    };
+    // Every key a sweep reads from the log.
+    const bookkeeping = {
+      agreementId: 'agr-1',
+      side: 'owner',
+      feeNoticeId: 'fee-notice-1',
+      feeNoticeRound: '2',
+      priceMoveId: 'price-move-1',
+    };
+
+    beforeEach(() => {
+      (
+        mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([
+        {
+          id: 'template-agr',
+          name: 'agreement-expiring-soon',
+          subject: 'Expiring soon: {{orgName}}',
+          htmlBody: '<p>Hi {{recipientName}}, open {{deepLinkUrl}}</p>',
+          textBody: 'Hi {{recipientName}}',
+          scope: 'creator',
+        },
+      ]);
+      (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        messageId: 'msg-test-send',
+      });
+    });
+
+    const send = (testSend?: boolean) =>
+      service.sendEmail({
+        to: 'owner@example.com',
+        templateName: 'agreement-expiring-soon',
+        data: { ...fields, ...bookkeeping },
+        testSend,
+      });
+    const logged = () =>
+      JSON.parse(mockDbRaw.values.mock.calls[0]![0].metadata);
+
+    it("logs only that it was a test send, and still renders the caller's data", async () => {
+      await send(true);
+
+      expect(logged()).toEqual({ testSend: true });
+      expect(mockEmailProvider.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'owner@example.com',
+          subject: 'Expiring soon: Acme Studios',
+          html: expect.stringContaining(
+            'Hi Riley Stone, open https://acme.revelations.studio/studio'
+          ),
+        }),
+        expect.anything()
+      );
+    });
+
+    it('a real send keeps its data, the bookkeeping keys with it', async () => {
+      await send();
+
+      expect(logged()).toEqual({ ...fields, ...bookkeeping });
+    });
+  });
 });
