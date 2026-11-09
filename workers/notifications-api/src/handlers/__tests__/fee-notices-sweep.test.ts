@@ -1532,10 +1532,11 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       quotedFrom: announce?.quotedFrom,
     });
     expect(obsLog.info).toHaveBeenCalledWith(
-      'fee step: a fee rise was voided while its email was in flight; recorded as sent',
+      'fee step: a fee rise was voided while its email was in flight; the cancellation email is owed',
       {
         feeNoticeId: announce?.id,
         changeId,
+        outcome: 'sent',
         cancelledNoticeAdded: true,
       }
     );
@@ -1543,6 +1544,44 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     const nextMorning = mailerAnswering();
     await run(changeId, NOV_4, nextMorning);
     expect(mailFor(nextMorning, pia.id).map((p) => p.templateName)).toEqual([
+      'fee-change-cancelled',
+    ]);
+  });
+
+  it('a rise cancelled while its email gets no answer: it may have gone, so that person is emailed it is off too (owner, 2026-11-09)', async () => {
+    const una = await person('Una Unknown');
+    const { changeId, announce, cancelled } = await cancelledInFlight(una, {
+      accepted: false,
+      status: 503,
+    });
+
+    // As voidPending leaves a row that was `unknown`: set aside, keeping
+    // what the email may have told them.
+    expect(announce).toMatchObject({
+      state: 'not_needed',
+      lastReason: 'unknown',
+      acceptedAt: null,
+    });
+    expect(announce?.quotedFrom).not.toBeNull();
+    expect(cancelled).toMatchObject({
+      state: 'due',
+      roles: announce?.roles,
+      afterValues: announce?.afterValues,
+      quotedFrom: announce?.quotedFrom,
+    });
+    expect(obsLog.info).toHaveBeenCalledWith(
+      'fee step: a fee rise was voided while its email was in flight; the cancellation email is owed',
+      {
+        feeNoticeId: announce?.id,
+        changeId,
+        outcome: 'unknown',
+        cancelledNoticeAdded: true,
+      }
+    );
+
+    const nextMorning = mailerAnswering();
+    await run(changeId, NOV_4, nextMorning);
+    expect(mailFor(nextMorning, una.id).map((p) => p.templateName)).toEqual([
       'fee-change-cancelled',
     ]);
   });

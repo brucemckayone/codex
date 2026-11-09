@@ -573,6 +573,61 @@ describe('FeeConfigService — classifying a write (real DB)', () => {
     });
   });
 
+  // Owner, 2026-11-09: an announcement with no answer may have gone, so a
+  // cancel emails that person it's off, as it does the told; one refused, or
+  // never tried, told nobody.
+  it.each([
+    { state: 'unknown', attempts: 1, lastReason: 'unknown', emailed: true },
+    { state: 'due', attempts: 0, lastReason: null, emailed: false },
+    { state: 'failed', attempts: 1, lastReason: 'refused', emailed: false },
+  ] as const)('a cancel emails someone whose announcement is left $state that it is off: $emailed', async (left) => {
+    const rise = await svc.updateOrgFees(
+      organizationId,
+      { orgFeePercent: 1500 },
+      adminId
+    );
+    const riseId = rise.change?.id as string;
+    const roles = [{ organizationId, as: 'creator' as const }];
+    await db.insert(feeChangeNotices).values({
+      changeId: riseId,
+      userId: untoldId,
+      kind: 'announce',
+      onList: true,
+      roles,
+      beforeValues: [],
+      afterValues: [],
+      quotedFrom: '2026-12-04',
+      state: left.state,
+      attempts: left.attempts,
+      lastReason: left.lastReason,
+    });
+
+    await svc.cancelChange(riseId, adminId);
+
+    const rows = await db
+      .select()
+      .from(feeChangeNotices)
+      .where(
+        and(
+          eq(feeChangeNotices.changeId, riseId),
+          eq(feeChangeNotices.userId, untoldId)
+        )
+      );
+    // Nobody waits for a cancelled rise.
+    expect(rows.find((n) => n.kind === 'announce')?.state).toBe('not_needed');
+    const cancelled = rows.find((n) => n.kind === 'cancelled');
+    if (left.emailed) {
+      // With the date and roles that email named.
+      expect(cancelled).toMatchObject({
+        state: 'due',
+        roles,
+        quotedFrom: '2026-12-04',
+      });
+    } else {
+      expect(cancelled).toBeUndefined();
+    }
+  });
+
   // ── One transaction (Codex-rtwpv) and the level lock ──────────────────────
 
   it('a failure late in the write rolls back the change and its version', async () => {
