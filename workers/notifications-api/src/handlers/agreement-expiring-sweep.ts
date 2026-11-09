@@ -19,7 +19,11 @@
  * sends the owner's alone, not the creator's again (final review #4). A
  * side whose log row an earlier run left `pending` is sent again: its
  * outcome never came, and a duplicate warning is harmless where a missing
- * one is not (owner, 2026-11-09).
+ * one is not (owner, 2026-11-09). A side another run is sending right now
+ * (its `pending` row still in flight) is not sent either, but its row is
+ * left UNMARKED: this sweep has no claim, so two runs at once can meet, and
+ * that send may still fail. The next morning reads its outcome, and sends
+ * it if it never went.
  *
  * Time (Codex-2hxff.100): each send waits SEND_TIMEOUT_MS at most, and no
  * row starts after SENDS_TIME_BUDGET_MS from the wake, so the money sweep
@@ -73,14 +77,20 @@ const TEMPLATE = 'agreement-expiring-soon';
 /** Which party an agreement's expiry email is for. */
 type AgreementSide = 'creator' | 'owner';
 
-/** Is this side's email for this agreement already in the email log? */
+/**
+ * What the email log shows of one side's email: it went (`sent`), another
+ * run is sending it now (`in_flight`), or neither (`no`).
+ */
+type SideInLog = 'sent' | 'in_flight' | 'no';
+
+/** What the email log shows of this side's email for this agreement. */
 type AlreadySent = (args: {
   to: string;
   agreementId: string;
   side: AgreementSide;
   /** No email about the agreement can predate this. */
   since: Date;
-}) => Promise<boolean>;
+}) => Promise<SideInLog>;
 
 export interface RunAgreementExpiringSweepDeps {
   /** Pre-constructed DB client (per-request HTTP client) */
@@ -127,11 +137,18 @@ export interface RunAgreementExpiringSweepDeps {
   alreadySent?: AlreadySent;
 }
 
+type Mailer = NonNullable<RunAgreementExpiringSweepDeps['mailer']>;
+
 export interface ExpiringSweepResult {
   agreementsScanned: number;
   emailsSent: number;
   /** Sides not sent again: the email log shows them sent. */
   emailsAlreadySent: number;
+  /**
+   * Sides not sent because another run is sending them now. Their rows are
+   * left unmarked, for the next morning to read that send's outcome.
+   */
+  emailsInFlight: number;
   agreementsMarked: number;
   errors: number;
   /** The send budget ran out: the rows not reached go the next morning. */
@@ -258,12 +275,14 @@ function makeDefaultMailer(deps: {
 }
 
 /**
- * Does the email log show this side's email for this agreement sent? The fee
- * step's `foundSent`: template, recipient and the shared rule
+ * What does the email log show of this side's email for this agreement? The
+ * fee step's `foundSent`: template, recipient and the shared rule
  * (`emailLogShowsSent` at the run's clock: `success`, or `pending` while it
  * may still be in flight, never a test send), then the agreement id and the
  * side in the row's metadata, each quoted with its key so no id matches as a
- * prefix of another. The send path
+ * prefix of another. The row the rule passes says which: `success` is
+ * `sent`, an in-flight `pending` is `in_flight`, preferring `success` when
+ * both are there. The send path
  * stores the email data verbatim as metadata, and the template's data
  * schema drops both keys before the render, so they never reach the email.
  *
@@ -278,7 +297,7 @@ function makeDefaultMailer(deps: {
 function makeAlreadySent(db: Database, now: Date): AlreadySent {
   return async ({ to, agreementId, side, since }) => {
     const [row] = await db
-      .select({ id: emailAuditLogs.id })
+      .select({ status: emailAuditLogs.status })
       .from(emailAuditLogs)
       .where(
         and(
@@ -290,9 +309,86 @@ function makeAlreadySent(db: Database, now: Date): AlreadySent {
           sql`strpos(${emailAuditLogs.metadata}, ${`"side":"${side}"`}) > 0`
         )
       )
+      .orderBy(sql`(${emailAuditLogs.status} = 'success') DESC`)
       .limit(1);
-    return row !== undefined;
+    if (!row) return 'no';
+    // The shared rule passes `success`, or a `pending` still in flight.
+    return row.status === 'success' ? 'sent' : 'in_flight';
   };
+}
+
+/** What one row's sends share: the run's log lookup, mailer and tally. */
+interface SideSender {
+  alreadySent: AlreadySent;
+  mailer: Mailer;
+  result: ExpiringSweepResult;
+  /** The row's sides another run is sending now: they keep it unmarked. */
+  inFlight: AgreementSide[];
+}
+
+/**
+ * One side's email, unless the email log shows it sent, or another run
+ * sending it now (the side then goes on `inFlight`). Its data carries
+ * `agreementId` and `side`, which is how the log finds it.
+ */
+async function sendSide(
+  sender: SideSender,
+  agreement: AgreementWithShare,
+  side: AgreementSide,
+  to: { id: string; email: string; name: string },
+  data: Record<string, string | number | boolean>
+): Promise<void> {
+  const { result } = sender;
+  const since = new Date(agreement.createdAt.getTime() - 60 * 1000);
+  const agreementId = agreement.id;
+  const inLog = await sender.alreadySent({
+    to: to.email,
+    agreementId,
+    side,
+    since,
+  });
+  if (inLog === 'sent') {
+    result.emailsAlreadySent += 1;
+    return;
+  }
+  if (inLog === 'in_flight') {
+    result.emailsInFlight += 1;
+    sender.inFlight.push(side);
+    return;
+  }
+  await sender.mailer({
+    to: to.email,
+    toName: to.name,
+    templateName: TEMPLATE,
+    category: 'transactional',
+    userId: to.id,
+    organizationId: agreement.organizationId,
+    data: { ...data, agreementId, side },
+  });
+  result.emailsSent += 1;
+}
+
+/**
+ * Mark the row sent, once its sides are sent or found sent. A side another
+ * run is sending may yet fail, so then the row is NOT marked: the next
+ * morning finds that send's outcome in the log (`success`: not sent again;
+ * a dead `pending` or `failed`: sent).
+ */
+async function markUnlessInFlight(
+  service: AgreementService,
+  sender: SideSender,
+  agreementId: string,
+  obs: ObservabilityClient
+): Promise<void> {
+  if (sender.inFlight.length > 0) {
+    obs.warn(
+      'agreement-expiring-soon: another run is sending this row; it is left for the next morning',
+      { agreementId, inFlight: sender.inFlight }
+    );
+    return;
+  }
+  await service.markExpiringSoonSent(agreementId);
+  sender.result.agreementsMarked += 1;
 }
 
 /**
@@ -304,7 +400,9 @@ function makeAlreadySent(db: Database, now: Date): AlreadySent {
  *      not yet marked as sent)
  *   2. for each row: look up the first active owner, send TWO emails
  *      (creator + owner) via the mailer thunk, skipping a side the email
- *      log shows an earlier morning sent, and mark the row as sent
+ *      log shows an earlier morning sent, and mark the row as sent. A
+ *      side another run is sending now is skipped too, and its row is
+ *      left unmarked
  *   3. on per-row failure: log + count, continue to the next row
  *
  * If no active owner exists for an org (orphan), the creator-side
@@ -322,6 +420,7 @@ export async function runAgreementExpiringSweep(
     agreementsScanned: 0,
     emailsSent: 0,
     emailsAlreadySent: 0,
+    emailsInFlight: 0,
     agreementsMarked: 0,
     errors: 0,
     budgetSpent: false,
@@ -348,34 +447,6 @@ export async function runAgreementExpiringSweep(
     const alreadySent =
       deps.alreadySent ?? makeAlreadySent(db, now ?? new Date());
 
-    /**
-     * One side's email, unless the email log shows it sent. Its data
-     * carries `agreementId` and `side`, which is how the log finds it.
-     */
-    async function sendSide(
-      agreement: AgreementWithShare,
-      side: AgreementSide,
-      to: { id: string; email: string; name: string },
-      data: Record<string, string | number | boolean>
-    ): Promise<void> {
-      const since = new Date(agreement.createdAt.getTime() - 60 * 1000);
-      const agreementId = agreement.id;
-      if (await alreadySent({ to: to.email, agreementId, side, since })) {
-        result.emailsAlreadySent += 1;
-        return;
-      }
-      await mailer({
-        to: to.email,
-        toName: to.name,
-        templateName: TEMPLATE,
-        category: 'transactional',
-        userId: to.id,
-        organizationId: agreement.organizationId,
-        data: { ...data, agreementId, side },
-      });
-      result.emailsSent += 1;
-    }
-
     for (const row of candidates) {
       // Before the row, never between its two emails, so the budget leaves
       // no row half-sent. A row whose owner email fails after the creator's
@@ -394,9 +465,16 @@ export async function runAgreementExpiringSweep(
         const ownerContact = await service.getFirstActiveOwnerContact(
           row.agreement.organizationId
         );
+        const sender: SideSender = {
+          alreadySent,
+          mailer,
+          result,
+          inFlight: [],
+        };
         // Creator-side email: counterparty is the owner (or a placeholder
         // when the org is orphaned).
         await sendSide(
+          sender,
           row.agreement,
           'creator',
           row.creator,
@@ -413,13 +491,15 @@ export async function runAgreementExpiringSweep(
             }),
           })
         );
-        creatorEmailSent = true;
+        // One another run is sending has not gone yet.
+        creatorEmailSent = !sender.inFlight.includes('creator');
 
         // Owner-side email — only when an active owner exists. Orphan
         // orgs (no active owner row) skip this branch but the creator
         // email + row marking still proceed.
         if (ownerContact) {
           await sendSide(
+            sender,
             row.agreement,
             'owner',
             ownerContact,
@@ -441,8 +521,7 @@ export async function runAgreementExpiringSweep(
           );
         }
 
-        await service.markExpiringSoonSent(row.agreement.id);
-        result.agreementsMarked += 1;
+        await markUnlessInFlight(service, sender, row.agreement.id, obs);
       } catch (rowError) {
         result.errors += 1;
         obs.error('agreement-expiring-soon per-row dispatch failed', {

@@ -1,9 +1,15 @@
 /**
- * Preview and test-send render a creator template in the brand of the org it
- * names, so both need the creator's ACTIVE membership of that org still
- * (Codex-tgkgb, owner decision 2026-11-09). A creator who has left can no
- * longer send in its name, but their template stays theirs to list and
- * delete.
+ * Preview and test-send render a template in the brand of the org it
+ * belongs to or names (Codex-tgkgb, owner decisions 2026-11-09):
+ *
+ * - A creator template naming an org needs the creator's ACTIVE TEAM role in
+ *   it (owner, admin, creator or member) for both. A creator who has left,
+ *   or who only subscribes, can no longer send in its name, but their
+ *   template stays theirs to list and delete.
+ * - An org's own templates: its team may list and preview them; only its
+ *   owner or admin may test-send one. A paying subscriber gets none of it.
+ * - A test send of a creator template naming an org goes only to the
+ *   sender's own address; one naming no org goes anywhere, as before.
  *
  * The REAL template and preview routes with procedure() on a bare Hono app,
  * the session pre-set by a middleware, against the real database: the rule
@@ -32,44 +38,95 @@ import templates from '../templates';
 
 const db = createDbClient(env as unknown as Bindings);
 const tag = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
-const creatorId = `tplsender${tag}`;
-const orgIds = { member: '', former: '' };
+
+/** A signed-in caller: their user id and platform role. */
+interface Caller {
+  id: string;
+  role: string;
+}
+
+const creator: Caller = { id: `tplsender${tag}`, role: 'creator' };
+// The team org's people, one per role under test.
+const subscriber: Caller = { id: `tplsubscriber${tag}`, role: 'creator' };
+const member: Caller = { id: `tplmember${tag}`, role: 'customer' };
+const admin: Caller = { id: `tpladmin${tag}`, role: 'creator' };
+const people = [creator, subscriber, member, admin];
+
+/** The orgs a creator template can name. */
+const orgIds = { member: '', former: '', subscribed: '' };
+/** The org whose own templates are under test. */
+let teamOrgId = '';
 const recipients: string[] = [];
 
 beforeAll(async () => {
-  await db.insert(users).values({
-    id: creatorId,
-    name: 'Template Sender',
-    email: `${creatorId}@example.test`,
-  });
-  const [member, former] = await db
+  await db.insert(users).values(
+    people.map((p) => ({
+      id: p.id,
+      name: `Template ${p.id}`,
+      email: `${p.id}@example.test`,
+    }))
+  );
+  const [memberOrg, former, subscribed, team] = await db
     .insert(organizations)
     .values([
       { name: 'Member Org', slug: `tpl-send-member-${tag}` },
       { name: 'Former Org', slug: `tpl-send-former-${tag}` },
+      { name: 'Subscribed Org', slug: `tpl-send-subscribed-${tag}` },
+      { name: 'Team Org', slug: `tpl-send-team-${tag}` },
     ])
     .returning({ id: organizations.id });
-  if (!member || !former) throw new Error('orgs not inserted');
-  orgIds.member = member.id;
+  if (!memberOrg || !former || !subscribed || !team) {
+    throw new Error('orgs not inserted');
+  }
+  orgIds.member = memberOrg.id;
   orgIds.former = former.id;
+  orgIds.subscribed = subscribed.id;
+  teamOrgId = team.id;
   await db.insert(organizationMemberships).values([
     {
       organizationId: orgIds.member,
-      userId: creatorId,
+      userId: creator.id,
       role: 'creator',
       status: 'active',
     },
     // The creator made a template here, then left: the row stays, inactive.
     {
       organizationId: orgIds.former,
-      userId: creatorId,
+      userId: creator.id,
       role: 'creator',
       status: 'inactive',
+    },
+    // A paying customer of the org, as `upsertSubscriberMembership` writes
+    // it: active, but not on its team.
+    {
+      organizationId: orgIds.subscribed,
+      userId: creator.id,
+      role: 'subscriber',
+      status: 'active',
+    },
+    {
+      organizationId: teamOrgId,
+      userId: subscriber.id,
+      role: 'subscriber',
+      status: 'active',
+    },
+    {
+      organizationId: teamOrgId,
+      userId: member.id,
+      role: 'member',
+      status: 'active',
+    },
+    {
+      organizationId: teamOrgId,
+      userId: admin.id,
+      role: 'admin',
+      status: 'active',
     },
   ]);
 });
 
 afterAll(async () => {
+  const ids = people.map((p) => p.id);
   if (recipients.length > 0) {
     await db
       .delete(emailAuditLogs)
@@ -77,30 +134,34 @@ afterAll(async () => {
   }
   await db
     .delete(emailTemplates)
-    .where(eq(emailTemplates.creatorId, creatorId));
+    .where(eq(emailTemplates.creatorId, creator.id));
+  await db
+    .delete(emailTemplates)
+    .where(eq(emailTemplates.organizationId, teamOrgId));
   await db
     .delete(organizationMemberships)
-    .where(eq(organizationMemberships.userId, creatorId));
+    .where(inArray(organizationMemberships.userId, ids));
   await db
     .delete(organizations)
-    .where(inArray(organizations.id, Object.values(orgIds)));
-  await db.delete(users).where(eq(users.id, creatorId));
+    .where(inArray(organizations.id, [...Object.values(orgIds), teamOrgId]));
+  await db.delete(users).where(inArray(users.id, ids));
 });
 
 async function call(
   method: 'GET' | 'POST' | 'DELETE',
   path: string,
-  body?: Record<string, unknown>
+  body?: Record<string, unknown>,
+  as: Caller = creator
 ): Promise<Response> {
   const app = new Hono<{ Variables: Record<string, unknown> }>();
   app.use('*', async (c, next) => {
     c.set('user', {
-      id: creatorId,
-      email: `${creatorId}@example.test`,
-      name: 'Template Sender',
-      role: 'creator',
+      id: as.id,
+      email: `${as.id}@example.test`,
+      name: `Template ${as.id}`,
+      role: as.role,
     });
-    c.set('session', { id: `sess_tpl_send_${tag}`, userId: creatorId });
+    c.set('session', { id: `sess_tpl_send_${as.id}`, userId: as.id });
     c.set('obs', new ObservabilityClient('notifications-api', 'test'));
     await next();
   });
@@ -120,22 +181,44 @@ async function call(
   return response;
 }
 
-/** A creator template naming `org`, as stored while the creator belonged. */
-async function stored(org: keyof typeof orgIds): Promise<string> {
+/**
+ * A creator template naming `org` (as stored while the creator belonged), or
+ * naming none.
+ */
+async function stored(org: keyof typeof orgIds | null): Promise<string> {
   const [row] = await db
     .insert(emailTemplates)
     .values({
-      name: `tpl-send-${org}-${crypto.randomUUID().slice(0, 8)}`,
+      name: `tpl-send-${org ?? 'none'}-${crypto.randomUUID().slice(0, 8)}`,
       scope: 'creator',
-      creatorId,
-      createdBy: creatorId,
-      organizationId: orgIds[org],
+      creatorId: creator.id,
+      createdBy: creator.id,
+      organizationId: org ? orgIds[org] : null,
       subject: 'News from {{platformName}}',
       htmlBody: '<p>News from {{platformName}}</p>',
       textBody: 'News from {{platformName}}',
     })
     .returning({ id: emailTemplates.id });
   if (!row) throw new Error('template not inserted');
+  return row.id;
+}
+
+/** One of the team org's own templates, made by its admin. */
+async function storedOrgTemplate(): Promise<string> {
+  const [row] = await db
+    .insert(emailTemplates)
+    .values({
+      name: `tpl-send-org-${crypto.randomUUID().slice(0, 8)}`,
+      scope: 'organization',
+      organizationId: teamOrgId,
+      creatorId: null,
+      createdBy: admin.id,
+      subject: 'Team news from {{platformName}}',
+      htmlBody: '<p>Team news from {{platformName}}</p>',
+      textBody: 'Team news from {{platformName}}',
+    })
+    .returning({ id: emailTemplates.id });
+  if (!row) throw new Error('org template not inserted');
   return row.id;
 }
 
@@ -154,9 +237,12 @@ const auditRowsFor = (email: string) =>
     .from(emailAuditLogs)
     .where(eq(emailAuditLogs.recipientEmail, email));
 
-describe('a creator who left the org the template names', () => {
+describe.each([
+  ['who left the org the template names', 'former'],
+  ['who only subscribes to the org the template names', 'subscribed'],
+] as const)('a creator %s', (_case, org) => {
   it('is refused a preview', async () => {
-    const id = await stored('former');
+    const id = await stored(org);
 
     const response = await call('POST', `/api/templates/${id}/preview`, {
       data: {},
@@ -166,8 +252,8 @@ describe('a creator who left the org the template names', () => {
   });
 
   it('is refused a test send: nothing is sent, and nothing is logged', async () => {
-    const id = await stored('former');
-    const to = recipient('former-send');
+    const id = await stored(org);
+    const to = recipient(`${org}-send`);
 
     const response = await call('POST', `/api/templates/${id}/test-send`, {
       recipientEmail: to,
@@ -180,7 +266,7 @@ describe('a creator who left the org the template names', () => {
   });
 
   it('still lists the template, and can delete it', async () => {
-    const id = await stored('former');
+    const id = await stored(org);
 
     const list = await call('GET', '/api/templates/creator?limit=100');
     expect(list.status).toBe(200);
@@ -194,7 +280,7 @@ describe('a creator who left the org the template names', () => {
       .from(emailTemplates)
       .where(eq(emailTemplates.id, id));
     expect(row?.deletedAt).not.toBeNull();
-  });
+  }, 15_000); // two route calls and their database round trips
 });
 
 describe("an active member of the template's org", () => {
@@ -210,14 +296,160 @@ describe("an active member of the template's org", () => {
     expect(body.data.subject).toMatch(/^News from /);
   });
 
-  it('test-sends it', async () => {
+  // Owner decision 2026-11-09: in the org's brand, a creator template's
+  // test send (its only send) goes to the sender alone, never a mailing.
+  it('test-sends it to their own address, typed in any case with spaces round it', async () => {
     const id = await stored('member');
-    const to = recipient('member-send');
+    // Stored trimmed, as typed: the send goes to the address given.
+    const own = `${creator.id}@example.test`.toUpperCase();
+    recipients.push(own);
+
+    const response = await call('POST', `/api/templates/${id}/test-send`, {
+      recipientEmail: `  ${own}  `,
+      data: {},
+    });
+
+    expect(response.status).toBe(200);
+    expect(await auditRowsFor(own)).toEqual([
+      { status: 'success', metadata: '{"testSend":true}' },
+    ]);
+  });
+
+  it('is refused a test send to anyone else: nothing is sent, and nothing is logged', async () => {
+    const id = await stored('member');
+    const to = recipient('member-send-other');
 
     const response = await call('POST', `/api/templates/${id}/test-send`, {
       recipientEmail: to,
       data: {},
     });
+
+    // The log first: a send that went through would have written its row.
+    expect(await auditRowsFor(to)).toEqual([]);
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toBe(
+      'Test sends of an organization-branded template go only to your own email address'
+    );
+  });
+});
+
+describe('a creator template naming no org', () => {
+  it('test-sends to any address, as before', async () => {
+    const id = await stored(null);
+    const to = recipient('no-org-send');
+
+    const response = await call('POST', `/api/templates/${id}/test-send`, {
+      recipientEmail: to,
+      data: {},
+    });
+
+    expect(response.status).toBe(200);
+    expect(await auditRowsFor(to)).toEqual([
+      { status: 'success', metadata: '{"testSend":true}' },
+    ]);
+  });
+});
+
+describe("an org's own templates", () => {
+  const listed = async (as: Caller) =>
+    call(
+      'GET',
+      `/api/templates/organizations/${teamOrgId}?limit=100`,
+      undefined,
+      as
+    );
+
+  describe('a paying subscriber of the org', () => {
+    it('is refused the list', async () => {
+      await storedOrgTemplate();
+
+      const response = await listed(subscriber);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('is refused a preview', async () => {
+      const id = await storedOrgTemplate();
+
+      const response = await call(
+        'POST',
+        `/api/templates/${id}/preview`,
+        { data: {} },
+        subscriber
+      );
+
+      expect(response.status).toBe(403);
+    });
+
+    it('is refused a test send: nothing is sent, and nothing is logged', async () => {
+      const id = await storedOrgTemplate();
+      const to = recipient('org-subscriber-send');
+
+      const response = await call(
+        'POST',
+        `/api/templates/${id}/test-send`,
+        { recipientEmail: to, data: {} },
+        subscriber
+      );
+
+      expect(await auditRowsFor(to)).toEqual([]);
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe("a member of the org's team", () => {
+    it('lists them', async () => {
+      const id = await storedOrgTemplate();
+
+      const response = await listed(member);
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { items: Array<{ id: string }> };
+      expect(body.items.map((t) => t.id)).toContain(id);
+    });
+
+    it('previews one', async () => {
+      const id = await storedOrgTemplate();
+
+      const response = await call(
+        'POST',
+        `/api/templates/${id}/preview`,
+        { data: {} },
+        member
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { data: { subject: string } };
+      expect(body.data.subject).toMatch(/^Team news from /);
+    });
+
+    it('is refused a test send: only an owner or admin may send one', async () => {
+      const id = await storedOrgTemplate();
+      const to = recipient('org-member-send');
+
+      const response = await call(
+        'POST',
+        `/api/templates/${id}/test-send`,
+        { recipientEmail: to, data: {} },
+        member
+      );
+
+      expect(await auditRowsFor(to)).toEqual([]);
+      expect(response.status).toBe(403);
+    });
+  });
+
+  it('an admin of the org test-sends one', async () => {
+    const id = await storedOrgTemplate();
+    const to = recipient('org-admin-send');
+
+    const response = await call(
+      'POST',
+      `/api/templates/${id}/test-send`,
+      { recipientEmail: to, data: {} },
+      admin
+    );
 
     expect(response.status).toBe(200);
     expect(await auditRowsFor(to)).toEqual([

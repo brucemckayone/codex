@@ -129,7 +129,7 @@ vi.mock('@codex/agreements', async () => {
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 /** An empty email log: no side was sent on an earlier morning. */
-const nothingSent = async () => false;
+const nothingSent = async () => 'no' as const;
 
 function buildObs() {
   const calls: Array<{ level: string; msg: string; ctx?: unknown }> = [];
@@ -632,7 +632,10 @@ describe('runAgreementExpiringSweep', () => {
           to: string;
           agreementId: string;
           side: string;
-        }) => sent.includes(key(a.to, a.agreementId, a.side)),
+        }) =>
+          sent.includes(key(a.to, a.agreementId, a.side))
+            ? ('sent' as const)
+            : ('no' as const),
       };
     }
 
@@ -994,7 +997,123 @@ describe('runAgreementExpiringSweep', () => {
           [stale, 'creator-agr-stale@example.test'],
           [forged, 'creator-agr-forged@example.test'],
         ]);
-        expect(result).toMatchObject({ emailsAlreadySent: 2, errors: 0 });
+        expect(result).toMatchObject({
+          emailsAlreadySent: 1,
+          emailsInFlight: 1,
+          errors: 0,
+        });
+        // The stale row's owner side is another run's to finish: not marked.
+        expect(sharedMockState.markedIds).toEqual([forged]);
+      } finally {
+        await db.delete(emailAuditLogs).where(
+          inArray(
+            emailAuditLogs.id,
+            rows.map((r) => r.id)
+          )
+        );
+      }
+    });
+
+    // Two runs at once (a cron fired twice, a manual run): this sweep has no
+    // claim, so one can meet a side the other is still sending. That side is
+    // not sent again, but nor is the row marked, as that send may yet fail:
+    // the next morning reads its outcome (silent-failure review, delta 2).
+    it('a side another run is still sending is not sent and leaves the row unmarked; the next morning, that send never having come, sends it and marks the row', async () => {
+      oneRow();
+      const db = createDbClient(env as unknown as Bindings);
+      const agreementId = `agr-log-${crypto.randomUUID()}`;
+      const owner = `owner-${crypto.randomUUID()}@example.test`;
+      const now = new Date();
+      const DAY = 24 * 60 * 60 * 1000;
+      sharedMockState.enrichedCandidates = [
+        {
+          ...candidate('agr-half'),
+          agreement: mockAgreement({
+            id: agreementId,
+            organizationId: 'org-agr-half',
+            createdAt: new Date(now.getTime() - 3 * 60 * 60 * 1000),
+          }),
+        },
+      ];
+      sharedMockState.ownerLookup = async () => ({
+        id: 'owner-log',
+        email: owner,
+        name: 'Owner',
+      });
+      const entry = (
+        recipientEmail: string,
+        side: 'creator' | 'owner',
+        status: 'success' | 'pending',
+        ageMs: number
+      ) => {
+        const at = new Date(now.getTime() - ageMs);
+        return {
+          templateName: 'agreement-expiring-soon',
+          recipientEmail,
+          status,
+          metadata: JSON.stringify({ recipientName: 'X', agreementId, side }),
+          createdAt: at,
+          updatedAt: at,
+        };
+      };
+      const rows = await db
+        .insert(emailAuditLogs)
+        .values([
+          // The other run's creator email went.
+          entry('creator-agr-half@example.test', 'creator', 'success', 120_000),
+          // Its owner email, a minute old: still in flight.
+          entry(owner, 'owner', 'pending', 60_000),
+        ])
+        .returning({ id: emailAuditLogs.id });
+
+      const run = async (clock: Date) => {
+        const { obs, calls } = buildObs();
+        const mailer = vi.fn<MailerFn>(async () => undefined);
+        const result = await runAgreementExpiringSweep({
+          db,
+          obs,
+          environment: 'test',
+          workerSecret: 'unused',
+          notificationsUrl: 'http://notifications.test',
+          now: clock,
+          mailer,
+        });
+        const sent = mailer.mock.calls.map((c) => [c[0].to, c[0].data.side]);
+        return { result, calls, sent };
+      };
+
+      try {
+        const first = await run(now);
+        // That send may yet fail: the row is left for the next morning.
+        expect(sharedMockState.markedIds).toEqual([]);
+        expect(first.sent).toEqual([]);
+        expect(first.result).toMatchObject({
+          emailsSent: 0,
+          emailsAlreadySent: 1,
+          emailsInFlight: 1,
+          agreementsMarked: 0,
+          errors: 0,
+        });
+        expect(first.calls).toContainEqual(
+          expect.objectContaining({
+            level: 'warn',
+            msg: 'agreement-expiring-soon: another run is sending this row; it is left for the next morning',
+            ctx: { agreementId, inFlight: ['owner'] },
+          })
+        );
+
+        // The next morning: the owner's row is still `pending`, its outcome
+        // never came, so it goes now; the creator's went, so it does not.
+        const second = await run(new Date(now.getTime() + DAY));
+        expect(second.sent).toEqual([[owner, 'owner']]);
+        expect(sharedMockState.markedIds).toEqual([agreementId]);
+        expect(second.result).toMatchObject({
+          emailsSent: 1,
+          emailsAlreadySent: 1,
+          emailsInFlight: 0,
+          agreementsMarked: 1,
+          errors: 0,
+        });
       } finally {
         await db.delete(emailAuditLogs).where(
           inArray(

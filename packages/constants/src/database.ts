@@ -27,6 +27,20 @@ export const ORGANIZATION_ROLES = {
   MEMBER: 'member',
 } as const;
 
+/**
+ * The org's TEAM: every role except `subscriber`. A paying subscriber holds
+ * an ACTIVE membership too (role `subscriber`), so a check that means "on
+ * the team" must filter by these roles, never by status alone (Codex-tgkgb,
+ * owner decision 2026-11-09). Also the roles a subscription never downgrades
+ * to `subscriber` (`upsertSubscriberMembership`).
+ */
+export const ORGANIZATION_TEAM_ROLES = [
+  ORGANIZATION_ROLES.OWNER,
+  ORGANIZATION_ROLES.ADMIN,
+  ORGANIZATION_ROLES.CREATOR,
+  ORGANIZATION_ROLES.MEMBER,
+] as const;
+
 export const ORGANIZATION_STATUS = {
   ACTIVE: 'active',
   INACTIVE: 'inactive',

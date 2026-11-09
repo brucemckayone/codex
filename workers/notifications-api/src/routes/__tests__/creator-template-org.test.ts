@@ -1,8 +1,9 @@
 /**
  * A creator template that names an organisation needs the creator's ACTIVE
- * membership of it, on create and on update (Codex-tgkgb, owner decision
- * 2026-11-09). A test send renders a template in its org's brand and logs it
- * under that org, so naming another org would send in its name.
+ * TEAM role in it (owner, admin, creator or member), on create and on update
+ * (Codex-tgkgb, owner decisions 2026-11-09). A test send renders a template
+ * in its org's brand and logs it under that org, so naming another org, or
+ * one the creator only subscribes to, would send in its name.
  *
  * The REAL routes and procedure() on a bare Hono app, with the session
  * pre-set by a middleware, against the real database: the rule is a
@@ -30,10 +31,11 @@ import templates from '../templates';
 const db = createDbClient(env as unknown as Bindings);
 const tag = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
 const creatorId = `tplcreator${tag}`;
-const orgIds: Record<'member' | 'former' | 'foreign', string> = {
+const orgIds: Record<'member' | 'former' | 'foreign' | 'subscribed', string> = {
   member: '',
   former: '',
   foreign: '',
+  subscribed: '',
 };
 
 beforeAll(async () => {
@@ -42,18 +44,22 @@ beforeAll(async () => {
     name: 'Template Creator',
     email: `${creatorId}@example.test`,
   });
-  const [member, former, foreign] = await db
+  const [member, former, foreign, subscribed] = await db
     .insert(organizations)
     .values([
       { name: 'Member Org', slug: `tpl-member-${tag}` },
       { name: 'Former Org', slug: `tpl-former-${tag}` },
       { name: 'Foreign Org', slug: `tpl-foreign-${tag}` },
+      { name: 'Subscribed Org', slug: `tpl-subscribed-${tag}` },
     ])
     .returning({ id: organizations.id });
-  if (!member || !former || !foreign) throw new Error('orgs not inserted');
+  if (!member || !former || !foreign || !subscribed) {
+    throw new Error('orgs not inserted');
+  }
   orgIds.member = member.id;
   orgIds.former = former.id;
   orgIds.foreign = foreign.id;
+  orgIds.subscribed = subscribed.id;
   await db.insert(organizationMemberships).values([
     {
       organizationId: orgIds.member,
@@ -67,6 +73,14 @@ beforeAll(async () => {
       userId: creatorId,
       role: 'creator',
       status: 'inactive',
+    },
+    // A paying customer of the org, as `upsertSubscriberMembership` writes
+    // it: active, but not on its team.
+    {
+      organizationId: orgIds.subscribed,
+      userId: creatorId,
+      role: 'subscriber',
+      status: 'active',
     },
   ]);
 });
@@ -134,10 +148,11 @@ const rowsNamed = (name: string) =>
       )
     );
 
-describe('POST /api/templates/creator: an org needs active membership', () => {
+describe('POST /api/templates/creator: an org needs an active team role', () => {
   it.each([
     ['an org the creator is not a member of', 'foreign'],
     ['an org whose membership is no longer active', 'former'],
+    ['an org the creator only subscribes to', 'subscribed'],
   ] as const)('refuses %s, and creates nothing', async (_case, org) => {
     const name = `tpl-create-${org}-${tag}`;
 
@@ -176,7 +191,7 @@ describe('POST /api/templates/creator: an org needs active membership', () => {
   });
 });
 
-describe('PATCH /api/templates/creator/:id: its org needs active membership still', () => {
+describe('PATCH /api/templates/creator/:id: its org needs an active team role still', () => {
   /** A creator template as already stored: from before the fix, or before the creator left. */
   async function stored(org: keyof typeof orgIds | null): Promise<string> {
     const [row] = await db
@@ -204,6 +219,7 @@ describe('PATCH /api/templates/creator/:id: its org needs active membership stil
   it.each([
     ['an org the creator is not a member of', 'foreign'],
     ['an org whose membership is no longer active', 'former'],
+    ['an org the creator only subscribes to', 'subscribed'],
   ] as const)('refuses a template naming %s, and changes nothing', async (_case, org) => {
     const id = await stored(org);
 
