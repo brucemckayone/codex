@@ -33,6 +33,8 @@ vi.mock(
 import {
   CHARGE_ID,
   chargeDetail,
+  LIFTED_WINDOW,
+  lateWonChargeback,
   preview,
 } from '../__fixtures__/support-fixtures';
 import {
@@ -516,7 +518,11 @@ describe('after the reload a refused preview asked for (R3-L3)', () => {
   const LESS_LEFT = () =>
     chargeDetail({
       refundCount: 2,
-      refundable: { maxCents: 250, blocked: null },
+      refundable: {
+        maxCents: 250,
+        blocked: null,
+        refundedOutsideStripeOn: null,
+      },
     });
 
   function mountReactive() {
@@ -581,7 +587,11 @@ describe('after the reload a refused preview asked for (R3-L3)', () => {
     radio?.blur();
     props.detail = chargeDetail({
       refundCount: 3,
-      refundable: { maxCents: 200, blocked: null },
+      refundable: {
+        maxCents: 200,
+        blocked: null,
+        refundedOutsideStripeOn: null,
+      },
     });
     flushSync();
     await wait(0);
@@ -755,10 +765,12 @@ describe('a blocked charge', () => {
         refundable: {
           maxCents: blocked === 'nothing_left' ? 0 : 2000,
           blocked,
+          refundedOutsideStripeOn: null,
         },
         window: {
           closesAt: '2026-10-17T07:15:00.000Z',
           isOpen: blocked !== 'window_closed',
+          liftedByLateWin: false,
         },
       }),
     });
@@ -766,6 +778,73 @@ describe('a blocked charge', () => {
     expect(alert?.getAttribute('data-reason')).toBe(blocked);
     expect(alert?.textContent).toContain(text);
     expect(review()).toBeNull();
+  });
+
+  // The design's words promised "an hour", which a refund Stripe won't make
+  // outlasts: reworded in review cycle 1 (M3) to stay true while it retries.
+  test('a won chargeback still paying the creators back: the form waits, and promises no time', () => {
+    mountForm({
+      detail: chargeDetail({
+        refundable: {
+          maxCents: 2400,
+          blocked: 'chargeback_settling',
+          refundedOutsideStripeOn: null,
+        },
+        chargebacks: [lateWonChargeback({ settling: true })],
+      }),
+    });
+    const alert = document.querySelector('[data-testid="refund-blocked"]');
+    expect(alert?.getAttribute('data-reason')).toBe('chargeback_settling');
+    expect(alert?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      "This payment's chargeback was decided for us, and the creators are still being paid back. Refunds wait until that finishes. A step that fails is retried every hour, and one that keeps failing is settled by hand."
+    );
+    expect(alert?.closest('[data-variant]')?.getAttribute('data-variant')).toBe(
+      'info'
+    );
+    expect(review()).toBeNull();
+  });
+
+  test('a charge settled by hand (owner decision 2026-11-08): never refunded here, whatever the window says', () => {
+    mountForm({
+      detail: chargeDetail({
+        refundable: {
+          maxCents: 2400,
+          blocked: 'refunded_outside_stripe',
+          refundedOutsideStripeOn: '2026-11-08T14:00:00.000Z',
+        },
+        window: LIFTED_WINDOW,
+        chargebacks: [lateWonChargeback()],
+      }),
+    });
+    const alert = document.querySelector('[data-testid="refund-blocked"]');
+    expect(alert?.getAttribute('data-reason')).toBe('refunded_outside_stripe');
+    expect(alert?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      "Refunded outside Stripe on 8 Nov 2026. Don't refund this charge here."
+    );
+    expect(alert?.closest('[data-variant]')?.getAttribute('data-variant')).toBe(
+      'warning'
+    );
+    expect(review()).toBeNull();
+    expect(document.body.textContent).not.toContain(
+      m.support_form_can_lifted({ amount: '£24.00' })
+    );
+  });
+
+  test('a window a late win lifted (Q7): the form is open, says there is no time limit, and never prints the passed date', () => {
+    mountForm({
+      detail: chargeDetail({
+        window: LIFTED_WINDOW,
+        chargebacks: [lateWonChargeback()],
+      }),
+    });
+    const text = document.body.textContent?.replace(/\s+/g, ' ') ?? '';
+    // £4.00 was refunded before, so £20.00 is left.
+    expect(text).toContain(
+      '£20.00 is left to refund. No time limit: the chargeback was won late.'
+    );
+    expect(text).not.toContain('17 Sep');
+    expect(text).not.toContain('The window closes');
+    expect(review()).not.toBeNull();
   });
 
   test('an inquiry does not block, and the form says what a full refund does to it', () => {
@@ -779,6 +858,9 @@ describe('a blocked charge', () => {
             reason: 'general',
             createdAt: NOW_ISO,
             respondBy: null,
+            lostOn: null,
+            lateWonOn: null,
+            settling: false,
           },
         ],
       }),

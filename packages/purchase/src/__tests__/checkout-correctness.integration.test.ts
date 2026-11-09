@@ -767,6 +767,7 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
         accessEnded: false,
         duplicatePayment: true,
         itemTitle: item.title,
+        lateWinKeptThrough: null,
       });
       const [access] = await db
         .select()
@@ -794,10 +795,15 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
       );
       await complete(service, secondPi, customerId, item.id);
 
+      const stripeDisputeId = `dp_${crypto.randomUUID()}`;
       const opened = await service.processDispute(secondPi, {
-        stripeDisputeId: `dp_${crypto.randomUUID()}`,
+        stripeDisputeId,
       });
-      const lost = await service.processLostDispute(secondPi, 1500);
+      const lost = await service.processLostDispute(
+        secondPi,
+        1500,
+        stripeDisputeId
+      );
 
       expect(opened?.accessEnded).toBe(false);
       expect(lost?.accessEnded).toBe(false);

@@ -15555,11 +15555,51 @@ export const earnings_bank_taken_back_chargeback = (params) => `Taken back for a
 
 
 /**
+ * @param {{ date: NonNullable<unknown>, paidBackOn: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_taken_back_chargeback_paid_back = (params) => `Taken back for a chargeback on ${params.date}, then paid back on ${params.paidBackOn}`
+
+
+/**
  * @param {{ date: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const earnings_bank_taken_back_refund = (params) => `Taken back for a refund on ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_cancelled_for_chargeback = (params) => `Held for a chargeback, cancelled when it was lost on ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, paidBackOn: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_cancelled_for_chargeback_paid_back = (params) => `Held for a chargeback, cancelled when it was lost on ${params.date}, then paid back on ${params.paidBackOn}`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_pays_back_titled = (params) => `Paid back: the chargeback on ‘${params.title}’ was decided for us`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_pays_back = () => `Paid back: the chargeback was decided for us`
 
 
 /**
@@ -16256,6 +16296,14 @@ export const payouts_negative_cause_elsewhere_refund = (params) => `A refund on 
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const payouts_cause_untitled_here = () => `one of the organisation's sales`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_type_paid_back = (params) => `${params.type} · paid back`
 
 
 /**
@@ -24695,6 +24743,30 @@ export const support_window_closed_on = (params) => `Closed ${params.date}`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_window_lifted = () => `No time limit`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_lifted_why = () => `The chargeback was won late`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_lifted_long = () => `No time limit: the chargeback was won late`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_days_left_one = () => `1 day left`
 
 
@@ -24880,6 +24952,14 @@ export const support_amount_none = (params) => `${params.amount} · nothing refu
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_amount_full = (params) => `${params.amount} · refunded in full`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_outside_stripe = (params) => `${params.amount} · refunded outside Stripe on ${params.date}`
 
 
 /**
@@ -25467,6 +25547,38 @@ export const support_chargebacks_none = () => `None on this charge.`
 
 
 /**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargebacks_settling = (params) => `The bank decided this chargeback for us on ${params.date}, after it was lost. The creators are being paid back; a step that fails is tried again within the hour.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_won_late = () => `Won late`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_paying_back = () => `Paying the creators back`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_lost_on = (params) => `Lost ${params.date}`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -25568,6 +25680,22 @@ export const support_form_left = (params) => `${params.amount} is left to refund
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_form_can = (params) => `${params.amount} can be refunded. The window closes on ${params.date} at ${params.time}.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_can_lifted = (params) => `${params.amount} can be refunded. No time limit: the chargeback was won late.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_left_lifted = (params) => `${params.amount} is left to refund. No time limit: the chargeback was won late.`
 
 
 /**
@@ -25955,6 +26083,38 @@ export const support_blocked_nothing = () => `Nothing is left to refund on this 
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_chargeback_settling_lead = () => `This payment's chargeback was decided for us, and the creators are still being paid back.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_chargeback_settling_body = () => `Refunds wait until that finishes. A step that fails is retried every hour, and one that keeps failing is settled by hand.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_refunded_outside_stripe_lead = (params) => `Refunded outside Stripe on ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_refunded_outside_stripe_body = () => `Don't refund this charge here.`
+
+
+/**
  * @param {{ amount: NonNullable<unknown>, buyer: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -26232,6 +26392,14 @@ export const support_outcome_refused_other = () => `Nothing was refunded and not
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_outcome_chargeback_lead = () => `This charge has a chargeback, so it can't be refunded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_refunded_outside_stripe_lead = () => `This charge was refunded outside Stripe.`
 
 
 /**
@@ -26739,6 +26907,22 @@ export const support_history_cause_dispute_won = (params) => `Chargeback · open
 
 
 /**
+ * @param {{ opened: NonNullable<unknown>, lost: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_cause_dispute_lost = (params) => `Chargeback · opened ${params.opened}, lost ${params.lost}`
+
+
+/**
+ * @param {{ opened: NonNullable<unknown>, lost: NonNullable<unknown>, won: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_cause_dispute_lost_won = (params) => `Chargeback · opened ${params.opened}, lost ${params.lost}, won ${params.won}`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -26839,6 +27023,14 @@ export const support_history_what_taken_dispute = () => `Taken back while the ch
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_taken_dispute_being_paid_back = () => `Taken back while the chargeback was open. Being paid back.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_history_what_taken_from_repay = () => `Taken from the payout that paid this share back, before it went out.`
 
 
@@ -26856,6 +27048,14 @@ export const support_history_what_owed = () => `There was nothing left to take i
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_history_what_paid_back = () => `Taken back, then paid back by a new payout.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_cancelled_paid_back = () => `Cancelled when the chargeback was lost, then paid back by a new payout.`
 
 
 /**
@@ -27267,6 +27467,22 @@ export const support_repay_needs_person_body = () => `Part of what the refund to
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_late_win_lead = () => `This refund pays back a buyer who paid twice, so the creators can't be re-paid for it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_late_win_body = () => `Refund the buyer another way, then mark it refunded another way.`
+
+
+/**
  * @param {{ buyer: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -27352,6 +27568,14 @@ export const support_repay_off_later_refunds = () => `Re-pay is off: a later ref
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_repay_off_needs_person = () => `Re-pay is off: this one needs settling by hand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_late_win = () => `Re-pay is off: this refund pays back a buyer who paid twice. Settle it another way.`
 
 
 /**
@@ -28576,6 +28800,22 @@ export const support_queue_moves_queued = (params) => `Queued for ${params.time}
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_queue_moves_queued_by = (params) => `Queued for ${params.time} · ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_waits_dispute = () => `Waits while a chargeback is open`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_waits_dispute_by = (params) => `Waits while a chargeback is open · ${params.name}`
 
 
 /**

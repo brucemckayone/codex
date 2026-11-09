@@ -793,7 +793,8 @@ and no new Neon wake: it rides the hourly one.
    fold into the run's end alert, whose errorId those rows carry. The end
    line is an error only when rows were folded into it; otherwise it is the
    info line `Price moves: run finished`, since each held row and each
-   stopped change has alerted already (review C1, SF-4).
+   stopped change has alerted already (review C1, SF-4). An idle run, one
+   that claimed, restarted and reopened nothing, logs no end line at all.
    A batch that throws while recording keeps its claims (its rows may have
    been emailed already), so their reclaim checks the email log and Stripe
    before telling anyone; only claims no batch started go back (SF-1).

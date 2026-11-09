@@ -24,6 +24,7 @@ import {
   creatorDebt,
   debtPerson,
   failedRefund,
+  LIFTED_WINDOW,
   NOW,
   owedItem,
   refusedDebtPerson,
@@ -192,6 +193,23 @@ describe('a row whose re-pay was refused for a later cause', () => {
     expect(
       row?.querySelector('[data-testid="repay-off"]')?.textContent
     ).toContain(m.support_repay_off_needs_person());
+  });
+
+  test('a late win\'s own refund says it pays back a buyer who paid twice, and still offers "refunded another way"', () => {
+    markRepayBlocked(failedRefund().refundId, 'late_win_refund');
+    render(FailedRefundsTable, { items: [failedRefund()], onSettle: vi.fn() });
+    const row = document.querySelector<HTMLElement>(
+      'table [data-testid="failed-refund-row"]'
+    );
+    const buttonIn = (label: string) =>
+      [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (b) => b.textContent?.includes(label)
+      );
+    expect(buttonIn(m.support_action_repay())?.disabled).toBe(true);
+    expect(
+      row?.querySelector('[data-testid="repay-off"]')?.textContent
+    ).toContain(m.support_repay_off_late_win());
+    expect(buttonIn(m.support_action_elsewhere())?.disabled).toBe(false);
   });
 });
 
@@ -855,6 +873,35 @@ describe('Settling a failed refund', () => {
     );
   });
 
+  test("a late win's own refund (owner decision 6): never re-paid, refund the buyer another way, and Re-pay stays off", async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'LATE_WIN_REFUND_NOT_REPAYABLE' })
+    );
+    const notices = renderDialog('creators_repaid');
+    typeNote('Re-pay.');
+    submit()?.focus();
+    submit()?.click();
+    await settled();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const problem = document.querySelector('[data-testid="settle-problem"]');
+    expect(problem?.getAttribute('data-problem')).toBe('late_win_refund');
+    expect(problem?.getAttribute('data-variant')).toBe('warning');
+    expect(problem?.textContent).toContain(m.support_repay_late_win_lead());
+    expect(problem?.textContent).toContain(m.support_repay_late_win_body());
+    // The server's own words (W4: the page words it from en.json).
+    expect(problem?.textContent).toContain(
+      "This refund pays back a buyer who paid twice, so the creators can't be re-paid for it."
+    );
+    // Where support made the choice: the dialog stays, and is read out.
+    expect(document.activeElement).toBe(problem);
+    expect(notices).toHaveLength(0);
+    expect(submit()?.disabled).toBe(true);
+    expect(repayBlockReason(failedRefund().refundId)).toBe('late_win_refund');
+    expect(text()).not.toContain(
+      m.support_repay_access_lead({ buyer: 'Daniel Price' })
+    );
+  });
+
   test('a prediction the server couldn’t make says so, and promises nothing', () => {
     renderDialog(
       'creators_repaid',
@@ -1136,6 +1183,26 @@ describe('The charges found', () => {
     const row = document.querySelector('[data-testid="charge-row"]');
     expect(row?.textContent).toContain(m.support_deleted());
     expect(row?.textContent).toContain(m.support_chargeback_lost());
+  });
+
+  test('a window a late win lifted (Q7): no time limit, on the table and the narrow list, and never its passed date', () => {
+    render(ChargeResults, {
+      items: [chargeSummary({ window: LIFTED_WINDOW })],
+      now: NOW,
+    });
+    const tableRow =
+      document
+        .querySelector('[data-testid="charge-row"]')
+        ?.textContent?.replace(/\s+/g, ' ') ?? '';
+    const listRow =
+      document.querySelector('.row-item')?.textContent?.replace(/\s+/g, ' ') ??
+      '';
+    for (const shown of [tableRow, listRow]) {
+      expect(shown).toContain('No time limit');
+      expect(shown).toContain('The chargeback was won late');
+    }
+    expect(text()).not.toContain('17 Sep');
+    expect(text()).not.toMatch(/days? left/);
   });
 });
 

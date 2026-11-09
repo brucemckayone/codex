@@ -116,6 +116,8 @@ describe('ecom-api payouts-sweep handler', () => {
   // And the dispute reconcile's second source (Codex-2hxff.58): no row of
   // ours is final and unapplied.
   let disputeRows: MockInstance<PurchaseService['findDisputesToReconcile']>;
+  // And its third (Codex-2hxff.70): no lost row of ours to re-check.
+  let lostRows: MockInstance<PurchaseService['findLostDisputesToRecheck']>;
   // And the daily bank payout (Codex-2hxff.29), pinned in its own tests.
   let bankPayouts: MockInstance<SubscriptionService['runBankPayouts']>;
   // And the waiting tier moves' backstop (Codex-2hxff.16): nothing due.
@@ -156,6 +158,9 @@ describe('ecom-api payouts-sweep handler', () => {
     disputeRows = vi
       .spyOn(PurchaseService.prototype, 'findDisputesToReconcile')
       .mockResolvedValue([]);
+    lostRows = vi
+      .spyOn(PurchaseService.prototype, 'findLostDisputesToRecheck')
+      .mockResolvedValue([]);
     offSaleCancel = vi
       .spyOn(CourseSubscriptionService.prototype, 'cancelForCoursesOffSale')
       .mockResolvedValue({ cancelled: 0, failed: 0, remaining: 0 });
@@ -171,6 +176,7 @@ describe('ecom-api payouts-sweep handler', () => {
     clawbackRetry.mockRestore();
     offSaleCancel.mockRestore();
     disputeRows.mockRestore();
+    lostRows.mockRestore();
     bankPayouts.mockRestore();
     tierBackstop.mockRestore();
   });
@@ -603,6 +609,24 @@ describe('ecom-api payouts-sweep handler', () => {
         error: 'database unavailable (test)',
       })
     );
+  });
+
+  it('the 08:00 London run finds no new late wins; any other hour re-checks our lost disputes (Codex-2hxff.70)', async () => {
+    /** Thu 14 Jan 2027, 08:00 and 09:00 London (GMT). */
+    const LONDON_EIGHT = Date.UTC(2027, 0, 14, 8);
+    const LONDON_NINE = Date.UTC(2027, 0, 14, 9);
+    const { obs } = makeObs();
+
+    await cronWithStubbedSweeps(disputeEventsStripe(), obs, {
+      scheduledTime: LONDON_EIGHT,
+    });
+    expect(lostRows).not.toHaveBeenCalled();
+
+    await cronWithStubbedSweeps(disputeEventsStripe(), obs, {
+      scheduledTime: LONDON_NINE,
+    });
+    expect(lostRows).toHaveBeenCalledOnce();
+    expect(obs.error).not.toHaveBeenCalled();
   });
 
   it('a dispute reconcile that throws outright is logged and never fails the cron (Codex-2hxff.58)', async () => {

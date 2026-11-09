@@ -271,6 +271,8 @@ async function clawBackRefundsUnderDispute(
       charge: { id: charge.id, amountCents: charge.amount },
       source,
       refunds: () => listClawableRefunds(deps.stripe, charge.id),
+      // This is the win's own settlement: a refund's clawback waits for it.
+      settlingDisputeId: disputeId,
     });
   }
 }

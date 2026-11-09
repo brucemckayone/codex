@@ -254,6 +254,13 @@ function purchaseServiceOver(store: Store, session: Stripe.Checkout.Session) {
     completeCoursePurchase: complete,
     markCheckoutSessionCompleted: vi.fn(async () => undefined),
     claimReceipt: vi.fn((purchaseId: string) => store.claim(purchaseId)),
+    // The receipt's link target (Codex-0u7kb).
+    findItemLink: vi.fn(async () => ({
+      kind: 'org_content' as const,
+      contentId: CONTENT_ID,
+      slug: 'landing-item',
+      organizationSlug: 'landing-org',
+    })),
   };
 }
 

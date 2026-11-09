@@ -1444,7 +1444,7 @@
 
   .audio-player__error-message {
     font-size: var(--text-sm);
-    color: var(--color-error-500);
+    color: var(--color-status-error-text);
   }
 
   .audio-player__error-retry {

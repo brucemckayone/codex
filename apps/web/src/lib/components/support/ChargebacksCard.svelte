@@ -5,6 +5,12 @@
   An inquiry (the bank asking, no money taken) is listed too; it doesn't
   block a refund, and the form says so.
 
+  A chargeback lost and then won (Codex-2hxff.70, late-win mockups S1-S3)
+  reads "Won late", from `lateWonOn`, never from its status: a normal win is
+  `won` too. While the creators are being paid back (`settling`) it is info
+  and the card says so in one sentence; after, it is success and says when
+  it was lost.
+
   @prop {ChargebackRow[]} chargebacks
 -->
 <script lang="ts">
@@ -22,16 +28,30 @@
 
   const { chargebacks }: Props = $props();
 
+  /** A late win whose pay-back is still running: the card says what happens. */
+  const settlingLateWin = $derived(
+    chargebacks.find((row) => row.lateWonOn !== null && row.settling)
+  );
+
   function reasonOf(row: ChargebackRow): string {
     return row.reason ? humanise(row.reason) : m.support_reason_none();
   }
 </script>
 
 {#snippet status(row: ChargebackRow)}
-  {@const badge = disputeStatus(row.status)}
-  <Badge variant={badge.variant}>{badge.label}</Badge>
-  {#if row.respondBy}
-    <span class="cell-sub">{m.support_respond_by({ date: formatShortDay(row.respondBy) })}</span>
+  {#if row.lateWonOn !== null}
+    <Badge variant={row.settling ? 'info' : 'success'}>{m.support_chargeback_won_late()}</Badge>
+    {#if row.settling}
+      <span class="cell-sub">{m.support_chargeback_paying_back()}</span>
+    {:else if row.lostOn}
+      <span class="cell-sub">{m.support_chargeback_lost_on({ date: formatShortDay(row.lostOn) })}</span>
+    {/if}
+  {:else}
+    {@const badge = disputeStatus(row.status)}
+    <Badge variant={badge.variant}>{badge.label}</Badge>
+    {#if row.respondBy}
+      <span class="cell-sub">{m.support_respond_by({ date: formatShortDay(row.respondBy) })}</span>
+    {/if}
   {/if}
 {/snippet}
 
@@ -40,6 +60,10 @@
     <Card.Title level={2}>{m.support_chargebacks_title()}</Card.Title>
     {#if chargebacks.length === 0}
       <Card.Description>{m.support_chargebacks_none()}</Card.Description>
+    {:else if settlingLateWin?.lateWonOn}
+      <Card.Description>
+        {m.support_chargebacks_settling({ date: formatShortDay(settlingLateWin.lateWonOn) })}
+      </Card.Description>
     {/if}
   </Card.Header>
   {#if chargebacks.length > 0}

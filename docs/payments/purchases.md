@@ -203,8 +203,17 @@ guards).
    delivery or the success page. A later one finds it claimed and sends
    nothing. A purchase refunded in full before its checkout is recorded
    gets none, and a claim that fails transiently returns 500 so Stripe
-   redelivers. A creator whose slice went pending is emailed to finish payouts
-   setup — **gap**: `Codex-2hxff.7`.
+   redelivers. The receipt's link opens the item's own page, by its slug
+   (`PurchaseService.findItemLink`, `Codex-0u7kb`): org content on its org's
+   subdomain, personal content on the creators host, a course on its journey
+   dashboard. The link is read before the claim, so nothing is awaited
+   between the claim and the send. An item with no page (deleted, a course
+   no longer published, or a creator with no username) links the buyer's
+   library instead, logged at warn; a lookup that fails does too, logged at
+   error with an errorId. With no `WEB_APP_URL` nothing is claimed or sent,
+   logged at error with the purchase id.
+   A creator whose slice went pending is emailed to finish payouts setup —
+   **gap**: `Codex-2hxff.7`.
 
 **Errors.** A transient failure (database connection, Stripe outage) returns
 500 and Stripe retries. A failure writing the slices after the purchase has
@@ -474,6 +483,40 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
   4. **The platform fee's share is cancelled** and the fee slice is `paid`
      again, with no re-pay row: the money is back in the platform's balance.
 
+**A late win's own refund is never re-paid** (owner decision 2026-11-08,
+"Block it in code"). A failed refund a late win made (see
+[Disputes](#disputes)) pays back a buyer who paid twice, so the buyer is still
+owed it and its clawback stands. "Creators re-paid" refuses it with 422
+`LATE_WIN_REFUND_NOT_REPAYABLE`. It is known by our record
+(`disputes.late_win_refund_id`) or by the refund's own metadata at Stripe
+(`codex_late_win_dispute`). The late win writes the metadata in the same call
+that makes the refund, and our record only after Stripe answers, so the
+metadata still names a refund whose record was never written. Stripe is asked
+for the metadata only when the refund's charge has a late win (`late_won_at`),
+which the late win records before it makes its refund. So "refunded
+elsewhere" on any other charge never reads Stripe, and goes through while
+Stripe is unreachable; on a late win's charge it fails until Stripe answers.
+Both are checked before the re-pay reads anything else at Stripe, so a
+refusal writes nothing.
+Our record is read once more in the settle's transaction, which only narrows
+the window for a late win that records its id meanwhile; the metadata is what
+closes it. Support refunds the buyer another way, or first refunds it again
+through Stripe on the charge page, then settles it as refunded elsewhere.
+Settled after a refund another way, the late win's dispute is marked
+`refunded_outside_stripe_at` in the same transaction, unless the charge's
+succeeded Stripe refunds already cover it or a date is already set. A re-refund
+still pending doesn't count, so the charge is marked: if it then fails, the
+charge is already blocked; if it succeeds, the charge reads "refunded outside
+Stripe" although Stripe refunded it: on the charge card's amount line, and in
+the form's block, which shows that in place of "Nothing is left to refund on
+this charge." No money is at stake, since nothing is left to refund either
+way. The charge page then
+blocks any further Stripe refund (`REFUNDED_OUTSIDE_STRIPE`;
+[operations](operations.md#late-wins)): Stripe doesn't count the failed refund
+and the late win lifts the 14-day window, so it would otherwise offer the whole
+amount again with no end. Any other failed refund of the same charge is settled
+as above.
+
 A purchase it refunded in part stops counting it: `refund.updated` restates
 the purchase's refunded amount, id and reason from the refunds still standing
 (`restateStandingRefunds`, owner decision 2026-10-24), so Sales and its stats
@@ -605,7 +648,8 @@ Stripe sends `charge.dispute.created`, `.updated` and `.closed` to
 |---|---|---|
 | **Opened** | Paused: the purchase is marked disputed and the streaming block is written. The library hides the item. | Paid creator and organisation slices are reversed in proportion to the disputed amount. Pending slices are held and not drained. |
 | **Won** | Restored: the disputed mark is cleared. | The reversed slices are paid again; held slices are released. |
-| **Lost** | Ends for good. | The reversals stand; held slices are cancelled. |
+| **Lost** | Ends. | The reversals stand; held slices are cancelled. |
+| **Won late** (lost, then won) | Restored, unless the buyer bought the item again, or something else keeps it ended. | Paid back as a win. A buyer who bought it again has the first payment refunded, and a duplicate payment is refunded. |
 
 The platform pays Stripe's dispute fee.
 
@@ -638,6 +682,45 @@ dispute event records it, then acts on the status the record has.
   access the chargeback paused is restored and its streaming block lifted.
 - **Lost.** The purchase becomes `refunded` and held slices
   `cancelled_by_dispute` (Q3).
+- **Won late.** Stripe can turn a lost dispute into a won one, weeks or months
+  later (Codex-2hxff.70; [design](dispute-record.md#10-a-late-win-codex-2hxff70)).
+  The row moves `lost` → `won` once, with `late_won_at`, and the loss is
+  undone as a win:
+  - the purchase is decided by support's failed-refund rule: `completed`
+    again with its access and entitlement back, its refund fields restated
+    from the refunds that still stand, never the disputed amount the loss
+    added. It stays as it is when the buyer bought the item again, when it was
+    a duplicate payment, when refunds still cover what was paid, or when
+    another chargeback holds it;
+  - the creators are paid back by the dispute's re-pay, held until the
+    outcome is applied;
+  - a buyer who bought it again has the first payment refunded (owner
+    decision Q1), after the re-pay, so each share comes off its held re-pay
+    row and the creators net nothing for that payment. The refund email says
+    they keep the item through their later purchase;
+  - a duplicate payment the loss refunded is refunded the same way, on its
+    own disputed charge, even when the purchase it repeats was refunded
+    since (owner decisions 2026-11-05 and 2026-11-08). Its refund email is
+    the duplicate one ("a second payment"). One the loss never got to is
+    still pending, and the hourly duplicate sweep refunds it;
+  - a refund Stripe cancels, or one already failed when the undo reads it,
+    counts as settled, but the buyer got nothing: it is alerted at error for
+    support to settle by hand (owner decision 2026-11-05). A failed one is
+    also in the Failed refunds queue, and its clawback stands, as any failed
+    refund's does. It is settled only as refunded elsewhere, which then
+    blocks a Stripe refund of the charge: "creators re-paid" is refused for
+    it ([above](#refunds));
+  - a refund Stripe won't make is retried every hour and alerted each time,
+    and support settles it by hand
+    ([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)):
+    the buyer is refunded another way, and the charge is never refunded
+    through Stripe after that;
+  - a restored buyer is emailed once that their access is back (Q5).
+
+  A re-run of the unfinished loss reads the dispute under a share lock first
+  and refunds nothing once it is won. A refund's clawback waits while a won
+  chargeback on its charge is not yet applied, so it is never shared against
+  the loss's steps.
 - **Prevented.** Stripe defines `prevented` as a dispute "prevented from
   becoming a formal chargeback", so it closes like an inquiry: nothing to
   restore or re-pay, and its held slices are released. One that has a

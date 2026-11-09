@@ -7,6 +7,7 @@
  */
 
 import { InternalServiceError } from '@codex/service-errors';
+import { SQL } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -26,11 +27,20 @@ function serviceWith(db: Record<string, unknown>): PurchaseService {
   );
 }
 
-/** A db whose only write is the outcome mark. */
+/**
+ * A db whose only write is the outcome mark. Its one read is the re-pay's
+ * guard (`repayWonDispute`): the dispute is won and not yet applied.
+ */
 function markingDb() {
-  const where = vi.fn().mockResolvedValue(undefined);
+  const returning = vi.fn().mockResolvedValue([{ status: 'won' }]);
+  const where = vi.fn(() => ({ returning }));
   const set = vi.fn(() => ({ where }));
-  return { db: { update: vi.fn(() => ({ set })) }, set };
+  const won = [{ status: 'won', outcomeAppliedAt: null }];
+  const limit = vi.fn().mockResolvedValue(won);
+  const select = vi.fn(() => ({
+    from: () => ({ where: () => ({ limit }) }),
+  }));
+  return { db: { select, update: vi.fn(() => ({ set })) }, set };
 }
 
 describe('PurchaseService.settleWonDispute', () => {
@@ -53,6 +63,8 @@ describe('PurchaseService.settleWonDispute', () => {
     await serviceWith(db).settleWonDispute('dp_repay_ok');
 
     expect(db.update).toHaveBeenCalledOnce();
-    expect(set).toHaveBeenCalledWith({ outcomeAppliedAt: expect.any(Date) });
+    // GREATEST(now, late_won_at): the real time is proved on a database in
+    // late-win.integration.test.ts.
+    expect(set).toHaveBeenCalledWith({ outcomeAppliedAt: expect.any(SQL) });
   });
 });

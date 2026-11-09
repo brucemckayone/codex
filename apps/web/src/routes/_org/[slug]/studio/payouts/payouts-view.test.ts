@@ -14,6 +14,8 @@ import {
   orgCauseLine,
   ownerBalanceOf,
   ownerBankLine,
+  ownerLines,
+  typeLabel,
 } from './payouts-view';
 
 // Wednesday 28 Oct 2026, 09:00 London (GMT since 25 Oct).
@@ -359,5 +361,128 @@ describe('the bank line', () => {
         connectState: 'pending_verification',
       })
     ).toBe(m.earnings_bank_paused());
+  });
+});
+
+describe('a won chargeback’s pay-back (late-win studio/payouts.html P1)', () => {
+  // Tuesday 15 December 2026, 10:00 London: paid at 17:00 on 14 Dec.
+  const now = new Date('2026-12-15T10:00:00.000Z');
+  const ctx = {
+    connectState: 'enabled' as const,
+    balance: { negative: null },
+    now,
+  };
+  const paysBack = {
+    causeType: 'dispute' as const,
+    title: 'Winter Light',
+    wonOn: '2026-12-14',
+  };
+  const paidPayBack = (payoutType: string) => ({
+    id: 'payback-1',
+    payoutType,
+    status: 'resolved',
+    reason: null,
+    amountCents: 720,
+    bankOn: '2026-12-15',
+    paysBack,
+  });
+
+  test("the organisation's pay-back says what it is above its bank line, without the sale's name", () => {
+    expect(ownerLines(paidPayBack('organization_fee'), ctx)).toEqual([
+      'Paid back: the chargeback was decided for us',
+      'Sent to your bank on 15 Dec',
+    ]);
+  });
+
+  test("a creator's pay-back has no line here: its Type cell names it", () => {
+    expect(ownerLines(paidPayBack('creator_payout'), ctx)).toEqual([]);
+  });
+
+  test('any other owner row keeps its bank line alone', () => {
+    expect(
+      ownerLines({ ...paidPayBack('organization_fee'), paysBack: null }, ctx)
+    ).toEqual(['Sent to your bank on 15 Dec']);
+  });
+
+  test('the Type cell: "Org fee · paid back", "Creator share · paid back"', () => {
+    expect(typeLabel({ payoutType: 'organization_fee', paysBack })).toBe(
+      'Org fee · paid back'
+    );
+    expect(typeLabel({ payoutType: 'creator_payout', paysBack })).toBe(
+      'Creator share · paid back'
+    );
+    expect(typeLabel({ payoutType: 'organization_fee', paysBack: null })).toBe(
+      'Org fee'
+    );
+    expect(typeLabel({ payoutType: 'platform_fee', paysBack: null })).toBe(
+      'Platform fee'
+    );
+    expect(
+      typeLabel({ payoutType: 'creator_payout_to_owner', paysBack: null })
+    ).toBe('Creator pool');
+  });
+});
+
+describe('a share Stripe took back (late-win studio/payouts.html P0, P1)', () => {
+  // The owner chose "Add the line": every taken-back row of the
+  // organisation's own share says when and why, as Earnings does.
+  const ctx = {
+    connectState: 'enabled' as const,
+    balance: { negative: null },
+    now: new Date('2026-12-15T10:00:00.000Z'),
+  };
+  const reversed = (
+    payoutType: string,
+    takenBack: { causeType: 'refund' | 'dispute'; on: string },
+    paidBack: { on: string } | null = null
+  ) => ({
+    id: 'reversed-1',
+    payoutType,
+    status: 'reversed',
+    reason: null,
+    amountCents: 720,
+    bankOn: '2026-09-17',
+    takenBack,
+    paidBack,
+    paysBack: null,
+  });
+  const chargeback = { causeType: 'dispute' as const, on: '2026-10-26' };
+
+  test('a chargeback: when it was taken back, and why (P0)', () => {
+    expect(ownerLines(reversed('organization_fee', chargeback), ctx)).toEqual([
+      'Taken back for a chargeback on 26 Oct',
+    ]);
+  });
+
+  test('a late win: then paid back on its day (P1)', () => {
+    expect(
+      ownerLines(
+        reversed('organization_fee', chargeback, { on: '2026-12-14' }),
+        ctx
+      )
+    ).toEqual([
+      'Taken back for a chargeback on 26 Oct, then paid back on 14 Dec',
+    ]);
+  });
+
+  test('a refund: Earnings’ wording for it', () => {
+    expect(
+      ownerLines(
+        reversed('creator_payout_to_owner', {
+          causeType: 'refund',
+          on: '2026-10-14',
+        }),
+        ctx
+      )
+    ).toEqual(['Taken back for a refund on 14 Oct']);
+  });
+
+  test("a creator's taken-back row has no line: their money is in their own account", () => {
+    expect(
+      ownerLines(
+        reversed('creator_payout', chargeback, { on: '2026-12-14' }),
+        ctx
+      )
+    ).toEqual([]);
   });
 });

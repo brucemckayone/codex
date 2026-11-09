@@ -310,6 +310,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       accessEnded: false,
       duplicatePayment: false,
       itemTitle: expect.any(String),
+      lateWinKeptThrough: null,
     });
     expect(stripe.refunds.list).toHaveBeenCalledWith(
       expect.objectContaining({ charge: seeded.charge.id })
@@ -439,6 +440,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       accessEnded: true,
       duplicatePayment: false,
       itemTitle: expect.any(String),
+      lateWinKeptThrough: null,
     });
   });
 
@@ -766,7 +768,10 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
     ).toBeUndefined();
   });
 
-  // ── a late win (owner decision 2026-10-25, "alert only") ──────────────
+  // ── a late win (Codex-2hxff.70; late-win data design §3.3) ────────────
+  // These replace the "alert only" tests (owner decision 2026-10-25), which
+  // were right until this bead: the record now moves to won, and the undo
+  // runs as an unapplied win (late-win.integration.test.ts).
 
   /** The service, with its error log watched. */
   function watchedService() {
@@ -776,99 +781,114 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
         .obs,
       'error'
     );
-    const lateWinAlerts = () =>
-      alert.mock.calls.filter(([message]) =>
-        String(message).startsWith('late win on a lost dispute')
-      );
-    return { service, alert, lateWinAlerts };
+    return { service, alert };
   }
 
-  it('a late win (lost → won) is only alerted, with ids only: the record stays lost and applied, nothing is re-paid and nothing restored', async () => {
+  it('a late win on an applied loss: the row becomes won, late_won_at set, the loss’s applied time kept in lost_applied_at and outcome_applied_at cleared; nothing is alerted, and a second delivery changes nothing', async () => {
     const seeded = await seedPurchase(1000);
-    const access = await grantAccess(seeded);
     const disputeId = `dp_late_${seeded.tag}`;
     createdDisputeIds.push(disputeId);
-    const { service, alert, lateWinAlerts } = watchedService();
+    const { service, alert } = watchedService();
     const record = (status: string) =>
       service.recordDispute(disputeFor(seeded, disputeId, status));
     await record('needs_response');
     await record('lost');
-    await service.processLostDispute(seeded.paymentIntentId, 1000);
-    await service.markDisputeOutcomeApplied(disputeId);
+    await service.processLostDispute(seeded.paymentIntentId, 1000, disputeId);
+    await service.markDisputeOutcomeApplied(disputeId, { status: 'lost' });
     const applied = (await record('lost'))?.outcomeAppliedAt;
     expect(applied).not.toBeNull();
-    const payoutsBefore = await db
-      .select({ id: payouts.id })
-      .from(payouts)
-      .where(eq(payouts.purchaseId, seeded.purchase.id));
 
     const after = await record('won');
 
-    expect(after?.status).toBe('lost');
-    expect(after?.outcomeAppliedAt).toEqual(applied);
-    expect(alert).toHaveBeenCalledWith(
-      'late win on a lost dispute: re-pay creators and restore the buyer by hand',
-      {
-        errorId: expect.any(String),
-        disputeId,
-        chargeId: seeded.charge.id,
-        purchaseId: seeded.purchase.id,
-        subscriptionId: null,
-        courseSubscriptionId: null,
-      }
-    );
-    expect(lateWinAlerts()).toHaveLength(1);
-    // The loss stands: still refunded, access still ended, no re-pay rows.
-    expect(
-      takeFirst(
-        await db
-          .select({ status: purchases.status })
-          .from(purchases)
-          .where(eq(purchases.id, seeded.purchase.id))
-      ).status
-    ).toBe('refunded');
-    expect((await access()).deletedAt).not.toBeNull();
-    expect(
-      await db
-        .select({ id: payouts.id })
-        .from(payouts)
-        .where(eq(payouts.purchaseId, seeded.purchase.id))
-    ).toEqual(payoutsBefore);
+    expect(after).toMatchObject({
+      status: 'won',
+      lostAppliedAt: applied,
+      outcomeAppliedAt: null,
+    });
+    expect(after?.lateWonAt).toBeInstanceOf(Date);
+    expect(after).not.toHaveProperty('refusedLost');
+    expect(alert).not.toHaveBeenCalled();
+
+    // A redelivery, or the reconcile's read of the same win.
+    const again = await record('won');
+    expect(again).toEqual(after);
   });
 
-  it('a late win on a loss whose handling never finished leaves it unapplied, for the loss to finish', async () => {
+  it('a late win on a loss whose handling never finished: won with no lost_applied_at, and unapplied, for the undo to run', async () => {
     const seeded = await seedPurchase(1000);
     const disputeId = `dp_late_unapplied_${seeded.tag}`;
     createdDisputeIds.push(disputeId);
-    const { service, lateWinAlerts } = watchedService();
+    const { service, alert } = watchedService();
     const record = (status: string) =>
       service.recordDispute(disputeFor(seeded, disputeId, status));
     await record('lost');
 
     const after = await record('won');
 
-    expect(after).toMatchObject({ status: 'lost', outcomeAppliedAt: null });
-    expect(lateWinAlerts()).toHaveLength(1);
+    expect(after).toMatchObject({
+      status: 'won',
+      lostAppliedAt: null,
+      outcomeAppliedAt: null,
+    });
+    expect(after?.lateWonAt).toBeInstanceOf(Date);
+    expect(alert).not.toHaveBeenCalled();
   });
 
-  it('every other move out of a final status is still refused, and a plain win alerts nothing', async () => {
+  it('a late win writes updated_at, so the reconcile’s grace sees it as the webhook’s, then retries it as a won, unapplied row (premise 31)', async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_late_grace_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
+    await service.markDisputeOutcomeApplied(disputeId, { status: 'lost' });
+    // The loss was applied long ago.
+    await db
+      .update(disputes)
+      .set({ updatedAt: new Date(Date.now() - 2 * 3600_000) })
+      .where(eq(disputes.stripeDisputeId, disputeId));
+    const inSource2 = async (updatedBefore: Date) =>
+      (await service.findDisputesToReconcile(10_000, updatedBefore)).some(
+        (row) => row.stripeDisputeId === disputeId
+      );
+
+    await service.recordDispute(disputeFor(seeded, disputeId, 'won'));
+
+    // Inside the 15-minute grace: still the webhook's.
+    expect(await inSource2(new Date(Date.now() - 15 * 60_000))).toBe(false);
+    // After it: won and unapplied, so the hourly source 2 retries the undo.
+    expect(await inSource2(new Date(Date.now() + 60_000))).toBe(true);
+  });
+
+  it('won → lost is refused and flagged refusedLost; every other move out of a final status is refused silently; a normal win is not a late one', async () => {
     const seeded = await seedPurchase(1000);
     const wonId = `dp_won_${seeded.tag}`;
     const closedId = `dp_closed_${seeded.tag}`;
     createdDisputeIds.push(wonId, closedId);
-    const { service, lateWinAlerts } = watchedService();
+    const { service, alert } = watchedService();
     const record = (disputeId: string, status: string) =>
       service.recordDispute(disputeFor(seeded, disputeId, status));
 
     await record(wonId, 'needs_response');
-    expect((await record(wonId, 'won'))?.status).toBe('won');
-    expect((await record(wonId, 'lost'))?.status).toBe('won');
-    expect((await record(wonId, 'prevented'))?.status).toBe('won');
+    const won = await record(wonId, 'won');
+    expect(won).toMatchObject({ status: 'won', lateWonAt: null });
+    expect(await record(wonId, 'lost')).toMatchObject({
+      status: 'won',
+      lateWonAt: null,
+      refusedLost: true,
+    });
+    const prevented = await record(wonId, 'prevented');
+    expect(prevented?.status).toBe('won');
+    expect(prevented).not.toHaveProperty('refusedLost');
     // Only `lost` may become `won`: a closed inquiry may not.
     await record(closedId, 'warning_closed');
-    expect((await record(closedId, 'won'))?.status).toBe('warning_closed');
-    expect((await record(closedId, 'lost'))?.status).toBe('warning_closed');
-    expect(lateWinAlerts()).toHaveLength(0);
+    expect(await record(closedId, 'won')).toMatchObject({
+      status: 'warning_closed',
+      lateWonAt: null,
+    });
+    const closedLost = await record(closedId, 'lost');
+    expect(closedLost?.status).toBe('warning_closed');
+    expect(closedLost).not.toHaveProperty('refusedLost');
+    expect(alert).not.toHaveBeenCalled();
   });
 
   it('an open dispute holds a purchase row recorded before charge ids, by its purchase', async () => {
@@ -1026,8 +1046,12 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       .update(purchases)
       .set({ refundAmountCents: 300 })
       .where(eq(purchases.id, seeded.purchase.id));
+    const disputeId = `dp_lost_q3_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
 
-    await makeService().processLostDispute(seeded.paymentIntentId, 1000);
+    await service.processLostDispute(seeded.paymentIntentId, 1000, disputeId);
 
     expect(await readPurchase(seeded.purchase.id)).toMatchObject({
       status: 'refunded',

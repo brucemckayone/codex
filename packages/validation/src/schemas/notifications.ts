@@ -259,6 +259,22 @@ export const refundProcessedDataSchema = z.object({
   accessNote: z.string().optional(),
 });
 
+/**
+ * A buyer's purchase or course is back after a chargeback lost and then won
+ * (Codex-2hxff.70, Q5). The renderer has no conditionals, so the sender
+ * composes the clause after the title and the button for an item or a course.
+ */
+export const purchaseAccessRestoredDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  /** After the title: "so it's back in your library and ready to watch." */
+  accessSentence: z.string().min(1),
+  amount: z.string(),
+  paidOn: z.string(),
+  itemUrl: z.string().url(),
+  buttonLabel: z.string().min(1),
+});
+
 // ============================================
 // Organization Templates
 // ============================================
@@ -560,6 +576,7 @@ export const templateDataSchemas = {
   'subscription-cancelled': subscriptionCancelledDataSchema,
   'subscription-tier-price-change': subscriptionTierPriceChangeDataSchema,
   'refund-processed': refundProcessedDataSchema,
+  'purchase-access-restored': purchaseAccessRestoredDataSchema,
   // Organization
   'org-member-invitation': orgMemberInvitationDataSchema,
   'member-role-changed': memberRoleChangedDataSchema,
