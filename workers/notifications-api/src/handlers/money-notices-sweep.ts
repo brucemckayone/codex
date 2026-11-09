@@ -176,16 +176,22 @@ function makeDefaultMailer(deps: {
   timeoutMs: number;
 }): MoneyMailer {
   return async (params) => {
-    const res = await workerFetch(
-      `${deps.notificationsUrl}/internal/send`,
-      {
-        method: 'POST',
-        body: JSON.stringify(params),
-        // A timeout rejects the fetch, so the send is failed, as an error is.
-        signal: AbortSignal.timeout(deps.timeoutMs),
-      },
-      deps.workerSecret
-    );
+    // A timeout rejects the fetch, so the send is failed, as an error is.
+    const signal = AbortSignal.timeout(deps.timeoutMs);
+    let res: Response;
+    try {
+      res = await workerFetch(
+        `${deps.notificationsUrl}/internal/send`,
+        { method: 'POST', body: JSON.stringify(params), signal },
+        deps.workerSecret
+      );
+    } catch (error) {
+      // Cut off by our timeout: rethrow the signal's own reason, a
+      // TimeoutError, whatever the runtime's fetch rejected with (it may be
+      // a plain AbortError), so `isSendTimeout` reads it as a timeout.
+      if (signal.aborted) throw signal.reason;
+      throw error;
+    }
     if (!res.ok) {
       throw new Error(
         `notifications-api /internal/send returned ${res.status}`
@@ -250,8 +256,9 @@ async function claim(
 }
 
 /**
- * A send cut off by `AbortSignal.timeout`, which rejects with a
- * `TimeoutError`: unlike a refusal, the email may still have gone.
+ * A send cut off by `AbortSignal.timeout`: the default mailer rethrows the
+ * signal's reason, a `TimeoutError`. Unlike a refusal, the email may still
+ * have gone.
  */
 function isSendTimeout(error: unknown): boolean {
   return (

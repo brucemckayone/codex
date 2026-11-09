@@ -852,6 +852,60 @@ describe('runMoneyNoticesSweep', { timeout: 60_000 }, () => {
     );
   });
 
+  it('a timed-out send whose fetch rejects with a plain AbortError, not the TimeoutError, is still logged as a send that may have gone', async () => {
+    const kim = await person('Kim AbortError');
+    await waitingRow(kim.id, hollowOak, 2500, DEC_2019);
+    // The runtime's fetch may reject an aborted request with a generic
+    // AbortError rather than the signal's own reason. This stub does that.
+    let aborted = false;
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) => {
+        if (!String(input).startsWith('http://notifications.test/')) {
+          return realFetch(input, init);
+        }
+        return new Promise<Response>((resolve, reject) => {
+          const answered = setTimeout(
+            () => resolve(Response.json({ data: { success: true } })),
+            2_000
+          );
+          init?.signal?.addEventListener('abort', () => {
+            aborted = true;
+            clearTimeout(answered);
+            reject(
+              new DOMException('The operation was aborted.', 'AbortError')
+            );
+          });
+        });
+      });
+    try {
+      await runMoneyNoticesSweep({
+        db,
+        obs,
+        environment: 'development',
+        workerSecret: 'test-secret',
+        notificationsUrl: 'http://notifications.test',
+        now: FEB_2020,
+        sendTimeoutMs: 50,
+        templateExists: remindersOnly,
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+    expect(aborted).toBe(true);
+    const [notice] = await noticesOf(kim.id);
+    expect(notice?.failedAt).not.toBeNull();
+    expect(notice?.sentAt).toBeNull();
+    expect(obsLog.error).toHaveBeenCalledWith(
+      'money notice send timed out; it may have gone, and it is not retried',
+      expect.objectContaining({
+        moneyNoticeId: notice?.id,
+        outcome: 'timed_out_may_have_gone',
+      })
+    );
+  });
+
   it('a run past its send budget claims no one more: nobody is left claimed and unsent, and the rest go the next morning', async () => {
     const pair = [await person('Ada Budget'), await person('Ben Budget')];
     for (const who of pair) await waitingRow(who.id, hollowOak, 1800, DEC_2019);

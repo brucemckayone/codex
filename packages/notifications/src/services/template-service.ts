@@ -425,10 +425,10 @@ export class TemplateService extends BaseService {
     creatorId: string,
     input: CreateCreatorTemplateInput
   ): Promise<EmailTemplate> {
-    if (input.organizationId) {
-      await this.requireOrgMembership(input.organizationId, creatorId);
-    }
     try {
+      if (input.organizationId) {
+        await this.requireOrgMembership(input.organizationId, creatorId);
+      }
       const [template] = await this.db
         .insert(schema.emailTemplates)
         .values({
@@ -452,12 +452,16 @@ export class TemplateService extends BaseService {
 
       return template;
     } catch (error) {
-      this.obs.error('Error creating creator template', {
-        error,
-        creatorId,
-        input,
-      });
-      throw error;
+      // A refusal is the caller's typed 403, not a fault: it passes through
+      // unlogged. Anything unexpected is logged here and wrapped.
+      if (!(error instanceof TemplateAccessDeniedError)) {
+        this.obs.error('Error creating creator template', {
+          error,
+          creatorId,
+          input,
+        });
+      }
+      this.handleError(error, 'createCreatorTemplate');
     }
   }
 
@@ -472,45 +476,51 @@ export class TemplateService extends BaseService {
     templateId: string,
     input: UpdateTemplateInput
   ): Promise<EmailTemplate> {
-    const current = await this.db.query.emailTemplates.findFirst({
-      where: and(
-        eq(schema.emailTemplates.id, templateId),
-        eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
-        eq(schema.emailTemplates.creatorId, creatorId),
-        isNull(schema.emailTemplates.deletedAt)
-      ),
-      columns: { organizationId: true },
-    });
-    if (!current) {
-      throw new TemplateNotFoundError(templateId);
-    }
-    if (current.organizationId) {
-      await this.requireOrgMembership(current.organizationId, creatorId);
-    }
-
-    const [updated] = await this.db
-      .update(schema.emailTemplates)
-      .set({
-        ...input,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
+    // The typed 404 and 403 pass through `handleError`; anything unexpected,
+    // a failed membership read included, is wrapped.
+    try {
+      const current = await this.db.query.emailTemplates.findFirst({
+        where: and(
           eq(schema.emailTemplates.id, templateId),
           eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
           eq(schema.emailTemplates.creatorId, creatorId),
           isNull(schema.emailTemplates.deletedAt)
+        ),
+        columns: { organizationId: true },
+      });
+      if (!current) {
+        throw new TemplateNotFoundError(templateId);
+      }
+      if (current.organizationId) {
+        await this.requireOrgMembership(current.organizationId, creatorId);
+      }
+
+      const [updated] = await this.db
+        .update(schema.emailTemplates)
+        .set({
+          ...input,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.emailTemplates.id, templateId),
+            eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
+            eq(schema.emailTemplates.creatorId, creatorId),
+            isNull(schema.emailTemplates.deletedAt)
+          )
         )
-      )
-      .returning();
+        .returning();
 
-    if (!updated) {
-      throw new TemplateNotFoundError(templateId);
+      if (!updated) {
+        throw new TemplateNotFoundError(templateId);
+      }
+
+      this.obs.info('Creator template updated', { templateId, creatorId });
+
+      return updated;
+    } catch (error) {
+      this.handleError(error, 'updateCreatorTemplate');
     }
-
-    this.obs.info('Creator template updated', { templateId, creatorId });
-
-    return updated;
   }
 
   /**
@@ -571,8 +581,8 @@ export class TemplateService extends BaseService {
       throw new TemplateNotFoundError(templateId);
     }
 
-    // Check access based on scope
-    const hasAccess = await this.checkTemplateAccess(
+    // A preview renders in the template's org brand: the send-time check.
+    const hasAccess = await this.checkTemplateSendAccess(
       template,
       userId,
       userRole
@@ -592,8 +602,9 @@ export class TemplateService extends BaseService {
   }
 
   /**
-   * Check if a user has access to a template based on scope
-   * Public for use in worker routes that need access checks separate from preview
+   * Check if a user has access to a template based on scope: may they use
+   * it at all? Rendering it in its brand (preview, test-send) asks more:
+   * {@link checkTemplateSendAccess}.
    */
   async checkTemplateAccess(
     template: EmailTemplate,
@@ -616,6 +627,29 @@ export class TemplateService extends BaseService {
     }
 
     return false;
+  }
+
+  /**
+   * May the user render this template in its brand, to preview it or to
+   * test-send it? `checkTemplateAccess`, and for a creator template that
+   * names an org, the creator's ACTIVE membership of it still (Codex-tgkgb,
+   * owner decision 2026-11-09). A creator who leaves the org can no longer
+   * preview or send in its name; listing and deleting their own template do
+   * not come through here, so those stay theirs. Templates with no org, and
+   * org templates (membership-checked already), are unchanged.
+   */
+  async checkTemplateSendAccess(
+    template: EmailTemplate,
+    userId: string,
+    userRole: string
+  ): Promise<boolean> {
+    if (!(await this.checkTemplateAccess(template, userId, userRole))) {
+      return false;
+    }
+    if (template.scope === TEMPLATE_SCOPES.CREATOR && template.organizationId) {
+      return this.isActiveOrgMember(template.organizationId, userId);
+    }
+    return true;
   }
 
   // ===========================================================================
