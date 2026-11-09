@@ -278,6 +278,21 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
     return row;
   }
 
+  /** The service's logger, to watch its support alerts. */
+  function errorLog() {
+    return (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+      .obs;
+  }
+
+  /** What each "credit not given back" alert carried (Codex-2hxff.98). */
+  function notReturnedAlerts(errors: { mock: { calls: unknown[][] } }) {
+    return errors.mock.calls
+      .filter(([message]) =>
+        String(message).includes("cancelled duplicate's invoice")
+      )
+      .map(([, metadata]) => metadata);
+  }
+
   async function membershipOf(userId: string, orgId: string) {
     const [row] = await db
       .select()
@@ -430,6 +445,40 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
         .from(payoutsTable)
         .where(eq(payoutsTable.stripeChargeId, lateChargeId));
       expect(slices).toHaveLength(0);
+    });
+
+    it('its invoice paid after it was settled, wholly by customer credit: nothing to refund, and support is told the credit went back to no one (Codex-2hxff.98)', async () => {
+      const { org, second } = await subscribeTwice('dup-late-credit');
+      await service.handleSubscriptionCreated(second);
+      const duplicate = await rowFor(second.id);
+      const refundsBefore = asMock(stripe.refunds.create).mock.calls.length;
+      const errors = vi.spyOn(errorLog(), 'error');
+      const late = invoiceFor(second.id, {
+        amount_paid: 0,
+        starting_balance: -2000,
+        total: 999,
+        payments: { data: [] },
+      });
+
+      expect(await service.handleInvoicePaymentSucceeded(late)).toBeUndefined();
+
+      expect(asMock(stripe.refunds.create).mock.calls).toHaveLength(
+        refundsBefore
+      );
+      expect(notReturnedAlerts(errors)).toEqual([
+        {
+          errorId: expect.any(String),
+          invoiceId: late.id,
+          stripeSubscriptionId: second.id,
+          subscriptionId: duplicate?.id,
+          organizationId: org.id,
+          userId: subscriberId,
+          kind: 'tier',
+          cause: 'duplicate',
+          creditNotReturnedCents: 999,
+          cardRefundedCents: 0,
+        },
+      ]);
     });
 
     it('its customer.subscription.deleted leaves the first subscription and the membership alone', async () => {
@@ -849,6 +898,42 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
       expect(stripe.transfers.create).not.toHaveBeenCalled();
       // B's access is untouched: the membership stays active.
       expect((await membershipOf(subscriberId, org.id))?.status).toBe('active');
+    });
+
+    it('its reviving invoice paid wholly by customer credit: no refund, one cancel, and support is told the credit went back to no one (Codex-2hxff.98)', async () => {
+      const { org, a, aRow, invoice } =
+        await reviveNextToNewer('revive-credit');
+      // Credit paid it all: the card paid nothing, and there is no charge.
+      // The live subscription's latest_invoice is this same object.
+      Object.assign(invoice, {
+        amount_paid: 0,
+        starting_balance: -2000,
+        total: 499,
+        payments: { data: [] },
+      });
+      const errors = vi.spyOn(errorLog(), 'error');
+
+      expect(await service.handleInvoicePaymentSucceeded(invoice)).toEqual({});
+
+      expect(stripe.refunds.create).not.toHaveBeenCalled();
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledExactlyOnceWith(
+        a.id,
+        expect.objectContaining({ prorate: false }),
+        { idempotencyKey: `revived_cancel_${a.id}` }
+      );
+      expect((await rowFor(a.id))?.endedAt).not.toBeNull();
+      expect(notReturnedAlerts(errors)).toEqual([
+        expect.objectContaining({
+          invoiceId: invoice.id,
+          subscriptionId: aRow?.id,
+          organizationId: org.id,
+          userId: subscriberId,
+          kind: 'tier',
+          cause: 'revived',
+          creditNotReturnedCents: 499,
+          cardRefundedCents: 0,
+        }),
+      ]);
     });
 
     it('revived by an update first: retired there, and its invoice after is inert with no second Stripe call', async () => {

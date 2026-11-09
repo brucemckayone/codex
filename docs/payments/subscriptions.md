@@ -245,8 +245,18 @@ owner: "Alert support").
   - the alert is logged before the mark;
   - a failed mark is a warning;
   - it never throws out of the handler.
-- **Open gap:** cancelling a duplicate doesn't give back credit that paid
-  it. That's `Codex-2hxff.98`, outside C1.
+
+**A cancelled duplicate's credit is restored by hand** (`Codex-2hxff.98`,
+owner: "Alert support"). Cancelling a duplicate, or an old subscription
+revived beside a newer one, refunds its card charge only. Putting the credit
+part back on the balance would re-open the leak above, so support gets one
+error per invoice after the card refund, "Customer credit paid a cancelled
+duplicate's invoice …", naming the invoice, the subscription, the org, the
+user, `cause` (`duplicate` or `revived`), `creditNotReturnedCents` and
+`cardRefundedCents` (0 when the credit paid it all). Support restores that
+credit to the member by hand. The invoice is marked with its own key
+(`codex_credit_not_returned`), since the alert above marks it first; a replay
+stays silent (`alertCreditNotReturned`, `credit-paid-invoice.ts`).
 
 ### Cancelling, reactivating, resuming
 

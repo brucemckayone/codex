@@ -171,7 +171,10 @@ import {
   scheduleNeedsFinishing,
   type WaitingBilling,
 } from './billing-change';
-import { alertIfCreditPaid } from './credit-paid-invoice';
+import {
+  alertCreditNotReturned,
+  alertIfCreditPaid,
+} from './credit-paid-invoice';
 import {
   addMonthsClamped,
   CLEAR_PENDING_PRICE_METADATA,
@@ -2002,12 +2005,13 @@ export class SubscriptionService extends BaseService {
    * after a good refund repeats that refund under its key. Then the row
    * becomes a tombstone. Any Stripe failure leaves the row as it was and is
    * retryable. The reviving invoice pays no one; the refund's own
-   * `charge.refunded` emails the buyer.
+   * `charge.refunded` emails the buyer. What customer credit paid of it is
+   * not given back: support is told after the Stripe steps (Codex-2hxff.98).
    */
   private async retireRevived(
     row: Subscription,
     keptSubscriptionId: string,
-    reviving?: { invoiceId: string; chargeId: string },
+    reviving?: { invoice: Stripe.Invoice; chargeId: string },
     live?: Stripe.Subscription
   ): Promise<void> {
     const context = {
@@ -2015,18 +2019,18 @@ export class SubscriptionService extends BaseService {
       stripeSubscriptionId: row.stripeSubscriptionId,
       keptSubscriptionId,
     };
-    let refunded: { invoiceId: string; chargeId: string } | undefined;
+    let paid: { invoice: Stripe.Invoice; chargeId: string | null } | undefined;
     try {
       const atStripe =
         live ??
         (await this.stripe.subscriptions.retrieve(row.stripeSubscriptionId));
       // On `updated` the reviving payment is the latest invoice, if paid.
-      refunded = reviving ?? (await this.paidLatestInvoice(atStripe));
-      if (refunded) {
+      paid = reviving ?? (await this.paidLatestInvoice(atStripe));
+      if (paid?.chargeId) {
         await issueRefund(this.stripe, {
-          chargeId: refunded.chargeId,
+          chargeId: paid.chargeId,
           reason: 'requested_by_customer',
-          idempotencyKey: `refund_revived_${refunded.invoiceId}`,
+          idempotencyKey: `refund_revived_${paid.invoice.id}`,
           environment: this.environment,
         });
       }
@@ -2057,6 +2061,9 @@ export class SubscriptionService extends BaseService {
         { subscriptionId: row.id }
       );
     }
+    // What credit paid of the reviving invoice goes back to no one
+    // (Codex-2hxff.98).
+    if (paid) await this.alertUnreturnedCredit(row, paid.invoice, 'revived');
     // Under the lock, so an invoice event re-reading the row before paying
     // out sees it ended.
     const at = new Date();
@@ -2076,7 +2083,10 @@ export class SubscriptionService extends BaseService {
     );
     this.obs.warn(
       'Old subscription revived next to a newer one: cancelled, its reviving payment refunded',
-      { ...context, refundedInvoiceId: refunded?.invoiceId }
+      {
+        ...context,
+        refundedInvoiceId: paid?.chargeId ? paid.invoice.id : undefined,
+      }
     );
   }
 
@@ -2147,18 +2157,21 @@ export class SubscriptionService extends BaseService {
     return typeof latest === 'string' ? latest : (latest?.id ?? undefined);
   }
 
-  /** The subscription's latest invoice with its charge, when it is paid. */
+  /**
+   * The subscription's latest invoice when it is paid, with its charge: null
+   * when the card paid nothing of it (customer credit paid it all,
+   * Codex-2hxff.98).
+   */
   private async paidLatestInvoice(
     stripeSub: Stripe.Subscription
-  ): Promise<{ invoiceId: string; chargeId: string } | undefined> {
+  ): Promise<{ invoice: Stripe.Invoice; chargeId: string | null } | undefined> {
     const latest = stripeSub.latest_invoice;
     const invoice =
       typeof latest === 'string'
         ? await this.stripe.invoices.retrieve(latest)
         : latest;
-    if (!invoice?.id || invoice.status !== 'paid' || invoice.amount_paid <= 0) {
-      return undefined;
-    }
+    if (!invoice?.id || invoice.status !== 'paid') return undefined;
+    if (invoice.amount_paid <= 0) return { invoice, chargeId: null };
     const chargeId = await resolveInvoiceCharge(this.stripe, invoice);
     if (!chargeId) {
       throw new InternalServiceError(
@@ -2166,7 +2179,7 @@ export class SubscriptionService extends BaseService {
         { invoiceId: invoice.id }
       );
     }
-    return { invoiceId: invoice.id, chargeId };
+    return { invoice, chargeId };
   }
 
   /** Our row for a Stripe subscription, if we hold one. */
@@ -2229,6 +2242,13 @@ export class SubscriptionService extends BaseService {
       ({ refundedInvoices } = await cancelAndRefundDuplicate(this.stripe, {
         stripeSubscriptionId: row.stripeSubscriptionId,
         environment: this.environment,
+        obs: this.obs,
+        ids: {
+          subscriptionId: row.id,
+          organizationId: row.organizationId,
+          userId: row.userId,
+          kind: 'tier',
+        },
       }));
     } catch (error) {
       this.obs.error(
@@ -2262,6 +2282,30 @@ export class SubscriptionService extends BaseService {
       stripeSubscriptionId: row.stripeSubscriptionId,
       refundedInvoices,
     });
+  }
+
+  /**
+   * A paid invoice of a subscription we cancel and refund by card: what
+   * customer credit paid of it is not given back, so support is told, once
+   * per invoice (Codex-2hxff.98). Called after the card refund. Never throws.
+   */
+  private async alertUnreturnedCredit(
+    row: Subscription,
+    invoice: Stripe.Invoice,
+    cause: 'duplicate' | 'revived'
+  ): Promise<void> {
+    await alertCreditNotReturned(
+      { stripe: this.stripe, obs: this.obs },
+      invoice,
+      {
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        subscriptionId: row.id,
+        organizationId: row.organizationId,
+        userId: row.userId,
+        kind: 'tier',
+        cause,
+      }
+    );
   }
 
   /**
@@ -2483,14 +2527,17 @@ export class SubscriptionService extends BaseService {
     if (isDuplicateSubscription(sub)) {
       // Without a charge there is nothing of this invoice's to refund, and
       // a duplicate renews nothing: left as it always was.
-      if (!sourceTransaction) return;
-      await this.settleDuplicate(sub);
-      await this.refundDuplicateInvoice(
-        sub,
-        stripeInvoice.id,
-        sourceTransaction
-      );
-      return {};
+      if (sourceTransaction) {
+        await this.settleDuplicate(sub);
+        await this.refundDuplicateInvoice(
+          sub,
+          stripeInvoice.id,
+          sourceTransaction
+        );
+      }
+      // What credit paid of it goes back to no one (Codex-2hxff.98).
+      await this.alertUnreturnedCredit(sub, stripeInvoice, 'duplicate');
+      return sourceTransaction ? {} : undefined;
     }
 
     // Fetch the Stripe subscription for period dates (v19+: on items)
@@ -2566,7 +2613,7 @@ export class SubscriptionService extends BaseService {
             sub,
             keptId,
             reviving && sourceTransaction
-              ? { invoiceId: stripeInvoice.id, chargeId: sourceTransaction }
+              ? { invoice: stripeInvoice, chargeId: sourceTransaction }
               : undefined,
             stripeSub
           );

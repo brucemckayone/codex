@@ -15,6 +15,10 @@
  * stays silent. Nothing handles `invoice.updated`, so the mark cannot loop
  * back through the webhooks. It fails toward alerting: an unreadable invoice
  * alerts, and the alert is logged before the mark is written.
+ *
+ * Cancelling a duplicate refunds its card charge only, so what credit paid of
+ * its invoice is not given back; support is told that too, the same way,
+ * under its own mark (`alertCreditNotReturned`, Codex-2hxff.98).
  */
 
 import { describeThrown } from '@codex/service-errors';
@@ -23,9 +27,28 @@ import type Stripe from 'stripe';
 /** Invoice metadata: when the credit-paid alert went out (ISO time). */
 export const CREDIT_ALERTED_KEY = 'codex_credit_alerted';
 
-interface CreditAlertLogger {
+/**
+ * Invoice metadata: when the alert that a cancelled duplicate's credit was
+ * not given back went out (ISO time, Codex-2hxff.98). Its own mark: the
+ * payment handler's credit-paid alert marks the same invoice first, on the
+ * same event, so sharing `CREDIT_ALERTED_KEY` would silence this one.
+ */
+export const CREDIT_NOT_RETURNED_KEY = 'codex_credit_not_returned';
+
+export interface CreditAlertLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
   warn(message: string, metadata?: Record<string, unknown>): void;
+}
+
+/** What the not-returned alert names: ids only, never the person. */
+export interface CreditNotReturnedIds {
+  stripeSubscriptionId: string;
+  subscriptionId: string;
+  organizationId: string | null;
+  userId: string;
+  kind: 'tier' | 'course';
+  /** A duplicate, or an old subscription revived beside a newer one. */
+  cause: 'duplicate' | 'revived';
 }
 
 /**
@@ -60,11 +83,73 @@ export async function alertIfCreditPaid(
   const invoiceId = invoice.id;
   if (covered === 0 || !invoiceId) return;
 
-  // The event's copy can predate the mark, so the live invoice is read.
+  await alertOncePerInvoice(deps, invoiceId, CREDIT_ALERTED_KEY, () =>
+    deps.obs.error(
+      'Customer credit paid a subscription invoice: its creator is paid on what the card paid, and support must review it',
+      {
+        errorId: crypto.randomUUID(),
+        invoiceId,
+        stripeSubscriptionId: ids.stripeSubscriptionId,
+        subscriptionId: ids.subscriptionId,
+        organizationId: ids.organizationId,
+        kind: ids.kind,
+        creditCoveredCents: covered,
+        amountPaidCents: invoice.amount_paid,
+      }
+    )
+  );
+}
+
+/**
+ * Log one support alert when customer credit paid some or all of the invoice
+ * of a subscription we cancel and refund by card (a duplicate, or an old one
+ * revived beside a newer one), then mark it (Codex-2hxff.98, owner decision
+ * "Alert support"). The refund gives back the card charge only. The credit
+ * part is NOT put back on the balance: that credit would pay the member's
+ * next bill in any org. Support restores it by hand.
+ *
+ * Call it once the card part is refunded, so the alert can name both parts.
+ * Ids and amounts only. Never throws.
+ */
+export async function alertCreditNotReturned(
+  deps: { stripe: Stripe; obs: CreditAlertLogger },
+  invoice: Stripe.Invoice,
+  ids: CreditNotReturnedIds
+): Promise<void> {
+  const covered = creditCoveredCents(invoice);
+  const invoiceId = invoice.id;
+  if (covered === 0 || !invoiceId) return;
+
+  await alertOncePerInvoice(deps, invoiceId, CREDIT_NOT_RETURNED_KEY, () =>
+    deps.obs.error(
+      "Customer credit paid a cancelled duplicate's invoice: only the card part was refunded, and support must restore the credit by hand",
+      {
+        errorId: crypto.randomUUID(),
+        invoiceId,
+        ...ids,
+        creditNotReturnedCents: covered,
+        cardRefundedCents: invoice.amount_paid,
+      }
+    )
+  );
+}
+
+/**
+ * Raise `alert` unless the live invoice already carries `mark`, then write
+ * the mark. The event's copy can predate the mark, so the live invoice is
+ * read. It fails toward alerting: an unreadable invoice alerts, the alert is
+ * logged before the mark, and a failed mark is a warning. Never throws.
+ */
+async function alertOncePerInvoice(
+  deps: { stripe: Stripe; obs: CreditAlertLogger },
+  invoiceId: string,
+  mark: string,
+  alert: () => void
+): Promise<void> {
   let alerted = false;
   try {
     const live = await deps.stripe.invoices.retrieve(invoiceId);
-    alerted = Boolean(live.metadata?.[CREDIT_ALERTED_KEY]);
+    alerted = Boolean(live.metadata?.[mark]);
   } catch (error) {
     deps.obs.warn(
       'Could not re-read a credit-paid invoice; alerting in case this is its first delivery',
@@ -73,23 +158,11 @@ export async function alertIfCreditPaid(
   }
   if (alerted) return;
 
-  deps.obs.error(
-    'Customer credit paid a subscription invoice: its creator is paid on what the card paid, and support must review it',
-    {
-      errorId: crypto.randomUUID(),
-      invoiceId,
-      stripeSubscriptionId: ids.stripeSubscriptionId,
-      subscriptionId: ids.subscriptionId,
-      organizationId: ids.organizationId,
-      kind: ids.kind,
-      creditCoveredCents: covered,
-      amountPaidCents: invoice.amount_paid,
-    }
-  );
+  alert();
 
   try {
     await deps.stripe.invoices.update(invoiceId, {
-      metadata: { [CREDIT_ALERTED_KEY]: new Date().toISOString() },
+      metadata: { [mark]: new Date().toISOString() },
     });
   } catch (error) {
     deps.obs.warn(
