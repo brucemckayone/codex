@@ -107,7 +107,8 @@ export async function alertIfCreditPaid(
  * revived beside a newer one), then mark it (Codex-2hxff.98, owner decision
  * "Alert support"). The refund gives back the card charge only. The credit
  * part is NOT put back on the balance: that credit would pay the member's
- * next bill in any org. Support restores it by hand.
+ * next bill in any org. Support pays the member back outside Stripe, never as
+ * balance credit (owner decision 2026-11-09).
  *
  * Call it once the card part is refunded, so the alert can name both parts.
  * Ids and amounts only. Never throws.
