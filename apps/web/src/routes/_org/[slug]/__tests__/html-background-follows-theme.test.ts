@@ -2,21 +2,20 @@
 /**
  * The org layout copies its background onto <html> so the scrollbar's
  * gutter matches the page. A dialog's scroll lock keeps that gutter, and
- * Chromium paints it with <html>'s background. The copy re-ran only when
- * the brand or the editor's pending colour changed, never on a theme
- * toggle, which flips `--color-background` under the same brand: the strip
- * beside every dialog showed the previous theme (Codex-vlphc review G4-U5).
- * The brand editor's preview theme is a second writer: `data-editing-theme`
- * on .org-layout flips the same background (org-brand.css), and nothing the
- * effect read changed with it (review G5-C-L2).
+ * Chromium paints it with <html>'s background. A copy taken only when the
+ * layout's own state changed went stale under every writer that changes
+ * the background through the DOM instead: a theme toggle (Codex-vlphc
+ * review G4-U5), the brand editor's preview theme (G5-C-L2), and
+ * PreviewFrame stamping the preview's theme onto a framed page's <html>,
+ * where no state changes at all (review c6, Codex-q6qjb).
+ * `followLayoutBackground` watches those attributes itself; its own tests
+ * are in lib/utils/root-background.test.ts.
  *
  * A SOURCE test, the weaker instrument (this layout has no render harness):
- * the effect that writes <html>'s background reads `themeState.theme` and
- * `brandEditor.editingTheme`. The
- * paint was measured in Chromium with a classic scrollbar on a verbatim copy
- * of the effect: after a toggle to dark the strip stayed rgb(250, 250, 250)
- * without the read and turned rgb(23, 23, 23) with it. Read with svelte's own
- * parser, so a commented-out read is not a read.
+ * one $effect hands .org-layout to followLayoutBackground and re-runs on
+ * the brand and the editor's pending colour, and nothing else in the layout
+ * writes <html>'s background. Read with svelte's own parser, so a
+ * commented-out call is not a call.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,32 +54,72 @@ function chain(node: Node | undefined): string {
 
 describe("the org layout's <html> background", () => {
   const ast = parse(readFileSync(LAYOUT, 'utf8'), { modern: true });
-  const effects = [...walk(ast.instance?.content)].filter(
+  const nodes = [...walk(ast.instance?.content)];
+  const effects = nodes.filter(
     (n) => n.type === 'CallExpression' && chain(n.callee as Node) === '$effect'
   );
-  const writer = effects.find((effect) =>
+  const followers = effects.filter((effect) =>
     [...walk(effect)].some(
       (n) =>
-        n.type === 'AssignmentExpression' &&
-        chain(n.left as Node) ===
-          'document.documentElement.style.backgroundColor'
+        n.type === 'CallExpression' &&
+        chain(n.callee as Node) === 'followLayoutBackground'
     )
   );
 
-  it('is written by one $effect', () => {
-    expect(writer).toBeDefined();
+  it('is followed by one $effect, through followLayoutBackground', () => {
+    expect(followers).toHaveLength(1);
   });
 
   const reads = (member: string) =>
-    [...walk(writer)].some(
-      (n) => n.type === 'MemberExpression' && chain(n) === member
+    [...walk(followers[0])].some(
+      (n) =>
+        (n.type === 'MemberExpression' || n.type === 'Identifier') &&
+        chain(n) === member
     );
 
-  it('re-runs on a theme toggle: that effect reads themeState.theme', () => {
-    expect(reads('themeState.theme')).toBe(true);
+  it("re-runs on the brand and on the editor's pending colour", () => {
+    expect(reads('brandBackground')).toBe(true);
+    expect(reads('brandEditor.pending.backgroundColor')).toBe(true);
   });
 
-  it("re-runs on the brand editor's preview theme: it reads brandEditor.editingTheme", () => {
-    expect(reads('brandEditor.editingTheme')).toBe(true);
+  // A write is an assignment to <html>'s style or to one of its properties
+  // (`.x` or `['x']`), or a setProperty or removeProperty call on it,
+  // through document.documentElement or a local name for it or its style
+  // (review fu-focus-2).
+  it('has no other writer in the layout', () => {
+    const html = new Set(['document.documentElement']);
+    const style = new Set<string>();
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const name of html) style.add(`${name}.style`);
+      for (const n of nodes) {
+        if (n.type !== 'VariableDeclarator') continue;
+        const id = n.id as Node;
+        const init = chain(n.init as Node);
+        if (id.type !== 'Identifier' || !init) continue;
+        const into = html.has(init) ? html : style.has(init) ? style : null;
+        if (into && !into.has(String(id.name))) {
+          into.add(String(id.name));
+          grew = true;
+        }
+      }
+    }
+    const onStyle = (node: Node | undefined) =>
+      style.has(chain(node)) ||
+      (node?.type === 'MemberExpression' &&
+        style.has(chain(node.object as Node)));
+    const writes = nodes.filter((n) => {
+      if (n.type === 'AssignmentExpression') return onStyle(n.left as Node);
+      if (n.type !== 'CallExpression') return false;
+      const callee = n.callee as Node;
+      return (
+        callee.type === 'MemberExpression' &&
+        ['setProperty', 'removeProperty'].includes(
+          chain(callee.property as Node)
+        ) &&
+        style.has(chain(callee.object as Node))
+      );
+    });
+    expect(writes).toEqual([]);
   });
 });

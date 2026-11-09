@@ -80,6 +80,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import type Stripe from 'stripe';
+import { settlingWinSql } from './settling-win';
 
 /** The subset of `ObservabilityClient` the ledger logs through. */
 interface LedgerLogger {
@@ -210,11 +211,12 @@ const DRAINABLE: Array<'pending' | 'failed'> = ['pending', 'failed'];
  * is held through the slice it re-pays: while THAT slice's charge has a
  * dispute holding it — a second dispute of the same charge, which Stripe
  * allows (Codex-2hxff.59). It is also held while the dispute that re-paid it
- * is `won` but its outcome is not applied yet (`outcome_applied_at`): the
- * win's follow-up, a refund's share taken off the re-pay row, may have failed
- * and be waiting for its retry, and a drain must not pay the row in full
- * first. `repaid_by_payout_id` is unique-indexed, so this costs one index
- * probe per row.
+ * is `won` but its outcome is not applied yet (`settlingWinSql`, the rule
+ * support's refund block and the clawback's wait read too): the win's
+ * follow-up, a refund's share taken off the re-pay row, may have failed and
+ * be waiting for its retry, and a drain must not pay the row in full first.
+ * `repaid_by_payout_id` is unique-indexed, so this costs one index probe per
+ * row.
  *
  * A payee credit's re-pay row (`payee_credits.repay_payout_id`, support's
  * Re-pay of a late take-back) is held the same way through its credit's
@@ -232,7 +234,7 @@ export function isDrainablePayout(): SQL {
   // `payouts` there still names the outer row. A credit's slice may itself
   // be a re-pay row (its step was on one), with no charge id: its charge is
   // then the slice that row re-pays.
-  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND ${payouts.needsReviewAt} IS NULL AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${holdsItsSale()} AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})) AND NOT EXISTS (SELECT 1 FROM ${payoutReversals} JOIN ${payouts} AS repaid_slice ON repaid_slice.id = ${payoutReversals.payoutId} JOIN ${disputes} ON (${disputes.stripeChargeId} = repaid_slice.stripe_charge_id OR ${disputes.stripeDisputeId} = ${payoutReversals.causeId}) WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id} AND (${holdsItsSale()} OR (${disputes.stripeDisputeId} = ${payoutReversals.causeId} AND ${disputes.status} = 'won' AND ${disputes.outcomeAppliedAt} IS NULL))) AND NOT EXISTS (SELECT 1 FROM ${payeeCredits} JOIN ${payouts} AS credited_slice ON credited_slice.id = ${payeeCredits.payoutId} LEFT JOIN ${payoutReversals} AS credited_from ON credited_from.repaid_by_payout_id = credited_slice.id LEFT JOIN ${payouts} AS credited_origin ON credited_origin.id = credited_from.payout_id JOIN ${disputes} ON ${disputes.stripeChargeId} = COALESCE(credited_slice.stripe_charge_id, credited_origin.stripe_charge_id) WHERE ${payeeCredits.repayPayoutId} = ${payouts.id} AND ${holdsItsSale()}))`;
+  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND ${payouts.needsReviewAt} IS NULL AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${holdsItsSale()} AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})) AND NOT EXISTS (SELECT 1 FROM ${payoutReversals} JOIN ${payouts} AS repaid_slice ON repaid_slice.id = ${payoutReversals.payoutId} JOIN ${disputes} ON (${disputes.stripeChargeId} = repaid_slice.stripe_charge_id OR ${disputes.stripeDisputeId} = ${payoutReversals.causeId}) WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id} AND (${holdsItsSale()} OR (${disputes.stripeDisputeId} = ${payoutReversals.causeId} AND ${settlingWinSql()}))) AND NOT EXISTS (SELECT 1 FROM ${payeeCredits} JOIN ${payouts} AS credited_slice ON credited_slice.id = ${payeeCredits.payoutId} LEFT JOIN ${payoutReversals} AS credited_from ON credited_from.repaid_by_payout_id = credited_slice.id LEFT JOIN ${payouts} AS credited_origin ON credited_origin.id = credited_from.payout_id JOIN ${disputes} ON ${disputes.stripeChargeId} = COALESCE(credited_slice.stripe_charge_id, credited_origin.stripe_charge_id) WHERE ${payeeCredits.repayPayoutId} = ${payouts.id} AND ${holdsItsSale()}))`;
 }
 
 /**

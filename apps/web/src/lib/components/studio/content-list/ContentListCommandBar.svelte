@@ -82,7 +82,7 @@
   </div>
 
   <div class="bar-search">
-    <div class="search-input-wrapper">
+    <div class="search-input-wrapper" data-field-box>
       <span class="search-icon-slot" aria-hidden="true">
         <SearchIcon size={16} />
       </span>
@@ -269,8 +269,11 @@
     max-width: 18rem;
   }
 
+  /* The border's focus cue is base.css's `[data-field-box]` rule:
+     --color-border-focus, which an org brand holds to 3:1 against its ground.
+     It was --color-interactive, the brand's colour as picked: 1.53:1 for a
+     pale yellow brand, 1.83:1 for a navy one on a dark page (Codex-c5prp). */
   .search-input-wrapper:focus-within {
-    border-color: var(--color-interactive);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-interactive) 15%, transparent);
   }
 

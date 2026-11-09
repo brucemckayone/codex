@@ -47,12 +47,17 @@ import {
 } from '@codex/database';
 import {
   connectBalances,
+  content,
+  courseSubscriptions,
+  courses,
+  disputes,
   organizationFollowers,
   organizationMemberships,
   type PayoutType,
   payoutReversals,
   payouts,
   priceChanges,
+  purchases,
   stripeConnectAccounts,
   subscriptionPriceMoves,
   subscriptions,
@@ -134,8 +139,10 @@ import {
   lt,
   ne,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
@@ -555,6 +562,27 @@ export interface PayoutWithCreator {
    * payee's account.
    */
   bankOn: string | null;
+  /**
+   * A `reversed` row's take-back: when Stripe took the money back (London
+   * `YYYY-MM-DD`) and why, from its latest step that moved money. Null
+   * otherwise. The page words it on the organisation's own shares only
+   * (owner, Codex-2hxff.70: late-win mockups P0, P1).
+   */
+  takenBack: { causeType: 'refund' | 'dispute'; on: string } | null;
+  /**
+   * A share a won chargeback paid back: when the pay-back went (London
+   * `YYYY-MM-DD`). Null otherwise (Codex-2hxff.70, late-win design §6).
+   */
+  paidBack: { on: string } | null;
+  /**
+   * On the re-pay row itself: whose chargeback it pays back, and when it was
+   * won. Null on every other row (Codex-2hxff.70).
+   */
+  paysBack: {
+    causeType: 'dispute';
+    title: string | null;
+    wonOn: string;
+  } | null;
 }
 
 /**
@@ -672,6 +700,20 @@ export interface CreatorPayoutRow {
    * otherwise.
    */
   takenBack: { causeType: 'refund' | 'dispute'; on: string } | null;
+  /** As on {@link PayoutWithCreator}: a share a won chargeback paid back. */
+  paidBack: { on: string } | null;
+  /** As on {@link PayoutWithCreator}: the re-pay row's chargeback. */
+  paysBack: {
+    causeType: 'dispute';
+    title: string | null;
+    wonOn: string;
+  } | null;
+  /**
+   * A share cancelled while held for a chargeback that was lost: "Held for
+   * a chargeback, cancelled when it was lost on …". Null otherwise
+   * (Codex-2hxff.70).
+   */
+  cancelledFor: { causeType: 'dispute'; on: string } | null;
 }
 
 /**
@@ -732,6 +774,87 @@ const CREATOR_EARNING_PAYOUT_TYPES = [
  * back to its transfer group, then to itself.
  */
 const NEEDS_ATTENTION_CHARGES = sql<number>`count(DISTINCT COALESCE(${payouts.stripeChargeId}, ${payouts.transferGroup}, ${payouts.id}::text))::int`;
+
+/**
+ * Leaves out a re-pay row a refund cancelled before it was paid (late-win
+ * design §4.5, Q4): a re-bought buyer's refund takes the won chargeback's
+ * pay-back back while it is still held, so it never moved money, and no
+ * list shows it. In SQL, so a page's rows and its `total` agree. A re-pay
+ * row is one a step's `repaid_by_payout_id` points at.
+ */
+function movedMoneyOrIsNoRepay(): SQL {
+  return sql`NOT (${payouts.status} = 'cancelled_by_refund' AND ${payouts.stripeTransferId} IS NULL AND EXISTS (SELECT 1 FROM ${payoutReversals} WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id}))`;
+}
+
+/** A page's chargeback lines, by payout id (`disputeLinesFor`). */
+interface DisputeLines {
+  paysBack: Map<string, NonNullable<CreatorPayoutRow['paysBack']>>;
+  paidBack: Map<string, NonNullable<CreatorPayoutRow['paidBack']>>;
+  cancelledFor: Map<string, NonNullable<CreatorPayoutRow['cancelledFor']>>;
+}
+
+/** Keeps a row's latest London day: two steps can both say it. */
+function laterDay<T extends { on: string }>(
+  lines: Map<string, T>,
+  payoutId: string,
+  line: T
+): void {
+  const known = lines.get(payoutId);
+  if (!known || known.on < line.on) lines.set(payoutId, line);
+}
+
+/** One chargeback step, as `disputeLinesFor` reads it. */
+interface DisputeLineStep {
+  payoutId: string;
+  repayId: string | null;
+  kind: string;
+  status: string;
+  resolvedAt: Date | null;
+  /** The step is on a listed share, under the caller's scope. */
+  onShare: boolean | null;
+  /** The step's re-pay row is listed, under the caller's scope. */
+  onRepay: boolean | null;
+  repayCreatedAt: Date | null;
+  repayMovedNothing: boolean | null;
+  wonAt: Date | string | null;
+  title: string | null;
+}
+
+/** What one chargeback step says on its re-pay row (`disputeLinesFor`). */
+function addPaysBackLine(lines: DisputeLines, step: DisputeLineStep): void {
+  // One step per re-pay row (`uq_payout_reversals_repaid_by`).
+  if (step.onRepay !== true || !step.repayId || !step.repayCreatedAt) return;
+  lines.paysBack.set(step.repayId, {
+    causeType: 'dispute',
+    title: step.title ?? null,
+    wonOn: londonDate(step.wonAt ? new Date(step.wonAt) : step.repayCreatedAt),
+  });
+}
+
+/** What one chargeback step says on its share (`disputeLinesFor`). */
+function addShareLines(
+  lines: DisputeLines,
+  step: DisputeLineStep,
+  cancelledByLoss: ReadonlySet<string>
+): void {
+  if (step.onShare !== true) return;
+  if (step.repayCreatedAt && step.repayMovedNothing !== true) {
+    laterDay(lines.paidBack, step.payoutId, {
+      on: londonDate(step.repayCreatedAt),
+    });
+  }
+  if (
+    cancelledByLoss.has(step.payoutId) &&
+    step.kind === 'cancellation' &&
+    step.status === 'done' &&
+    step.resolvedAt
+  ) {
+    laterDay(lines.cancelledFor, step.payoutId, {
+      causeType: 'dispute',
+      on: londonDate(step.resolvedAt),
+    });
+  }
+}
 
 /**
  * Map the persisted `payouts.status` column to the UI display vocabulary.
@@ -6377,6 +6500,7 @@ export class SubscriptionService extends BaseService {
   private buildPayoutConditions(orgId: string, options: PayoutFilterOptions) {
     return [
       eq(payouts.organizationId, orgId),
+      movedMoneyOrIsNoRepay(),
       ...this.buildPayoutFilterConditions(options),
     ];
   }
@@ -6395,6 +6519,7 @@ export class SubscriptionService extends BaseService {
     return [
       eq(payouts.userId, userId),
       inArray(payouts.payoutType, [...CREATOR_EARNING_PAYOUT_TYPES]),
+      movedMoneyOrIsNoRepay(),
       ...this.buildPayoutFilterConditions(options),
     ];
   }
@@ -6487,11 +6612,23 @@ export class SubscriptionService extends BaseService {
             // banner-first/children-after render stays predictable.
             .orderBy(desc(payouts.createdAt), payouts.payoutType, payouts.id);
 
-    const bankDates = await this.bankDatesFor(
-      items.flatMap((row) => (row.creatorId ? [row.creatorId] : []))
-    );
+    const [bankDates, takenBack, disputeLines] = await Promise.all([
+      this.bankDatesFor(
+        items.flatMap((row) => (row.creatorId ? [row.creatorId] : []))
+      ),
+      this.takenBackFor(
+        { organizationId: orgId },
+        items.filter((row) => row.status === 'reversed').map((row) => row.id)
+      ),
+      this.disputeLinesFor({ organizationId: orgId }, items),
+    ]);
     const datesOf = (creatorId: string | null) =>
       creatorId ? bankDates.get(creatorId) : undefined;
+    const linesOf = (payoutId: string) => ({
+      takenBack: takenBack.get(payoutId) ?? null,
+      paidBack: disputeLines.paidBack.get(payoutId) ?? null,
+      paysBack: disputeLines.paysBack.get(payoutId) ?? null,
+    });
 
     return {
       items: items.map((row) => ({
@@ -6520,6 +6657,7 @@ export class SubscriptionService extends BaseService {
           datesOf(row.creatorId)?.manualSince ?? null,
           datesOf(row.creatorId)?.cleared ?? null
         ),
+        ...linesOf(row.id),
       })),
       pagination: {
         page,
@@ -6702,14 +6840,15 @@ export class SubscriptionService extends BaseService {
     ]);
 
     const total = totalResult?.count ?? 0;
-    const [bankDates, takenBack] = await Promise.all([
+    const [bankDates, takenBack, disputeLines] = await Promise.all([
       rows.length === 0
         ? undefined
         : this.bankDatesFor([userId]).then((dates) => dates.get(userId)),
       this.takenBackFor(
-        userId,
+        { userId },
         rows.filter((row) => row.status === 'reversed').map((row) => row.id)
       ),
+      this.disputeLinesFor({ userId }, rows),
     ]);
 
     return {
@@ -6735,6 +6874,9 @@ export class SubscriptionService extends BaseService {
           bankDates?.cleared ?? null
         ),
         takenBack: takenBack.get(row.id) ?? null,
+        paidBack: disputeLines.paidBack.get(row.id) ?? null,
+        paysBack: disputeLines.paysBack.get(row.id) ?? null,
+        cancelledFor: disputeLines.cancelledFor.get(row.id) ?? null,
       })),
       pagination: {
         page,
@@ -6747,10 +6889,12 @@ export class SubscriptionService extends BaseService {
 
   /**
    * Each reversed row's latest take-back that moved money, in one query for
-   * the page, and only the caller's own rows (`payouts.user_id`).
+   * the page, and only the caller's own rows: the payee's (`payouts.user_id`)
+   * for Earnings, the organisation's (`payouts.organization_id`) for Org
+   * Payouts.
    */
   private async takenBackFor(
-    userId: string,
+    scope: { userId: string } | { organizationId: string },
     payoutIds: readonly string[]
   ): Promise<Map<string, NonNullable<CreatorPayoutRow['takenBack']>>> {
     const latest = new Map<
@@ -6768,7 +6912,9 @@ export class SubscriptionService extends BaseService {
       .innerJoin(payouts, eq(payouts.id, payoutReversals.payoutId))
       .where(
         and(
-          eq(payouts.userId, userId),
+          'userId' in scope
+            ? eq(payouts.userId, scope.userId)
+            : eq(payouts.organizationId, scope.organizationId),
           inArray(payoutReversals.payoutId, [...payoutIds]),
           takeBackMovedMoney(),
           isNotNull(payoutReversals.resolvedAt)
@@ -6782,6 +6928,106 @@ export class SubscriptionService extends BaseService {
       latest.set(step.payoutId, { causeType, on: londonDate(resolvedAt) });
     }
     return latest;
+  }
+
+  /**
+   * A page's chargeback lines, read from the chargebacks' steps in one query
+   * (Codex-2hxff.70; late-win design §6, mockups E1-E3 and P1):
+   *   - `paysBack` on a re-pay row: the won chargeback whose step it pays
+   *     back, the sale's title, and when it was won;
+   *   - `paidBack` on a share the chargeback took: the day its re-pay was
+   *     written, unless a refund cancelled that re-pay before it was paid (it
+   *     is never listed, so nothing was paid back);
+   *   - `cancelledFor` on a share the loss cancelled (`cancelled_by_dispute`,
+   *     which only a lost chargeback writes): the day its cancellation was
+   *     done.
+   * Each side is scoped by the row it describes, as `takenBackFor` is: the
+   * share by its own payee or organisation, the re-pay row by its own. An
+   * organisation's re-pay row also needs its share in the organisation:
+   * `paysBack`'s title is read through the share's sale. A re-pay copies its
+   * share's organisation (@codex/payments `insertRepayRow`), so this drops
+   * nothing, but it no longer rests on that alone. Not a payee's: a re-homed
+   * re-pay's payee can differ from its share's.
+   */
+  private async disputeLinesFor(
+    scope: { userId: string } | { organizationId: string },
+    rows: readonly { id: string; status: string }[]
+  ): Promise<DisputeLines> {
+    const lines: DisputeLines = {
+      paysBack: new Map(),
+      paidBack: new Map(),
+      cancelledFor: new Map(),
+    };
+    if (rows.length === 0) return lines;
+    const ids = rows.map((row) => row.id);
+    const cancelledByLoss = new Set(
+      rows
+        .filter((row) => row.status === 'cancelled_by_dispute')
+        .map((row) => row.id)
+    );
+    const repay = alias(payouts, 'repay');
+    const subscribedCourse = alias(courses, 'subscribed_course');
+    const shareScope =
+      'userId' in scope
+        ? eq(payouts.userId, scope.userId)
+        : eq(payouts.organizationId, scope.organizationId);
+    const repayScope =
+      'userId' in scope
+        ? eq(repay.userId, scope.userId)
+        : sql`(${eq(repay.organizationId, scope.organizationId)} AND ${eq(payouts.organizationId, scope.organizationId)})`;
+    const onShare = sql<boolean>`(${inArray(payoutReversals.payoutId, ids)} AND ${shareScope})`;
+    const onRepay = sql<boolean>`(${inArray(payoutReversals.repaidByPayoutId, ids)} AND ${repayScope})`;
+    const steps = await this.db
+      .select({
+        payoutId: payoutReversals.payoutId,
+        repayId: payoutReversals.repaidByPayoutId,
+        kind: payoutReversals.kind,
+        status: payoutReversals.status,
+        resolvedAt: payoutReversals.resolvedAt,
+        onShare,
+        onRepay,
+        repayCreatedAt: repay.createdAt,
+        repayMovedNothing: sql<boolean>`(${repay.status} = 'cancelled_by_refund' AND ${repay.stripeTransferId} IS NULL)`,
+        // A late win's own date, else when the win was applied; a win not
+        // yet applied falls back to its re-pay row's.
+        wonAt: sql<
+          Date | string | null
+        >`COALESCE(${disputes.lateWonAt}, ${disputes.outcomeAppliedAt})`,
+        title: sql<
+          string | null
+        >`COALESCE(${content.title}, ${courses.title}, ${subscriptionTiers.name}, ${subscribedCourse.title})`,
+      })
+      .from(payoutReversals)
+      .innerJoin(payouts, eq(payouts.id, payoutReversals.payoutId))
+      .leftJoin(repay, eq(repay.id, payoutReversals.repaidByPayoutId))
+      .leftJoin(disputes, eq(disputes.stripeDisputeId, payoutReversals.causeId))
+      .leftJoin(purchases, eq(purchases.id, payouts.purchaseId))
+      .leftJoin(content, eq(content.id, purchases.contentId))
+      .leftJoin(courses, eq(courses.id, purchases.courseId))
+      .leftJoin(subscriptions, eq(subscriptions.id, payouts.subscriptionId))
+      .leftJoin(
+        subscriptionTiers,
+        eq(subscriptionTiers.id, subscriptions.tierId)
+      )
+      .leftJoin(
+        courseSubscriptions,
+        eq(courseSubscriptions.id, payouts.courseSubscriptionId)
+      )
+      .leftJoin(
+        subscribedCourse,
+        eq(subscribedCourse.id, courseSubscriptions.courseId)
+      )
+      .where(
+        and(
+          eq(payoutReversals.causeType, 'dispute'),
+          sql`(${onShare} OR ${onRepay})`
+        )
+      );
+    for (const step of steps) {
+      addPaysBackLine(lines, step);
+      addShareLines(lines, step, cancelledByLoss);
+    }
+    return lines;
   }
 
   /**

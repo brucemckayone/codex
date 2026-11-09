@@ -31,8 +31,9 @@ import { isIos } from '@melt-ui/svelte/internal/helpers';
  *
  * Every style is put back exactly at the last release. The lock keeps
  * Melt's `data-melt-scroll-lock` mark: a Melt builder that locks on its own
- * (a Select open inside a dialog) finds the page held and stacks nothing on
- * it, and a page Melt already holds is left as it is.
+ * (a component that builds its own Melt select with Melt's default lock)
+ * finds the page held and stacks nothing on it, and a page Melt already
+ * holds is left as it is.
  */
 const MARK = 'data-melt-scroll-lock';
 let holders = 0;
@@ -93,10 +94,22 @@ function hold(): () => void {
   };
 }
 
-/** iOS: <body> fixed at the page's scroll position, which is put back at the release. */
+/**
+ * iOS: <body> fixed at the page's scroll position, which is put back at the
+ * release.
+ *
+ * A fixed <body> leaves the root nothing to scroll, so `pageYOffset` reads 0
+ * while it is held. SvelteKit saves a page's place from `pageXOffset` and
+ * `pageYOffset`: on a back-swipe, before the new page tears the dialog down,
+ * and on an app switch (visibilitychange) into sessionStorage. Both saved 0,
+ * so the page came back at its top (Codex-8v12c). While it is held, those
+ * two read the place it is held at.
+ */
 function fixBody(body: HTMLElement): () => void {
   const { scrollX, scrollY, visualViewport } = window;
   const undo = [
+    holdOffset('pageXOffset', scrollX),
+    holdOffset('pageYOffset', scrollY),
     setStyle(body, 'position', 'fixed'),
     setStyle(
       body,
@@ -126,19 +139,50 @@ function fixBody(body: HTMLElement): () => void {
   };
 }
 
-/** Run every restore, the last style set first; one that throws is rethrown once the rest have run. */
+/**
+ * Run every restore, the last style set first. Once the rest have run, one
+ * that threw is rethrown as it was; several, together in an AggregateError,
+ * so no failure hides behind the first.
+ */
 function restoreAll(undo: (() => void)[]): void {
-  let failed = false;
-  let failure: unknown;
+  const failures: unknown[] = [];
   for (const restore of undo.reverse()) {
     try {
       restore();
     } catch (error) {
-      if (!failed) failure = error;
-      failed = true;
+      failures.push(error);
     }
   }
-  if (failed) throw failure;
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1)
+    throw new AggregateError(
+      failures,
+      `${failures.length} scroll-lock restores failed`
+    );
+}
+
+/**
+ * `window[name]` reads `value` until what it returns puts back exactly what
+ * was there. A window that will not take it is left as it is: the page is
+ * held all the same.
+ */
+function holdOffset(
+  name: 'pageXOffset' | 'pageYOffset',
+  value: number
+): () => void {
+  const own = Object.getOwnPropertyDescriptor(window, name);
+  try {
+    Object.defineProperty(window, name, {
+      configurable: true,
+      get: () => value,
+    });
+  } catch {
+    return () => {};
+  }
+  return () => {
+    if (own) Object.defineProperty(window, name, own);
+    else Reflect.deleteProperty(window, name);
+  };
 }
 
 /** Set one inline style; what it returns puts back exactly what was there. */

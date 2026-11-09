@@ -10,6 +10,9 @@
  * browser proof wheels the page in the app's layout. Here: which styles go
  * on, and that each comes back exactly.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const platform = vi.hoisted(() => ({ ios: false }));
@@ -24,6 +27,13 @@ const LOCKED = 'data-melt-scroll-lock';
 const html = document.documentElement;
 const body = document.body;
 const locked = () => body.hasAttribute(LOCKED);
+
+// On iOS the lock replaces both offsets while it holds the page (Codex-8v12c).
+// What window had before any test, put back after each.
+const OFFSETS = ['pageXOffset', 'pageYOffset'] as const;
+const offsets = () =>
+  OFFSETS.map((name) => Object.getOwnPropertyDescriptor(window, name));
+const NATIVE_OFFSETS = offsets();
 
 /** A classic scrollbar `width` px wide: innerWidth less the root's clientWidth. */
 function scrollbar(width: number) {
@@ -56,6 +66,12 @@ describe('lockScroll', () => {
     body.style.cssText = '';
     Reflect.deleteProperty(html, 'clientWidth');
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+    Object.defineProperty(window, 'scrollX', { configurable: true, value: 0 });
+    OFFSETS.forEach((name, i) => {
+      const native = NATIVE_OFFSETS[i];
+      if (native) Object.defineProperty(window, name, native);
+      else Reflect.deleteProperty(window, name);
+    });
   });
 
   it('holds the viewport on the first hold and lets go on the last', () => {
@@ -171,6 +187,51 @@ describe('lockScroll', () => {
     });
   });
 
+  // SvelteKit saves a page's place from pageXOffset/pageYOffset: on a
+  // back-swipe before the new page tears the dialog down, and on an app
+  // switch. With <body> fixed they read 0, and the page came back at its
+  // top (Codex-8v12c). Read bare here, as SvelteKit reads them.
+  it('on iOS, while held, pageXOffset and pageYOffset read the place the page is held at', () => {
+    platform.ios = true;
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(window, 'scrollX', { configurable: true, value: 40 });
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+
+    const hold = lockScroll();
+    expect({ x: pageXOffset, y: pageYOffset }).toEqual({ x: 40, y: 600 });
+    hold();
+
+    expect(offsets()).toEqual(NATIVE_OFFSETS);
+  });
+
+  it('off iOS the page offsets are left as they are', () => {
+    const hold = lockScroll();
+    expect(offsets()).toEqual(NATIVE_OFFSETS);
+    hold();
+  });
+
+  // The fix above rests on this: if SvelteKit ever saves from something
+  // else (scrollY), the held offsets stop reaching it.
+  it('SvelteKit still saves a page’s place from pageXOffset and pageYOffset', () => {
+    // Found from this file, not the working directory: a run started at the
+    // repo root has no node_modules/@sveltejs/kit there. Not as
+    // `new URL(…, import.meta.url)`: Vite rewrites that form into an http://
+    // asset URL for the browser-like environment.
+    const utils = readFileSync(
+      resolve(
+        dirname(fileURLToPath(import.meta.url)),
+        '../../../node_modules/@sveltejs/kit/src/runtime/client/utils.js'
+      ),
+      'utf8'
+    );
+    expect(utils).toMatch(
+      /function scroll_state\(\) \{\s*return \{\s*x: pageXOffset,\s*y: pageYOffset,?\s*\};/
+    );
+  });
+
   it('on iOS a scrollTo that rejects `instant` still lets the page go, and back to its place', () => {
     platform.ios = true;
     Object.defineProperty(window, 'scrollY', {
@@ -219,6 +280,37 @@ describe('lockScroll', () => {
     expect(html.style.cssText).toBe('');
   });
 
+  // The first failure alone hid every other: a second broken restore went
+  // unreported (review q6qjb NIT 5).
+  it('a release where several restores throw reports every one of them', () => {
+    const hold = lockScroll();
+    // The first two restores (the gutter, then overflow) do their work, then throw.
+    const remove = html.style.removeProperty.bind(html.style);
+    const first = new Error('gutter restore failed');
+    const second = new Error('overflow restore failed');
+    vi.spyOn(html.style, 'removeProperty')
+      .mockImplementationOnce((property) => {
+        remove(property);
+        throw first;
+      })
+      .mockImplementationOnce((property) => {
+        remove(property);
+        throw second;
+      });
+
+    let thrown: unknown;
+    try {
+      hold();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as AggregateError).errors).toEqual([first, second]);
+    expect(locked()).toBe(false);
+    expect(html.style.cssText).toBe('');
+  });
+
   it('on iOS a <body> restore that throws still puts the rest back, and the scroll', () => {
     platform.ios = true;
     Object.defineProperty(window, 'scrollY', {
@@ -240,6 +332,7 @@ describe('lockScroll', () => {
     expect(locked()).toBe(false);
     expect(body.style.cssText).toBe('');
     expect(html.style.cssText).toBe('');
+    expect(offsets()).toEqual(NATIVE_OFFSETS);
     expect(scrollTo).toHaveBeenCalledWith({
       left: 0,
       top: 600,

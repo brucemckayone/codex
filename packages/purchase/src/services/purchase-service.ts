@@ -62,6 +62,8 @@ import {
 import {
   assertGbpOnly,
   type ClawbackCharge,
+  type DisputeRepayResult,
+  type IssueRefundResult,
   issueRefund,
   type LedgerDeps,
   listChargeRefunds,
@@ -127,6 +129,7 @@ import {
   CourseAlreadyOwnedError,
   CourseNotPurchasableError,
   ForbiddenError,
+  LateWinRefundRefusedError,
   NotFoundError,
   PaymentProcessingError,
   PurchaseNotFoundError,
@@ -189,9 +192,53 @@ const REFUND_STATUSES: ReadonlySet<string> = new Set<RefundStatus>([
   'canceled',
 ]);
 
+/**
+ * What a Stripe error says it is, for an alert: its `type` (a refusal is
+ * `StripeInvalidRequestError`; an outage, a rate limit or a key without the
+ * right is another) and its HTTP `statusCode`, each null when absent. Never
+ * its message.
+ */
+function stripeErrorKind(error: unknown): {
+  stripeType: string | null;
+  stripeStatusCode: number | null;
+} {
+  const { type, statusCode } = (error ?? {}) as {
+    type?: unknown;
+    statusCode?: unknown;
+  };
+  return {
+    stripeType: typeof type === 'string' ? type : null,
+    stripeStatusCode: typeof statusCode === 'number' ? statusCode : null,
+  };
+}
+
 /** A status the `refunds` table admits (its CHECK). */
 function isRefundStatus(status: string | null): status is RefundStatus {
   return status !== null && REFUND_STATUSES.has(status);
+}
+
+/**
+ * A refund Stripe is done with: it succeeded, failed, or was canceled, which
+ * returned nothing, as a failed one (owner decision 2026-10-25). Pending and
+ * `requires_action` are still Stripe's.
+ */
+function isSettledRefundStatus(status: string | null): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'canceled';
+}
+
+/**
+ * The late win's refund as Stripe lists the charge's refunds now, else as it
+ * was made. None was made when the charge was already refunded in full,
+ * which is as good as succeeded.
+ */
+function lateWinRefundStatus(
+  listed: readonly Stripe.Refund[],
+  made: { refundId: string | null; status: string | null }
+): string | null {
+  if (!made.refundId) return 'succeeded';
+  return (
+    listed.find((refund) => refund.id === made.refundId)?.status ?? made.status
+  );
 }
 
 /**
@@ -240,21 +287,71 @@ function either(first: SQL, second: SQL | undefined): SQL {
 }
 
 /**
- * Whether the dispute still holds its sale, read under a share lock on its
- * row (a win's record then waits for the caller's commit). A dispute with no
- * row holds: nothing has closed it.
+ * The dispute's row, read under a share lock: a win's record, which writes the
+ * row, then waits for the caller's commit. Taken before the purchase's row,
+ * the late win's lock order (late-win data design §4.1).
+ */
+async function lockedDispute(
+  tx: Tx,
+  stripeDisputeId: string
+): Promise<Dispute | undefined> {
+  const [dispute] = await tx
+    .select()
+    .from(disputes)
+    .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+    .limit(1)
+    .for('share');
+  return dispute;
+}
+
+/**
+ * Whether the dispute still holds its sale (`lockedDispute`). A dispute with
+ * no row holds: nothing has closed it.
  */
 async function disputeStillHolds(
   tx: Tx,
   stripeDisputeId: string
 ): Promise<boolean> {
-  const [dispute] = await tx
-    .select({ status: disputes.status })
-    .from(disputes)
-    .where(eq(disputes.stripeDisputeId, stripeDisputeId))
-    .limit(1)
-    .for('share');
+  const dispute = await lockedDispute(tx, stripeDisputeId);
   return !dispute || HOLDING_DISPUTE_STATUSES.includes(dispute.status);
+}
+
+/**
+ * Whether the dispute is still lost (`lockedDispute`; late-win data design
+ * §4.8): a late win recorded meanwhile waits for the caller's commit, and its
+ * restore runs after. A dispute with no row has not been won.
+ */
+async function disputeStillLost(
+  tx: Tx,
+  stripeDisputeId: string
+): Promise<boolean> {
+  const dispute = await lockedDispute(tx, stripeDisputeId);
+  return !dispute || dispute.status === 'lost';
+}
+
+/** The dispute, if it is a late win being undone (`lockedDispute`). */
+async function lockedLateWin(
+  tx: Tx,
+  stripeDisputeId: string
+): Promise<Dispute | undefined> {
+  const dispute = await lockedDispute(tx, stripeDisputeId);
+  return dispute && isLateWinBeingUndone(dispute) ? dispute : undefined;
+}
+
+/**
+ * A late win whose undo has not finished (late-win data design §3.2): won
+ * after a loss, its outcome not yet applied. Every step of the undo keys on
+ * this, so an applied one, including a row settled by hand under release
+ * step R18, is never re-paid, restored, refunded or emailed again.
+ */
+function isLateWinBeingUndone(
+  dispute: Pick<Dispute, 'status' | 'lateWonAt' | 'outcomeAppliedAt'>
+): boolean {
+  return (
+    dispute.status === 'won' &&
+    dispute.lateWonAt !== null &&
+    dispute.outcomeAppliedAt === null
+  );
 }
 
 /** `DISPUTE_STATUS_RANK` in SQL, for the upsert's guard. */
@@ -273,8 +370,12 @@ import type {
   CheckoutSessionVerifyResult,
   CompleteCoursePurchaseMetadata,
   CompletePurchaseMetadata,
+  LateWinRefundStep,
+  LateWinRestore,
+  LateWinRestoreOutcome,
   PaymentIntentCharge,
   Purchase,
+  PurchaseItemLink,
   PurchaseListItem,
   PurchaseWithItem,
   SaleListItem,
@@ -538,6 +639,66 @@ function selfHealedSale(metadata: Stripe.Metadata): {
         },
       }
     : null;
+}
+
+/** A row's soft delete, as `findItemLink` reads it. */
+interface Live {
+  deletedAt: Date | null;
+}
+
+/**
+ * A content item's page (`findItemLink`): on its org as it is now, or, for
+ * personal content, on its creator's profile. Null when it has none.
+ */
+function contentItemLink(
+  item: Live & {
+    id: string;
+    slug: string;
+    organization: (Live & { slug: string }) | null;
+    creator: (Live & { username: string | null }) | null;
+  }
+): PurchaseItemLink | null {
+  const { organization, creator } = item;
+  if (item.deletedAt) return null;
+  if (organization) {
+    if (organization.deletedAt) return null;
+    return {
+      kind: 'org_content',
+      contentId: item.id,
+      slug: item.slug,
+      organizationSlug: organization.slug,
+    };
+  }
+  if (!creator?.username || creator.deletedAt) return null;
+  return {
+    kind: 'personal_content',
+    contentId: item.id,
+    slug: item.slug,
+    creatorUsername: creator.username,
+  };
+}
+
+/**
+ * A course's dashboard on its org (`findItemLink`). Null when it has none:
+ * the dashboard finds only a published course (`getCourseBySlug`), so one
+ * archived or back in draft would be a 404.
+ */
+function courseItemLink(
+  course: Live & {
+    id: string;
+    slug: string;
+    status: string;
+    organization: Live & { slug: string };
+  }
+): PurchaseItemLink | null {
+  if (course.deletedAt || course.organization.deletedAt) return null;
+  if (course.status !== CONTENT_STATUS.PUBLISHED) return null;
+  return {
+    kind: 'course',
+    courseId: course.id,
+    slug: course.slug,
+    organizationSlug: course.organization.slug,
+  };
 }
 
 /**
@@ -915,6 +1076,48 @@ export class PurchaseService extends BaseService {
     }
   }
 
+  /**
+   * Where the purchase's item lives, for an email's link to it (Codex-0u7kb):
+   * the receipt's "Access Content" button, and the late win's access-restored
+   * email's (Codex-2hxff.70). Keyed by the purchase; the item, its org and
+   * its creator are the purchase's own. The pages look an item up
+   * by its slug, so a link built from the id was a 404.
+   *
+   * Org content links to its org as it is now, not the sale's: that is where
+   * its page is. Null when there is no page to link to: no such purchase; its
+   * item or that item's org is deleted; a course is not published; personal
+   * content's creator is deleted or has no username. The caller links
+   * somewhere that exists.
+   */
+  async findItemLink(purchaseId: string): Promise<PurchaseItemLink | null> {
+    try {
+      const row = await this.db.query.purchases.findFirst({
+        where: eq(purchases.id, purchaseId),
+        columns: { id: true },
+        with: {
+          content: {
+            columns: { id: true, slug: true, deletedAt: true },
+            with: {
+              organization: { columns: { slug: true, deletedAt: true } },
+              creator: { columns: { username: true, deletedAt: true } },
+            },
+          },
+          course: {
+            columns: { id: true, slug: true, status: true, deletedAt: true },
+            with: {
+              organization: { columns: { slug: true, deletedAt: true } },
+            },
+          },
+        },
+      });
+      if (row?.content) return contentItemLink(row.content);
+      if (row?.course) return courseItemLink(row.course);
+      return null;
+    } catch (error) {
+      this.handleError(error, 'findItemLink');
+    }
+  }
+
   // ─── A second payment for an owned item (Codex-2hxff.14) ───────────────────
 
   /**
@@ -1107,14 +1310,26 @@ export class PurchaseService extends BaseService {
     db: Tx | DatabaseClient,
     purchase: Pick<Purchase, 'id' | 'customerId' | 'contentId' | 'courseId'>
   ): Promise<boolean> {
+    return (await this.otherCompletedPurchase(db, purchase)) !== undefined;
+  }
+
+  /** The buyer's other completed purchase of this purchase's item, if any. */
+  private async otherCompletedPurchase(
+    db: Tx | DatabaseClient,
+    purchase: Pick<Purchase, 'id' | 'customerId' | 'contentId' | 'courseId'>
+  ): Promise<Pick<Purchase, 'id' | 'purchasedAt' | 'createdAt'> | undefined> {
     const item = purchase.contentId
       ? eq(purchases.contentId, purchase.contentId)
       : purchase.courseId
         ? eq(purchases.courseId, purchase.courseId)
         : undefined;
-    if (!item) return false;
+    if (!item) return undefined;
     const [other] = await db
-      .select({ id: purchases.id })
+      .select({
+        id: purchases.id,
+        purchasedAt: purchases.purchasedAt,
+        createdAt: purchases.createdAt,
+      })
       .from(purchases)
       .where(
         and(
@@ -1125,7 +1340,40 @@ export class PurchaseService extends BaseService {
         )
       )
       .limit(1);
-    return other !== undefined;
+    return other;
+  }
+
+  /**
+   * When `refundId` is the late win's refund of this purchase, the buyer's
+   * first payment for an item they bought again (late-win data design §4.5,
+   * §7): the date of the purchase they keep it through, for the refund
+   * email's note. Null for any other refund, or once no other purchase
+   * grants the item. Null for a late-won duplicate payment too: what it
+   * refunds is the second payment, and `duplicatePayment` says so.
+   */
+  private async lateWinKeptThrough(
+    purchase: Pick<
+      Purchase,
+      'id' | 'customerId' | 'contentId' | 'courseId' | 'duplicateOfPurchaseId'
+    >,
+    refundId: string | undefined
+  ): Promise<{ purchasedAt: string } | null> {
+    if (!refundId || isDuplicatePayment(purchase)) return null;
+    const [lateWin] = await this.db
+      .select({ id: disputes.id })
+      .from(disputes)
+      .where(
+        and(
+          eq(disputes.purchaseId, purchase.id),
+          eq(disputes.lateWinRefundId, refundId)
+        )
+      )
+      .limit(1);
+    if (!lateWin) return null;
+    const kept = await this.otherCompletedPurchase(this.db, purchase);
+    return kept
+      ? { purchasedAt: toIso(kept.purchasedAt ?? kept.createdAt) }
+      : null;
   }
 
   /**
@@ -2729,6 +2977,12 @@ export class PurchaseService extends BaseService {
         duplicatePayment: boolean;
         /** The item's title, for the refund email (charges carry none). */
         itemTitle: string | null;
+        /**
+         * The refund is a late win's of the buyer's first payment, and they
+         * keep the item through the purchase of this date (ISO): the email
+         * says so (late-win data design §7). Null otherwise.
+         */
+        lateWinKeptThrough: { purchasedAt: string } | null;
       }
     | undefined
   > {
@@ -2793,6 +3047,10 @@ export class PurchaseService extends BaseService {
           accessEnded: !(await this.keepsItemElsewhere(this.db, purchase)),
           duplicatePayment: isDuplicatePayment(purchase),
           itemTitle: await this.itemTitle(purchase),
+          lateWinKeptThrough: await this.lateWinKeptThrough(
+            purchase,
+            refundDetails.stripeRefundId
+          ),
         };
       }
 
@@ -2888,6 +3146,8 @@ export class PurchaseService extends BaseService {
         accessEnded: isFull && !keptElsewhere,
         duplicatePayment: isDuplicatePayment(purchase),
         itemTitle: await this.itemTitle(purchase),
+        // The late win's refund only meets a purchase already refunded.
+        lateWinKeptThrough: null,
       };
     } catch (error) {
       this.handleError(error, 'processRefund');
@@ -2902,7 +3162,8 @@ export class PurchaseService extends BaseService {
    */
   private async clawBackRefunds(
     purchaseId: string,
-    charge: ClawbackCharge
+    charge: ClawbackCharge,
+    settlingDisputeId?: string
   ): Promise<void> {
     await reverseCharge(
       { ...this.ledger(), obs: this.obs },
@@ -2910,6 +3171,7 @@ export class PurchaseService extends BaseService {
         charge,
         source: { sourceType: 'purchase', purchaseId },
         refunds: () => listClawableRefunds(this.stripe, charge.id),
+        settlingDisputeId,
       }
     );
   }
@@ -3261,13 +3523,21 @@ export class PurchaseService extends BaseService {
    *
    * Forward only, because Stripe does not deliver events in order: an inquiry
    * may become a chargeback, and a final status (`won`, `lost`,
-   * `warning_closed`, `prevented`) never changes. Stripe can turn `lost`
-   * into `won` (a late win): that event is only alerted, once per event, and
-   * the row stays `lost` (owner decision 2026-10-25, "alert only"), so the
-   * loss's refund, reversals and ended access stand until a person undoes
-   * them. Codex-2hxff.70 will record the win together with the undo. Returns
-   * the row as it now stands, which is what the caller acts on, not the
-   * event's snapshot. A status Stripe adds later is logged and not written.
+   * `warning_closed`, `prevented`) never changes, with one exception. Stripe
+   * can turn `lost` into `won` (a late win; Codex-2hxff.70, late-win data
+   * design §3.3): the row then moves lost → won once (`recordLateWin`), and
+   * the caller undoes the loss as an unapplied win. A second delivery finds
+   * it won and changes nothing.
+   *
+   * Stripe documents no move from won to lost, so it is refused. The row then
+   * comes back with `refusedLost: true`, for the caller to check the live
+   * dispute and alert only if Stripe says lost (an older `lost` event arriving
+   * after the late win's `won` is the harmless case). Every other move out of
+   * a final status is refused silently.
+   *
+   * Returns the row as it now stands, which is what the caller acts on, not
+   * the event's snapshot: callers never compare statuses. A status Stripe
+   * adds later is logged and not written.
    */
   async recordDispute(dispute: {
     stripeDisputeId: string;
@@ -3278,7 +3548,7 @@ export class PurchaseService extends BaseService {
     status: string;
     reason: string | null;
     stripeCreatedAt: Date;
-  }): Promise<Dispute | undefined> {
+  }): Promise<(Dispute & { refusedLost?: true }) | undefined> {
     try {
       const { status } = dispute;
       if (!DISPUTE_STATUS_RANK.has(status)) {
@@ -3295,11 +3565,6 @@ export class PurchaseService extends BaseService {
             .where(eq(purchases.stripePaymentIntentId, dispute.paymentIntentId))
             .limit(1)
         : [];
-      const [prior] = await this.db
-        .select({ status: disputes.status })
-        .from(disputes)
-        .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
-        .limit(1);
       await this.db
         .insert(disputes)
         .values({
@@ -3318,24 +3583,19 @@ export class PurchaseService extends BaseService {
           // Forward only; the amount may still be corrected until it closes.
           setWhere: sql`${disputeRank(sql`${disputes.status}`)} < ${disputeRank(sql`excluded.status`)} OR (${disputeRank(sql`${disputes.status}`)} < ${sql.raw(String(FINAL_DISPUTE_RANK))} AND ${disputes.status} = excluded.status AND ${disputes.amountCents} <> excluded.amount_cents)`,
         });
+      // The upsert refuses lost → won (both final); the late win is its own
+      // statement.
+      if (status === 'won') {
+        const moved = await this.recordLateWin(dispute.stripeDisputeId);
+        if (moved) return moved;
+      }
       const [current] = await this.db
         .select()
         .from(disputes)
         .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
         .limit(1);
-      // A late win: the upsert above refused it, so the row is still lost.
-      if (prior?.status === 'lost' && status === 'won' && current) {
-        this.obs.error(
-          'late win on a lost dispute: re-pay creators and restore the buyer by hand',
-          {
-            errorId: crypto.randomUUID(),
-            disputeId: current.stripeDisputeId,
-            chargeId: current.stripeChargeId,
-            purchaseId: current.purchaseId,
-            subscriptionId: current.subscriptionId,
-            courseSubscriptionId: current.courseSubscriptionId,
-          }
-        );
+      if (current && status === 'lost' && current.status === 'won') {
+        return { ...current, refusedLost: true };
       }
       return current;
     } catch (error) {
@@ -3344,13 +3604,58 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * A late win: a lost row becomes won (late-win data design §3.3). The
+   * loss's applied time moves to `lost_applied_at` (null when the loss never
+   * finished) and `outcome_applied_at` is cleared, so the undo runs as an
+   * unapplied win and the reconcile retries it hourly until it is marked.
+   * Every SET reads the row as it was, in one statement. `$now` is bound, and
+   * `updated_at` takes it too: the reconcile's grace reads it (premise 31).
+   * Undefined when the row is not lost: a second delivery.
+   */
+  private async recordLateWin(
+    stripeDisputeId: string
+  ): Promise<Dispute | undefined> {
+    const now = new Date();
+    const [moved] = await this.db
+      .update(disputes)
+      .set({
+        status: 'won',
+        lateWonAt: now,
+        lostAppliedAt: sql`${disputes.outcomeAppliedAt}`,
+        outcomeAppliedAt: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(disputes.stripeDisputeId, stripeDisputeId),
+          eq(disputes.status, 'lost')
+        )
+      )
+      .returning();
+    if (moved) {
+      this.obs.info('Late win: a lost dispute is now won', {
+        disputeId: moved.stripeDisputeId,
+        chargeId: moved.stripeChargeId,
+        purchaseId: moved.purchaseId,
+        subscriptionId: moved.subscriptionId,
+        courseSubscriptionId: moved.courseSubscriptionId,
+        lossApplied: moved.lostAppliedAt !== null,
+      });
+    }
+    return moved;
+  }
+
+  /**
    * Claw back this purchase's slices for every cause on the charge: its
    * refunds, and the chargebacks recorded in `disputes` (the dispute webhook).
    * No purchase for the PaymentIntent (a subscription's charge): nothing.
+   * `settlingDisputeId` names the won dispute whose undo is calling, which a
+   * refund's clawback would otherwise wait for (`reverseCharge`).
    */
   async clawBackPurchaseCharge(
     paymentIntentId: string,
-    charge: ClawbackCharge
+    charge: ClawbackCharge,
+    options?: { settlingDisputeId?: string }
   ): Promise<void> {
     try {
       const [purchase] = await this.db
@@ -3359,7 +3664,11 @@ export class PurchaseService extends BaseService {
         .where(eq(purchases.stripePaymentIntentId, paymentIntentId))
         .limit(1);
       if (!purchase) return;
-      await this.clawBackRefunds(purchase.id, charge);
+      await this.clawBackRefunds(
+        purchase.id,
+        charge,
+        options?.settlingDisputeId
+      );
     } catch (error) {
       this.handleError(error, 'clawBackPurchaseCharge');
     }
@@ -3391,27 +3700,7 @@ export class PurchaseService extends BaseService {
           .set({ disputedAt: null, updatedAt: new Date() })
           .where(eq(purchases.id, purchase.id));
         if (purchase.status !== PURCHASE_STATUS.COMPLETED) return;
-        if (purchase.contentId) {
-          await tx
-            .update(contentAccess)
-            .set({ deletedAt: null })
-            .where(
-              and(
-                eq(contentAccess.userId, purchase.customerId),
-                eq(contentAccess.contentId, purchase.contentId),
-                isNotNull(contentAccess.deletedAt)
-              )
-            );
-        }
-        await tx
-          .update(entitlements)
-          .set({ revokedAt: null })
-          .where(
-            and(
-              eq(entitlements.sourceRef, purchase.id),
-              isNotNull(entitlements.revokedAt)
-            )
-          );
+        await this.restorePurchaseAccess(tx, purchase);
       });
       this.obs.info('Won dispute restored access', {
         purchaseId: purchase.id,
@@ -3421,6 +3710,190 @@ export class PurchaseService extends BaseService {
     } catch (error) {
       this.handleError(error, 'restoreDisputedPurchase');
     }
+  }
+
+  /**
+   * A purchase's access given back, in the caller's transaction: the content
+   * access row it soft-deleted, and the entitlement it revoked (by
+   * `source_ref`, so a content or a course purchase alike; a course's lessons
+   * open through it).
+   */
+  private async restorePurchaseAccess(
+    tx: Tx,
+    purchase: Pick<Purchase, 'id' | 'customerId' | 'contentId'>
+  ): Promise<void> {
+    if (purchase.contentId) {
+      await tx
+        .update(contentAccess)
+        .set({ deletedAt: null })
+        .where(
+          and(
+            eq(contentAccess.userId, purchase.customerId),
+            eq(contentAccess.contentId, purchase.contentId),
+            isNotNull(contentAccess.deletedAt)
+          )
+        );
+    }
+    await tx
+      .update(entitlements)
+      .set({ revokedAt: null })
+      .where(
+        and(
+          eq(entitlements.sourceRef, purchase.id),
+          isNotNull(entitlements.revokedAt)
+        )
+      );
+  }
+
+  /**
+   * A LATE win (lost, then won; Codex-2hxff.70, late-win data design §4.2)
+   * gives the buyer back what the loss took, unless something else stands in
+   * the way. One transaction, in the late win's lock order (§4.1): the
+   * dispute under a share lock, still a late win being undone, then the
+   * purchase under its row lock. The won dispute no longer holds, so its
+   * disputed mark is cleared first and the failed-refund settle's rule
+   * decides (`accessKeptReason`): the two can never disagree. The refund
+   * fields come from the refunds that still stand (`standingRefundFields`),
+   * never from the disputed amount the loss added (`processLostDispute`).
+   *
+   * - `restored`: a purchase the loss refunded is `completed` again, with
+   *   `refunded_at` cleared, and its content access row and its entitlement
+   *   (by `source_ref`) are restored. A purchase the loss never refunded
+   *   keeps its status and gets its access back, as a normal win does;
+   * - `rebought`: the buyer bought the item again since. This purchase stays
+   *   refunded, with its refund fields restated, and its entitlement stays
+   *   revoked. The shared `content_access` row is the new purchase's and is
+   *   left alone. The first payment is refunded next
+   *   (`refundFirstPaymentAfterLateWin`);
+   * - `duplicate`: a duplicate payment, which never granted anything, stays
+   *   as it is;
+   * - `still_refunded`: the refunds that still stand cover what was paid. It
+   *   stays refunded, with its refund fields restated;
+   * - `dispute_holds`: another chargeback on it is open or lost. Nothing is
+   *   written, and that dispute decides.
+   *
+   * Idempotent: a re-run finds the purchase as it left it. Undefined, and
+   * nothing written, when the dispute is not a late win being undone
+   * (`isLateWinBeingUndone`: one applied, including by hand under R18, is
+   * left alone), or when it has no purchase. The caller bumps the library
+   * and, on `restored`, clears the streaming block and claims the email.
+   */
+  async restoreAfterLateWin(
+    stripeDisputeId: string
+  ): Promise<LateWinRestore | undefined> {
+    try {
+      const restored = await this.db.transaction(async (tx) => {
+        const dispute = await lockedLateWin(tx, stripeDisputeId);
+        if (!dispute?.purchaseId) return undefined;
+        const [purchase] = await tx
+          .select()
+          .from(purchases)
+          .where(eq(purchases.id, dispute.purchaseId))
+          .for('update');
+        if (!purchase) return undefined;
+        const outcome = await this.restoreLateWonPurchase(
+          tx,
+          purchase,
+          dispute.stripeChargeId
+        );
+        return { purchase, outcome };
+      });
+      if (!restored) return undefined;
+      const { purchase, outcome } = restored;
+      this.obs.info('Late win: the purchase restored', {
+        disputeId: stripeDisputeId,
+        purchaseId: purchase.id,
+        outcome,
+      });
+      return {
+        outcome,
+        userId: purchase.customerId,
+        orgId: purchase.organizationId,
+        purchaseId: purchase.id,
+        email:
+          outcome === 'restored'
+            ? await this.accessRestoredEmail(purchase)
+            : null,
+      };
+    } catch (error) {
+      this.handleError(error, 'restoreAfterLateWin');
+    }
+  }
+
+  /**
+   * The late win's decision for its purchase, and its writes, inside the
+   * caller's transaction with the purchase locked (`restoreAfterLateWin`).
+   */
+  private async restoreLateWonPurchase(
+    tx: Tx,
+    purchase: Purchase,
+    chargeId: string
+  ): Promise<LateWinRestoreOutcome> {
+    const now = new Date();
+    // The won dispute no longer holds: decided as if its mark were gone.
+    const { reason, standing } = await this.accessKeptReason(
+      tx,
+      { ...purchase, disputedAt: null },
+      chargeId
+    );
+    if (reason === 'dispute_holds') return 'dispute_holds';
+    // A purchase neither completed nor refunded can only be a duplicate the
+    // loss never got to: no other pending or failed purchase has a charge.
+    if (reason === 'not_refunded' && !isDuplicatePayment(purchase)) {
+      throw new InternalServiceError(
+        'A late win found its purchase in a status it cannot restore from',
+        { purchaseId: purchase.id, status: purchase.status }
+      );
+    }
+    if (reason === 'duplicate' || reason === 'not_refunded') {
+      await tx
+        .update(purchases)
+        .set({ disputedAt: null, updatedAt: now })
+        .where(eq(purchases.id, purchase.id));
+      return 'duplicate';
+    }
+    if (reason === 'rebought' || reason === 'still_refunded') {
+      await tx
+        .update(purchases)
+        .set({ ...standing, disputedAt: null, updatedAt: now })
+        .where(eq(purchases.id, purchase.id));
+      return reason;
+    }
+
+    // Null (refunded by the loss, nothing else in the way) or `partial`
+    // (still completed: the loss never finished). `partial`'s `standing` is
+    // the purchase's own refund fields, so it writes them back unchanged.
+    await tx
+      .update(purchases)
+      .set({
+        ...standing,
+        status: PURCHASE_STATUS.COMPLETED,
+        refundedAt: null,
+        disputedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(purchases.id, purchase.id));
+    await this.restorePurchaseAccess(tx, purchase);
+    return 'restored';
+  }
+
+  /**
+   * The facts of the `purchase-access-restored` email (late-win data design
+   * §7): the item, what was paid and when. Its link is the caller's, read by
+   * the purchase id (`findItemLink`, Codex-0u7kb). Null when the item's row
+   * cannot be read (soft deletes keep it), so no email goes out unnamed.
+   */
+  private async accessRestoredEmail(
+    purchase: Purchase
+  ): Promise<LateWinRestore['email']> {
+    const contentTitle = await this.itemTitle(purchase);
+    if (contentTitle === null) return null;
+    return {
+      contentTitle,
+      amountCents: purchase.amountPaidCents,
+      paidAt: toIso(purchase.purchasedAt ?? purchase.createdAt),
+      isCourse: purchase.courseId !== null,
+    };
   }
 
   /**
@@ -3503,27 +3976,7 @@ export class PurchaseService extends BaseService {
           updatedAt: now,
         })
         .where(eq(purchases.id, purchase.id));
-      if (purchase.contentId) {
-        await tx
-          .update(contentAccess)
-          .set({ deletedAt: null })
-          .where(
-            and(
-              eq(contentAccess.userId, purchase.customerId),
-              eq(contentAccess.contentId, purchase.contentId),
-              isNotNull(contentAccess.deletedAt)
-            )
-          );
-      }
-      await tx
-        .update(entitlements)
-        .set({ revokedAt: null })
-        .where(
-          and(
-            eq(entitlements.sourceRef, purchase.id),
-            isNotNull(entitlements.revokedAt)
-          )
-        );
+      await this.restorePurchaseAccess(tx, purchase);
       this.obs.info('Failed refund settled: purchase access restored', {
         purchaseId: purchase.id,
         customerId: purchase.customerId,
@@ -3714,10 +4167,18 @@ export class PurchaseService extends BaseService {
    * `refunded` and its access stays ended (owner decision Q3). The amount
    * refunded so far gains the disputed amount, capped at what was paid.
    * Idempotent. Returns the buyer, for the library cache.
+   *
+   * Only while `stripeDisputeId` is still lost (late-win data design §4.8):
+   * the hourly reconcile re-runs an unfinished loss, and a late win recorded
+   * meanwhile must not have its restored purchase refunded again. The dispute
+   * is read under a share lock before the purchase is written
+   * (`disputeStillLost`). Otherwise nothing is written, and `accessEnded` is
+   * false, so the caller writes no streaming block.
    */
   async processLostDispute(
     paymentIntentId: string,
-    disputedCents: number
+    disputedCents: number,
+    stripeDisputeId: string
   ): Promise<
     { userId: string; orgId: string | null; accessEnded: boolean } | undefined
   > {
@@ -3735,10 +4196,11 @@ export class PurchaseService extends BaseService {
         orgId: purchase.organizationId,
         accessEnded: !keptElsewhere,
       };
-      if (purchase.status === PURCHASE_STATUS.REFUNDED) return scope;
 
       const now = new Date();
-      await this.db.transaction(async (tx) => {
+      const applied = await this.db.transaction(async (tx) => {
+        if (!(await disputeStillLost(tx, stripeDisputeId))) return 'not_lost';
+        if (purchase.status === PURCHASE_STATUS.REFUNDED) return 'already';
         await tx
           .update(purchases)
           .set({
@@ -3774,12 +4236,23 @@ export class PurchaseService extends BaseService {
               isNull(entitlements.revokedAt)
             )
           );
+        return 'refunded';
       });
-      this.obs.info('Lost dispute recorded the purchase as refunded', {
-        purchaseId: purchase.id,
-        paymentIntentId,
-        disputedCents,
-      });
+      if (applied === 'not_lost') {
+        this.obs.info('Dispute is no longer lost; its loss refunds nothing', {
+          purchaseId: purchase.id,
+          paymentIntentId,
+          stripeDisputeId,
+        });
+        return { ...scope, accessEnded: false };
+      }
+      if (applied === 'refunded') {
+        this.obs.info('Lost dispute recorded the purchase as refunded', {
+          purchaseId: purchase.id,
+          paymentIntentId,
+          disputedCents,
+        });
+      }
       return scope;
     } catch (error) {
       this.handleError(error, 'processLostDispute');
@@ -3790,32 +4263,440 @@ export class PurchaseService extends BaseService {
    * A WON dispute's money (owner decision Q2): what it clawed back from every
    * source's slices is paid back by new pending payout rows the next sweep
    * pays (@codex/payments `repayDispute`). The held slices are released by
-   * the dispute closing. Then the outcome is marked applied.
+   * the dispute closing. The outcome is not marked: a late win's undo still
+   * has its refund step to run (late-win data design §4.5), and
+   * `settleWonDispute` marks a normal win.
+   *
+   * Only while the dispute is won and its outcome not yet applied. A late win
+   * applied by hand under release step R18 still has the loss's steps
+   * standing, and its creators were put right by hand: re-paying them would
+   * pay twice. Anything else re-pays nothing.
    */
-  async settleWonDispute(stripeDisputeId: string): Promise<void> {
+  async repayWonDispute(stripeDisputeId: string): Promise<DisputeRepayResult> {
     try {
-      await repayDispute(
+      const [dispute] = await this.db
+        .select({
+          status: disputes.status,
+          outcomeAppliedAt: disputes.outcomeAppliedAt,
+        })
+        .from(disputes)
+        .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+        .limit(1);
+      if (dispute?.status !== 'won' || dispute.outcomeAppliedAt !== null) {
+        this.obs.info('Won dispute not re-paid: not won, or already applied', {
+          disputeId: stripeDisputeId,
+          status: dispute?.status ?? null,
+        });
+        return { repaid: 0, cancelled: 0, debtsClosed: 0 };
+      }
+      return await repayDispute(
         { ...this.ledger(), obs: this.obs },
         { disputeId: stripeDisputeId }
       );
-      await this.markDisputeOutcomeApplied(stripeDisputeId);
+    } catch (error) {
+      this.handleError(error, 'repayWonDispute');
+    }
+  }
+
+  /** A normal win: the re-pay (`repayWonDispute`), then the outcome marked. */
+  async settleWonDispute(stripeDisputeId: string): Promise<void> {
+    try {
+      await this.repayWonDispute(stripeDisputeId);
+      await this.markDisputeOutcomeApplied(stripeDisputeId, { status: 'won' });
     } catch (error) {
       this.handleError(error, 'settleWonDispute');
     }
   }
 
-  /** A final status has been acted on: a redelivery stops at the record. */
-  async markDisputeOutcomeApplied(stripeDisputeId: string): Promise<void> {
+  /**
+   * The late win's refund of a buyer's first payment, when they had bought
+   * the item again (owner decision Q1; late-win data design §4.5). Run after
+   * the re-pay (`repayWonDispute`): the refund is then shared on the re-paid
+   * slices, and each share comes off its held, unpaid re-pay row
+   * (`clawBackRepaidShare`), so the creators net nothing for the first
+   * payment and keep the second sale. Refunded first, it would take each
+   * share a second time from slices a partial loss had only cut.
+   *
+   * Whatever is left of the charge is refunded (`issueRefund`, no amount),
+   * with reason `duplicate`, the key `late_win_refund_${disputeId}` and the
+   * metadata `codex_late_win_dispute`. Its id is written once
+   * (`late_win_refund_id IS NULL`), so a re-run reads that refund rather than
+   * making another. Then, as `charge.refunded` would: the charge's refunds
+   * are recorded (`recordChargeRefunds`), the purchase's refund fields are
+   * restated from those that stand, and the refund is clawed back
+   * (`clawBackPurchaseCharge`, naming this dispute so its wait lets it
+   * through). `charge.refunded` then finds all of that done, and only emails.
+   *
+   * - `none`: nothing to refund. It is not a late win being undone, it has
+   *   no purchase, or the loss did not refund the payment
+   *   (`refundedByTheLoss`): a buyer who bought the item again no longer
+   *   holds it through that purchase, or the payment was refunded some
+   *   other way;
+   * - `pending`: Stripe has not settled the refund. Do not mark the outcome:
+   *   the re-pay rows stay held, and the hourly reconcile's next run
+   *   finishes it (owner decision Q1 for refunds). Its `refund.updated`
+   *   cannot: that clawback waits for this win to settle;
+   * - `done`: refunded and clawed back, or the charge was already refunded
+   *   in full. A refund that fails later is support's, as any failed refund.
+   *   One found failed, or canceled by Stripe, is done too, but alerted at
+   *   error: the buyer got nothing. A failed one is clawed back from the
+   *   creators like any failed refund, and stays taken: support settles the
+   *   buyer's refund in Failed refunds as refunded elsewhere, which keeps it
+   *   ("creators re-paid" is refused for a late win's refund, owner decision
+   *   6). A canceled one takes nothing, and support settles it by hand.
+   *
+   * A late-won duplicate payment is refunded the same way when its loss ran
+   * (owner decisions 2026-11-05 and 2026-11-08): the loss left it refunded,
+   * whether or not the buyer still holds the purchase it repeats. It pays no
+   * one, so nothing is clawed back. One the loss never got to is the
+   * duplicate sweep's: before the sweep refunds it there is nothing to do,
+   * and after, the late win's refund meets `charge_already_refunded`. Exactly
+   * one refund either way.
+   *
+   * @throws {LateWinRefundRefusedError} Stripe did not make the refund. It
+   *   is retried, and the caller alerts with Stripe's code, type and status.
+   */
+  async refundFirstPaymentAfterLateWin(
+    stripeDisputeId: string,
+    charge: ClawbackCharge,
+    environment: string
+  ): Promise<LateWinRefundStep> {
     try {
+      const lateWin = await this.lateWinPurchase(stripeDisputeId);
+      if (!lateWin) return 'none';
+      const { dispute, purchase } = lateWin;
+
+      const made = dispute.lateWinRefundId
+        ? { refundId: dispute.lateWinRefundId, status: null }
+        : await this.issueLateWinRefund(dispute, purchase, charge, environment);
+      if (!made) return 'none';
+      const { refundId } = made;
+
+      const listed = await this.recordChargeRefunds({
+        id: charge.id,
+        paymentIntentId: purchase.stripePaymentIntentId,
+      });
+      await this.restateLateWonRefunds(stripeDisputeId, purchase.id, charge.id);
+      const status = lateWinRefundStatus(listed, made);
+      if (!isSettledRefundStatus(status)) {
+        this.obs.info("Late win: the payment's refund is pending", {
+          disputeId: stripeDisputeId,
+          purchaseId: purchase.id,
+          refundId,
+          status,
+        });
+        return 'pending';
+      }
+      await this.clawBackPurchaseCharge(
+        purchase.stripePaymentIntentId,
+        charge,
+        { settlingDisputeId: stripeDisputeId }
+      );
+      if (status === 'canceled') {
+        // Settled, as a failed refund is, but the Failed refunds queue reads
+        // `failed` only: this alert is how support finds it (owner decision
+        // 2026-11-05). Stripe documents no way to cancel a card refund.
+        this.obs.error(
+          'Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand',
+          {
+            errorId: crypto.randomUUID(),
+            disputeId: stripeDisputeId,
+            purchaseId: purchase.id,
+            refundId,
+            status,
+          }
+        );
+        return 'done';
+      }
+      if (status === 'failed') {
+        // Settled, and clawed back above like any failed refund: Stripe
+        // returned the money to the platform (owner decision 2026-10-19,
+        // "Hold it for support"). The creators' share stays taken: support
+        // settles the buyer's refund in Failed refunds, which lists it, as
+        // refunded elsewhere, which keeps it ("creators re-paid" is refused
+        // for a late win's refund, owner decision 6). Only a `canceled` one
+        // takes nothing. The buyer got nothing either way, so it is alerted
+        // as `canceled` is, not logged as a refund made.
+        this.obs.error(
+          'Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds',
+          {
+            errorId: crypto.randomUUID(),
+            disputeId: stripeDisputeId,
+            purchaseId: purchase.id,
+            refundId,
+            status,
+          }
+        );
+        return 'done';
+      }
+      this.obs.info("Late win: the payment's refund is clawed back", {
+        disputeId: stripeDisputeId,
+        purchaseId: purchase.id,
+        refundId,
+      });
+      return 'done';
+    } catch (error) {
+      this.handleError(error, 'refundFirstPaymentAfterLateWin');
+    }
+  }
+
+  /**
+   * The late win being undone, and its purchase; undefined for any other
+   * dispute, or one with no purchase. Unlocked: the refund step's own writes
+   * are guarded where they are made.
+   */
+  private async lateWinPurchase(
+    stripeDisputeId: string
+  ): Promise<{ dispute: Dispute; purchase: Purchase } | undefined> {
+    const [dispute] = await this.db
+      .select()
+      .from(disputes)
+      .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+      .limit(1);
+    if (!dispute?.purchaseId || !isLateWinBeingUndone(dispute)) {
+      return undefined;
+    }
+    const [purchase] = await this.db
+      .select()
+      .from(purchases)
+      .where(eq(purchases.id, dispute.purchaseId))
+      .limit(1);
+    return purchase ? { dispute, purchase } : undefined;
+  }
+
+  /**
+   * Ask Stripe for the late win's refund of the payment, and write its id
+   * once (`late_win_refund_id IS NULL`). Undefined, and no refund, unless
+   * the loss refunded the payment (`refundedByTheLoss`). A refund Stripe does
+   * not make, refused or not, is a `LateWinRefundRefusedError`.
+   */
+  private async issueLateWinRefund(
+    dispute: Dispute,
+    purchase: Purchase,
+    charge: ClawbackCharge,
+    environment: string
+  ): Promise<Pick<IssueRefundResult, 'refundId' | 'status'> | undefined> {
+    if (!(await this.refundedByTheLoss(purchase, charge.id))) {
+      return undefined;
+    }
+    const { stripeDisputeId } = dispute;
+    let issued: IssueRefundResult;
+    try {
+      issued = await issueRefund(this.stripe, {
+        chargeId: charge.id,
+        reason: 'duplicate',
+        idempotencyKey: `late_win_refund_${stripeDisputeId}`,
+        environment,
+        metadata: { codex_late_win_dispute: stripeDisputeId },
+      });
+    } catch (error) {
+      throw new LateWinRefundRefusedError(
+        {
+          disputeId: stripeDisputeId,
+          purchaseId: purchase.id,
+          stripeCode: stripeErrorCode(error) ?? null,
+          ...stripeErrorKind(error),
+        },
+        { cause: error }
+      );
+    }
+    if (issued.refundId) {
       await this.db
         .update(disputes)
-        .set({ outcomeAppliedAt: new Date() })
+        .set({ lateWinRefundId: issued.refundId })
         .where(
           and(
             eq(disputes.stripeDisputeId, stripeDisputeId),
-            isNull(disputes.outcomeAppliedAt)
+            isNull(disputes.lateWinRefundId)
           )
         );
+    }
+    return issued;
+  }
+
+  /**
+   * Did the LOSS refund this payment? Only then does the late win owe it back:
+   * one refunded any other way already has its money (B's review of
+   * Codex-2hxff.70). All of:
+   *
+   * - it is refunded. A loss whose outcome was never marked (its later steps
+   *   failed, so `lost_applied_at` is null) refunded it all the same. A
+   *   duplicate the loss never got to is still pending at the late win, and
+   *   the hourly duplicate sweep refunds it. Once the sweep has, and before
+   *   its `charge.refunded` is recorded, it reads as refunded here too: the
+   *   late win's refund then finds the charge refunded in full
+   *   (`charge_already_refunded`, which `issueRefund` counts as done), so it
+   *   is refunded exactly once either way;
+   * - the refunds that stand on the charge do not cover what was paid. A
+   *   payment refunded in full before the chargeback was lost (the loss found
+   *   it refunded, and wrote nothing) has its money back already. One refunded
+   *   in part is owed what the loss took: the remainder, which is what the
+   *   refund asks for;
+   * - the buyer bought the item again: they hold it through another
+   *   completed purchase, one bought since. A duplicate payment never
+   *   granted the item, so it is refunded whether or not the purchase it
+   *   repeats still stands (owner decision 2026-11-08, "Refund it"): a buyer
+   *   whose original was refunded since holds nothing, and paid once.
+   */
+  private async refundedByTheLoss(
+    purchase: Purchase,
+    chargeId: string
+  ): Promise<boolean> {
+    if (purchase.status !== PURCHASE_STATUS.REFUNDED) return false;
+    const { refundAmountCents } = await this.standingRefundFields(
+      this.db,
+      purchase.id,
+      chargeId
+    );
+    if ((refundAmountCents ?? 0) >= purchase.amountPaidCents) return false;
+    if (isDuplicatePayment(purchase)) return true;
+    return this.keepsItemElsewhere(this.db, purchase);
+  }
+
+  /**
+   * A re-bought purchase's refund fields once the late win's refund is
+   * recorded: the refunds that still stand, it among them, as the restore
+   * restates them before it. In the late win's lock order; only while the
+   * undo is unfinished and the purchase refunded.
+   */
+  private async restateLateWonRefunds(
+    stripeDisputeId: string,
+    purchaseId: string,
+    chargeId: string
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      if (!(await lockedLateWin(tx, stripeDisputeId))) return;
+      const [purchase] = await tx
+        .select({ status: purchases.status })
+        .from(purchases)
+        .where(eq(purchases.id, purchaseId))
+        .for('update');
+      if (purchase?.status !== PURCHASE_STATUS.REFUNDED) return;
+      const standing = await this.standingRefundFields(
+        tx,
+        purchaseId,
+        chargeId
+      );
+      await tx
+        .update(purchases)
+        .set({ ...standing, updatedAt: new Date() })
+        .where(eq(purchases.id, purchaseId));
+    });
+  }
+
+  /**
+   * Claim the buyer's "access is back" email for a late win (late-win data
+   * design §7): true once, for the caller to send it; false on every later
+   * call. A conditional update before the send, so a redelivery or the
+   * reconcile never sends a second one, and a send that fails is not retried.
+   *
+   * The caller claims after marking the outcome, so an applied row may
+   * claim. One applied by hand under release step R18 never does: it keeps
+   * the loss's applied time, which is before its `late_won_at`, while the
+   * undo marks it after.
+   */
+  async claimLateWinBuyerEmail(stripeDisputeId: string): Promise<boolean> {
+    try {
+      const claimed = await this.db
+        .update(disputes)
+        .set({ buyerToldAt: new Date() })
+        .where(
+          and(
+            eq(disputes.stripeDisputeId, stripeDisputeId),
+            eq(disputes.status, 'won'),
+            isNotNull(disputes.lateWonAt),
+            isNull(disputes.buyerToldAt),
+            either(
+              isNull(disputes.outcomeAppliedAt),
+              gte(disputes.outcomeAppliedAt, disputes.lateWonAt)
+            )
+          )
+        )
+        // The whole row: `.returning({ id })` does not type-check on the
+        // `Database | DatabaseWs` union (TS2554), only on a transaction.
+        .returning();
+      return claimed.length > 0;
+    } catch (error) {
+      this.handleError(error, 'claimLateWinBuyerEmail');
+    }
+  }
+
+  /**
+   * The hourly reconcile's third source (late-win data design §5): our
+   * disputes that are lost, opened since `since` (12 months, Q3), and not
+   * touched since `updatedBefore` (a row written in the last minutes is the
+   * webhook's). Newest first, as Stripe lists disputes: past `limit`, the
+   * oldest wait. None means no Stripe read at all.
+   */
+  async findLostDisputesToRecheck(params: {
+    since: Date;
+    updatedBefore: Date;
+    limit: number;
+  }): Promise<Array<Pick<Dispute, 'stripeDisputeId' | 'stripeCreatedAt'>>> {
+    try {
+      return await this.db
+        .select({
+          stripeDisputeId: disputes.stripeDisputeId,
+          stripeCreatedAt: disputes.stripeCreatedAt,
+        })
+        .from(disputes)
+        .where(
+          and(
+            eq(disputes.status, 'lost'),
+            gte(disputes.stripeCreatedAt, params.since),
+            lt(disputes.updatedAt, params.updatedBefore)
+          )
+        )
+        .orderBy(desc(disputes.stripeCreatedAt), desc(disputes.stripeDisputeId))
+        .limit(params.limit);
+    } catch (error) {
+      this.handleError(error, 'findLostDisputesToRecheck');
+    }
+  }
+
+  /**
+   * A final status has been acted on: a redelivery stops at the record.
+   *
+   * Only while the dispute still has `status`, the one the caller acted on
+   * (late-win data design §4.8). A loss run that a late win overtook (the
+   * reconcile re-running an unfinished loss while the `won` event records
+   * the late win) would otherwise mark the LATE WIN applied mid-undo, and
+   * its restore, re-pay and refund would never run. `moved`: the dispute's
+   * status is no longer `status`, so nothing is marked and the step that
+   * now owns it marks it. `already_marked`: another run marked it first.
+   *
+   * Never earlier than a late win's `late_won_at`, whichever worker's clock
+   * runs the mark: the buyer's email claim reads an outcome applied before
+   * the late win as one settled by hand (R18) and refuses it.
+   */
+  async markDisputeOutcomeApplied(
+    stripeDisputeId: string,
+    acted: { status: (typeof DISPUTE_CLOSED_STATUSES)[number] }
+  ): Promise<'marked' | 'already_marked' | 'moved'> {
+    try {
+      const now = new Date();
+      const [marked] = await this.db
+        .update(disputes)
+        .set({
+          outcomeAppliedAt: sql`GREATEST(${now}, ${disputes.lateWonAt})`,
+        })
+        .where(
+          and(
+            eq(disputes.stripeDisputeId, stripeDisputeId),
+            eq(disputes.status, acted.status),
+            isNull(disputes.outcomeAppliedAt)
+          )
+        )
+        .returning();
+      if (marked) return 'marked';
+      const [current] = await this.db
+        .select({ status: disputes.status })
+        .from(disputes)
+        .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+        .limit(1);
+      return current && current.status !== acted.status
+        ? 'moved'
+        : 'already_marked';
     } catch (error) {
       this.handleError(error, 'markDisputeOutcomeApplied');
     }
@@ -3858,11 +4739,17 @@ export class PurchaseService extends BaseService {
   /**
    * The recorded state of these disputes, for the reconcile to compare with
    * Stripe's (Codex-2hxff.58). A dispute with no row is simply absent.
+   * `lateWonAt` marks a late win (Codex-2hxff.70).
    */
   async findDisputeRecords(
     stripeDisputeIds: string[]
   ): Promise<
-    Array<Pick<Dispute, 'stripeDisputeId' | 'status' | 'outcomeAppliedAt'>>
+    Array<
+      Pick<
+        Dispute,
+        'stripeDisputeId' | 'status' | 'outcomeAppliedAt' | 'lateWonAt'
+      >
+    >
   > {
     if (stripeDisputeIds.length === 0) return [];
     try {
@@ -3871,6 +4758,7 @@ export class PurchaseService extends BaseService {
           stripeDisputeId: disputes.stripeDisputeId,
           status: disputes.status,
           outcomeAppliedAt: disputes.outcomeAppliedAt,
+          lateWonAt: disputes.lateWonAt,
         })
         .from(disputes)
         .where(inArray(disputes.stripeDisputeId, stripeDisputeIds));

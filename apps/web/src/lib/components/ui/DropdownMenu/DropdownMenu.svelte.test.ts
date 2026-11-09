@@ -189,36 +189,54 @@ describe('DropdownMenu', () => {
     afterEach(() => {
       window.removeEventListener('focusin', record, true);
       visits.length = 0;
+      vi.restoreAllMocks();
     });
 
     // Window, capturing: focus-trap stops a stray focusin at the document.
-    function pressItem(testId: string) {
-      component = mount(DropdownMenuDialogHarness, { target: document.body });
+    function pressItem(testId: string, props: { forceVisible?: boolean } = {}) {
+      component = mount(DropdownMenuDialogHarness, {
+        target: document.body,
+        props,
+      });
       flushSync();
       window.addEventListener('focusin', record, true);
       document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.click();
       flushSync();
     }
     const trigger = () => document.querySelector('[data-testid="trigger"]');
-    const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+    const panel = () => document.querySelector('.dialog-content');
+    // Melt moves focus through chained sleep(1) timers, which a loaded
+    // machine stretches well past any fixed wait. What must HAPPEN is
+    // waited for; a fixed wait is only for what must NEVER happen, and
+    // starts once a positive anchor holds, not from the press.
+    const happens = (assertion: () => void) =>
+      vi.waitFor(assertion, { timeout: 2000 });
+    const lingers = () => new Promise((resolve) => setTimeout(resolve, 50));
 
     test('leaves focus in the dialog: the trigger never takes it', async () => {
       pressItem('opens-dialog');
       // A panel that scrolls as a whole, scrolled down as focus-trap left it.
-      const panel = document.querySelector<HTMLElement>('.dialog-content');
+      const dialog = document.querySelector<HTMLElement>('.dialog-content');
       let scrollTop = 166;
-      if (panel)
-        Object.defineProperty(panel, 'scrollTop', {
+      if (dialog)
+        Object.defineProperty(dialog, 'scrollTop', {
           configurable: true,
           get: () => scrollTop,
           set: (value: number) => {
             scrollTop = value;
           },
         });
-      await settle();
+      await happens(() => {
+        expect(dialog?.contains(document.activeElement)).toBe(true);
+        expect(scrollTop).toBe(0);
+      });
+      await lingers();
 
-      expect(panel?.contains(document.activeElement)).toBe(true);
+      expect(dialog?.contains(document.activeElement)).toBe(true);
       expect(visits).not.toContain(trigger());
+      // Pins openFocus (G4-U3), its one write to the stand-in. jsdom's
+      // focus() never scrolls, so a closeFocus regression fails `visits`
+      // above, not this (review c6).
       expect(scrollTop).toBe(0);
     });
 
@@ -232,19 +250,39 @@ describe('DropdownMenu', () => {
     // on it. Melt's roving answered a millisecond later by taking tabindex 0
     // from whatever had focus by then: the dialog's buttons (review c5).
     test('the pointer leaving the pressed item takes no tab stop from the dialog', async () => {
-      pressItem('opens-dialog');
+      // forceVisible, as in the app: the menu stays through its outro, inert,
+      // and a browser's focus() refuses an inert node. jsdom keeps Svelte's
+      // `inert` as a plain property and focuses anything, so here focus()
+      // refuses a node under one, as a browser does.
+      const focus = HTMLElement.prototype.focus;
+      const inert = (el: HTMLElement | null): boolean =>
+        !!el && (el.inert || inert(el.parentElement));
+      vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (
+        this: HTMLElement,
+        options?: FocusOptions
+      ) {
+        if (!inert(this)) focus.call(this, options);
+      });
+      pressItem('opens-dialog', { forceVisible: true });
       const item = document.querySelector('[data-testid="opens-dialog"]');
       item?.dispatchEvent(mouse('pointerleave'));
-      await settle();
-      // The menu has closed: a pointer still over what is left of it.
+      await happens(() =>
+        expect(panel()?.contains(document.activeElement)).toBe(true)
+      );
+      await lingers();
+      // The menu has closed: a pointer still over what is left of it,
+      // which its outro keeps in the DOM.
+      await happens(() =>
+        expect(trigger()?.getAttribute('aria-expanded')).toBe('false')
+      );
+      expect(item?.isConnected).toBe(true);
       item?.dispatchEvent(mouse('pointermove'));
-      await settle();
+      await lingers();
 
-      const panel = document.querySelector('.dialog-content');
       expect(
         document.querySelector<HTMLElement>('[data-testid="cancel"]')?.tabIndex
       ).toBe(0);
-      expect(panel?.contains(document.activeElement)).toBe(true);
+      expect(panel()?.contains(document.activeElement)).toBe(true);
       // Nothing behind the dialog took focus, even for a moment.
       expect(visits.filter((el) => el.closest('[role="menu"]'))).toEqual([]);
     });
@@ -267,7 +305,9 @@ describe('DropdownMenu', () => {
       // Closed before the unmount: a menu unmounted open closes late, in
       // the next test.
       item?.click();
-      await settle();
+      await happens(() =>
+        expect(trigger()?.getAttribute('aria-expanded')).toBe('false')
+      );
     });
 
     // A press that leaves the menu open: in the app, a menu reopened during
@@ -281,7 +321,9 @@ describe('DropdownMenu', () => {
       flushSync();
       const item = document.querySelector<HTMLElement>('[data-testid="plain"]');
       item?.click();
-      await settle();
+      // Left open: whatever the press set off in Melt has run by now.
+      await lingers();
+      expect(trigger()?.getAttribute('aria-expanded')).toBe('true');
 
       item?.dispatchEvent(mouse('pointermove'));
       item?.dispatchEvent(mouse('pointerleave'));
@@ -291,15 +333,43 @@ describe('DropdownMenu', () => {
       document.activeElement?.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
       );
-      await settle();
-      expect(trigger()?.getAttribute('aria-expanded')).toBe('false');
+      await happens(() =>
+        expect(trigger()?.getAttribute('aria-expanded')).toBe('false')
+      );
+    });
+
+    // The usual close in the app: focus on the item, where the menu's own
+    // focus trap keeps it. With forceVisible the leaving menu stays in the
+    // DOM, item focused, when closeFocus asks where focus is (review c6,
+    // Codex-q6qjb). The trap, live in jsdom, then pulls focus back onto
+    // the item, so the trigger's focus() is what is checked.
+    test('an item chosen by keyboard gives focus back to the trigger', async () => {
+      component = mount(DropdownMenuDialogHarness, {
+        target: document.body,
+        props: { forceVisible: true },
+      });
+      flushSync();
+      // Melt's own focus on open, a few timers later: into the menu.
+      await happens(() =>
+        expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull()
+      );
+      const item = document.querySelector<HTMLElement>('[data-testid="plain"]');
+      const button = trigger();
+      const focus =
+        button instanceof HTMLElement ? vi.spyOn(button, 'focus') : null;
+      item?.focus();
+      item?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+
+      await happens(() => expect(focus).toHaveBeenCalled());
+      expect(item?.isConnected).toBe(true);
     });
 
     test('an item that opens nothing gives focus back to the trigger', async () => {
       pressItem('plain');
-      await settle();
 
-      expect(document.activeElement).toBe(trigger());
+      await happens(() => expect(document.activeElement).toBe(trigger()));
     });
   });
 
@@ -372,6 +442,28 @@ describe('DropdownMenuTrigger', () => {
       document.querySelector('[data-testid="dropdown-content"]')
     );
   });
+
+  // The menu's aria-labelledby names the trigger's id, and Melt's keyboard
+  // open and a dialog's way back to this button find the menu through its
+  // aria-controls (review fu-focus-2, as Content's id in review c6).
+  test("keeps Melt's id and aria-controls whatever a page passes, so the menu and its button still name each other", () => {
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: {
+        open: true,
+        triggerAttrs: { id: 'page-trigger', 'aria-controls': 'page-menu' },
+      },
+    });
+
+    flushSync();
+
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    const content = document.querySelector('[data-testid="dropdown-content"]');
+    expect(trigger?.id).not.toBe('page-trigger');
+    expect(trigger?.getAttribute('aria-controls')).not.toBe('page-menu');
+    expect(trigger?.getAttribute('aria-controls')).toBe(content?.id);
+    expect(content?.getAttribute('aria-labelledby')).toBe(trigger?.id);
+  });
 });
 
 describe('DropdownMenuContent', () => {
@@ -402,6 +494,22 @@ describe('DropdownMenuContent', () => {
     expect(trigger).toBe(
       document.querySelector('[data-testid="dropdown-trigger"]')
     );
+  });
+
+  // The trigger's aria-controls, the close focus and a dialog's way back
+  // to the menu's button all find the menu by Melt's id (review c6).
+  test("keeps Melt's id whatever a page passes, so the trigger still names it", () => {
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true, contentAttrs: { id: 'page-id' } },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('[data-testid="dropdown-content"]');
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    expect(content?.id).not.toBe('page-id');
+    expect(content?.id).toBe(trigger?.getAttribute('aria-controls'));
   });
 
   test('is focusable via tabindex="-1"', () => {

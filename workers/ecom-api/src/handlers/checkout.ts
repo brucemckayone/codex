@@ -47,6 +47,7 @@ import {
   isTransientError,
   settleAfterCommit,
 } from '../utils/error-classification';
+import { purchaseItemUrl, webAppOrigin } from '../utils/item-link';
 
 /** What completing a session asks of the PurchaseService. */
 type CompletionPurchaseService = Pick<
@@ -55,6 +56,7 @@ type CompletionPurchaseService = Pick<
   | 'completeCoursePurchase'
   | 'markCheckoutSessionCompleted'
   | 'claimReceipt'
+  | 'findItemLink'
 >;
 
 export interface CheckoutCompletionDeps {
@@ -114,7 +116,8 @@ interface Sale {
     payment: { charge: PaymentIntentCharge; paidAt?: Date; offerAt?: Date }
   ): Promise<Purchase>;
   logs: { duplicate: string; completed: string };
-  receipt: { title: string; path: string };
+  /** The receipt's title. Its link is the purchase's (`purchaseItemUrl`). */
+  receipt: { title: string };
 }
 
 /**
@@ -365,24 +368,39 @@ export async function completeCheckoutSession(
     // Send purchase receipt email (fire-and-forget), once per purchase.
     const customerEmail = session.customer_details?.email;
     const customerName = session.customer_details?.name || 'there';
-    if (
-      customerEmail &&
-      (await claimReceipt(purchaseService, purchase.id, obs))
-    ) {
-      sendEmailToWorker(deps.env, deps.executionCtx, {
-        to: customerEmail,
-        toName: customerName,
-        templateName: 'purchase-receipt',
-        category: 'transactional',
-        userId: sale.customerId,
-        data: {
-          userName: customerName,
-          contentTitle: sale.receipt.title,
-          priceFormatted: `£${(sale.amountCents / 100).toFixed(2)}`,
-          purchaseDate: new Date().toLocaleDateString('en-GB'),
-          contentUrl: `${deps.env.WEB_APP_URL || ''}${sale.receipt.path}`,
-        },
-      });
+    const webApp = customerEmail
+      ? receiptWebApp(deps.env, purchase.id, obs)
+      : null;
+    if (customerEmail && webApp) {
+      // The item's own page (Codex-0u7kb), or the library when it has none.
+      // Read BEFORE the claim: once the claim commits, nothing may be awaited
+      // until sendEmailToWorker hands the send to waitUntil. A request
+      // cancelled in that gap (Stripe timing out, the buyer leaving the
+      // success page) spends the claim with nothing sent, and every
+      // redelivery finds it claimed. The price is one read per delivery, not
+      // per purchase. It never rejects.
+      const contentUrl = await purchaseItemUrl(
+        purchaseService,
+        purchase.id,
+        webApp,
+        obs
+      );
+      if (await claimReceipt(purchaseService, purchase.id, obs)) {
+        sendEmailToWorker(deps.env, deps.executionCtx, {
+          to: customerEmail,
+          toName: customerName,
+          templateName: 'purchase-receipt',
+          category: 'transactional',
+          userId: sale.customerId,
+          data: {
+            userName: customerName,
+            contentTitle: sale.receipt.title,
+            priceFormatted: `£${(sale.amountCents / 100).toFixed(2)}`,
+            purchaseDate: new Date().toLocaleDateString('en-GB'),
+            contentUrl,
+          },
+        });
+      }
     }
     return { kind: 'completed', purchase, failure };
   });
@@ -456,7 +474,6 @@ function readSale(
       // Resolve content title from metadata or use fallback
       title:
         metadata?.contentTitle || metadata?.contentName || 'Content purchase',
-      path: `/content/${validated.contentId}`,
     },
   };
 }
@@ -516,7 +533,6 @@ function readCourseSale(
     },
     receipt: {
       title: metadata.courseTitle || 'Course purchase',
-      path: `/courses/${metadata.courseId}`,
     },
   };
 }
@@ -540,6 +556,27 @@ async function recordSessionPaid(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/**
+ * The web app's origin for the receipt's link (Codex-0u7kb). Without it the
+ * link was relative, which notifications-api refuses (`contentUrl` must be a
+ * URL), so no receipt arrived, and the mailer's refusal named no purchase.
+ * Alerted with ids; the receipt is not claimed, so nothing is used up.
+ */
+function receiptWebApp(
+  env: Bindings,
+  purchaseId: string,
+  obs: ObservabilityClient | undefined
+): URL | null {
+  const webApp = webAppOrigin(env.WEB_APP_URL);
+  if (!webApp) {
+    obs?.error(
+      'WEB_APP_URL is unset or not a URL: the purchase receipt has no working link, so it was not sent',
+      { errorId: crypto.randomUUID(), purchaseId }
+    );
+  }
+  return webApp;
 }
 
 /**

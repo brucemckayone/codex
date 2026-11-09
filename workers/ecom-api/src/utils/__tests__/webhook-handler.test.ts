@@ -10,9 +10,11 @@
  * - Successful handling → 200 with { received: true }
  */
 
+import { LateWinRefundRefusedError, WinSettlingError } from '@codex/purchase';
 import {
   BaseService,
   NotFoundError,
+  ServiceUnavailableError,
   UnsupportedCurrencyError,
 } from '@codex/service-errors';
 import { createMockHonoContext, type MockHonoContext } from '@codex/test-utils';
@@ -116,6 +118,96 @@ describe('createWebhookHandler', () => {
         expect.stringContaining('transient error'),
         expect.anything()
       );
+    });
+
+    it("a late win's refund Stripe did not make → 500, with no second alert: its own step alerted it once already (Codex-2hxff.70)", async () => {
+      const handler = createWebhookHandler('Test', async () => {
+        throw new LateWinRefundRefusedError(
+          {
+            disputeId: 'dp_late',
+            purchaseId: 'purchase_late',
+            stripeCode: 'balance_insufficient',
+            stripeType: 'StripeInvalidRequestError',
+            stripeStatusCode: 400,
+          },
+          { cause: new Error('Insufficient platform balance (test)') }
+        );
+      });
+      const { context, mock } = createContext();
+      let responseStatus: number | undefined;
+      (mock as unknown as Record<string, unknown>).json = vi
+        .fn()
+        .mockImplementation((_body: unknown, status?: number) => {
+          responseStatus = status;
+          return new Response(JSON.stringify(_body), { status: status ?? 200 });
+        });
+
+      await handler(context);
+
+      // Still a 500: Stripe redelivers, and the reconcile retries hourly.
+      expect(responseStatus).toBe(500);
+      expect(mock._obs.error).not.toHaveBeenCalled();
+    });
+
+    /** The handler's response status, captured. */
+    function captureStatus(
+      mock: MockHonoContext<StripeWebhookEnv['Bindings']>
+    ): () => number | undefined {
+      let responseStatus: number | undefined;
+      (mock as unknown as Record<string, unknown>).json = vi
+        .fn()
+        .mockImplementation((_body: unknown, status?: number) => {
+          responseStatus = status;
+          return new Response(JSON.stringify(_body), { status: status ?? 200 });
+        });
+      return () => responseStatus;
+    }
+
+    it("a refund's clawback waiting for a won chargeback to settle → 500, one warn with ids, no error: waiting is not a fault (Codex-2hxff.70, §11)", async () => {
+      const handler = createWebhookHandler('Payment', async () => {
+        throw new WinSettlingError({
+          chargeId: 'ch_wait',
+          disputeId: 'dp_wait',
+        });
+      });
+      const { context, mock } = createContext();
+      const status = captureStatus(mock);
+
+      await handler(context);
+
+      // Still a 500, so Stripe redelivers until the win settles.
+      expect(status()).toBe(500);
+      expect(mock._obs.error).not.toHaveBeenCalled();
+      expect(mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+        "A refund's clawback waits for a won chargeback on its charge to settle; Stripe redelivers the event",
+        {
+          chargeId: 'ch_wait',
+          disputeId: 'dp_wait',
+          eventType: 'test.event',
+          eventId: 'evt_test_1',
+        }
+      );
+    });
+
+    it('any other "not yet" is still alerted at error: only the settling wait is a warn', async () => {
+      const handler = createWebhookHandler('Payment', async () => {
+        throw new ServiceUnavailableError('another delivery holds it (test)');
+      });
+      const { context, mock } = createContext();
+      const status = captureStatus(mock);
+
+      await handler(context);
+
+      expect(status()).toBe(500);
+      expect(mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+        'Payment webhook transient error (will retry)',
+        expect.objectContaining({
+          error: 'another delivery holds it (test)',
+          eventType: 'test.event',
+          eventId: 'evt_test_1',
+        })
+      );
+      expect(mock._obs.warn).not.toHaveBeenCalled();
     });
   });
 

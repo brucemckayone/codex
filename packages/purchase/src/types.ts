@@ -288,3 +288,74 @@ export interface CheckoutSessionVerifyResult {
    */
   duplicatePayment?: true;
 }
+
+/**
+ * What the late-win undo did for the buyer of a purchase or a course
+ * (Codex-2hxff.70; late-win data design §4.2). `restored` is the only
+ * outcome that emails the buyer; the others say why access needed nothing:
+ * they bought it again, the payment was a duplicate, a refund still stands,
+ * or another dispute still holds the purchase.
+ */
+export type LateWinRestoreOutcome =
+  | 'restored'
+  | 'rebought'
+  | 'duplicate'
+  | 'still_refunded'
+  | 'dispute_holds';
+
+/** What `PurchaseService.restoreAfterLateWin` did, for the caller's effects. */
+export interface LateWinRestore {
+  outcome: LateWinRestoreOutcome;
+  /** The buyer, for the library bump and, on `restored`, the streaming block. */
+  userId: string;
+  orgId: string | null;
+  purchaseId: string;
+  /**
+   * The `purchase-access-restored` email's facts, on `restored` only; null
+   * otherwise. `paidAt` is the purchase date (ISO). Its link is the caller's
+   * to read, by `purchaseId` (`findItemLink`, as the receipt's is).
+   */
+  email: {
+    contentTitle: string;
+    amountCents: number;
+    paidAt: string;
+    isCourse: boolean;
+  } | null;
+}
+
+/**
+ * The late win's refund of a buyer's first payment, when they had bought
+ * the item again (Q1; design §4.5): none needed, made and waiting for
+ * Stripe, or done.
+ */
+export type LateWinRefundStep = 'none' | 'pending' | 'done';
+
+/**
+ * Where a purchase's item lives on the web app, as the URL builders need it
+ * (`PurchaseService.findItemLink`, Codex-0u7kb). The pages look an item up by
+ * its slug, so the slug is always the real one, never the id.
+ *
+ * - `org_content`: on its org's subdomain, `/content/{slug}`.
+ * - `personal_content`: no org; on the creators host,
+ *   `/@{creatorUsername}/content/{slug}`.
+ * - `course`: on its org's subdomain, `/journeys/{slug}/…`.
+ */
+export type PurchaseItemLink =
+  | {
+      kind: 'org_content';
+      contentId: string;
+      slug: string;
+      organizationSlug: string;
+    }
+  | {
+      kind: 'personal_content';
+      contentId: string;
+      slug: string;
+      creatorUsername: string;
+    }
+  | {
+      kind: 'course';
+      courseId: string;
+      slug: string;
+      organizationSlug: string;
+    };

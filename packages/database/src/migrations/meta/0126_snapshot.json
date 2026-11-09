@@ -1,5 +1,5 @@
 {
-  "id": "de605505-9e7f-4997-8a5f-56a64ee0e28b",
+  "id": "522d2a86-9a8a-4cb7-b441-8ffeab0538fd",
   "prevId": "fd0278c9-7ab4-428a-b3c7-701e66e41b6f",
   "version": "7",
   "dialect": "postgresql",
@@ -1090,18 +1090,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "publish_requested_at": {
-          "name": "publish_requested_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "publish_blocked_reason": {
-          "name": "publish_blocked_reason",
-          "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": false
-        },
         "featured": {
           "name": "featured",
           "type": "boolean",
@@ -1344,22 +1332,6 @@
           ],
           "isUnique": false,
           "where": "\"content\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_content_publish_requested_media": {
-          "name": "idx_content_publish_requested_media",
-          "columns": [
-            {
-              "expression": "media_item_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"content\".\"publish_requested_at\" IS NOT NULL AND \"content\".\"deleted_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3229,6 +3201,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "late_won_at": {
+          "name": "late_won_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lost_applied_at": {
+          "name": "lost_applied_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "late_win_refund_id": {
+          "name": "late_win_refund_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "buyer_told_at": {
+          "name": "buyer_told_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3377,6 +3373,18 @@
         "check_disputes_status": {
           "name": "check_disputes_status",
           "value": "\"disputes\".\"status\" IN ('warning_needs_response', 'warning_under_review', 'warning_closed', 'needs_response', 'under_review', 'won', 'lost', 'prevented')"
+        },
+        "check_disputes_late_won_status": {
+          "name": "check_disputes_late_won_status",
+          "value": "\"disputes\".\"late_won_at\" IS NULL OR \"disputes\".\"status\" = 'won'"
+        },
+        "check_disputes_late_win_refund": {
+          "name": "check_disputes_late_win_refund",
+          "value": "\"disputes\".\"late_win_refund_id\" IS NULL OR \"disputes\".\"late_won_at\" IS NOT NULL"
+        },
+        "check_disputes_lost_applied": {
+          "name": "check_disputes_lost_applied",
+          "value": "\"disputes\".\"lost_applied_at\" IS NULL OR \"disputes\".\"late_won_at\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false

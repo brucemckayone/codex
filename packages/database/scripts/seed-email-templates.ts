@@ -269,6 +269,16 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     status: 'active' as const,
     description: 'Sent when a refund is processed',
   },
+  {
+    name: 'purchase-access-restored',
+    scope: 'global' as const,
+    subject: 'Your access is back - {{platformName}}',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f9f9f9;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #eee}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>Your access is back</h1><p>Hi {{userName}},</p><p>Your bank has confirmed your payment for <strong>{{contentTitle}}</strong>, {{accessSentence}}</p><div class="details"><p style="margin:5px 0;"><strong>Item:</strong> {{contentTitle}}</p><p style="margin:5px 0;"><strong>Amount:</strong> {{amount}}</p><p style="margin:5px 0;"><strong>Paid:</strong> {{paidOn}}</p></div><p style="text-align:center;margin:30px 0;"><a href="{{itemUrl}}" class="button" style="color:white;">{{buttonLabel}}</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\nYour bank has confirmed your payment for {{contentTitle}}, {{accessSentence}}\n\nItem: {{contentTitle}}\nAmount: {{amount}}\nPaid: {{paidOn}}\n\n{{buttonLabel}}: {{itemUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent once to a buyer when a chargeback that was lost is won later and their purchase or course comes back (Codex-2hxff.70, Q5). It says the bank confirmed the payment, never that the buyer disputed it. The sender composes accessSentence and buttonLabel: the template has no conditionals.',
+  },
   // ============ Organization (P1) ============
   {
     name: 'org-member-invitation',

@@ -226,7 +226,19 @@ describe('planClawback equals what reverseCharge records', () => {
       .set({ status: 'won' })
       .where(eq(disputes.stripeDisputeId, disputeId));
     await repayDispute(deps, { disputeId });
+    await applyOutcome(disputeId);
     return { charge, creator, repay: await repayOf(creator.id) };
+  }
+
+  /**
+   * The won dispute's outcome applied, as `settleWonDispute` applies it after
+   * the re-pay. Until then a refund's clawback waits (Codex-2hxff.70).
+   */
+  async function applyOutcome(disputeId: string) {
+    await db
+      .update(disputes)
+      .set({ outcomeAppliedAt: new Date() })
+      .where(eq(disputes.stripeDisputeId, disputeId));
   }
 
   async function repayOf(sliceId: string): Promise<Payout> {
@@ -484,6 +496,7 @@ describe('planClawback equals what reverseCharge records', () => {
       .set({ status: 'won' })
       .where(eq(disputes.stripeDisputeId, disputeId));
     await repayDispute(deps, { disputeId });
+    await applyOutcome(disputeId);
     vi.mocked(stripe.transfers.createReversal).mockRejectedValueOnce(
       Object.assign(new Error('fully reversed'), {
         code: 'parameter_invalid',
