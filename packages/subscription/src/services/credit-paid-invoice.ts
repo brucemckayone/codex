@@ -28,8 +28,9 @@ import type Stripe from 'stripe';
 export const CREDIT_ALERTED_KEY = 'codex_credit_alerted';
 
 /**
- * Invoice metadata: when the alert that a cancelled duplicate's credit was
- * not given back went out (ISO time, Codex-2hxff.98). Its own mark: the
+ * Invoice metadata: when the alert that a cancelled duplicate's or revived
+ * subscription's credit was not given back went out (ISO time,
+ * Codex-2hxff.98). Its own mark: the
  * payment handler's credit-paid alert marks the same invoice first, on the
  * same event, so sharing `CREDIT_ALERTED_KEY` would silence this one.
  */
@@ -122,7 +123,7 @@ export async function alertCreditNotReturned(
 
   await alertOncePerInvoice(deps, invoiceId, CREDIT_NOT_RETURNED_KEY, () =>
     deps.obs.error(
-      "Customer credit paid a cancelled duplicate's invoice: only the card part was refunded, and support must restore the credit by hand",
+      "Customer credit paid a cancelled subscription's invoice (a duplicate, or an old one revived beside a newer one): only the card part was refunded, and support must restore the credit by hand",
       {
         errorId: crypto.randomUUID(),
         invoiceId,

@@ -177,7 +177,7 @@ describe('alertCreditNotReturned (Codex-2hxff.98)', () => {
     cause: 'duplicate' as const,
   };
   const NOT_RETURNED = expect.stringContaining(
-    "Customer credit paid a cancelled duplicate's invoice"
+    "Customer credit paid a cancelled subscription's invoice"
   );
 
   it('credit paid part of it: one alert naming the credit kept and the card part refunded, then its own mark', async () => {
