@@ -727,6 +727,24 @@ export function darkTokenOverridesToCssVars(
 }
 
 /**
+ * The org's token overrides, light and dark, as the org layout's
+ * server-rendered inline style (Codex-wcwpw, Codex-wwedk). Every entry is one
+ * of the two mappers above's, and nothing else, so the style carries exactly
+ * what they emit. `undefined` when neither emits a property.
+ */
+export function tokenOverrideStyle(
+  light: Record<string, string | null | undefined> | null,
+  dark: Record<string, string | null | undefined> | null
+): string | undefined {
+  const entries = Object.entries({
+    ...(light ? tokenOverridesToCssVars(light) : {}),
+    ...(dark ? darkTokenOverridesToCssVars(dark) : {}),
+  });
+  if (entries.length === 0) return undefined;
+  return entries.map(([prop, value]) => `${prop}: ${value}`).join('; ');
+}
+
+/**
  * Codex-wwedk: server-side render dark token overrides as CSS vars on the
  * given element. Counterpart to injectTokenOverrides for the dark theme.
  */

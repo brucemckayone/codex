@@ -98,7 +98,11 @@ account's payout schedule; creators cannot change it.
   flagged in `connect_balances` (switched), least recently checked first and
   any on a failing streak last, at most 1,000 a run (`BANK_PAYOUT_ACCOUNT_LIMIT`,
   sized to the invocation's 10,000-subrequest budget, which the wake's other
-  sweeps share: the arithmetic is beside the constant). Reaching it is an error
+  sweeps share: the arithmetic is beside the constant). The dispute reconcile's
+  late-win check (`Codex-2hxff.70`, ≲125 a run: 3 list pages and at most 10
+  undos of about 12 each) skips this run, as the price moves do, so neither
+  counts against it; on every other run it sits beside the price moves' 8,500,
+  about 8,625 in all. Reaching it is an error
   alert with the flagged count, and the rest go first the next morning. If
   Cloudflare's "Too many subrequests" comes first (many transfer pages, say),
   the run stops at it with one error alert naming the accounts done and left,

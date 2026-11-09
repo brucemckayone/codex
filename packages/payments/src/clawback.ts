@@ -63,6 +63,7 @@ import {
   lateTransferOf,
   PAYOUT_ATTEMPT_LEASE_MINUTES,
 } from './payout-ledger';
+import { settlingWinSql, WinSettlingError } from './settling-win';
 
 interface ClawbackLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
@@ -510,6 +511,10 @@ type StepResult = { failure?: unknown };
  * is a `ServiceUnavailableError`, which is transient too. A step Stripe
  * refused is left `failed` without rejecting (see `reverseTransfer`); the
  * hourly retry takes it.
+ *
+ * It waits, with a `WinSettlingError` (a `ServiceUnavailableError`), while
+ * a chargeback on the charge is won and not yet applied
+ * (`waitForWinToSettle`), unless the caller is that win's own settlement.
  */
 export async function reverseCharge(
   deps: ClawbackDeps,
@@ -524,6 +529,12 @@ export async function reverseCharge(
     refunds:
       | readonly ClawbackRefund[]
       | (() => Promise<readonly ClawbackRefund[]>);
+    /**
+     * The won dispute this call settles: its re-pay's own clawback, or the
+     * late win's refund of a first payment (Codex-2hxff.70). It does not
+     * wait for itself.
+     */
+    settlingDisputeId?: string;
   }
 ): Promise<void> {
   const { charge, source } = input;
@@ -537,6 +548,9 @@ export async function reverseCharge(
     deps.db,
     typeof input.refunds === 'function' ? await input.refunds() : input.refunds
   );
+  if (refunds.length > 0) {
+    await waitForWinToSettle(deps.db, charge.id, input.settlingDisputeId);
+  }
   const chargebacks = await chargebacksFor(deps.db, charge.id);
   if (refunds.length === 0 && chargebacks.length === 0) return;
   assertChargeAmount(charge);
@@ -568,6 +582,43 @@ export async function reverseCharge(
           failures.length === 1 ? failures[0] : new AggregateError(failures),
       }
     );
+  }
+}
+
+/**
+ * A refund is not clawed back while a chargeback on its charge is won and its
+ * outcome not yet applied (`isSettlingWin`; late-win data design §4.7). The
+ * win's re-pay must run first: refunds are shared before chargebacks
+ * (`inClawbackOrder`), so a refund clawed back while the dispute's steps
+ * still stand, nothing re-paid, would take each share a second time. After
+ * the re-pay it comes off the re-pay rows (`clawBackRepaidShare`). A late
+ * win's undo can take an hour or more (its own refund may be pending at
+ * Stripe), and a normal win has the same short window.
+ *
+ * A `WinSettlingError`, a `ServiceUnavailableError`: Stripe redelivers, and
+ * the hourly retry tries again; the webhook logs it at warn, since waiting
+ * is not a fault. The win's own settlement names its dispute and is let
+ * through.
+ */
+async function waitForWinToSettle(
+  db: Client,
+  chargeId: string,
+  settlingDisputeId: string | undefined
+): Promise<void> {
+  const conditions: SQL[] = [
+    eq(disputes.stripeChargeId, chargeId),
+    settlingWinSql(),
+  ];
+  if (settlingDisputeId) {
+    conditions.push(ne(disputes.stripeDisputeId, settlingDisputeId));
+  }
+  const [settling] = await db
+    .select({ id: disputes.stripeDisputeId })
+    .from(disputes)
+    .where(and(...conditions))
+    .limit(1);
+  if (settling) {
+    throw new WinSettlingError({ chargeId, disputeId: settling.id });
   }
 }
 
@@ -1902,17 +1953,37 @@ export async function retryFailedClawbacks(
       retried++;
     } catch (error) {
       stillFailing++;
-      deps.obs.error(
-        'Retrying a failed clawback failed; the next run tries again',
-        {
-          errorId: crypto.randomUUID(),
-          chargeId: target.chargeId,
-          error: error instanceof Error ? error.message : String(error),
-        }
-      );
+      logRetryFailed(deps.obs, target.chargeId, error);
     }
   }
   return { charges: targets.length, retried, stillFailing };
+}
+
+/**
+ * A charge whose failed steps the hourly retry could not finish, still
+ * failing. A refund's clawback waiting for a won chargeback on the charge to
+ * settle (`WinSettlingError`) is not a fault (late-win data design §11): its
+ * step's attempt and age do not move, so an alert would repeat every hour
+ * until the win's outcome is marked. It is a warn with ids, no errorId. Any
+ * other failure is alerted at error.
+ */
+function logRetryFailed(
+  obs: ClawbackLogger,
+  chargeId: string,
+  error: unknown
+): void {
+  if (error instanceof WinSettlingError) {
+    obs.warn(
+      'Retrying a failed clawback waits for a won chargeback on its charge to settle; the next run tries again',
+      { chargeId, disputeId: error.context?.disputeId ?? null }
+    );
+    return;
+  }
+  obs.error('Retrying a failed clawback failed; the next run tries again', {
+    errorId: crypto.randomUUID(),
+    chargeId,
+    error: error instanceof Error ? error.message : String(error),
+  });
 }
 
 /**

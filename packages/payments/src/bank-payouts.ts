@@ -1298,7 +1298,9 @@ export const BANK_PAYOUT_FAILING_ALERT_DAYS = 3;
  * count. The same wake's other sweeps first take at most about 4,000
  * (disputes 50, the drain's 50 payees and their transfers, owed duplicates
  * 50, course off-sale 200, clawback retries 100, each a few calls plus
- * retries), which leaves 6,000. One account is about 6: the balance 1, one
+ * retries), which leaves 6,000. The reconcile's late-win check (≲125 a run,
+ * Codex-2hxff.70) and the price moves skip this run, so neither counts
+ * here. One account is about 6: the balance 1, one
  * page of transfers 1, a payout per pot 1, two Studio-cache invalidations
  * 2, and 1 for a retry. 6,000 / 6 = 1,000. Reaching it is an error alert:
  * the budget needs raising (`limits.subrequests`) before accounts wait days.

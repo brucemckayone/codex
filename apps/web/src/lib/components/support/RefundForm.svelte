@@ -21,8 +21,9 @@
   CHARGE_CHANGED if it moved) and is guarded against a double click: one call
   per submit. The server's idempotency key makes a repeat harmless anyway.
 
-  A blocked charge (window closed, a chargeback, nothing left) shows the
-  reason in place of the form; the server refuses all three too.
+  A blocked charge (refunded outside Stripe, window closed, a chargeback, a
+  won chargeback still paying the creators back, nothing left) shows the
+  reason in place of the form; the server refuses all five too.
 
   A preview the route REFUSES (a 4xx: the amount no longer fits, nothing is
   left) means the charge moved since it loaded, so trying again can never
@@ -43,7 +44,7 @@
   @prop {() => void} [onStale] - Reload the charge: the preview was refused.
 -->
 <script lang="ts">
-  import type { ChargeDetail, RefundPreviewLine } from '@codex/admin';
+  import type { ChargeDetail, RefundBlock, RefundPreviewLine } from '@codex/admin';
   import { tick, untrack } from 'svelte';
   import {
     DISPUTE_CHARGEBACK_OPEN_STATUSES,
@@ -364,6 +365,82 @@
       )
   );
 
+  /**
+   * What a blocked charge shows in place of the form, one alert per reason.
+   * Exhaustive, so a new reason can never fall through to the form.
+   */
+  function blockedAlert(block: RefundBlock): {
+    variant: 'warning' | 'error' | 'info';
+    lead: string | null;
+    body: string;
+  } {
+    switch (block) {
+      // Settled by hand: the buyer was refunded another way, so a refund
+      // here would pay them twice (owner decision 2026-11-08).
+      case 'refunded_outside_stripe': {
+        const on = detail.refundable.refundedOutsideStripeOn;
+        return {
+          variant: 'warning',
+          lead: on
+            ? m.support_blocked_refunded_outside_stripe_lead({ date: formatDay(on) })
+            : m.support_outcome_refunded_outside_stripe_lead(),
+          body: m.support_blocked_refunded_outside_stripe_body(),
+        };
+      }
+      case 'window_closed':
+        return {
+          variant: 'warning',
+          lead: m.support_blocked_lead(),
+          body: m.support_blocked_window({
+            date: formatDay(detail.window.closesAt),
+            time: formatTime(detail.window.closesAt),
+          }),
+        };
+      case 'chargeback':
+        return {
+          variant: 'error',
+          lead: chargebackLost
+            ? m.support_blocked_chargeback_lost_lead()
+            : m.support_blocked_chargeback_open_lead(),
+          body: m.support_blocked_chargeback_body(),
+        };
+      // A won chargeback's pay-back is still running (Codex-2hxff.70, late-win
+      // design §6): the refusal clears by itself, so it informs.
+      case 'chargeback_settling':
+        return {
+          variant: 'info',
+          lead: m.support_blocked_chargeback_settling_lead(),
+          body: m.support_blocked_chargeback_settling_body(),
+        };
+      case 'nothing_left':
+        return { variant: 'info', lead: null, body: m.support_blocked_nothing() };
+      default: {
+        // strictNullChecks is off here, so only this makes a missed reason fail svelte-check.
+        const unhandled: never = block;
+        return unhandled;
+      }
+    }
+  }
+
+  /**
+   * What the form can refund, and until when. A window a late-won chargeback
+   * lifted (owner Q7) has no end, and its `closesAt` has passed: no date.
+   */
+  const refundableText = $derived.by(() => {
+    const amount = formatPrice(maxCents);
+    const partly = detail.charge.refundedCents > 0;
+    if (detail.window.liftedByLateWin) {
+      return partly
+        ? m.support_form_left_lifted({ amount })
+        : m.support_form_can_lifted({ amount });
+    }
+    return (partly ? m.support_form_left : m.support_form_can)({
+      amount,
+      date: formatDay(detail.window.closesAt),
+      time: formatTime(detail.window.closesAt),
+    });
+  });
+
   function capitalise(text: string): string {
     return text.charAt(0).toUpperCase() + text.slice(1);
   }
@@ -467,40 +544,17 @@
   <Card.Header>
     <Card.Title level={2}>{m.support_form_title()}</Card.Title>
     {#if !detail.refundable.blocked}
-      <Card.Description>
-        {(detail.charge.refundedCents > 0 ? m.support_form_left : m.support_form_can)({
-          amount: formatPrice(maxCents),
-          date: formatDay(detail.window.closesAt),
-          time: formatTime(detail.window.closesAt),
-        })}
-      </Card.Description>
+      <Card.Description>{refundableText}</Card.Description>
     {/if}
   </Card.Header>
   <Card.Content>
-    {#if detail.refundable.blocked === 'window_closed'}
-      <Alert variant="warning" data-testid="refund-blocked" data-reason="window_closed">
+    {#if detail.refundable.blocked}
+      {@const alert = blockedAlert(detail.refundable.blocked)}
+      <Alert variant={alert.variant} data-testid="refund-blocked" data-reason={detail.refundable.blocked}>
         <p>
-          <strong>{m.support_blocked_lead()}</strong>
-          {m.support_blocked_window({
-            date: formatDay(detail.window.closesAt),
-            time: formatTime(detail.window.closesAt),
-          })}
+          {#if alert.lead}<strong>{alert.lead}</strong>{/if}
+          {alert.body}
         </p>
-      </Alert>
-    {:else if detail.refundable.blocked === 'chargeback'}
-      <Alert variant="error" data-testid="refund-blocked" data-reason="chargeback">
-        <p>
-          <strong>
-            {chargebackLost
-              ? m.support_blocked_chargeback_lost_lead()
-              : m.support_blocked_chargeback_open_lead()}
-          </strong>
-          {m.support_blocked_chargeback_body()}
-        </p>
-      </Alert>
-    {:else if detail.refundable.blocked === 'nothing_left'}
-      <Alert variant="info" data-testid="refund-blocked" data-reason="nothing_left">
-        <p>{m.support_blocked_nothing()}</p>
       </Alert>
     {:else}
       <div class="refund-form">

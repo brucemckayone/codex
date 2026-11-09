@@ -23,6 +23,7 @@ export type PayoutGroup = {
    */
   latestAt: string;
   rows: PayoutWithCreator[];
+  /** What the charge was: its pay-back rows are left out (below). */
   totalCents: number;
 };
 
@@ -78,6 +79,11 @@ export function groupKeyOf(row: PayoutWithCreator): string {
  * `totalCents` is only ever shown by the page when `rows.length > 1` — a
  * "transaction total" that sums a single line is a figure the operator cannot
  * check against anything.
+ *
+ * A won chargeback's pay-back (`paysBack`) keeps the sale's purchase id, so it
+ * joins the sale's group, but it pays back money the sale already counted:
+ * it is listed and left out of the total, so a £24.00 sale reads £24.00, not
+ * £45.60 (Codex-2hxff.70, late-win design Q4, mockup P1).
  */
 export function groupTransactions(
   items: readonly PayoutWithCreator[]
@@ -101,7 +107,7 @@ export function groupTransactions(
       map.set(key, g);
     }
     g.rows.push(row);
-    g.totalCents += row.amountCents;
+    if (!row.paysBack) g.totalCents += row.amountCents;
     // The subscriber denorm comes from payouts → subscriptions → users, so a
     // purchase-sourced row can never resolve one and only some siblings carry
     // it. Take the first non-null across the group rather than whichever row

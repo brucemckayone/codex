@@ -213,6 +213,23 @@
             mono: null,
             reload: false,
           };
+        case 'chargeback_settling':
+          return {
+            variant: 'info',
+            lead: m.support_blocked_chargeback_settling_lead(),
+            body: m.support_blocked_chargeback_settling_body(),
+            mono: null,
+            reload: false,
+          };
+        // The page reloads the charge (`reloadsCharge`), whose form then says when.
+        case 'refunded_outside_stripe':
+          return {
+            variant: 'warning',
+            lead: m.support_outcome_refunded_outside_stripe_lead(),
+            body: m.support_blocked_refunded_outside_stripe_body(),
+            mono: null,
+            reload: false,
+          };
         case 'nothing_left':
           return {
             variant: 'info',

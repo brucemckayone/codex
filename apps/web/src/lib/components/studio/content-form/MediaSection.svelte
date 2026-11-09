@@ -222,9 +222,7 @@
   .player-skeleton {
     width: 100%;
     height: 100%;
-    /* --space-24 = 96px * density; largest defined spacing token. Audio-player
-       stand-in height — previously referenced --space-32, which is not defined
-       in tokens/spacing.css (would resolve to `initial` = no min-height). */
+    /* Audio-player stand-in height: 96px * density. */
     min-height: var(--space-24);
     background: linear-gradient(
       90deg,

@@ -57,8 +57,13 @@ vi.mock('@codex/access', () => ({
 }));
 
 import { AccessRevocation } from '@codex/access';
+import { LateWinRefundRefusedError } from '@codex/purchase';
+import {
+  BusinessLogicError,
+  InternalServiceError,
+} from '@codex/service-errors';
 import { invalidateForUser } from '@codex/subscription';
-import { createWebhookServices } from '@codex/worker-utils';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import { handlePaymentWebhook } from '../payment-webhook';
 
 type KVMock = {
@@ -147,6 +152,8 @@ function createDisputeEvent(
 describe('handlePaymentWebhook — disputes', () => {
   let mockStripe: Stripe;
   let mockRetrieve: ReturnType<typeof vi.fn>;
+  /** `stripe.disputes.retrieve`: the dispute as Stripe has it now. */
+  let mockDisputeRetrieve: ReturnType<typeof vi.fn>;
   let mockRelease: ReturnType<typeof vi.fn>;
   let purchase: Record<string, ReturnType<typeof vi.fn>>;
   let subscription: Record<string, ReturnType<typeof vi.fn>>;
@@ -172,7 +179,11 @@ describe('handlePaymentWebhook — disputes', () => {
       payment_intent: 'pi_test_dispute',
       metadata: {},
     });
-    mockStripe = { charges: { retrieve: mockRetrieve } } as unknown as Stripe;
+    mockDisputeRetrieve = vi.fn();
+    mockStripe = {
+      charges: { retrieve: mockRetrieve },
+      disputes: { retrieve: mockDisputeRetrieve },
+    } as unknown as Stripe;
     calls = [];
     mockReverseSubscription = vi.fn().mockImplementation(async () => {
       calls.push('clawback');
@@ -211,6 +222,14 @@ describe('handlePaymentWebhook — disputes', () => {
       settleWonDispute: vi.fn().mockResolvedValue(undefined),
       markDisputeOutcomeApplied: vi.fn().mockResolvedValue(undefined),
       processRefund: vi.fn().mockResolvedValue(undefined),
+      // The late win's steps (Codex-2hxff.70), faked against the contract.
+      restoreAfterLateWin: vi.fn().mockResolvedValue(undefined),
+      repayWonDispute: vi
+        .fn()
+        .mockResolvedValue({ repaid: 0, cancelled: 0, debtsClosed: 0 }),
+      refundFirstPaymentAfterLateWin: vi.fn().mockResolvedValue('none'),
+      claimLateWinBuyerEmail: vi.fn().mockResolvedValue(true),
+      findItemLink: vi.fn().mockResolvedValue(null),
     };
 
     // The registry's services, as the composition root hands them over.
@@ -368,7 +387,8 @@ describe('handlePaymentWebhook — disputes', () => {
     );
 
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
-      'dp_test_dispute'
+      'dp_test_dispute',
+      { status: 'warning_closed' }
     );
     expect(mockReverseSubscription).not.toHaveBeenCalled();
   });
@@ -448,7 +468,8 @@ describe('handlePaymentWebhook — disputes', () => {
 
     expect(purchase.processLostDispute).toHaveBeenCalledWith(
       'pi_test_dispute',
-      1999
+      1999,
+      'dp_test_dispute'
     );
     expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
     expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledWith(
@@ -460,8 +481,57 @@ describe('handlePaymentWebhook — disputes', () => {
     ).toBeGreaterThan(
       purchase.clawBackPurchaseCharge?.mock.invocationCallOrder[0] ?? Infinity
     );
+    // Marked as lost only: a late win recorded meanwhile is not marked (§4.8).
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledExactlyOnceWith(
+      'dp_test_dispute',
+      { status: 'lost' }
+    );
     // A dispute that opened already lost never paused access: block it now.
     expect(mockRevoke).toHaveBeenCalledWith('user_lost', 'org_lost', 'refund');
+    expect(bundle.mock._obs.warn).not.toHaveBeenCalled();
+    expect(bundle.mock._obs.info).toHaveBeenCalledWith(
+      'Dispute lost: purchase refunded, held slices cancelled',
+      { disputeId: 'dp_test_dispute', chargeId: 'ch_test' }
+    );
+  });
+
+  it('lost, but a late win overtook the run: nothing is marked, and it is logged at warn with ids, not as a loss applied (§4.8)', async () => {
+    recordedAs('lost', {
+      purchaseId: 'purchase_lost',
+      subscriptionId: null,
+      courseSubscriptionId: null,
+    });
+    purchase.markDisputeOutcomeApplied?.mockResolvedValueOnce('moved');
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      {
+        ...createDisputeEvent({ status: 'lost' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      } as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledExactlyOnceWith(
+      'dp_test_dispute',
+      { status: 'lost' }
+    );
+    expect(bundle.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+      'Dispute lost run found it no longer lost (a late win overtook it): its outcome is left for the late win to mark',
+      {
+        disputeId: 'dp_test_dispute',
+        chargeId: 'ch_test',
+        purchaseId: 'purchase_lost',
+        subscriptionId: null,
+        courseSubscriptionId: null,
+      }
+    );
+    expect(bundle.mock._obs.info).not.toHaveBeenCalledWith(
+      'Dispute lost: purchase refunded, held slices cancelled',
+      expect.anything()
+    );
+    expect(bundle.mock._obs.error).not.toHaveBeenCalled();
   });
 
   it('an outcome already applied stops at the record: a redelivered won or lost does nothing more', async () => {
@@ -479,10 +549,11 @@ describe('handlePaymentWebhook — disputes', () => {
     expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
   });
 
-  it('a late win (a won event on a lost record) acts on the record: nothing is restored or re-paid', async () => {
-    // Owner decision 2026-10-25, "alert only": recordDispute keeps the row
-    // lost and alerts; Codex-2hxff.70 will record the win with the undo.
-    recordedAs('lost', { outcomeAppliedAt: new Date() });
+  it("a late win (a won event on a lost record) acts on the record: it moved lost → won, so the loss is undone, not a normal win's steps run", async () => {
+    // Was "alert only" (owner decision 2026-10-25): the row stayed lost.
+    // Codex-2hxff.70 records the win (lateWonAt, the outcome cleared) and
+    // undoes the loss; the late-win suite below pins its steps.
+    recordedAs('won', { lateWonAt: new Date(), lostAppliedAt: new Date() });
     const bundle = buildContext();
 
     await handlePaymentWebhook(
@@ -491,10 +562,17 @@ describe('handlePaymentWebhook — disputes', () => {
       bundle.context
     );
 
+    expect(purchase.restoreAfterLateWin).toHaveBeenCalledWith(
+      'dp_test_dispute'
+    );
+    expect(purchase.repayWonDispute).toHaveBeenCalledWith('dp_test_dispute');
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
+      'dp_test_dispute',
+      { status: 'won' }
+    );
+    // The normal win's restore and settle (re-pay plus mark) do not run.
     expect(purchase.restoreDisputedPurchase).not.toHaveBeenCalled();
-    expect(subscription.restoreAfterDispute).not.toHaveBeenCalled();
     expect(purchase.settleWonDispute).not.toHaveBeenCalled();
-    expect(mockClear).not.toHaveBeenCalled();
     expect(purchase.processLostDispute).not.toHaveBeenCalled();
   });
 
@@ -867,7 +945,8 @@ describe('handlePaymentWebhook — disputes', () => {
       'dp_test_dispute'
     );
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
-      'dp_test_dispute'
+      'dp_test_dispute',
+      { status: 'prevented' }
     );
     expect(purchase.restoreDisputedPurchase).not.toHaveBeenCalled();
     expect(purchase.settleWonDispute).not.toHaveBeenCalled();
@@ -902,8 +981,760 @@ describe('handlePaymentWebhook — disputes', () => {
       }
     );
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
-      'dp_test_dispute'
+      'dp_test_dispute',
+      { status: 'prevented' }
     );
     expect(purchase.settleWonDispute).not.toHaveBeenCalled();
+  });
+
+  // ── a late win: lost, then decided for us after all (Codex-2hxff.70;
+  // late-win data design §4, §7, §11). recordDispute's lost → won move
+  // hands back the row won, with lateWonAt set and the outcome cleared.
+
+  describe('a late win (Codex-2hxff.70)', () => {
+    const WEB = 'https://revelations.studio';
+    const WINTER_LIGHT = {
+      contentTitle: 'Winter Light',
+      amountCents: 2400,
+      paidAt: '2026-09-03T10:15:00.000Z',
+      isCourse: false,
+    };
+    // Where `findItemLink` finds each kind of item (Codex-0u7kb).
+    const WINTER_LIGHT_PAGE = {
+      kind: 'org_content',
+      contentId: 'content_wl',
+      slug: 'winter-light',
+      organizationSlug: 'hollow-oak',
+    };
+    const FIELD_NOTES_PAGE = {
+      kind: 'personal_content',
+      contentId: 'content_fn',
+      slug: 'field-notes',
+      creatorUsername: 'alex-creator',
+    };
+    const COLOUR_GRADING_PAGE = {
+      kind: 'course',
+      courseId: 'course_cg',
+      slug: 'colour-grading',
+      organizationSlug: 'northlight',
+    };
+
+    function recordedLateWin(extra: Record<string, unknown> = {}) {
+      recordedAs('won', {
+        lateWonAt: new Date('2026-12-14T09:00:00Z'),
+        lostAppliedAt: new Date('2026-11-16T10:00:00Z'),
+        purchaseId: 'purchase_late',
+        subscriptionId: null,
+        courseSubscriptionId: null,
+        ...extra,
+      });
+    }
+
+    function restoredAs(
+      outcome: string,
+      email: Record<string, unknown> | null = null
+    ) {
+      purchase.restoreAfterLateWin?.mockImplementationOnce(async () => {
+        calls.push('restore purchase');
+        return {
+          outcome,
+          userId: 'user_late',
+          orgId: 'org_late',
+          purchaseId: 'purchase_late',
+          email,
+        };
+      });
+    }
+
+    const wonEvent = () =>
+      ({
+        ...createDisputeEvent({ status: 'won' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      }) as Stripe.Event;
+
+    async function deliver(bundle = buildContext({ WEB_APP_URL: WEB })) {
+      await handlePaymentWebhook(wonEvent(), mockStripe, bundle.context);
+      await drainWaitUntil(bundle);
+      return bundle;
+    }
+
+    const sent = () =>
+      vi.mocked(sendEmailToWorker).mock.calls.map((call) => call[2]);
+
+    beforeEach(() => {
+      mockRetrieve.mockResolvedValue({
+        id: 'ch_test',
+        amount: 1999,
+        payment_intent: 'pi_test_dispute',
+        metadata: {},
+        billing_details: { email: 'ellen@example.com', name: 'Ellen Marsh' },
+      });
+      purchase.repayWonDispute?.mockImplementation(async () => {
+        calls.push('repay');
+        return { repaid: 2, cancelled: 1, debtsClosed: 0 };
+      });
+      purchase.refundFirstPaymentAfterLateWin?.mockImplementation(async () => {
+        calls.push('refund');
+        return 'done';
+      });
+      purchase.markDisputeOutcomeApplied?.mockImplementation(async () => {
+        calls.push('mark');
+      });
+      purchase.claimLateWinBuyerEmail?.mockImplementation(async () => {
+        calls.push('claim');
+        return true;
+      });
+      purchase.findItemLink?.mockImplementation(async () => {
+        calls.push('link');
+        return WINTER_LIGHT_PAGE;
+      });
+      vi.mocked(sendEmailToWorker).mockImplementation(() => {
+        calls.push('send');
+      });
+    });
+
+    /** The one access-restored email sent, and its link. */
+    function emailLink(): unknown {
+      const emails = sent().filter(
+        (email) => email.templateName === 'purchase-access-restored'
+      );
+      expect(emails).toHaveLength(1);
+      return emails[0]?.data.itemUrl;
+    }
+
+    it("undoes the loss in order: the buyer, the subscription, the money, the email's link, then the outcome; then the buyer is told, once", async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+
+      const bundle = await deliver();
+
+      // The link is read before the mark: from the mark to the send, only
+      // the email's claim is awaited.
+      expect(calls).toEqual([
+        'restore purchase',
+        'restore',
+        'repay',
+        'link',
+        'mark',
+        'claim',
+        'send',
+      ]);
+      expect(purchase.findItemLink).toHaveBeenCalledExactlyOnceWith(
+        'purchase_late'
+      );
+      expect(purchase.restoreAfterLateWin).toHaveBeenCalledWith(
+        'dp_test_dispute'
+      );
+      expect(subscription.restoreAfterDispute).toHaveBeenCalledWith(
+        disputeInput
+      );
+      expect(purchase.refundFirstPaymentAfterLateWin).not.toHaveBeenCalled();
+      expect(invalidateForUser).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(Function),
+        expect.objectContaining({ userId: 'user_late' }),
+        expect.anything()
+      );
+      // The loss's block expired long ago; cleared anyway for a restore.
+      expect(mockClear).toHaveBeenCalledWith('user_late', 'org_late');
+      // Q6: one info line, ids and counts only.
+      expect(bundle.mock._obs.info).toHaveBeenCalledWith(
+        'Late win: loss undone',
+        {
+          disputeId: 'dp_test_dispute',
+          chargeId: 'ch_test',
+          purchaseId: 'purchase_late',
+          subscriptionId: null,
+          courseSubscriptionId: null,
+          outcome: 'restored',
+          repaid: 2,
+          cancelled: 1,
+          debtsClosed: 0,
+          refund: 'none',
+        }
+      );
+      expect(bundle.mock._obs.error).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).toHaveBeenCalledWith(
+        bundle.context.env,
+        bundle.context.executionCtx,
+        {
+          to: 'ellen@example.com',
+          templateName: 'purchase-access-restored',
+          category: 'transactional',
+          userId: 'user_late',
+          data: {
+            userName: 'Ellen Marsh',
+            contentTitle: 'Winter Light',
+            accessSentence: "so it's back in your library and ready to watch.",
+            amount: '£24.00',
+            paidOn: '03/09/2026',
+            itemUrl:
+              'https://hollow-oak.revelations.studio/content/winter-light',
+            buttonLabel: 'Watch now',
+          },
+        }
+      );
+    });
+
+    const COLOUR_GRADING = {
+      contentTitle: 'Colour Grading Masterclass',
+      amountCents: 9900,
+      paidAt: '2026-09-02T08:00:00.000Z',
+      isCourse: true,
+    };
+
+    it("a course's email names the course in its sentence and its button", async () => {
+      recordedLateWin();
+      restoredAs('restored', COLOUR_GRADING);
+      purchase.findItemLink?.mockResolvedValueOnce(COLOUR_GRADING_PAGE);
+
+      await deliver();
+
+      expect(sent()[0]?.data).toMatchObject({
+        contentTitle: 'Colour Grading Masterclass',
+        accessSentence: 'so the course is open to you again.',
+        amount: '£99.00',
+        paidOn: '02/09/2026',
+        buttonLabel: 'Go to the course',
+      });
+    });
+
+    // ── the email's button (Codex-0u7kb's link, review C1): the item's own
+    // page, found by the purchase, as the receipt links it.
+
+    it.each([
+      [
+        'org content',
+        WINTER_LIGHT,
+        WINTER_LIGHT_PAGE,
+        'https://hollow-oak.revelations.studio/content/winter-light',
+      ],
+      [
+        'personal content',
+        WINTER_LIGHT,
+        FIELD_NOTES_PAGE,
+        'https://creators.revelations.studio/@alex-creator/content/field-notes',
+      ],
+      [
+        'a course (its journey dashboard)',
+        COLOUR_GRADING,
+        COLOUR_GRADING_PAGE,
+        'https://northlight.revelations.studio/journeys/colour-grading/dashboard',
+      ],
+    ])("%s: the button opens the item's own page", async (_kind, email, page, expected) => {
+      recordedLateWin();
+      restoredAs('restored', email);
+      purchase.findItemLink?.mockResolvedValueOnce(page);
+
+      await deliver();
+
+      expect(purchase.findItemLink).toHaveBeenCalledExactlyOnceWith(
+        'purchase_late'
+      );
+      expect(emailLink()).toBe(expected);
+    });
+
+    it('in development: the same pages on the dev host', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+
+      await deliver(buildContext({ WEB_APP_URL: 'http://lvh.me:3000' }));
+
+      expect(emailLink()).toBe(
+        'http://hollow-oak.lvh.me:3000/content/winter-light'
+      );
+    });
+
+    // The old link, pinned as WRONG so it cannot come back: the platform
+    // host has no `/content/<id>` or `/courses/<id>` route.
+    it.each([
+      ['content', WINTER_LIGHT, WINTER_LIGHT_PAGE, '/content/content_wl'],
+      ['course', COLOUR_GRADING, COLOUR_GRADING_PAGE, '/courses/course_cg'],
+    ])('a %s email never links the item id on the platform host', async (_kind, email, page, oldPath) => {
+      recordedLateWin();
+      restoredAs('restored', email);
+      purchase.findItemLink?.mockResolvedValueOnce(page);
+
+      await deliver();
+
+      const link = String(emailLink());
+      expect(link).not.toBe(`${WEB}${oldPath}`);
+      expect(new URL(link).host).not.toBe(new URL(WEB).host);
+    });
+
+    it('an item with no page: the button opens the library on the platform, with a warn of ids, and the email still goes', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      purchase.findItemLink?.mockResolvedValueOnce(null);
+
+      const bundle = await deliver();
+
+      expect(emailLink()).toBe('https://revelations.studio/library');
+      expect(bundle.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+        "A purchase's item has no page to link to, so its email links the library",
+        { purchaseId: 'purchase_late' }
+      );
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+    });
+
+    it('a lookup that fails: the library link, alerted with an errorId; the undo is neither failed nor retried', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      purchase.findItemLink?.mockRejectedValueOnce(
+        Object.assign(new Error('Connection terminated'), {
+          code: 'ECONNRESET',
+        })
+      );
+
+      const bundle = await deliver();
+
+      expect(emailLink()).toBe('https://revelations.studio/library');
+      expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+        "A purchase's item page could not be looked up, so its email links the library",
+        expect.objectContaining({
+          errorId: expect.any(String),
+          purchaseId: 'purchase_late',
+        })
+      );
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+    });
+
+    // Once the outcome is marked nothing comes back for the email (the next
+    // delivery stops at the record), so a request cancelled from the mark on
+    // must still have handed it to the mailer: from the mark, no read
+    // returns.
+    it('a request cancelled once the outcome is marked still hands its email to the mailer', async () => {
+      let marked = false;
+      purchase.markDisputeOutcomeApplied?.mockImplementationOnce(async () => {
+        marked = true;
+      });
+      purchase.findItemLink?.mockImplementation(() =>
+        marked ? new Promise(() => {}) : Promise.resolve(WINTER_LIGHT_PAGE)
+      );
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      const bundle = buildContext({ WEB_APP_URL: WEB });
+
+      const delivery = handlePaymentWebhook(
+        wonEvent(),
+        mockStripe,
+        bundle.context
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(marked).toBe(true);
+      expect(emailLink()).toBe(
+        'https://hollow-oak.revelations.studio/content/winter-light'
+      );
+      await delivery;
+    });
+
+    it('no read where no email would be sent: bought again, a duplicate, refunds standing, another dispute, or a pending refund', async () => {
+      for (const outcome of [
+        'rebought',
+        'duplicate',
+        'still_refunded',
+        'dispute_holds',
+      ]) {
+        recordedLateWin();
+        restoredAs(outcome);
+        await deliver();
+      }
+      recordedLateWin();
+      restoredAs('rebought');
+      purchase.refundFirstPaymentAfterLateWin?.mockResolvedValueOnce('pending');
+      await deliver();
+
+      expect(purchase.findItemLink).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+    });
+
+    it('bought again: the first payment is refunded after the re-pay, for this dispute and charge, then marked; nobody is emailed (Q1)', async () => {
+      recordedLateWin();
+      restoredAs('rebought');
+
+      const bundle = await deliver();
+
+      expect(calls).toEqual([
+        'restore purchase',
+        'restore',
+        'repay',
+        'refund',
+        'mark',
+      ]);
+      // The dispute keys the refund (late_win_refund_<dispute>), so a rerun
+      // makes no second one.
+      expect(purchase.refundFirstPaymentAfterLateWin).toHaveBeenCalledWith(
+        'dp_test_dispute',
+        { id: 'ch_test', amountCents: 1999 },
+        'test'
+      );
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      // Their access is through the new purchase: no block to clear.
+      expect(mockClear).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.info).toHaveBeenCalledWith(
+        'Late win: loss undone',
+        expect.objectContaining({ outcome: 'rebought', refund: 'done' })
+      );
+    });
+
+    it('a late-won duplicate payment is refunded too (owner, "Refund it"): after the re-pay, for this dispute and charge, then marked; nobody is emailed', async () => {
+      recordedLateWin();
+      restoredAs('duplicate');
+
+      const bundle = await deliver();
+
+      expect(calls).toEqual([
+        'restore purchase',
+        'restore',
+        'repay',
+        'refund',
+        'mark',
+      ]);
+      expect(purchase.refundFirstPaymentAfterLateWin).toHaveBeenCalledWith(
+        'dp_test_dispute',
+        { id: 'ch_test', amountCents: 1999 },
+        'test'
+      );
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(mockClear).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.info).toHaveBeenCalledWith(
+        'Late win: loss undone',
+        expect.objectContaining({ outcome: 'duplicate', refund: 'done' })
+      );
+    });
+
+    it("nothing is marked while the refund is pending at Stripe: its re-pay rows stay held for the hourly reconcile's next run", async () => {
+      recordedLateWin();
+      restoredAs('rebought');
+      purchase.refundFirstPaymentAfterLateWin?.mockResolvedValueOnce('pending');
+
+      const bundle = await deliver();
+
+      expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.info).not.toHaveBeenCalledWith(
+        'Late win: loss undone',
+        expect.anything()
+      );
+      // Waiting is not a fault (§11).
+      expect(bundle.mock._obs.error).not.toHaveBeenCalled();
+    });
+
+    it("a refund Stripe refuses is alerted at error with Stripe's code, type and status on every try, rethrown, and nothing is marked", async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        recordedLateWin();
+        restoredAs('rebought');
+        const refusal = new LateWinRefundRefusedError({
+          disputeId: 'dp_test_dispute',
+          purchaseId: 'purchase_late',
+          stripeCode: 'charge_disputed',
+          stripeType: 'StripeInvalidRequestError',
+          stripeStatusCode: 400,
+        });
+        purchase.refundFirstPaymentAfterLateWin?.mockRejectedValueOnce(refusal);
+        const bundle = buildContext({ WEB_APP_URL: WEB });
+
+        await expect(
+          handlePaymentWebhook(wonEvent(), mockStripe, bundle.context)
+        ).rejects.toBe(refusal);
+
+        expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+          'Late win: Stripe refused the refund of a payment the buyer made twice (bought again, or a duplicate). Nothing is marked; it is retried hourly',
+          {
+            errorId: expect.any(String),
+            disputeId: 'dp_test_dispute',
+            purchaseId: 'purchase_late',
+            stripeCode: 'charge_disputed',
+            stripeType: 'StripeInvalidRequestError',
+            stripeStatusCode: 400,
+          }
+        );
+      }
+      expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+    });
+
+    it('a refund Stripe could not be asked for (an outage, a rate limit, a key without the right) is alerted as could not be refunded, never as refused, with what Stripe answered', async () => {
+      for (const [stripeType, stripeStatusCode] of [
+        ['StripeConnectionError', null],
+        ['StripeAPIError', 500],
+        ['StripePermissionError', 403],
+        [null, null],
+      ] as const) {
+        recordedLateWin();
+        restoredAs('rebought');
+        const failure = new LateWinRefundRefusedError({
+          disputeId: 'dp_test_dispute',
+          purchaseId: 'purchase_late',
+          stripeCode: null,
+          stripeType,
+          stripeStatusCode,
+        });
+        purchase.refundFirstPaymentAfterLateWin?.mockRejectedValueOnce(failure);
+        const bundle = buildContext({ WEB_APP_URL: WEB });
+
+        await expect(
+          handlePaymentWebhook(wonEvent(), mockStripe, bundle.context)
+        ).rejects.toBe(failure);
+
+        expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+          'Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded. Nothing is marked; it is retried hourly',
+          {
+            errorId: expect.any(String),
+            disputeId: 'dp_test_dispute',
+            purchaseId: 'purchase_late',
+            stripeCode: null,
+            stripeType,
+            stripeStatusCode,
+          }
+        );
+      }
+      expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+    });
+
+    it('another error from the refund step is rethrown without the refusal alert, even one carrying a stripeCode', async () => {
+      recordedLateWin();
+      restoredAs('rebought');
+      const other = new BusinessLogicError('not a refusal (test)', {
+        stripeCode: 'charge_disputed',
+      });
+      purchase.refundFirstPaymentAfterLateWin?.mockRejectedValueOnce(other);
+      const bundle = buildContext({ WEB_APP_URL: WEB });
+
+      await expect(
+        handlePaymentWebhook(wonEvent(), mockStripe, bundle.context)
+      ).rejects.toBe(other);
+
+      for (const alert of [
+        'Stripe refused the refund',
+        'could not be refunded',
+      ]) {
+        expect(bundle.mock._obs.error).not.toHaveBeenCalledWith(
+          expect.stringContaining(alert),
+          expect.anything()
+        );
+      }
+      expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+    });
+
+    it('refunds that still stand, or another dispute holding it: the loss is undone and marked, and nobody is refunded or emailed', async () => {
+      for (const outcome of ['still_refunded', 'dispute_holds']) {
+        recordedLateWin();
+        restoredAs(outcome);
+
+        await deliver();
+      }
+
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledTimes(2);
+      expect(purchase.refundFirstPaymentAfterLateWin).not.toHaveBeenCalled();
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(mockClear).not.toHaveBeenCalled();
+    });
+
+    it('the email is claimed before it is sent: a claim already taken sends nothing', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      purchase.claimLateWinBuyerEmail?.mockResolvedValueOnce(false);
+
+      await deliver();
+
+      expect(purchase.claimLateWinBuyerEmail).toHaveBeenCalledExactlyOnceWith(
+        'dp_test_dispute'
+      );
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+    });
+
+    it('no address on the charge: nothing is read, claimed or sent, and the loss is still undone; logged at warn with ids', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      mockRetrieve.mockResolvedValueOnce({
+        id: 'ch_test',
+        amount: 1999,
+        payment_intent: 'pi_test_dispute',
+        metadata: {},
+        billing_details: { email: null, name: null },
+        receipt_email: null,
+      });
+
+      const bundle = await deliver();
+
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+      expect(purchase.findItemLink).not.toHaveBeenCalled();
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+        "Late win: the buyer's access-restored email was not sent: the charge has no email address",
+        {
+          errorId: expect.any(String),
+          disputeId: 'dp_test_dispute',
+          userId: 'user_late',
+        }
+      );
+    });
+
+    it.each([
+      ['unset', undefined],
+      ['not a URL', 'revelations.studio'],
+      ['host:port with no scheme', 'lvh.me:3000'],
+    ])('WEB_APP_URL %s: alerted with ids; nothing is read, claimed or sent, and the loss is still undone', async (_case, webAppUrl) => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+
+      const bundle = await deliver(buildContext({ WEB_APP_URL: webAppUrl }));
+
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+      expect(purchase.findItemLink).not.toHaveBeenCalled();
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+        "WEB_APP_URL is unset or not a URL: the late win's access-restored email has no working link, so it was not sent",
+        { errorId: expect.any(String), disputeId: 'dp_test_dispute' }
+      );
+    });
+
+    it('an item whose title cannot be read: the loss is undone and nothing is read or sent, logged at warn with ids', async () => {
+      recordedLateWin();
+      restoredAs('restored', null);
+
+      const bundle = await deliver();
+
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+      expect(purchase.findItemLink).not.toHaveBeenCalled();
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.warn).toHaveBeenCalledExactlyOnceWith(
+        "Late win: the buyer's access-restored email was not sent: the item's title could not be read",
+        {
+          errorId: expect.any(String),
+          disputeId: 'dp_test_dispute',
+          userId: 'user_late',
+        }
+      );
+      expect(bundle.mock._obs.error).not.toHaveBeenCalled();
+    });
+
+    it('a claim that fails is alerted at error with ids and its root cause, never the address: the outcome is marked, so nothing retries the email', async () => {
+      recordedLateWin();
+      restoredAs('restored', WINTER_LIGHT);
+      // As the service's handleError wraps it: a generic message, the
+      // driver's error underneath.
+      purchase.claimLateWinBuyerEmail?.mockRejectedValueOnce(
+        new InternalServiceError('An unexpected error occurred', undefined, {
+          cause: Object.assign(new Error('connection reset (test)'), {
+            code: 'ECONNRESET',
+          }),
+        })
+      );
+
+      const bundle = await deliver();
+
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+        "Late win: the buyer's access-restored email could not be claimed, so it was not sent, and it is not retried",
+        {
+          errorId: expect.any(String),
+          disputeId: 'dp_test_dispute',
+          userId: 'user_late',
+          error: 'An unexpected error occurred',
+          cause: {
+            name: 'Error',
+            message: 'connection reset (test)',
+            code: 'ECONNRESET',
+          },
+        }
+      );
+      expect(JSON.stringify(bundle.mock._obs.error.mock.calls)).not.toContain(
+        'ellen@example.com'
+      );
+      expect(bundle.mock._obs.warn).not.toHaveBeenCalled();
+    });
+
+    it("a subscription invoice's late win: no purchase; the subscription is restored as a win restores it, re-paid, marked, and not emailed (Q2)", async () => {
+      recordedLateWin({ purchaseId: null, subscriptionId: 'sub_row' });
+      // Ended by the loss: it grants nothing and is not live at Stripe.
+      subscription.restoreAfterDispute?.mockImplementationOnce(async () => {
+        calls.push('restore');
+        return { subscription: disputedSubscription, restored: false };
+      });
+
+      await deliver();
+
+      expect(calls).toEqual(['restore', 'repay', 'mark']);
+      expect(mockClear).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+    });
+
+    it('a late win already applied (settled by hand under release step R18) stops at the record: nothing restored, re-paid, refunded or sent', async () => {
+      recordedLateWin({ outcomeAppliedAt: new Date('2026-12-15T10:00:00Z') });
+
+      await deliver();
+
+      expect(purchase.restoreAfterLateWin).not.toHaveBeenCalled();
+      expect(subscription.restoreAfterDispute).not.toHaveBeenCalled();
+      expect(purchase.repayWonDispute).not.toHaveBeenCalled();
+      expect(purchase.refundFirstPaymentAfterLateWin).not.toHaveBeenCalled();
+      expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+    });
+
+    it('a refused won → lost is alerted at error only when Stripe says the dispute is lost now; nothing changes', async () => {
+      const lostEvent = () =>
+        ({
+          ...createDisputeEvent({ status: 'lost' }),
+          type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+        }) as Stripe.Event;
+
+      // A late `lost` event the win overtook: Stripe says won. No fault.
+      recordedAs('won', {
+        refusedLost: true,
+        outcomeAppliedAt: new Date(),
+      });
+      mockDisputeRetrieve.mockResolvedValueOnce({
+        id: 'dp_test_dispute',
+        status: 'won',
+      });
+      const overtaken = buildContext();
+      await handlePaymentWebhook(lostEvent(), mockStripe, overtaken.context);
+      expect(overtaken.mock._obs.error).not.toHaveBeenCalled();
+
+      // Stripe itself says lost now.
+      recordedAs('won', {
+        refusedLost: true,
+        outcomeAppliedAt: new Date(),
+      });
+      mockDisputeRetrieve.mockResolvedValueOnce({
+        id: 'dp_test_dispute',
+        status: 'lost',
+      });
+      const reported = buildContext();
+      await handlePaymentWebhook(lostEvent(), mockStripe, reported.context);
+      expect(reported.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+        'A won dispute was reported lost: nothing changed, check it in Stripe',
+        { errorId: expect.any(String), disputeId: 'dp_test_dispute' }
+      );
+
+      expect(mockDisputeRetrieve).toHaveBeenCalledTimes(2);
+      expect(mockDisputeRetrieve).toHaveBeenCalledWith('dp_test_dispute');
+      expect(purchase.processLostDispute).not.toHaveBeenCalled();
+      expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+    });
+
+    it('any other refused move reads nothing from Stripe and raises nothing', async () => {
+      recordedAs('lost', { outcomeAppliedAt: new Date() });
+      const bundle = buildContext();
+
+      await handlePaymentWebhook(
+        createDisputeEvent({ status: 'warning_closed' }),
+        mockStripe,
+        bundle.context
+      );
+
+      expect(mockDisputeRetrieve).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.error).not.toHaveBeenCalled();
+    });
   });
 });

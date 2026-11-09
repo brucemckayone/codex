@@ -10,6 +10,7 @@ import {
   endFontPreview,
   injectBrandVars,
   previewFont,
+  tokenOverrideStyle,
   tokenOverridesToCssVars,
 } from './css-injection';
 import { groundLuminance } from './ground';
@@ -201,6 +202,24 @@ describe('darkTokenOverridesToCssVars', () => {
     // Presets and colours stay raw — only font families are quoted.
     expect(result['--brand-shader-preset-dark']).toBe('ink');
     expect(result['--color-surface-secondary-dark']).toBe('#0a0a0a');
+  });
+});
+
+describe('tokenOverrideStyle', () => {
+  it('joins the light and dark mappings into one inline style', () => {
+    expect(
+      tokenOverrideStyle(
+        { 'hero-logo-scale': '2' },
+        { 'surface-secondary': '#0a0a0a' }
+      )
+    ).toBe(
+      '--brand-hero-logo-scale: 2; --color-surface-secondary-dark: #0a0a0a'
+    );
+  });
+
+  it('is undefined when neither theme emits a property', () => {
+    expect(tokenOverrideStyle(null, null)).toBeUndefined();
+    expect(tokenOverrideStyle({ 'hero-hide-title': '' }, {})).toBeUndefined();
   });
 });
 

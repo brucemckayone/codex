@@ -5,6 +5,7 @@
  * Each mounts the real component.
  */
 
+import type { HistoryLine } from '@codex/admin';
 import type { Component } from 'svelte';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import * as m from '$paraglide/messages';
@@ -14,9 +15,13 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import {
+  chargebackRow,
   chargeDetail,
   creatorDebt,
   historyLine,
+  LIFTED_WINDOW,
+  lateWonChargeback,
+  lateWonHistoryLine,
   NOW,
   refundRow,
   SLICES,
@@ -58,6 +63,32 @@ describe('The charge', () => {
     );
     expect(text()).toContain('ch_3QeT8xLk2vRb09aZ');
     expect(text()).toContain('pi_3QeT8xLk2vRb09aZ');
+  });
+
+  test('a charge settled by hand: the amount says it was refunded outside Stripe, never "nothing refunded"', () => {
+    render(ChargeSummaryCard, {
+      detail: chargeDetail({
+        charge: { ...chargeDetail().charge, refundedCents: 0 },
+        refundable: {
+          maxCents: 2400,
+          blocked: 'refunded_outside_stripe',
+          refundedOutsideStripeOn: '2026-11-08T14:00:00.000Z',
+        },
+      }),
+      now: NOW,
+    });
+    expect(text()).toContain('£24.00 · refunded outside Stripe on 8 Nov 2026');
+    expect(text()).not.toContain(m.support_amount_none({ amount: '£24.00' }));
+  });
+
+  test('a window a late win lifted (Q7): no time limit, and never its passed date', () => {
+    render(ChargeSummaryCard, {
+      detail: chargeDetail({ window: LIFTED_WINDOW }),
+      now: NOW,
+    });
+    expect(text()).toContain('No time limit: the chargeback was won late');
+    expect(text()).not.toContain('17 Sep');
+    expect(text()).not.toMatch(/days? left/);
   });
 
   test('an invoice: the plan, and that it is the current period’s payment', () => {
@@ -283,6 +314,9 @@ describe('Chargebacks', () => {
           reason: 'product_not_received',
           createdAt: '2026-10-22T09:00:00.000Z',
           respondBy: '2026-11-01T09:00:00.000Z',
+          lostOn: null,
+          lateWonOn: null,
+          settling: false,
         },
       ],
     });
@@ -296,6 +330,140 @@ describe('Chargebacks', () => {
   test('none: "None on this charge."', () => {
     render(ChargebacksCard, { chargebacks: [] });
     expect(text()).toContain(m.support_chargebacks_none());
+  });
+});
+
+// The mockup's own words (late-win support/charge-page.html), not the
+// messages: a word changed in en.json alone must fail here.
+describe('A chargeback won after it was lost (late-win S1-S3)', () => {
+  const rowText = () =>
+    document
+      .querySelector('[data-testid="chargeback-row"]')
+      ?.textContent?.replace(/\s+/g, ' ') ?? '';
+  const badge = () =>
+    document.querySelector('[data-testid="chargeback-row"] [data-variant]');
+
+  test('S1: while the creators are paid back, "Won late" is info, and the card says what happens', () => {
+    render(ChargebacksCard, {
+      chargebacks: [lateWonChargeback({ settling: true })],
+    });
+    expect(badge()?.textContent?.trim()).toBe('Won late');
+    expect(badge()?.getAttribute('data-variant')).toBe('info');
+    expect(rowText()).toContain('Paying the creators back');
+    expect(rowText()).not.toContain('Lost 20 Nov');
+    expect(text()).toContain(
+      'The bank decided this chargeback for us on 14 Dec, after it was lost. The creators are being paid back; a step that fails is tried again within the hour.'
+    );
+  });
+
+  test('S2: once undone, "Won late" is success, says when it was lost, and the card says nothing more', () => {
+    render(ChargebacksCard, { chargebacks: [lateWonChargeback()] });
+    expect(badge()?.textContent?.trim()).toBe('Won late');
+    expect(badge()?.getAttribute('data-variant')).toBe('success');
+    expect(rowText()).toContain('Lost 20 Nov');
+    expect(rowText()).not.toContain('Paying the creators back');
+    expect(text()).not.toContain('The bank decided this chargeback for us');
+  });
+
+  test('a normal win is "Won" as before, even while its pay-back runs: "Won late" keys on the late win, never the status', () => {
+    render(ChargebacksCard, {
+      chargebacks: [
+        chargebackRow({ status: 'won', respondBy: null, settling: true }),
+      ],
+    });
+    expect(badge()?.textContent?.trim()).toBe(m.support_dispute_won());
+    expect(text()).not.toContain('Won late');
+    expect(text()).not.toContain('The bank decided this chargeback for us');
+  });
+
+  const history = (lines: HistoryLine[]) => {
+    render(SliceHistory, {
+      title: 'How Maya Okafor’s share was taken back',
+      lines,
+    });
+    return [...document.querySelectorAll('[data-testid="history-line"]')].map(
+      (line) => line.textContent?.replace(/\s+/g, ' ') ?? ''
+    );
+  };
+
+  test('S1: the cause names the loss, and the line says it is being paid back', () => {
+    const [line] = history([
+      lateWonHistoryLine({
+        outcome: 'taken',
+        repayPayoutId: null,
+        disputeWonAt: null,
+      }),
+    ]);
+    expect(line).toContain('Chargeback · opened 26 Oct, lost 20 Nov');
+    expect(line).not.toContain(', won');
+    expect(line).toContain(
+      'Taken back while the chargeback was open. Being paid back.'
+    );
+  });
+
+  test('S2: the cause names all three dates, and the share was paid back', () => {
+    const [line] = history([lateWonHistoryLine()]);
+    expect(line).toContain(
+      'Chargeback · opened 26 Oct, lost 20 Nov, won 14 Dec'
+    );
+    expect(line).toContain('Taken back, then paid back by a new payout.');
+    expect(line).toContain('Paid back');
+  });
+
+  test('S3: a share the loss cancelled before it was paid says so', () => {
+    const [line] = history([
+      lateWonHistoryLine({
+        causeAmountCents: 9900,
+        amountCents: 1980,
+        disputeOpenedAt: '2026-10-27T09:00:00.000Z',
+        lostOn: '2026-11-21T10:00:00.000Z',
+        stepKind: 'cancellation',
+      }),
+    ]);
+    expect(line).toContain(
+      'Chargeback · opened 27 Oct, lost 21 Nov, won 14 Dec'
+    );
+    expect(line).toContain(
+      'Cancelled when the chargeback was lost, then paid back by a new payout.'
+    );
+  });
+
+  test('a normal win’s line is as before: opened, then won', () => {
+    const [line] = history([
+      lateWonHistoryLine({ lostOn: null, stepKind: undefined }),
+    ]);
+    expect(line).toContain('Chargeback · opened 26 Oct, won 14 Dec');
+    expect(line).toContain('Taken back, then paid back by a new payout.');
+  });
+
+  test('a settled late win’s lines keep the loss date but never say "Being paid back." (S2)', () => {
+    // After the undo, the lines still carry `lostOn` (WP-B): only settling
+    // is "being paid back", and a line whose win is applied is not settling.
+    const lines = history([
+      lateWonHistoryLine(),
+      lateWonHistoryLine({ stepKind: 'cancellation' }),
+      lateWonHistoryLine({ outcome: 'taken', repayPayoutId: null }),
+    ]);
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).toContain('lost 20 Nov, won 14 Dec');
+      expect(line).not.toContain('Being paid back');
+    }
+  });
+
+  test('a late win whose loss never finished: no loss date, and nothing reads "null"', () => {
+    // `lostOn` is present but null when the loss was never applied (WP-B).
+    const [line] = history([
+      lateWonHistoryLine({
+        outcome: 'taken',
+        repayPayoutId: null,
+        disputeWonAt: null,
+        lostOn: null,
+      }),
+    ]);
+    expect(line).toContain('Chargeback · opened 26 Oct');
+    expect(line).not.toContain('lost');
+    expect(line).not.toContain('null');
   });
 });
 

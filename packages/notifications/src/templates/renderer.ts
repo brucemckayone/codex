@@ -223,6 +223,17 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'refundDate',
     'accessNote',
   ],
+  // A chargeback lost and then won (Codex-2hxff.70): the sender composes the
+  // sentence and the button, for an item or a course.
+  'purchase-access-restored': [
+    'userName',
+    'contentTitle',
+    'accessSentence',
+    'amount',
+    'paidOn',
+    'itemUrl',
+    'buttonLabel',
+  ],
 
   // Organization
   'org-member-invitation': [
@@ -492,6 +503,8 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'subscription-tier-price-change',
   'payment-failed',
   'refund-processed',
+  // A payment's access back after a chargeback (Codex-2hxff.70).
+  'purchase-access-restored',
   'org-member-invitation',
   'member-role-changed',
   'member-removed',

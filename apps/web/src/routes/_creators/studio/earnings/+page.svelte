@@ -35,12 +35,12 @@
   import * as m from '$paraglide/messages';
   import type { PageData } from './$types';
   import {
-    bankLineFor,
     deriveConnectState,
     filterPayouts,
     formatDay,
     formatPence,
     negativeCauseLine,
+    rowLines,
     ruleLine,
     type SourceFilter,
     type StatusFilter,
@@ -553,7 +553,7 @@
               <span class="payouts-table__th" role="columnheader">{m.earnings_payouts_col_source()}</span>
             </div>
             {#each filtered as payout (payout.id)}
-              {@const bankLine = bankLineFor(payout, {
+              {@const lines = rowLines(payout, {
                 connectState: connectStateStatus,
                 balance: rowBalance,
                 now,
@@ -578,9 +578,9 @@
                     <span class="status-badge status-badge--{statusTone(payout.status)}">
                       {statusLabel(payout.status)}
                     </span>
-                    {#if bankLine}
-                      <span class="bank-line">{bankLine}</span>
-                    {/if}
+                    {#each lines as line (line)}
+                      <span class="bank-line">{line}</span>
+                    {/each}
                   </span>
                 </span>
                 <span class="payouts-table__cell" role="cell" data-label={m.earnings_payouts_col_source()}>

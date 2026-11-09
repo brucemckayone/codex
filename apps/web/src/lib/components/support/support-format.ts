@@ -100,11 +100,21 @@ export function daysLeftText(closesAt: string, now: Date = new Date()): string {
     : m.support_days_left({ count: String(days) });
 }
 
-/** The window's cell in the search results: a Badge and one line under it. */
+/**
+ * The window's cell in the search results: a Badge and one line under it. A
+ * window a late-won chargeback lifted (owner Q7) has no end, and its
+ * `closesAt` has passed, so it never shows a date or a day count.
+ */
 export function windowCell(
   window: SupportRefundWindow,
   now: Date = new Date()
 ): { badge: BadgeTreatment; detail: string } {
+  if (window.liftedByLateWin) {
+    return {
+      badge: { label: m.support_window_lifted(), variant: 'success' },
+      detail: m.support_window_lifted_why(),
+    };
+  }
   if (window.isOpen) {
     return {
       badge: { label: m.support_window_open(), variant: 'success' },

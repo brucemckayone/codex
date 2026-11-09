@@ -28,7 +28,7 @@
   import '$lib/styles/tokens/font-fallbacks.css';
   import { withFallback } from '$lib/brand-editor/font-fallbacks';
   import { groundLuminanceVars, paintableColour } from '$lib/brand-editor/ground';
-  import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars, writeBackLayoutBrandInputs } from '$lib/brand-editor';
+  import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverrideStyle, writeBackLayoutBrandInputs } from '$lib/brand-editor';
   import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
@@ -242,18 +242,14 @@
   // injectBrandVars / removeOverrideVars calls during live preview. When the
   // editor closes (save or discard), the binding re-applies and the $effect
   // below idempotently re-injects to match.
-  const serverTokenOverrideStyle = $derived.by(() => {
-    if (!brandEditor.isClosed) return undefined;
-    const lightOverrides = serverTokenOverrides;
-    const darkOverrides = serverDarkTokenOverrides;
-    if (!lightOverrides && !darkOverrides) return undefined;
-    const vars: Record<string, string> = {};
-    if (lightOverrides) Object.assign(vars, tokenOverridesToCssVars(lightOverrides));
-    if (darkOverrides) Object.assign(vars, darkTokenOverridesToCssVars(darkOverrides));
-    const entries = Object.entries(vars);
-    if (entries.length === 0) return undefined;
-    return entries.map(([prop, value]) => `${prop}: ${value}`).join('; ');
-  });
+  //
+  // Built by tokenOverrideStyle alone: the hero logo's source test pins this
+  // line, since what the style may carry is what that function emits.
+  const serverTokenOverrideStyle = $derived(
+    brandEditor.isClosed
+      ? tokenOverrideStyle(serverTokenOverrides, serverDarkTokenOverrides)
+      : undefined
+  );
 
   // Inject token overrides as CSS custom properties on the org layout element.
   // Runs on mount and whenever serverTokenOverrides changes (e.g. after branding save).

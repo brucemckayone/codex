@@ -145,8 +145,8 @@ describe('the face lookup', () => {
       ].map(([, value]) => (value ?? '').trim())
     );
     // org-brand.css: --font-sans, and --font-body and --font-heading light and
-    // dark; typography.css: --font-sans and --font-heading.
-    expect(stacks).toHaveLength(7);
+    // dark; typography.css: --font-sans, --font-body and --font-heading.
+    expect(stacks).toHaveLength(8);
     for (const stack of stacks)
       expect(
         stack === 'var(--font-sans)' || stack.endsWith(`, ${SANS_STACK_TAIL}`),

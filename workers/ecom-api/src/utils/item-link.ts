@@ -9,7 +9,8 @@
  * `PurchaseService.findItemLink`.
  *
  * One function for every email that links a bought item, so they cannot
- * drift: the receipt today, the late win's access-restored email next.
+ * drift: the receipt, and the late win's access-restored email
+ * (Codex-2hxff.70).
  */
 
 import type { ObservabilityClient } from '@codex/observability';

@@ -168,55 +168,16 @@ into the subscribers-only switch (`is_tier_gated`) plus one tick per tier
 migrations first and redeploys content-api later. In between, the OLD
 content-api still saves films, and it writes only the old column. A film saved
 as "Subscribers" in that window has the switch off and no ticks, and the new
-workers read it as **free to anyone signed in**. Production had 1 tier and 0
-gated films on 2026-10-29, so expect nothing; the check below proves it.
+workers read it as **free to anyone signed in**. The parity check for that
+window (formerly R12) ran on 2026-10-31 after the deploy: check A = 0, check
+B = 0/0, check C = 0. It is done.
 
-Both steps use one read-only script. It runs in a `READ ONLY` transaction and
-prints counts and content ids only. It loads no env file, so pass the
-production connection string in the shell (Neon console → Connection details),
-never from a file:
-
-    DB_METHOD=PRODUCTION DATABASE_URL='<production url>' pnpm --filter @codex/database audit:plan-access
-
-### R12 — after the deploy: the plan-access parity check
-
-Run it once, after the production deploy has finished and before anyone saves a
-film's access in the new Studio. Expect **check A = 0** and **check B = 0**;
-the exit code is 1 only when A is not 0.
-
-- **Check A** (legacy tier set, switch off): the window shape above. The fix is
-  `0120`'s own backfill, steps 6 then 5, each scoped to `NOT is_tier_gated` so
-  it touches only these rows. The script prints the same statements. Run them
-  in the Neon SQL Editor, in one transaction, in this order (the INSERT finds
-  its rows by the switch still being off), then run the script again:
-
-  ```sql
-  BEGIN;
-  INSERT INTO content_tier_access (content_id, tier_id, organization_id)
-  SELECT c.id, t.id, c.organization_id
-    FROM content c
-    JOIN subscription_tiers x ON x.id = c.included_in_tier_id
-    JOIN subscription_tiers t ON t.organization_id = c.organization_id
-                             AND t.deleted_at IS NULL
-                             AND t.sort_order >= x.sort_order
-   WHERE c.organization_id IS NOT NULL
-     AND NOT c.is_tier_gated
-  ON CONFLICT DO NOTHING;
-  UPDATE content SET is_tier_gated = true
-   WHERE included_in_tier_id IS NOT NULL
-     AND NOT is_tier_gated;
-  COMMIT;
-  ```
-
-  Never run `0120`'s step 6 unscoped once the new Studio is in use: it would
-  add every dearer tier to each bundle ("Basic, Premium") a creator has saved.
-  Both statements are idempotent.
-- **Check B** (ticks differ from the ladder `0120` would give): straight after
-  the deploy, a `ticked_not_ladder` row is an old-Studio edit in the window
-  that narrowed or cleared the tier. Its ticks still open the old set. Open the
-  film in the new Studio and save the tiers the creator wants. Once creators
-  use the new Studio, bundles, "keep" deletes and tier reorders make B non-zero
-  by design, so B is only meaningful on this first run.
+R13 uses a read-only script, `audit:plan-access`. It runs in a `READ ONLY`
+transaction and prints counts and content ids only. It loads no env file, so
+pass the production connection string in the shell (Neon console → Connection
+details), never from a file. Never run `0120`'s step 6 unscoped now that the
+new Studio is in use: it would add every dearer tier to each bundle ("Basic,
+Premium") a creator has saved.
 
 ### R13 — before any workers rollback
 
@@ -411,10 +372,12 @@ ROLLBACK;
 ### R17 — the first hourly price-moves run
 
 ecom-api's hourly cron runs the price-moves step, except on the 08:00 London
-run, which the bank payout has to itself. After the first run, read its `Price moves: run finished` log line:
-with no price saved since the deploy, it reads all zeros. Look for any
-`Price moves: a step of the run failed` or `payouts-sweep cron could not run
-the price moves` error.
+run, which the bank payout has to itself. A run with nothing to do logs
+nothing: `Price moves: run finished` appears only when a run claimed,
+restarted or reopened at least one move. So with no price saved since the
+deploy, expect no `Price moves` line at all (confirmed on production's 12:00Z
+run, 2026-11-06). Either way, look for any `Price moves: a step of the run
+failed` or `payouts-sweep cron could not run the price moves` error.
 
 ### Rollback
 
@@ -473,3 +436,247 @@ Runbook). So roll back only when no listed `pending_tier_from` with a
 members with the owner first. Don't change prices while
 rolled back: the old fan-out writes no price moves, so the hourly step can't
 see its subscribers after the roll forward.
+
+---
+
+## A late win undoes a lost chargeback (migrations `0126` and `0127`)
+
+`0126` adds four nullable columns and three CHECKs to `disputes`
+(`Codex-2hxff.70`; [dispute record](dispute-record.md)). It is plain
+drizzle-kit DDL. The buyer's `purchase-access-restored` email is in no
+migration: the deploy's template seed (`db:seed:templates`, which runs right
+after `db:migrate` and before any worker deploys) inserts it, as it does every
+new template, and skips one that already exists. `0127` adds one more nullable column,
+`refunded_outside_stripe_at`: a charge whose buyer support refunded outside
+Stripe, which its refund route then refuses
+([operations](operations.md#late-wins)). Both
+are additive and run before the workers deploy. The old workers never read the
+columns, and they still only alert a late win and leave its row `lost`, which
+every CHECK allows. No backfill: nothing sets the new column until support
+settles a case, by hand, by settling a late win's own failed refund as
+refunded elsewhere, or with R19's UPDATE for one refunded another way. Both stay on a rollback, but list the late wins still being
+undone first ([R19](#r19--before-any-workers-rollback-late-wins-still-being-undone)).
+The old support route doesn't read `refunded_outside_stripe_at`, so a charge
+refunded outside Stripe is refundable through Stripe again while rolled back:
+don't refund one then. R19 lists them.
+
+### R18 — lost chargebacks already settled by hand
+
+From this release the hourly reconcile undoes any lost dispute that Stripe
+now shows as won, including one alerted under the old "alert only" rule that
+a person has already put right by hand. Its first run comes within the hour
+of the deploy, and the deploy migrates and starts the new workers in one job,
+so such a row must stop being `lost` before the deploy. `0126`'s columns don't
+exist until the deploy, so R18 has two parts.
+
+**(a) Before the deploy.** List the rows the reconcile could pick up and check
+each in Stripe:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT stripe_dispute_id, stripe_charge_id, purchase_id, subscription_id,
+       course_subscription_id, amount_cents, stripe_created_at, outcome_applied_at
+  FROM disputes
+ WHERE status = 'lost'
+   AND stripe_created_at >= now() - interval '12 months'
+ ORDER BY stripe_created_at;
+ROLLBACK;
+```
+
+**Expect none:** production runs on Stripe test keys and has had no late-win
+alert.
+
+For any that Stripe shows as won and that was already put right by hand, mark
+it won and applied, so neither the old workers nor the new ones act on it
+again. This one writes: run it only with the owner's OK, with the ids from the
+list. Run it between :20 and :50 past the hour, as the operations step does:
+the old workers' hourly retry of an unfinished loss takes no lock, so a write
+while it runs could let it finish the loss on a row that is now won.
+
+```sql
+BEGIN;
+UPDATE disputes
+   SET status = 'won',
+       outcome_applied_at = COALESCE(outcome_applied_at, now() - interval '1 second'),
+       updated_at = now()
+ WHERE stripe_dispute_id IN ('du_…') AND status = 'lost'
+RETURNING stripe_dispute_id, status, outcome_applied_at;
+COMMIT;
+```
+
+It returns one line per id. A missing line means the id was mistyped or is no
+longer lost: check it before going on. Each row is now an applied win:
+
+- **Every CHECK allows it, `0126`'s included.** It writes only columns that
+  exist today, and `0126`'s three CHECKs test only its new columns, which
+  arrive empty.
+- **Nothing acts on it.** The webhook stops at an applied outcome, the hourly
+  retry takes only unapplied rows, and the late-win check reads only lost ones,
+  on the old workers and the new.
+- **A row whose loss never finished** (`outcome_applied_at` empty in the list)
+  gets an applied time a second before the write. It then still reads as
+  settled by hand, not by the undo, and (b) leaves its `lost_applied_at`
+  empty, as for any loss that never finished, so support shows no made-up
+  "lost on" date. Marking it won also releases the sale's
+  unpaid payouts that its unfinished loss was holding, and the next payout run
+  pays them, as for any win. Check first that the hand settlement didn't pay
+  those creators some other way.
+
+**(b) After the deploy**, at any time, record the same rows as late wins. This
+adds support's history ("Won late") and the lifted refund limit (Q7). Nothing
+races it, because the row stays applied:
+
+```sql
+BEGIN;
+UPDATE disputes
+   SET late_won_at = now(),
+       -- In the ARRAY: each id whose outcome_applied_at was EMPTY in (a)'s
+       -- list (its loss never finished). ARRAY[]::text[] when there are none.
+       lost_applied_at = CASE
+         WHEN stripe_dispute_id = ANY (ARRAY['du_…']::text[]) THEN NULL
+         ELSE outcome_applied_at
+       END,
+       updated_at = now()
+ WHERE stripe_dispute_id IN ('du_…')
+   AND status = 'won' AND late_won_at IS NULL
+   AND outcome_applied_at IS NOT NULL
+RETURNING stripe_dispute_id, outcome_applied_at, late_won_at, lost_applied_at;
+COMMIT;
+```
+
+Then check that each is an applied late win settled by hand. Every column
+should read `t`:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT stripe_dispute_id, status,
+       outcome_applied_at < late_won_at AS applied_before_the_late_win,
+       (late_won_at IS NULL OR status = 'won') AS check_late_won_status,
+       (late_win_refund_id IS NULL OR late_won_at IS NOT NULL) AS check_late_win_refund,
+       (lost_applied_at IS NULL OR late_won_at IS NOT NULL) AS check_lost_applied
+  FROM disputes
+ WHERE stripe_dispute_id IN ('du_…');
+ROLLBACK;
+```
+
+`applied_before_the_late_win` is what keeps the buyer's "access is back" email
+from being sent for it ([dispute record](dispute-record.md#an-applied-late-win)).
+
+### R19 — before any workers rollback: late wins still being undone
+
+A late win that the new workers have already undone stays undone. A late win
+still being undone does not (won, `late_won_at` set, its outcome not yet
+applied). Within the hour, the old workers' hourly retry finishes it as a plain
+win: it re-pays the creators and marks it applied, but it leaves a refunded
+purchase refunded, and it never refunds a payment the buyer made twice. After
+the roll forward, nothing revisits it, because it is applied. So before any
+workers rollback, list them:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT d.stripe_dispute_id, d.stripe_charge_id, d.purchase_id,
+       d.subscription_id, d.course_subscription_id, d.late_won_at,
+       d.late_win_refund_id, pu.status AS purchase_status,
+       pu.duplicate_of_purchase_id,
+       EXISTS (SELECT 1 FROM purchases o
+                WHERE o.customer_id = pu.customer_id AND o.id <> pu.id
+                  AND o.status = 'completed'
+                  AND (o.content_id = pu.content_id
+                       OR o.course_id = pu.course_id)) AS bought_again
+  FROM disputes d
+  LEFT JOIN purchases pu ON pu.id = d.purchase_id
+ WHERE d.late_won_at IS NOT NULL AND d.outcome_applied_at IS NULL
+ ORDER BY d.late_won_at;
+ROLLBACK;
+```
+
+Keep this list for support too: the charges whose buyer was refunded outside
+Stripe. The old charge page doesn't block them, so while rolled back none of
+them is ever refunded through Stripe:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT stripe_dispute_id, stripe_charge_id, refunded_outside_stripe_at
+  FROM disputes
+ WHERE refunded_outside_stripe_at IS NOT NULL;
+ROLLBACK;
+```
+
+At 0 late wins still being undone, a workers rollback is exact for them.
+Otherwise, prefer a forward fix. Each listed row has a step that is retried
+every hour and alerted ([operations](operations.md#late-wins)). Fix its cause
+and let the next run finish it, or settle a refund Stripe won't make
+([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)), then
+list again.
+
+**A row whose last alert is the refund not made** ("Late win: Stripe refused
+the refund of a payment the buyer made twice…" or "Late win: a payment the
+buyer made twice (bought again, or a duplicate) could not be refunded…") **MUST
+be settled with that operations step BEFORE any rollback.** It can't be
+settled after: the step's first check needs the outcome empty. And once the
+old workers mark it applied, the held re-pay is released and the next payout
+run pays the creators back the first payment, with nothing to take it back. A
+case the step stops (STOP) is the owner's to settle before the rollback; until
+then, don't roll back.
+
+**A late win's failed refund is settled with the NEW admin, or not until the
+roll forward.** The new admin's "refunded elsewhere" marks the charge refunded
+outside Stripe; the old one marks nothing, and once a refund is settled
+nothing marks it later. So before any rollback, list them:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT r.stripe_refund_id, r.stripe_charge_id, d.stripe_dispute_id,
+       COALESCE(d.late_win_refund_id = r.stripe_refund_id, false)
+         AS recorded_as_the_late_wins
+  FROM refunds r
+  JOIN disputes d ON d.stripe_charge_id = r.stripe_charge_id
+                 AND d.late_won_at IS NOT NULL
+ WHERE r.status = 'failed' AND r.resolved_at IS NULL
+ ORDER BY r.stripe_charge_id, r.stripe_refund_id;
+ROLLBACK;
+```
+
+It lists every open failed refund on a late win's charge, not only the one
+our record names: the late win's own refund may carry only Stripe's metadata
+(`codex_late_win_dispute`) when our record's write was lost. Settle each as
+the late-win alert row says ([operations](operations.md#late-wins)). One still
+open at the rollback stays open until the roll forward: refund the buyer
+another way meanwhile if need be, but don't settle it in the old admin, and
+never with "Re-pay payees". One settled while rolled back anyway is recorded
+with (b) below.
+
+If the workers must roll back anyway, **keep the list first.** Once the old
+workers mark a row applied, it looks exactly like a late win the new workers
+undid, and it can't be found again. Then wait until each row shows
+`outcome_applied_at` set, and act on it:
+
+| The row | What to do |
+|---|---|
+| A subscription or a course subscription | Nothing: the old workers settle it as the new ones would |
+| `purchase_status` is `completed` | Nothing: the buyer already has it back. They aren't sent the "access is back" email |
+| `purchase_status` is `pending` (a duplicate payment the loss never got to) | Nothing: the hourly duplicate sweep refunds it |
+| `late_win_refund_id` set | Nothing, once Stripe shows that refund succeeded: its `charge.refunded` takes it back from the creators. If a payout run paid their re-pay first, it leaves a `slice_repaid` debt for support, as any refund of a re-paid sale does. If it fails or is canceled instead, the buyer is still owed it: refund them another way. Settle a failed one in Failed refunds as refunded elsewhere, **never** "Re-pay payees": the old admin doesn't refuse it, and the old alert even suggests it. A canceled one paid nothing out and took nothing back, so there is nothing to settle. The old admin doesn't mark either charge refunded outside Stripe: record it with (b) after the roll forward, and never refund it through Stripe before then |
+| `refunded`, `late_win_refund_id` empty, and `bought_again` true or `duplicate_of_purchase_id` set | The buyer paid twice. Refund what is left of the charge: from Stripe's Dashboard while rolled back (the old charge page keeps the 14-day limit), or from the charge page once rolled forward (a late win has no limit there). Its `charge.refunded` takes it back from the creators, as in the row above |
+| `refunded`, and neither | The undo never gave the buyer the item back. Unless the charge's refunds cover what was paid (check in Stripe), give it back by hand, with the owner's OK: content with a [support grant](access.md#support-grants), and a course as the owner decides |
+
+**(b) After the roll forward**, with the owner's OK for each case, mark every
+charge whose buyer was refunded another way while rolled back: a late-win
+refund that failed or was canceled (row 4), or one the old admin settled.
+Nothing else marks it: the new admin marks only a refund it settles itself, so
+the charge page would offer a Stripe refund again, with no end date.
+
+```sql
+BEGIN;
+UPDATE disputes
+   SET refunded_outside_stripe_at = now(),
+       updated_at = now()
+ WHERE stripe_dispute_id IN ('du_…')
+   AND late_won_at IS NOT NULL
+   AND refunded_outside_stripe_at IS NULL
+RETURNING stripe_dispute_id, refunded_outside_stripe_at;
+COMMIT;
+```
+
+It returns one line per id. A missing line means the id was mistyped, isn't a
+late win, or is already marked: check it before going on.
