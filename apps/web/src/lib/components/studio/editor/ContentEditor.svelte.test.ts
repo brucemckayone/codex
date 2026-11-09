@@ -931,6 +931,42 @@ describe('ContentEditor · it went live by another way', () => {
     expect(text()).toContain(m.studio_editor_open_live_failed());
   });
 
+  // A piece first saved on /new: its move changes route, which reads for
+  // itself, and this page has no read of its own, so it is not gated on
+  // one (the round-4 and round-5 reviews).
+  test('Open from a new piece moves, its page having no read to wait for', async () => {
+    remotes.readPublishState.mockResolvedValueOnce({
+      status: 'published',
+      publishedAt: new Date(),
+      publishRequestedAt: null,
+      publishBlockedReason: null,
+      slug: 'runes',
+    });
+    render({});
+    type('Title', 'Runes');
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    expect(remotes.createContentDraft).toHaveBeenCalled();
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+    });
+    type('Title', 'Runes, properly');
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    flushSync();
+
+    [...document.querySelectorAll('button')]
+      .find((node) => node.textContent?.includes(m.studio_editor_open_live()))
+      ?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(nav.goto).toHaveBeenCalledWith(
+      '/studio/content/c-new/edit',
+      expect.anything()
+    );
+    expect(text()).not.toContain(m.studio_editor_open_live_failed());
+  });
+
   // Next's save came back refused as live: the step froze, and focus is the
   // notice's to place, never the bar's emptied words (the round-3 review).
   test('Next refused as live: focus goes to Open it to update', async () => {

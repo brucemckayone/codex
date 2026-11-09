@@ -439,6 +439,57 @@ describe('a piece that has been live', () => {
     expect(session.wentLiveElsewhere).toBe(true);
   });
 
+  // An emptied title is a draft's to leave out, never an Update's to wait
+  // for: the rest goes, and the refusal freezes (the round-5 review).
+  it('a clean flip, then the title emptied: the rest goes as a draft, and is refused', async () => {
+    const session = start();
+    publication = LIVE;
+    flushSync();
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+    });
+
+    session.set('title', '');
+    session.set('description', 'Rewritten');
+    await afterDebounce();
+
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      asDraft: true,
+      patch: { description: 'Rewritten' },
+    });
+    expect(session.wentLiveElsewhere).toBe(true);
+  });
+
+  // A move waits for a draft's save, whatever the page reads; refused, it
+  // asks as live, the notice behind it (the round-5 review).
+  it('a clean flip, then a move: it waits for the save, which finds it live, and asks as live', async () => {
+    const session = start();
+    publication = LIVE;
+    flushSync();
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+    });
+    session.set('description', 'Half-typed');
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    const { cancel } = navigate();
+    // Not asked yet: nothing has said it went live.
+    expect(confirm).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalled();
+    await settle();
+
+    expect(remotes.saveContent).toHaveBeenCalledWith(
+      expect.objectContaining({ asDraft: true })
+    );
+    expect(session.wentLiveElsewhere).toBe(true);
+    expect(confirm).toHaveBeenCalledWith(
+      m.studio_content_draft_confirm_leave_live()
+    );
+  });
+
   // Typed while Publish was out: the save was armed before it went live.
   it('a save armed as a draft does not land on the piece once it is live', async () => {
     const session = start();
@@ -2698,6 +2749,11 @@ describe('it went live by another way', () => {
       'studio_editor.open_live_page_replaced',
       { contentId: ID, keys: ['description'] }
     );
+    await settle();
+    expect(told.logWarn).not.toHaveBeenCalledWith(
+      'studio_editor.closed_with_unsent_changes',
+      expect.anything()
+    );
     expect(takeLiveHandoff(ID)).toEqual({
       changes: { description: 'Half-typed' },
     });
@@ -2781,6 +2837,12 @@ describe('it went live by another way', () => {
       'studio_editor.open_live_page_replaced',
       { contentId: ID, keys: ['description'] }
     );
+    // One trace of how the close ended, never a "dropped" one as well
+    // (the round-5 review).
+    expect(told.logWarn).not.toHaveBeenCalledWith(
+      'studio_editor.closed_with_unsent_changes',
+      expect.anything()
+    );
     expect(takeLiveHandoff(ID)).toEqual({
       changes: { description: 'Half-typed' },
     });
@@ -2800,8 +2862,20 @@ describe('it went live by another way', () => {
     close();
     reading.resolve({ status: 'published', publishedAt: '2026-11-09' });
     await opened;
+    await settle();
 
     expect(takeLiveHandoff(ID)).toBeNull();
+    // Left behind, by the creator's choice: said once.
+    expect(
+      told.logWarn.mock.calls.filter(
+        ([event]) => event === 'studio_editor.closed_with_unsent_changes'
+      )
+    ).toEqual([
+      [
+        'studio_editor.closed_with_unsent_changes',
+        { contentId: ID, keys: ['description'], abandoned: true },
+      ],
+    ]);
   });
 
   it('carried to the live editor, its close leaves no trace of dropped changes', async () => {

@@ -415,6 +415,20 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   let handedOff = false;
   /** The creator answered the live question with Leave: its changes are theirs to have dropped. */
   let leftChanges = false;
+  /** "Open it to update" is out: a close meanwhile is its to trace. */
+  let openingLive = false;
+  /** The close's trace of changes left behind, said once. */
+  let closeTraced = false;
+  /** Closed with changes no save or hand-off took: one trace, never two that disagree (the round-5 review). */
+  function traceClosedUnsent(): void {
+    if (closeTraced || !isDirty || handedOff) return;
+    closeTraced = true;
+    logger.warn('studio_editor.closed_with_unsent_changes', {
+      contentId,
+      keys: sendableKeys(),
+      abandoned: abandoned || leftChanges,
+    });
+  }
   const isLive = (): boolean =>
     publishing ||
     wentLive ||
@@ -625,7 +639,9 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     // asks (Try again, Next, a move's save). Its changes go to the live one.
     if (liveElsewhere) return leftForLive();
     // Update puts every field live at once: none goes without its title.
-    if (needsTitle && isLive()) return titleNeeded();
+    // An Update by the session's own facts, never the page's read: a draft
+    // leaves an emptied title out and sends the rest (the round-5 review).
+    if (needsTitle && ownLive()) return titleNeeded();
     // Taken before the first await: whatever is typed from here on is the
     // next save's.
     const sent: Partial<DraftValues> = Object.fromEntries(
@@ -745,7 +761,10 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     // Update them, discard them, or stay (Codex-a6ofh.2.5). Leave at once
     // lets the move go as it was. An Update still on the wire is waited
     // for, like a save.
-    if (isLive() && sending === null) {
+    // By the session's own facts: a draft whose page reads live waits for
+    // its save like any draft's, and a refusal asks as live with the notice
+    // behind it (the round-5 review).
+    if (ownLive() && sending === null) {
       const to = navigation.to?.url;
       if (!isDirty || !to) return;
       const asked = ++questions;
@@ -1085,14 +1104,9 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           (!unsaved() || (isLive() && sending === null))
         ) {
           // The page's to guard (Codex-a6ofh.2.5); a trace if it did not.
-          // Changes carried to the live editor were not dropped.
-          if (isDirty && !handedOff) {
-            logger.warn('studio_editor.closed_with_unsent_changes', {
-              contentId,
-              keys: sendableKeys(),
-              abandoned,
-            });
-          }
+          // An Open still out says how its close ended itself: carried, or
+          // left behind.
+          if (!openingLive) traceClosedUnsent();
           finish();
           return;
         }
@@ -1113,6 +1127,119 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       }
     });
   });
+
+  /**
+   * One "Open it to update" (see {@link DraftSession.openLive}). True when
+   * the editor closed while it was out and its changes went to the live
+   * editor all the same.
+   */
+  async function openLiveOnce(id: string): Promise<boolean> {
+    openProblem = null;
+    leftChanges = false;
+    // Where it stands, by a read whose failure is seen. kit's
+    // invalidateAll() resolves even when a refresh in it fails (2.55), so
+    // it cannot say the piece is live.
+    try {
+      const state = await readPublishState(id);
+      if (!hasBeenLive(state)) {
+        // Refused as live, read as never live: our own contract broken.
+        logger.error('studio_editor.open_live_reread_failed', {
+          contentId: id,
+          status: state.status,
+          neverLive: true,
+        });
+        openProblem = 'outage';
+        return false;
+      }
+    } catch (err) {
+      // Signed out or gone is a refusal (a warning), and no try again
+      // helps; an outage is an error.
+      logReadFailure('studio_editor.open_live_reread_failed', err, {
+        contentId: id,
+      });
+      openProblem = readProblem(err) ?? 'outage';
+      return false;
+    }
+    const carry = () =>
+      handOffToLive(
+        id,
+        Object.fromEntries(
+          sendableKeys()
+            .filter((key) => key !== 'slug')
+            .map((key) => [key, $state.snapshot(values[key])])
+        )
+      );
+    // Closed while it read: no move of its own to make. Left on purpose
+    // (Back, the rail, answered Leave), its changes were the creator's to
+    // drop; closed by something else (an error page), they wait, said.
+    if (unmounted) {
+      if (leftChanges || !isDirty) return false;
+      carry();
+      logger.warn('studio_editor.open_live_page_replaced', {
+        contentId: id,
+        keys: sendableKeys(),
+      });
+      return true;
+    }
+    carry();
+    try {
+      // The route's own read (a query, or a load) takes that answer: a move
+      // to the same address reads nothing new of itself.
+      await invalidateAll();
+      if (unmounted) {
+        // The creator left without them: theirs to have dropped.
+        if (leftChanges || !isDirty) {
+          withdrawLiveHandoff(id);
+          return false;
+        }
+        // Something else took the screen (an error page, as a load
+        // failed): the changes wait for the live editor's next mount, or
+        // are said as too late after their window, never dropped unsaid.
+        logger.warn('studio_editor.open_live_page_replaced', {
+          contentId: id,
+          keys: sendableKeys(),
+        });
+        return true;
+      }
+      // In place (Write, on the edit route), the next editor is built from
+      // this page's read, and invalidateAll resolves even when its refresh
+      // failed: a move on a read still a draft's would open the draft
+      // editor again, the changes gone. From Publish or a new piece the
+      // move changes step or route, which reads again (the round-4 review).
+      if (options.openLiveInPlace === true && !readLive()) {
+        withdrawLiveHandoff(id);
+        openProblem = 'outage';
+        logger.error('studio_editor.open_live_reread_failed', {
+          contentId: id,
+          stage: 'page',
+        });
+        return false;
+      }
+      handedOff = true;
+      // Passed by the guard: the changes are carried, not dropped.
+      leaving = true;
+      // From Write, the address is the one it is on: replaced, so Back
+      // never lands on a same-address entry kit would rebuild from a read
+      // older than an Update since. From Publish the step changes, which
+      // reads again, so it is a move of its own.
+      await goto(editHref(id), {
+        replaceState: readEditorStep(new URL(location.href)) === 'write',
+      });
+    } catch (err) {
+      // The creator stays, the notice and its button with them.
+      handedOff = false;
+      withdrawLiveHandoff(id);
+      openProblem = 'outage';
+      logger.error('studio_editor.open_live_failed', {
+        contentId: id,
+        ...describeThrown(err),
+      });
+    } finally {
+      // Still mounted: the move did not happen, so guard again.
+      if (!unmounted) leaving = false;
+    }
+    return false;
+  }
 
   return {
     get values() {
@@ -1152,111 +1279,17 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       return openProblem;
     },
     async openLive() {
-      if (!liveElsewhere || contentId === null) return;
+      if (!liveElsewhere || contentId === null || openingLive) return;
       const id = contentId;
-      openProblem = null;
-      leftChanges = false;
-      // Where it stands, by a read whose failure is seen. kit's
-      // invalidateAll() resolves even when a refresh in it fails (2.55), so
-      // it cannot say the piece is live.
+      openingLive = true;
+      /** Closed meanwhile, its changes went to the live editor. */
+      let keptOnClose = false;
       try {
-        const state = await readPublishState(id);
-        if (!hasBeenLive(state)) {
-          // Refused as live, read as never live: our own contract broken.
-          logger.error('studio_editor.open_live_reread_failed', {
-            contentId: id,
-            status: state.status,
-            neverLive: true,
-          });
-          openProblem = 'outage';
-          return;
-        }
-      } catch (err) {
-        // Signed out or gone is a refusal (a warning), and no try again
-        // helps; an outage is an error.
-        logReadFailure('studio_editor.open_live_reread_failed', err, {
-          contentId: id,
-        });
-        openProblem = readProblem(err) ?? 'outage';
-        return;
-      }
-      const carry = () =>
-        handOffToLive(
-          id,
-          Object.fromEntries(
-            sendableKeys()
-              .filter((key) => key !== 'slug')
-              .map((key) => [key, $state.snapshot(values[key])])
-          )
-        );
-      // Closed while it read: no move of its own to make. Left on purpose
-      // (Back, the rail, answered Leave), its changes were the creator's to
-      // drop; closed by something else (an error page), they wait, said.
-      if (unmounted) {
-        if (leftChanges || !isDirty) return;
-        carry();
-        logger.warn('studio_editor.open_live_page_replaced', {
-          contentId: id,
-          keys: sendableKeys(),
-        });
-        return;
-      }
-      carry();
-      try {
-        // The route's own read (a query, or a load) takes that answer: a move
-        // to the same address reads nothing new of itself.
-        await invalidateAll();
-        if (unmounted) {
-          // The creator left without them: theirs to have dropped.
-          if (leftChanges || !isDirty) {
-            withdrawLiveHandoff(id);
-            return;
-          }
-          // Something else took the screen (an error page, as a load
-          // failed): the changes wait for the live editor's next mount, or
-          // are said as too late after their window, never dropped unsaid.
-          logger.warn('studio_editor.open_live_page_replaced', {
-            contentId: id,
-            keys: sendableKeys(),
-          });
-          return;
-        }
-        // In place (Write, on the edit route), the next editor is built from
-        // this page's read, and invalidateAll resolves even when its refresh
-        // failed: a move on a read still a draft's would open the draft
-        // editor again, the changes gone. From Publish or a new piece the
-        // move changes step or route, which reads again (the round-4 review).
-        if (options.openLiveInPlace === true && !readLive()) {
-          withdrawLiveHandoff(id);
-          openProblem = 'outage';
-          logger.error('studio_editor.open_live_reread_failed', {
-            contentId: id,
-            stage: 'page',
-          });
-          return;
-        }
-        handedOff = true;
-        // Passed by the guard: the changes are carried, not dropped.
-        leaving = true;
-        // From Write, the address is the one it is on: replaced, so Back
-        // never lands on a same-address entry kit would rebuild from a read
-        // older than an Update since. From Publish the step changes, which
-        // reads again, so it is a move of its own.
-        await goto(editHref(id), {
-          replaceState: readEditorStep(new URL(location.href)) === 'write',
-        });
-      } catch (err) {
-        // The creator stays, the notice and its button with them.
-        handedOff = false;
-        withdrawLiveHandoff(id);
-        openProblem = 'outage';
-        logger.error('studio_editor.open_live_failed', {
-          contentId: id,
-          ...describeThrown(err),
-        });
+        keptOnClose = await openLiveOnce(id);
       } finally {
-        // Still mounted: the move did not happen, so guard again.
-        if (!unmounted) leaving = false;
+        openingLive = false;
+        // Closed while it was out, and nothing took them: said once, here.
+        if (unmounted && !keptOnClose) traceClosedUnsent();
       }
     },
     discard() {
