@@ -693,8 +693,10 @@ late win, or is already marked: check it before going on.
   transaction, so inserts into the email log wait while it builds and until
   the file commits: a moment on today's table. Disputes are locked from the
   CHECK's scan until the commit. Organisation and user reads and writes wait
-  only for the commit itself: the file drops the pin's foreign key, which
-  locks both tables, as its last statement (moved there by hand);
+  only for the commit, or for up to 5 s if the drop has to wait behind a long
+  transaction (then the file fails and nothing applies): the file drops the
+  pin's foreign key, which locks both tables, as its last statement (moved
+  there by hand);
 - CHECK `check_disputes_buyer_told`: a buyer told of a late win needs a late
   win (`Codex-h301h`). Its preflight in
   `packages/database/scripts/migration-preflight.ts` refuses the whole run,
@@ -715,9 +717,13 @@ edits out. Do both halves instead:
 
 1. Delete this file, its snapshot and its journal entry.
 2. Run `pnpm --filter @codex/database db:gen:drizzle --name email_log_index_and_buyer_told_check`. It writes a correct snapshot on top of the other `0128`.
-3. Before overwriting, diff the regenerated `.sql` against ours. The only differences may be the two hand edits; anything else means the two schemas overlap, so stop.
-4. Overwrite the new `.sql` with this file's committed text (`git show`).
-5. Run `generate` once more: it must find no schema changes.
+3. Before overwriting, diff the regenerated `.sql` against ours, which step 1 deleted from disk: `diff <(git show HEAD:packages/database/src/migrations/0128_email_log_index_and_buyer_told_check.sql) packages/database/src/migrations/0129_email_log_index_and_buyer_told_check.sql`. The only differences may be the two hand edits; anything else means the two schemas overlap, so stop, and delete the files step 2 wrote.
+4. Overwrite the new `.sql` with this file's committed text (the same `git show`).
+5. Run `generate` once more: it must find no schema changes. If it writes a file, delete it and stop.
+6. Carry the new name everywhere the old one is named:
+   - the `migration` of the `MIGRATION_PREFLIGHTS` entry (its "names migrations that exist" test fails until you do);
+   - the "0128" mentions in `migration-preflight.ts`, `dispute-late-win-checks.test.ts`, the guard tests' comments and this section;
+   - every local database that already applied the old name, since the runner records a file by its name and would run the renamed one again (its `CREATE INDEX` then fails, and that database's migrate is stuck): `UPDATE "__drizzle_migrations" SET hash = '0129_email_log_index_and_buyer_told_check.sql' WHERE hash = '0128_email_log_index_and_buyer_told_check.sql';`. Production and CI never ran the old name.
 
 Two tests in `packages/database/scripts/__tests__/migration-preflight.test.ts`
 fail until both hand edits are back: no migration drops the pin column, and

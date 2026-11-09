@@ -133,9 +133,10 @@ const main = async () => {
         // One transaction per file: its lock bound, the file and the row that
         // records it commit together or not at all. A lock wait over 5 s fails
         // the file, nothing is half-applied, re-run the deploy once the
-        // blocking transaction ends (Codex-vliwn). `SET LOCAL` ends with the
-        // transaction, so a file's own `RESET lock_timeout` (0111, 0122-0125)
-        // never reaches the next file. No file may hold its own BEGIN/COMMIT.
+        // blocking transaction ends (Codex-vliwn). Every file opens with its
+        // own `SET LOCAL`, so a file's own `RESET lock_timeout` (0111,
+        // 0122-0125), which outlives its commit, never leaves the next file
+        // unbounded. No file may hold its own BEGIN/COMMIT.
         await client.query('BEGIN');
         await client.query("SET LOCAL lock_timeout = '5s'");
         await client.query(migration.sql);
