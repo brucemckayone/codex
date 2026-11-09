@@ -87,6 +87,7 @@ export function refundRow(overrides: Partial<RefundRow> = {}): RefundRow {
     createdAt: '2026-10-20T08:12:00.000Z',
     notifiedAt: '2026-10-20T08:13:00.000Z',
     requestedBy: { userId: 'user-jordan', name: 'Jordan Reid', deleted: false },
+    resolution: null,
     ...overrides,
   };
 }

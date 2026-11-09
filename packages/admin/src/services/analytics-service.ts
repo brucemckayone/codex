@@ -8,7 +8,6 @@
 
 import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
 import { dateWindow, schema, toIso } from '@codex/database';
-import { STANDING_REFUND_STATUSES } from '@codex/purchase';
 import { BaseService, NotFoundError } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
@@ -62,6 +61,7 @@ import {
   trailingDaysStart,
   zeroFillDays,
 } from './analytics-window';
+import { countsAgainstCharge } from './counted-refunds';
 
 const REVENUE_KINDS: readonly RevenueKind[] = [
   'one_off',
@@ -150,8 +150,11 @@ export class AdminAnalyticsService extends BaseService {
    *   own). A charge first recorded before the window is left out whole,
    *   even when a later replay adds a slice inside it. Its `gross` is the sum
    *   of its slices, which add up to what the buyer paid.
-   * - `taken`: what went back to the buyer: its standing refunds and lost
-   *   chargebacks, never more than the charge (owner decision Q-C).
+   * - `taken`: what went back to the buyer: its refunds that count against
+   *   it (`countsAgainstCharge`: standing ones, and failed ones support
+   *   settled as refunded elsewhere, owner decision 2026-11-09, "Count it as
+   *   refunded") and its lost chargebacks, never more than the charge (owner
+   *   decision Q-C).
    * - `slice_net`: each slice less its share of `taken`, by the clawback's own
    *   rounding, floor(slice × taken / gross), so the figures match what the
    *   ledger takes back without reading `payout_reversals`.
@@ -162,10 +165,6 @@ export class AdminAnalyticsService extends BaseService {
   private orgCharges(organizationId: string, window: AnalyticsWindow): SQL {
     const start = window.start.toISOString();
     const end = window.end.toISOString();
-    const standing = sql.join(
-      STANDING_REFUND_STATUSES.map((status) => sql`${status}`),
-      sql`, `
-    );
     return sql`
       WITH window_charges AS (
         SELECT DISTINCT p.stripe_charge_id
@@ -211,9 +210,9 @@ export class AdminAnalyticsService extends BaseService {
         SELECT c.stripe_charge_id,
                LEAST(
                  c.gross,
-                 COALESCE((SELECT SUM(r.amount_cents) FROM refunds r
-                           WHERE r.stripe_charge_id = c.stripe_charge_id
-                             AND r.status IN (${standing})), 0)
+                 COALESCE((SELECT SUM(refunds.amount_cents) FROM refunds
+                           WHERE refunds.stripe_charge_id = c.stripe_charge_id
+                             AND ${countsAgainstCharge()}), 0)
                  + COALESCE((SELECT SUM(d.amount_cents) FROM disputes d
                              WHERE d.stripe_charge_id = c.stripe_charge_id
                                AND d.status = 'lost'), 0)

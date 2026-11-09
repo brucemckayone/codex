@@ -7,7 +7,9 @@
   taken when `charge.refunded` arrives. Until the webhook has recorded it (no
   slice has a history line for it, and the buyer has not been emailed) its
   row says "Taking back shares…". After support makes a refund the page
-  reloads once and offers Refresh (Q10); nothing polls.
+  reloads once and offers Refresh (Q10); nothing polls. A failed refund
+  support settled as refunded elsewhere reads "Refunded another way", not
+  "Failed": it counts as refunded (Codex-3xnta).
 
   @prop {ChargeDetail} detail
   @prop {() => void} [onRefresh] - Shows the Refresh button.
@@ -65,7 +67,7 @@
 </script>
 
 {#snippet status(refund: RefundRow)}
-  {@const badge = refundStatus(refund.status)}
+  {@const badge = refundStatus(refund)}
   <Badge variant={badge.variant}>{badge.label}</Badge>
   {#if refund.status === 'failed' && refund.failureLabel}
     <span class="cell-sub">{refund.failureLabel}</span>

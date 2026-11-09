@@ -4221,6 +4221,16 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         const detail = await service.getChargeDetail(chargeId);
         expect(detail.charge.refundedCents).toBe(300);
         expect(detail.refundable.maxCents).toBe(700);
+        // Each refund row says how support settled it, from our record.
+        expect(
+          detail.refunds
+            .map((refund) => [refund.amountCents, refund.resolution])
+            .sort((a, b) => Number(a[0]) - Number(b[0]))
+        ).toEqual([
+          [100, null],
+          [200, 'creators_repaid'],
+          [300, 'refunded_elsewhere'],
+        ]);
         const [row] = (
           await service.searchCharges({ lookup: chargeId, page: 1, limit: 20 })
         ).items;

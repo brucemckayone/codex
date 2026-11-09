@@ -378,6 +378,13 @@ export interface RefundRow {
   /** When the buyer was emailed about it; null until the webhook records it. */
   notifiedAt: string | null;
   requestedBy: RefundRequester;
+  /**
+   * How support settled it in Failed refunds, from our record; null while it
+   * is open, and for a refund that didn't fail. A failed one settled
+   * `refunded_elsewhere` counts as refunded (Codex-3xnta), and the card says
+   * "Refunded another way" for it, not "Failed".
+   */
+  resolution: FailedRefundResolution | null;
 }
 
 /** One dispute of the charge, from `disputes`. */

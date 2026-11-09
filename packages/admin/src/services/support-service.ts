@@ -194,6 +194,7 @@ import type {
   CreatorDebtItem,
   CreatorDebtPerson,
   FailedRefundItem,
+  FailedRefundResolution,
   FeeChangeCard,
   FeeChangeLine,
   FeeNoticeItem,
@@ -227,6 +228,11 @@ import type {
   SystemDecision,
   ToldAnotherWayResult,
 } from '../support-types';
+import {
+  countsAgainstCharge,
+  settledElsewhere,
+  settledElsewhereCentsIn,
+} from './counted-refunds';
 import {
   causeKey,
   chargebackState,
@@ -348,31 +354,15 @@ function standingCents(listed: readonly Stripe.Refund[]): number {
 }
 
 /**
- * What the charge's failed refunds that support settled as refunded elsewhere
- * add up to (owner decision 2026-11-09, "Count it as refunded"; Codex-3xnta).
- * The buyer has that money back, so it counts against what the charge still
- * offers through Stripe, as if the refund had succeeded. It is never counted
- * twice: only a failed row holds a resolution (`check_refunds_resolution`),
- * a failed refund is final at Stripe and in our record (`recordRefund`), and
- * `standingCents` never counts a failed one.
+ * How support settled a failed refund, from our record; null while it is
+ * open, and for any refund that didn't fail (`check_refunds_resolution`).
  */
-function settledElsewhereCentsIn(
-  recorded: ReadonlyArray<{ amountCents: number; resolution: string | null }>
-): number {
-  return recorded
-    .filter((row) => row.resolution === 'refunded_elsewhere')
-    .reduce((sum, row) => sum + row.amountCents, 0);
-}
-
-/**
- * The recorded refunds that count against their charge: a standing one, or a
- * failed one settled as refunded elsewhere (`settledElsewhereCentsIn`).
- */
-function countsAgainstCharge(): SQL {
-  return either(
-    inArray(refunds.status, [...STANDING_REFUND_STATUSES]),
-    eq(refunds.resolution, 'refunded_elsewhere')
-  );
+function failedRefundResolution(
+  value: string | null | undefined
+): FailedRefundResolution | null {
+  return value === 'refunded_elsewhere' || value === 'creators_repaid'
+    ? value
+    : null;
 }
 
 /** What the listed refunds in any of these statuses add up to. */
@@ -1185,13 +1175,17 @@ export class SupportService extends BaseService {
     return new Map(rows.map((row) => [row.payoutId, row.shareBps]));
   }
 
-  /** The charge's refunds as Stripe lists them, oldest first. */
+  /**
+   * The charge's refunds as Stripe lists them, oldest first, with how support
+   * settled a failed one, from our record.
+   */
   private async refundRows(
     listed: readonly Stripe.Refund[],
     recorded: ReadonlyArray<{
       stripeRefundId: string;
       notifiedAt: Date | null;
       requestedByUserId: string | null;
+      resolution: string | null;
     }>
   ): Promise<RefundRow[]> {
     const byId = new Map(recorded.map((row) => [row.stripeRefundId, row]));
@@ -1231,6 +1225,7 @@ export class SupportService extends BaseService {
           createdAt: stripeSeconds(refund.created),
           notifiedAt: toIso(byId.get(refund.id)?.notifiedAt),
           requestedBy,
+          resolution: failedRefundResolution(byId.get(refund.id)?.resolution),
         };
       });
   }
@@ -1376,12 +1371,7 @@ export class SupportService extends BaseService {
           resolution: refunds.resolution,
         })
         .from(refunds)
-        .where(
-          and(
-            eq(refunds.stripeChargeId, chargeId),
-            eq(refunds.resolution, 'refunded_elsewhere')
-          )
-        )
+        .where(and(eq(refunds.stripeChargeId, chargeId), settledElsewhere()))
     );
   }
 
