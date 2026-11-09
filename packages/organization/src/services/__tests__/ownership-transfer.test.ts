@@ -31,6 +31,8 @@ import {
   ConflictError,
   ForbiddenError,
   IneligibleOwnershipRecipientError,
+  InternalServiceError,
+  NotFoundError,
   NotOrganisationOwnerError,
   OwnershipConfirmationMismatchError,
   OwnershipOfferNotOpenError,
@@ -39,6 +41,7 @@ import {
   OrganizationService,
   type OwnershipMailer,
 } from '../organization-service';
+import { createOwnershipOffer } from '../ownership-transfer';
 
 const ORG_NAME = 'Studio Alpha';
 
@@ -329,6 +332,45 @@ describe('ownership transfer', () => {
       await expect(offer(adminId)).resolves.toMatchObject({ status: 'open' });
       expect((await offerRow(first.id))?.status).toBe('expired');
     });
+
+    // Codex-2hxff.46 (g): a lost race raises the unique violation (409
+    // above). An INSERT that returned no row is our fault, so a 500.
+    it('an insert that returns no row is an internal error, not a conflict', async () => {
+      const insertReturnsNothing = new Proxy(db, {
+        get(target, prop, receiver) {
+          if (prop !== 'transaction')
+            return Reflect.get(target, prop, receiver);
+          return (run: (tx: object) => Promise<unknown>) =>
+            target.transaction((tx) =>
+              run(
+                new Proxy(tx, {
+                  get(txTarget, txProp, txReceiver) {
+                    if (txProp !== 'insert') {
+                      return Reflect.get(txTarget, txProp, txReceiver);
+                    }
+                    return () => ({
+                      values: () => ({ returning: async () => [] }),
+                    });
+                  },
+                })
+              )
+            );
+        },
+      });
+
+      await expect(
+        createOwnershipOffer(
+          insertReturnsNothing,
+          {
+            organizationId: orgId,
+            ownerUserId: ownerId,
+            recipientUserId: creatorId,
+            confirmName: ORG_NAME,
+          },
+          new Date()
+        )
+      ).rejects.toThrow(InternalServiceError);
+    });
   });
 
   describe('withdraw and decline', () => {
@@ -456,6 +498,26 @@ describe('ownership transfer', () => {
         IneligibleOwnershipRecipientError
       );
       await expectOwnerAndPeriodAgree(ownerId);
+    });
+
+    // Codex-2hxff.46 (d): the organisation must exist and not be deleted.
+    it('refuses a deleted organisation as not found, and moves nothing', async () => {
+      await db
+        .update(schema.organizations)
+        .set({ deletedAt: new Date() })
+        .where(eq(schema.organizations.id, orgId));
+
+      await expect(service.reassignOwner(orgId, adminId)).rejects.toThrow(
+        NotFoundError
+      );
+      expect(await roleOf(adminId)).toBe('admin');
+      await expectOwnerAndPeriodAgree(ownerId);
+    });
+
+    it('refuses an unknown organisation as not found', async () => {
+      await expect(
+        service.reassignOwner(crypto.randomUUID(), adminId)
+      ).rejects.toThrow(NotFoundError);
     });
 
     // Codex-2hxff.37 — owner decision 2026-10-18, "Hold it for the next
@@ -613,6 +675,128 @@ describe('ownership transfer', () => {
       await expect(service.getOwnership(orgId, memberId)).rejects.toThrow(
         ForbiddenError
       );
+    });
+
+    // Codex-2hxff.46 (h): the view's reads run together. Every field of each
+    // viewer's view is pinned, so a read wired to the wrong field, or an
+    // owner-only field shown to another viewer, fails here.
+    it('each viewer sees exactly their view, every field in place', async () => {
+      const day = 24 * 60 * 60 * 1000;
+      const joined = async (userId: string, at: Date) =>
+        db
+          .update(schema.organizationMemberships)
+          .set({ createdAt: at })
+          .where(
+            and(
+              eq(schema.organizationMemberships.organizationId, orgId),
+              eq(schema.organizationMemberships.userId, userId)
+            )
+          );
+      // The creator joined first, so the list keeps them first.
+      await joined(creatorId, new Date(Date.now() - 2 * day));
+      await joined(adminId, new Date(Date.now() - day));
+      // The admin declined an earlier offer; the open one is the creator's,
+      // whose payouts are set up.
+      const declined = await offer(adminId);
+      await service.declineOwnershipOffer(orgId, declined.id, adminId);
+      const open = await offer(creatorId);
+      const [connect] = await db
+        .insert(schema.stripeConnectAccounts)
+        .values({
+          userId: creatorId,
+          stripeAccountId: `acct_view_${crypto.randomUUID().slice(0, 12)}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+        })
+        .returning();
+      if (!connect) throw new Error('connect account not inserted');
+
+      // In `finally`: a ready Connect row left behind feeds other suites.
+      try {
+        const people = await db
+          .select()
+          .from(schema.users)
+          .where(inArray(schema.users.id, [ownerId, adminId, creatorId]));
+        const person = (id: string) => {
+          const row = people.find((p) => p.id === id);
+          if (!row) throw new Error(`user ${id} not found`);
+          return row;
+        };
+        const memberships = await db
+          .select()
+          .from(schema.organizationMemberships)
+          .where(eq(schema.organizationMemberships.organizationId, orgId));
+        const joinedAt = (id: string) =>
+          memberships.find((m) => m.userId === id)?.createdAt.toISOString();
+        const period = await db.query.organizationOwnershipPeriods.findFirst({
+          where: (p, { and, eq, isNull }) =>
+            and(eq(p.organizationId, orgId), isNull(p.endedAt)),
+        });
+        const openRow = await offerRow(open.id);
+        const declinedRow = await offerRow(declined.id);
+
+        const owner = {
+          userId: ownerId,
+          name: person(ownerId).name,
+          avatarUrl: person(ownerId).avatarUrl ?? person(ownerId).image ?? null,
+          ownerSince: period?.startedAt.toISOString(),
+          payoutsReady: false,
+        };
+        const openOffer = {
+          id: open.id,
+          recipient: {
+            userId: creatorId,
+            name: person(creatorId).name,
+            payoutsReady: true,
+          },
+          offeredBy: { userId: ownerId, name: person(ownerId).name },
+          offeredAt: openRow?.createdAt.toISOString(),
+          expiresAt: openRow?.expiresAt.toISOString(),
+        };
+
+        expect(await service.getOwnership(orgId, ownerId)).toStrictEqual({
+          owner,
+          viewerRole: 'owner',
+          openOffer,
+          lastOutcome: {
+            status: 'declined',
+            recipientName: person(adminId).name,
+            at: declinedRow?.respondedAt?.toISOString(),
+            withdrawnReason: null,
+          },
+          eligibleRecipients: [
+            {
+              userId: creatorId,
+              name: person(creatorId).name,
+              role: 'creator',
+              joinedAt: joinedAt(creatorId),
+              payoutsReady: true,
+            },
+            {
+              userId: adminId,
+              name: person(adminId).name,
+              role: 'admin',
+              joinedAt: joinedAt(adminId),
+              payoutsReady: false,
+            },
+          ],
+        });
+        expect(await service.getOwnership(orgId, adminId)).toStrictEqual({
+          owner,
+          viewerRole: 'admin',
+          openOffer: null,
+        });
+        expect(await service.getOwnership(orgId, creatorId)).toStrictEqual({
+          owner,
+          viewerRole: 'creator',
+          openOffer,
+        });
+      } finally {
+        await db
+          .delete(schema.stripeConnectAccounts)
+          .where(eq(schema.stripeConnectAccounts.id, connect.id));
+      }
     });
 
     it('the owner sees an expired offer as the last outcome', async () => {

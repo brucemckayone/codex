@@ -8,7 +8,8 @@
  *     (it was an empty catch: an ex-owner kept their cached role for up to
  *     the 60s TTL with no trace), even when the caller's `obs` is undefined;
  *   - `invalidateMemberCaches` busts all three: the membership entry, the
- *     org's slug-keyed public caches, and the user's library.
+ *     org's slug-keyed public caches, and the user's library; for two users
+ *     (an ownership change), each key exactly once.
  *
  * Assertions are on the KV keys written or deleted, never on "a helper was
  * called": the members-cache test records how a call-count assertion passed
@@ -31,6 +32,7 @@ vi.mock('@codex/database', async (importOriginal) => {
   return { ...actual, createDbClient: vi.fn(() => dbStub) };
 });
 
+import { createDbClient } from '@codex/database';
 import {
   invalidateMemberCaches,
   invalidateMembershipCache,
@@ -87,6 +89,7 @@ function makeObs() {
 }
 
 beforeEach(() => {
+  vi.mocked(createDbClient).mockClear();
   dbStub.query.organizations.findFirst.mockReset();
   dbStub.query.organizations.findFirst.mockResolvedValue({ slug: 'acme' });
 });
@@ -163,7 +166,7 @@ describe('invalidateMemberCaches', () => {
     const { ctx, drain } = makeCtx(kv);
     const { obs, warn, error } = makeObs();
 
-    invalidateMemberCaches(ctx, ORG_ID, USER_ID, obs);
+    invalidateMemberCaches(ctx, ORG_ID, [USER_ID], obs);
     await drain();
 
     expect(deletes).toEqual([membershipCacheKey(ORG_ID, USER_ID)]);
@@ -175,5 +178,53 @@ describe('invalidateMemberCaches', () => {
     ]);
     expect(warn).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
+  });
+
+  // Codex-2hxff.46 (e): an ownership change busts both owners. Each user's
+  // keys go once, and the org-slug pass, with its DB client, goes once.
+  describe('an ownership change: every key exactly once', () => {
+    const OTHER_ID = 'user-fanout-2';
+
+    async function fanOut(userIds: readonly (string | null)[]) {
+      const { kv, deletes, puts } = makeKv();
+      const { ctx, drain } = makeCtx(kv);
+      const { obs } = makeObs();
+      invalidateMemberCaches(ctx, ORG_ID, userIds, obs);
+      await drain();
+      return { deletes: [...deletes].sort(), puts: [...puts].sort() };
+    }
+
+    it("two users: each one's keys, and the org's once", async () => {
+      expect(await fanOut([USER_ID, OTHER_ID])).toEqual({
+        deletes: [
+          membershipCacheKey(ORG_ID, USER_ID),
+          membershipCacheKey(ORG_ID, OTHER_ID),
+        ].sort(),
+        puts: [
+          'cache:version:acme',
+          'cache:version:org:acme:creators',
+          `cache:version:user:${USER_ID}:library`,
+          `cache:version:user:${OTHER_ID}:library`,
+        ].sort(),
+      });
+      expect(vi.mocked(createDbClient)).toHaveBeenCalledTimes(1);
+      expect(dbStub.query.organizations.findFirst).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['the same user twice', [USER_ID, USER_ID]],
+      ['a null previous owner', [USER_ID, null]],
+    ])("%s: one user's keys, and the org's once", async (_case, userIds) => {
+      expect(await fanOut(userIds)).toEqual({
+        deletes: [membershipCacheKey(ORG_ID, USER_ID)],
+        puts: [
+          'cache:version:acme',
+          'cache:version:org:acme:creators',
+          `cache:version:user:${USER_ID}:library`,
+        ],
+      });
+      expect(vi.mocked(createDbClient)).toHaveBeenCalledTimes(1);
+      expect(dbStub.query.organizations.findFirst).toHaveBeenCalledTimes(1);
+    });
   });
 });

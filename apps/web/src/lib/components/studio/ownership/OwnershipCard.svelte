@@ -45,6 +45,7 @@
     offerOwnership,
     withdrawOwnershipOffer,
   } from '$lib/remote/ownership.remote';
+  import { logger } from '$lib/observability';
   import { queryErrorMessage } from '$lib/remote/query-result';
   import type { OwnershipActiveAgreement, OwnershipView } from '$lib/types';
   import { formatDate, getInitials } from '$lib/utils/format';
@@ -95,6 +96,13 @@
     ownershipQuery.refresh().catch(() => {});
   }
 
+  /**
+   * Run a command, then what follows its success. Only the command's own
+   * failure shows as its error: `after` (a toast, the layout refresh, a
+   * navigation) runs outside that catch, so a refresh that fails after a
+   * committed accept can never read as a failed accept (Codex-2hxff.46). The
+   * success stays on the card, and the failed follow-up is logged.
+   */
   async function run(
     kind: NonNullable<typeof busy>,
     action: () => Promise<unknown>,
@@ -104,10 +112,20 @@
     actionError = null;
     try {
       await action();
-      await after();
     } catch (error) {
       actionError = ownershipErrorMessage(error);
       reread();
+      busy = null;
+      return;
+    }
+    try {
+      await after();
+    } catch (error) {
+      logger.warn('ownership.after_command_failed', {
+        organizationId: orgId,
+        command: kind,
+        error: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       busy = null;
     }
