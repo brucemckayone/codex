@@ -1214,9 +1214,11 @@
         // against Date.now() if omitted — meaning a slow-clicking user
         // could be charged a different amount than they confirmed.
         prorationDate: tierChangePreview?.prorationDate,
-        // A switch into yearly billing cannot be pinned that way: its figures
-        // go back to be re-checked, and a difference is refused as an
-        // expired preview below (Codex-2hxff.96).
+        // A switch into yearly billing cannot be pinned that way, and a plan
+        // change that leaves yearly billing (C(b)) charges at a yearly price
+        // the price check never reads: either one's figures go back to be
+        // re-checked, and a difference is refused as an expired preview
+        // below (Codex-2hxff.96, .103).
         ...(tierChangePreview?.quote && { quote: tierChangePreview.quote }),
         // Every change bills the price read at confirm: a change that waits at
         // the renewal with no notice, and one that a price saved since turned

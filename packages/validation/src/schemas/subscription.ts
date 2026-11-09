@@ -297,10 +297,12 @@ export const createSubscriptionCheckoutSchema = z.object({
 // ============================================================================
 
 /**
- * What a switch into yearly billing's dialog showed, as `previewTierChange()`
- * returns it: the amount due, every line's amount and the next bill's London
- * date (`tierChangeQuote` in @codex/subscription, Codex-2hxff.96). The page
- * echoes it unchanged; the commit re-previews and refuses any difference.
+ * What the dialog showed for a switch into yearly billing, or for a plan
+ * change that leaves yearly billing (C(b)) and charges now, as
+ * `previewTierChange()` returns it: the amount due, every line's amount and
+ * the next bill's London date (`tierChangeQuote` in @codex/subscription,
+ * Codex-2hxff.96, .103). The page echoes it unchanged; the commit re-previews
+ * and refuses any difference.
  */
 export const tierChangeQuoteSchema = z
   .string()
@@ -319,9 +321,13 @@ export const changeTierSchema = z.object({
    */
   prorationDate: z.number().int().positive().optional(),
   /**
-   * The preview's `quote`. Required by `changeTier()` for a switch into
-   * yearly billing, which cannot be pinned by `prorationDate`; every other
-   * change leaves it out.
+   * The preview's `quote`, when it returned one. Required by `changeTier()`
+   * for a switch into yearly billing, which cannot be pinned by
+   * `prorationDate` (Codex-2hxff.96). A plan change that leaves yearly
+   * billing (C(b)) returns one too when it charges now, and `changeTier()`
+   * refuses a quote that differs, or one sent or missing where its own
+   * re-preview has none or one (Codex-2hxff.103). Every other change leaves
+   * it out.
    */
   quote: tierChangeQuoteSchema.optional(),
   /**

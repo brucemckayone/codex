@@ -253,8 +253,11 @@ part back on the balance would re-open the leak above, so support gets one
 error per invoice after the card refund, "Customer credit paid a cancelled
 duplicate's invoice …", naming the invoice, the subscription, the org, the
 user, `cause` (`duplicate` or `revived`), `creditNotReturnedCents` and
-`cardRefundedCents` (0 when the credit paid it all). Support restores that
-credit to the member by hand. The invoice is marked with its own key
+`cardRefundedCents` (0 when the credit paid it all). Support pays the member
+that amount outside Stripe, by bank transfer for example, and the platform
+bears it (owner decision 2026-11-09); never as Stripe balance credit, which
+would re-open that leak ([runbook](operations.md#customer-credit-on-a-subscription-invoice)).
+The invoice is marked with its own key
 (`codex_credit_not_returned`), since the alert above marks it first; a replay
 stays silent (`alertCreditNotReturned`, `credit-paid-invoice.ts`).
 
