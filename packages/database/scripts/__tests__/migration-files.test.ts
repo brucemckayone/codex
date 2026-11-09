@@ -16,60 +16,77 @@ import { describe, expect, it } from 'vitest';
 
 const MIGRATIONS = new URL('../../src/migrations/', import.meta.url);
 
+/** End of a `--` comment (drizzle's `--> statement-breakpoint` among them). */
+function lineCommentEnd(sql: string, start: number): number {
+  const end = sql.indexOf('\n', start);
+  return end === -1 ? sql.length : end;
+}
+
+/** End of a block comment, which Postgres nests. */
+function blockCommentEnd(sql: string, start: number): number {
+  let depth = 0;
+  let i = start;
+  do {
+    if (sql.startsWith('/*', i)) depth++;
+    else if (sql.startsWith('*/', i)) depth--;
+    else {
+      i++;
+      continue;
+    }
+    i += 2;
+  } while (i < sql.length && depth > 0);
+  return i;
+}
+
+/** End of a `$$ ... $$` or `$tag$ ... $tag$` body opened by `tag`. */
+function dollarBodyEnd(sql: string, start: number, tag: string): number {
+  const close = sql.indexOf(tag, start + tag.length);
+  return close === -1 ? sql.length : close + tag.length;
+}
+
+/** Whether the quote at `start` opens an E'string', where `\` escapes. */
+function opensEscapeString(sql: string, start: number): boolean {
+  const before = sql.slice(Math.max(0, start - 2), start);
+  return sql[start] === "'" && /(^|[^A-Za-z0-9_])[Ee]$/.test(before);
+}
+
+/** End of a 'string' ('' escapes), E'string' (backslash escapes) or "name". */
+function quotedEnd(sql: string, start: number): number {
+  const quote = sql[start];
+  const escapes = opensEscapeString(sql, start);
+  let i = start + 1;
+  while (i < sql.length) {
+    if (escapes && sql[i] === '\\') {
+      i += 2;
+    } else if (sql[i] !== quote) {
+      i++;
+    } else if (sql[i + 1] === quote) {
+      i += 2;
+    } else {
+      return i + 1;
+    }
+  }
+  return i;
+}
+
+/** Where the span that isn't code, starting at `i`, ends; -1 when `i` is code. */
+function spanEnd(sql: string, i: number): number {
+  if (sql.startsWith('--', i)) return lineCommentEnd(sql, i);
+  if (sql.startsWith('/*', i)) return blockCommentEnd(sql, i);
+  const dollar = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+  if (dollar) return dollarBodyEnd(sql, i, dollar[0]);
+  if (sql[i] === "'" || sql[i] === '"') return quotedEnd(sql, i);
+  return -1;
+}
+
 /** `sql` with every span Postgres doesn't parse as statements blanked out. */
 function codeOnly(sql: string): string {
   let out = '';
   let i = 0;
   while (i < sql.length) {
-    // `--` comments, drizzle's `--> statement-breakpoint` among them.
-    if (sql.startsWith('--', i)) {
-      const end = sql.indexOf('\n', i);
-      i = end === -1 ? sql.length : end;
-      out += ' ';
-      continue;
-    }
-    // Block comments, which Postgres nests.
-    if (sql.startsWith('/*', i)) {
-      let depth = 1;
-      i += 2;
-      while (i < sql.length && depth > 0) {
-        if (sql.startsWith('/*', i)) depth++;
-        else if (sql.startsWith('*/', i)) depth--;
-        else {
-          i++;
-          continue;
-        }
-        i += 2;
-      }
-      out += ' ';
-      continue;
-    }
-    // `$$ ... $$` and `$tag$ ... $tag$` bodies.
-    const dollar = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
-    if (dollar) {
-      const close = sql.indexOf(dollar[0], i + dollar[0].length);
-      i = close === -1 ? sql.length : close + dollar[0].length;
-      out += ' ';
-      continue;
-    }
-    // 'strings' ('' escapes), E'strings' (backslash escapes), "identifiers".
-    const quote = sql[i];
-    if (quote === "'" || quote === '"') {
-      const escapes =
-        quote === "'" &&
-        /[Ee]/.test(sql[i - 1] ?? '') &&
-        !/[A-Za-z0-9_]/.test(sql[i - 2] ?? '');
-      i++;
-      while (i < sql.length) {
-        if (escapes && sql[i] === '\\') i += 2;
-        else if (sql[i] === quote && sql[i + 1] === quote) i += 2;
-        else if (sql[i++] === quote) break;
-      }
-      out += ' ';
-      continue;
-    }
-    out += quote;
-    i++;
+    const end = spanEnd(sql, i);
+    out += end === -1 ? sql[i] : ' ';
+    i = end === -1 ? i + 1 : end;
   }
   return out;
 }
