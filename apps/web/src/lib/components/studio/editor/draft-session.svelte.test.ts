@@ -13,6 +13,7 @@ import type { DraftValues } from './draft-session.svelte';
 const remotes = vi.hoisted(() => ({
   saveContent: vi.fn(),
   createContentDraft: vi.fn(),
+  readPublishState: vi.fn(),
 }));
 const nav = vi.hoisted(() => ({
   guards: [] as Array<(navigation: unknown) => void>,
@@ -45,7 +46,7 @@ vi.mock('$lib/observability', () => ({
 const { answeredLive, createDraftSession } = await import(
   './draft-session.svelte'
 );
-const { takeLiveHandoff } = await import('./live-handoff');
+const { takeLiveHandoff, withdrawLiveHandoff } = await import('./live-handoff');
 type Options = Parameters<typeof createDraftSession>[0];
 type Session = ReturnType<typeof createDraftSession>;
 
@@ -137,7 +138,15 @@ beforeEach(() => {
   nav.guards.length = 0;
   nav.goto.mockReset().mockResolvedValue(undefined);
   nav.invalidateAll.mockReset().mockResolvedValue(undefined);
-  takeLiveHandoff(ID);
+  withdrawLiveHandoff(ID);
+  // Where the piece stands, as "Open it to update" reads it: live.
+  remotes.readPublishState.mockReset().mockResolvedValue({
+    status: 'published',
+    publishedAt: '2026-11-09T10:00:00.000Z',
+    publishRequestedAt: null,
+    publishBlockedReason: null,
+    slug: SAVED_VALUES.slug,
+  });
   remotes.saveContent.mockReset().mockResolvedValue(undefined);
   // As the command does: the slug from the title it was sent.
   remotes.createContentDraft
@@ -2440,12 +2449,16 @@ describe('it went live by another way', () => {
     });
   });
 
-  it('Open it to update reads afresh, then moves, carrying every change but the address', async () => {
+  it('Open it to update reads where it stands, has the page read it, then moves, carrying every change but the address', async () => {
     const session = await wentLive(FOLLOWING);
     session.set('title', 'Runes renamed');
     // An address typed on Publish meanwhile: a live piece keeps its own.
     session.set('slug', 'a-new-address');
     const steps: string[] = [];
+    remotes.readPublishState.mockImplementation(async () => {
+      steps.push('read');
+      return { status: 'published', publishedAt: '2026-11-09T10:00:00.000Z' };
+    });
     nav.invalidateAll.mockImplementation(async () => {
       steps.push('reread');
     });
@@ -2458,29 +2471,109 @@ describe('it went live by another way', () => {
 
     await session.openLive();
 
-    expect(steps).toEqual(['reread', 'move']);
+    expect(steps).toEqual(['read', 'reread', 'move']);
+    expect(remotes.readPublishState).toHaveBeenCalledWith(ID);
     expect(nav.goto).toHaveBeenCalledWith(`/studio/content/${ID}/edit`);
     expect(takeLiveHandoff(ID)).toEqual({
-      title: 'Runes renamed',
-      description: 'Half-typed',
+      changes: { title: 'Runes renamed', description: 'Half-typed' },
     });
     expect(remotes.saveContent).toHaveBeenCalledTimes(1);
+    expect(session.openLiveFailed).toBe(false);
   });
 
-  it('a re-read that fails still moves, and is logged', async () => {
+  // kit's invalidateAll() resolves when a refresh in it fails (2.55): only a
+  // read whose failure is seen can say the piece reads as live (the round-2
+  // review). One that fails keeps the creator here, changes and all.
+  it('a read that fails stays, says so, and hands nothing off', async () => {
     const session = await wentLive();
-    nav.invalidateAll.mockRejectedValueOnce(offline());
+    remotes.readPublishState.mockRejectedValueOnce(offline());
 
     await session.openLive();
 
-    expect(nav.goto).toHaveBeenCalledWith(`/studio/content/${ID}/edit`);
-    expect(told.logWarn).toHaveBeenCalledWith(
+    expect(nav.invalidateAll).not.toHaveBeenCalled();
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(takeLiveHandoff(ID)).toBeNull();
+    expect(session.openLiveFailed).toBe(true);
+    expect(session.values.description).toBe('Half-typed');
+    expect(told.logError).toHaveBeenCalledWith(
       'studio_editor.open_live_reread_failed',
       expect.objectContaining({ contentId: ID })
     );
+
+    // The next press tries again, and clears what the last one said.
+    await session.openLive();
+    expect(session.openLiveFailed).toBe(false);
+    expect(nav.goto).toHaveBeenCalledTimes(1);
   });
 
-  it('a move that fails is logged, and the creator stays with their changes', async () => {
+  it('a read that says it was never live stays too: the live editor would not open', async () => {
+    const session = await wentLive();
+    remotes.readPublishState.mockResolvedValueOnce({
+      status: 'draft',
+      publishedAt: null,
+    });
+
+    await session.openLive();
+
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(session.openLiveFailed).toBe(true);
+  });
+
+  it('while it reads, a move elsewhere is still asked about: only its own move passes', async () => {
+    const session = await wentLive();
+    const reading = Promise.withResolvers<{
+      status: string;
+      publishedAt: string;
+    }>();
+    remotes.readPublishState.mockReturnValueOnce(reading.promise);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    const opened = session.openLive();
+    const { cancel } = navigate();
+
+    expect(confirm).toHaveBeenCalledWith(
+      m.studio_content_draft_confirm_leave_live()
+    );
+    expect(cancel).toHaveBeenCalled();
+    reading.resolve({ status: 'published', publishedAt: '2026-11-09' });
+    await opened;
+    expect(nav.goto).toHaveBeenCalledWith(`/studio/content/${ID}/edit`);
+  });
+
+  it('closed while it read: no move of its own, nothing handed off', async () => {
+    const session = await wentLive();
+    const reading = Promise.withResolvers<{
+      status: string;
+      publishedAt: string;
+    }>();
+    remotes.readPublishState.mockReturnValueOnce(reading.promise);
+
+    const opened = session.openLive();
+    close();
+    reading.resolve({ status: 'published', publishedAt: '2026-11-09' });
+    await opened;
+
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(takeLiveHandoff(ID)).toBeNull();
+    // Nor does it have the page it went to read again: that page is not its.
+    expect(nav.invalidateAll).not.toHaveBeenCalled();
+  });
+
+  it('carried to the live editor, its close leaves no trace of dropped changes', async () => {
+    const session = await wentLive();
+    await session.openLive();
+    told.logWarn.mockClear();
+
+    close();
+    await settle();
+
+    expect(told.logWarn).not.toHaveBeenCalledWith(
+      'studio_editor.closed_with_unsent_changes',
+      expect.anything()
+    );
+  });
+
+  it('a move that fails is logged and said, and the creator stays with their changes', async () => {
     const session = await wentLive();
     nav.goto.mockRejectedValueOnce(new Error('navigation aborted'));
 
@@ -2490,12 +2583,36 @@ describe('it went live by another way', () => {
       'studio_editor.open_live_failed',
       expect.objectContaining({ contentId: ID })
     );
+    expect(session.openLiveFailed).toBe(true);
+    expect(takeLiveHandoff(ID)).toBeNull();
     expect(session.values.description).toBe('Half-typed');
     // Guarding again: a move now asks, as the live piece's changes wait.
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const { cancel } = navigate();
     expect(confirm).toHaveBeenCalled();
     expect(cancel).toHaveBeenCalled();
+  });
+
+  it('a move that waits for a save it then finds live asks as live, not as a failure', async () => {
+    const out = Promise.withResolvers<never>();
+    const session = start();
+    remotes.saveContent.mockReturnValueOnce(out.promise);
+    session.set('description', 'Half-typed');
+    await afterDebounce();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    const { cancel } = navigate();
+    expect(cancel).toHaveBeenCalled();
+    out.reject(refusedAsLive);
+    await settle();
+
+    expect(session.wentLiveElsewhere).toBe(true);
+    expect(confirm).toHaveBeenCalledWith(
+      m.studio_content_draft_confirm_leave_live()
+    );
+    expect(confirm).not.toHaveBeenCalledWith(
+      m.studio_content_draft_confirm_leave()
+    );
   });
 
   it('before it went live, Open it to update does nothing', async () => {

@@ -8767,7 +8767,7 @@ export const studio_content_form_publish_success = () => `Content published succ
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_unpublish_success = () => `Content unpublished to draft`
+export const studio_content_form_unpublish_success = () => `Taken off sale. People who bought it keep it.`
 
 
 /**
@@ -12552,6 +12552,30 @@ export const studio_editor_open_live = () => `Open it to update`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_live_carried = () => `Your changes from writing are here. Update puts them live.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_live_carried_off_sale = () => `Your changes from writing are here. Update saves them; it stays off sale.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_live_carried_lost = () => `Your changes from writing couldn’t be brought over. This is the piece as it is live.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_open_live_failed = () => `It couldn’t be opened just now. Your changes are still here, so try again.`
 
 
 /**

@@ -254,6 +254,32 @@ describe('saveContent with a slug the title gives', () => {
     ).resolves.toEqual({ slug: 'winter-light', thumbnailUrl: KEPT_COVER });
   });
 
+  it('refused as live, it goes once: no other slug is tried (the round-2 review)', async () => {
+    const api = worker(
+      json(409, {
+        error: {
+          code: 'CONFLICT',
+          message: 'This went live, so a draft save can’t change it.',
+          details: { contentId: ID, code: 'CONTENT_ALREADY_LIVE' },
+        },
+      }),
+      json(200, { data: { id: ID } })
+    );
+    const err = await rejection(
+      remote.saveContent({
+        id: ID,
+        patch: { title: 'Winter light', slug: 'winter-light' },
+        slugFollowsTitle: true,
+        asDraft: true,
+      })
+    );
+    expect(err).toMatchObject({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE' },
+    });
+    expect(api.sent()).toHaveLength(1);
+  });
+
   it('a slug the creator typed is theirs: taken, it is refused at once', async () => {
     const api = worker(taken());
     const err = await rejection(

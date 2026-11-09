@@ -2167,3 +2167,50 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
     );
   });
 });
+
+// Owner, 2026-11-09: once it went live by another way, the step freezes. Its
+// settings can't touch the live piece (a cover would upload onto it), and its
+// checklist, intro and Publish, all a draft's, go: the notice is the way on.
+/** Inert by the property, as Svelte sets it (jsdom reflects no attribute). */
+const insideInert = (node: Element | null | undefined) => {
+  for (let at = node ?? null; at; at = at.parentElement) {
+    if ((at as HTMLElement).inert) return true;
+  }
+  return false;
+};
+
+describe('PublishStep · it went live by another way', () => {
+  test('frozen: settings inert; no intro, checklist, Publish or Preview; the notice says so', async () => {
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+    expect(text()).toContain(m.studio_publish_intro());
+    expect(text()).toContain(m.studio_publish_gaps());
+    expect(publishButton()).not.toBeUndefined();
+    expect(text()).toContain(m.studio_preview_button());
+
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+    });
+    choose('free');
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+
+    expect(text()).toContain(
+      m.studio_editor_went_live_elsewhere({ title: 'Svelte runes deep dive' })
+    );
+    expect(text()).not.toContain(m.studio_publish_intro());
+    expect(text()).not.toContain(m.studio_publish_gaps());
+    expect(publishButton()).toBeUndefined();
+    expect(text()).not.toContain(m.studio_preview_button());
+    const settings = document
+      .querySelector('input[value="free"]')
+      ?.closest('.publish-held');
+    expect(settings).not.toBeNull();
+    expect((settings as HTMLElement | null)?.inert).toBe(true);
+    // The notice's own button is outside what froze.
+    const open = [...document.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes(m.studio_editor_open_live())
+    );
+    expect(open).not.toBeUndefined();
+    expect(insideInert(open)).toBe(false);
+  });
+});

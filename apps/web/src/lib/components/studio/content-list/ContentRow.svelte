@@ -164,10 +164,8 @@
       >
         {#if publishing}
           <Spinner size="sm" />
-        {:else if status.variant === 'published'}
-          {m.studio_content_form_unpublish()}
         {:else}
-          {m.studio_content_form_publish()}
+          {status.toggle}
         {/if}
       </button>
       <a {href} class="row-edit" aria-label="Edit {item.title}">
@@ -424,8 +422,11 @@
     border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
   }
 
-  .status-pill[data-status='archived'] {
-    color: var(--color-text-muted);
+  /* Once live, off sale now (archived too): plain, as the mockup's Off sale
+     row. Secondary ink, never muted: muted is 2.3:1 on this ground, and the
+     pill's words are small (7.2:1, measured 2026-11-09). */
+  .status-pill[data-status='off-sale'] {
+    color: var(--color-text-secondary);
     background: var(--color-surface-secondary);
   }
 

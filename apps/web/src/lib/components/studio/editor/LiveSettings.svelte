@@ -93,9 +93,12 @@
 
   // ── Unpublish, or publish again ────────────────────────────────────────
   let toggling = $state(false);
-  /** The toggle says how it went (a toast either way); a failure leaves it as it was. */
-  /** Busy while it goes, the pressed toggle loses focus: it has it back once settled (the epic review). */
   let toggleRow = $state<HTMLElement | null>(null);
+  /**
+   * The toggle says how it went (a toast either way); a failure leaves it as
+   * it was. Busy while it goes, the pressed toggle loses focus: it has it
+   * back once settled (the epic review).
+   */
   async function togglePublished() {
     toggling = true;
     try {

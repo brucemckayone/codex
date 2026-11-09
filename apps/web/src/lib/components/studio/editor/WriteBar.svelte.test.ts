@@ -121,6 +121,26 @@ describe('it went live by another way', () => {
     ).toBe(false);
   });
 
+  // Owner, 2026-11-09: freeze it. Neither would do anything useful now, and
+  // Next, a primary button, would stand beside the notice's way on.
+  test.each([
+    ['write', '/studio/content/c1/preview'],
+    ['publish', '/studio/content/c1/preview?step=publish'],
+  ] as const)('on %s it offers neither Preview nor Next', (step, previewHref) => {
+    render({
+      step,
+      previewHref,
+      onnext: () => {},
+      sessionExtra: { wentLiveElsewhere: true },
+    });
+
+    expect(previewLink()).toBeNull();
+    expect(
+      document.querySelector('.write-bar')?.hasAttribute('data-preview')
+    ).toBe(false);
+    expect(document.querySelector('.write-next')).toBeNull();
+  });
+
   test('calibration: a draft whose save failed still says so, with Try again', () => {
     render({ sessionExtra: { status: 'error', errorMessage: 'Not saved.' } });
 

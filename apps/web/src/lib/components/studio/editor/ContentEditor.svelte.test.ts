@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { ContentWithRelations } from '$lib/types';
 import { contentSlugFromTitle } from '$lib/utils/content-slug';
+import * as m from '$paraglide/messages';
 import {
   flushSync,
   mount,
@@ -166,14 +167,25 @@ const nav = vi.hoisted(() => ({
   goto: vi.fn(),
   guards: [] as ((move: Move) => void)[],
   /** What runs once a move lands: the visit turns over. */
-  arrived: [] as (() => void)[],
+  arrived: [] as ((landed: { type: string; to: object | null }) => void)[],
+  /** `navigating.to`: where the navigation in flight is going, or null. */
+  inFlight: null as object | null,
 }));
 // Shallow-routing state: what Back restores to a history entry.
 const pageState = vi.hoisted(() => ({ state: {} as Record<string, unknown> }));
-vi.mock('$app/state', () => ({ page: pageState }));
+vi.mock('$app/state', () => ({
+  page: pageState,
+  navigating: {
+    get to() {
+      return nav.inFlight;
+    },
+  },
+}));
 vi.mock('$app/navigation', () => ({
   beforeNavigate: (guard: (move: Move) => void) => nav.guards.push(guard),
-  afterNavigate: (then: () => void) => nav.arrived.push(then),
+  afterNavigate: (
+    then: (landed: { type: string; to: object | null }) => void
+  ) => nav.arrived.push(then),
   replaceState: (...args: unknown[]) => nav.replaceState(...args),
   goto: (...args: unknown[]) => nav.goto(...args),
 }));
@@ -277,6 +289,7 @@ afterEach(() => {
   pageState.state = {};
   nav.guards.length = 0;
   nav.arrived.length = 0;
+  nav.inFlight = null;
   queue.items = [];
   coverForm.result = undefined;
   coverForm.send = null;
@@ -821,7 +834,12 @@ describe('ContentEditor · a saved draft', () => {
     await vi.advanceTimersByTimeAsync(0);
     flushSync();
     expect(nav.goto).not.toHaveBeenCalled();
-    expect(document.querySelector('[role="alert"]')).not.toBeNull();
+    // One with words: the went-live notice's alert is always mounted, empty.
+    expect(
+      [...document.querySelectorAll('[role="alert"]')].some(
+        (node) => (node.textContent ?? '').trim() !== ''
+      )
+    ).toBe(true);
   });
 
   test('Next waits 10 s at most for a save that never answers, then stays put and keeps focus', async () => {
@@ -839,6 +857,42 @@ describe('ContentEditor · a saved draft', () => {
       document.querySelector('.editor-canvas')?.hasAttribute('inert')
     ).toBe(false);
     expect(document.activeElement).toBe(next);
+  });
+});
+
+// Owner, 2026-11-09: once it went live by another way, Write freezes. Nothing
+// on it can touch the live piece, and Next, which could only fail, goes: the
+// notice is the way on (the round-2 review and the visual check).
+/** Inert by the property, as Svelte sets it (jsdom reflects no attribute). */
+const insideInert = (node: Element | null | undefined) => {
+  for (let at = node ?? null; at; at = at.parentElement) {
+    if ((at as HTMLElement).inert) return true;
+  }
+  return false;
+};
+
+describe('ContentEditor · it went live by another way', () => {
+  test('Write freezes: the canvas is inert, and neither Next is offered', async () => {
+    render({ content: draft({}) });
+    expect(nextButton()).not.toBeUndefined();
+    expect(document.querySelector('.editor-foot')).not.toBeNull();
+
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+    });
+    type('Title', 'Runes, properly');
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    flushSync();
+
+    expect(insideInert(document.querySelector('.editor-canvas'))).toBe(true);
+    expect(nextButton()).toBeUndefined();
+    expect(document.querySelector('.editor-foot')).toBeNull();
+    const open = [...document.querySelectorAll('button')].find((node) =>
+      node.textContent?.includes(m.studio_editor_open_live())
+    );
+    expect(open).not.toBeUndefined();
+    expect(insideInert(open)).toBe(false);
   });
 });
 
@@ -875,16 +929,20 @@ describe('ContentEditor · which step', () => {
   test('the next step is built as the visit turns over, never as its props move', async () => {
     const Host = (await import('./__fixtures__/ContentEditorStepHost.svelte'))
       .default;
+    // Mounted during the move that brought it, which lands just after.
+    const mounting = { url: 'edit' };
+    nav.inFlight = mounting;
     component = mount(Host, {
       target: document.body,
       props: { content: draft({}) },
     });
     flushSync();
-    const arrive = () => {
-      for (const then of [...nav.arrived]) then();
+    nav.inFlight = null;
+    const arrive = (to: object = { url: 'edit' }) => {
+      for (const then of [...nav.arrived]) then({ type: 'goto', to });
       flushSync();
     };
-    arrive(); // The move that mounted it.
+    arrive(mounting); // The move that mounted it.
     const probe = () => document.querySelector('[data-probe="publish-step"]');
 
     document.querySelector<HTMLButtonElement>('[data-next-step]')?.click();

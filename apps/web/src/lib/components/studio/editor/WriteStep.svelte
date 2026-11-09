@@ -242,13 +242,19 @@
     holding={heldMove !== null}
     previewHref={session.contentId === null ? null : previewHref(session.contentId)}
   />
-  <WentLiveNotice {session} />
-  <div class="editor-canvas" inert={advancing}>
+  <!-- A cover or file still on its way would miss the hand-off: Open waits for it. -->
+  <WentLiveNotice
+    {session}
+    waitFor={coverBusy ? m.studio_editor_next_needs_cover() : mediaPending ? m.studio_editor_next_needs_upload() : null}
+  />
+  <!-- Live by another way (owner, 2026-11-09): frozen, so nothing here can
+       touch the live piece; the notice is the way on, its changes carried. -->
+  <div class="editor-canvas" inert={advancing || session.wentLiveElsewhere}>
     {#if showRefused}
       <p class="editor-note" role="status">{m.media_picker_chosen_gone()}</p>
     {/if}
-    <!-- Live by another way (Codex-a6ofh.2): the canvas is a live piece's, so
-         a cover is staged for Update and travels with the carried changes. -->
+    <!-- Live by another way (Codex-a6ofh.2): the canvas reads as a live
+         piece's, its address locked as the live one keeps it. -->
     <WriteCanvas
       {session}
       {contentType}
@@ -265,21 +271,24 @@
       }}
     />
   </div>
-  <!-- Phone (W8a): one button at the foot always says what's next. -->
-  <div class="editor-foot">
-    <Button
-      type="button"
-      disabled={nextHint !== null}
-      loading={advancing}
-      aria-describedby={nextHint === null ? undefined : footHintId}
-      onclick={next}
-    >
-      {m.studio_editor_next_phone()}
-    </Button>
-    {#if nextHint !== null}
-      <span id={footHintId} class="sr-only">{nextHint}</span>
-    {/if}
-  </div>
+  <!-- Phone (W8a): one button at the foot always says what's next; none once
+       it went live by another way (the notice says what is). -->
+  {#if !session.wentLiveElsewhere}
+    <div class="editor-foot">
+      <Button
+        type="button"
+        disabled={nextHint !== null}
+        loading={advancing}
+        aria-describedby={nextHint === null ? undefined : footHintId}
+        onclick={next}
+      >
+        {m.studio_editor_next_phone()}
+      </Button>
+      {#if nextHint !== null}
+        <span id={footHintId} class="sr-only">{nextHint}</span>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>

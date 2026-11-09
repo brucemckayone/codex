@@ -209,7 +209,9 @@ vi.mock('svelte/transition', async (actual) => ({
 }));
 
 const LiveEditor = (await import('./LiveEditor.svelte')).default;
-const { handOffToLive, takeLiveHandoff } = await import('./live-handoff');
+const { handOffToLive, LIVE_HANDOFF_FRESH_MS, takeLiveHandoff } = await import(
+  './live-handoff'
+);
 
 /** The autosave's debounce, with room: a live piece must not save by then. */
 const SETTLE_MS = 1_600;
@@ -375,6 +377,54 @@ describe('LiveEditor · changes carried from writing', () => {
 
     expect(title()?.value).toBe('Advanced Svelte Patterns');
     expect(document.querySelector('.live-carried')?.textContent).toBe('');
+  });
+
+  // The round-2 review: the line keyed on "something carried" and "dirty",
+  // so it came back for edits made here, after Update had ended it.
+  test('once Update ends it, an edit made here is never said to be carried', async () => {
+    handOffToLive('c1', { title: 'Carried from writing' });
+    render();
+    click(m.studio_live_update());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(document.querySelector('.live-carried')?.textContent).toBe('');
+
+    typeTitle('Edited in the live editor');
+    flushSync();
+
+    expect(text()).toContain(m.studio_live_changes_one());
+    expect(document.querySelector('.live-carried')?.textContent).toBe('');
+  });
+
+  test('nothing carried that differs from what is live: never said, nor after an edit', () => {
+    handOffToLive('c1', { title: 'Advanced Svelte Patterns' });
+    render();
+    expect(document.querySelector('.live-carried')?.textContent).toBe('');
+
+    typeTitle('Edited in the live editor');
+    flushSync();
+
+    expect(document.querySelector('.live-carried')?.textContent).toBe('');
+  });
+
+  test('off sale, Update saves them and it stays off sale: said so', () => {
+    handOffToLive('c1', { title: 'Carried from writing' });
+    render(live({ status: 'draft' }));
+
+    expect(document.querySelector('.live-carried')?.textContent).toBe(
+      m.studio_live_carried_off_sale()
+    );
+  });
+
+  test('ones that came too late are said, and never applied', () => {
+    handOffToLive('c1', { title: 'Carried from writing' });
+    vi.advanceTimersByTime(LIVE_HANDOFF_FRESH_MS + 1);
+    render();
+
+    expect(title()?.value).toBe('Advanced Svelte Patterns');
+    expect(text()).toContain(m.studio_live_no_changes());
+    expect(document.querySelector('.live-carried')?.textContent).toBe(
+      m.studio_live_carried_lost()
+    );
   });
 });
 

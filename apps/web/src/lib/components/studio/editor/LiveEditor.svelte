@@ -88,9 +88,43 @@
   /**
    * Changes carried from writing: the piece went live under its draft's
    * editor, and "Open it to update" brought them here (Codex-a6ofh.2). They
-   * start as changes waiting for Update. Taken once, as this visit mounts.
+   * start as changes waiting for Update. Taken once, as this visit mounts;
+   * ones that came too late are said instead (`live-handoff`).
    */
-  const carried = untrack(() => takeLiveHandoff(content.id));
+  const handoff = untrack(() => takeLiveHandoff(content.id));
+  const carried = handoff && 'changes' in handoff ? handoff.changes : null;
+  const carriedLost = handoff !== null && 'expired' in handoff;
+  /**
+   * What the line under the bar says. Its words come once it is mounted (a
+   * status region put in with its words is not read out), and it says the
+   * carried changes until the first Update or Discard ends them, never about
+   * edits made here after.
+   */
+  let carriedSaid = $state<'waiting' | 'lost' | null>(null);
+  let carriedEnded = false;
+  $effect(() => {
+    if (carriedLost) {
+      carriedSaid = 'lost';
+      return;
+    }
+    if (!carried || carriedEnded) return;
+    if (session.isDirty) {
+      carriedSaid = 'waiting';
+    } else {
+      // Updated, discarded, or nothing carried differed from what is live.
+      carriedSaid = null;
+      carriedEnded = true;
+    }
+  });
+  const carriedWords = $derived(
+    carriedSaid === 'lost'
+      ? m.studio_live_carried_lost()
+      : carriedSaid === 'waiting'
+        ? published
+          ? m.studio_live_carried()
+          : m.studio_live_carried_off_sale()
+        : ''
+  );
 
   // One session per mount (ContentEditor keys it per visit): the props it is
   // started from are this visit's read. Mounted only for a piece that has
@@ -185,7 +219,7 @@
   <Tabs.Root bind:value={() => tab, switchTab} defaultValue={initialTab}>
     <LiveBar {session} {published} onupdate={update} ondiscard={discard} {updating} {updateHint} {waiting} />
     <!-- Said while the carried changes still wait: Update or Discard ends it. -->
-    <p class="live-carried" role="status">{carried && session.isDirty ? m.studio_live_carried() : ''}</p>
+    <p class="live-carried" role="status" data-type={contentType}>{carriedWords}</p>
     <div class="editor-body" inert={updating}>
       <Tabs.Content value="page">
         {#key discards}
@@ -244,12 +278,18 @@
     display: contents;
   }
 
+  /* On the canvas's column (WriteCanvas `.canvas`), so it starts where the page does. */
   .live-carried {
+    inline-size: 100%;
     max-inline-size: var(--container-content);
     margin: var(--space-3) auto 0;
     padding-inline: var(--space-4);
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
+  }
+
+  .live-carried[data-type='written'] {
+    max-inline-size: var(--container-article);
   }
 
   /* Empty, out of the flow but still in the tree, so its words are heard when they come. */

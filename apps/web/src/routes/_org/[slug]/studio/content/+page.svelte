@@ -196,8 +196,13 @@
         currentStatus === 'published' ? 'draft' : 'published';
       statusOverrides[item.id] = optimistic;
       await togglePublishStatus(item.id, currentStatus);
-    } catch {
+    } catch (err) {
+      // Said in the toggle's own toast; logged here, by the studio's one rule.
       delete statusOverrides[item.id];
+      logReadFailure('studio_content.publish_toggle_failed', err, {
+        contentId: item.id,
+        from: currentStatus,
+      });
     } finally {
       togglingId = null;
     }

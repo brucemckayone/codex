@@ -508,8 +508,16 @@ export const unpublishContent = command(z.string().uuid(), async (id) => {
 // Draft saving (Codex-a6ofh.2.2)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Another piece holds the slug: a 409. Not the went-live refusal, a 409 too
+ * (`ContentAlreadyLiveError` extends `ConflictError`), told by its own code:
+ * every slug would be refused alike, six PATCHes before the editor heard it.
+ */
 const isSlugTaken = (err: unknown) =>
-  ApiError.isApiError(err) && err.status === 409;
+  ApiError.isApiError(err) &&
+  err.status === 409 &&
+  (err.details as { code?: unknown } | undefined)?.code !==
+    ERROR_CODES.CONTENT_ALREADY_LIVE;
 
 /**
  * A slug the title gives, made free: each of {@link freeSlugCandidates} in

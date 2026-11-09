@@ -205,10 +205,8 @@
         >
           {#if publishing}
             <Spinner size="sm" />
-          {:else if statusMeta.variant === 'published'}
-            {m.studio_content_form_unpublish()}
           {:else}
-            {m.studio_content_form_publish()}
+            {statusMeta.toggle}
           {/if}
         </button>
         <a class="action-link" {href}>
@@ -388,6 +386,13 @@
     color: var(--color-warning-700);
     background: var(--color-warning-50);
     border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  }
+
+  /* Once live, off sale now (archived too): plain, as the mockup's Off sale
+     row, in secondary ink (muted is 2.3:1 on this ground; see ContentRow). */
+  .slab-status-pill[data-status='off-sale'] {
+    color: var(--color-text-secondary);
+    background: var(--color-surface-secondary);
   }
 
   /* ── Title + strap ──────────────────────────────────────── */

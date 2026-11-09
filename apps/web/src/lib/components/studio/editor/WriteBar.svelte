@@ -6,7 +6,10 @@
   the only save UI: a draft saves itself, so there is no Save button. On a
   phone the steps shrink to numbers and Next moves to the foot of the page
   (the editor's own). On Publish (Codex-a6ofh.2.4, mockup W4) it goes back to
-  writing, Write reads as done, and the step's own button publishes.
+  writing, Write reads as done, and the step's own button publishes. Once
+  the piece went live by another way, it reads Live and offers neither
+  Preview nor Next: the screen is frozen, and the notice under the bar is the
+  one way on (owner, 2026-11-09).
 
   @prop {DraftSession} session - The editor's draft session
   @prop {EditorContentType} contentType - Names a piece not yet saved
@@ -73,6 +76,9 @@
   });
 
   const nextHintId = $props.id();
+  /** Live by another way: what a draft's bar offers goes (owner, 2026-11-09: freeze it). */
+  const frozen = $derived(session.wentLiveElsewhere);
+  const showPreview = $derived(previewHref !== null && !frozen);
 
   let wordsEl = $state<HTMLElement | null>(null);
 
@@ -87,7 +93,7 @@
   }
 </script>
 
-<header class="write-bar" data-preview={previewHref ? '' : undefined}>
+<header class="write-bar" data-preview={showPreview ? '' : undefined}>
   <EditorBarLink
     href={backHref}
     label={step === 'publish' ? m.studio_editor_back_to_writing() : m.studio_editor_back()}
@@ -137,12 +143,12 @@
   </ol>
 
   <div class="write-actions">
-    {#if previewHref}
+    {#if showPreview && previewHref}
       <!-- Mockup w4: on both steps. Leaving saves first (the session's guard),
            so the preview shows the latest words. -->
       <EditorBarLink href={previewHref} label={m.studio_preview_button()} icon={EyeIcon} />
     {/if}
-    {#if step === 'write'}
+    {#if step === 'write' && !frozen}
       <div class="write-next">
         <Button
           type="button"

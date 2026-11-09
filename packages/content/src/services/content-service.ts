@@ -330,6 +330,11 @@ function stoppingReason(error: unknown): PublishBlockedReason | null {
  * platform-produced), so the only effect is that a caller cannot set a
  * thumbnail at all on a mis-configured deployment.
  */
+export interface ContentServiceConfig extends ServiceConfig {
+  /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
+  r2PublicUrlBase?: string;
+}
+
 /** How {@link ContentService.update} is asked to save. */
 export interface UpdateContentOptions {
   /**
@@ -337,11 +342,6 @@ export interface UpdateContentOptions {
    * `ContentAlreadyLiveError` once the piece has been live, never written.
    */
   asDraft?: boolean;
-}
-
-export interface ContentServiceConfig extends ServiceConfig {
-  /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
-  r2PublicUrlBase?: string;
 }
 
 /**

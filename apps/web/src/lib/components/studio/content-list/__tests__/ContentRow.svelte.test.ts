@@ -103,8 +103,13 @@ describe('ContentRow', () => {
     );
 
     expect(text('.status-pill')).toBe(m.studio_live_badge_unpublished());
+    // Muted, as archived is (the mockup's Off sale row), never a draft's amber.
+    expect(
+      document.querySelector('.status-pill')?.getAttribute('data-status')
+    ).toBe('off-sale');
     expect(document.querySelector('.draft-progress')).toBeNull();
-    expect(text('button.row-toggle')).toBe(m.studio_content_form_publish());
+    // Put back as the live editor says it: Publish again.
+    expect(text('button.row-toggle')).toBe(m.studio_live_republish());
     expect(document.querySelector('a.row-edit')?.getAttribute('href')).toBe(
       '/studio/content/c1/edit'
     );

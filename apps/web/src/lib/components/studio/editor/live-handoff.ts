@@ -12,10 +12,12 @@
  *
  * A hand-off is taken once, and only while fresh. kit's `goto` can resolve
  * before the editor swaps to the live one, so the hand-off is never dropped
- * as the move ends. One the move never reached is past its window when the
- * piece is next opened, and is never applied.
+ * as the move ends; a move that failed withdraws it. One found past its
+ * window is never applied, and is said: logged here, and told by the live
+ * editor (`expired`), never lost without a word.
  */
 
+import { logger } from '$lib/observability';
 import type { DraftValues } from './draft-session.svelte';
 
 /** How long a hand-off waits for the live editor: one move, never a later visit. */
@@ -26,6 +28,9 @@ const waiting = new Map<
   { changes: Partial<DraftValues>; at: number }
 >();
 
+/** What the live editor of a piece finds: changes to start from, or that they came too late. */
+export type LiveHandoff = { changes: Partial<DraftValues> } | { expired: true };
+
 /** Leave these changes for the live editor of `contentId`. */
 export function handOffToLive(
   contentId: string,
@@ -34,12 +39,24 @@ export function handOffToLive(
   waiting.set(contentId, { changes, at: Date.now() });
 }
 
-/** The changes left for `contentId`, taken once; null when none, or too old. */
-export function takeLiveHandoff(
-  contentId: string
-): Partial<DraftValues> | null {
+/** The move did not go: the next live editor of `contentId` starts from the row. */
+export function withdrawLiveHandoff(contentId: string): void {
+  waiting.delete(contentId);
+}
+
+/** What was left for `contentId`, taken once; null when nothing was. */
+export function takeLiveHandoff(contentId: string): LiveHandoff | null {
   const left = waiting.get(contentId);
   waiting.delete(contentId);
-  if (!left || Date.now() - left.at > LIVE_HANDOFF_FRESH_MS) return null;
-  return left.changes;
+  if (!left) return null;
+  const ageMs = Date.now() - left.at;
+  if (ageMs > LIVE_HANDOFF_FRESH_MS) {
+    logger.warn('studio_editor.live_handoff_expired', {
+      contentId,
+      ageMs,
+      keys: Object.keys(left.changes),
+    });
+    return { expired: true };
+  }
+  return { changes: left.changes };
 }

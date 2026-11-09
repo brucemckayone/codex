@@ -1158,9 +1158,6 @@ export function createServerApi(
         }),
 
       /**
-       * Update content
-       */
-      /**
        * Save fields. `asDraft`: a draft's autosave, refused (409
        * CONTENT_ALREADY_LIVE) once the piece has been live, so it never
        * writes to a live piece (Codex-a6ofh.2).

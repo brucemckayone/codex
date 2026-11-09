@@ -3,6 +3,7 @@
  * (Codex-a6ofh.2, owner 2026-11-09): said once, as an alert mounted before
  * its words come, and its button opens the piece to update.
  */
+import { tick } from 'svelte';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import * as m from '$paraglide/messages';
 import {
@@ -13,12 +14,15 @@ import {
 import type { DraftSession } from './draft-session.svelte';
 import WentLiveNotice from './WentLiveNotice.svelte';
 
-const state = $state({ wentLiveElsewhere: false });
+const state = $state({ wentLiveElsewhere: false, openLiveFailed: false });
 const openLive = vi.fn();
 
 const session = {
   get wentLiveElsewhere() {
     return state.wentLiveElsewhere;
+  },
+  get openLiveFailed() {
+    return state.openLiveFailed;
   },
   savedTitle: 'Runes deep dive',
   openLive,
@@ -26,10 +30,10 @@ const session = {
 
 let component: ReturnType<typeof mount> | null = null;
 
-function render() {
+function render(props: { waitFor?: string | null } = {}) {
   component = mount(WentLiveNotice, {
     target: document.body,
-    props: { session },
+    props: { session, ...props },
   });
   flushSync();
 }
@@ -45,6 +49,7 @@ afterEach(() => {
   component = null;
   document.body.innerHTML = '';
   state.wentLiveElsewhere = false;
+  state.openLiveFailed = false;
   openLive.mockReset();
 });
 
@@ -87,5 +92,70 @@ describe('WentLiveNotice', () => {
     await Promise.resolve();
     flushSync();
     expect(openButton()?.getAttribute('aria-busy')).not.toBe('true');
+  });
+
+  test('a press that could not open it says so, in the same alert', () => {
+    state.wentLiveElsewhere = true;
+    render();
+    const before = alertEl();
+    expect(alertEl()?.textContent).not.toContain(
+      m.studio_editor_open_live_failed()
+    );
+
+    state.openLiveFailed = true;
+    flushSync();
+
+    expect(alertEl()).toBe(before);
+    expect(alertEl()?.textContent).toContain(
+      m.studio_editor_open_live_failed()
+    );
+  });
+
+  test('something still on its way holds Open, and says why', () => {
+    state.wentLiveElsewhere = true;
+    render({ waitFor: m.studio_editor_next_needs_cover() });
+
+    const button = openButton();
+    expect(button?.disabled).toBe(true);
+    const hintId = button?.getAttribute('aria-describedby');
+    expect(hintId).toBeTruthy();
+    expect(document.getElementById(hintId ?? '')?.textContent).toBe(
+      m.studio_editor_next_needs_cover()
+    );
+    button?.click();
+    expect(openLive).not.toHaveBeenCalled();
+  });
+
+  test('the step froze under the creator: focus that was in it comes to Open', async () => {
+    const frozen = document.createElement('div');
+    const field = document.createElement('textarea');
+    frozen.appendChild(field);
+    document.body.appendChild(frozen);
+    render();
+    field.focus();
+    expect(document.activeElement).toBe(field);
+
+    // As the step does: the canvas goes inert as the notice comes.
+    frozen.inert = true;
+    state.wentLiveElsewhere = true;
+    flushSync();
+    await tick();
+    await tick();
+
+    expect(document.activeElement).toBe(openButton());
+  });
+
+  test('focus somewhere still usable stays where it is', async () => {
+    const elsewhere = document.createElement('button');
+    document.body.appendChild(elsewhere);
+    render();
+    elsewhere.focus();
+
+    state.wentLiveElsewhere = true;
+    flushSync();
+    await tick();
+    await tick();
+
+    expect(document.activeElement).toBe(elsewhere);
   });
 });

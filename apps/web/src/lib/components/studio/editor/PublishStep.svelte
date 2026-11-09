@@ -183,6 +183,13 @@
   let done = $state<'list' | 'move' | null>(null);
   /** Live, as Publish or as the schedule saw it land: held still, its way on offered. */
   const held = $derived(publishing || done !== null || schedule.live);
+  /**
+   * Live by another way (owner, 2026-11-09: freeze it): the step stays in
+   * view, but nothing in it can touch the live piece. Its settings are
+   * inert, its checklist, banner and foot go, and the notice is the one way
+   * on, carrying the changes.
+   */
+  const frozen = $derived(session.wentLiveElsewhere);
   const waitHint = $derived(
     coverBusy ? m.studio_editor_next_needs_cover() : categoryBusy ? m.studio_publish_wait_category() : null
   );
@@ -472,18 +479,20 @@
     />
   </div>
   <!-- Never held: once it went live elsewhere, its button is the way on. -->
-  <WentLiveNotice {session} />
+  <WentLiveNotice {session} waitFor={waitHint} />
 
   <div class="publish">
     <div class="publish-held" inert={held}>
       <header class="publish-head">
         <h1 class="publish-title">{values.title}</h1>
-        <p class="publish-intro">{m.studio_publish_intro()}</p>
+        {#if !frozen}
+          <p class="publish-intro">{m.studio_publish_intro()}</p>
+        {/if}
       </header>
     </div>
 
     <!-- Never held: once it is live, its View and the foot's Done are the way on. -->
-    {#if schedule.phase !== null}
+    {#if schedule.phase !== null && !frozen}
       <div class="publish-schedule" tabindex="-1" bind:this={scheduleEl}>
         <PublishScheduled
           {schedule}
@@ -501,7 +510,7 @@
     {/if}
     <p class="sr-only" role="status">{scheduleNotice}</p>
 
-    <div class="publish-held" inert={held}>
+    <div class="publish-held" inert={held || frozen}>
 
       <PublishSettings
         {session}
@@ -521,7 +530,7 @@
         onslugcheck={(invalid) => (slugInvalid = invalid)}
       />
 
-      {#if checklistShown}
+      {#if checklistShown && !frozen}
       <EditorSection headingId="{gapsId}-gaps" ordinal={4} title={m.studio_publish_gaps()}>
         <div class="publish-gaps" id={gapsId} tabindex="-1" bind:this={gapsEl}>
           {#if !ready}
@@ -588,6 +597,7 @@
       {/if}
     </div>
 
+    {#if !frozen}
     <div class="publish-foot">
       <p class={['publish-progress', { 'sr-only': !held }]} role="status" tabindex="-1" bind:this={progressEl}>
         {progressWords}
@@ -599,8 +609,7 @@
         <Button type="button" variant={schedule.live ? 'primary' : 'secondary'} onclick={() => leave(CONTENT_LIST_HREF)}>
           {m.studio_publish_done()}
         </Button>
-      {:else if !session.wentLiveElsewhere}
-        <!-- Live by another way: the notice above opens it to update. -->
+      {:else}
         <Button
           type="button"
           disabled={blocked || navigating.to !== null}
@@ -612,6 +621,7 @@
         </Button>
       {/if}
     </div>
+    {/if}
   </div>
 </div>
 

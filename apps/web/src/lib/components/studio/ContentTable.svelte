@@ -24,6 +24,7 @@
   import { listStatus } from './content-list/list-status';
   import { focusIfLost } from '$lib/utils/focus-if-lost';
   import { editHref } from './editor/editor-url';
+  import { logReadFailure } from './media-library/log-read-failure';
 
   interface Props {
     items: ContentWithRelations[];
@@ -58,8 +59,13 @@
       const optimistic = currentStatus === 'published' ? 'draft' : 'published';
       statusOverrides[item.id] = optimistic;
       await togglePublishStatus(item.id, currentStatus as ContentStatus);
-    } catch {
+    } catch (err) {
+      // Said in the toggle's own toast; logged here, by the studio's one rule.
       delete statusOverrides[item.id];
+      logReadFailure('studio_content.publish_toggle_failed', err, {
+        contentId: item.id,
+        from: currentStatus,
+      });
     } finally {
       togglingId = null;
     }
@@ -134,10 +140,8 @@
                 >
                   {#if togglingId === item.id}
                     <Spinner size="sm" />
-                  {:else if status === 'published'}
-                    {m.studio_content_form_unpublish()}
                   {:else}
-                    {m.studio_content_form_publish()}
+                    {shown.toggle}
                   {/if}
                 </button>
                 <a {href} class="action-edit">
@@ -272,7 +276,7 @@
 
   .status-dot[data-status='published'] { background-color: var(--color-success-500); }
   .status-dot[data-status='draft']     { background-color: var(--color-warning-400); }
-  .status-dot[data-status='archived']  { background-color: var(--color-text-muted); }
+  .status-dot[data-status='off-sale']  { background-color: var(--color-text-muted); }
 
   .status-text {
     font-size: var(--text-sm);
