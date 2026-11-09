@@ -451,7 +451,7 @@ By API:
 | | `charge.dispute.created` | `handleChargeDisputeCreated` 200 | `Purchase.processDispute` only. No reversal and no subscription handling (PAY-05/06) |
 | `/webhooks/stripe/connect` | `account.updated` | `handleConnectWebhook` 31 | `Connect.getAccountByStripeId`, `Connect.handleAccountUpdated`. On the inactive→active transition with `codex_organization_id` metadata, `Sub.resolvePendingPayouts(orgId, acct)` runs in `waitUntil`. Accounts are created with only `codex_user_id` (connect-account-service 241), so this branch never parses (SUB-05, Codex-2hxff.13) |
 | | `account.application.deauthorized` | | `Connect.handleAccountDeauthorized` |
-| `/webhooks/stripe/customer` | any | none (ack only) | — |
+| `/webhooks/stripe/customer` | any | none (ack only) | — (route and secret removed 2026-11-09, `Codex-2hxff.24`) |
 | `/webhooks/stripe/dev` | all | `routeDevWebhook` | prefix router; `checkout.session.completed` goes to both handlers |
 | cron `0 * * * *` | — | `dispatchScheduled` → `runPayoutsSweep` | `Sub.sweepUnresolvedPayouts` → `rehomeHeldPayouts` / `accounts.retrieve` / `resolvePendingPayouts` |
 

@@ -772,3 +772,28 @@ All three stay on a workers rollback. The old workers never read the index
 or the CHECK, never write `buyer_told_at` without a late win, and no longer
 read or write the pin: drizzle doesn't need the foreign key. Don't run R21's
 migration while a rollback past this release is possible.
+
+---
+
+## The retired customer webhook (`Codex-2hxff.24`)
+
+This release removes ecom-api's `/webhooks/stripe/customer` route and its
+`STRIPE_WEBHOOK_SECRET_CUSTOMER` secret from the code, workflows and docs. The
+route only acknowledged events; nothing read them. Production's customer
+endpoint at Stripe is already disabled, so no delivery reaches the removed
+route. **Re-enabling that endpoint now gets 404s and Stripe's retries.**
+
+### R22 — after the deploy: delete the leftovers (owner)
+
+The deploy uploads secrets but never deletes them, so three leftovers stay
+until someone removes them:
+
+1. The worker secret, from `workers/ecom-api`:
+   `npx wrangler secret delete STRIPE_WEBHOOK_SECRET_CUSTOMER --env production`
+2. The disabled endpoint `we_1SO1fH7wyGmo4sh612lL8e29`, in the Stripe
+   Dashboard (Developers → Webhooks).
+3. The GitHub secret `STRIPE_WEBHOOK_SECRET_CUSTOMER`, in the `production`,
+   `preview` and `test` environments.
+
+Nothing reads any of them, so the order doesn't matter, and leaving them
+does no harm beyond clutter.
