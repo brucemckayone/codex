@@ -571,8 +571,8 @@ export class TemplateService extends BaseService {
       throw new TemplateNotFoundError(templateId);
     }
 
-    // Check access based on scope
-    const hasAccess = await this.checkTemplateAccess(
+    // A preview renders in the template's org brand: the send-time check.
+    const hasAccess = await this.checkTemplateSendAccess(
       template,
       userId,
       userRole
@@ -592,8 +592,9 @@ export class TemplateService extends BaseService {
   }
 
   /**
-   * Check if a user has access to a template based on scope
-   * Public for use in worker routes that need access checks separate from preview
+   * Check if a user has access to a template based on scope: may they use
+   * it at all? Rendering it in its brand (preview, test-send) asks more:
+   * {@link checkTemplateSendAccess}.
    */
   async checkTemplateAccess(
     template: EmailTemplate,
@@ -616,6 +617,29 @@ export class TemplateService extends BaseService {
     }
 
     return false;
+  }
+
+  /**
+   * May the user render this template in its brand, to preview it or to
+   * test-send it? `checkTemplateAccess`, and for a creator template that
+   * names an org, the creator's ACTIVE membership of it still (Codex-tgkgb,
+   * owner decision 2026-11-09). A creator who leaves the org can no longer
+   * preview or send in its name; listing and deleting their own template do
+   * not come through here, so those stay theirs. Templates with no org, and
+   * org templates (membership-checked already), are unchanged.
+   */
+  async checkTemplateSendAccess(
+    template: EmailTemplate,
+    userId: string,
+    userRole: string
+  ): Promise<boolean> {
+    if (!(await this.checkTemplateAccess(template, userId, userRole))) {
+      return false;
+    }
+    if (template.scope === TEMPLATE_SCOPES.CREATOR && template.organizationId) {
+      return this.isActiveOrgMember(template.organizationId, userId);
+    }
+    return true;
   }
 
   // ===========================================================================

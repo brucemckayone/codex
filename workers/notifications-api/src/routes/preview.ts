@@ -72,8 +72,10 @@ app.post(
         ctx.input.params.id
       );
 
-      // Check access using template service
-      const hasAccess = await ctx.services.templates.checkTemplateAccess(
+      // A test send goes out in the template's org brand: the send-time
+      // check, which also wants a creator's active membership of that org
+      // (Codex-tgkgb).
+      const hasAccess = await ctx.services.templates.checkTemplateSendAccess(
         template,
         ctx.user.id,
         ctx.user.role
