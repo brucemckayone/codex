@@ -5,8 +5,10 @@
 import type Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  alertCreditNotReturned,
   alertIfCreditPaid,
   CREDIT_ALERTED_KEY,
+  CREDIT_NOT_RETURNED_KEY,
   creditCoveredCents,
 } from '../credit-paid-invoice';
 
@@ -162,5 +164,88 @@ describe('alertIfCreditPaid', () => {
       expect.stringContaining('Could not mark'),
       expect.objectContaining({ invoiceId: 'in_b' })
     );
+  });
+});
+
+describe('alertCreditNotReturned (Codex-2hxff.98)', () => {
+  const DUPLICATE = {
+    stripeSubscriptionId: 'sub_dup',
+    subscriptionId: '00000000-0000-4000-8000-0000000000d1',
+    organizationId: '00000000-0000-4000-8000-0000000000d2',
+    userId: 'user_dup',
+    kind: 'course' as const,
+    cause: 'duplicate' as const,
+  };
+  const NOT_RETURNED = expect.stringContaining(
+    "Customer credit paid a cancelled duplicate's invoice"
+  );
+
+  it('credit paid part of it: one alert naming the credit kept and the card part refunded, then its own mark', async () => {
+    const h = harness();
+
+    await alertCreditNotReturned(
+      h,
+      invoice({ starting_balance: -300, total: 1000, amount_paid: 700 }),
+      DUPLICATE
+    );
+
+    expect(h.obs.error).toHaveBeenCalledExactlyOnceWith(NOT_RETURNED, {
+      errorId: expect.any(String),
+      invoiceId: 'in_b',
+      ...DUPLICATE,
+      creditNotReturnedCents: 300,
+      cardRefundedCents: 700,
+    });
+    expect(h.update).toHaveBeenCalledExactlyOnceWith('in_b', {
+      metadata: { [CREDIT_NOT_RETURNED_KEY]: expect.any(String) },
+    });
+  });
+
+  it('the credit-paid alert marked the invoice first, on the same event: this one still alerts', async () => {
+    const h = harness({
+      metadata: { [CREDIT_ALERTED_KEY]: '2027-01-12T10:59:00.000Z' },
+    });
+
+    await alertCreditNotReturned(
+      h,
+      invoice({ starting_balance: -6493, total: 1000, amount_paid: 0 }),
+      DUPLICATE
+    );
+
+    expect(h.obs.error).toHaveBeenCalledExactlyOnceWith(
+      NOT_RETURNED,
+      expect.objectContaining({
+        creditNotReturnedCents: 1000,
+        cardRefundedCents: 0,
+      })
+    );
+  });
+
+  it('a replay of an invoice it marked: silent', async () => {
+    const h = harness({
+      metadata: { [CREDIT_NOT_RETURNED_KEY]: '2027-01-12T10:59:00.000Z' },
+    });
+
+    await alertCreditNotReturned(
+      h,
+      invoice({ starting_balance: -6493, total: 1000, amount_paid: 0 }),
+      DUPLICATE
+    );
+
+    expect(h.obs.error).not.toHaveBeenCalled();
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it('the card paid alone: silent, and Stripe is not asked', async () => {
+    const h = harness();
+
+    await alertCreditNotReturned(
+      h,
+      invoice({ starting_balance: 0 }),
+      DUPLICATE
+    );
+
+    expect(h.obs.error).not.toHaveBeenCalled();
+    expect(h.retrieve).not.toHaveBeenCalled();
   });
 });

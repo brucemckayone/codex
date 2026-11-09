@@ -171,7 +171,10 @@ import {
   scheduleNeedsFinishing,
   type WaitingBilling,
 } from './billing-change';
-import { alertIfCreditPaid } from './credit-paid-invoice';
+import {
+  alertCreditNotReturned,
+  alertIfCreditPaid,
+} from './credit-paid-invoice';
 import {
   addMonthsClamped,
   CLEAR_PENDING_PRICE_METADATA,
@@ -315,6 +318,21 @@ function nowProration(
   return plan.newRecurringAmount > plan.sub.amountCents
     ? 'always_invoice'
     : 'create_prorations';
+}
+
+/**
+ * C(b) at a dearer plan: the one change leaving yearly billing that charges
+ * today, the part-year at the new tier's YEARLY Price (Codex-2hxff.97). Its
+ * preview and its confirm both ask this, so a `quote` is shown exactly when
+ * the confirm re-checks one (Codex-2hxff.103).
+ */
+function chargesBeforeBillingWait(
+  plan: Parameters<typeof nowProration>[0]
+): boolean {
+  return (
+    plan.kind === 'change_then_billing_wait' &&
+    nowProration(plan) === 'always_invoice'
+  );
 }
 
 /** The idempotency-key prefix of a change made now, by its proration. */
@@ -977,9 +995,10 @@ export interface TierChangePreview {
    */
   currentPeriodEnd: Date;
   /**
-   * Set for a switch into yearly billing only: what the dialog shows, which
-   * the page passes back to `changeTier()` to be re-checked before the write
-   * (`tierChangeQuote`, Codex-2hxff.96).
+   * Set for a switch into yearly billing (Codex-2hxff.96), and for C(b) when
+   * it charges now (Codex-2hxff.103): what the dialog shows, which the page
+   * passes back to `changeTier()` to be re-checked before the write
+   * (`tierChangeQuote`).
    */
   quote?: string;
   /**
@@ -1986,12 +2005,13 @@ export class SubscriptionService extends BaseService {
    * after a good refund repeats that refund under its key. Then the row
    * becomes a tombstone. Any Stripe failure leaves the row as it was and is
    * retryable. The reviving invoice pays no one; the refund's own
-   * `charge.refunded` emails the buyer.
+   * `charge.refunded` emails the buyer. What customer credit paid of it is
+   * not given back: support is told after the Stripe steps (Codex-2hxff.98).
    */
   private async retireRevived(
     row: Subscription,
     keptSubscriptionId: string,
-    reviving?: { invoiceId: string; chargeId: string },
+    reviving?: { invoice: Stripe.Invoice; chargeId: string },
     live?: Stripe.Subscription
   ): Promise<void> {
     const context = {
@@ -1999,21 +2019,12 @@ export class SubscriptionService extends BaseService {
       stripeSubscriptionId: row.stripeSubscriptionId,
       keptSubscriptionId,
     };
-    let refunded: { invoiceId: string; chargeId: string } | undefined;
+    let revived: { paid?: Stripe.Invoice; refundedInvoiceId?: string } = {};
     try {
       const atStripe =
         live ??
         (await this.stripe.subscriptions.retrieve(row.stripeSubscriptionId));
-      // On `updated` the reviving payment is the latest invoice, if paid.
-      refunded = reviving ?? (await this.paidLatestInvoice(atStripe));
-      if (refunded) {
-        await issueRefund(this.stripe, {
-          chargeId: refunded.chargeId,
-          reason: 'requested_by_customer',
-          idempotencyKey: `refund_revived_${refunded.invoiceId}`,
-          environment: this.environment,
-        });
-      }
+      revived = await this.refundReviving(atStripe, reviving);
       if (!endedAtStripeStatus(atStripe.status)) {
         await this.stripe.subscriptions.cancel(
           row.stripeSubscriptionId,
@@ -2041,6 +2052,11 @@ export class SubscriptionService extends BaseService {
         { subscriptionId: row.id }
       );
     }
+    // What credit paid of the reviving invoice goes back to no one
+    // (Codex-2hxff.98).
+    if (revived.paid) {
+      await this.alertUnreturnedCredit(row, revived.paid, 'revived');
+    }
     // Under the lock, so an invoice event re-reading the row before paying
     // out sees it ended.
     const at = new Date();
@@ -2060,8 +2076,29 @@ export class SubscriptionService extends BaseService {
     );
     this.obs.warn(
       'Old subscription revived next to a newer one: cancelled, its reviving payment refunded',
-      { ...context, refundedInvoiceId: refunded?.invoiceId }
+      { ...context, refundedInvoiceId: revived.refundedInvoiceId }
     );
+  }
+
+  /**
+   * Refund the card part of the invoice that revived a subscription: the
+   * one the caller names, or (on `updated`) the latest invoice, if paid.
+   * Returns that paid invoice, for the credit alert (Codex-2hxff.98), and
+   * its id when a refund was made.
+   */
+  private async refundReviving(
+    atStripe: Stripe.Subscription,
+    reviving?: { invoice: Stripe.Invoice; chargeId: string }
+  ): Promise<{ paid?: Stripe.Invoice; refundedInvoiceId?: string }> {
+    const paid = reviving ?? (await this.paidLatestInvoice(atStripe));
+    if (!paid?.chargeId) return { paid: paid?.invoice };
+    await issueRefund(this.stripe, {
+      chargeId: paid.chargeId,
+      reason: 'requested_by_customer',
+      idempotencyKey: `refund_revived_${paid.invoice.id}`,
+      environment: this.environment,
+    });
+    return { paid: paid.invoice, refundedInvoiceId: paid.invoice.id };
   }
 
   /** The row as it stands now, read under the per-user, per-org lock. */
@@ -2131,18 +2168,21 @@ export class SubscriptionService extends BaseService {
     return typeof latest === 'string' ? latest : (latest?.id ?? undefined);
   }
 
-  /** The subscription's latest invoice with its charge, when it is paid. */
+  /**
+   * The subscription's latest invoice when it is paid, with its charge: null
+   * when the card paid nothing of it (customer credit paid it all,
+   * Codex-2hxff.98).
+   */
   private async paidLatestInvoice(
     stripeSub: Stripe.Subscription
-  ): Promise<{ invoiceId: string; chargeId: string } | undefined> {
+  ): Promise<{ invoice: Stripe.Invoice; chargeId: string | null } | undefined> {
     const latest = stripeSub.latest_invoice;
     const invoice =
       typeof latest === 'string'
         ? await this.stripe.invoices.retrieve(latest)
         : latest;
-    if (!invoice?.id || invoice.status !== 'paid' || invoice.amount_paid <= 0) {
-      return undefined;
-    }
+    if (!invoice?.id || invoice.status !== 'paid') return undefined;
+    if (invoice.amount_paid <= 0) return { invoice, chargeId: null };
     const chargeId = await resolveInvoiceCharge(this.stripe, invoice);
     if (!chargeId) {
       throw new InternalServiceError(
@@ -2150,7 +2190,7 @@ export class SubscriptionService extends BaseService {
         { invoiceId: invoice.id }
       );
     }
-    return { invoiceId: invoice.id, chargeId };
+    return { invoice, chargeId };
   }
 
   /** Our row for a Stripe subscription, if we hold one. */
@@ -2213,6 +2253,8 @@ export class SubscriptionService extends BaseService {
       ({ refundedInvoices } = await cancelAndRefundDuplicate(this.stripe, {
         stripeSubscriptionId: row.stripeSubscriptionId,
         environment: this.environment,
+        alertUnreturnedCredit: (invoice) =>
+          this.alertUnreturnedCredit(row, invoice, 'duplicate'),
       }));
     } catch (error) {
       this.obs.error(
@@ -2246,6 +2288,30 @@ export class SubscriptionService extends BaseService {
       stripeSubscriptionId: row.stripeSubscriptionId,
       refundedInvoices,
     });
+  }
+
+  /**
+   * A paid invoice of a subscription we cancel and refund by card: what
+   * customer credit paid of it is not given back, so support is told, once
+   * per invoice (Codex-2hxff.98). Called after the card refund. Never throws.
+   */
+  private async alertUnreturnedCredit(
+    row: Subscription,
+    invoice: Stripe.Invoice,
+    cause: 'duplicate' | 'revived'
+  ): Promise<void> {
+    await alertCreditNotReturned(
+      { stripe: this.stripe, obs: this.obs },
+      invoice,
+      {
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        subscriptionId: row.id,
+        organizationId: row.organizationId,
+        userId: row.userId,
+        kind: 'tier',
+        cause,
+      }
+    );
   }
 
   /**
@@ -2467,14 +2533,17 @@ export class SubscriptionService extends BaseService {
     if (isDuplicateSubscription(sub)) {
       // Without a charge there is nothing of this invoice's to refund, and
       // a duplicate renews nothing: left as it always was.
-      if (!sourceTransaction) return;
-      await this.settleDuplicate(sub);
-      await this.refundDuplicateInvoice(
-        sub,
-        stripeInvoice.id,
-        sourceTransaction
-      );
-      return {};
+      if (sourceTransaction) {
+        await this.settleDuplicate(sub);
+        await this.refundDuplicateInvoice(
+          sub,
+          stripeInvoice.id,
+          sourceTransaction
+        );
+      }
+      // What credit paid of it goes back to no one (Codex-2hxff.98).
+      await this.alertUnreturnedCredit(sub, stripeInvoice, 'duplicate');
+      return sourceTransaction ? {} : undefined;
     }
 
     // Fetch the Stripe subscription for period dates (v19+: on items)
@@ -2550,7 +2619,7 @@ export class SubscriptionService extends BaseService {
             sub,
             keptId,
             reviving && sourceTransaction
-              ? { invoiceId: stripeInvoice.id, chargeId: sourceTransaction }
+              ? { invoice: stripeInvoice, chargeId: sourceTransaction }
               : undefined,
             stripeSub
           );
@@ -3619,7 +3688,9 @@ export class SubscriptionService extends BaseService {
    * charged a different amount than they confirmed. A switch into yearly
    * billing cannot be pinned that way (Stripe refuses `proration_date` with
    * `billing_cycle_anchor: 'now'`), so its preview also returns a `quote` the
-   * page echoes back, and the commit re-checks it (Codex-2hxff.96).
+   * page echoes back, and the commit re-checks it (Codex-2hxff.96). So does
+   * C(b) when it charges: pinned, but at a yearly Price the commit's price
+   * check never reads (Codex-2hxff.103).
    *
    * Reuses the same tier-existence + price-configured guards as `changeTier()`
    * so a preview that succeeds is a strong signal the commit will too,
@@ -3647,28 +3718,28 @@ export class SubscriptionService extends BaseService {
       // the renewal. For A and B the plan waits with it and nothing happens
       // today, so Stripe is not asked; the period end is the live one, never
       // a month from today (nothing starts today). For C(b) the plan changes
-      // now on yearly billing, previewed as any change now.
+      // now on yearly billing, previewed as any change now; when that
+      // charges, its `quote` goes back to be re-checked (Codex-2hxff.103).
       if (plan.billing) {
         const billingChange = {
           interval: BILLING_INTERVAL.MONTH,
           amountCents: plan.billing.amountCents,
           effectiveAt: periodEnd.toISOString(),
         };
-        const charges = nowProration(plan) === 'always_invoice';
-        const shown =
-          plan.kind === 'change_then_billing_wait' && charges
-            ? await this.previewNow(plan, prorationDate)
-            : {
-                amountDueCents: 0,
-                prorationLineItems: [],
-                currentPeriodEnd: periodEnd,
-              };
+        const charges = chargesBeforeBillingWait(plan);
+        const shown = charges
+          ? await this.previewNow(plan, prorationDate)
+          : {
+              amountDueCents: 0,
+              prorationLineItems: [],
+              currentPeriodEnd: periodEnd,
+            };
         return {
           ...shown,
           newRecurringAmountCents: plan.billing.amountCents,
           newRecurringInterval: BILLING_INTERVAL.MONTH,
           prorationDate,
-          isUpgrade: plan.kind === 'change_then_billing_wait' && charges,
+          isUpgrade: charges,
           takesEffect:
             plan.kind === 'change_then_billing_wait' ? 'now' : 'period_end',
           billingChange,
@@ -3724,6 +3795,12 @@ export class SubscriptionService extends BaseService {
    * lines then add up to the charge, and the re-check compares them all. A
    * switch of billing period is next billed one new
    * period from `at`; an upgrade, at the old period's end.
+   *
+   * C(b) is pinned to `at` like any change now, but it bills the new tier's
+   * YEARLY Price, which the confirm's price check (the monthly bill it waits
+   * for) never reads. So it returns a `quote` too, and the confirm previews
+   * again at the same `at` and compares (Codex-2hxff.103). It is only
+   * previewed when it charges (`chargesBeforeBillingWait`).
    */
   private async previewNow(
     plan: TierChangePlan,
@@ -3770,7 +3847,7 @@ export class SubscriptionService extends BaseService {
       amountDueCents: preview.amount_due,
       prorationLineItems,
       currentPeriodEnd,
-      ...(newPeriod && {
+      ...((newPeriod || plan.kind === 'change_then_billing_wait') && {
         quote: tierChangeQuote({
           amountDueCents: preview.amount_due,
           lineAmountsCents: prorationLineItems.map((line) => line.amountCents),
@@ -3868,6 +3945,14 @@ export class SubscriptionService extends BaseService {
    * Stripe is written to, so the member confirms the price they will pay
    * (review C1 cycle 2, L4; cycle 3, L4-a). For C(b) it is the monthly bill
    * the change waits for.
+   *
+   * A change leaving yearly billing is also checked against the preview's
+   * `quote`: C(b) at a dearer plan charges the part-year at the new tier's
+   * yearly Price now, so it is previewed again at the pinned `prorationDate`
+   * and any difference throws `TierChangePreviewExpiredError` before Stripe
+   * is written to. A quote passed where nothing is charged now, or none
+   * where it is (a price saved since turned a cheaper pick dearer, or a
+   * dearer one cheaper), is a difference (Codex-2hxff.103).
    */
   async changeTier(
     userId: string,
@@ -3916,6 +4001,22 @@ export class SubscriptionService extends BaseService {
           prorationDate: effectiveProrationDate,
           newTierId,
         });
+      }
+
+      // Leaving yearly billing: C(b)'s part-year charge, at the new tier's
+      // yearly Price, is previewed again at the pinned date the write uses.
+      // A quote that differs, one where the dialog showed none, or none where
+      // it showed one, is refused (Codex-2hxff.103).
+      if (plan.billing) {
+        const charged = chargesBeforeBillingWait(plan)
+          ? (await this.previewNow(plan, effectiveProrationDate)).quote
+          : undefined;
+        if (charged !== quote) {
+          throw new TierChangePreviewExpiredError({
+            prorationDate: effectiveProrationDate,
+            newTierId,
+          });
+        }
       }
 
       if (plan.billing) {

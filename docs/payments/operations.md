@@ -337,6 +337,18 @@ the same way once retried. Both say so (`waitsForDispute`); an ended
 subscription's or a closed row doesn't. Nothing needs doing: once the
 chargeback ends, the next run treats them as anyone else.
 
+## Customer credit on a subscription invoice
+
+Each member has one Stripe customer across every organisation, so credit on
+its balance pays their next bill in any org. A bill credit paid raises
+"Customer credit paid a subscription invoice …"
+([subscriptions.md](subscriptions.md#renewals), `Codex-2hxff.97`). When that
+bill belonged to a duplicate we cancelled, a second alert follows:
+
+| Alert | What it means | What to do |
+|---|---|---|
+| Customer credit paid a cancelled duplicate's invoice: only the card part was refunded, and support must restore the credit by hand | A duplicate subscription, or an old one revived beside a newer one (`cause`), was cancelled and its card charge refunded (`cardRefundedCents`, 0 when the credit paid it all). The `creditNotReturnedCents` of credit that paid the invoice was not given back (`Codex-2hxff.98`). It names `invoiceId`, `stripeSubscriptionId`, `subscriptionId`, `organizationId`, `userId` and `kind`, once per invoice (`codex_credit_not_returned` on the invoice) | Pay the member `creditNotReturnedCents` outside Stripe, by bank transfer for example, as for a buyer refunded another way; the platform bears it (owner decision 2026-11-09). **Never add it back as Stripe balance credit**: their one customer would spend it on their next bill in any org, and that bill's creator would be paid nothing |
+
 ## Late wins
 
 A chargeback lost and then decided for us after all (a "late win",
