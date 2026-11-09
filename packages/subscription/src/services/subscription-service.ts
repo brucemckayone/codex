@@ -34,6 +34,7 @@ import {
   BILLING_INTERVAL,
   CHECKOUT_SESSION_KIND,
   CURRENCY,
+  ORGANIZATION_TEAM_ROLES,
   STRIPE_ENV_METADATA_KEY,
   SUBSCRIPTION_STATUS,
   stripeEnvMetadata,
@@ -1943,7 +1944,7 @@ export class SubscriptionService extends BaseService {
         ],
         set: {
           status: 'active',
-          role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${organizationMemberships.role} IN ('owner', 'admin', 'creator', 'member') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
+          role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${inArray(organizationMemberships.role, [...ORGANIZATION_TEAM_ROLES])} THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
           updatedAt: new Date(),
         },
       });

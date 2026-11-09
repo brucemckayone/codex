@@ -73,8 +73,8 @@ app.post(
       );
 
       // A test send goes out in the template's org brand: the send-time
-      // check, which also wants a creator's active membership of that org
-      // (Codex-tgkgb).
+      // check. A creator template naming an org needs a team role in it; an
+      // org's own template needs its owner or admin (Codex-tgkgb).
       const hasAccess = await ctx.services.templates.checkTemplateSendAccess(
         template,
         ctx.user.id,
