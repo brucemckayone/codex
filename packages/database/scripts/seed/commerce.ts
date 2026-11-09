@@ -1019,6 +1019,8 @@ export async function seedCommerce(
 
   await db.insert(schema.subscriptions).values(subscriptionRows);
 
+  // No agreements: a real org has none until a proposal is accepted (Codex-2hxff.24).
+
   // ── Stripe Connect accounts for monetised seed orgs ─────────────
   // Every org with subscription tiers needs a fully-active Connect account, or
   // SubscriptionService.createCheckoutSession throws ConnectAccountNotReadyError
