@@ -497,6 +497,7 @@ describe('runAgreementExpiringSweep', () => {
     resetState();
     sharedMockState.enrichedCandidates = [candidate('agr-slow')];
     // notifications-api answering after 2 s, unless the request is aborted.
+    let aborted = false;
     const realFetch = globalThis.fetch;
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -510,13 +511,13 @@ describe('runAgreementExpiringSweep', () => {
             2_000
           );
           init?.signal?.addEventListener('abort', () => {
+            aborted = true;
             clearTimeout(answered);
             reject(init.signal?.reason);
           });
         });
       });
     const { obs } = buildObs();
-    const started = Date.now();
     let result: Awaited<ReturnType<typeof runAgreementExpiringSweep>>;
     try {
       result = await runAgreementExpiringSweep({
@@ -533,7 +534,8 @@ describe('runAgreementExpiringSweep', () => {
       fetchSpy.mockRestore();
     }
 
-    expect(Date.now() - started).toBeLessThan(2_000);
+    // Cut off by its own timeout, not answered.
+    expect(aborted).toBe(true);
     expect(result).toMatchObject({ emailsSent: 0, errors: 1 });
     expect(sharedMockState.markedIds).toEqual([]);
   });

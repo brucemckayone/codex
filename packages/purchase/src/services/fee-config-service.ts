@@ -65,11 +65,13 @@ import {
   type FeeWriteOutcome,
   feeLevelKey,
   feeLevelWhere,
+  feeNoticeMayHaveTold,
   feeRiseStartAfter,
   layerLevelFees,
   lockFeeLevel,
   mirrorLegacyFeeRow,
   nextFeeNoticeRunAfter,
+  queueSmallerFeeNotices,
   readFeeVersions,
   resolveFeesAt,
   versionInForce,
@@ -1210,14 +1212,14 @@ async function insertVersion(
 /**
  * Void a waiting rise. Nobody still waits for it: its open notices become
  * `not_needed`. Unless a bigger rise replaces it (whose own announcement
- * says so), everyone it may have told is emailed that it's off (F2,
- * `fee-change-cancelled`, sent by the next daily run): told, or `unknown`,
- * an email with no answer that may have gone (owner, 2026-11-09). The
- * cancelled notice keeps what they were told (roles, values, the date named)
- * for its email. It is queued before the open notices are closed, which is
- * what still marks an `unknown` one. notifications-api's fee step applies
- * the same rule to someone whose email was in flight as the rise was voided
- * (`tellOfVoid`): change both together.
+ * says so), everyone it told, or may have told (payments'
+ * `feeNoticeMayHaveTold`), is emailed that it's off (F2,
+ * `fee-change-cancelled`, sent by the next daily run). The cancelled notice
+ * keeps what they were told (roles, values, the date named) for its email.
+ * It is queued before the open notices are closed, which would hide which
+ * ones may have gone. For someone whose email was in flight as the rise was
+ * voided, notifications-api's fee step runs this insert narrowed to them
+ * (`tellOfVoid`), with what that email told.
  */
 async function voidPending(
   tx: Tx,
@@ -1229,6 +1231,15 @@ async function voidPending(
     .update(feeChanges)
     .set({ voidedAt: now, voidReason: reason })
     .where(eq(feeChanges.id, changeId));
+  // Lock the notices before reading them (review final M3): a send's record()
+  // then waits for this void and takes its void branch (tellOfVoid), and the
+  // daily run's claim (SKIP LOCKED) passes them by, so no email is recorded
+  // between the read below and the close, unseen by both.
+  await tx.execute(sql`
+    SELECT id FROM ${feeChangeNotices}
+    WHERE change_id = ${changeId} AND kind <> 'cancelled'
+    FOR UPDATE
+  `);
   if (reason !== 'replaced_by_bigger') {
     await tx.execute(sql`
       INSERT INTO ${feeChangeNotices}
@@ -1237,7 +1248,7 @@ async function voidPending(
       FROM ${feeChangeNotices}
       WHERE change_id = ${changeId}
         AND kind = 'announce'
-        AND state IN ('sent', 'told_another_way', 'unknown')
+        AND ${feeNoticeMayHaveTold(now)}
       ON CONFLICT (change_id, user_id, kind) DO NOTHING
     `);
   }
@@ -1254,38 +1265,17 @@ async function voidPending(
 }
 
 /**
- * Q2 (A): a waiting rise made smaller sends one short email to everyone
- * already told. Someone told about an earlier smaller figure is told again;
- * someone not told yet simply gets the announcement with the new figures.
- * A row told again starts a new round at `now`: the daily step's email-log
- * check searches from created_at, so the last round's email can't count as
- * this one's (review cycle 3, N1). So does a row whose last email MAY have
- * gone, `unknown` or `due` after a try (a run cut off after sending, or a
- * send in flight now), or the next morning's check finds that email and
- * counts the earlier figure as this one (Codex-2hxff.104). A `failed` row
- * (its last email certainly did not go) and a `due` row never tried keep
- * their round: their next send carries the new figure anyway.
+ * Q2 (A): the smaller email for everyone the waiting rise's announcement
+ * told, or may have told, and a new round for those told before; the rule
+ * and the statement are payments' `queueSmallerFeeNotices`, which the daily
+ * step also runs for one person it emailed with figures read before a cut.
  */
 async function queueSmallerNotices(
   tx: Tx,
   changeId: string,
   now: Date
 ): Promise<void> {
-  await tx.execute(sql`
-    INSERT INTO ${feeChangeNotices}
-      (change_id, user_id, kind, on_list, roles, before_values, after_values, state)
-    SELECT change_id, user_id, 'smaller', false, roles, '[]'::jsonb, '[]'::jsonb, 'due'
-    FROM ${feeChangeNotices}
-    WHERE change_id = ${changeId}
-      AND kind = 'announce'
-      AND state IN ('sent', 'told_another_way')
-    ON CONFLICT (change_id, user_id, kind) DO UPDATE
-      SET state = 'due', attempts = 0, attempted_at = NULL, accepted_at = NULL,
-          last_reason = NULL, last_error = NULL, alert_error_id = NULL,
-          created_at = ${now}, updated_at = ${now}
-      WHERE ${feeChangeNotices}.state <> 'failed'
-        AND NOT (${feeChangeNotices}.state = 'due' AND ${feeChangeNotices}.attempts = 0)
-  `);
+  await queueSmallerFeeNotices(tx, { changeId, now });
 }
 
 async function writeAudit(

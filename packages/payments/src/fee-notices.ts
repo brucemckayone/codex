@@ -322,6 +322,76 @@ export async function affectedPayees(
 /** States in which a person on the list still holds the date. */
 export const FEE_NOTICE_OPEN_STATES = ['due', 'failed', 'unknown'] as const;
 
+/**
+ * A notice tried this recently may still be held by a daily run, so the
+ * run's claim hands it to no other run (overlapping runs), and a `failed`
+ * one tried this recently may be in flight (`feeNoticeMayHaveTold`).
+ */
+export const FEE_NOTICE_RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * THE rule for a notice whose email told, or MAY have told, its person
+ * ("unconfirmed, retried, or failed mid-retry": owner, 2026-11-09). One
+ * predicate for every place that asks, so they can't drift: the first cut's
+ * smaller emails and the second cut's restarts (`queueSmallerFeeNotices`),
+ * and a void's "it's off" emails (purchase's `voidPending`). Told, or maybe:
+ *   - `sent` or `told_another_way`: told;
+ *   - `unknown`: a send with no answer, which may have gone;
+ *   - `due` after a try (attempts > 0): a run cut off after sending, or a
+ *     send in flight now (the claim adds the try before it sends);
+ *   - `failed`, tried within FEE_NOTICE_RECLAIM_AFTER_MS: the claim leaves a
+ *     retried notice `failed` (it adds the try and stamps attempted_at with
+ *     the run's clock), and one tried that recently may still be held by a
+ *     run, its retry in flight with an earlier figure, or cut off after it
+ *     went.
+ * The window trades this way: a refusal that already finished looks the same
+ * in the row, so its person may get one short email about a rise they never
+ * saw, which the owner accepted over missing a killed run's retry that went.
+ * Never tried (`due`, no attempts) is not told, nor is `not_needed`. The
+ * columns are the table's own, so it reads the row a FROM names and an
+ * ON CONFLICT DO UPDATE's existing row alike.
+ */
+export function feeNoticeMayHaveTold(now: Date): SQL {
+  const heldSince = new Date(now.getTime() - FEE_NOTICE_RECLAIM_AFTER_MS);
+  return sql`(${feeChangeNotices.state} IN ('sent', 'told_another_way', 'unknown')
+    OR (${feeChangeNotices.state} = 'due' AND ${feeChangeNotices.attempts} > 0)
+    OR (${feeChangeNotices.state} = 'failed' AND ${feeChangeNotices.attemptedAt} > ${heldSince}::timestamptz))`;
+}
+
+/**
+ * Q2 (A): a waiting rise made smaller owes one short email to everyone its
+ * announcement told, or may have told (`feeNoticeMayHaveTold`): one in
+ * flight carries the earlier figure. One person's alone when `userId` is
+ * given (the daily step, for an email it sent with figures read before the
+ * cut). A smaller email told, or maybe told, starts a new round at `now`:
+ * the step's email-log check is tied to the round, so the last round's
+ * email can't count as this one's (review cycle 3, N1; Codex-2hxff.104). So
+ * does one set aside (`not_needed`), which would send nothing more. One that
+ * surely didn't go (failed and done, or never tried) keeps its round: its
+ * next send carries the new figure anyway.
+ */
+export async function queueSmallerFeeNotices(
+  db: Queryable,
+  input: { changeId: string; now: Date; userId?: string }
+): Promise<void> {
+  const { changeId, now, userId } = input;
+  await db.execute(sql`
+    INSERT INTO ${feeChangeNotices}
+      (change_id, user_id, kind, on_list, roles, before_values, after_values, state)
+    SELECT change_id, user_id, 'smaller', false, roles, '[]'::jsonb, '[]'::jsonb, 'due'
+    FROM ${feeChangeNotices}
+    WHERE change_id = ${changeId}
+      AND kind = 'announce'
+      AND ${feeNoticeMayHaveTold(now)}
+      ${userId === undefined ? sql`` : sql`AND user_id = ${userId}`}
+    ON CONFLICT (change_id, user_id, kind) DO UPDATE
+      SET state = 'due', attempts = 0, attempted_at = NULL, accepted_at = NULL,
+          last_reason = NULL, last_error = NULL, alert_error_id = NULL,
+          created_at = ${now}, updated_at = ${now}
+      WHERE ${feeNoticeMayHaveTold(now)} OR ${feeChangeNotices.state} = 'not_needed'
+  `);
+}
+
 export type DateRiseOutcome =
   | { dated: true; effectiveFrom: Date }
   | {

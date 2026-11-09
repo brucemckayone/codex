@@ -219,8 +219,9 @@ Fees change only through admin-api's `/api/admin/fees/*` routes
 notice a rise owes the people it pays less, breaks the dated history a replayed
 invoice is split by, and is not in the audit log. To undo a waiting rise, save
 the old value again (or `POST /api/admin/fees/changes/:changeId/cancel`):
-everyone already told is emailed that it's off, and so is anyone whose email
-got no answer (it may have gone).
+everyone its email told, or may have told, is emailed that it's off (an email
+with no answer, or one a run was still sending, counts:
+[told, or may have been](fees-and-splits.md#notice-of-a-change)).
 
 **After saving a rise.** The answer's `change` has `kind: 'rise'` and
 `effectiveFrom: null`: it waits. The next 08:00 run (UTC) makes its list and

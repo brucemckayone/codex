@@ -36,6 +36,7 @@ import {
   affectedPayees,
   dbFeeVersionReader,
   feeRiseStartAfter,
+  queueSmallerFeeNotices,
   readFeeVersionsByLevel,
   resolveFeesAt,
 } from '@codex/payments';
@@ -133,6 +134,15 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
         String(message).startsWith(startsWith) &&
         (context as { changeId?: string }).changeId === changeId
     );
+
+  /** Every warning logged about one notice, in order. */
+  const warningsFor = (feeNoticeId: string | undefined) =>
+    obsLog.warn.mock.calls
+      .filter(
+        ([, context]) =>
+          (context as { feeNoticeId?: string }).feeNoticeId === feeNoticeId
+      )
+      .map(([message]) => message);
 
   afterAll(async () => {
     if (logIds.length > 0) {
@@ -1384,6 +1394,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       env as unknown as Bindings
     );
     let roundOne: Awaited<ReturnType<typeof smallerOf>>;
+    let mid: Awaited<ReturnType<typeof run>> | undefined;
     const mailer = vi.fn(
       async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
         // Uma's email is accepted, but only once the rise was made smaller
@@ -1405,7 +1416,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
         admin.id
       );
       roundOne = await smallerOf();
-      await run(changeId, new Date(), mailer);
+      mid = await run(changeId, new Date(), mailer);
     } finally {
       await closeRegistry();
     }
@@ -1426,14 +1437,11 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     expect(roundTwo.createdAt.getTime()).toBeGreaterThan(
       roundOne.createdAt.getTime()
     );
-    expect(
-      obsLog.info.mock.calls.filter(
-        ([message, context]) =>
-          String(message).startsWith(
-            'fee step: a notice changed while its email was in flight'
-          ) && (context as { feeNoticeId?: string }).feeNoticeId === roundOne.id
-      )
-    ).toHaveLength(1);
+    // Not written, so not counted sent: a warning, and the run says so (S5).
+    expect(mid).toMatchObject({ notRecorded: 1, sent: 0 });
+    expect(warningsFor(roundOne.id)).toEqual([
+      'fee step: a notice changed while this run held it; this outcome is not recorded on it',
+    ]);
 
     // The next morning Uma is told the second cut's figure.
     const next = mailerAnswering();
@@ -1537,7 +1545,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
         feeNoticeId: announce?.id,
         changeId,
         outcome: 'sent',
-        cancelledNoticeAdded: true,
+        cancelledNoticeQueued: true,
       }
     );
 
@@ -1575,9 +1583,13 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
         feeNoticeId: announce?.id,
         changeId,
         outcome: 'unknown',
-        cancelledNoticeAdded: true,
+        cancelledNoticeQueued: true,
       }
     );
+    // Closed by the void, it is never tried again, and the log says so (S6).
+    expect(warningsFor(announce?.id)).toEqual([
+      'fee step: a fee email was not accepted, and its rise was voided meanwhile; it is not tried again',
+    ]);
 
     const nextMorning = mailerAnswering();
     await run(changeId, NOV_4, nextMorning);
@@ -1586,13 +1598,563 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     ]);
   });
 
-  it('a rise cancelled while its email is refused: nobody was told, so the notice stays set aside and no "it’s off" email is queued', async () => {
+  it('a rise cancelled while its email is in flight, then refused: in flight it may have told them, so "it’s off" is queued (the one rule); the refusal is not told', async () => {
     const rob = await person('Rob Refused');
     const { announce, cancelled } = await cancelledInFlight(rob, {
       accepted: false,
       status: 400,
     });
     expect(announce).toMatchObject({ state: 'not_needed', acceptedAt: null });
-    expect(cancelled).toBeUndefined();
+    expect(cancelled).toMatchObject({ state: 'due' });
+    // A refusal told nothing: it is not written on the closed row (S6).
+    expect(warningsFor(announce?.id)).toEqual([
+      'fee step: a notice changed while this run held it; this outcome is not recorded on it',
+    ]);
+  });
+
+  // ── Review final M1-M3 ────────────────────────────────────────────────────
+
+  const HOUR = 60 * 60 * 1000;
+
+  async function kindOf(
+    changeId: string,
+    userId: string,
+    kind: (typeof feeChangeNotices.$inferSelect)['kind']
+  ) {
+    const [row] = await db
+      .select()
+      .from(feeChangeNotices)
+      .where(
+        and(
+          eq(feeChangeNotices.changeId, changeId),
+          eq(feeChangeNotices.userId, userId),
+          eq(feeChangeNotices.kind, kind)
+        )
+      );
+    return row;
+  }
+
+  /**
+   * The mailer, writing the email log as notifications-api's sender does:
+   * one line per send, its metadata the data exactly as sent.
+   */
+  function loggingMailer(answers: Record<string, FeeNoticeDelivery> = {}) {
+    return vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        const answer = answers[params.userId] ?? { accepted: true };
+        const [log] = await db
+          .insert(emailAuditLogs)
+          .values({
+            templateName: params.templateName,
+            recipientEmail: params.to,
+            status: answer.accepted ? 'success' : 'failed',
+            metadata: JSON.stringify(params.data),
+          })
+          .returning({ id: emailAuditLogs.id });
+        if (log) logIds.push(log.id);
+        return answer;
+      }
+    );
+  }
+
+  it('a rise made smaller while a FAILED smaller email is being retried: the retry never counts for the new round (M1)', async () => {
+    const fay = await person('Fay Retry');
+    const admin = await person('Al Admin');
+    const org = await organisation(fay.id);
+    const changeId = await rise(org);
+    // The writes stamp the real clock, so the mornings here are set from it.
+    await run(changeId, new Date(Date.now() - 3 * HOUR), mailerAnswering());
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    const retryAt = new Date(Date.now() + 13 * HOUR);
+    const retry = vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        // Fay's retry is accepted, but only once the rise was made smaller
+        // again while it was on its way.
+        if (params.userId === fay.id) {
+          await registry.feeConfig.updateOrgFees(
+            org,
+            { orgFeePercent: 1200 },
+            admin.id
+          );
+        }
+        return { accepted: true };
+      }
+    );
+    try {
+      await registry.feeConfig.updateOrgFees(
+        org,
+        { orgFeePercent: 1300 },
+        admin.id
+      );
+      // Morning one: the smaller email is refused.
+      await run(
+        changeId,
+        new Date(),
+        mailerAnswering({ [fay.id]: { accepted: false, status: 400 } })
+      );
+      expect(await kindOf(changeId, fay.id, 'smaller')).toMatchObject({
+        state: 'failed',
+        attempts: 1,
+      });
+      // Morning two retries it: the claim leaves it `failed`.
+      await run(changeId, retryAt, retry);
+    } finally {
+      await closeRegistry();
+    }
+
+    expect(JSON.stringify(mailFor(retry, fay.id)[0]?.data)).toContain(
+      formatPercent(1300)
+    );
+    expect(await kindOf(changeId, fay.id, 'smaller')).toMatchObject({
+      state: 'due',
+      attempts: 0,
+      acceptedAt: null,
+    });
+    const next = mailerAnswering();
+    await run(changeId, new Date(retryAt.getTime() + 13 * HOUR), next);
+    expect(JSON.stringify(mailFor(next, fay.id)[0]?.data)).toContain(
+      formatPercent(1200)
+    );
+  });
+
+  it('a round told again never takes the last round’s logged email for its own, however close in time (M2)', async () => {
+    const vic = await person('Vic Rounds');
+    const admin = await person('Ada Admin');
+    const org = await organisation(vic.id);
+    const changeId = await rise(org);
+    await run(changeId, new Date(Date.now() - 3 * HOUR), mailerAnswering());
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    try {
+      await registry.feeConfig.updateOrgFees(
+        org,
+        { orgFeePercent: 1300 },
+        admin.id
+      );
+      // Round one goes, and the email log keeps its line.
+      await run(changeId, new Date(), loggingMailer());
+      expect(await kindOf(changeId, vic.id, 'smaller')).toMatchObject({
+        state: 'sent',
+      });
+      // Seconds later the rise is made smaller again: the same row, round two.
+      await registry.feeConfig.updateOrgFees(
+        org,
+        { orgFeePercent: 1200 },
+        admin.id
+      );
+    } finally {
+      await closeRegistry();
+    }
+    // Round two's first send gets no answer.
+    const second = new Date();
+    await run(
+      changeId,
+      second,
+      loggingMailer({ [vic.id]: { accepted: false, status: 503 } })
+    );
+    expect(await kindOf(changeId, vic.id, 'smaller')).toMatchObject({
+      state: 'unknown',
+    });
+
+    // Round one's line has this row's id and is seconds older than round
+    // two, but it is round one's: round two is sent.
+    const third = loggingMailer();
+    expect(
+      await run(changeId, new Date(second.getTime() + 13 * HOUR), third)
+    ).toMatchObject({ foundInLog: 0, sent: 1 });
+    expect(JSON.stringify(mailFor(third, vic.id)[0]?.data)).toContain(
+      formatPercent(1200)
+    );
+  });
+
+  /** Waits until a query matching `pattern` is waiting on a lock. */
+  async function waitingOnLock(pattern: string): Promise<void> {
+    for (let i = 0; i < 200; i++) {
+      const found = await db.execute(
+        sql`SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock'
+              AND query ILIKE ${pattern}`
+      );
+      if ((found.rows[0] as { n: number }).n > 0) return;
+      await new Promise((wake) => setTimeout(wake, 50));
+    }
+    throw new Error(`no query like ${pattern} waited on a lock`);
+  }
+
+  it('a cancel locks its notices before reading them: a run in its middle sends nothing it can miss (M3)', async () => {
+    const yan = await person('Yan Untold');
+    const zoe = await person('Zoe Told');
+    const admin = await person('Ari Admin');
+    const changeId = await rise(await organisation(yan.id, zoe.id));
+    // The list is made with its template held; then Zoe is told.
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering(),
+      async (name) => name !== 'fee-change-notice'
+    );
+    const told = await kindOf(changeId, zoe.id, 'announce');
+    await db
+      .update(feeChangeNotices)
+      .set({
+        state: 'sent',
+        attempts: 1,
+        attemptedAt: NOV_3,
+        acceptedAt: NOV_3,
+      })
+      .where(eq(feeChangeNotices.id, told?.id as string));
+
+    // A second connection holds Zoe's "it's off" row, uncommitted: the
+    // cancel's insert waits on it, inside its own transaction.
+    let release = () => {};
+    const released = new Promise<void>((go) => {
+      release = go;
+    });
+    let holding = () => {};
+    const held = new Promise<void>((go) => {
+      holding = go;
+    });
+    const holder = db
+      .transaction(async (tx) => {
+        await tx.insert(feeChangeNotices).values({
+          changeId,
+          userId: zoe.id,
+          kind: 'cancelled',
+          onList: false,
+          roles: told?.roles ?? [],
+          beforeValues: [],
+          afterValues: [],
+        });
+        holding();
+        await released;
+        tx.rollback();
+      })
+      .catch(() => {});
+    await held;
+
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    const mailer = mailerAnswering();
+    try {
+      const cancel = registry.feeConfig.cancelChange(changeId, admin.id);
+      await waitingOnLock('%INSERT INTO "fee_change_notices"%cancelled%');
+      // A run starts in the middle of the cancel, and gets as far as its
+      // dates step, which waits for the cancel.
+      const morning = run(changeId, NOV_4, mailer);
+      await waitingOnLock('%from "fee_changes"%for update%');
+      release();
+      await holder;
+      await cancel;
+      await morning;
+    } finally {
+      release();
+      await closeRegistry();
+    }
+
+    // Yan was never sent the rise email, so owes no "it's off" email.
+    expect(mailFor(mailer, yan.id)).toEqual([]);
+    expect(await kindOf(changeId, yan.id, 'announce')).toMatchObject({
+      state: 'not_needed',
+      acceptedAt: null,
+    });
+    expect(await kindOf(changeId, yan.id, 'cancelled')).toBeUndefined();
+    // Zoe, told, has exactly one.
+    const zoes = await db
+      .select()
+      .from(feeChangeNotices)
+      .where(
+        and(
+          eq(feeChangeNotices.changeId, changeId),
+          eq(feeChangeNotices.userId, zoe.id),
+          eq(feeChangeNotices.kind, 'cancelled')
+        )
+      );
+    expect(zoes).toHaveLength(1);
+  });
+
+  // ── Review final S2, S3 ───────────────────────────────────────────────────
+
+  /** A rise one creator was told of, and a creator who joined after. */
+  async function toldThenJoined(told: string, joiner: string) {
+    const admin = await person('Ada Admin');
+    const org = await organisation(told);
+    const changeId = await rise(org);
+    await run(changeId, new Date(Date.now() - 3 * HOUR), mailerAnswering());
+    await join(org, joiner);
+    return { admin, org, changeId };
+  }
+
+  /** The step's next read of who a rise affects runs `then` once it has read. */
+  function afterNextPayeeRead(then: () => Promise<void>) {
+    let fired = false;
+    vi.mocked(affectedPayees).mockImplementation(async (client, ...rest) => {
+      const read = await realAffectedPayees(client, ...rest);
+      if (!fired && client === db) {
+        fired = true;
+        await then();
+      }
+      return read;
+    });
+  }
+
+  it('a rise made smaller while its email is in flight: that email named the earlier figure, so the next morning names the new one (S2)', async () => {
+    const pat = await person('Pat Inflight');
+    const admin = await person('Ari Admin');
+    const org = await organisation(pat.id);
+    const changeId = await rise(org);
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    const mailer = vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        if (params.userId === pat.id) {
+          await registry.feeConfig.updateOrgFees(
+            org,
+            { orgFeePercent: 1300 },
+            admin.id
+          );
+        }
+        return { accepted: true };
+      }
+    );
+    try {
+      await run(changeId, new Date(), mailer);
+    } finally {
+      await closeRegistry();
+    }
+
+    expect(JSON.stringify(mailFor(mailer, pat.id)[0]?.data)).not.toContain(
+      formatPercent(1300)
+    );
+    expect(await kindOf(changeId, pat.id, 'announce')).toMatchObject({
+      state: 'sent',
+    });
+    expect(await kindOf(changeId, pat.id, 'smaller')).toMatchObject({
+      state: 'due',
+      attempts: 0,
+    });
+    const next = mailerAnswering();
+    await run(changeId, new Date(Date.now() + 13 * HOUR), next);
+    expect(JSON.stringify(mailFor(next, pat.id)[0]?.data)).toContain(
+      formatPercent(1300)
+    );
+    expect(await kindOf(changeId, pat.id, 'smaller')).toMatchObject({
+      state: 'sent',
+    });
+  });
+
+  it('a rise made smaller after the run read its figures but before it claimed: its emails name the new figure, and nobody is owed another (S2)', async () => {
+    const uma = await person('Uma Told');
+    const jo = await person('Jo Joiner');
+    const { admin, org, changeId } = await toldThenJoined(uma.id, jo.id);
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    // The joiners step reads the figures; the rise is made smaller; then
+    // the claim, and the sends.
+    afterNextPayeeRead(async () => {
+      await registry.feeConfig.updateOrgFees(
+        org,
+        { orgFeePercent: 1300 },
+        admin.id
+      );
+    });
+    const morning = mailerAnswering();
+    try {
+      await run(changeId, new Date(), morning);
+    } finally {
+      await closeRegistry();
+    }
+
+    // Jo's first email and Uma's smaller one both name the new figure.
+    const [joFirst, ...joMore] = mailFor(morning, jo.id);
+    expect(joMore).toEqual([]);
+    expect(joFirst?.data.feeNoticeId).toBe(
+      (await kindOf(changeId, jo.id, 'announce'))?.id
+    );
+    expect(JSON.stringify(joFirst?.data)).toContain(formatPercent(1300));
+    const [umaSmaller, ...umaMore] = mailFor(morning, uma.id);
+    expect(umaMore).toEqual([]);
+    expect(umaSmaller?.data.feeNoticeId).toBe(
+      (await kindOf(changeId, uma.id, 'smaller'))?.id
+    );
+    expect(JSON.stringify(umaSmaller?.data)).toContain(formatPercent(1300));
+    // Jo was told the new figure first, so is owed no smaller email.
+    expect(await kindOf(changeId, jo.id, 'smaller')).toBeUndefined();
+  });
+
+  it('a cut whose transaction stays open across the claim: the email it missed named the earlier figure, so its person is told the new one the next morning (S2)', async () => {
+    const uma = await person('Uma Told');
+    const jo = await person('Jo Joiner');
+    const { changeId } = await toldThenJoined(uma.id, jo.id);
+    let release = () => {};
+    const released = new Promise<void>((go) => {
+      release = go;
+    });
+    let holding = () => {};
+    const held = new Promise<void>((go) => {
+      holding = go;
+    });
+    let holder: Promise<void> = Promise.resolve();
+    // A cut as the purchase service makes one (the version superseded, a
+    // new one, the smaller emails queued), on another connection, held open
+    // from just after the joiners step's read.
+    afterNextPayeeRead(async () => {
+      holder = db.transaction(async (tx) => {
+        try {
+          const cutAt = new Date();
+          const versions = await tx
+            .select()
+            .from(feeConfigVersions)
+            .where(eq(feeConfigVersions.changeId, changeId));
+          const live = versions.find((v) => v.supersededAt === null);
+          if (!live) throw new Error('no live version');
+          await tx
+            .update(feeConfigVersions)
+            .set({ supersededAt: cutAt })
+            .where(eq(feeConfigVersions.id, live.id));
+          await tx.insert(feeConfigVersions).values({
+            changeId,
+            scope: 'org',
+            orgFeePercent: 1300,
+          });
+          await queueSmallerFeeNotices(tx, { changeId, now: cutAt });
+        } finally {
+          holding();
+        }
+        await released;
+      });
+      await held;
+    });
+    // It commits while Jo's first email is on its way.
+    const morning = vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        if (params.userId === jo.id) {
+          release();
+          await holder;
+        }
+        return { accepted: true };
+      }
+    );
+    try {
+      await run(changeId, new Date(), morning);
+    } finally {
+      release();
+      await holder;
+    }
+
+    // Jo's first email was read before the cut could be seen.
+    const joAnnounce = await kindOf(changeId, jo.id, 'announce');
+    expect(joAnnounce).toMatchObject({ state: 'sent' });
+    expect(JSON.stringify(mailFor(morning, jo.id)[0]?.data)).not.toContain(
+      formatPercent(1300)
+    );
+    // So Jo is owed the smaller email, queued with that send's record.
+    expect(await kindOf(changeId, jo.id, 'smaller')).toMatchObject({
+      state: 'due',
+      attempts: 0,
+    });
+    expect(obsLog.info).toHaveBeenCalledWith(
+      'fee step: a fee email named a figure the rise was cut from since; the smaller email is owed',
+      { feeNoticeId: joAnnounce?.id, changeId }
+    );
+    const next = mailerAnswering();
+    await run(changeId, new Date(Date.now() + 13 * HOUR), next);
+    expect(JSON.stringify(mailFor(next, jo.id)[0]?.data)).toContain(
+      formatPercent(1300)
+    );
+    expect(JSON.stringify(mailFor(next, uma.id)[0]?.data)).toContain(
+      formatPercent(1300)
+    );
+  });
+
+  it('a void’s write and its "it’s off" refresh are one transaction: when the refresh fails neither lands, and the cancel’s own "it’s off" email still goes (S3)', async () => {
+    const sam = await person('Sam Rollback');
+    const admin = await person('Ari Admin');
+    const changeId = await rise(await organisation(sam.id));
+    // The step's own client, but once armed, the next raw statement it sends,
+    // in a transaction or not (tellOfVoid's insert), fails.
+    let failNext = false;
+    const failOnce = () => {
+      failNext = false;
+      return () => Promise.reject(new Error('the insert failed'));
+    };
+    const failing = new Proxy(db, {
+      get(target, key) {
+        if (key === 'execute' && failNext) return failOnce();
+        if (key === 'transaction') {
+          const transaction: DatabaseWs['transaction'] = (work, config) =>
+            target.transaction(
+              (tx) =>
+                work(
+                  new Proxy(tx, {
+                    get(inner, innerKey) {
+                      if (innerKey === 'execute' && failNext) return failOnce();
+                      const value = Reflect.get(inner, innerKey, inner);
+                      return typeof value === 'function'
+                        ? value.bind(inner)
+                        : value;
+                    },
+                  })
+                ),
+              config
+            );
+          return transaction;
+        }
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    try {
+      await runFeeNoticesSweep({
+        db: failing,
+        obs,
+        environment: 'development',
+        workerSecret: 'unused',
+        notificationsUrl: 'http://unused.test',
+        now: NOV_3,
+        mailer: vi.fn(
+          async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+            if (params.userId === sam.id) {
+              await registry.feeConfig.cancelChange(changeId, admin.id);
+              failNext = true;
+            }
+            return { accepted: true };
+          }
+        ),
+        templateExists: async () => true,
+        onlyChanges: [changeId],
+      });
+    } finally {
+      await closeRegistry();
+    }
+
+    expect(errorsFor(changeId, 'fee step: one notice failed')).toHaveLength(1);
+    // The send's write went with the insert: the row is as the cancel left it.
+    const announce = await kindOf(changeId, sam.id, 'announce');
+    expect(announce).toMatchObject({ state: 'not_needed', acceptedAt: null });
+    expect(
+      obsLog.info.mock.calls.filter(
+        ([message, context]) =>
+          String(message).startsWith('fee step: a fee rise was voided') &&
+          (context as { feeNoticeId?: string }).feeNoticeId === announce?.id
+      )
+    ).toEqual([]);
+    // The cancel queued its own "it's off" email for the notice in flight.
+    expect(await kindOf(changeId, sam.id, 'cancelled')).toMatchObject({
+      state: 'due',
+    });
+    const nextMorning = mailerAnswering();
+    await run(changeId, NOV_4, nextMorning);
+    expect(mailFor(nextMorning, sam.id).map((p) => p.templateName)).toEqual([
+      'fee-change-cancelled',
+    ]);
   });
 });

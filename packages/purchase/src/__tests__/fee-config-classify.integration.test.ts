@@ -297,94 +297,220 @@ describe('FeeConfigService — classifying a write (real DB)', () => {
     expect(notices.find((n) => n.kind === 'smaller')?.onList).toBe(false);
   });
 
-  // Codex-2hxff.104: a rise made smaller twice. The told person's `smaller`
-  // email from the first cut is left as a morning can leave it, an hour
-  // old; the second cut starts it a new round only if that email MAY have
-  // gone, or its log line would count the first cut's figure as told.
-  it.each([
-    { left: 'unknown', state: 'unknown', attempts: 1, lastReason: 'unknown' },
+  // ── Told, or may have been (owner, 2026-11-09) ──────────────────────────
+  // ONE rule (payments' `feeNoticeMayHaveTold`) decides whom the first cut's
+  // smaller email, the second cut's restart and a cancel's "it's off" email
+  // reach. Each case is a notice as a morning can leave it.
+  const HOUR = 60 * 60 * 1000;
+  const LEFT = [
+    {
+      left: 'sent',
+      state: 'sent',
+      attempts: 1,
+      tried: 1,
+      reason: null,
+      told: true,
+    },
+    {
+      left: 'told another way',
+      state: 'told_another_way',
+      attempts: 1,
+      tried: 1,
+      reason: 'refused',
+      told: true,
+    },
+    {
+      left: 'with no answer',
+      state: 'unknown',
+      attempts: 1,
+      tried: 1,
+      reason: 'unknown',
+      told: true,
+    },
     {
       left: 'due after a try (a run cut off after sending)',
       state: 'due',
       attempts: 1,
-      lastReason: null,
+      tried: 1,
+      reason: null,
+      told: true,
     },
-  ] as const)('a second cut starts a smaller email left $left a new round', async (left) => {
-    const { riseId, roundOne } = await toldOfTwoCuts(left);
-    const roundTwo = await smallerOf(riseId);
-    expect(roundTwo).toMatchObject({
+    {
+      left: 'failed, retried an hour ago (it may be in flight)',
+      state: 'failed',
+      attempts: 2,
+      tried: 1,
+      reason: 'refused',
+      told: true,
+    },
+    {
+      left: 'failed, last tried 13 hours ago',
+      state: 'failed',
+      attempts: 1,
+      tried: 13,
+      reason: 'refused',
+      told: false,
+    },
+    {
+      left: 'due, never tried',
       state: 'due',
       attempts: 0,
-      attemptedAt: null,
-      lastReason: null,
-    });
-    expect(roundTwo.createdAt.getTime()).toBeGreaterThan(roundOne.getTime());
-  });
+      tried: null,
+      reason: null,
+      told: false,
+    },
+  ] as const;
+  type Left = (typeof LEFT)[number];
 
-  it.each([
-    { left: 'due, never tried', state: 'due', attempts: 0, lastReason: null },
-    { left: 'failed', state: 'failed', attempts: 1, lastReason: 'refused' },
-  ] as const)('a second cut leaves a smaller email left $left in its round: its next send has the new figure', async (left) => {
-    const { riseId, roundOne } = await toldOfTwoCuts(left);
-    expect(await smallerOf(riseId)).toMatchObject({
+  /** A notice's columns as `left` leaves them. */
+  function leftAs(left: Left) {
+    const at = (hours: number) => new Date(Date.now() - hours * HOUR);
+    return {
       state: left.state,
       attempts: left.attempts,
-      lastReason: left.lastReason,
-      createdAt: roundOne,
-    });
-  });
+      attemptedAt: left.tried === null ? null : at(left.tried),
+      lastReason: left.reason,
+      acceptedAt: left.state === 'sent' ? at(1) : null,
+      ...(left.state === 'told_another_way'
+        ? { toldNote: 'by phone', toldByUserId: adminId, toldAt: at(1) }
+        : {}),
+    };
+  }
 
-  /**
-   * A rise made smaller, its told person's smaller email left so an hour
-   * ago (`roundOne`), then made smaller again.
-   */
-  async function toldOfTwoCuts(left: {
-    state: 'due' | 'failed' | 'unknown';
-    attempts: number;
-    lastReason: 'unknown' | 'refused' | null;
-  }): Promise<{ riseId: string; roundOne: Date }> {
+  /** A waiting rise, and the untold person's announcement left as `left`. */
+  async function riseAnnounced(left: Left): Promise<string> {
     const rise = await svc.updateOrgFees(
       organizationId,
       { orgFeePercent: 1500 },
       adminId
     );
     const riseId = rise.change?.id as string;
-    await listNotices(riseId);
-    await svc.updateOrgFees(organizationId, { orgFeePercent: 1300 }, adminId);
-    const roundOne = new Date(Date.now() - 60 * 60 * 1000);
-    await db
-      .update(feeChangeNotices)
-      .set({
-        state: left.state,
-        attempts: left.attempts,
-        attemptedAt: left.attempts > 0 ? roundOne : null,
-        lastReason: left.lastReason,
-        createdAt: roundOne,
-      })
-      .where(eq(feeChangeNotices.id, (await smallerOf(riseId)).id));
-    const again = await svc.updateOrgFees(
-      organizationId,
-      { orgFeePercent: 1200 },
-      adminId
-    );
-    expect(again.outcome).toBe('smaller');
-    return { riseId, roundOne };
+    await db.insert(feeChangeNotices).values({
+      changeId: riseId,
+      userId: untoldId,
+      kind: 'announce',
+      onList: true,
+      roles: [{ organizationId, as: 'creator' as const }],
+      beforeValues: [],
+      afterValues: [],
+      quotedFrom: '2026-12-04',
+      ...leftAs(left),
+    });
+    return riseId;
   }
 
-  async function smallerOf(changeId: string) {
+  async function noticeOfKind(
+    changeId: string,
+    kind: (typeof feeChangeNotices.$inferSelect)['kind']
+  ) {
     const [row] = await db
       .select()
       .from(feeChangeNotices)
       .where(
         and(
           eq(feeChangeNotices.changeId, changeId),
-          eq(feeChangeNotices.userId, toldId),
-          eq(feeChangeNotices.kind, 'smaller')
+          eq(feeChangeNotices.userId, untoldId),
+          eq(feeChangeNotices.kind, kind)
         )
       );
-    if (!row) throw new Error('no smaller notice');
     return row;
   }
+
+  it.each(
+    LEFT
+  )('the first cut queues a smaller email for an announcement left $left: $told', async (left) => {
+    const riseId = await riseAnnounced(left);
+    const smaller = await svc.updateOrgFees(
+      organizationId,
+      { orgFeePercent: 1300 },
+      adminId
+    );
+    expect(smaller.outcome).toBe('smaller');
+    const queued = await noticeOfKind(riseId, 'smaller');
+    if (left.told) {
+      expect(queued).toMatchObject({ state: 'due', attempts: 0 });
+    } else {
+      expect(queued).toBeUndefined();
+    }
+  });
+
+  it.each(
+    LEFT
+  )('the second cut starts a smaller email left $left a new round: $told', async (left) => {
+    const riseId = await riseAnnounced(LEFT[0]);
+    await svc.updateOrgFees(organizationId, { orgFeePercent: 1300 }, adminId);
+    const roundOne = new Date(Date.now() - HOUR);
+    const first = await noticeOfKind(riseId, 'smaller');
+    await db
+      .update(feeChangeNotices)
+      .set({ ...leftAs(left), createdAt: roundOne })
+      .where(eq(feeChangeNotices.id, first?.id as string));
+
+    const again = await svc.updateOrgFees(
+      organizationId,
+      { orgFeePercent: 1200 },
+      adminId
+    );
+    expect(again.outcome).toBe('smaller');
+    const roundTwo = await noticeOfKind(riseId, 'smaller');
+    if (left.told) {
+      expect(roundTwo).toMatchObject({
+        state: 'due',
+        attempts: 0,
+        attemptedAt: null,
+        lastReason: null,
+      });
+      expect(roundTwo?.createdAt.getTime()).toBeGreaterThan(roundOne.getTime());
+    } else {
+      // Its next send carries the new figure anyway.
+      expect(roundTwo).toMatchObject({
+        state: left.state,
+        attempts: left.attempts,
+        createdAt: roundOne,
+      });
+    }
+  });
+
+  it('the second cut starts a smaller email set aside a new round: it would send nothing more', async () => {
+    const riseId = await riseAnnounced(LEFT[0]);
+    await svc.updateOrgFees(organizationId, { orgFeePercent: 1300 }, adminId);
+    const first = await noticeOfKind(riseId, 'smaller');
+    await db
+      .update(feeChangeNotices)
+      .set({ state: 'not_needed', attempts: 4 })
+      .where(eq(feeChangeNotices.id, first?.id as string));
+    await svc.updateOrgFees(organizationId, { orgFeePercent: 1200 }, adminId);
+    expect(await noticeOfKind(riseId, 'smaller')).toMatchObject({
+      state: 'due',
+      attempts: 0,
+    });
+  });
+
+  it.each(
+    LEFT
+  )('a cancel emails someone whose announcement is left $left that it is off: $told', async (left) => {
+    const riseId = await riseAnnounced(left);
+    await svc.cancelChange(riseId, adminId);
+
+    const announce = await noticeOfKind(riseId, 'announce');
+    // Nobody waits for a cancelled rise; the told stay told.
+    expect(announce?.state).toBe(
+      left.state === 'sent' || left.state === 'told_another_way'
+        ? left.state
+        : 'not_needed'
+    );
+    const cancelled = await noticeOfKind(riseId, 'cancelled');
+    if (left.told) {
+      // With the date and roles that email named.
+      expect(cancelled).toMatchObject({
+        state: 'due',
+        roles: announce?.roles,
+        quotedFrom: '2026-12-04',
+      });
+    } else {
+      expect(cancelled).toBeUndefined();
+    }
+  });
 
   it('a rise restated with the same figures keeps its change and emails nobody', async () => {
     const rise = await svc.updateOrgFees(
@@ -571,61 +697,6 @@ describe('FeeConfigService — classifying a write (real DB)', () => {
     await expect(svc.cancelChange(cutId, adminId)).rejects.toMatchObject({
       context: { code: 'FEE_CHANGE_NOT_WAITING' },
     });
-  });
-
-  // Owner, 2026-11-09: an announcement with no answer may have gone, so a
-  // cancel emails that person it's off, as it does the told; one refused, or
-  // never tried, told nobody.
-  it.each([
-    { state: 'unknown', attempts: 1, lastReason: 'unknown', emailed: true },
-    { state: 'due', attempts: 0, lastReason: null, emailed: false },
-    { state: 'failed', attempts: 1, lastReason: 'refused', emailed: false },
-  ] as const)('a cancel emails someone whose announcement is left $state that it is off: $emailed', async (left) => {
-    const rise = await svc.updateOrgFees(
-      organizationId,
-      { orgFeePercent: 1500 },
-      adminId
-    );
-    const riseId = rise.change?.id as string;
-    const roles = [{ organizationId, as: 'creator' as const }];
-    await db.insert(feeChangeNotices).values({
-      changeId: riseId,
-      userId: untoldId,
-      kind: 'announce',
-      onList: true,
-      roles,
-      beforeValues: [],
-      afterValues: [],
-      quotedFrom: '2026-12-04',
-      state: left.state,
-      attempts: left.attempts,
-      lastReason: left.lastReason,
-    });
-
-    await svc.cancelChange(riseId, adminId);
-
-    const rows = await db
-      .select()
-      .from(feeChangeNotices)
-      .where(
-        and(
-          eq(feeChangeNotices.changeId, riseId),
-          eq(feeChangeNotices.userId, untoldId)
-        )
-      );
-    // Nobody waits for a cancelled rise.
-    expect(rows.find((n) => n.kind === 'announce')?.state).toBe('not_needed');
-    const cancelled = rows.find((n) => n.kind === 'cancelled');
-    if (left.emailed) {
-      // With the date and roles that email named.
-      expect(cancelled).toMatchObject({
-        state: 'due',
-        roles,
-        quotedFrom: '2026-12-04',
-      });
-    } else {
-      expect(cancelled).toBeUndefined();
-    }
   });
 
   // ── One transaction (Codex-rtwpv) and the level lock ──────────────────────
