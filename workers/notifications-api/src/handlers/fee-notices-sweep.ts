@@ -51,6 +51,7 @@ import {
   eq,
   gte,
   inArray,
+  isLockNotAvailable,
   isNull,
   lt,
   lte,
@@ -124,6 +125,13 @@ const ALERT_NAMED = 50;
 const LIST_BATCH = 500;
 /** Sends in flight at once. */
 const SEND_CONCURRENCY = 8;
+/**
+ * How long the joiners step waits for an open edit of a rise (its level's
+ * lock): an edit commits in milliseconds, so this is only ever reached by a
+ * stuck one, whose change then gets its joiners the next morning. Short
+ * beside the send budget the steps after it need.
+ */
+const JOINERS_LOCK_WAIT_MS = 5_000;
 /**
  * The owner's rule is to alert only when a person is needed. An `unknown`
  * send (a 5xx or a timeout: it may have gone, and each morning checks the
@@ -508,11 +516,14 @@ async function currentPayeesOf(
 /**
  * S2: an email that carried figures read before the rise was made smaller
  * names a bigger figure than the rise now holds, so its person is owed the
- * smaller email (Q2 (A)). The backstop to the cut's lock (`lockFeeNotices`):
- * that lock holds only the notices there when the cut took it, so a joiner
- * added while a cut was open can be claimed then and sent the earlier
- * figure, and it is this check that tells them. A cut that saw the notice
- * tried has queued its email itself, so the queue here adds nothing then.
+ * smaller email (Q2 (A)). A backstop only. Every cut locks the change's
+ * notices before it queues (`lockFeeNotices`), so the claim passes them by
+ * while it is open, and one claimed before it is read as tried and queued
+ * by the cut itself. No notice is made while a cut is open, so none escapes
+ * that lock: a list waits on the change row the cut holds, and a joiner on
+ * the level's lock (`addChangeJoiners`). This check finds nothing then, and
+ * queues nothing; it stays for an insert path that one day skips those
+ * locks.
  */
 async function figuresMovedSince(
   ctx: SweepContext,
@@ -562,68 +573,15 @@ async function addJoiners(
   for (const change of changes) {
     if (listedThisRun.has(change.id)) continue;
     try {
-      const affected = await payeesOf(ctx, change);
-      const existing = await ctx.db
-        .select({
-          id: feeChangeNotices.id,
-          userId: feeChangeNotices.userId,
-          state: feeChangeNotices.state,
-        })
-        .from(feeChangeNotices)
-        .where(
-          and(
-            eq(feeChangeNotices.changeId, change.id),
-            eq(feeChangeNotices.kind, 'announce')
-          )
-        );
-      const known = new Map(existing.map((n) => [n.userId, n]));
-      const joiners = [...affected.values()].filter(
-        (p) => !known.has(p.userId)
-      );
-      const added = await insertNotices(
-        ctx.db,
-        change.id,
-        joiners,
-        false,
-        ctx.now
-      );
-      ctx.result.joinersAdded += added;
-
-      const gone = existing
-        .filter(
-          (n) =>
-            (FEE_NOTICE_OPEN_STATES as readonly string[]).includes(n.state) &&
-            !affected.has(n.userId)
-        )
-        .map((n) => n.id);
-      if (gone.length > 0) {
-        await ctx.db
-          .update(feeChangeNotices)
-          .set({ state: 'not_needed', updatedAt: ctx.now })
-          .where(
-            and(
-              inArray(feeChangeNotices.id, gone),
-              inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES])
-            )
-          );
-        ctx.result.notNeeded += gone.length;
-      }
-      // Affected again after being set aside: back to due.
-      const back = existing
-        .filter((n) => n.state === 'not_needed' && affected.has(n.userId))
-        .map((n) => n.id);
-      if (back.length > 0) {
-        await ctx.db
-          .update(feeChangeNotices)
-          .set({ state: 'due', attempts: 0, updatedAt: ctx.now })
-          .where(
-            and(
-              inArray(feeChangeNotices.id, back),
-              eq(feeChangeNotices.state, 'not_needed')
-            )
-          );
-      }
+      await ctx.db.transaction((tx) => addChangeJoiners(ctx, tx, change));
     } catch (error) {
+      if (isLockNotAvailable(error)) {
+        ctx.obs.warn(
+          'fee step: a fee rise was being edited past the wait; its joiners are added the next morning',
+          { changeId: change.id, waitedMs: JOINERS_LOCK_WAIT_MS }
+        );
+        continue;
+      }
       ctx.result.errors += 1;
       ctx.obs.error('fee step: joiners could not be added for a change', {
         errorId: crypto.randomUUID(),
@@ -631,6 +589,84 @@ async function addJoiners(
         error: messageForLog(error),
       });
     }
+  }
+}
+
+/**
+ * One change's joiners, set aside and back, under its level's lock
+ * (`lockFeeLevel`), which every edit of the rise (a cut, a void) holds for
+ * its whole transaction (review final, commerce confirm NIT). So a joiner
+ * waits for an open edit, then its figures are read as that edit left them,
+ * and it is inserted before the next edit's `lockFeeNotices` can pass it
+ * by: an edit open while a joiner was added can't leave them the earlier
+ * figure. The wait is bounded (JOINERS_LOCK_WAIT_MS, `lock_timeout`, which
+ * covers every lock this transaction takes): a stuck edit puts this
+ * change's joiners off to the next morning, and never the send budget the
+ * steps after this one need. The level lock comes first, before any
+ * notice row, as an edit takes it before `lockFeeNotices`.
+ */
+async function addChangeJoiners(
+  ctx: SweepContext,
+  tx: SweepTx,
+  change: FeeChangeRow
+): Promise<void> {
+  await tx.execute(
+    sql.raw(`SET LOCAL lock_timeout = '${JOINERS_LOCK_WAIT_MS}ms'`)
+  );
+  await lockFeeLevel(tx, levelOfChange(change));
+  // Read after the lock: an edit that held it has committed.
+  const affected = await currentPayeesOf(ctx, change);
+  const existing = await tx
+    .select({
+      id: feeChangeNotices.id,
+      userId: feeChangeNotices.userId,
+      state: feeChangeNotices.state,
+    })
+    .from(feeChangeNotices)
+    .where(
+      and(
+        eq(feeChangeNotices.changeId, change.id),
+        eq(feeChangeNotices.kind, 'announce')
+      )
+    );
+  const known = new Map(existing.map((n) => [n.userId, n]));
+  const joiners = [...affected.values()].filter((p) => !known.has(p.userId));
+  const added = await insertNotices(tx, change.id, joiners, false, ctx.now);
+  ctx.result.joinersAdded += added;
+
+  const gone = existing
+    .filter(
+      (n) =>
+        (FEE_NOTICE_OPEN_STATES as readonly string[]).includes(n.state) &&
+        !affected.has(n.userId)
+    )
+    .map((n) => n.id);
+  if (gone.length > 0) {
+    await tx
+      .update(feeChangeNotices)
+      .set({ state: 'not_needed', updatedAt: ctx.now })
+      .where(
+        and(
+          inArray(feeChangeNotices.id, gone),
+          inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES])
+        )
+      );
+    ctx.result.notNeeded += gone.length;
+  }
+  // Affected again after being set aside: back to due.
+  const back = existing
+    .filter((n) => n.state === 'not_needed' && affected.has(n.userId))
+    .map((n) => n.id);
+  if (back.length > 0) {
+    await tx
+      .update(feeChangeNotices)
+      .set({ state: 'due', attempts: 0, updatedAt: ctx.now })
+      .where(
+        and(
+          inArray(feeChangeNotices.id, back),
+          eq(feeChangeNotices.state, 'not_needed')
+        )
+      );
   }
 }
 
@@ -857,6 +893,18 @@ function levelsOf(scope: {
     }
   }
   return levels;
+}
+
+/**
+ * The level a change was saved on: the last of its scope's levels (its
+ * scope CHECK guarantees the keys).
+ */
+function levelOfChange(change: FeeChangeRow): FeeLevel {
+  const levels = levelsOf({
+    organizationId: change.scope === 'platform' ? null : change.organizationId,
+    creatorId: change.scope === 'creator' ? change.creatorId : null,
+  });
+  return levels[levels.length - 1] ?? { scope: 'platform' };
 }
 
 /** A role's fees in force now. */
@@ -1227,13 +1275,12 @@ async function sendOne(
   if (notice.prevAttemptedAt !== null && email) {
     const at = await foundSent(ctx, notice, email);
     if (at) {
-      // Its figures need no check here: at any cut since it went, it was
-      // `unknown` or tried, and the cut, which locks the change's notices
-      // before it queues (`lockFeeNotices`), read it so and queued its
-      // smaller email itself. The claim passes a locked notice by, so none
-      // is claimed unseen while a cut is open. The one exception is a
-      // joiner added while a cut was open, whose run then dies before its
-      // record; S2's post-send check covers every run that records.
+      // Its figures need no check here: every cut since it went found it
+      // `unknown` or tried, and queued its smaller email itself. A cut locks
+      // the change's notices before it queues (`lockFeeNotices`), so the
+      // claim passes them by while it is open, and no notice is made while
+      // a cut is open (a list waits on the change row, a joiner on the
+      // level's lock), so none escapes that lock.
       const found = await record(ctx, notice, {
         state: 'sent',
         acceptedAt: at,
