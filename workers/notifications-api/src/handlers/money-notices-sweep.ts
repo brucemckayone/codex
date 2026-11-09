@@ -249,6 +249,18 @@ async function claim(
   return row?.id ?? null;
 }
 
+/**
+ * A send cut off by `AbortSignal.timeout`, which rejects with a
+ * `TimeoutError`: unlike a refusal, the email may still have gone.
+ */
+function isSendTimeout(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { name?: unknown }).name === 'TimeoutError'
+  );
+}
+
 /** Send a claimed notice once, and record how it went. */
 async function sendClaimed(
   ctx: SweepContext,
@@ -269,12 +281,22 @@ async function sendClaimed(
     });
   } catch (error) {
     ctx.result.sendsFailed += 1;
-    ctx.obs.error('money notice send failed; it is not retried', {
-      errorId: crypto.randomUUID(),
-      kind,
-      moneyNoticeId: noticeId,
-      error: messageForLog(error),
-    });
+    // A timeout is not a refusal: the email may have gone. Either way the
+    // claim stands and failed_at is stamped, since this sweep sends at most
+    // once; the outcome tells support which it was (Codex-2hxff.100).
+    const timedOut = isSendTimeout(error);
+    ctx.obs.error(
+      timedOut
+        ? 'money notice send timed out; it may have gone, and it is not retried'
+        : 'money notice send failed; it is not retried',
+      {
+        errorId: crypto.randomUUID(),
+        kind,
+        moneyNoticeId: noticeId,
+        outcome: timedOut ? 'timed_out_may_have_gone' : 'failed',
+        error: messageForLog(error),
+      }
+    );
     await ctx.db
       .update(moneyNotices)
       .set({ failedAt: new Date() })

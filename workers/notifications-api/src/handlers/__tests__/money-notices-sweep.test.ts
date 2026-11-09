@@ -376,6 +376,11 @@ describe('runMoneyNoticesSweep', { timeout: 60_000 }, () => {
     const [notice] = await noticesOf(tom.id);
     expect(notice?.failedAt).not.toBeNull();
     expect(notice?.sentAt).toBeNull();
+    // A refusal, so the email did not go (Codex-2hxff.100).
+    expect(obsLog.error).toHaveBeenCalledWith(
+      'money notice send failed; it is not retried',
+      expect.objectContaining({ moneyNoticeId: notice?.id, outcome: 'failed' })
+    );
 
     const retry = sweep(new Date(NOV_1.getTime() + DAY));
     await retry.run;
@@ -835,6 +840,14 @@ describe('runMoneyNoticesSweep', { timeout: 60_000 }, () => {
     const [notice] = await noticesOf(kim.id);
     expect(notice?.failedAt).not.toBeNull();
     expect(notice?.sentAt).toBeNull();
+    // Not a refusal: the email may have gone, and the log says so.
+    expect(obsLog.error).toHaveBeenCalledWith(
+      'money notice send timed out; it may have gone, and it is not retried',
+      expect.objectContaining({
+        moneyNoticeId: notice?.id,
+        outcome: 'timed_out_may_have_gone',
+      })
+    );
   });
 
   it('a run past its send budget claims no one more: nobody is left claimed and unsent, and the rest go the next morning', async () => {
