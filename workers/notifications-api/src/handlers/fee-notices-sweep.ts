@@ -12,8 +12,8 @@
  *      list no longer affected and not yet told becomes `not_needed`.
  *   3. SEND: up to FEE_NOTICES_PER_RUN notices in `due`, `failed` or
  *      `unknown`, oldest first, claimed under FOR UPDATE SKIP LOCKED. Each
- *      send waits FEE_NOTICE_TIMEOUT_MS at most, and no batch starts after
- *      FEE_SENDS_TIME_BUDGET_MS: the rest are given back for the next
+ *      send waits SEND_TIMEOUT_MS at most, and no batch starts after
+ *      SENDS_TIME_BUDGET_MS: the rest are given back for the next
  *      morning, so the dates and the alert always run. A notice tried on
  *      an earlier run is first looked for in `email_audit_logs`: found sent
  *      or pending, it counts as told then and nothing is resent (M1's rule,
@@ -55,6 +55,7 @@ import {
   lte,
   messageForLog,
   or,
+  type SQL,
   sql,
 } from '@codex/database';
 import {
@@ -106,9 +107,10 @@ import {
   type OrgNames,
 } from './fee-notice-copy';
 import { greetingName } from './money-notice-copy';
+import { SEND_TIMEOUT_MS, SENDS_TIME_BUDGET_MS } from './send-limits';
 
 /** Emails a run sends at most; the rest go the next morning (§1.5 budget). */
-export const FEE_NOTICES_PER_RUN = 2000;
+const FEE_NOTICES_PER_RUN = 2000;
 /** A follow-up is dropped after this many failed mornings. */
 const FOLLOW_UP_TRIES = 3;
 /** People named in the run's one alert. */
@@ -129,20 +131,6 @@ const RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
  */
 const UNKNOWN_TRIES_BEFORE_ALERT = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
-/**
- * How long one send may take, as the price-moves step's
- * PRICE_NOTICE_TIMEOUT_MS. A send still running then is `unknown` (it MAY
- * have gone), so the next run checks the email log first.
- */
-const FEE_NOTICE_TIMEOUT_MS = 5_000;
-/**
- * No send batch starts after this, counted from the 08:00 invocation's start
- * (the step's own start when it has none), as the price-moves step's
- * PRICE_MOVES_TIME_BUDGET_MS. The step runs last in the 08:00 chain, after
- * the agreement and money sweeps, inside the cron's 15-minute wall, and the
- * dates and the alert run after the sends.
- */
-export const FEE_SENDS_TIME_BUDGET_MS = 8 * 60 * 1000;
 
 const TEMPLATE_FOR = {
   announce: 'fee-change-notice',
@@ -897,15 +885,90 @@ async function withFollowUpReads(
   }
 }
 
+/**
+ * What a send did, written on the round it claimed while that row is still
+ * open (`due`, `failed` or `unknown`). Two writes can move it while the
+ * email is in flight:
+ *   - a rise made smaller starts it a new round (`queueSmallerNotices`: a
+ *     new created_at, untried). This email carried the figure read before
+ *     that, so nothing is recorded on the new round (Codex-2hxff.104);
+ *   - a rise voided sets it `not_needed` (`voidPending`). An email that went
+ *     is recorded `sent` all the same, as a row already sent when the void
+ *     arrived, and its person gets voidPending's "it's off" email
+ *     (`tellOfVoid`). One that didn't go stays `not_needed`, as a row still
+ *     waiting does.
+ * Each check is in an UPDATE's WHERE, not a read before it: an UPDATE that
+ * meets the other write's lock waits, then tests the committed row.
+ * created_at holds microseconds (the column's now() default) and the claim
+ * read it to the millisecond, so both sides are compared at that.
+ */
 async function record(
   ctx: SweepContext,
   notice: Claimed,
   set: Partial<FeeChangeNoticeRow>
 ): Promise<void> {
-  await ctx.db
-    .update(feeChangeNotices)
-    .set({ ...set, updatedAt: ctx.now })
-    .where(eq(feeChangeNotices.id, notice.id));
+  const ours = [
+    eq(feeChangeNotices.id, notice.id),
+    sql`date_trunc('milliseconds', ${feeChangeNotices.createdAt}) = ${notice.createdAt}::timestamptz`,
+  ];
+  const writeIf = async (state: SQL): Promise<boolean> => {
+    const written = await ctx.db
+      .update(feeChangeNotices)
+      .set({ ...set, updatedAt: ctx.now })
+      .where(and(...ours, state))
+      .returning({ id: feeChangeNotices.id });
+    return written.length > 0;
+  };
+  if (
+    await writeIf(inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES]))
+  ) {
+    return;
+  }
+  const ids = { feeNoticeId: notice.id, changeId: notice.changeId };
+  if (
+    set.state === 'sent' &&
+    (await writeIf(eq(feeChangeNotices.state, 'not_needed')))
+  ) {
+    ctx.obs.info(
+      'fee step: a fee rise was voided while its email was in flight; recorded as sent',
+      { ...ids, cancelledNoticeAdded: await tellOfVoid(ctx, notice) }
+    );
+    return;
+  }
+  ctx.obs.info(
+    'fee step: a notice changed while its email was in flight; this send is not recorded on it',
+    ids
+  );
+}
+
+/**
+ * voidPending's rule for the "it's off" email (F2), for one person whose
+ * email went while the rise was being voided: everyone told of a rise that
+ * is called off is emailed, with what they were told, unless a bigger rise
+ * replaced it (whose own email says so). The same statement as
+ * voidPending's, narrowed to this person; one it already queued is kept. It
+ * runs after the write above, so it reads the void as committed.
+ */
+async function tellOfVoid(
+  ctx: SweepContext,
+  notice: Claimed
+): Promise<boolean> {
+  const added = await ctx.db.execute(sql`
+    INSERT INTO ${feeChangeNotices}
+      (change_id, user_id, kind, on_list, roles, before_values, after_values, quoted_from, state)
+    SELECT n.change_id, n.user_id, 'cancelled', false, n.roles, n.before_values, n.after_values, n.quoted_from, 'due'
+    FROM ${feeChangeNotices} n
+    JOIN ${feeChanges} c ON c.id = n.change_id
+    WHERE n.change_id = ${notice.changeId}
+      AND n.user_id = ${notice.userId}
+      AND n.kind = 'announce'
+      AND n.state IN ('sent', 'told_another_way')
+      AND c.voided_at IS NOT NULL
+      AND c.void_reason <> 'replaced_by_bigger'
+    ON CONFLICT (change_id, user_id, kind) DO NOTHING
+    RETURNING id
+  `);
+  return added.rows.length > 0;
 }
 
 interface Recipient {
@@ -1495,7 +1558,7 @@ export async function runFeeNoticesSweep(
     errors: 0,
   };
   const clock = deps.clock ?? Date.now;
-  const sendsUntil = (deps.wakeStartedAt ?? clock()) + FEE_SENDS_TIME_BUDGET_MS;
+  const sendsUntil = (deps.wakeStartedAt ?? clock()) + SENDS_TIME_BUDGET_MS;
   try {
     const ctx: SweepContext = {
       db: deps.db,
@@ -1505,7 +1568,7 @@ export async function runFeeNoticesSweep(
         makeDefaultMailer({
           notificationsUrl: deps.notificationsUrl,
           workerSecret: deps.workerSecret,
-          timeoutMs: deps.sendTimeoutMs ?? FEE_NOTICE_TIMEOUT_MS,
+          timeoutMs: deps.sendTimeoutMs ?? SEND_TIMEOUT_MS,
         }),
       now: deps.now ?? new Date(),
       clock,

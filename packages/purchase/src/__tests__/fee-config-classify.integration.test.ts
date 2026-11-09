@@ -297,6 +297,95 @@ describe('FeeConfigService — classifying a write (real DB)', () => {
     expect(notices.find((n) => n.kind === 'smaller')?.onList).toBe(false);
   });
 
+  // Codex-2hxff.104: a rise made smaller twice. The told person's `smaller`
+  // email from the first cut is left as a morning can leave it, an hour
+  // old; the second cut starts it a new round only if that email MAY have
+  // gone, or its log line would count the first cut's figure as told.
+  it.each([
+    { left: 'unknown', state: 'unknown', attempts: 1, lastReason: 'unknown' },
+    {
+      left: 'due after a try (a run cut off after sending)',
+      state: 'due',
+      attempts: 1,
+      lastReason: null,
+    },
+  ] as const)('a second cut starts a smaller email left $left a new round', async (left) => {
+    const { riseId, roundOne } = await toldOfTwoCuts(left);
+    const roundTwo = await smallerOf(riseId);
+    expect(roundTwo).toMatchObject({
+      state: 'due',
+      attempts: 0,
+      attemptedAt: null,
+      lastReason: null,
+    });
+    expect(roundTwo.createdAt.getTime()).toBeGreaterThan(roundOne.getTime());
+  });
+
+  it.each([
+    { left: 'due, never tried', state: 'due', attempts: 0, lastReason: null },
+    { left: 'failed', state: 'failed', attempts: 1, lastReason: 'refused' },
+  ] as const)('a second cut leaves a smaller email left $left in its round: its next send has the new figure', async (left) => {
+    const { riseId, roundOne } = await toldOfTwoCuts(left);
+    expect(await smallerOf(riseId)).toMatchObject({
+      state: left.state,
+      attempts: left.attempts,
+      lastReason: left.lastReason,
+      createdAt: roundOne,
+    });
+  });
+
+  /**
+   * A rise made smaller, its told person's smaller email left so an hour
+   * ago (`roundOne`), then made smaller again.
+   */
+  async function toldOfTwoCuts(left: {
+    state: 'due' | 'failed' | 'unknown';
+    attempts: number;
+    lastReason: 'unknown' | 'refused' | null;
+  }): Promise<{ riseId: string; roundOne: Date }> {
+    const rise = await svc.updateOrgFees(
+      organizationId,
+      { orgFeePercent: 1500 },
+      adminId
+    );
+    const riseId = rise.change?.id as string;
+    await listNotices(riseId);
+    await svc.updateOrgFees(organizationId, { orgFeePercent: 1300 }, adminId);
+    const roundOne = new Date(Date.now() - 60 * 60 * 1000);
+    await db
+      .update(feeChangeNotices)
+      .set({
+        state: left.state,
+        attempts: left.attempts,
+        attemptedAt: left.attempts > 0 ? roundOne : null,
+        lastReason: left.lastReason,
+        createdAt: roundOne,
+      })
+      .where(eq(feeChangeNotices.id, (await smallerOf(riseId)).id));
+    const again = await svc.updateOrgFees(
+      organizationId,
+      { orgFeePercent: 1200 },
+      adminId
+    );
+    expect(again.outcome).toBe('smaller');
+    return { riseId, roundOne };
+  }
+
+  async function smallerOf(changeId: string) {
+    const [row] = await db
+      .select()
+      .from(feeChangeNotices)
+      .where(
+        and(
+          eq(feeChangeNotices.changeId, changeId),
+          eq(feeChangeNotices.userId, toldId),
+          eq(feeChangeNotices.kind, 'smaller')
+        )
+      );
+    if (!row) throw new Error('no smaller notice');
+    return row;
+  }
+
   it('a rise restated with the same figures keeps its change and emails nobody', async () => {
     const rise = await svc.updateOrgFees(
       organizationId,

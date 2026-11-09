@@ -1213,6 +1213,8 @@ async function insertVersion(
  * says so), everyone already told about it is emailed that it's off (F2,
  * `fee-change-cancelled`, sent by the next daily run). The cancelled notice
  * keeps what they were told (roles, values, the date named) for its email.
+ * notifications-api's fee step applies the same rule to someone whose email
+ * was in flight as the rise was voided (`tellOfVoid`): change both together.
  */
 async function voidPending(
   tx: Tx,
@@ -1252,7 +1254,12 @@ async function voidPending(
  * someone not told yet simply gets the announcement with the new figures.
  * A row told again starts a new round at `now`: the daily step's email-log
  * check searches from created_at, so the last round's email can't count as
- * this one's (review cycle 3, N1).
+ * this one's (review cycle 3, N1). So does a row whose last email MAY have
+ * gone, `unknown` or `due` after a try (a run cut off after sending, or a
+ * send in flight now), or the next morning's check finds that email and
+ * counts the earlier figure as this one (Codex-2hxff.104). A `failed` row
+ * (its last email certainly did not go) and a `due` row never tried keep
+ * their round: their next send carries the new figure anyway.
  */
 async function queueSmallerNotices(
   tx: Tx,
@@ -1271,7 +1278,8 @@ async function queueSmallerNotices(
       SET state = 'due', attempts = 0, attempted_at = NULL, accepted_at = NULL,
           last_reason = NULL, last_error = NULL, alert_error_id = NULL,
           created_at = ${now}, updated_at = ${now}
-      WHERE ${feeChangeNotices}.state NOT IN ('due', 'failed', 'unknown')
+      WHERE ${feeChangeNotices}.state <> 'failed'
+        AND NOT (${feeChangeNotices}.state = 'due' AND ${feeChangeNotices}.attempts = 0)
   `);
 }
 
