@@ -517,6 +517,21 @@ async function lockOffer(tx: Tx, organizationId: string, offerId: string) {
   return offer;
 }
 
+/** The organisation, unless it is missing or deleted: then a 404. */
+async function loadLiveOrganization(tx: Tx, organizationId: string) {
+  const [org] = await tx
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(
+      and(eq(organizations.id, organizationId), isNull(organizations.deletedAt))
+    )
+    .limit(1);
+  if (!org) {
+    throw new NotFoundError('Organization not found', { organizationId });
+  }
+  return org;
+}
+
 function assertOpen(offer: Offer, now: Date): void {
   if (offer.status !== 'open' || offer.expiresAt <= now) {
     throw new OwnershipOfferNotOpenError({
@@ -547,19 +562,7 @@ export async function createOwnershipOffer(
     return await db.transaction(async (tx) => {
       await lockOwnerMembership(tx, organizationId, ownerUserId);
 
-      const [org] = await tx
-        .select({ name: organizations.name })
-        .from(organizations)
-        .where(
-          and(
-            eq(organizations.id, organizationId),
-            isNull(organizations.deletedAt)
-          )
-        )
-        .limit(1);
-      if (!org) {
-        throw new NotFoundError('Organization not found', { organizationId });
-      }
+      const org = await loadLiveOrganization(tx, organizationId);
       if (
         input.confirmName.trim().toLowerCase() !== org.name.trim().toLowerCase()
       ) {
@@ -754,19 +757,7 @@ export async function reassignOrganisationOwner(
     // As `createOwnershipOffer` checks: a deleted organisation keeps no
     // owner to reassign, and an unknown one is a 404, not the recipient's
     // refusal (Codex-2hxff.46). A plain read takes no lock.
-    const [org] = await tx
-      .select({ id: organizations.id })
-      .from(organizations)
-      .where(
-        and(
-          eq(organizations.id, organizationId),
-          isNull(organizations.deletedAt)
-        )
-      )
-      .limit(1);
-    if (!org) {
-      throw new NotFoundError('Organization not found', { organizationId });
-    }
+    await loadLiveOrganization(tx, organizationId);
 
     // The open offer locked before any membership: the order every path
     // takes them in, so this does not deadlock with an accept or an account
