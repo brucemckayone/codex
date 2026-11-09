@@ -298,21 +298,24 @@ describe("an active member of the template's org", () => {
 
   // Owner decision 2026-11-09: in the org's brand, a creator template's
   // test send (its only send) goes to the sender alone, never a mailing.
-  it('test-sends it to their own address, typed in any case with spaces round it', async () => {
+  it('test-sends it to their own address, typed in any case with spaces round it: it goes to the address as stored', async () => {
     const id = await stored('member');
-    // Stored trimmed, as typed: the send goes to the address given.
-    const own = `${creator.id}@example.test`.toUpperCase();
-    recipients.push(own);
+    // The account's address as stored, and as the caller typed it.
+    const own = `${creator.id}@example.test`;
+    const typed = own.toUpperCase();
+    recipients.push(own, typed);
 
     const response = await call('POST', `/api/templates/${id}/test-send`, {
-      recipientEmail: `  ${own}  `,
+      recipientEmail: `  ${typed}  `,
       data: {},
     });
 
     expect(response.status).toBe(200);
+    // Sent to the stored address, never the one typed.
     expect(await auditRowsFor(own)).toEqual([
       { status: 'success', metadata: '{"testSend":true}' },
     ]);
+    expect(await auditRowsFor(typed)).toEqual([]);
   });
 
   it('is refused a test send to anyone else: nothing is sent, and nothing is logged', async () => {

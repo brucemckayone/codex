@@ -682,32 +682,36 @@ export class TemplateService extends BaseService {
   }
 
   /**
-   * May a test send of this template go to `recipientEmail`? A creator
-   * template that names an org renders in that org's brand, and a test send
-   * is the only way a creator template is ever sent (no internal sender
-   * passes a `creatorId`), so it goes only to the sender's own address
-   * (`callerEmail`, the signed-in user's), or it is a mailer in the org's
-   * name to anyone (owner decision 2026-11-09, Codex-tgkgb). A creator
-   * template with no org, an org's own template and a global one may go to
-   * any address. Compared trimmed and case-insensitively.
+   * Where does a test send of this template go? A creator template that
+   * names an org renders in that org's brand, and a test send is the only
+   * way a creator template is ever sent (no internal sender passes a
+   * `creatorId`), so it goes only to the sender's own address, or it is a
+   * mailer in the org's name to anyone (owner decision 2026-11-09,
+   * Codex-tgkgb). The body's address must name it (compared trimmed and
+   * case-insensitively), and the send then goes to `callerEmail`, the
+   * signed-in user's address as stored, never the body's as typed. A creator
+   * template with no org, an org's own template and a global one go to the
+   * body's address, unchanged.
    *
+   * @returns The address to send the test to
    * @throws {TestSendRecipientError} (403) for any other address
    */
   requireTestSendRecipient(
     template: EmailTemplate,
     recipientEmail: string,
     callerEmail: string
-  ): void {
+  ): string {
     if (
       template.scope !== TEMPLATE_SCOPES.CREATOR ||
       !template.organizationId
     ) {
-      return;
+      return recipientEmail;
     }
     const normalised = (email: string) => email.trim().toLowerCase();
     if (normalised(recipientEmail) !== normalised(callerEmail)) {
       throw new TestSendRecipientError(template.id);
     }
+    return callerEmail;
   }
 
   // ===========================================================================
