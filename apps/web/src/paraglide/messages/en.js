@@ -12583,6 +12583,14 @@ export const studio_editor_open_live_failed = () => `It couldn’t be opened jus
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_open_live_save_slow = () => `Your last change is still saving. Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_preview_button = () => `Preview as a visitor`
 
 

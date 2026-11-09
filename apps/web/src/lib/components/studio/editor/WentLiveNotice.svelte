@@ -24,8 +24,7 @@
   import { Alert, Button } from '$lib/components/ui';
   import { focusIfLost } from '$lib/utils/focus-if-lost';
   import * as m from '$paraglide/messages';
-  import type { DraftSession } from './draft-session.svelte';
-  import type { ReadProblem } from './read-problem';
+  import type { DraftSession, OpenLiveProblem } from './draft-session.svelte';
 
   interface Props {
     session: DraftSession;
@@ -41,10 +40,11 @@
   const hintId = `${id}-wait`;
   const failedId = `${id}-failed`;
 
-  const FAILED_WORDS: Record<ReadProblem, () => string> = {
+  const FAILED_WORDS: Record<OpenLiveProblem, () => string> = {
     'signed-out': m.studio_content_draft_signed_out,
     gone: m.studio_editor_not_found,
     outage: m.studio_editor_open_live_failed,
+    slow: m.studio_editor_open_live_save_slow,
   };
   const problem = $derived(opening ? null : session.openLiveProblem);
   const describedBy = $derived(

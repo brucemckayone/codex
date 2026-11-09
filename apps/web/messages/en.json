@@ -1570,6 +1570,7 @@
   "studio_live_carried_off_sale": "Your changes from writing are here. Update saves them; it stays off sale.",
   "studio_live_carried_lost": "Your changes from writing couldn’t be brought over. This is the piece as it is live.",
   "studio_editor_open_live_failed": "It couldn’t be opened just now. Your changes are still here, so try again.",
+  "studio_editor_open_live_save_slow": "Your last change is still saving. Try again in a moment.",
   "studio_preview_button": "Preview as a visitor",
   "studio_preview_region": "Preview",
   "studio_preview_draft": "Preview · not live yet",

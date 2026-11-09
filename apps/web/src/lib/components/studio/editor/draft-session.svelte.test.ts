@@ -2996,10 +2996,11 @@ describe('it went live by another way', () => {
     });
   });
 
-  // Closed with that save on the wire, the teardown rides it, and how the
-  // close ended is that save's to say: one toast, no hand-off, no second
-  // trace (the round-6 review).
-  it('closed with a save out while Open waits: the save says how it ended, once', async () => {
+  // Closed in place with that save on the wire, the teardown only rides it:
+  // the Open still out carries what the save left, as any close by
+  // something else does, and says so once, with no read for a screen that
+  // went (the round-7 review: who can carry owns the close).
+  it('closed with a save out while Open waits: the Open carries what the save left, said once', async () => {
     const { session, out } = frozenWithASaveOut();
 
     const opened = session.openLive();
@@ -3009,17 +3010,139 @@ describe('it went live by another way', () => {
     await opened;
     await settle();
 
-    expect(told.toastAdd).toHaveBeenCalledTimes(1);
-    expect(takeLiveHandoff(ID)).toBeNull();
-    expect(told.logWarn).not.toHaveBeenCalledWith(
+    expect(takeLiveHandoff(ID)).toEqual({
+      changes: {
+        title: 'Runes, renamed',
+        description: 'Typed while it went',
+      },
+    });
+    expect(told.logWarn).toHaveBeenCalledWith(
       'studio_editor.open_live_page_replaced',
-      expect.anything()
+      { contentId: ID, keys: ['title', 'description'] }
     );
+    expect(told.toastAdd).not.toHaveBeenCalled();
+    expect(remotes.readPublishState).not.toHaveBeenCalled();
     expect(
       told.logWarn.mock.calls.filter(
         ([event]) => event === 'studio_editor.closed_with_unsent_changes'
       )
     ).toHaveLength(0);
+  });
+
+  // Past its bound the wait is said for what it is, and logged, as every
+  // other way Open fails is (the round-7 review).
+  it('a save still out past the bound: Open says so, logs it, and stays', async () => {
+    const { session, out } = frozenWithASaveOut();
+
+    await Promise.all([
+      session.openLive(),
+      vi.advanceTimersByTimeAsync(10_000),
+    ]);
+
+    expect(session.openLiveProblem).toBe('slow');
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.open_live_save_slow',
+      { contentId: ID }
+    );
+    expect(nav.goto).not.toHaveBeenCalled();
+    out.reject(refusedAsLive);
+    await settle();
+  });
+
+  // A Leave answered while Open is out is the creator's move: Open stands
+  // down, never re-reading (which would abort it) nor moving (the round-7
+  // review).
+  it('answered Leave while it read: Open stands down, and the move is theirs', async () => {
+    const session = await wentLive();
+    const reading = Promise.withResolvers<{
+      status: string;
+      publishedAt: string;
+    }>();
+    remotes.readPublishState.mockReturnValueOnce(reading.promise);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const opened = session.openLive();
+    const { cancel } = navigate();
+    expect(cancel).not.toHaveBeenCalled();
+    reading.resolve({ status: 'published', publishedAt: '2026-11-09' });
+    await opened;
+
+    expect(nav.invalidateAll).not.toHaveBeenCalled();
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(takeLiveHandoff(ID)).toBeNull();
+  });
+
+  // Every way the creator says Leave stands Open down: the page's own
+  // dialog, the page's leave(), and the question asked once a save out
+  // was refused (the round-7 review).
+  it("answered Leave in the page's dialog while it read: Open stands down", async () => {
+    const asked = Promise.withResolvers<'leave' | 'stay' | 'update'>();
+    const session = await wentLive(SAVED_VALUES, {
+      askToLeave: () => asked.promise,
+    });
+    const reading = Promise.withResolvers<{
+      status: string;
+      publishedAt: string;
+    }>();
+    remotes.readPublishState.mockReturnValueOnce(reading.promise);
+
+    const opened = session.openLive();
+    navigate();
+    asked.resolve('leave');
+    await settle();
+    reading.resolve({ status: 'published', publishedAt: '2026-11-09' });
+    await opened;
+
+    expect(nav.invalidateAll).not.toHaveBeenCalled();
+    expect(nav.goto).not.toHaveBeenCalledWith(
+      `/studio/content/${ID}/edit`,
+      expect.anything()
+    );
+  });
+
+  it("the page's leave() while it read: Open stands down", async () => {
+    const session = await wentLive();
+    const reading = Promise.withResolvers<{
+      status: string;
+      publishedAt: string;
+    }>();
+    remotes.readPublishState.mockReturnValueOnce(reading.promise);
+
+    const opened = session.openLive();
+    void session.leave('/studio/content');
+    reading.resolve({ status: 'published', publishedAt: '2026-11-09' });
+    await opened;
+
+    expect(nav.invalidateAll).not.toHaveBeenCalled();
+    expect(nav.goto).not.toHaveBeenCalledWith(
+      `/studio/content/${ID}/edit`,
+      expect.anything()
+    );
+  });
+
+  it('answered Leave once a save out was refused: Open, which waited on it, stands down', async () => {
+    const { session, out } = frozenWithASaveOut();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    // Open waits on the save first, so it resumes first, and reads.
+    const opened = session.openLive();
+    await settle();
+    const { cancel } = navigate();
+    expect(cancel).toHaveBeenCalled();
+    out.reject(refusedAsLive);
+    await opened;
+    await settle();
+
+    // The question lands a few ticks after Open's read, so Open may have
+    // started re-reading: the creator's move, newer, wins kit's navigation,
+    // and Open stands down after it. Their move went, once; Open's never
+    // did, and nothing is carried.
+    expect(nav.goto).toHaveBeenCalledTimes(1);
+    expect(nav.goto).not.toHaveBeenCalledWith(
+      `/studio/content/${ID}/edit`,
+      expect.anything()
+    );
+    expect(takeLiveHandoff(ID)).toBeNull();
   });
 
   it('before it went live, Open it to update does nothing', async () => {

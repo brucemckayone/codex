@@ -11,13 +11,12 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
-import type { DraftSession } from './draft-session.svelte';
-import type { ReadProblem } from './read-problem';
+import type { DraftSession, OpenLiveProblem } from './draft-session.svelte';
 import WentLiveNotice from './WentLiveNotice.svelte';
 
 const state = $state<{
   wentLiveElsewhere: boolean;
-  openLiveProblem: ReadProblem | null;
+  openLiveProblem: OpenLiveProblem | null;
 }>({ wentLiveElsewhere: false, openLiveProblem: null });
 const openLive = vi.fn();
 
@@ -103,6 +102,7 @@ describe('WentLiveNotice', () => {
     ['outage', () => m.studio_editor_open_live_failed()],
     ['signed-out', () => m.studio_content_draft_signed_out()],
     ['gone', () => m.studio_editor_not_found()],
+    ['slow', () => m.studio_editor_open_live_save_slow()],
   ] as const)('a press that could not open it (%s) says why, in the same alert', (problem, words) => {
     state.wentLiveElsewhere = true;
     render();

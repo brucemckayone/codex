@@ -80,6 +80,9 @@ import { editHref, readEditorStep } from './editor-url';
 import { handOffToLive, withdrawLiveHandoff } from './live-handoff';
 import { type ReadProblem, readProblem } from './read-problem';
 
+/** Why "Open it to update" could not open it: a read's problem, or a save still out past its bound. */
+export type OpenLiveProblem = ReadProblem | 'slow';
+
 /**
  * Who can watch, and at what price: one value, sent as one group, as the
  * schema checks the flags together (`accessGroupToFlags`).
@@ -260,10 +263,11 @@ export interface DraftSession {
   openLive(): Promise<void>;
   /**
    * Why the last "Open it to update" could not open it, said by the notice
-   * until the next try: signed out, the piece gone, or a failure a try
-   * again can help (`readProblem`); null when it did not fail.
+   * until the next try: signed out, the piece gone, a failure a try again
+   * can help (`readProblem`), or a save still out past its bound; null when
+   * it did not fail.
    */
-  readonly openLiveProblem: ReadProblem | null;
+  readonly openLiveProblem: OpenLiveProblem | null;
   set<K extends keyof DraftValues>(key: K, value: DraftValues[K]): void;
   /**
    * Put every field back as the server holds it (an Update still on the
@@ -410,19 +414,13 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   /** A draft's save found it live: see {@link DraftSession.wentLiveElsewhere}. */
   let liveElsewhere = $state(false);
   /** See {@link DraftSession.openLiveProblem}. */
-  let openProblem = $state<ReadProblem | null>(null);
+  let openProblem = $state<OpenLiveProblem | null>(null);
   /** Its changes went to the live editor: closing this one drops nothing. */
   let handedOff = false;
   /** The creator answered the live question with Leave: its changes are theirs to have dropped. */
   let leftChanges = false;
   /** "Open it to update" is out: a close meanwhile is its to trace. */
   let openingLive = false;
-  /**
-   * The editor closed with a save on the wire, which the teardown rides:
-   * how the close ended is that save's to say, never an Open's as well.
-   * One owner per close (the round-6 review).
-   */
-  let drainingOnClose = false;
   /** The close's trace of changes left behind, said once. */
   let closeTraced = false;
   /** Closed with changes no save or hand-off took: one trace, never two that disagree (the round-5 review). */
@@ -835,6 +833,8 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
             return;
           }
           if (answer === 'leave') {
+            // An Open still out stands down: the creator chose to go.
+            leftChanges = true;
             // The live dialog's Discard, as when nothing was out.
             if (reason === 'live') discardChanges();
             // A slow save is left running, not given up: its failure is
@@ -930,7 +930,10 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       if (asked === questions) stayAfterAll();
       return;
     }
-    if (given === 'leave') discardChanges();
+    if (given === 'leave') {
+      leftChanges = true;
+      discardChanges();
+    }
     await sendOn(move);
   }
 
@@ -1112,9 +1115,14 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           finish();
           return;
         }
-        drainingOnClose = true;
+        // One owner per close, whoever can carry (the round-7 review): an
+        // Open still out carries what this save leaves and says how the
+        // close ended, so the teardown only rides the save.
+        const openOwns = openingLive;
         void drain()
-          .then((result) => reportClose(result.ok))
+          .then((result) => {
+            if (!openOwns) reportClose(result.ok);
+          })
           .catch((err) => {
             logger.error(
               'studio_editor.close_save_failed',
@@ -1139,13 +1147,41 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   async function openLiveOnce(id: string): Promise<boolean> {
     openProblem = null;
     leftChanges = false;
+    const carry = () =>
+      handOffToLive(
+        id,
+        Object.fromEntries(
+          sendableKeys()
+            .filter((key) => key !== 'slug')
+            .map((key) => [key, $state.snapshot(values[key])])
+        )
+      );
+    /**
+     * Closed meanwhile. Left on purpose (Back, the rail, answered Leave),
+     * its changes were the creator's to drop; closed by something else (an
+     * error page), they wait for the live editor, said (the round-3 to
+     * round-7 reviews).
+     */
+    const keepOnClose = (): boolean => {
+      if (leftChanges || !isDirty) return false;
+      carry();
+      logger.warn('studio_editor.open_live_page_replaced', {
+        contentId: id,
+        keys: sendableKeys(),
+      });
+      return true;
+    };
     // A draft's save still out (it froze as that save went): its fields are
     // on no row until it settles, so the hand-off waits for it, or they would
     // be carried by neither (the round-6 review). Bounded, as a move is.
     if (sending !== null) {
       await settleWithin(autosave.flush());
+      if (unmounted) return keepOnClose();
+      // Answered Leave meanwhile: their move, not this one (round 7).
+      if (leftChanges) return false;
       if (sending !== null) {
-        openProblem = 'outage';
+        logger.warn('studio_editor.open_live_save_slow', { contentId: id });
+        openProblem = 'slow';
         return false;
       }
     }
@@ -1173,27 +1209,11 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       openProblem = readProblem(err) ?? 'outage';
       return false;
     }
-    const carry = () =>
-      handOffToLive(
-        id,
-        Object.fromEntries(
-          sendableKeys()
-            .filter((key) => key !== 'slug')
-            .map((key) => [key, $state.snapshot(values[key])])
-        )
-      );
-    // Closed while it read: no move of its own to make. Left on purpose
-    // (Back, the rail, answered Leave), its changes were the creator's to
-    // drop; closed by something else (an error page), they wait, said.
-    if (unmounted) {
-      if (leftChanges || !isDirty || drainingOnClose) return false;
-      carry();
-      logger.warn('studio_editor.open_live_page_replaced', {
-        contentId: id,
-        keys: sendableKeys(),
-      });
-      return true;
-    }
+    // Closed while it read: no move of its own to make.
+    if (unmounted) return keepOnClose();
+    // Answered Leave while it read: their move goes, never this one, which
+    // would abort it (kit's invalidateAll takes a new navigation).
+    if (leftChanges) return false;
     carry();
     try {
       // The route's own read (a query, or a load) takes that answer: a move
@@ -1201,7 +1221,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       await invalidateAll();
       if (unmounted) {
         // The creator left without them: theirs to have dropped.
-        if (leftChanges || !isDirty || drainingOnClose) {
+        if (leftChanges || !isDirty) {
           withdrawLiveHandoff(id);
           return false;
         }
@@ -1213,6 +1233,12 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           keys: sendableKeys(),
         });
         return true;
+      }
+      // Answered Leave while the page re-read: their move took the
+      // navigation, so this one stands down (the round-7 review).
+      if (leftChanges) {
+        withdrawLiveHandoff(id);
+        return false;
       }
       // In place (Write, on the edit route), the next editor is built from
       // this page's read, and invalidateAll resolves even when its refresh
@@ -1302,7 +1328,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       } finally {
         openingLive = false;
         // Closed while it was out, and nothing took them: said once, here.
-        if (unmounted && !keptOnClose && !drainingOnClose) traceClosedUnsent();
+        if (unmounted && !keptOnClose) traceClosedUnsent();
       }
     },
     discard() {
@@ -1310,6 +1336,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       discardChanges();
     },
     async leave(to) {
+      leftChanges = true;
       discardChanges();
       leaving = true;
       goingWithout = to;
