@@ -19,6 +19,7 @@ import {
   eq,
   inArray,
   sql,
+  TEST_SEND_METADATA,
 } from '@codex/database';
 import {
   emailAuditLogs,
@@ -1203,27 +1204,69 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     if (log) logIds.push(log.id);
   }
 
-  it('a send still pending in the email log counts as told: it may have gone', async () => {
+  // Owner, 2026-11-09 (replacing review C1's F4, "a `pending` row counts"):
+  // a send cut short leaves its log row `pending` for good, so one an
+  // earlier run left is not told, and the email goes again. One still in
+  // flight is told.
+  it('the email log: a pending row an earlier run left goes again, one still in flight does not, and a test send never counts', async () => {
     const pam = await person('Pam Pending');
-    const changeId = await rise(await organisation(pam.id));
+    const pia = await person('Pia Inflight');
+    const tess = await person('Tess Testsend');
+    const changeId = await rise(await organisation(pam.id, pia.id, tess.id));
     await run(
       changeId,
       NOV_3,
-      mailerAnswering({ [pam.id]: { accepted: false, status: 503 } })
+      mailerAnswering({
+        [pam.id]: { accepted: false, status: 503 },
+        [pia.id]: { accepted: false, status: 503 },
+        [tess.id]: { accepted: false, status: 503 },
+      })
     );
-    const notice = await noticeOf(changeId, pam.id);
-    const loggedAt = new Date(NOV_3.getTime() + 60 * 1000);
-    await logged(notice?.id as string, pam.email, 'pending', loggedAt);
+    const noticeId = async (userId: string) =>
+      (await noticeOf(changeId, userId))?.id as string;
+    // Morning one's send, left pending: its outcome never came.
+    await logged(
+      await noticeId(pam.id),
+      pam.email,
+      'pending',
+      new Date(NOV_3.getTime() + 60 * 1000)
+    );
+    // A run beside morning two's, sending it now.
+    const inFlightAt = new Date(NOV_4.getTime() - 2 * 60 * 1000);
+    await logged(await noticeId(pia.id), pia.email, 'pending', inFlightAt);
+    // A test send carrying the notice's id, as its marker sits in the log.
+    const testSentAt = new Date(NOV_3.getTime() + 60 * 1000);
+    const [forged] = await db
+      .insert(emailAuditLogs)
+      .values({
+        templateName: 'fee-change-notice',
+        recipientEmail: tess.email,
+        status: 'success',
+        metadata: JSON.stringify({
+          ...TEST_SEND_METADATA,
+          feeNoticeId: await noticeId(tess.id),
+        }),
+        createdAt: testSentAt,
+        updatedAt: testSentAt,
+      })
+      .returning({ id: emailAuditLogs.id });
+    if (forged) logIds.push(forged.id);
 
     const mailer = mailerAnswering();
     expect(await run(changeId, NOV_4, mailer)).toMatchObject({
       foundInLog: 1,
-      sent: 0,
+      sent: 2,
     });
-    expect(mailFor(mailer, pam.id)).toEqual([]);
+    expect(mailFor(mailer, pam.id)).toHaveLength(1);
+    expect(mailFor(mailer, tess.id)).toHaveLength(1);
+    expect(mailFor(mailer, pia.id)).toEqual([]);
+    expect(await noticeOf(changeId, pia.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: inFlightAt,
+    });
     expect(await noticeOf(changeId, pam.id)).toMatchObject({
       state: 'sent',
-      acceptedAt: loggedAt,
+      acceptedAt: NOV_4,
     });
   });
 

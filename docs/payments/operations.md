@@ -238,7 +238,9 @@ rise`, naming up to 50 notice and user ids; the queue is the lasting record,
 so a missed alert loses nothing. A send that failed outright (refused, skipped,
 no address) is named at once, and tried again the next morning. One with no
 answer (a 5xx, a timeout) may have gone, so the next run first looks in
-`email_audit_logs` and only sends again if nothing is there. It is named only
+`email_audit_logs` and only sends again if nothing there shows it sent: a
+`success` row, not a `pending` one an earlier run left, whose outcome never
+came (owner, 2026-11-09; `emailLogShowsSent`). It is named only
 after three such mornings, or at once when its rise starts within three days,
 since the mornings themselves usually mend it. A follow-up email
 (made smaller, cancelled) holds nothing: it is dropped after three failed

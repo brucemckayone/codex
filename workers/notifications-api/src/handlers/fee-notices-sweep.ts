@@ -15,9 +15,9 @@
  *      send waits SEND_TIMEOUT_MS at most, and no batch starts after
  *      SENDS_TIME_BUDGET_MS: the rest are given back for the next
  *      morning, so the dates and the alert always run. A notice tried on
- *      an earlier run is first looked for in `email_audit_logs`: found sent
- *      or pending, it counts as told then and nothing is resent (M1's rule,
- *      with F4's: on every reclaim). Each email names a date: the change's,
+ *      an earlier run is first looked for in `email_audit_logs`: shown sent
+ *      (`emailLogShowsSent`), it counts as told then and nothing is resent
+ *      (M1's rule, on every reclaim). Each email names a date: the change's,
  *      or the earliest it can be (Q1). The words are worked out at send time, so a
  *      rise made smaller is announced with its smaller figure.
  *   4. DATE: a rise whose list has nobody left waiting is dated the first UK
@@ -47,6 +47,7 @@ import {
   asc,
   createPerRequestDbClient,
   type DatabaseWs,
+  emailLogShowsSent,
   eq,
   gte,
   inArray,
@@ -707,12 +708,16 @@ async function claim(ctx: SweepContext): Promise<Claimed[]> {
 
 /**
  * Did the email go after all? Asked on every claim after an earlier try,
- * whatever that try recorded (F4's rule, as the price-moves step): a run cut
- * off after sending leaves the notice `due`. A `success` or `pending` row in
- * the email log for this notice counts as told then: a `pending` one may
- * have gone. The search starts at the notice's making, not its last try, so
- * a morning that failed before recording can't hide an earlier morning's
- * send (review cycle 2, L6); its feeNoticeId pins the row either way.
+ * whatever that try recorded (as the price-moves step): a run cut off after
+ * sending leaves the notice `due`. A row in the email log for this notice
+ * that `@codex/database`'s `emailLogShowsSent` accepts at the run's clock
+ * counts as told then: `success`, or `pending` while its send may still be
+ * in flight, never a test send. A `pending` row an earlier run left is not
+ * told: its outcome never came, so the email goes again (owner, 2026-11-09;
+ * it replaces review C1's F4, "a `pending` row counts"). The search starts
+ * at the notice's making, not its last try, so a morning that failed before
+ * recording can't hide an earlier morning's send (review cycle 2, L6); its
+ * feeNoticeId pins the row either way.
  * A row told again keeps its id, so the log line must also be this ROUND's:
  * each email carries the round's created_at (`feeNoticeRound`), and a line
  * from an earlier round never counts, however close in time (review final
@@ -735,7 +740,7 @@ async function foundSent(
       and(
         eq(emailAuditLogs.templateName, TEMPLATE_FOR[notice.kind]),
         eq(emailAuditLogs.recipientEmail, email),
-        inArray(emailAuditLogs.status, ['success', 'pending']),
+        emailLogShowsSent(ctx.now),
         gte(emailAuditLogs.createdAt, since),
         sql`strpos(${emailAuditLogs.metadata}, ${`"feeNoticeId":"${notice.id}"`}) > 0`,
         sql`(strpos(${emailAuditLogs.metadata}, ${`"feeNoticeRound":"${roundOf(notice)}"`}) > 0
