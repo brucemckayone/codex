@@ -32,8 +32,8 @@ import { getMyMembership } from './org.remote';
 
 const organizationIdSchema = z.string().uuid();
 
-// `recipientUserId` is a BetterAuth nanoid, not a UUID, and the worker's schema
-// rightly validates it as a trimmed non-empty string.
+// `recipientUserId` is a BetterAuth nanoid, not a UUID: the shared schema trims
+// it, then checks it with `userIdSchema` (1–64 letters and digits).
 const offerOwnershipArgsSchema = offerOwnershipSchema.extend({
   organizationId: organizationIdSchema,
 });
