@@ -80,6 +80,15 @@ describe('runMigrationPreflights', () => {
     expect(guard?.sql).toContain('HAVING count(*) > 1');
   });
 
+  // Calibrated by hand on a throwaway DB at 0127 (Codex-h301h): one dispute
+  // with a told buyer and no late win made the migrate refuse, "1 found".
+  it('guards the told-buyer CHECK with the rows that would break it', () => {
+    const guard = MIGRATION_PREFLIGHTS.find((p) => p.table === 'disputes');
+    expect(guard?.sql).toContain(
+      'buyer_told_at IS NOT NULL AND late_won_at IS NULL'
+    );
+  });
+
   // A renamed or regenerated migration would silently switch its guard off.
   it('names migrations that exist', async () => {
     const files = await readdir(

@@ -1,8 +1,9 @@
 /**
  * Migration 0126's three CHECKs on `disputes` (Codex-2hxff.70; late-win data
- * design §3; docs/payments/dispute-record.md §10). They are the database's
- * backstop for the late win: the code refuses each of these moves first (the
- * rank map, `recordLateWin`), so without this a schema edit that dropped or
+ * design §3; docs/payments/dispute-record.md §10), and 0128's fourth
+ * (Codex-h301h). They are the database's backstop for the late win: the code
+ * refuses each of these moves first (the rank map, `recordLateWin`,
+ * `claimLateWinBuyerEmail`), so without this a schema edit that dropped or
  * loosened one, then regenerated, would pass every suite (review MG3).
  *
  * Pins, on real rows inside ONE transaction that is always rolled back, each
@@ -11,7 +12,8 @@
  *   - a late win on a row that isn't won (`check_disputes_late_won_status`),
  *     also as an UPDATE back to `lost`;
  *   - a late-win refund with no late win (`check_disputes_late_win_refund`);
- *   - a loss date kept with no late win (`check_disputes_lost_applied`).
+ *   - a loss date kept with no late win (`check_disputes_lost_applied`);
+ *   - a told buyer with no late win (`check_disputes_buyer_told`).
  *
  * Real DB. Skips when DB_METHOD is not configured (fee-config-schema.test.ts).
  */
@@ -129,6 +131,12 @@ describe.skipIf(!HAS_DB)('0126 late win: the disputes CHECKs', () => {
           sql`INSERT INTO disputes (stripe_dispute_id, stripe_charge_id, amount_cents, currency, stripe_created_at, status, lost_applied_at)
               VALUES (${id('c')}, 'ch_c', 1000, 'gbp', ${day(1)}, 'lost', ${day(10)})`
         );
+        // `won`, so this breaks only the told-buyer CHECK.
+        await refuse(
+          'a told buyer with no late win',
+          sql`INSERT INTO disputes (stripe_dispute_id, stripe_charge_id, amount_cents, currency, stripe_created_at, status, buyer_told_at)
+              VALUES (${id('d')}, 'ch_d', 1000, 'gbp', ${day(1)}, 'won', ${day(21)})`
+        );
         await refuse(
           'a late win moved back to lost',
           sql`UPDATE disputes SET status = 'lost' WHERE stripe_dispute_id = ${id('won_late_undone')}`
@@ -152,6 +160,10 @@ describe.skipIf(!HAS_DB)('0126 late win: the disputes CHECKs', () => {
       'loss date with no late win': {
         code: '23514',
         constraint: 'check_disputes_lost_applied',
+      },
+      'a told buyer with no late win': {
+        code: '23514',
+        constraint: 'check_disputes_buyer_told',
       },
       'a late win moved back to lost': {
         code: '23514',

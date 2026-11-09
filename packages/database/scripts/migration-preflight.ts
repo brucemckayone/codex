@@ -53,6 +53,17 @@ WHERE stripe_charge_id IS NOT NULL AND payout_type = 'creator_payout'
 GROUP BY stripe_charge_id, payout_type, user_id
 HAVING count(*) > 1`;
 
+/**
+ * 0128 adds `check_disputes_buyer_told` (Codex-h301h): only a late win has a
+ * told buyer. A dispute that breaks it makes the ADD CONSTRAINT fail. None
+ * should exist: `claimLateWinBuyerEmail`, the column's only writer, requires
+ * a late win, and nothing clears `late_won_at`.
+ */
+const BUYER_TOLD_WITHOUT_LATE_WIN = `
+SELECT id, stripe_dispute_id, status, buyer_told_at
+FROM disputes
+WHERE buyer_told_at IS NOT NULL AND late_won_at IS NULL`;
+
 export const MIGRATION_PREFLIGHTS: ReadonlyArray<MigrationPreflight> = [
   {
     migration: '0099_wonderful_rage.sql',
@@ -60,6 +71,13 @@ export const MIGRATION_PREFLIGHTS: ReadonlyArray<MigrationPreflight> = [
       'duplicate payout slices: decide each one before deploying (release checklist R5)',
     sql: DUPLICATE_PAYOUT_SLICES,
     table: 'payouts',
+  },
+  {
+    migration: '0128_email_log_index_and_buyer_told_check.sql',
+    description:
+      'disputes with a told buyer but no late win: resolve each one before deploying',
+    sql: BUYER_TOLD_WITHOUT_LATE_WIN,
+    table: 'disputes',
   },
 ];
 
