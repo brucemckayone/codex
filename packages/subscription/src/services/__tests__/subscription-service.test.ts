@@ -3697,13 +3697,8 @@ describe('SubscriptionService', () => {
       expect(results.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("sends the org's four display fields, never its payee id (Codex-kk6zx)", async () => {
+    it("sends only the org's four display fields (Codex-kk6zx)", async () => {
       const { org, tier1 } = await createFullOrg('mine-org-fields');
-      const payee = takeFirst(await seedTestUsers(db, 1), 'payee id');
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: payee })
-        .where(eq(organizations.id, org.id));
       const subscriber = takeFirst(await seedTestUsers(db, 1), 'subscriber');
       await db
         .insert(subscriptions)

@@ -22,7 +22,6 @@ export {
   type OrganizationServiceConfig,
   type OwnershipMailer,
   type OwnershipTemplateName,
-  READABLE_ORGANIZATION_COLUMNS,
 } from './organization-service';
 export {
   OWNERSHIP_OFFER_TTL_MS,

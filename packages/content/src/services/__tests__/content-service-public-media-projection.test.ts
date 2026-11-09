@@ -11,9 +11,8 @@
  * old `mediaItem: true` lived, and the old `organization: true` beside it
  * (Codex-567de). `list({ scope: 'browse' })`, which any signed-in account reads
  * through GET /api/content/browse, had the same two (Codex-1bdx0). Both now
- * leave out the content row's sales count too, and the studio reads the
- * org's payee id (Codex-kk6zx). The real-Postgres half, that the exclusions
- * do exclude, is content-service-public-live-org.test.ts.
+ * leave out the content row's sales count too. The real-Postgres half, that
+ * the exclusions do exclude, is content-service-public-live-org.test.ts.
  */
 
 import type { Database } from '@codex/database';
@@ -31,18 +30,13 @@ type CapturedQuery = {
 };
 
 function createCapturingDb() {
-  const captured: { findMany?: CapturedQuery; findFirst?: CapturedQuery } = {};
+  const captured: { findMany?: CapturedQuery } = {};
   const db = {
     query: {
       content: {
         findMany: async (args: CapturedQuery) => {
           captured.findMany = args;
           return [];
-        },
-        // `get` returns at once on no row, before its memberships read.
-        findFirst: async (args: CapturedQuery) => {
-          captured.findFirst = args;
-          return undefined;
         },
       },
     },
@@ -124,30 +118,5 @@ describe("ContentService.list({ scope: 'browse' }) — catalogue projection (Cod
       creator: { columns: { id: true, name: true } },
     });
     expect(captured.findMany?.columns).toEqual({ purchaseCount: false });
-  });
-});
-
-// The studio reads check content ownership, not org management, so any
-// creator-role member reads them; the org row is not theirs (Codex-kk6zx).
-describe("ContentService studio reads — the org's payee id stays out", () => {
-  const PAYEE_EXCLUDED = { columns: { primaryConnectAccountUserId: false } };
-
-  it('list (studio scope)', async () => {
-    const { db, captured } = createCapturingDb();
-    const service = new ContentService({ db, environment: 'test' });
-
-    await service.list('creator-1', {}, { page: 1, limit: 20 });
-
-    expect(captured.findMany?.with?.organization).toEqual(PAYEE_EXCLUDED);
-    expect(captured.findMany?.columns).toBeUndefined();
-  });
-
-  it('get', async () => {
-    const { db, captured } = createCapturingDb();
-    const service = new ContentService({ db, environment: 'test' });
-
-    await service.get('3c111111-1111-4111-8111-111111111001', 'creator-1');
-
-    expect(captured.findFirst?.with?.organization).toEqual(PAYEE_EXCLUDED);
   });
 });

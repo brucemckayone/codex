@@ -10,16 +10,16 @@ Organization CRUD, membership management, subscription tiers, follower relations
 |---|---|---|---|---|---|
 | POST | `/api/organizations` | `required`, roles: creator/admin/platform_owner | body: `createOrganizationSchema` | 201 | Warms brand KV cache via `waitUntil` |
 | GET | `/api/organizations/check-slug/:slug` | `required` | params: `slug` | 200 `{ available }` | Checks against reserved subdomains |
-| GET | `/api/organizations/slug/:slug` | `required` | params: `slug` | 200 | Get org by slug, without the payee's `primaryConnectAccountUserId` (Codex-kk6zx) |
+| GET | `/api/organizations/slug/:slug` | `required` | params: `slug` | 200 | Get org by slug |
 | GET | `/api/organizations/my-organizations` | `required` | — | 200 | User's orgs with their role |
 | GET | `/api/organizations/public/:slug` | `none` | params: `slug` | 200 | Public branding fields only (legacy) |
 | GET | `/api/organizations/public/:slug/info` | `none` | params: `slug` | 200 | Full public org identity + branding; KV-cached 4h |
 | GET | `/api/organizations/public/:slug/stats` | `none` | params: `slug` | 200 | Content counts, duration, creator count, views; KV-cached |
 | GET | `/api/organizations/public/:slug/creators` | `none` | params + query: page/limit/search | 200 | Paginated public creator profiles; KV-cached, except a `search` (matched on name or username), which reads the DB as the content search does (Codex-pd8m1) |
 | GET | `/api/organizations/public/:slug/members` | `none` | params + query: page/limit/role | 200 | Paginated public member profiles; not KV-cached |
-| GET | `/api/organizations/:id` | `required` | params: `id` | 200 | Get org by ID, without the payee's user id |
+| GET | `/api/organizations/:id` | `required` | params: `id` | 200 | Get org by ID |
 | PATCH | `/api/organizations/:id` | `required`, `requireOrgManagement` | body: `updateOrganizationSchema` | 200 | Invalidates brand KV + VersionedCache on slug change |
-| GET | `/api/organizations` | `required` | query: pagination + filters | 200 | List EVERY live org (not scoped to the user), each without the payee's user id |
+| GET | `/api/organizations` | `required` | query: pagination + filters | 200 | List EVERY live org (not scoped to the user) |
 | DELETE | `/api/organizations/:id` | `required`, `requireOrgManagement`, `rateLimit: 'strict'` | params: `id` | 204 | Soft delete; invalidates KV |
 
 ### Member Routes (`/api/organizations/:id/members/*`)

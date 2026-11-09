@@ -8,7 +8,6 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { users } from './users';
 
 /**
  * Organizations table
@@ -27,19 +26,8 @@ export const organizations = pgTable(
     logoUrl: text('logo_url'),
     websiteUrl: text('website_url'),
 
-    /**
-     * The user whose single Connect account settles this org's revenue slice
-     * (Codex-69t7c). This is now the SOLE org→account link: resolve it by
-     * reading this field, then looking up that user's one account
-     * (`stripe_connect_accounts.user_id` is unique). It replaced the former
-     * arbitrary `.limit(1)` over `stripe_connect_accounts.organization_id`,
-     * which is no longer part of account identity. Set when the org owner
-     * onboards Connect; NULL means the org has not onboarded an account yet,
-     * so its org-fee slice accrues to `pending_payouts` until one connects.
-     */
-    primaryConnectAccountUserId: text(
-      'primary_connect_account_user_id'
-    ).references(() => users.id, { onDelete: 'set null' }),
+    // The retired payee pin `primary_connect_account_user_id` is still in the
+    // database for one release, unread; step 2 drops it (Codex-2hxff.36).
 
     // Timestamps
     createdAt: timestamp('created_at', { withTimezone: true })
