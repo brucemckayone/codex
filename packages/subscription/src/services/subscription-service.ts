@@ -317,6 +317,21 @@ function nowProration(
     : 'create_prorations';
 }
 
+/**
+ * C(b) at a dearer plan: the one change leaving yearly billing that charges
+ * today, the part-year at the new tier's YEARLY Price (Codex-2hxff.97). Its
+ * preview and its confirm both ask this, so a `quote` is shown exactly when
+ * the confirm re-checks one (Codex-2hxff.103).
+ */
+function chargesBeforeBillingWait(
+  plan: Parameters<typeof nowProration>[0]
+): boolean {
+  return (
+    plan.kind === 'change_then_billing_wait' &&
+    nowProration(plan) === 'always_invoice'
+  );
+}
+
 /** The idempotency-key prefix of a change made now, by its proration. */
 const NOW_CHANGE_KEY_PREFIX = {
   always_invoice: 'upgrade',
@@ -977,9 +992,10 @@ export interface TierChangePreview {
    */
   currentPeriodEnd: Date;
   /**
-   * Set for a switch into yearly billing only: what the dialog shows, which
-   * the page passes back to `changeTier()` to be re-checked before the write
-   * (`tierChangeQuote`, Codex-2hxff.96).
+   * Set for a switch into yearly billing (Codex-2hxff.96), and for C(b) when
+   * it charges now (Codex-2hxff.103): what the dialog shows, which the page
+   * passes back to `changeTier()` to be re-checked before the write
+   * (`tierChangeQuote`).
    */
   quote?: string;
   /**
@@ -3619,7 +3635,9 @@ export class SubscriptionService extends BaseService {
    * charged a different amount than they confirmed. A switch into yearly
    * billing cannot be pinned that way (Stripe refuses `proration_date` with
    * `billing_cycle_anchor: 'now'`), so its preview also returns a `quote` the
-   * page echoes back, and the commit re-checks it (Codex-2hxff.96).
+   * page echoes back, and the commit re-checks it (Codex-2hxff.96). So does
+   * C(b) when it charges: pinned, but at a yearly Price the commit's price
+   * check never reads (Codex-2hxff.103).
    *
    * Reuses the same tier-existence + price-configured guards as `changeTier()`
    * so a preview that succeeds is a strong signal the commit will too,
@@ -3647,28 +3665,28 @@ export class SubscriptionService extends BaseService {
       // the renewal. For A and B the plan waits with it and nothing happens
       // today, so Stripe is not asked; the period end is the live one, never
       // a month from today (nothing starts today). For C(b) the plan changes
-      // now on yearly billing, previewed as any change now.
+      // now on yearly billing, previewed as any change now; when that
+      // charges, its `quote` goes back to be re-checked (Codex-2hxff.103).
       if (plan.billing) {
         const billingChange = {
           interval: BILLING_INTERVAL.MONTH,
           amountCents: plan.billing.amountCents,
           effectiveAt: periodEnd.toISOString(),
         };
-        const charges = nowProration(plan) === 'always_invoice';
-        const shown =
-          plan.kind === 'change_then_billing_wait' && charges
-            ? await this.previewNow(plan, prorationDate)
-            : {
-                amountDueCents: 0,
-                prorationLineItems: [],
-                currentPeriodEnd: periodEnd,
-              };
+        const charges = chargesBeforeBillingWait(plan);
+        const shown = charges
+          ? await this.previewNow(plan, prorationDate)
+          : {
+              amountDueCents: 0,
+              prorationLineItems: [],
+              currentPeriodEnd: periodEnd,
+            };
         return {
           ...shown,
           newRecurringAmountCents: plan.billing.amountCents,
           newRecurringInterval: BILLING_INTERVAL.MONTH,
           prorationDate,
-          isUpgrade: plan.kind === 'change_then_billing_wait' && charges,
+          isUpgrade: charges,
           takesEffect:
             plan.kind === 'change_then_billing_wait' ? 'now' : 'period_end',
           billingChange,
@@ -3724,6 +3742,12 @@ export class SubscriptionService extends BaseService {
    * lines then add up to the charge, and the re-check compares them all. A
    * switch of billing period is next billed one new
    * period from `at`; an upgrade, at the old period's end.
+   *
+   * C(b) is pinned to `at` like any change now, but it bills the new tier's
+   * YEARLY Price, which the confirm's price check (the monthly bill it waits
+   * for) never reads. So it returns a `quote` too, and the confirm previews
+   * again at the same `at` and compares (Codex-2hxff.103). It is only
+   * previewed when it charges (`chargesBeforeBillingWait`).
    */
   private async previewNow(
     plan: TierChangePlan,
@@ -3770,7 +3794,7 @@ export class SubscriptionService extends BaseService {
       amountDueCents: preview.amount_due,
       prorationLineItems,
       currentPeriodEnd,
-      ...(newPeriod && {
+      ...((newPeriod || plan.kind === 'change_then_billing_wait') && {
         quote: tierChangeQuote({
           amountDueCents: preview.amount_due,
           lineAmountsCents: prorationLineItems.map((line) => line.amountCents),
@@ -3868,6 +3892,14 @@ export class SubscriptionService extends BaseService {
    * Stripe is written to, so the member confirms the price they will pay
    * (review C1 cycle 2, L4; cycle 3, L4-a). For C(b) it is the monthly bill
    * the change waits for.
+   *
+   * A change leaving yearly billing is also checked against the preview's
+   * `quote`: C(b) at a dearer plan charges the part-year at the new tier's
+   * yearly Price now, so it is previewed again at the pinned `prorationDate`
+   * and any difference throws `TierChangePreviewExpiredError` before Stripe
+   * is written to. A quote passed where nothing is charged now, or none
+   * where it is (a price saved since turned a cheaper pick dearer, or a
+   * dearer one cheaper), is a difference (Codex-2hxff.103).
    */
   async changeTier(
     userId: string,
@@ -3916,6 +3948,22 @@ export class SubscriptionService extends BaseService {
           prorationDate: effectiveProrationDate,
           newTierId,
         });
+      }
+
+      // Leaving yearly billing: C(b)'s part-year charge, at the new tier's
+      // yearly Price, is previewed again at the pinned date the write uses.
+      // A quote that differs, one where the dialog showed none, or none where
+      // it showed one, is refused (Codex-2hxff.103).
+      if (plan.billing) {
+        const charged = chargesBeforeBillingWait(plan)
+          ? (await this.previewNow(plan, effectiveProrationDate)).quote
+          : undefined;
+        if (charged !== quote) {
+          throw new TierChangePreviewExpiredError({
+            prorationDate: effectiveProrationDate,
+            newTierId,
+          });
+        }
       }
 
       if (plan.billing) {

@@ -328,6 +328,15 @@ happens (`takesEffect`: `now` or `period_end`).
     yearly billing**, the part-year difference charged as any upgrade, and
     monthly billing waits for the renewal (Q1). A tier with no yearly Price
     waits whole instead.
+  - That part-year charge is at the target's **yearly** Price, which the
+    price check at confirm (the monthly bill) never reads. So when C charges,
+    its preview also returns a `quote`, and change-tier previews again at the
+    same pinned `proration_date` (`Codex-2hxff.103`, owner: "Re-check, refuse
+    if changed"). Any difference is refused with
+    `TIER_CHANGE_PREVIEW_EXPIRED` before Stripe is written to. A quote where
+    none was shown, or none where one was, is a difference: a yearly price
+    saved since can turn a cheaper pick (B) into C, or C into B. It costs one
+    more Stripe preview on that confirm.
 - **Into yearly billing**, the same tier switches now with a charge.
   Another tier switches now when it is not cheaper. A cheaper one is two
   steps (T1), refused with `TIER_CHANGE_TWO_STEPS` (422) and
