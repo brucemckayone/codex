@@ -130,21 +130,30 @@ const main = async () => {
     for (const migration of pending) {
       try {
         console.log(`  📝 Applying: ${migration.name}`);
-        // A lock wait over 5 s fails the file, nothing is half-applied, re-run
-        // the deploy once the blocking transaction ends (Codex-vliwn). Per
-        // file: a file's own `RESET lock_timeout` (0111, 0122-0125) would
-        // leave every later file unbounded.
-        await client.query("SET lock_timeout = '5s'");
+        // One transaction per file: its lock bound, the file and the row that
+        // records it commit together or not at all. A lock wait over 5 s fails
+        // the file, nothing is half-applied, re-run the deploy once the
+        // blocking transaction ends (Codex-vliwn). `SET LOCAL` ends with the
+        // transaction, so a file's own `RESET lock_timeout` (0111, 0122-0125)
+        // never reaches the next file. No file may hold its own BEGIN/COMMIT.
+        await client.query('BEGIN');
+        await client.query("SET LOCAL lock_timeout = '5s'");
         await client.query(migration.sql);
         await client.query(
           'INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES ($1, $2)',
           [migration.name, Date.now()]
         );
+        await client.query('COMMIT');
         appliedCount++;
         console.log(`    ✓ Success`);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         console.error(`    ✗ Failed: ${errorMsg}`);
+        try {
+          await client.query('ROLLBACK');
+        } catch (_rollbackError) {
+          // The connection is gone, and the server rolls back with it.
+        }
         throw error;
       }
     }
