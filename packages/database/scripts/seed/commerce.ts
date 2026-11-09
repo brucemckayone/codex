@@ -1,9 +1,11 @@
 import { FEES } from '@codex/constants';
 import { eq } from 'drizzle-orm';
-import Stripe from 'stripe';
-// The live subscription split, by relative path: @codex/database cannot
-// depend on the service packages that depend on it.
+import type Stripe from 'stripe';
+// The live subscription split and the Stripe client with the platform's
+// pinned API version, by relative path: @codex/database cannot depend on the
+// service packages that depend on it.
 import { applyMinPlatformFeeFloor } from '../../../purchase/src/services/revenue-calculator';
+import { createStripeClient } from '../../../purchase/src/stripe-client';
 import { calculateRevenueSplit } from '../../../subscription/src/services/revenue-split';
 import type { dbWs as DbClient } from '../../src';
 import { schema } from '../../src';
@@ -778,7 +780,7 @@ export async function seedCommerce(
     // Refuse to seed against a live Stripe account — the seed creates
     // disposable customers and subscriptions that must never touch real data.
     assertTestModeKey(stripeKey);
-    const stripe = new Stripe(stripeKey);
+    const stripe = createStripeClient(stripeKey);
     seedEnv = resolveSeedEnv();
     console.log(`  Stripe seed env: ${seedEnv}`);
 
@@ -921,7 +923,7 @@ export async function seedCommerce(
     if (stripeKey && stripePriceIdsByTier && seedEnv) {
       const tierPrices = stripePriceIdsByTier.get(TIERS.alphaStandard.id);
       if (tierPrices) {
-        const stripe = new Stripe(stripeKey);
+        const stripe = createStripeClient(stripeKey);
         try {
           const result = await createOrFindStripeSubscription(stripe, {
             user,
@@ -1025,7 +1027,7 @@ export async function seedCommerce(
   if (stripeKey) {
     // Re-assert test mode (cheap, defensive — key could have rotated mid-seed).
     assertTestModeKey(stripeKey);
-    const stripe = new Stripe(stripeKey);
+    const stripe = createStripeClient(stripeKey);
 
     // `limit: 100` (Stripe's maximum), not 20. `accounts.list` returns the
     // MOST RECENT accounts and supports no metadata filter, so the window has
