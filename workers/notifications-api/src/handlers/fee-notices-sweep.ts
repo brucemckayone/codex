@@ -892,11 +892,11 @@ async function withFollowUpReads(
  *   - a rise made smaller starts it a new round (`queueSmallerNotices`: a
  *     new created_at, untried). This email carried the figure read before
  *     that, so nothing is recorded on the new round (Codex-2hxff.104);
- *   - a rise voided sets it `not_needed` (`voidPending`). An email that went
- *     is recorded `sent` all the same, as a row already sent when the void
- *     arrived, and its person gets voidPending's "it's off" email
- *     (`tellOfVoid`). One that didn't go stays `not_needed`, as a row still
- *     waiting does.
+ *   - a rise voided sets it `not_needed` (`voidPending`). The row ends as
+ *     voidPending leaves one that already had this outcome: an email that
+ *     went is recorded `sent`, one with no answer stays `not_needed` with
+ *     what it may have told, and both are owed the "it's off" email
+ *     (`tellOfVoid`). One refused stays `not_needed`: nobody was told.
  * Each check is in an UPDATE's WHERE, not a read before it: an UPDATE that
  * meets the other write's lock waits, then tests the committed row.
  * created_at holds microseconds (the column's now() default) and the claim
@@ -911,10 +911,13 @@ async function record(
     eq(feeChangeNotices.id, notice.id),
     sql`date_trunc('milliseconds', ${feeChangeNotices.createdAt}) = ${notice.createdAt}::timestamptz`,
   ];
-  const writeIf = async (state: SQL): Promise<boolean> => {
+  const writeIf = async (
+    state: SQL,
+    values: Partial<FeeChangeNoticeRow> = set
+  ): Promise<boolean> => {
     const written = await ctx.db
       .update(feeChangeNotices)
-      .set({ ...set, updatedAt: ctx.now })
+      .set({ ...values, updatedAt: ctx.now })
       .where(and(...ours, state))
       .returning({ id: feeChangeNotices.id });
     return written.length > 0;
@@ -925,13 +928,21 @@ async function record(
     return;
   }
   const ids = { feeNoticeId: notice.id, changeId: notice.changeId };
+  const mayHaveTold = set.state === 'sent' || set.state === 'unknown';
   if (
-    set.state === 'sent' &&
-    (await writeIf(eq(feeChangeNotices.state, 'not_needed')))
+    mayHaveTold &&
+    (await writeIf(
+      eq(feeChangeNotices.state, 'not_needed'),
+      set.state === 'sent' ? set : { ...set, state: 'not_needed' }
+    ))
   ) {
     ctx.obs.info(
-      'fee step: a fee rise was voided while its email was in flight; recorded as sent',
-      { ...ids, cancelledNoticeAdded: await tellOfVoid(ctx, notice) }
+      'fee step: a fee rise was voided while its email was in flight; the cancellation email is owed',
+      {
+        ...ids,
+        outcome: set.state,
+        cancelledNoticeAdded: await tellOfVoid(ctx, notice),
+      }
     );
     return;
   }
@@ -943,11 +954,13 @@ async function record(
 
 /**
  * voidPending's rule for the "it's off" email (F2), for one person whose
- * email went while the rise was being voided: everyone told of a rise that
- * is called off is emailed, with what they were told, unless a bigger rise
- * replaced it (whose own email says so). The same statement as
- * voidPending's, narrowed to this person; one it already queued is kept. It
- * runs after the write above, so it reads the void as committed.
+ * email went, or may have (`unknown`), while the rise was being voided:
+ * everyone a called-off rise may have told is emailed, with what they were
+ * told, unless a bigger rise replaced it (whose own email says so). The same
+ * statement as voidPending's, narrowed to this person; the send's outcome,
+ * not the row's state, is what says they may have been told. One it already
+ * queued is kept. It runs after the write above, so it reads the void as
+ * committed.
  */
 async function tellOfVoid(
   ctx: SweepContext,
@@ -962,7 +975,6 @@ async function tellOfVoid(
     WHERE n.change_id = ${notice.changeId}
       AND n.user_id = ${notice.userId}
       AND n.kind = 'announce'
-      AND n.state IN ('sent', 'told_another_way')
       AND c.voided_at IS NOT NULL
       AND c.void_reason <> 'replaced_by_bigger'
     ON CONFLICT (change_id, user_id, kind) DO NOTHING
@@ -1128,6 +1140,9 @@ async function sendOne(
   }
   const errorId = crypto.randomUUID();
   await record(ctx, notice, {
+    // One with no answer may have told them, so it keeps what: a void's
+    // "it's off" email quotes it (owner, 2026-11-09).
+    ...(outcome.state === 'unknown' ? told : {}),
     state: outcome.state,
     lastReason: outcome.reason,
     lastError: outcome.error,

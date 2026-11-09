@@ -1210,11 +1210,14 @@ async function insertVersion(
 /**
  * Void a waiting rise. Nobody still waits for it: its open notices become
  * `not_needed`. Unless a bigger rise replaces it (whose own announcement
- * says so), everyone already told about it is emailed that it's off (F2,
- * `fee-change-cancelled`, sent by the next daily run). The cancelled notice
- * keeps what they were told (roles, values, the date named) for its email.
- * notifications-api's fee step applies the same rule to someone whose email
- * was in flight as the rise was voided (`tellOfVoid`): change both together.
+ * says so), everyone it may have told is emailed that it's off (F2,
+ * `fee-change-cancelled`, sent by the next daily run): told, or `unknown`,
+ * an email with no answer that may have gone (owner, 2026-11-09). The
+ * cancelled notice keeps what they were told (roles, values, the date named)
+ * for its email. It is queued before the open notices are closed, which is
+ * what still marks an `unknown` one. notifications-api's fee step applies
+ * the same rule to someone whose email was in flight as the rise was voided
+ * (`tellOfVoid`): change both together.
  */
 async function voidPending(
   tx: Tx,
@@ -1226,26 +1229,28 @@ async function voidPending(
     .update(feeChanges)
     .set({ voidedAt: now, voidReason: reason })
     .where(eq(feeChanges.id, changeId));
+  if (reason !== 'replaced_by_bigger') {
+    await tx.execute(sql`
+      INSERT INTO ${feeChangeNotices}
+        (change_id, user_id, kind, on_list, roles, before_values, after_values, quoted_from, state)
+      SELECT change_id, user_id, 'cancelled', false, roles, before_values, after_values, quoted_from, 'due'
+      FROM ${feeChangeNotices}
+      WHERE change_id = ${changeId}
+        AND kind = 'announce'
+        AND state IN ('sent', 'told_another_way', 'unknown')
+      ON CONFLICT (change_id, user_id, kind) DO NOTHING
+    `);
+  }
   await tx
     .update(feeChangeNotices)
     .set({ state: 'not_needed', updatedAt: now })
     .where(
       and(
         eq(feeChangeNotices.changeId, changeId),
+        ne(feeChangeNotices.kind, 'cancelled'),
         inArray(feeChangeNotices.state, ['due', 'failed', 'unknown'])
       )
     );
-  if (reason === 'replaced_by_bigger') return;
-  await tx.execute(sql`
-    INSERT INTO ${feeChangeNotices}
-      (change_id, user_id, kind, on_list, roles, before_values, after_values, quoted_from, state)
-    SELECT change_id, user_id, 'cancelled', false, roles, before_values, after_values, quoted_from, 'due'
-    FROM ${feeChangeNotices}
-    WHERE change_id = ${changeId}
-      AND kind = 'announce'
-      AND state IN ('sent', 'told_another_way')
-    ON CONFLICT (change_id, user_id, kind) DO NOTHING
-  `);
 }
 
 /**

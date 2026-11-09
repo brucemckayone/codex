@@ -89,7 +89,8 @@ batch C1's decisions F1–F9 and Q1–Q5 (2026-10-30):
   transaction lock on its level (`pg_advisory_xact_lock`), under which a
   dated rise that hasn't started counts as pending too. Saving again while one
   is pending: back to today
-  cancels it (everyone told is emailed that it's off); below today cancels it
+  cancels it (everyone told is emailed that it's off, and so is anyone whose
+  email got no answer: it may have gone); below today cancels it
   and the cut applies at once; a **smaller** rise keeps its date and sends one
   short email to everyone already told (Q2); a **bigger** one replaces it, says
   so, and its 30 days start again (F2). Made smaller again, even the same day,
