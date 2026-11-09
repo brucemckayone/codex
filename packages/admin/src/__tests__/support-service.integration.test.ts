@@ -65,6 +65,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import { AdminAnalyticsService } from '../services/analytics-service';
 import { SupportService } from '../services/support-service';
 
 const uid = () => crypto.randomUUID().replaceAll('-', '').slice(0, 10);
@@ -4353,6 +4354,88 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         ).items;
         expect(row).toMatchObject({ chargeId, refundedCents: 1000 });
       }
+    });
+
+    it('one figure in all four: an open failed full refund is nothing back in the search, the charge page, revenue and Sales; settled elsewhere it counts, capped; a standing refund and a lost chargeback count once (owner decision 2026-11-09)', async () => {
+      const purchaseService = new PurchaseService(
+        { db, environment: 'test', ...createTestMoneyDeps() },
+        fake.stripe
+      );
+      const analytics = new AdminAnalyticsService({ db, environment: 'test' });
+      const sales = async () =>
+        (await purchaseService.getSalesStats(orgId, {})).refundedCents;
+      const revenue = async () =>
+        (await analytics.getRevenueStats(orgId)).totalRevenueCents;
+      const before = { sales: await sales(), revenue: await revenue() };
+      const made: Awaited<ReturnType<typeof purchaseCharge>>[] = [];
+      const charge = async () => {
+        const one = await purchaseCharge();
+        made.push(one);
+        return one;
+      };
+      const onPage = async (
+        one: Awaited<ReturnType<typeof purchaseCharge>>
+      ) => ({
+        search: (await searchRowOf(one.purchase.id))?.refundedCents,
+        detail: (await service.getChargeDetail(one.chargeId)).charge
+          .refundedCents,
+      });
+      // Each £10 charge made here adds its gross to revenue: what revenue
+      // falls short of that is its `taken`.
+      const takenBack = async () => ({
+        sales: (await sales()) - before.sales,
+        revenue: made.length * 1000 - ((await revenue()) - before.revenue),
+      });
+      /** A standing refund, at Stripe and in our record. */
+      const standingRefund = async (
+        one: Awaited<ReturnType<typeof purchaseCharge>>,
+        amountCents: number
+      ) => {
+        const listed = stripeRefund(one.chargeId, amountCents);
+        await db.insert(refunds).values({
+          stripeRefundId: listed.id,
+          stripeChargeId: one.chargeId,
+          purchaseId: one.purchase.id,
+          amountCents,
+          currency: 'gbp',
+          status: 'succeeded',
+          stripeCreatedAt: new Date(),
+        });
+      };
+
+      // A full refund that failed: `processRefund` ended access and wrote
+      // the full amount on the purchase, and nothing restates a refunded one.
+      const full = await charge();
+      const failed = await failedRefund(full, 1000);
+      await endAccess(full);
+      expect(await onPage(full)).toEqual({ search: 0, detail: 0 });
+      expect(await takenBack()).toEqual({ sales: 0, revenue: 0 });
+
+      await settleElsewhere(failed.id);
+      expect(await onPage(full)).toEqual({ search: 1000, detail: 1000 });
+      expect(await takenBack()).toEqual({ sales: 1000, revenue: 1000 });
+
+      // Refunded again through Stripe as well: capped at the charge.
+      await standingRefund(full, 1000);
+      expect(await onPage(full)).toEqual({ search: 1000, detail: 1000 });
+      expect(await takenBack()).toEqual({ sales: 1000, revenue: 1000 });
+
+      // A standing part refund counts once.
+      const part = await charge();
+      await standingRefund(part, 250);
+      expect(await onPage(part)).toEqual({ search: 250, detail: 250 });
+      expect(await takenBack()).toEqual({ sales: 1250, revenue: 1250 });
+
+      // A lost chargeback: revenue and Sales count it; the search and the
+      // charge page count refunds only, and show the chargeback beside.
+      const lost = await charge();
+      await dispute(lost.chargeId, 'lost', lost.purchase.id);
+      await db
+        .update(purchases)
+        .set({ status: PURCHASE_STATUS.REFUNDED, refundAmountCents: 1000 })
+        .where(eq(purchases.id, lost.purchase.id));
+      expect(await onPage(lost)).toEqual({ search: 0, detail: 0 });
+      expect(await takenBack()).toEqual({ sales: 2250, revenue: 2250 });
     });
 
     it("ties a refund recorded without its purchase to it by the purchase's charge: the search row, the charge page and Sales count it alike, once, capped (one key)", async () => {
