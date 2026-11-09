@@ -92,7 +92,11 @@ batch C1's decisions F1–F9 and Q1–Q5 (2026-10-30):
   cancels it (everyone told is emailed that it's off); below today cancels it
   and the cut applies at once; a **smaller** rise keeps its date and sends one
   short email to everyone already told (Q2); a **bigger** one replaces it, says
-  so, and its 30 days start again (F2).
+  so, and its 30 days start again (F2). Made smaller again, even the same day,
+  it tells again everyone its last smaller email may have reached, not only
+  those surely told (no answer yet, or a run cut off after sending), so two
+  smaller emails can come a day apart; anyone it surely missed just gets the
+  lower figure.
 - Someone who joins while a rise waits is told the same date, and never holds
   it (F8). Their failed email is still listed for support (Q4).
 - Each email names a date: the change's, or the earliest it can be, with a

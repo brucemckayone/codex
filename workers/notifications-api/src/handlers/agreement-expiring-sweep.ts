@@ -11,6 +11,12 @@
  * Per-row failures are logged + counted, but do NOT short-circuit the
  * sweep — the next row still gets a fair shot.
  *
+ * Time (Codex-2hxff.100): each send waits SEND_TIMEOUT_MS at most, and no
+ * row starts after SENDS_TIME_BUDGET_MS from the wake, so the money sweep
+ * and the fee step after this one keep their time. A row is marked only
+ * after its sends, so a row timed out or not reached is tried the next
+ * morning.
+ *
  * Error handling: NEVER throws. The function is invoked from
  * `scheduled()` inside a `waitUntil` chain — if we throw, the cron
  * invocation crashes mid-cycle and skips its observability logging.
@@ -24,13 +30,14 @@ import {
   buildAgreementEmailLink,
   isEnvName,
 } from '@codex/agreements';
-import { createDbClient, type Database } from '@codex/database';
+import { createDbClient, type Database, messageForLog } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import { workerFetch } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
 import { type EnvName, buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { runScheduledFeeNoticesSweep } from './fee-notices-sweep';
 import { runScheduledMoneyNoticesSweep } from './money-notices-sweep';
+import { SEND_TIMEOUT_MS, SENDS_TIME_BUDGET_MS } from './send-limits';
 
 /**
  * Default warning lead time — fire the email when an agreement is within
@@ -72,6 +79,15 @@ export interface RunAgreementExpiringSweepDeps {
     organizationId?: string | null;
     data: Record<string, string | number | boolean>;
   }) => Promise<void>;
+  /** Real time, for the send budget (testing only). */
+  clock?: () => number;
+  /**
+   * When the 08:00 invocation started (ms since the epoch): the send budget
+   * counts from it. Default: the sweep's own start.
+   */
+  wakeStartedAt?: number;
+  /** Testing only. */
+  sendTimeoutMs?: number;
 }
 
 export interface ExpiringSweepResult {
@@ -79,6 +95,8 @@ export interface ExpiringSweepResult {
   emailsSent: number;
   agreementsMarked: number;
   errors: number;
+  /** The send budget ran out: the rows not reached go the next morning. */
+  budgetSpent: boolean;
 }
 
 /**
@@ -172,6 +190,7 @@ function buildEmailPayload(args: {
 function makeDefaultMailer(deps: {
   notificationsUrl: string;
   workerSecret: string;
+  timeoutMs: number;
 }) {
   return async (params: {
     to: string;
@@ -186,7 +205,8 @@ function makeDefaultMailer(deps: {
     const body = JSON.stringify(params);
     const res = await workerFetch(
       url,
-      { method: 'POST', body },
+      // A timeout rejects the fetch: the row is not marked, as on an error.
+      { method: 'POST', body, signal: AbortSignal.timeout(deps.timeoutMs) },
       deps.workerSecret
     );
     if (!res.ok) {
@@ -216,12 +236,15 @@ export async function runAgreementExpiringSweep(
   deps: RunAgreementExpiringSweepDeps
 ): Promise<ExpiringSweepResult> {
   const { db, obs, environment, daysAhead = DEFAULT_DAYS_AHEAD, now } = deps;
+  const clock = deps.clock ?? Date.now;
+  const sendsUntil = (deps.wakeStartedAt ?? clock()) + SENDS_TIME_BUDGET_MS;
 
   const result: ExpiringSweepResult = {
     agreementsScanned: 0,
     emailsSent: 0,
     agreementsMarked: 0,
     errors: 0,
+    budgetSpent: false,
   };
 
   try {
@@ -238,9 +261,20 @@ export async function runAgreementExpiringSweep(
       makeDefaultMailer({
         notificationsUrl: deps.notificationsUrl,
         workerSecret: deps.workerSecret,
+        timeoutMs: deps.sendTimeoutMs ?? SEND_TIMEOUT_MS,
       });
 
     for (const row of candidates) {
+      // Before the row, never between its two emails: a row is whole or
+      // untouched, and an untouched one is still a candidate tomorrow.
+      if (clock() >= sendsUntil) {
+        result.budgetSpent = true;
+        obs.warn(
+          'agreement-expiring-soon: the send budget ran out; the rest go tomorrow',
+          { agreementsMarked: result.agreementsMarked }
+        );
+        break;
+      }
       try {
         const ownerContact = await service.getFirstActiveOwnerContact(
           row.agreement.organizationId
@@ -306,8 +340,7 @@ export async function runAgreementExpiringSweep(
         obs.error('agreement-expiring-soon per-row dispatch failed', {
           agreementId: row.agreement.id,
           organizationId: row.agreement.organizationId,
-          error:
-            rowError instanceof Error ? rowError.message : String(rowError),
+          error: messageForLog(rowError),
         });
       }
     }
@@ -320,7 +353,7 @@ export async function runAgreementExpiringSweep(
     return result;
   } catch (error) {
     obs.error('agreement-expiring-soon cron failed at top level', {
-      error: error instanceof Error ? error.message : String(error),
+      error: messageForLog(error),
     });
     return result;
   }
@@ -376,6 +409,7 @@ async function runScheduledAgreementExpiringSweep(
     daysAhead: deps?.daysAhead,
     now: deps?.now,
     mailer: deps?.mailer,
+    wakeStartedAt: deps?.wakeStartedAt,
   });
 }
 
@@ -402,11 +436,11 @@ export function dispatchScheduled(
   const cronExpression = controller.cron;
 
   if (cronExpression === '0 8 * * *') {
-    // The wake's start: the fee step's send budget counts from it, because
-    // the two sweeps before it share the cron's wall.
+    // The wake's start: every step's send budget counts from it, because the
+    // three share the cron's wall (Codex-2hxff.100).
     const startedAt = Date.now();
     ctx.waitUntil(
-      runScheduledAgreementExpiringSweep(env)
+      runScheduledAgreementExpiringSweep(env, { wakeStartedAt: startedAt })
         .catch((error: unknown) => {
           // runScheduledAgreementExpiringSweep already swallows its own
           // errors and logs via ObservabilityClient — this .catch is the
@@ -420,7 +454,7 @@ export function dispatchScheduled(
         // The money sweep (Codex-2hxff.34, .30) runs after the agreement
         // sweep, on the same wake, and a failure in one never stops the
         // other.
-        .then(() => runScheduledMoneyNoticesSweep(env))
+        .then(() => runScheduledMoneyNoticesSweep(env, { startedAt }))
         .catch((error: unknown) => {
           console.error('notifications-api money sweep rejected', error);
         })

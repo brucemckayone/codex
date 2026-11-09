@@ -23,6 +23,7 @@ import type { AgreementWithShare } from '@codex/agreements';
 import { describe, expect, it, vi } from 'vitest';
 import type { RunAgreementExpiringSweepDeps } from '../agreement-expiring-sweep';
 import { runAgreementExpiringSweep } from '../agreement-expiring-sweep';
+import { SENDS_TIME_BUDGET_MS } from '../send-limits';
 
 // Concrete mailer type — vi.fn() with this signature preserves typing
 // on .mock.calls so we can index payload fields without TS narrowing
@@ -461,5 +462,112 @@ describe('runAgreementExpiringSweep', () => {
     expect(result.agreementsMarked).toBe(0);
     expect(result.errors).toBe(0);
     expect(mailer).not.toHaveBeenCalled();
+  });
+
+  // ─── Time (Codex-2hxff.100) ─────────────────────────────────────────────
+
+  function candidate(id: string) {
+    return {
+      agreement: mockAgreement({ id, organizationId: `org-${id}` }),
+      creator: {
+        id: `creator-${id}`,
+        email: `creator-${id}@example.test`,
+        name: `Creator ${id}`,
+      },
+      orgName: `Org ${id}`,
+      orgSlug: `org-${id}`,
+    };
+  }
+
+  it('a send that outlasts its timeout is cut off: the row is not marked, so the next morning tries it again', async () => {
+    resetState();
+    sharedMockState.enrichedCandidates = [candidate('agr-slow')];
+    // notifications-api answering after 2 s, unless the request is aborted.
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) => {
+        if (!String(input).startsWith('http://notifications.test/')) {
+          return realFetch(input, init);
+        }
+        return new Promise<Response>((resolve, reject) => {
+          const answered = setTimeout(
+            () => resolve(Response.json({ data: { success: true } })),
+            2_000
+          );
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(answered);
+            reject(init.signal?.reason);
+          });
+        });
+      });
+    const { obs } = buildObs();
+    const started = Date.now();
+    let result: Awaited<ReturnType<typeof runAgreementExpiringSweep>>;
+    try {
+      result = await runAgreementExpiringSweep({
+        // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
+        db: {} as any,
+        obs,
+        environment: 'test',
+        workerSecret: 'test-secret',
+        notificationsUrl: 'http://notifications.test',
+        sendTimeoutMs: 50,
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(result).toMatchObject({ emailsSent: 0, errors: 1 });
+    expect(sharedMockState.markedIds).toEqual([]);
+  });
+
+  it('a run past its send budget starts no new row: a row is whole or untouched, and the rest go the next morning', async () => {
+    resetState();
+    sharedMockState.enrichedCandidates = [
+      candidate('agr-first'),
+      candidate('agr-second'),
+    ];
+    sharedMockState.ownerLookup = async (orgId) => ({
+      id: `owner-${orgId}`,
+      email: `owner-${orgId}@example.test`,
+      name: 'Owner',
+    });
+    // The budget is spent by the first row's first send.
+    let clockMs = 0;
+    const mailer = vi.fn<MailerFn>(async () => {
+      clockMs = SENDS_TIME_BUDGET_MS;
+    });
+    const { obs, calls } = buildObs();
+
+    const result = await runAgreementExpiringSweep({
+      // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
+      db: {} as any,
+      obs,
+      environment: 'test',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://notifications.test',
+      mailer,
+      clock: () => clockMs,
+    });
+
+    expect(result).toMatchObject({
+      emailsSent: 2,
+      agreementsMarked: 1,
+      budgetSpent: true,
+    });
+    // Both of the first row's emails, then nothing of the second.
+    expect(mailer.mock.calls.map((c) => c[0].to)).toEqual([
+      'creator-agr-first@example.test',
+      'owner-org-agr-first@example.test',
+    ]);
+    expect(sharedMockState.markedIds).toEqual(['agr-first']);
+    expect(calls).toContainEqual(
+      expect.objectContaining({
+        level: 'warn',
+        msg: 'agreement-expiring-soon: the send budget ran out; the rest go tomorrow',
+      })
+    );
   });
 });

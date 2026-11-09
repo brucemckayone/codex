@@ -18,6 +18,7 @@ import {
   type DatabaseWs,
   eq,
   inArray,
+  sql,
 } from '@codex/database';
 import {
   emailAuditLogs,
@@ -51,11 +52,11 @@ import {
 } from 'vitest';
 import { FEE_RULE_SENTENCE, formatPercent } from '../fee-notice-copy';
 import {
-  FEE_SENDS_TIME_BUDGET_MS,
   type FeeMailerParams,
   type FeeNoticeDelivery,
   runFeeNoticesSweep,
 } from '../fee-notices-sweep';
+import { SENDS_TIME_BUDGET_MS } from '../send-limits';
 
 // Who a rise affects, and the fee levels a batch reads: real unless a test
 // makes one read fail.
@@ -620,7 +621,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     let refused: string | undefined;
     const mailer = vi.fn(
       async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
-        clockMs = FEE_SENDS_TIME_BUDGET_MS;
+        clockMs = SENDS_TIME_BUDGET_MS;
         if (refused) return { accepted: true };
         refused = params.userId;
         return { accepted: false, status: 400 };
@@ -1157,7 +1158,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       templateExists: async () => true,
       clock: () => now,
       // The agreement and money sweeps took the whole budget.
-      wakeStartedAt: now - FEE_SENDS_TIME_BUDGET_MS,
+      wakeStartedAt: now - SENDS_TIME_BUDGET_MS,
       onlyChanges: [changeId],
     });
 
@@ -1355,5 +1356,115 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       'fee-change-notice',
     ]);
     expect(await smallerOf()).toMatchObject({ state: 'sent' });
+  });
+
+  it('a rise made smaller while its smaller email is in flight: that email never counts for the new round, which goes the next morning', async () => {
+    const uma = await person('Uma Inflight');
+    const admin = await person('Ali Admin');
+    const org = await organisation(uma.id);
+    const changeId = await rise(org);
+    const smallerOf = async () => {
+      const [row] = await db
+        .select()
+        .from(feeChangeNotices)
+        .where(
+          and(
+            eq(feeChangeNotices.changeId, changeId),
+            eq(feeChangeNotices.userId, uma.id),
+            eq(feeChangeNotices.kind, 'smaller')
+          )
+        );
+      if (!row) throw new Error('no smaller notice');
+      return row;
+    };
+    // The writes stamp the real clock, so the mornings here are set from it.
+    const hour = 60 * 60 * 1000;
+    await run(changeId, new Date(Date.now() - 3 * hour), mailerAnswering());
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    let roundOne: Awaited<ReturnType<typeof smallerOf>>;
+    const mailer = vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        // Uma's email is accepted, but only once the rise was made smaller
+        // again while it was on its way.
+        if (params.userId === uma.id) {
+          await registry.feeConfig.updateOrgFees(
+            org,
+            { orgFeePercent: 1200 },
+            admin.id
+          );
+        }
+        return { accepted: true };
+      }
+    );
+    try {
+      await registry.feeConfig.updateOrgFees(
+        org,
+        { orgFeePercent: 1300 },
+        admin.id
+      );
+      roundOne = await smallerOf();
+      await run(changeId, new Date(), mailer);
+    } finally {
+      await closeRegistry();
+    }
+
+    // The email that went names the figure before the second cut.
+    const [inFlight, ...more] = mailFor(mailer, uma.id);
+    expect(more).toEqual([]);
+    expect(inFlight?.data.feeNoticeId).toBe(roundOne.id);
+    expect(JSON.stringify(inFlight?.data)).toContain(formatPercent(1300));
+    // So the row is the second cut's round, untried, not marked told.
+    const roundTwo = await smallerOf();
+    expect(roundTwo).toMatchObject({
+      state: 'due',
+      attempts: 0,
+      attemptedAt: null,
+      acceptedAt: null,
+    });
+    expect(roundTwo.createdAt.getTime()).toBeGreaterThan(
+      roundOne.createdAt.getTime()
+    );
+    expect(
+      obsLog.info.mock.calls.filter(
+        ([message, context]) =>
+          String(message).startsWith(
+            'fee step: a notice started a new round'
+          ) && (context as { feeNoticeId?: string }).feeNoticeId === roundOne.id
+      )
+    ).toHaveLength(1);
+
+    // The next morning Uma is told the second cut's figure.
+    const next = mailerAnswering();
+    await run(changeId, new Date(Date.now() + 13 * hour), next);
+    const [told] = mailFor(next, uma.id);
+    expect(JSON.stringify(told?.data)).toContain(formatPercent(1200));
+    expect(await smallerOf()).toMatchObject({ state: 'sent' });
+  });
+
+  it('a round made at the database clock, to the microsecond, is still marked when its email goes', async () => {
+    const mo = await person('Mo Micro');
+    const changeId = await rise(await organisation(mo.id));
+    // The list is made with its template held, so nothing goes yet.
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering(),
+      async (name) => name !== 'fee-change-notice'
+    );
+    const notice = await noticeOf(changeId, mo.id);
+    // As the column's now() default writes it: finer than a JS Date.
+    await db.execute(
+      sql`UPDATE ${feeChangeNotices} SET created_at = '2026-11-03 07:30:00.123456+00' WHERE id = ${notice?.id}`
+    );
+
+    const mailer = mailerAnswering();
+    expect(await run(changeId, NOV_4, mailer)).toMatchObject({ sent: 1 });
+    expect(mailFor(mailer, mo.id)).toHaveLength(1);
+    expect(await noticeOf(changeId, mo.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: NOV_4,
+    });
   });
 });
