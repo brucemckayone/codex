@@ -86,8 +86,8 @@ app.post(
       }
 
       // An org-branded creator template goes only to the sender's own
-      // address: the signed-in user's, never one the body names.
-      ctx.services.templates.requireTestSendRecipient(
+      // address: the signed-in user's as stored, never one the body names.
+      const to = ctx.services.templates.requireTestSendRecipient(
         template,
         ctx.input.body.recipientEmail,
         ctx.user.email
@@ -97,7 +97,7 @@ app.post(
       // data renders the email but never reaches the email log, where the
       // sweeps would read its keys as one of their own sends.
       const result = await ctx.services.notifications.sendEmail({
-        to: ctx.input.body.recipientEmail,
+        to,
         templateName: template.name,
         data: ctx.input.body.data,
         organizationId: template.organizationId,
