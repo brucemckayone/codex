@@ -447,6 +447,38 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
       expect(slices).toHaveLength(0);
     });
 
+    it('settled with its invoice paid partly by customer credit: the card part refunded, then one alert names the credit not given back (Codex-2hxff.98)', async () => {
+      const { org, second, invoiceId, chargeId } =
+        await subscribeTwice('dup-settle-credit');
+      // The balance paid £5.00 of the £14.99 bill; the card paid the £9.99.
+      Object.assign(paidInvoicesBySub.get(second.id)?.[0] ?? {}, {
+        starting_balance: -500,
+        total: 1499,
+      });
+      const errors = vi.spyOn(errorLog(), 'error');
+
+      expect(await service.handleSubscriptionCreated(second)).toEqual({});
+
+      expect(stripe.refunds.create).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ charge: chargeId, reason: 'duplicate' }),
+        { idempotencyKey: `refund_duplicate_${invoiceId}` }
+      );
+      expect(notReturnedAlerts(errors)).toEqual([
+        {
+          errorId: expect.any(String),
+          invoiceId,
+          stripeSubscriptionId: second.id,
+          subscriptionId: (await rowFor(second.id))?.id,
+          organizationId: org.id,
+          userId: subscriberId,
+          kind: 'tier',
+          cause: 'duplicate',
+          creditNotReturnedCents: 500,
+          cardRefundedCents: 999,
+        },
+      ]);
+    });
+
     it('its invoice paid after it was settled, wholly by customer credit: nothing to refund, and support is told the credit went back to no one (Codex-2hxff.98)', async () => {
       const { org, second } = await subscribeTwice('dup-late-credit');
       await service.handleSubscriptionCreated(second);

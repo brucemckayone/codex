@@ -1,6 +1,9 @@
 import type Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
-import { CREDIT_NOT_RETURNED_KEY } from '../credit-paid-invoice';
+import {
+  alertCreditNotReturned,
+  CREDIT_NOT_RETURNED_KEY,
+} from '../credit-paid-invoice';
 import {
   cancelAndRefundDuplicate,
   isDuplicateSubscription,
@@ -74,13 +77,17 @@ const IDS = {
   kind: 'tier' as const,
 };
 
-/** The call's params, with the harness's logger. */
-function params(obs: { error: () => void; warn: () => void }) {
+/** The call's params, telling support as the services do. */
+function params(stripe: Stripe, obs: { error: () => void; warn: () => void }) {
   return {
     stripeSubscriptionId: 'sub_dup',
     environment: 'test',
-    obs,
-    ids: IDS,
+    alertUnreturnedCredit: (invoice: Stripe.Invoice) =>
+      alertCreditNotReturned({ stripe, obs }, invoice, {
+        stripeSubscriptionId: 'sub_dup',
+        ...IDS,
+        cause: 'duplicate',
+      }),
   };
 }
 
@@ -115,7 +122,7 @@ describe('cancelAndRefundDuplicate', () => {
       ],
     });
 
-    const result = await cancelAndRefundDuplicate(stripe, params(obs));
+    const result = await cancelAndRefundDuplicate(stripe, params(stripe, obs));
 
     expect(result).toEqual({ refundedInvoices: 1 });
     expect(cancel).toHaveBeenCalledWith(
@@ -140,7 +147,7 @@ describe('cancelAndRefundDuplicate', () => {
       invoices: [{ id: 'in_1', amount_paid: 1000, charge: 'ch_1' }],
     });
 
-    await cancelAndRefundDuplicate(stripe, params(obs));
+    await cancelAndRefundDuplicate(stripe, params(stripe, obs));
 
     expect(cancel).not.toHaveBeenCalled();
     expect(refundsCreate).toHaveBeenCalledTimes(1);
@@ -154,7 +161,7 @@ describe('cancelAndRefundDuplicate', () => {
     });
 
     await expect(
-      cancelAndRefundDuplicate(stripe, params(obs))
+      cancelAndRefundDuplicate(stripe, params(stripe, obs))
     ).resolves.toEqual({ refundedInvoices: 1 });
   });
 
@@ -164,7 +171,10 @@ describe('cancelAndRefundDuplicate', () => {
       invoices: [{ id: 'in_1', amount_paid: 1000, charge: null }],
     });
     await expect(
-      cancelAndRefundDuplicate(noCharge.stripe, params(noCharge.obs))
+      cancelAndRefundDuplicate(
+        noCharge.stripe,
+        params(noCharge.stripe, noCharge.obs)
+      )
     ).rejects.toThrow('no charge to refund');
 
     const refused = stripeWith({
@@ -173,7 +183,10 @@ describe('cancelAndRefundDuplicate', () => {
       refundError: { code: 'charge_disputed' },
     });
     await expect(
-      cancelAndRefundDuplicate(refused.stripe, params(refused.obs))
+      cancelAndRefundDuplicate(
+        refused.stripe,
+        params(refused.stripe, refused.obs)
+      )
     ).rejects.toEqual({ code: 'charge_disputed' });
     // A refund that failed has told support nothing yet: the retry does.
     expect(refused.obs.error).not.toHaveBeenCalled();
@@ -195,7 +208,7 @@ describe('cancelAndRefundDuplicate', () => {
       ],
     });
 
-    const result = await cancelAndRefundDuplicate(stripe, params(obs));
+    const result = await cancelAndRefundDuplicate(stripe, params(stripe, obs));
 
     expect(result).toEqual({ refundedInvoices: 0 });
     expect(refundsCreate).not.toHaveBeenCalled();
@@ -227,7 +240,7 @@ describe('cancelAndRefundDuplicate', () => {
       ],
     });
 
-    const result = await cancelAndRefundDuplicate(stripe, params(obs));
+    const result = await cancelAndRefundDuplicate(stripe, params(stripe, obs));
 
     expect(result).toEqual({ refundedInvoices: 1 });
     expect(refundsCreate).toHaveBeenCalledExactlyOnceWith(
@@ -254,7 +267,7 @@ describe('cancelAndRefundDuplicate', () => {
       invoices: [{ id: 'in_card', amount_paid: 1000, charge: 'ch_card' }],
     });
 
-    await cancelAndRefundDuplicate(stripe, params(obs));
+    await cancelAndRefundDuplicate(stripe, params(stripe, obs));
 
     expect(refundsCreate).toHaveBeenCalledTimes(1);
     expect(obs.error).not.toHaveBeenCalled();
@@ -276,7 +289,7 @@ describe('cancelAndRefundDuplicate', () => {
       marked: ['in_part'],
     });
 
-    await cancelAndRefundDuplicate(stripe, params(obs));
+    await cancelAndRefundDuplicate(stripe, params(stripe, obs));
 
     expect(refundsCreate).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
       idempotencyKey: 'refund_duplicate_in_part',

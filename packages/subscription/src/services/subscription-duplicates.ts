@@ -18,11 +18,6 @@
 import { issueRefund, resolveInvoiceCharge } from '@codex/payments';
 import { InternalServiceError } from '@codex/service-errors';
 import type Stripe from 'stripe';
-import {
-  alertCreditNotReturned,
-  type CreditAlertLogger,
-  type CreditNotReturnedIds,
-} from './credit-paid-invoice';
 
 /** A tier subscription row or a course-plan one. */
 type DuplicateMarked =
@@ -43,8 +38,9 @@ export function isDuplicateSubscription(row: DuplicateMarked): boolean {
  * by its invoice, and a charge already refunded counts as done. Any failure
  * is thrown; the caller makes it retryable and leaves the row unsettled.
  *
- * An invoice credit paid some or all of raises one support alert after its
- * card part is refunded, once per invoice (`alertCreditNotReturned`), so a
+ * Each paid invoice, once its card part is refunded, goes to
+ * `alertUnreturnedCredit`, so the caller can tell support what credit paid of
+ * it. The caller's alert is once per invoice (`alertCreditNotReturned`), so a
  * repeat stays silent.
  */
 export async function cancelAndRefundDuplicate(
@@ -52,12 +48,11 @@ export async function cancelAndRefundDuplicate(
   params: {
     stripeSubscriptionId: string;
     environment: string;
-    obs: CreditAlertLogger;
-    /** Our row, for the alert. */
-    ids: Omit<CreditNotReturnedIds, 'stripeSubscriptionId' | 'cause'>;
+    /** Never throws (Codex-2hxff.98). */
+    alertUnreturnedCredit: (invoice: Stripe.Invoice) => Promise<void>;
   }
 ): Promise<{ refundedInvoices: number }> {
-  const { stripeSubscriptionId, environment, obs, ids } = params;
+  const { stripeSubscriptionId, environment, alertUnreturnedCredit } = params;
   const live = await stripe.subscriptions.retrieve(stripeSubscriptionId);
   if (live.status !== 'canceled' && live.status !== 'incomplete_expired') {
     await stripe.subscriptions.cancel(
@@ -98,11 +93,7 @@ export async function cancelAndRefundDuplicate(
       });
       refundedInvoices++;
     }
-    await alertCreditNotReturned({ stripe, obs }, invoice, {
-      stripeSubscriptionId,
-      ...ids,
-      cause: 'duplicate',
-    });
+    await alertUnreturnedCredit(invoice);
   }
   return { refundedInvoices };
 }

@@ -1978,7 +1978,11 @@ export class CourseSubscriptionService extends BaseService {
    * its cause, so Stripe redelivers the event through its retry window, as
    * `PurchaseService.refundDuplicatePayment` does. One that never clears is
    * held for support (owner decision: a failed refund is held for support).
+   *
+   * It mirrors the tier service's `settleDuplicate` by design, so fallow
+   * reports the pair as a clone; what they share is `cancelAndRefundDuplicate`.
    */
+  // fallow-ignore-next-line code-duplication
   private async settleDuplicate(row: CourseSubscription): Promise<void> {
     if (row.duplicateSettledAt) return;
     let refundedInvoices: number;
@@ -1986,13 +1990,8 @@ export class CourseSubscriptionService extends BaseService {
       ({ refundedInvoices } = await cancelAndRefundDuplicate(this.stripe, {
         stripeSubscriptionId: row.stripeSubscriptionId,
         environment: this.environment,
-        obs: this.obs,
-        ids: {
-          subscriptionId: row.id,
-          organizationId: row.organizationId,
-          userId: row.userId,
-          kind: 'course',
-        },
+        alertUnreturnedCredit: (invoice) =>
+          this.alertUnreturnedCredit(row, invoice, 'duplicate'),
       }));
     } catch (error) {
       this.obs.error(

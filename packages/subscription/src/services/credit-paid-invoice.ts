@@ -35,13 +35,13 @@ export const CREDIT_ALERTED_KEY = 'codex_credit_alerted';
  */
 export const CREDIT_NOT_RETURNED_KEY = 'codex_credit_not_returned';
 
-export interface CreditAlertLogger {
+interface CreditAlertLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
   warn(message: string, metadata?: Record<string, unknown>): void;
 }
 
 /** What the not-returned alert names: ids only, never the person. */
-export interface CreditNotReturnedIds {
+interface CreditNotReturnedIds {
   stripeSubscriptionId: string;
   subscriptionId: string;
   organizationId: string | null;

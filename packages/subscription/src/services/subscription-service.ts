@@ -2019,21 +2019,12 @@ export class SubscriptionService extends BaseService {
       stripeSubscriptionId: row.stripeSubscriptionId,
       keptSubscriptionId,
     };
-    let paid: { invoice: Stripe.Invoice; chargeId: string | null } | undefined;
+    let revived: { paid?: Stripe.Invoice; refundedInvoiceId?: string } = {};
     try {
       const atStripe =
         live ??
         (await this.stripe.subscriptions.retrieve(row.stripeSubscriptionId));
-      // On `updated` the reviving payment is the latest invoice, if paid.
-      paid = reviving ?? (await this.paidLatestInvoice(atStripe));
-      if (paid?.chargeId) {
-        await issueRefund(this.stripe, {
-          chargeId: paid.chargeId,
-          reason: 'requested_by_customer',
-          idempotencyKey: `refund_revived_${paid.invoice.id}`,
-          environment: this.environment,
-        });
-      }
+      revived = await this.refundReviving(atStripe, reviving);
       if (!endedAtStripeStatus(atStripe.status)) {
         await this.stripe.subscriptions.cancel(
           row.stripeSubscriptionId,
@@ -2063,7 +2054,9 @@ export class SubscriptionService extends BaseService {
     }
     // What credit paid of the reviving invoice goes back to no one
     // (Codex-2hxff.98).
-    if (paid) await this.alertUnreturnedCredit(row, paid.invoice, 'revived');
+    if (revived.paid) {
+      await this.alertUnreturnedCredit(row, revived.paid, 'revived');
+    }
     // Under the lock, so an invoice event re-reading the row before paying
     // out sees it ended.
     const at = new Date();
@@ -2083,11 +2076,29 @@ export class SubscriptionService extends BaseService {
     );
     this.obs.warn(
       'Old subscription revived next to a newer one: cancelled, its reviving payment refunded',
-      {
-        ...context,
-        refundedInvoiceId: paid?.chargeId ? paid.invoice.id : undefined,
-      }
+      { ...context, refundedInvoiceId: revived.refundedInvoiceId }
     );
+  }
+
+  /**
+   * Refund the card part of the invoice that revived a subscription: the
+   * one the caller names, or (on `updated`) the latest invoice, if paid.
+   * Returns that paid invoice, for the credit alert (Codex-2hxff.98), and
+   * its id when a refund was made.
+   */
+  private async refundReviving(
+    atStripe: Stripe.Subscription,
+    reviving?: { invoice: Stripe.Invoice; chargeId: string }
+  ): Promise<{ paid?: Stripe.Invoice; refundedInvoiceId?: string }> {
+    const paid = reviving ?? (await this.paidLatestInvoice(atStripe));
+    if (!paid?.chargeId) return { paid: paid?.invoice };
+    await issueRefund(this.stripe, {
+      chargeId: paid.chargeId,
+      reason: 'requested_by_customer',
+      idempotencyKey: `refund_revived_${paid.invoice.id}`,
+      environment: this.environment,
+    });
+    return { paid: paid.invoice, refundedInvoiceId: paid.invoice.id };
   }
 
   /** The row as it stands now, read under the per-user, per-org lock. */
@@ -2242,13 +2253,8 @@ export class SubscriptionService extends BaseService {
       ({ refundedInvoices } = await cancelAndRefundDuplicate(this.stripe, {
         stripeSubscriptionId: row.stripeSubscriptionId,
         environment: this.environment,
-        obs: this.obs,
-        ids: {
-          subscriptionId: row.id,
-          organizationId: row.organizationId,
-          userId: row.userId,
-          kind: 'tier',
-        },
+        alertUnreturnedCredit: (invoice) =>
+          this.alertUnreturnedCredit(row, invoice, 'duplicate'),
       }));
     } catch (error) {
       this.obs.error(
