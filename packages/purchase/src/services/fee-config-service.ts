@@ -69,6 +69,7 @@ import {
   feeRiseStartAfter,
   layerLevelFees,
   lockFeeLevel,
+  lockFeeNotices,
   mirrorLegacyFeeRow,
   nextFeeNoticeRunAfter,
   queueSmallerFeeNotices,
@@ -1231,15 +1232,12 @@ async function voidPending(
     .update(feeChanges)
     .set({ voidedAt: now, voidReason: reason })
     .where(eq(feeChanges.id, changeId));
-  // Lock the notices before reading them (review final M3): a send's record()
-  // then waits for this void and takes its void branch (tellOfVoid), and the
-  // daily run's claim (SKIP LOCKED) passes them by, so no email is recorded
-  // between the read below and the close, unseen by both.
-  await tx.execute(sql`
-    SELECT id FROM ${feeChangeNotices}
-    WHERE change_id = ${changeId} AND kind <> 'cancelled'
-    FOR UPDATE
-  `);
+  // Lock the notices before reading them (review final M3), in the one
+  // order (`lockFeeNotices`): a send's record() then waits for this void and
+  // takes its void branch (tellOfVoid), and the daily run's claim (SKIP
+  // LOCKED) passes them by, so no email is recorded between the read below
+  // and the close, unseen by both.
+  await lockFeeNotices(tx, { changeId });
   if (reason !== 'replaced_by_bigger') {
     await tx.execute(sql`
       INSERT INTO ${feeChangeNotices}
@@ -1269,12 +1267,17 @@ async function voidPending(
  * told, or may have told, and a new round for those told before; the rule
  * and the statement are payments' `queueSmallerFeeNotices`, which the daily
  * step also runs for one person it emailed with figures read before a cut.
+ * The notices are locked first, as a void locks them (`lockFeeNotices`, the
+ * one order; review final silent L1): the daily claim passes them by while
+ * this cut is open, and a claim already committed is read as tried, so no
+ * announcement goes with the bigger figure unseen by this queue.
  */
 async function queueSmallerNotices(
   tx: Tx,
   changeId: string,
   now: Date
 ): Promise<void> {
+  await lockFeeNotices(tx, { changeId });
   await queueSmallerFeeNotices(tx, { changeId, now });
 }
 

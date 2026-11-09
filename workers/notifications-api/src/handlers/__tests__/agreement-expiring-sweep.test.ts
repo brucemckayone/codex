@@ -25,7 +25,13 @@ import {
   waitOnExecutionContext,
 } from 'cloudflare:test';
 import type { AgreementWithShare } from '@codex/agreements';
-import { and, createDbClient, eq, inArray } from '@codex/database';
+import {
+  and,
+  createDbClient,
+  eq,
+  inArray,
+  TEST_SEND_METADATA,
+} from '@codex/database';
 import { emailAuditLogs, emailTemplates, users } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
@@ -882,6 +888,113 @@ describe('runAgreementExpiringSweep', () => {
         });
 
         expect(mailer.mock.calls.map((c) => c[0].data.side)).toEqual(['owner']);
+      } finally {
+        await db.delete(emailAuditLogs).where(
+          inArray(
+            emailAuditLogs.id,
+            rows.map((r) => r.id)
+          )
+        );
+      }
+    });
+
+    // Owner, 2026-11-09: a `pending` row an earlier run left is NOT sent (its
+    // outcome never came), so the warning goes again: a duplicate is
+    // harmless, a missing one defeats it. One still in flight is sent.
+    it('a side an earlier run left pending goes again; one still in flight, or sent, does not; a test send never counts', async () => {
+      resetState();
+      const db = createDbClient(env as unknown as Bindings);
+      const HOUR = 60 * 60 * 1000;
+      const stale = `agr-log-${crypto.randomUUID()}`;
+      const forged = `agr-log-${crypto.randomUUID()}`;
+      const owner = `owner-${crypto.randomUUID()}@example.test`;
+      const agreementFor = (id: string) =>
+        mockAgreement({
+          id,
+          organizationId: `org-${id}`,
+          createdAt: new Date(Date.now() - 3 * HOUR),
+        });
+      sharedMockState.enrichedCandidates = [
+        { ...candidate('agr-stale'), agreement: agreementFor(stale) },
+        { ...candidate('agr-forged'), agreement: agreementFor(forged) },
+      ];
+      sharedMockState.ownerLookup = async () => ({
+        id: 'owner-log',
+        email: owner,
+        name: 'Owner',
+      });
+      const entry = (
+        recipientEmail: string,
+        keys: { agreementId: string; side: 'creator' | 'owner' },
+        status: 'success' | 'pending',
+        ageMs: number,
+        testSend = false
+      ) => {
+        const at = new Date(Date.now() - ageMs);
+        return {
+          templateName: 'agreement-expiring-soon',
+          recipientEmail,
+          status,
+          // As the send path stores it: the data verbatim, or a test send's
+          // marker (here beside the keys, so the reader's own guard is what
+          // keeps it out).
+          metadata: JSON.stringify({
+            ...(testSend ? TEST_SEND_METADATA : {}),
+            recipientName: 'X',
+            ...keys,
+          }),
+          createdAt: at,
+          updatedAt: at,
+        };
+      };
+      const rows = await db
+        .insert(emailAuditLogs)
+        .values([
+          // An earlier run's, left pending: its outcome never came.
+          entry(
+            'creator-agr-stale@example.test',
+            { agreementId: stale, side: 'creator' },
+            'pending',
+            2 * HOUR
+          ),
+          // A run beside this one sending it now: in flight.
+          entry(
+            owner,
+            { agreementId: stale, side: 'owner' },
+            'pending',
+            60_000
+          ),
+          // A test send carrying the agreement's keys.
+          entry(
+            'creator-agr-forged@example.test',
+            { agreementId: forged, side: 'creator' },
+            'success',
+            HOUR,
+            true
+          ),
+          // Sent.
+          entry(owner, { agreementId: forged, side: 'owner' }, 'success', HOUR),
+        ])
+        .returning({ id: emailAuditLogs.id });
+
+      try {
+        const mailer = vi.fn<MailerFn>(async () => undefined);
+        const result = await runAgreementExpiringSweep({
+          db,
+          obs: buildObs().obs,
+          environment: 'test',
+          workerSecret: 'unused',
+          notificationsUrl: 'http://notifications.test',
+          mailer,
+        });
+
+        expect(
+          mailer.mock.calls.map((c) => [c[0].data.agreementId, c[0].to])
+        ).toEqual([
+          [stale, 'creator-agr-stale@example.test'],
+          [forged, 'creator-agr-forged@example.test'],
+        ]);
+        expect(result).toMatchObject({ emailsAlreadySent: 2, errors: 0 });
       } finally {
         await db.delete(emailAuditLogs).where(
           inArray(

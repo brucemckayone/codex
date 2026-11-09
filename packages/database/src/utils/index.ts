@@ -14,6 +14,8 @@ export * from './creator-listing';
 export * from './date-window';
 // Error detection utilities
 export * from './db-errors';
+// Did an email go? The email log's one rule, and the test-send marker
+export * from './email-log';
 // ISO-date serialisation helper
 export * from './iso-date';
 // What a media_items row may serve (no raw transcoder detail)

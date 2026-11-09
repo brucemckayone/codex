@@ -19,6 +19,7 @@ import {
   eq,
   inArray,
   sql,
+  TEST_SEND_METADATA,
 } from '@codex/database';
 import {
   emailAuditLogs,
@@ -36,6 +37,7 @@ import {
   affectedPayees,
   dbFeeVersionReader,
   feeRiseStartAfter,
+  lockFeeNotices,
   queueSmallerFeeNotices,
   readFeeVersionsByLevel,
   resolveFeesAt,
@@ -1203,27 +1205,69 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     if (log) logIds.push(log.id);
   }
 
-  it('a send still pending in the email log counts as told: it may have gone', async () => {
+  // Owner, 2026-11-09 (replacing review C1's F4, "a `pending` row counts"):
+  // a send cut short leaves its log row `pending` for good, so one an
+  // earlier run left is not told, and the email goes again. One still in
+  // flight is told.
+  it('the email log: a pending row an earlier run left goes again, one still in flight does not, and a test send never counts', async () => {
     const pam = await person('Pam Pending');
-    const changeId = await rise(await organisation(pam.id));
+    const pia = await person('Pia Inflight');
+    const tess = await person('Tess Testsend');
+    const changeId = await rise(await organisation(pam.id, pia.id, tess.id));
     await run(
       changeId,
       NOV_3,
-      mailerAnswering({ [pam.id]: { accepted: false, status: 503 } })
+      mailerAnswering({
+        [pam.id]: { accepted: false, status: 503 },
+        [pia.id]: { accepted: false, status: 503 },
+        [tess.id]: { accepted: false, status: 503 },
+      })
     );
-    const notice = await noticeOf(changeId, pam.id);
-    const loggedAt = new Date(NOV_3.getTime() + 60 * 1000);
-    await logged(notice?.id as string, pam.email, 'pending', loggedAt);
+    const noticeId = async (userId: string) =>
+      (await noticeOf(changeId, userId))?.id as string;
+    // Morning one's send, left pending: its outcome never came.
+    await logged(
+      await noticeId(pam.id),
+      pam.email,
+      'pending',
+      new Date(NOV_3.getTime() + 60 * 1000)
+    );
+    // A run beside morning two's, sending it now.
+    const inFlightAt = new Date(NOV_4.getTime() - 2 * 60 * 1000);
+    await logged(await noticeId(pia.id), pia.email, 'pending', inFlightAt);
+    // A test send carrying the notice's id, as its marker sits in the log.
+    const testSentAt = new Date(NOV_3.getTime() + 60 * 1000);
+    const [forged] = await db
+      .insert(emailAuditLogs)
+      .values({
+        templateName: 'fee-change-notice',
+        recipientEmail: tess.email,
+        status: 'success',
+        metadata: JSON.stringify({
+          ...TEST_SEND_METADATA,
+          feeNoticeId: await noticeId(tess.id),
+        }),
+        createdAt: testSentAt,
+        updatedAt: testSentAt,
+      })
+      .returning({ id: emailAuditLogs.id });
+    if (forged) logIds.push(forged.id);
 
     const mailer = mailerAnswering();
     expect(await run(changeId, NOV_4, mailer)).toMatchObject({
       foundInLog: 1,
-      sent: 0,
+      sent: 2,
     });
-    expect(mailFor(mailer, pam.id)).toEqual([]);
+    expect(mailFor(mailer, pam.id)).toHaveLength(1);
+    expect(mailFor(mailer, tess.id)).toHaveLength(1);
+    expect(mailFor(mailer, pia.id)).toEqual([]);
+    expect(await noticeOf(changeId, pia.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: inFlightAt,
+    });
     expect(await noticeOf(changeId, pam.id)).toMatchObject({
       state: 'sent',
-      acceptedAt: loggedAt,
+      acceptedAt: NOV_4,
     });
   });
 
@@ -1878,6 +1922,39 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
 
   // ── Review final S2, S3 ───────────────────────────────────────────────────
 
+  /**
+   * The step's own client with faults to arm: once armed, the next
+   * `execute`, `select` or `transaction` it is asked for, on the client or
+   * inside a transaction, fails.
+   */
+  function faultyClient() {
+    const armed = new Set<string>();
+    const wrap = <T extends object>(target: T): T =>
+      new Proxy(target, {
+        get(inner, key) {
+          if (typeof key === 'string' && armed.delete(key)) {
+            return () => {
+              throw new Error(`the ${key} failed`);
+            };
+          }
+          if (key === 'transaction') {
+            const transaction: DatabaseWs['transaction'] = (work, config) =>
+              (inner as unknown as DatabaseWs).transaction(
+                (tx) => work(wrap(tx)),
+                config
+              );
+            return transaction;
+          }
+          const value = Reflect.get(inner, key, inner);
+          return typeof value === 'function' ? value.bind(inner) : value;
+        },
+      });
+    return {
+      client: wrap(db),
+      arm: (key: 'execute' | 'select' | 'transaction') => armed.add(key),
+    };
+  }
+
   /** A rise one creator was told of, and a creator who joined after. */
   async function toldThenJoined(told: string, joiner: string) {
     const admin = await person('Ada Admin');
@@ -1987,7 +2064,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     expect(await kindOf(changeId, jo.id, 'smaller')).toBeUndefined();
   });
 
-  it('a cut whose transaction stays open across the claim: the email it missed named the earlier figure, so its person is told the new one the next morning (S2)', async () => {
+  it('a joiner added while a cut is open: the cut never saw them, so the email they were sent with the earlier figure owes the smaller one the next morning (S2, the lock’s backstop)', async () => {
     const uma = await person('Uma Told');
     const jo = await person('Jo Joiner');
     const { changeId } = await toldThenJoined(uma.id, jo.id);
@@ -2001,8 +2078,9 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     });
     let holder: Promise<void> = Promise.resolve();
     // A cut as the purchase service makes one (the version superseded, a
-    // new one, the smaller emails queued), on another connection, held open
-    // from just after the joiners step's read.
+    // new one, the notices locked, the smaller emails queued), on another
+    // connection, held open from just after the joiners step's read, so Jo
+    // joins after its lock and its queue.
     afterNextPayeeRead(async () => {
       holder = db.transaction(async (tx) => {
         try {
@@ -2022,6 +2100,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
             scope: 'org',
             orgFeePercent: 1300,
           });
+          await lockFeeNotices(tx, { changeId });
           await queueSmallerFeeNotices(tx, { changeId, now: cutAt });
         } finally {
           holding();
@@ -2076,45 +2155,15 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     const sam = await person('Sam Rollback');
     const admin = await person('Ari Admin');
     const changeId = await rise(await organisation(sam.id));
-    // The step's own client, but once armed, the next raw statement it sends,
-    // in a transaction or not (tellOfVoid's insert), fails.
-    let failNext = false;
-    const failOnce = () => {
-      failNext = false;
-      return () => Promise.reject(new Error('the insert failed'));
-    };
-    const failing = new Proxy(db, {
-      get(target, key) {
-        if (key === 'execute' && failNext) return failOnce();
-        if (key === 'transaction') {
-          const transaction: DatabaseWs['transaction'] = (work, config) =>
-            target.transaction(
-              (tx) =>
-                work(
-                  new Proxy(tx, {
-                    get(inner, innerKey) {
-                      if (innerKey === 'execute' && failNext) return failOnce();
-                      const value = Reflect.get(inner, innerKey, inner);
-                      return typeof value === 'function'
-                        ? value.bind(inner)
-                        : value;
-                    },
-                  })
-                ),
-              config
-            );
-          return transaction;
-        }
-        const value = Reflect.get(target, key, target);
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    });
+    // Once armed, the next raw statement the step sends (tellOfVoid's
+    // insert) fails.
+    const faults = faultyClient();
     const { registry, cleanup: closeRegistry } = await createServiceRegistry(
       env as unknown as Bindings
     );
     try {
       await runFeeNoticesSweep({
-        db: failing,
+        db: faults.client,
         obs,
         environment: 'development',
         workerSecret: 'unused',
@@ -2124,7 +2173,7 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
           async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
             if (params.userId === sam.id) {
               await registry.feeConfig.cancelChange(changeId, admin.id);
-              failNext = true;
+              faults.arm('execute');
             }
             return { accepted: true };
           }
@@ -2136,7 +2185,14 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       await closeRegistry();
     }
 
-    expect(errorsFor(changeId, 'fee step: one notice failed')).toHaveLength(1);
+    // Logged as an email that went, whose record failed (silent L2).
+    expect(
+      errorsFor(
+        changeId,
+        'fee step: a fee email went, or may have, but its record failed'
+      )
+    ).toHaveLength(1);
+    expect(errorsFor(changeId, 'fee step: one notice failed')).toEqual([]);
     // The send's write went with the insert: the row is as the cancel left it.
     const announce = await kindOf(changeId, sam.id, 'announce');
     expect(announce).toMatchObject({ state: 'not_needed', acceptedAt: null });
@@ -2156,5 +2212,238 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     expect(mailFor(nextMorning, sam.id).map((p) => p.templateName)).toEqual([
       'fee-change-cancelled',
     ]);
+  });
+
+  // ── Review final silent L1-L3 ─────────────────────────────────────────────
+
+  it('a cut locks its notices before it queues: a run in its middle claims none of them, so nobody is sent the bigger figure unseen (silent L1)', async () => {
+    const yan = await person('Yan Waiting');
+    const zoe = await person('Zoe Told');
+    const admin = await person('Ari Admin');
+    const org = await organisation(yan.id, zoe.id);
+    const changeId = await rise(org);
+    // The list is made with its template held; then Zoe is told.
+    await run(
+      changeId,
+      new Date(Date.now() - 3 * HOUR),
+      mailerAnswering(),
+      async (name) => name !== 'fee-change-notice'
+    );
+    const told = await kindOf(changeId, zoe.id, 'announce');
+    await db
+      .update(feeChangeNotices)
+      .set({ state: 'sent', attempts: 1, acceptedAt: new Date() })
+      .where(eq(feeChangeNotices.id, told?.id as string));
+
+    // A second connection holds Zoe's smaller row, uncommitted: the cut's
+    // queue waits on it, inside its own transaction, after its lock.
+    let release = () => {};
+    const released = new Promise<void>((go) => {
+      release = go;
+    });
+    let holding = () => {};
+    const held = new Promise<void>((go) => {
+      holding = go;
+    });
+    const holder = db
+      .transaction(async (tx) => {
+        await tx.insert(feeChangeNotices).values({
+          changeId,
+          userId: zoe.id,
+          kind: 'smaller',
+          onList: false,
+          roles: told?.roles ?? [],
+          beforeValues: [],
+          afterValues: [],
+        });
+        holding();
+        await released;
+        tx.rollback();
+      })
+      .catch(() => {});
+    await held;
+
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    const during = mailerAnswering();
+    try {
+      const cut = registry.feeConfig.updateOrgFees(
+        org,
+        { orgFeePercent: 1300 },
+        admin.id
+      );
+      await waitingOnLock('%INSERT INTO "fee_change_notices"%smaller%');
+      // A run in the middle of the cut: Yan's notice is locked, so passed by.
+      // It gets as far as its dates step, which waits for the cut (its
+      // inserts hold the change row).
+      const morning = run(changeId, new Date(), during);
+      await waitingOnLock('%from "fee_changes"%for update%');
+      release();
+      await holder;
+      await cut;
+      expect(await morning).toMatchObject({ sent: 0 });
+    } finally {
+      release();
+      await closeRegistry();
+    }
+    expect(mailFor(during, yan.id)).toEqual([]);
+    expect(await kindOf(changeId, yan.id, 'announce')).toMatchObject({
+      state: 'due',
+      attempts: 0,
+    });
+
+    // The next morning Yan is told the cut's figure, first time.
+    const next = mailerAnswering();
+    await run(changeId, new Date(Date.now() + 13 * HOUR), next);
+    const [first, ...more] = mailFor(next, yan.id);
+    expect(more).toEqual([]);
+    expect(JSON.stringify(first?.data)).toContain(formatPercent(1300));
+    expect(await kindOf(changeId, yan.id, 'smaller')).toBeUndefined();
+  });
+
+  it('a fee email that went, whose record then fails, is logged as gone, and the next run finds it in the email log (silent L2)', async () => {
+    const lou = await person('Lou Lostrecord');
+    const changeId = await rise(await organisation(lou.id));
+    // Once Lou's email is accepted, the record's transaction fails.
+    const faults = faultyClient();
+    const accepted = loggingMailer();
+    await runFeeNoticesSweep({
+      db: faults.client,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_3,
+      mailer: vi.fn(async (params: FeeMailerParams) => {
+        const answer = await accepted(params);
+        if (params.userId === lou.id) faults.arm('transaction');
+        return answer;
+      }),
+      templateExists: async () => true,
+      onlyChanges: [changeId],
+    });
+
+    const [gone, ...more] = errorsFor(
+      changeId,
+      'fee step: a fee email went, or may have, but its record failed'
+    );
+    expect(more).toEqual([]);
+    expect(gone?.[1]).toMatchObject({ outcome: 'sent' });
+    expect(errorsFor(changeId, 'fee step: one notice failed')).toEqual([]);
+    expect(await noticeOf(changeId, lou.id)).toMatchObject({
+      state: 'due',
+      attempts: 1,
+    });
+
+    const mailer = mailerAnswering();
+    expect(await run(changeId, NOV_4, mailer)).toMatchObject({
+      foundInLog: 1,
+      sent: 0,
+    });
+    expect(mailFor(mailer, lou.id)).toEqual([]);
+    expect(await noticeOf(changeId, lou.id)).toMatchObject({ state: 'sent' });
+  });
+
+  it('when whether the rise was cut since cannot be read, the email’s outcome is still recorded, and the change is named to check by hand (silent L2)', async () => {
+    const mo = await person('Mo Unread');
+    const changeId = await rise(await organisation(mo.id));
+    // Once Mo's email is accepted, the next read (the live version) fails.
+    const faults = faultyClient();
+    const result = await runFeeNoticesSweep({
+      db: faults.client,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_3,
+      mailer: vi.fn(
+        async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+          if (params.userId === mo.id) faults.arm('select');
+          return { accepted: true };
+        }
+      ),
+      templateExists: async () => true,
+      onlyChanges: [changeId],
+    });
+
+    const [unread, ...more] = errorsFor(
+      changeId,
+      'fee step: a fee email went, or may have, but whether its rise was cut since could not be read'
+    );
+    expect(more).toEqual([]);
+    expect(unread?.[1]).toMatchObject({ outcome: 'sent' });
+    expect(result).toMatchObject({ sent: 1 });
+    expect(await noticeOf(changeId, mo.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: NOV_3,
+    });
+  });
+
+  it('figures that did not move are not "moved" because two roles came back the other way round (silent L3)', async () => {
+    const pat = await person('Pat Tworoles');
+    const changeId = await rise(await organisation(pat.id));
+    const other = await organisation(pat.id);
+    // Pat in two roles, read first one way round, then, once the version
+    // has moved, the other.
+    let reversed = false;
+    let readReversed = 0;
+    vi.mocked(affectedPayees).mockImplementation(async (client, ...rest) => {
+      const read = await realAffectedPayees(client, ...rest);
+      return read.map((p) => {
+        if (p.userId !== pat.id) return p;
+        const twice = <T extends { organizationId: string | null }>(
+          list: T[]
+        ): T[] => {
+          const both = [
+            ...list,
+            ...list.map((v) => ({ ...v, organizationId: other })),
+          ];
+          return reversed ? both.reverse() : both;
+        };
+        if (reversed) readReversed += 1;
+        return {
+          ...p,
+          roles: twice(p.roles),
+          before: twice(p.before),
+          after: twice(p.after),
+        };
+      });
+    });
+    // While Pat's email is on its way, the rise is saved again with the same
+    // figures: its live version moves, its figures don't.
+    const mailer = vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        if (params.userId === pat.id) {
+          await db.transaction(async (tx) => {
+            const versions = await tx
+              .select()
+              .from(feeConfigVersions)
+              .where(eq(feeConfigVersions.changeId, changeId));
+            const live = versions.find((v) => v.supersededAt === null);
+            if (!live) throw new Error('no live version');
+            await tx
+              .update(feeConfigVersions)
+              .set({ supersededAt: new Date() })
+              .where(eq(feeConfigVersions.id, live.id));
+            await tx.insert(feeConfigVersions).values({
+              changeId,
+              scope: 'org',
+              orgFeePercent: live.orgFeePercent,
+            });
+          });
+          reversed = true;
+        }
+        return { accepted: true };
+      }
+    );
+    await run(changeId, NOV_3, mailer);
+
+    // The check read them again, the other way round, and found no move.
+    expect(readReversed).toBeGreaterThan(0);
+    const announce = await kindOf(changeId, pat.id, 'announce');
+    expect(announce).toMatchObject({ state: 'sent' });
+    expect(announce?.afterValues).toHaveLength(2);
+    expect(await kindOf(changeId, pat.id, 'smaller')).toBeUndefined();
   });
 });

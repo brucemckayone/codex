@@ -359,6 +359,39 @@ export function feeNoticeMayHaveTold(now: Date): SQL {
 }
 
 /**
+ * Lock a change's notices (every kind but `cancelled`), or one person's, in
+ * id order, after the change row itself. THE lock every writer that reads
+ * them to decide takes first: a cut before it queues smaller emails, a void
+ * before it queues "it's off" (purchase), and the daily step before it
+ * queues one person's smaller email (`record`'s re-tell). One order, the
+ * change row then its notices by id, means none of them holds a row another
+ * waits for (review final, commerce NIT): support's "told another way" locks
+ * the change row FOR UPDATE before its notice, and a notice insert takes the
+ * change row FOR KEY SHARE (its foreign key), so the re-tell takes that first
+ * too. KEY SHARE never waits on a cut (it holds the same) or a void (a no-key
+ * update). While a cut or a void holds the notices, the daily claim (`SKIP
+ * LOCKED`) passes them by, and a claim already committed is read as tried
+ * (`feeNoticeMayHaveTold`), so no email goes out between the read and the
+ * write, unseen by both (review final M3, silent L1).
+ */
+export async function lockFeeNotices(
+  tx: Queryable,
+  input: { changeId: string; userId?: string }
+): Promise<void> {
+  const { changeId, userId } = input;
+  await tx.execute(sql`
+    SELECT 1 FROM ${feeChanges} WHERE id = ${changeId} FOR KEY SHARE
+  `);
+  await tx.execute(sql`
+    SELECT id FROM ${feeChangeNotices}
+    WHERE change_id = ${changeId} AND kind <> 'cancelled'
+      ${userId === undefined ? sql`` : sql`AND user_id = ${userId}`}
+    ORDER BY id
+    FOR UPDATE
+  `);
+}
+
+/**
  * Q2 (A): a waiting rise made smaller owes one short email to everyone its
  * announcement told, or may have told (`feeNoticeMayHaveTold`): one in
  * flight carries the earlier figure. One person's alone when `userId` is

@@ -13,17 +13,20 @@
  *
  * A row left unmarked is tried the next morning, one SIDE at a time: each
  * email carries `agreementId` and `side` in its data, which the email log
- * keeps, and a side the log shows sent (or in flight) is not sent again
- * (`makeAlreadySent`, the fee step's `foundSent` pattern). So when the
- * owner's email fails after the creator's went, the next morning sends the
- * owner's alone, not the creator's again (final review #4).
+ * keeps, and a side the log shows sent is not sent again (`makeAlreadySent`,
+ * `@codex/database`'s `emailLogShowsSent`, as the fee step's `foundSent`).
+ * So when the owner's email fails after the creator's went, the next morning
+ * sends the owner's alone, not the creator's again (final review #4). A
+ * side whose log row an earlier run left `pending` is sent again: its
+ * outcome never came, and a duplicate warning is harmless where a missing
+ * one is not (owner, 2026-11-09).
  *
  * Time (Codex-2hxff.100): each send waits SEND_TIMEOUT_MS at most, and no
  * row starts after SENDS_TIME_BUDGET_MS from the wake, so the money sweep
  * and the fee step after this one keep their time. A row is marked only
  * after its sends, so a row timed out or not reached is tried the next
- * morning. A timed-out send may still have gone; if it reached the email
- * log, that side is not sent again.
+ * morning. A timed-out send may still have gone; if the email log shows it
+ * sent, that side is not sent again.
  *
  * Error handling: NEVER throws. The function is invoked from
  * `scheduled()` inside a `waitUntil` chain — if we throw, the cron
@@ -42,9 +45,9 @@ import {
   and,
   createDbClient,
   type Database,
+  emailLogShowsSent,
   eq,
   gte,
-  inArray,
   messageForLog,
   sql,
 } from '@codex/database';
@@ -127,7 +130,7 @@ export interface RunAgreementExpiringSweepDeps {
 export interface ExpiringSweepResult {
   agreementsScanned: number;
   emailsSent: number;
-  /** Sides not sent again: the email log shows an earlier morning sent them. */
+  /** Sides not sent again: the email log shows them sent. */
   emailsAlreadySent: number;
   agreementsMarked: number;
   errors: number;
@@ -255,10 +258,12 @@ function makeDefaultMailer(deps: {
 }
 
 /**
- * Is this side's email for this agreement already in the email log, sent or
- * in flight? The fee step's `foundSent`: template, recipient and status,
- * then the agreement id and the side in the row's metadata, each quoted
- * with its key so no id matches as a prefix of another. The send path
+ * Does the email log show this side's email for this agreement sent? The fee
+ * step's `foundSent`: template, recipient and the shared rule
+ * (`emailLogShowsSent` at the run's clock: `success`, or `pending` while it
+ * may still be in flight, never a test send), then the agreement id and the
+ * side in the row's metadata, each quoted with its key so no id matches as a
+ * prefix of another. The send path
  * stores the email data verbatim as metadata, and the template's data
  * schema drops both keys before the render, so they never reach the email.
  *
@@ -270,7 +275,7 @@ function makeDefaultMailer(deps: {
  * `agreementId`, so an agreement whose owner side failed before the deploy
  * may email its creator once more, on the first morning after release.
  */
-function makeAlreadySent(db: Database): AlreadySent {
+function makeAlreadySent(db: Database, now: Date): AlreadySent {
   return async ({ to, agreementId, side, since }) => {
     const [row] = await db
       .select({ id: emailAuditLogs.id })
@@ -279,7 +284,7 @@ function makeAlreadySent(db: Database): AlreadySent {
         and(
           eq(emailAuditLogs.templateName, TEMPLATE),
           eq(emailAuditLogs.recipientEmail, to),
-          inArray(emailAuditLogs.status, ['success', 'pending']),
+          emailLogShowsSent(now),
           gte(emailAuditLogs.createdAt, since),
           sql`strpos(${emailAuditLogs.metadata}, ${`"agreementId":"${agreementId}"`}) > 0`,
           sql`strpos(${emailAuditLogs.metadata}, ${`"side":"${side}"`}) > 0`
@@ -339,12 +344,13 @@ export async function runAgreementExpiringSweep(
         timeoutMs: deps.sendTimeoutMs ?? SEND_TIMEOUT_MS,
       });
 
-    const alreadySent = deps.alreadySent ?? makeAlreadySent(db);
+    // The run's own clock, as the candidates are found by it.
+    const alreadySent =
+      deps.alreadySent ?? makeAlreadySent(db, now ?? new Date());
 
     /**
-     * One side's email, unless the email log shows an earlier morning sent
-     * it. Its data carries `agreementId` and `side`, which is how the log
-     * finds it then.
+     * One side's email, unless the email log shows it sent. Its data
+     * carries `agreementId` and `side`, which is how the log finds it.
      */
     async function sendSide(
       agreement: AgreementWithShare,

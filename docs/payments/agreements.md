@@ -142,7 +142,10 @@ Owner decision AGR-01, "Keeps paying", clarified as "Yes, any time".
 - Thirty days before the review date both sides are emailed a reminder
   (`agreement-expiring-soon`, notifications-api cron `0 8 * * *`, production
   only), worded as a review reminder. Migration 0106 rewrote the live
-  templates, unless an organisation had edited its own copy.
+  templates, unless an organisation had edited its own copy. A side whose
+  email the log doesn't show sent goes again the next morning, and one an
+  earlier run left `pending` counts as not sent: a duplicate reminder is
+  harmless, a missing one defeats it (owner, 2026-11-09).
 
 `effective_until` stores the review date. Only the reminder scan
 (`findExpiringAgreements`) reads it. Payments, Studio, the 100% limit and the

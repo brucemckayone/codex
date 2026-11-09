@@ -1,4 +1,5 @@
 import { EMAIL_SEND_STATUS } from '@codex/constants';
+import { TEST_SEND_METADATA } from '@codex/database';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Database, EmailProvider } from '../../types';
 import { NotificationsService } from '../notifications-service';
@@ -578,6 +579,10 @@ describe('NotificationsService', () => {
       await send(true);
 
       expect(logged()).toEqual({ testSend: true });
+      // The exact text the readers' `notATestSend` looks for.
+      expect(mockDbRaw.values.mock.calls[0]![0].metadata).toBe(
+        JSON.stringify(TEST_SEND_METADATA)
+      );
       expect(mockEmailProvider.send).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'owner@example.com',

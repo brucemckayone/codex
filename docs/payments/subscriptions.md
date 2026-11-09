@@ -798,12 +798,18 @@ and no new Neon wake: it rides the hourly one.
    retried row whose kept `held_reason` is `notice_unknown`) is looked for
    first in notifications' email log: a row for the template and recipient,
    carrying the row's `priceMoveId`, since a minute before the last try,
-   `success` or `pending` (F4). Found, it was told then. Then at Stripe:
+   that shows it sent (`emailLogShowsSent` in `@codex/database`, the rule
+   every morning reader shares). Found, it was told then. Then at Stripe:
    already on the new Price, or marked pending for it, counts as moved.
    Only then is it sent again. notifications-api writes the log row
-   `pending` before the provider call and `success` after it, so one left
-   `pending` may have been delivered; `failed` (every attempt failed) and
-   `skipped` (an opt-out) do not count.
+   `pending` before the provider call and `success` after it. `success`
+   counts. `pending` counts only while the send may still be in flight (made
+   within 15 minutes, the cron's wall, of the run's start): one an earlier
+   run left never got its outcome, so the notice goes again (owner,
+   2026-11-09; this replaces review C1's F4, "a `pending` row counts",
+   since a duplicate is harmless and a missing notice is not). `failed`
+   (every attempt failed), `skipped` (an opt-out) and a template test send
+   never count.
 6. **A change stops** when every notice of its first batch in a run was
    refused with a 4xx that will not go away by itself (not 408, 409, 425 or
    429: a missing template, a bad worker secret) and none of its notices was

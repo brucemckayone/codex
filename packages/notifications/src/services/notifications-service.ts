@@ -1,5 +1,5 @@
 import { EMAIL_SEND_STATUS } from '@codex/constants';
-import { schema } from '@codex/database';
+import { schema, TEST_SEND_METADATA } from '@codex/database';
 import {
   BrandingSettingsService,
   ContactSettingsService,
@@ -71,7 +71,8 @@ interface SendEmailParams {
   userId?: string;
   /**
    * A template test send: the email renders with the caller's data, but
-   * the email log records only `{"testSend":true}`. Set by the test-send
+   * the email log records only `TEST_SEND_METADATA` (`@codex/database`,
+   * beside the readers' `notATestSend`), `{"testSend":true}`. Set by the test-send
    * route alone, never from anything the caller sends. That data is the
    * caller's own, and the sweeps read the log's metadata for their own
    * bookkeeping keys (`agreementId`, `feeNoticeId`, `priceMoveId`), so a
@@ -79,9 +80,6 @@ interface SendEmailParams {
    */
   testSend?: boolean;
 }
-
-/** A test send's whole audit metadata (see `SendEmailParams.testSend`). */
-const TEST_SEND_METADATA = { testSend: true } as const;
 
 export class NotificationsService extends BaseService {
   private readonly emailProvider: EmailProvider;
