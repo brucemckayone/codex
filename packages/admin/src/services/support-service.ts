@@ -126,10 +126,13 @@ import {
   versionInForce,
 } from '@codex/payments';
 import {
+  countsAgainstCharge,
   type FeeConfigService,
   type PurchaseService,
   type RestoredRefundAccess,
   STANDING_REFUND_STATUSES,
+  settledElsewhere,
+  settledElsewhereCentsIn,
   supportRequesterOf,
 } from '@codex/purchase';
 import {
@@ -228,11 +231,6 @@ import type {
   SystemDecision,
   ToldAnotherWayResult,
 } from '../support-types';
-import {
-  countsAgainstCharge,
-  settledElsewhere,
-  settledElsewhereCentsIn,
-} from './counted-refunds';
 import {
   causeKey,
   chargebackState,
@@ -351,6 +349,33 @@ function supportRefundKey(
 /** The refunds that count against the charge at Stripe: made and not undone. */
 function standingCents(listed: readonly Stripe.Refund[]): number {
   return refundedCentsIn(listed, STANDING_REFUND_STATUSES);
+}
+
+/**
+ * What the charge's recorded refunds settled as refunded elsewhere add up to,
+ * less any Stripe's list shows standing: `standingCents` counts that one
+ * already, so a refund counts once whatever the two sources say (review LOW).
+ */
+function settledElsewhereBeyondStripe(
+  listed: readonly Stripe.Refund[],
+  recorded: ReadonlyArray<{
+    stripeRefundId: string;
+    amountCents: number;
+    resolution: string | null;
+  }>
+): number {
+  const standing = new Set(
+    listed
+      .filter((refund) =>
+        (STANDING_REFUND_STATUSES as readonly string[]).includes(
+          refund.status ?? ''
+        )
+      )
+      .map((refund) => refund.id)
+  );
+  return settledElsewhereCentsIn(
+    recorded.filter((row) => !standing.has(row.stripeRefundId))
+  );
 }
 
 /**
@@ -832,8 +857,9 @@ export class SupportService extends BaseService {
           amountCents: sql<number>`${purchases.amountPaidCents}`.as(
             'amount_cents'
           ),
+          // Capped at the charge, as the detail is (review PAY-001).
           refundedCents:
-            sql<number>`(SELECT COALESCE(SUM(${refunds.amountCents}), 0)::int FROM ${refunds} WHERE ${refunds.purchaseId} = ${purchases.id} AND ${counted})`.as(
+            sql<number>`LEAST(${purchases.amountPaidCents}, (SELECT COALESCE(SUM(${refunds.amountCents}), 0)::int FROM ${refunds} WHERE ${refunds.purchaseId} = ${purchases.id} AND ${counted}))`.as(
               'refunded_cents'
             ),
           paidAt:
@@ -872,6 +898,7 @@ export class SupportService extends BaseService {
     // the table too: `FROM ${payouts} ${slice}`.
     const slice = alias(payouts, 'charge_slice');
     const counted = countsAgainstCharge();
+    const amount = sql<number>`(SELECT COALESCE(SUM(${slice.amountCents}), 0)::int FROM ${payouts} ${slice} WHERE ${slice.stripeChargeId} = ${payouts.stripeChargeId} AND ${slice.sourceType} = 'subscription')`;
     return this.db
       .select({
         rowId: sql<string>`${payouts.id}::text`.as('row_id'),
@@ -904,12 +931,10 @@ export class SupportService extends BaseService {
         buyerDeleted: sql<boolean>`(${users.deletedAt} IS NOT NULL)`.as(
           'buyer_deleted'
         ),
-        amountCents:
-          sql<number>`(SELECT COALESCE(SUM(${slice.amountCents}), 0)::int FROM ${payouts} ${slice} WHERE ${slice.stripeChargeId} = ${payouts.stripeChargeId} AND ${slice.sourceType} = 'subscription')`.as(
-            'amount_cents'
-          ),
+        amountCents: sql<number>`${amount}`.as('amount_cents'),
+        // Capped at the charge, as the detail is (review PAY-001).
         refundedCents:
-          sql<number>`(SELECT COALESCE(SUM(${refunds.amountCents}), 0)::int FROM ${refunds} WHERE ${refunds.stripeChargeId} = ${payouts.stripeChargeId} AND ${counted})`.as(
+          sql<number>`LEAST(${amount}, (SELECT COALESCE(SUM(${refunds.amountCents}), 0)::int FROM ${refunds} WHERE ${refunds.stripeChargeId} = ${payouts.stripeChargeId} AND ${counted}))`.as(
             'refunded_cents'
           ),
         paidAt: sql<Date>`${payouts.createdAt}`.as('paid_at'),
@@ -1008,9 +1033,13 @@ export class SupportService extends BaseService {
           .where(eq(refunds.stripeChargeId, chargeId)),
       ]);
 
-      // Back with the buyer: through Stripe, or another way (Codex-3xnta).
-      const refundedCents =
-        standingCents(listed) + settledElsewhereCentsIn(recorded);
+      // Back with the buyer: through Stripe, or another way (Codex-3xnta),
+      // never more than the charge: the late-win runbook can count both a
+      // re-refund and the refund settled elsewhere (review PAY-001).
+      const refundedCents = Math.min(
+        charge.amount,
+        standingCents(listed) + settledElsewhereBeyondStripe(listed, recorded)
+      );
       const maxCents = Math.max(0, charge.amount - refundedCents);
       const holds = refundHolds(disputeRows);
       const outsideStripe = refundedOutsideStripeAt(disputeRows);
@@ -1279,7 +1308,7 @@ export class SupportService extends BaseService {
       const [listed, holds, elsewhere] = await Promise.all([
         listChargeRefunds(this.stripe, chargeId),
         this.refundHoldsOf(chargeId),
-        this.settledElsewhereCents(chargeId),
+        this.settledElsewhereRows(chargeId),
       ]);
       // As the detail's block reads, before the amount it would refuse.
       if (holds.refundedOutsideStripeAt) {
@@ -1287,7 +1316,12 @@ export class SupportService extends BaseService {
       }
       if (holds.settling) throw new ChargebackSettlingError();
       const refunded = standingCents(listed);
-      this.assertAmountFits(amountCents, charge.amount - refunded - elsewhere);
+      this.assertAmountFits(
+        amountCents,
+        charge.amount -
+          refunded -
+          settledElsewhereBeyondStripe(listed, elsewhere)
+      );
 
       const clawbackCharge = { id: chargeId, amountCents: charge.amount };
       const plan = planClawback({
@@ -1360,19 +1394,19 @@ export class SupportService extends BaseService {
   }
 
   /**
-   * `settledElsewhereCentsIn` over the charge's refunds as recorded now: the
-   * preview's and the route's cap read it fresh, never from the page.
+   * The charge's refunds settled as refunded elsewhere, as recorded now: the
+   * preview's and the route's cap read them fresh, never from the page, and
+   * count them by `settledElsewhereBeyondStripe`.
    */
-  private async settledElsewhereCents(chargeId: string): Promise<number> {
-    return settledElsewhereCentsIn(
-      await this.db
-        .select({
-          amountCents: refunds.amountCents,
-          resolution: refunds.resolution,
-        })
-        .from(refunds)
-        .where(and(eq(refunds.stripeChargeId, chargeId), settledElsewhere()))
-    );
+  private async settledElsewhereRows(chargeId: string) {
+    return this.db
+      .select({
+        stripeRefundId: refunds.stripeRefundId,
+        amountCents: refunds.amountCents,
+        resolution: refunds.resolution,
+      })
+      .from(refunds)
+      .where(and(eq(refunds.stripeChargeId, chargeId), settledElsewhere()));
   }
 
   /**
@@ -1445,7 +1479,7 @@ export class SupportService extends BaseService {
       // the refund count as it was, so only this read sees it.
       const [holds, elsewhere] = await Promise.all([
         this.refundHoldsOf(chargeId),
-        this.settledElsewhereCents(chargeId),
+        this.settledElsewhereRows(chargeId),
       ]);
       // Settled by hand (owner decision 2026-11-08): never through Stripe,
       // whatever the window or a late win says.
@@ -1460,7 +1494,9 @@ export class SupportService extends BaseService {
       if (holds.settling) throw new ChargebackSettlingError();
       this.assertAmountFits(
         input.amountCents,
-        charge.amount - standingCents(listed) - elsewhere
+        charge.amount -
+          standingCents(listed) -
+          settledElsewhereBeyondStripe(listed, elsewhere)
       );
 
       let made: Awaited<ReturnType<typeof issueStripeRefund>>;

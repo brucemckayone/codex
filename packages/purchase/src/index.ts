@@ -87,6 +87,13 @@ export {
   stripeErrorCode,
   toStripeTime,
 } from './services/checkout-reservations';
+// Which refunds count as the buyer's money back (Codex-3xnta)
+export {
+  countsAgainstCharge,
+  STANDING_REFUND_STATUSES,
+  settledElsewhere,
+  settledElsewhereCentsIn,
+} from './services/counted-refunds';
 // Entitlement + auto-enrollment write seam (Codex-2pryk WP-6)
 export {
   autoEnroll,
@@ -121,7 +128,6 @@ export {
   PurchaseService,
   type RefundAccessKept,
   type RestoredRefundAccess,
-  STANDING_REFUND_STATUSES,
   supportRequesterOf,
 } from './services/purchase-service';
 // Customer resolution (Codex-49gev)

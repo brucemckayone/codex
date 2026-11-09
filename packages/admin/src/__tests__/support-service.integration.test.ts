@@ -4295,6 +4295,64 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         resolution: 'refunded_elsewhere',
       });
       expect((await searchRowOf(charge.purchase.id))?.refundedCents).toBe(400);
+      // Stripe now lists it standing while our record holds it settled
+      // elsewhere: the charge page, the preview and the route count it once.
+      const detail = await service.getChargeDetail(charge.chargeId);
+      expect(detail.charge.refundedCents).toBe(400);
+      expect(detail.refundable.maxCents).toBe(600);
+      const preview = await failureOf(
+        service.previewRefund(charge.chargeId, 601)
+      );
+      expect(preview.context).toEqual({
+        code: 'REFUND_AMOUNT_TOO_LARGE',
+        maxCents: 600,
+      });
+      const route = await failureOf(
+        service.issueRefund(
+          charge.chargeId,
+          refundInput(601, detail.refundCount),
+          supportId
+        )
+      );
+      expect(route.context).toEqual({
+        code: 'REFUND_AMOUNT_TOO_LARGE',
+        maxCents: 600,
+      });
+    });
+
+    it('is capped at the charge: a refund again through Stripe and the one settled elsewhere read refunded in full, never more (review PAY-001)', async () => {
+      const charge = await purchaseCharge();
+      const invoice = await invoiceCharge();
+      for (const [chargeId, purchaseId] of [
+        [charge.chargeId, charge.purchase.id],
+        [invoice.chargeId, null],
+      ] as const) {
+        await recordedFailure(chargeId, 1000, 'refunded_elsewhere', purchaseId);
+        // The late-win runbook's re-refund, at Stripe and in our record.
+        const again = stripeRefund(chargeId, 1000);
+        await db.insert(refunds).values({
+          stripeRefundId: again.id,
+          stripeChargeId: chargeId,
+          purchaseId,
+          amountCents: 1000,
+          currency: 'gbp',
+          status: 'succeeded',
+          stripeCreatedAt: new Date(),
+        });
+      }
+
+      for (const chargeId of [charge.chargeId, invoice.chargeId]) {
+        const detail = await service.getChargeDetail(chargeId);
+        expect(detail.charge.refundedCents).toBe(1000);
+        expect(detail.refundable).toMatchObject({
+          maxCents: 0,
+          blocked: 'nothing_left',
+        });
+        const [row] = (
+          await service.searchCharges({ lookup: chargeId, page: 1, limit: 20 })
+        ).items;
+        expect(row).toMatchObject({ chargeId, refundedCents: 1000 });
+      }
     });
   });
 

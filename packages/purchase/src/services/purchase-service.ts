@@ -53,6 +53,7 @@ import {
   entitlements,
   moneyNotices,
   payoutReversals,
+  payouts,
   purchases,
   type RefundStatus,
   refunds,
@@ -144,6 +145,7 @@ import {
   stripeErrorCode,
   toStripeTime,
 } from './checkout-reservations';
+import { STANDING_REFUND_STATUSES, settledElsewhere } from './counted-refunds';
 import {
   writeContentPurchaseEntitlement,
   writeCoursePurchaseEntitlement,
@@ -240,17 +242,6 @@ function lateWinRefundStatus(
     listed.find((refund) => refund.id === made.refundId)?.status ?? made.status
   );
 }
-
-/**
- * The refunds that count against what was paid: made and not undone. A failed
- * or canceled refund gave the buyer nothing (Codex-2hxff.28): support may
- * refund that amount again, and a failed full refund gives access back.
- */
-export const STANDING_REFUND_STATUSES: readonly RefundStatus[] = [
-  'pending',
-  'requires_action',
-  'succeeded',
-];
 
 /**
  * How far along a dispute is: an inquiry, then a chargeback, then final. A
@@ -5426,6 +5417,15 @@ export class PurchaseService extends BaseService {
       ...purchaseDateWindow(validated.fromDate, validated.toDate),
     ];
 
+    // A failed refund support settled as refunded elsewhere counts as
+    // refunded (owner decision 2026-11-09; `settledElsewhere`, the rule
+    // support and the admin revenue share), on the purchase or, recorded
+    // without it (Codex-aa08z), on its charge, as `standingRefundFields`
+    // counts. Its own `sql`, nested in the field: a single-table select
+    // writes a field's top-level columns without their table, and
+    // `purchase_id = id` would then read the refund's own id.
+    const settledElsewhereCents = sql`(SELECT COALESCE(SUM(${refunds.amountCents}), 0) FROM ${refunds} WHERE ${settledElsewhere()} AND (${refunds.purchaseId} = ${purchases.id} OR (${refunds.purchaseId} IS NULL AND ${refunds.stripeChargeId} IN (SELECT ${payouts.stripeChargeId} FROM ${payouts} WHERE ${payouts.purchaseId} = ${purchases.id} AND ${payouts.stripeChargeId} IS NOT NULL))))`;
+
     const [agg] = await this.db
       .select({
         // Gross: amount collected on completed OR refunded rows (refunded
@@ -5434,8 +5434,11 @@ export class PurchaseService extends BaseService {
         // Net to the seller: their share on completed rows only. Refunded rows
         // already returned the customer's money so they zero out for net.
         netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
-        // Partial refunds too: they leave the purchase completed (P-1).
-        refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}), 0)::int`,
+        // Partial refunds too: they leave the purchase completed (P-1), and
+        // any refund settled elsewhere. Each purchase is capped at what was
+        // paid: a refund again through Stripe and the settled one can both
+        // count (the late-win runbook).
+        refundedCents: sql<number>`COALESCE(SUM(LEAST(${purchases.amountPaidCents}, COALESCE(${purchases.refundAmountCents}, 0) + ${settledElsewhereCents})), 0)::int`,
         count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
       })
       .from(purchases)
