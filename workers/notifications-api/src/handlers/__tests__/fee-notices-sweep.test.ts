@@ -727,6 +727,135 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     });
   });
 
+  /** How a notice can fail, as the end alert counts the ones not named. */
+  const FAILURE_KINDS = [
+    'failed',
+    'went',
+    'mayHaveGone',
+    'figuresUnread',
+  ] as const;
+  type FailureKind = (typeof FAILURE_KINDS)[number];
+  type FoldedKind = { notices: number; changes: number; changeIds: string[] };
+
+  it('past the named fifty, the end alert counts the rest by how they failed, each kind with its changes, so support knows which to check by hand (review final silent-delta2)', async () => {
+    // Two rises, 29 people each: 58 notices, each failing once. The first
+    // 50 failures are named one by one, and the last 8 fold.
+    const changeOf = new Map<string, string>();
+    for (const org of ['A', 'B']) {
+      const ids: string[] = [];
+      for (let i = 0; i < 29; i += 1) {
+        ids.push((await person(`Fold ${org}${i}`)).id);
+      }
+      const changeId = await rise(await organisation(...ids));
+      for (const id of ids) changeOf.set(id, changeId);
+    }
+    const changeIds = [...new Set(changeOf.values())];
+
+    // Each send fails as its turn says: a refusal whose record fails ("one
+    // notice failed"), an accepted or an unanswered send whose record fails,
+    // or an accepted send whose figure read fails. The sends go one at a
+    // time, a turn ending once its record has settled, so each fault is met
+    // by its own notice and the failures come in turn order.
+    const answers: Record<FailureKind, FeeNoticeDelivery> = {
+      failed: { accepted: false, status: 422 },
+      went: { accepted: true },
+      mayHaveGone: { accepted: false, error: 'the send timed out' },
+      figuresUnread: { accepted: true },
+    };
+    const faults = faultyClient();
+    let endTurn: (() => void) | undefined;
+    const client = new Proxy(faults.client, {
+      get(inner, key) {
+        const value = Reflect.get(inner, key, inner);
+        if (key !== 'transaction') return value;
+        const transaction: DatabaseWs['transaction'] = async (work, config) => {
+          try {
+            return await (value as DatabaseWs['transaction'])(work, config);
+          } finally {
+            // Once the failure it ends in is logged.
+            const end = endTurn;
+            endTurn = undefined;
+            if (end) setTimeout(end, 0);
+          }
+        };
+        return transaction;
+      },
+    });
+    let turns = 0;
+    let lastTurn: Promise<void> = Promise.resolve();
+    const caused = new Map<FailureKind, Set<string>>();
+    const mailer = vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        const before = lastTurn;
+        let end = () => {};
+        lastTurn = new Promise((resolve) => {
+          end = resolve;
+        });
+        await before;
+        const kind = FAILURE_KINDS[turns % FAILURE_KINDS.length]!;
+        turns += 1;
+        if (turns > 50) {
+          const ids = caused.get(kind) ?? new Set<string>();
+          ids.add(changeOf.get(params.userId) ?? 'unknown change');
+          caused.set(kind, ids);
+        }
+        endTurn = end;
+        faults.arm(kind === 'figuresUnread' ? 'select' : 'transaction');
+        return answers[kind];
+      }
+    );
+
+    const result = await runFeeNoticesSweep({
+      db: client,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_3,
+      mailer,
+      templateExists: async () => true,
+      onlyChanges: changeIds,
+    });
+
+    expect(turns).toBe(58);
+    expect(result).toMatchObject({ listed: 58, errors: 58 });
+    const named = changeIds.flatMap((id) => [
+      ...errorsFor(id, 'fee step: one notice failed'),
+      ...errorsFor(id, 'fee step: a fee email went, or may have'),
+    ]);
+    expect(named).toHaveLength(50);
+    const alerts = obsLog.error.mock.calls.filter(
+      ([message, context]) =>
+        String(message).startsWith('fee step: more notices failed') &&
+        changeIds.some((id) =>
+          (context as { changeIds: string[] }).changeIds.includes(id)
+        )
+    );
+    expect(alerts).toHaveLength(1);
+    const alert = alerts[0]?.[1] as {
+      failed: number;
+      notNamed: number;
+      byKind?: Record<string, FoldedKind>;
+    };
+    expect(alert).toMatchObject({ failed: 58, notNamed: 8 });
+    // Turns 51 to 58 fold: two of each kind, each named with its changes.
+    const sortedIds = (byKind: Record<string, FoldedKind>) =>
+      Object.fromEntries(
+        Object.entries(byKind).map(([kind, folded]) => [
+          kind,
+          { ...folded, changeIds: [...folded.changeIds].sort() },
+        ])
+      );
+    expect(sortedIds(alert.byKind ?? {})).toEqual(
+      Object.fromEntries(
+        FAILURE_KINDS.map((kind) => {
+          const ids = [...(caused.get(kind) ?? [])].sort();
+          return [kind, { notices: 2, changes: ids.length, changeIds: ids }];
+        })
+      )
+    );
+  });
+
   /**
    * A rise cancelled after its email: each person was told on 3 November,
    * and their cancellation email is due.

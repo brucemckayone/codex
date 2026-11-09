@@ -67,6 +67,7 @@ import {
   type FeeNoticeReason,
   type FeeNoticeRole,
   type FeeNoticeRoleValues,
+  type FeeNoticeValues,
   feeChangeNotices,
   feeChanges,
   feeConfigOrg,
@@ -257,10 +258,26 @@ interface SweepContext {
   orgNames: Map<string, { name: string; slug: string }>;
   onlyChanges: readonly string[] | null;
   alertNamed: number;
-  /** Notices whose send threw this run, and the changes of those not named. */
+  /**
+   * Notices whose send threw this run, and those not named, counted by how
+   * they failed, each with its changes.
+   */
   noticeFailures: number;
-  foldedChangeIds: Set<string>;
+  folded: Map<NoticeFailure, { notices: number; changeIds: Set<string> }>;
 }
+
+/**
+ * How a notice failed, kept for the ones past the named few: what each needs
+ * from support differs (review final silent-delta2).
+ * - `failed`: nothing went this time; the next run tries it again.
+ * - `went`: it went, but its record failed; the next run finds it in the
+ *   email log.
+ * - `mayHaveGone`: no answer came, and its record failed; the next run
+ *   checks the email log.
+ * - `figuresUnread`: it went, or may have, but whether its rise was cut since
+ *   could not be read; check its change by hand for a smaller email owed.
+ */
+type NoticeFailure = 'failed' | 'went' | 'mayHaveGone' | 'figuresUnread';
 
 /** `onlyChanges` as a filter on `fee_changes`; none in production. */
 function scope(ctx: SweepContext) {
@@ -536,18 +553,29 @@ async function figuresMovedSince(
 }
 
 /**
+ * Every field of a role's values, in the one order `figuresOf` reads them.
+ * Typed against `FeeNoticeValues`, so a field added there and not here is a
+ * type error, never a figure the compare skips (review final silent-delta2).
+ */
+const FEE_NOTICE_FIGURES = {
+  platformFeePercent: true,
+  orgFeePercent: true,
+  minPlatformFeeCents: true,
+  minTransferCents: true,
+} as const satisfies Record<keyof FeeNoticeValues, true>;
+const FEE_NOTICE_FIGURE_KEYS = Object.keys(
+  FEE_NOTICE_FIGURES
+) as (keyof FeeNoticeValues)[];
+
+/**
  * A person's figures as one comparable string, by role: the members read
  * has no order, so two roles can come back either way round (review final
- * silent L3), and each role's values are read field by field, never by an
- * object's key order.
+ * silent L3), and each role's values are read field by field
+ * (`FEE_NOTICE_FIGURES`), never by an object's key order.
  */
 function figuresOf(values: FeeNoticeRoleValues[]): string {
-  const fields = (v: FeeNoticeRoleValues['oneOff']) => [
-    v.platformFeePercent,
-    v.orgFeePercent,
-    v.minPlatformFeeCents,
-    v.minTransferCents,
-  ];
+  const fields = (v: FeeNoticeValues) =>
+    FEE_NOTICE_FIGURE_KEYS.map((key) => v[key]);
   return values
     .map((v) =>
       [
@@ -1403,6 +1431,7 @@ async function sendOne(
       noticeFailed(
         ctx,
         notice,
+        'figuresUnread',
         'fee step: a fee email went, or may have, but whether its rise was cut since could not be read; check this change by hand for a smaller email owed',
         error,
         went
@@ -1415,6 +1444,7 @@ async function sendOne(
     noticeFailed(
       ctx,
       notice,
+      outcome.state === 'sent' ? 'went' : 'mayHaveGone',
       'fee step: a fee email went, or may have, but its record failed; the next run looks for it in the email log before sending again',
       error,
       went
@@ -1485,10 +1515,13 @@ async function recordOutcome(
  * One notice failed: named one by one up to ALERT_NAMED, the rest folded
  * into one end alert with their count (`alertFoldedFailures`), so one cause
  * reaching every notice is never thousands of lines (review cycle 2, L4).
+ * A folded one keeps how it failed and its change, so the end alert still
+ * says which changes need a by-hand check (review final silent-delta2).
  */
 function noticeFailed(
   ctx: SweepContext,
   notice: Claimed,
+  kind: NoticeFailure,
   message: string,
   error: unknown,
   context: Record<string, string> = {}
@@ -1496,7 +1529,13 @@ function noticeFailed(
   ctx.result.errors += 1;
   ctx.noticeFailures += 1;
   if (ctx.noticeFailures > ctx.alertNamed) {
-    ctx.foldedChangeIds.add(notice.changeId);
+    let folded = ctx.folded.get(kind);
+    if (!folded) {
+      folded = { notices: 0, changeIds: new Set() };
+      ctx.folded.set(kind, folded);
+    }
+    folded.notices += 1;
+    folded.changeIds.add(notice.changeId);
     return;
   }
   ctx.obs.error(message, {
@@ -1607,7 +1646,13 @@ async function sendDue(ctx: SweepContext): Promise<void> {
         try {
           await sendOne(ctx, notice, changes, people, reads);
         } catch (error) {
-          noticeFailed(ctx, notice, 'fee step: one notice failed', error);
+          noticeFailed(
+            ctx,
+            notice,
+            'failed',
+            'fee step: one notice failed',
+            error
+          );
         }
       })
     );
@@ -1618,15 +1663,31 @@ async function sendDue(ctx: SweepContext): Promise<void> {
  * One cause (a database blip, say) fails every notice it reaches: the first
  * ALERT_NAMED are named one by one and the rest fold into this one error
  * with their count, as the price-moves step does (review cycle 2, L4).
+ * The folded are counted by how they failed (`NoticeFailure`), each kind
+ * with its changes: a database outage mid-run is when this fires, and
+ * `byKind.figuresUnread` names the changes to check by hand for a smaller
+ * email owed (review final silent-delta2). `changes` beside a kind's ids
+ * shows when the list was cut short.
  */
 async function alertFoldedFailures(ctx: SweepContext): Promise<void> {
   const notNamed = ctx.noticeFailures - ctx.alertNamed;
   if (notNamed <= 0) return;
+  const changeIds = new Set<string>();
+  const byKind: Record<string, object> = {};
+  for (const [kind, folded] of ctx.folded) {
+    for (const id of folded.changeIds) changeIds.add(id);
+    byKind[kind] = {
+      notices: folded.notices,
+      changes: folded.changeIds.size,
+      changeIds: [...folded.changeIds].slice(0, ALERT_NAMED),
+    };
+  }
   ctx.obs.error('fee step: more notices failed than are named one by one', {
     errorId: crypto.randomUUID(),
     failed: ctx.noticeFailures,
     notNamed,
-    changeIds: [...ctx.foldedChangeIds].slice(0, ALERT_NAMED),
+    changeIds: [...changeIds].slice(0, ALERT_NAMED),
+    byKind,
   });
 }
 
@@ -1934,7 +1995,7 @@ export async function runFeeNoticesSweep(
       onlyChanges: deps.onlyChanges ?? null,
       alertNamed: deps.alertNamed ?? ALERT_NAMED,
       noticeFailures: 0,
-      foldedChangeIds: new Set(),
+      folded: new Map(),
     };
     let listedThisRun: Set<string> = new Set();
     // Each part is isolated: one failing never stops the others.
