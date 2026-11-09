@@ -8,7 +8,7 @@
 
 import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
 import { dateWindow, schema, toIso } from '@codex/database';
-import { countsAgainstCharge } from '@codex/purchase';
+import { disputesOfCharge, refundsOfCharge, takenBack } from '@codex/purchase';
 import { BaseService, NotFoundError } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
@@ -154,7 +154,8 @@ export class AdminAnalyticsService extends BaseService {
    *   it (`countsAgainstCharge`: standing ones, and failed ones support
    *   settled as refunded elsewhere, owner decision 2026-11-09, "Count it as
    *   refunded") and its lost chargebacks, never more than the charge (owner
-   *   decision Q-C).
+   *   decision Q-C). It is `takenBack` by the charge, the expression studio
+   *   Sales' "Refunds" reads by the purchase, so the two agree.
    * - `slice_net`: each slice less its share of `taken`, by the clawback's own
    *   rounding, floor(slice × taken / gross), so the figures match what the
    *   ledger takes back without reading `payout_reversals`.
@@ -208,15 +209,11 @@ export class AdminAnalyticsService extends BaseService {
       ),
       taken AS (
         SELECT c.stripe_charge_id,
-               LEAST(
-                 c.gross,
-                 COALESCE((SELECT SUM(refunds.amount_cents) FROM refunds
-                           WHERE refunds.stripe_charge_id = c.stripe_charge_id
-                             AND ${countsAgainstCharge()}), 0)
-                 + COALESCE((SELECT SUM(d.amount_cents) FROM disputes d
-                             WHERE d.stripe_charge_id = c.stripe_charge_id
-                               AND d.status = 'lost'), 0)
-               )::bigint AS cents
+               ${takenBack(
+                 sql`c.gross`,
+                 refundsOfCharge(sql`c.stripe_charge_id`),
+                 disputesOfCharge(sql`c.stripe_charge_id`)
+               )}::bigint AS cents
         FROM charges c
       ),
       slice_net AS (
