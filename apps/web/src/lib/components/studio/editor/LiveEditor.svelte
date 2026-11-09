@@ -40,6 +40,7 @@
   import LeaveDialog from './LeaveDialog.svelte';
   import LiveBar from './LiveBar.svelte';
   import LiveSettings from './LiveSettings.svelte';
+  import { takeLiveHandoff } from './live-handoff';
   import WriteCanvas from './WriteCanvas.svelte';
 
   interface Props {
@@ -84,6 +85,13 @@
     });
   }
 
+  /**
+   * Changes carried from writing: the piece went live under its draft's
+   * editor, and "Open it to update" brought them here (Codex-a6ofh.2). They
+   * start as changes waiting for Update. Taken once, as this visit mounts.
+   */
+  const carried = untrack(() => takeLiveHandoff(content.id));
+
   // One session per mount (ContentEditor keys it per visit): the props it is
   // started from are this visit's read. Mounted only for a piece that has
   // been live, so it reads as one throughout: an older row with no publish
@@ -91,6 +99,7 @@
   const session = untrack(() =>
     createDraftSession({
       saved: { id: content.id, values: savedDraftValues(content) },
+      carried,
       publication: () => ({
         status: published ? 'published' : 'draft',
         publishedAt: content.publishedAt ?? content.createdAt,
@@ -175,6 +184,8 @@
 <div class="editor">
   <Tabs.Root bind:value={() => tab, switchTab} defaultValue={initialTab}>
     <LiveBar {session} {published} onupdate={update} ondiscard={discard} {updating} {updateHint} {waiting} />
+    <!-- Said while the carried changes still wait: Update or Discard ends it. -->
+    <p class="live-carried" role="status">{carried && session.isDirty ? m.studio_live_carried() : ''}</p>
     <div class="editor-body" inert={updating}>
       <Tabs.Content value="page">
         {#key discards}
@@ -231,5 +242,20 @@
   /* No box of its own: the tabs' panels lay out as the editor's children. */
   .editor-body {
     display: contents;
+  }
+
+  .live-carried {
+    max-inline-size: var(--container-content);
+    margin: var(--space-3) auto 0;
+    padding-inline: var(--space-4);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  /* Empty, out of the flow but still in the tree, so its words are heard when they come. */
+  .live-carried:empty {
+    position: absolute;
+    margin: 0;
+    padding: 0;
   }
 </style>

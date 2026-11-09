@@ -11,6 +11,7 @@
   @prop {PayoutsRead} payouts - The page's one payouts read, for each draft's step
 -->
 <script lang="ts">
+  import { hasBeenLive } from '@codex/constants';
   import * as m from '$paraglide/messages';
   import * as DropdownMenu from '$lib/components/ui/DropdownMenu';
   import {
@@ -69,6 +70,14 @@
   );
   // A value wins (a failed refresh keeps the last one), then a failure, then loading.
   const drafts = $derived(draftsQuery?.current?.items ?? null);
+  /**
+   * The drafts to continue: a piece that has been live and is a draft again
+   * is off sale, opens in the live editor, and has no step to continue
+   * (Codex-a6ofh.2, the epic review). Filtered here, from the page read: when
+   * the newest few are all off sale, none is offered. The list's Drafts and
+   * Off sale filters (Codex-a6ofh.3.6) move this to the query.
+   */
+  const toContinue = $derived(drafts?.filter((row) => !hasBeenLive(row)) ?? null);
   const draftTotal = $derived(draftsQuery?.current?.pagination.total ?? 0);
   const failed = $derived(drafts === null && draftsQuery?.error != null);
   $effect(() => {
@@ -133,9 +142,9 @@
   </DropdownMenu.Trigger>
 
   <DropdownMenu.Content class="new-menu" data-new-menu={menuKey}>
-    {#if drafts && drafts.length > 0}
+    {#if toContinue && toContinue.length > 0}
       <p class="new-menu-heading" aria-hidden="true">{m.studio_new_menu_drafts()}</p>
-      {#each drafts as row (row.id)}
+      {#each toContinue as row (row.id)}
         {@const progress = draftProgress(row, payouts)}
         <DropdownMenu.Item href={progress?.href ?? editHref(row.id)}>
           <span class="new-menu-draft">

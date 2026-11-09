@@ -58,6 +58,7 @@
   import { createPublishSchedule } from './publish-schedule.svelte';
   import PublishScheduled from './PublishScheduled.svelte';
   import PublishSettings from './PublishSettings.svelte';
+  import WentLiveNotice from './WentLiveNotice.svelte';
   import WriteBar from './WriteBar.svelte';
 
   interface Props {
@@ -470,6 +471,8 @@
       previewHref={session.contentId === null ? null : previewHref(session.contentId, 'publish')}
     />
   </div>
+  <!-- Never held: once it went live elsewhere, its button is the way on. -->
+  <WentLiveNotice {session} />
 
   <div class="publish">
     <div class="publish-held" inert={held}>
@@ -596,7 +599,8 @@
         <Button type="button" variant={schedule.live ? 'primary' : 'secondary'} onclick={() => leave(CONTENT_LIST_HREF)}>
           {m.studio_publish_done()}
         </Button>
-      {:else}
+      {:else if !session.wentLiveElsewhere}
+        <!-- Live by another way: the notice above opens it to update. -->
         <Button
           type="button"
           disabled={blocked || navigating.to !== null}
@@ -623,7 +627,7 @@
     flex-direction: column;
     gap: var(--space-8);
     inline-size: 100%;
-    max-inline-size: 760px;
+    max-inline-size: var(--container-settings);
     margin: 0 auto;
     padding: var(--space-8) var(--space-4) var(--space-12);
   }

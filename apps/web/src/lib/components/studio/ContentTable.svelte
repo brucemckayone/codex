@@ -10,6 +10,7 @@
   @prop {PayoutsRead} payouts - The page's one payouts read, for each draft's step
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { ContentWithRelations } from '$lib/types';
   import { FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
@@ -20,6 +21,8 @@
   import DraftProgress from './content-list/DraftProgress.svelte';
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
   import { draftProgress } from './content-list/draft-progress';
+  import { listStatus } from './content-list/list-status';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
   import { editHref } from './editor/editor-url';
 
   interface Props {
@@ -38,21 +41,6 @@
     return statusOverrides[item.id] ?? item.status;
   }
 
-  function getStatusVariant(status: string): 'published' | 'draft' | 'archived' {
-    if (status === 'published') return 'published';
-    if (status === 'draft') return 'draft';
-    return 'archived';
-  }
-
-  function getStatusText(status: string): string {
-    switch (status) {
-      case 'published': return m.studio_content_status_published();
-      case 'draft': return m.studio_content_status_draft();
-      case 'archived': return m.studio_content_status_archived();
-      default: return status;
-    }
-  }
-
   function getTypeText(contentType: string): string {
     switch (contentType) {
       case 'video': return m.content_type_video();
@@ -62,7 +50,8 @@
     }
   }
 
-  async function handlePublishToggle(item: ContentWithRelations) {
+  /** Disabled while it goes, the pressed toggle loses focus: it has it back once settled. */
+  async function handlePublishToggle(item: ContentWithRelations, button: HTMLButtonElement) {
     togglingId = item.id;
     const currentStatus = getItemStatus(item);
     try {
@@ -74,6 +63,8 @@
     } finally {
       togglingId = null;
     }
+    await tick();
+    focusIfLost(button);
   }
 </script>
 
@@ -102,6 +93,8 @@
         {#each items as item (item.id)}
           {@const status = getItemStatus(item)}
           {@const progress = status === 'draft' ? draftProgress(item, payouts) : null}
+          <!-- An unpublished piece is "Off sale", never a draft (`listStatus`). -->
+          {@const shown = listStatus({ status, publishedAt: item.publishedAt })}
           {@const href = progress?.href ?? editHref(item.id)}
           <tr class="row">
             <td class="cell-title">
@@ -116,9 +109,9 @@
               <span class="type-badge">{getTypeText(item.contentType)}</span>
             </td>
             <td>
-              <span class="status-dot" data-status={getStatusVariant(status)}></span>
-              <span class="status-text" data-status={getStatusVariant(status)}>
-                {getStatusText(status)}
+              <span class="status-dot" data-status={shown.variant}></span>
+              <span class="status-text" data-status={shown.variant}>
+                {shown.label}
               </span>
             </td>
             <td class="cell-date">{formatDate(item.createdAt)}</td>
@@ -137,7 +130,7 @@
                   class="action-btn"
                   data-action={status === 'published' ? 'unpublish' : 'publish'}
                   disabled={togglingId === item.id}
-                  onclick={() => handlePublishToggle(item)}
+                  onclick={(event) => handlePublishToggle(item, event.currentTarget)}
                 >
                   {#if togglingId === item.id}
                     <Spinner size="sm" />

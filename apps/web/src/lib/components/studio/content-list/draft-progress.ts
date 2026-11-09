@@ -6,6 +6,7 @@
  * left is put right on the Write step, and Continue opens the step still to
  * do.
  */
+import { hasBeenLive } from '@codex/constants';
 import type { ContentWithRelations } from '$lib/types';
 import type { PayoutsRead } from '$lib/utils/connect-readiness';
 import * as m from '$paraglide/messages';
@@ -28,11 +29,16 @@ export interface DraftProgress {
   left: GapRow[];
 }
 
-/** A draft's progress, or null for a type the editor does not know (it cannot be opened). */
+/**
+ * A draft's progress, or null: for a piece that has been live, which is no
+ * draft (unpublished, it is off sale; owner 2026-11-05) and opens in the live
+ * editor, or for a type the editor does not know (it cannot be opened).
+ */
 export function draftProgress(
   row: ContentWithRelations,
   payouts: PayoutsRead
 ): DraftProgress | null {
+  if (hasBeenLive(row)) return null;
   const contentType = editorContentType(row.contentType);
   if (!contentType) return null;
   const media = row.mediaItem

@@ -19,6 +19,7 @@
   to do (Codex-a6ofh.2.6), where a published piece offers its toggle.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { ContentWithRelations } from '$lib/types';
   import {
     FilmIcon,
@@ -36,11 +37,13 @@
   import DraftProgress from './DraftProgress.svelte';
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
   import { draftProgress } from './draft-progress';
+  import { listStatus } from './list-status';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
 
   interface Props {
     item: ContentWithRelations;
     publishing?: boolean;
-    onPublishToggle: () => void;
+    onPublishToggle: () => Promise<unknown> | void;
     payouts: PayoutsRead;
   }
 
@@ -74,16 +77,16 @@
     }
   });
 
-  const statusMeta = $derived.by(() => {
-    switch (item.status) {
-      case 'published':
-        return { label: m.studio_content_status_published(), variant: 'published' as const };
-      case 'archived':
-        return { label: m.studio_content_status_archived(), variant: 'archived' as const };
-      default:
-        return { label: m.studio_content_status_draft(), variant: 'draft' as const };
-    }
-  });
+  // An unpublished piece is "Off sale", never a draft (`listStatus`).
+  const statusMeta = $derived(listStatus(item));
+
+  let toggleEl = $state<HTMLButtonElement | null>(null);
+  /** Disabled while it goes, the pressed toggle loses focus: it has it back once settled. */
+  async function toggle() {
+    await onPublishToggle();
+    await tick();
+    focusIfLost(toggleEl);
+  }
 
   // TODO i18n — studio_content_slab_eyebrow = "Featured · Most recent"
   const eyebrow = 'Featured';
@@ -197,7 +200,8 @@
           class="action-btn"
           data-tone={statusMeta.variant === 'published' ? 'muted' : 'primary'}
           disabled={publishing}
-          onclick={onPublishToggle}
+          onclick={toggle}
+          bind:this={toggleEl}
         >
           {#if publishing}
             <Spinner size="sm" />

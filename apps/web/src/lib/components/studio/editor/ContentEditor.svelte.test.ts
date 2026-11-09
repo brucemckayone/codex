@@ -391,6 +391,7 @@ describe('ContentEditor · a new piece named after its media', () => {
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: 'c-new',
+      asDraft: true,
       patch: { mediaItemId: null },
     });
 
@@ -802,6 +803,7 @@ describe('ContentEditor · a saved draft', () => {
     // The slug is still its title's: it follows (Codex-a6ofh.2.4).
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: 'c1',
+      asDraft: true,
       patch: { title: 'Runes, properly', slug: 'runes-properly' },
       slugFollowsTitle: true,
     });

@@ -17,6 +17,7 @@ const remotes = vi.hoisted(() => ({
 const nav = vi.hoisted(() => ({
   guards: [] as Array<(navigation: unknown) => void>,
   goto: vi.fn(),
+  invalidateAll: vi.fn(),
 }));
 const told = vi.hoisted(() => ({
   toastAdd: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock('$app/navigation', () => ({
     nav.guards.push(guard);
   },
   goto: (...args: unknown[]) => nav.goto(...args),
+  invalidateAll: (...args: unknown[]) => nav.invalidateAll(...args),
 }));
 vi.mock('$lib/components/ui/Toast/toast-store', () => ({
   toast: { add: told.toastAdd, warning: told.toastWarning },
@@ -43,6 +45,7 @@ vi.mock('$lib/observability', () => ({
 const { answeredLive, createDraftSession } = await import(
   './draft-session.svelte'
 );
+const { takeLiveHandoff } = await import('./live-handoff');
 type Options = Parameters<typeof createDraftSession>[0];
 type Session = ReturnType<typeof createDraftSession>;
 
@@ -133,6 +136,8 @@ beforeEach(() => {
   publication = DRAFT;
   nav.guards.length = 0;
   nav.goto.mockReset().mockResolvedValue(undefined);
+  nav.invalidateAll.mockReset().mockResolvedValue(undefined);
+  takeLiveHandoff(ID);
   remotes.saveContent.mockReset().mockResolvedValue(undefined);
   // As the command does: the slug from the title it was sent.
   remotes.createContentDraft
@@ -166,6 +171,7 @@ describe('what a save sends, and when', () => {
     expect(remotes.saveContent).toHaveBeenCalledTimes(1);
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: 'Runes' },
     });
     expect(session.status).toBe('saved');
@@ -198,6 +204,7 @@ describe('what a save sends, and when', () => {
     expect(remotes.saveContent).toHaveBeenCalledTimes(2);
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { description: 'Typed while saving' },
     });
   });
@@ -331,6 +338,7 @@ describe('what a save sends, and when', () => {
 
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { description: 'Rewritten' },
     });
     // Saved, so the bar says so; Publish and Update are still told the
@@ -358,6 +366,7 @@ describe('what a save sends, and when', () => {
     await settle();
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: SAVED_VALUES.title },
     });
   });
@@ -493,6 +502,7 @@ describe('a piece that has been live', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { description: 'Typed while Publish was out' },
     });
   });
@@ -663,6 +673,7 @@ describe('a new piece', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { description: 'Then a description' },
     });
   });
@@ -775,6 +786,7 @@ describe('a new piece', () => {
     expect(session.values.title).toBe('My real title');
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: 'My real title' },
     });
   });
@@ -860,6 +872,7 @@ describe('leaving', () => {
     expect(remotes.saveContent).toHaveBeenCalledTimes(2);
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { description: 'Typed during the load' },
     });
   });
@@ -1030,6 +1043,7 @@ describe('closing the editor in place', () => {
     expect(remotes.saveContent).toHaveBeenCalledTimes(1);
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: 'Last words' },
     });
   });
@@ -1049,6 +1063,7 @@ describe('closing the editor in place', () => {
     expect(remotes.saveContent).toHaveBeenCalledTimes(2);
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { description: 'Typed during the save' },
     });
   });
@@ -1215,6 +1230,7 @@ describe('closing the editor in place', () => {
     await settle();
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { mediaItemId: '7e000000-0000-4000-8000-000000000009' },
     });
     expect(told.logError).not.toHaveBeenCalled();
@@ -1240,6 +1256,7 @@ describe('closing the editor in place', () => {
     await settle();
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { description: 'Typed during the load' },
     });
   });
@@ -1289,6 +1306,7 @@ describe('the Publish step’s fields', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: {
         isFree: false,
         isPurchasable: true,
@@ -1310,6 +1328,7 @@ describe('the Publish step’s fields', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { tags: ['svelte', 'runes', 'state'] },
     });
   });
@@ -1326,6 +1345,7 @@ describe('the slug', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: 'Runes, all three', slug: 'runes-all-three' },
       slugFollowsTitle: true,
     });
@@ -1343,6 +1363,7 @@ describe('the slug', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: 'Runes', slug: 'runes' },
       slugFollowsTitle: true,
     });
@@ -1361,6 +1382,7 @@ describe('the slug', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: 'Runes, ALL three!' },
     });
   });
@@ -1373,6 +1395,7 @@ describe('the slug', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: 'Runes, all three', slug: 'runes-all-three' },
       slugFollowsTitle: true,
     });
@@ -1385,6 +1408,7 @@ describe('the slug', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: 'Runes, all three', slug: 'my-runes' },
     });
   });
@@ -1431,6 +1455,7 @@ describe('the slug', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: ID,
+      asDraft: true,
       patch: { title: 'Runes, all three', slug: 'runes-all-three' },
       slugFollowsTitle: true,
     });
@@ -1502,6 +1527,7 @@ describe('publish', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { tags: ['typed-while-out'] },
     });
   });
@@ -1547,6 +1573,7 @@ describe('publish', () => {
     await afterDebounce();
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: ID,
+      asDraft: true,
       patch: { tags: ['late'] },
     });
     expect(told.logWarn).toHaveBeenCalledWith(
@@ -2329,5 +2356,165 @@ describe('a piece that has been live: Discard, its count, and leaving (Codex-a6o
     await settle();
     expect(nav.goto).not.toHaveBeenCalled();
     expect(unload()).toBe(true);
+  });
+});
+
+// The epic review's critical (Codex-a6ofh.2, owner 2026-11-09): a piece can
+// go live with its draft's editor open (its schedule fired, an admin, another
+// tab). The server refuses the draft's save; from then on this editor sends
+// nothing, and "Open it to update" carries its changes to the live editor.
+describe('it went live by another way', () => {
+  const refusedAsLive = {
+    status: 409,
+    body: { code: 'CONTENT_ALREADY_LIVE', message: 'This went live.' },
+  };
+  const FOLLOWING: DraftValues = {
+    ...SAVED_VALUES,
+    title: 'Runes',
+    slug: contentSlugFromTitle('Runes', 'video'),
+  };
+
+  async function wentLive(values: DraftValues = SAVED_VALUES) {
+    const session = start({ saved: { id: ID, values } });
+    remotes.saveContent.mockRejectedValueOnce(refusedAsLive);
+    session.set('description', 'Half-typed');
+    await afterDebounce();
+    return session;
+  }
+
+  it('a draft save refused as live: nothing more is sent, whatever asks', async () => {
+    const session = await wentLive();
+    expect(remotes.saveContent).toHaveBeenCalledTimes(1);
+    expect(remotes.saveContent).toHaveBeenCalledWith(
+      expect.objectContaining({ asDraft: true })
+    );
+    expect(session.wentLiveElsewhere).toBe(true);
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.went_live_elsewhere',
+      { contentId: ID }
+    );
+
+    // More typing, Try again, and Next's or a move's flush: none sends, as
+    // each would be an Update this editor was never asked for.
+    session.set('description', 'More words');
+    await afterDebounce();
+    session.retry();
+    await settle();
+    const flushed = await session.flush();
+
+    expect(remotes.saveContent).toHaveBeenCalledTimes(1);
+    expect(flushed).toMatchObject({
+      ok: false,
+      code: 'CONTENT_ALREADY_LIVE',
+      message: m.studio_editor_went_live_elsewhere({
+        title: SAVED_VALUES.title,
+      }),
+    });
+    expect(session.values.description).toBe('More words');
+    expect(session.isDirty).toBe(true);
+  });
+
+  it('its address stays the live one: a slug that followed the title goes back', async () => {
+    const session = start({ saved: { id: ID, values: FOLLOWING } });
+    remotes.saveContent.mockRejectedValueOnce(refusedAsLive);
+    session.set('title', 'Runes renamed');
+    expect(session.values.slug).toBe(
+      contentSlugFromTitle('Runes renamed', 'video')
+    );
+    await afterDebounce();
+
+    expect(session.values.slug).toBe(FOLLOWING.slug);
+    session.set('title', 'Runes renamed again');
+    expect(session.values.slug).toBe(FOLLOWING.slug);
+  });
+
+  it("a live piece's Update is not a draft's save: it goes without asDraft", async () => {
+    publication = LIVE;
+    const session = start();
+    session.set('description', 'On purpose');
+    await session.flush();
+
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: { description: 'On purpose' },
+    });
+  });
+
+  it('Open it to update reads afresh, then moves, carrying every change but the address', async () => {
+    const session = await wentLive(FOLLOWING);
+    session.set('title', 'Runes renamed');
+    // An address typed on Publish meanwhile: a live piece keeps its own.
+    session.set('slug', 'a-new-address');
+    const steps: string[] = [];
+    nav.invalidateAll.mockImplementation(async () => {
+      steps.push('reread');
+    });
+    nav.goto.mockImplementation(async () => {
+      steps.push('move');
+      // The move is the session's own: its guard lets it go, unasked.
+      const { cancel } = navigate(vi.fn(), `/studio/content/${ID}/edit`);
+      expect(cancel).not.toHaveBeenCalled();
+    });
+
+    await session.openLive();
+
+    expect(steps).toEqual(['reread', 'move']);
+    expect(nav.goto).toHaveBeenCalledWith(`/studio/content/${ID}/edit`);
+    expect(takeLiveHandoff(ID)).toEqual({
+      title: 'Runes renamed',
+      description: 'Half-typed',
+    });
+    expect(remotes.saveContent).toHaveBeenCalledTimes(1);
+  });
+
+  it('a re-read that fails still moves, and is logged', async () => {
+    const session = await wentLive();
+    nav.invalidateAll.mockRejectedValueOnce(offline());
+
+    await session.openLive();
+
+    expect(nav.goto).toHaveBeenCalledWith(`/studio/content/${ID}/edit`);
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.open_live_reread_failed',
+      expect.objectContaining({ contentId: ID })
+    );
+  });
+
+  it('a move that fails is logged, and the creator stays with their changes', async () => {
+    const session = await wentLive();
+    nav.goto.mockRejectedValueOnce(new Error('navigation aborted'));
+
+    await session.openLive();
+
+    expect(told.logError).toHaveBeenCalledWith(
+      'studio_editor.open_live_failed',
+      expect.objectContaining({ contentId: ID })
+    );
+    expect(session.values.description).toBe('Half-typed');
+    // Guarding again: a move now asks, as the live piece's changes wait.
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { cancel } = navigate();
+    expect(confirm).toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('before it went live, Open it to update does nothing', async () => {
+    const session = start();
+
+    await session.openLive();
+
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(takeLiveHandoff(ID)).toBeNull();
+  });
+
+  it('carried changes start unsaved, waiting for Update, never autosaved', async () => {
+    publication = LIVE;
+    const session = start({ carried: { description: 'Carried over' } });
+
+    expect(session.values.description).toBe('Carried over');
+    expect(session.isDirty).toBe(true);
+    expect(session.changeCount).toBe(1);
+    await afterDebounce();
+    expect(remotes.saveContent).not.toHaveBeenCalled();
   });
 });

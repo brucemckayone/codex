@@ -145,6 +145,46 @@ describe('saveContent', () => {
   });
 });
 
+// A draft's autosave says so, and the server refuses it once the piece went
+// live meanwhile (Codex-a6ofh.2): that refusal reaches the session by its
+// own code, which is how the editor learns it is live.
+describe('saveContent as a draft', () => {
+  it('a draft save PATCHes with asDraft=true; an ordinary one without', async () => {
+    const api = worker(
+      json(200, { data: { id: ID, title: 'A' } }),
+      json(200, { data: { id: ID, title: 'B' } })
+    );
+
+    await remote.saveContent({ id: ID, patch: { title: 'A' }, asDraft: true });
+    await remote.saveContent({ id: ID, patch: { title: 'B' } });
+
+    const [asDraft, plain] = api.sent();
+    expect(asDraft?.url).toMatch(
+      new RegExp(`/api/content/${ID}\\?asDraft=true$`)
+    );
+    expect(plain?.url).toMatch(new RegExp(`/api/content/${ID}$`));
+  });
+
+  it('one refused as live reaches the browser as CONTENT_ALREADY_LIVE', async () => {
+    worker(
+      json(409, {
+        error: {
+          code: 'CONFLICT',
+          message: 'This went live, so a draft save can’t change it.',
+          details: { contentId: ID, code: 'CONTENT_ALREADY_LIVE' },
+        },
+      })
+    );
+    const err = await rejection(
+      remote.saveContent({ id: ID, patch: { title: 'A' }, asDraft: true })
+    );
+    expect(err).toMatchObject({
+      status: 409,
+      body: { code: 'CONTENT_ALREADY_LIVE' },
+    });
+  });
+});
+
 // The live editor's Delete reads a piece already gone as done, so the
 // piece's own not-found must reach it: the class code says any 404.
 describe('deleteContent (Codex-a6ofh.2.5)', () => {

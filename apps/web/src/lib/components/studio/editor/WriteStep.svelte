@@ -38,6 +38,7 @@
     publishStepHref,
     readEditorStep,
   } from './editor-url';
+  import WentLiveNotice from './WentLiveNotice.svelte';
   import WriteBar from './WriteBar.svelte';
   import WriteCanvas from './WriteCanvas.svelte';
 
@@ -241,15 +242,19 @@
     holding={heldMove !== null}
     previewHref={session.contentId === null ? null : previewHref(session.contentId)}
   />
+  <WentLiveNotice {session} />
   <div class="editor-canvas" inert={advancing}>
     {#if showRefused}
       <p class="editor-note" role="status">{m.media_picker_chosen_gone()}</p>
     {/if}
+    <!-- Live by another way (Codex-a6ofh.2): the canvas is a live piece's, so
+         a cover is staged for Update and travels with the carried changes. -->
     <WriteCanvas
       {session}
       {contentType}
       {authorName}
       durationSeconds={chosenMedia?.durationSeconds ?? null}
+      live={session.wentLiveElsewhere}
       oncoverbusy={(busy, failed) => {
         coverBusy = busy;
         if (failed) heldMove = null;

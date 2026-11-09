@@ -1160,11 +1160,21 @@ export function createServerApi(
       /**
        * Update content
        */
-      update: (id: string, data: unknown) =>
-        request<ContentWithRelations>('content', `/api/content/${id}`, {
-          method: 'PATCH',
-          body: JSON.stringify(data),
-        }),
+      /**
+       * Save fields. `asDraft`: a draft's autosave, refused (409
+       * CONTENT_ALREADY_LIVE) once the piece has been live, so it never
+       * writes to a live piece (Codex-a6ofh.2).
+       */
+      update: (
+        id: string,
+        data: unknown,
+        options: { asDraft?: boolean } = {}
+      ) =>
+        request<ContentWithRelations>(
+          'content',
+          `/api/content/${id}${options.asDraft ? '?asDraft=true' : ''}`,
+          { method: 'PATCH', body: JSON.stringify(data) }
+        ),
 
       /**
        * Publish content (draft -> published). `whenReady`: media still on

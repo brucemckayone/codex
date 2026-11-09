@@ -4,9 +4,10 @@
  * live piece keeps its toggle and Edit. A draft goes live on the Publish
  * step, with its checks, never from the list.
  */
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { ContentWithRelations } from '$lib/types';
 import type { PayoutsRead } from '$lib/utils/connect-readiness';
+import * as m from '$paraglide/messages';
 import {
   flushSync,
   mount,
@@ -22,10 +23,20 @@ const text = (selector: string) =>
 describe('ContentRow', () => {
   let component: ReturnType<typeof mount> | null = null;
 
-  function render(item: ContentWithRelations, payouts: PayoutsRead = 'ready') {
+  function render(
+    item: ContentWithRelations,
+    payouts: PayoutsRead = 'ready',
+    extra: Record<string, unknown> = {}
+  ) {
     component = mount(ContentRow, {
       target: document.body,
-      props: { ordinal: '02', item, payouts, onPublishToggle: () => {} },
+      props: {
+        ordinal: '02',
+        item,
+        payouts,
+        onPublishToggle: () => {},
+        ...extra,
+      },
     });
     flushSync();
   }
@@ -78,5 +89,43 @@ describe('ContentRow', () => {
     expect(document.querySelector('a.row-edit')?.getAttribute('href')).toBe(
       '/studio/content/c1/edit'
     );
+  });
+
+  // Codex-a6ofh.2, the epic review: unpublished, a piece is off sale, never a
+  // draft (owner 2026-11-05). It keeps its toggle and Edit, as a live one.
+  test('a piece unpublished since is off sale, with its toggle, and no Continue', () => {
+    render(
+      draftRow({
+        ...withMedia('ready'),
+        status: 'draft',
+        publishedAt: new Date('2026-11-01T09:00:00.000Z'),
+      })
+    );
+
+    expect(text('.status-pill')).toBe(m.studio_live_badge_unpublished());
+    expect(document.querySelector('.draft-progress')).toBeNull();
+    expect(text('button.row-toggle')).toBe(m.studio_content_form_publish());
+    expect(document.querySelector('a.row-edit')?.getAttribute('href')).toBe(
+      '/studio/content/c1/edit'
+    );
+  });
+
+  test('the pressed toggle has focus back once it settles', async () => {
+    const toggled = Promise.withResolvers<void>();
+    render(draftRow({ ...withMedia('ready'), ...LIVE }), 'ready', {
+      onPublishToggle: vi.fn(() => toggled.promise),
+    });
+    const toggle =
+      document.querySelector<HTMLButtonElement>('button.row-toggle');
+    toggle?.focus();
+    toggle?.click();
+    // Disabled while it goes, it lost focus, as a browser drops it.
+    toggle?.blur();
+
+    toggled.resolve();
+    await toggled.promise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(document.activeElement).toBe(toggle);
   });
 });

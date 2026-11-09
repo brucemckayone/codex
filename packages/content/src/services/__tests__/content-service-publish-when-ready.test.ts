@@ -475,6 +475,65 @@ describe('ContentService: publish when ready', () => {
     });
   });
 
+  // The epic review's critical (Codex-a6ofh.2): a piece can go live with the
+  // editor still open on it (its schedule fired, an admin, another tab). A
+  // draft's autosave must then never write to it: its changes wait for Update.
+  describe("a draft's autosave (asDraft)", () => {
+    const DRAFT_SAVE_REFUSED = {
+      statusCode: 409,
+      context: { code: 'CONTENT_ALREADY_LIVE' },
+    };
+
+    it('saves a draft that has never been live', async () => {
+      const row = await onItsWay();
+      await service.publish(row.id, creatorId, { whenReady: true });
+
+      await service.update(row.id, { title: 'Still a draft' }, creatorId, {
+        asDraft: true,
+      });
+
+      expect((await stored(row.id)).title).toBe('Still a draft');
+    });
+
+    it('is refused once it went live, and writes nothing', async () => {
+      const row = await draft({ mediaItemId: (await media('ready')).id });
+      await service.publish(row.id, creatorId);
+      const live = await stored(row.id);
+
+      await expect(
+        service.update(row.id, { title: 'Half-typed' }, creatorId, {
+          asDraft: true,
+        })
+      ).rejects.toMatchObject(DRAFT_SAVE_REFUSED);
+      const after = await stored(row.id);
+      expect(after.title).toBe(live.title);
+      expect(after.updatedAt).toEqual(live.updatedAt);
+    });
+
+    // Ever live counts as live (owner, 2026-11-05: its buyers keep it).
+    it('is refused on a piece unpublished since', async () => {
+      const row = await draft({ mediaItemId: (await media('ready')).id });
+      await service.publish(row.id, creatorId);
+      await service.unpublish(row.id, creatorId);
+      expect((await stored(row.id)).status).toBe('draft');
+
+      await expect(
+        service.update(row.id, { title: 'Half-typed' }, creatorId, {
+          asDraft: true,
+        })
+      ).rejects.toMatchObject(DRAFT_SAVE_REFUSED);
+    });
+
+    it("a live piece's Update (no asDraft) still saves", async () => {
+      const row = await draft({ mediaItemId: (await media('ready')).id });
+      await service.publish(row.id, creatorId);
+
+      await service.update(row.id, { title: 'Updated on purpose' }, creatorId);
+
+      expect((await stored(row.id)).title).toBe('Updated on purpose');
+    });
+  });
+
   describe('a refusal says what to do', () => {
     it('a stopped upload is marked stalled; one still uploading is not', async () => {
       const stalled = await draft({

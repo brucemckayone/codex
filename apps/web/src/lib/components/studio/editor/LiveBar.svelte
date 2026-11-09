@@ -11,14 +11,16 @@
 
   @prop {DraftSession} session - The editor's draft session
   @prop {boolean} published - On sale now; false once unpublished
-  @prop {() => void} onupdate - Send the changes
+  @prop {() => Promise<unknown> | void} onupdate - Send the changes; focus goes to the changes line once it settles
   @prop {() => void} ondiscard - Put every field back as it is live
   @prop {boolean} [updating] - Update was pressed and is sending
   @prop {string | null} [updateHint] - Why Update can't go yet; null when it can
   @prop {boolean} [waiting] - Something is on its way (a cover, an upload, a category): Discard waits for it
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import { Badge, Button } from '$lib/components/ui';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
   import * as Tabs from '$lib/components/ui/Tabs';
   import * as m from '$paraglide/messages';
   import type { DraftSession } from './draft-session.svelte';
@@ -28,7 +30,7 @@
   interface Props {
     session: DraftSession;
     published: boolean;
-    onupdate: () => void;
+    onupdate: () => Promise<unknown> | void;
     ondiscard: () => void;
     updating?: boolean;
     updateHint?: string | null;
@@ -57,6 +59,18 @@
     return count === 1 ? m.studio_live_changes_one() : m.studio_live_changes({ count });
   });
   const hintId = $props.id();
+
+  let changesEl = $state<HTMLElement | null>(null);
+  /**
+   * Update and Discard each disable themselves once pressed (busy, or with
+   * nothing left), which drops focus: it goes to the line that says how it
+   * went (the epic review).
+   */
+  async function settled(action: () => Promise<unknown> | void) {
+    await action();
+    await tick();
+    focusIfLost(changesEl);
+  }
 </script>
 
 <header class="live-bar">
@@ -77,7 +91,12 @@
     {#if failed}
       <span class="live-error" role="alert">{session.errorMessage ?? m.studio_content_draft_save_failed()}</span>
     {/if}
-    <span class={['live-changes', { 'live-changes--some': count > 0 }]} role="status">{changesWords}</span>
+    <span
+      class={['live-changes', { 'live-changes--some': count > 0 }]}
+      role="status"
+      tabindex="-1"
+      bind:this={changesEl}
+    >{changesWords}</span>
     {#if leaving}
       <Button type="button" size="sm" variant="ghost" onclick={() => session.stay()}>
         {m.studio_live_leave_stay()}
@@ -92,7 +111,7 @@
       variant="ghost"
       disabled={count === 0 || updating || waiting}
       aria-describedby={waiting && updateHint !== null ? hintId : undefined}
-      onclick={ondiscard}
+      onclick={() => settled(ondiscard)}
     >
       {m.studio_live_discard()}
     </Button>
@@ -102,7 +121,7 @@
       disabled={count === 0 || updateHint !== null}
       loading={updating}
       aria-describedby={updateHint === null ? undefined : hintId}
-      onclick={onupdate}
+      onclick={() => settled(onupdate)}
     >
       {m.studio_live_update()}
     </Button>
@@ -147,6 +166,12 @@
 
   .live-changes {
     color: var(--color-text-secondary);
+  }
+
+  .live-changes:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
   }
 
   .live-changes--some {

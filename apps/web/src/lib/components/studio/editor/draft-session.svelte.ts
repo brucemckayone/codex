@@ -42,12 +42,13 @@
 
 import {
   CONTENT_STATUS,
+  ERROR_CODES,
   hasBeenLive,
   type PublicationState,
 } from '@codex/constants';
 import { type CreateContentInput, extractPlainText } from '@codex/validation';
 import { untrack } from 'svelte';
-import { beforeNavigate, goto } from '$app/navigation';
+import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
 import { describeThrown } from '$lib/client-log';
 import { toast } from '$lib/components/ui/Toast/toast-store';
 import { logger } from '$lib/observability';
@@ -70,6 +71,8 @@ import {
 } from '$lib/utils/content-access';
 import { contentSlugFromTitle, isTitleSlug } from '$lib/utils/content-slug';
 import * as m from '$paraglide/messages';
+import { editHref } from './editor-url';
+import { handOffToLive } from './live-handoff';
 
 /**
  * Who can watch, and at what price: one value, sent as one group, as the
@@ -136,6 +139,12 @@ export function askToLeaveByConfirm(reason: LeaveReason): LeaveAnswer {
 export interface DraftSessionOptions {
   /** The saved piece, or null for a new one that its first save creates. */
   saved: { id: string; values: DraftValues } | null;
+  /**
+   * Changes carried from the piece's draft editor, which it went live under
+   * ("Open it to update", Codex-a6ofh.2): on no row yet, so they start
+   * unsaved, waiting for Update. A piece that has been live only.
+   */
+  carried?: Partial<DraftValues> | null;
   /**
    * The piece's status and publishedAt, read each time they matter, so a
    * Publish or Unpublish while the editor is open changes what it does. A
@@ -218,6 +227,21 @@ export interface DraftSession {
   readonly hasUnpublishedChanges: boolean;
   /** How many fields a save would send: the live bar's "2 changes not live yet". */
   readonly changeCount: number;
+  /**
+   * It went live by a way this editor did not see (its schedule fired, an
+   * admin, another tab), as a draft's save found (Codex-a6ofh.2). From then
+   * on nothing is sent from here: its changes wait, for the live editor
+   * ({@link DraftSession.openLive}).
+   */
+  readonly wentLiveElsewhere: boolean;
+  /** The title the server holds: what the piece is called where it is live. */
+  readonly savedTitle: string;
+  /**
+   * Open the piece in the live editor, carrying every change not on its row
+   * (but its address: a live piece keeps its own), to wait for Update
+   * (owner, 2026-11-09). Only once it {@link DraftSession.wentLiveElsewhere}.
+   */
+  openLive(): Promise<void>;
   set<K extends keyof DraftValues>(key: K, value: DraftValues[K]): void;
   /**
    * Put every field back as the server holds it (an Update still on the
@@ -355,11 +379,19 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   /** This session's own Publish is out, or it put the piece live. */
   let publishing = false;
   let wentLive = false;
+  /** A draft's save found it live: see {@link DraftSession.wentLiveElsewhere}. */
+  let liveElsewhere = $state(false);
   const isLive = (): boolean =>
-    publishing || wentLive || (unmounted ? lastLive : readLive());
+    publishing ||
+    wentLive ||
+    liveElsewhere ||
+    (unmounted ? lastLive : readLive());
   const initial = options.saved?.values ?? EMPTY;
-  // A copy: the baseline must never share a list the screen changes.
-  const values = $state<DraftValues>(structuredClone(initial));
+  // A copy: the baseline must never share a list the screen changes. Changes
+  // carried from the draft editor start unsaved, against the row.
+  const values = $state<DraftValues>(
+    structuredClone({ ...initial, ...options.carried })
+  );
   let baseline = $state.raw<DraftValues>(initial);
   let contentId = $state<string | null>(options.saved?.id ?? null);
 
@@ -523,9 +555,33 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     return { ...rest, ...accessGroupToFlags(access, organizationId) };
   }
 
+  /** What a save comes to once it went live elsewhere: nothing sent. */
+  const leftForLive = (): AutosaveSaveResult => ({
+    ok: false,
+    code: ERROR_CODES.CONTENT_ALREADY_LIVE,
+    message: m.studio_editor_went_live_elsewhere({
+      title: baseline.title.trim(),
+    }),
+  });
+
+  /**
+   * The server refused a draft's save: the piece went live meanwhile, by a
+   * way this editor did not see. It reads as live from here, so nothing
+   * autosaves, and its address stays the live one the row holds.
+   */
+  function wentLiveElsewhere(): void {
+    liveElsewhere = true;
+    slugFollows = false;
+    values.slug = baseline.slug;
+    logger.warn('studio_editor.went_live_elsewhere', { contentId });
+  }
+
   async function save(): Promise<AutosaveSaveResult> {
     const keys = sendableKeys();
     if (keys.length === 0) return { ok: true };
+    // Live by another way: an Update is not this editor's to send, whatever
+    // asks (Try again, Next, a move's save). Its changes go to the live one.
+    if (liveElsewhere) return leftForLive();
     // Update puts every field live at once: none goes without its title.
     if (needsTitle && isLive()) return titleNeeded();
     // Taken before the first await: whatever is typed from here on is the
@@ -562,6 +618,8 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           id: contentId,
           patch: toPatch(sent),
           ...(slugFollowsTitle && { slugFollowsTitle }),
+          // A draft's autosave says so: refused once it has been live.
+          ...(!sendingUpdate && { asDraft: true }),
         });
         // The slug the save made free, in place of the one sent.
         const freed = saved?.slug;
@@ -589,6 +647,13 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         }
       }
     } catch (err) {
+      if (
+        !sendingUpdate &&
+        remoteErrorCode(err) === ERROR_CODES.CONTENT_ALREADY_LIVE
+      ) {
+        wentLiveElsewhere();
+        return leftForLive();
+      }
       return failure(err);
     } finally {
       sending = null;
@@ -993,6 +1058,46 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     },
     get changeCount() {
       return toSend.length;
+    },
+    get wentLiveElsewhere() {
+      return liveElsewhere;
+    },
+    get savedTitle() {
+      return baseline.title.trim();
+    },
+    async openLive() {
+      if (!liveElsewhere || contentId === null) return;
+      const id = contentId;
+      handOffToLive(
+        id,
+        Object.fromEntries(
+          sendableKeys()
+            .filter((key) => key !== 'slug')
+            .map((key) => [key, $state.snapshot(values[key])])
+        )
+      );
+      leaving = true;
+      try {
+        // Read afresh first. Each route opens the live editor from its read
+        // of the piece, and a move to the same address reads nothing new.
+        // A read that fails still moves: the live editor's route reads it.
+        await invalidateAll().catch((err: unknown) => {
+          logger.warn('studio_editor.open_live_reread_failed', {
+            contentId: id,
+            ...describeThrown(err),
+          });
+        });
+        await goto(editHref(id));
+      } catch (err) {
+        // The creator stays, the notice and its button with them.
+        logger.error('studio_editor.open_live_failed', {
+          contentId: id,
+          ...describeThrown(err),
+        });
+      } finally {
+        // Still mounted: the move did not happen, so guard again.
+        if (!unmounted) leaving = false;
+      }
     },
     discard() {
       if (!isLive()) return;

@@ -418,6 +418,7 @@ describe('PublishStep · who can watch', () => {
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: 'c1',
+      asDraft: true,
       patch: {
         isFree: false,
         isPurchasable: true,
@@ -452,6 +453,7 @@ describe('PublishStep · who can watch', () => {
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
     expect(remotes.saveContent).toHaveBeenLastCalledWith({
       id: 'c1',
+      asDraft: true,
       patch: expect.objectContaining({
         isFree: true,
         isPurchasable: false,
@@ -1048,7 +1050,11 @@ describe('PublishStep · what it tells, and when', () => {
     choose('followers');
     publishButton()?.click();
     await vi.advanceTimersByTimeAsync(0);
-    const alerts = [...document.querySelectorAll('[role="alert"]')];
+    // Alerts that say something: an empty one, mounted for words to come
+    // (the went-live notice), announces nothing.
+    const alerts = [...document.querySelectorAll('[role="alert"]')].filter(
+      (alert) => alert.textContent?.trim()
+    );
     expect(alerts).toHaveLength(1);
     expect(alerts[0]?.classList.contains('publish-refusal')).toBe(true);
   });

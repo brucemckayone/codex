@@ -38,6 +38,7 @@ import {
   env,
   waitOnExecutionContext,
 } from 'cloudflare:test';
+import { ContentAlreadyLiveError } from '@codex/content';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -141,10 +142,10 @@ async function publish(contentId: string, query = ''): Promise<Response> {
   return res;
 }
 
-async function save(contentId: string): Promise<Response> {
+async function save(contentId: string, query = ''): Promise<Response> {
   const ec = createExecutionContext();
   const res = await buildApp().fetch(
-    new Request(`http://content-api.test/api/content/${contentId}`, {
+    new Request(`http://content-api.test/api/content/${contentId}${query}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'A better title' }),
@@ -343,6 +344,44 @@ describe('PATCH /:id fans out only for a piece that has been live', () => {
         reason: 'content_updated',
       })
     );
+  });
+
+  // A draft's autosave (Codex-a6ofh.2): the editor says it is one, so the
+  // service can refuse it on a piece that went live meanwhile.
+  it('a draft autosave asks with asDraft; a plain save does not', async () => {
+    const ids = saved(false);
+
+    await save(ids.contentId, '?asDraft=true');
+    await save(ids.contentId);
+
+    const calls = contentSpies.updateReportingDroppedThumbnail.mock.calls;
+    expect(calls.map((call) => call[3])).toEqual([
+      { asDraft: true },
+      { asDraft: false },
+    ]);
+  });
+
+  it('a mistyped asDraft is refused before the service is asked', async () => {
+    const { contentId } = freshIds();
+
+    expect((await save(contentId, '?asDraft=yes')).status).toBe(400);
+    expect(contentSpies.updateReportingDroppedThumbnail).not.toHaveBeenCalled();
+  });
+
+  it('a draft save refused as live is a 409 with its code, and bumps nothing', async () => {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.updateReportingDroppedThumbnail.mockRejectedValue(
+      new ContentAlreadyLiveError(ids.contentId, 'draft-save')
+    );
+
+    const res = await save(ids.contentId, '?asDraft=true');
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: { details: { code: 'CONTENT_ALREADY_LIVE' } },
+    });
+    await untouched(ids);
   });
 });
 

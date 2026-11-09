@@ -19,6 +19,7 @@
   toggle: the Publish step is where a draft goes live, with its checks.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import type { ContentWithRelations } from '$lib/types';
   import {
@@ -36,12 +37,14 @@
   import DraftProgress from './DraftProgress.svelte';
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
   import { draftProgress } from './draft-progress';
+  import { listStatus } from './list-status';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
 
   interface Props {
     ordinal: string;
     item: ContentWithRelations;
     publishing?: boolean;
-    onPublishToggle: () => void;
+    onPublishToggle: () => Promise<unknown> | void;
     payouts: PayoutsRead;
   }
 
@@ -65,29 +68,21 @@
     }
   });
 
-  const statusVariant = $derived(
-    item.status === 'published'
-      ? 'published'
-      : item.status === 'archived'
-        ? 'archived'
-        : 'draft'
-  );
+  // An unpublished piece is "Off sale", never a draft (`listStatus`).
+  const status = $derived(listStatus(item));
 
-  const statusLabel = $derived.by(() => {
-    switch (item.status) {
-      case 'published':
-        return m.studio_content_status_published();
-      case 'archived':
-        return m.studio_content_status_archived();
-      default:
-        return m.studio_content_status_draft();
-    }
-  });
+  let toggleEl = $state<HTMLButtonElement | null>(null);
+  /** Disabled while it goes, the pressed toggle loses focus: it has it back once settled. */
+  async function toggle() {
+    await onPublishToggle();
+    await tick();
+    focusIfLost(toggleEl);
+  }
 
   const isGated = $derived(accessKind !== 'free');
 </script>
 
-<article class="row" data-status={statusVariant}>
+<article class="row" data-status={status.variant}>
   <div class="row-thumb">
     {#if item.thumbnailUrl}
       <!-- 9-12rem wide, 6rem below md (Codex-kk9nv.3), in a 16:9 frame the
@@ -143,9 +138,9 @@
   </div>
 
   <div class="row-status">
-    <span class="status-pill" data-status={statusVariant}>
+    <span class="status-pill" data-status={status.variant}>
       <span class="status-dot" aria-hidden="true"></span>
-      {statusLabel}
+      {status.label}
     </span>
     <time class="row-date" datetime={new Date(item.updatedAt).toISOString()}>
       {formatRelativeTime(item.updatedAt)}
@@ -162,13 +157,14 @@
       <button
         type="button"
         class="row-toggle"
-        data-action={statusVariant === 'published' ? 'unpublish' : 'publish'}
+        data-action={status.variant === 'published' ? 'unpublish' : 'publish'}
         disabled={publishing}
-        onclick={onPublishToggle}
+        onclick={toggle}
+        bind:this={toggleEl}
       >
         {#if publishing}
           <Spinner size="sm" />
-        {:else if statusVariant === 'published'}
+        {:else if status.variant === 'published'}
           {m.studio_content_form_unpublish()}
         {:else}
           {m.studio_content_form_publish()}

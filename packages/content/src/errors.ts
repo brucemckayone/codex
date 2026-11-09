@@ -220,17 +220,26 @@ export class ContentTypeMismatchError extends BusinessLogicError {
 }
 
 /**
- * A cancel of a publish-when-ready schedule that came too late: the piece
- * went live first, by the media-ready trigger or another tab (Codex-a6ofh.2.7).
- * 409 with `details.code: 'CONTENT_ALREADY_LIVE'`, never a 200 that reads as
- * "cancelled".
+ * 409 with `details.code: 'CONTENT_ALREADY_LIVE'`: what was asked of a draft
+ * came too late, as the piece went live first (the media-ready trigger, an
+ * admin, another tab). `refused` names what was asked:
+ * - `cancel`: a publish-when-ready cancel (Codex-a6ofh.2.7), never a 200
+ *   that reads as "cancelled".
+ * - `draft-save`: a draft's autosave (`asDraft`, Codex-a6ofh.2), never
+ *   written, so a half-typed change never reaches the live piece. Its
+ *   changes wait for Update.
  */
 export class ContentAlreadyLiveError extends ConflictError {
-  constructor(contentId: string) {
-    super('This is already live, so there is no publish to cancel.', {
-      contentId,
-      code: ERROR_CODES.CONTENT_ALREADY_LIVE,
-    });
+  constructor(contentId: string, refused: 'cancel' | 'draft-save') {
+    super(
+      refused === 'cancel'
+        ? 'This is already live, so there is no publish to cancel.'
+        : 'This went live, so a draft save can’t change it. Its changes wait for Update.',
+      {
+        contentId,
+        code: ERROR_CODES.CONTENT_ALREADY_LIVE,
+      }
+    );
   }
 }
 

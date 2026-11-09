@@ -12531,6 +12531,30 @@ export const studio_editor_unknown_type = () => `This piece can’t be opened in
 
 
 /**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_went_live_elsewhere = (params) => `“${params.title}” went live while you were writing. Your latest changes aren’t on it yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_open_live = () => `Open it to update`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_live_carried = () => `Your changes from writing are here. Update puts them live.`
+
+
+/**
  * 
  * @returns {string}
  */

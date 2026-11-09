@@ -252,9 +252,10 @@ export const NON_RETRYABLE_TRANSCODING_ERROR_CODES: readonly TranscodingErrorCod
 /**
  * A failed transcode nothing will try again: its code is one no attempt can
  * cure, or its attempts are spent. The same rule `claimForDispatch` refuses
- * a claim by, so a failure it would still dispatch (the maintenance run, or
- * the creator's Retry) is not terminal. Publish when ready clears a schedule
- * only on these (Codex-a6ofh.2.8); any other failure may yet get there.
+ * a claim by, so a failure the creator's Retry would still dispatch is not
+ * terminal (the maintenance run claims only `uploaded` rows, never a failed
+ * one). Publish when ready clears a schedule only on these (Codex-a6ofh.2.8);
+ * any other failure may yet get there.
  */
 export function isTerminalTranscodeFailure(media: {
   status: string;

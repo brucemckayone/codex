@@ -51,6 +51,15 @@
    * (Codex-a6ofh.2.3). One token, so the two cannot drift apart. */
   --container-content: 60rem; /* 960px */
 
+  /* An article's Write canvas: near the public page's prose measure
+   * (prose.css caps it at 72ch inside --container-content), so the words
+   * wrap about where readers see them (Codex-a6ofh.2.3). */
+  --container-article: 45rem; /* 720px */
+
+  /* The Publish step's column and a live piece's Settings: one setting to a
+   * row, the length a form reads at (Codex-a6ofh.2.4, .2.5). */
+  --container-settings: 47.5rem; /* 760px */
+
   /* ========================================
    * CONTROL WIDTHS
    * ========================================

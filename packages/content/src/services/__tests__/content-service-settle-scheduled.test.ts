@@ -281,6 +281,61 @@ describe('ContentService.settleScheduledForMedia', () => {
       expect(saved.publishBlockedReason).toBe('TIER_REQUIRED_TO_PUBLISH');
     });
 
+    // The epic review: a deleted org's slug is free for another org to take
+    // (idx_unique_org_slug is partial on deleted_at), so a stopped draft's
+    // email must never link to it: no slug, so no link.
+    it('a draft in an org deleted since is stopped with no slug to link to', async () => {
+      const team = await org();
+      await joinTeam(db, team.id, creatorId);
+      const film = await media('ready');
+      const row = await scheduled(film.id, { organizationId: team.id });
+      await db
+        .update(organizations)
+        .set({ deletedAt: new Date() })
+        .where(eq(organizations.id, team.id));
+
+      const { settled } = await settleTelling(service, film.id);
+
+      expect(settled.wentLive).toEqual([]);
+      expect(settled.stopped).toEqual([
+        expect.objectContaining({ id: row.id, organizationSlug: null }),
+      ]);
+    });
+
+    it('one moved into a deleted org between the read and the write has no slug either', async () => {
+      const team = await org();
+      await joinTeam(db, team.id, creatorId);
+      await db
+        .update(organizations)
+        .set({ deletedAt: new Date() })
+        .where(eq(organizations.id, team.id));
+      const film = await media('ready');
+      const row = await scheduled(film.id);
+      const svc = serviceWhere({
+        transaction: {
+          swap:
+            (real) =>
+            async (...args) => {
+              await db
+                .update(content)
+                .set({ organizationId: team.id })
+                .where(eq(content.id, row.id));
+              return real(...args);
+            },
+        },
+      });
+
+      const settled = await svc.settleScheduledForMedia(film.id);
+
+      expect([...settled.wentLive, ...settled.stopped]).toEqual([
+        expect.objectContaining({
+          id: row.id,
+          organizationId: team.id,
+          organizationSlug: null,
+        }),
+      ]);
+    });
+
     // The webhook and the maintenance run can both read a draft as scheduled
     // before either publishes it. Made certain here: the draft's row lock is
     // held until BOTH settles wait on it, so each has read it as scheduled.

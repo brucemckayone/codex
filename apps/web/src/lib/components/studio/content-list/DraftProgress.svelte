@@ -76,6 +76,6 @@
 
   /* Write's to put right: the draft is not finished yet. */
   .next[data-fix='write'] {
-    color: var(--color-warning-700);
+    color: var(--color-status-warning-text);
   }
 </style>

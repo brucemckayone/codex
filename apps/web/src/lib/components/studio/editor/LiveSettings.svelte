@@ -24,11 +24,12 @@
 -->
 <script lang="ts">
   import { ERROR_CODES } from '@codex/constants';
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { Button, ConfirmDialog } from '$lib/components/ui';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { describeThrown } from '$lib/client-log';
   import { logger } from '$lib/observability';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
   import { deleteContent } from '$lib/remote/content.remote';
   import { queryErrorMessage, remoteErrorCode, remoteErrorStatus } from '$lib/remote/query-result';
   import type { ContentWithRelations } from '$lib/types';
@@ -93,6 +94,8 @@
   // ── Unpublish, or publish again ────────────────────────────────────────
   let toggling = $state(false);
   /** The toggle says how it went (a toast either way); a failure leaves it as it was. */
+  /** Busy while it goes, the pressed toggle loses focus: it has it back once settled (the epic review). */
+  let toggleRow = $state<HTMLElement | null>(null);
   async function togglePublished() {
     toggling = true;
     try {
@@ -105,6 +108,8 @@
     } finally {
       toggling = false;
     }
+    await tick();
+    focusIfLost(toggleRow?.querySelector('button'));
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────
@@ -173,7 +178,7 @@
   {/if}
 
   <EditorSection headingId="{ids}-off" ordinal={lastOrdinal} title={m.studio_live_off()}>
-    <div class="settings-off">
+    <div class="settings-off" bind:this={toggleRow}>
       <p class="settings-hint">{published ? m.studio_live_unpublish_hint() : m.studio_live_republish_hint()}</p>
       <Button type="button" size="sm" variant="secondary" loading={toggling} onclick={togglePublished}>
         {published ? m.studio_content_form_unpublish() : m.studio_live_republish()}
@@ -204,7 +209,7 @@
     flex-direction: column;
     gap: var(--space-8);
     inline-size: 100%;
-    max-inline-size: 760px;
+    max-inline-size: var(--container-settings);
     margin: 0 auto;
     padding: var(--space-8) var(--space-4) var(--space-12);
   }

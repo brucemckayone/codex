@@ -330,6 +330,15 @@ function stoppingReason(error: unknown): PublishBlockedReason | null {
  * platform-produced), so the only effect is that a caller cannot set a
  * thumbnail at all on a mis-configured deployment.
  */
+/** How {@link ContentService.update} is asked to save. */
+export interface UpdateContentOptions {
+  /**
+   * A draft's autosave (Codex-a6ofh.2): refused with
+   * `ContentAlreadyLiveError` once the piece has been live, never written.
+   */
+  asDraft?: boolean;
+}
+
 export interface ContentServiceConfig extends ServiceConfig {
   /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
   r2PublicUrlBase?: string;
@@ -851,16 +860,20 @@ export class ContentService extends BaseService {
    * @throws {ContentTypeMismatchError} If its type isn't the content's
    * @throws {CreatorPayoutsRequiredError} If the update sets or changes a
    *   price or tier on published content whose creator can't be paid
+   * @throws {ContentAlreadyLiveError} (409) `asDraft` on a piece that has
+   *   been live: a draft's autosave never writes to one
    */
   async update(
     id: string,
     input: UpdateContentInput,
-    creatorId: string
+    creatorId: string,
+    options: UpdateContentOptions = {}
   ): Promise<Content & ContentTierWire> {
     const { content: updated } = await this.updateReportingDroppedThumbnail(
       id,
       input,
-      creatorId
+      creatorId,
+      options
     );
     return updated;
   }
@@ -879,7 +892,8 @@ export class ContentService extends BaseService {
   async updateReportingDroppedThumbnail(
     id: string,
     input: UpdateContentInput,
-    creatorId: string
+    creatorId: string,
+    { asDraft = false }: UpdateContentOptions = {}
   ): Promise<{
     content: Content & ContentTierWire;
     droppedThumbnailUrl: string | null;
@@ -942,6 +956,14 @@ export class ContentService extends BaseService {
 
         if (!existing) {
           throw new ContentNotFoundError(id);
+        }
+
+        // A draft's autosave writes only while the piece has never been
+        // live. Judged here, on the locked row, so a go-live the editor did
+        // not see (its schedule fired, an admin, another tab) is refused,
+        // never a half-typed change on the live piece (Codex-a6ofh.2).
+        if (asDraft && hasBeenLive(existing)) {
+          throw new ContentAlreadyLiveError(id, 'draft-save');
         }
 
         // Moving the row into a different org needs the same team membership
@@ -1742,7 +1764,7 @@ export class ContentService extends BaseService {
         throw new ContentNotFoundError(id);
       }
       if (!cleared && row.status === CONTENT_STATUS.PUBLISHED) {
-        throw new ContentAlreadyLiveError(id);
+        throw new ContentAlreadyLiveError(id, 'cancel');
       }
       const [wired] = await withTierWire(this.db, [row]);
       return wired ?? { ...row, includedInTierIds: [], includedInTierId: null };
@@ -2067,10 +2089,16 @@ export class ContentService extends BaseService {
     if (row.organizationId === read.organizationId) return refreshed;
     if (!row.organizationId) return { ...refreshed, organizationSlug: null };
     try {
+      // A deleted org's slug is free for another org to take: never linked.
       const [org] = await this.db
         .select({ slug: organizations.slug })
         .from(organizations)
-        .where(eq(organizations.id, row.organizationId));
+        .where(
+          and(
+            eq(organizations.id, row.organizationId),
+            isNull(organizations.deletedAt)
+          )
+        );
       return { ...refreshed, organizationSlug: org?.slug ?? null };
     } catch (error) {
       this.obs.error('Org slug of a settled draft not read; no link sent', {
@@ -2106,13 +2134,18 @@ export class ContentService extends BaseService {
         creator: {
           columns: { id: true, name: true, email: true, username: true },
         },
-        organization: { columns: { slug: true } },
+        organization: { columns: { slug: true, deletedAt: true } },
       },
     });
     return {
       drafts: rows.slice(0, SETTLE_BATCH).map(({ organization, ...row }) => ({
         ...row,
-        organizationSlug: organization?.slug ?? null,
+        // A deleted org's slug is free for another org to take: the draft
+        // is sent no link rather than one into someone else's studio.
+        organizationSlug:
+          organization && organization.deletedAt === null
+            ? organization.slug
+            : null,
       })),
       more: rows.length > SETTLE_BATCH,
     };

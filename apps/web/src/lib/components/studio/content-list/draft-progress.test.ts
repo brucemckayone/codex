@@ -70,6 +70,24 @@ describe('draftProgress: Write', () => {
       draftProgress(draftRow({ contentType: 'podcast' }), 'ready')
     ).toBeNull();
   });
+
+  // Codex-a6ofh.2, the epic review: unpublished, a piece is off sale, never a
+  // draft (owner 2026-11-05). It opens in the live editor; no step is left.
+  it('a piece unpublished since has no progress, as it is no draft', () => {
+    expect(
+      draftProgress(
+        draftRow({
+          status: 'draft',
+          publishedAt: new Date('2026-11-01T09:00:00.000Z'),
+        }),
+        'ready'
+      )
+    ).toBeNull();
+    // Calibration: the same row, never live, is a draft with its steps.
+    expect(
+      draftProgress(draftRow({ status: 'draft', publishedAt: null }), 'ready')
+    ).not.toBeNull();
+  });
 });
 
 describe('draftProgress: Publish', () => {

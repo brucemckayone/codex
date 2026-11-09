@@ -209,6 +209,7 @@ vi.mock('svelte/transition', async (actual) => ({
 }));
 
 const LiveEditor = (await import('./LiveEditor.svelte')).default;
+const { handOffToLive, takeLiveHandoff } = await import('./live-handoff');
 
 /** The autosave's debounce, with room: a live piece must not save by then. */
 const SETTLE_MS = 1_600;
@@ -342,7 +343,61 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// Codex-a6ofh.2 (owner 2026-11-09): the piece went live under its draft's
+// editor, and "Open it to update" carried the changes not on it yet here.
+describe('LiveEditor · changes carried from writing', () => {
+  test('they wait for Update, said so, and go with it as an ordinary save', async () => {
+    handOffToLive('c1', { title: 'Carried from writing' });
+    render();
+
+    expect(title()?.value).toBe('Carried from writing');
+    expect(text()).toContain(m.studio_live_changes_one());
+    expect(document.querySelector('.live-carried')?.textContent).toBe(
+      m.studio_live_carried()
+    );
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    expect(remotes.saveContent).not.toHaveBeenCalled();
+
+    click(m.studio_live_update());
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: 'c1',
+      patch: { title: 'Carried from writing' },
+    });
+    expect(document.querySelector('.live-carried')?.textContent).toBe('');
+    // Taken once: the next visit finds none.
+    expect(takeLiveHandoff('c1')).toBeNull();
+  });
+
+  test('calibration: none carried, none said', () => {
+    render();
+
+    expect(title()?.value).toBe('Advanced Svelte Patterns');
+    expect(document.querySelector('.live-carried')?.textContent).toBe('');
+  });
+});
+
 describe('LiveEditor · changes wait for Update', () => {
+  // The epic review: Update and Discard disable themselves once pressed,
+  // which drops focus; it goes to the line that says how it went.
+  test.each([
+    ['Update', () => m.studio_live_update()],
+    ['Discard', () => m.studio_live_discard()],
+  ])('%s leaves focus on the changes line, never the page', async (_name, label) => {
+    render();
+    typeTitle('Changed');
+    const pressed = button(label());
+    pressed?.focus();
+    click(label());
+    pressed?.blur();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(document.activeElement).toBe(
+      document.querySelector('.live-changes')
+    );
+  });
+
   test('opens on the page, live, with nothing to update', () => {
     render();
     expect(text()).toContain(m.studio_live_badge());
@@ -671,6 +726,22 @@ describe('LiveEditor · Settings', () => {
     expect(remotes.unpublishContent).toHaveBeenCalledWith('c1');
     expect(text()).toContain(m.studio_live_badge_unpublished());
     expect(button(m.studio_live_republish())).toBeDefined();
+  });
+
+  // The epic review: busy while it goes, the pressed toggle loses focus.
+  test('Unpublish has focus back on its toggle once it settles', async () => {
+    render();
+    openTab(m.studio_live_tab_settings());
+    const toggle = button(m.studio_content_form_unpublish());
+    // A browser drops focus from a control as it is disabled; jsdom keeps it
+    // there, and ignores a blur once it is. So it is dropped as pressed.
+    toggle?.focus();
+    toggle?.blur();
+    click(m.studio_content_form_unpublish());
+    expect(document.activeElement).toBe(document.body);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(document.activeElement).toBe(button(m.studio_live_republish()));
   });
 
   test('a failed Unpublish leaves it live and is logged as an outage', async () => {

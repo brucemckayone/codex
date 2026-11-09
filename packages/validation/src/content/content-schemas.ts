@@ -826,6 +826,18 @@ export const publishContentQuerySchema = z.object({
 });
 
 /**
+ * PATCH /api/content/:id's query (Codex-a6ofh.2, the epic review's
+ * critical). `asDraft=true` is a draft's autosave: it saves only while the
+ * piece has never been live. One that went live meanwhile (its schedule
+ * fired, an admin, another tab) is refused, so half-typed changes never
+ * reach a live piece; its changes wait for Update. Absent or `false` is an
+ * ordinary save, a live piece's Update included.
+ */
+export const updateContentQuerySchema = z.object({
+  asDraft: queryFlagSchema.optional().transform((value) => value === true),
+});
+
+/**
  * Content query/filter schema
  * Used for listing and searching content
  * Extends pagination with content-specific filters and sorting

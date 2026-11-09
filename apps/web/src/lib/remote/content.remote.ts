@@ -271,13 +271,17 @@ export const getContentBySlug = query(
  *
  * Used by SlugField for real-time uniqueness feedback.
  * Scoped to organization (org content) or creator (personal content).
+ * A refusal keeps its status (a lapsed sign-in, a piece not theirs), never
+ * a 500 read as an outage (the epic review).
  */
 export const checkContentSlug = query(
   checkContentSlugSchema,
   async ({ slug, organizationId, excludeContentId }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.content.checkSlug(slug, organizationId, excludeContentId);
+    return forwardClientErrors(() =>
+      api.content.checkSlug(slug, organizationId, excludeContentId)
+    );
   }
 );
 
@@ -468,6 +472,12 @@ export const readPublishState = command(z.string().uuid(), async (id) => {
 /** Its own code, so the step can tell "it went live first" from a failure. */
 const CANCEL_REFUSAL_CODES = [ERROR_CODES.CONTENT_ALREADY_LIVE] as const;
 
+/** A save's own refusals: a publish rule's, or a draft's save that came after it went live. */
+const SAVE_REFUSAL_CODES = [
+  ...PUBLISH_REFUSAL_CODES,
+  ERROR_CODES.CONTENT_ALREADY_LIVE,
+] as const;
+
 /**
  * Cancel a publish-when-ready schedule (Codex-a6ofh.2.9): DELETE
  * /api/content/:id/publish-request. The draft stays a draft. Refused with
@@ -538,14 +548,20 @@ async function withFreeSlug<T>(
  * `slugFollowsTitle`: the slug is the one the title gives, not one the
  * creator typed, so another piece holding it is made free as the first save
  * does ({@link createContentDraft}), never a refusal that stops every save.
+ *
+ * `asDraft`: a draft's autosave. The server refuses it once the piece has
+ * been live (409 CONTENT_ALREADY_LIVE, forwarded with its code), so a piece
+ * that went live with the editor still open (its schedule fired, an admin,
+ * another tab) never takes a half-typed change (Codex-a6ofh.2).
  */
 export const saveContent = command(
   z.object({
     id: z.string().uuid(),
     patch: updateContentSchema,
     slugFollowsTitle: z.boolean().optional(),
+    asDraft: z.boolean().optional(),
   }),
-  async ({ id, patch, slugFollowsTitle }) => {
+  async ({ id, patch, slugFollowsTitle, asDraft = false }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     const coverKept = (saved: { thumbnailUrl: string | null }) =>
@@ -556,14 +572,14 @@ export const saveContent = command(
       async (): Promise<{ slug?: string; thumbnailUrl?: string | null }> => {
         const { slug } = patch;
         if (!slugFollowsTitle || !slug) {
-          return coverKept(await api.content.update(id, patch));
+          return coverKept(await api.content.update(id, patch, { asDraft }));
         }
         const saved = await withFreeSlug(slug, (free) =>
-          api.content.update(id, { ...patch, slug: free })
+          api.content.update(id, { ...patch, slug: free }, { asDraft })
         );
         return { slug: saved.slug, ...coverKept(saved.result) };
       },
-      { detailCodes: PUBLISH_REFUSAL_CODES }
+      { detailCodes: SAVE_REFUSAL_CODES }
     );
   }
 );
@@ -731,13 +747,14 @@ export const stageThumbnailForm = form(
 );
 
 /**
- * Delete content thumbnail
+ * Delete content thumbnail. A refusal keeps its status and words, never a
+ * 500 read as an outage (the epic review).
  */
 export const deleteThumbnailCommand = command(
   z.string().uuid(),
   async (contentId) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.content.deleteThumbnail(contentId);
+    return forwardClientErrors(() => api.content.deleteThumbnail(contentId));
   }
 );

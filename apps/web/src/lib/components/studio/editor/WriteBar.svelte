@@ -94,17 +94,22 @@
   />
 
   <div class="write-state">
-    {#if session.contentId !== null}
+    {#if session.wentLiveElsewhere}
+      <!-- Live by another way (Codex-a6ofh.2): the notice below says so, once, and has the way on. -->
+      <Badge variant="success" class="write-pill">{m.studio_live_badge()}</Badge>
+    {:else if session.contentId !== null}
       <Badge variant="warning" class="write-pill">{m.studio_content_status_draft()}</Badge>
     {/if}
     <span class="write-words" tabindex="-1" bind:this={wordsEl}>
-      {#if session.status === 'error'}
+      {#if session.wentLiveElsewhere}
+        <!-- Nothing to say here, nor to try again: nothing is sent from this editor now. -->
+      {:else if session.status === 'error'}
         <span class="write-error" role="alert">{session.errorMessage ?? m.studio_content_draft_save_failed()}</span>
       {:else}
         <span class="write-saved">{saveWords}</span>
       {/if}
     </span>
-    {#if session.status === 'error'}
+    {#if session.status === 'error' && !session.wentLiveElsewhere}
       <Button type="button" size="xs" variant="ghost" onclick={retry}>
         {m.common_try_again()}
       </Button>

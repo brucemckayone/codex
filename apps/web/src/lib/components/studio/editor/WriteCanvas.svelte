@@ -3,10 +3,10 @@
 
   Step 1, Write (Codex-a6ofh.2.3, mockups W2/W3/W6): the piece laid out as
   its public page lays it out, in the page's own type (ContentDetailView's
-  960px column, 720px for an article), with every field editable in place. A
-  field has no label box: its placeholder is in the real type, and an outline
-  shows only on hover or focus. Price and access hold their place; they are
-  chosen in step 2.
+  960px column; an article's 720px, near the page's prose measure), with
+  every field editable in place. A field has no label box: its placeholder is
+  in the real type, and an outline shows only on hover or focus. Price and
+  access hold their place; they are chosen in step 2.
 
   @prop {DraftSession} session - The editor's draft session: every field reads and sets it
   @prop {EditorContentType} contentType - The piece's type
@@ -196,7 +196,8 @@
 </div>
 
 <style>
-  /* ContentDetailView's column (`.content-detail`): 960px, an article 720px. */
+  /* ContentDetailView's column (`.content-detail`), 960px; an article's words
+     near its prose measure (72ch), 720px. */
   .canvas {
     display: flex;
     flex-direction: column;
@@ -208,7 +209,7 @@
   }
 
   .canvas[data-type='written'] {
-    max-inline-size: 720px;
+    max-inline-size: var(--container-article);
   }
 
   .canvas-header {

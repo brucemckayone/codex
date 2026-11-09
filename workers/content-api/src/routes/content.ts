@@ -46,6 +46,7 @@ import type {
 import {
   createIdParamsSchema,
   publishContentQuerySchema,
+  updateContentQuerySchema,
 } from '@codex/validation';
 import {
   multipartProcedure,
@@ -233,6 +234,9 @@ app.patch(
     input: {
       params: createIdParamsSchema(),
       body: updateContentSchema,
+      // `asDraft=true`: a draft's autosave, refused (409
+      // CONTENT_ALREADY_LIVE) once the piece has been live (Codex-a6ofh.2).
+      query: updateContentQuerySchema,
     },
     handler: async (ctx): Promise<UpdateContentResponse['data']> => {
       const {
@@ -242,7 +246,8 @@ app.patch(
       } = await ctx.services.content.updateReportingDroppedThumbnail(
         ctx.input.params.id,
         ctx.input.body,
-        ctx.user.id
+        ctx.user.id,
+        { asDraft: ctx.input.query.asDraft }
       );
       // The editor's "use media thumbnail" moves the row off an uploaded
       // thumbnail without the DELETE route; its folder goes here instead

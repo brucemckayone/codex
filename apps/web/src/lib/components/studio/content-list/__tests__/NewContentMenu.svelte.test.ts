@@ -160,6 +160,29 @@ describe('NewContentMenu', () => {
     expect(menuText()).not.toContain('Finding your drafts…');
   });
 
+  // Codex-a6ofh.2, the epic review: the list asks for status=draft, which an
+  // unpublished piece has too. It is off sale and opens in the live editor,
+  // so it is no draft to continue.
+  test('a piece unpublished since is not offered as a draft to continue', async () => {
+    render();
+    await openMenu();
+    landContent(
+      [
+        draftRow({ id: 'c1', title: 'Runes deep dive' }),
+        draftRow({
+          id: 'c2',
+          title: 'Off sale now',
+          publishedAt: new Date('2026-11-01T09:00:00.000Z'),
+        }),
+      ],
+      2
+    );
+    await settle();
+
+    expect(menuText()).toContain('Runes deep dive');
+    expect(menuText()).not.toContain('Off sale now');
+  });
+
   test('no drafts: straight to the kinds, with nothing said about drafts', async () => {
     render();
     await openMenu();
