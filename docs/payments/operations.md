@@ -761,8 +761,10 @@ it. An account already back on both settings is listed as
   resolve).
 - A Cloudflare tunnel (`ecom-api-local.revelations.studio` → `localhost:42072`)
   can receive real endpoint deliveries locally.
-- Seeds refuse live keys. Seeded data should exercise the real fee split and
-  include agreements — **gap**: `Codex-2hxff.24`.
+- Seeds refuse live keys. Seeded subscriptions take the default subscription
+  split, through the same functions a live invoice uses (`Codex-2hxff.24`).
+  Seeded data should also include agreements — **gap**: `Codex-2hxff.24`
+  (which creators, what shares and what dates is not yet decided).
 - Run the dev stack with `pnpm dev` from the repository root.
 
 ## Testing

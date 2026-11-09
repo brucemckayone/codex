@@ -1,5 +1,10 @@
+import { FEES } from '@codex/constants';
 import { eq } from 'drizzle-orm';
 import Stripe from 'stripe';
+// The live subscription split, by relative path: @codex/database cannot
+// depend on the service packages that depend on it.
+import { applyMinPlatformFeeFloor } from '../../../purchase/src/services/revenue-calculator';
+import { calculateRevenueSplit } from '../../../subscription/src/services/revenue-split';
 import type { dbWs as DbClient } from '../../src';
 import { schema } from '../../src';
 import {
@@ -881,8 +886,19 @@ export async function seedCommerce(
   // STRIPE_SECRET_KEY is absent) so cancel/reactivate flows operate on
   // independent Stripe objects.
   const subMonthly = TIERS.alphaStandard.priceMonthly; // £4.99
-  const subPlatformFee = Math.round(subMonthly * 0.1);
-  const subCreatorPayout = subMonthly - subPlatformFee;
+  // Split as a live invoice with no fee override splits it
+  // (SubscriptionService.computeSubscriptionSplit): 10% platform, 15% of the
+  // rest to the organisation, the platform's minimum fee floor. £4.99 is
+  // 50p / 68p / £3.81 (Codex-2hxff.24).
+  const subSplit = applyMinPlatformFeeFloor(
+    subMonthly,
+    calculateRevenueSplit(
+      subMonthly,
+      FEES.PLATFORM_PERCENT,
+      FEES.SUBSCRIPTION_ORG_PERCENT
+    ),
+    FEES.MIN_PLATFORM_FEE_CENTS
+  );
 
   type SeededSubscriber = {
     user: { id: string; email: string; name: string };
@@ -957,9 +973,9 @@ export async function seedCommerce(
       currentPeriodStart,
       currentPeriodEnd,
       amountCents: subMonthly,
-      platformFeeCents: subPlatformFee,
-      organizationFeeCents: 0,
-      creatorPayoutCents: subCreatorPayout,
+      platformFeeCents: subSplit.platformFeeCents,
+      organizationFeeCents: subSplit.organizationFeeCents,
+      creatorPayoutCents: subSplit.creatorPayoutCents,
       createdAt: now,
       updatedAt: now,
     };
