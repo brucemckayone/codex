@@ -715,8 +715,9 @@ edits out. Do both halves instead:
 
 1. Delete this file, its snapshot and its journal entry.
 2. Run `pnpm --filter @codex/database db:gen:drizzle --name email_log_index_and_buyer_told_check`. It writes a correct snapshot on top of the other `0128`.
-3. Overwrite the new `.sql` with this file's committed text (`git show`).
-4. Run `generate` once more: it must find no schema changes.
+3. Before overwriting, diff the regenerated `.sql` against ours. The only differences may be the two hand edits; anything else means the two schemas overlap, so stop.
+4. Overwrite the new `.sql` with this file's committed text (`git show`).
+5. Run `generate` once more: it must find no schema changes.
 
 Two tests in `packages/database/scripts/__tests__/migration-preflight.test.ts`
 fail until both hand edits are back: no migration drops the pin column, and
