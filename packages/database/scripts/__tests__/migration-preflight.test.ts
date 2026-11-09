@@ -28,14 +28,17 @@ const check: MigrationPreflight = {
 function client(opts: {
   tableExists: boolean;
   rows: unknown[];
-  columnsPresent?: number;
+  /** The columns the pg_attribute probe finds. */
+  columnsPresent?: string[];
 }) {
   return {
     query: vi.fn(async (sql: string) => {
       if (sql.startsWith('SELECT to_regclass'))
         return { rows: [{ present: opts.tableExists ? 'example' : null }] };
-      if (sql.includes('information_schema.columns'))
-        return { rows: [{ n: opts.columnsPresent ?? 0 }] };
+      if (sql.includes('FROM pg_attribute'))
+        return {
+          rows: (opts.columnsPresent ?? []).map((attname) => ({ attname })),
+        };
       return { rows: opts.rows };
     }),
   };
@@ -102,38 +105,70 @@ describe('runMigrationPreflights', () => {
 
   // The checks run before the run's FIRST pending migration: one that also
   // applies the migration adding the columns finds none yet (Codex-h301h).
-  it('skips when a column its query reads is not there yet', async () => {
+  it('skips when a column its query reads is not there yet, and says so', async () => {
     const db = client({
       tableExists: true,
       rows: [{ id: 'a' }],
-      columnsPresent: 1,
+      columnsPresent: ['added_at'],
     });
+    const log = vi.fn();
 
     expect(
       await runMigrationPreflights(
         db,
         ['0200_example.sql'],
-        [{ ...check, columns: ['added_at', 'other_at'] }]
+        [{ ...check, columns: ['added_at', 'other_at'] }],
+        log
       )
     ).toEqual([]);
     expect(db.query).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalledExactlyOnceWith(
+      '  ⏭ Preflight skipped 0200_example.sql: columns not there yet (other_at)'
+    );
   });
 
   it('runs the check once every column it reads is there', async () => {
     const db = client({
       tableExists: true,
       rows: [{ id: 'a' }],
-      columnsPresent: 2,
+      columnsPresent: ['added_at', 'other_at'],
     });
+    const log = vi.fn();
 
     const failures = await runMigrationPreflights(
       db,
       ['0200_example.sql'],
-      [{ ...check, columns: ['added_at', 'other_at'] }]
+      [{ ...check, columns: ['added_at', 'other_at'] }],
+      log
     );
 
     expect(failures).toHaveLength(1);
     expect(failures[0]).toContain('1 found');
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  // The probe binds the table as to_regclass does and asks pg_attribute, which
+  // a role's column privileges never hide (information_schema.columns does).
+  it('probes pg_attribute for the columns, by the table to_regclass found', async () => {
+    const db = client({
+      tableExists: true,
+      rows: [],
+      columnsPresent: ['added_at', 'other_at'],
+    });
+
+    await runMigrationPreflights(
+      db,
+      ['0200_example.sql'],
+      [{ ...check, columns: ['added_at', 'other_at'] }],
+      vi.fn()
+    );
+
+    expect(db.query.mock.calls[1]?.[0]).toContain('FROM pg_attribute');
+    expect(db.query.mock.calls[1]?.[0]).toContain('NOT attisdropped');
+    expect(db.query.mock.calls[1]?.[1]).toEqual([
+      'public.example',
+      ['added_at', 'other_at'],
+    ]);
   });
 
   it('guards the payout uniqueness migration with the release-checklist query', () => {
