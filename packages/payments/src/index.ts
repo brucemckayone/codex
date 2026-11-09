@@ -123,6 +123,10 @@ export {
   type OrganisationPayee,
   resolveOrganisationPayee,
 } from './resolve-organisation-payee';
+// A won chargeback whose outcome is not applied yet: the one rule support's
+// refund block, the clawback's wait and the re-pay hold all read, and the
+// wait's own error (Codex-2hxff.70)
+export { isSettlingWin, WinSettlingError } from './settling-win';
 // Money waiting for a payee to finish Connect setup: the Studio banner and
 // the monthly reminder share one query (Codex-2hxff.34)
 export * from './waiting-money';

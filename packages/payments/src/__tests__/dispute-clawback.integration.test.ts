@@ -200,6 +200,17 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
       .where(eq(disputes.stripeDisputeId, id));
   }
 
+  /**
+   * The won dispute's outcome applied, as `settleWonDispute` applies it after
+   * the re-pay. Until then a refund's clawback waits (Codex-2hxff.70).
+   */
+  async function applyOutcome(id: string) {
+    await db
+      .update(disputes)
+      .set({ outcomeAppliedAt: new Date() })
+      .where(eq(disputes.stripeDisputeId, id));
+  }
+
   function run(charge: ClawbackCharge, refunds: ClawbackRefund[] = []) {
     return reverseCharge(deps, {
       charge,
@@ -451,6 +462,7 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
     await run(charge);
     await setDisputeStatus(disputeId, 'won');
     await repayDispute(deps, { disputeId });
+    await applyOutcome(disputeId);
     vi.mocked(stripe.transfers.createReversal).mockClear();
     return { charge, creator, disputeId, repay: await repayOf(creator.id) };
   }
@@ -711,6 +723,7 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
     );
     await setDisputeStatus(disputeId, 'won');
     await repayDispute(deps, { disputeId });
+    await applyOutcome(disputeId);
     const repay = await repayOf(creator.id);
     expect(repay.amountCents).toBe(765);
     vi.mocked(stripe.transfers.createReversal).mockClear();
@@ -837,7 +850,9 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
     expect(result.repaid).toBe(1);
     // floor(765 × 300/1000) = 229 is the refund's: 765 − 229.
     expect(await payeeNets(creator.id)).toBe(536);
-    // A later run of the same refund takes nothing more.
+    // A later run of the same refund, once the win is applied, takes nothing
+    // more.
+    await applyOutcome(disputeId);
     await run(charge, [refund]);
     expect(await payeeNets(creator.id)).toBe(536);
     expect(await reviewsFor([creator.id])).toHaveLength(0);

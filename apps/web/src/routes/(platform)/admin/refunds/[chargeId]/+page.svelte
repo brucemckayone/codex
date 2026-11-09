@@ -257,7 +257,10 @@
 {:else if header}
   <PageHeader kicker={header.kicker} title={header.title}>
     {#snippet actions()}
-      {#if detail.window.isOpen}
+      {#if detail.window.liftedByLateWin}
+        <!-- Lifted by a late win (owner Q7): its date has passed, so none shows. -->
+        <Badge variant="success">{m.support_window_lifted_long()}</Badge>
+      {:else if detail.window.isOpen}
         <Badge variant="success">
           {m.support_window_badge_open({ left: daysLeftText(detail.window.closesAt) })}
         </Badge>

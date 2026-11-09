@@ -7,11 +7,19 @@
  *   a paid row is `resolved`, not `paid` (Codex-2hxff.87). The Paid chip
  *   matches `resolved`.
  * - Each row's bank line (mock-b-studio earnings.html E1-E6): when the money
- *   goes to the bank, or why it doesn't go on that date.
+ *   goes to the bank, or why it doesn't go on that date. A won chargeback's
+ *   pay-back says so above it (late-win studio/earnings.html E1-E3).
  * - Dates are London calendar days, the daily payout job's clock.
  */
 
-import { formatDay, formatPence, londonDay } from '$lib/utils/bank-payouts';
+import {
+  type BankLineRow,
+  bankLineFor,
+  formatDay,
+  formatPence,
+  londonDay,
+  paysBackLine,
+} from '$lib/utils/bank-payouts';
 import * as m from '$paraglide/messages';
 
 // The bank-date helpers are shared with Org Studio → Payouts; the page and
@@ -87,6 +95,23 @@ export function statusTone(status: string): StatusTone {
     default:
       return 'neutral';
   }
+}
+
+// ── A row's lines under its status (late-win Q4) ────────────────────────────
+
+/**
+ * The lines under a ledger row's status badge: a won chargeback's pay-back
+ * names the sale above its bank line (E1-E3); any other row has its bank
+ * line alone, or none.
+ */
+export function rowLines(
+  row: BankLineRow & { paysBack?: { title: string | null } | null },
+  ctx: Parameters<typeof bankLineFor>[1]
+): string[] {
+  return [
+    paysBackLine(row.paysBack, { named: true }),
+    bankLineFor(row, ctx),
+  ].filter((line): line is string => line !== null);
 }
 
 // ── The money waiting for setup (the banner, .34) ───────────────────────────

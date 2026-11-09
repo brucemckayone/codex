@@ -504,12 +504,16 @@ describe('bank dates and waiting money on the earnings reads', () => {
     await step(theirs, '2026-10-26T10:00:00Z', 'dispute');
     const reader = service().service as unknown as {
       takenBackFor(
-        userId: string,
+        scope: { userId: string },
         ids: string[]
       ): Promise<Map<string, unknown>>;
     };
 
-    expect((await reader.takenBackFor(me.userId, [theirs])).size).toBe(0);
-    expect((await reader.takenBackFor(other.userId, [theirs])).size).toBe(1);
+    expect(
+      (await reader.takenBackFor({ userId: me.userId }, [theirs])).size
+    ).toBe(0);
+    expect(
+      (await reader.takenBackFor({ userId: other.userId }, [theirs])).size
+    ).toBe(1);
   });
 });
