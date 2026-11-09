@@ -689,9 +689,12 @@ late win, or is already marked: check it before going on.
 
 - an index on `email_audit_logs (recipient_email, template_name, created_at)`,
   for the sweeps' "did this email go?" checks (`Codex-2hxff.102`). It is built
-  without `CONCURRENTLY`, because the runner sends each file as one
-  transaction, so inserts into the email log wait while it builds: a moment on
-  today's table;
+  without `CONCURRENTLY`, because the runner applies each file as one
+  transaction, so inserts into the email log wait while it builds and until
+  the file commits: a moment on today's table. Disputes are locked from the
+  CHECK's scan until the commit. Organisation and user reads and writes wait
+  only for the commit itself: the file drops the pin's foreign key, which
+  locks both tables, as its last statement (moved there by hand);
 - CHECK `check_disputes_buyer_told`: a buyer told of a late win needs a late
   win (`Codex-h301h`). Its preflight in
   `packages/database/scripts/migration-preflight.ts` refuses the whole run,
@@ -702,12 +705,28 @@ late win, or is already marked: check it before going on.
   every organisation query, so dropping it now would fail every org page until
   they redeploy. Its generated `DROP COLUMN` was taken out of the SQL by hand
   for that reason (owner, 2026-11-09: "Two steps"); the snapshot already
-  records it gone, so no later `generate` re-emits it. [R21](#r21--after-this-release-is-live-drop-the-payee-pin-column)
+  records it gone, so no `generate` after `0128` re-emits it. [R21](#r21--after-this-release-is-live-drop-the-payee-pin-column)
   drops it.
 
+**Renumbering `0128`** (another session's `0128` landed first). A snapshot
+holds the whole schema, so renaming the file alone leaves the next `generate`
+re-emitting the other file's changes, and regenerating alone writes both hand
+edits out. Do both halves instead:
+
+1. Delete this file, its snapshot and its journal entry.
+2. Run `pnpm --filter @codex/database db:gen:drizzle --name email_log_index_and_buyer_told_check`. It writes a correct snapshot on top of the other `0128`.
+3. Before overwriting, diff the regenerated `.sql` against ours. The only differences may be the two hand edits; anything else means the two schemas overlap, so stop.
+4. Overwrite the new `.sql` with this file's committed text (`git show`).
+5. Run `generate` once more: it must find no schema changes.
+
+Two tests in `packages/database/scripts/__tests__/migration-preflight.test.ts`
+fail until both hand edits are back: no migration drops the pin column, and
+the pin's foreign key drop is its file's last statement.
+
 From this release the migration runner bounds every file's lock wait at 5 s
-(`Codex-vliwn`). If the deploy's migrate step fails with `canceling statement
-due to lock timeout`, nothing in that file was applied: find the long
+(`Codex-vliwn`), and applies each file and the row recording it in one
+transaction. If the deploy's migrate step fails with `canceling statement
+due to lock timeout`, nothing in that file was applied or recorded: find the long
 transaction holding the table in `pg_stat_activity`, let it end, and re-run
 the deploy.
 
@@ -721,6 +740,10 @@ SELECT count(*) FROM disputes
 It must be 0, or the preflight stops the deploy at its migrate step. Only the
 late-win email's claim writes `buyer_told_at`, and it requires a late win, so a
 row here was edited by hand: stop and ask the owner.
+
+If production's last migration is before `0126`, the columns arrive with this
+deploy, no row can break the CHECK, and the preflight skips it. Run this query
+only on a database at `0126` or later.
 
 ### R21 — after this release is live: drop the payee pin column
 

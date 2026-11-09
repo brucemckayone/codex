@@ -26,6 +26,14 @@ export interface MigrationPreflight {
    * to violate anything, so the check is skipped.
    */
   table: string;
+  /**
+   * The columns of `table` the query reads, when an earlier migration adds
+   * them. The checks see the database as it was before the run's FIRST
+   * pending migration, so a run that also applies that migration has no such
+   * column yet, and no row can break the guarded constraint: the check is
+   * skipped unless every one exists.
+   */
+  columns?: string[];
 }
 
 /**
@@ -57,7 +65,8 @@ HAVING count(*) > 1`;
  * 0128 adds `check_disputes_buyer_told` (Codex-h301h): only a late win has a
  * told buyer. A dispute that breaks it makes the ADD CONSTRAINT fail. None
  * should exist: `claimLateWinBuyerEmail`, the column's only writer, requires
- * a late win, and nothing clears `late_won_at`.
+ * a late win, and nothing clears `late_won_at`. Both columns arrive with
+ * 0126, so a run from before 0126 skips it.
  */
 const BUYER_TOLD_WITHOUT_LATE_WIN = `
 SELECT id, stripe_dispute_id, status, buyer_told_at
@@ -78,6 +87,7 @@ export const MIGRATION_PREFLIGHTS: ReadonlyArray<MigrationPreflight> = [
       'disputes with a told buyer but no late win: resolve each one before deploying',
     sql: BUYER_TOLD_WITHOUT_LATE_WIN,
     table: 'disputes',
+    columns: ['buyer_told_at', 'late_won_at'],
   },
 ];
 
@@ -103,6 +113,16 @@ export async function runMigrationPreflights(
     );
     if ((tables[0] as { present: unknown } | undefined)?.present == null) {
       continue;
+    }
+    if (check.columns && check.columns.length > 0) {
+      const { rows: present } = await client.query(
+        `SELECT count(*)::int AS n FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = $1
+            AND column_name = ANY($2)`,
+        [check.table, check.columns]
+      );
+      if ((present[0] as { n: number } | undefined)?.n !== check.columns.length)
+        continue;
     }
     const { rows } = await client.query(check.sql);
     if (rows.length > 0) {
