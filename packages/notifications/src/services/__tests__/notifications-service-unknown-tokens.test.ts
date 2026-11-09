@@ -9,8 +9,8 @@
  * them.
  *
  * So did an ALLOWED token the data lacks (`missingTokens`): a sender that
- * stops passing `acceptUrl` while a row still links its button to it
- * (Codex-2hxff.83). A send now warns those too, except the tokens whose copy
+ * omits a link its schema leaves optional while a row still points its
+ * button at it. A send now warns those too, except the tokens whose copy
  * reads well without them (a decline with no reason).
  *
  * Mocks mirror notifications-service.test.ts: a stub database, provider and
@@ -146,23 +146,19 @@ describe('NotificationsService: unknown template tokens', () => {
 const MISSING =
   'Email data lacks tokens its template uses; they render as nothing';
 
-/** The invitation row production has today: its button is `{{acceptUrl}}`. */
-const invitationRow = template({
-  name: 'org-member-invitation',
-  subject: "You've been invited to {{orgName}}",
+/**
+ * A password-changed row whose button links to `{{supportUrl}}`, which its
+ * data schema leaves optional: a send without it ships a dead button.
+ */
+const passwordChangedRow = template({
+  name: 'password-changed',
+  subject: 'Your password was changed',
   htmlBody:
-    '<p>{{inviterName}} has invited you to join {{orgName}} as a {{roleName}}.</p><a href="{{acceptUrl}}">Accept Invitation</a><p>This invitation expires in {{expiryDays}} days.</p>',
-  textBody:
-    'Accept your invitation: {{acceptUrl}}\n\nThis invitation expires in {{expiryDays}} days.',
+    '<p>Hi {{userName}}, your password was changed.</p><a href="{{supportUrl}}">Contact support</a>',
+  textBody: 'Hi {{userName}}. Not you? Contact support: {{supportUrl}}',
 });
 
-const invitationData = {
-  inviterName: 'Sam',
-  orgName: 'Studio Alpha',
-  roleName: 'creator',
-  roleLabel: 'a creator',
-  orgUrl: 'https://studio-alpha.revelations.studio/studio',
-};
+const passwordChangedData = { userName: 'Sam' };
 
 describe('NotificationsService: allowed tokens the data lacks', () => {
   let service: NotificationsService;
@@ -180,35 +176,34 @@ describe('NotificationsService: allowed tokens the data lacks', () => {
   });
 
   it('a send warns ONCE, listing each blank token once, across subject and bodies', async () => {
-    findMany.mockResolvedValue([invitationRow]);
+    findMany.mockResolvedValue([passwordChangedRow]);
 
     await service.sendEmail({
       to: 'user@example.com',
-      templateName: 'org-member-invitation',
-      data: invitationData,
+      templateName: 'password-changed',
+      data: passwordChangedData,
     });
 
     const calls = warn.mock.calls.filter(([message]) => message === MISSING);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.[1]).toEqual({
-      templateName: 'org-member-invitation',
+      templateName: 'password-changed',
       organizationId: null,
-      missingTokens: ['acceptUrl', 'expiryDays'],
+      missingTokens: ['supportUrl'],
     });
     // Allowed, so not the unknown-token warning.
     expect(warn).not.toHaveBeenCalledWith(WARNING, expect.anything());
   });
 
   it("the sender's full payload fills that row: no warning", async () => {
-    findMany.mockResolvedValue([invitationRow]);
+    findMany.mockResolvedValue([passwordChangedRow]);
 
     await service.sendEmail({
       to: 'user@example.com',
-      templateName: 'org-member-invitation',
+      templateName: 'password-changed',
       data: {
-        ...invitationData,
-        acceptUrl: invitationData.orgUrl,
-        expiryDays: '7',
+        ...passwordChangedData,
+        supportUrl: 'https://revelations.studio/support',
       },
     });
 
@@ -240,9 +235,9 @@ describe('NotificationsService: allowed tokens the data lacks', () => {
   });
 
   it("a preview does not warn: it renders an editor's sample data", async () => {
-    findMany.mockResolvedValue([invitationRow]);
+    findMany.mockResolvedValue([passwordChangedRow]);
 
-    await service.previewTemplate('org-member-invitation', {});
+    await service.previewTemplate('password-changed', {});
 
     expect(warn).not.toHaveBeenCalledWith(MISSING, expect.anything());
   });

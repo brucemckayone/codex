@@ -550,8 +550,8 @@ export class NotificationsService extends BaseService {
 
   /**
    * A token the template allows but the data lacks renders as nothing too:
-   * a sender that stops passing `acceptUrl` while a row still links its
-   * button to it. Warned once per send, with every such token, except those
+   * a sender that stops passing a link while a row still points its button
+   * at it. Warned once per send, with every such token, except those
    * whose copy reads well without them (`getTokensThatMayRenderBlank`). Not
    * on a preview: that renders an editor's sample data, where a gap is
    * expected and shows in the preview itself.
