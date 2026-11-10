@@ -37,9 +37,10 @@ export type AlertRead = QueryRead | LoadRead<unknown>;
 /**
  * Makes a load read. Build it from the page's `data` alone, in a `$derived`:
  * the alert takes each new read as a new answer, so never mark the reload in
- * it. Its `refresh` must rerun the load it is built from (`depends(key)`
- * there, `invalidate(key)` here). One that reruns nothing ends with Retry
- * offered again and nothing said.
+ * it. Its `refresh` must return the one `invalidate(key)` that reruns the
+ * load it is built from (`depends(key)` there): a second invalidate in the
+ * same tick resolves before anything reloads. If it reruns nothing, Retry is
+ * offered again while the alert goes on waiting for the data to change.
  */
 export function loadRead<T>(
   // Never a remote query: one goes to the alert as it is.

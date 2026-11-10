@@ -12,7 +12,8 @@
   alert (Codex-2hxff.45, `money_setup_load_failed*`):
   - Retry keeps the alert (and the focused button) in place while it runs: no
     `loading` on the Button, which would disable it and drop focus to <body>;
-    the label reads "Retrying…" and a second click sends nothing.
+    the label reads "Retrying…" and a second click sends nothing (unless a
+    load read's refresh settled with nothing changed: see `heldRead`).
   - A Retry that fails again says "We still couldn't…" and puts focus back on
     the alert, so a repeat of identical text is still read out.
   - A Retry that loads it moves focus to a status line that says so, because
@@ -55,7 +56,10 @@
     againMessage: string;
     /** "… loaded." for the status line a successful Retry focuses. */
     loadedMessage: string;
-    /** True while a Retry runs. Bind it to keep a failed layout until then. */
+    /**
+     * True while a Retry runs, including a load read's that waits with Retry
+     * offered again. Bind it to keep a failed layout until then.
+     */
     retrying?: boolean;
     'data-testid'?: string;
   }
@@ -142,10 +146,12 @@
    * A load read is rebuilt whenever the page's data changes, so the Retry
    * waits for a read other than the one it holds.
    *
-   * Some overtakes reload nothing (a shallow Back), and a refresh can rerun
+   * Some overtakes reload nothing (a shallow Back), a batched second
+   * invalidate resolves before anything reloads, and a refresh can rerun
    * nothing. So once the refresh settles with the data unchanged, Retry is
    * offered again, and the wait goes on: a reload that lands later is still
-   * judged and announced.
+   * judged and announced. The wait has no end, so the next change to the
+   * page's data, whatever reran it, is judged as this Retry.
    */
   async function heldRead(refreshed: NonNullable<Props['query']>) {
     const reread = refreshed.refresh();

@@ -322,6 +322,9 @@ describe("Retry, on a read from the page's load", () => {
     expect(retryButton()?.textContent?.trim()).toBe(
       m.money_setup_load_failed_retrying()
     );
+    // A second press while it runs sends nothing.
+    await pressRetry();
+    expect(read.refreshes()).toBe(1);
 
     read.land(LOADED);
     await settle();
