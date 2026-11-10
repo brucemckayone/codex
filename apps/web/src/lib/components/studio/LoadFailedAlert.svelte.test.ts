@@ -297,10 +297,8 @@ describe('Retry, when the page keeps its query', () => {
 
 describe("Retry, on a read from the page's load", () => {
   /** A load read whose first load failed, mounted as the creator list does. */
-  function mountLoadRead(options?: {
-    marksReloading?: boolean;
-  }): LoadReadDouble<unknown> {
-    const read = loadReadDouble<unknown>(options);
+  function mountLoadRead(): LoadReadDouble<unknown> {
+    const read = loadReadDouble<unknown>();
     component = mount(LoadFailedAlertHarness, {
       target: document.body,
       props: { remote: read },
@@ -347,25 +345,6 @@ describe("Retry, on a read from the page's load", () => {
     );
   });
 
-  test('waits for the reload when the page rebuilds the read to mark it', async () => {
-    const read = mountLoadRead({ marksReloading: true });
-    const before = read.get();
-
-    await pressRetry();
-    // A new read object, still failed, and no promise: judging it at once
-    // would say "still" while the reload is in flight.
-    expect(read.get()).not.toBe(before);
-    expect(retryButton()?.textContent?.trim()).toBe(
-      m.money_setup_load_failed_retrying()
-    );
-    expect(alert()?.textContent).not.toContain("We still couldn't");
-
-    read.land(LOADED);
-    await settle();
-    expect(alert()).toBeNull();
-    expect(document.activeElement).toBe(status());
-  });
-
   test('a list that lands ends the Retry while other queries hold the refresh', async () => {
     const read = mountLoadRead();
     await pressRetry();
@@ -382,7 +361,7 @@ describe("Retry, on a read from the page's load", () => {
     expect(status()?.textContent?.trim()).toBe('It loaded.');
   });
 
-  test('an overtaken reload keeps "Retrying…" until the run that overtook it lands', async () => {
+  test('an overtaken reload offers Retry again, and still announces the run that lands', async () => {
     const read = mountLoadRead();
     await pressRetry();
 
@@ -390,7 +369,7 @@ describe("Retry, on a read from the page's load", () => {
     read.overtake();
     await settle();
     expect(retryButton()?.textContent?.trim()).toBe(
-      m.money_setup_load_failed_retrying()
+      m.money_setup_load_failed_retry()
     );
     expect(alert()?.textContent).not.toContain("We still couldn't");
 
@@ -399,6 +378,25 @@ describe("Retry, on a read from the page's load", () => {
     await settle();
     expect(alert()).toBeNull();
     expect(status()?.textContent?.trim()).toBe('It loaded.');
+    expect(document.activeElement).toBe(status());
+  });
+
+  test('after an overtake that reloads nothing, a second Retry can load it', async () => {
+    const read = mountLoadRead();
+    await pressRetry();
+    // A shallow Back overtook it, and nothing reloads.
+    read.overtake();
+    await settle();
+
+    await pressRetry();
+    expect(read.refreshes()).toBe(2);
+    expect(retryButton()?.textContent?.trim()).toBe(
+      m.money_setup_load_failed_retrying()
+    );
+
+    read.land(LOADED);
+    await settle();
+    expect(alert()).toBeNull();
     expect(document.activeElement).toBe(status());
   });
 });

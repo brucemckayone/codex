@@ -21,7 +21,8 @@
     which is not always the one it refreshed (see `heldRead`). With no value
     and no error (the page let the query go), it claims nothing.
   - A list read from the page's load (`loadRead`), not a remote query, works
-    too: its Retry ends when the page's data changes (see `heldRead`).
+    too: its Retry ends when the page's data changes, and a refresh that
+    settles with nothing changed offers Retry again (see `heldRead`).
   - Focus moves only if it is still where Retry left it.
 
   MOUNT IT UNCONDITIONALLY, beside the list it stands in for. It renders
@@ -78,6 +79,13 @@
   let alertNode = $state<HTMLElement | null>(null);
   let statusNode = $state<HTMLElement | null>(null);
 
+  /**
+   * A load read's refresh settled with the page's data unchanged: Retry is
+   * offered again while the alert keeps waiting (see `heldRead`).
+   */
+  let stalled = $state(false);
+  const busy = $derived(retrying && !stalled);
+
   /** Called with each read the page hands over (see `nextRead`). */
   let onRead: (() => void) | null = null;
   $effect(() => {
@@ -91,13 +99,15 @@
    * it only on success).
    */
   async function retry() {
-    if (retrying || !query) return;
+    if (busy || !query) return;
     const before = outcome;
     retrying = true;
+    stalled = false;
     try {
       await heldRead(query);
     } finally {
       retrying = false;
+      stalled = false;
     }
     outcome = outcomeOf(kind);
     await tick();
@@ -128,19 +138,25 @@
    * does not say when the answer landed. Kit resolves it only once the
    * page's live remote queries have settled too. One that another
    * navigation or invalidate overtook resolves with the page's data
-   * unchanged, and the run that overtook it reloads the page later. A load
-   * read is rebuilt whenever the page's data changes, so the Retry waits for
-   * a read other than the one it holds (the page may have rebuilt it to mark
-   * the reload).
+   * unchanged, and the run that overtook it usually reloads the page later.
+   * A load read is rebuilt whenever the page's data changes, so the Retry
+   * waits for a read other than the one it holds.
+   *
+   * Some overtakes reload nothing (a shallow Back), and a refresh can rerun
+   * nothing. So once the refresh settles with the data unchanged, Retry is
+   * offered again, and the wait goes on: a reload that lands later is still
+   * judged and announced.
    */
   async function heldRead(refreshed: NonNullable<Props['query']>) {
     const reread = refreshed.refresh();
     // The page's derivation is read lazily, so this is already the new query.
     const held = query;
     if (isLoadRead(refreshed)) {
-      void reread.catch(() => {
-        // Its answer arrives as the page's new data, which nextRead waits for.
-      });
+      // Its answer arrives as the page's new data, which nextRead waits for.
+      const settled = () => {
+        if (query === held) stalled = true;
+      };
+      void reread.then(settled, settled);
       await nextRead(held);
       return;
     }
@@ -204,7 +220,7 @@
      loading (see heldRead), and unmounting would drop the focused button. -->
 {#if failed || retrying}
   <div bind:this={alertNode} class="load-failed" tabindex="-1">
-    <Alert variant="error" data-testid={testId} aria-busy={retrying}>
+    <Alert variant="error" data-testid={testId} aria-busy={busy}>
       <div class="load-failed__row">
         {#key repeats}
           <p class="load-failed__message">
@@ -212,7 +228,7 @@
           </p>
         {/key}
         <Button variant="secondary" size="sm" onclick={retry}>
-          {retrying
+          {busy
             ? m.money_setup_load_failed_retrying()
             : m.money_setup_load_failed_retry()}
         </Button>

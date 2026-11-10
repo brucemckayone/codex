@@ -11,11 +11,9 @@
  *   live remote queries have settled too (`landBeforeQueries`, then
  *   `queriesSettle`);
  * - an invalidate that another navigation or invalidate overtook resolves
- *   with the data unchanged (`overtake`), and the run that overtook it lands
- *   the data later (`land` or `fail` after it).
- *
- * With `marksReloading`, `refresh()` also marks the reload in the data at
- * once, so the page hands the alert a NEW read before the reload lands.
+ *   with the data unchanged (`overtake`). The run that overtook it usually
+ *   lands the data later (`land` or `fail` after it); a shallow Back lands
+ *   nothing.
  *
  * Not modelled: a load that throws (kit renders the error page instead).
  */
@@ -35,31 +33,23 @@ export interface LoadReadDouble<T> {
   landBeforeQueries(value: T): void;
   /** The other live remote queries settle, so the refresh resolves. */
   queriesSettle(): void;
-  /** Overtaken: the refresh resolves, data unchanged; land or fail follows. */
+  /** Overtaken: the refresh resolves with the data unchanged. */
   overtake(): void;
 }
 
 interface Data<T> {
   failed: boolean;
   value: T | undefined;
-  reloading: boolean;
 }
 
 /** A page whose first load failed, as the alert is mounted for. */
-export function loadReadDouble<T>(
-  options: { marksReloading?: boolean } = {}
-): LoadReadDouble<T> {
-  let data = $state<Data<T>>({
-    failed: true,
-    value: undefined,
-    reloading: false,
-  });
+export function loadReadDouble<T>(): LoadReadDouble<T> {
+  let data = $state<Data<T>>({ failed: true, value: undefined });
   let pending: (() => void) | null = null;
   let calls = 0;
 
   function refresh(): Promise<void> {
     calls += 1;
-    if (options.marksReloading) data = { ...data, reloading: true };
     return new Promise((resolve) => {
       pending = resolve;
     });
@@ -71,7 +61,7 @@ export function loadReadDouble<T>(
     resolve?.();
   }
 
-  // Reads `data` itself, so any new data, `reloading` included, rebuilds it.
+  // Built from `data` alone, as a page builds it: new data, a new read.
   const read = $derived(
     loadRead<T>({
       current: data.failed ? undefined : data.value,
@@ -84,15 +74,15 @@ export function loadReadDouble<T>(
     get: () => read,
     refreshes: () => calls,
     land(value) {
-      data = { failed: false, value, reloading: false };
+      data = { failed: false, value };
       resolvePending();
     },
     fail() {
-      data = { failed: true, value: undefined, reloading: false };
+      data = { failed: true, value: undefined };
       resolvePending();
     },
     landBeforeQueries(value) {
-      data = { failed: false, value, reloading: false };
+      data = { failed: false, value };
     },
     queriesSettle: resolvePending,
     overtake: resolvePending,
