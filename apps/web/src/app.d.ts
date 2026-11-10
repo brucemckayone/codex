@@ -76,6 +76,16 @@ declare global {
     interface PageData {
       user: UserData | null;
     }
+
+    /** Shallow-routing state (`pushState`/`replaceState`), restored on Back and Forward. */
+    interface PageState {
+      /**
+       * The draft a new piece's editor made, set when it swaps its address
+       * to the draft's edit page. Back to that entry restores it, and the
+       * new-piece page opens the draft rather than a blank editor.
+       */
+      editorDraftId?: string;
+    }
   }
 }
 

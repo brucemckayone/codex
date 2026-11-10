@@ -77,6 +77,7 @@ import type {
   BrandingSettingsResponse,
   CheckSlugResponse,
   ContactSettingsResponse,
+  ContentPortalUses,
   CourseOffer,
   FeatureSettingsResponse,
   MediaLibrarySummary,
@@ -188,6 +189,7 @@ import type { SellPreview } from '$lib/page-builder/render';
 // OrgMemberItem is in $lib/types (not here) so components can import it
 // without triggering the vite server-only module guard.
 import type {
+  CatalogueHiddenField,
   CheckoutResponse,
   ConnectAccountStatusResponse,
   ConnectDashboardResponse,
@@ -230,8 +232,8 @@ export type MyStripeBalance = Awaited<
  * is four fields, never the organizations row (Codex-567de), and the creator
  * is its id and name. All three are the `@codex/shared-types` contract the
  * worker's mapper is typed against; reading anything else off them needs a
- * worker change. The row carries no sales count (`purchaseCount`): the lists
- * leave it out (owner, 2026-10-26). `listPublic` attaches
+ * worker change. The row carries none of the `CatalogueHiddenField` columns
+ * (the sales count, the publish schedule). `listPublic` attaches
  * `categorySlugs`; `content_type` is a `varchar`
  * column (so `ContentWithRelations` widens it to `string`) but is constrained
  * to its enum, so we narrow it here. The SPEC §6.1 access-policy flags
@@ -250,7 +252,11 @@ export type MyStripeBalance = Awaited<
  */
 export type PublicContentListItem = Omit<
   ContentWithRelations,
-  'mediaItem' | 'organization' | 'creator' | 'contentType' | 'purchaseCount'
+  | 'mediaItem'
+  | 'organization'
+  | 'creator'
+  | 'contentType'
+  | CatalogueHiddenField
 > & {
   mediaItem: PublicMediaItem | null;
   organization: PublicContentOrganization | null;
@@ -778,6 +784,27 @@ export function createServerApi(
     return `${path}?${q}`;
   }
 
+  type ContentCoverUpload = {
+    thumbnailUrl: string;
+    size: number;
+    mimeType: string;
+  };
+  /** A content cover on to the content-api: applied (`thumbnail`), or staged for Update. */
+  function sendContentCover(
+    id: string,
+    file: File,
+    path: 'thumbnail' | 'thumbnail/stage'
+  ): Promise<ContentCoverUpload> {
+    return forwardMultipartUpload<ContentCoverUpload>({
+      url: `${serverApiUrl(platform, 'content')}/api/content/${id}/${path}`,
+      fieldName: 'thumbnail',
+      file,
+      fallbackFilename: 'thumbnail',
+      sessionCookie,
+      failureMessage: 'Thumbnail upload failed',
+    });
+  }
+
   return {
     /**
      * Low-level fetch method (for backward compatibility)
@@ -1054,10 +1081,20 @@ export function createServerApi(
        * Get content by ID
        *
        * @param id - Content UUID
+       * @param options.timeoutMs - For a caller that gives up sooner than the default
        * @returns Single content item with relations (media, organization, etc.)
        */
-      get: (id: string) =>
-        request<ContentWithRelations>('content', `/api/content/${id}`),
+      get: (id: string, { timeoutMs }: { timeoutMs?: number } = {}) =>
+        request<ContentWithRelations>('content', `/api/content/${id}`, {
+          timeoutMs,
+        }),
+
+      /**
+       * The portals the creator's own piece is a practice in, draft portals
+       * too (Codex-a6ofh.2.5): the live editor's "Also in the portal" line.
+       */
+      portals: (id: string) =>
+        request<ContentPortalUses>('content', `/api/content/${id}/portals`),
 
       /**
        * List content with pagination and filtering
@@ -1121,21 +1158,43 @@ export function createServerApi(
         }),
 
       /**
-       * Update content
+       * Save fields. `asDraft`: a draft's autosave, refused (409
+       * CONTENT_ALREADY_LIVE) once the piece has been live, so it never
+       * writes to a live piece (Codex-a6ofh.2).
        */
-      update: (id: string, data: unknown) =>
-        request<ContentWithRelations>('content', `/api/content/${id}`, {
-          method: 'PATCH',
-          body: JSON.stringify(data),
-        }),
+      update: (
+        id: string,
+        data: unknown,
+        options: { asDraft?: boolean } = {}
+      ) =>
+        request<ContentWithRelations>(
+          'content',
+          `/api/content/${id}${options.asDraft ? '?asDraft=true' : ''}`,
+          { method: 'PATCH', body: JSON.stringify(data) }
+        ),
 
       /**
-       * Publish content (draft -> published)
+       * Publish content (draft -> published). `whenReady`: media still on
+       * its way schedules instead of refusing, and the draft comes back
+       * still a draft with `publishRequestedAt` set (Codex-a6ofh.2.7).
        */
-      publish: (id: string) =>
-        request<ContentWithRelations>('content', `/api/content/${id}/publish`, {
-          method: 'POST',
-        }),
+      publish: (id: string, options: { whenReady?: boolean } = {}) =>
+        request<ContentWithRelations>(
+          'content',
+          `/api/content/${id}/publish${options.whenReady ? '?whenReady=true' : ''}`,
+          { method: 'POST' }
+        ),
+
+      /**
+       * Cancel a publish-when-ready schedule, and any reason a scheduled
+       * attempt didn't go live. 409 CONTENT_ALREADY_LIVE: it went live first.
+       */
+      cancelPublishRequest: (id: string) =>
+        request<ContentWithRelations>(
+          'content',
+          `/api/content/${id}/publish-request`,
+          { method: 'DELETE' }
+        ),
 
       /**
        * Unpublish content (published -> draft)
@@ -1167,22 +1226,15 @@ export function createServerApi(
        * header says it exists to stop a third path reintroducing. It also
        * masked the worker's real error behind a fixed string.
        */
-      uploadThumbnail: (
-        id: string,
-        file: File
-      ): Promise<{ thumbnailUrl: string; size: number; mimeType: string }> =>
-        forwardMultipartUpload<{
-          thumbnailUrl: string;
-          size: number;
-          mimeType: string;
-        }>({
-          url: `${serverApiUrl(platform, 'content')}/api/content/${id}/thumbnail`,
-          fieldName: 'thumbnail',
-          file,
-          fallbackFilename: 'thumbnail',
-          sessionCookie,
-          failureMessage: 'Thumbnail upload failed',
-        }),
+      uploadThumbnail: (id: string, file: File) =>
+        sendContentCover(id, file, 'thumbnail'),
+
+      /**
+       * Ready a cover for a piece that has been live, without applying it
+       * (Codex-a6ofh.2.5): Update sends the URL this returns.
+       */
+      stageThumbnail: (id: string, file: File) =>
+        sendContentCover(id, file, 'thumbnail/stage'),
 
       /**
        * Delete content thumbnail
@@ -2940,10 +2992,15 @@ export function createServerApi(
         request<MediaLibrarySummary>('content', '/api/media/summary'),
 
       /**
-       * Get a single media item by ID
+       * Get a single media item by ID. It carries its poster's CDN URL, or
+       * null with none, as the list rows do (the route resolves
+       * `thumbnailKey`, Codex-a6ofh.1.8).
        */
       get: (id: string) =>
-        request<MediaItemWithRelations>('content', `/api/media/${id}`),
+        request<MediaItemWithRelations & { thumbnailUrl: string | null }>(
+          'content',
+          `/api/media/${id}`
+        ),
 
       /**
        * Update media item metadata

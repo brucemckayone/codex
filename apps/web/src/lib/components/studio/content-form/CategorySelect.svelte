@@ -5,8 +5,7 @@
   callbacks, no remote imports, so it renders/tests in isolation (mirrors
   CategoryList). The parent (OrganizeSection) owns the remote fetch of options
   and the create-on-the-fly mutation; this component only renders the picker,
-  emits toggle/create intents, and serializes the selection into the hidden
-  `categoryIds` input the content form submits.
+  emits toggle/create intents; its host holds the selection.
 
   @prop options   Available categories in the org space ({ id, name }).
   @prop selected  Currently-selected category ids (controlled by the parent).
@@ -54,8 +53,7 @@
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Enter') {
-      // Prevent the parent <form> from submitting when the creator presses
-      // Enter to add a topic.
+      // Enter adds the topic, and never submits a form the field sits in.
       event.preventDefault();
       submitCreate();
     }
@@ -66,10 +64,6 @@
   <span class="field-label" id="category-select-label">
     Categories <span class="optional-hint">Optional</span>
   </span>
-
-  <!-- The form field: a JSON array of the selected ids, kept in sync with the
-       controlled `selected` prop. -->
-  <input type="hidden" name="categoryIds" value={JSON.stringify(selected)} />
 
   {#if options.length > 0}
     <div class="option-grid" role="group" aria-labelledby="category-select-label">

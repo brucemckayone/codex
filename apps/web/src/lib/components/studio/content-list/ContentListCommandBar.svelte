@@ -2,39 +2,42 @@
   @component ContentListCommandBar
 
   Sticky editorial command bar for the Studio content list. Mirrors
-  ContentFormCommandBar / DashboardCommandBar vocabulary: backdrop-blur,
+  DashboardCommandBar's vocabulary: backdrop-blur,
   breadcrumb eyebrow, mono ordinal ratio, narrative lede, status segmented
-  control, search field, primary Create CTA.
+  control, search field, the page's actions.
 
   Left   — breadcrumb (Studio · Content) + total ordinal
-  Mid    — status segmented filter (All / Draft / Published / Archived)
-  Right  — search field + Create action
+  Mid    — status filter (ContentStatusTabs, shared with the personal list)
+  Right  — search field + the page's actions (the New menu, Codex-a6ofh.2.6)
 
   All state lives in URL query params in the parent — this component is
   purely presentational plus a search debounce (owned by parent).
 
-  @prop total          Total matching items (for the ordinal meter)
+  @prop total          Total matching items (for the ordinal meter); null when never read
   @prop selectedStatus Active status filter ("all" | draft | published | archived)
   @prop searchValue    Bound-ish search field value (controlled by parent)
   @prop onSearchInput  Input handler — parent owns the debounce timer
   @prop onSearchClear  Clear button handler
   @prop onStatusChange Segmented control click handler (parent navigates)
+  @prop actions        The page's actions, at the right (its New menu)
 -->
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import * as m from '$paraglide/messages';
-  import { PlusIcon, SearchIcon, XIcon } from '$lib/components/ui/Icon';
-
-  type StatusFilter = 'all' | 'draft' | 'published' | 'archived';
+  import { SearchIcon, XIcon } from '$lib/components/ui/Icon';
+  import ContentStatusTabs from './ContentStatusTabs.svelte';
+  import type { ContentStatusFilter } from './content-status';
 
   interface Props {
-    total: number;
+    /** Null when the list was never read: no count, rather than "000". */
+    total: number | null;
     loading: boolean;
-    selectedStatus: StatusFilter;
+    selectedStatus: ContentStatusFilter;
     searchValue: string;
-    createHref: string;
     onSearchInput: (e: Event) => void;
     onSearchClear: () => void;
-    onStatusChange: (status: StatusFilter) => void;
+    onStatusChange: (status: ContentStatusFilter) => void;
+    actions: Snippet;
   }
 
   const {
@@ -42,29 +45,17 @@
     loading,
     selectedStatus,
     searchValue,
-    createHref,
     onSearchInput,
     onSearchClear,
     onStatusChange,
+    actions,
   }: Props = $props();
 
   // TODO i18n — "studio_content_list_eyebrow" = "Studio · Library"
   const eyebrow = 'Studio';
   const leaf = m.studio_content_title();
 
-  // TODO i18n — filter labels
-  //   studio_content_filter_all      = "All"
-  //   studio_content_filter_draft    = "Drafts"
-  //   studio_content_filter_published= "Published"
-  //   studio_content_filter_archived = "Archived"
-  const filters: Array<{ value: StatusFilter; label: string }> = [
-    { value: 'all', label: 'All' },
-    { value: 'draft', label: 'Drafts' },
-    { value: 'published', label: 'Published' },
-    { value: 'archived', label: 'Archived' },
-  ];
-
-  const ordinalText = $derived(total.toString().padStart(3, '0'));
+  const ordinalText = $derived(total?.toString().padStart(3, '0') ?? '');
 </script>
 
 <div class="command-bar" role="toolbar" aria-label="Content library actions">
@@ -74,30 +65,20 @@
       <span class="breadcrumb-sep" aria-hidden="true">/</span>
       <span class="breadcrumb-leaf">{leaf}</span>
     </a>
-    <span
-      class="count-chip"
-      data-loading={loading || undefined}
-      aria-label="{total} items total"
-    >
-      <span class="count-num">{ordinalText}</span>
-      <span class="count-label">items</span>
-    </span>
+    {#if total !== null}
+      <span
+        class="count-chip"
+        data-loading={loading || undefined}
+        aria-label="{total} items total"
+      >
+        <span class="count-num">{ordinalText}</span>
+        <span class="count-label">items</span>
+      </span>
+    {/if}
   </div>
 
-  <div class="bar-filters" role="tablist" aria-label="Filter by status">
-    {#each filters as f (f.value)}
-      <button
-        type="button"
-        role="tab"
-        aria-selected={selectedStatus === f.value}
-        class="filter-tab"
-        data-active={selectedStatus === f.value || undefined}
-        data-status={f.value}
-        onclick={() => onStatusChange(f.value)}
-      >
-        {f.label}
-      </button>
-    {/each}
+  <div class="bar-filters">
+    <ContentStatusTabs selected={selectedStatus} onChange={onStatusChange} />
   </div>
 
   <div class="bar-search">
@@ -130,10 +111,7 @@
   </div>
 
   <div class="bar-actions">
-    <a href={createHref} class="create-btn">
-      <PlusIcon size={16} />
-      <span class="create-btn-label">{m.studio_content_create()}</span>
-    </a>
+    {@render actions()}
   </div>
 </div>
 
@@ -261,52 +239,12 @@
 
   /* ── Segmented filter ───────────────────────────────────── */
   .bar-filters {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-0-5);
-    padding: var(--space-0-5);
-    border-radius: var(--radius-full, 9999px);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    background: color-mix(in srgb, var(--color-surface-secondary) 60%, var(--color-surface));
+    display: flex;
     justify-self: center;
   }
 
   @media (--below-lg) {
     .bar-filters { justify-self: start; }
-  }
-
-  .filter-tab {
-    appearance: none;
-    border: 0;
-    background: transparent;
-    color: var(--color-text-muted);
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    padding: var(--space-1-5) var(--space-3);
-    border-radius: var(--radius-full, 9999px);
-    cursor: pointer;
-    white-space: nowrap;
-    transition:
-      background-color var(--duration-fast) var(--ease-out),
-      color var(--duration-fast) var(--ease-out);
-  }
-
-  .filter-tab:hover { color: var(--color-text-secondary); }
-
-  .filter-tab[data-active] {
-    background: var(--color-surface);
-    color: var(--color-text);
-    box-shadow:
-      0 1px 0 color-mix(in srgb, var(--color-text) 6%, transparent),
-      0 1px 2px color-mix(in srgb, var(--color-text) 8%, transparent);
-  }
-
-  .filter-tab:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
   }
 
   /* ── Search ─────────────────────────────────────────────── */
@@ -388,43 +326,5 @@
     align-items: center;
     gap: var(--space-2);
     justify-content: flex-end;
-  }
-
-  .create-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    height: var(--space-10);
-    padding: 0 var(--space-4);
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--color-on-interactive);
-    background-color: var(--color-interactive);
-    border: none;
-    border-radius: var(--radius-full, 9999px);
-    text-decoration: none;
-    white-space: nowrap;
-    transition:
-      background-color var(--duration-fast) var(--ease-out),
-      transform var(--duration-fast) var(--ease-out);
-  }
-
-  .create-btn:hover {
-    background-color: var(--color-interactive-hover);
-    color: var(--color-on-interactive-hover);
-  }
-
-  .create-btn:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .create-btn:hover { transform: translateY(calc(-1 * var(--border-width))); }
-  }
-
-  @media (--below-sm) {
-    .create-btn-label { display: none; }
-    .create-btn { padding: 0 var(--space-3); }
   }
 </style>

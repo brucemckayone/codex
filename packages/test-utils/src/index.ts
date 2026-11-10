@@ -26,6 +26,8 @@ export * from './helpers';
 export * from './mocks';
 // Money dependencies for PurchaseService / SubscriptionService / CourseSubscriptionService (Codex-2hxff.55)
 export * from './money-deps';
+// Org team (Codex-a6ofh.2.1): seat a fixture's creator on an org's team
+export * from './org-team';
 // Plan access (Codex-2hxff.91): gate content to an exact set of tiers
 export * from './plan-access';
 // Purchase Seeders (purchase + contentAccess atomic inserts)

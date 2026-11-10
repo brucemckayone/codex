@@ -27,7 +27,10 @@ export async function renderContentBody(
     contentBodyJson?: Record<string, unknown> | null;
     contentBody?: string | null;
   },
-  context: { contentId: string; surface?: 'content-detail' | 'course-player' }
+  context: {
+    contentId: string;
+    surface?: 'content-detail' | 'course-player' | 'studio-preview';
+  }
 ): Promise<string | null> {
   try {
     // Loaded on first use: only pages that show a body need the renderers.

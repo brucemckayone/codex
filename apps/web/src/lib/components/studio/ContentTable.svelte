@@ -3,10 +3,14 @@
 
   Displays a compact data table of content items for studio content management.
   Shows title (linked to edit), type badge, status badge, created date, and actions.
+  A draft shows how far it has got and Continue, which opens the step still
+  to do (Codex-a6ofh.2.6); a live piece keeps its publish toggle and Edit.
 
   @prop {ContentWithRelations[]} items - Array of content items to display
+  @prop {PayoutsRead} payouts - The page's one payouts read, for each draft's step
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { ContentWithRelations } from '$lib/types';
   import { FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
@@ -14,12 +18,20 @@
   import { formatDate } from '$lib/utils/format';
   import { togglePublishStatus, type ContentStatus } from './publish-toggle';
   import Spinner from '$lib/components/ui/Feedback/Spinner/Spinner.svelte';
+  import DraftProgress from './content-list/DraftProgress.svelte';
+  import type { PayoutsRead } from '$lib/utils/connect-readiness';
+  import { draftProgress } from './content-list/draft-progress';
+  import { listStatus } from './content-list/list-status';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
+  import { editHref } from './editor/editor-url';
+  import { logReadFailure } from './media-library/log-read-failure';
 
   interface Props {
     items: ContentWithRelations[];
+    payouts: PayoutsRead;
   }
 
-  const { items }: Props = $props();
+  const { items, payouts }: Props = $props();
 
   let togglingId = $state<string | null>(null);
   let statusOverrides = $state<Record<string, string>>({});
@@ -28,21 +40,6 @@
 
   function getItemStatus(item: ContentWithRelations): string {
     return statusOverrides[item.id] ?? item.status;
-  }
-
-  function getStatusVariant(status: string): 'published' | 'draft' | 'archived' {
-    if (status === 'published') return 'published';
-    if (status === 'draft') return 'draft';
-    return 'archived';
-  }
-
-  function getStatusText(status: string): string {
-    switch (status) {
-      case 'published': return m.studio_content_status_published();
-      case 'draft': return m.studio_content_status_draft();
-      case 'archived': return m.studio_content_status_archived();
-      default: return status;
-    }
   }
 
   function getTypeText(contentType: string): string {
@@ -54,18 +51,26 @@
     }
   }
 
-  async function handlePublishToggle(item: ContentWithRelations) {
+  /** Disabled while it goes, the pressed toggle loses focus: it has it back once settled. */
+  async function handlePublishToggle(item: ContentWithRelations, button: HTMLButtonElement) {
     togglingId = item.id;
     const currentStatus = getItemStatus(item);
     try {
       const optimistic = currentStatus === 'published' ? 'draft' : 'published';
       statusOverrides[item.id] = optimistic;
       await togglePublishStatus(item.id, currentStatus as ContentStatus);
-    } catch {
+    } catch (err) {
+      // Said in the toggle's own toast; logged here, by the studio's one rule.
       delete statusOverrides[item.id];
+      logReadFailure('studio_content.publish_toggle_failed', err, {
+        contentId: item.id,
+        from: currentStatus,
+      });
     } finally {
       togglingId = null;
     }
+    await tick();
+    focusIfLost(button);
   }
 </script>
 
@@ -93,41 +98,56 @@
       <tbody>
         {#each items as item (item.id)}
           {@const status = getItemStatus(item)}
+          {@const progress = status === 'draft' ? draftProgress(item, payouts) : null}
+          <!-- An unpublished piece is "Off sale", never a draft (`listStatus`). -->
+          {@const shown = listStatus({ status, publishedAt: item.publishedAt })}
+          {@const href = progress?.href ?? editHref(item.id)}
           <tr class="row">
             <td class="cell-title">
-              <a href="/studio/content/{item.id}/edit" class="title-link">
+              <a {href} class="title-link">
                 {item.title}
               </a>
+              {#if progress}
+                <DraftProgress {progress} />
+              {/if}
             </td>
             <td>
               <span class="type-badge">{getTypeText(item.contentType)}</span>
             </td>
             <td>
-              <span class="status-dot" data-status={getStatusVariant(status)}></span>
-              <span class="status-text" data-status={getStatusVariant(status)}>
-                {getStatusText(status)}
+              <span class="status-dot" data-status={shown.variant}></span>
+              <span class="status-text" data-status={shown.variant}>
+                {shown.label}
               </span>
             </td>
             <td class="cell-date">{formatDate(item.createdAt)}</td>
             <td class="cell-actions">
-              <button
-                type="button"
-                class="action-btn"
-                data-action={status === 'published' ? 'unpublish' : 'publish'}
-                disabled={togglingId === item.id}
-                onclick={() => handlePublishToggle(item)}
-              >
-                {#if togglingId === item.id}
-                  <Spinner size="sm" />
-                {:else if status === 'published'}
-                  {m.studio_content_form_unpublish()}
-                {:else}
-                  {m.studio_content_form_publish()}
-                {/if}
-              </button>
-              <a href="/studio/content/{item.id}/edit" class="action-edit">
-                {m.studio_content_edit()}
-              </a>
+              {#if progress}
+                <a
+                  {href}
+                  class="action-edit"
+                  aria-label={m.studio_drafts_continue_label({ title: item.title })}
+                >
+                  {m.studio_drafts_continue()}
+                </a>
+              {:else}
+                <button
+                  type="button"
+                  class="action-btn"
+                  data-action={status === 'published' ? 'unpublish' : 'publish'}
+                  disabled={togglingId === item.id}
+                  onclick={(event) => handlePublishToggle(item, event.currentTarget)}
+                >
+                  {#if togglingId === item.id}
+                    <Spinner size="sm" />
+                  {:else}
+                    {shown.toggle}
+                  {/if}
+                </button>
+                <a {href} class="action-edit">
+                  {m.studio_content_edit()}
+                </a>
+              {/if}
             </td>
           </tr>
         {/each}
@@ -146,6 +166,12 @@
 
   .content-table {
     width: 100%;
+    /*
+     * The fixed columns alone are wider than a phone: below this the title,
+     * and a draft's progress under it, were crushed and clipped. Narrower,
+     * the table scrolls in its wrap.
+     */
+    min-inline-size: calc(var(--space-24) * 8);
     border-collapse: collapse;
     font-size: var(--text-sm);
   }
@@ -205,6 +231,10 @@
     text-overflow: ellipsis;
   }
 
+  .cell-title :global(.draft-progress) {
+    margin-block-start: var(--space-1);
+  }
+
   .title-link {
     font-weight: var(--font-medium);
     color: var(--color-text);
@@ -246,7 +276,7 @@
 
   .status-dot[data-status='published'] { background-color: var(--color-success); }
   .status-dot[data-status='draft']     { background-color: var(--color-warning); }
-  .status-dot[data-status='archived']  { background-color: var(--color-text-muted); }
+  .status-dot[data-status='off-sale']  { background-color: var(--color-text-muted); }
 
   .status-text {
     font-size: var(--text-sm);

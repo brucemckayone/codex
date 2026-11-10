@@ -168,6 +168,24 @@ describe('TabsList', () => {
     const list = document.querySelector('.tabs-list');
     expect(list?.getAttribute('aria-orientation')).toBe('vertical');
   });
+
+  test('is underlined unless asked to be bare', () => {
+    component = mount(TabsHarness, { target: document.body, props: {} });
+    flushSync();
+    expect(
+      document.querySelector('.tabs-list')?.getAttribute('data-variant')
+    ).toBe('underlined');
+    unmount(component);
+
+    component = mount(TabsHarness, {
+      target: document.body,
+      props: { listVariant: 'bare' },
+    });
+    flushSync();
+    expect(
+      document.querySelector('.tabs-list')?.getAttribute('data-variant')
+    ).toBe('bare');
+  });
 });
 
 describe('TabsTrigger', () => {

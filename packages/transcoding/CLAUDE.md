@@ -28,8 +28,17 @@ const service = new TranscodingService({
   runpodTimeout?,       // /run answer timeout. Default: 10000ms
   runpodWorkersMax?,    // Max workers the endpoint should have. Default: 5
   runpodApi?,           // RunPodApi override (tests)
+  alerts?, mediaStatus?, // registry-built collaborators
+  contentReady?,        // ContentReadyNotifier (Codex-a6ofh.2.8)
 });
 ```
+
+`publish(row)` is every guarded write's hook: it tells the studio's live
+status, and `contentReady.mediaChanged(row.id)` when the row is now `ready`
+or failed for good (`isTerminalTranscodeFailure`); a failure that may still
+be retried settles no schedule, so it costs no call. content-api re-reads the
+item and decides. Every writer of either state goes through it, so a new one
+is covered.
 
 RunPod credentials are required. Storage credentials (R2, B2) are stored in RunPod's secret manager — not in this config.
 
@@ -88,6 +97,23 @@ the existing hourly production cron.
    dispatches it); definitely absent → `failed UPLOAD_INCOMPLETE`; R2 cannot
    say → left alone, and the step stops. No R2 bucket → the step fails, at
    error, every run.
+6. `publishWhenReady` (Codex-a6ofh.2.8), with a `contentReady` notifier:
+   media with drafts scheduled on it that has settled (ready, deleted, or
+   failed for good: `not mayRetryTranscode()`, the SQL twin of
+   `isTerminalTranscodeFailure` that dispatch's claim also uses) gets
+   `contentReady.settle(id)`, awaited, at most 25 items inside the deadline,
+   the most recently changed first (a lost call is most likely the latest
+   write's; an item content-api keeps waiting for good sinks). content-api
+   answers 204 at once and settles after, logging what it did there. It
+   catches a lost webhook call and what no webhook announces (a swap onto
+   media already ready). The report's `publishWhenReady`: `handedOver`,
+   `failed` (calls content-api would not take; retried next run), `deferred`
+   (found, out of time) and `more` (the read hit its cap). A settle that
+   fails inside content-api is in its log, not here, so `failed: 0` is no
+   health signal. A step, never a new cron trigger (per-account
+   cap). Known gap: a lost call for a file that went ready under LIVE content
+   with no draft waiting is not re-sent, so those orgs' lists refresh at their
+   TTL (5 min, Codex-1szw2), not at once.
 
 The rules are pure functions in `maintenance-rules.ts`. Every write is guarded
 on the state the run read (deletion included), so a creator's Retry or a

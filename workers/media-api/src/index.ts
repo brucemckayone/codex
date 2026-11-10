@@ -263,6 +263,14 @@ async function runTranscodingMaintenance(
     });
   }
 
+  if (!env.WORKER_SHARED_SECRET) {
+    // No notifier: drafts scheduled to publish when ready wait, everywhere,
+    // and neither the webhooks nor this run can tell content-api.
+    obs.error('publish_when_ready.notifier_unavailable', {
+      reason: 'WORKER_SHARED_SECRET not set',
+    });
+  }
+
   let release: (() => void) | undefined;
   try {
     const webhook = await createWebhookServices(env, ctx, { obs });

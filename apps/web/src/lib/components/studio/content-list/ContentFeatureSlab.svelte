@@ -13,8 +13,13 @@
   @prop item  The content item to feature (usually items[0])
   @prop publishing    Whether publish toggle is in flight
   @prop onPublishToggle
+  @prop payouts       The page's one payouts read, for a draft's progress
+
+  A draft shows how far it has got and offers Continue, at the step still
+  to do (Codex-a6ofh.2.6), where a published piece offers its toggle.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { ContentWithRelations } from '$lib/types';
   import {
     FilmIcon,
@@ -28,14 +33,24 @@
   import { deriveContentAccessKind } from '$lib/utils/content-access';
   import { extractPlainText } from '@codex/validation';
   import * as m from '$paraglide/messages';
+  import { editHref } from '../editor/editor-url';
+  import DraftProgress from './DraftProgress.svelte';
+  import type { PayoutsRead } from '$lib/utils/connect-readiness';
+  import { draftProgress } from './draft-progress';
+  import { listStatus } from './list-status';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
 
   interface Props {
     item: ContentWithRelations;
     publishing?: boolean;
-    onPublishToggle: () => void;
+    onPublishToggle: () => Promise<unknown> | void;
+    payouts: PayoutsRead;
   }
 
-  const { item, publishing = false, onPublishToggle }: Props = $props();
+  const { item, publishing = false, onPublishToggle, payouts }: Props = $props();
+
+  const progress = $derived(item.status === 'draft' ? draftProgress(item, payouts) : null);
+  const href = $derived(progress?.href ?? editHref(item.id));
 
   /**
    * The 16:9 thumb: the full width less the shell's and the slab's 1rem
@@ -62,16 +77,16 @@
     }
   });
 
-  const statusMeta = $derived.by(() => {
-    switch (item.status) {
-      case 'published':
-        return { label: m.studio_content_status_published(), variant: 'published' as const };
-      case 'archived':
-        return { label: m.studio_content_status_archived(), variant: 'archived' as const };
-      default:
-        return { label: m.studio_content_status_draft(), variant: 'draft' as const };
-    }
-  });
+  // An unpublished piece is "Off sale", never a draft (`listStatus`).
+  const statusMeta = $derived(listStatus(item));
+
+  let toggleEl = $state<HTMLButtonElement | null>(null);
+  /** Disabled while it goes, the pressed toggle loses focus: it has it back once settled. */
+  async function toggle() {
+    await onPublishToggle();
+    await tick();
+    focusIfLost(toggleEl);
+  }
 
   // TODO i18n — studio_content_slab_eyebrow = "Featured · Most recent"
   const eyebrow = 'Featured';
@@ -81,9 +96,9 @@
 
   // Narrative strapline — plain-text lede lifted from the description.
   //
-  // `description` is authored with RichTextEditor (ContentDetails.svelte), which
+  // `description` is authored with RichTextEditor (WriteCanvas.svelte), which
   // serialises the TipTap doc via `JSON.stringify(editor.getJSON())` — so rows
-  // saved by the current form hold a JSON *string*, while older rows hold plain
+  // saved by the editor hold a JSON *string*, while older rows hold plain
   // text. `extractPlainText` walks the doc's node tree for the JSON shape and
   // returns its input unchanged for anything that isn't a TipTap doc, so both
   // shapes read as prose and neither throws. This is the same helper the public
@@ -111,7 +126,7 @@
 </script>
 
 <article class="slab" data-status={statusMeta.variant}>
-  <a class="slab-thumb" href="/studio/content/{item.id}/edit" aria-label="Open {item.title}">
+  <a class="slab-thumb" {href} aria-label="Open {item.title}">
     {#if item.thumbnailUrl}
       <img
         src={item.thumbnailUrl}
@@ -143,12 +158,16 @@
     </header>
 
     <h2 class="slab-title">
-      <a href="/studio/content/{item.id}/edit" class="slab-title-link">
+      <a {href} class="slab-title-link">
         {item.title}
       </a>
     </h2>
 
     <p class="slab-strap">{strap}</p>
+
+    {#if progress}
+      <DraftProgress {progress} />
+    {/if}
 
     <dl class="slab-meta">
       <div class="meta-item">
@@ -170,25 +189,31 @@
     </dl>
 
     <div class="slab-actions">
-      <button
-        type="button"
-        class="action-btn"
-        data-tone={statusMeta.variant === 'published' ? 'muted' : 'primary'}
-        disabled={publishing}
-        onclick={onPublishToggle}
-      >
-        {#if publishing}
-          <Spinner size="sm" />
-        {:else if statusMeta.variant === 'published'}
-          {m.studio_content_form_unpublish()}
-        {:else}
-          {m.studio_content_form_publish()}
-        {/if}
-      </button>
-      <a class="action-link" href="/studio/content/{item.id}/edit">
-        <EditIcon size={14} />
-        {m.studio_content_edit()}
-      </a>
+      {#if progress}
+        <a class="action-btn" data-tone="action" {href} aria-label={m.studio_drafts_continue_label({ title: item.title })}>
+          <EditIcon size={14} />
+          {m.studio_drafts_continue()}
+        </a>
+      {:else}
+        <button
+          type="button"
+          class="action-btn"
+          data-tone={statusMeta.variant === 'published' ? 'muted' : 'primary'}
+          disabled={publishing}
+          onclick={toggle}
+          bind:this={toggleEl}
+        >
+          {#if publishing}
+            <Spinner size="sm" />
+          {:else}
+            {statusMeta.toggle}
+          {/if}
+        </button>
+        <a class="action-link" {href}>
+          <EditIcon size={14} />
+          {m.studio_content_edit()}
+        </a>
+      {/if}
     </div>
   </div>
 </article>
@@ -363,6 +388,13 @@
     border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
   }
 
+  /* Once live, off sale now (archived too): plain, as the mockup's Off sale
+     row, in secondary ink (muted is 2.3:1 on this ground; see ContentRow). */
+  .slab-status-pill[data-status='off-sale'] {
+    color: var(--color-text-secondary);
+    background: var(--color-surface-secondary);
+  }
+
   /* ── Title + strap ──────────────────────────────────────── */
   .slab-title {
     margin: 0;
@@ -460,6 +492,7 @@
 
   .action-btn {
     display: inline-flex;
+    text-decoration: none;
     align-items: center;
     gap: var(--space-2);
     min-height: calc(var(--space-8) + var(--space-1));
@@ -485,6 +518,19 @@
   .action-btn[data-tone='primary']:hover:not(:disabled) {
     background: var(--color-success-600);
     border-color: var(--color-success-600);
+  }
+
+  /* Continue: the brand's call to action, where primary (green) is Publish's. */
+  .action-btn[data-tone='action'] {
+    background: var(--color-interactive);
+    color: var(--color-on-interactive);
+    border-color: var(--color-interactive);
+  }
+
+  .action-btn[data-tone='action']:hover {
+    background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
+    border-color: var(--color-interactive-hover);
   }
 
   .action-btn[data-tone='muted'] {

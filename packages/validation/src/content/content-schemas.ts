@@ -8,14 +8,17 @@ import {
   MEDIA_STATUS_GROUPS,
   MEDIA_TYPES,
   type MediaStatusGroup,
+  MIME_TYPES,
   VISIBILITY,
 } from '@codex/constants';
 import { z } from 'zod';
+import { MAX_IMAGE_SIZE_BYTES } from '../image';
 import {
   createOptionalTextSchema,
   createSanitizedStringSchema,
   createSlugSchema,
   priceCentsSchema,
+  queryFlagSchema,
   urlSchema,
   userIdSchema,
   uuidSchema,
@@ -356,17 +359,47 @@ const mixesLegacyTierInput = (data: {
   data.includedInTierId !== undefined &&
   (data.isTierGated !== undefined || data.includedInTierIds !== undefined);
 
+/** A content title's limit: the editor's field stops where a save would be refused. */
+export const CONTENT_TITLE_MAX = 500;
+
+/** A content description's limit. */
+export const CONTENT_DESCRIPTION_MAX = 10_000;
+
+/**
+ * What a content thumbnail (its cover) may be: the upload's own check and
+ * every field that takes one, so a field never offers what the upload refuses.
+ */
+export const CONTENT_THUMBNAIL_MIME_TYPES = [
+  MIME_TYPES.IMAGE.PNG,
+  MIME_TYPES.IMAGE.JPEG,
+  MIME_TYPES.IMAGE.WEBP,
+] as const;
+
+/**
+ * The largest cover the upload takes: the content-api thumbnail routes' own
+ * `maxSize`, so a field never offers what the route refuses (Codex-a6ofh.2.5).
+ * It was 10 MB here against the route's 5, and a shrunk photo between the two
+ * passed every studio check only to be refused by the worker.
+ */
+export const CONTENT_THUMBNAIL_MAX_BYTES = MAX_IMAGE_SIZE_BYTES;
+
+/** The same limit in whole megabytes, for the words that state it, so they never drift from it. */
+export const CONTENT_THUMBNAIL_MAX_MB = Math.round(
+  CONTENT_THUMBNAIL_MAX_BYTES / (1024 * 1024)
+);
+
 /**
  * Base content schema (without refinements)
  * Used for both create and update schemas
  */
 const baseContentSchema = z.object({
-  title: sanitizedStringSchema(1, 500, 'Title'),
+  title: sanitizedStringSchema(1, CONTENT_TITLE_MAX, 'Title'),
   slug: slugSchema,
-  description: optionalTextSchema(10000, 'Description'),
+  description: optionalTextSchema(CONTENT_DESCRIPTION_MAX, 'Description'),
   contentType: contentTypeEnum,
 
-  // Media reference (required for video/audio, optional for written)
+  // Media reference. A video or audio draft may have none yet; it needs one
+  // to publish (Codex-a6ofh.2.1). Written content has none.
   mediaItemId: uuidSchema.optional().nullable(),
 
   // Written content body (Phase 2+) — limit raised for Tiptap JSON overhead
@@ -467,53 +500,15 @@ const baseContentSchema = z.object({
  * - Validates mediaItemId exists and belongs to creator (service layer)
  * - Validates content type matches media type (service layer)
  * - Slug uniqueness per organization (database constraint)
+ *
+ * A draft needs only a title and a type (Codex-a6ofh.2.1, owner 4A): the
+ * studio creates the row on the first thing typed and autosaves the rest.
+ * What a piece needs to go LIVE (its media, an article's body, a price of at
+ * least £1 when it is for sale) is checked when it publishes, by
+ * `assertPublishable` in @codex/content. The rules kept here are the
+ * structural ones: a row that breaks them is wrong even as a draft.
  */
 export const createContentSchema = baseContentSchema
-  .refine(
-    (data) => {
-      // Video/audio content MUST have mediaItemId
-      if (
-        ([CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO] as string[]).includes(
-          data.contentType
-        )
-      ) {
-        return !!data.mediaItemId;
-      }
-      return true;
-    },
-    {
-      message: 'Media item is required for video and audio content',
-      path: ['mediaItemId'],
-    }
-  )
-  .refine(
-    (data) => {
-      // Written content MUST have contentBody
-      if (data.contentType === CONTENT_TYPES.WRITTEN) {
-        return !!data.contentBody && data.contentBody.length > 0;
-      }
-      return true;
-    },
-    {
-      message: 'Content body is required for written content',
-      path: ['contentBody'],
-    }
-  )
-  .refine(
-    (data) => {
-      // Purchasable content requires a price (SPEC §6.1 — priceCents pairs
-      // with isPurchasable). `priceCentsSchema` already refuses 1p–99p, so any
-      // positive price that reaches here is at least £1.00.
-      if (data.isPurchasable) {
-        return !!data.priceCents && data.priceCents > 0;
-      }
-      return true;
-    },
-    {
-      message: 'Purchasable content requires a price of at least £1.00',
-      path: ['priceCents'],
-    }
-  )
   .refine(
     (data) => {
       // Follower-gated content requires an organisation (followers are org-scoped).
@@ -720,20 +715,11 @@ export const updateContentSchema = baseContentSchema
       'Send either includedInTierId (legacy) or isTierGated / includedInTierIds, not both',
     path: ['includedInTierId'],
   })
-  .refine(
-    (data) => {
-      // If a caller marks content purchasable AND sends a price in the same
-      // payload, the price must be positive. A price-only or flag-only partial
-      // is validated defensively in ContentService.update().
-      if (!data.isPurchasable) return true;
-      if (data.priceCents === undefined) return true;
-      return !!data.priceCents && data.priceCents > 0;
-    },
-    {
-      message: 'Purchasable content requires a price of at least £1.00',
-      path: ['priceCents'],
-    }
-  )
+  // No price rule here (Codex-a6ofh.2.1): a draft may be for sale with no
+  // price yet, as create allows. A live piece's next state must still have
+  // one, and ContentService.update() refuses a save that drops it with the
+  // publish gate's PRICE_REQUIRED (assertSaveKeepsContentFilled), so every
+  // save is judged on the whole row, not on what a partial happens to send.
   .refine(
     (data) => {
       // Mirror of the create-schema invariant: an update that EXPLICITLY marks
@@ -780,6 +766,22 @@ export const updateContentSchema = baseContentSchema
 export type UpdateContentInput = z.infer<typeof updateContentSchema>;
 
 /**
+ * What the studio sends to start a draft (Codex-a6ofh.2.2): the row is made
+ * on the first thing the creator adds, from the type, the title and whatever
+ * else they have added so far. The slug is not asked for: the studio makes it
+ * from the title. `createContentSchema` still validates the whole create at
+ * the worker; this only keeps the studio's limits the same as its.
+ */
+export const contentDraftSchema = baseContentSchema.pick({
+  contentType: true,
+  organizationId: true,
+  title: true,
+  description: true,
+  contentBody: true,
+  mediaItemId: true,
+});
+
+/**
  * Publish Content Input
  * Simple schema for status change operations
  */
@@ -805,6 +807,35 @@ export const sortOrderEnum = z.enum(['asc', 'desc']);
 
 /** The longest topic (category) slug: the `categories.slug` column width. */
 export const TOPIC_SLUG_MAX = 120;
+
+/**
+ * POST /internal/content/media-ready (worker HMAC, Codex-a6ofh.2.8): a media
+ * item changed, so settle the drafts scheduled on it by its state now. The
+ * body names the item only: content-api reads what happened to it itself.
+ */
+export const mediaReadyBodySchema = z.object({ mediaItemId: uuidSchema });
+export type MediaReadyBody = z.infer<typeof mediaReadyBodySchema>;
+
+/**
+ * POST /api/content/:id/publish's query (Codex-a6ofh.2.7, Publish when
+ * ready). `whenReady=true` schedules the publish while its media is still on
+ * its way; absent or `false` publishes now.
+ */
+export const publishContentQuerySchema = z.object({
+  whenReady: queryFlagSchema.optional().transform((value) => value === true),
+});
+
+/**
+ * PATCH /api/content/:id's query (Codex-a6ofh.2, the epic review's
+ * critical). `asDraft=true` is a draft's autosave: it saves only while the
+ * piece has never been live. One that went live meanwhile (its schedule
+ * fired, an admin, another tab) is refused, so half-typed changes never
+ * reach a live piece; its changes wait for Update. Absent or `false` is an
+ * ordinary save, a live piece's Update included.
+ */
+export const updateContentQuerySchema = z.object({
+  asDraft: queryFlagSchema.optional().transform((value) => value === true),
+});
 
 /**
  * Content query/filter schema
@@ -1009,12 +1040,7 @@ export const publicContentQuerySchema = paginationSchema
     // Creator-flagged featured filter — true returns only featured items,
     // false excludes them. Undefined (default) returns all published items.
     // Accepts boolean or stringified boolean (URL query strings).
-    featured: z
-      .union([
-        z.boolean(),
-        z.enum(['true', 'false']).transform((v) => v === 'true'),
-      ])
-      .optional(),
+    featured: z.union([z.boolean(), queryFlagSchema]).optional(),
   })
   .refine((data) => data.orgId || data.creatorId || data.slug, {
     message: 'One of orgId, creatorId or slug must be provided',

@@ -4,7 +4,51 @@
  * field started, and what the chosen item's status line says.
  */
 import type { MediaItemState } from '@codex/validation';
+import type { Attachment } from 'svelte/attachments';
+import type { UploadItem } from '$lib/client/upload-queue.svelte';
+import type { getMediaItem } from '$lib/remote/media.remote';
 import { describeTile, type TileMedia, type TileView } from './tile-state';
+
+/**
+ * What the picker hands a caller that draws its own field (its `field`
+ * snippet): the content editor's media slot draws it at the player's size
+ * (Codex-a6ofh.2.3). The picker keeps every rule, the by-id read, the upload
+ * it follows, the status watch and the stall clock, so a field drawn
+ * elsewhere cannot drift from them.
+ */
+export interface PickerField {
+  /** Give it to the control that opens the dialog: focus returns there on close. */
+  readonly triggerId: string;
+  /** An upload started here, until it is done. */
+  readonly uploading: UploadItem | null;
+  /** The chosen item, once read; null with nothing chosen or while it reads. */
+  readonly chosen: Awaited<ReturnType<typeof getMediaItem>> | null;
+  /** The chosen item's read failed: gone (404), or an outage. */
+  readonly chosenFailed: boolean;
+  readonly chosenGone: boolean;
+  /** The chosen item by the library's rules: a failed or stopped item never reads as processing. */
+  readonly view: TileView | null;
+  /** Why the last file was not taken here, or null. */
+  readonly uploadNote: string | null;
+  /** How the watch on a processing item falls back, in the library's words. */
+  readonly watchWords: string;
+  /** Heard, not shown: the item watched here reached ready. */
+  readonly readyWords: string;
+  /** The watch paused: offer {@link PickerField.resumeWatch} beside its status. */
+  readonly watchPaused: boolean;
+  open(): void;
+  remove(): void;
+  /** Take a file dropped on the field, as the dialog's Upload row does. */
+  upload(file: File): void;
+  /** Open the file chooser the dialog's Upload row opens: the file goes up the same way. */
+  chooseFile(): void;
+  reread(): void;
+  resumeWatch(): void;
+  /** On the element that says the watch's words: Refresh moves focus to it. */
+  readonly statusNote: Attachment<HTMLElement>;
+  /** On a control that can leave while focused: focus goes to the field's trigger. */
+  readonly keepsFocus: Attachment<HTMLElement>;
+}
 
 /** An upload this field started, as it moves through the studio's queue. */
 export interface Following {

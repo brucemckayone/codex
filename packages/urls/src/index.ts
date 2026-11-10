@@ -10,6 +10,7 @@ export {
   buildOrgUrlFromEnv,
   buildPlatformUrl,
   buildServiceUrl,
+  isEnvName,
   type JourneySurface,
   type JourneyUrlTarget,
 } from './build-url';

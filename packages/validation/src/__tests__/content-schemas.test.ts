@@ -318,34 +318,17 @@ describe('Content Schemas', () => {
       expect(result.isFree).toBe(true);
     });
 
-    it('should reject video content without mediaItemId', () => {
+    // A draft needs only a title and a type (Codex-a6ofh.2.1): its media,
+    // body and price are checked when it publishes (@codex/content
+    // assertPublishable), so each type saves bare.
+    it.each([
+      'video',
+      'audio',
+      'written',
+    ] as const)('accepts a bare %s draft: a title and a type', (contentType) => {
       expect(() =>
-        createContentSchema.parse({
-          title: 'Test',
-          slug: 'test',
-          contentType: 'video',
-        })
-      ).toThrow('Media item is required for video and audio content');
-    });
-
-    it('should reject audio content without mediaItemId', () => {
-      expect(() =>
-        createContentSchema.parse({
-          title: 'Test',
-          slug: 'test',
-          contentType: 'audio',
-        })
-      ).toThrow('Media item is required for video and audio content');
-    });
-
-    it('should reject written content without contentBody', () => {
-      expect(() =>
-        createContentSchema.parse({
-          title: 'Test',
-          slug: 'test',
-          contentType: 'written',
-        })
-      ).toThrow('Content body is required for written content');
+        createContentSchema.parse({ title: 'Test', slug: 'test', contentType })
+      ).not.toThrow();
     });
 
     it('should validate written content with contentBody', () => {
@@ -362,9 +345,10 @@ describe('Content Schemas', () => {
       expect(result.contentBody).toBeDefined();
     });
 
-    it('should reject purchasable content without a price', () => {
-      // Flag model (SPEC §6.1): priceCents pairs with isPurchasable — a
-      // purchasable item MUST carry a positive price.
+    it('accepts a purchasable draft with no price yet', () => {
+      // Flag model (SPEC §6.1): priceCents pairs with isPurchasable, but a
+      // draft may set the switch before the price. Publish refuses it until
+      // the price is at least £1 (Codex-a6ofh.2.1).
       expect(() =>
         createContentSchema.parse({
           title: 'Test',
@@ -373,7 +357,7 @@ describe('Content Schemas', () => {
           mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
           isPurchasable: true,
         })
-      ).toThrow('Purchasable content requires a price of at least £1.00');
+      ).not.toThrow();
     });
 
     it('should reject price exceeding £100,000', () => {
@@ -536,23 +520,28 @@ describe('Content Schemas', () => {
       ).not.toThrow();
     });
 
-    it('rejects purchasable content without a price', () => {
+    // Publish refuses both until the price is at least £1 (Codex-a6ofh.2.1).
+    it.each([
+      ['no price', undefined],
+      ['a zero price', 0],
+    ])('accepts a purchasable draft with %s', (_case, priceCents) => {
       expect(() =>
         createContentSchema.parse({
           ...baseVideo,
           isPurchasable: true,
+          priceCents,
         })
-      ).toThrow(/price of at least £1\.00/i);
+      ).not.toThrow();
     });
 
-    it('rejects purchasable content with a zero price', () => {
+    it('still refuses a price between 1p and 99p, even on a draft', () => {
       expect(() =>
         createContentSchema.parse({
           ...baseVideo,
           isPurchasable: true,
-          priceCents: 0,
+          priceCents: 50,
         })
-      ).toThrow(/price of at least £1\.00/i);
+      ).toThrow(/£1\.00/);
     });
 
     it('rejects follower-gated content without an org', () => {
@@ -577,13 +566,16 @@ describe('Content Schemas', () => {
       expect(() => updateContentSchema.parse({ isFree: true })).not.toThrow();
     });
 
-    it('rejects a partial update marking purchasable with a zero price', () => {
+    // Codex-a6ofh.2.1: a draft may be for sale before it has a price, as on
+    // create. Publish refuses it, and so does a save of a LIVE piece
+    // (ContentService.update), with PRICE_REQUIRED.
+    it.each([
+      ['a zero price', 0],
+      ['no price', null],
+    ])('accepts a partial update marking purchasable with %s', (_label, priceCents) => {
       expect(() =>
-        updateContentSchema.parse({
-          isPurchasable: true,
-          priceCents: 0,
-        })
-      ).toThrow(/price of at least £1\.00/i);
+        updateContentSchema.parse({ isPurchasable: true, priceCents })
+      ).not.toThrow();
     });
 
     // Codex-2hxff.32: Stripe refuses card charges under £0.30, so a sub-£1

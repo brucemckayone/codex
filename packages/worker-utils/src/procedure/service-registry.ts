@@ -78,6 +78,7 @@ import {
 } from '@codex/subscription';
 import {
   type AlertLedger,
+  type ContentReadyNotifier,
   type MediaStatusFeed,
   type MediaStatusPublisher,
   TranscodingAlerts,
@@ -85,6 +86,7 @@ import {
   TranscodingService,
 } from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
+import { contentApiUrlFor, WorkerContentReadyNotifier } from '../content-ready';
 import {
   type SendEmailToWorkerParams,
   sendEmailToWorker,
@@ -547,6 +549,24 @@ export async function createServiceRegistry(
       _obs
     );
     return _mediaStatusFeed;
+  }
+
+  let _contentReady: ContentReadyNotifier | undefined;
+  /**
+   * Publish when ready (Codex-a6ofh.2.8): the transcoding services tell
+   * content-api when an item turned ready or failed. None without the shared
+   * secret or an execution context. The call touches no pool here, so plain
+   * waitUntil.
+   */
+  function getContentReadyNotifier(): ContentReadyNotifier | undefined {
+    if (!env.WORKER_SHARED_SECRET || !cacheWaitUntil) return undefined;
+    _contentReady ??= new WorkerContentReadyNotifier(
+      contentApiUrlFor(env),
+      env.WORKER_SHARED_SECRET,
+      cacheWaitUntil,
+      _obs
+    );
+    return _contentReady;
   }
 
   /**
@@ -1332,6 +1352,7 @@ export async function createServiceRegistry(
             : undefined,
           alerts: getTranscodingAlerts(),
           mediaStatus: getMediaStatusFeed(),
+          contentReady: getContentReadyNotifier(),
         });
       }
       return _transcoding;
@@ -1352,6 +1373,7 @@ export async function createServiceRegistry(
             : undefined,
           alerts: getTranscodingAlerts(),
           mediaStatus: getMediaStatusFeed(),
+          contentReady: getContentReadyNotifier(),
         });
       }
       return _transcodingMaintenance;

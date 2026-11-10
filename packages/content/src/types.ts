@@ -5,7 +5,7 @@
  * All types are inferred from database schema or explicitly defined.
  */
 
-import type { MediaStatusGroup } from '@codex/constants';
+import type { MediaStatusGroup, PublishBlockedReason } from '@codex/constants';
 import type { DatabaseClient, dbHttp } from '@codex/database';
 import type {
   Content,
@@ -213,7 +213,8 @@ export type PublicMediaItemSource = Pick<
 
 /**
  * A catalogue row any viewer may read: the content row without its sales count
- * (`CATALOGUE_CONTENT_COLUMNS`), its creator without an email, and the
+ * or a draft's publish-when-ready state (`CATALOGUE_CONTENT_COLUMNS`; the two
+ * lists must match), its creator without an email, and the
  * projected org and media item. `list({ scope: 'browse' })` returns these
  * (Codex-1bdx0); `listPublic` adds the topic slugs. The org and creator are
  * already their wire shapes (`@codex/shared-types`); the media item still holds
@@ -221,7 +222,12 @@ export type PublicMediaItemSource = Pick<
  */
 export type CatalogueContentRow = Omit<
   ContentWithRelations,
-  'mediaItem' | 'organization' | 'creator' | 'purchaseCount'
+  | 'mediaItem'
+  | 'organization'
+  | 'creator'
+  | 'purchaseCount'
+  | 'publishRequestedAt'
+  | 'publishBlockedReason'
 > & {
   mediaItem: PublicMediaItemSource | null;
   organization: PublicContentOrganization | null;
@@ -274,6 +280,76 @@ export type UpdateContentResponse = SingleItemResponse<Content>;
  * Returns published content item
  */
 export type PublishContentResponse = SingleItemResponse<Content>;
+/** DELETE /api/content/:id/publish-request (Codex-a6ofh.2.7). */
+export type CancelPublishRequestResponse = SingleItemResponse<Content>;
+
+/**
+ * A draft that was scheduled to publish when its media is ready, as the
+ * media-ready trigger reports it (Codex-a6ofh.2.8): enough to bump its org's
+ * caches and email its creator. The creator's email is for the send only;
+ * never log it.
+ */
+export interface SettledDraft {
+  id: string;
+  title: string;
+  slug: string;
+  contentType: string;
+  organizationId: string | null;
+  organizationSlug: string | null;
+  creator: {
+    id: string;
+    name: string | null;
+    email: string;
+    /** For a personal piece's public page, `/@{username}/content/{slug}`. */
+    username: string | null;
+  };
+}
+
+/**
+ * What `ContentService.settleScheduledForMedia` did with the drafts
+ * scheduled on one media item, by its state at the time.
+ */
+export interface ScheduleSettlement {
+  /** Drafts THIS call put live: one "is live" email each, never two. */
+  wentLive: SettledDraft[];
+  /**
+   * Drafts that stopped waiting, and why (`publish_blocked_reason`). A
+   * MEDIA_DELETED one gets no email: the creator deleted the file, and the
+   * editor says why (owner).
+   */
+  stopped: Array<StoppedDraft>;
+  /**
+   * Drafts left waiting for the next run: an unexpected error, or none
+   * started past the settle's budget.
+   */
+  retryLater: number;
+  /** More drafts wait than one call reads; the next run takes them. */
+  more: boolean;
+  /**
+   * Orgs with LIVE content on this media, whose cached lists a file that
+   * just went ready changes (Codex-1szw2). Empty unless the media is ready.
+   */
+  liveOrgIds: string[];
+}
+
+/** A draft that stopped waiting, and why (`publish_blocked_reason`). */
+export type StoppedDraft = SettledDraft & { reason: PublishBlockedReason };
+
+/** One draft a settle put live or stopped, told as its write commits. */
+export type SettleOutcome =
+  | { kind: 'live'; draft: SettledDraft }
+  | { kind: 'stopped'; draft: StoppedDraft };
+
+export interface SettleOptions {
+  /** No draft is started after this many ms (default 10 s). */
+  budgetMs?: number;
+  /**
+   * Called as each draft's write commits, before the next one starts, so
+   * what committed is told even if the work is cut off after. A throw is
+   * logged and the settle goes on.
+   */
+  onSettled?: (outcome: SettleOutcome) => void;
+}
 
 /**
  * Response for POST /api/content/:id/unpublish

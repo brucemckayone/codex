@@ -605,6 +605,26 @@ export interface ContentCourseLinks {
 }
 
 /**
+ * A portal a piece is a practice in, as its own editor lists it
+ * (Codex-a6ofh.2.5, mockup W5): "Also in the portal X · stage 2. Change that
+ * in the portal." Unlike {@link ContentCourseLinks} it is the creator's own
+ * read, so a draft portal counts too; a deleted course or stage does not.
+ */
+export interface ContentPortalUse {
+  courseId: string;
+  /** The portal's page, whose curriculum holds its stages; null when no page presents the course. */
+  pageId: string | null;
+  /** What the studio calls the portal: its page's title, else its course's. */
+  title: string;
+  /** Each stage the piece is in, by its place in the course, from 1. */
+  stageNumbers: number[];
+}
+
+export interface ContentPortalUses {
+  uses: ContentPortalUse[];
+}
+
+/**
  * A published course as it surfaces in DISCOVERY — the /explore "Journeys" rail
  * (SPEC §8.5). The minimal PUBLIC projection needed to render a journey card and
  * link to its sales page: no curriculum, no entitlement, no signed media. Same
