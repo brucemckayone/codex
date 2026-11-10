@@ -95,6 +95,7 @@ import categoriesSrc from '../categories.ts?raw';
 import contentSrc from '../content.ts?raw';
 import contentAccess from '../content-access';
 import contentAccessSrc from '../content-access.ts?raw';
+import internalSrc from '../internal.ts?raw';
 import journeyInsightsSrc from '../journey-insights.ts?raw';
 import journeys from '../journeys';
 import journeysSrc from '../journeys.ts?raw';
@@ -103,8 +104,11 @@ import publicSrc from '../public.ts?raw';
 
 // ─── Fixtures (valid RFC4122 v4 UUIDs so uuidSchema accepts them) ─────────────
 
+// This file's own subject. The limiter counts per subject across every file
+// in this single-worker run, so a shared id runs past the api preset's 100
+// a minute and later files read 429 (Codex-a6ofh.2).
 const USER = {
-  id: '7a1d0f2e-3b4c-4d5e-8f60-112233445566',
+  id: '7a1d0f2e-3b4c-4d5e-8f60-000000000010',
   email: 'creator@test.com',
   role: 'creator',
 };
@@ -1017,6 +1021,8 @@ const MOUNTED_ROUTE_SOURCES: ReadonlyArray<readonly [string, string]> = [
   ['content-access.ts', contentAccessSrc],
   ['journey-insights.ts', journeyInsightsSrc],
   ['journeys.ts', journeysSrc],
+  // Worker HMAC routes (Codex-a6ofh.2.8): no session, so no carve-out.
+  ['internal.ts', internalSrc],
 ];
 
 /**

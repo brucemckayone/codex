@@ -378,6 +378,15 @@ export const emailSchema = z.string().email('Invalid email format');
 // ============================================================================
 
 /**
+ * A yes/no flag as a query string carries it: exactly `true` or `false`,
+ * read as a boolean; anything else is refused. Never `z.coerce.boolean()`,
+ * which reads every non-empty string, "false" included, as true.
+ */
+export const queryFlagSchema = z
+  .enum(['true', 'false'])
+  .transform((value) => value === 'true');
+
+/**
  * Create params schema with ID
  * Common pattern for route params validation
  *

@@ -64,6 +64,7 @@ Import from `@codex/database` (re-exported from `utils`):
 | `isUniqueViolation(error)` | `(unknown) → boolean` | Detects Postgres 23505 (also unwraps Drizzle cause) |
 | `isForeignKeyViolation(error)` | `(unknown) → boolean` | Detects Postgres 23503 |
 | `isNotNullViolation(error)` | `(unknown) → boolean` | Detects Postgres 23502 |
+| `isLockNotAvailable(error)` | `(unknown) → boolean` | Detects Postgres 55P03, a lock not granted within `lock_timeout` or under NOWAIT (also unwraps Drizzle cause) |
 | `getConstraintName(error)` | `(unknown) → string\|null` | Extracts constraint name from Postgres error |
 | `isFailedQuery(error)` | `(unknown) → error is FailedQueryError` | Whether it is drizzle's `Failed query: <sql>\nparams: <params>` wrapper, with the driver's reason on `cause` |
 | `messageForLog(error)` | `(unknown) → string` | An error's message for a log line: a failed query's SQL and params replaced by the driver's reason, never the query itself |
@@ -125,5 +126,5 @@ import type { Database, DatabaseWs } from '@codex/database';
 
 - `packages/database/src/schema/` — all table definitions
 - `packages/database/src/utils/query-helpers.ts` — `scopedNotDeleted`, `withPagination`, etc.
-- `packages/database/src/utils/db-errors.ts` — `isUniqueViolation`, `isForeignKeyViolation`, `isFailedQuery`, `messageForLog`, `stackForLog`
+- `packages/database/src/utils/db-errors.ts` — `isUniqueViolation`, `isForeignKeyViolation`, `isLockNotAvailable`, `isFailedQuery`, `messageForLog`, `stackForLog`
 - `packages/database/src/client.ts` — client factories and exports

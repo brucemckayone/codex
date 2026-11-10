@@ -225,7 +225,7 @@
   .onboarding__progress-fill {
     height: 100%;
     border-radius: inherit;
-    background-color: var(--color-success-500);
+    background-color: var(--color-success);
     transition: width var(--duration-slow) var(--ease-out);
   }
 

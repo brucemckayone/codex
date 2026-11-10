@@ -36,19 +36,20 @@
   "dependencies": {
     "@codex/cache": "workspace:*",
     "@codex/constants": "workspace:*",
+    "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/payments": "workspace:*",
     "@codex/purchase": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/subscription": "workspace:*",
-    "@codex/transcoding": "workspace:*",
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7",
     "stripe": "^19.2.0"
   },
   "devDependencies": {
     "@codex/test-utils": "workspace:*",
+    "@codex/transcoding": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.3",
     "vite": "^7.2.2",

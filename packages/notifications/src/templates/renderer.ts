@@ -260,6 +260,9 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'retryUrl',
   ],
   'transcoding-owner-alert': ['headline', 'summary', 'details'],
+  // Publish when ready (Codex-a6ofh.2.8), to the piece's creator.
+  'content-live': ['userName', 'contentTitle', 'mediaKind', 'contentUrl'],
+  'content-not-live': ['userName', 'contentTitle', 'reason', 'editUrl'],
 
   // Creator
   'new-sale': [
@@ -507,6 +510,9 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'transcoding-failed',
   // To the platform owner about the pipeline itself (Codex-l2c48.6).
   'transcoding-owner-alert',
+  // What became of a publish the creator asked for (Codex-a6ofh.2.8).
+  'content-live',
+  'content-not-live',
   'connect-account-status',
   // Payout notifications (WP-10 — Codex-69t7c.10): touch billing state.
   'creator-connect-needed',

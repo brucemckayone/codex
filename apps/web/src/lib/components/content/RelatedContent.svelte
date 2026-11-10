@@ -18,15 +18,15 @@
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
-  import type { ContentWithRelations } from '$lib/types';
+  import type { CatalogueHiddenField, ContentWithRelations } from '$lib/types';
 
   // The media item and org fields a card and its link read. The public content
   // API sends the media fields with the R2 keys already resolved to CDN URLs
   // (Codex-ve5eh) and the org as four fields (Codex-567de).
-  // No `purchaseCount`: the public and browse lists never send it.
+  // No `CatalogueHiddenField`: the public and browse lists never send them.
   type RelatedItem = Omit<
     ContentWithRelations,
-    'mediaItem' | 'organization' | 'purchaseCount'
+    'mediaItem' | 'organization' | CatalogueHiddenField
   > & {
     mediaItem?: {
       durationSeconds?: number | null;

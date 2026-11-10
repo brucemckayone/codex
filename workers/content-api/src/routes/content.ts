@@ -16,10 +16,9 @@
  * - POST   /api/content/:id/thumbnail - Upload content thumbnail
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
-import { AUTH_ROLES } from '@codex/constants';
+import { AUTH_ROLES, CONTENT_STATUS } from '@codex/constants';
 import type {
-  ContentInvalidationReason,
+  CancelPublishRequestResponse,
   ContentResponse,
   CreateContentResponse,
   DeleteContentResponse,
@@ -33,139 +32,35 @@ import {
   contentBrowseQuerySchema,
   contentQuerySchema,
   createContentSchema,
-  invalidateContentAccess,
   updateContentSchema,
 } from '@codex/content';
-import { createDbClient } from '@codex/database';
 import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
-import type { Logger, ObservabilityClient } from '@codex/observability';
-import type { CheckSlugResponse, HonoEnv } from '@codex/shared-types';
-import { createIdParamsSchema } from '@codex/validation';
+import type {
+  CheckSlugResponse,
+  ContentPortalUses,
+  HonoEnv,
+} from '@codex/shared-types';
 import {
-  invalidateOrgSlugCache,
+  createIdParamsSchema,
+  publishContentQuerySchema,
+  updateContentQuerySchema,
+} from '@codex/validation';
+import {
   multipartProcedure,
   PaginatedResult,
   procedure,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { cleanupContentThumbnailOnDelete } from './content-cleanup';
+import {
+  afterContentPublished,
+  bumpOrgContentVersion,
+  fanContentInvalidation,
+} from './content-invalidation';
 import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
-
-/**
- * Bump the org content version in KV after publish/unpublish/delete.
- * Also invalidates the org's public caches (info, stats, creators) since
- * content changes affect creator contentCount and org stats.
- * Fire-and-forget via waitUntil — does not block the response, and never
- * throws: the thumbnail route calls it from a `.finally()`, where a throw
- * would replace the upload's own error.
- */
-function bumpOrgContentVersion(
-  env: HonoEnv['Bindings'],
-  executionCtx: ExecutionContext,
-  organizationId: string | null | undefined,
-  obs?: ObservabilityClient
-): void {
-  if (!organizationId || !env.CACHE_KV) return;
-  // Given `obs`, because the cache swallows a failed invalidation and logs it
-  // only through its own client: the `.catch` below never sees one.
-  const cache = new VersionedCache({
-    kv: env.CACHE_KV,
-    waitUntil: (promise) => executionCtx.waitUntil(promise),
-    obs,
-  });
-  // Invalidate slug-keyed cache (stats, creators, public info) — shared
-  // helper resolves orgId → slug and swallows transient failures. Started in
-  // a promise of its own, so a client that cannot be built (missing config)
-  // lands in the `.catch` below instead of throwing to the caller, and the
-  // other bumps still run.
-  const bySlug = Promise.resolve().then(() =>
-    invalidateOrgSlugCache({
-      db: createDbClient(env),
-      cache,
-      orgId: organizationId,
-      logger: obs,
-    })
-  );
-  executionCtx.waitUntil(
-    Promise.all([
-      // Invalidate org content collection version
-      cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
-      bySlug,
-      // Invalidate the public topic list: publish/unpublish/delete changes the
-      // set of categories with ≥1 published item, so a cached "Browse by topic"
-      // list could otherwise show empty or missing topics until TTL.
-      cache.invalidate(CacheType.CATEGORIES(organizationId)),
-      // Invalidate the public portal (journey) rails for the same reason
-      // (Codex-72k55): each card's `practiceCount`/`stageCount` counts only
-      // practices whose content is PUBLISHED, so publishing or unpublishing one
-      // practice changes cards that name no content at all. Without this bump a
-      // portal advertises "8 practices" while only 7 are reachable.
-      cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
-    ]).catch((err: unknown) => {
-      obs?.warn('Cache invalidation failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    })
-  );
-}
-
-/**
- * Fan per-user library cache invalidation after a content mutation.
- *
- * Codex-c01do — content mutations (update-access-config, unpublish, delete,
- * publish) previously bumped ONLY catalogue version keys. The per-user
- * library cache (`COLLECTION_USER_LIBRARY`) was untouched, so library UI
- * showed stale accessType flags until the next visibility-change staleness
- * roundtrip. Access decisions at click time are always live (server-side)
- * — this is UX drift, not a security bug — but per feedback_dont_defer_cache_issues
- * we close the gap proactively.
- *
- * Fire-and-forget: the whole block is wrapped in `waitUntil` so the route
- * response is never blocked on KV writes.
- */
-function fanContentInvalidation(
-  env: HonoEnv['Bindings'],
-  executionCtx: ExecutionContext,
-  contentId: string,
-  organizationId: string | null | undefined,
-  reason: ContentInvalidationReason,
-  obs?: Logger,
-  options: { includeFollowers?: boolean } = {}
-): void {
-  if (!env.CACHE_KV) return;
-  const cache = new VersionedCache({
-    kv: env.CACHE_KV,
-    waitUntil: (promise) => executionCtx.waitUntil(promise),
-  });
-  const db = createDbClient(env);
-  const waitUntil = executionCtx.waitUntil.bind(executionCtx);
-
-  // Wrap the whole fanout in waitUntil so the DB `resolveAffectedUsers`
-  // query does not block the response. The helper internally hands each
-  // per-user KV bump to waitUntil as well.
-  executionCtx.waitUntil(
-    invalidateContentAccess({
-      db,
-      cache,
-      waitUntil,
-      contentId,
-      organizationId: organizationId ?? null,
-      reason,
-      logger: obs,
-      includeFollowers: options.includeFollowers ?? false,
-    }).catch((err: unknown) => {
-      obs?.warn('content-invalidation: fanout failed', {
-        contentId,
-        organizationId,
-        reason,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    })
-  );
-}
 
 const app = new Hono<HonoEnv>();
 
@@ -300,6 +195,29 @@ app.get(
 );
 
 /**
+ * GET /api/content/:id/portals
+ * The portals the creator's own piece is a practice in, draft portals too,
+ * for its editor (Codex-a6ofh.2.5). A read of its own, so the piece's read
+ * stays lean and this loads only where it is shown. Empty for a piece that
+ * is not the caller's.
+ *
+ * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {ContentPortalUses}
+ */
+app.get(
+  '/:id/portals',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<ContentPortalUses> =>
+      ctx.services.courseJourney.getContentPortalUses(
+        ctx.input.params.id,
+        ctx.user.id
+      ),
+  })
+);
+
+/**
  * PATCH /api/content/:id
  * Update content
  *
@@ -316,14 +234,21 @@ app.patch(
     input: {
       params: createIdParamsSchema(),
       body: updateContentSchema,
+      // `asDraft=true`: a draft's autosave, refused (409
+      // CONTENT_ALREADY_LIVE) once the piece has been live (Codex-a6ofh.2).
+      query: updateContentQuerySchema,
     },
     handler: async (ctx): Promise<UpdateContentResponse['data']> => {
-      const { content: result, droppedThumbnailUrl } =
-        await ctx.services.content.updateReportingDroppedThumbnail(
-          ctx.input.params.id,
-          ctx.input.body,
-          ctx.user.id
-        );
+      const {
+        content: result,
+        droppedThumbnailUrl,
+        hasBeenLive,
+      } = await ctx.services.content.updateReportingDroppedThumbnail(
+        ctx.input.params.id,
+        ctx.input.body,
+        ctx.user.id,
+        { asDraft: ctx.input.query.asDraft }
+      );
       // The editor's "use media thumbnail" moves the row off an uploaded
       // thumbnail without the DELETE route; its folder goes here instead
       // (Codex-kk9nv.5). Only this content's own folder is ever deleted.
@@ -334,6 +259,10 @@ app.patch(
           droppedThumbnailUrl
         );
       }
+      // A draft that was never live is in no cache (see `hasBeenLive` in
+      // @codex/constants; the service judges it from the row before the
+      // update).
+      if (!hasBeenLive) return result;
       // Fan per-user library invalidation (Codex-c01do). Covers access-config
       // edits — the most common cause of stale accessType flags in library UI.
       fanContentInvalidation(
@@ -391,10 +320,12 @@ app.get(
 
 /**
  * POST /api/content/:id/publish
- * Publish content
+ * Publish content, or with `?whenReady=true` (Codex-a6ofh.2.7) schedule it to go
+ * live once its media, still on its way, is ready
  *
  * Security: Creator/Admin only, API rate limit (100 req/min)
- * @returns {PublishContentResponse}
+ * @returns {PublishContentResponse} The published content, or the scheduled
+ *   draft (status `draft`, `publishRequestedAt` set)
  */
 app.post(
   '/:id/publish',
@@ -403,28 +334,17 @@ app.post(
       auth: 'required',
       roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
     },
-    input: { params: createIdParamsSchema() },
+    input: { params: createIdParamsSchema(), query: publishContentQuerySchema },
     handler: async (ctx): Promise<PublishContentResponse['data']> => {
       const result = await ctx.services.content.publish(
         ctx.input.params.id,
-        ctx.user.id
+        ctx.user.id,
+        { whenReady: ctx.input.query.whenReady }
       );
-      bumpOrgContentVersion(
-        ctx.env,
-        ctx.executionCtx,
-        result.organizationId,
-        ctx.obs
-      );
-      // Fan per-user library invalidation (Codex-c01do). A publish adds the
-      // item to subscribers'/members' libraries — they need a fresh view.
-      fanContentInvalidation(
-        ctx.env,
-        ctx.executionCtx,
-        result.id,
-        result.organizationId,
-        'content_published',
-        ctx.obs
-      );
+      // A schedule changed nothing public: no version to bump, no library
+      // to fan out to.
+      if (result.status !== CONTENT_STATUS.PUBLISHED) return result;
+      afterContentPublished(ctx.env, ctx.executionCtx, result, ctx.obs);
 
       // TODO: Send new-content-published email to subscribers
       // Requires a subscriber query (users with contentAccess in this org).
@@ -433,6 +353,32 @@ app.post(
 
       return result;
     },
+  })
+);
+
+/**
+ * DELETE /api/content/:id/publish-request
+ * Cancel a publish-when-ready schedule (Codex-a6ofh.2.7): the draft stays a
+ * draft. One with neither a schedule nor a blocked reason comes back as it
+ * is; one that went live first is a 409 (`CONTENT_ALREADY_LIVE`), never a
+ * "cancelled".
+ *
+ * Security: Creator/Admin only, API rate limit (100 req/min)
+ * @returns {CancelPublishRequestResponse}
+ */
+app.delete(
+  '/:id/publish-request',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<CancelPublishRequestResponse['data']> =>
+      ctx.services.content.cancelPublishRequest(
+        ctx.input.params.id,
+        ctx.user.id
+      ),
   })
 );
 
@@ -539,6 +485,19 @@ app.delete(
 );
 
 /**
+ * The cover file both thumbnail routes take, so an upload and a stage never
+ * refuse differently (Codex-a6ofh.2.5). The studio checks the same size
+ * before sending (`CONTENT_THUMBNAIL_MAX_BYTES`).
+ */
+const THUMBNAIL_FILES = {
+  thumbnail: {
+    required: true,
+    maxSize: MAX_IMAGE_SIZE_BYTES,
+    allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
+  },
+} as const;
+
+/**
  * POST /api/content/:id/thumbnail
  * Upload and process content thumbnail
  *
@@ -551,13 +510,7 @@ app.post(
   multipartProcedure({
     policy: { auth: 'required', roles: ['creator', 'admin'] },
     input: { params: createIdParamsSchema() },
-    files: {
-      thumbnail: {
-        required: true,
-        maxSize: MAX_IMAGE_SIZE_BYTES,
-        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
-      },
-    },
+    files: THUMBNAIL_FILES,
     handler: async (ctx) => {
       // Verify content exists and is owned by user
       const content = await ctx.services.content.get(
@@ -588,6 +541,57 @@ app.post(
             ctx.obs
           )
         );
+
+      return {
+        thumbnailUrl: result.url,
+        size: result.size,
+        mimeType: result.mimeType,
+      };
+    },
+  })
+);
+
+/**
+ * POST /api/content/:id/thumbnail/stage
+ * Ready a cover for a piece that has been live, without applying it
+ * (Codex-a6ofh.2.5): its changes wait for Update, which sends the URL this
+ * returns as `thumbnailUrl`. Nothing on the row or in public changes, so no
+ * cache version is bumped. A piece holds one stage at a time (a new one
+ * retires the last), and one never applied is reclaimed by the sweep.
+ *
+ * `rateLimit: 'strict'` (20/min), not the upload's `'api'`: every stage
+ * leaves files for the sweep, where an upload deletes the folder it replaced.
+ *
+ * Security: Creator/Admin only, must own content
+ * Content-Type: multipart/form-data
+ * Form field: thumbnail (file)
+ */
+app.post(
+  '/:id/thumbnail/stage',
+  multipartProcedure({
+    policy: {
+      auth: 'required',
+      roles: ['creator', 'admin'],
+      rateLimit: 'strict',
+    },
+    input: { params: createIdParamsSchema() },
+    files: THUMBNAIL_FILES,
+    handler: async (ctx) => {
+      const content = await ctx.services.content.get(
+        ctx.input.params.id,
+        ctx.user.id
+      );
+      if (!content) {
+        throw new ContentNotFoundError(ctx.input.params.id);
+      }
+
+      const result = await ctx.services.imageProcessing.stageContentThumbnail(
+        ctx.input.params.id,
+        ctx.user.id,
+        new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
+          type: ctx.files.thumbnail.type,
+        })
+      );
 
       return {
         thumbnailUrl: result.url,

@@ -75,22 +75,6 @@ export function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
- * Check if error is a lock wait that ran past `lock_timeout`
- * Postgres error code: 55P03
- *
- * Checks both the error itself and its cause (for DrizzleQueryError wrapping)
- */
-export function isLockNotAvailable(error: unknown): boolean {
-  const code = POSTGRES_ERROR_CODES.LOCK_NOT_AVAILABLE;
-  if (isPostgresError(error) && error.code === code) return true;
-  if (error instanceof Error && 'cause' in error) {
-    const cause = (error as { cause: unknown }).cause;
-    return isPostgresError(cause) && cause.code === code;
-  }
-  return false;
-}
-
-/**
  * Check if error is a foreign key violation
  * Postgres error code: 23503
  *
@@ -110,6 +94,33 @@ export function isForeignKeyViolation(error: unknown): boolean {
     return (
       isPostgresError(cause) &&
       cause.code === POSTGRES_ERROR_CODES.FOREIGN_KEY_VIOLATION
+    );
+  }
+
+  return false;
+}
+
+/**
+ * Check if error is a lock that was given up: not granted within the
+ * transaction's `lock_timeout` (or under NOWAIT).
+ * Postgres error code: 55P03
+ *
+ * Checks both the error itself and its cause (for DrizzleQueryError wrapping)
+ */
+export function isLockNotAvailable(error: unknown): boolean {
+  if (
+    isPostgresError(error) &&
+    error.code === POSTGRES_ERROR_CODES.LOCK_NOT_AVAILABLE
+  ) {
+    return true;
+  }
+
+  // Check if the error has a cause (Drizzle wraps Postgres errors)
+  if (error instanceof Error && 'cause' in error) {
+    const cause = (error as { cause: unknown }).cause;
+    return (
+      isPostgresError(cause) &&
+      cause.code === POSTGRES_ERROR_CODES.LOCK_NOT_AVAILABLE
     );
   }
 
@@ -144,12 +155,30 @@ export function isNotNullViolation(error: unknown): boolean {
 
 /**
  * Get constraint name from Postgres error
+ *
+ * From the error itself or its cause, as {@link isUniqueViolation} reads it
+ * (Drizzle wraps Postgres errors).
  */
 export function getConstraintName(error: unknown): string | null {
-  if (isPostgresError(error)) {
-    return error.constraint || null;
+  if (isPostgresError(error) && error.constraint) return error.constraint;
+  if (error instanceof Error && 'cause' in error) {
+    const cause = (error as { cause: unknown }).cause;
+    if (isPostgresError(cause)) return cause.constraint || null;
   }
   return null;
+}
+
+/**
+ * A unique violation on one of `constraints`: the clash a caller can name
+ * (a slug taken, say), so any other unique index it trips stays unexpected.
+ */
+export function isUniqueViolationOf(
+  error: unknown,
+  constraints: ReadonlySet<string>
+): boolean {
+  return (
+    isUniqueViolation(error) && constraints.has(getConstraintName(error) ?? '')
+  );
 }
 
 /**

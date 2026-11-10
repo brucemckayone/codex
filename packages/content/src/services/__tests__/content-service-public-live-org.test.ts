@@ -251,6 +251,9 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
     expect(items.length).toBeGreaterThan(0);
     for (const item of items) {
       expect(item).not.toHaveProperty('purchaseCount');
+      // A draft's publish-when-ready state is the studio's (Codex-a6ofh.2.7).
+      expect(item).not.toHaveProperty('publishRequestedAt');
+      expect(item).not.toHaveProperty('publishBlockedReason');
       expect(item).toHaveProperty('viewCount');
     }
   });

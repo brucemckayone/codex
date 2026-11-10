@@ -901,8 +901,8 @@
     {
       "idx": 128,
       "version": "7",
-      "when": 1794220033013,
-      "tag": "0128_email_log_index_and_buyer_told_check",
+      "when": 1794233912950,
+      "tag": "0128_publish_when_ready",
       "breakpoints": true
     }
   ]

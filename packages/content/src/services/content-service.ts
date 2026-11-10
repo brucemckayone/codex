@@ -19,17 +19,22 @@ import {
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
+  ERROR_CODES,
+  hasBeenLive,
+  isMediaOnItsWay,
   isPublicContent,
+  isPublishBlockedReason,
+  isTerminalTranscodeFailure,
   MEDIA_STATUS,
   MEDIA_TYPES,
-  ORGANIZATION_ROLES,
-  ORGANIZATION_STATUS,
   PAGINATION,
-  requiresPayoutsToPublish,
+  type PublishBlockedReason,
 } from '@codex/constants';
 import {
-  isUniqueViolation,
+  isLockNotAvailable,
+  isUniqueViolationOf,
   MEDIA_ITEM_RESPONSE_COLUMNS,
+  messageForLog,
   paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
@@ -39,24 +44,24 @@ import {
   content,
   contentCategories,
   mediaItems,
-  organizationMemberships,
   organizations,
-  stripeConnectAccounts,
 } from '@codex/database/schema';
 import {
+  claimStagedCover,
   type ImageProcessingResult,
   ImageProcessingService,
   ownContentThumbnailFolder,
+  stagedCoverRefusal,
 } from '@codex/image-processing';
 import type { ServiceConfig } from '@codex/service-errors';
 import {
   BaseService,
-  ForbiddenError,
+  isServiceError,
+  ServiceUnavailableError,
   ValidationError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import {
-  type PosterFrameSource,
   playedMediaItemId,
   posterFolderCount,
   posterFramesOf,
@@ -66,6 +71,7 @@ import {
   createContentSchema,
   createPlatformImageUrlSchema,
   PLATFORM_IMAGE_URL_MESSAGE,
+  parseTiptapDoc,
   updateContentSchema,
 } from '@codex/validation';
 import {
@@ -84,17 +90,13 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
-  BusinessLogicError,
+  ContentAlreadyLiveError,
   ContentNotFoundError,
   ContentTypeMismatchError,
-  CreatorPayoutsRequiredError,
   InternalServiceError,
-  MediaDeletedError,
   MediaNotFoundError,
   MediaNotReadyError,
   SlugConflictError,
-  ThumbnailMediaDeletedError,
-  TierRequiredToPublishError,
 } from '../errors';
 import type {
   CatalogueContentRow,
@@ -107,13 +109,17 @@ import type {
   PublicContentOrganization,
   PublicContentRow,
   PublicMediaItemSource,
+  ScheduleSettlement,
+  SettledDraft,
+  SettleOptions,
+  SettleOutcome,
+  StoppedDraft,
 } from '../types';
 import {
   assertTiersInOrg,
   type ContentTierWire,
   clearTicks,
   expandLegacyTier,
-  hasAnyTick,
   notClosedToNewViewers,
   readTickIds,
   replaceTicks,
@@ -121,6 +127,16 @@ import {
   syncLegacyIncludedInTierId,
   withTierWire,
 } from './content-tier-access';
+import {
+  assertCanFileInOrg,
+  assertCreatorCanBePaid,
+  assertPublishable,
+  assertSaveKeepsContentFilled,
+  assertThumbnailFrameNotDeleted,
+  goLiveColumns,
+  NO_PUBLISH_REQUEST,
+  type PublishOptions,
+} from './publish-gate';
 
 /**
  * The media_items columns `listPublic` selects (Codex-ve5eh). It used to load
@@ -177,19 +193,121 @@ export const PUBLIC_CREATOR_COLUMNS = {
  */
 export const CATALOGUE_CONTENT_COLUMNS = {
   purchaseCount: false,
+  // A draft's publish-when-ready state (Codex-a6ofh.2.7) is the studio's:
+  // null on every live row, and kept off the public wire from the column's
+  // first day, so no cached public slot ever held it (no bump needed).
+  publishRequestedAt: false,
+  publishBlockedReason: false,
 } as const satisfies Partial<Record<keyof Content, false>>;
 
 /**
- * The org roles that may file content into an org's catalogue (Codex-ocal6):
- * the team. `subscriber` and `member` are the org's audience: they can watch
- * its content, never publish into it. The same set as the "Team only" access
- * rule (`MANAGEMENT_ROLES` in @codex/access access-decision.ts).
+ * The media-ready trigger reached a row no longer waiting on the media that
+ * fired (Codex-a6ofh.2.8): a cancel, a removal or a swap committed first.
  */
-const MANAGEMENT_ROLES: string[] = [
-  ORGANIZATION_ROLES.OWNER,
-  ORGANIZATION_ROLES.ADMIN,
-  ORGANIZATION_ROLES.CREATOR,
-];
+function noLongerScheduledOn(
+  row: Pick<Content, 'publishRequestedAt' | 'mediaItemId'>,
+  fromSchedule: PublishOptions['fromSchedule']
+): boolean {
+  return (
+    fromSchedule !== undefined &&
+    (row.publishRequestedAt === null ||
+      row.mediaItemId !== fromSchedule.mediaItemId)
+  );
+}
+
+/** Drafts one media-ready call settles; the maintenance run takes the rest. */
+const SETTLE_BATCH = 50;
+
+/**
+ * A settle's write gave up a lock held elsewhere (`lock_timeout`): nothing
+ * was written, the draft keeps waiting, and the next run tries again. A 503,
+ * so it is kept, not read as a refusal its creator must fix. `lockedOn` is
+ * the table it waited on, when Postgres names it: a go-live locks the
+ * draft's media, the membership and the thumbnail's media as well as the
+ * draft. Unnamed for a waiter queued behind another on the same row, or for
+ * a table lock (a migration's).
+ */
+class ScheduledRowLockedError extends ServiceUnavailableError {
+  readonly lockedOn: string | undefined;
+  constructor(contentId: string | undefined, cause: unknown) {
+    super(
+      'A scheduled draft is locked; the next run tries again',
+      { ...(contentId ? { contentId } : {}) },
+      { cause }
+    );
+    this.lockedOn = lockedRelation(cause);
+  }
+}
+
+/**
+ * The table a given-up lock waited on, from Postgres's `where` (`while
+ * locking tuple (0,1) in relation "media_items"`), through Drizzle's
+ * wrapper. Only the name: the field can carry statement text. It runs as
+ * a lock error is caught, so it never throws: an error it cannot read names
+ * no table.
+ */
+function lockedRelation(error: unknown): string | undefined {
+  try {
+    let at = error;
+    for (let hop = 0; hop < 3; hop++) {
+      if (typeof at !== 'object' || at === null) return undefined;
+      const { where, cause } = at as { where?: unknown; cause?: unknown };
+      if (typeof where === 'string') {
+        return /in relation "([^"]+)"/.exec(where)?.[1];
+      }
+      at = cause;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A given-up lock's log fields (the table it waited on); none otherwise. */
+const lockFields = (error: unknown) =>
+  error instanceof ScheduledRowLockedError ? { lockedOn: error.lockedOn } : {};
+
+/**
+ * No draft is started past this. The route settles in the 30 s Workers gives
+ * background work after a response, shared with its emails and cache bumps.
+ */
+const SETTLE_BUDGET_MS = 10_000;
+
+/**
+ * `and()` arguments for a creator's drafts still scheduled on a media item:
+ * both predicates of idx_content_publish_requested_media, and the scope.
+ * Spread into the `and()`, never held in one, which is typed `SQL | undefined`.
+ */
+function waitingOn(mediaItemId: string, creatorId: string): SQL[] {
+  return [
+    eq(content.mediaItemId, mediaItemId),
+    scopedNotDeleted(content, creatorId),
+    isNotNull(content.publishRequestedAt),
+  ];
+}
+
+/** The SET that ends a draft's wait, keeping why for its editor. */
+function stoppedWaiting(reason: PublishBlockedReason) {
+  return {
+    publishRequestedAt: null,
+    publishBlockedReason: reason,
+    updatedAt: new Date(),
+  };
+}
+
+/**
+ * Why a scheduled draft stops waiting, from what its go-live refused with: a
+ * publish refusal the creator must fix (`details.code`). Null for anything a
+ * later run may get past: an unexpected error, or media no longer ready (a
+ * new transcode claimed it), which leaves the schedule waiting on it.
+ */
+function stoppingReason(error: unknown): PublishBlockedReason | null {
+  if (!isServiceError(error) || error.statusCode >= 500) return null;
+  const code = error.context?.code;
+  return isPublishBlockedReason(code) && code !== ERROR_CODES.MEDIA_NOT_READY
+    ? code
+    : null;
+}
 
 /**
  * Content Service Class
@@ -214,6 +332,15 @@ const MANAGEMENT_ROLES: string[] = [
 export interface ContentServiceConfig extends ServiceConfig {
   /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
   r2PublicUrlBase?: string;
+}
+
+/** How {@link ContentService.update} is asked to save. */
+export interface UpdateContentOptions {
+  /**
+   * A draft's autosave (Codex-a6ofh.2): refused with
+   * `ContentAlreadyLiveError` once the piece has been live, never written.
+   */
+  asDraft?: boolean;
 }
 
 /**
@@ -251,33 +378,11 @@ async function assertOwnPosterFolders(
   }
 }
 
-/**
- * Refuse a thumbnail that is a frame of one of the creator's deleted videos
- * (Codex-tqvmx): the purge removes that frame 30 days after the delete, and
- * a live thumbnail would then 404, or keep the purge skipping its video every
- * week. A locking read, taken after the row's and its own media's locks: a
- * delete that committed first is seen here, and one that waits on this lock
- * then finds a live use of the frame (the usage lookup's `thumbnail` slot,
- * which matches URLs by the same test), and refuses. A frame of no video of
- * the creator's isn't this check's (Codex-p0uuc).
- */
-async function assertThumbnailFrameNotDeleted(
-  tx: DatabaseTransaction,
-  contentId: string,
-  source: PosterFrameSource,
-  action: 'publish' | 'save'
-): Promise<void> {
-  const frames = posterFramesOf(source);
-  if (frames === undefined) return;
-  const rows = await tx
-    .select({ deletedAt: mediaItems.deletedAt })
-    .from(mediaItems)
-    .where(frames)
-    .for('key share');
-  if (rows.some((row) => row.deletedAt !== null)) {
-    throw new ThumbnailMediaDeletedError(contentId, action);
-  }
-}
+/** The partial unique indexes that keep a slug to one piece (schema/content.ts). */
+const CONTENT_SLUG_INDEXES = new Set([
+  'idx_unique_content_slug_per_org',
+  'idx_unique_content_slug_personal',
+]);
 
 export class ContentService extends BaseService {
   private cache?: VersionedCache;
@@ -341,65 +446,10 @@ export class ContentService extends BaseService {
     contentBodyJson: Record<string, unknown> | null;
   } {
     if (!raw) return { contentBody: null, contentBodyJson: null };
-    if (raw.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && parsed.type === 'doc') {
-          return { contentBody: null, contentBodyJson: parsed };
-        }
-      } catch {
-        // Not valid JSON — treat as plain text
-      }
-    }
-    return { contentBody: raw, contentBodyJson: null };
-  }
-
-  /**
-   * Whether the creator's Stripe Connect account can receive money.
-   *
-   * DB-only readiness check: `charges_enabled` + `payouts_enabled` on
-   * `stripe_connect_accounts` are kept in sync by Stripe's `account.updated`
-   * webhook, so this needs no live Stripe call (content-api has no
-   * STRIPE_SECRET_KEY binding) and mirrors the backend gate the subscription
-   * domain uses (`chargesEnabled && payoutsEnabled`). One account per user is
-   * enforced by a unique(userId) constraint, so `.limit(1)` is exact.
-   */
-  private async isCreatorConnectReady(
-    tx: DatabaseTransaction,
-    creatorId: string
-  ): Promise<boolean> {
-    const [account] = await tx
-      .select({
-        chargesEnabled: stripeConnectAccounts.chargesEnabled,
-        payoutsEnabled: stripeConnectAccounts.payoutsEnabled,
-      })
-      .from(stripeConnectAccounts)
-      .where(eq(stripeConnectAccounts.userId, creatorId))
-      .limit(1);
-
-    return !!account && account.chargesEnabled && account.payoutsEnabled;
-  }
-
-  /**
-   * Refuse to put content that earns money on sale while its creator can't be
-   * paid. `requiresPayoutsToPublish` decides what earns money — any price or
-   * any tier, whether or not the row is marked purchasable (owner rule,
-   * Codex-2hxff.14) — so publish() and update() both ask here. Free, followers
-   * and team content passes without a lookup.
-   *
-   * @throws {CreatorPayoutsRequiredError} When the row needs payouts and the
-   *   creator's Connect account is not charges + payouts enabled
-   */
-  private async assertCreatorCanBePaid(
-    tx: DatabaseTransaction,
-    creatorId: string,
-    row: { priceCents: number | null; isTierGated: boolean }
-  ): Promise<void> {
-    if (!requiresPayoutsToPublish(row)) return;
-    if (await this.isCreatorConnectReady(tx, creatorId)) return;
-    throw new CreatorPayoutsRequiredError(
-      (row.priceCents ?? 0) > 0 ? 'paid' : 'included_in_tier'
-    );
+    const doc = parseTiptapDoc(raw);
+    return doc
+      ? { contentBody: null, contentBodyJson: doc }
+      : { contentBody: raw, contentBodyJson: null };
   }
 
   /**
@@ -487,7 +537,7 @@ export class ContentService extends BaseService {
    * @param input - Content creation data (validated by Zod)
    * @param creatorId - ID of the creator
    * @returns Created content
-   * @throws {ForbiddenError} If `organizationId` names an org the creator is
+   * @throws {NotOnOrgTeamError} If `organizationId` names an org the creator is
    *   not an active owner, admin or creator of
    * @throws {MediaNotFoundError} If media item doesn't exist or doesn't belong to creator
    * @throws {MediaNotReadyError} If media item is not in 'ready' status
@@ -522,7 +572,7 @@ export class ContentService extends BaseService {
         // between a creator and another org's catalogue (Codex-ocal6). It runs
         // first so a non-member learns nothing about media or tiers.
         if (validated.organizationId) {
-          await this.assertCanFileInOrg(
+          await assertCanFileInOrg(
             tx as DatabaseTransaction,
             validated.organizationId,
             creatorId
@@ -696,8 +746,8 @@ export class ContentService extends BaseService {
         wired ?? { ...result, includedInTierIds: [], includedInTierId: null }
       );
     } catch (error) {
-      // Handle unique constraint violations (slug conflicts)
-      if (isUniqueViolation(error)) {
+      // A slug another piece holds; any other clash stays unexpected.
+      if (isUniqueViolationOf(error, CONTENT_SLUG_INDEXES)) {
         throw new SlugConflictError(validated.slug);
       }
       this.handleError(error, 'create');
@@ -801,7 +851,7 @@ export class ContentService extends BaseService {
    * @param creatorId - Creator ID (for authorization)
    * @returns Updated content
    * @throws {ContentNotFoundError} If content doesn't exist
-   * @throws {ForbiddenError} If `organizationId` moves the content into an
+   * @throws {NotOnOrgTeamError} If `organizationId` moves the content into an
    *   org the creator is not an active owner, admin or creator of
    * @throws {MediaNotFoundError} If a newly attached media item isn't the
    *   caller's, or is deleted
@@ -809,16 +859,20 @@ export class ContentService extends BaseService {
    * @throws {ContentTypeMismatchError} If its type isn't the content's
    * @throws {CreatorPayoutsRequiredError} If the update sets or changes a
    *   price or tier on published content whose creator can't be paid
+   * @throws {ContentAlreadyLiveError} (409) `asDraft` on a piece that has
+   *   been live: a draft's autosave never writes to one
    */
   async update(
     id: string,
     input: UpdateContentInput,
-    creatorId: string
+    creatorId: string,
+    options: UpdateContentOptions = {}
   ): Promise<Content & ContentTierWire> {
     const { content: updated } = await this.updateReportingDroppedThumbnail(
       id,
       input,
-      creatorId
+      creatorId,
+      options
     );
     return updated;
   }
@@ -828,14 +882,21 @@ export class ContentService extends BaseService {
    * off, or null. Each upload goes to a new folder (Codex-kk9nv.5), so nothing
    * would ever overwrite the old one; this service has no R2 binding, so the
    * content-api PATCH route deletes it.
+   *
+   * `hasBeenLive` says whether any cache can hold the piece, so whether the
+   * route fans out invalidation. It is judged from the row as it was before
+   * this update (see `hasBeenLive` in `@codex/constants`): an update cannot
+   * make a piece live, and moving it out of its org resets the row.
    */
   async updateReportingDroppedThumbnail(
     id: string,
     input: UpdateContentInput,
-    creatorId: string
+    creatorId: string,
+    { asDraft = false }: UpdateContentOptions = {}
   ): Promise<{
     content: Content & ContentTierWire;
     droppedThumbnailUrl: string | null;
+    hasBeenLive: boolean;
   }> {
     // Validate input
     const validated = updateContentSchema.parse(input);
@@ -847,6 +908,11 @@ export class ContentService extends BaseService {
 
     // Read inside the transaction; only meaningful once it has committed.
     let previousThumbnailUrl: string | null = null;
+    let previousSlug: string | null = null;
+    let wasLive = false;
+    // `as`: assigned in the callback, which TS cannot see, so it would stay
+    // narrowed to `null` after it.
+    let refusedFolder = null as string | null;
 
     try {
       const result = await this.db.transaction(async (tx) => {
@@ -891,6 +957,14 @@ export class ContentService extends BaseService {
           throw new ContentNotFoundError(id);
         }
 
+        // A draft's autosave writes only while the piece has never been
+        // live. Judged here, on the locked row, so a go-live the editor did
+        // not see (its schedule fired, an admin, another tab) is refused,
+        // never a half-typed change on the live piece (Codex-a6ofh.2).
+        if (asDraft && hasBeenLive(existing)) {
+          throw new ContentAlreadyLiveError(id, 'draft-save');
+        }
+
         // Moving the row into a different org needs the same team membership
         // as create() (Codex-ocal6). An unchanged org is not re-checked: the
         // studio form sends the current organizationId on every save.
@@ -899,7 +973,7 @@ export class ContentService extends BaseService {
           validated.organizationId &&
           validated.organizationId !== existing.organizationId
         ) {
-          await this.assertCanFileInOrg(
+          await assertCanFileInOrg(
             tx as DatabaseTransaction,
             validated.organizationId,
             creatorId
@@ -921,24 +995,33 @@ export class ContentService extends BaseService {
           includedInTierId: sentLegacyTierId,
           ...restValidated
         } = validated;
-        const bodyFields =
-          _rawBody !== undefined ? this.parseContentBody(_rawBody) : {};
+        const sentBody =
+          _rawBody !== undefined ? this.parseContentBody(_rawBody) : undefined;
+        const bodyFields = sentBody ?? {};
         previousThumbnailUrl = existing.thumbnailUrl;
+        previousSlug = existing.slug;
+        wasLive = hasBeenLive(existing);
 
         // A URL in this content's own thumbnail folders is written only by an
         // upload. One the payload sends that differs from the row's names an
         // upload since replaced, whose files are deleted, so a stale form
         // re-sending it would point the row at a 404. The stored thumbnail
-        // stays (Codex-kk9nv.5).
+        // stays (Codex-kk9nv.5). Unless it is a cover staged for this piece's
+        // Update (Codex-a6ofh.2.5), which this PATCH takes, so it applies
+        // once; a stage taken before, replaced or too old is not one.
         const sentThumbnailUrl = restValidated.thumbnailUrl;
+        const sentOwnFolder =
+          sentThumbnailUrl != null && sentThumbnailUrl !== existing.thumbnailUrl
+            ? ownContentThumbnailFolder(
+                sentThumbnailUrl,
+                { creatorId, contentId: id },
+                this.r2PublicUrlBase
+              )
+            : null;
         const keepStoredThumbnail =
-          sentThumbnailUrl != null &&
-          sentThumbnailUrl !== existing.thumbnailUrl &&
-          ownContentThumbnailFolder(
-            sentThumbnailUrl,
-            { creatorId, contentId: id },
-            this.r2PublicUrlBase
-          ) !== null;
+          sentOwnFolder !== null &&
+          !(await claimStagedCover(tx, id, sentOwnFolder));
+        if (keepStoredThumbnail) refusedFolder = sentOwnFolder;
 
         // Codex-up7bx: the tier gate is only valid on org-scoped content —
         // subscription_tiers is org-scoped. Determine the org the row will have
@@ -1083,11 +1166,12 @@ export class ContentService extends BaseService {
         // new one is picked (a restore heals it), so a save that doesn't touch
         // the media still goes through.
         const sentMediaItemId = restValidated.mediaItemId;
+        let swappedTo: { status: string; createdAt: Date } | null = null;
         if (
           sentMediaItemId != null &&
           sentMediaItemId !== existing.mediaItemId
         ) {
-          await this.validateMediaItem(
+          swappedTo = await this.validateMediaItem(
             tx as DatabaseTransaction,
             sentMediaItemId,
             creatorId,
@@ -1095,8 +1179,37 @@ export class ContentService extends BaseService {
             // Live as the usage lookup counts it: released content keeps its
             // buyers after it goes off sale, so it needs a playable item too.
             existing.status === CONTENT_STATUS.PUBLISHED ||
-              existing.publishedAt !== null
+              existing.publishedAt !== null,
+            // A scheduled draft reads its new media FOR SHARE, as the publish
+            // gate does: a transcode failing mid-swap is either seen here,
+            // and clears the schedule, or waits for this save (review R2).
+            existing.publishRequestedAt ? 'share' : 'key share'
           );
+        }
+
+        // A LIVE piece stays complete (Codex-a6ofh.2.1, review): a save may
+        // not open a gap publishing it would refuse, media, an article's
+        // body, a price of at least £1, since those rules left the schema for
+        // publish(). Judged on the whole row, the partial overlaid on it,
+        // because the studio resends some fields and not others; a gap the
+        // row already had doesn't block an unrelated edit. Drafts are left to
+        // publish(), and so is a piece taken off sale.
+        if (existing.status === CONTENT_STATUS.PUBLISHED) {
+          assertSaveKeepsContentFilled(existing, {
+            id,
+            contentType: restValidated.contentType ?? existing.contentType,
+            mediaItemId:
+              restValidated.mediaItemId === undefined
+                ? existing.mediaItemId
+                : restValidated.mediaItemId,
+            contentBody: sentBody ? sentBody.contentBody : existing.contentBody,
+            contentBodyJson: sentBody
+              ? sentBody.contentBodyJson
+              : existing.contentBodyJson,
+            isPurchasable:
+              restValidated.isPurchasable ?? existing.isPurchasable,
+            priceCents: effPriceCents ?? null,
+          });
         }
 
         // Codex-p0uuc: a poster-frame thumbnail must be of the caller's own
@@ -1162,13 +1275,25 @@ export class ContentService extends BaseService {
             (effGated && !existing.isTierGated) ||
             (!existing.isPurchasable && restValidated.isPurchasable === true);
           if (opensAWayToPay) {
-            await this.assertCreatorCanBePaid(
-              tx as DatabaseTransaction,
-              creatorId,
-              { priceCents: nextPriceCents, isTierGated: effGated }
-            );
+            await assertCreatorCanBePaid(tx as DatabaseTransaction, creatorId, {
+              priceCents: nextPriceCents,
+              isTierGated: effGated,
+            });
           }
         }
+
+        // A publish-when-ready schedule waits only on media that will get
+        // there (owner, Codex-a6ofh.2.7): removing the media clears it, and so
+        // does a swap onto a failed item or a stopped upload, or a change to
+        // an article, which plays no media. A swap onto media on its way, or
+        // already ready, keeps it.
+        const dropsSchedule =
+          restValidated.mediaItemId === null ||
+          (restValidated.contentType ?? existing.contentType) ===
+            CONTENT_TYPES.WRITTEN ||
+          (swappedTo !== null &&
+            swappedTo.status !== MEDIA_STATUS.READY &&
+            !isMediaOnItsWay(swappedTo));
 
         // Update content
         const [updated] = await tx
@@ -1200,6 +1325,7 @@ export class ContentService extends BaseService {
             ...(keepStoredThumbnail
               ? { thumbnailUrl: existing.thumbnailUrl }
               : {}),
+            ...(dropsSchedule ? NO_PUBLISH_REQUEST : {}),
             isTierGated: effGated,
             // Clamp AFTER the spread so it overrides a stale `isFree:false` the
             // partial may carry alongside the gate it just cleared — and a
@@ -1265,9 +1391,16 @@ export class ContentService extends BaseService {
         throw new ContentNotFoundError(id);
       }
 
-      // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
-      void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
-      if (result.organizationId) {
+      // Bump content catalogue version keys (fire-and-forget; invalidate
+      // swallows errors), unless the piece was never live. Judged from the
+      // row before the update: moving a piece out of its org fires
+      // trigger_unpublish_on_org_delete (migration 0004), which resets its
+      // status and publishedAt, and its buyers still hold it. An update
+      // cannot set either, so the row after it can only read less live.
+      if (wasLive) {
+        void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+      }
+      if (wasLive && result.organizationId) {
         void this.cache?.invalidate(
           CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
         );
@@ -1286,6 +1419,21 @@ export class ContentService extends BaseService {
         }
       }
 
+      if (refusedFolder) {
+        // Once committed: a PATCH that rolled back kept nothing. Why, read
+        // after it and best-effort: the log's, so it never fails the Update.
+        // The answer carries the cover kept, for the editor to say so.
+        const reason = await stagedCoverRefusal(
+          this.db,
+          id,
+          refusedFolder
+        ).catch((err: unknown) => `unread: ${messageForLog(err)}`);
+        this.obs.warn(
+          'Sent cover was not a stage this piece could take; stored cover kept',
+          // The folder's name, never its path: that starts with a user id.
+          { contentId: id, folder: refusedFolder.split('/').at(-1), reason }
+        );
+      }
       const thumbnailMoved = previousThumbnailUrl !== result.thumbnailUrl;
       const [wired] = await withTierWire(this.db, [result]);
       return {
@@ -1295,10 +1443,18 @@ export class ContentService extends BaseService {
           includedInTierId: result.legacyIncludedInTierId,
         },
         droppedThumbnailUrl: thumbnailMoved ? previousThumbnailUrl : null,
+        hasBeenLive: wasLive,
       };
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
+      }
+      // A slug another piece holds, a 409 as create() reports it: the
+      // creator's to change, never an unexpected error (Codex-a6ofh.2.4).
+      // Only the slug's own indexes: any other clash stays unexpected. A move
+      // to an org where its slug is taken sends none: the clash is its own.
+      if (isUniqueViolationOf(error, CONTENT_SLUG_INDEXES)) {
+        throw new SlugConflictError(validated.slug ?? previousSlug ?? '');
       }
       this.handleError(error, 'update');
     }
@@ -1402,26 +1558,67 @@ export class ContentService extends BaseService {
    * Business Logic:
    * - Sets status to 'published'
    * - Sets publishedAt timestamp
-   * - Validates content is ready (has media if video/audio)
+   * - Refuses unless `assertPublishable` passes (./publish-gate.ts): the
+   *   org's team, media, body, price, thumbnail, tier and payouts rules
+   * - Publish when ready (Codex-a6ofh.2.7): with `whenReady`, media still on
+   *   its way schedules it instead, and the scheduled draft comes back. Its
+   *   `publishRequestedAt` keeps the first request's time; the media-ready
+   *   trigger publishes it later, every rule again
+   * - Clears any schedule, and the last attempt's blocked reason, as it goes
+   *   live
    * - Idempotent (returns success if already published)
    *
    * @param id - Content ID
    * @param creatorId - Creator ID (for authorization)
-   * @returns Published content
+   * @param options - `whenReady`: schedule on media still on its way
+   * @returns Published content, or the scheduled draft (status `draft`,
+   *   `publishRequestedAt` set)
    * @throws {ContentNotFoundError} If content doesn't exist
-   * @throws {BusinessLogicError} If content is not ready to publish
-   * @throws {MediaDeletedError} If its media item was deleted (Codex-6sbn1)
+   * @throws {BusinessLogicError} (422) A rule refused it; `details.code` names
+   *   which (see `assertPublishable`)
+   * @throws {NotOnOrgTeamError} (403) The creator is not on the org's team
    * @throws {MediaNotFoundError} If its media item is another creator's
    *   (Codex-vmi6m)
    */
   async publish(
     id: string,
-    creatorId: string
+    creatorId: string,
+    options: PublishOptions = {}
   ): Promise<Content & ContentTierWire> {
+    const { row } = await this.publishAndReport(id, creatorId, options);
     try {
+      const [wired] = await withTierWire(this.db, [row]);
+      return wired ?? { ...row, includedInTierIds: [], includedInTierId: null };
+    } catch (error) {
+      this.handleError(error, 'publish');
+    }
+  }
+
+  /**
+   * `publish` without its tier wire, and whether THIS call put the row live:
+   * true only when its own transaction wrote the go-live columns under the
+   * row lock, so of two callers racing one draft (the media-ready webhook and
+   * the maintenance run) exactly one hears it (Codex-a6ofh.2.8). An
+   * already-live row, a schedule, or a trigger that came too late, is false.
+   */
+  private async publishAndReport(
+    id: string,
+    creatorId: string,
+    options: PublishOptions
+  ): Promise<{ row: Content; wentLive: boolean }> {
+    try {
+      let wentLive = false;
       const result = await this.db.transaction(async (tx) => {
-        // The row first, locked FOR NO KEY UPDATE, then its media FOR KEY
-        // SHARE below: the order update() takes them in. Publish takes no tier
+        // A scheduled go-live gives up any one lock it waits 5 s on (each of
+        // its row, media, membership and thumbnail locks), for the next run:
+        // a lock held elsewhere must not run a settle past the 30 s its
+        // background work gets, cutting off what it had not told.
+        if (options.fromSchedule) {
+          await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+        }
+        // The row first, locked FOR NO KEY UPDATE, then its media below (FOR
+        // KEY SHARE, or FOR SHARE to publish when ready): the order update()
+        // takes them in. Publish takes no tier
         // lock (its tick and payouts reads are plain), so the plan-access lock
         // order (@codex/subscription tier-service.ts) holds. Unlocked, a PATCH
         // that swapped the media between this read and the media lock made
@@ -1448,132 +1645,509 @@ export class ContentService extends BaseService {
           return existing;
         }
 
-        // Validate content is ready to publish
-        if (
-          [CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO].includes(
-            existing.contentType as
-              | typeof CONTENT_TYPES.VIDEO
-              | typeof CONTENT_TYPES.AUDIO
-          )
-        ) {
-          if (!existing.mediaItem) {
-            throw new BusinessLogicError(
-              'Cannot publish content without media',
-              {
-                contentId: id,
-                contentType: existing.contentType,
-              }
-            );
-          }
-          // A draft keeps its link to a deleted item (Codex-6sbn1), and must
-          // not go live on it. A locking read, so a delete running now is
-          // ordered against this publish: one that committed first is seen
-          // here; one that waits on this lock then sees a published use, and
-          // refuses. Scoped to the content's creator: a row that took another
-          // creator's item through the old PATCH hole (Codex-vmi6m) must not
-          // go live streaming their file.
-          const [media] = await tx
-            .select({ deletedAt: mediaItems.deletedAt })
-            .from(mediaItems)
-            .where(
-              and(
-                eq(mediaItems.id, existing.mediaItem.id),
-                eq(mediaItems.creatorId, existing.creatorId)
-              )
-            )
-            .for('key share');
-          if (!media) {
-            throw new MediaNotFoundError(existing.mediaItem.id);
-          }
-          if (media.deletedAt) {
-            throw new MediaDeletedError(id);
-          }
-          if (existing.mediaItem.status !== MEDIA_STATUS.READY) {
-            throw new MediaNotReadyError(existing.mediaItem.id);
-          }
+        // The media-ready trigger publishes a row only if it is still
+        // scheduled on the media that fired (Codex-a6ofh.2.8): a cancel, a
+        // removal or a swap that committed first wins. Read under the lock.
+        if (noLongerScheduledOn(existing, options.fromSchedule)) {
+          return existing;
         }
 
-        // Any type: written content can show a video's frame too, and one of
-        // the video it links but doesn't play, which nothing above checks.
-        await assertThumbnailFrameNotDeleted(
+        // Every rule a piece must pass to go live (Codex-a6ofh.2.1), shared
+        // with the platform owner's publish so the two can't drift apart.
+        const readiness = await assertPublishable(
           tx as DatabaseTransaction,
-          id,
-          {
-            thumbnailUrl: existing.thumbnailUrl,
-            creatorId: existing.creatorId,
-            exceptMediaItemId: playedMediaItemId(existing),
-          },
-          'publish'
+          existing,
+          options
         );
 
-        // Subscriber content needs at least one tier to go live (Codex-2hxff.91,
-        // owner U2). Saving it with none is allowed (closed); publishing it is
-        // not. A paid item whose tiers are optional stays on sale, so it may.
+        // Publish when ready: nothing public changes, the draft only
+        // remembers it was asked (Codex-a6ofh.2.7), from the first ask on. A
+        // repeat ask that has nothing to clear writes nothing.
+        const scheduling = readiness === 'when-media-ready';
         if (
-          existing.isTierGated &&
-          !existing.isPurchasable &&
-          !(await hasAnyTick(tx as DatabaseTransaction, id))
+          scheduling &&
+          existing.publishRequestedAt &&
+          !existing.publishBlockedReason
         ) {
-          throw new TierRequiredToPublishError(id);
+          return existing;
         }
-
-        // Content that earns money needs a payout-ready Connect account before
-        // it can go live: publishing without a payout destination strands
-        // buyer funds in a pending payout indefinitely. Any price or tier
-        // counts, purchasable or not (Codex-2hxff.14 — the old gate only saw
-        // a price on a row marked purchasable).
-        await this.assertCreatorCanBePaid(
-          tx as DatabaseTransaction,
-          creatorId,
-          existing
-        );
-
-        // Publish content
-        const [published] = await tx
+        const now = new Date();
+        const [written] = await tx
           .update(content)
-          .set({
-            status: CONTENT_STATUS.PUBLISHED,
-            publishedAt: new Date(),
-            // Back on sale: no longer "taken off sale on departure"
-            // (Codex-2hxff.64), so tier access follows the normal rule.
-            offSaleAt: null,
-            updatedAt: new Date(),
-          })
+          .set(
+            scheduling
+              ? {
+                  publishRequestedAt: existing.publishRequestedAt ?? now,
+                  publishBlockedReason: null,
+                  updatedAt: now,
+                }
+              : goLiveColumns(now)
+          )
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
           .returning();
 
-        if (!published) {
+        if (!written) {
           throw new ContentNotFoundError(id);
         }
 
-        return published;
+        wentLive = !scheduling;
+        return written;
       });
 
       if (!result) {
         throw new ContentNotFoundError(id);
       }
 
-      // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
-      void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
-      if (result.organizationId) {
-        void this.cache?.invalidate(
-          CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
-        );
+      // Bump content catalogue version keys (fire-and-forget; invalidate
+      // swallows errors). A scheduled draft changed nothing public.
+      if (result.status === CONTENT_STATUS.PUBLISHED) {
+        void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+        if (result.organizationId) {
+          void this.cache?.invalidate(
+            CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
+          );
+        }
       }
 
-      const [wired] = await withTierWire(this.db, [result]);
-      return (
-        wired ?? { ...result, includedInTierIds: [], includedInTierId: null }
-      );
+      return { row: result, wentLive };
     } catch (error) {
-      if (
-        error instanceof ContentNotFoundError ||
-        error instanceof BusinessLogicError
-      ) {
-        throw error;
+      // A scheduled go-live that gave up its lock is expected: kept for the
+      // next run, a typed 503, never logged as an unhandled error.
+      if (options.fromSchedule && isLockNotAvailable(error)) {
+        throw new ScheduledRowLockedError(id, error);
       }
       this.handleError(error, 'publish');
     }
+  }
+
+  /**
+   * Cancel a publish-when-ready schedule (Codex-a6ofh.2.7): the draft stays a
+   * draft, and its media going ready no longer publishes it. Also clears the
+   * reason a scheduled attempt didn't go live, which the media-ready trigger
+   * leaves with no schedule (Codex-a6ofh.2.8). A draft with neither comes
+   * back as it is; a piece already live refuses, so a cancel that lost to a
+   * go-live is never read as "cancelled".
+   *
+   * @param id - Content ID
+   * @param creatorId - Creator ID (for authorization)
+   * @returns The content, its schedule cleared
+   * @throws {ContentNotFoundError} If content doesn't exist
+   * @throws {ContentAlreadyLiveError} (409) It went live first
+   */
+  async cancelPublishRequest(
+    id: string,
+    creatorId: string
+  ): Promise<Content & ContentTierWire> {
+    try {
+      // Each clause spelled out: an `and()` held in a variable is typed
+      // `SQL | undefined`, and a nested one that came back undefined would be
+      // dropped with the creator scope in it.
+      const [cleared] = await this.db
+        .update(content)
+        .set({ ...NO_PUBLISH_REQUEST, updatedAt: new Date() })
+        .where(
+          and(
+            eq(content.id, id),
+            scopedNotDeleted(content, creatorId),
+            // Plain SQL, never `or()`: it cannot come back undefined either.
+            sql`(${isNotNull(content.publishRequestedAt)} or ${isNotNull(content.publishBlockedReason)})`
+          )
+        )
+        .returning();
+      const row =
+        cleared ??
+        (await this.db.query.content.findFirst({
+          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
+        }));
+      if (!row) {
+        throw new ContentNotFoundError(id);
+      }
+      if (!cleared && row.status === CONTENT_STATUS.PUBLISHED) {
+        throw new ContentAlreadyLiveError(id, 'cancel');
+      }
+      const [wired] = await withTierWire(this.db, [row]);
+      return wired ?? { ...row, includedInTierIds: [], includedInTierId: null };
+    } catch (error) {
+      this.handleError(error, 'cancelPublishRequest');
+    }
+  }
+
+  /**
+   * Settle every draft scheduled to publish when this media item is ready
+   * (Codex-a6ofh.2.8), by the media's state NOW, so a late, repeated or
+   * concurrent call can neither publish nor clear the wrong thing:
+   * - ready: each goes live through every publish rule again (`fromSchedule`,
+   *   under the row's lock); one a rule refuses stops waiting, the refusal's
+   *   code kept as its reason;
+   * - deleted: each stops waiting with MEDIA_DELETED, and no email (owner);
+   * - failed for good (`isTerminalTranscodeFailure`): MEDIA_FAILED;
+   * - on its way, or a failure that may still be retried: nothing.
+   *
+   * A worker operation keyed by a media id (content-api's media-ready route,
+   * and after a media delete), so every read is scoped to the MEDIA's
+   * creator: the gate never schedules a draft on another creator's file.
+   * At most SETTLE_BATCH drafts, and none started after `budgetMs`; the
+   * maintenance run settles the rest. Never call it while a transaction that
+   * wrote the media row is still open.
+   *
+   * Never throws once it has written: a draft that went live or stopped no
+   * longer reads as waiting, so a later call can't announce it. Everything
+   * its creator is told is read BEFORE the first write, each draft is handed
+   * to `onSettled` as its write commits (so work cut off later loses nothing
+   * already told), and every step after a write is guarded and logged. A
+   * throw means nothing was written.
+   */
+  async settleScheduledForMedia(
+    mediaItemId: string,
+    options: SettleOptions = {}
+  ): Promise<ScheduleSettlement> {
+    try {
+      const settlement: ScheduleSettlement = {
+        wentLive: [],
+        stopped: [],
+        retryLater: 0,
+        more: false,
+        liveOrgIds: [],
+      };
+      const [media] = await this.db
+        .select({
+          creatorId: mediaItems.creatorId,
+          status: mediaItems.status,
+          deletedAt: mediaItems.deletedAt,
+          transcodingErrorCode: mediaItems.transcodingErrorCode,
+          transcodingAttempts: mediaItems.transcodingAttempts,
+        })
+        .from(mediaItems)
+        .where(eq(mediaItems.id, mediaItemId));
+      if (!media) return settlement;
+      // Nothing will make this media ready: every draft waiting on it stops.
+      const never = media.deletedAt
+        ? ERROR_CODES.MEDIA_DELETED
+        : isTerminalTranscodeFailure(media)
+          ? ERROR_CODES.MEDIA_FAILED
+          : null;
+      if (!never && media.status !== MEDIA_STATUS.READY) return settlement;
+
+      const { drafts: waiting, more } = await this.waitingDrafts(
+        mediaItemId,
+        media.creatorId
+      );
+      settlement.more = more;
+
+      if (never) {
+        if (waiting.length === 0) return settlement;
+        // One write; only a draft still waiting matches, so a second caller
+        // matches none. Nothing after it can fail.
+        let stopped: Content[];
+        try {
+          stopped = await this.writeStop(
+            never,
+            waiting.map((draft) => draft.id),
+            mediaItemId,
+            media.creatorId
+          );
+        } catch (error) {
+          if (!(error instanceof ScheduledRowLockedError)) throw error;
+          // Nothing written, and expected: the maintenance run reads this
+          // file again, as it does every file that will never be ready.
+          settlement.retryLater = waiting.length;
+          this.obs.warn('Drafts on a file never to be ready are locked; kept', {
+            mediaItemId,
+            reason: never,
+            left: waiting.length,
+            ...lockFields(error),
+          });
+          return settlement;
+        }
+        const read = new Map(waiting.map((draft) => [draft.id, draft]));
+        for (const row of stopped) {
+          const draft = read.get(row.id);
+          if (!draft) continue;
+          const told = {
+            ...(await this.settledFrom(draft, row)),
+            reason: never,
+          };
+          settlement.stopped.push(told);
+          this.tell(options, { kind: 'stopped', draft: told });
+        }
+        return settlement;
+      }
+
+      const stopBy = Date.now() + (options.budgetMs ?? SETTLE_BUDGET_MS);
+      for (const [index, draft] of waiting.entries()) {
+        if (Date.now() >= stopBy) {
+          // Still waiting: the next run settles them.
+          settlement.retryLater += waiting.length - index;
+          this.obs.warn('Settle out of time; the rest wait for the next run', {
+            mediaItemId,
+            left: waiting.length - index,
+          });
+          break;
+        }
+        // Only the go-live is classified here: what follows a write that
+        // committed must never be read as the write having failed.
+        let published: { row: Content; wentLive: boolean };
+        try {
+          published = await this.publishAndReport(draft.id, media.creatorId, {
+            fromSchedule: { mediaItemId },
+          });
+        } catch (error) {
+          const stopped = await this.stopRefused(
+            error,
+            draft,
+            mediaItemId,
+            media.creatorId
+          );
+          if (stopped === 'kept') settlement.retryLater++;
+          else if (stopped) {
+            settlement.stopped.push(stopped);
+            this.tell(options, { kind: 'stopped', draft: stopped });
+          }
+          continue;
+        }
+        if (published.wentLive) {
+          const told = await this.settledFrom(draft, published.row);
+          settlement.wentLive.push(told);
+          this.tell(options, { kind: 'live', draft: told });
+        }
+      }
+
+      // A file that went ready changes every live list showing it, not only
+      // the drafts it just published (Codex-1szw2). Lost, those lists wait
+      // for their TTL; the route still refreshes the go-lives' own orgs.
+      try {
+        const liveOrgs = await this.db
+          .selectDistinct({ organizationId: content.organizationId })
+          .from(content)
+          .where(
+            and(
+              eq(content.mediaItemId, mediaItemId),
+              scopedNotDeleted(content, media.creatorId),
+              eq(content.status, CONTENT_STATUS.PUBLISHED),
+              isNotNull(content.organizationId)
+            )
+          );
+        settlement.liveOrgIds = liveOrgs.flatMap((row) =>
+          row.organizationId ? [row.organizationId] : []
+        );
+      } catch (error) {
+        this.obs.error('Orgs showing a ready file not read; not refreshed', {
+          mediaItemId,
+          error: messageForLog(error),
+        });
+      }
+      return settlement;
+    } catch (error) {
+      this.handleError(error, 'settleScheduledForMedia');
+    }
+  }
+
+  /**
+   * What a scheduled draft's failed go-live means. Deleted since the read:
+   * nothing (null). A refusal its creator must fix: it stops waiting, if it
+   * still is (a cancel or a swap that committed meanwhile wins). Anything
+   * else, or a stop that could not be written: 'kept', for the next run.
+   * Never throws.
+   */
+  private async stopRefused(
+    error: unknown,
+    draft: SettledDraft,
+    mediaItemId: string,
+    creatorId: string
+  ): Promise<StoppedDraft | 'kept' | null> {
+    if (
+      isServiceError(error) &&
+      error.context?.code === ERROR_CODES.CONTENT_NOT_FOUND
+    ) {
+      return null;
+    }
+    const reason = stoppingReason(error);
+    if (reason === null) {
+      const log = {
+        contentId: draft.id,
+        mediaItemId,
+        error: messageForLog(error),
+      };
+      // A 4xx with no reason its creator can be told refuses again every
+      // run, and the editor shows it waiting: a gate this trigger can't name.
+      if (
+        isServiceError(error) &&
+        error.statusCode < 500 &&
+        error.context?.code !== ERROR_CODES.MEDIA_NOT_READY
+      ) {
+        this.obs.error('A scheduled draft was refused for no known reason', {
+          ...log,
+          statusCode: error.statusCode,
+          code: error.code,
+        });
+      } else {
+        this.obs.warn('A scheduled draft could not be settled; kept', {
+          ...log,
+          ...lockFields(error),
+        });
+      }
+      return 'kept';
+    }
+    let stopped: Content | undefined;
+    try {
+      [stopped] = await this.writeStop(
+        reason,
+        [draft.id],
+        mediaItemId,
+        creatorId
+      );
+    } catch (stopError) {
+      // Nothing written: the next run is refused again and stops it then.
+      // A lock held elsewhere is expected; anything else would fail the
+      // same way every run, its creator never told.
+      const log = {
+        contentId: draft.id,
+        mediaItemId,
+        reason,
+        error: messageForLog(stopError),
+      };
+      if (stopError instanceof ScheduledRowLockedError) {
+        this.obs.warn('A refused draft could not be stopped; kept', {
+          ...log,
+          ...lockFields(stopError),
+        });
+      } else {
+        this.obs.error('A refused draft could not be stopped; kept', log);
+      }
+      return 'kept';
+    }
+    return stopped
+      ? { ...(await this.settledFrom(draft, stopped)), reason }
+      : null;
+  }
+
+  /**
+   * The write that ends the wait of the drafts `ids`, those of them still
+   * the creator's and still scheduled on the media: scoped here, never by
+   * the caller. It gives up any one row lock it waits 5 s on as a typed 503,
+   * as a scheduled go-live does, so it is never left queued for good.
+   */
+  private async writeStop(
+    reason: PublishBlockedReason,
+    ids: string[],
+    mediaItemId: string,
+    creatorId: string
+  ): Promise<Content[]> {
+    if (ids.length === 0) return [];
+    try {
+      return await this.db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+        return tx
+          .update(content)
+          .set(stoppedWaiting(reason))
+          .where(
+            and(inArray(content.id, ids), ...waitingOn(mediaItemId, creatorId))
+          )
+          .returning();
+      });
+    } catch (error) {
+      if (isLockNotAvailable(error)) {
+        throw new ScheduledRowLockedError(
+          ids.length === 1 ? ids[0] : undefined,
+          error
+        );
+      }
+      throw error;
+    }
+  }
+
+  /** Hands one settled draft to the caller as its write commits. Never throws. */
+  private tell(options: SettleOptions, outcome: SettleOutcome): void {
+    try {
+      options.onSettled?.(outcome);
+    } catch (error) {
+      this.obs.error('A settled draft was not announced', {
+        contentId: outcome.draft.id,
+        kind: outcome.kind,
+        error: messageForLog(error),
+      });
+    }
+  }
+
+  /**
+   * A settled draft as its creator is told: the details read before the
+   * write, refreshed from the row the write returned. An org it moved to
+   * since that read gets one guarded slug read; failing that, no slug, and
+   * the route sends that draft no link rather than a wrong one. Never throws.
+   */
+  private async settledFrom(
+    read: SettledDraft,
+    row: Pick<Content, 'title' | 'slug' | 'organizationId'>
+  ): Promise<SettledDraft> {
+    const refreshed = {
+      ...read,
+      title: row.title,
+      slug: row.slug,
+      organizationId: row.organizationId,
+    };
+    if (row.organizationId === read.organizationId) return refreshed;
+    if (!row.organizationId) return { ...refreshed, organizationSlug: null };
+    try {
+      // A deleted org's slug is free for another org to take: never linked.
+      const [org] = await this.db
+        .select({ slug: organizations.slug })
+        .from(organizations)
+        .where(
+          and(
+            eq(organizations.id, row.organizationId),
+            isNull(organizations.deletedAt)
+          )
+        );
+      return { ...refreshed, organizationSlug: org?.slug ?? null };
+    } catch (error) {
+      this.obs.error('Org slug of a settled draft not read; no link sent', {
+        contentId: read.id,
+        organizationId: row.organizationId,
+        error: messageForLog(error),
+      });
+      return { ...refreshed, organizationSlug: null };
+    }
+  }
+
+  /**
+   * The creator's drafts still scheduled on the media, with everything their
+   * emails and cache bumps need, oldest ask first, at most SETTLE_BATCH, and
+   * whether more wait (one row over the cap tells).
+   */
+  private async waitingDrafts(
+    mediaItemId: string,
+    creatorId: string
+  ): Promise<{ drafts: SettledDraft[]; more: boolean }> {
+    const rows = await this.db.query.content.findMany({
+      where: and(...waitingOn(mediaItemId, creatorId)),
+      orderBy: asc(content.publishRequestedAt),
+      limit: SETTLE_BATCH + 1,
+      columns: {
+        id: true,
+        title: true,
+        slug: true,
+        contentType: true,
+        organizationId: true,
+      },
+      with: {
+        creator: {
+          columns: { id: true, name: true, email: true, username: true },
+        },
+        organization: { columns: { slug: true, deletedAt: true } },
+      },
+    });
+    return {
+      drafts: rows.slice(0, SETTLE_BATCH).map(({ organization, ...row }) => ({
+        ...row,
+        // A deleted org's slug is free for another org to take: the draft
+        // is sent no link rather than one into someone else's studio.
+        organizationSlug:
+          organization && organization.deletedAt === null
+            ? organization.slug
+            : null,
+      })),
+      more: rows.length > SETTLE_BATCH,
+    };
   }
 
   /**
@@ -2173,45 +2747,6 @@ export class ContentService extends BaseService {
   }
 
   /**
-   * Private helper: refuse unless `userId` may file content into
-   * `organizationId` (Codex-ocal6).
-   *
-   * Allowed: an ACTIVE membership whose role is owner, admin or creator.
-   * `subscriber` and `member` are the audience; `invited` and `inactive` are
-   * not (yet, or any longer) on the team. One message whatever the reason, so
-   * the refusal never says whether an org id exists.
-   *
-   * @param tx - Database transaction
-   * @param organizationId - The org the write would file the content under
-   * @param userId - The creator making the write
-   * @throws {ForbiddenError} If there is no such membership
-   */
-  private async assertCanFileInOrg(
-    tx: DatabaseTransaction,
-    organizationId: string,
-    userId: string
-  ): Promise<void> {
-    const [membership] = await tx
-      .select({ id: organizationMemberships.id })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.userId, userId),
-          eq(organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE),
-          inArray(organizationMemberships.role, MANAGEMENT_ROLES)
-        )
-      )
-      .limit(1);
-
-    if (!membership) {
-      throw new ForbiddenError(
-        "You can only add content to an organization you're on the team of."
-      );
-    }
-  }
-
-  /**
    * Private helper: Validate media item
    *
    * Checks:
@@ -2221,15 +2756,20 @@ export class ContentService extends BaseService {
    * - Media status is 'ready' (if requireReady is true)
    * - Media type matches content type
    *
-   * A locking read (FOR KEY SHARE): a media delete holds the row FOR UPDATE
-   * while it checks the item's uses, so an attach that started after it
-   * waits, re-reads the row, finds it deleted and refuses (Codex-6sbn1).
+   * A locking read (FOR KEY SHARE, or the caller's `lock`): a media delete
+   * holds the row FOR UPDATE while it checks the item's uses, so an attach
+   * that started after it waits, re-reads the row, finds it deleted and
+   * refuses (Codex-6sbn1). A scheduled draft's swap passes FOR SHARE, which a
+   * status write also waits on, because it decides on the status.
    *
    * @param tx - Database transaction
    * @param mediaItemId - Media item ID
    * @param creatorId - Creator ID
    * @param contentType - Content type
    * @param requireReady - Whether to require media status to be 'ready' (default: true)
+   * @param lock - The row lock: KEY SHARE holds off a delete; SHARE also
+   *   holds off a status write, for a read the caller decides on
+   * @returns The item's status and creation time, read under the lock
    * @throws {MediaNotFoundError} If media doesn't exist or doesn't belong to creator
    * @throws {MediaNotReadyError} If media is not ready (when requireReady is true)
    * @throws {ContentTypeMismatchError} If types don't match
@@ -2239,10 +2779,15 @@ export class ContentService extends BaseService {
     mediaItemId: string,
     creatorId: string,
     contentType: string,
-    requireReady: boolean = true
-  ): Promise<void> {
+    requireReady: boolean = true,
+    lock: 'key share' | 'share' = 'key share'
+  ): Promise<{ status: string; createdAt: Date }> {
     const [mediaItem] = await tx
-      .select({ status: mediaItems.status, mediaType: mediaItems.mediaType })
+      .select({
+        status: mediaItems.status,
+        mediaType: mediaItems.mediaType,
+        createdAt: mediaItems.createdAt,
+      })
       .from(mediaItems)
       .where(
         and(
@@ -2250,7 +2795,7 @@ export class ContentService extends BaseService {
           scopedNotDeleted(mediaItems, creatorId)
         )
       )
-      .for('key share');
+      .for(lock);
 
     if (!mediaItem) {
       throw new MediaNotFoundError(mediaItemId);
@@ -2258,7 +2803,12 @@ export class ContentService extends BaseService {
 
     // Only check ready status when required (e.g., during publishing)
     if (requireReady && mediaItem.status !== MEDIA_STATUS.READY) {
-      throw new MediaNotReadyError(mediaItemId);
+      throw new MediaNotReadyError(
+        mediaItemId,
+        mediaItem.status,
+        mediaItem.status === MEDIA_STATUS.UPLOADING &&
+          !isMediaOnItsWay(mediaItem)
+      );
     }
 
     // Validate content type matches media type
@@ -2270,5 +2820,6 @@ export class ContentService extends BaseService {
     ) {
       throw new ContentTypeMismatchError(contentType, mediaItem.mediaType);
     }
+    return mediaItem;
   }
 }

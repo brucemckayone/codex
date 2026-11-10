@@ -437,6 +437,9 @@ importers:
       '@codex/constants':
         specifier: workspace:*
         version: link:../constants
+      '@codex/content':
+        specifier: workspace:*
+        version: link:../content
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -455,9 +458,6 @@ importers:
       '@codex/subscription':
         specifier: workspace:*
         version: link:../subscription
-      '@codex/transcoding':
-        specifier: workspace:*
-        version: link:../transcoding
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -471,6 +471,9 @@ importers:
       '@codex/test-utils':
         specifier: workspace:*
         version: link:../test-utils
+      '@codex/transcoding':
+        specifier: workspace:*
+        version: link:../transcoding
       '@types/node':
         specifier: ^22.0.0
         version: 22.13.0
@@ -1511,6 +1514,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../../packages/urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation

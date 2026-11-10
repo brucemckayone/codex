@@ -2,7 +2,7 @@
   @component TodayStat
 
   Editorial numbered stat tile for the dashboard. Replaces StatCard with:
-  - "01/04" ordinal eyebrow (like ContentForm FormSection) for editorial rhythm
+  - "01/04" ordinal eyebrow for editorial rhythm
   - Big-type value with tabular numerals
   - Optional change chip (Δ% vs previous 7-day)
   - Inline 14-point sparkline rendered beneath the value using brand
@@ -164,7 +164,7 @@
     font-weight: var(--font-medium);
     letter-spacing: var(--tracking-wider);
     color: var(--color-text-muted);
-    /* matches FormSection editorial rule */
+    /* the studio's editorial rule */
     border-right: var(--border-width) var(--border-style) var(--color-border);
     padding-right: var(--space-3);
     line-height: var(--leading-none);
@@ -197,13 +197,13 @@
   }
 
   .stat-change[data-direction='up'] {
-    color: var(--color-success-700);
-    background: color-mix(in srgb, var(--color-success-500) 10%, var(--color-surface));
+    color: var(--color-status-success-text);
+    background: var(--color-status-success-surface);
   }
 
   .stat-change[data-direction='down'] {
-    color: var(--color-error-700, var(--color-error-500));
-    background: color-mix(in srgb, var(--color-error-500) 10%, var(--color-surface));
+    color: var(--color-status-error-text);
+    background: var(--color-status-error-surface);
   }
 
   .change-arrow {

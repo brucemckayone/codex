@@ -4,6 +4,7 @@ import {
   connectQueryState,
   isConnectReady,
   moneyReadiness,
+  readPayouts,
 } from './connect-readiness';
 
 /** Fully-ready account; each test flips exactly one field to prove it gates. */
@@ -216,5 +217,68 @@ describe('moneyReadiness', () => {
       moneyReadiness(ready(), { hasTiers: true, subscriberCount: 0 }).blocking
     ).toBe(false);
     expect(moneyReadiness(ready(), populated).blocking).toBe(false);
+  });
+});
+
+// The Publish step's and the content lists' one rule (Codex-a6ofh.2.6).
+describe('readPayouts', () => {
+  const connected = (chargesEnabled: boolean, payoutsEnabled: boolean) => ({
+    isConnected: true,
+    chargesEnabled,
+    payoutsEnabled,
+    status: 'active',
+  });
+
+  it('still loading is its own answer, never set up: each caller decides', () => {
+    expect(readPayouts({ current: undefined, error: undefined })).toBe(
+      'loading'
+    );
+    expect(readPayouts(null)).toBe('loading');
+  });
+
+  it('a read that failed is not read, never set up', () => {
+    expect(
+      readPayouts({
+        current: undefined,
+        error: { status: 503, body: { message: 'Down' } },
+      })
+    ).toBe('unread');
+    expect(
+      readPayouts({ current: { fetchFailed: true }, error: undefined })
+    ).toBe('unread');
+  });
+
+  it('set up only when charges and payouts are both on', () => {
+    expect(
+      readPayouts({ current: connected(true, true), error: undefined })
+    ).toBe('ready');
+    expect(
+      readPayouts({ current: connected(true, false), error: undefined })
+    ).toBe('missing');
+    expect(
+      readPayouts({ current: connected(false, true), error: undefined })
+    ).toBe('missing');
+    expect(
+      readPayouts({
+        current: {
+          isConnected: false,
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          status: null,
+        },
+        error: undefined,
+      })
+    ).toBe('missing');
+  });
+
+  // The publish gate (`assertCreatorCanBePaid`) reads the two flags only,
+  // not the account's status, which `isConnectReady` also asks for.
+  it("judges by the publish gate's two flags, not the account's status", () => {
+    expect(
+      readPayouts({
+        current: { ...connected(true, true), status: 'restricted' },
+        error: undefined,
+      })
+    ).toBe('ready');
   });
 });

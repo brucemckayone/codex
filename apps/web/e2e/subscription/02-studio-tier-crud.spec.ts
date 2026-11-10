@@ -1,5 +1,12 @@
 import { expect, type Page, test } from '@playwright/test';
 import {
+  chooseAccess,
+  goToPublishStep,
+  navigateToStudioPage,
+  startDraft,
+  waitForEditorSave,
+} from '../helpers/studio';
+import {
   archiveTestStripeProducts,
   buildOrgUrl,
   captureSeededCreatorCookies,
@@ -17,11 +24,11 @@ import {
  *         asks "Include everything from…" (Codex-2hxff.91): the dearest
  *         existing tier is chosen by default; Bronze picks "Nothing", the
  *         others keep the default copy.
- *   2.b — Create content with accessType='subscribers' and a tier ticked in
- *         the shared tier picker (checkboxes, not the old "Minimum tier"
- *         combobox). With nothing ticked the picker says the item is closed
- *         to subscribers. Asserts the resulting content row appears (read-
- *         side: the content list after the redirect).
+ *   2.b — Start an article in the editor (Codex-a6ofh.2), and on its
+ *         Publish step choose Subscribers and tick a tier in the shared tier
+ *         picker. With nothing ticked the picker says the item is closed to
+ *         subscribers. The step saves as it changes: read-side, the piece
+ *         read afresh holds both.
  *
  * Fixture:
  *   - Seeded creator@test.com (Studio Alpha owner). Connect is
@@ -252,92 +259,59 @@ test.describe('Studio Tier CRUD', () => {
     expect(finalTierCount).toBe(initialTierCount + TEST_TIERS.length);
   });
 
-  test('2.b creates an article with accessType=subscribers and a tier ticked', async ({
+  test('2.b gates a new article to subscribers, with a tier ticked, on the Publish step', async ({
     page,
   }) => {
     await injectCreatorAuth(page);
 
-    await page.goto(
-      buildOrgUrl(page, STUDIO_ALPHA.slug, '/studio/content/new')
-    );
-
-    // Form mounts (mirrors studio/content.spec.ts pattern).
-    await expect(page.getByRole('textbox', { name: 'Title' })).toBeVisible({
-      timeout: 30_000,
-    });
-
-    const uniqueSlug = `e2e-tier-content-${RUN_ID}`;
     const contentTitle = `E2E Tier Test Content ${RUN_ID}`;
+    // An article sidesteps the media. The first thing added makes its row.
+    const contentId = await startDraft(
+      page,
+      STUDIO_ALPHA.slug,
+      'written',
+      contentTitle
+    );
+    await goToPublishStep(page);
 
-    await page.getByRole('textbox', { name: 'Title' }).fill(contentTitle);
-    await page.getByRole('textbox', { name: 'Slug' }).fill(uniqueSlug);
-    // Description is a Tiptap RichTextEditor — not addressable by role=textbox
-    // with that name. Skip; it's optional and not required for tier-gating
-    // assertions. See `apps/web/src/lib/components/studio/content-form/
-    // ContentDetails.svelte:71-89` (RichTextEditor, "Optional").
+    // The Subscribers option is the subscribers-only switch; the shared tier
+    // picker (Codex-2hxff.91) says which tiers. Studio Alpha's Connect is
+    // active and it has tiers (seeded, plus 2.a's), so it can be chosen.
+    await chooseAccess(page, /^Subscribers/);
+    await waitForEditorSave(page);
 
-    // Article type — sidesteps the media-item requirement. The content type
-    // selector is a radio group (group "Content Type" → radio "Article …"),
-    // NOT a combobox, despite what older tests like
-    // apps/web/e2e/studio/content.spec.ts:213-214 suggest. The form was
-    // redesigned (iter-10 studio shell) but the older tests' selectors
-    // weren't updated. Verified via Playwright snapshot.
-    //
-    // Click the radio with `force: true` because the sticky command bar at
-    // the top of the form intercepts pointer events when the click target
-    // is just below the bar. The radio is reachable via keyboard / aria so
-    // we don't need to scroll first.
-    await page.getByRole('radio', { name: /^Article/i }).click({ force: true });
-
-    // Switch access from "Free" to "Subscribers" — the AccessSection radio
-    // group's "Subscribers" option is only rendered when the org has at
-    // least one tier (after 2.a, Studio Alpha has 5+ tiers). Click the
-    // radio directly; its accessible name includes the description prefix.
-    const subscribersRadio = page.getByRole('radio', { name: /^Subscribers/i });
-    await expect(subscribersRadio).toBeVisible({ timeout: 15_000 });
-    // force: true — sticky command bar can intercept clicks on form rows.
-    await subscribersRadio.click({ force: true });
-
-    // The conditional row reveals the shared tier picker (Codex-2hxff.91):
-    // one toggle per tier, cheapest first, named by the field label. With
-    // nothing ticked the item is CLOSED to subscribers, and the picker says so.
+    // With nothing ticked the item is CLOSED to subscribers, and says so.
     const picker = page.getByRole('group', { name: 'Tiers that include this' });
     await expect(picker).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-testid="tier-closed"]')).toBeVisible();
 
-    // Tick the first (cheapest) tier. Any of: alphaStandard / alphaPro
-    // (seeded) or our 3 E2E tiers (created by 2.a).
+    // Tick the first (cheapest) tier: one of alphaStandard / alphaPro
+    // (seeded) or 2.a's three.
     const firstTier = picker.locator('button.tier').first();
-    await firstTier.click({ force: true });
+    const tierName = (await firstTier.innerText()).trim();
+    await firstTier.click();
     await expect(firstTier).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('[data-testid="tier-closed"]')).toHaveCount(0);
+    // The Publish step saves as it changes: wait for that save to land.
+    await waitForEditorSave(page);
 
-    // Submit
-    await page.getByRole('button', { name: 'Create Content' }).click();
-
-    // Success path: redirect to /studio/content (or stay on /new with toast).
-    // Mirrors studio/content.spec.ts:218-232's mixed-success assertion.
-    await page
-      .waitForURL(/\/studio\/content(?!\/new)/, { timeout: 30_000 })
-      .catch(() => {});
-
-    const url = page.url();
-    const hasRedirected = !url.includes('/content/new');
-    const hasToast = await page
-      .locator('[role="status"], [role="alert"]')
-      .first()
-      .isVisible()
-      .catch(() => false);
-
-    expect(hasRedirected || hasToast).toBeTruthy();
-
-    // Read-side assertion: the new content appears in the studio content
-    // list. We don't go via the public-content API because Article-type
-    // drafts may not be published yet.
-    if (hasRedirected) {
-      await expect(page.locator(`text=${contentTitle}`).first()).toBeVisible({
-        timeout: 15_000,
-      });
-    }
+    // Read-side: the piece, read afresh, holds both. (Not `buildOrgUrl`:
+    // it prefixes the slug to the page's host, already the org's here.)
+    await navigateToStudioPage(
+      page,
+      STUDIO_ALPHA.slug,
+      `/content/${contentId}/edit?step=publish`
+    );
+    await expect(page.getByRole('radio', { name: /^Subscribers/ })).toBeChecked(
+      {
+        timeout: 30_000,
+      }
+    );
+    await expect(
+      page
+        .getByRole('group', { name: 'Tiers that include this' })
+        .locator('button.tier', { hasText: tierName })
+        .first()
+    ).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
   });
 });

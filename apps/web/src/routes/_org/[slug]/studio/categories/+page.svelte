@@ -165,8 +165,7 @@
   // that stale result as brand new and replay its side effects — a "Topic
   // created" toast (and, before Codex-1g5lh.7, a selection jump) that no submit
   // in this mount produced. Seeding to the current value marks it
-  // already-handled, so only a result minted by a submit HERE fires. Same
-  // pattern and reasoning as `ContentForm.svelte`'s `lastHandledResult`.
+  // already-handled, so only a result minted by a submit HERE fires.
   let lastCreateResult: unknown = untrack(() => createCategoryForm.result);
   $effect(() => {
     const r = createCategoryForm.result;

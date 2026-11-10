@@ -29,7 +29,7 @@
   import JourneyRailCard from '$lib/components/explore/JourneyRailCard.svelte';
   import type { CourseCardSummary } from '$lib/journeys/types';
   import type { PublicContentOrganization } from '@codex/shared-types';
-  import type { ContentWithRelations } from '$lib/types';
+  import type { CatalogueHiddenField, ContentWithRelations } from '$lib/types';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import { gateSearchQuery, isSearchQueryBelowFloor } from '@codex/validation';
   import { applyFilterPatch } from '$lib/utils/filter-url';
@@ -53,10 +53,10 @@
   // list, send the same media item: R2 keys resolved to URLs and nothing else
   // of the media_items row (Codex-ve5eh, Codex-1bdx0). These are the fields the
   // grid reads off it, and the org is the four-field public org (Codex-567de).
-  // No `purchaseCount`: the public and browse lists never send it.
+  // No `CatalogueHiddenField`: the public and browse lists never send them.
   type ExploreItem = Omit<
     ContentWithRelations,
-    'mediaItem' | 'organization' | 'purchaseCount'
+    'mediaItem' | 'organization' | CatalogueHiddenField
   > & {
     mediaItem?: {
       durationSeconds?: number | null;

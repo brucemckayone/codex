@@ -21,6 +21,7 @@ export {
   darkTokenOverridesToCssVars,
   injectDarkTokenOverrides,
   injectTokenOverrides,
+  tokenOverrideStyle,
   tokenOverridesToCssVars,
 } from './css-injection';
 // Brand Editor - Fallback defaults (used when an org has not branded)

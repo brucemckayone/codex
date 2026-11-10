@@ -21,8 +21,11 @@ import { createExecutionContext, env } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// This file's own subject. The limiter counts per subject across every file
+// in this single-worker run, so a shared id runs past the api preset's 100
+// a minute and later files read 429 (Codex-a6ofh.2).
 const USER = {
-  id: '7a1d0f2e-3b4c-4d5e-8f60-112233445566',
+  id: '7a1d0f2e-3b4c-4d5e-8f60-000000000005',
   email: 'creator@test.com',
   role: 'creator',
 };

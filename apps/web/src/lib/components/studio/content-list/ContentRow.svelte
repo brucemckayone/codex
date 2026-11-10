@@ -6,14 +6,20 @@
   …), a narrative title + metadata cluster, and inline status + actions.
 
   Designed to replace generic-SaaS table rows with a rhythm that matches
-  ContentForm's FormSection + TodayStat editorial vocabulary.
+  TodayStat's editorial vocabulary.
 
   @prop ordinal  Two-digit zero-padded row number ("02"..)
   @prop item     The content item
   @prop publishing  Whether this item's publish toggle is in flight
   @prop onPublishToggle  Handler for publish toggle
+  @prop payouts  The page's one payouts read, for a draft's progress
+
+  A draft shows how far it has got (Codex-a6ofh.2.6, mockup W7) and offers
+  Continue, at the step still to do, where a published piece offers its
+  toggle: the Publish step is where a draft goes live, with its checks.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import type { ContentWithRelations } from '$lib/types';
   import {
@@ -27,15 +33,25 @@
   import { formatRelativeTime } from '$lib/utils/format';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
   import * as m from '$paraglide/messages';
+  import { editHref } from '../editor/editor-url';
+  import DraftProgress from './DraftProgress.svelte';
+  import type { PayoutsRead } from '$lib/utils/connect-readiness';
+  import { draftProgress } from './draft-progress';
+  import { listStatus } from './list-status';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
 
   interface Props {
     ordinal: string;
     item: ContentWithRelations;
     publishing?: boolean;
-    onPublishToggle: () => void;
+    onPublishToggle: () => Promise<unknown> | void;
+    payouts: PayoutsRead;
   }
 
-  const { ordinal, item, publishing = false, onPublishToggle }: Props = $props();
+  const { ordinal, item, publishing = false, onPublishToggle, payouts }: Props = $props();
+
+  const progress = $derived(item.status === 'draft' ? draftProgress(item, payouts) : null);
+  const href = $derived(progress?.href ?? editHref(item.id));
 
   // Collapse the SPEC §6.1 policy flags to the single display kind used for
   // the meta-chip label + its `data-access` CSS selector (WP-1).
@@ -52,29 +68,21 @@
     }
   });
 
-  const statusVariant = $derived(
-    item.status === 'published'
-      ? 'published'
-      : item.status === 'archived'
-        ? 'archived'
-        : 'draft'
-  );
+  // An unpublished piece is "Off sale", never a draft (`listStatus`).
+  const status = $derived(listStatus(item));
 
-  const statusLabel = $derived.by(() => {
-    switch (item.status) {
-      case 'published':
-        return m.studio_content_status_published();
-      case 'archived':
-        return m.studio_content_status_archived();
-      default:
-        return m.studio_content_status_draft();
-    }
-  });
+  let toggleEl = $state<HTMLButtonElement | null>(null);
+  /** Disabled while it goes, the pressed toggle loses focus: it has it back once settled. */
+  async function toggle() {
+    await onPublishToggle();
+    await tick();
+    focusIfLost(toggleEl);
+  }
 
   const isGated = $derived(accessKind !== 'free');
 </script>
 
-<article class="row" data-status={statusVariant}>
+<article class="row" data-status={status.variant}>
   <div class="row-thumb">
     {#if item.thumbnailUrl}
       <!-- 9-12rem wide, 6rem below md (Codex-kk9nv.3), in a 16:9 frame the
@@ -105,7 +113,7 @@
 
   <div class="row-body">
     <h3 class="row-title">
-      <a href="/studio/content/{item.id}/edit" class="row-title-link">
+      <a {href} class="row-title-link">
         {item.title}
       </a>
     </h3>
@@ -124,12 +132,15 @@
         <span>{accessKind}</span>
       </li>
     </ul>
+    {#if progress}
+      <DraftProgress {progress} />
+    {/if}
   </div>
 
   <div class="row-status">
-    <span class="status-pill" data-status={statusVariant}>
+    <span class="status-pill" data-status={status.variant}>
       <span class="status-dot" aria-hidden="true"></span>
-      {statusLabel}
+      {status.label}
     </span>
     <time class="row-date" datetime={new Date(item.updatedAt).toISOString()}>
       {formatRelativeTime(item.updatedAt)}
@@ -137,25 +148,31 @@
   </div>
 
   <div class="row-actions">
-    <button
-      type="button"
-      class="row-toggle"
-      data-action={statusVariant === 'published' ? 'unpublish' : 'publish'}
-      disabled={publishing}
-      onclick={onPublishToggle}
-    >
-      {#if publishing}
-        <Spinner size="sm" />
-      {:else if statusVariant === 'published'}
-        {m.studio_content_form_unpublish()}
-      {:else}
-        {m.studio_content_form_publish()}
-      {/if}
-    </button>
-    <a href="/studio/content/{item.id}/edit" class="row-edit" aria-label="Edit {item.title}">
-      <EditIcon size={14} />
-      <span class="row-edit-label">{m.studio_content_edit()}</span>
-    </a>
+    {#if progress}
+      <a {href} class="row-edit" aria-label={m.studio_drafts_continue_label({ title: item.title })}>
+        <EditIcon size={14} />
+        <span class="row-edit-label">{m.studio_drafts_continue()}</span>
+      </a>
+    {:else}
+      <button
+        type="button"
+        class="row-toggle"
+        data-action={status.variant === 'published' ? 'unpublish' : 'publish'}
+        disabled={publishing}
+        onclick={toggle}
+        bind:this={toggleEl}
+      >
+        {#if publishing}
+          <Spinner size="sm" />
+        {:else}
+          {status.toggle}
+        {/if}
+      </button>
+      <a {href} class="row-edit" aria-label="Edit {item.title}">
+        <EditIcon size={14} />
+        <span class="row-edit-label">{m.studio_content_edit()}</span>
+      </a>
+    {/if}
   </div>
 </article>
 
@@ -405,8 +422,11 @@
     border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
   }
 
-  .status-pill[data-status='archived'] {
-    color: var(--color-text-muted);
+  /* Once live, off sale now (archived too): plain, as the mockup's Off sale
+     row. Secondary ink, never muted: muted is 2.3:1 on this ground, and the
+     pill's words are small (7.2:1, measured 2026-11-09). */
+  .status-pill[data-status='off-sale'] {
+    color: var(--color-text-secondary);
     background: var(--color-surface-secondary);
   }
 

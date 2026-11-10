@@ -338,6 +338,28 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     status: 'active' as const,
     description: 'Sent to creator when video transcoding fails',
   },
+  // Publish when ready (Codex-a6ofh.2.8): copy approved by the owner,
+  // 2026-11-07.
+  {
+    name: 'content-live',
+    scope: 'global' as const,
+    subject: `"{{contentTitle}}" is live`,
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>"{{contentTitle}}" is live</h1><p>Hi {{userName}},</p><p>Your {{mediaKind}} finished processing, so <strong>{{contentTitle}}</strong> is now live, as you asked.</p><p style="text-align:center;margin:30px 0;"><a href="{{contentUrl}}" class="button" style="color:white;">See it</a></p><div class="footer"><p>{{platformName}}</p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\nYour {{mediaKind}} finished processing, so "{{contentTitle}}" is now live, as you asked.\n\nSee it: {{contentUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to creator when a piece scheduled to publish when ready goes live',
+  },
+  {
+    name: 'content-not-live',
+    scope: 'global' as const,
+    subject: `"{{contentTitle}}" didn't go live`,
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>"{{contentTitle}}" didn't go live</h1><p>Hi {{userName}},</p><p>We couldn't put <strong>{{contentTitle}}</strong> live: {{reason}}</p><p>It's saved as a draft and nothing is scheduled now.</p><p style="text-align:center;margin:30px 0;"><a href="{{editUrl}}" class="button" style="color:white;">Fix this and publish it</a></p><div class="footer"><p>{{platformName}}</p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\nWe couldn't put "{{contentTitle}}" live: {{reason}}\n\nIt's saved as a draft and nothing is scheduled now. Fix this and publish it here:\n{{editUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      "Sent to creator when a piece scheduled to publish when ready can't go live",
+  },
   {
     name: 'transcoding-owner-alert',
     scope: 'global' as const,

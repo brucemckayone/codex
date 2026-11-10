@@ -25,6 +25,16 @@ export function formatDuration(seconds: number | null | undefined): string {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
+/**
+ * An article's reading time, in seconds, from its plain text: 250 words a
+ * minute, at least a minute once anything is written; 0 for none. The one
+ * rule the public page, its cards and the studio editor read.
+ */
+export function readingSeconds(plainText: string): number {
+  const words = plainText.split(/\s+/).filter(Boolean).length;
+  return words === 0 ? 0 : Math.max(60, Math.round((words / 250) * 60));
+}
+
 /** Format bytes as `123 KB` or `4.5 MB`. Returns empty string for falsy input. */
 export function formatFileSize(bytes: number | null | undefined): string {
   if (!bytes) return '';

@@ -15,7 +15,7 @@ export const POSTGRES_ERROR_CODES = {
   FOREIGN_KEY_VIOLATION: '23503',
   NOT_NULL_VIOLATION: '23502',
   CHECK_VIOLATION: '23514',
-  /** A lock wait ran past `lock_timeout` (or a NOWAIT lock was taken). */
+  /** A row lock not granted within `lock_timeout` (or under NOWAIT). */
   LOCK_NOT_AVAILABLE: '55P03',
 } as const;
 
@@ -26,6 +26,18 @@ export const ORGANIZATION_ROLES = {
   SUBSCRIBER: 'subscriber',
   MEMBER: 'member',
 } as const;
+
+/**
+ * The org's team: the roles that make and run its catalogue. `subscriber`
+ * and `member` are its audience. Read with an active membership: re-joining
+ * as an audience member reactivates a departed creator's row with an
+ * audience role, so status alone never proves someone is on the team.
+ */
+export const ORGANIZATION_TEAM_ROLES: readonly string[] = [
+  ORGANIZATION_ROLES.OWNER,
+  ORGANIZATION_ROLES.ADMIN,
+  ORGANIZATION_ROLES.CREATOR,
+];
 
 /**
  * Every role except `subscriber`: the people an owner or admin put on the

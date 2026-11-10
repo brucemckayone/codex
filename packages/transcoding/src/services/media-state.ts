@@ -9,12 +9,27 @@
  */
 
 import {
+  MAX_TRANSCODING_ATTEMPTS,
   MEDIA_STATUS,
+  NON_RETRYABLE_TRANSCODING_ERROR_CODES,
   TRANSCODING_ERROR_MAX_LENGTH,
   type TranscodingErrorCode,
 } from '@codex/constants';
 import { mediaItems } from '@codex/database/schema';
-import { sql } from 'drizzle-orm';
+import { isNull, lt, notInArray, type SQL, sql } from 'drizzle-orm';
+
+/**
+ * An item that may be transcoded again: attempts left, and no code that no
+ * attempt can cure. The SQL twin of `isTerminalTranscodeFailure`'s
+ * attempt-and-code half (@codex/constants): dispatch claims only these, and
+ * the maintenance run settles a failed item that is not one (Codex-a6ofh.2.8).
+ * Plain SQL, never `or()`, which is typed `SQL | undefined`; never NULL either
+ * (the attempts column is NOT NULL, the code's NULL is tested), so a NOT of it
+ * is safe.
+ */
+export function mayRetryTranscode(): SQL {
+  return sql`(${lt(mediaItems.transcodingAttempts, MAX_TRANSCODING_ATTEMPTS)} and (${isNull(mediaItems.transcodingErrorCode)} or ${notInArray(mediaItems.transcodingErrorCode, [...NON_RETRYABLE_TRANSCODING_ERROR_CODES])}))`;
+}
 
 /** The SET of every move to `failed`; the detail is cut to fit the column. */
 /**
