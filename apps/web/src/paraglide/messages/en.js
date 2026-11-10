@@ -27655,7 +27655,7 @@ export const support_queue_tab_fees = () => `Fee notices`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_queue_fees_intro = () => `A fee rise starts 30 days after everyone it affects has been told. These people's emails haven't gone through, so the rise is waiting for them. The 08:00 run tries again every day; if you reach someone another way, mark them as told.`
+export const support_queue_fees_intro = () => `A fee rise starts 30 days after everyone it affects has been told. These people's emails haven't gone through, so the rise is waiting for them. The 08:00 UTC run tries again every day; if you reach someone another way, mark them as told.`
 
 
 /**
@@ -28223,7 +28223,7 @@ export const support_queue_fees_mark_when = (params) => `${params.date} at ${par
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_queue_fees_mark_last = (params) => `${params.name} is the last person this rise is waiting for, so it will start on ${params.date}.`
+export const support_queue_fees_mark_last = (params) => `${params.name} is the last person this rise is waiting for, so it will start no sooner than ${params.date}.`
 
 
 /**
@@ -28327,7 +28327,7 @@ export const support_queue_fees_marked_dated = (params) => `This rise already ha
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_queue_fees_marked_dated_next_run = () => `Nobody on the list is waiting now, so the next 08:00 run sets the rise's start date.`
+export const support_queue_fees_marked_dated_next_run = () => `Nobody on the list is waiting now, so the next 08:00 UTC run sets the rise's start date.`
 
 
 /**
@@ -28455,7 +28455,7 @@ export const support_queue_fees_empty_waiting_title = () => `No emails have fail
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_queue_fees_empty_waiting_body = () => `The rise is waiting for the 08:00 run to email everyone it affects.`
+export const support_queue_fees_empty_waiting_body = () => `The rise is waiting for the 08:00 UTC run to email everyone it affects.`
 
 
 /**
