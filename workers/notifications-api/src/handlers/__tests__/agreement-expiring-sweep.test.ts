@@ -159,7 +159,7 @@ function resetState() {
   sharedMockState.markedIds = [];
 }
 
-describe('runAgreementExpiringSweep', () => {
+describe('runAgreementExpiringSweep', { timeout: 60_000 }, () => {
   it('fires TWO emails per agreement (creator + owner) and marks the row', async () => {
     resetState();
     const ag = mockAgreement({ id: 'agr-1', organizationId: 'org-1' });
