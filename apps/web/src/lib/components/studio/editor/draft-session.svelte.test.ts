@@ -3154,19 +3154,19 @@ describe('it went live by another way', () => {
       ([event]) => event === 'studio_editor.closed_with_unsent_changes'
     );
 
-  // Closed with no screen left to answer, the Open sees that save through
-  // as the close does: given up at its bound, the fields still out went
-  // with no one, no hand-off, toast or trace (the round-8 review).
-  it('closed while Open waits, the save outlasting its bound: the Open sees it through and carries what it left', async () => {
+  // Closed with no screen left to answer, the Open carries at its bound,
+  // the fields still out with the rest: they are on no row until that save
+  // lands (the round-8 review). Carried then, never after the save settles,
+  // so the hand-off cannot land after the creator reached the live editor
+  // and wrote over it there (the round-9 review).
+  it('closed while Open waits, the save outlasting its bound: carried at the bound, the save’s fields with the rest', async () => {
     const { session, out } = frozenWithASaveOut();
 
     const opened = session.openLive();
     await settle();
     close();
     await vi.advanceTimersByTimeAsync(10_000);
-    out.reject(refusedAsLive);
     await opened;
-    await settle();
 
     expect(takeLiveHandoff(ID)).toEqual({
       changes: {
@@ -3178,16 +3178,22 @@ describe('it went live by another way', () => {
       'studio_editor.open_live_page_replaced',
       { contentId: ID, keys: ['title', 'description'] }
     );
+    // Refused after: already carried, so nothing else is said.
+    out.reject(refusedAsLive);
+    await settle();
     expect(told.toastAdd).not.toHaveBeenCalled();
     expect(closedTraces()).toHaveLength(0);
   });
 
   // Who owns a close is fixed as it happens: a Leave answered first makes
   // it the creator's, so a slow save they left running is still told when
-  // it fails, as it is with no Open out (the round-8 review).
+  // it fails, as it is with no Open out (the round-8 review). The only
+  // change is the one on the wire, so the move is asked as slow (the
+  // round-9 review).
   it('a slow Leave answered while Open is out, then closed: the save that fails is still told, once', async () => {
     const { session, out } = frozenWithASaveOut();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    session.set('description', SAVED_VALUES.description);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     // Back first, Open a moment later: the move's wait ends first.
     navigate();
@@ -3196,6 +3202,9 @@ describe('it went live by another way', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     // Asked as slow and answered Leave; their move unmounts the editor
     // while Open still waits.
+    expect(confirm).toHaveBeenCalledWith(
+      m.studio_content_draft_confirm_leave_slow()
+    );
     expect(nav.goto).toHaveBeenCalledTimes(1);
     close();
     out.reject(offline());
@@ -3312,6 +3321,29 @@ describe('it went live by another way', () => {
     const session = await wentLive();
 
     await session.leave('/studio/content');
+    session.set('description', 'Typed after staying');
+    close();
+    await settle();
+
+    expect(closedTraces()).toEqual([
+      [
+        'studio_editor.closed_with_unsent_changes',
+        expect.objectContaining({ abandoned: false }),
+      ],
+    ]);
+  });
+
+  // The page's dialog is the fourth way to say Leave (the round-9 review).
+  it("Leave in the page's dialog whose move was stopped: a later close is not traced as abandoned", async () => {
+    const asked = Promise.withResolvers<'leave' | 'stay' | 'update'>();
+    const session = await wentLive(SAVED_VALUES, {
+      askToLeave: () => asked.promise,
+    });
+
+    navigate();
+    asked.resolve('leave');
+    await settle();
+    expect(nav.goto).toHaveBeenCalledTimes(1);
     session.set('description', 'Typed after staying');
     close();
     await settle();

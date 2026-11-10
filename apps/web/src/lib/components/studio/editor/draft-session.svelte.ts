@@ -949,6 +949,10 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       discardChanges();
     }
     await sendOn(move);
+    // Moved by goto and still here: their move was stopped, so not left
+    // after all, as on the other Leaves (the round-9 review); an Open still
+    // out stands down on it. Back's history move is not waited for.
+    if (move.delta === null && !unmounted && !openingLive) leftChanges = false;
   }
 
   /**
@@ -1131,8 +1135,9 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           return;
         }
         // One owner per close, whoever can carry (the round-7 review): an
-        // Open that owns it sees this save through, carries what it leaves
-        // and says how the close ended, so the teardown only rides the save.
+        // Open that owns it carries what is unsent, this save's fields with
+        // the rest, and says how the close ended, so the teardown only
+        // rides the save.
         void drain()
           .then((result) => {
             if (!openOwnsClose) reportClose(result.ok);
@@ -1161,11 +1166,24 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   async function openLiveOnce(id: string): Promise<boolean> {
     openProblem = null;
     leftChanges = false;
+    /**
+     * What a hand-off carries: every field that differs from what the row
+     * holds now, but an emptied title. Against `baseline`, not `landing()`:
+     * a save still out holds its fields on no row until it lands, and one
+     * that lands later makes them equal to the row, which the live editor
+     * reads as no change (the round-9 review).
+     */
+    const carriedKeys = (): (keyof DraftValues)[] =>
+      (Object.keys(values) as (keyof DraftValues)[]).filter(
+        (key) =>
+          !same(values[key], baseline[key]) &&
+          !(key === 'title' && values.title.trim() === '')
+      );
     const carry = () =>
       handOffToLive(
         id,
         Object.fromEntries(
-          sendableKeys()
+          carriedKeys()
             .filter((key) => key !== 'slug')
             .map((key) => [key, $state.snapshot(values[key])])
         )
@@ -1177,11 +1195,12 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
      * round-7 reviews).
      */
     const keepOnClose = (): boolean => {
-      if (leftChanges || !isDirty) return false;
+      const keys = carriedKeys();
+      if (leftChanges || keys.length === 0) return false;
       carry();
       logger.warn('studio_editor.open_live_page_replaced', {
         contentId: id,
-        keys: sendableKeys(),
+        keys,
       });
       return true;
     };
@@ -1190,14 +1209,11 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     // be carried by neither (the round-6 review). Bounded, as a move is.
     if (sending !== null) {
       await settleWithin(autosave.flush());
-      // Closed meanwhile: no screen is left to keep answering, so it sees
-      // the save through, as the close does, and carries what that save
-      // left. Given up at the bound, the fields still out went with no one
-      // (the round-8 review).
-      if (unmounted) {
-        if (sending !== null) await drain();
-        return keepOnClose();
-      }
+      // Closed meanwhile: carried now, the fields still out with the rest,
+      // so the hand-off is whole and on time (the round-8 and round-9
+      // reviews). Waiting out a slow save could land it after the creator
+      // reached the live editor, over what they wrote there.
+      if (unmounted) return keepOnClose();
       // Answered Leave meanwhile: their move, not this one (round 7).
       if (leftChanges) return false;
       if (sending !== null) {
@@ -1256,7 +1272,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         // are said as too late after their window, never dropped unsaid.
         logger.warn('studio_editor.open_live_page_replaced', {
           contentId: id,
-          keys: sendableKeys(),
+          keys: carriedKeys(),
         });
         return true;
       }
