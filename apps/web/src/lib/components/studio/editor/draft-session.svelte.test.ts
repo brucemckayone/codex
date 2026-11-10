@@ -3209,6 +3209,40 @@ describe('it went live by another way', () => {
     await settle();
   });
 
+  // A slug that followed the title rides the save on the wire, and the
+  // freeze puts it back: never carried (a live piece keeps its address),
+  // so never said as carried either (the round-11 review).
+  it('a slug that followed the title, on the wire at the bound: neither carried nor said as carried', async () => {
+    const out = Promise.withResolvers<never>();
+    remotes.saveContent.mockReturnValueOnce(out.promise);
+    const session = start({ saved: { id: ID, values: FOLLOWING } });
+    session.set('title', 'Runes renamed');
+    void session.flush();
+    expect(remotes.saveContent).toHaveBeenCalledWith(
+      expect.objectContaining({ slugFollowsTitle: true })
+    );
+    session.set('description', 'Typed while it went');
+    publication = LIVE;
+    flushSync();
+    expect(session.wentLiveElsewhere).toBe(true);
+
+    const opened = session.openLive();
+    await settle();
+    close();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await opened;
+
+    expect(takeLiveHandoff(ID)).toEqual({
+      changes: { title: 'Runes renamed', description: 'Typed while it went' },
+    });
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.open_live_page_replaced',
+      { contentId: ID, keys: ['title', 'description'] }
+    );
+    out.reject(refusedAsLive);
+    await settle();
+  });
+
   // Who owns a close is fixed as it happens: a Leave answered first makes
   // it the creator's, so a slow save they left running is still told when
   // it fails, as it is with no Open out (the round-8 review). The only

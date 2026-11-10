@@ -1173,12 +1173,15 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
      * the first, a change put back while it is out from the second, and
      * whichever way that save ends, a carried value equal to the row is no
      * change in the live editor (the round-9 and round-10 reviews). With no
-     * save out the two agree.
+     * save out the two agree. Never the slug: a live piece keeps its
+     * address. One list, so the hand-off, its log and whether anything was
+     * kept all say the same (the round-11 review).
      */
     const carriedKeys = (): (keyof DraftValues)[] => {
       const held = landing();
       return (Object.keys(values) as (keyof DraftValues)[]).filter(
         (key) =>
+          key !== 'slug' &&
           (!same(values[key], baseline[key]) ||
             !same(values[key], held[key])) &&
           !(key === 'title' && values.title.trim() === '')
@@ -1188,9 +1191,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       handOffToLive(
         id,
         Object.fromEntries(
-          carriedKeys()
-            .filter((key) => key !== 'slug')
-            .map((key) => [key, $state.snapshot(values[key])])
+          carriedKeys().map((key) => [key, $state.snapshot(values[key])])
         )
       );
     /**
