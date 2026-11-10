@@ -683,9 +683,9 @@ late win, or is already marked: check it before going on.
 
 ---
 
-## The email log index, a told-buyer CHECK and the payee pin's link (migration `0128`)
+## The email log index, a told-buyer CHECK and the payee pin's link (migration `0129`)
 
-`0128` is drizzle-kit DDL with two hand edits, one statement taken out and
+`0129` is drizzle-kit DDL with two hand edits, one statement taken out and
 one moved. It holds:
 
 - an index on `email_audit_logs (recipient_email, template_name, created_at)`,
@@ -708,10 +708,14 @@ one moved. It holds:
   every organisation query, so dropping it now would fail every org page until
   they redeploy. Its generated `DROP COLUMN` was taken out of the SQL by hand
   for that reason (owner, 2026-11-09: "Two steps"); the snapshot already
-  records it gone, so no `generate` after `0128` re-emits it. [R21](#r21--after-this-release-is-live-drop-the-payee-pin-column)
+  records it gone, so no `generate` after `0129` re-emits it. [R21](#r21--after-this-release-is-live-drop-the-payee-pin-column)
   drops it.
 
-**Renumbering `0128`** (another session's `0128` landed first). A snapshot
+**Renumbering** (another session's migration of the same number landed
+first). This file was `0128` until 2026-11-10, when studio E2's
+`0128_publish_when_ready` landed first and these steps renumbered it to `0129`.
+The steps name `0128` and `0129` as they ran then; if another clash comes
+before this merges, run them again with the new numbers. A snapshot
 holds the whole schema, so renaming the file alone leaves the next `generate`
 re-emitting the other file's changes, and regenerating alone writes both hand
 edits out. Do both halves instead:

@@ -62,7 +62,7 @@ GROUP BY stripe_charge_id, payout_type, user_id
 HAVING count(*) > 1`;
 
 /**
- * 0128 adds `check_disputes_buyer_told` (Codex-h301h): only a late win has a
+ * 0129 adds `check_disputes_buyer_told` (Codex-h301h): only a late win has a
  * told buyer. A dispute that breaks it makes the ADD CONSTRAINT fail. None
  * should exist: `claimLateWinBuyerEmail`, the column's only writer, requires
  * a late win, and nothing clears `late_won_at`. Both columns arrive with
@@ -82,7 +82,7 @@ export const MIGRATION_PREFLIGHTS: ReadonlyArray<MigrationPreflight> = [
     table: 'payouts',
   },
   {
-    migration: '0128_email_log_index_and_buyer_told_check.sql',
+    migration: '0129_email_log_index_and_buyer_told_check.sql',
     description:
       'disputes with a told buyer but no late win: resolve each one before deploying',
     sql: BUYER_TOLD_WITHOUT_LATE_WIN,

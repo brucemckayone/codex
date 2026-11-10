@@ -1,6 +1,6 @@
 /**
  * Migration 0126's three CHECKs on `disputes` (Codex-2hxff.70; late-win data
- * design §3; docs/payments/dispute-record.md §10), and 0128's fourth
+ * design §3; docs/payments/dispute-record.md §10), and 0129's fourth
  * (Codex-h301h). They are the database's backstop for the late win: the code
  * refuses each of these moves first (the rank map, `recordLateWin`,
  * `claimLateWinBuyerEmail`), so without this a schema edit that dropped or

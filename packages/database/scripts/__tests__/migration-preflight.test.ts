@@ -177,8 +177,9 @@ describe('runMigrationPreflights', () => {
   });
 
   // Calibrated by hand on throwaway DBs (Codex-h301h): from 0125, production's
-  // state, the run skipped it and applied 0126-0128; at 0127, one dispute with
-  // a told buyer and no late win made the migrate refuse, "1 found".
+  // state, the run skipped it and applied 0126-0128 (this file was 0128 then,
+  // and is 0129 since studio E2's 0128 landed first); at 0127, one dispute
+  // with a told buyer and no late win made the migrate refuse, "1 found".
   it('guards the told-buyer CHECK with the rows that would break it', () => {
     const guard = MIGRATION_PREFLIGHTS.find((p) => p.table === 'disputes');
     expect(guard?.sql).toContain(
@@ -198,7 +199,7 @@ describe('runMigrationPreflights', () => {
   });
 
   // Codex-2hxff.36 is two releases: the workers still running while a deploy
-  // migrates name the pin column in every org query. Regenerating 0128 writes
+  // migrates name the pin column in every org query. Regenerating 0129 writes
   // its drop back. Step 2's PR, which drops it, flips this test.
   it('drops no payee pin column before step 2', async () => {
     const dropping = (await migrationStatements())
@@ -209,7 +210,7 @@ describe('runMigrationPreflights', () => {
     expect(dropping).toEqual([]);
   });
 
-  // 0128's second hand edit: the pin's foreign key drop locks organizations
+  // 0129's second hand edit: the pin's foreign key drop locks organizations
   // AND users, so it runs last and holds them only for the commit.
   it("drops the pin's foreign key as its file's last statement", async () => {
     const fk =
