@@ -665,15 +665,28 @@ async function addJoiners(
         joinersPutOff(ctx, change);
         continue;
       }
-      ctx.result.errors += 1;
-      ctx.obs.error('fee step: joiners could not be added for a change', {
-        errorId: crypto.randomUUID(),
-        changeId: change.id,
-        error: messageForLog(error),
-      });
+      joinersFailed(ctx, change, error);
     }
   }
   return skipped;
+}
+
+/** What an urgent joiners error asks of support, whatever kept them out. */
+const TELL_JOINERS_BY_HAND =
+  'tell anyone it now affects by hand. See Admin › Queue › Fee notices';
+
+/**
+ * The rise's start, when it comes before the next run: joiners not added
+ * this morning would be charged untold (commerce delta4).
+ */
+function startsBeforeNextRun(
+  ctx: SweepContext,
+  change: FeeChangeRow
+): Date | null {
+  const startsOn = change.effectiveFrom;
+  return startsOn !== null && startsOn.getTime() < ctx.now.getTime() + DAY_MS
+    ? startsOn
+    : null;
 }
 
 /**
@@ -682,8 +695,8 @@ async function addJoiners(
  * that one is an error for support to tell them by hand (commerce delta4).
  */
 function joinersPutOff(ctx: SweepContext, change: FeeChangeRow): void {
-  const startsOn = change.effectiveFrom;
-  if (startsOn === null || startsOn.getTime() >= ctx.now.getTime() + DAY_MS) {
+  const startsOn = startsBeforeNextRun(ctx, change);
+  if (startsOn === null) {
     putOff(
       ctx,
       'fee step: a fee rise was being edited past the wait; its joiners are added the next morning',
@@ -693,12 +706,43 @@ function joinersPutOff(ctx: SweepContext, change: FeeChangeRow): void {
   }
   ctx.result.deferred += 1;
   ctx.obs.error(
-    'fee step: a fee rise that starts before the next run was being edited past the wait, so its joiners were not added; tell anyone it now affects by hand. See Admin › Queue › Fee notices',
+    `fee step: a fee rise that starts before the next run was being edited past the wait, so its joiners were not added; ${TELL_JOINERS_BY_HAND}`,
     {
       errorId: crypto.randomUUID(),
       changeId: change.id,
       effectiveFrom: startsOn.toISOString(),
       waitedMs: LOCK_WAIT_MS,
+    }
+  );
+}
+
+/**
+ * A change's joiners step failed for any other reason (a database error,
+ * say). The next morning tries again, as with a put-off, and a rise that
+ * starts before then gets the same urgent error, with its start, so support
+ * tells those joiners by hand (review final silent, 3a00722eb confirm).
+ */
+function joinersFailed(
+  ctx: SweepContext,
+  change: FeeChangeRow,
+  error: unknown
+): void {
+  ctx.result.errors += 1;
+  const startsOn = startsBeforeNextRun(ctx, change);
+  const ids = { errorId: crypto.randomUUID(), changeId: change.id };
+  if (startsOn === null) {
+    ctx.obs.error('fee step: joiners could not be added for a change', {
+      ...ids,
+      error: messageForLog(error),
+    });
+    return;
+  }
+  ctx.obs.error(
+    `fee step: joiners could not be added for a fee rise that starts before the next run; ${TELL_JOINERS_BY_HAND}`,
+    {
+      ...ids,
+      effectiveFrom: startsOn.toISOString(),
+      error: messageForLog(error),
     }
   );
 }

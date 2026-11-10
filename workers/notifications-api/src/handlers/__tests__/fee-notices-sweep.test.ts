@@ -3396,4 +3396,55 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       feeRiseStartAfter(morning)
     );
   });
+
+  it('a joiners step that fails on a rise starting before the next run is the urgent error, with its start; one starting later stays the generic one (silent, 3a00722eb confirm)', async () => {
+    const URGENT =
+      'fee step: joiners could not be added for a fee rise that starts before the next run; tell anyone it now affects by hand. See Admin › Queue › Fee notices';
+    const GENERIC = 'fee step: joiners could not be added for a change';
+    const now = new Date();
+    // A rise dated to start before the next morning's run, and one dated
+    // the usual 30 days out, each with a joiner.
+    const soon = await toldThenJoined(
+      (await person('Uma Soon')).id,
+      (await person('Jo Soon')).id
+    );
+    const startsOn = new Date(now.getTime() + 12 * HOUR);
+    await db
+      .update(feeChanges)
+      .set({ effectiveFrom: startsOn })
+      .where(eq(feeChanges.id, soon.changeId));
+    const later = await toldThenJoined(
+      (await person('Uma Later')).id,
+      (await person('Jo Later')).id
+    );
+
+    // Each morning, the joiners step's read of who the rise affects fails.
+    for (const { changeId } of [soon, later]) {
+      failOnePayeeRead();
+      expect(await run(changeId, now, mailerAnswering())).toMatchObject({
+        joinersAdded: 0,
+        deferred: 0,
+        errors: 1,
+      });
+    }
+
+    const urgent = errorsFor(soon.changeId, URGENT);
+    expect(urgent).toHaveLength(1);
+    expect(urgent[0]?.[1]).toEqual({
+      errorId: expect.any(String),
+      changeId: soon.changeId,
+      effectiveFrom: startsOn.toISOString(),
+      error: expect.stringContaining('payee read timed out'),
+    });
+    expect(errorsFor(soon.changeId, GENERIC)).toEqual([]);
+
+    const generic = errorsFor(later.changeId, GENERIC);
+    expect(generic).toHaveLength(1);
+    expect(generic[0]?.[1]).toEqual({
+      errorId: expect.any(String),
+      changeId: later.changeId,
+      error: expect.stringContaining('payee read timed out'),
+    });
+    expect(errorsFor(later.changeId, URGENT)).toEqual([]);
+  });
 });
