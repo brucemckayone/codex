@@ -22,7 +22,7 @@
  *      rise made smaller is announced with its smaller figure.
  *   4. DATE: a rise whose list has nobody left waiting is dated the first UK
  *      midnight at least 30 days after the last of them was told
- *      (`dateRiseIfAllTold`, shared with support's "told another way"),
+ *      (`dateRiseIfAllTold`; support's "told another way" never dates),
  *      never on a morning its joiners step was put off or failed: that step
  *      puts a set-aside person who is affected again back on the list. A
  *      rise whose date has come puts its values in its level's old
@@ -311,14 +311,14 @@ async function boundLockWaits(tx: SweepTx): Promise<void> {
 }
 
 /**
- * A part of one change (or level) put off to the next morning by an edit
- * that held its lock past LOCK_WAIT_MS: counted (`deferred`) and warned,
- * never an error, since every part is tried again each morning.
+ * A part of one change (or level, or notice) put off to the next morning by
+ * an edit that held its lock past LOCK_WAIT_MS: counted (`deferred`) and
+ * warned, never an error, since every part is tried again each morning.
  */
 function putOff(
   ctx: SweepContext,
   message: string,
-  context: Record<string, string | null>
+  context: Record<string, unknown>
 ): void {
   ctx.result.deferred += 1;
   ctx.obs.warn(message, { ...context, waitedMs: LOCK_WAIT_MS });
@@ -1215,6 +1215,11 @@ async function record(
     sql`date_trunc('milliseconds', ${feeChangeNotices.createdAt}) = ${notice.createdAt}::timestamptz`,
   ];
   const done = await ctx.db.transaction(async (tx) => {
+    // A cut or void begun while the email was in flight holds this row
+    // (`lockFeeNotices`): bounded, a stuck one fails the record, which its
+    // caller logs (the next run checks the email log first), never a run
+    // held to the cron wall (review final silent-delta3).
+    await boundLockWaits(tx);
     // A re-tell writes this row, then the person's smaller row: both taken
     // first, in the one order a cut and a void take a change's notices
     // (`lockFeeNotices`), so none of them holds a row the other waits for.
@@ -1522,6 +1527,10 @@ async function sendOne(
   try {
     await recordOutcome(ctx, notice, outcome, told, toldAgain);
   } catch (error) {
+    // A cut or void begun mid-send held the row past the wait: the same L2
+    // path (the email went, or may have, and is not recorded yet), and
+    // counted with the parts put off, so the summary shows the lock.
+    if (isLockNotAvailable(error)) ctx.result.deferred += 1;
     noticeFailed(
       ctx,
       notice,
@@ -1633,10 +1642,42 @@ function noticeFailed(
  * undone, as the price-moves step does. A follow-up keeps its tries, and an
  * `unknown` is still checked against the email log from its real last try.
  * The next morning claims them.
+ *
+ * A cut or void begun since the claim holds some of these rows: the wait is
+ * bounded (`boundLockWaits`), and past it they stay claimed. They are
+ * claimed again once FEE_NOTICE_RECLAIM_AFTER_MS has passed (the next
+ * morning), each with this run's try counted, and the email log is read
+ * from the notice's making, so no earlier send is missed (review final
+ * silent-delta3).
  */
 async function giveBack(ctx: SweepContext, unsent: Claimed[]): Promise<number> {
   if (unsent.length === 0) return 0;
-  const back = await ctx.db.execute(sql`
+  try {
+    const back = await ctx.db.transaction(async (tx) => {
+      await boundLockWaits(tx);
+      return giveBackClaims(ctx, tx, unsent);
+    });
+    ctx.result.givenBack += back.rows.length;
+    return back.rows.length;
+  } catch (error) {
+    if (!isLockNotAvailable(error)) throw error;
+    putOff(
+      ctx,
+      'fee step: unsent claims were being edited past the wait, so they were not given back; they are claimed again the next morning, this try counted',
+      {
+        notices: unsent.length,
+        changeIds: [...new Set(unsent.map((c) => c.changeId))].slice(
+          0,
+          ALERT_NAMED
+        ),
+      }
+    );
+    return 0;
+  }
+}
+
+function giveBackClaims(ctx: SweepContext, tx: SweepTx, unsent: Claimed[]) {
+  return tx.execute(sql`
     UPDATE ${feeChangeNotices} AS n
        SET attempts = n.attempts - 1, attempted_at = g.prev,
            updated_at = ${ctx.now}::timestamptz
@@ -1655,8 +1696,6 @@ async function giveBack(ctx: SweepContext, unsent: Claimed[]): Promise<number> {
        AND n.state IN ('due', 'failed', 'unknown')
     RETURNING n.id
   `);
-  ctx.result.givenBack += back.rows.length;
-  return back.rows.length;
 }
 
 /**
@@ -1727,6 +1766,17 @@ async function sendDue(ctx: SweepContext): Promise<void> {
         try {
           await sendOne(ctx, notice, changes, people, reads);
         } catch (error) {
+          // A record before any send (a refusal, a drop, one found in the
+          // log) met an edit past the wait: nothing went this time, and the
+          // next morning takes it up again.
+          if (isLockNotAvailable(error)) {
+            putOff(
+              ctx,
+              'fee step: a notice was being edited past the wait; it is taken up again the next morning',
+              { feeNoticeId: notice.id, changeId: notice.changeId }
+            );
+            return;
+          }
           noticeFailed(
             ctx,
             notice,

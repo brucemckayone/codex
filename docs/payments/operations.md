@@ -260,9 +260,13 @@ the rise now affects by hand.
 
 **Told another way.** If support reaches someone another way (the phone,
 their other address), they press Told another way on that row and say how in
-the note. That counts as the person's notice from then. When they were the
-last person the rise waited for, the same transaction sets the date, and the
-answer says so. A second press answers 409 `FEE_NOTICE_ALREADY_TOLD`, which
+the note. That counts as the person's notice from then. The mark never sets
+the date. When they were the last person the rise waited for, the answer says
+nobody is waiting, and the next 08:00 run dates the rise, after its joiners
+step: that step puts anyone set aside and affected again back on the list,
+who would otherwise be told with less than 30 days. The date counts from the
+last person told either way, so it is the same as if it had been set at the
+mark. A second press answers 409 `FEE_NOTICE_ALREADY_TOLD`, which
 the page reads as done; a rise cancelled meanwhile answers 409
 `FEE_CHANGE_NOT_WAITING`. A joiner's row is tagged Joined later: it never
 holds the date, but they still need telling.

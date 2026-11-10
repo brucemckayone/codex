@@ -91,7 +91,7 @@ import {
   type ClawbackSource,
   DEBT_INVOICE_AFTER_DAYS,
   DEBT_INVOICE_THRESHOLD_CENTS,
-  dateRiseIfAllTold,
+  FEE_NOTICE_OPEN_STATES,
   type FeeLevel,
   type FeeVersionList,
   type FeeVersionValues,
@@ -3530,9 +3530,10 @@ export class SupportService extends BaseService {
    * Support told someone about a fee rise another way, for example on the
    * phone (§1.6). One transaction: lock the change, then the notice (the
    * order the fee writes and the daily run take them in), refuse with a 409
-   * when there is nothing to mark, record the mark, and date the rise when
-   * this was the last person on the list. After the commit it invalidates
-   * the level's fee cache, so the date shows at once.
+   * when there is nothing to mark, record the mark, and say how many on the
+   * list the rise still waits for. It never dates the rise: the next 08:00
+   * run does, after its joiners step (review final, commerce delta4). So
+   * no fee read changes, and the level's fee cache is left alone.
    *
    * A second press after a lost answer meets FEE_NOTICE_ALREADY_TOLD, and the
    * page reads that as done.
@@ -3557,7 +3558,7 @@ export class SupportService extends BaseService {
       if (!found) {
         throw new NotFoundError('No fee notice with this id', { noticeId });
       }
-      const { result, level } = await this.db.transaction(async (tx) => {
+      return await this.db.transaction(async (tx) => {
         const [change] = await tx
           .select()
           .from(feeChanges)
@@ -3624,12 +3625,18 @@ export class SupportService extends BaseService {
             updatedAt: now,
           })
           .where(eq(feeChangeNotices.id, noticeId));
-        const dating = await dateRiseIfAllTold(tx, change.id);
+        // Never dated here: the next 08:00 run dates a rise nobody on its
+        // list waits for, after its joiners step, which puts anyone set
+        // aside and affected again back on the list. Dated here, a person
+        // who rejoined since the last run would be left out, and told with
+        // less than 30 days (review final, commerce delta4). The date
+        // counts from the last person told either way, so it is the same.
+        const waitingFor = await waitingOnList(tx, change);
         this.obs.info('Support marked a fee notice told another way', {
           noticeId,
           changeId: change.id,
           toldByUserId,
-          dated: dating.dated,
+          waitingFor,
         });
         const marked: ToldAnotherWayResult = {
           notice: {
@@ -3641,16 +3648,12 @@ export class SupportService extends BaseService {
           },
           change: {
             changeId: change.id,
-            effectiveFrom: toIso(dating.effectiveFrom),
-            waitingFor: dating.dated ? 0 : dating.waitingFor,
+            effectiveFrom: toIso(change.effectiveFrom),
+            waitingFor,
           },
         };
-        return { result: marked, level: feeLevelOfChange(change) };
+        return marked;
       });
-      // Not needed for correctness (a date is 30 days off, and the cache
-      // re-reads hourly while a rise waits); it shows the date at once.
-      this.feeConfig.invalidateLevel(level);
-      return result;
     } catch (error) {
       this.handleError(error, 'markToldAnotherWay');
     }
@@ -5160,6 +5163,26 @@ function notToldYet(now: Date) {
     inArray(feeChangeNotices.state, ['failed', 'unknown']),
     notStartedRise(now)
   );
+}
+
+/**
+ * The people on a waiting rise's list it still waits for (none once it is
+ * dated), read in the mark's transaction: the answer's `waitingFor`.
+ */
+async function waitingOnList(tx: Tx, change: FeeChangeRow): Promise<number> {
+  if (change.effectiveFrom !== null) return 0;
+  const [open] = await tx
+    .select({ n: sql<number>`count(*)`.mapWith(Number) })
+    .from(feeChangeNotices)
+    .where(
+      and(
+        eq(feeChangeNotices.changeId, change.id),
+        eq(feeChangeNotices.kind, 'announce'),
+        eq(feeChangeNotices.onList, true),
+        inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES])
+      )
+    );
+  return open?.n ?? 0;
 }
 
 /** The level a change was saved on (its scope CHECK guarantees the keys). */

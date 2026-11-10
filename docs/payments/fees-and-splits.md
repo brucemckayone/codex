@@ -157,7 +157,8 @@ organisation's values or an override, the removal did happen.
 Fee versions are cached in KV per level (`fee-versions:*`), for a day, or an
 hour while the level has a rise waiting: notifications-api dates the rise and
 has no cache binding, so readers see the date within the hour (it is at least
-30 days off). Every write and support's mark invalidates the level. A fee is
+30 days off). Every write invalidates the level; support's mark changes no fee
+read (it never dates the rise), so it doesn't. A fee is
 read when each sale is processed; it is never snapshotted on an agreement. A
 replayed invoice keeps the platform fee its first delivery recorded
 ([below](#a-replayed-invoice)).

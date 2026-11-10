@@ -492,7 +492,7 @@ describe('SupportService fee notices (real DB)', () => {
     expect(counts.feeNotices).toBeGreaterThanOrEqual(4);
   });
 
-  it('marking the last person told another way dates the rise from the mark, in the same answer, and makes the level’s fee read fresh', async () => {
+  it('marking the last person told another way never dates the rise: the answer says nobody is waiting, the next 08:00 run dates it, and the fee cache is left alone (review final, commerce delta4)', async () => {
     const { organizationId, changeId } = await rise();
     const [kit, lou] = await people(2);
     await notice(changeId, organizationId, kit as string, SENT(FIRST_RUN));
@@ -521,16 +521,18 @@ describe('SupportService fee notices (real DB)', () => {
       },
       change: {
         changeId,
-        effectiveFrom: feeRiseStartAfter(NOW).toISOString(),
+        effectiveFrom: null,
         waitingFor: 0,
       },
     });
-    expect(feeRiseStartAfter(NOW).toISOString()).toBe(
-      '2026-12-05T00:00:00.000Z'
-    );
-    expect(invalidateLevel.mock.calls).toEqual([
-      [{ scope: 'org', organizationId }],
-    ]);
+    // The date is the next run's to set, after its joiners step: no fee
+    // read moved, so nothing to make fresh.
+    const [change] = await db
+      .select({ effectiveFrom: feeChanges.effectiveFrom })
+      .from(feeChanges)
+      .where(eq(feeChanges.id, changeId));
+    expect(change).toEqual({ effectiveFrom: null });
+    expect(invalidateLevel).not.toHaveBeenCalled();
     const [row] = await db
       .select()
       .from(feeChangeNotices)
