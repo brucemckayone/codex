@@ -712,6 +712,10 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           ...kept,
         };
         if (freed && values.slug === sent.slug) values.slug = freed;
+        // Frozen while it was out: the address is the row's, which this
+        // save may just have moved, never a change of the creator's to
+        // send (the round-12 review).
+        if (liveElsewhere) values.slug = baseline.slug;
         if (kept) {
           if (values.thumbnailUrl === sent.thumbnailUrl) {
             values.thumbnailUrl = kept.thumbnailUrl;
@@ -1268,8 +1272,10 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       // to the same address reads nothing new of itself.
       await invalidateAll();
       if (unmounted) {
-        // The creator left without them: theirs to have dropped.
-        if (leftChanges || !isDirty) {
+        // The creator left without them: theirs to have dropped. Nothing
+        // carried is nothing kept, by the one list (the round-12 review).
+        const keys = carriedKeys();
+        if (leftChanges || keys.length === 0) {
           withdrawLiveHandoff(id);
           return false;
         }
@@ -1278,7 +1284,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         // are said as too late after their window, never dropped unsaid.
         logger.warn('studio_editor.open_live_page_replaced', {
           contentId: id,
-          keys: carriedKeys(),
+          keys,
         });
         return true;
       }

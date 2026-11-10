@@ -3243,6 +3243,35 @@ describe('it went live by another way', () => {
     await settle();
   });
 
+  // The freeze puts the address back to the row's; a save that then lands
+  // moves the row's, and the screen's goes with it. Never an unsent change
+  // of the creator's, so nothing asks about it (the round-12 review).
+  it('a slug-moving save that lands after the freeze: the address follows the row, and nothing is unsent', async () => {
+    const out = Promise.withResolvers<undefined>();
+    remotes.saveContent.mockReturnValueOnce(out.promise);
+    const session = start({ saved: { id: ID, values: FOLLOWING } });
+    session.set('title', 'Runes renamed');
+    void session.flush();
+    session.set('description', 'Typed while it went');
+    publication = LIVE;
+    flushSync();
+    expect(session.wentLiveElsewhere).toBe(true);
+    expect(session.values.slug).toBe(FOLLOWING.slug);
+
+    out.resolve(undefined);
+    await settle();
+    session.set('description', FOLLOWING.description);
+
+    expect(session.values.slug).toBe(
+      contentSlugFromTitle('Runes renamed', 'video')
+    );
+    expect(session.isDirty).toBe(false);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { cancel } = navigate();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
   // Who owns a close is fixed as it happens: a Leave answered first makes
   // it the creator's, so a slow save they left running is still told when
   // it fails, as it is with no Open out (the round-8 review). The only
