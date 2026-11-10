@@ -76,8 +76,7 @@
 
   // Seed the form's field state with the current org values ONCE, so the inputs
   // render pre-populated. The guard + untrack keep it to a single seed and stop
-  // a later org refetch from clobbering an in-progress edit — the ContentForm
-  // edit-mode initialisation pattern.
+  // a later org refetch from clobbering an in-progress edit.
   let seeded = false;
   $effect(() => {
     if (seeded) return;

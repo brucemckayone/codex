@@ -55,6 +55,7 @@ describe('ContentFeatureSlab description strapline', () => {
         // biome-ignore lint/suspicious/noExplicitAny: narrow row stand-in for a presentational card
         item: { ...BASE_ITEM, description } as any,
         onPublishToggle: () => {},
+        payouts: 'ready',
       },
     });
   }

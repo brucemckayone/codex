@@ -24,7 +24,8 @@
   - A list read from the page's load (`loadRead`), not a remote query, works
     too: its Retry ends when the page's data changes, and a refresh that
     settles with nothing changed offers Retry again (see `heldRead`).
-  - Focus moves only if it is still where Retry left it.
+  - Focus moves only if it is still where Retry left it, or nowhere
+    (`focusIsFree`, the rule the studio's other Try agains share).
 
   MOUNT IT UNCONDITIONALLY, beside the list it stands in for. It renders
   nothing visible until `query` fails, and its status line has to persist for
@@ -41,6 +42,7 @@
   import * as m from '$paraglide/messages';
   import { Alert, Button } from '$lib/components/ui';
   import { connectQueryState } from '$lib/utils/connect-readiness';
+  import { focusIsFree } from '$lib/utils/focus-if-lost';
   import { type AlertRead, isLoadRead } from './alert-read';
 
   interface Props {
@@ -115,7 +117,8 @@
     }
     outcome = outcomeOf(kind);
     await tick();
-    if (focusUnmoved()) {
+    // Not if they moved on during it: a read can take seconds.
+    if (focusIsFree(alertNode)) {
       if (outcome === 'ok') statusNode?.focus();
       if (outcome === 'failed') alertNode?.focus();
     } else if (outcome === 'failed' && before === 'failed') {
@@ -200,16 +203,6 @@
     if (kind === 'ok') return 'ok';
     if (kind === 'failed') return 'failed';
     return null;
-  }
-
-  /**
-   * Focus is where Retry left it: on its button, or on <body> after the
-   * alert unmounted with it. Anywhere else, the creator has moved on.
-   */
-  function focusUnmoved(): boolean {
-    const active = document.activeElement;
-    if (active === null || active === document.body) return true;
-    return alertNode?.contains(active) ?? false;
   }
 </script>
 

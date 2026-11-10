@@ -1,24 +1,26 @@
 import { expect } from '@playwright/test';
 import { test } from '../fixtures/auth';
 import {
+  chooseAccess,
   cleanupSharedStudioAuth,
+  goToPublishStep,
   injectSharedStudioAuth,
   navigateToStudioPage,
   registerSharedStudioUser,
   type SharedStudioAuth,
   setupStudioUser,
+  startDraft,
+  waitForEditorSave,
 } from '../helpers/studio';
 
 /**
  * Studio Content E2E Tests
  *
- * Tests content listing, creation form, and form fields.
- *
- * NOTE: The Select component renders as a custom combobox (role="combobox"),
- * not a native <select>. Use getByRole('combobox', { name }) to interact.
- *
- * NOTE: Svelte 5 bind:value + Playwright fill() does not trigger oninput,
- * so auto-slug from title does not work. Tests fill the slug field manually.
+ * The content list, and the two-step editor that replaced the old form
+ * (Codex-a6ofh.2): a piece starts on the Write step, is a draft from the
+ * first thing added (its row is made then, and the address moves to its
+ * edit page), and goes live from the Publish step, where every setting
+ * sits on one screen and saves as it changes.
  */
 
 test.describe('Studio Content - List Page', () => {
@@ -50,17 +52,6 @@ test.describe('Studio Content - List Page', () => {
     await expect(page.locator('.command-bar .breadcrumb-leaf')).toBeVisible();
   });
 
-  test('create button links to new content', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/content'
-    );
-
-    const createLink = page.locator('a[href="/studio/content/new"]');
-    await expect(createLink.first()).toBeVisible();
-  });
-
   test('empty state or table renders', async ({ page }) => {
     await navigateToStudioPage(
       page,
@@ -81,7 +72,8 @@ test.describe('Studio Content - List Page', () => {
     });
   });
 
-  test('create link navigates to new content page', async ({ page }) => {
+  // The empty list's create link: no type asked for, so a video.
+  test('create link opens the Write step', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
@@ -90,10 +82,37 @@ test.describe('Studio Content - List Page', () => {
 
     await page.locator('a[href="/studio/content/new"]').first().click();
     await page.waitForURL(/\/studio\/content\/new/);
+    // Not saved until something is added.
+    await expect(
+      page.getByRole('textbox', { name: 'Title', exact: true })
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('New video · not saved yet')).toBeVisible();
+  });
+
+  test('the New menu offers the three kinds, each opening its Write step', async ({
+    page,
+  }) => {
+    await navigateToStudioPage(
+      page,
+      sharedAuth.member.organization.slug,
+      '/content'
+    );
+
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+    for (const [name, type] of [
+      [/^Video/, 'video'],
+      [/^Audio/, 'audio'],
+      [/^Article/, 'written'],
+    ] as const) {
+      await expect(page.getByRole('menuitem', { name })).toHaveAttribute(
+        'href',
+        `/studio/content/new?type=${type}`
+      );
+    }
   });
 });
 
-test.describe('Studio Content - Create Form', () => {
+test.describe('Studio Content - Write step', () => {
   test.describe.configure({ mode: 'serial' });
 
   let sharedAuth: SharedStudioAuth;
@@ -110,153 +129,174 @@ test.describe('Studio Content - Create Form', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('create form renders all fields', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/content/new'
-    );
-
-    // Text fields (label-associated via id/for)
-    await expect(page.getByRole('textbox', { name: 'Title' })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'Slug' })).toBeVisible();
-
-    // Description is now a RichTextEditor (Tiptap contenteditable), not a
-    // <textarea>. Multiple RichTextEditors render on the form (description
-    // + future fields can use them), so scope by the description label
-    // section. The label uses `for="description"` which targets the editor's
-    // internal element by id.
-    await expect(page.locator('label[for="description"]')).toBeVisible();
-    await expect(
-      page.locator('.rich-text-editor__content').first()
-    ).toBeVisible({ timeout: 10000 });
-
-    // ContentForm now uses radio cards (not comboboxes) for type + access:
-    //  - Content Type: `<fieldset>` + radios per type
-    //  - Access: `<div role="radiogroup">` + radios per option
-    await expect(page.getByRole('radio', { name: 'Video' })).toBeVisible();
-    await expect(page.getByRole('radio', { name: 'Article' })).toBeVisible();
-
-    // Price is conditionally rendered — only shows when access type is 'paid'
-    // or 'subscribers' (AccessSection's `showPrice` derived). Click the
-    // "One-time purchase" radio (the i18n label for the 'paid' access type
-    // — see messages/en.json `studio_content_form_access_paid`) first to
-    // surface the input, then assert visible.
-    await page
-      .getByRole('radio', { name: /one-time purchase/i })
-      .check({ force: true });
-    await expect(page.locator('input#price')).toBeVisible();
-
-    // Submit button
-    await expect(
-      page.getByRole('button', { name: 'Create Content' })
-    ).toBeVisible();
-  });
-
-  test('content type has Video, Audio, Article radio options', async ({
+  test('a new article opens the canvas: title, description and its words', async ({
     page,
   }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
-      '/content/new'
+      '/content/new?type=written'
     );
 
-    // Radios are sr-only; check existence rather than visibility — the
-    // labels wrapping them provide the accessible name.
-    await expect(page.getByRole('radio', { name: 'Video' })).toBeAttached();
-    await expect(page.getByRole('radio', { name: 'Audio' })).toBeAttached();
-    await expect(page.getByRole('radio', { name: 'Article' })).toBeAttached();
+    await expect(
+      page.getByRole('textbox', { name: 'Title', exact: true })
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByRole('textbox', { name: 'Description', exact: true })
+    ).toBeVisible();
+    // The body is the TipTap editor, named for what it holds.
+    await expect(
+      page.getByRole('textbox', { name: 'Article', exact: true })
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('New article · not saved yet')).toBeVisible();
+
+    // Nothing added yet: Next says what it needs, and waits.
+    await expect(
+      page.getByRole('button', { name: 'Next: publish', exact: true })
+    ).toBeDisabled();
   });
 
-  test('access options are rendered as a radiogroup', async ({ page }) => {
+  test('a new video opens with a place for the video', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
-      '/content/new'
+      '/content/new?type=video'
     );
 
-    // AccessSection uses role="radiogroup" + radio cards. Confirm the group
-    // exists; specific option labels (free / paid / subscribers) depend on
-    // the page copy and are exercised by content-form-access unit tests.
-    await expect(page.locator('[role="radiogroup"]')).toBeAttached();
+    await expect(page.getByText('Add the video')).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(
+      page.getByRole('button', { name: 'Choose from library' })
+    ).toBeVisible();
+  });
+});
+
+test.describe('Studio Content - Publish step', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  let sharedAuth: SharedStudioAuth;
+  const title = `E2E Draft ${Date.now()}`;
+  /** Made by the first test; the others open it. */
+  let draftId = '';
+
+  test.beforeAll(async () => {
+    sharedAuth = await registerSharedStudioUser({ orgRole: 'owner' });
+  });
+
+  test.afterAll(async () => {
+    await cleanupSharedStudioAuth(sharedAuth);
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await injectSharedStudioAuth(page, sharedAuth);
+  });
+
+  test('a title makes the draft; Next opens Publish, with access as one choice', async ({
+    page,
+  }) => {
+    // The address moves once the row is made, which saved the title.
+    draftId = await startDraft(
+      page,
+      sharedAuth.member.organization.slug,
+      'written',
+      title
+    );
+    await goToPublishStep(page);
+
+    await expect(
+      page.getByRole('heading', { level: 1, name: title })
+    ).toBeVisible();
+    const access = page.getByRole('radiogroup', { name: 'Access' });
+    for (const name of [/^Free/, /^Buy once/, /^Followers/, /^Team only/]) {
+      await expect(access.getByRole('radio', { name })).toBeAttached();
+    }
+    // A new org has no tiers, so there is nothing to gate it to.
+    await expect(
+      access.getByRole('radio', { name: /^Subscribers/ })
+    ).toHaveCount(0);
   });
 
   test('monetised access is gated until payouts are set up', async ({
     page,
   }) => {
+    // Codex-eb00a.10: selling (or gating behind a subscription, which a new
+    // org with no tiers is not offered) needs a payout-ready Stripe Connect
+    // account, as the publish gate does. A fresh studio user has none.
+    // Payouts read as ready until the status query answers, so this waits on
+    // the disabled state (expect retries).
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
-      '/content/new'
+      `/content/${draftId}/edit?step=publish`
     );
-
-    // Codex-eb00a.10: monetised access options (one-time purchase /
-    // subscribers) are disabled until the creator has a payout-ready Stripe
-    // Connect account, mirroring the backend publish gate. A fresh studio user
-    // has no Connect account, so `getMyConnectStatus()` resolves not-ready and
-    // the paid option renders disabled with a "set up payouts" prompt.
-    //
-    // `connectReady` is optimistically true until the status query resolves, so
-    // poll on the disabled state (expect() retries) rather than asserting once.
-    const paidRadio = page.getByRole('radio', {
-      name: /one-time purchase/i,
+    await expect(page.getByRole('radiogroup', { name: 'Access' })).toBeVisible({
+      timeout: 30_000,
     });
-    await expect(paidRadio).toBeDisabled();
 
-    // The payouts prompt is shown alongside the gated options.
+    await expect(page.getByRole('radio', { name: /^Buy once/ })).toBeDisabled();
     await expect(page.locator('.payouts-hint')).toBeVisible();
-
-    // The gate holds — the price input stays hidden because 'paid' can't be
-    // selected, so access remains the default 'free' (price is only rendered
-    // for paid/subscribers). Absent from the DOM, not merely hidden.
+    // Nothing for sale, so no price: absent, not merely hidden.
     await expect(page.locator('input#price')).toHaveCount(0);
+  });
+
+  test('a populated org’s New menu offers its draft before the kinds', async ({
+    page,
+  }) => {
+    await navigateToStudioPage(
+      page,
+      sharedAuth.member.organization.slug,
+      '/content'
+    );
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+
+    // The drafts are read as the menu opens: the newest first, so nothing
+    // is started twice, then "All drafts", then the kinds.
+    const items = page.getByRole('menuitem');
+    await expect(items.first()).toContainText(title, { timeout: 15_000 });
+    await expect(
+      page.getByRole('menuitem', { name: /^All drafts \(1\)/ })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('menuitem', { name: /^Article/ })
+    ).toHaveAttribute('href', '/studio/content/new?type=written');
+
+    // The draft opens where it was left (its step, from its own fields).
+    await items.first().click();
+    await expect(page).toHaveURL(
+      new RegExp(`/studio/content/${draftId}/edit(\\?step=publish)?$`),
+      { timeout: 30_000 }
+    );
   });
 });
 
-test.describe('Studio Content - Create Submission', () => {
-  test('content create with written type succeeds', async ({ page }) => {
+test.describe('Studio Content - Publish', () => {
+  test('an article with a title and words goes live from the Publish step', async ({
+    page,
+  }) => {
     const member = await setupStudioUser(page, { orgRole: 'owner' });
+    const title = `E2E Article ${Date.now()}`;
 
-    await navigateToStudioPage(page, member.organization.slug, '/content/new');
+    await startDraft(page, member.organization.slug, 'written', title);
+    // An article needs its words to go live (Codex-a6ofh.2.1).
+    const body = page.getByRole('textbox', { name: 'Article', exact: true });
+    await body.click();
+    await page.keyboard.type('Test article body');
+    await waitForEditorSave(page);
+    await goToPublishStep(page);
 
-    // Fill title and slug manually (Playwright fill doesn't trigger oninput for auto-slug)
-    const uniqueSlug = `e2e-article-${Date.now()}`;
-    await page.getByRole('textbox', { name: 'Title' }).fill('E2E Test Article');
-    await page.getByRole('textbox', { name: 'Slug' }).fill(uniqueSlug);
+    // Free: nothing else is needed, and no payouts are.
+    await chooseAccess(page, /^Free/);
+    await page.getByRole('button', { name: 'Publish', exact: true }).click();
 
-    // Description is now a Tiptap RichTextEditor (contenteditable div). Type
-    // into the ProseMirror element instead of filling a <textarea>. Wait for
-    // the editor to mount before typing — onMount initialises it client-side.
-    // Multiple editors may render on the form, so target the first one
-    // (description is the first field after Title/Slug).
-    const editor = page.locator('.rich-text-editor__content').first();
-    await editor.waitFor({ state: 'visible', timeout: 10000 });
-    await editor.click();
-    await page.keyboard.type('Test article description');
-
-    // Switch to Article type (doesn't require mediaItemId).
-    // Radios are sr-only — `.check({ force: true })` works on hidden radios.
-    await page.getByRole('radio', { name: 'Article' }).check({ force: true });
-
-    // Submit
-    await page.getByRole('button', { name: 'Create Content' }).click();
-
-    // Codex-ko8ko: create now redirects into EDIT mode (/studio/content/:id/edit)
-    // so the creator can upload a thumbnail file, which needs the new content id.
-    // Kept tolerant of a toast-only outcome for env robustness.
-    await page
-      .waitForURL(/\/studio\/content\/[^/]+\/edit/, { timeout: 30000 })
-      .catch(() => {});
-
-    const url = page.url();
-    const hasRedirected = !url.includes('/content/new');
-    const hasToast = await page
-      .locator('[role="status"], [role="alert"]')
-      .first()
-      .isVisible()
-      .catch(() => false);
-
-    expect(hasRedirected || hasToast).toBeTruthy();
+    // Live, it is listed with the creator's other pieces. The toast says
+    // so (it outlasts the step, whose own line says it too until it goes).
+    await expect(
+      page.getByRole('alert', { name: `“${title}” is live.` })
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page).toHaveURL(/\/studio\/content$/, { timeout: 30_000 });
+    await expect(page.getByText(title).first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });

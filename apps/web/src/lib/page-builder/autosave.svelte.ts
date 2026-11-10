@@ -163,13 +163,21 @@ export function createAutosave(deps: AutosaveDeps): AutosaveController {
    * simple truthy check instead of racing a reassignment.
    */
   async function runChain(): Promise<AutosaveSaveResult> {
-    let result = await attemptSave();
-    while (!disposed && queuedAnotherSave) {
+    try {
+      let result = await attemptSave();
+      // A follow-up queued while still a draft waits for Publish's own save
+      // once the page has gone live.
+      while (!disposed && queuedAnotherSave && !deps.isPublished()) {
+        queuedAnotherSave = false;
+        result = await attemptSave();
+      }
+      return result;
+    } finally {
+      // Whatever happened, the next change, flush or retry starts afresh
+      // rather than riding a chain that has ended.
       queuedAnotherSave = false;
-      result = await attemptSave();
+      inFlight = null;
     }
-    inFlight = null;
-    return result;
   }
 
   function startChain(): Promise<AutosaveSaveResult> {
@@ -188,6 +196,12 @@ export function createAutosave(deps: AutosaveDeps): AutosaveController {
     clearDebounce();
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
+      // Armed while a draft; the page went live in the meantime. Its
+      // changes now wait for an explicit publish (hasUnpublishedChanges).
+      if (deps.isPublished()) {
+        if (state.status === 'pending') state.status = 'idle';
+        return;
+      }
       void startChain();
     }, debounceMs);
   }
@@ -207,6 +221,9 @@ export function createAutosave(deps: AutosaveDeps): AutosaveController {
 
   function retry(): void {
     if (disposed || inFlight) return;
+    // A change since the failure armed the debounce; this save covers it.
+    // Left armed, the timer would start a second chain beside this one.
+    clearDebounce();
     void startChain();
   }
 

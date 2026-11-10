@@ -7,8 +7,11 @@
  *   two refusals reach the client as 409s whose details are the two counts.
  *   (An org's intro video always counts as live, so the delete no longer
  *   drops any org's public cache, as it did for Codex-376dl.)
+ * - A delete that went through settles the drafts scheduled on the file
+ *   (Codex-a6ofh.2.8), after the delete and outside it.
  *
- * Real `procedure()` and Hono routing; only `MediaItemService` is stubbed.
+ * Real `procedure()` and Hono routing; `MediaItemService` and
+ * `ContentService` are stubbed.
  */
 
 import {
@@ -30,12 +33,14 @@ const USER = {
 const MEDIA_ID = '4d000000-0000-4000-8000-0000000006b1';
 
 const mediaSpies = { getUsage: vi.fn(), delete: vi.fn() };
+const contentSpies = { settleScheduledForMedia: vi.fn(), setCache: vi.fn() };
 
 vi.mock('@codex/content', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/content')>();
   return {
     ...actual,
     MediaItemService: vi.fn(() => mediaSpies),
+    ContentService: vi.fn(() => contentSpies),
   };
 });
 
@@ -107,6 +112,42 @@ describe('GET /api/media/:id/usage', () => {
 describe('DELETE /api/media/:id?usage=', () => {
   beforeEach(() => {
     mediaSpies.delete.mockReset();
+    contentSpies.settleScheduledForMedia.mockReset();
+    contentSpies.settleScheduledForMedia.mockResolvedValue({
+      wentLive: [],
+      stopped: [],
+      retryLater: 0,
+      liveOrgIds: [],
+    });
+  });
+
+  it('settles the drafts scheduled on the file once it is deleted', async () => {
+    const order: string[] = [];
+    mediaSpies.delete.mockImplementation(async () => {
+      order.push('delete');
+      return { drafts: 1 };
+    });
+    contentSpies.settleScheduledForMedia.mockImplementation(async () => {
+      order.push('settle');
+      return { wentLive: [], stopped: [], retryLater: 0, liveOrgIds: [] };
+    });
+
+    const res = await call('DELETE', `/${MEDIA_ID}?usage=abc123`);
+
+    expect(res.status).toBe(204);
+    expect(contentSpies.settleScheduledForMedia).toHaveBeenCalledWith(MEDIA_ID);
+    expect(order).toEqual(['delete', 'settle']);
+  });
+
+  it('a settle that fails leaves the delete answered', async () => {
+    mediaSpies.delete.mockResolvedValue({ drafts: 1 });
+    contentSpies.settleScheduledForMedia.mockRejectedValue(
+      new Error('database went away')
+    );
+
+    const res = await call('DELETE', `/${MEDIA_ID}`);
+
+    expect(res.status).toBe(204);
   });
 
   it('passes the fingerprint through and answers 204', async () => {
@@ -158,5 +199,7 @@ describe('DELETE /api/media/:id?usage=', () => {
     };
     expect(body.error.code).toBe(code);
     expect(body.error.details).toEqual(details);
+    // Nothing was deleted, so nothing scheduled on it changes.
+    expect(contentSpies.settleScheduledForMedia).not.toHaveBeenCalled();
   });
 });

@@ -35,14 +35,25 @@ import {
   transcodingErrorInfo,
 } from '@codex/constants';
 import { messageForLog } from '@codex/database';
-import { mediaItems } from '@codex/database/schema';
+import { content, mediaItems } from '@codex/database/schema';
 import {
   BaseService,
   InternalServiceError,
   type ServiceConfig,
 } from '@codex/service-errors';
 import { MEDIA_STATUS_RESYNC_MAX_ROWS } from '@codex/validation';
-import { and, asc, eq, inArray, isNull, lt } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  sql,
+} from 'drizzle-orm';
+import type { ContentReadyNotifier } from '../content-ready';
 import {
   type JobAnswer,
   type LostJobAction,
@@ -58,7 +69,7 @@ import {
 } from '../maintenance-rules';
 import { type MediaStatusFeed, toMediaStatusChange } from '../media-status';
 import type { RunPodApiFailureReason } from '../runpod-api';
-import { failedFields, waitingFields } from './media-state';
+import { failedFields, mayRetryTranscode, waitingFields } from './media-state';
 import type { TranscodingAlerts } from './transcoding-alerts';
 import {
   DISPATCH_BUDGET_MS,
@@ -101,6 +112,8 @@ interface TranscodingMaintenanceConfig extends ServiceConfig {
   alerts?: TranscodingAlerts;
   /** The studio's live status (Codex-l2c48.9). Absent: no resync step. */
   mediaStatus?: MediaStatusFeed;
+  /** Publish when ready (Codex-a6ofh.2.8). Absent: no publishWhenReady step. */
+  contentReady?: ContentReadyNotifier;
 }
 
 /** The lifecycle states the live status mirrors (the rest are terminal). */
@@ -125,6 +138,21 @@ export interface MaintenanceReport {
   uploads: { arrived: number; incomplete: number; unknown: number };
   /** Rows the live status was resynced with; null when it was not. */
   resynced: number | null;
+  /**
+   * Media whose scheduled drafts were handed over to content-api to settle
+   * (Codex-a6ofh.2.8). It answers at once and settles after, so a settle
+   * that fails there is in ITS log ('Publish when ready: settle failed'),
+   * never here: `failed` counts only calls it would not take (retried next
+   * run), so `failed: 0` is no sign the settles worked. `deferred` were
+   * found but not sent (out of time); `more` says the read hit its cap. Null
+   * when the step did not run.
+   */
+  publishWhenReady: {
+    handedOver: number;
+    failed: number;
+    deferred: number;
+    more: boolean;
+  } | null;
   /** Writes and claims that matched nothing: a webhook, a Retry or another run got there first. */
   raced: number;
   /** Steps that threw; the run went on. */
@@ -169,6 +197,7 @@ export class TranscodingMaintenance extends BaseService {
   private readonly originalExists?: (r2Key: string) => Promise<boolean>;
   private readonly alerts?: TranscodingAlerts;
   private readonly mediaStatus?: MediaStatusFeed;
+  private readonly contentReady?: ContentReadyNotifier;
 
   constructor(config: TranscodingMaintenanceConfig) {
     super(config);
@@ -176,6 +205,7 @@ export class TranscodingMaintenance extends BaseService {
     this.originalExists = config.originalExists;
     this.alerts = config.alerts;
     this.mediaStatus = config.mediaStatus;
+    this.contentReady = config.contentReady;
   }
 
   /** One run. NEVER THROWS: a failing step is logged and reported. */
@@ -193,6 +223,7 @@ export class TranscodingMaintenance extends BaseService {
       waiting: { retried: 0, notAccepted: 0, gaveUp: 0, deferred: 0 },
       uploads: { arrived: 0, incomplete: 0, unknown: 0 },
       resynced: null,
+      publishWhenReady: null,
       raced: 0,
       failedSteps: [],
     };
@@ -221,6 +252,9 @@ export class TranscodingMaintenance extends BaseService {
     await step('waiting', () => this.retryWaiting(now, deadline, report));
     await step('uploads', () =>
       this.checkStalledUploads(now, deadline, report)
+    );
+    await step('publishWhenReady', () =>
+      this.settleScheduled(deadline, report)
     );
     await step('resync', () => this.resync(report));
     return report;
@@ -326,6 +360,69 @@ export class TranscodingMaintenance extends BaseService {
       return 'gone';
     }
     return resolved === 'waiting' ? 'requeued' : 'failed';
+  }
+
+  /**
+   * Publish when ready's safety net (Codex-a6ofh.2.8). Media with drafts
+   * scheduled on it that has settled (ready, deleted, or failed for good)
+   * gets the call its webhook makes: for one that was lost, and for what no
+   * webhook announces, such as a swap onto media already ready. content-api
+   * decides what each draft does, so a repeat is harmless. At most
+   * ROWS_PER_STEP items, inside the run's deadline; a failed call is counted
+   * and retried next run.
+   *
+   * Not creator-scoped: like the other steps, a platform sweep over every
+   * item, keyed by media id.
+   */
+  private async settleScheduled(
+    deadline: number,
+    report: MaintenanceReport
+  ): Promise<void> {
+    if (!this.contentReady) return;
+    const tally = { handedOver: 0, failed: 0, deferred: 0, more: false };
+    report.publishWhenReady = tally;
+    // Plain SQL for the OR: drizzle's or() is typed `SQL | undefined`, and an
+    // undefined filter here would sweep every scheduled item.
+    const found = await this.db
+      .selectDistinct({ id: mediaItems.id, updatedAt: mediaItems.updatedAt })
+      .from(mediaItems)
+      .innerJoin(
+        content,
+        and(
+          eq(content.mediaItemId, mediaItems.id),
+          // Both predicates of idx_content_publish_requested_media.
+          isNotNull(content.publishRequestedAt),
+          isNull(content.deletedAt)
+        )
+      )
+      .where(
+        sql`(${eq(mediaItems.status, MEDIA_STATUS.READY)} or ${isNotNull(mediaItems.deletedAt)} or (${eq(mediaItems.status, MEDIA_STATUS.FAILED)} and not ${mayRetryTranscode()}))`
+      )
+      // Latest change first: a lost call is most likely the latest write's,
+      // and an item content-api keeps for good sinks instead of taking every
+      // slot every run.
+      .orderBy(desc(mediaItems.updatedAt))
+      // One over the cap tells a capped read from a complete one.
+      .limit(ROWS_PER_STEP + 1);
+    tally.more = found.length > ROWS_PER_STEP;
+    const due = found.slice(0, ROWS_PER_STEP);
+
+    for (const [index, { id }] of due.entries()) {
+      if (Date.now() >= deadline) {
+        tally.deferred = due.length - index;
+        break;
+      }
+      try {
+        await this.contentReady.settle(id);
+        tally.handedOver++;
+      } catch (error) {
+        tally.failed++;
+        this.obs.warn('transcoding.publish_when_ready_settle_failed', {
+          mediaId: id,
+          error: messageForLog(error),
+        });
+      }
+    }
   }
 
   private async resync(report: MaintenanceReport): Promise<void> {

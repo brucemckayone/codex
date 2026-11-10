@@ -52,9 +52,86 @@ export class MediaNotFoundError extends NotFoundError {
   }
 }
 
+/**
+ * Media that isn't ready to play: still processing, or failed. `mediaStatus`
+ * tells the two apart, since one will finish and the other never will, and
+ * `stalled` marks an upload that stopped (`uploading` past its stall line),
+ * which won't either: the editor asks for the file again rather than to wait
+ * (Codex-a6ofh.2.7).
+ */
 export class MediaNotReadyError extends BusinessLogicError {
-  constructor(mediaItemId: string) {
-    super('Media item not ready for publishing', { mediaItemId });
+  constructor(mediaItemId: string, mediaStatus?: string, stalled = false) {
+    super('Media item not ready for publishing', {
+      mediaItemId,
+      ...(mediaStatus ? { mediaStatus } : {}),
+      ...(stalled ? { stalled: true } : {}),
+      code: ERROR_CODES.MEDIA_NOT_READY,
+    });
+  }
+}
+
+/**
+ * A video or audio piece with no media attached, at publish or in a save of a
+ * live piece. A draft may have none (Codex-a6ofh.2.1). 422 with
+ * `details.code: 'MEDIA_REQUIRED'`.
+ */
+export class MediaRequiredToPublishError extends BusinessLogicError {
+  constructor(contentId: string, contentType: string) {
+    super('This content needs its media before it can be live.', {
+      contentId,
+      contentType,
+      code: ERROR_CODES.MEDIA_REQUIRED,
+    });
+  }
+}
+
+/**
+ * An article with nothing to read (`hasArticleBody`, @codex/validation), at
+ * publish or in a save of a live piece. A draft may be empty
+ * (Codex-a6ofh.2.1). 422 with `details.code: 'BODY_REQUIRED'`.
+ */
+export class ContentBodyRequiredError extends BusinessLogicError {
+  constructor(contentId: string) {
+    super('This article needs something to read before it can be live.', {
+      contentId,
+      code: ERROR_CODES.BODY_REQUIRED,
+    });
+  }
+}
+
+/**
+ * A piece for sale without a price of at least £1, at publish or in a save of
+ * a live piece. A draft may set the switch before the price
+ * (Codex-a6ofh.2.1). 422 with `details.code: 'PRICE_REQUIRED'`.
+ */
+export class PriceRequiredToPublishError extends BusinessLogicError {
+  constructor(contentId: string) {
+    super(
+      'Paid content needs a price of at least £1.00 before it can be live.',
+      {
+        contentId,
+        code: ERROR_CODES.PRICE_REQUIRED,
+      }
+    );
+  }
+}
+
+/**
+ * Filing content into an org whose team the creator isn't on (Codex-ocal6),
+ * by a create or a move, or publishing it there (Codex-a6ofh.2.1: a creator
+ * who has left the org can't put a draft live in it). A create or move says
+ * one thing whatever the reason, so it never tells whether an org id exists.
+ * A publish names the creator: the caller may be an org admin, who IS on the
+ * team, and the org is the row's own. 403 with `details.code: 'NOT_ON_ORG_TEAM'`.
+ */
+export class NotOnOrgTeamError extends ForbiddenError {
+  constructor(action: 'file' | 'publish' = 'file') {
+    super(
+      action === 'publish'
+        ? "This content's creator is no longer on the organization's team, so it can't be published there."
+        : "You can only add content to an organization you're on the team of.",
+      { code: ERROR_CODES.NOT_ON_ORG_TEAM }
+    );
   }
 }
 
@@ -121,7 +198,6 @@ export class MediaDeletedError extends BusinessLogicError {
  * frame 30 days after the delete, and a live thumbnail would 404. 422
  * `BUSINESS_LOGIC_ERROR` with `details.code: 'THUMBNAIL_MEDIA_DELETED'`; the
  * editor shows the message, worded for the publish or the save it refused.
- * `@codex/admin` has a twin for its publish: keep the two in step.
  */
 export class ThumbnailMediaDeletedError extends BusinessLogicError {
   constructor(contentId: string, action: 'publish' | 'save') {
@@ -140,6 +216,30 @@ export class ContentTypeMismatchError extends BusinessLogicError {
       expectedType,
       actualType,
     });
+  }
+}
+
+/**
+ * 409 with `details.code: 'CONTENT_ALREADY_LIVE'`: what was asked of a draft
+ * came too late, as the piece went live first (the media-ready trigger, an
+ * admin, another tab). `refused` names what was asked:
+ * - `cancel`: a publish-when-ready cancel (Codex-a6ofh.2.7), never a 200
+ *   that reads as "cancelled".
+ * - `draft-save`: a draft's autosave (`asDraft`, Codex-a6ofh.2), never
+ *   written, so a half-typed change never reaches the live piece. Its
+ *   changes wait for Update.
+ */
+export class ContentAlreadyLiveError extends ConflictError {
+  constructor(contentId: string, refused: 'cancel' | 'draft-save') {
+    super(
+      refused === 'cancel'
+        ? 'This is already live, so there is no publish to cancel.'
+        : 'This went live, so a draft save can’t change it. Its changes wait for Update.',
+      {
+        contentId,
+        code: ERROR_CODES.CONTENT_ALREADY_LIVE,
+      }
+    );
   }
 }
 
@@ -182,8 +282,8 @@ export class CategorySlugConflictError extends ConflictError {
  * or included in a tier — `requiresPayoutsToPublish`, `@codex/constants`)
  * before their Stripe Connect account can receive money, or to set or change
  * the price or tier of content that is already published. `@codex/access`
- * throws it for courses too (same rule, Codex-2hxff.14); `@codex/admin`, which
- * cannot depend on this package, has a twin with the same message and code.
+ * throws it for courses too (same rule, Codex-2hxff.14), and `@codex/admin`'s
+ * publish through the shared `assertPublishable` (Codex-a6ofh.2.1).
  *
  * Without this gate, a buyer can pay for content whose creator has no payout
  * destination — funds are collected and the creator payout is parked pending
@@ -209,7 +309,7 @@ export class CreatorPayoutsRequiredError extends BusinessLogicError {
       {
         accessType,
         ...items,
-        code: 'CREATOR_CONNECT_REQUIRED',
+        code: ERROR_CODES.CREATOR_CONNECT_REQUIRED,
       }
     );
   }
@@ -230,7 +330,7 @@ export class TierRequiredToPublishError extends BusinessLogicError {
   constructor(contentId: string) {
     super('Tick at least one plan before publishing subscriber content.', {
       contentId,
-      code: 'TIER_REQUIRED_TO_PUBLISH',
+      code: ERROR_CODES.TIER_REQUIRED_TO_PUBLISH,
     });
   }
 }

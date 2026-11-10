@@ -156,8 +156,8 @@
     padding: var(--space-4);
     /* `clip` (Baseline Widely) clips horizontally without creating a
        scroll container. `overflow-x: hidden` would promote overflow-y
-       to `auto` and break `position: sticky` on children (e.g.
-       ContentForm's command bar + section rail). See iter-11 fix notes. */
+       to `auto` and break `position: sticky` on children (e.g. the
+       studio's sticky command bars). See iter-11 fix notes. */
     overflow-x: clip;
   }
 

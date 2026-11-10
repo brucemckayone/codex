@@ -9,6 +9,7 @@
     open?: boolean;
     defaultOpen?: boolean;
     onOpenChange?: (open: boolean) => void;
+    onKeep?: () => void;
     /** Attributes a page might pass to Content. */
     contentAttrs?: Record<string, string>;
     /** Attributes a page might pass to Trigger. */
@@ -19,6 +20,7 @@
     open = $bindable(false),
     defaultOpen = false,
     onOpenChange,
+    onKeep,
     contentAttrs = {},
     triggerAttrs = {},
   }: Props = $props();
@@ -31,5 +33,7 @@
     <DropdownMenuItem data-testid="item-2">Item Two</DropdownMenuItem>
     <DropdownMenuSeparator data-testid="separator" />
     <DropdownMenuItem data-testid="item-3" disabled>Disabled Item</DropdownMenuItem>
+    <DropdownMenuItem data-testid="item-keep" keepOpen onclick={onKeep}>Try again</DropdownMenuItem>
+    <DropdownMenuItem data-testid="item-link" href="#drafts">All drafts</DropdownMenuItem>
   </DropdownMenuContent>
 </DropdownMenu>

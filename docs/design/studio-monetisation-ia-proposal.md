@@ -37,7 +37,7 @@ CONCERN — and the four concern labels needed to fix that already ship and alre
 | Revenue share | `/studio/monetisation/revenue-share` — moved from `/studio/settings/revenue-share`, 308 retained (Codex-4zmw7); the component is *still named* `SettingsRevenueShare` | Monetisation → tab 2 |
 | Public pricing-page FAQ | `/studio/monetisation/pricing-faq` — moved from settings, 308 retained (Codex-eb00a.17) | Monetisation → tab 3 |
 | Org catalogue revenue **+ the owner's own consumer Stripe portal** | `/studio/billing` (`portalSessionForm` re-exported from `account.remote` — the *customer* portal) | Sidebar → **OWNER** → Billing |
-| Per-content price, access type, tier inclusion | `ContentForm` → `content-form/AccessSection.svelte` | Sidebar → Content → open an item |
+| Per-content price, access type, tier inclusion | the editor's Publish step (`editor/PublishSettings.svelte` → `content-form/AccessSection.svelte`; a live piece's Settings tab) | Sidebar → Content → open an item → Next |
 | Journey offer price, course plan, tier access | `/studio/journeys/[id]/page` builder | Sidebar → **ADMIN** → Portals → open → page builder |
 | Customers (purchasers) | `/studio/customers` — in the **ADMIN** group, but its header kicker reads **"Audience"** | Sidebar → **ADMIN** |
 

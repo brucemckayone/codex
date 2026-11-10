@@ -15,6 +15,7 @@ import type {
 import {
   and,
   eq,
+  gt,
   inArray,
   isFailedQuery,
   lt,
@@ -32,6 +33,7 @@ import {
 import { uuidSchema } from '@codex/validation';
 import { pageIdOfPageImageKey } from './page-image-keys';
 import { CALLER_OWNED_STILL_BASE } from './still-bases';
+import { stillVariantKeys, variantKeyList } from './utils/upload-pipeline';
 
 /**
  * Each sized still, by image type: the base its folders sit under for one
@@ -157,6 +159,31 @@ const DEFAULT_BATCH_SIZE = 50;
 export const PAGE_IMAGE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * How long a cover staged for Update waits before the sweep may act on it
+ * (Codex-a6ofh.2.5). A stage is recorded the moment it is made, and its row
+ * names it only once the creator presses Update, which may be hours later.
+ * Only a stage's rows wait ({@link STAGED_COVER_NOTE}): any other cover
+ * orphan is swept as before.
+ */
+export const STAGED_COVER_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * How long before the sweep may act on a stage Update stops taking it, so
+ * the two never meet on one folder: the sweep deletes a folder's files one
+ * key at a time.
+ */
+const STAGE_CLAIM_MARGIN_MS = 60 * 60 * 1000;
+
+/**
+ * What a stage's rows say, in the column that otherwise holds a cleanup's
+ * last failure or a retention's reason: it marks them as a stage's, so its
+ * grace, Update's claim and a later stage's retiring find them and nothing
+ * else. A failed attempt overwrites it only after the grace, when the sweep
+ * owns the row anyway.
+ */
+const STAGED_COVER_NOTE = 'Cover staged for Update (Codex-a6ofh.2.5)';
+
+/**
  * Whether a live row still addresses a sized still folder (Codex-kk9nv.13).
  * The owning row is found by the orphan's own type and entity id, and only a
  * live one counts: a deleted entity's stills go with it (Codex-kk9nv.14).
@@ -205,6 +232,118 @@ export async function isStillFolderReferenced(
     )
     .limit(1);
   return references.length > 0;
+}
+
+/**
+ * A stage's rows for one piece that nothing has decided yet, as conditions
+ * to spread into `and()`: never an `and()` of their own, whose type admits
+ * `undefined`, which an outer `and()` would drop without a word.
+ */
+function stagedCoverRows(contentId: string): SQL[] {
+  const t = schema.orphanedImageFiles;
+  return [
+    eq(t.imageType, 'content_thumbnail'),
+    eq(t.originalEntityId, contentId),
+    eq(t.status, 'pending'),
+    eq(t.errorMessage, STAGED_COVER_NOTE),
+  ];
+}
+
+/** The note a stage's rows take once an Update applies it. */
+const STAGE_APPLIED_NOTE = 'Applied by Update';
+/** The note a stage's rows take once a later stage replaces it: still pending, so the sweep's at once. */
+const STAGE_REPLACED_NOTE = 'Replaced by a later stage';
+
+/**
+ * Why a sent cover was not taken, so the PATCH kept the stored one: it was
+ * `applied` by an earlier Update, `replaced` by a later stage, `too_old`
+ * (in the sweep's reach, or acted on by it: any row it has failed on reads
+ * so, a stage's or not, since a failed attempt writes over the note), or
+ * `not_a_stage` (nothing staged for this piece there). A stage is recorded
+ * whole, in one insert, so a part of one is the sweep's work, and too old.
+ */
+type StagedCoverRefusal = 'applied' | 'replaced' | 'too_old' | 'not_a_stage';
+
+/**
+ * Take a cover staged for this piece's Update, for the PATCH that applies
+ * it (Codex-a6ofh.2.5). It is taken only whole: all four of its keys still
+ * a stage's and undecided, and young enough that the sweep is not yet
+ * acting on it. Its rows are then marked retained, so a stage applies once:
+ * a stale form re-sending it after a later cover replaced it (and its files
+ * were deleted) takes nothing, and the stored cover stays (Codex-kk9nv.5).
+ * Why one was refused is {@link stagedCoverRefusal}'s, read after the PATCH.
+ *
+ * The rows are locked first, so a later stage retiring this one waits for
+ * the PATCH and then finds them decided. Inside the PATCH's transaction: if
+ * it rolls back, so does the claim. The keys are asked for by name, which
+ * the r2_key index finds.
+ */
+export async function claimStagedCover(
+  db: Pick<DatabaseClient, 'select' | 'update'>,
+  contentId: string,
+  folder: string,
+  now: Date = new Date()
+): Promise<boolean> {
+  const t = schema.orphanedImageFiles;
+  const keys = variantKeyList(stillVariantKeys(folder));
+  const takenBefore = new Date(
+    now.getTime() - STAGED_COVER_GRACE_MS + STAGE_CLAIM_MARGIN_MS
+  );
+  const rows = await db
+    .select({ id: t.id, r2Key: t.r2Key })
+    .from(t)
+    .where(
+      and(
+        inArray(t.r2Key, keys),
+        ...stagedCoverRows(contentId),
+        gt(t.orphanedAt, takenBefore)
+      )
+    )
+    .for('update');
+  if (new Set(rows.map((row) => row.r2Key)).size < keys.length) return false;
+  await db
+    .update(t)
+    .set({ status: 'retained', errorMessage: STAGE_APPLIED_NOTE })
+    .where(
+      inArray(
+        t.id,
+        rows.map((row) => row.id)
+      )
+    );
+  return true;
+}
+
+/**
+ * Why {@link claimStagedCover} refused this folder: from its rows for this
+ * piece, whatever their state. For the log, so read once the PATCH is done
+ * and never inside it, where a failed read would fail the Update.
+ */
+export async function stagedCoverRefusal(
+  db: Pick<DatabaseClient, 'select'>,
+  contentId: string,
+  folder: string
+): Promise<StagedCoverRefusal> {
+  const t = schema.orphanedImageFiles;
+  const keys = variantKeyList(stillVariantKeys(folder));
+  const rows = await db
+    .select({ note: t.errorMessage, attempts: t.cleanupAttempts })
+    .from(t)
+    .where(
+      and(
+        inArray(t.r2Key, keys),
+        eq(t.imageType, 'content_thumbnail'),
+        eq(t.originalEntityId, contentId)
+      )
+    );
+  if (rows.some((row) => row.note === STAGE_APPLIED_NOTE)) return 'applied';
+  if (rows.some((row) => row.note === STAGE_REPLACED_NOTE)) return 'replaced';
+  // Still a stage's, but past what Update takes: too near the sweep, or
+  // part-way through it (each row is swept alone; a failed attempt writes
+  // its error over the note).
+  if (rows.some((row) => row.note === STAGED_COVER_NOTE || row.attempts > 0)) {
+    return 'too_old';
+  }
+  return 'not_a_stage';
 }
 
 export class OrphanedFileService extends BaseService {
@@ -278,17 +417,108 @@ export class OrphanedFileService extends BaseService {
   }
 
   /**
+   * Record a cover staged for a piece's Update (Codex-a6ofh.2.5): its keys,
+   * marked as a stage's, so they wait out {@link STAGED_COVER_GRACE_MS} and
+   * Update can take them ({@link claimStagedCover}).
+   */
+  async recordStagedCover(
+    contentId: string,
+    keys: readonly string[],
+    stagedAt: Date = new Date()
+  ): Promise<string[]> {
+    const records = await this.db
+      .insert(schema.orphanedImageFiles)
+      .values(
+        keys.map((r2Key) => ({
+          r2Key,
+          imageType: 'content_thumbnail' as const,
+          originalEntityId: contentId,
+          originalEntityType: 'content' as const,
+          status: 'pending' as const,
+          errorMessage: STAGED_COVER_NOTE,
+          orphanedAt: stagedAt,
+        }))
+      )
+      .returning();
+    return records.map((record) => record.id);
+  }
+
+  /**
+   * Hand a piece's stages recorded before `stagedAt` (a new stage's own
+   * time) to the sweep, and return them for the caller to delete at once
+   * (Codex-a6ofh.2.5): a piece holds one staged cover at a time, and staging
+   * never fills the sweep. One statement, and only the note changes: an
+   * Update can no longer take them, their grace ends, and they stay pending
+   * until their files are gone ({@link markReplacedStagesDeleted}), as any
+   * orphan does. So whatever happens after this, even a retire that fails
+   * to answer yet commits, the sweep finishes it, and no row says deleted
+   * while its files remain.
+   *
+   * Only stages still undecided and in their grace: one an Update has taken
+   * (whose rows it locks) is never among them, and an older one is the
+   * sweep's already. Strictly before: two stages sent together each replace
+   * only what came before them, so the later one stays whichever finishes
+   * first.
+   */
+  async retireStagedCovers(
+    contentId: string,
+    stagedAt: Date
+  ): Promise<{ id: string; r2Key: string }[]> {
+    const t = schema.orphanedImageFiles;
+    const inGrace = new Date(stagedAt.getTime() - STAGED_COVER_GRACE_MS);
+    const replaced = await this.db
+      .update(t)
+      .set({ errorMessage: STAGE_REPLACED_NOTE })
+      .where(
+        and(
+          ...stagedCoverRows(contentId),
+          gt(t.orphanedAt, inGrace),
+          lt(t.orphanedAt, stagedAt)
+        )
+      )
+      .returning();
+    return replaced.map(({ id, r2Key }) => ({ id, r2Key }));
+  }
+
+  /**
+   * Mark replaced stages deleted once their files are gone, as the sweep
+   * marks its own: only this piece's rows that a retire handed over and the
+   * sweep has not since decided.
+   */
+  async markReplacedStagesDeleted(
+    contentId: string,
+    ids: readonly string[]
+  ): Promise<void> {
+    if (ids.length === 0) return;
+    const t = schema.orphanedImageFiles;
+    await this.db
+      .update(t)
+      .set({ status: 'deleted', lastAttemptAt: new Date() })
+      .where(
+        and(
+          inArray(t.id, ids),
+          eq(t.imageType, 'content_thumbnail'),
+          eq(t.originalEntityId, contentId),
+          eq(t.status, 'pending'),
+          eq(t.errorMessage, STAGE_REPLACED_NOTE)
+        )
+      );
+  }
+
+  /**
    * Get pending orphans for cleanup
    *
    * Orders by orphanedAt (oldest first) to ensure FIFO processing.
-   * Only returns orphans with attempts < MAX_CLEANUP_ATTEMPTS, and a
-   * `page_image` orphan only once {@link PAGE_IMAGE_GRACE_MS} has passed.
+   * Only returns orphans with attempts < MAX_CLEANUP_ATTEMPTS, a
+   * `page_image` orphan only once {@link PAGE_IMAGE_GRACE_MS} has passed,
+   * and a staged cover only once {@link STAGED_COVER_GRACE_MS} has.
    */
   async getPendingOrphans(
     limit: number = DEFAULT_BATCH_SIZE,
     now: Date = new Date()
   ): Promise<OrphanedFileRecord[]> {
     const pageImagesDueBefore = new Date(now.getTime() - PAGE_IMAGE_GRACE_MS);
+    const stagesDueBefore = new Date(now.getTime() - STAGED_COVER_GRACE_MS);
     const orphans = await this.db
       .select()
       .from(schema.orphanedImageFiles)
@@ -299,7 +529,8 @@ export class OrphanedFileService extends BaseService {
           // A `sql` fragment, not `or(...)`: drizzle types `or()` as
           // `SQL | undefined`, and `and()` drops an undefined argument
           // silently, which here would sweep page images with no wait.
-          sql`(${schema.orphanedImageFiles.imageType} <> 'page_image' OR ${schema.orphanedImageFiles.orphanedAt} < ${pageImagesDueBefore})`
+          sql`(${schema.orphanedImageFiles.imageType} <> 'page_image' OR ${schema.orphanedImageFiles.orphanedAt} < ${pageImagesDueBefore})`,
+          sql`(${schema.orphanedImageFiles.errorMessage} IS DISTINCT FROM ${STAGED_COVER_NOTE} OR ${schema.orphanedImageFiles.orphanedAt} < ${stagesDueBefore})`
         )
       )
       .orderBy(schema.orphanedImageFiles.orphanedAt)

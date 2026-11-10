@@ -48,6 +48,8 @@ export type {
   CompletionSource,
   ContentAccessPolicy,
   ContentCourseLinks,
+  ContentPortalUse,
+  ContentPortalUses,
   CourseAccessPath,
   CourseCardSummary,
   CourseDashboardData,

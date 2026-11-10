@@ -14,8 +14,8 @@
 import {
   isWaitingForTranscoder,
   MAX_TRANSCODING_ATTEMPTS,
-  MEDIA_UPLOAD_STALLED_AFTER_MS,
   transcodingErrorInfo,
+  uploadStallsAt,
 } from '@codex/constants';
 import type { MediaItemState, TranscodingStep } from '@codex/validation';
 
@@ -26,11 +26,6 @@ export interface TileMedia {
   transcodingAttempts?: number | null;
   /** An upload that no tab reports reads as stopped past its stall line. */
   createdAt?: string | Date | null;
-}
-
-/** When an upload begun at `createdAt` reads as stopped (epoch ms). */
-export function stallsAt(createdAt: string | Date): number {
-  return new Date(createdAt).getTime() + MEDIA_UPLOAD_STALLED_AFTER_MS;
 }
 
 /** Why a failed tile failed: one sentence each. */
@@ -99,7 +94,11 @@ export function describeTile(
       // forgotten it): past the stall line it has stopped, as the library's
       // attention filter and its header count it (Codex-a6ofh.1.4). One rule
       // for every surface: the tile, the row, the drawer and the picker.
-      if (!upload && media.createdAt && clock > stallsAt(media.createdAt)) {
+      if (
+        !upload &&
+        media.createdAt &&
+        clock > uploadStallsAt(media.createdAt)
+      ) {
         return { kind: 'stopped' };
       }
       return {

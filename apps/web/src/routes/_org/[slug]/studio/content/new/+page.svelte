@@ -1,43 +1,31 @@
 <!--
   @component NewContentPage
 
-  Page wrapper for creating new content. Passes organizationId to the
-  ContentForm, and the media a piece starts with from "Create content from
-  this" (`?media=&type=`). The media picker reads the library itself, on open
-  (Codex-a6ofh.1.8), so nothing here waits for it.
+  A new piece in the org's studio: the shared content editor (Codex-a6ofh.2.3),
+  as `?type=` asks, or with the media from "Create content from this"
+  (`?media=&type=`). Opening it makes no row: the first save does.
 -->
 <script lang="ts">
   import { page } from '$app/state';
-  import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
-  import ContentForm from '$lib/components/studio/ContentForm.svelte';
-  import { readNewContentMedia } from '$lib/components/studio/media-library/library-url';
+  import ContentEditor from '$lib/components/studio/editor/ContentEditor.svelte';
+  import { TYPE_WORD } from '$lib/components/studio/editor/canvas-text';
+  import { readNewContent } from '$lib/components/studio/editor/editor-url';
+  import * as m from '$paraglide/messages';
 
   let { data } = $props();
 
-  const organizationId = $derived(data.org?.id);
-  const orgSlug = $derived(data.org?.slug);
-
-  const breadcrumbs = [
-    { label: 'Content', href: '/studio/content' },
-    { label: 'New Content' },
-  ];
-
-  const initialMedia = $derived(readNewContentMedia(page.url));
+  const start = $derived(readNewContent(page.url));
 </script>
 
 <svelte:head>
-  <title>New Content | Studio</title>
+  <title>{m.studio_editor_page_title_new({ type: TYPE_WORD[start.contentType]() })} | Studio</title>
+  <meta name="robots" content="noindex" />
 </svelte:head>
 
-<div class="new-content-page">
-  <Breadcrumb items={breadcrumbs} />
-  <ContentForm {organizationId} {orgSlug} {initialMedia} />
-</div>
-
-<style>
-  .new-content-page {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-</style>
+<ContentEditor
+  content={null}
+  contentType={start.contentType}
+  organizationId={data.org.id}
+  initialMediaId={start.mediaId}
+  authorName={data.studioUser.name}
+/>

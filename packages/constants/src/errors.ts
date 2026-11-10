@@ -13,7 +13,28 @@ export const ERROR_CODES = {
   // A publish, or a save to live content, refused because its thumbnail is a
   // frame of a deleted video (Codex-tqvmx).
   THUMBNAIL_MEDIA_DELETED: 'THUMBNAIL_MEDIA_DELETED',
+  // The `details.code` of the other publish refusals (Codex-a6ofh.2.1): a
+  // video or audio piece with no media, an article with nothing to read, a
+  // piece for sale under £1, and a creator no longer on the org's team (also
+  // a create or a move into an org they aren't on). The editor's publish
+  // checklist maps each code to its row.
+  MEDIA_REQUIRED: 'MEDIA_REQUIRED',
+  BODY_REQUIRED: 'BODY_REQUIRED',
+  PRICE_REQUIRED: 'PRICE_REQUIRED',
+  NOT_ON_ORG_TEAM: 'NOT_ON_ORG_TEAM',
+  // A subscriber piece published with no plan ticked, and a paid or
+  // subscriber piece whose creator can't be paid yet (`@codex/content` and
+  // `@codex/subscription` share the second, so the studio says one thing).
+  TIER_REQUIRED_TO_PUBLISH: 'TIER_REQUIRED_TO_PUBLISH',
+  CREATOR_CONNECT_REQUIRED: 'CREATOR_CONNECT_REQUIRED',
   CONTENT_NOT_FOUND: 'CONTENT_NOT_FOUND',
+  // A cancel of a publish-when-ready schedule that came too late: the piece
+  // went live first (Codex-a6ofh.2.7), so the editor says that, not "cancelled".
+  CONTENT_ALREADY_LIVE: 'CONTENT_ALREADY_LIVE',
+  // A publish-when-ready schedule cleared because its media failed for good
+  // (Codex-a6ofh.2.8). Stored as `content.publish_blocked_reason`; no
+  // publish ever refuses with it.
+  MEDIA_FAILED: 'MEDIA_FAILED',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   NOT_FOUND: 'NOT_FOUND',
@@ -23,6 +44,44 @@ export const ERROR_CODES = {
   BUSINESS_LOGIC_ERROR: 'BUSINESS_LOGIC_ERROR',
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
 } as const;
+
+/**
+ * Every `details.code` a publish can be refused with (`@codex/content`'s
+ * publish gate). The top-level code is only the class (`BUSINESS_LOGIC_ERROR`,
+ * `FORBIDDEN`), so the studio forwards these (`forwardClientErrors`) and its
+ * publish checklist maps each to its row (Codex-a6ofh.2.4).
+ */
+export const PUBLISH_REFUSAL_CODES = [
+  ERROR_CODES.MEDIA_REQUIRED,
+  ERROR_CODES.MEDIA_NOT_READY,
+  ERROR_CODES.MEDIA_DELETED,
+  ERROR_CODES.BODY_REQUIRED,
+  ERROR_CODES.PRICE_REQUIRED,
+  ERROR_CODES.NOT_ON_ORG_TEAM,
+  ERROR_CODES.THUMBNAIL_MEDIA_DELETED,
+  ERROR_CODES.TIER_REQUIRED_TO_PUBLISH,
+  ERROR_CODES.CREATOR_CONNECT_REQUIRED,
+] as const;
+
+export type PublishRefusalCode = (typeof PUBLISH_REFUSAL_CODES)[number];
+
+/**
+ * Every reason a publish-when-ready schedule can end without going live, as
+ * `content.publish_blocked_reason` stores it (Codex-a6ofh.2.8): a refusal
+ * the go-live re-check returned, or the media failing for good.
+ */
+export const PUBLISH_BLOCKED_REASONS = [
+  ...PUBLISH_REFUSAL_CODES,
+  ERROR_CODES.MEDIA_FAILED,
+] as const;
+
+export type PublishBlockedReason = (typeof PUBLISH_BLOCKED_REASONS)[number];
+
+export function isPublishBlockedReason(
+  code: unknown
+): code is PublishBlockedReason {
+  return (PUBLISH_BLOCKED_REASONS as readonly unknown[]).includes(code);
+}
 
 export const STATUS_CODES = {
   BAD_REQUEST: 400,
