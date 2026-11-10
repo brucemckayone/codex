@@ -6,9 +6,9 @@
  */
 
 import {
+  ORGANIZATION_NON_SUBSCRIBER_ROLES,
   ORGANIZATION_ROLES,
   ORGANIZATION_STATUS,
-  ORGANIZATION_TEAM_ROLES,
   TEMPLATE_SCOPES,
 } from '@codex/constants';
 import { paginatedQuery, schema } from '@codex/database';
@@ -735,7 +735,7 @@ export class TemplateService extends BaseService {
         eq(schema.organizationMemberships.organizationId, orgId),
         eq(schema.organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE),
         inArray(schema.organizationMemberships.role, [
-          ...ORGANIZATION_TEAM_ROLES,
+          ...ORGANIZATION_NON_SUBSCRIBER_ROLES,
         ])
       ),
     });

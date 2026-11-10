@@ -28,13 +28,19 @@ export const ORGANIZATION_ROLES = {
 } as const;
 
 /**
- * The org's TEAM: every role except `subscriber`. A paying subscriber holds
+ * Every role except `subscriber`: the people an owner or admin put on the
+ * org's Team page (owner, admin, creator, member). A paying subscriber holds
  * an ACTIVE membership too (role `subscriber`), so a check that means "on
- * the team" must filter by these roles, never by status alone (Codex-tgkgb,
- * owner decision 2026-11-09). Also the roles a subscription never downgrades
- * to `subscriber` (`upsertSubscriberMembership`).
+ * the Team page" must filter by these roles, never by status alone. Email
+ * templates use this set (Codex-tgkgb, owner decision 2026-11-09). So does a
+ * subscription, which never downgrades these roles to `subscriber`
+ * (`upsertSubscriberMembership`).
+ *
+ * NOT the access set. A `member` still pays for content. Gates that let a
+ * role in without paying use `ORGANIZATION_TEAM_ROLES` (owner, admin,
+ * creator).
  */
-export const ORGANIZATION_TEAM_ROLES = [
+export const ORGANIZATION_NON_SUBSCRIBER_ROLES = [
   ORGANIZATION_ROLES.OWNER,
   ORGANIZATION_ROLES.ADMIN,
   ORGANIZATION_ROLES.CREATOR,
