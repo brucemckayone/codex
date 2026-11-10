@@ -253,10 +253,17 @@ date, or the level's old fee row. `deferred` in `fee step completed` counts
 them. One that comes back morning after morning means an edit is stuck. A
 rise whose joiners were put off, or whose joiners step failed, is not dated
 that morning. That step puts anyone set aside and affected again back on the
-list, and the next morning dates the rise counting them. Joiners put off on a
-rise that starts before the next run are an error alert, `fee step: a fee rise
-that starts before the next run was being edited past the wait`: tell anyone
-the rise now affects by hand.
+list, and the next morning dates the rise counting them.
+
+**Joiners on a rise that starts before the next run** would be charged before
+the next morning could tell them. So whenever their joiners step doesn't run
+for such a rise, the step raises an error alert. That happens if the step is
+put off past the wait, fails for that rise, or fails as a whole (it then reads
+which rises start before the next run). Every such alert ends `tell anyone it
+now affects by hand. See Admin › Queue › Fee notices`, and names the change
+and its start date. If the step fails as a whole and that read fails too, one
+`fee step part failed` error for the joiners part ends with the same words,
+so an alert on them always fires. Tell anyone the rise now affects by hand.
 
 **Told another way.** If support reaches someone another way (the phone,
 their other address), they press Told another way on that row and say how in

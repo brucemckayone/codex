@@ -98,7 +98,7 @@ function typeNote(value: string) {
 
 /**
  * The last person on the list: marking them leaves nobody waiting, and the
- * next 08:00 run dates the rise (never the mark: commerce delta4).
+ * next 08:00 UTC run dates the rise (never the mark: commerce delta4).
  */
 const LAST_CARD = feeChangeCard({
   told: { byEmail: 411, anotherWay: 0 },
@@ -306,7 +306,7 @@ describe('told another way', () => {
     expect(dialog()?.textContent).toContain(m.support_note_missing());
   });
 
-  test('F4 marked the last one: the notice says the next 08:00 run sets the date; the lists and the counts re-read once', async () => {
+  test('F4 marked the last one: the notice says the next 08:00 UTC run sets the date; the lists and the counts re-read once', async () => {
     markToldAnotherWay.mockResolvedValue({
       outcome: 'done',
       result: {
