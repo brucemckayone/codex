@@ -16,12 +16,6 @@
     "src/lib/components/studio/ActivityFeed.svelte": {
       "TS2305": 2
     },
-    "src/lib/components/studio/ContentForm.svelte": {
-      "TS2322": 1,
-      "TS2339": 1,
-      "TS2353": 1,
-      "TS2551": 2
-    },
     "src/lib/components/studio/CustomerTable.svelte": {
       "TS2305": 1
     },
