@@ -73,6 +73,6 @@
   .logo-adapter__error {
     margin: var(--space-2) 0 0;
     font-size: var(--text-xs);
-    color: var(--color-error-500);
+    color: var(--color-status-error-text);
   }
 </style>

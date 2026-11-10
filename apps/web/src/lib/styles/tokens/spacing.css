@@ -28,8 +28,10 @@
      and `SearchPill` lost its height on the same row. Nine components consume
      `--space-9`; four consume `--space-14`. The formulas are copied verbatim
      from org-brand.css so the density re-declaration there still wins at org
-     scope. Keep the two scales in lockstep: a rung declared for branded orgs
-     but not here is a silent layout break on every platform route. */
+     scope. Keep the two scales in lockstep (spacing-lockstep.test.ts): a rung
+     declared for branded orgs but not here is a silent layout break on every
+     platform route, and a rung declared here but not there ignores the org's
+     density (`--space-32` did, until Codex-1g5lh.6). */
   --space-9: calc(var(--space-unit) * 9); /* 36px * density */
   --space-10: calc(var(--space-unit) * 10); /* 40px * density */
   --space-11: calc(var(--space-unit) * 11); /* 44px * density */
@@ -39,6 +41,7 @@
   --space-20: calc(var(--space-unit) * 20); /* 80px * density */
   --space-24: calc(var(--space-unit) * 24); /* 96px * density */
   --space-32: calc(var(--space-unit) * 32); /* 128px * density */
+  --space-48: calc(var(--space-unit) * 48); /* 192px * density */
 
   /* ─── GUARDRAIL: the WCAG 2.5.5 minimum target size ──────────────────────
      44px, and DENSITY MAY ONLY EVER MAKE IT LARGER.

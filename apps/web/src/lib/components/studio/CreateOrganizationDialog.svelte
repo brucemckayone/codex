@@ -268,11 +268,11 @@
   }
 
   .field-input.input-available:not(:focus-visible) {
-    border-color: var(--color-success-500);
+    border-color: var(--color-success);
   }
 
   .field-input.input-taken:not(:focus-visible) {
-    border-color: var(--color-error-500);
+    border-color: var(--color-error);
   }
 
   .field-textarea {

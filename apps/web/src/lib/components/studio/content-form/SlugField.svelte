@@ -195,7 +195,7 @@
 
   .field-input[aria-invalid='true'],
   .field-input.input-error {
-    border-color: var(--color-status-error-border);
+    border-color: var(--color-error);
   }
 
   .field-error {
