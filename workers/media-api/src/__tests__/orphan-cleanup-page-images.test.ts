@@ -201,6 +201,11 @@ describe('OrphanedFileCleanupDO sweep — page images (Codex-61zsk.10)', () => {
     return rows.map((row) => row.status);
   }
 
+  // Up to five sweeps of the 50 oldest due rows, each deleting their R2
+  // objects: 4.5-4.9 s when it passes, so vitest's 5 s default timed it out
+  // under ordinary load, the DO still mid-sweep as storage was torn down
+  // ('Isolated storage failed' is that aftermath). Sized as
+  // orphan-cleanup-sweep.test.ts's sweep is (Codex-27f0c).
   it('deletes all four objects of an unreferenced image past its grace, and leaves a young one alone', async () => {
     const ns = testEnv.ORPHAN_CLEANUP_DO;
     const stub = ns.get(ns.idFromName('singleton'));
@@ -231,5 +236,5 @@ describe('OrphanedFileCleanupDO sweep — page images (Codex-61zsk.10)', () => {
     for (const key of young) {
       expect(await testEnv.ASSETS_BUCKET.head(key)).not.toBeNull();
     }
-  });
+  }, 30_000);
 });
