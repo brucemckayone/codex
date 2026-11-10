@@ -246,11 +246,27 @@ since the mornings themselves usually mend it. A follow-up email
 (made smaller, cancelled) holds nothing: it is dropped after three failed
 mornings with a warning, and never reaches the queue.
 
+**An edit stuck open.** The step waits at most 5 s for a lock an edit of a
+rise holds (a cut, a cancel, a save at its level). Past that, the part is put
+off to the next morning with a warning: the change's list, its joiners, its
+date, or the level's old fee row. `deferred` in `fee step completed` counts
+them. One that comes back morning after morning means an edit is stuck. A
+rise whose joiners were put off, or whose joiners step failed, is not dated
+that morning. That step puts anyone set aside and affected again back on the
+list, and the next morning dates the rise counting them. Joiners put off on a
+rise that starts before the next run are an error alert, `fee step: a fee rise
+that starts before the next run was being edited past the wait`: tell anyone
+the rise now affects by hand.
+
 **Told another way.** If support reaches someone another way (the phone,
 their other address), they press Told another way on that row and say how in
-the note. That counts as the person's notice from then. When they were the
-last person the rise waited for, the same transaction sets the date, and the
-answer says so. A second press answers 409 `FEE_NOTICE_ALREADY_TOLD`, which
+the note. That counts as the person's notice from then. The mark never sets
+the date. When they were the last person the rise waited for, the answer says
+nobody is waiting, and the next 08:00 run dates the rise, after its joiners
+step: that step puts anyone set aside and affected again back on the list,
+who would otherwise be told with less than 30 days. The date counts from the
+last person told either way, so it is the same as if it had been set at the
+mark. A second press answers 409 `FEE_NOTICE_ALREADY_TOLD`, which
 the page reads as done; a rise cancelled meanwhile answers 409
 `FEE_CHANGE_NOT_WAITING`. A joiner's row is tagged Joined later: it never
 holds the date, but they still need telling.

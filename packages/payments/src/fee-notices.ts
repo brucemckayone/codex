@@ -7,8 +7,9 @@
  *   lists them on its first morning and adds joiners on later ones (F8).
  * - `dateRiseIfAllTold` (F4, step 4): once nobody on a rise's first list is
  *   still waiting (`due`, `failed`, `unknown`), the rise is dated the first UK
- *   midnight at least 30 days after the last of them was told. The daily run
- *   and support's "told another way" both call it, in their own transaction.
+ *   midnight at least 30 days after the last of them was told. Only the
+ *   daily run calls it, after its joiners step: support's "told another way"
+ *   never dates a rise (review final, commerce delta4).
  */
 
 import type { DatabaseClient } from '@codex/database';
@@ -437,9 +438,12 @@ export type DateRiseOutcome =
     };
 
 /**
- * Step 4 of the daily run (data design §1.5), also run by support's "told
- * another way" (§1.6). Call it inside the caller's transaction: it locks the
- * change row, so the run and a mark can't both date it.
+ * Step 4 of the daily run (data design §1.5), and only there, after its
+ * joiners step: that step puts anyone set aside and affected again back on
+ * the list, and a rise dated before it ran would leave them out, told with
+ * less than 30 days (review final, commerce delta4). Support's "told another
+ * way" (§1.6) no longer calls it. Call it inside the caller's transaction:
+ * it locks the change row, so two runs can't both date it.
  *
  * When the change is a rise with its first list made, not voided and not yet
  * dated, and no `announce` notice on that list is still due, failed or

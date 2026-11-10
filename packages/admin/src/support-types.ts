@@ -945,8 +945,13 @@ export interface ToldAnotherWayResult {
   };
   change: {
     changeId: string;
-    /** Set when this mark was the last one the rise waited for. */
+    /**
+     * The rise's date when it already has one. A mark never sets it: with
+     * nobody on the list left waiting (`waitingFor` 0), the next 08:00 run
+     * dates it, after its joiners step (review final, commerce delta4).
+     */
     effectiveFrom: string | null;
+    /** The people on the list the rise still waits for. */
     waitingFor: number;
   };
 }
