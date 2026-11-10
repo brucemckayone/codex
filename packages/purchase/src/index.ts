@@ -10,11 +10,15 @@
  * - Types: Purchase records and service types
  *
  * @example
- * import { PurchaseService, calculateRevenueSplit } from '@codex/purchase';
+ * import {
+ *   PurchaseService,
+ *   calculateRevenueSplit,
+ *   createStripeClient,
+ * } from '@codex/purchase';
  * import { createDbClient } from '@codex/database';
- * import Stripe from 'stripe';
  *
- * const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+ * // Always the factory: it pins the API version. Never `new Stripe(...)`.
+ * const stripe = createStripeClient(c.env.STRIPE_SECRET_KEY);
  * const purchaseService = new PurchaseService(
  *   { db: createDbClient(c.env), environment: 'production' },
  *   stripe
