@@ -1168,17 +1168,22 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     leftChanges = false;
     /**
      * What a hand-off carries: every field that differs from what the row
-     * holds now, but an emptied title. Against `baseline`, not `landing()`:
-     * a save still out holds its fields on no row until it lands, and one
-     * that lands later makes them equal to the row, which the live editor
-     * reads as no change (the round-9 review).
+     * holds now (`baseline`) or will hold once a save still out lands
+     * (`landing()`), but an emptied title. A field on the wire differs from
+     * the first, a change put back while it is out from the second, and
+     * whichever way that save ends, a carried value equal to the row is no
+     * change in the live editor (the round-9 and round-10 reviews). With no
+     * save out the two agree.
      */
-    const carriedKeys = (): (keyof DraftValues)[] =>
-      (Object.keys(values) as (keyof DraftValues)[]).filter(
+    const carriedKeys = (): (keyof DraftValues)[] => {
+      const held = landing();
+      return (Object.keys(values) as (keyof DraftValues)[]).filter(
         (key) =>
-          !same(values[key], baseline[key]) &&
+          (!same(values[key], baseline[key]) ||
+            !same(values[key], held[key])) &&
           !(key === 'title' && values.title.trim() === '')
       );
+    };
     const carry = () =>
       handOffToLive(
         id,

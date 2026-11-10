@@ -3185,6 +3185,30 @@ describe('it went live by another way', () => {
     expect(closedTraces()).toHaveLength(0);
   });
 
+  // A change put back while its save is out equals the row, but that save
+  // carries the words taken out: carried too, or a save that lands puts
+  // them on the live page unsaid (the round-10 review).
+  it('a change put back while its save is out, closed at the bound: carried, and the save may land', async () => {
+    const { session, out } = frozenWithASaveOut();
+    session.set('title', SAVED_VALUES.title);
+
+    const opened = session.openLive();
+    await settle();
+    close();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await opened;
+
+    expect(takeLiveHandoff(ID)).toEqual({
+      changes: {
+        title: SAVED_VALUES.title,
+        description: 'Typed while it went',
+      },
+    });
+    expect(closedTraces()).toHaveLength(0);
+    out.resolve(undefined as never);
+    await settle();
+  });
+
   // Who owns a close is fixed as it happens: a Leave answered first makes
   // it the creator's, so a slow save they left running is still told when
   // it fails, as it is with no Open out (the round-8 review). The only
