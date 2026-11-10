@@ -30,7 +30,7 @@ import {
   type LoadReadDouble,
   loadReadDouble,
 } from './__fixtures__/load-read.mock.svelte';
-import type { AlertRead } from './alert-read';
+import { type AlertRead, loadRead } from './alert-read';
 
 let component: ReturnType<typeof mount> | null = null;
 /** The harness's props, reactive so a test can change what the page refuses. */
@@ -366,35 +366,40 @@ describe("Retry, on a read from the page's load", () => {
     expect(document.activeElement).toBe(status());
   });
 
-  test('once the list is in, the alert goes while other queries hold the refresh', async () => {
+  test('a list that lands ends the Retry while other queries hold the refresh', async () => {
     const read = mountLoadRead();
     await pressRetry();
 
-    // Kit's invalidate lands the data, then waits on every live remote query.
+    // Kit's invalidate lands the data, then waits on the live remote queries.
     read.landBeforeQueries(LOADED);
     await settle();
     expect(alert()).toBeNull();
+    expect(status()?.textContent?.trim()).toBe('It loaded.');
+    expect(document.activeElement).toBe(status());
 
     read.queriesSettle();
     await settle();
     expect(status()?.textContent?.trim()).toBe('It loaded.');
-    expect(document.activeElement).toBe(status());
   });
 
-  test('a reload that was overtaken claims nothing', async () => {
+  test('an overtaken reload keeps "Retrying…" until the run that overtook it lands', async () => {
     const read = mountLoadRead();
     await pressRetry();
 
-    // A tab click or another invalidate overtook it: nothing reran.
+    // A tab click or another invalidate overtook it: the data is unchanged.
     read.overtake();
     await settle();
-    expect(messageNode()?.textContent).toContain("We couldn't load it.");
-    expect(alert()?.textContent).not.toContain("We still couldn't");
     expect(retryButton()?.textContent?.trim()).toBe(
-      m.money_setup_load_failed_retry()
+      m.money_setup_load_failed_retrying()
     );
-    expect(status()?.textContent?.trim()).toBe('');
-    expect(document.activeElement).toBe(retryButton());
+    expect(alert()?.textContent).not.toContain("We still couldn't");
+
+    // The run that overtook it reloads the page.
+    read.land(LOADED);
+    await settle();
+    expect(alert()).toBeNull();
+    expect(status()?.textContent?.trim()).toBe('It loaded.');
+    expect(document.activeElement).toBe(status());
   });
 });
 
@@ -409,5 +414,12 @@ describe('the query prop', () => {
     // @ts-expect-error neither a remote query nor made by loadRead
     const prop: AlertRead = wrapped;
     expect(prop).toBe(wrapped);
+  });
+
+  test('loadRead takes no remote query', () => {
+    const wrapKit = (query: KitRead<unknown>) =>
+      // @ts-expect-error a remote query goes to the alert as it is
+      loadRead(query);
+    expect(typeof wrapKit).toBe('function');
   });
 });

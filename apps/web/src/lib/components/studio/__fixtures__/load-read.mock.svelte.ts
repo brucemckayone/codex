@@ -7,11 +7,12 @@
  * - the read is rebuilt whenever the page's data changes, and is no promise;
  * - the load catches its own failure, so a failed reload still lands, with
  *   `error` set;
- * - the data lands first, and the refresh resolves only once every live
- *   remote query has settled too (`landBeforeQueries`, then
+ * - the data lands first, and the refresh resolves only once the page's
+ *   live remote queries have settled too (`landBeforeQueries`, then
  *   `queriesSettle`);
- * - an invalidate that another navigation or invalidate overtakes resolves
- *   with nothing rerun (`overtake`).
+ * - an invalidate that another navigation or invalidate overtook resolves
+ *   with the data unchanged (`overtake`), and the run that overtook it lands
+ *   the data later (`land` or `fail` after it).
  *
  * With `marksReloading`, `refresh()` also marks the reload in the data at
  * once, so the page hands the alert a NEW read before the reload lands.
@@ -34,7 +35,7 @@ export interface LoadReadDouble<T> {
   landBeforeQueries(value: T): void;
   /** The other live remote queries settle, so the refresh resolves. */
   queriesSettle(): void;
-  /** Overtaken: the refresh resolves, and the page's data is unchanged. */
+  /** Overtaken: the refresh resolves, data unchanged; land or fail follows. */
   overtake(): void;
 }
 

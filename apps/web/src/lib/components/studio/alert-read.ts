@@ -12,6 +12,10 @@
  *     })
  *   );
  *
+ * Its `refresh` must rerun the load the read is built from (`depends(key)`
+ * there, `invalidate(key)` here): the alert's Retry ends when the page's data
+ * changes, so a refresh that reruns nothing leaves it on "Retrying…".
+ *
  * Only `loadRead` makes one, and the alert tells it from a remote query by
  * its tag. Pass a remote query to the alert as it is: a plain object wrapping
  * one would hide kit's query swap on Retry from the alert.
@@ -22,11 +26,7 @@ import type { QueryResult } from '$lib/remote/query-result';
 const LOAD_READ: unique symbol = Symbol('load-read');
 
 export interface LoadRead<T> extends QueryResult<T> {
-  /**
-   * The page's `invalidate`. Kit resolves it once the load has rerun and
-   * every live remote query has settled, or at once, with nothing rerun,
-   * when another navigation or invalidate overtakes it.
-   */
+  /** The page's `invalidate`, which reruns the load the read is built from. */
   refresh: () => Promise<unknown>;
   readonly [LOAD_READ]: true;
 }
@@ -39,7 +39,8 @@ export type QueryRead = QueryResult<unknown> &
 export type AlertRead = QueryRead | LoadRead<unknown>;
 
 export function loadRead<T>(
-  read: Pick<LoadRead<T>, 'current' | 'error' | 'refresh'>
+  // Never a remote query: one goes to the alert as it is.
+  read: Pick<LoadRead<T>, 'current' | 'error' | 'refresh'> & { then?: never }
 ): LoadRead<T> {
   return { ...read, [LOAD_READ]: true };
 }
