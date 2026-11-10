@@ -26,7 +26,11 @@ import {
   kitQuery,
 } from './__fixtures__/kit-query.mock.svelte';
 import LoadFailedAlertHarness from './__fixtures__/LoadFailedAlertHarness.test.svelte';
-import { type LoadRead, loadRead } from './__fixtures__/load-read.mock.svelte';
+import {
+  type LoadReadDouble,
+  loadReadDouble,
+} from './__fixtures__/load-read.mock.svelte';
+import type { AlertRead } from './alert-read';
 
 let component: ReturnType<typeof mount> | null = null;
 /** The harness's props, reactive so a test can change what the page refuses. */
@@ -295,8 +299,8 @@ describe("Retry, on a read from the page's load", () => {
   /** A load read whose first load failed, mounted as the creator list does. */
   function mountLoadRead(options?: {
     marksReloading?: boolean;
-  }): LoadRead<unknown> {
-    const read = loadRead<unknown>(options);
+  }): LoadReadDouble<unknown> {
+    const read = loadReadDouble<unknown>(options);
     component = mount(LoadFailedAlertHarness, {
       target: document.body,
       props: { remote: read },
@@ -360,5 +364,50 @@ describe("Retry, on a read from the page's load", () => {
     await settle();
     expect(alert()).toBeNull();
     expect(document.activeElement).toBe(status());
+  });
+
+  test('once the list is in, the alert goes while other queries hold the refresh', async () => {
+    const read = mountLoadRead();
+    await pressRetry();
+
+    // Kit's invalidate lands the data, then waits on every live remote query.
+    read.landBeforeQueries(LOADED);
+    await settle();
+    expect(alert()).toBeNull();
+
+    read.queriesSettle();
+    await settle();
+    expect(status()?.textContent?.trim()).toBe('It loaded.');
+    expect(document.activeElement).toBe(status());
+  });
+
+  test('a reload that was overtaken claims nothing', async () => {
+    const read = mountLoadRead();
+    await pressRetry();
+
+    // A tab click or another invalidate overtook it: nothing reran.
+    read.overtake();
+    await settle();
+    expect(messageNode()?.textContent).toContain("We couldn't load it.");
+    expect(alert()?.textContent).not.toContain("We still couldn't");
+    expect(retryButton()?.textContent?.trim()).toBe(
+      m.money_setup_load_failed_retry()
+    );
+    expect(status()?.textContent?.trim()).toBe('');
+    expect(document.activeElement).toBe(retryButton());
+  });
+});
+
+describe('the query prop', () => {
+  test('takes a remote query as it is, or a load read, never a plain object', () => {
+    const wrapped = {
+      current: undefined,
+      error: undefined,
+      refresh: () => Promise.resolve(),
+    };
+    // A plain object wrapping a remote query would hide kit's query swap.
+    // @ts-expect-error neither a remote query nor made by loadRead
+    const prop: AlertRead = wrapped;
+    expect(prop).toBe(wrapped);
   });
 });

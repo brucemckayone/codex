@@ -1,35 +1,41 @@
 /**
- * Test double of a read that comes from the page's LOAD, not a remote query:
- * the creator content list builds one as
- * `$derived({ current, error, refresh: () => invalidate(key) })`.
+ * Test double of a page whose list is read from its LOAD, as the creator
+ * content list's is: `$derived(loadRead({ current, error, refresh }))`, with
+ * `refresh: () => invalidate(key)`. Built with the real `loadRead`.
  *
- * As there:
- * - the read object is rebuilt whenever the page's data changes, and is not
- *   thenable;
+ * As kit 2.55's `invalidate` (client.js `_invalidate`):
+ * - the read is rebuilt whenever the page's data changes, and is no promise;
  * - the load catches its own failure, so a failed reload still lands, with
  *   `error` set;
- * - `refresh()` resolves only once the reload has landed, as `invalidate`
- *   does.
+ * - the data lands first, and the refresh resolves only once every live
+ *   remote query has settled too (`landBeforeQueries`, then
+ *   `queriesSettle`);
+ * - an invalidate that another navigation or invalidate overtakes resolves
+ *   with nothing rerun (`overtake`).
  *
  * With `marksReloading`, `refresh()` also marks the reload in the data at
  * once, so the page hands the alert a NEW read before the reload lands.
+ *
+ * Not modelled: a load that throws (kit renders the error page instead).
  */
 
-import type { QueryResult } from '$lib/remote/query-result';
+import { type LoadRead, loadRead } from '../alert-read';
 
-export type LoadReadResult<T> = QueryResult<T> & {
-  refresh: () => Promise<void>;
-};
-
-export interface LoadRead<T> {
-  /** The read the page holds now: a page derives it from its data. */
-  get(): LoadReadResult<T>;
+export interface LoadReadDouble<T> {
+  /** The read the page holds now. */
+  get(): LoadRead<T>;
   /** How many times `refresh()` was called. */
   refreshes(): number;
-  /** The pending reload lands with `value`; its `refresh()` resolves. */
+  /** The reload lands with `value`, and its refresh resolves. */
   land(value: T): void;
-  /** The pending reload lands failed; its `refresh()` resolves. */
+  /** The reload lands failed, and its refresh resolves. */
   fail(): void;
+  /** The reload lands with `value`; its refresh waits on other queries. */
+  landBeforeQueries(value: T): void;
+  /** The other live remote queries settle, so the refresh resolves. */
+  queriesSettle(): void;
+  /** Overtaken: the refresh resolves, and the page's data is unchanged. */
+  overtake(): void;
 }
 
 interface Data<T> {
@@ -38,10 +44,10 @@ interface Data<T> {
   reloading: boolean;
 }
 
-/** A load read whose first load failed, as the alert is mounted for. */
-export function loadRead<T>(
+/** A page whose first load failed, as the alert is mounted for. */
+export function loadReadDouble<T>(
   options: { marksReloading?: boolean } = {}
-): LoadRead<T> {
+): LoadReadDouble<T> {
   let data = $state<Data<T>>({
     failed: true,
     value: undefined,
@@ -58,24 +64,36 @@ export function loadRead<T>(
     });
   }
 
-  function landWith(next: Data<T>) {
-    data = next;
+  function resolvePending() {
     const resolve = pending;
     pending = null;
     resolve?.();
   }
 
-  const read = $derived<LoadReadResult<T> & { reloading: boolean }>({
-    current: data.failed ? undefined : data.value,
-    error: data.failed ? 'The load failed.' : undefined,
-    reloading: data.reloading,
-    refresh,
-  });
+  // Reads `data` itself, so any new data, `reloading` included, rebuilds it.
+  const read = $derived(
+    loadRead<T>({
+      current: data.failed ? undefined : data.value,
+      error: data.failed ? 'The load failed.' : undefined,
+      refresh,
+    })
+  );
 
   return {
     get: () => read,
     refreshes: () => calls,
-    land: (value) => landWith({ failed: false, value, reloading: false }),
-    fail: () => landWith({ failed: true, value: undefined, reloading: false }),
+    land(value) {
+      data = { failed: false, value, reloading: false };
+      resolvePending();
+    },
+    fail() {
+      data = { failed: true, value: undefined, reloading: false };
+      resolvePending();
+    },
+    landBeforeQueries(value) {
+      data = { failed: false, value, reloading: false };
+    },
+    queriesSettle: resolvePending,
+    overtake: resolvePending,
   };
 }

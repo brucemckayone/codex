@@ -20,9 +20,8 @@
   - The outcome is judged on the query the page holds once Retry has run,
     which is not always the one it refreshed (see `heldRead`). With no value
     and no error (the page let the query go), it claims nothing.
-  - A list read from the page's load, not a remote query, works too: its
-    `refresh()` (an `invalidate`) ends the Retry once the page holds the
-    answer.
+  - A list read from the page's load (`loadRead`), not a remote query, works
+    too: its `refresh()` is the page's `invalidate` (see `heldRead`).
   - Focus moves only if it is still where Retry left it.
 
   MOUNT IT UNCONDITIONALLY, beside the list it stands in for. It renders
@@ -39,20 +38,16 @@
   import { tick } from 'svelte';
   import * as m from '$paraglide/messages';
   import { Alert, Button } from '$lib/components/ui';
-  import type { QueryResult } from '$lib/remote/query-result';
   import { connectQueryState } from '$lib/utils/connect-readiness';
+  import { type AlertRead, isLoadRead } from './alert-read';
 
   interface Props {
     /**
      * The list's read. `null` while it isn't being made. Either the page's
-     * remote query, a promise of its read that `heldRead` awaits, or a read
-     * from the page's load (`{ current, error, refresh: () => invalidate(…) }`),
-     * whose `refresh()` resolves once the page holds the answer.
+     * remote query as it is (a promise of its read, which `heldRead` awaits),
+     * or a read of the page's load made by `loadRead` (`./alert-read`).
      */
-    query:
-      | (QueryResult<unknown> &
-          Partial<PromiseLike<unknown>> & { refresh: () => Promise<unknown> })
-      | null;
+    query: AlertRead | null;
     /** "We couldn't load your …." */
     message: string;
     /** "We still couldn't load your …." after a Retry that failed. */
@@ -73,7 +68,8 @@
     'data-testid': testId,
   }: Props = $props();
 
-  const failed = $derived(connectQueryState(query).kind === 'failed');
+  const kind = $derived(connectQueryState(query).kind);
+  const failed = $derived(kind === 'failed');
 
   /** Outcome of the last Retry, for the copy and for where focus goes. */
   let outcome = $state<'ok' | 'failed' | null>(null);
@@ -91,12 +87,13 @@
     if (retrying || !query) return;
     const before = outcome;
     retrying = true;
+    let landed = false;
     try {
-      await heldRead(query);
+      landed = await heldRead(query);
     } finally {
       retrying = false;
     }
-    outcome = outcomeOf(connectQueryState(query).kind);
+    outcome = landed ? outcomeOf(kind) : null;
     await tick();
     if (focusUnmoved()) {
       if (outcome === 'ok') statusNode?.focus();
@@ -109,7 +106,8 @@
   }
 
   /**
-   * Refreshes `refreshed`, then waits for the read of the query the page holds.
+   * Refreshes `refreshed`, then waits for the answer the page will hold: the
+   * read of the query it holds now, or a load read's reload.
    *
    * Pages derive their query (`$derived(getX(id))`), and kit drops a query
    * whose first read FAILED from its cache (2.55, `create_remote_function`).
@@ -120,29 +118,41 @@
    * read: a repeat failure counted as a success, and a slow stray fetch kept
    * "Retrying…" beside the page that had loaded (Codex-zskbp).
    *
-   * A read from the page's load is no promise. Its `refresh()` is what lands
-   * the answer, even if the page rebuilt the read meanwhile (to mark the
-   * reload, say): awaiting the rebuilt read would end the Retry at once.
+   * A load read is no promise. Its `refresh()`, the page's `invalidate`, is
+   * what lands the answer, even if the page rebuilt the read meanwhile to
+   * mark the reload. Kit also resolves it with nothing rerun when another
+   * navigation or invalidate overtakes it.
+   *
+   * Returns whether an answer landed, for the outcome to judge.
    */
-  async function heldRead(refreshed: NonNullable<Props['query']>) {
+  async function heldRead(
+    refreshed: NonNullable<Props['query']>
+  ): Promise<boolean> {
     const reread = refreshed.refresh();
     // The page's derivation is read lazily, so this is already the new query.
     const held = query;
-    const swapped = held !== refreshed && (held === null || isThenable(held));
-    if (swapped) {
+    if (isLoadRead(refreshed)) {
+      try {
+        await reread;
+      } catch {
+        // What landed, if anything, is in the page's data, which the read is
+        // built from.
+      }
+      // A load read is rebuilt whenever the page's data changes, so the same
+      // one means the load never reran: it was overtaken.
+      return query !== held;
+    }
+    if (held !== refreshed) {
       void reread.catch(() => {
         // The stray fetch of a query the page let go: nobody reads its result.
       });
     }
     try {
-      await (swapped ? held : reread);
+      await (held === refreshed ? reread : held);
     } catch {
       // Kept on the held query's `.error`, which the outcome reads.
     }
-  }
-
-  function isThenable(read: NonNullable<Props['query']>): boolean {
-    return typeof read.then === 'function';
+    return true;
   }
 
   /**
@@ -178,9 +188,11 @@
 >
   {outcome === 'ok' && !failed ? loadedMessage : ''}
 </p>
-<!-- Kept while a Retry runs: the page can be handed a new query that is still
-     loading (see heldRead), and unmounting would drop the focused button. -->
-{#if failed || retrying}
+<!-- Kept while a Retry runs, until the page holds a value: the page can be
+     handed a new query that is still loading (see heldRead), and unmounting
+     would drop the focused button. A load read's refresh also waits on every
+     live remote query, so a list that is in does not sit under "Retrying…". -->
+{#if failed || (retrying && kind !== 'ok')}
   <div bind:this={alertNode} class="load-failed" tabindex="-1">
     <Alert variant="error" data-testid={testId} aria-busy={retrying}>
       <div class="load-failed__row">

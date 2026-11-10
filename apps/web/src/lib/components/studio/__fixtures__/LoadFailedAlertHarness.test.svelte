@@ -8,14 +8,12 @@
   never collect it.
 -->
 <script lang="ts">
-  import type { ComponentProps } from 'svelte';
+  import type { AlertRead } from '../alert-read';
   import LoadFailedAlert from '../LoadFailedAlert.svelte';
 
   interface Props {
     /** A kit query double or a load read double: what the page holds now. */
-    remote: {
-      get(): NonNullable<ComponentProps<typeof LoadFailedAlert>['query']>;
-    };
+    remote: { get(): AlertRead };
     refuseStatus?: number;
   }
 
