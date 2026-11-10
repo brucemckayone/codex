@@ -540,7 +540,7 @@ export function markWords(
 /**
  * The notice after a mark that went through (F4). A mark never dates the
  * rise: a date in the answer is one it already had, and with nobody on the
- * list left waiting, the next 08:00 run sets it (review final, commerce
+ * list left waiting, the next 08:00 UTC run sets it (review final, commerce
  * delta4).
  */
 export function markedNotice(
