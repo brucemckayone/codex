@@ -3047,6 +3047,9 @@ describe('it went live by another way', () => {
     expect(nav.goto).not.toHaveBeenCalled();
     out.reject(refusedAsLive);
     await settle();
+    // Said of that save: once it settles, the words go, and the button is
+    // the way on (the round-8 review).
+    expect(session.openLiveProblem).toBeNull();
   });
 
   // A Leave answered while Open is out is the creator's move: Open stands
@@ -3143,6 +3146,182 @@ describe('it went live by another way', () => {
       expect.anything()
     );
     expect(takeLiveHandoff(ID)).toBeNull();
+  });
+
+  /** Every "dropped" trace a close wrote. */
+  const closedTraces = () =>
+    told.logWarn.mock.calls.filter(
+      ([event]) => event === 'studio_editor.closed_with_unsent_changes'
+    );
+
+  // Closed with no screen left to answer, the Open sees that save through
+  // as the close does: given up at its bound, the fields still out went
+  // with no one, no hand-off, toast or trace (the round-8 review).
+  it('closed while Open waits, the save outlasting its bound: the Open sees it through and carries what it left', async () => {
+    const { session, out } = frozenWithASaveOut();
+
+    const opened = session.openLive();
+    await settle();
+    close();
+    await vi.advanceTimersByTimeAsync(10_000);
+    out.reject(refusedAsLive);
+    await opened;
+    await settle();
+
+    expect(takeLiveHandoff(ID)).toEqual({
+      changes: {
+        title: 'Runes, renamed',
+        description: 'Typed while it went',
+      },
+    });
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.open_live_page_replaced',
+      { contentId: ID, keys: ['title', 'description'] }
+    );
+    expect(told.toastAdd).not.toHaveBeenCalled();
+    expect(closedTraces()).toHaveLength(0);
+  });
+
+  // Who owns a close is fixed as it happens: a Leave answered first makes
+  // it the creator's, so a slow save they left running is still told when
+  // it fails, as it is with no Open out (the round-8 review).
+  it('a slow Leave answered while Open is out, then closed: the save that fails is still told, once', async () => {
+    const { session, out } = frozenWithASaveOut();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    // Back first, Open a moment later: the move's wait ends first.
+    navigate();
+    await vi.advanceTimersByTimeAsync(5_000);
+    const opened = session.openLive();
+    await vi.advanceTimersByTimeAsync(5_000);
+    // Asked as slow and answered Leave; their move unmounts the editor
+    // while Open still waits.
+    expect(nav.goto).toHaveBeenCalledTimes(1);
+    close();
+    out.reject(offline());
+    await opened;
+    await settle();
+
+    expect(told.toastAdd).toHaveBeenCalledTimes(1);
+    expect(takeLiveHandoff(ID)).toBeNull();
+    expect(closedTraces()).toHaveLength(0);
+  });
+
+  // A question asked before Open's move, answered Discard while that move
+  // loads: their move wins, and what Open carried goes back with the
+  // changes they discarded (the round-8 review).
+  it("Discard answered while Open's move loads: what it carried goes back", async () => {
+    const asked = Promise.withResolvers<'leave' | 'stay' | 'update'>();
+    const session = await wentLive(SAVED_VALUES, {
+      askToLeave: () => asked.promise,
+    });
+    const reading = Promise.withResolvers<{
+      status: string;
+      publishedAt: string;
+    }>();
+    remotes.readPublishState.mockReturnValueOnce(reading.promise);
+    const moving = Promise.withResolvers<void>();
+    nav.goto.mockReturnValueOnce(moving.promise);
+
+    const opened = session.openLive();
+    navigate();
+    reading.resolve({ status: 'published', publishedAt: '2026-11-09' });
+    await settle();
+    expect(nav.goto).toHaveBeenCalledWith(
+      `/studio/content/${ID}/edit`,
+      expect.anything()
+    );
+    asked.resolve('leave');
+    await settle();
+    // kit resolves the move theirs superseded.
+    moving.resolve();
+    await opened;
+
+    expect(session.isDirty).toBe(false);
+    expect(takeLiveHandoff(ID)).toBeNull();
+  });
+
+  // The read is not needed to carry, and an outage can fail it and the
+  // page together: carried, as at every other point the screen goes (the
+  // round-8 review).
+  it('closed while it read, the read then failing as an outage: carried', async () => {
+    const session = await wentLive();
+    const reading = Promise.withResolvers<never>();
+    remotes.readPublishState.mockReturnValueOnce(reading.promise);
+
+    const opened = session.openLive();
+    await settle();
+    close();
+    reading.reject(offline());
+    await opened;
+    await settle();
+
+    expect(takeLiveHandoff(ID)).toEqual({
+      changes: { description: 'Half-typed' },
+    });
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.open_live_page_replaced',
+      { contentId: ID, keys: ['description'] }
+    );
+    expect(closedTraces()).toHaveLength(0);
+  });
+
+  it('closed while it read, the piece then gone: nothing carried, the close traced', async () => {
+    const session = await wentLive();
+    const reading = Promise.withResolvers<never>();
+    remotes.readPublishState.mockReturnValueOnce(reading.promise);
+
+    const opened = session.openLive();
+    await settle();
+    close();
+    reading.reject({
+      status: 404,
+      body: { code: 'NOT_FOUND', message: 'Content not found.' },
+    });
+    await opened;
+    await settle();
+
+    expect(takeLiveHandoff(ID)).toBeNull();
+    expect(closedTraces()).toHaveLength(1);
+  });
+
+  // A Leave whose move was stopped leaves the creator here: no longer
+  // theirs to have left, as `abandoned` is cleared, so a later close is
+  // not traced as abandoned (the round-8 review).
+  it('a Leave whose move was stopped: a later close is not traced as abandoned', async () => {
+    const { session, out } = frozenWithASaveOut();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    navigate();
+    out.reject(refusedAsLive);
+    await settle();
+    expect(nav.goto).toHaveBeenCalledTimes(1);
+    session.set('description', 'Typed after staying');
+    close();
+    await settle();
+
+    expect(closedTraces()).toEqual([
+      [
+        'studio_editor.closed_with_unsent_changes',
+        expect.objectContaining({ abandoned: false }),
+      ],
+    ]);
+  });
+
+  it("the page's leave() whose move was stopped: a later close is not traced as abandoned", async () => {
+    const session = await wentLive();
+
+    await session.leave('/studio/content');
+    session.set('description', 'Typed after staying');
+    close();
+    await settle();
+
+    expect(closedTraces()).toEqual([
+      [
+        'studio_editor.closed_with_unsent_changes',
+        expect.objectContaining({ abandoned: false }),
+      ],
+    ]);
   });
 
   it('before it went live, Open it to update does nothing', async () => {

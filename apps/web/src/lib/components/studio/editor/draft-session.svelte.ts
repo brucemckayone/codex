@@ -264,8 +264,8 @@ export interface DraftSession {
   /**
    * Why the last "Open it to update" could not open it, said by the notice
    * until the next try: signed out, the piece gone, a failure a try again
-   * can help (`readProblem`), or a save still out past its bound; null when
-   * it did not fail.
+   * can help (`readProblem`), or a save still out past its bound (until that
+   * save settles); null when it did not fail.
    */
   readonly openLiveProblem: OpenLiveProblem | null;
   set<K extends keyof DraftValues>(key: K, value: DraftValues[K]): void;
@@ -421,6 +421,14 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   let leftChanges = false;
   /** "Open it to update" is out: a close meanwhile is its to trace. */
   let openingLive = false;
+  /**
+   * Who says how a close ended, fixed the moment it happens: an Open still
+   * out, unless the creator answered Leave, which makes the close theirs
+   * (a slow save they left running is still told). Read when the Open ends,
+   * never decided again by whichever side gets there first (the round-8
+   * review).
+   */
+  let openOwnsClose = false;
   /** The close's trace of changes left behind, said once. */
   let closeTraced = false;
   /** Closed with changes no save or hand-off took: one trace, never two that disagree (the round-5 review). */
@@ -723,6 +731,9 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       return failure(err);
     } finally {
       sending = null;
+      // "Still saving" is said of this save: once it settles, the words are
+      // no longer true, and the button is the way on (the round-8 review).
+      if (openProblem === 'slow') openProblem = null;
     }
     if (createdId !== null) announceCreated(createdId);
     return { ok: true };
@@ -853,6 +864,9 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
             if (unmounted) return;
             leaving = false;
             abandoned = false;
+            // The trace reads this too (the round-8 review); an Open still
+            // out stands down on it.
+            if (!openingLive) leftChanges = false;
             stayAfterAll();
           });
       })
@@ -1082,6 +1096,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
 
   $effect(() => () => {
     unmounted = true;
+    openOwnsClose = openingLive && !leftChanges;
     // Unmounted, by a move or with the editor closed in place: save what is
     // left (words typed while the next page loaded, or never saved), just
     // after the teardown rather than in it. A teardown in the same batch as
@@ -1109,19 +1124,18 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
           (!unsaved() || (isLive() && sending === null))
         ) {
           // The page's to guard (Codex-a6ofh.2.5); a trace if it did not.
-          // An Open still out says how its close ended itself: carried, or
-          // left behind.
-          if (!openingLive) traceClosedUnsent();
+          // An Open that owns the close says how it ended itself: carried,
+          // or left behind.
+          if (!openOwnsClose) traceClosedUnsent();
           finish();
           return;
         }
         // One owner per close, whoever can carry (the round-7 review): an
-        // Open still out carries what this save leaves and says how the
-        // close ended, so the teardown only rides the save.
-        const openOwns = openingLive;
+        // Open that owns it sees this save through, carries what it leaves
+        // and says how the close ended, so the teardown only rides the save.
         void drain()
           .then((result) => {
-            if (!openOwns) reportClose(result.ok);
+            if (!openOwnsClose) reportClose(result.ok);
           })
           .catch((err) => {
             logger.error(
@@ -1176,7 +1190,14 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     // be carried by neither (the round-6 review). Bounded, as a move is.
     if (sending !== null) {
       await settleWithin(autosave.flush());
-      if (unmounted) return keepOnClose();
+      // Closed meanwhile: no screen is left to keep answering, so it sees
+      // the save through, as the close does, and carries what that save
+      // left. Given up at the bound, the fields still out went with no one
+      // (the round-8 review).
+      if (unmounted) {
+        if (sending !== null) await drain();
+        return keepOnClose();
+      }
       // Answered Leave meanwhile: their move, not this one (round 7).
       if (leftChanges) return false;
       if (sending !== null) {
@@ -1206,7 +1227,12 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       logReadFailure('studio_editor.open_live_reread_failed', err, {
         contentId: id,
       });
-      openProblem = readProblem(err) ?? 'outage';
+      const problem = readProblem(err) ?? 'outage';
+      // Closed while it read, by an outage that can fail both: carried, as
+      // at every other point the screen goes (the round-8 review). Signed
+      // out or gone, no live editor will take them.
+      if (unmounted && problem === 'outage') return keepOnClose();
+      openProblem = problem;
       return false;
     }
     // Closed while it read: no move of its own to make.
@@ -1264,6 +1290,15 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       await goto(editHref(id), {
         replaceState: readEditorStep(new URL(location.href)) === 'write',
       });
+      // Answered Leave or Discard on a question asked before this move:
+      // theirs, newer, won the navigation (kit resolves the one it
+      // superseded), so what was carried goes back, or a live editor opened
+      // inside its window would bring back what they discarded (the round-8
+      // review). One that mounted has already taken it.
+      if (leftChanges) {
+        handedOff = false;
+        withdrawLiveHandoff(id);
+      }
     } catch (err) {
       // The creator stays, the notice and its button with them.
       handedOff = false;
@@ -1327,8 +1362,9 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         keptOnClose = await openLiveOnce(id);
       } finally {
         openingLive = false;
-        // Closed while it was out, and nothing took them: said once, here.
-        if (unmounted && !keptOnClose) traceClosedUnsent();
+        // Closed while it was out, its close, and nothing took them: said
+        // once, here. A close the creator chose is the teardown's to say.
+        if (unmounted && openOwnsClose && !keptOnClose) traceClosedUnsent();
       }
     },
     discard() {
@@ -1346,6 +1382,9 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         // Still mounted: something else stopped the move, so guard again.
         if (!unmounted) {
           leaving = false;
+          // Not left after all, as `abandoned` is cleared (the round-8
+          // review); an Open still out stands down on it.
+          if (!openingLive) leftChanges = false;
           stayAfterAll();
         }
       }
