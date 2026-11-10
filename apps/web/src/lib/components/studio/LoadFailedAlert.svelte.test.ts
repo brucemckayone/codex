@@ -26,6 +26,7 @@ import {
   kitQuery,
 } from './__fixtures__/kit-query.mock.svelte';
 import LoadFailedAlertHarness from './__fixtures__/LoadFailedAlertHarness.test.svelte';
+import { type LoadRead, loadRead } from './__fixtures__/load-read.mock.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
 /** The harness's props, reactive so a test can change what the page refuses. */
@@ -287,5 +288,77 @@ describe('Retry, when the page keeps its query', () => {
     await settle();
     expect(alert()).toBeNull();
     expect(status()?.textContent?.trim()).toBe('It loaded.');
+  });
+});
+
+describe("Retry, on a read from the page's load", () => {
+  /** A load read whose first load failed, mounted as the creator list does. */
+  function mountLoadRead(options?: {
+    marksReloading?: boolean;
+  }): LoadRead<unknown> {
+    const read = loadRead<unknown>(options);
+    component = mount(LoadFailedAlertHarness, {
+      target: document.body,
+      props: { remote: read },
+    });
+    flushSync();
+    return read;
+  }
+
+  async function pressRetry() {
+    retryButton()?.focus();
+    retryButton()?.click();
+    await settle();
+  }
+
+  test('keeps "Retrying…" until the reload lands, then says it loaded', async () => {
+    const read = mountLoadRead();
+    expect(alert()).not.toBeNull();
+
+    await pressRetry();
+    expect(read.refreshes()).toBe(1);
+    expect(retryButton()?.textContent?.trim()).toBe(
+      m.money_setup_load_failed_retrying()
+    );
+
+    read.land(LOADED);
+    await settle();
+    expect(alert()).toBeNull();
+    expect(status()?.textContent?.trim()).toBe('It loaded.');
+    expect(document.activeElement).toBe(status());
+  });
+
+  test('a reload that fails again says so and focuses the alert', async () => {
+    const read = mountLoadRead();
+    await pressRetry();
+    expect(retryButton()?.textContent?.trim()).toBe(
+      m.money_setup_load_failed_retrying()
+    );
+
+    read.fail();
+    await settle();
+    expect(alert()?.textContent).toContain("We still couldn't load it.");
+    expect(document.activeElement?.classList.contains('load-failed')).toBe(
+      true
+    );
+  });
+
+  test('waits for the reload when the page rebuilds the read to mark it', async () => {
+    const read = mountLoadRead({ marksReloading: true });
+    const before = read.get();
+
+    await pressRetry();
+    // A new read object, still failed, and no promise: judging it at once
+    // would say "still" while the reload is in flight.
+    expect(read.get()).not.toBe(before);
+    expect(retryButton()?.textContent?.trim()).toBe(
+      m.money_setup_load_failed_retrying()
+    );
+    expect(alert()?.textContent).not.toContain("We still couldn't");
+
+    read.land(LOADED);
+    await settle();
+    expect(alert()).toBeNull();
+    expect(document.activeElement).toBe(status());
   });
 });

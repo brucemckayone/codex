@@ -1,17 +1,21 @@
 <!--
   Test-only harness: LoadFailedAlert as a page mounts it, with the query
-  DERIVED from its remote function, as every caller does. With `refuseStatus`
+  DERIVED from its remote function, as every caller does, or from a read of
+  the page's load (`load-read.mock.svelte`). With `refuseStatus`
   it lets the query go on that status, as the negotiation thread passes
   `threadRefused ? null : threadQuery`. The input stands for anywhere else on
   the page. Named `*.test.svelte` (a fixture) so the vitest include globs
   never collect it.
 -->
 <script lang="ts">
+  import type { ComponentProps } from 'svelte';
   import LoadFailedAlert from '../LoadFailedAlert.svelte';
-  import type { KitQuery } from './kit-query.mock.svelte';
 
   interface Props {
-    remote: KitQuery<unknown>;
+    /** A kit query double or a load read double: what the page holds now. */
+    remote: {
+      get(): NonNullable<ComponentProps<typeof LoadFailedAlert>['query']>;
+    };
     refuseStatus?: number;
   }
 

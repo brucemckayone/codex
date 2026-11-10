@@ -20,6 +20,9 @@
   - The outcome is judged on the query the page holds once Retry has run,
     which is not always the one it refreshed (see `heldRead`). With no value
     and no error (the page let the query go), it claims nothing.
+  - A list read from the page's load, not a remote query, works too: its
+    `refresh()` (an `invalidate`) ends the Retry once the page holds the
+    answer.
   - Focus moves only if it is still where Retry left it.
 
   MOUNT IT UNCONDITIONALLY, beside the list it stands in for. It renders
@@ -41,12 +44,14 @@
 
   interface Props {
     /**
-     * The list's remote query. `null` while it isn't being made. A kit query
-     * is a promise of its read, which `heldRead` awaits.
+     * The list's read. `null` while it isn't being made. Either the page's
+     * remote query, a promise of its read that `heldRead` awaits, or a read
+     * from the page's load (`{ current, error, refresh: () => invalidate(…) }`),
+     * whose `refresh()` resolves once the page holds the answer.
      */
     query:
       | (QueryResult<unknown> &
-          PromiseLike<unknown> & { refresh: () => Promise<unknown> })
+          Partial<PromiseLike<unknown>> & { refresh: () => Promise<unknown> })
       | null;
     /** "We couldn't load your …." */
     message: string;
@@ -114,21 +119,30 @@
    * kit's doing. Waiting on the refreshed query judged the Retry on the wrong
    * read: a repeat failure counted as a success, and a slow stray fetch kept
    * "Retrying…" beside the page that had loaded (Codex-zskbp).
+   *
+   * A read from the page's load is no promise. Its `refresh()` is what lands
+   * the answer, even if the page rebuilt the read meanwhile (to mark the
+   * reload, say): awaiting the rebuilt read would end the Retry at once.
    */
   async function heldRead(refreshed: NonNullable<Props['query']>) {
     const reread = refreshed.refresh();
     // The page's derivation is read lazily, so this is already the new query.
     const held = query;
-    if (held !== refreshed) {
+    const swapped = held !== refreshed && (held === null || isThenable(held));
+    if (swapped) {
       void reread.catch(() => {
         // The stray fetch of a query the page let go: nobody reads its result.
       });
     }
     try {
-      await (held === refreshed ? reread : held);
+      await (swapped ? held : reread);
     } catch {
       // Kept on the held query's `.error`, which the outcome reads.
     }
+  }
+
+  function isThenable(read: NonNullable<Props['query']>): boolean {
+    return typeof read.then === 'function';
   }
 
   /**
