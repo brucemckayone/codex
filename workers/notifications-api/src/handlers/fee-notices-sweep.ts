@@ -681,7 +681,7 @@ const TELL_JOINERS_BY_HAND =
  */
 function startsBeforeNextRun(
   ctx: SweepContext,
-  change: FeeChangeRow
+  change: Pick<FeeChangeRow, 'effectiveFrom'>
 ): Date | null {
   const startsOn = change.effectiveFrom;
   return startsOn !== null && startsOn.getTime() < ctx.now.getTime() + DAY_MS
@@ -729,22 +729,71 @@ function joinersFailed(
 ): void {
   ctx.result.errors += 1;
   const startsOn = startsBeforeNextRun(ctx, change);
-  const ids = { errorId: crypto.randomUUID(), changeId: change.id };
   if (startsOn === null) {
     ctx.obs.error('fee step: joiners could not be added for a change', {
-      ...ids,
+      errorId: crypto.randomUUID(),
+      changeId: change.id,
       error: messageForLog(error),
     });
     return;
   }
+  joinersUntold(ctx, change.id, startsOn, error);
+}
+
+/** The urgent error for a rise starting before the next run whose joiners failed. */
+function joinersUntold(
+  ctx: SweepContext,
+  changeId: string,
+  startsOn: Date,
+  error: unknown
+): void {
   ctx.obs.error(
     `fee step: joiners could not be added for a fee rise that starts before the next run; ${TELL_JOINERS_BY_HAND}`,
     {
-      ...ids,
+      errorId: crypto.randomUUID(),
+      changeId,
       effectiveFrom: startsOn.toISOString(),
       error: messageForLog(error),
     }
   );
+}
+
+/**
+ * The whole joiners step failed before its changes (its own read, say).
+ * No rise is dated this run (`dateRises`), but a rise that starts before
+ * the next run charges its new joiners untold all the same. So, after the
+ * part's own error, a best-effort read names each such rise with the urgent
+ * error, as `joinersFailed` does for one change. When that read fails too,
+ * one more error for the part carries the instruction, so an alert on
+ * TELL_JOINERS_BY_HAND still fires. Never throws: it runs in the part's
+ * catch (review final, commerce confirm nit).
+ */
+async function joinersStepFailed(
+  ctx: SweepContext,
+  error: unknown
+): Promise<void> {
+  let changes: Array<Pick<FeeChangeRow, 'id' | 'effectiveFrom'>>;
+  try {
+    changes = await ctx.db
+      .select({ id: feeChanges.id, effectiveFrom: feeChanges.effectiveFrom })
+      .from(feeChanges)
+      .where(and(notStarted(ctx.now), scope(ctx)));
+  } catch (readError) {
+    ctx.obs.error(
+      `fee step part failed, and the rises that start before the next run could not be read: for each of them, ${TELL_JOINERS_BY_HAND}`,
+      {
+        errorId: crypto.randomUUID(),
+        part: 'joiners',
+        error: messageForLog(error),
+        readError: messageForLog(readError),
+      }
+    );
+    return;
+  }
+  for (const change of changes) {
+    const startsOn = startsBeforeNextRun(ctx, change);
+    if (startsOn !== null) joinersUntold(ctx, change.id, startsOn, error);
+  }
 }
 
 /**
@@ -1612,21 +1661,48 @@ async function recordOutcome(
     if (sent !== 'not_recorded') ctx.result.sent += 1;
     return;
   }
+  await recordNotAccepted(ctx, notice, outcome, told, toldAgain);
+}
+
+/** A send not accepted (refused, or no answer), written with its reason. */
+async function recordNotAccepted(
+  ctx: SweepContext,
+  notice: Claimed,
+  outcome: Exclude<ReturnType<typeof outcomeOf>, { state: 'sent' }>,
+  told: Partial<FeeChangeNoticeRow>,
+  toldAgain: boolean
+): Promise<void> {
   const errorId = crypto.randomUUID();
-  const recorded = await record(
-    ctx,
-    notice,
-    {
-      // One with no answer may have told them, so it keeps what: a void's
-      // "it's off" email quotes it (owner, 2026-11-09).
-      ...(outcome.state === 'unknown' ? told : {}),
-      state: outcome.state,
-      lastReason: outcome.reason,
-      lastError: outcome.error,
-      alertErrorId: errorId,
-    },
-    toldAgain
-  );
+  const fields = {
+    errorId,
+    feeNoticeId: notice.id,
+    changeId: notice.changeId,
+    kind: notice.kind,
+    reason: outcome.reason,
+  };
+  let recorded: Recorded;
+  try {
+    recorded = await record(
+      ctx,
+      notice,
+      {
+        // One with no answer may have told them, so it keeps what: a void's
+        // "it's off" email quotes it (owner, 2026-11-09).
+        ...(outcome.state === 'unknown' ? told : {}),
+        state: outcome.state,
+        lastReason: outcome.reason,
+        lastError: outcome.error,
+        alertErrorId: errorId,
+      },
+      toldAgain
+    );
+  } catch (error) {
+    // Anything but a refusal's record meeting an edit past the wait takes
+    // its caller's path (a send with no answer: the L2 one).
+    if (outcome.state !== 'failed' || !isLockNotAvailable(error)) throw error;
+    refusalPutOff(ctx, fields, outcome.error);
+    return;
+  }
   if (recorded === 'not_recorded') return;
   if (outcome.state === 'failed') ctx.result.failed += 1;
   else ctx.result.unknown += 1;
@@ -1635,13 +1711,28 @@ async function recordOutcome(
     recorded === 'voided'
       ? 'fee step: a fee email was not accepted, and its rise was voided meanwhile; it is not tried again'
       : 'fee step: a fee email was not accepted; it is tried again tomorrow',
-    {
-      errorId,
-      feeNoticeId: notice.id,
-      changeId: notice.changeId,
-      kind: notice.kind,
-      reason: outcome.reason,
-    }
+    fields
+  );
+}
+
+/**
+ * A refusal whose record met an edit past the wait (55P03): nothing went,
+ * and the row still reads as claimed, so the next morning tries it again.
+ * Its usual warning still goes today, with what the row would have kept
+ * (the reason, the mail service's answer, the alert id), so the refusal is
+ * never a day out of sight; counted as failed and put off (review final
+ * silent, 3a00722eb confirm).
+ */
+function refusalPutOff(
+  ctx: SweepContext,
+  fields: Record<string, string>,
+  answer: string
+): void {
+  ctx.result.failed += 1;
+  ctx.result.deferred += 1;
+  ctx.obs.warn(
+    'fee step: a fee email was not accepted; it is tried again tomorrow',
+    { ...fields, lastError: answer, recorded: false, waitedMs: LOCK_WAIT_MS }
   );
 }
 
@@ -2223,8 +2314,11 @@ export async function runFeeNoticesSweep(
     let listedThisRun: Set<string> = new Set();
     // Null until the joiners step finishes: no rise is dated without it.
     let joinersSkipped: Set<string> | null = null;
-    // Each part is isolated: one failing never stops the others.
-    const parts: Array<[string, () => Promise<void>]> = [
+    // Each part is isolated: one failing never stops the others. A part may
+    // name what follows its own error when it fails (never throwing).
+    const parts: Array<
+      [string, () => Promise<void>, ((error: unknown) => Promise<void>)?]
+    > = [
       [
         'lists',
         async () => {
@@ -2236,6 +2330,7 @@ export async function runFeeNoticesSweep(
         async () => {
           joinersSkipped = await addJoiners(ctx, listedThisRun);
         },
+        (error) => joinersStepFailed(ctx, error),
       ],
       ['templates', () => alertMissingTemplates(ctx)],
       ['sends', () => sendDue(ctx)],
@@ -2245,7 +2340,7 @@ export async function runFeeNoticesSweep(
       ['old rows', () => mirrorStartedRises(ctx)],
       ['alert', () => alertNotTold(ctx)],
     ];
-    for (const [part, run] of parts) {
+    for (const [part, run, afterFailure] of parts) {
       try {
         await run();
       } catch (error) {
@@ -2255,6 +2350,7 @@ export async function runFeeNoticesSweep(
           part,
           error: messageForLog(error),
         });
+        await afterFailure?.(error);
       }
     }
     deps.obs.info('fee step completed', { ...result });

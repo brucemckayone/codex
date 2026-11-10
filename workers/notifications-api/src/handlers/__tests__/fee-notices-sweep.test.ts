@@ -3447,4 +3447,182 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     });
     expect(errorsFor(later.changeId, URGENT)).toEqual([]);
   });
+
+  // ── Task t: the final confirms' silent LOW and commerce nit ──────────────
+
+  it('a refused send whose record meets a cut begun mid-send still says so that day, with its reason and the mail service’s answer, counted as failed and put off (silent, final confirm)', async () => {
+    const [ada] = await refusedOnce('Ada Refusedagain');
+    if (!ada) throw new Error('rise not made');
+    const admin = await person('Ari Admin');
+    const announce = await kindOf(ada.changeId, ada.userId, 'announce');
+    // Ada's email is refused again, and while it is in flight a cut of her
+    // rise takes its notices, and sticks.
+    let cut: { done: () => Promise<void> } | undefined;
+    const mailer = vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        if (params.userId === ada.userId) {
+          cut = await cutHeldOpen(ada.changeId, ada.org, admin.id, ada.userId);
+        }
+        return { accepted: false, status: 422 };
+      }
+    );
+    const running = runFeeNoticesSweep({
+      db,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      mailer,
+      templateExists: async () => true,
+      onlyChanges: [ada.changeId],
+    });
+    let result: Awaited<typeof running> | undefined;
+    try {
+      result = await within(running, 'the run refused under a cut');
+    } finally {
+      await cut?.done();
+      await running;
+    }
+
+    // Her record and her rise's date met the cut, and were put off; the
+    // refusal is told today all the same, with what the row would keep.
+    expect(result).toMatchObject({ failed: 1, deferred: 2, errors: 0 });
+    expect(obsLog.warn).toHaveBeenCalledWith(
+      'fee step: a fee email was not accepted; it is tried again tomorrow',
+      {
+        errorId: expect.any(String),
+        feeNoticeId: announce?.id,
+        changeId: ada.changeId,
+        kind: 'announce',
+        reason: 'refused',
+        lastError: 'HTTP 422',
+        recorded: false,
+        waitedMs: 5_000,
+      }
+    );
+    expect(obsLog.warn).not.toHaveBeenCalledWith(
+      'fee step: a notice was being edited past the wait; it is taken up again the next morning',
+      { feeNoticeId: announce?.id, changeId: ada.changeId, waitedMs: 5_000 }
+    );
+  });
+
+  it('when the joiners step fails before its changes, each rise that starts before the next run still gets the urgent error, after the part’s own; when that read fails too, the part’s next error carries the instruction (commerce, final confirm)', async () => {
+    const URGENT =
+      'fee step: joiners could not be added for a fee rise that starts before the next run; tell anyone it now affects by hand. See Admin › Queue › Fee notices';
+    const READ_FAILED =
+      'fee step part failed, and the rises that start before the next run could not be read: for each of them, tell anyone it now affects by hand. See Admin › Queue › Fee notices';
+    const now = new Date();
+    // A rise dated to start before the next morning's run, and one dated
+    // the usual 30 days out, each with a joiner.
+    const soon = await toldThenJoined(
+      (await person('Uma Soon')).id,
+      (await person('Jo Soon')).id
+    );
+    const startsOn = new Date(now.getTime() + 12 * HOUR);
+    await db
+      .update(feeChanges)
+      .set({ effectiveFrom: startsOn })
+      .where(eq(feeChanges.id, soon.changeId));
+    const later = await toldThenJoined(
+      (await person('Uma Later')).id,
+      (await person('Jo Later')).id
+    );
+    // Each morning a new rise is listed. Once its list has read who it
+    // affects, the step's next `failing` selects fail: the joiners step's
+    // own read, and on the second morning the read after it too.
+    const fresh: string[] = [];
+    for (const name of ['Cal One', 'Cal Two']) {
+      fresh.push(await rise(await organisation((await person(name)).id)));
+    }
+    let failing = 0;
+    let armNext = 0;
+    const client = new Proxy(db, {
+      get(target, key) {
+        if (key === 'select' && failing > 0) {
+          failing -= 1;
+          return () => {
+            throw new Error('the select failed');
+          };
+        }
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.mocked(affectedPayees).mockImplementation(async (reader, ...rest) => {
+      const read = await realAffectedPayees(reader, ...rest);
+      if (armNext > 0 && fresh.includes(rest[0].id)) {
+        failing = armNext;
+        armNext = 0;
+      }
+      return read;
+    });
+    const morning = async (listed: string, selectsFailing: number) => {
+      const before = obsLog.error.mock.calls.length;
+      armNext = selectsFailing;
+      await within(
+        runFeeNoticesSweep({
+          db: client,
+          obs,
+          environment: 'development',
+          workerSecret: 'unused',
+          notificationsUrl: 'http://unused.test',
+          now,
+          mailer: mailerAnswering(),
+          templateExists: async () => true,
+          onlyChanges: [soon.changeId, later.changeId, listed],
+        }),
+        'the morning whose joiners step fails'
+      );
+      return obsLog.error.mock.calls.slice(before);
+    };
+    const at = (
+      calls: Array<unknown[]>,
+      message: string,
+      key: 'part' | 'changeId',
+      value: string
+    ) =>
+      calls.findIndex(
+        ([m, c]) =>
+          m === message && (c as Record<string, unknown>)[key] === value
+      );
+
+    // The read of the rises that start soon works: the urgent error for
+    // the one that does, after the part's own, unchanged.
+    const first = await morning(fresh[0] as string, 1);
+    const partFailed = at(first, 'fee step part failed', 'part', 'joiners');
+    expect(first[partFailed]?.[1]).toEqual({
+      errorId: expect.any(String),
+      part: 'joiners',
+      error: expect.stringContaining('the select failed'),
+    });
+    const urgent = at(first, URGENT, 'changeId', soon.changeId);
+    expect(urgent).toBeGreaterThan(partFailed);
+    expect(first[urgent]?.[1]).toEqual({
+      errorId: expect.any(String),
+      changeId: soon.changeId,
+      effectiveFrom: startsOn.toISOString(),
+      error: expect.stringContaining('the select failed'),
+    });
+    expect(at(first, URGENT, 'changeId', later.changeId)).toBe(-1);
+    expect(at(first, READ_FAILED, 'part', 'joiners')).toBe(-1);
+
+    // That read fails too: the part's next error carries the instruction.
+    const second = await morning(fresh[1] as string, 2);
+    const partFailedAgain = at(
+      second,
+      'fee step part failed',
+      'part',
+      'joiners'
+    );
+    const readFailed = at(second, READ_FAILED, 'part', 'joiners');
+    expect(readFailed).toBeGreaterThan(partFailedAgain);
+    expect(partFailedAgain).toBeGreaterThanOrEqual(0);
+    expect(second[readFailed]?.[1]).toEqual({
+      errorId: expect.any(String),
+      part: 'joiners',
+      error: expect.stringContaining('the select failed'),
+      readError: expect.stringContaining('the select failed'),
+    });
+    expect(at(second, URGENT, 'changeId', soon.changeId)).toBe(-1);
+  });
 });
