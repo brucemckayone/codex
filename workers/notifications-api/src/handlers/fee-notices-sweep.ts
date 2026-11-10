@@ -765,8 +765,9 @@ function joinersUntold(
  * part's own error, a best-effort read names each such rise with the urgent
  * error, as `joinersFailed` does for one change. When that read fails too,
  * one more error for the part carries the instruction, so an alert on
- * TELL_JOINERS_BY_HAND still fires. Never throws: it runs in the part's
- * catch (review final, commerce confirm nit).
+ * TELL_JOINERS_BY_HAND still fires. It tries never to throw; the parts loop
+ * guards it anyway, so one that did would cost only its own alerts, never
+ * the parts after it (review final, commerce confirm nit; silent confirm).
  */
 async function joinersStepFailed(
   ctx: SweepContext,
@@ -2315,7 +2316,10 @@ export async function runFeeNoticesSweep(
     // Null until the joiners step finishes: no rise is dated without it.
     let joinersSkipped: Set<string> | null = null;
     // Each part is isolated: one failing never stops the others. A part may
-    // name what follows its own error when it fails (never throwing).
+    // name what follows its own error when it fails. The loop guards that
+    // follow-up as it guards the part: one that throws, at once or later,
+    // is logged and counted, and the parts after it still run. A follow-up
+    // should still try not to throw (review final silent confirm).
     const parts: Array<
       [string, () => Promise<void>, ((error: unknown) => Promise<void>)?]
     > = [
@@ -2350,7 +2354,16 @@ export async function runFeeNoticesSweep(
           part,
           error: messageForLog(error),
         });
-        await afterFailure?.(error);
+        try {
+          await afterFailure?.(error);
+        } catch (hookError) {
+          result.errors += 1;
+          deps.obs.error('fee step part failure follow-up failed', {
+            errorId: crypto.randomUUID(),
+            part,
+            error: messageForLog(hookError),
+          });
+        }
       }
     }
     deps.obs.info('fee step completed', { ...result });

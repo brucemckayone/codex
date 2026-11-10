@@ -3625,4 +3625,77 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     });
     expect(at(second, URGENT, 'changeId', soon.changeId)).toBe(-1);
   });
+
+  it('a part’s failure follow-up that throws is logged and counted, and every part after it still runs, to the summary (silent, final confirm)', async () => {
+    const URGENT =
+      'fee step: joiners could not be added for a fee rise that starts before the next run';
+    const now = new Date();
+    // A rise starting before the next run, so the joiners part's follow-up
+    // has an urgent error to raise.
+    const soon = await toldThenJoined(
+      (await person('Uma Soon')).id,
+      (await person('Jo Soon')).id
+    );
+    await db
+      .update(feeChanges)
+      .set({ effectiveFrom: new Date(now.getTime() + 12 * HOUR) })
+      .where(eq(feeChanges.id, soon.changeId));
+    // A new rise, listed this morning: once its list has read who it
+    // affects, the step's next select (the joiners step's own) fails.
+    const cal = await person('Cal Sent');
+    const listed = await rise(await organisation(cal.id));
+    const faults = faultyClient();
+    let armed = false;
+    vi.mocked(affectedPayees).mockImplementation(async (reader, ...rest) => {
+      const read = await realAffectedPayees(reader, ...rest);
+      if (!armed && rest[0].id === listed) {
+        armed = true;
+        faults.arm('select');
+      }
+      return read;
+    });
+    // The follow-up throws: raising its urgent error fails (the logger is
+    // the seam; nothing in the step changes).
+    obsLog.error.mockImplementation((message: unknown) => {
+      if (String(message).startsWith(URGENT)) {
+        throw new Error('the alert could not be raised');
+      }
+    });
+    const before = obsLog.error.mock.calls.length;
+    const mailer = mailerAnswering();
+    let result: Awaited<ReturnType<typeof runFeeNoticesSweep>> | undefined;
+    try {
+      result = await runFeeNoticesSweep({
+        db: faults.client,
+        obs,
+        environment: 'development',
+        workerSecret: 'unused',
+        notificationsUrl: 'http://unused.test',
+        now,
+        mailer,
+        templateExists: async () => true,
+        onlyChanges: [soon.changeId, listed],
+      });
+    } finally {
+      obsLog.error.mockImplementation(() => undefined);
+    }
+    const errors = obsLog.error.mock.calls.slice(before);
+
+    expect(errors).toContainEqual([
+      'fee step part failure follow-up failed',
+      {
+        errorId: expect.any(String),
+        part: 'joiners',
+        error: expect.stringContaining('the alert could not be raised'),
+      },
+    ]);
+    expect(
+      errors.filter(([message]) => message === 'fee step failed at top level')
+    ).toEqual([]);
+    // The parts after it ran: Cal's email went, and the summary was logged,
+    // counting the part's failure and its follow-up's.
+    expect(mailFor(mailer, cal.id)).toHaveLength(1);
+    expect(result).toMatchObject({ listsMade: 1, sent: 1, errors: 2 });
+    expect(obsLog.info).toHaveBeenCalledWith('fee step completed', result);
+  });
 });
