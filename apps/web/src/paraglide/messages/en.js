@@ -27179,6 +27179,14 @@ export const support_elsewhere_submit = () => `Mark as refunded`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_elsewhere_late_win_warning = () => `Make any Stripe refund first: once this is marked, the charge can't be refunded through Stripe.`
+
+
+/**
  * @param {{ buyer: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -28311,7 +28319,15 @@ export const support_queue_fees_marked_lead = (params) => `${params.name} is mar
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_queue_fees_marked_dated = (params) => `Everyone this rise affects has now been told, so it starts on ${params.date}.`
+export const support_queue_fees_marked_dated = (params) => `This rise already has its start date: ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_marked_dated_next_run = () => `Nobody on the list is waiting now, so the next 08:00 run sets the rise's start date.`
 
 
 /**
