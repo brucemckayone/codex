@@ -15,6 +15,7 @@ import {
   CONTENT_THUMBNAIL_MAX_BYTES,
   CONTENT_THUMBNAIL_MAX_MB,
   CONTENT_THUMBNAIL_MIME_TYPES,
+  type ContentQueryInput,
   checkContentSlugSchema,
   contentDraftSchema,
   contentQuerySchema,
@@ -74,17 +75,42 @@ export const listContent = query(
     // A 4xx keeps its status, so the list can tell a refusal from an outage
     // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit
     // logs no forwarded 4xx, so it is logged here, for every page that reads
-    // this (the dashboard's counts log nothing of their own).
+    // this (the dashboard's counts log nothing of their own), with the args
+    // that tell its readers apart.
     return forwardClientErrors(() =>
       logRefusedRead(
-        'content.list_refused',
-        { organizationId: params?.organizationId ?? null, page: params?.page },
+        {
+          refused: 'content.list_refused',
+          unavailable: 'content.list_unavailable',
+        },
+        listContentLog(params),
         () =>
           api.content.list(searchParams.toString() ? searchParams : undefined)
       )
     );
   }
 );
+
+/**
+ * What a refused list read logs of its args: each filter by name, so the
+ * dashboard's count, the New menu's drafts and the list read apart. Never the
+ * text a creator typed: a search or a category slug is only "was there one".
+ * Named one by one, so a new free-text arg is not logged by default.
+ */
+function listContentLog(params: ContentQueryInput | undefined) {
+  return {
+    organizationId: params?.organizationId ?? null,
+    page: params?.page,
+    limit: params?.limit,
+    statusFilter: params?.status ?? 'all',
+    contentType: params?.contentType ?? 'all',
+    accessType: params?.accessType ?? 'any',
+    sortBy: params?.sortBy,
+    sortOrder: params?.sortOrder,
+    hasSearch: params?.search !== undefined,
+    hasCategory: params?.category !== undefined,
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Org Browse Query

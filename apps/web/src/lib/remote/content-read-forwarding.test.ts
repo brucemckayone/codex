@@ -239,29 +239,61 @@ describe('getContent', () => {
 describe.each([
   [
     'listContent',
-    () => remote.listContent({ page: 1, limit: 24 }),
+    (search?: string) =>
+      remote.listContent({ page: 1, limit: 24, ...(search && { search }) }),
     'content.list_refused',
+    'content.list_unavailable',
   ],
   [
     'listMedia',
-    () => media.listMedia({ page: 1, limit: 24 }),
+    (search?: string) =>
+      media.listMedia({ page: 1, limit: 24, ...(search && { search }) }),
     'media.list_refused',
+    'media.list_unavailable',
   ],
-] as const)('%s', (_name, list, event) => {
+] as const)('%s', (_name, list, refused, unavailable) => {
   it('a 403 keeps its status', async () => {
     workerAnswers(403, 'Forbidden');
     const err = await rejection(list());
     expect(err).toMatchObject({ status: 403, body: { message: 'Forbidden' } });
   });
 
-  // Kit skips handleError for an HttpError: without this line a refused
-  // read reached no log at all, on a page that logs none of its own.
-  it('a forwarded 4xx is logged on the server, as kit no longer logs it', async () => {
-    workerAnswers(403, 'Forbidden');
+  // Kit skips handleError for an HttpError: without these lines a refused
+  // read reached no log at all, on a page that logs none of its own. Behind
+  // a session the level is the route's own (Codex-a6ofh.3.1 review round 3):
+  // a sign-out is no contract bug, and an error alert must not page for one.
+  it.each([
+    [400, 'Invalid request data', 'error', 'refused'],
+    [401, 'Authentication required', 'warn', 'refused'],
+    [403, 'Forbidden', 'warn', 'refused'],
+    [429, 'Too many requests', 'warn', 'refused'],
+    [408, 'Request to content timed out', 'error', 'unavailable'],
+  ] as const)('a forwarded %i is logged on the server at %s, as %s', async (status, message, level, kind) => {
+    workerAnswers(status, message);
     await rejection(list());
-    expect(logger.error).toHaveBeenCalledWith(
+    const event = kind === 'refused' ? refused : unavailable;
+    const other = level === 'error' ? logger.warn : logger.error;
+    expect(logger[level]).toHaveBeenCalledWith(
       event,
-      expect.objectContaining({ status: 403, page: 1 })
+      expect.objectContaining({
+        status,
+        page: 1,
+        limit: 24,
+        statusFilter: 'all',
+      })
+    );
+    expect(other).not.toHaveBeenCalledWith(event, expect.anything());
+  });
+
+  it('says a search was on, never what was searched for', async () => {
+    workerAnswers(403, 'Forbidden');
+    await rejection(list('private notes'));
+    expect(logger.warn).toHaveBeenCalledWith(
+      refused,
+      expect.objectContaining({ hasSearch: true })
+    );
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain(
+      'private notes'
     );
   });
 
@@ -270,8 +302,10 @@ describe.each([
     const err = await rejection(list());
     expect(err).not.toHaveProperty('body');
     // handleError logs it; a line here would log it twice.
-    expect(logger.error).not.toHaveBeenCalledWith(event, expect.anything());
-    expect(logger.warn).not.toHaveBeenCalledWith(event, expect.anything());
+    for (const event of [refused, unavailable]) {
+      expect(logger.error).not.toHaveBeenCalledWith(event, expect.anything());
+      expect(logger.warn).not.toHaveBeenCalledWith(event, expect.anything());
+    }
   });
 });
 

@@ -12,6 +12,7 @@
 
 import {
   deleteMediaInputSchema,
+  type MediaQueryInput,
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/validation';
@@ -45,13 +46,34 @@ export const listMedia = query(mediaQuerySchema, async (params) => {
   }
   // A 4xx keeps its status, so the library can say a refusal is one
   // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit logs
-  // no forwarded 4xx, so it is logged here, for the library and the pickers.
+  // no forwarded 4xx, so it is logged here, for the library, the pickers and
+  // the dashboard, with the args that tell them apart.
   return forwardClientErrors(() =>
-    logRefusedRead('media.list_refused', { page: params.page }, () =>
-      api.media.list(searchParams)
+    logRefusedRead(
+      { refused: 'media.list_refused', unavailable: 'media.list_unavailable' },
+      listMediaLog(params),
+      () => api.media.list(searchParams)
     )
   );
 });
+
+/**
+ * What a refused media read logs of its args: each filter by name, never the
+ * search text (only whether there was one). Named one by one, so a new
+ * free-text arg is not logged by default.
+ */
+function listMediaLog(params: MediaQueryInput) {
+  return {
+    page: params.page,
+    limit: params.limit,
+    statusFilter: params.status ?? 'all',
+    mediaType: params.mediaType ?? 'all',
+    usage: params.usage,
+    sortBy: params.sortBy,
+    sortOrder: params.sortOrder,
+    hasSearch: params.search !== undefined,
+  };
+}
 
 /**
  * The whole library in four numbers (Codex-a6ofh.1.6): `{ total, totalBytes,
