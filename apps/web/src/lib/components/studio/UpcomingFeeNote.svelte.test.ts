@@ -390,4 +390,18 @@ describe('Try again, as kit runs it', () => {
     expect(note()).not.toBeNull();
     expect(document.activeElement).toBe(outside);
   });
+
+  test('focus moved on during it stays put when nothing is coming, and the hidden line says so', async () => {
+    renderFailed();
+    const outside = elsewhere();
+    await pressTryAgain();
+
+    outside.focus();
+    kit.land([]);
+    await settle();
+
+    expect(note()).toBeNull();
+    expect(noneLine()?.textContent?.trim()).toBe(m.fee_note_check_none());
+    expect(document.activeElement).toBe(outside);
+  });
 });

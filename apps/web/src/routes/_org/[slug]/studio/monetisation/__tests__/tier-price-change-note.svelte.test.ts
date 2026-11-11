@@ -521,6 +521,19 @@ describe('Try again on the failed note, as kit runs it (P10)', () => {
     expect(document.activeElement).toBe(createTier());
   });
 
+  test('focus moved on during it stays put when nothing is going out', async () => {
+    mountFailed();
+    await pressTryAgain();
+
+    createTier().focus();
+    kit.land([]);
+    await settle();
+
+    expect(failedNote()).toBeNull();
+    expect(notesIn(document)).toHaveLength(0);
+    expect(document.activeElement).toBe(createTier());
+  });
+
   test('after a failed Check again, Try again re-reads the same query in place, and Check again meanwhile reads nothing', async () => {
     kit = kitPriceChanges();
     mountPage();

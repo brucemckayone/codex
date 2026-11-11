@@ -228,12 +228,19 @@ test('derived-refresh FIRES on a handler prop of a component given a failure pro
     failed: '<Note failed={thingFailed} onTryAgain={retry} />',
     named: '<Note priceFailed={thingFailed} onTryAgain={() => retry()} />',
     error: '<Note error={thingQuery.error} onretry={retry} />',
+    // Bare, as the real `<PriceChangeNote failed …>` is written.
+    bare: '<Note failed busy={retrying} onTryAgain={retry} />',
+    // Named as an {#if} test is: `hasError`, `isError`, `problem`.
+    'has-error': '<Note hasError={thingFailed} onTryAgain={retry} />',
   };
   const quiet = {
     // No failure prop: a Check again of a read that has loaded.
     'no-failure-prop':
       '<Note view={thingQuery.current} onCheckAgain={retry} />',
     'failed-false': '<Note failed={false} onTryAgain={retry} />',
+    // A DOM attribute, not the component's say: a field-validity hook, as
+    // on RefundForm's amount `<Input>` (its Enter presses Review).
+    'data-attribute': '<Note data-error={thingFailed} onkeydown={retry} />',
   };
   const sources = {};
   for (const [name, markup] of Object.entries({ ...fires, ...quiet })) {

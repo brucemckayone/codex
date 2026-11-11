@@ -1085,4 +1085,32 @@ describe('Try again on a failed preview, as kit runs it (R2-L2)', () => {
     expect(words()?.textContent).toBe(before?.textContent);
     expect(words()).not.toBe(before);
   });
+
+  test('focus moved on during it stays put when the amount is refused', async () => {
+    await failedAt750();
+    await pressTryAgain();
+
+    amountInput()?.focus();
+    kit.fail(httpError(409, 'Conflict'));
+    await settle();
+
+    expect(
+      document.querySelector('[data-testid="preview-refused"]')
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(amountInput());
+  });
+
+  test('focus moved on during it stays put when the session has ended', async () => {
+    await failedAt750();
+    await pressTryAgain();
+
+    amountInput()?.focus();
+    kit.fail(httpError(404, 'Not Found'));
+    await settle();
+
+    expect(
+      document.querySelector('[data-testid="session-ended"]')
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(amountInput());
+  });
 });

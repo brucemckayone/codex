@@ -17,7 +17,11 @@
  *   lands the data later; a shallow Back lands nothing.
  * - a rerun of ANOTHER load (the platform layout's `cache:versions`, on
  *   every tab return) hands the page new merged `data`, with this load's
- *   output kept as it was, the same objects (`otherLoadReruns`).
+ *   output kept as it was, the same objects (`otherLoadReruns`). Stricter
+ *   than kit while a Retry's invalidate is pending: kit clears its list of
+ *   invalidated dependencies only once a run lands (client.js:429,1735), so
+ *   the run a tab return starts reloads this load too. The double never
+ *   does, so a test of it is harder to pass, not easier.
  *
  * So the invalidate's promise is never the answer: judged when it resolves,
  * a Retry is judged late, or on the data it was meant to replace.

@@ -58,8 +58,10 @@
  * page keeps the query it refreshed.
  *
  * Not checked: a Retry written with `.then()` instead of `await`, a refresh
- * reached through another module, and a function that awaits something
- * unrelated before its refresh.
+ * reached through another module, a function that awaits something
+ * unrelated before its refresh, and a failure prop passed in a spread
+ * (`<Note {...noteProps} onTryAgain={retry} />`): only props written out are
+ * read.
  *
  * Scanned: apps/web/src, without paraglide/, tests (`*.test.*`, `__tests__/`,
  * `src/tests/`) and fixtures (`__fixtures__/`). LoadFailedAlert.svelte owns
@@ -504,19 +506,29 @@ function testPolarity(test) {
   }
 }
 
-/** A prop that says its component shows a failure: `failed`, `…Failed`, `error`. */
-const FAILURE_PROP = /^(?:failed|error)$|Failed$/;
 /** A callback prop or event handler: `onTryAgain`, `onclick`. */
 const HANDLER_PROP = /^on/;
+/**
+ * Passed through to the DOM, not the component's own say: `data-error` on
+ * an `<Input>` is a field-validity hook, not a failed read.
+ */
+const DOM_ATTRIBUTE = /^(?:data|aria)-/;
 
-/** `<Note failed …>`: a component told it shows a failure (not `={false}`). */
+/**
+ * `<Note failed …>`: a component told it shows a failure (not `={false}`).
+ * A failure prop is named as an `{#if}` test is (FAILURE_NAME: `failed`,
+ * `hasError`, `problem`), never a handler (`onError` is a callback) or a
+ * DOM attribute (`data-error`).
+ */
 function showsFailure(node) {
   if (node.type !== 'Component' && node.type !== 'SvelteComponent')
     return false;
   return node.attributes.some(
     (attr) =>
       attr.type === 'Attribute' &&
-      FAILURE_PROP.test(attr.name) &&
+      FAILURE_NAME.test(attr.name) &&
+      !HANDLER_PROP.test(attr.name) &&
+      !DOM_ATTRIBUTE.test(attr.name) &&
       !(
         attr.value?.type === 'ExpressionTag' &&
         attr.value.expression.type === 'Literal' &&

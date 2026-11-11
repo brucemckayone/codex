@@ -131,7 +131,7 @@ describe('a superseded Retry resolves null, and never hangs', () => {
     expect(core.retrying).toBe(false);
   });
 
-  test('unmounting mid-wait resolves it null, and tells the unmounted caller nothing more', async () => {
+  test('unmounting mid-wait resolves it null, and tells the caller once that retrying ended', async () => {
     const kit = kitQuery<string[]>();
     const { core, told } = makeCore(() => kit.get());
     kit.fail();
@@ -143,10 +143,16 @@ describe('a superseded Retry resolves null, and never hangs', () => {
     stop = null;
 
     expect(await within(pending)).toEqual({ value: null });
-    expect(told).toEqual([true]);
+    // A page that binds `retrying` drops its failed layout.
+    expect(told).toEqual([true, false]);
+
+    // The answer that comes after is nobody's: nothing more is told.
+    kit.land(['late']);
+    await settle();
+    expect(told).toEqual([true, false]);
   });
 
-  test('unmounting while a load read waits resolves it null too', async () => {
+  test('unmounting while a load read waits resolves it null too, and ends retrying', async () => {
     const load = loadReadDouble<string[]>();
     const { core, told } = makeCore(() => load.get());
 
@@ -156,7 +162,24 @@ describe('a superseded Retry resolves null, and never hangs', () => {
     stop = null;
 
     expect(await within(pending)).toEqual({ value: null });
-    expect(told).toEqual([true]);
+    expect(told).toEqual([true, false]);
+  });
+
+  test('unmounting with no Retry in flight tells the caller nothing', async () => {
+    const kit = kitQuery<string[]>();
+    const { core, told } = makeCore(() => kit.get());
+    kit.fail();
+    flushSync();
+
+    const pending = core.retry();
+    await settle();
+    kit.land(['x']);
+    await within(pending);
+    expect(told).toEqual([true, false]);
+
+    stop?.();
+    stop = null;
+    expect(told).toEqual([true, false]);
   });
 });
 

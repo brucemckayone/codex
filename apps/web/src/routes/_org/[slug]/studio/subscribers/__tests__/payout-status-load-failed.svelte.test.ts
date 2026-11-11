@@ -43,12 +43,17 @@ import type {
 import {
   ACTIVE_ACCOUNT,
   kitOrgPayout,
+  land,
   NO_ACCOUNT,
   reset,
+  tiersSlot,
 } from '$lib/components/studio/__fixtures__/subscription-remote.mock.svelte';
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
 import { logger } from '$lib/observability';
-import type { OrganizationPayoutStatusResponse } from '$lib/types';
+import type {
+  OrganizationPayoutStatusResponse,
+  SubscriptionTier,
+} from '$lib/types';
 import SubscribersPage from '../+page.svelte';
 
 const ORG = {
@@ -252,6 +257,18 @@ describe('Retry, once the new query answers', () => {
 
   test('a read that loads clears the alert, gives the real verdict, and says so', async () => {
     mountFailed();
+    // A tier on sale, so an active account means the tiers are live.
+    land(tiersSlot(), [
+      {
+        id: 'tier-0',
+        name: 'Founding',
+        description: null,
+        priceMonthly: 999,
+        priceAnnual: 9990,
+        isRecommended: false,
+      } as unknown as SubscriptionTier,
+    ]);
+    flushSync();
     const { refreshed } = await pressRetry();
 
     payout.land(ACTIVE_ACCOUNT);
@@ -263,6 +280,9 @@ describe('Retry, once the new query answers', () => {
     expect(text()).not.toContain(
       m.subscribers_empty_status_unknown_description()
     );
+    // The real verdict, shown: the empty list says the tiers are live.
+    expect(text()).toContain(m.subscribers_empty_title());
+    expect(text()).toContain(m.subscribers_empty_description());
     // The alert unmounted with the focused Retry inside it.
     expect(document.activeElement).not.toBe(document.body);
     expect(document.activeElement).toBe(loadedStatus());

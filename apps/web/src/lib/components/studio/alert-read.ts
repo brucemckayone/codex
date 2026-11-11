@@ -14,9 +14,10 @@
  *   );
  *
  * The load must catch its own failure (a failed reload still lands as new
- * `data`) and `depends()` on the key `refresh` invalidates, or a Retry waits.
- * `key` is an object that load returns, fresh on each run of it (its catch
- * branch included): kit keeps it when only another load reruns.
+ * `data`) and call `depends(dep)` with the dependency `refresh` invalidates
+ * (`invalidate(dep)`), or a Retry waits. `key` is an object that load
+ * returns, fresh on each run of it (its catch branch included): kit keeps it
+ * when only another load reruns.
  *
  * Only `loadRead` makes one, and the alert tells it from a remote query by
  * its tag. Pass a remote query to the alert as it is: a plain object wrapping
@@ -35,9 +36,12 @@ export interface LoadRead<T> extends QueryResult<T> {
    * Kit merges every load's output into `data`, so a rerun of ANOTHER load (a
    * layout's `cache:versions` on each tab return) makes a new read with this
    * load's output unchanged; the key tells a Retry that is not its answer.
-   * Without one, any new data is taken as the answer.
+   * Without one, any new data is taken as the answer. An object, compared by
+   * identity: a primitive (`data.loadFailed`) would make every failed reload
+   * "the same read", so a repeat failure would never be judged; Retry would
+   * just be offered again, with no "We still couldn't…".
    */
-  readonly key?: unknown;
+  readonly key?: object;
   readonly [LOAD_READ]: true;
 }
 
@@ -51,10 +55,11 @@ export type AlertRead = QueryRead | LoadRead<unknown>;
 /**
  * Makes a load read. Build it from the page's `data` alone, in a `$derived`:
  * the alert takes each new read (of a new `key`, given one) as a new answer,
- * so never mark the reload in it. Its `refresh` must return the one `invalidate(key)` that reruns the
- * load it is built from (`depends(key)` there): a second invalidate in the
- * same tick resolves before anything reloads. If it reruns nothing, Retry is
- * offered again while the alert goes on waiting for the load to run again.
+ * so never mark the reload in it. Its `refresh` must return the one
+ * `invalidate(dep)` that reruns the load it is built from (`depends(dep)`
+ * there): a second invalidate in the same tick resolves before anything
+ * reloads. If it reruns nothing, Retry is offered again while the alert goes
+ * on waiting for the load to run again.
  */
 export function loadRead<T>(
   // Never a remote query: one goes to the alert as it is.

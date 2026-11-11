@@ -24,7 +24,9 @@
  *   a remote read this Retry did not start (the refund preview's amount
  *   changed, or the page let the query go); or the component unmounts. That
  *   Retry is superseded: it resolves `null`, and leaves focus, `settled` and
- *   `retrying` to whatever runs now.
+ *   `retrying` to whatever runs now. On unmount nothing runs on, so the core
+ *   itself tells the caller `retrying` is false: a page that binds it would
+ *   otherwise keep its failed layout up over a read that may be fine.
  * - `retrying` / `busy`. True from the press until the answer is in, so a
  *   failure UI that renders while `failed || retrying` stays mounted, with
  *   its focused button, while the new read loads. A press while `busy` does
@@ -68,7 +70,12 @@ export interface RetryFocus<R> {
 }
 
 export interface RetryResult<R> {
-  /** The read the caller holds now, settled. `null`: the caller let it go. */
+  /**
+   * The read the caller holds once the answer is in. `null` when the answer
+   * itself made the caller let the read go (a thread a 403 refuses passes
+   * `null`). Letting it go BEFORE the answer is not this: that Retry resolves
+   * `null` as a whole (see `LoadRetry.retry`).
+   */
   read: R | null;
   /** Focus was still in `from`, or lost, once the outcome rendered. */
   focusFree: boolean;
@@ -81,8 +88,14 @@ export interface LoadRetry<R extends AlertRead> {
   readonly busy: boolean;
   /**
    * Refreshes the read and waits for the answer the caller will hold. Never
-   * rejects. Resolves `null` when nothing ran (a Retry is `busy`, or there is
-   * no read) or when it was superseded before an answer (see the header).
+   * rejects. Resolves `null`, with no `settled` call and no focus move, when:
+   * - at the press, a Retry is `busy`, or the caller holds no read;
+   * - before a remote read answers, the caller holds another read, or none
+   *   (for a load read, a new read IS the answer);
+   * - a later Retry takes a load read's wait over (pressed once its refresh
+   *   settled unchanged);
+   * - the component unmounts before the answer is judged.
+   * Otherwise it resolves `{ read, focusFree }`.
    */
   retry(focus?: RetryFocus<R>): Promise<RetryResult<R> | null>;
 }
@@ -112,9 +125,16 @@ export function createLoadRetry<R extends AlertRead>(
   const busy = $derived(retrying && !stalled);
   /** The Retry that owns the wait. A later one, or unmounting, moves it on. */
   let run = 0;
+  /**
+   * The caller was told `retrying` and not yet told it ended. Plain, not
+   * `$state`: the unmount teardown reads it, and a teardown can read state as
+   * it was before its last change.
+   */
+  let toldRetrying = false;
 
   function setRetrying(value: boolean) {
     retrying = value;
+    toldRetrying = value;
     options.onretrying?.(value);
   }
 
@@ -135,10 +155,16 @@ export function createLoadRetry<R extends AlertRead>(
     });
   });
 
-  // Unmounted: a Retry still waiting is superseded, and touches nothing.
+  // Unmounted: a Retry still waiting is superseded, and touches nothing
+  // more. Nothing runs on to end `retrying`, so it ends here: a page that
+  // binds it keeps its failed layout up otherwise.
   $effect(() => () => {
     run += 1;
     release(false);
+    if (toldRetrying) {
+      toldRetrying = false;
+      options.onretrying?.(false);
+    }
   });
 
   /**

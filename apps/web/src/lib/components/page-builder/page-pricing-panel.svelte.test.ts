@@ -464,4 +464,97 @@ describe('Try again on the failed note, as kit runs it (P10)', () => {
     ).not.toBeNull();
     expect(document.activeElement).toBe(monthly());
   });
+
+  test('focus moved on during it stays put when nothing is going out', async () => {
+    await pressTryAgain();
+    // Not the monthly price: with nothing going out, that is where focus
+    // would go, so a control outside the panel shows it stayed.
+    const outside = document.createElement('button');
+    outside.textContent = 'Elsewhere';
+    document.body.appendChild(outside);
+
+    outside.focus();
+    kit.land([]);
+    await settle();
+
+    expect(failedNote()).toBeNull();
+    expect(document.activeElement).toBe(outside);
+  });
+});
+
+/**
+ * The one-read rule while Try again runs (the `planRetry.busy` half of
+ * `planBusy`; the P6 test covers the `planReading` half). Reachable: a Check
+ * again that failed leaves the note beside the failed line, and Try again
+ * then re-reads that same query in place, as kit does for a read that loaded.
+ */
+describe('Check again while Try again runs (P10)', () => {
+  let kit: KitQuery<unknown[]>;
+  const running = () =>
+    change({
+      counts: { emailed: 10, scheduled: 10, due: 20 },
+      lastRunAt: '2026-10-30T15:00:00.000Z',
+      nextRunAt: '2026-10-30T16:00:00.000Z',
+      estimatedDoneAt: '2026-10-30T17:00:00.000Z',
+    });
+  const settle = async () => {
+    for (let turn = 0; turn < 3; turn++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    flushSync();
+  };
+  const way = () => subscriptionWay();
+  const failedNote = () =>
+    way()?.querySelector<HTMLElement>(
+      '[data-testid="price-change-note-failed"]'
+    ) ?? null;
+  const tryAgain = () =>
+    failedNote()?.querySelector('button') as HTMLButtonElement | null;
+  const checkAgain = () =>
+    [...(way()?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+      (b) => b.textContent?.trim() === m.price_note_check_again()
+    ) ?? null;
+
+  test('after a failed Check again, Try again re-reads the same query in place, and Check again meanwhile reads nothing', async () => {
+    if (component) unmount(component);
+    kit = kitPriceChanges();
+    vi.setSystemTime(new Date('2026-10-30T15:04:00.000Z'));
+    component = mount(PagePricingPanel, { target: document.body });
+    flushSync();
+    kit.land([running()]);
+    flushSync();
+    const query = kit.held();
+
+    // Check again fails: the note stays, the failed line beside it.
+    checkAgain()?.click();
+    kit.fail();
+    await settle();
+    expect(failedNote()).not.toBeNull();
+    expect(
+      way()?.querySelector('[data-testid="price-change-note"]')
+    ).not.toBeNull();
+
+    tryAgain()?.focus();
+    tryAgain()?.click();
+    await settle();
+    // A read that had loaded is re-read in place: no new query.
+    expect(kit.held()).toBe(query);
+    expect(kit.refreshes(query)).toBe(2);
+    expect(tryAgain()?.getAttribute('aria-busy')).toBe('true');
+
+    // The one-read rule: Check again on the note reads nothing more.
+    expect(checkAgain()?.getAttribute('aria-busy')).toBe('true');
+    checkAgain()?.click();
+    await settle();
+    expect(kit.refreshes(query)).toBe(2);
+
+    kit.land([running()]);
+    await settle();
+    expect(failedNote()).toBeNull();
+    expect(document.activeElement).toBe(
+      way()?.querySelector(
+        '[data-testid="price-change-note"] [data-testid="price-note-status"]'
+      )
+    );
+  });
 });
