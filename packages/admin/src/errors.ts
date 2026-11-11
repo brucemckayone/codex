@@ -123,7 +123,10 @@ export class NothingLeftToRefundError extends BusinessLogicError {
   }
 }
 
-/** More than the charge less its standing refunds (400). */
+/**
+ * More than the charge less its standing refunds and those settled as
+ * refunded elsewhere (400).
+ */
 export class RefundAmountTooLargeError extends ValidationError {
   constructor(maxCents: number) {
     super('The amount is more than is left to refund.', {

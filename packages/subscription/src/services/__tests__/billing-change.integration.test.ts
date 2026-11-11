@@ -65,7 +65,11 @@ import {
   TierChangePreviewExpiredError,
 } from '../../errors';
 import { applyDuePendingPriceChange } from '../pending-price-change';
-import { SubscriptionService } from '../subscription-service';
+import {
+  SubscriptionService,
+  type TierChangePreview,
+} from '../subscription-service';
+import { tierChangeQuote } from '../tier-move';
 
 const DAY = 86_400;
 
@@ -1682,6 +1686,78 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
   // ─── C(b): a dearer plan now, monthly later (Q1) ───────────────────────
 
   describe('C(b): Pro yearly to Premium monthly', () => {
+    /** Confirm with what the dialog had, as the pricing page sends it. */
+    function confirmAsShown(
+      userId: string,
+      orgId: string,
+      tierId: string,
+      preview: TierChangePreview
+    ) {
+      return service.changeTier(
+        userId,
+        orgId,
+        tierId,
+        'month',
+        preview.prorationDate,
+        preview.quote,
+        preview.newRecurringAmountCents
+      );
+    }
+
+    /**
+     * Stripe's preview worked out from the Price asked for and the
+     * `proration_date`, as Stripe does: the unused share of the year at the
+     * Price on the item, against the same share at the new Price.
+     */
+    function pricedPreviews() {
+      fake.createPreview.mockImplementation(
+        async (params: {
+          subscription: string;
+          subscription_details: {
+            items: Array<{ price: string }>;
+            proration_date: number;
+          };
+        }) => {
+          const [item] = liveOf(params.subscription).items.data;
+          const target = prices.get(
+            params.subscription_details.items[0]?.price ?? ''
+          );
+          if (!item || !target) throw new Error('no Price to preview');
+          const share =
+            (item.current_period_end -
+              params.subscription_details.proration_date) /
+            (item.current_period_end - item.current_period_start);
+          const unused = -Math.round(item.price.unit_amount * share);
+          const remaining = Math.round(target.amount * share);
+          const line = (description: string, amount: number) => ({
+            description,
+            amount,
+            parent: { subscription_item_details: { proration: true } },
+          });
+          return {
+            amount_due: unused + remaining,
+            lines: {
+              data: [
+                line('Unused time', unused),
+                line('Remaining time', remaining),
+              ],
+            },
+          };
+        }
+      );
+    }
+
+    /** The creator saves `tier`'s yearly price at `amount`: a new Price. */
+    async function saveYearly(tier: Tier, amount: number): Promise<string> {
+      const repriced = `${tier.stripePriceAnnualId}_repriced_${amount}`;
+      prices.set(repriced, { amount, interval: 'year' });
+      await db
+        .update(subscriptionTiers)
+        .set({ priceAnnual: amount, stripePriceAnnualId: repriced })
+        .where(eq(subscriptionTiers.id, tier.id));
+      return repriced;
+    }
+
     it('the preview is the yearly upgrade’s, with the monthly bill from the renewal', async () => {
       const { org, pro, premium } = await hollowOak('cb-preview');
       const { userId, periodEnd } = await yearlyMember(org.id, pro);
@@ -1711,22 +1787,33 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
         newRecurringInterval: 'month',
         currentPeriodEnd: new Date(periodEnd * 1000),
         billingChange: { interval: 'month', amountCents: 2000 },
+        // It charges now, so its figures go back to be re-checked
+        // (Codex-2hxff.103).
+        quote: tierChangeQuote({
+          amountDueCents: 2915,
+          lineAmountsCents: [-4438, 7353],
+          nextBillAt: new Date(periodEnd * 1000),
+        }),
       });
-      expect(preview).not.toHaveProperty('quote');
     });
 
     it('confirm: Premium yearly now, paid by card, with the record; then the schedule to Premium monthly', async () => {
       const { org, pro, premium } = await hollowOak('cb-commit');
       const { userId, row, periodEnd } = await yearlyMember(org.id, pro);
-      const now = Math.floor(Date.now() / 1000);
+      const preview = await service.previewTierChange(
+        userId,
+        org.id,
+        premium.id,
+        'month'
+      );
 
-      await service.changeTier(userId, org.id, premium.id, 'month', now);
+      await confirmAsShown(userId, org.id, premium.id, preview);
 
       const [first] = vi.mocked(fake.stripe.subscriptions.update).mock.calls;
       expect(first?.[1]).toMatchObject({
         items: [{ price: premium.stripePriceAnnualId }],
         proration_behavior: 'always_invoice',
-        proration_date: now,
+        proration_date: preview.prorationDate,
         payment_behavior: 'error_if_incomplete',
         metadata: {
           codex_tier_id: premium.id,
@@ -1768,6 +1855,12 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
     it('a declined card: nothing is set, no schedule', async () => {
       const { org, pro, premium } = await hollowOak('cb-402');
       const { userId, row } = await yearlyMember(org.id, pro);
+      const preview = await service.previewTierChange(
+        userId,
+        org.id,
+        premium.id,
+        'month'
+      );
       vi.mocked(fake.stripe.subscriptions.update).mockRejectedValueOnce(
         Object.assign(new Error('Your card was declined.'), {
           type: 'StripeCardError',
@@ -1776,7 +1869,7 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
       );
 
       await expect(
-        service.changeTier(userId, org.id, premium.id, 'month')
+        confirmAsShown(userId, org.id, premium.id, preview)
       ).rejects.toThrow(SubscriptionPaymentRequiredError);
 
       expect(fake.subscriptionSchedules.create).not.toHaveBeenCalled();
@@ -1784,6 +1877,143 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
         'codex_move_tier_id'
       );
       expect((await rowOf(row.id)).tierId).toBe(pro.id);
+    });
+
+    // ─── The part-year charge is re-checked at confirm (Codex-2hxff.103) ──
+    // The monthly price the change waits for is unchanged in each of these,
+    // so only the re-check of the yearly charge can see the difference.
+
+    it('a yearly price saved between the preview and confirm is refused before Stripe; the fresh preview’s goes through', async () => {
+      const { org, pro, premium } = await hollowOak('cb-repriced');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      pricedPreviews();
+      const preview = await service.previewTierChange(
+        userId,
+        org.id,
+        premium.id,
+        'month'
+      );
+
+      // Premium yearly goes from £200 to £240 while the dialog is open.
+      const repriced = await saveYearly(premium, 24000);
+
+      const refused = await confirmAsShown(
+        userId,
+        org.id,
+        premium.id,
+        preview
+      ).catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(TierChangePreviewExpiredError);
+      expect(fake.writes).toEqual([]);
+      expect((await rowOf(row.id)).tierId).toBe(pro.id);
+
+      const fresh = await service.previewTierChange(
+        userId,
+        org.id,
+        premium.id,
+        'month'
+      );
+      expect(fresh.amountDueCents).toBeGreaterThan(preview.amountDueCents);
+      await confirmAsShown(userId, org.id, premium.id, fresh);
+      expect(liveOf(row.stripeSubscriptionId).items.data[0]?.price.id).toBe(
+        repriced
+      );
+    });
+
+    it('an unchanged price goes through: the confirm previews again at the preview’s date, not its own', async () => {
+      const { org, pro, premium } = await hollowOak('cb-unchanged');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      pricedPreviews();
+      const opened = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(opened);
+      try {
+        const preview = await service.previewTierChange(
+          userId,
+          org.id,
+          premium.id,
+          'month'
+        );
+        // The member reads the dialog for 30 seconds. The confirm asks
+        // Stripe about the preview's moment, the one the write is pinned to;
+        // asked about its own, a figure on a rounding edge could move and
+        // refuse a price that did not change.
+        clock.mockReturnValue(opened + 30_000);
+
+        await confirmAsShown(userId, org.id, premium.id, preview);
+
+        expect(fake.createPreview).toHaveBeenCalledTimes(2);
+        expect(fake.createPreview.mock.calls[1]?.[0]).toMatchObject({
+          subscription_details: {
+            items: [{ price: premium.stripePriceAnnualId }],
+            proration_date: preview.prorationDate,
+          },
+        });
+        const [write] = vi.mocked(fake.stripe.subscriptions.update).mock.calls;
+        expect(write?.[1]).toMatchObject({
+          proration_date: preview.prorationDate,
+        });
+        expect((await rowOf(row.id)).tierId).toBe(premium.id);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it('a cheaper pick that a yearly price saved since makes dearer is refused: the dialog showed nothing due today', async () => {
+      const { org, pro, basic } = await hollowOak('cb-flip-dearer');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      pricedPreviews();
+      // Basic monthly from Pro yearly: cheaper, so the whole change waits (B).
+      const preview = await service.previewTierChange(
+        userId,
+        org.id,
+        basic.id,
+        'month'
+      );
+      expect(preview).toMatchObject({
+        amountDueCents: 0,
+        takesEffect: 'period_end',
+      });
+      expect(preview).not.toHaveProperty('quote');
+
+      // Basic yearly saved at £150, above the £120 paid: now it is C(b),
+      // a part-year charge today.
+      await saveYearly(basic, 15000);
+
+      const refused = await confirmAsShown(
+        userId,
+        org.id,
+        basic.id,
+        preview
+      ).catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(TierChangePreviewExpiredError);
+      expect(fake.writes).toEqual([]);
+      expect((await rowOf(row.id)).pendingTierId).toBeNull();
+    });
+
+    it('a dearer pick that a yearly price saved since makes cheaper is refused too: the dialog showed a charge that would not be made', async () => {
+      const { org, pro, premium } = await hollowOak('cb-flip-cheaper');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      pricedPreviews();
+      const preview = await service.previewTierChange(
+        userId,
+        org.id,
+        premium.id,
+        'month'
+      );
+      expect(preview.takesEffect).toBe('now');
+
+      // Premium yearly saved at £100, below the £120 paid: now it waits (B).
+      await saveYearly(premium, 10000);
+
+      const refused = await confirmAsShown(
+        userId,
+        org.id,
+        premium.id,
+        preview
+      ).catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(TierChangePreviewExpiredError);
+      expect(fake.writes).toEqual([]);
+      expect((await rowOf(row.id)).pendingTierId).toBeNull();
     });
   });
 

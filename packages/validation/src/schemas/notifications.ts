@@ -126,8 +126,8 @@ export const previewTemplateSchema = z.object({
 export type PreviewTemplateInput = z.infer<typeof previewTemplateSchema>;
 
 export const testSendTemplateSchema = z.object({
-  // Email address to send test to
-  recipientEmail: z.string().email('Invalid email address'),
+  // Email address to send test to, without the spaces round a pasted one
+  recipientEmail: z.string().trim().email('Invalid email address'),
   // Optional test data (limited to 50 keys)
   data: z
     .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
@@ -285,7 +285,8 @@ export const purchaseAccessRestoredDataSchema = z.object({
  * nothing expires (Codex-bnxhw). `orgUrl` opens the organisation: its Studio
  * for an admin or creator, its home page for a member. `roleLabel` reads
  * after "as": "an admin", "a creator", "a member". `roleName` is the plain
- * role, which the stock row production has today reads as "as a {{roleName}}".
+ * role, for a customised copy that still reads it: migration 0117 moved the
+ * stock row's "as a {{roleName}}" to "as {{roleLabel}}".
  */
 export const orgMemberInvitationDataSchema = z.object({
   inviterName: z.string(),
@@ -293,13 +294,6 @@ export const orgMemberInvitationDataSchema = z.object({
   roleName: z.string(),
   roleLabel: z.string(),
   orgUrl: z.string().url(),
-  // Transitional (Codex-2hxff.83). Until migration 0117 rewrites it, one
-  // release after this code (Codex-2hxff.84), the stock row production has
-  // links its button to `acceptUrl` and says it "expires in {{expiryDays}}
-  // days". Optional, so the sender can later stop passing them without
-  // waiting for notifications-api, which deploys after organization-api.
-  acceptUrl: z.string().url().optional(),
-  expiryDays: z.string().optional(),
 });
 
 export const memberRoleChangedDataSchema = z.object({

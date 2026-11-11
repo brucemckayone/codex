@@ -41,10 +41,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isForeignStripeEnvironment } from '@codex/constants';
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
+// The platform's Stripe client, with its pinned API version, by relative path:
+// @codex/purchase depends on @codex/database, so a package dependency would be
+// circular.
+import { createStripeClient } from '../../purchase/src/stripe-client';
 import { assertKeyMatchesEnv, keyMode } from './backfill-payout-schedule';
-
-const STRIPE_API_VERSION = '2025-10-29.clover' as const;
 
 /** Each Stripe call gives up after 20 s. */
 const STRIPE_REQUEST = {
@@ -251,7 +253,7 @@ async function main(): Promise<void> {
   const key = process.env.STRIPE_SECRET_KEY;
   // Reads Stripe only, but the key still has to be this environment's.
   assertKeyMatchesEnv(key, { ...args, confirm: null });
-  const stripe = new Stripe(key as string, { apiVersion: STRIPE_API_VERSION });
+  const stripe = createStripeClient(key as string);
   const { dbHttp } = await import('../src');
 
   console.log(

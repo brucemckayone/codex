@@ -245,8 +245,21 @@ owner: "Alert support").
   - the alert is logged before the mark;
   - a failed mark is a warning;
   - it never throws out of the handler.
-- **Open gap:** cancelling a duplicate doesn't give back credit that paid
-  it. That's `Codex-2hxff.98`, outside C1.
+
+**A cancelled subscription's credit is paid back outside Stripe** (`Codex-2hxff.98`,
+owner: "Alert support"). Cancelling a duplicate, or an old subscription
+revived beside a newer one, refunds its card charge only. Putting the credit
+part back on the balance would re-open the leak above, so support gets one
+error per invoice after the card refund, "Customer credit paid a cancelled
+subscription's invoice …", naming the invoice, the subscription, the org, the
+user, `cause` (`duplicate` or `revived`), `creditNotReturnedCents` and
+`cardRefundedCents` (0 when the credit paid it all). Support pays the member
+that amount outside Stripe, by bank transfer for example, and the platform
+bears it (owner decision 2026-11-09); never as Stripe balance credit, which
+would re-open that leak ([runbook](operations.md#customer-credit-on-a-subscription-invoice)).
+The invoice is marked with its own key
+(`codex_credit_not_returned`), since the alert above marks it first; a replay
+stays silent (`alertCreditNotReturned`, `credit-paid-invoice.ts`).
 
 ### Cancelling, reactivating, resuming
 
@@ -328,6 +341,15 @@ happens (`takesEffect`: `now` or `period_end`).
     yearly billing**, the part-year difference charged as any upgrade, and
     monthly billing waits for the renewal (Q1). A tier with no yearly Price
     waits whole instead.
+  - That part-year charge is at the target's **yearly** Price, which the
+    price check at confirm (the monthly bill) never reads. So when C charges,
+    its preview also returns a `quote`, and change-tier previews again at the
+    same pinned `proration_date` (`Codex-2hxff.103`, owner: "Re-check, refuse
+    if changed"). Any difference is refused with
+    `TIER_CHANGE_PREVIEW_EXPIRED` before Stripe is written to. A quote where
+    none was shown, or none where one was, is a difference: a yearly price
+    saved since can turn a cheaper pick (B) into C, or C into B. It costs one
+    more Stripe preview on that confirm.
 - **Into yearly billing**, the same tier switches now with a charge.
   Another tier switches now when it is not cheaper. A cheaper one is two
   steps (T1), refused with `TIER_CHANGE_TWO_STEPS` (422) and
@@ -635,7 +657,9 @@ hand at Stripe, in one metadata edit. First, if `codex_hold_pending_price_id`
 is set, write it and `codex_hold_pending_price_from` back as
 `codex_pending_price_id` and `codex_pending_price_from`, as Keep does
 (`keepMetadata`, `tier-move.ts`): they hold a price change the wait parked,
-and removing them drops that change with no alert. Then remove the other
+and removing them drops that change with no alert. If it isn't set, write
+`codex_pending_price_id` and `codex_pending_price_from` empty instead, as Keep
+does when nothing was parked. Then remove the other
 `codex_move_*` and `codex_hold_*` keys. Keep also puts such a member back
 into that price change's hourly step (`rejoinPriceChange`), which a hand
 edit can't, so tell the owner. The item
@@ -774,12 +798,18 @@ and no new Neon wake: it rides the hourly one.
    retried row whose kept `held_reason` is `notice_unknown`) is looked for
    first in notifications' email log: a row for the template and recipient,
    carrying the row's `priceMoveId`, since a minute before the last try,
-   `success` or `pending` (F4). Found, it was told then. Then at Stripe:
+   that shows it sent (`emailLogShowsSent` in `@codex/database`, the rule
+   every morning reader shares). Found, it was told then. Then at Stripe:
    already on the new Price, or marked pending for it, counts as moved.
    Only then is it sent again. notifications-api writes the log row
-   `pending` before the provider call and `success` after it, so one left
-   `pending` may have been delivered; `failed` (every attempt failed) and
-   `skipped` (an opt-out) do not count.
+   `pending` before the provider call and `success` after it. `success`
+   counts. `pending` counts only while the send may still be in flight (made
+   within 15 minutes, the cron's wall, of the run's start): one an earlier
+   run left never got its outcome, so the notice goes again (owner,
+   2026-11-09; this replaces review C1's F4, "a `pending` row counts",
+   since a duplicate is harmless and a missing notice is not). `failed`
+   (every attempt failed), `skipped` (an opt-out) and a template test send
+   never count.
 6. **A change stops** when every notice of its first batch in a run was
    refused with a 4xx that will not go away by itself (not 408, 409, 425 or
    429: a missing template, a bad worker secret) and none of its notices was

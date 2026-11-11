@@ -88,11 +88,26 @@ batch C1's decisions F1–F9 and Q1–Q5 (2026-10-30):
   started one must not block the next), and every write first takes a
   transaction lock on its level (`pg_advisory_xact_lock`), under which a
   dated rise that hasn't started counts as pending too. Saving again while one
-  is pending: back to today
-  cancels it (everyone told is emailed that it's off); below today cancels it
-  and the cut applies at once; a **smaller** rise keeps its date and sends one
-  short email to everyone already told (Q2); a **bigger** one replaces it, says
-  so, and its 30 days start again (F2).
+  is pending: back to today cancels it (everyone its email told, or may have
+  told, is emailed that it's off); below today cancels it and the cut applies
+  at once; a **smaller** rise keeps its date and sends one short email to
+  everyone its announcement told, or may have told (Q2); a **bigger** one
+  replaces it, says so, and its 30 days start again (F2). Made smaller again,
+  even the same day, it tells again everyone its last smaller email told, or
+  may have told, so two smaller emails can come a day apart; anyone it surely
+  missed just gets the lower figure.
+- **Told, or may have been** (owner, 2026-11-09; one rule,
+  `feeNoticeMayHaveTold` in `@codex/payments`, for all three above): the
+  email was accepted, or support marked them told another way; or it may have
+  gone: it got no answer, a run tried it (cut off after sending, or still
+  sending), or it failed and was retried in the last 12 hours, the time a run
+  can hold a notice. An email never tried has told nobody. Erring this way
+  means some people get one email more, never one fewer.
+- A rise made smaller while the daily run is sending: the run reads the
+  figures again once it sees the edit (it looks after its claim and after
+  each send), so its later emails name the new figure. One already on its
+  way names the earlier one, and its person gets the smaller email the next
+  morning.
 - Someone who joins while a rise waits is told the same date, and never holds
   it (F8). Their failed email is still listed for support (Q4).
 - Each email names a date: the change's, or the earliest it can be, with a
@@ -142,7 +157,8 @@ organisation's values or an override, the removal did happen.
 Fee versions are cached in KV per level (`fee-versions:*`), for a day, or an
 hour while the level has a rise waiting: notifications-api dates the rise and
 has no cache binding, so readers see the date within the hour (it is at least
-30 days off). Every write and support's mark invalidates the level. A fee is
+30 days off). Every write invalidates the level; support's mark changes no fee
+read (it never dates the rise), so it doesn't. A fee is
 read when each sale is processed; it is never snapshotted on an agreement. A
 replayed invoice keeps the platform fee its first delivery recorded
 ([below](#a-replayed-invoice)).

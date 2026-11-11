@@ -169,17 +169,12 @@ app.post(
           data: {
             inviterName: ctx.user.name || 'A team member',
             orgName: org.name,
-            // The plain role, as before: the stock row production has reads
-            // "as a {{roleName}}". The new copy reads "as {{roleLabel}}".
+            // The plain role, for a customised copy that still reads
+            // {{roleName}}. Migration 0117 moved "as a {{roleName}}" to
+            // "as {{roleLabel}}", which carries its article.
             roleName: ctx.input.body.role,
             roleLabel: invitation.roleLabel,
             orgUrl,
-            // Transitional (Codex-2hxff.83). The previous notifications-api
-            // requires these, and the stock row links its button to
-            // `acceptUrl` and says it expires, until migration 0117 rewrites
-            // it, one release after this code (Codex-2hxff.84).
-            acceptUrl: orgUrl,
-            expiryDays: '7',
           },
         });
       } else {

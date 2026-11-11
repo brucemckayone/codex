@@ -53,7 +53,6 @@ import {
   ownContentThumbnailFolder,
   stagedCoverRefusal,
 } from '@codex/image-processing';
-import { READABLE_ORGANIZATION_COLUMNS } from '@codex/organization';
 import type { ServiceConfig } from '@codex/service-errors';
 import {
   BaseService,
@@ -776,7 +775,7 @@ export class ContentService extends BaseService {
         where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         with: {
           mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
-          organization: { columns: READABLE_ORGANIZATION_COLUMNS },
+          organization: true,
           creator: {
             columns: {
               id: true,
@@ -2472,10 +2471,10 @@ export class ContentService extends BaseService {
                 offset,
                 orderBy: [orderByClause],
                 // The studio scope is the signed-in creator's own rows, whole
-                // and with their email. The org is not theirs: no payee id.
+                // and with their email.
                 with: {
                   mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
-                  organization: { columns: READABLE_ORGANIZATION_COLUMNS },
+                  organization: true,
                   creator: { columns: { id: true, email: true, name: true } },
                 },
               }),

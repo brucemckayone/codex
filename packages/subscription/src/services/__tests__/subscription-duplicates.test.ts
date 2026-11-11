@@ -1,20 +1,36 @@
 import type Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  alertCreditNotReturned,
+  CREDIT_NOT_RETURNED_KEY,
+} from '../credit-paid-invoice';
+import {
   cancelAndRefundDuplicate,
   isDuplicateSubscription,
 } from '../subscription-duplicates';
 
+interface FakeInvoice {
+  id: string;
+  amount_paid: number;
+  charge: string | null;
+  /** Below 0 when customer credit was on the balance. */
+  starting_balance?: number;
+  total?: number;
+}
+
 function stripeWith(opts: {
   status: string;
-  invoices: Array<{ id: string; amount_paid: number; charge: string | null }>;
+  invoices: FakeInvoice[];
   refundError?: { code: string };
+  /** Invoices whose live copy already carries the not-returned mark. */
+  marked?: string[];
 }) {
   const refundsCreate = vi.fn(async () => {
     if (opts.refundError) throw opts.refundError;
     return { id: 're_1' };
   });
   const cancel = vi.fn(async () => ({ id: 'sub_dup', status: 'canceled' }));
+  const update = vi.fn(async () => ({}));
   const stripe = {
     subscriptions: {
       retrieve: vi.fn(async () => ({ id: 'sub_dup', status: opts.status })),
@@ -25,17 +41,59 @@ function stripeWith(opts: {
         data: opts.invoices.map((inv) => ({
           id: inv.id,
           amount_paid: inv.amount_paid,
+          starting_balance: inv.starting_balance ?? 0,
+          total: inv.total ?? inv.amount_paid,
+          metadata: {},
           payments: {
             data: inv.charge ? [{ payment: { charge: inv.charge } }] : [],
           },
         })),
       })),
-      retrieve: vi.fn(async (id: string) => ({ id, payments: { data: [] } })),
+      retrieve: vi.fn(async (id: string) => ({
+        id,
+        payments: { data: [] },
+        metadata: opts.marked?.includes(id)
+          ? { [CREDIT_NOT_RETURNED_KEY]: '2027-01-12T10:59:00.000Z' }
+          : {},
+      })),
+      update,
     },
     refunds: { create: refundsCreate },
   };
-  return { stripe: stripe as unknown as Stripe, cancel, refundsCreate };
+  const obs = { error: vi.fn(), warn: vi.fn() };
+  return {
+    stripe: stripe as unknown as Stripe,
+    cancel,
+    refundsCreate,
+    update,
+    obs,
+  };
 }
+
+const IDS = {
+  subscriptionId: '00000000-0000-4000-8000-0000000000d1',
+  organizationId: '00000000-0000-4000-8000-0000000000d2',
+  userId: 'user_dup',
+  kind: 'tier' as const,
+};
+
+/** The call's params, telling support as the services do. */
+function params(stripe: Stripe, obs: { error: () => void; warn: () => void }) {
+  return {
+    stripeSubscriptionId: 'sub_dup',
+    environment: 'test',
+    alertUnreturnedCredit: (invoice: Stripe.Invoice) =>
+      alertCreditNotReturned({ stripe, obs }, invoice, {
+        stripeSubscriptionId: 'sub_dup',
+        ...IDS,
+        cause: 'duplicate',
+      }),
+  };
+}
+
+const NOT_RETURNED = expect.stringContaining(
+  "Customer credit paid a cancelled subscription's invoice"
+);
 
 describe('isDuplicateSubscription', () => {
   it('reads either table marker', () => {
@@ -56,7 +114,7 @@ describe('isDuplicateSubscription', () => {
 
 describe('cancelAndRefundDuplicate', () => {
   it('cancels a live duplicate without proration, then refunds each paid invoice by its charge', async () => {
-    const { stripe, cancel, refundsCreate } = stripeWith({
+    const { stripe, cancel, refundsCreate, obs } = stripeWith({
       status: 'active',
       invoices: [
         { id: 'in_1', amount_paid: 1000, charge: 'ch_1' },
@@ -64,10 +122,7 @@ describe('cancelAndRefundDuplicate', () => {
       ],
     });
 
-    const result = await cancelAndRefundDuplicate(stripe, {
-      stripeSubscriptionId: 'sub_dup',
-      environment: 'test',
-    });
+    const result = await cancelAndRefundDuplicate(stripe, params(stripe, obs));
 
     expect(result).toEqual({ refundedInvoices: 1 });
     expect(cancel).toHaveBeenCalledWith(
@@ -87,32 +142,26 @@ describe('cancelAndRefundDuplicate', () => {
   });
 
   it('does not cancel one Stripe has already ended, but still refunds it', async () => {
-    const { stripe, cancel, refundsCreate } = stripeWith({
+    const { stripe, cancel, refundsCreate, obs } = stripeWith({
       status: 'canceled',
       invoices: [{ id: 'in_1', amount_paid: 1000, charge: 'ch_1' }],
     });
 
-    await cancelAndRefundDuplicate(stripe, {
-      stripeSubscriptionId: 'sub_dup',
-      environment: 'test',
-    });
+    await cancelAndRefundDuplicate(stripe, params(stripe, obs));
 
     expect(cancel).not.toHaveBeenCalled();
     expect(refundsCreate).toHaveBeenCalledTimes(1);
   });
 
   it('counts a charge already refunded as done', async () => {
-    const { stripe } = stripeWith({
+    const { stripe, obs } = stripeWith({
       status: 'canceled',
       invoices: [{ id: 'in_1', amount_paid: 1000, charge: 'ch_1' }],
       refundError: { code: 'charge_already_refunded' },
     });
 
     await expect(
-      cancelAndRefundDuplicate(stripe, {
-        stripeSubscriptionId: 'sub_dup',
-        environment: 'test',
-      })
+      cancelAndRefundDuplicate(stripe, params(stripe, obs))
     ).resolves.toEqual({ refundedInvoices: 1 });
   });
 
@@ -122,10 +171,10 @@ describe('cancelAndRefundDuplicate', () => {
       invoices: [{ id: 'in_1', amount_paid: 1000, charge: null }],
     });
     await expect(
-      cancelAndRefundDuplicate(noCharge.stripe, {
-        stripeSubscriptionId: 'sub_dup',
-        environment: 'test',
-      })
+      cancelAndRefundDuplicate(
+        noCharge.stripe,
+        params(noCharge.stripe, noCharge.obs)
+      )
     ).rejects.toThrow('no charge to refund');
 
     const refused = stripeWith({
@@ -134,10 +183,118 @@ describe('cancelAndRefundDuplicate', () => {
       refundError: { code: 'charge_disputed' },
     });
     await expect(
-      cancelAndRefundDuplicate(refused.stripe, {
-        stripeSubscriptionId: 'sub_dup',
-        environment: 'test',
-      })
+      cancelAndRefundDuplicate(
+        refused.stripe,
+        params(refused.stripe, refused.obs)
+      )
     ).rejects.toEqual({ code: 'charge_disputed' });
+    // A refund that failed has told support nothing yet: the retry does.
+    expect(refused.obs.error).not.toHaveBeenCalled();
+  });
+
+  // ─── Customer credit is not given back (Codex-2hxff.98) ──────────────────
+
+  it('a duplicate customer credit paid in full: no card refund, and one alert naming the whole amount', async () => {
+    const { stripe, refundsCreate, update, obs } = stripeWith({
+      status: 'canceled',
+      invoices: [
+        {
+          id: 'in_credit',
+          amount_paid: 0,
+          charge: null,
+          starting_balance: -6493,
+          total: 1000,
+        },
+      ],
+    });
+
+    const result = await cancelAndRefundDuplicate(stripe, params(stripe, obs));
+
+    expect(result).toEqual({ refundedInvoices: 0 });
+    expect(refundsCreate).not.toHaveBeenCalled();
+    expect(obs.error).toHaveBeenCalledExactlyOnceWith(NOT_RETURNED, {
+      errorId: expect.any(String),
+      invoiceId: 'in_credit',
+      stripeSubscriptionId: 'sub_dup',
+      ...IDS,
+      cause: 'duplicate',
+      creditNotReturnedCents: 1000,
+      cardRefundedCents: 0,
+    });
+    expect(update).toHaveBeenCalledExactlyOnceWith('in_credit', {
+      metadata: { [CREDIT_NOT_RETURNED_KEY]: expect.any(String) },
+    });
+  });
+
+  it('a duplicate credit paid part of: the card part is still refunded, then one alert names both parts', async () => {
+    const { stripe, refundsCreate, obs } = stripeWith({
+      status: 'canceled',
+      invoices: [
+        {
+          id: 'in_part',
+          amount_paid: 700,
+          charge: 'ch_part',
+          starting_balance: -300,
+          total: 1000,
+        },
+      ],
+    });
+
+    const result = await cancelAndRefundDuplicate(stripe, params(stripe, obs));
+
+    expect(result).toEqual({ refundedInvoices: 1 });
+    expect(refundsCreate).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ charge: 'ch_part', reason: 'duplicate' }),
+      { idempotencyKey: 'refund_duplicate_in_part' }
+    );
+    expect(obs.error).toHaveBeenCalledExactlyOnceWith(
+      NOT_RETURNED,
+      expect.objectContaining({
+        invoiceId: 'in_part',
+        creditNotReturnedCents: 300,
+        cardRefundedCents: 700,
+      })
+    );
+    // The alert says the card part WAS refunded, so it comes after.
+    expect(refundsCreate.mock.invocationCallOrder[0]).toBeLessThan(
+      obs.error.mock.invocationCallOrder[0] ?? 0
+    );
+  });
+
+  it('a duplicate the card paid alone: refunded, no alert, and Stripe is not asked about a mark', async () => {
+    const { stripe, refundsCreate, update, obs } = stripeWith({
+      status: 'canceled',
+      invoices: [{ id: 'in_card', amount_paid: 1000, charge: 'ch_card' }],
+    });
+
+    await cancelAndRefundDuplicate(stripe, params(stripe, obs));
+
+    expect(refundsCreate).toHaveBeenCalledTimes(1);
+    expect(obs.error).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('a replay of an invoice already alerted: the refund is asked again under its key, and support is not told twice', async () => {
+    const { stripe, refundsCreate, update, obs } = stripeWith({
+      status: 'canceled',
+      invoices: [
+        {
+          id: 'in_part',
+          amount_paid: 700,
+          charge: 'ch_part',
+          starting_balance: -300,
+          total: 1000,
+        },
+      ],
+      marked: ['in_part'],
+    });
+
+    await cancelAndRefundDuplicate(stripe, params(stripe, obs));
+
+    expect(refundsCreate).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      idempotencyKey: 'refund_duplicate_in_part',
+    });
+    expect(obs.error).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 });

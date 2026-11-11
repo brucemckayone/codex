@@ -26,6 +26,14 @@ export interface MigrationPreflight {
    * to violate anything, so the check is skipped.
    */
   table: string;
+  /**
+   * The columns of `table` the query reads, when an earlier migration adds
+   * them. The checks see the database as it was before the run's FIRST
+   * pending migration, so a run that also applies that migration has no such
+   * column yet, and no row can break the guarded constraint: the check is
+   * skipped unless every one exists.
+   */
+  columns?: string[];
 }
 
 /**
@@ -53,6 +61,18 @@ WHERE stripe_charge_id IS NOT NULL AND payout_type = 'creator_payout'
 GROUP BY stripe_charge_id, payout_type, user_id
 HAVING count(*) > 1`;
 
+/**
+ * 0129 adds `check_disputes_buyer_told` (Codex-h301h): only a late win has a
+ * told buyer. A dispute that breaks it makes the ADD CONSTRAINT fail. None
+ * should exist: `claimLateWinBuyerEmail`, the column's only writer, requires
+ * a late win, and nothing clears `late_won_at`. Both columns arrive with
+ * 0126, so a run from before 0126 skips it.
+ */
+const BUYER_TOLD_WITHOUT_LATE_WIN = `
+SELECT id, stripe_dispute_id, status, buyer_told_at
+FROM disputes
+WHERE buyer_told_at IS NOT NULL AND late_won_at IS NULL`;
+
 export const MIGRATION_PREFLIGHTS: ReadonlyArray<MigrationPreflight> = [
   {
     migration: '0099_wonderful_rage.sql',
@@ -60,6 +80,14 @@ export const MIGRATION_PREFLIGHTS: ReadonlyArray<MigrationPreflight> = [
       'duplicate payout slices: decide each one before deploying (release checklist R5)',
     sql: DUPLICATE_PAYOUT_SLICES,
     table: 'payouts',
+  },
+  {
+    migration: '0129_email_log_index_and_buyer_told_check.sql',
+    description:
+      'disputes with a told buyer but no late win: resolve each one before deploying',
+    sql: BUYER_TOLD_WITHOUT_LATE_WIN,
+    table: 'disputes',
+    columns: ['buyer_told_at', 'late_won_at'],
   },
 ];
 
@@ -69,12 +97,14 @@ interface QueryClient {
 
 /**
  * Run the checks for the migrations about to be applied. Returns one line
- * per failed check; empty means every check passed.
+ * per failed check; empty means every check passed. A check skipped for
+ * missing columns says so through `log`.
  */
 export async function runMigrationPreflights(
   client: QueryClient,
   pendingMigrations: ReadonlyArray<string>,
-  preflights: ReadonlyArray<MigrationPreflight> = MIGRATION_PREFLIGHTS
+  preflights: ReadonlyArray<MigrationPreflight> = MIGRATION_PREFLIGHTS,
+  log: (line: string) => void = console.log
 ): Promise<string[]> {
   const failures: string[] = [];
   for (const check of preflights) {
@@ -85,6 +115,27 @@ export async function runMigrationPreflights(
     );
     if ((tables[0] as { present: unknown } | undefined)?.present == null) {
       continue;
+    }
+    if (check.columns && check.columns.length > 0) {
+      // pg_attribute, not information_schema.columns: that view lists only
+      // the columns this role holds a privilege on, so it could hide one
+      // that exists and wrongly skip the check.
+      const { rows: present } = await client.query(
+        `SELECT attname FROM pg_attribute
+          WHERE attrelid = to_regclass($1) AND attname = ANY($2)
+            AND NOT attisdropped AND attnum > 0`,
+        [`public.${check.table}`, check.columns]
+      );
+      const found = new Set(
+        (present as Array<{ attname: string }>).map((row) => row.attname)
+      );
+      const missing = check.columns.filter((column) => !found.has(column));
+      if (missing.length > 0) {
+        log(
+          `  ⏭ Preflight skipped ${check.migration}: columns not there yet (${missing.join(', ')})`
+        );
+        continue;
+      }
     }
     const { rows } = await client.query(check.sql);
     if (rows.length > 0) {

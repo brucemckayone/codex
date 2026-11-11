@@ -12,9 +12,9 @@ import type {
   MediaItem,
   NewContent,
   NewMediaItem,
+  Organization,
   ServedMediaItem,
 } from '@codex/database/schema';
-import type { ReadableOrganization } from '@codex/organization';
 
 /**
  * Database client type — re-exported from `@codex/database` so consumers
@@ -115,8 +115,7 @@ export interface ContentWithRelations extends Content {
     email?: string;
     name: string | null;
   };
-  /** Never the payee's user id: every read leaves it out (Codex-kk6zx). */
-  organization?: ReadableOrganization | null;
+  organization?: Organization | null;
   mediaItem?: ServedMediaItem | null;
   /**
    * The creator's video its thumbnail is a frame of, its own included

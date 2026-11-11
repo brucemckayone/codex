@@ -4462,6 +4462,22 @@ describe('PurchaseService Integration', () => {
   describe('getSalesStats (studio Sales KPIs)', () => {
     let statsOrgId: string;
     let statsContentId: string;
+    /** The refund and the dispute written here, deleted in afterAll. */
+    const statsRefundIds: string[] = [];
+    const statsDisputeIds: string[] = [];
+
+    afterAll(async () => {
+      if (statsRefundIds.length > 0) {
+        await db
+          .delete(schema.refunds)
+          .where(inArray(schema.refunds.stripeRefundId, statsRefundIds));
+      }
+      if (statsDisputeIds.length > 0) {
+        await db
+          .delete(schema.disputes)
+          .where(inArray(schema.disputes.stripeDisputeId, statsDisputeIds));
+      }
+    });
 
     beforeAll(async () => {
       const [org] = await db
@@ -4514,10 +4530,11 @@ describe('PurchaseService Integration', () => {
       await contentService.publish(c.id, userId);
       statsContentId = c.id;
 
-      // Three completed @ 1000p + one refunded @ 1000p (refund 500p partial).
-      // Four buyers: a second completed purchase of the item by one buyer is
-      // a duplicate payment, refunded at completion (Codex-2hxff.14).
-      const buyers = await seedTestUsers(db, 4);
+      // Three completed @ 1000p, one refunded @ 1000p (a 500p refund) and
+      // one lost to a chargeback @ 1000p. Five buyers: a second completed
+      // purchase of the item by one buyer is a duplicate payment, refunded
+      // at completion (Codex-2hxff.14).
+      const buyers = await seedTestUsers(db, 5);
       for (let i = 0; i < 3; i++) {
         await purchaseService.completePurchase(
           `pi_stats_${i}_${Date.now()}_${Math.random()}`,
@@ -4548,17 +4565,63 @@ describe('PurchaseService Integration', () => {
           refundAmountCents: 500,
         })
         .where(eq(schema.purchases.id, refunded.id));
+      // Sales counts what went back from our record, as the admin revenue's
+      // `taken` does (owner decision 2026-11-09): the refund's own row.
+      const refundId = `re_stats_${Date.now()}_${Math.random()}`;
+      statsRefundIds.push(refundId);
+      await db.insert(schema.refunds).values({
+        stripeRefundId: refundId,
+        stripeChargeId: `ch_stats_${Date.now()}`,
+        purchaseId: refunded.id,
+        amountCents: 500,
+        currency: 'gbp',
+        status: 'succeeded',
+        stripeCreatedAt: new Date(),
+      });
+      // A chargeback lost, as `processLostDispute` leaves the purchase.
+      const disputed = await purchaseService.completePurchase(
+        `pi_stats_dispute_${Date.now()}`,
+        {
+          customerId: takeFirst(buyers.slice(4), 'stats dispute buyer'),
+          contentId: statsContentId,
+          organizationId: statsOrgId,
+          amountPaidCents: 1000,
+          currency: 'gbp',
+        }
+      );
+      await db
+        .update(schema.purchases)
+        .set({
+          status: 'refunded',
+          refundedAt: new Date(),
+          refundAmountCents: 1000,
+        })
+        .where(eq(schema.purchases.id, disputed.id));
+      const disputeId = `du_stats_${Date.now()}_${Math.random()}`;
+      statsDisputeIds.push(disputeId);
+      await db.insert(schema.disputes).values({
+        stripeDisputeId: disputeId,
+        stripeChargeId: `ch_stats_dispute_${Date.now()}`,
+        purchaseId: disputed.id,
+        amountCents: 1000,
+        currency: 'gbp',
+        status: 'lost',
+        reason: 'fraudulent',
+        stripeCreatedAt: new Date(),
+        outcomeAppliedAt: new Date(),
+      });
     });
 
     it('computes gross, net, refundedCents and count for org', async () => {
       const stats = await purchaseService.getSalesStats(statsOrgId, {});
-      // 3 completed @ 1000 + 1 refunded @ 1000 (originally collected) = 4000
-      expect(stats.grossCents).toBe(4000);
+      // 3 completed + 2 refunded @ 1000 (originally collected) = 5000
+      expect(stats.grossCents).toBe(5000);
       // Net = sum of (creator + org fee) on completed rows only
       //   = 3 * (1000 - platformFee) on completed rows
       // Default platform fee 10% => 900 per row => 2700
       expect(stats.netCents).toBe(2700);
-      expect(stats.refundedCents).toBe(500);
+      // The 500p refund's row, plus the 1000p lost chargeback.
+      expect(stats.refundedCents).toBe(1500);
       expect(stats.count).toBe(3);
       expect(stats.currency).toBe('gbp');
     });

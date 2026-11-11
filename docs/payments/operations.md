@@ -61,10 +61,10 @@ signing secret.
 - The connect endpoint must be created as a **connected accounts** endpoint
   (`connect: true`). A platform-only endpoint never receives creators'
   `account.updated`. The scope cannot be changed after creation.
-- `/webhooks/stripe/customer` is a log-only stub with no handler, and its
-  endpoint is disabled. It is to be removed with its secret — **gap**:
-  `Codex-2hxff.24`. A Customer deleted in Stripe needs no webhook: checkout
-  clears the stale id and retries.
+- There is no customer endpoint. The log-only `/webhooks/stripe/customer` stub
+  and `STRIPE_WEBHOOK_SECRET_CUSTOMER` were removed (`Codex-2hxff.24`). A
+  Customer deleted in Stripe needs no webhook: checkout clears the stale id and
+  retries.
 - `/webhooks/stripe/dev` exists for local development only and returns 404 in
   production.
 
@@ -104,11 +104,10 @@ There is no event-id table; safety on redelivery comes from unique keys
 | `DATABASE_URL` | secret | |
 | `STRIPE_SECRET_KEY` | secret | Also needed by organization-api, which creates tier Products and Prices. The daily bank payout (`Codex-2hxff.29`) needs, on connected accounts, Balance read, Payouts write and Transfers read: list them if ecom-api ever moves to a restricted key |
 | `STRIPE_WEBHOOK_SECRET_BOOKING`, `_PAYMENT`, `_DISPUTE`, `_SUBSCRIPTION`, `_CONNECT` | secret | One per endpoint |
-| `STRIPE_WEBHOOK_SECRET_CUSTOMER` | secret | To be removed — **gap**: `Codex-2hxff.24` |
 | `STRIPE_PORTAL_CONFIGURATION_ID` | secret | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox. Optional at boot; without it the billing portal refuses to open. The deploy uploads it only when it is set and is a `bpc_` id; otherwise the run warns (unset) or errors (wrong shape) and keeps the current value (`Codex-2hxff.41`) |
 | `ENVIRONMENT` | var | `production` disables the dev webhook route |
 | `WEB_APP_URL` | var | Required — agreement emails need it — **gap**: `Codex-2hxff.7` (declared optional) |
-| `API_URL` | var | Must be declared under `env.production` — **gap**: `Codex-2hxff.24` |
+| `API_URL` | var | Local development and test only, as one CORS origin. Not declared under `env.production` and not checked at boot: production's browser origins come from `WEB_APP_URL` and the `*.revelations.studio` patterns (`Codex-2hxff.24`) |
 | `RATE_LIMIT_STRICT`, `RATE_LIMIT_API` | rate-limit bindings | A route's preset needs its binding, or it fails open |
 
 **Production secrets** are stored only in the GitHub environment `production`
@@ -220,7 +219,9 @@ Fees change only through admin-api's `/api/admin/fees/*` routes
 notice a rise owes the people it pays less, breaks the dated history a replayed
 invoice is split by, and is not in the audit log. To undo a waiting rise, save
 the old value again (or `POST /api/admin/fees/changes/:changeId/cancel`):
-everyone already told is emailed that it's off.
+everyone its email told, or may have told, is emailed that it's off (an email
+with no answer, or one a run was still sending, counts:
+[told, or may have been](fees-and-splits.md#notice-of-a-change)).
 
 **After saving a rise.** The answer's `change` has `kind: 'rise'` and
 `effectiveFrom: null`: it waits. The next 08:00 run (UTC) makes its list and
@@ -237,17 +238,42 @@ rise`, naming up to 50 notice and user ids; the queue is the lasting record,
 so a missed alert loses nothing. A send that failed outright (refused, skipped,
 no address) is named at once, and tried again the next morning. One with no
 answer (a 5xx, a timeout) may have gone, so the next run first looks in
-`email_audit_logs` and only sends again if nothing is there. It is named only
+`email_audit_logs` and only sends again if nothing there shows it sent: a
+`success` row, not a `pending` one an earlier run left, whose outcome never
+came (owner, 2026-11-09; `emailLogShowsSent`). It is named only
 after three such mornings, or at once when its rise starts within three days,
 since the mornings themselves usually mend it. A follow-up email
 (made smaller, cancelled) holds nothing: it is dropped after three failed
 mornings with a warning, and never reaches the queue.
 
+**An edit stuck open.** The step waits at most 5 s for a lock an edit of a
+rise holds (a cut, a cancel, a save at its level). Past that, the part is put
+off to the next morning with a warning: the change's list, its joiners, its
+date, or the level's old fee row. `deferred` in `fee step completed` counts
+them. One that comes back morning after morning means an edit is stuck. A
+rise whose joiners were put off, or whose joiners step failed, is not dated
+that morning. That step puts anyone set aside and affected again back on the
+list, and the next morning dates the rise counting them.
+
+**Joiners on a rise that starts before the next run** would be charged before
+the next morning could tell them. So whenever their joiners step doesn't run
+for such a rise, the step raises an error alert. That happens if the step is
+put off past the wait, fails for that rise, or fails as a whole (it then reads
+which rises start before the next run). Every such alert ends `tell anyone it
+now affects by hand. See Admin › Queue › Fee notices`, and names the change
+and its start date. If the step fails as a whole and that read fails too, one
+`fee step part failed` error for the joiners part ends with the same words,
+so an alert on them always fires. Tell anyone the rise now affects by hand.
+
 **Told another way.** If support reaches someone another way (the phone,
 their other address), they press Told another way on that row and say how in
-the note. That counts as the person's notice from then. When they were the
-last person the rise waited for, the same transaction sets the date, and the
-answer says so. A second press answers 409 `FEE_NOTICE_ALREADY_TOLD`, which
+the note. That counts as the person's notice from then. The mark never sets
+the date. When they were the last person the rise waited for, the answer says
+nobody is waiting, and the next 08:00 run dates the rise, after its joiners
+step: that step puts anyone set aside and affected again back on the list,
+who would otherwise be told with less than 30 days. The date counts from the
+last person told either way, so it is the same as if it had been set at the
+mark. A second press answers 409 `FEE_NOTICE_ALREADY_TOLD`, which
 the page reads as done; a rise cancelled meanwhile answers 409
 `FEE_CHANGE_NOT_WAITING`. A joiner's row is tagged Joined later: it never
 holds the date, but they still need telling.
@@ -337,6 +363,18 @@ the same way once retried. Both say so (`waitsForDispute`); an ended
 subscription's or a closed row doesn't. Nothing needs doing: once the
 chargeback ends, the next run treats them as anyone else.
 
+## Customer credit on a subscription invoice
+
+Each member has one Stripe customer across every organisation, so credit on
+its balance pays their next bill in any org. A bill credit paid raises
+"Customer credit paid a subscription invoice …"
+([subscriptions.md](subscriptions.md#renewals), `Codex-2hxff.97`). When that
+bill belonged to a duplicate we cancelled, a second alert follows:
+
+| Alert | What it means | What to do |
+|---|---|---|
+| Customer credit paid a cancelled subscription's invoice (a duplicate, or an old one revived beside a newer one): only the card part was refunded, and support must pay the member back outside Stripe | A duplicate subscription, or an old one revived beside a newer one (`cause`), was cancelled and its card charge refunded (`cardRefundedCents`, 0 when the credit paid it all). The `creditNotReturnedCents` of credit that paid the invoice was not given back (`Codex-2hxff.98`). It names `invoiceId`, `stripeSubscriptionId`, `subscriptionId`, `organizationId`, `userId` and `kind`, once per invoice (`codex_credit_not_returned` on the invoice) | Pay the member `creditNotReturnedCents` outside Stripe, by bank transfer for example, as for a buyer refunded another way; the platform bears it (owner decision 2026-11-09). **Never add it back as Stripe balance credit**: their one customer would spend it on their next bill in any org, and that bill's creator would be paid nothing |
+
 ## Late wins
 
 A chargeback lost and then decided for us after all (a "late win",
@@ -386,9 +424,10 @@ set, and is never refunded through Stripe again. Three things set it:
 - the late win's own failed refund settled in Failed refunds as refunded
   elsewhere, unless the charge's SUCCEEDED Stripe refunds already cover it
   (support refunded it again through Stripe first). Without the mark the
-  charge would stay refundable for good, since Stripe doesn't count the failed
-  refund and the late win lifts the 14-day window. That is owner decision 5's
-  rule, applied in review cycle 2. A re-refund still pending doesn't count, so
+  charge would have stayed refundable for good, since Stripe doesn't count the
+  failed refund and the late win lifts the 14-day window. That is owner
+  decision 5's rule, applied in review cycle 2, and kept now that the settled
+  refund counts as refunded too (below; Codex-3xnta). A re-refund still pending doesn't count, so
   the charge is marked: if it then fails, the charge is already blocked; if it
   succeeds, the buyer was refunded once, through Stripe, yet the charge reads
   "refunded outside Stripe". The charge card's amount line says so, and so does
@@ -410,6 +449,26 @@ says, and nothing lifts its window. The detail's `refundable.blocked` is
 card's amount reads "refunded outside Stripe on {date}", since Stripe lists no
 standing refund for it.
 
+**Refunded elsewhere counts as refunded** (owner decision 2026-11-09, "Count
+it as refunded"; Codex-3xnta). Any failed refund support settles in Failed
+refunds as refunded elsewhere, a late win's or not, counts against its charge
+as if it had succeeded: in the charge page's refunded figure and what the form
+offers ("All that's left"), in the refund preview's cap, in the refund route's
+cap (read again in its re-check, so a settle after the page loaded counts),
+and in the search's refunded figure. The charge page's refunds list reads it
+"Refunded another way", not "Failed". It also comes off the admin revenue
+figures (`taken`) and the studio Sales "Refunds" tile, by the same rule
+(`countsAgainstCharge`, `@codex/purchase`). What is left stays refundable
+within the 14-day window. The preview's access line still counts Stripe's
+refunds only: the refund webhook decides access from Stripe's list, where the
+settled refund stays failed. Each refund counts once, since only a failed
+refund holds a resolution (`check_refunds_resolution`), a failed refund is
+final at Stripe and in our record, and the charge page skips a recorded row
+Stripe's list shows standing. On a late win's own refund the charge is
+blocked anyway (above), so the count changes nothing there. If support
+refunded it again through Stripe first, both refunds count, so every figure is
+capped at the charge: the page reads it refunded in full, never more.
+
 **Alerts** (ids, codes and counts only; Q6). A late win that works logs
 "Late win: loss undone" at info and alerts nobody. Each of these is an error
 with an `errorId`, unless it says otherwise:
@@ -417,7 +476,7 @@ with an `errorId`, unless it says otherwise:
 | Alert | What it means | What to do |
 |---|---|---|
 | Late win: Stripe refused the refund of a payment the buyer made twice… / Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded… | The late win's refund of a first payment (a buyer who bought it again) or of a duplicate payment wasn't made. "Refused": Stripe refused the request itself (`stripeType` `StripeInvalidRequestError`). "Could not be refunded": anything else, such as an outage, a rate limit or a key without refund rights. `stripeCode`, `stripeType` and `stripeStatusCode` say which; each is empty when Stripe gave none. Nothing is marked, the creators' pay-back stays held, and it is retried: on each of Stripe's redeliveries, then every hour, one alert per try. Stripe replays an answer for 24 hours under the same idempotency key, so a cause that clears (a low balance, a fixed key) is only tried again a day after the first answer | Read the three fields. A "could not be refunded" usually clears by itself once the outage passes or the key is fixed. One Stripe will never make: settle it by hand ([below](#settling-a-late-win-refund-stripe-wont-make)). **Never refund the buyer another way first** |
-| Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds | The late win's refund was made, but Stripe reports it `failed` (`refundId`, `status`). The late win counts as settled and its outcome is marked. As with any failed refund, its clawback stands: the creators gave the first payment back off their held re-pay rows. The buyer has not been refunded | Refund the buyer another way, or first refund it again through Stripe on the charge page, then settle the refund in Failed refunds as refunded elsewhere. Settled after a refund another way, the charge is marked refunded outside Stripe and the charge page blocks any further Stripe refund: Stripe doesn't count the failed refund and the late win lifts the 14-day window, so it would otherwise offer the whole amount again, for good ([above](#late-wins)). So a Stripe refund comes first or not at all. "Re-pay payees" (creators re-paid) is refused for it, 422 `LATE_WIN_REFUND_NOT_REPAYABLE` (owner decision 2026-11-08, "Block it in code"): the buyer is still owed this money, so its clawback stands |
+| Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds | The late win's refund was made, but Stripe reports it `failed` (`refundId`, `status`). The late win counts as settled and its outcome is marked. As with any failed refund, its clawback stands: the creators gave the first payment back off their held re-pay rows. The buyer has not been refunded | Refund the buyer another way, or first refund it again through Stripe on the charge page, then settle the refund in Failed refunds as refunded elsewhere. Settled after a refund another way, the charge is marked refunded outside Stripe and the charge page blocks any further Stripe refund: Stripe doesn't count the failed refund and the late win lifts the 14-day window, so without the mark it offered the whole amount again, for good, until the settled refund came to count as refunded ([above](#late-wins); Codex-3xnta); the mark stays (owner decision 5). So a Stripe refund comes first or not at all, and the settle dialog's "Refunded another way" says so: "Make any Stripe refund first: once this is marked, the charge can't be refunded through Stripe." (Codex-ohlcx). It knows the late win's refund by our record only (`late_win_refund_id`, on a charge not yet marked): one known only from Stripe's metadata gets no warning, and its settle still marks the charge. "Re-pay payees" (creators re-paid) is refused for it, 422 `LATE_WIN_REFUND_NOT_REPAYABLE` (owner decision 2026-11-08, "Block it in code"): the buyer is still owed this money, so its clawback stands |
 | Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand | Settled as for a failed refund, but the Failed refunds queue lists only `failed` ones, so this alert is how support finds it (owner decision 2026-11-05). It took nothing from the creators | Settle it with the owner; the buyer has not been refunded. If the owner refunds the buyer another way, record it with the UPDATE in [R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone): a canceled refund never reaches Failed refunds, so nothing else marks the charge refunded outside Stripe, and the charge page would offer a Stripe refund again for good |
 | A won dispute was reported lost: nothing changed, check it in Stripe | Stripe now says lost a dispute we hold as won. Nothing was changed | Check the dispute in Stripe's Dashboard |
 | The hourly late-win check read its page limit of Stripe's disputes | More than 300 disputes since our oldest lost one: the older ones weren't re-checked this run | None by itself; if it repeats, the check needs a wider limit |
@@ -721,8 +780,9 @@ it. An account already back on both settings is listed as
 
 - `stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev`, with
   every `STRIPE_WEBHOOK_SECRET_*` set to the secret the CLI prints. The dev route
-  dispatches each event to the right handler by type. It must route every event
-  production handles — **gap**: `Codex-2hxff.24` (no `product.*` or `price.*`).
+  dispatches each event to the right handler by type, and routes every event
+  production handles: `product.*` and `price.*` go to the subscription handler
+  (`Codex-2hxff.24`).
 - Hosted dev endpoints are created by `.github/scripts/setup-stripe-dev-webhooks.sh`.
   Its endpoint list mirrors the production table above: the same endpoints,
   events and connected-accounts scope. Change both together. The script creates
@@ -732,8 +792,9 @@ it. An account already back on both settings is listed as
   resolve).
 - A Cloudflare tunnel (`ecom-api-local.revelations.studio` → `localhost:42072`)
   can receive real endpoint deliveries locally.
-- Seeds refuse live keys. Seeded data should exercise the real fee split and
-  include agreements — **gap**: `Codex-2hxff.24`.
+- Seeds refuse live keys. Seeded subscriptions take the default subscription
+  split, through the same functions a live invoice uses, and no agreements: a
+  real org has none until a proposal is accepted (`Codex-2hxff.24`).
 - Run the dev stack with `pnpm dev` from the repository root.
 
 ## Testing

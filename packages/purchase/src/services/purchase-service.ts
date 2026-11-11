@@ -145,6 +145,12 @@ import {
   toStripeTime,
 } from './checkout-reservations';
 import {
+  disputesOfPurchase,
+  refundsOfPurchase,
+  STANDING_REFUND_STATUSES,
+  takenBack,
+} from './counted-refunds';
+import {
   writeContentPurchaseEntitlement,
   writeCoursePurchaseEntitlement,
 } from './entitlement-writer';
@@ -240,17 +246,6 @@ function lateWinRefundStatus(
     listed.find((refund) => refund.id === made.refundId)?.status ?? made.status
   );
 }
-
-/**
- * The refunds that count against what was paid: made and not undone. A failed
- * or canceled refund gave the buyer nothing (Codex-2hxff.28): support may
- * refund that amount again, and a failed full refund gives access back.
- */
-export const STANDING_REFUND_STATUSES: readonly RefundStatus[] = [
-  'pending',
-  'requires_action',
-  'succeeded',
-];
 
 /**
  * How far along a dispute is: an inquiry, then a chargeback, then final. A
@@ -5434,8 +5429,14 @@ export class PurchaseService extends BaseService {
         // Net to the seller: their share on completed rows only. Refunded rows
         // already returned the customer's money so they zero out for net.
         netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
-        // Partial refunds too: they leave the purchase completed (P-1).
-        refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}), 0)::int`,
+        // What went back to each buyer, as the admin revenue's `taken`
+        // counts it (`takenBack`, owner decision 2026-11-09): the refunds that
+        // count, a part refund's and one settled elsewhere included, plus
+        // lost chargebacks, capped at what was paid. From our record, never
+        // `refund_amount_cents`: a failed full refund leaves that at the full
+        // amount until support settles it, and the buyer got nothing back.
+        // Nested `sql`, so the outer `purchases.id` keeps its table.
+        refundedCents: sql<number>`COALESCE(SUM(${takenBack(purchases.amountPaidCents, refundsOfPurchase(), disputesOfPurchase())}), 0)::int`,
         count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
       })
       .from(purchases)

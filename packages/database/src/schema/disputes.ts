@@ -141,8 +141,9 @@ export const disputes = pgTable(
       'check_disputes_status',
       sql`${table.status} IN ('warning_needs_response', 'warning_under_review', 'warning_closed', 'needs_response', 'under_review', 'won', 'lost', 'prevented')`
     ),
-    // A late win is a won row, and only a late win keeps a loss date or a
-    // late-win refund. `status` is NOT NULL, so none of these can be NULL.
+    // A late win is a won row, and only a late win keeps a loss date, a
+    // late-win refund or a told buyer (Codex-h301h). `status` is NOT NULL, so
+    // none of these can be NULL.
     check(
       'check_disputes_late_won_status',
       sql`${table.lateWonAt} IS NULL OR ${table.status} = 'won'`
@@ -154,6 +155,10 @@ export const disputes = pgTable(
     check(
       'check_disputes_lost_applied',
       sql`${table.lostAppliedAt} IS NULL OR ${table.lateWonAt} IS NOT NULL`
+    ),
+    check(
+      'check_disputes_buyer_told',
+      sql`${table.buyerToldAt} IS NULL OR ${table.lateWonAt} IS NOT NULL`
     ),
   ]
 );

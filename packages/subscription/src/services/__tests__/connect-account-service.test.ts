@@ -1819,7 +1819,7 @@ describe('ConnectAccountService', () => {
       return org;
     }
 
-    it('activation writes no pin', async () => {
+    it("activation makes the owner's account payable", async () => {
       const org = await makeOwnedOrg('payee-activation');
       const acct = takeFirst(
         await db
@@ -1841,11 +1841,6 @@ describe('ConnectAccountService', () => {
         requirements: { currently_due: [], disabled_reason: null },
       } as unknown as Stripe.Account);
 
-      const [row] = await db
-        .select({ pin: organizations.primaryConnectAccountUserId })
-        .from(organizations)
-        .where(eq(organizations.id, org.id));
-      expect(row?.pin).toBeNull();
       expect(await service.getOrganizationPayoutStatus(org.id)).toMatchObject({
         isConnected: true,
         chargesEnabled: true,

@@ -118,6 +118,7 @@ import type { Database, DatabaseWs } from '@codex/database';
 
 - Generate: `pnpm db:gen` (root) or `pnpm db:generate` (from `packages/database`)
 - Apply: `pnpm db:local:migrate` (root) or `pnpm db:migrate` (from `packages/database`) — migrates the database named in the URL (`.env.dev`: `main`)
+- Lock waits: the runner applies each file in its own transaction (`BEGIN`, `SET LOCAL lock_timeout = '5s'`, the file, the row recording it, `COMMIT`), so a lock wait over 5 s fails the file, nothing is half-applied and nothing is recorded, re-run the deploy once the blocking transaction ends. A file needs no `SET lock_timeout` of its own, and must hold no `BEGIN`/`COMMIT`, `CONCURRENTLY` or `VACUUM`
 - Test database: `pnpm db:test:setup` (root) creates + migrates the disposable local `main_test` that `.env.test` should point at; re-run after new migrations. See `packages/test-utils/CLAUDE.md` → "Running DB-backed tests locally"
 - Files: `packages/database/src/migrations/`
 

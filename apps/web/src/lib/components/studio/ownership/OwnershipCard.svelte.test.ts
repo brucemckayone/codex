@@ -11,6 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { toast } from '$lib/components/ui/Toast/toast-store';
+import { logger } from '$lib/observability';
 import type { OwnershipView } from '$lib/types';
 import { formatDate } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
@@ -444,6 +445,40 @@ describe('recipient (states 6 and 7)', () => {
     );
     expect(refresh).toHaveBeenCalled();
     expect(navigation.invalidate).not.toHaveBeenCalled();
+  });
+
+  // Codex-2hxff.46 (l): the accept committed, so a layout refresh that fails
+  // after it is logged, never shown as a failed accept.
+  test('a refresh that fails after a committed accept keeps the success', async () => {
+    setView(recipientView());
+    acceptOwnershipOffer.mockImplementation(async () => {
+      setView(
+        ownerView({
+          owner: { ...recipientView().owner, userId: 'sam', name: 'Sam Patel' },
+          eligibleRecipients: [],
+        })
+      );
+      return {};
+    });
+    navigation.invalidate.mockRejectedValueOnce(
+      new Error('layout load failed')
+    );
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    mountCard();
+
+    button(m.ownership_recipient_accept())?.click();
+
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith('ownership.after_command_failed', {
+        organizationId: ORG_ID,
+        command: 'accept',
+        error: 'layout load failed',
+      })
+    );
+    flushSync();
+    expect(text()).toContain(m.ownership_accepted({ orgName: ORG_NAME }));
+    expect(card().querySelector('[role="alert"]')).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
   });
 });
 

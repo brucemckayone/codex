@@ -71,6 +71,11 @@ const main = async () => {
 
     console.log('🔄 Connecting to database...');
     client = new Client({ connectionString: dbUrl });
+    // A dropped connection also arrives as an 'error' event. Unheard, it
+    // crashes the process before the failed file rolls back and is reported.
+    client.on('error', (error) => {
+      console.warn(`    ⚠ Database connection error: ${error.message}`);
+    });
     await client.connect();
     console.log('✓ Database connection established\n');
 
@@ -130,16 +135,37 @@ const main = async () => {
     for (const migration of pending) {
       try {
         console.log(`  📝 Applying: ${migration.name}`);
+        // One transaction per file: its lock bound, the file and the row that
+        // records it commit together or not at all. A lock wait over 5 s fails
+        // the file, nothing is half-applied, re-run the deploy once the
+        // blocking transaction ends (Codex-vliwn). Every file opens with its
+        // own `SET LOCAL`, so a file's own `RESET lock_timeout` (0111,
+        // 0122-0125), which outlives its commit, never leaves the next file
+        // unbounded. No file may hold its own BEGIN/COMMIT.
+        await client.query('BEGIN');
+        await client.query("SET LOCAL lock_timeout = '5s'");
         await client.query(migration.sql);
         await client.query(
           'INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES ($1, $2)',
           [migration.name, Date.now()]
         );
+        await client.query('COMMIT');
         appliedCount++;
         console.log(`    ✓ Success`);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         console.error(`    ✗ Failed: ${errorMsg}`);
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackError) {
+          // Usually the connection is gone, and the server rolls back with
+          // it. Say so, then fail with the file's own error, not this one.
+          const rollbackMsg =
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : String(rollbackError);
+          console.warn(`    ⚠ Rollback failed too: ${rollbackMsg}`);
+        }
         throw error;
       }
     }

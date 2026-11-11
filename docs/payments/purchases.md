@@ -427,7 +427,21 @@ some other way. So the clawback stands, and the failure is recorded in
 Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
 
 - **refunded elsewhere**: the customer was refunded another way, so the
-  clawback stands and the row is just resolved;
+  clawback stands and the row is resolved. It then counts as refunded (owner
+  decision 2026-11-09, "Count it as refunded"; Codex-3xnta), as if it had
+  succeeded: its amount comes off what the charge page, the refund preview and
+  the refund route offer through Stripe (the route reads it again in its
+  re-check), and the search's refunded figure, the admin revenue `taken` and
+  the studio Sales "Refunds" tile all count it, by one rule
+  (`countsAgainstCharge` and `settledElsewhere`, `@codex/purchase`). Any rest
+  stays refundable within the 14-day window. The preview's access line still
+  counts Stripe's refunds only, since the refund webhook decides access from
+  Stripe's list, where this refund stays failed. Each refund counts once: only
+  a failed refund holds a resolution (`check_refunds_resolution`), a failed
+  refund is final at Stripe and in our record (`recordRefund`), and the charge
+  page skips a recorded row Stripe's list shows standing. Each figure is capped
+  at the charge, since a refund made again through Stripe and the settled one
+  can both count (the late-win runbook);
 - **creators re-paid**: the customer is not refunded, so the payees get back
   what the refund took (`repayFailedRefund`, `@codex/payments`). Each step of
   its clawback that took money from a payee, on a slice or on a re-pay row,
@@ -502,6 +516,11 @@ Our record is read once more in the settle's transaction, which only narrows
 the window for a late win that records its id meanwhile; the metadata is what
 closes it. Support refunds the buyer another way, or first refunds it again
 through Stripe on the charge page, then settles it as refunded elsewhere.
+The settle dialog warns of the order when our record knows the refund as the
+late win's own on a charge not yet marked (`isLateWinRefund`; Codex-ohlcx):
+"Make any Stripe refund first: once this is marked, the charge can't be
+refunded through Stripe." One known only from Stripe's metadata gets no
+warning, and its settle still marks the charge.
 Settled after a refund another way, the late win's dispute is marked
 `refunded_outside_stripe_at` in the same transaction, unless the charge's
 succeeded Stripe refunds already cover it or a date is already set. A re-refund
@@ -513,8 +532,9 @@ this charge." No money is at stake, since nothing is left to refund either
 way. The charge page then
 blocks any further Stripe refund (`REFUNDED_OUTSIDE_STRIPE`;
 [operations](operations.md#late-wins)): Stripe doesn't count the failed refund
-and the late win lifts the 14-day window, so it would otherwise offer the whole
-amount again with no end. Any other failed refund of the same charge is settled
+and the late win lifts the 14-day window, so without the mark it offered the
+whole amount again with no end, until the settled refund came to count as
+refunded (above; Codex-3xnta); the mark stays (owner decision 5). Any other failed refund of the same charge is settled
 as above.
 
 A purchase it refunded in part stops counting it: `refund.updated` restates

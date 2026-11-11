@@ -256,9 +256,11 @@ Codex has separate webhook endpoints per domain, each with its own secret:
 | `/webhooks/stripe/payment` | Refunds, chargebacks | `STRIPE_WEBHOOK_SECRET_PAYMENT` |
 | `/webhooks/stripe/subscription` | Subscription lifecycle | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` |
 | `/webhooks/stripe/connect` | Connect account events | `STRIPE_WEBHOOK_SECRET_CONNECT` |
-| `/webhooks/stripe/customer` | Log-only stub — to be removed (`Codex-2hxff.24`) | `STRIPE_WEBHOOK_SECRET_CUSTOMER` |
 | `/webhooks/stripe/dispute` | Disputes + early fraud warnings (`handlePaymentWebhook`) | `STRIPE_WEBHOOK_SECRET_DISPUTE` |
 | `/webhooks/stripe/dev` | Dev all-events | `STRIPE_WEBHOOK_SECRET_BOOKING` (reused in dev) |
+
+The log-only `/webhooks/stripe/customer` stub and `STRIPE_WEBHOOK_SECRET_CUSTOMER`
+were removed (`Codex-2hxff.24`); there is no customer endpoint.
 
 Separate secrets mean if one leaks, you rotate that endpoint's secret without
 disrupting the others.

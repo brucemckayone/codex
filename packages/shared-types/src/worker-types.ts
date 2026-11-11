@@ -234,11 +234,6 @@ export type Bindings = {
   STRIPE_WEBHOOK_SECRET_CONNECT?: string;
 
   /**
-   * Stripe webhook signing secret for customer events
-   */
-  STRIPE_WEBHOOK_SECRET_CUSTOMER?: string;
-
-  /**
    * Stripe webhook signing secret for booking/checkout events
    */
   STRIPE_WEBHOOK_SECRET_BOOKING?: string;

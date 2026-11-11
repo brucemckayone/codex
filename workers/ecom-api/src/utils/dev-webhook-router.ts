@@ -45,20 +45,29 @@ const EVENT_ROUTES: Array<{
     },
   },
   {
-    // customer.subscription.* and invoice.* → subscription handler
+    // customer.subscription.*, invoice.*, product.* and price.* → subscription
+    // handler. Production's subscription endpoint takes product.updated,
+    // price.created and price.updated: a Dashboard edit to a tier's Product
+    // syncs back, and a Dashboard Price is logged as drift (Codex-2hxff.24).
     match: (type) =>
-      type.startsWith('customer.subscription.') || type.startsWith('invoice.'),
+      type.startsWith('customer.subscription.') ||
+      type.startsWith('invoice.') ||
+      type.startsWith('product.') ||
+      type.startsWith('price.'),
     label: 'Subscription',
     handler: handleSubscriptionWebhook,
   },
   {
-    // charge.*, refund.* and payment_intent.* → payment handler. refund.updated
-    // and refund.failed claw back a refund that settled after charge.refunded,
-    // and record a failed one for support (Codex-2hxff.8).
+    // charge.*, refund.*, payment_intent.* and radar.* → payment handler.
+    // refund.updated and refund.failed claw back a refund that settled after
+    // charge.refunded, and record a failed one for support (Codex-2hxff.8).
+    // radar.early_fraud_warning.created reaches it through production's
+    // dispute endpoint, which logs it (Codex-2hxff.24).
     match: (type) =>
       type.startsWith('charge.') ||
       type.startsWith('refund.') ||
-      type.startsWith('payment_intent.'),
+      type.startsWith('payment_intent.') ||
+      type.startsWith('radar.'),
     label: 'Payment',
     handler: handlePaymentWebhook,
   },

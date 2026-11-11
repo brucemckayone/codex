@@ -10,11 +10,15 @@
  * - Types: Purchase records and service types
  *
  * @example
- * import { PurchaseService, calculateRevenueSplit } from '@codex/purchase';
+ * import {
+ *   PurchaseService,
+ *   calculateRevenueSplit,
+ *   createStripeClient,
+ * } from '@codex/purchase';
  * import { createDbClient } from '@codex/database';
- * import Stripe from 'stripe';
  *
- * const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+ * // Always the factory: it pins the API version. Never `new Stripe(...)`.
+ * const stripe = createStripeClient(c.env.STRIPE_SECRET_KEY);
  * const purchaseService = new PurchaseService(
  *   { db: createDbClient(c.env), environment: 'production' },
  *   stripe
@@ -87,6 +91,18 @@ export {
   stripeErrorCode,
   toStripeTime,
 } from './services/checkout-reservations';
+// Which refunds count as the buyer's money back (Codex-3xnta)
+export {
+  countsAgainstCharge,
+  disputesOfCharge,
+  disputesOfPurchase,
+  refundsOfCharge,
+  refundsOfPurchase,
+  STANDING_REFUND_STATUSES,
+  settledElsewhere,
+  settledElsewhereCentsIn,
+  takenBack,
+} from './services/counted-refunds';
 // Entitlement + auto-enrollment write seam (Codex-2pryk WP-6)
 export {
   autoEnroll,
@@ -121,7 +137,6 @@ export {
   PurchaseService,
   type RefundAccessKept,
   type RestoredRefundAccess,
-  STANDING_REFUND_STATUSES,
   supportRequesterOf,
 } from './services/purchase-service';
 // Customer resolution (Codex-49gev)

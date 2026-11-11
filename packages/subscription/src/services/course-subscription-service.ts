@@ -123,7 +123,10 @@ import {
   createKeyRefusal,
   stripeRefusalDetail,
 } from './create-key-refusal';
-import { alertIfCreditPaid } from './credit-paid-invoice';
+import {
+  alertCreditNotReturned,
+  alertIfCreditPaid,
+} from './credit-paid-invoice';
 import {
   platformWriteMetadata,
   recordPlanPriceChange,
@@ -1975,7 +1978,11 @@ export class CourseSubscriptionService extends BaseService {
    * its cause, so Stripe redelivers the event through its retry window, as
    * `PurchaseService.refundDuplicatePayment` does. One that never clears is
    * held for support (owner decision: a failed refund is held for support).
+   *
+   * It mirrors the tier service's `settleDuplicate` by design, so fallow
+   * reports the pair as a clone; what they share is `cancelAndRefundDuplicate`.
    */
+  // fallow-ignore-next-line code-duplication
   private async settleDuplicate(row: CourseSubscription): Promise<void> {
     if (row.duplicateSettledAt) return;
     let refundedInvoices: number;
@@ -1983,6 +1990,8 @@ export class CourseSubscriptionService extends BaseService {
       ({ refundedInvoices } = await cancelAndRefundDuplicate(this.stripe, {
         stripeSubscriptionId: row.stripeSubscriptionId,
         environment: this.environment,
+        alertUnreturnedCredit: (invoice) =>
+          this.alertUnreturnedCredit(row, invoice, 'duplicate'),
       }));
     } catch (error) {
       this.obs.error(
@@ -2024,13 +2033,23 @@ export class CourseSubscriptionService extends BaseService {
    * others; subscription checkouts don't restrict `payment_method_types`)
    * can be paid after the settle found nothing to refund. The key is the one
    * `cancelAndRefundDuplicate` uses, so a refund it made is not made twice. A
-   * failure is retryable, as in {@link settleDuplicate}.
+   * failure is retryable, as in {@link settleDuplicate}. What customer credit
+   * paid of it is not given back, and support is told (Codex-2hxff.98).
    */
   private async refundDuplicateInvoice(
     row: CourseSubscription,
     invoice: Stripe.Invoice
   ): Promise<void> {
-    if (!invoice.id || invoice.amount_paid <= 0) return;
+    if (!invoice.id) return;
+    if (invoice.amount_paid > 0) await this.refundDuplicateCharge(row, invoice);
+    await this.alertUnreturnedCredit(row, invoice, 'duplicate');
+  }
+
+  /** The card part of a duplicate's paid invoice, refunded in full. */
+  private async refundDuplicateCharge(
+    row: CourseSubscription,
+    invoice: Stripe.Invoice
+  ): Promise<void> {
     try {
       const chargeId = await resolveInvoiceCharge(this.stripe, invoice);
       if (!chargeId) {
@@ -2059,6 +2078,31 @@ export class CourseSubscriptionService extends BaseService {
         { courseSubscriptionId: row.id }
       );
     }
+  }
+
+  /**
+   * A paid invoice of a course subscription we cancel and refund by card:
+   * what customer credit paid of it is not given back, so support is told,
+   * once per invoice (Codex-2hxff.98). Called after the card refund. Never
+   * throws.
+   */
+  private async alertUnreturnedCredit(
+    row: CourseSubscription,
+    invoice: Stripe.Invoice,
+    cause: 'duplicate' | 'revived'
+  ): Promise<void> {
+    await alertCreditNotReturned(
+      { stripe: this.stripe, obs: this.obs },
+      invoice,
+      {
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        subscriptionId: row.id,
+        organizationId: row.organizationId,
+        userId: row.userId,
+        kind: 'course',
+        cause,
+      }
+    );
   }
 
   /**
@@ -2218,7 +2262,9 @@ export class CourseSubscriptionService extends BaseService {
    * answers that the charge is refunded already) and then writes the row.
    *
    * `revivingInvoice` is the paid invoice, or (from `updated`) the
-   * subscription's `latest_invoice`, refunded only if it was paid.
+   * subscription's `latest_invoice`, refunded only if it was paid. What
+   * customer credit paid of it is not given back: support is told after the
+   * Stripe steps (Codex-2hxff.98).
    */
   private async endRevived(
     row: CourseSubscription,
@@ -2226,11 +2272,13 @@ export class CourseSubscriptionService extends BaseService {
     revivingInvoice: Stripe.Invoice | string | null
   ): Promise<void> {
     let refundedInvoiceId: string | null = null;
+    let paidInvoice: Stripe.Invoice | null = null;
     try {
       const invoice =
         typeof revivingInvoice === 'string'
           ? await this.stripe.invoices.retrieve(revivingInvoice)
           : revivingInvoice;
+      if (invoice?.id && invoice.status === 'paid') paidInvoice = invoice;
       if (invoice?.id && invoice.status === 'paid' && invoice.amount_paid > 0) {
         const chargeId = await resolveInvoiceCharge(this.stripe, invoice);
         if (!chargeId) {
@@ -2279,6 +2327,11 @@ export class CourseSubscriptionService extends BaseService {
         'Revived course subscription refund failed; it will be retried',
         { courseSubscriptionId: row.id }
       );
+    }
+    // What credit paid of the reviving invoice goes back to no one
+    // (Codex-2hxff.98).
+    if (paidInvoice) {
+      await this.alertUnreturnedCredit(row, paidInvoice, 'revived');
     }
 
     const at = new Date();

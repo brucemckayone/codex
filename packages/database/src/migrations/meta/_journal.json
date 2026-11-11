@@ -904,6 +904,13 @@
       "when": 1794233912950,
       "tag": "0128_publish_when_ready",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1794274864217,
+      "tag": "0129_email_log_index_and_buyer_told_check",
+      "breakpoints": true
     }
   ]
 }

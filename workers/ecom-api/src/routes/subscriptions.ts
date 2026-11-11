@@ -202,8 +202,9 @@ subscriptions.get(
  *
  * The returned `prorationDate` MUST be passed back to /change-tier so the
  * commit-time proration matches the preview to the penny. A switch into
- * yearly billing also returns a `quote`, passed back as well: change-tier re-checks it
- * before the write (Codex-2hxff.96).
+ * yearly billing also returns a `quote`, passed back as well: change-tier
+ * re-checks it before the write (Codex-2hxff.96). So does a plan change that
+ * leaves yearly billing (C(b)) when it charges now (Codex-2hxff.103).
  */
 subscriptions.post(
   '/preview-tier-change',

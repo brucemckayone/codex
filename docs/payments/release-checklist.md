@@ -680,3 +680,137 @@ COMMIT;
 
 It returns one line per id. A missing line means the id was mistyped, isn't a
 late win, or is already marked: check it before going on.
+
+---
+
+## The email log index, a told-buyer CHECK and the payee pin's link (migration `0129`)
+
+`0129` is drizzle-kit DDL with two hand edits, one statement taken out and
+one moved. It holds:
+
+- an index on `email_audit_logs (recipient_email, template_name, created_at)`,
+  for the sweeps' "did this email go?" checks (`Codex-2hxff.102`). It is built
+  without `CONCURRENTLY`, because the runner applies each file as one
+  transaction, so inserts into the email log wait while it builds and until
+  the file commits: a moment on today's table. Disputes are locked from the
+  CHECK's scan until the commit. Organisation and user reads and writes wait
+  only for the commit, or for up to 5 s if the drop has to wait behind a long
+  transaction (then the file fails and nothing applies): the file drops the
+  pin's foreign key, which locks both tables, as its last statement (moved
+  there by hand);
+- CHECK `check_disputes_buyer_told`: a buyer told of a late win needs a late
+  win (`Codex-h301h`). Its preflight in
+  `packages/database/scripts/migration-preflight.ts` refuses the whole run,
+  applying nothing, if any row breaks it;
+- the drop of the foreign key on `organizations.primary_connect_account_user_id`,
+  the retired payee pin (`Codex-2hxff.36`). **The column itself stays this
+  release.** The workers still running while the deploy migrates list it in
+  every organisation query, so dropping it now would fail every org page until
+  they redeploy. Its generated `DROP COLUMN` was taken out of the SQL by hand
+  for that reason (owner, 2026-11-09: "Two steps"); the snapshot already
+  records it gone, so no `generate` after `0129` re-emits it. [R21](#r21--after-this-release-is-live-drop-the-payee-pin-column)
+  drops it.
+
+**Renumbering** (another session's migration of the same number landed
+first). This file was `0128` until 2026-11-10, when studio E2's
+`0128_publish_when_ready` landed first and these steps renumbered it to `0129`.
+The steps name `0128` and `0129` as they ran then; if another clash comes
+before this merges, run them again with the new numbers. A snapshot
+holds the whole schema, so renaming the file alone leaves the next `generate`
+re-emitting the other file's changes, and regenerating alone writes both hand
+edits out. Do both halves instead:
+
+1. Before bringing in the branch that holds the other `0128`, note this
+   branch's head: `PRE=$(git rev-parse HEAD)`. Steps 3 and 4 read this file
+   from `PRE`, because once the conflict below is resolved `HEAD` may no
+   longer hold it. Both branches add `meta/0128_snapshot.json` and a journal
+   entry, so the rebase or merge conflicts on `meta/0128_snapshot.json` and
+   `meta/_journal.json`: take the other branch's side of both, and delete this
+   file. Its snapshot and journal entry go with them.
+2. Run `pnpm --filter @codex/database db:gen:drizzle --name email_log_index_and_buyer_told_check`. It writes a correct snapshot on top of the other `0128`.
+3. Before overwriting, diff the regenerated `.sql` against ours: `diff <(git show "$PRE":packages/database/src/migrations/0128_email_log_index_and_buyer_told_check.sql) packages/database/src/migrations/0129_email_log_index_and_buyer_told_check.sql`. The only differences may be the two hand edits. Anything else means the two schemas overlap, so stop: delete the new `0129` `.sql` and snapshot, and restore the journal (`git checkout -- packages/database/src/migrations/meta/_journal.json`). Ours stays recoverable from `PRE`.
+4. Overwrite the new `.sql` with this file's committed text (`git show "$PRE":…0128_email_log_index_and_buyer_told_check.sql`).
+5. Run `generate` once more: it must find no schema changes. If it writes a file, delete it, restore the journal as in step 3, and stop.
+6. Carry the new name everywhere the old one is named:
+   - the `migration` of the `MIGRATION_PREFLIGHTS` entry (its "names migrations that exist" test fails until you do);
+   - the "0128" mentions in `migration-preflight.ts`, `dispute-late-win-checks.test.ts`, the guard tests' comments and this section;
+   - every local database that already applied the old name, since the runner records a file by its name and would run the renamed one again (its `CREATE INDEX` then fails, and that database's migrate is stuck): `UPDATE "__drizzle_migrations" SET hash = '0129_email_log_index_and_buyer_told_check.sql' WHERE hash = '0128_email_log_index_and_buyer_told_check.sql';`. Production and CI never ran the old name; neither did the dev Neon database, unless `seed-dev-db` (manual dispatch only) was run from this branch.
+
+Two tests in `packages/database/scripts/__tests__/migration-preflight.test.ts`
+fail until both hand edits are back: no migration drops the pin column, and
+the pin's foreign key drop is its file's last statement.
+
+From this release the migration runner bounds every file's lock wait at 5 s
+(`Codex-vliwn`), and applies each file and the row recording it in one
+transaction. If the deploy's migrate step fails with `canceling statement
+due to lock timeout`, nothing in that file was applied or recorded: find the long
+transaction holding the table in `pg_stat_activity`, let it end, and re-run
+the deploy.
+
+### R20 — before the deploy: no told buyer without a late win
+
+```sql
+SELECT count(*) FROM disputes
+ WHERE buyer_told_at IS NOT NULL AND late_won_at IS NULL;
+```
+
+It must be 0, or the preflight stops the deploy at its migrate step. Only the
+late-win email's claim writes `buyer_told_at`, and it requires a late win, so a
+row here was edited by hand: stop and ask the owner.
+
+If production's last migration is before `0126`, the columns arrive with this
+deploy, no row can break the CHECK, and the preflight skips it. Run this query
+only on a database at `0126` or later.
+
+### R21 — after this release is live: drop the payee pin column
+
+Only once this release's deploy has finished and every worker has updated, the
+follow-up release's custom migration drops the column:
+
+```sql
+ALTER TABLE "organizations" DROP COLUMN IF EXISTS "primary_connect_account_user_id";
+```
+
+Before merging it, confirm that nothing is set:
+
+```sql
+SELECT count(*) AS pinned FROM organizations
+ WHERE primary_connect_account_user_id IS NOT NULL;
+```
+
+That count was 0 of 1 org on 2026-11-09. On the same day, the audit of orgs
+whose pin differed from their active owner (whose org-share payee changed when
+payee resolution stopped reading the pin) returned no rows. Nobody's money
+moved.
+
+### Rollback
+
+All three stay on a workers rollback. The old workers never read the index
+or the CHECK, never write `buyer_told_at` without a late win, and no longer
+read or write the pin: drizzle doesn't need the foreign key. Don't run R21's
+migration while a rollback past this release is possible.
+
+---
+
+## The retired customer webhook (`Codex-2hxff.24`)
+
+This release removes ecom-api's `/webhooks/stripe/customer` route and its
+`STRIPE_WEBHOOK_SECRET_CUSTOMER` secret from the code, workflows and docs. The
+route only acknowledged events; nothing read them. Production's customer
+endpoint at Stripe is already disabled, so no delivery reaches the removed
+route. **Re-enabling that endpoint now gets 404s and Stripe's retries.**
+
+### R22 — after the deploy: delete the leftovers (owner)
+
+The deploy uploads secrets but never deletes them, so three leftovers stay
+until someone removes them:
+
+1. The worker secret, from `workers/ecom-api`:
+   `npx wrangler secret delete STRIPE_WEBHOOK_SECRET_CUSTOMER --env production`
+2. The disabled endpoint `we_1SO1fH7wyGmo4sh612lL8e29`, in the Stripe
+   Dashboard (Developers → Webhooks).
+3. The GitHub secret `STRIPE_WEBHOOK_SECRET_CUSTOMER`, in the `production`,
+   `preview` and `test` environments.
+
+Nothing reads any of them, so the order doesn't matter, and leaving them
+does no harm beyond clutter.

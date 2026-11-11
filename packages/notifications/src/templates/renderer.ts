@@ -242,11 +242,6 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'roleName',
     'roleLabel',
     'orgUrl',
-    // Transitional (Codex-2hxff.83): the stock row production has uses these
-    // until migration 0117 rewrites it (Codex-2hxff.84). Drop them with the
-    // sender's copies once it has.
-    'acceptUrl',
-    'expiryDays',
   ],
   'member-role-changed': ['userName', 'orgName', 'oldRole', 'newRole'],
   'member-removed': ['userName', 'orgName'],
@@ -564,11 +559,10 @@ export function getAllowedTokens(templateName: string): string[] {
 /**
  * Tokens whose copy reads well when the data lacks them: a proposal sent
  * with no note, a refund with no access note. Any OTHER allowed token the
- * data lacks renders blank (an empty button link, "expires in  days"), and
- * NotificationsService warns it. A field that is optional in its data schema
- * is not enough on its own: `acceptUrl` is optional only so its sender can
- * stop passing it before notifications-api deploys, and a row still using it
- * would then ship a dead button (Codex-2hxff.83).
+ * data lacks renders blank (an empty button link, a sentence with a gap),
+ * and NotificationsService warns it. A field that is optional in its data
+ * schema is not enough on its own: optional says the sender may omit it, not
+ * that a template using it still reads well without it.
  */
 const MAY_RENDER_BLANK: Record<string, readonly string[]> = {
   'refund-processed': ['accessNote'],

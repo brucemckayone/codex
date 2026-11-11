@@ -3697,13 +3697,8 @@ describe('SubscriptionService', () => {
       expect(results.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("sends the org's four display fields, never its payee id (Codex-kk6zx)", async () => {
+    it("sends only the org's four display fields (Codex-kk6zx)", async () => {
       const { org, tier1 } = await createFullOrg('mine-org-fields');
-      const payee = takeFirst(await seedTestUsers(db, 1), 'payee id');
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: payee })
-        .where(eq(organizations.id, org.id));
       const subscriber = takeFirst(await seedTestUsers(db, 1), 'subscriber');
       await db
         .insert(subscriptions)
@@ -4457,7 +4452,9 @@ describe('SubscriptionService', () => {
       );
 
       // Real webhook shape: no `payments` field at all.
-      const realChargeId = 'ch_resolved_via_expand';
+      // Unique per run: a charge already split records nothing on a re-run
+      // against a kept database (Codex-2hxff.101).
+      const realChargeId = `ch_resolved_via_expand_${createUniqueSlug('c')}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 499,
         parent: {
@@ -4507,7 +4504,7 @@ describe('SubscriptionService', () => {
       );
 
       const piId = 'pi_with_latest_charge';
-      const chargeViaPi = 'ch_recovered_via_pi';
+      const chargeViaPi = `ch_recovered_via_pi_${createUniqueSlug('c')}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 499,
         parent: {
@@ -4563,7 +4560,7 @@ describe('SubscriptionService', () => {
       );
 
       const piId = 'pi_pending_latest_charge';
-      const chargeViaList = 'ch_recovered_via_list';
+      const chargeViaList = `ch_recovered_via_list_${createUniqueSlug('c')}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 499,
         parent: {

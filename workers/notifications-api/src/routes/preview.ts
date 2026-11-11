@@ -72,8 +72,10 @@ app.post(
         ctx.input.params.id
       );
 
-      // Check access using template service
-      const hasAccess = await ctx.services.templates.checkTemplateAccess(
+      // A test send goes out in the template's org brand: the send-time
+      // check. A creator template naming an org needs a team role in it; an
+      // org's own template needs its owner or admin (Codex-tgkgb).
+      const hasAccess = await ctx.services.templates.checkTemplateSendAccess(
         template,
         ctx.user.id,
         ctx.user.role
@@ -83,13 +85,24 @@ app.post(
         throw new TemplateAccessDeniedError(ctx.input.params.id);
       }
 
-      // Use notification service to send email
+      // An org-branded creator template goes only to the sender's own
+      // address: the signed-in user's as stored, never one the body names.
+      const to = ctx.services.templates.requireTestSendRecipient(
+        template,
+        ctx.input.body.recipientEmail,
+        ctx.user.email
+      );
+
+      // Use notification service to send email. A test send: the caller's
+      // data renders the email but never reaches the email log, where the
+      // sweeps would read its keys as one of their own sends.
       const result = await ctx.services.notifications.sendEmail({
-        to: ctx.input.body.recipientEmail,
+        to,
         templateName: template.name,
         data: ctx.input.body.data,
         organizationId: template.organizationId,
         creatorId: template.creatorId,
+        testSend: true,
       });
 
       return result;

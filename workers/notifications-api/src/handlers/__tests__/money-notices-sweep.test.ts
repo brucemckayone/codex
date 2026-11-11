@@ -36,6 +36,7 @@ import {
   type MoneyMailerParams,
   runMoneyNoticesSweep,
 } from '../money-notices-sweep';
+import { SENDS_TIME_BUDGET_MS } from '../send-limits';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -375,6 +376,11 @@ describe('runMoneyNoticesSweep', { timeout: 60_000 }, () => {
     const [notice] = await noticesOf(tom.id);
     expect(notice?.failedAt).not.toBeNull();
     expect(notice?.sentAt).toBeNull();
+    // A refusal, so the email did not go (Codex-2hxff.100).
+    expect(obsLog.error).toHaveBeenCalledWith(
+      'money notice send failed; it is not retried',
+      expect.objectContaining({ moneyNoticeId: notice?.id, outcome: 'failed' })
+    );
 
     const retry = sweep(new Date(NOV_1.getTime() + DAY));
     await retry.run;
@@ -784,5 +790,199 @@ describe('runMoneyNoticesSweep', { timeout: 60_000 }, () => {
     await tomorrow.run;
     // The reminded two are left out of the page, so the cap reaches the third.
     expect(reached(tomorrow.mailer)).toEqual([0, 0, 1]);
+  });
+
+  // Codex-2hxff.100. These runs are set in 2020, with money waiting since
+  // 2019, so the reminders page holds this test's people alone; the other
+  // kinds are held unless a test needs them.
+  const FEB_2020 = new Date('2020-02-01T08:00:00Z');
+  const DEC_2019 = new Date('2019-12-01T10:00:00Z');
+  const remindersOnly = async (name: string) => name === 'payouts-waiting';
+
+  it('a send that outlasts its timeout is cut off, and failed as an error is: not sent again', async () => {
+    const kim = await person('Kim Slow');
+    await waitingRow(kim.id, hollowOak, 2500, DEC_2019);
+    // notifications-api answering after 2 s, unless the request is aborted.
+    let aborted = false;
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) => {
+        if (!String(input).startsWith('http://notifications.test/')) {
+          return realFetch(input, init);
+        }
+        return new Promise<Response>((resolve, reject) => {
+          const answered = setTimeout(
+            () => resolve(Response.json({ data: { success: true } })),
+            2_000
+          );
+          init?.signal?.addEventListener('abort', () => {
+            aborted = true;
+            clearTimeout(answered);
+            reject(init.signal?.reason);
+          });
+        });
+      });
+    try {
+      await runMoneyNoticesSweep({
+        db,
+        obs,
+        environment: 'development',
+        workerSecret: 'test-secret',
+        notificationsUrl: 'http://notifications.test',
+        now: FEB_2020,
+        sendTimeoutMs: 50,
+        templateExists: remindersOnly,
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+    // Cut off by its own timeout, not answered.
+    expect(aborted).toBe(true);
+    const [notice] = await noticesOf(kim.id);
+    expect(notice?.failedAt).not.toBeNull();
+    expect(notice?.sentAt).toBeNull();
+    // Not a refusal: the email may have gone, and the log says so.
+    expect(obsLog.error).toHaveBeenCalledWith(
+      'money notice send timed out; it may have gone, and it is not retried',
+      expect.objectContaining({
+        moneyNoticeId: notice?.id,
+        outcome: 'timed_out_may_have_gone',
+      })
+    );
+  });
+
+  it('a timed-out send whose fetch rejects with a plain AbortError, not the TimeoutError, is still logged as a send that may have gone', async () => {
+    const kim = await person('Kim AbortError');
+    await waitingRow(kim.id, hollowOak, 2500, DEC_2019);
+    // The runtime's fetch may reject an aborted request with a generic
+    // AbortError rather than the signal's own reason. This stub does that.
+    let aborted = false;
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) => {
+        if (!String(input).startsWith('http://notifications.test/')) {
+          return realFetch(input, init);
+        }
+        return new Promise<Response>((resolve, reject) => {
+          const answered = setTimeout(
+            () => resolve(Response.json({ data: { success: true } })),
+            2_000
+          );
+          init?.signal?.addEventListener('abort', () => {
+            aborted = true;
+            clearTimeout(answered);
+            reject(
+              new DOMException('The operation was aborted.', 'AbortError')
+            );
+          });
+        });
+      });
+    try {
+      await runMoneyNoticesSweep({
+        db,
+        obs,
+        environment: 'development',
+        workerSecret: 'test-secret',
+        notificationsUrl: 'http://notifications.test',
+        now: FEB_2020,
+        sendTimeoutMs: 50,
+        templateExists: remindersOnly,
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+    expect(aborted).toBe(true);
+    const [notice] = await noticesOf(kim.id);
+    expect(notice?.failedAt).not.toBeNull();
+    expect(notice?.sentAt).toBeNull();
+    expect(obsLog.error).toHaveBeenCalledWith(
+      'money notice send timed out; it may have gone, and it is not retried',
+      expect.objectContaining({
+        moneyNoticeId: notice?.id,
+        outcome: 'timed_out_may_have_gone',
+      })
+    );
+  });
+
+  it('a run past its send budget claims no one more: nobody is left claimed and unsent, and the rest go the next morning', async () => {
+    const pair = [await person('Ada Budget'), await person('Ben Budget')];
+    for (const who of pair) await waitingRow(who.id, hollowOak, 1800, DEC_2019);
+    // The budget is spent by the first send.
+    let clockMs = 0;
+    const mailer = vi.fn(async () => {
+      clockMs = SENDS_TIME_BUDGET_MS;
+    });
+    const result = await runMoneyNoticesSweep({
+      db,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: FEB_2020,
+      mailer,
+      templateExists: remindersOnly,
+      clock: () => clockMs,
+    });
+
+    expect(result).toMatchObject({ remindersSent: 1, budgetSpent: true });
+    expect(mailer).toHaveBeenCalledOnce();
+    const notices = await Promise.all(pair.map((who) => noticesOf(who.id)));
+    const reached = notices.findIndex((rows) => rows.length > 0);
+    // The one reached was sent; the other was never claimed.
+    expect(reached).toBeGreaterThanOrEqual(0);
+    expect(notices[reached]?.[0]?.sentAt).toBeInstanceOf(Date);
+    expect(notices[1 - reached]).toEqual([]);
+    expect(obsLog.warn).toHaveBeenCalledWith(
+      'money sweep: the send budget ran out; the rest go tomorrow',
+      expect.objectContaining({ remindersSent: 1 })
+    );
+
+    const nextMorning = sweep(new Date(FEB_2020.getTime() + DAY), {
+      templateExists: remindersOnly,
+    });
+    await nextMorning.run;
+    expect(callsFor(nextMorning.mailer, pair[reached]?.id ?? '')).toEqual([]);
+    expect(
+      callsFor(nextMorning.mailer, pair[1 - reached]?.id ?? '')
+    ).toHaveLength(1);
+  });
+
+  it('the send budget counts from the wake: spent by the sweep before, no kind claims anything', async () => {
+    const waiting = await person('Wes Waiting');
+    await waitingRow(waiting.id, hollowOak, 2200, SEP_14);
+    const below = await person('Bea Below');
+    await negativeBalance(below.id, {
+      availableCents: -900,
+      pendingCents: 0,
+      checkedAt: new Date('2026-10-27T08:00:00Z'),
+      negativeSince: new Date('2026-10-27T08:00:00Z'),
+    });
+    const ended = await endedEpisode('Eve Ended', {
+      clearedReason: 'recovered',
+      availableCents: 400,
+      clearedOwedCents: 840,
+    });
+    const mailer = vi.fn(async () => {});
+    const result = await runMoneyNoticesSweep({
+      db,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: new Date('2026-10-29T08:00:00Z'),
+      mailer,
+      templateExists: async () => true,
+      wakeStartedAt: Date.now() - SENDS_TIME_BUDGET_MS,
+    });
+
+    expect(result.budgetSpent).toBe(true);
+    expect(mailer).not.toHaveBeenCalled();
+    expect(await noticesOf(waiting.id)).toEqual([]);
+    expect(await noticesOf(below.id)).toEqual([]);
+    expect((await noticesOf(ended.id)).map((n) => n.kind)).toEqual([
+      'balance_below_zero',
+    ]);
   });
 });
