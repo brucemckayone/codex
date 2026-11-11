@@ -295,8 +295,15 @@
   // Preserve the unsaved-changes guard the retired overlay used to provide.
   // A confirmed Discard clears the tab's draft too: leaving keeps it otherwise,
   // for the next open to offer (Codex-0keaj).
-  beforeNavigate(({ cancel }) => {
+  beforeNavigate(({ type, cancel }) => {
     if (!brandEditor.isDirty) return;
+    // A reload, tab close or typed URL: cancelling shows the browser's own
+    // prompt, and the draft stays for the reload it exists for. confirm() is
+    // not called there (browsers block it during unload, but may not).
+    if (type === 'leave') {
+      cancel();
+      return;
+    }
     if (confirm('You have unsaved brand changes. Discard?')) {
       brandEditor.discard();
     } else {

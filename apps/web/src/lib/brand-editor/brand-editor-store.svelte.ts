@@ -67,7 +67,7 @@ function storedColour(value: string | null): string | null {
  * - an empty dark token map is not sent, so it reads back as null, and an
  *   empty token map reads back as `{}`;
  * - an unset hero layout reads back as 'default';
- * - stored JSON does not keep key order.
+ * - key order is ignored, as a precaution: the stored text keeps it.
  *
  * The logo is left out. Save never sends it (the logo control commits on
  * pick), so the server's is always current, and a draft never brings one.
@@ -187,6 +187,8 @@ const breadcrumbs = $derived(getBreadcrumb(state.level));
 // root — it runs at import time, outside any component lifecycle.
 
 let effectsInitialized = false;
+/** A failed draft write is logged once per page load, not once per edit. */
+let writeFailureLogged = false;
 
 function initEffects() {
   if (effectsInitialized) return;
@@ -227,11 +229,17 @@ function initEffects() {
       };
       try {
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(row));
-      } catch {
+      } catch (error) {
         // sessionStorage full or unavailable: crash recovery is best-effort.
         // Drop the older row, which a reload would restore as if it were all
-        // of this work.
+        // of this work, and say once that recovery is off for this tab.
         clearStorage();
+        if (!writeFailureLogged) {
+          writeFailureLogged = true;
+          logger.warn('Brand editor draft could not be kept', {
+            reason: errorName(error),
+          });
+        }
       }
     });
   });
@@ -265,16 +273,28 @@ function open(orgId: string, saved: BrandEditorState): RecoveryOutcome {
 
   try {
     return recover(orgId, saved);
-  } catch {
-    return unusable('not JSON');
+  } catch (error) {
+    // Not expected: the row is parsed and checked first. The saved brand
+    // stands, and the log says why.
+    return unusable(errorName(error));
   }
 }
 
+/** An error's name, for a log: a storage DOMException is not always an Error. */
+function errorName(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'name' in error) {
+    return typeof error.name === 'string' ? error.name : 'unknown';
+  }
+  return 'unknown';
+}
+
 /**
- * A row this editor cannot use. It held unsaved work (a row is written only
- * then), so it is reported as discarded, and the page says so, rather than
- * dropped without a word. Logged, because a shape change between releases
- * would otherwise turn recovery off for everyone unseen.
+ * A row this editor cannot use. A row is written only while something is
+ * unsaved (the previous release also wrote one on every open, so just after
+ * a deploy this can fire once for a row with nothing in it), so it is
+ * reported as discarded, and the page says so, rather than dropped without a
+ * word. Logged, because a shape change between releases would otherwise turn
+ * recovery off for everyone unseen.
  */
 function unusable(reason: string): RecoveryOutcome {
   clearStorage();
@@ -294,9 +314,14 @@ function unusable(reason: string): RecoveryOutcome {
  */
 function recover(orgId: string, saved: BrandEditorState): RecoveryOutcome {
   if (!browser) return 'none';
-  const raw = sessionStorage.getItem(STORAGE_KEY);
+  const raw = storedRow();
   if (!raw) return 'none';
-  const row: unknown = JSON.parse(raw);
+  let row: unknown;
+  try {
+    row = JSON.parse(raw);
+  } catch {
+    return unusable('not JSON');
+  }
   if (!isRecoveryRow(row)) return unusable('not a brand draft');
   if (row.orgId !== orgId) return 'none';
   const baseline = fingerprint(saved);
@@ -609,6 +634,16 @@ function markSaved(sent: BrandEditorState): void {
   if (!state.pending) return;
   state.saved = $state.snapshot(sent) as BrandEditorState;
   clearStorage();
+}
+
+/** The tab's row as stored; null when there is none or storage is blocked. */
+function storedRow(): string | null {
+  try {
+    return sessionStorage.getItem(STORAGE_KEY);
+  } catch {
+    // Blocked storage holds no draft, so there is nothing to offer.
+    return null;
+  }
 }
 
 function clearStorage(): void {

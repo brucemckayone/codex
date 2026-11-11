@@ -360,13 +360,32 @@ describe('brandEditor — crash recovery (Codex-0keaj)', () => {
     flushSync();
     expect(sessionStorage.getItem(KEY)).not.toBeNull();
 
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('full', 'QuotaExceededError');
     });
     brandEditor.updateField('radius', 1);
     flushSync();
+    brandEditor.updateField('radius', 1.5);
+    flushSync();
 
     expect(sessionStorage.getItem(KEY)).toBeNull();
+    // Said once that recovery is off for this tab, not once per edit.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('Brand editor draft could not be kept', {
+      reason: 'QuotaExceededError',
+    });
+  });
+
+  it('blocked storage has no draft to offer, and says nothing', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+
+    expect(brandEditor.open(ORG_ID, makeSaved())).toBe('none');
+    expect(brandEditor.pending?.primaryColor).toBe('#3B82F6');
+    expect(warn).not.toHaveBeenCalled();
   });
 
   describe('a brand this tab saved matches the copy the server hands back', () => {
@@ -415,14 +434,6 @@ describe('brandEditor — crash recovery (Codex-0keaj)', () => {
       [
         'an empty dark token map',
         () => brandEditor.updateField('darkTokenOverrides', {}),
-      ],
-      [
-        'token keys in another order',
-        () =>
-          brandEditor.updateField('tokenOverrides', {
-            'shadow-scale': '2',
-            'body-weight': '500',
-          }),
       ],
     ];
 

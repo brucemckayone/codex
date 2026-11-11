@@ -111,10 +111,12 @@ const settle = async () => {
 };
 
 /** The page's leave guard, as it registered it with beforeNavigate. */
-function leaveGuard(): (navigation: { cancel: () => void }) => void {
+type Navigation = { type?: string; cancel: () => void };
+
+function leaveGuard(): (navigation: Navigation) => void {
   const guard = vi.mocked(beforeNavigate).mock.calls.at(-1)?.[0];
   expect(guard).toBeDefined();
-  return guard as unknown as (navigation: { cancel: () => void }) => void;
+  return guard as unknown as (navigation: Navigation) => void;
 }
 
 describe('Save', () => {
@@ -158,6 +160,20 @@ describe('leaving with unsaved changes', () => {
     expect(cancel).not.toHaveBeenCalled();
     expect(brandEditor.isDirty).toBe(false);
     expect(sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  test('a reload leaves the asking to the browser and keeps the draft', () => {
+    mountEdited();
+    // Were the browser to show it, OK would throw the draft away.
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const cancel = vi.fn();
+
+    leaveGuard()({ type: 'leave', cancel });
+    flushSync();
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalled();
+    expect(sessionStorage.getItem(KEY)).not.toBeNull();
   });
 
   test('declining stays on the page with the draft kept', () => {

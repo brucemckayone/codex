@@ -321,6 +321,25 @@ describe('a draft from an earlier session', () => {
     expect(warning).toHaveBeenCalledWith(m.studio_brand_recovery_discarded());
   });
 
+  test('a draft the admin never saw, because the read failed, waits for the next open', () => {
+    const info = vi.spyOn(toast, 'info');
+    editThenReload();
+
+    // The read fails, and the admin goes elsewhere before Retry.
+    mountFailed();
+    if (component) unmount(component);
+    component = null;
+    reset();
+    expect(sessionStorage.getItem(KEY)).not.toBeNull();
+
+    mountPage();
+    brandingRemote().land(BRANDING);
+    flushSync();
+
+    expect(brandEditor.pending?.primaryColor).toBe('#111111');
+    expect(info).toHaveBeenCalledWith(m.studio_brand_recovery_restored());
+  });
+
   test('nothing to restore says nothing', () => {
     const info = vi.spyOn(toast, 'info');
     const warning = vi.spyOn(toast, 'warning');
