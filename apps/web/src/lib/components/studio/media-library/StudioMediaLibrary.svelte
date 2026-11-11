@@ -96,7 +96,7 @@
   const list = new PagedList({
     args: (pageNumber) => libraryListArgs(view, search, pageNumber),
     read: listMedia,
-    onMoreFailed: (error) => logReadFailure('studio_media.show_more_failed', error),
+    onMoreFailed: (error, page) => logReadFailure('studio_media.show_more_failed', error, { page }),
   });
   const summary = getMediaSummary();
 
@@ -157,7 +157,8 @@
   // ── Header ────────────────────────────────────────────────────────────
   const countText = $derived.by(() => {
     if (narrowed) {
-      if (!sums) return null;
+      // Only this view's own count: a held list's is another view's.
+      if (!sums || list.total === null) return null;
       const label = soleFacetLabel(view);
       const shown = m.media_library_count_narrowed({ shown: list.total, total: sums.total });
       return label ? `${shown} · ${label}` : shown;
@@ -167,7 +168,7 @@
       if (sums.total === 1) return m.media_library_count_one({ size });
       return size ? m.media_library_count({ count: sums.total, size }) : m.media_library_items({ count: sums.total });
     }
-    return list.shown ? m.media_library_items({ count: list.total }) : null;
+    return list.total === null ? null : m.media_library_items({ count: list.total });
   });
 
   const attention = $derived(attentionLine(sums, view.status));
@@ -613,6 +614,7 @@
     {#if list.unread || (list.failed && rowsEmpty)}
       {@render loadFailed()}
     {:else if list.loading}
+      <!-- Also over an empty held list: that "none" is another view's. -->
       <div class="library-skeleton" aria-hidden="true">
         {#each Array(8) as _, index (index)}
           <div class="skeleton-tile">

@@ -181,6 +181,28 @@ describe('StudioContentList: the three states', () => {
     render();
     expect(text()).toContain('Piece 1');
     expect(text()).not.toContain(m.studio_content_empty_title());
+    // A lesser failure than a list never read, and logged as one.
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.list_refetch_failed',
+      expect.anything(),
+      expect.objectContaining({ studio: 'org' })
+    );
+    expect(logReadFailure).not.toHaveBeenCalledWith(
+      'studio_content.list_unread',
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  test('a filter the API refuses says so, and offers to clear it', () => {
+    s.first = {
+      current: undefined,
+      error: { status: 400, body: { message: 'Bad request' } },
+    };
+    render('?type=audio');
+    expect(text()).toContain(m.media_library_error_refused());
+    expect(text()).not.toContain(m.studio_content_load_failed());
+    expect(button(m.media_clear_filters())).toBeDefined();
   });
 
   test('no content at all invites the first piece', () => {
@@ -403,10 +425,11 @@ describe('StudioContentList: Show more', () => {
 
     expect(text()).toContain(m.media_library_show_more_failed());
     expect(text()).toContain('Piece 1');
+    // Which page of which view failed, never what was searched for.
     expect(logReadFailure).toHaveBeenCalledWith(
       'studio_content.show_more_failed',
       expect.any(Error),
-      expect.anything()
+      expect.objectContaining({ page: 2, sort: 'updated', hasSearch: false })
     );
   });
 });

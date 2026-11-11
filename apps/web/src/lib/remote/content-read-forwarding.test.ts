@@ -129,6 +129,10 @@ const remote = (await import('./content.remote')) as unknown as {
   }) => Promise<unknown>;
   uploadThumbnailForm: CoverForm;
   stageThumbnailForm: CoverForm;
+  listContent: (args?: Record<string, unknown>) => Promise<unknown>;
+};
+const media = (await import('./media.remote')) as unknown as {
+  listMedia: (args: Record<string, unknown>) => Promise<unknown>;
 };
 
 const CONTENT_ID = '55555555-5555-4555-8555-555555555555';
@@ -224,6 +228,28 @@ describe('getContent', () => {
     const err = await rejection(remote.getContent(CONTENT_ID));
     expect(err).not.toHaveProperty('body');
     expect(err).not.toMatchObject({ status: 404 });
+  });
+});
+
+/**
+ * The studio lists tell a refusal from an outage too (Codex-a6ofh.3.1
+ * review): a 401 or 403 reached them as kit's 500, so it read as an outage,
+ * with a Try again that could never work, and was logged as one.
+ */
+describe.each([
+  ['listContent', () => remote.listContent({ page: 1, limit: 24 })],
+  ['listMedia', () => media.listMedia({ page: 1, limit: 24 })],
+] as const)('%s', (_name, list) => {
+  it('a 403 keeps its status', async () => {
+    workerAnswers(403, 'Forbidden');
+    const err = await rejection(list());
+    expect(err).toMatchObject({ status: 403, body: { message: 'Forbidden' } });
+  });
+
+  it('a 5xx is not forwarded: it stays an unexpected error for handleError', async () => {
+    workerAnswers(500, 'connection to Neon failed');
+    const err = await rejection(list());
+    expect(err).not.toHaveProperty('body');
   });
 });
 

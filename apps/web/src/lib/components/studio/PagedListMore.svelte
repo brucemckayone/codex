@@ -14,7 +14,8 @@
     /** The list's paging, as `PagedList` keeps it. */
     list: {
       readonly left: number;
-      readonly total: number;
+      /** Null until the view's first page has arrived (then `left` is 0). */
+      readonly total: number | null;
       readonly moreLoading: boolean;
       readonly moreFailed: boolean;
       showMore(): Promise<void>;
@@ -24,7 +25,7 @@
   const { list }: Props = $props();
 </script>
 
-{#if list.left > 0}
+{#if list.left > 0 && list.total !== null}
   <div class="more">
     {#if list.moreFailed}
       <p class="more-failed" role="alert">{m.media_library_show_more_failed()}</p>

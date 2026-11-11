@@ -77,6 +77,7 @@ import {
 import {
   and,
   asc,
+  desc,
   eq,
   ilike,
   inArray,
@@ -2430,17 +2431,22 @@ export class ContentService extends BaseService {
 
       // Sort column and order (Codex-a6ofh.3.1). Descending puts NULLs LAST:
       // Postgres puts them first, so "Recently published" led with every
-      // draft, which has no publishedAt. Then the id, so rows that tie (the
-      // many at 0 views or 0 sales) keep one order from page to page: offset
-      // paging over a tie may reorder it, and "Show more" could repeat a row
-      // or skip one.
+      // draft, which has no publishedAt. A tie (the many at 0 views or 0
+      // sales, every draft on "Recently published") reads newest first, an
+      // order the creator recognises; the id is random, so it only comes
+      // last, to keep one order from page to page: offset paging over a tie
+      // may reorder it, and "Show more" could repeat a row or skip one.
       const sortColumn = filters.sortBy || 'createdAt';
       const sortOrder = filters.sortOrder || 'desc';
       const orderByClause =
         sortOrder === 'desc'
           ? sql`${content[sortColumn]} DESC NULLS LAST`
           : asc(content[sortColumn]);
-      const orderBy = [orderByClause, asc(content.id)];
+      const orderBy = [
+        orderByClause,
+        ...(sortColumn === 'createdAt' ? [] : [desc(content.createdAt)]),
+        asc(content.id),
+      ];
 
       const where = and(...whereConditions);
       const page = await paginatedQuery({

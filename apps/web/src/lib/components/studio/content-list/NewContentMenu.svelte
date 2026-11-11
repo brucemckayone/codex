@@ -28,7 +28,7 @@
   import { DRAFTS_HREF } from './content-status';
   import type { ContentWithRelations } from '$lib/types';
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { type DraftProgress, draftMenuWords, draftProgress } from './draft-progress';
 
   interface Props {
@@ -56,18 +56,27 @@
   let open = $state(false);
   const menuKey = $props.id();
 
-  const draftsQuery = $derived(
-    asked
-      ? listContent({
-          ...(organizationId && { organizationId }),
-          status: 'draft',
-          page: 1,
-          limit: MENU_DRAFTS,
-          sortBy: 'updatedAt',
-          sortOrder: 'desc',
-        })
-      : null
-  );
+  /**
+   * One query per org, made untracked. Kit (2.55) drops a query whose first
+   * read failed, and a derivation that makes one tracks its promise (kit
+   * reads `.then` inside the call), so a Try again would re-run it and be
+   * handed a new query, still loading: the failure it was judging would
+   * vanish, and a second failure read as a success (Codex-if444's census).
+   */
+  const draftsQuery = $derived.by(() => {
+    if (!asked) return null;
+    const org = organizationId;
+    return untrack(() =>
+      listContent({
+        ...(org && { organizationId: org }),
+        status: 'draft',
+        page: 1,
+        limit: MENU_DRAFTS,
+        sortBy: 'updatedAt',
+        sortOrder: 'desc',
+      })
+    );
+  });
   // A value wins (a failed refresh keeps the last one), then a failure, then loading.
   const drafts = $derived(draftsQuery?.current?.items ?? null);
   /**
@@ -106,14 +115,17 @@
   }
 
   async function retry() {
-    if (retrying || !draftsQuery) return;
+    const query = draftsQuery;
+    if (retrying || !query) return;
     retrying = true;
+    // Judged on the read's own answer: the menu holds the query it refreshed.
     try {
-      await draftsQuery.refresh();
+      await query.refresh();
+      failedAgain = false;
     } catch {
       // Kept on the query's `error`, which the effect above logs.
+      failedAgain = true;
     }
-    failedAgain = draftsQuery.current == null && draftsQuery.error != null;
     retrying = false;
     if (failedAgain || !open) return;
     // The pressed item went with the failure, leaving focus on the menu

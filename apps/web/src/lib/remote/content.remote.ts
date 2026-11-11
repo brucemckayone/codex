@@ -70,7 +70,12 @@ export const listContent = query(
       if (value !== undefined) searchParams.set(key, String(value));
     }
 
-    return api.content.list(searchParams.toString() ? searchParams : undefined);
+    // A 4xx keeps its status, so the list can tell a refusal from an outage
+    // (`PagedList.refused`) and logs it as a warning; kit makes anything
+    // else a sanitised 500.
+    return forwardClientErrors(() =>
+      api.content.list(searchParams.toString() ? searchParams : undefined)
+    );
   }
 );
 

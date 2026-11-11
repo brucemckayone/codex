@@ -42,7 +42,9 @@ export const listMedia = query(mediaQuerySchema, async (params) => {
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined) searchParams.set(key, String(value));
   }
-  return api.media.list(searchParams);
+  // A 4xx keeps its status, so the library can say a refusal is one
+  // (`PagedList.refused`); kit makes anything else a sanitised 500.
+  return forwardClientErrors(() => api.media.list(searchParams));
 });
 
 /**

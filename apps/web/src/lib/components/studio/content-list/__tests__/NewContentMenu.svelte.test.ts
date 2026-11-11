@@ -17,6 +17,7 @@ import {
   listContent,
   refreshListContent,
   resetListContent,
+  useKitQuery,
 } from '../../__fixtures__/list-content.mock.svelte';
 import NewContentMenu from '../NewContentMenu.svelte';
 
@@ -252,6 +253,29 @@ describe('NewContentMenu', () => {
     fail({ status: 503, body: { message: 'Still down' } });
     await settle();
 
+    expect(menuText()).toContain('Still couldn’t load your drafts.');
+    expect(isOpen()).toBe(true);
+  });
+
+  // As kit does it (Codex-if444's census): a Try again on a query whose
+  // first read failed hands a menu that tracks the query a new one, still
+  // loading, and the read it was judging fails again unseen.
+  test('a Try again that fails again says so, though kit hands over a new query', async () => {
+    const kit = useKitQuery();
+    render();
+    await openMenu();
+    const held = kit.held();
+    kit.fail();
+    await settle();
+    expect(menuText()).toContain('Couldn’t load your drafts.');
+
+    document.querySelector<HTMLElement>('.new-menu-retry')?.click();
+    await settle();
+    expect(kit.refreshes(held)).toBe(1);
+    expect(kit.held()).not.toBe(held); // kit made a new one; the menu keeps its own
+
+    kit.fail({ status: 503, body: { message: 'Still down' } }, held);
+    await settle();
     expect(menuText()).toContain('Still couldn’t load your drafts.');
     expect(isOpen()).toBe(true);
   });

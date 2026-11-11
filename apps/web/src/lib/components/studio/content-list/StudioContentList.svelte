@@ -72,22 +72,39 @@
   const layout = $derived(phone.current ? 'grid' : view.view);
 
   // ── Reads ─────────────────────────────────────────────────────────────
+  // What a failure log says about the view: its facets and sort, and whether
+  // a search was on, never the search text.
+  const viewLog = () => ({
+    statusFilter: view.status,
+    type: view.type,
+    access: view.access,
+    sort: view.sort,
+    hasSearch: search !== null,
+  });
+
   const list = new PagedList({
     args: (pageNumber) => contentListArgs(view, search, organizationId, pageNumber),
     read: listContent,
-    onMoreFailed: (error) =>
-      logReadFailure('studio_content.show_more_failed', error, { studio, organizationId }),
+    onMoreFailed: (error, pageNumber) =>
+      logReadFailure('studio_content.show_more_failed', error, {
+        studio,
+        organizationId,
+        page: pageNumber,
+        ...viewLog(),
+      }),
   });
 
-  // Once per failed read: the status is context, read untracked, so a view
-  // toggle while the read is failed never logs the same failure again.
+  // Once per failed read: the view is context, read untracked, so a view
+  // toggle while the read is failed never logs the same failure again. A
+  // refetch whose rows kit kept is a lesser failure than a list never read.
   $effect(() => {
     const error = list.first.error;
     if (error == null) return;
-    logReadFailure('studio_content.list_unread', error, {
+    const kept = untrack(() => list.landed);
+    logReadFailure(kept ? 'studio_content.list_refetch_failed' : 'studio_content.list_unread', error, {
       studio,
       organizationId,
-      statusFilter: untrack(() => view.status),
+      ...untrack(viewLog),
     });
   });
 
@@ -111,8 +128,12 @@
   const tierName = (id: string) => tierNames.get(id);
 
   // ── What the body shows ───────────────────────────────────────────────
+  // A filter or search the API refuses (a 4xx): Clear filters is the way out.
+  const refusedView = $derived(list.refused && narrowed);
+
   const countText = $derived.by(() => {
-    if (list.unread || list.shown === null) return null;
+    // Only this view's own count: a held list's is another view's.
+    if (list.unread || list.total === null) return null;
     if (narrowed) return m.studio_content_list_count_narrowed({ count: list.total });
     return list.total === 1
       ? m.studio_content_list_count_one()
@@ -176,14 +197,15 @@
   />
 
   <!-- Mounted unconditionally: it renders nothing until the read fails. -->
+  <!-- A refusal of a narrowed view says so; Clear filters is offered below. -->
   <LoadFailedAlert
     query={list.first}
-    message={m.studio_content_load_failed()}
-    againMessage={m.studio_content_load_failed_again()}
+    message={refusedView ? m.media_library_error_refused() : m.studio_content_load_failed()}
+    againMessage={refusedView ? m.media_library_error_refused() : m.studio_content_load_failed_again()}
     loadedMessage={m.studio_content_load_retry_ok()}
     data-testid="content-list-load-error"
   />
-  {#if list.refused && narrowed}
+  {#if refusedView}
     <!-- A refusal comes back however often it is tried: offer the way out. -->
     <div>
       <Button variant="secondary" onclick={clearFilters}>{m.media_clear_filters()}</Button>
@@ -212,7 +234,7 @@
           </div>
         {/each}
       </div>
-    {:else if list.items.length === 0}
+    {:else if list.empty}
       {#if narrowed}
         <EmptyState
           title={m.studio_content_search_empty()}

@@ -2617,10 +2617,24 @@ describe('ContentService', () => {
         ]);
       });
 
-      it('breaks a tie by id, so pages never repeat or skip a row', async () => {
+      it('breaks a tie newest first, then by id, so pages never repeat or skip a row', async () => {
         const [owner] = await seedTestUsers(db, 1);
-        // Five pieces at 0 views: one tie, inserted in random-uuid order.
+        // Five pieces at 0 views: one tie. Made on four days, the last two
+        // at the same moment, so only the id can order those two.
         const ids = await piecesFor(owner!, 5);
+        const made = [
+          '2026-01-01T00:00:00Z',
+          '2026-01-02T00:00:00Z',
+          '2026-01-03T00:00:00Z',
+          '2026-01-04T00:00:00Z',
+          '2026-01-04T00:00:00Z',
+        ];
+        for (const [index, id] of ids.entries()) {
+          await db
+            .update(content)
+            .set({ createdAt: new Date(made[index]!) })
+            .where(eq(content.id, id));
+        }
 
         const pages = [];
         for (const page of [1, 2, 3]) {
@@ -2636,8 +2650,10 @@ describe('ContentService', () => {
           result.items.map((item) => item.id)
         );
 
-        // The tie's order is the id's, the same on every page.
-        expect(paged).toEqual([...ids].sort());
+        // Newest first, the same on every page; the id orders the two made
+        // at the same moment.
+        const sameMoment = [ids[3]!, ids[4]!].sort();
+        expect(paged).toEqual([...sameMoment, ids[2], ids[1], ids[0]]);
       });
     });
   });
