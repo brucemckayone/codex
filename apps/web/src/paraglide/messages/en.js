@@ -32351,6 +32351,14 @@ export const fee_note_check_failed = () => `We couldn't check for upcoming fee c
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const fee_note_check_none = () => `No upcoming fee changes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const fee_note_try_again = () => `Try again`
 
 
