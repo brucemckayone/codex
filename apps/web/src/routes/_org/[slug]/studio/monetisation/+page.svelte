@@ -24,6 +24,7 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+  import { createLoadRetry } from '$lib/components/studio/load-retry.svelte';
   import MoneySetupPrompt from '$lib/components/studio/MoneySetupPrompt.svelte';
   import MoneyStatBand from '$lib/components/studio/MoneyStatBand.svelte';
   import type { MoneyStat } from '$lib/components/studio/money-stat';
@@ -400,27 +401,58 @@
     return map;
   });
 
+  // Try again on the failed note (P10) is judged on the read the page holds:
+  // kit drops a read that failed, so it hands the page a NEW query, still
+  // loading (Codex-if444). The note, and its focused Try again, stay until it
+  // answers.
+  const priceRetry = createLoadRetry(() => priceChangesQuery);
+  /** Check again or Try again is out: one read per press, never two at once (the cost rule). */
+  const priceBusy = $derived(priceReading || priceRetry.busy);
+  let priceFailedNode = $state<HTMLElement | null>(null);
+
   /**
-   * Check again (one note) or Try again (the failed read): one read per
-   * press, never two at once (the cost rule).
+   * Check again (one note): a re-read of a read that has loaded, which kit
+   * makes in place, so this press's own read is the answer.
    */
-  async function readPriceChanges(note?: PriceNoteView) {
+  async function readPriceChanges(note: PriceNoteView) {
     const query = priceChangesQuery;
-    if (!query || priceReading) return;
+    if (!query || priceBusy) return;
     priceReading = true;
     const at = new Date().toISOString();
     try {
       await query.refresh();
-      priceCheck =
-        note && !query.error
-          ? { key: note.key, at, lastRunAt: note.lastRunAt }
-          : null;
+      priceCheck = !query.error
+        ? { key: note.key, at, lastRunAt: note.lastRunAt }
+        : null;
     } catch {
       // The query keeps the error, and the failed line says so (P10).
       priceCheck = null;
     } finally {
       priceReading = false;
     }
+  }
+
+  /**
+   * Try again (the failed read). Focus then goes to what the read now says:
+   * the failed note's words (it failed again: read out once more), the first
+   * note on a tier row, or, with nothing going out, the Tiers heading.
+   */
+  async function retryPriceChanges() {
+    if (priceReading) return;
+    await priceRetry.retry({
+      from: () => priceFailedNode,
+      settled: () => {
+        priceCheck = null;
+        return () =>
+          priceChangesFailed
+            ? priceFailedNode?.querySelector<HTMLElement>(
+                '[data-testid="price-note-status"]'
+              )
+            : (document.querySelector<HTMLElement>(
+                '.tier-list [data-testid="price-note-status"]'
+              ) ?? document.querySelector<HTMLElement>('[data-tiers-heading]'));
+      },
+    });
   }
 
   function dismissPriceNote(note: PriceNoteView, tierId: string) {
@@ -1729,14 +1761,15 @@
              `.tier-info { flex: 1 }` absorbed every pixel of an 1808px column.
              Now the meaning-bearing clusters pack together on the left and only
              the row ACTIONS take the conventional right edge. -->
-        {#if priceChangesFailed}
+        {#if priceChangesFailed || priceRetry.retrying}
           <!-- P10: which tier changed is in the read that failed, so the
-               line sits once above the list, never as "no change". -->
-          <div class="tier-price-failed">
+               line sits once above the list, never as "no change". Kept
+               while Try again runs (see `priceRetry`). -->
+          <div class="tier-price-failed" bind:this={priceFailedNode}>
             <PriceChangeNote
               failed
-              busy={priceReading}
-              onTryAgain={() => readPriceChanges()}
+              busy={priceBusy}
+              onTryAgain={retryPriceChanges}
               data-testid="price-change-note-failed"
             />
           </div>
@@ -1874,7 +1907,7 @@
                     <PriceChangeNote
                       view={note}
                       name={tier.name}
-                      busy={priceReading}
+                      busy={priceBusy}
                       onCheckAgain={() => readPriceChanges(note)}
                       onDismiss={() => dismissPriceNote(note, tier.id)}
                     />

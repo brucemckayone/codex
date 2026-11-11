@@ -177,6 +177,8 @@ let deleteImpacts = new Map<string, QuerySlot<unknown>>();
 let tierItems = new Map<string, QuerySlot<unknown>>();
 /** The tiers' price changes (Codex-2hxff.86): answered, none, by default. */
 let priceChanges = makeSlot<unknown[]>([]);
+/** The price changes as kit hands them, for a Try again test (`kitPriceChanges`). */
+let priceChangesKit: KitQuery<unknown[]> | null = null;
 let subscribers = makeSlot<{
   items: unknown[];
   pagination: {
@@ -220,6 +222,7 @@ export function reset() {
   deleteImpacts = new Map();
   tierItems = new Map();
   priceChanges = makeSlot<unknown[]>([]);
+  priceChangesKit = null;
   subscribers = makeSlot({
     items: [],
     pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
@@ -245,6 +248,19 @@ export const tiersSlot = () => tiers;
 export const statsSlot = () => stats;
 export const accessSummarySlot = () => accessSummary;
 export const priceChangesSlot = () => priceChanges;
+
+/**
+ * The price changes as kit hands them, until the next `reset()`: a Try again
+ * of a failed first read hands the page a NEW query (Codex-if444). Read by
+ * `getTierPriceChanges`, and by a journeys mock through `priceChangesRead`.
+ */
+export function kitPriceChanges(): KitQuery<unknown[]> {
+  priceChangesKit = kitQuery();
+  return priceChangesKit;
+}
+
+/** What a price-changes read returns now: the kit double if set, else the slot. */
+export const priceChangesRead = () => priceChangesKit?.get() ?? priceChanges;
 
 /** The delete-impact slot for one tier (made on first read, still loading). */
 export function deleteImpactSlot(tierId: string): QuerySlot<unknown> {
@@ -286,4 +302,6 @@ export const listTierItems = vi.fn(
     tierItemsSlot(tierItemsKey(args))
 );
 export const listSubscribers = vi.fn((_args: unknown) => subscribers);
-export const getTierPriceChanges = vi.fn((_orgId: string) => priceChanges);
+export const getTierPriceChanges = vi.fn((_orgId: string) =>
+  priceChangesRead()
+);

@@ -4041,6 +4041,7 @@
   "fee_note_meta_list": "Sales before each date keep today's fees. We emailed you about each change.",
   "fee_note_meta_list_unsent": "Sales before each date keep today's fees.",
   "fee_note_check_failed": "We couldn't check for upcoming fee changes.",
+  "fee_note_check_none": "No upcoming fee changes.",
   "fee_note_try_again": "Try again",
   "price_note_edit_lead": "Your {count} {name} subscribers will be emailed about the new prices.",
   "price_note_edit_lead_one": "Your 1 {name} subscriber will be emailed about the new prices.",

@@ -342,6 +342,64 @@ export function createSession() {
   assert.deepEqual(summary(scan()), []);
 });
 
+/**
+ * E3's drafts menu (Codex-a6ofh.3), in its exact shape: the query is made
+ * on demand inside `$derived.by`, and Try again judges only the promise of
+ * the query it refreshed. With `untrack`, the derivation does not track the
+ * query, kit's refresh can't swap it, and that promise IS the answer.
+ */
+function draftsMenu({ untracked }) {
+  const made =
+    "listContent({ organizationId: org, status: 'draft', limit: 5 })";
+  return `<script lang="ts">
+  ${untracked ? "import { untrack } from 'svelte';" : ''}
+  import { listContent } from '$lib/remote/content.remote';
+  let { organizationId } = $props();
+  let asked = $state(false);
+  let outcome = $state<'loaded' | 'still-failed' | null>(null);
+  const draftsQuery = $derived.by(() => {
+    if (!asked) return null;
+    const org = organizationId;
+    return ${untracked ? `untrack(() => ${made})` : made};
+  });
+  async function retry() {
+    const query = draftsQuery;
+    if (!query) return;
+    try {
+      await query.refresh();
+      outcome = 'loaded';
+    } catch {
+      outcome = 'still-failed';
+    }
+  }
+</script>
+{#if draftsQuery?.error}<p>Couldn't load drafts.</p><button onclick={retry}>Try again</button>{/if}
+`;
+}
+
+test('derived-refresh is QUIET on a query made inside untrack(), and FIRES on its tracked twin', () => {
+  const tracked = draftsMenu({ untracked: false });
+  writeFixture('src/lib/menu/Tracked.svelte', tracked);
+  writeFixture(
+    'src/lib/menu/Untracked.svelte',
+    draftsMenu({ untracked: true })
+  );
+  assert.deepEqual(summary(scan()), [
+    `src/lib/menu/Tracked.svelte:${lineOf(tracked, 'await')} derived-refresh`,
+  ]);
+});
+
+test("untrack() is exempt only as Svelte's: a local function of that name is not", () => {
+  const src = draftsMenu({ untracked: true }).replace(
+    "import { untrack } from 'svelte';",
+    "import { untrack } from '$lib/utils/untrack';"
+  );
+  writeFixture('src/lib/menu/LocalUntrack.svelte', src);
+  assert.deepEqual(summary(scan()), [
+    `src/lib/menu/LocalUntrack.svelte:${lineOf(src, 'await')} derived-refresh`,
+  ]);
+});
+
 // --- retry-label -----------------------------------------------------------
 
 test("retry-label FIRES on LoadFailedAlert's Retry label anywhere else", () => {

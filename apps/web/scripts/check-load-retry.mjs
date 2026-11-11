@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Load-failure Retry gate (Codex-if444): a read that failed is retried
- * through the shared LoadFailedAlert, never by hand.
+ * through the shared retry core, never by hand: LoadFailedAlert, or
+ * `createLoadRetry` (load-retry.svelte.ts) under a failure UI of its own.
  *
  * The defect class. A page holds its read as `$derived(getX(id))`. When the
  * read FAILS, kit 2.55 drops the query from its cache, so `refresh()` re-runs
@@ -13,8 +14,8 @@
  * success and dropped focus to <body>. A load read's `invalidate()` is no
  * better: kit resolves it late (after every live remote query) or early
  * (overtaken, with the data unchanged), and Account → Payments said "We
- * still couldn't…" about a reload that never ran. LoadFailedAlert waits for
- * the read the page holds (`heldRead`), so:
+ * still couldn't…" about a reload that never ran. The core waits for the
+ * read the page holds (`createLoadRetry`'s `heldRead`), so:
  *
  *   retry-label      Outside LoadFailedAlert.svelte, no file names
  *                    `money_setup_load_failed_retry` or `…_retrying`. That
@@ -43,7 +44,10 @@
  * loaded, and kit re-reads a loaded query in place. A refresh inside a
  * callback (`read(query, () => query.refresh())`) is not the function's own
  * await, and a query held outside any `$derived` (`const q = getX()`) is
- * never swapped, so neither is flagged.
+ * never swapped, so neither is flagged. Nor is one created inside
+ * `untrack(…)` (imported from 'svelte') within its derivation: the
+ * derivation does not track it, so kit's refresh can't re-run it and the
+ * page keeps the query it refreshed.
  *
  * Not checked: a Retry written with `.then()` instead of `await`, a refresh
  * reached through another module, and a function that awaits something
@@ -104,38 +108,6 @@ export const ALLOWLIST = [
     bead: 'Codex-a6ofh.5',
     reason:
       "retryList's failed block unmounts while the new query loads; goes when the picker moves onto PagedList",
-  },
-  {
-    file: 'src/lib/components/studio/UpcomingFeeNote.svelte',
-    rule: 'derived-refresh',
-    expect: 1,
-    bead: 'Codex-if444',
-    reason:
-      'N11 keeps the failure a muted, not-red line with Try again, which LoadFailedAlert cannot render; awaits a headless retry core',
-  },
-  {
-    file: 'src/routes/_org/[slug]/studio/monetisation/+page.svelte',
-    rule: 'derived-refresh',
-    expect: 1,
-    bead: 'Codex-if444',
-    reason:
-      "P10 shows the price-changes failure as PriceChangeNote's warning note, which LoadFailedAlert cannot render; awaits a headless retry core",
-  },
-  {
-    file: 'src/lib/components/page-builder/PagePricingPanel.svelte',
-    rule: 'derived-refresh',
-    expect: 1,
-    bead: 'Codex-if444',
-    reason:
-      "P10 shows the plan-changes failure as PriceChangeNote's warning note, which LoadFailedAlert cannot render; awaits a headless retry core",
-  },
-  {
-    file: 'src/lib/components/support/RefundForm.svelte',
-    rule: 'derived-refresh',
-    expect: 1,
-    bead: 'Codex-if444',
-    reason:
-      'Try again can end refused or session-ended, and R2-L2 focuses what the preview says; LoadFailedAlert judges ok/failed only',
   },
 ];
 
@@ -346,6 +318,8 @@ function refreshedName(call) {
 function collectFacts(programs) {
   const remote = new Set();
   const navigation = new Set();
+  /** Local names of Svelte's `untrack`. */
+  const untracked = new Set();
   /** @type {Map<string, any>} */
   const derived = new Map();
   const dataProps = new Set();
@@ -367,6 +341,8 @@ function collectFacts(programs) {
           (imported === 'invalidate' || imported === 'invalidateAll')
         )
           navigation.add(spec.local.name);
+        else if (from === 'svelte' && imported === 'untrack')
+          untracked.add(spec.local.name);
       }
     }
     for (const node of descendants(program)) {
@@ -393,12 +369,19 @@ function collectFacts(programs) {
     }
   }
 
-  const callsRemote = (init) => {
-    for (const node of descendants(init)) {
-      if (node.type !== 'CallExpression') continue;
-      const root = calleeRoot(node.callee);
+  /**
+   * Whether a derivation calls a remote read, outside `untrack(…)`: a query
+   * created in there is not tracked, so kit's refresh never swaps it.
+   */
+  const callsRemote = (node) => {
+    if (node.type === 'CallExpression') {
+      const { callee } = node;
+      if (callee.type === 'Identifier' && untracked.has(callee.name))
+        return false;
+      const root = calleeRoot(callee);
       if (root !== null && remote.has(root)) return true;
     }
+    for (const child of childNodes(node)) if (callsRemote(child)) return true;
     return false;
   };
   const queries = new Set(
@@ -683,7 +666,8 @@ function checkPrograms(programs, fragment, source, shift, report) {
           `${refresh.via ? ` through \`${refresh.via}\`` : ''}, then ` +
           `${read ? `reads \`${read.name}\`` : 'acts on the result'}. A failed read is dropped by kit, so this ` +
           'waits on the stray read while the page holds a NEW query. Use LoadFailedAlert ' +
-          '(lib/components/studio/LoadFailedAlert.svelte), with `bind:retrying` to keep a failed layout'
+          '(lib/components/studio/LoadFailedAlert.svelte), with `bind:retrying` to keep a failed layout, ' +
+          'or createLoadRetry (lib/components/studio/load-retry.svelte.ts) under a failure UI of its own'
       );
       continue;
     }
@@ -698,7 +682,7 @@ function checkPrograms(programs, fragment, source, shift, report) {
         shift(first.start),
         `awaits \`${invalidator}()\`, then reads \`${read.name}\` from the page's load. Kit resolves it ` +
           'late (after every live query) or early (overtaken, data unchanged), so it is never the answer. ' +
-          'Use loadRead (lib/components/studio/alert-read.ts) with LoadFailedAlert'
+          'Use loadRead (lib/components/studio/alert-read.ts) with LoadFailedAlert or createLoadRetry'
       );
     }
   }
@@ -872,7 +856,7 @@ function main(argv = process.argv.slice(2)) {
       `\n${violations.length} violation(s), ${stale.length} stale and ${miscounted.length} miscounted allowlist entr${
         stale.length + miscounted.length === 1 ? 'y' : 'ies'
       }. ` +
-        'A read that failed is retried through LoadFailedAlert (a remote query as it is, or loadRead for load data). ' +
+        'A read that failed is retried through LoadFailedAlert or createLoadRetry (a remote query as it is, or loadRead for load data). ' +
         'See the header of apps/web/scripts/check-load-retry.mjs.'
     );
     process.exit(1);

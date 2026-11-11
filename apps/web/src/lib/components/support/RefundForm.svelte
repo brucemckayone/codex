@@ -59,6 +59,7 @@
   import { formatPrice } from '$lib/utils/format';
   import { queryErrorMessage } from '$lib/remote/query-result';
   import { getRefundPreview, issueSupportRefund } from '$lib/remote/support.remote';
+  import { createLoadRetry } from '$lib/components/studio/load-retry.svelte';
   import {
     type IssueRefundAnswer,
     parsePounds,
@@ -449,27 +450,40 @@
     return REASONS.includes(value as Reason);
   }
 
+  /** What the preview now says: its problem (why), or its heading (the lines). */
+  const previewNow = () =>
+    document.querySelector<HTMLElement>('[data-preview-problem]') ??
+    document.querySelector<HTMLElement>('[data-preview-heading]');
+
   /**
-   * After Review or Try again, which disable themselves while they run: if
-   * focus is still on that control, or dropped to the page, move it to what
-   * the preview now says (R2-L2). Focus anywhere else (the amount, after
-   * Enter) stays.
+   * After Review, which disables itself while it runs: if focus is still on
+   * it, or dropped to the page, move it to what the preview now says
+   * (R2-L2). Focus anywhere else (the amount, after Enter) stays.
    */
   async function focusPreview(control: Element | null) {
     await tick();
     const active = document.activeElement;
     const dropped = active === null || active === document.body || !active.isConnected;
     if (!dropped && (control === null || active !== control)) return;
-    (
-      document.querySelector<HTMLElement>('[data-preview-problem]') ??
-      document.querySelector<HTMLElement>('[data-preview-heading]')
-    )?.focus();
+    previewNow()?.focus();
   }
 
+  /**
+   * Try again on a preview whose read failed, judged by the shared core
+   * (Codex-if444). Kit drops a read that failed, so this hands the form a NEW
+   * preview query, still loading; the failed alert, and its focused Try again,
+   * stay until it answers. It can end four ways: the lines, refused, session
+   * ended, or failed again. Focus then moves to what the preview says, if it
+   * is still in that alert or dropped (R2-L2).
+   */
+  const previewRetry = createLoadRetry(() => previewQuery);
+
   async function retryPreview(event: MouseEvent) {
-    const control = event.currentTarget instanceof Element ? event.currentTarget : null;
-    await previewQuery?.refresh().catch(() => {});
-    await focusPreview(control);
+    const from =
+      event.currentTarget instanceof Element
+        ? event.currentTarget.closest('[data-preview-problem]')
+        : null;
+    await previewRetry.retry({ from: () => from, settled: () => previewNow });
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────
@@ -700,7 +714,10 @@
                   </Button>
                 </div>
               </Alert>
-            {:else if previewProblem === 'failed'}
+            {:else if previewProblem === 'failed' || previewRetry.retrying}
+              <!-- Kept while Try again runs (see `previewRetry`). Busy, not
+                   `loading`: a loading Button disables itself, which drops
+                   focus to <body> on the press. -->
               <Alert
                 variant="error"
                 tabindex={-1}
@@ -712,7 +729,7 @@
                   <Button
                     variant="secondary"
                     size="sm"
-                    loading={previewQuery?.loading === true}
+                    aria-busy={previewRetry.busy || undefined}
                     onclick={(event: MouseEvent) => void retryPreview(event)}
                   >
                     {m.support_try_again()}

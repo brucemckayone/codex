@@ -50,11 +50,16 @@ vi.mock('$lib/collections/dismissals', () => ({
 }));
 
 import { dismiss } from '$lib/collections/dismissals';
+import type {
+  KitQuery,
+  KitRead,
+} from '$lib/components/studio/__fixtures__/kit-query.mock.svelte';
 import {
   ACTIVE_ACCOUNT,
   deferRefresh,
   fail,
   failRefresh,
+  kitPriceChanges,
   land,
   myConnectSlot,
   priceChangesSlot,
@@ -371,5 +376,110 @@ describe('Edit Tier while the emails are still going out (P8)', () => {
     openEdit('Patrons');
     setMonthly(3000);
     expect(hint()?.dataset.kind).toBe('emailed');
+  });
+});
+
+/**
+ * Try again on the failed note, as kit runs it (Codex-if444). A failed first
+ * read is dropped, so Try again hands the page a NEW query, still loading.
+ * The page used to await the refreshed query's stray read: the failed note,
+ * with the focused Try again inside it, unmounted for the round trip, and
+ * focus fell to <body> when the answer came.
+ */
+describe('Try again on the failed note, as kit runs it (P10)', () => {
+  let kit: KitQuery<unknown[]>;
+
+  const failedNote = () =>
+    document.querySelector<HTMLElement>(
+      '[data-testid="price-change-note-failed"]'
+    );
+  const tryAgain = () =>
+    failedNote()?.querySelector('button') as HTMLButtonElement | null;
+  /** Lets reads settle and Try again run on from them, focus moves included. */
+  const settle = async () => {
+    for (let turn = 0; turn < 3; turn++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    flushSync();
+  };
+
+  function mountFailed() {
+    kit = kitPriceChanges();
+    mountPage();
+    kit.fail();
+    flushSync();
+  }
+
+  /** Presses Try again; returns the refreshed query WRAPPED (it is thenable). */
+  async function pressTryAgain(): Promise<{ refreshed: KitRead<unknown[]> }> {
+    const refreshed = kit.held();
+    tryAgain()?.focus();
+    tryAgain()?.click();
+    await settle();
+    expect(kit.refreshes(refreshed)).toBe(1);
+    expect(kit.held()).not.toBe(refreshed);
+    expect(kit.held().loading).toBe(true);
+    return { refreshed };
+  }
+
+  test('keeps the failed note and its focused Try again, busy, while the new read loads', async () => {
+    mountFailed();
+    await pressTryAgain();
+
+    expect(text(failedNote())).toContain(
+      "We couldn't load how your price change is going."
+    );
+    expect(document.activeElement).toBe(tryAgain());
+    expect(tryAgain()?.getAttribute('aria-busy')).toBe('true');
+    // One read at a time: a second press asks nothing more.
+    const held = kit.held();
+    tryAgain()?.click();
+    await settle();
+    expect(kit.refreshes(held)).toBe(0);
+  });
+
+  test('a Try again that fails again keeps the note and moves focus to its words', async () => {
+    mountFailed();
+    const { refreshed } = await pressTryAgain();
+
+    kit.fail(undefined, refreshed);
+    kit.fail();
+    await settle();
+
+    expect(failedNote()).not.toBeNull();
+    expect(document.activeElement).toBe(
+      failedNote()?.querySelector('[data-testid="price-note-status"]')
+    );
+    expect(tryAgain()?.getAttribute('aria-busy')).toBeNull();
+  });
+
+  test('a Try again that loads shows the note on its row and moves focus to it', async () => {
+    mountFailed();
+    const { refreshed } = await pressTryAgain();
+
+    kit.land([change()]);
+    await settle();
+
+    // Judged on the held read: the stray fetch is still out.
+    expect(refreshed.loading).toBe(true);
+    expect(failedNote()).toBeNull();
+    expect(notesIn(row('Members'))).toHaveLength(1);
+    expect(document.activeElement).toBe(
+      row('Members').querySelector('[data-testid="price-note-status"]')
+    );
+  });
+
+  test('a Try again that loads with nothing going out moves focus to the Tiers heading', async () => {
+    mountFailed();
+    await pressTryAgain();
+
+    kit.land([]);
+    await settle();
+
+    expect(failedNote()).toBeNull();
+    expect(notesIn(document)).toHaveLength(0);
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-tiers-heading]')
+    );
   });
 });
