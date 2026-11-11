@@ -293,9 +293,14 @@
   }
 
   // Preserve the unsaved-changes guard the retired overlay used to provide.
+  // A confirmed Discard clears the tab's draft too: leaving keeps it otherwise,
+  // for the next open to offer (Codex-0keaj).
   beforeNavigate(({ cancel }) => {
-    if (brandEditor.isDirty) {
-      if (!confirm('You have unsaved brand changes. Discard?')) cancel();
+    if (!brandEditor.isDirty) return;
+    if (confirm('You have unsaved brand changes. Discard?')) {
+      brandEditor.discard();
+    } else {
+      cancel();
     }
   });
 

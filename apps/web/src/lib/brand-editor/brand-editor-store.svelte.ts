@@ -9,6 +9,7 @@
  */
 
 import { browser } from '$app/environment';
+import { logger } from '$lib/observability';
 import { canonicalJson, hash } from '$lib/utils/fingerprint';
 import {
   clearBrandVars,
@@ -99,12 +100,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** A map of string (or null) values: the token and dark-colour overrides. */
-function isTextMap(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    Object.values(value).every((v) => v === null || typeof v === 'string')
-  );
+/**
+ * An override map. Its values are not checked: the saved brand carries the
+ * same ones (older stored JSON may hold a number), so a draft holding them is
+ * no less usable than the brand itself.
+ */
+function isMap(value: unknown): boolean {
+  return isRecord(value);
 }
 
 function isTextOrNull(value: unknown): boolean {
@@ -124,10 +126,9 @@ function isBrandEditorState(value: unknown): value is BrandEditorState {
     Number.isFinite(value.radius) &&
     Number.isFinite(value.density) &&
     isTextOrNull(value.logoUrl) &&
-    isTextMap(value.tokenOverrides) &&
-    (value.darkOverrides === null || isTextMap(value.darkOverrides)) &&
-    (value.darkTokenOverrides === null ||
-      isTextMap(value.darkTokenOverrides)) &&
+    isMap(value.tokenOverrides) &&
+    (value.darkOverrides === null || isMap(value.darkOverrides)) &&
+    (value.darkTokenOverrides === null || isMap(value.darkTokenOverrides)) &&
     typeof value.heroLayout === 'string'
   );
 }
@@ -228,6 +229,9 @@ function initEffects() {
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(row));
       } catch {
         // sessionStorage full or unavailable: crash recovery is best-effort.
+        // Drop the older row, which a reload would restore as if it were all
+        // of this work.
+        clearStorage();
       }
     });
   });
@@ -262,10 +266,20 @@ function open(orgId: string, saved: BrandEditorState): RecoveryOutcome {
   try {
     return recover(orgId, saved);
   } catch {
-    // Unreadable row: the saved brand stands.
-    clearStorage();
-    return 'none';
+    return unusable('not JSON');
   }
+}
+
+/**
+ * A row this editor cannot use. It held unsaved work (a row is written only
+ * then), so it is reported as discarded, and the page says so, rather than
+ * dropped without a word. Logged, because a shape change between releases
+ * would otherwise turn recovery off for everyone unseen.
+ */
+function unusable(reason: string): RecoveryOutcome {
+  clearStorage();
+  logger.warn('Brand editor draft could not be restored', { reason });
+  return 'discarded';
 }
 
 /**
@@ -283,10 +297,7 @@ function recover(orgId: string, saved: BrandEditorState): RecoveryOutcome {
   const raw = sessionStorage.getItem(STORAGE_KEY);
   if (!raw) return 'none';
   const row: unknown = JSON.parse(raw);
-  if (!isRecoveryRow(row)) {
-    clearStorage();
-    return 'none';
-  }
+  if (!isRecoveryRow(row)) return unusable('not a brand draft');
   if (row.orgId !== orgId) return 'none';
   const baseline = fingerprint(saved);
   const draft: BrandEditorState = { ...row.pending, logoUrl: saved.logoUrl };
@@ -316,7 +327,11 @@ function close(): void {
   // open, and clearBrandVars would then strip the org layout's own brand with
   // `isClosed` unchanged, so nothing writes it back (Codex-q01h8).
   if (state.panel !== 'closed') clearBrandVars();
-  clearStorage();
+  // The row is kept. A draft the admin never saw (the read failed, so the
+  // editor never opened) or never chose to throw away (a teardown with no
+  // prompt) comes back on the next open, and only over the brand it was
+  // edited from. Save, Reset all, an editor with nothing unsaved, and the
+  // page's confirmed "Discard?" clear it.
   state.panel = 'closed';
   state.pending = null;
   state.saved = null;
@@ -586,16 +601,13 @@ function getSavePayload(): BrandEditorState | null {
 }
 
 /**
- * The save landed: `saved` becomes what it sent. Pass the payload the save
- * read (`getSavePayload`): an edit made while the save was in flight is not
- * in it, so it stays unsaved, rather than being counted saved and never sent.
- * Without one, the brand as it stands now is taken as saved.
+ * The save landed: `saved` becomes `sent`, the payload the save read
+ * (`getSavePayload`). An edit made while the save was in flight is not in it,
+ * so it stays unsaved, rather than being counted saved and never sent.
  */
-function markSaved(sent?: BrandEditorState): void {
+function markSaved(sent: BrandEditorState): void {
   if (!state.pending) return;
-  state.saved = sent
-    ? structuredClone(sent)
-    : ($state.snapshot(state.pending) as BrandEditorState);
+  state.saved = $state.snapshot(sent) as BrandEditorState;
   clearStorage();
 }
 
