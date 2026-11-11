@@ -8191,6 +8191,38 @@ export const branding_description = () => `Customize your organization's visual 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const branding_loading = () => `Loading your brand…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_load_failed = () => `We couldn't load your brand settings. Nothing here can be edited until they load. Your saved brand is unchanged, and the preview shows it as it is.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_load_failed_again = () => `We still couldn't load your brand settings. If it keeps failing, reload the page. Your saved brand is unchanged.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_load_retry_ok = () => `Brand settings loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_title = () => `Hero text`
 
 

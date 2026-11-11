@@ -13,6 +13,7 @@
   import { page } from '$app/state';
   import ContentTable from '$lib/components/studio/ContentTable.svelte';
   import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+  import { loadRead } from '$lib/components/studio/alert-read';
   import ContentStatusTabs from '$lib/components/studio/content-list/ContentStatusTabs.svelte';
   import NewContentMenu from '$lib/components/studio/content-list/NewContentMenu.svelte';
   import {
@@ -35,12 +36,14 @@
   );
   const hasContent = $derived(data.content.items.length > 0 || currentPage > 1);
 
-  // The load's read, as the alert takes a query's: Retry reruns the load.
-  const listRead = $derived({
-    current: data.failed ? undefined : data.content,
-    error: data.failed ? m.studio_content_load_failed() : undefined,
-    refresh: () => invalidate('cache:studio-page:content'),
-  });
+  // The load's read: Retry reruns the load, and ends when its data changes.
+  const listRead = $derived(
+    loadRead({
+      current: data.failed ? undefined : data.content,
+      error: data.failed ? m.studio_content_load_failed() : undefined,
+      refresh: () => invalidate('cache:studio-page:content'),
+    })
+  );
 
   // The page's one payouts read, for every draft's step and the New menu's.
   const payouts = createPayoutsRead('studio_content.connect_unread', () => ({

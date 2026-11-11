@@ -16,10 +16,17 @@ export function focusIfLost(
   within?: Element | null,
   options?: FocusOptions
 ): void {
+  if (focusIsFree(within)) target?.focus(options);
+}
+
+/**
+ * Whether focus is still free to move: it is nowhere, or inside `within`.
+ * `focusIfLost`'s rule, for a caller that does something else when the
+ * person has moved it (LoadFailedAlert re-announces a repeat failure).
+ */
+export function focusIsFree(within?: Element | null): boolean {
   const active = document.activeElement;
-  if (focusLost(active) || (active && within?.contains(active))) {
-    target?.focus(options);
-  }
+  return focusLost(active) || Boolean(active && within?.contains(active));
 }
 
 function focusLost(active: Element | null): boolean {
