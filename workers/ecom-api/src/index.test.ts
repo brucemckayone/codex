@@ -42,7 +42,13 @@ describe('Stripe Webhook Handler', () => {
   // ecom-api test env has no payment, subscription or connect webhook secret
   // (generate-worker-dev-vars.sh writes only the booking one). Through SELF,
   // CI answered 500 to both requests. So these requests go to the worker's
-  // own fetch with placeholder secrets, and get the same answer everywhere.
+  // own fetch with placeholders for those three secrets, which gives the same
+  // answer locally and in CI. The other required keys still come from the
+  // real env: a run without repo secrets (a fork) would answer 500 again.
+  //
+  // Keep this the last request through `./index` in the run: the env check
+  // remembers a pass for the module's life, and singleWorker shares that
+  // module, so a later SELF request would skip the check.
   describe('Retired customer webhook route', () => {
     const webhookEnv = {
       ...env,
