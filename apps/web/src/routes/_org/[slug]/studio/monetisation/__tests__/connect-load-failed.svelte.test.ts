@@ -319,6 +319,20 @@ describe('Retry, once the new query answers', () => {
     expect(document.activeElement).toBe(loadedStatus());
   });
 
+  test('a read that loads "no account" shows Not connected and the set-up button, and says it loaded', async () => {
+    mountFailed();
+    await pressRetry();
+
+    connect.land(NO_ACCOUNT);
+    await settle();
+
+    expect(loadError()).toBeNull();
+    const badge = q('[data-testid="connect-status-badge"]');
+    expect(badge?.getAttribute('data-connect-status')).toBe('not_connected');
+    expect(q('[data-testid="connect-stripe-btn"]')).not.toBeNull();
+    expect(document.activeElement).toBe(loadedStatus());
+  });
+
   test('a second repeat failure is announced again: focus returns to the alert', async () => {
     mountFailed();
     await pressRetry();

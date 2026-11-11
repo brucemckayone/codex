@@ -268,6 +268,21 @@ describe('Retry, once the new query answers', () => {
     expect(document.activeElement).toBe(loadedStatus());
   });
 
+  test('a read that loads "no account" raises the stranded-money prompt, and says it loaded', async () => {
+    mountFailed();
+    await pressRetry();
+
+    payout.land(NO_ACCOUNT);
+    await settle();
+
+    expect(loadError()).toBeNull();
+    expect(text()).toContain(
+      m.money_setup_stripe_missing_subscribers_title({ count: '2' })
+    );
+    expect(text()).toContain(m.subscribers_empty_pending_setup_description());
+    expect(document.activeElement).toBe(loadedStatus());
+  });
+
   test('a second repeat failure is announced again: focus returns to the alert', async () => {
     mountFailed();
     await pressRetry();

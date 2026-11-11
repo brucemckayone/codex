@@ -97,7 +97,6 @@
       retrying = value;
     },
   });
-  const busy = $derived(core.busy);
 
   /**
    * The outcome is read from the query the page holds, not from whether a
@@ -114,7 +113,14 @@
           outcome === 'ok' ? statusNode : outcome === 'failed' ? alertNode : null;
       },
     });
-    if (result && !result.focusFree && outcome === 'failed' && before === 'failed') {
+    if (result === null) {
+      // Superseded: the page let the query go mid-Retry (or moved to another
+      // one). Claim nothing, so no stale "still" is left behind. A press that
+      // sent nothing (`busy`) leaves the running Retry's outcome alone.
+      if (!core.retrying) outcome = null;
+      return;
+    }
+    if (!result.focusFree && outcome === 'failed' && before === 'failed') {
       // Focus stays where the creator moved it, and the text is unchanged, so
       // `role="alert"` would say nothing: re-insert it so it is read out.
       repeats += 1;
@@ -149,7 +155,7 @@
      button. -->
 {#if failed || retrying}
   <div bind:this={alertNode} class="load-failed" tabindex="-1">
-    <Alert variant="error" data-testid={testId} aria-busy={busy}>
+    <Alert variant="error" data-testid={testId} aria-busy={core.busy}>
       <div class="load-failed__row">
         {#key repeats}
           <p class="load-failed__message">
@@ -157,7 +163,7 @@
           </p>
         {/key}
         <Button variant="secondary" size="sm" onclick={retry}>
-          {busy
+          {core.busy
             ? m.money_setup_load_failed_retrying()
             : m.money_setup_load_failed_retry()}
         </Button>

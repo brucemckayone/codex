@@ -406,9 +406,15 @@
   // loading (Codex-if444). The note, and its focused Try again, stay until it
   // answers.
   const priceRetry = createLoadRetry(() => priceChangesQuery);
-  /** Check again or Try again is out: one read per press, never two at once (the cost rule). */
+  /**
+   * Check again or Try again is out, and a press of either does nothing (the
+   * cost rule). One press, one re-read; a Try again of a failed read sends
+   * two, the stray one kit's doing (see `createLoadRetry`).
+   */
   const priceBusy = $derived(priceReading || priceRetry.busy);
   let priceFailedNode = $state<HTMLElement | null>(null);
+  /** Repeat failures read out without a focus move; keys the note's words. */
+  let priceRepeats = $state(0);
 
   /**
    * Check again (one note): a re-read of a read that has loaded, which kit
@@ -439,7 +445,7 @@
    */
   async function retryPriceChanges() {
     if (priceReading) return;
-    await priceRetry.retry({
+    const result = await priceRetry.retry({
       from: () => priceFailedNode,
       settled: () => {
         priceCheck = null;
@@ -453,6 +459,8 @@
               ) ?? document.querySelector<HTMLElement>('[data-tiers-heading]'));
       },
     });
+    // Focus moved on during it, and the words are the same: read them again.
+    if (result && !result.focusFree && priceChangesFailed) priceRepeats += 1;
   }
 
   function dismissPriceNote(note: PriceNoteView, tierId: string) {
@@ -1769,6 +1777,7 @@
             <PriceChangeNote
               failed
               busy={priceBusy}
+              repeats={priceRepeats}
               onTryAgain={retryPriceChanges}
               data-testid="price-change-note-failed"
             />

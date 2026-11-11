@@ -477,13 +477,23 @@
    * is still in that alert or dropped (R2-L2).
    */
   const previewRetry = createLoadRetry(() => previewQuery);
+  /** Repeat failures read out without a focus move; keys the alert's words. */
+  let previewRepeats = $state(0);
 
   async function retryPreview(event: MouseEvent) {
     const from =
       event.currentTarget instanceof Element
         ? event.currentTarget.closest('[data-preview-problem]')
         : null;
-    await previewRetry.retry({ from: () => from, settled: () => previewNow });
+    const result = await previewRetry.retry({
+      from: () => from,
+      settled: () => previewNow,
+    });
+    // Focus moved on during it, and the words are the same: insert them
+    // again, so `role="alert"` reads them out.
+    if (result && !result.focusFree && previewProblem === 'failed') {
+      previewRepeats += 1;
+    }
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────
@@ -714,25 +724,30 @@
                   </Button>
                 </div>
               </Alert>
-            {:else if previewProblem === 'failed' || previewRetry.retrying}
-              <!-- Kept while Try again runs (see `previewRetry`). Busy, not
-                   `loading`: a loading Button disables itself, which drops
-                   focus to <body> on the press. -->
+            {:else if previewProblem === 'failed' || (previewRetry.retrying && previewCents === shownCents)}
+              <!-- Kept while Try again runs (see `previewRetry`), for the
+                   amount it is retrying: a new amount is a new preview, so
+                   its own skeleton. Busy, not `loading`: a loading Button
+                   disables itself, which drops focus to <body> on the press. -->
               <Alert
                 variant="error"
                 tabindex={-1}
                 data-preview-problem
                 data-testid="preview-error"
               >
-                <p>{m.support_preview_error({ amount: formatPrice(shownCents) })}</p>
+                {#key previewRepeats}
+                  <p>{m.support_preview_error({ amount: formatPrice(shownCents) })}</p>
+                {/key}
                 <div class="alert-actions">
+                  <!-- The label says it is running, as LoadFailedAlert's does:
+                       focus stays on the button, so nothing else changes. -->
                   <Button
                     variant="secondary"
                     size="sm"
                     aria-busy={previewRetry.busy || undefined}
                     onclick={(event: MouseEvent) => void retryPreview(event)}
                   >
-                    {m.support_try_again()}
+                    {previewRetry.busy ? m.support_trying_again() : m.support_try_again()}
                   </Button>
                 </div>
               </Alert>

@@ -15,6 +15,9 @@
  * - an invalidate that another navigation or invalidate overtook resolves
  *   with the data unchanged (`overtake`). The run that overtook it usually
  *   lands the data later; a shallow Back lands nothing.
+ * - a rerun of ANOTHER load (the platform layout's `cache:versions`, on
+ *   every tab return) hands the page new merged `data`, with this load's
+ *   output kept as it was, the same objects (`otherLoadReruns`).
  *
  * So the invalidate's promise is never the answer: judged when it resolves,
  * a Retry is judged late, or on the data it was meant to replace.
@@ -40,6 +43,8 @@ export interface KitInvalidate<D> {
   queriesSettle(): void;
   /** Overtaken: the invalidate resolves with the data unchanged. */
   overtake(): void;
+  /** Another load reruns: new merged `data`, this load's output unchanged. */
+  otherLoadReruns(): void;
 }
 
 export function kitInvalidate<D>(data: D): KitInvalidate<D> {
@@ -71,5 +76,8 @@ export function kitInvalidate<D>(data: D): KitInvalidate<D> {
     },
     queriesSettle: resolvePending,
     overtake: resolvePending,
+    otherLoadReruns() {
+      props.data = { ...props.data };
+    },
   };
 }

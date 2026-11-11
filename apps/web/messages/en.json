@@ -3353,6 +3353,7 @@
   "support_reload_error_lead": "We couldn't reload this charge.",
   "support_reload_error_body": "What's shown may be out of date. Try again before you refund it.",
   "support_try_again": "Try again",
+  "support_trying_again": "Trying again…",
   "support_loading_charge": "Loading the charge…",
   "support_split_title": "How the {amount} was split",
   "support_split_desc_purchase": "As recorded for this charge, one row per payee. Payouts reach a bank only after the 14-day window, so a refund in the window takes money back from the payee's Stripe balance or from a payout not yet made.",

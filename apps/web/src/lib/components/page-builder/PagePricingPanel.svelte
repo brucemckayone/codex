@@ -239,9 +239,15 @@
   // still loading (Codex-if444). The note, and its focused Try again, stay
   // until it answers.
   const planRetry = createLoadRetry(() => planChangesQuery);
-  /** Check again or Try again is out: one read per press, never two at once. */
+  /**
+   * Check again or Try again is out, and a press of either does nothing. One
+   * press, one re-read; a Try again of a failed read sends two, the stray one
+   * kit's doing (see `createLoadRetry`).
+   */
   const planBusy = $derived(planReading || planRetry.busy);
   let planWayNode = $state<HTMLElement | null>(null);
+  /** Repeat failures read out without a focus move; keys the note's words. */
+  let planRepeats = $state(0);
 
   const failedPlanNote = () =>
     planWayNode?.querySelector<HTMLElement>(
@@ -277,7 +283,7 @@
    */
   async function retryPlanChanges() {
     if (planReading) return;
-    await planRetry.retry({
+    const result = await planRetry.retry({
       from: failedPlanNote,
       settled: () => {
         planCheck = null;
@@ -291,6 +297,8 @@
               ) ?? monthlyInput);
       },
     });
+    // Focus moved on during it, and the words are the same: read them again.
+    if (result && !result.focusFree && planChangesFailed) planRepeats += 1;
   }
 
   function dismissPlanNote(note: PriceNoteView) {
@@ -459,6 +467,7 @@
         <PriceChangeNote
           failed
           busy={planBusy}
+          repeats={planRepeats}
           onTryAgain={retryPlanChanges}
           data-testid="price-change-note-failed"
         />

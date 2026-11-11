@@ -33,6 +33,14 @@
  *                    function whose first await is `invalidate()` or
  *                    `invalidateAll()` and that then reads the page's `data`
  *                    prop or a `$derived` built from it.
+ *                    Only a Retry is checked. In a component, a function
+ *                    its markup presses from a failed state: an `{#if}` that
+ *                    holds when it failed (`{#if failed || retrying}`, the
+ *                    failed layout kept through a Retry, included), the
+ *                    `{:else}` of one that holds when loaded, a `{:catch}`,
+ *                    or a handler prop of a component given a failure prop
+ *                    (`<Note failed={x} onTryAgain={retry} />`). In a
+ *                    .svelte.ts module, a function named for a Retry.
  *   parse            A scanned file that does not parse fails: it can't be
  *                    checked.
  *
@@ -439,7 +447,9 @@ function* functionsOf(programs) {
  * Whether an `{#if}` test holds in the failed state ('fail'), in the loaded
  * one ('ok'), or neither (null): a name or string that says failure
  * (`connectFailed`, `data.loadFailed`, `query.error`, `previewProblem ===
- * 'failed'`), through `!`, `===`/`!==`, `&&` and `||`.
+ * 'failed'`), through `!`, `===`/`!==`, `&&` and `||`. An `||` holds whenever
+ * either side does, so one failure side makes it 'fail': `{#if failed ||
+ * retrying}` is the failed layout kept mounted through a Retry.
  */
 function testPolarity(test) {
   if (!test) return null;
@@ -483,8 +493,10 @@ function testPolarity(test) {
       const right = testPolarity(test.right);
       if (test.operator === '&&')
         return left === 'fail' || right === 'fail' ? 'fail' : null;
-      if (test.operator === '||')
-        return left === 'fail' && right === 'fail' ? 'fail' : null;
+      if (test.operator === '||') {
+        if (left === 'fail' || right === 'fail') return 'fail';
+        return left === 'ok' && right === 'ok' ? 'ok' : null;
+      }
       return null;
     }
     default:
@@ -492,11 +504,35 @@ function testPolarity(test) {
   }
 }
 
+/** A prop that says its component shows a failure: `failed`, `…Failed`, `error`. */
+const FAILURE_PROP = /^(?:failed|error)$|Failed$/;
+/** A callback prop or event handler: `onTryAgain`, `onclick`. */
+const HANDLER_PROP = /^on/;
+
+/** `<Note failed …>`: a component told it shows a failure (not `={false}`). */
+function showsFailure(node) {
+  if (node.type !== 'Component' && node.type !== 'SvelteComponent')
+    return false;
+  return node.attributes.some(
+    (attr) =>
+      attr.type === 'Attribute' &&
+      FAILURE_PROP.test(attr.name) &&
+      !(
+        attr.value?.type === 'ExpressionTag' &&
+        attr.value.expression.type === 'Literal' &&
+        attr.value.expression.value === false
+      )
+  );
+}
+
 /**
  * What the markup presses from a failed state: the names its handlers there
  * reference, and the functions written inline there. A failed state is the
  * branch of an `{#if}` / `{:else if}` whose test says failure (or the
- * `{:else}` of one that says loaded), and an `{#await}`'s `{:catch}`.
+ * `{:else}` of one that says loaded), an `{#await}`'s `{:catch}`, and the
+ * handler props of a component given a failure prop
+ * (`<Note failed={x} onTryAgain={retry} />`), which decides itself when to
+ * show its Retry.
  */
 function pressedFromFailure(fragment) {
   const names = new Set();
@@ -525,6 +561,13 @@ function pressedFromFailure(fragment) {
       visit(node.then, failed);
       visit(node.catch, true);
       return;
+    }
+    // Inside a failed branch its handlers are collected below anyway.
+    if (!failed && showsFailure(node)) {
+      for (const attr of node.attributes) {
+        if (attr.type === 'Attribute' && HANDLER_PROP.test(attr.name))
+          collect(attr);
+      }
     }
     // An ESTree expression inside the markup: a handler, a prop, a tag.
     if (!TEMPLATE_TYPES.has(node.type)) {
@@ -718,7 +761,7 @@ function scanFile(file, source, report) {
       match.index,
       'retry-label',
       `renders LoadFailedAlert's Retry label (\`${match[0]}\`) outside it: a hand-written load-failure Retry. ` +
-        'Mount LoadFailedAlert instead'
+        'Mount LoadFailedAlert instead, or build the failure UI on createLoadRetry (lib/components/studio/load-retry.svelte.ts) with labels of its own'
     );
   }
   if (!RUNES_FILE.test(file)) return;

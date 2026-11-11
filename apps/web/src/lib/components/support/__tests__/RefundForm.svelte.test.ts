@@ -1000,4 +1000,89 @@ describe('Try again on a failed preview, as kit runs it (R2-L2)', () => {
     expect(ended?.querySelector('button')).toBeNull();
     expect(document.activeElement).toBe(ended);
   });
+
+  test('says "Trying again…" while it runs, and "Try again" once it has answered', async () => {
+    await failedAt750();
+    await pressTryAgain();
+    expect(tryAgain()?.textContent?.trim()).toBe(m.support_trying_again());
+
+    kit.fail(httpError(500, 'boom'));
+    await settle();
+    expect(tryAgain()?.textContent?.trim()).toBe(m.support_try_again());
+  });
+
+  test('a second press while it runs sends nothing', async () => {
+    await failedAt750();
+    const { refreshed } = await pressTryAgain();
+
+    tryAgain()?.click();
+    await settle();
+    expect(kit.refreshes(refreshed)).toBe(1);
+    expect(kit.refreshes(kit.held())).toBe(0);
+  });
+
+  test('a stray fetch that lands first is not the answer; the held read failing again is', async () => {
+    await failedAt750();
+    const { refreshed } = await pressTryAgain();
+
+    kit.land(preview(), refreshed);
+    await settle();
+    expect(failedAlert()).not.toBeNull();
+    expect(document.querySelector('[data-testid="preview-lines"]')).toBeNull();
+    expect(tryAgain()?.getAttribute('aria-busy')).toBe('true');
+
+    kit.fail(httpError(500, 'boom'));
+    await settle();
+    expect(document.activeElement).toBe(failedAlert());
+  });
+
+  test('a new amount during it is a new preview: its lines show, and focus stays in the amount', async () => {
+    await failedAt750();
+    await pressTryAgain();
+    const kit800 = kitPreview({ ...ARGS_750, amountCents: 800 });
+
+    amountInput()?.focus();
+    choosePart('8.00');
+    // Not "Couldn't load" over the new amount while its preview waits.
+    expect(failedAlert()).toBeNull();
+    await wait(300);
+    kit800.land(preview({ amountCents: 800 }));
+    await settle();
+
+    expect(
+      document.querySelector('[data-testid="preview-lines"]')
+    ).not.toBeNull();
+    expect(failedAlert()).toBeNull();
+    expect(document.activeElement).toBe(amountInput());
+  });
+
+  test('focus moved on during it stays put when the lines land', async () => {
+    await failedAt750();
+    await pressTryAgain();
+
+    amountInput()?.focus();
+    kit.land(preview());
+    await settle();
+
+    expect(
+      document.querySelector('[data-testid="preview-lines"]')
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(amountInput());
+  });
+
+  test('focus moved on during it stays put on a repeat failure, and the alert is read out again', async () => {
+    await failedAt750();
+    await pressTryAgain();
+    const words = () => failedAlert()?.querySelector('p') ?? null;
+    const before = words();
+
+    amountInput()?.focus();
+    kit.fail(httpError(500, 'boom'));
+    await settle();
+
+    expect(document.activeElement).toBe(amountInput());
+    // The same words, so `role="alert"` reads them only if inserted again.
+    expect(words()?.textContent).toBe(before?.textContent);
+    expect(words()).not.toBe(before);
+  });
 });

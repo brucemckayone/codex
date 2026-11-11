@@ -14,10 +14,17 @@
  *   The Retry waits for the read the caller holds once it has refreshed. A
  *   load read (`loadRead`) is no promise and its `invalidate` resolves late
  *   (after every live remote query) or early (overtaken, data unchanged), so
- *   it waits for the caller's data to change: a read other than the one it
- *   held. Once that refresh settles unchanged, Retry is offered again
- *   (`busy` goes false) while the wait goes on, and the next change to the
- *   data, whatever reran it, is judged as this Retry.
+ *   it waits for the caller's data to change: a read of another run of the
+ *   load (`LoadRead.key`), not just new merged data. Once that refresh
+ *   settles unchanged, Retry is offered again (`busy` goes false) while the
+ *   wait goes on, and the next run of that load, whatever reran it, is
+ *   judged as this Retry.
+ * - WHEN it stops waiting without an answer. A later Retry takes the wait
+ *   over (after a load read's refresh settled unchanged); the caller moves to
+ *   a remote read this Retry did not start (the refund preview's amount
+ *   changed, or the page let the query go); or the component unmounts. That
+ *   Retry is superseded: it resolves `null`, and leaves focus, `settled` and
+ *   `retrying` to whatever runs now.
  * - `retrying` / `busy`. True from the press until the answer is in, so a
  *   failure UI that renders while `failed || retrying` stays mounted, with
  *   its focused button, while the new read loads. A press while `busy` does
@@ -32,7 +39,7 @@
  * and no error, the caller let the read go or it is still loading: claim
  * nothing.
  *
- * Call during a component's initialisation: it registers an effect.
+ * Call during a component's initialisation: it registers effects.
  */
 import { tick, untrack } from 'svelte';
 import { focusIsFree } from '$lib/utils/focus-if-lost';
@@ -74,10 +81,22 @@ export interface LoadRetry<R extends AlertRead> {
   readonly busy: boolean;
   /**
    * Refreshes the read and waits for the answer the caller will hold. Never
-   * rejects. Resolves `null` when nothing ran: a Retry is `busy`, or there
-   * is no read.
+   * rejects. Resolves `null` when nothing ran (a Retry is `busy`, or there is
+   * no read) or when it was superseded before an answer (see the header).
    */
   retry(focus?: RetryFocus<R>): Promise<RetryResult<R> | null>;
+}
+
+/**
+ * The same read: the same object, or load reads of one run of the load. A
+ * rerun of another load (a layout's) hands the page new merged data, so a
+ * new load read, built from the same run of this one.
+ */
+function sameRead(a: AlertRead | null, b: AlertRead | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || !isLoadRead(a) || !isLoadRead(b))
+    return false;
+  return a.key !== undefined && a.key === b.key;
 }
 
 export function createLoadRetry<R extends AlertRead>(
@@ -91,57 +110,92 @@ export function createLoadRetry<R extends AlertRead>(
    */
   let stalled = $state(false);
   const busy = $derived(retrying && !stalled);
+  /** The Retry that owns the wait. A later one, or unmounting, moves it on. */
+  let run = 0;
 
   function setRetrying(value: boolean) {
     retrying = value;
     options.onretrying?.(value);
   }
 
-  /** Called with each read the caller hands over (see `nextRead`). */
-  let onRead: (() => void) | null = null;
+  /** The running Retry's wait for the caller to hold a read other than `held`. */
+  let waiter: { held: R | null; done: (moved: boolean) => void } | null = null;
+
+  /** Ends the wait: `moved`, the caller holds another read; else superseded. */
+  function release(moved: boolean) {
+    const ending = waiter;
+    waiter = null;
+    ending?.done(moved);
+  }
+
   $effect(() => {
     void read();
-    untrack(() => onRead?.());
+    untrack(() => {
+      if (waiter && !sameRead(read(), waiter.held)) release(true);
+    });
+  });
+
+  // Unmounted: a Retry still waiting is superseded, and touches nothing.
+  $effect(() => () => {
+    run += 1;
+    release(false);
   });
 
   /**
-   * Refreshes `refreshed`, then waits for the answer the caller will hold:
-   * the read of the query it holds now, or a load read's new data.
+   * Resolves `true` once the caller holds a read other than `held`, `false`
+   * if superseded first. A wait it replaces is superseded.
    */
-  async function heldRead(refreshed: R) {
+  function nextRead(held: R | null) {
+    release(false);
+    const mine: { held: R | null; done: (moved: boolean) => void } = {
+      held,
+      done: () => {},
+    };
+    const moved = new Promise<boolean>((resolve) => {
+      mine.done = resolve;
+    });
+    waiter = mine;
+    return {
+      moved,
+      /** The answer came first: stop waiting, unless another wait took over. */
+      cancel: () => {
+        if (waiter === mine) waiter = null;
+      },
+    };
+  }
+
+  /**
+   * Refreshes `refreshed`, then waits for the answer the caller will hold:
+   * the read of the query it holds now, or a load read's new data. `false`:
+   * superseded first.
+   */
+  async function heldRead(refreshed: R, mine: number): Promise<boolean> {
     const reread = refreshed.refresh();
     // The caller's derivation is read lazily, so this is already the new query.
     const held = read();
     if (isLoadRead(refreshed)) {
       // Its answer arrives as the caller's new data, which nextRead waits for.
       const settled = () => {
-        if (read() === held) stalled = true;
+        if (run === mine && sameRead(read(), held)) stalled = true;
       };
       void reread.then(settled, settled);
-      await nextRead(held);
-      return;
+      return nextRead(held).moved;
     }
     if (held !== refreshed) {
       void reread.catch(() => {
         // The stray fetch of a query the caller let go: nobody reads its result.
       });
     }
-    try {
-      await (held === refreshed ? reread : held);
-    } catch {
+    const wait = nextRead(held);
+    const answer = Promise.resolve(held === refreshed ? reread : held).then(
+      () => true,
       // Kept on the held query's `.error`, which the caller reads.
-    }
-  }
-
-  /** Resolves once the caller holds a read other than `held`. */
-  function nextRead(held: R | null): Promise<void> {
-    return new Promise((resolve) => {
-      onRead = () => {
-        if (read() === held) return;
-        onRead = null;
-        resolve();
-      };
-    });
+      () => true
+    );
+    // The caller moving to a read this Retry did not start supersedes it.
+    const answered = await Promise.race([answer, wait.moved.then(() => false)]);
+    wait.cancel();
+    return answered;
   }
 
   return {
@@ -154,14 +208,21 @@ export function createLoadRetry<R extends AlertRead>(
     async retry(focus = {}) {
       const refreshed = read();
       if (busy || !refreshed) return null;
+      run += 1;
+      const mine = run;
       setRetrying(true);
       stalled = false;
+      let answered = false;
       try {
-        await heldRead(refreshed);
+        answered = await heldRead(refreshed, mine);
       } finally {
-        setRetrying(false);
-        stalled = false;
+        // Superseded by a later Retry or by unmounting: that owns it now.
+        if (run === mine) {
+          setRetrying(false);
+          stalled = false;
+        }
       }
+      if (!answered || run !== mine) return null;
       const settled = read();
       const target = focus.settled?.(settled);
       await tick();

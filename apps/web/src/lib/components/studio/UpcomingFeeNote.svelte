@@ -84,12 +84,6 @@
   }
 </script>
 
-{#if checkedNone && !view && !failed}
-  <p bind:this={statusNode} class="sr-only" role="status" tabindex="-1">
-    {m.fee_note_check_none()}
-  </p>
-{/if}
-
 {#if view}
   <Alert
     variant="info"
@@ -145,6 +139,13 @@
     </button>
   </p>
 {/if}
+
+<!-- Mounted throughout, its words swapped in: a live region that appears
+     with its words already in it is often not read out. Last, so the note
+     still sits straight under the page's header. -->
+<p bind:this={statusNode} class="sr-only" role="status" tabindex="-1">
+  {checkedNone && !view && !failed ? m.fee_note_check_none() : ''}
+</p>
 
 <style>
   .fee-note__row {

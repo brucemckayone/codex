@@ -117,12 +117,15 @@
 	// late (after the page's live remote queries) or early (overtaken, with the
 	// data unchanged), and the page judged on that said "We still couldn't…"
 	// about a reload that never ran (Codex-if444). The raw error is never
-	// rendered: the load logs it.
+	// rendered: the load logs it. Keyed on this load's own output, which is new
+	// on each run of it: the platform layout reruns on every tab return
+	// (`cache:versions`), which is new `data` but not this Retry's answer.
 	const purchasesRead = $derived(
 		loadRead({
 			current: data.loadFailed ? undefined : data.purchases,
 			error: data.loadFailed ? m.account_payments_load_failed() : undefined,
 			refresh: () => invalidate('account:purchases'),
+			key: data.purchases,
 		})
 	);
 </script>

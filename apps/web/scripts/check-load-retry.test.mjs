@@ -188,6 +188,74 @@ test('derived-refresh FIRES from every failed branch: {:else} of a loaded test, 
   );
 });
 
+/**
+ * The failed layout kept mounted through a Retry, two ways: an `{#if}` that
+ * also holds while retrying, and a component that decides itself when to
+ * show its Retry. Each with a hand-written Retry that waits on the stray read
+ * (the review's probe, Codex-if444 round 5), and a quiet twin.
+ */
+const KEPT_RETRY =
+  'retrying = true;\n    await thingQuery.refresh();\n    retrying = false;';
+const KEPT_SCRIPT = 'let retrying = $state(false);';
+const NOTE_IMPORT =
+  "import { getThing } from '$lib/remote/thing.remote';\n  import Note from '$lib/components/Note.svelte';";
+
+test('derived-refresh FIRES on a failed branch kept while retrying: {#if failed || retrying}', () => {
+  const src = page({
+    script: KEPT_SCRIPT,
+    retry: KEPT_RETRY,
+    markup:
+      '{#if thingFailed || retrying}<button onclick={retry}>Try again</button>{/if}',
+  });
+  writeFixture('src/routes/kept/+page.svelte', src);
+  // The quiet twin: neither side of its `||` says failure.
+  writeFixture(
+    'src/routes/kept-quiet/+page.svelte',
+    page({
+      script: KEPT_SCRIPT,
+      retry: KEPT_RETRY,
+      markup:
+        '{#if thingQuery.current || retrying}<button onclick={retry}>Refresh</button>{/if}',
+    })
+  );
+  assert.deepEqual(summary(scan()), [
+    `src/routes/kept/+page.svelte:${lineOf(src, 'await')} derived-refresh`,
+  ]);
+});
+
+test('derived-refresh FIRES on a handler prop of a component given a failure prop, with no {#if}', () => {
+  const fires = {
+    failed: '<Note failed={thingFailed} onTryAgain={retry} />',
+    named: '<Note priceFailed={thingFailed} onTryAgain={() => retry()} />',
+    error: '<Note error={thingQuery.error} onretry={retry} />',
+  };
+  const quiet = {
+    // No failure prop: a Check again of a read that has loaded.
+    'no-failure-prop':
+      '<Note view={thingQuery.current} onCheckAgain={retry} />',
+    'failed-false': '<Note failed={false} onTryAgain={retry} />',
+  };
+  const sources = {};
+  for (const [name, markup] of Object.entries({ ...fires, ...quiet })) {
+    sources[name] = page({
+      imports: NOTE_IMPORT,
+      script: KEPT_SCRIPT,
+      retry: KEPT_RETRY,
+      markup,
+    });
+    writeFixture(`src/routes/${name}/+page.svelte`, sources[name]);
+  }
+  assert.deepEqual(
+    summary(scan()).sort(),
+    Object.keys(fires)
+      .map(
+        (name) =>
+          `src/routes/${name}/+page.svelte:${lineOf(sources[name], 'await')} derived-refresh`
+      )
+      .sort()
+  );
+});
+
 test('derived-refresh FIRES on a load read, and on awaiting invalidate() then reading `data`', () => {
   const loadRead = page({
     imports:
@@ -497,6 +565,30 @@ test('an ALLOWLIST entry waives exactly its `expect` count; one that matches not
   assert.equal(otherRule.stale.length, 1);
 });
 
+test('a SECOND violation in an allowlisted file fails the gate: a miscount above `expect`', () => {
+  const entry = {
+    file: 'src/routes/two/+page.svelte',
+    rule: 'derived-refresh',
+    expect: 1,
+    bead: 'Codex-test.3',
+    reason: 'test',
+  };
+  writeFixture(
+    entry.file,
+    page({
+      script:
+        'async function retryAgain() {\n    await thingQuery.refresh();\n    busy = false;\n  }',
+      retry: 'await thingQuery.refresh();\n    busy = false;',
+      markup:
+        '{#if thingFailed}<button onclick={retry}>a</button><button onclick={retryAgain}>b</button>{/if}',
+    })
+  );
+  const result = scan([entry]);
+  assert.equal(result.miscounted.length, 1);
+  assert.equal(result.miscounted[0].found, 2);
+  assert.ok(failureLines(result).length > 0);
+});
+
 test('a STALE entry is an error: once its file is fixed the gate fails and names the bead', () => {
   const entry = {
     file: 'src/routes/fixed/+page.svelte',
@@ -566,6 +658,16 @@ test('the CLI exits 1 on a violation, 0 on a clean tree, 2 on a bad flag (--root
   // A mistyped flag must not fall back to scanning the real tree.
   assert.equal(runGate(GATE, '--rot', root).status, 2);
   assert.equal(runGate(GATE, '--root').status, 2);
+});
+
+test('the CLI fails closed on a --root with no directory, or one that is missing', () => {
+  const bare = runGate(GATE, '--root');
+  assert.equal(bare.status, 2, bare.stderr);
+  assert.match(bare.stderr, /--root needs a directory/);
+
+  const missing = runGate(GATE, '--root', join(root, 'not-there'));
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.stderr, /scan root does not exist/);
 });
 
 test('the CLI fails closed when it scans no files', () => {

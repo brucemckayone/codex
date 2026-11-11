@@ -482,4 +482,79 @@ describe('Try again on the failed note, as kit runs it (P10)', () => {
       document.querySelector('[data-tiers-heading]')
     );
   });
+
+  /** The failed note's words, the node `repeats` re-inserts. */
+  const failedWords = () =>
+    failedNote()?.querySelector('[data-testid="price-note-status"]')
+      ?.firstChild ?? null;
+  const createTier = () => button(document, m.monetisation_tiers_create());
+
+  test('focus moved on during it stays put on a repeat failure, and the note is read out again', async () => {
+    mountFailed();
+    const { refreshed } = await pressTryAgain();
+    const before = failedWords();
+
+    createTier().focus();
+    kit.fail(undefined, refreshed);
+    kit.fail();
+    await settle();
+
+    expect(document.activeElement).toBe(createTier());
+    expect(
+      failedNote()
+        ?.querySelector('[data-testid="price-note-status"]')
+        ?.getAttribute('aria-live')
+    ).toBe('polite');
+    expect(failedWords()?.textContent).toBe(before?.textContent);
+    expect(failedWords()).not.toBe(before);
+  });
+
+  test('focus moved on during it stays put when the notes land', async () => {
+    mountFailed();
+    await pressTryAgain();
+
+    createTier().focus();
+    kit.land([change()]);
+    await settle();
+
+    expect(notesIn(row('Members'))).toHaveLength(1);
+    expect(document.activeElement).toBe(createTier());
+  });
+
+  test('after a failed Check again, Try again re-reads the same query in place, and Check again meanwhile reads nothing', async () => {
+    kit = kitPriceChanges();
+    mountPage();
+    kit.land([change()]);
+    flushSync();
+    const query = kit.held();
+
+    // Check again fails: the note stays on its row, the failed line above.
+    button(row('Members'), 'Check again').click();
+    kit.fail();
+    await settle();
+    expect(failedNote()).not.toBeNull();
+    expect(notesIn(row('Members'))).toHaveLength(1);
+
+    tryAgain()?.focus();
+    tryAgain()?.click();
+    await settle();
+    // A read that had loaded is re-read in place: no new query.
+    expect(kit.held()).toBe(query);
+    expect(kit.refreshes(query)).toBe(2);
+    expect(tryAgain()?.getAttribute('aria-busy')).toBe('true');
+
+    // The one-read rule: Check again on the row reads nothing more.
+    const check = button(row('Members'), 'Check again');
+    expect(check.getAttribute('aria-busy')).toBe('true');
+    check.click();
+    await settle();
+    expect(kit.refreshes(query)).toBe(2);
+
+    kit.land([change()]);
+    await settle();
+    expect(failedNote()).toBeNull();
+    expect(document.activeElement).toBe(
+      row('Members').querySelector('[data-testid="price-note-status"]')
+    );
+  });
 });

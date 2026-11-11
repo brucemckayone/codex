@@ -204,23 +204,30 @@ describe('purchase history: Retry, as kit runs invalidate', () => {
     flushSync();
   };
 
-  async function pressRetry() {
+  /**
+   * Presses Retry with focus on it. A press that `sends` reruns the purchases
+   * load, by its key: a Retry that invalidated nothing would still pass the
+   * tests below, as `kit.land` changes the data anyway.
+   */
+  async function pressRetry({ sends = true } = {}) {
+    const before = kit.keys();
     retryButton()?.focus();
     retryButton()?.click();
     await settle();
+    expect(kit.keys()).toEqual(
+      sends ? [...before, 'account:purchases'] : before
+    );
   }
 
   test('keeps the alert and the focused Retry while the load reruns; a second press sends nothing', async () => {
     mountFailed();
     await pressRetry();
 
-    expect(kit.keys()).toEqual(['account:purchases']);
     expect(clean(retryButton())).toBe(m.money_setup_load_failed_retrying());
     expect(alert()?.getAttribute('aria-busy')).toBe('true');
     expect(document.activeElement).toBe(retryButton());
 
-    await pressRetry();
-    expect(kit.keys()).toHaveLength(1);
+    await pressRetry({ sends: false });
   });
 
   test('a reload that fails again says "We still couldn\'t…" and focuses the alert', async () => {
@@ -245,6 +252,49 @@ describe('purchase history: Retry, as kit runs invalidate', () => {
     expect(alert()).toBeNull();
     expect(document.querySelectorAll('tbody tr')).toHaveLength(1);
     expect(document.activeElement).toBe(loadedStatus());
+  });
+
+  test('a reload that loads an empty list says there are no purchases yet, and that it loaded', async () => {
+    mountFailed();
+    await pressRetry();
+
+    kit.land(pageData([]));
+    await settle();
+
+    expect(alert()).toBeNull();
+    expect(clean(document.body)).toContain(m.account_payments_none_history());
+    expect(document.activeElement).toBe(loadedStatus());
+  });
+
+  test('a tab return while it runs is not its answer: another load reran, this one did not', async () => {
+    mountFailed();
+    await pressRetry();
+
+    // The platform layout reruns on every tab return (`cache:versions`).
+    kit.otherLoadReruns();
+    await settle();
+    expect(message()).toBe(m.account_payments_load_failed());
+    expect(clean(retryButton())).toBe(m.money_setup_load_failed_retrying());
+
+    kit.land(pageData([CONTENT]));
+    await settle();
+    expect(alert()).toBeNull();
+    expect(document.activeElement).toBe(loadedStatus());
+  });
+
+  test('after an overtaken reload, a tab return says nothing: no "We still couldn\'t…" for a reload never run', async () => {
+    mountFailed();
+    await pressRetry();
+    kit.overtake();
+    await settle();
+
+    kit.otherLoadReruns();
+    await settle();
+    expect(message()).toBe(m.account_payments_load_failed());
+    expect(document.activeElement).toBe(retryButton());
+
+    // Retry is offered again, and sends.
+    await pressRetry();
   });
 
   test('a list that lands before the invalidate resolves ends the Retry then, with focus on the status line', async () => {

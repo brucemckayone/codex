@@ -330,4 +330,64 @@ describe('Try again, as kit runs it', () => {
     expect(checkedNone()?.classList.contains('sr-only')).toBe(true);
     expect(document.activeElement).toBe(checkedNone());
   });
+
+  /** Somewhere else on the page, for focus moved on during the read. */
+  function elsewhere(): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.textContent = 'Elsewhere';
+    document.body.appendChild(button);
+    return button;
+  }
+  /** The hidden line that says a Try again found nothing coming. */
+  const noneLine = () =>
+    document.querySelector<HTMLElement>('p.sr-only[role="status"]');
+  /** The failed line's words, the node `{#key repeats}` re-inserts. */
+  const failedWords = () =>
+    [...(failedLine()?.childNodes ?? [])].find(
+      (node) =>
+        node.nodeType === Node.TEXT_NODE &&
+        node.textContent?.includes(m.fee_note_check_failed())
+    ) ?? null;
+
+  test('the "nothing coming" line is in place before the answer, so its words are read out', async () => {
+    renderFailed();
+    const line = noneLine();
+    expect(line).not.toBeNull();
+    expect(line?.textContent?.trim()).toBe('');
+
+    await pressTryAgain();
+    kit.land([]);
+    await settle();
+
+    expect(noneLine()).toBe(line);
+    expect(line?.textContent?.trim()).toBe(m.fee_note_check_none());
+  });
+
+  test('focus moved on during it stays put on a repeat failure, and the line is read out again', async () => {
+    renderFailed();
+    const outside = elsewhere();
+    await pressTryAgain();
+    const before = failedWords();
+
+    outside.focus();
+    kit.fail();
+    await settle();
+
+    expect(document.activeElement).toBe(outside);
+    expect(failedWords()).not.toBeNull();
+    expect(failedWords()).not.toBe(before);
+  });
+
+  test('focus moved on during it stays put when a rise lands', async () => {
+    renderFailed();
+    const outside = elsewhere();
+    await pressTryAgain();
+
+    outside.focus();
+    kit.land([RISE]);
+    await settle();
+
+    expect(note()).not.toBeNull();
+    expect(document.activeElement).toBe(outside);
+  });
 });
