@@ -105,8 +105,12 @@ export function remoteErrorStatus(error: unknown): number | undefined {
 
 /**
  * A failure a Try again can help: no answer, a 5xx, a timeout or a rate
- * limit; never a refusal. The studio's one rule, server and browser alike,
- * so an alert on `logger.error` sees the same failures from every surface.
+ * limit; never a refusal. The studio's rule for what a page shows and for
+ * the logs of what a creator's input drives (a save, an upload), server and
+ * browser alike, so an alert on `logger.error` sees the same failures there.
+ * One exception: a signed-in list read whose args the remote already parsed
+ * logs its own server levels (`logRefusedRead`), since a 400 there can only
+ * be our drift and a 429 is anyone's to raise.
  */
 export function isReadOutage(error: unknown): boolean {
   const status = remoteErrorStatus(error);

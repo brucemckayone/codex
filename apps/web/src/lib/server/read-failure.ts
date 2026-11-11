@@ -70,18 +70,23 @@ export interface RefusedReadEvents {
  * reads it logged its own (Codex-a6ofh.3.1 review). A 5xx is left to escape to
  * `handleError`, which logs it.
  *
- * Its levels are a signed-in route's, not `apiErrorFields`' public-page rule,
- * where any 4xx but 408 and 429 is our bug. Behind a session:
+ * Its levels are a signed-in read's, not `apiErrorFields`' public-page rule,
+ * where any 4xx but 408 and 429 is our bug, nor `isReadOutage`'s, where a
+ * 429 is an outage and a 400 a refusal. These reads (the studio lists) need
+ * a session and no role, and the remote parses their args with the worker's
+ * own schema first. Behind a session:
  *
- * - 401, 403: the session ended (a sign-out in another tab) or the caller
- *   lacks the role. A refusal: warn. As an error, every sign-out would page.
- * - 429: the caller's rate limit. Warn: anyone can raise it at will, so it
- *   never reaches an error alert (Codex-osuqt's class). The page's own log
- *   says what the creator saw.
- * - 408: the worker did not answer. An outage: error, as the studio's client
- *   logs call one, under `unavailable`, never a "refusal".
- * - Any other 4xx: our request was wrong, a contract bug. Error, with the
- *   worker's `details` naming the field it refused (`logReadFailure`).
+ * - 401: the session ended (a sign-out in another tab, an expiry). Warn: as
+ *   an error, every sign-out would page.
+ * - 429: a rate limit. Warn: `procedure()` limits before it refuses a
+ *   missing session, so anyone can raise one at will, and it must never
+ *   reach an error alert (Codex-osuqt's class). The lists' client logs call
+ *   it an outage; for the dashboard's counts this warn is the only trace.
+ * - 408: the worker did not answer. An outage: error, under `unavailable`,
+ *   never a "refusal".
+ * - Any other 4xx, a 403 among them: these routes gate on no role, so it is
+ *   our request or a deploy skew, a contract bug. Error, with the worker's
+ *   `details` naming the field it refused (`logReadFailure`).
  *
  * `context` must never carry what the creator typed (a search, a slug).
  */
@@ -117,7 +122,6 @@ function logRefusal(
   };
   switch (error.status) {
     case 401:
-    case 403:
     case 429:
       logger.warn(events.refused, fields);
       return;

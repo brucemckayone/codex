@@ -138,6 +138,9 @@ const media = (await import('./media.remote')) as unknown as {
 const CONTENT_ID = '55555555-5555-4555-8555-555555555555';
 const NOT_YOURS = 'Content not found';
 
+/** What a validation 400 names: each refused field's path and static message. */
+const REFUSED_FIELDS = [{ path: ['status'], message: 'Invalid option' }];
+
 /** One worker answer: the envelope `mapErrorToResponse` writes. */
 function envelope(status: number, message: string) {
   const body =
@@ -150,8 +153,11 @@ function envelope(status: number, message: string) {
                 ? 'NOT_FOUND'
                 : status === 403
                   ? 'FORBIDDEN'
-                  : 'INTERNAL_ERROR',
+                  : status === 400
+                    ? 'VALIDATION_ERROR'
+                    : 'INTERNAL_ERROR',
             message,
+            ...(status === 400 && { details: REFUSED_FIELDS }),
           },
         };
   return new Response(JSON.stringify(body), {
@@ -258,43 +264,62 @@ describe.each([
     expect(err).toMatchObject({ status: 403, body: { message: 'Forbidden' } });
   });
 
+  /** Every server line this read wrote, as [level, event, fields]. */
+  const lines = () =>
+    (['error', 'warn'] as const).flatMap((level) =>
+      vi
+        .mocked(logger[level])
+        .mock.calls.filter(
+          ([event]) => event === refused || event === unavailable
+        )
+        .map(([event, fields]) => [level, event, fields] as const)
+    );
+
   // Kit skips handleError for an HttpError: without these lines a refused
   // read reached no log at all, on a page that logs none of its own. Behind
-  // a session the level is the route's own (Codex-a6ofh.3.1 review round 3):
-  // a sign-out is no contract bug, and an error alert must not page for one.
+  // a session the level is the route's own (Codex-a6ofh.3.1 review rounds
+  // 3-4): a sign-out is no contract bug, and an error alert must not page
+  // for one. Exactly one line each: a second at the other level would page
+  // all the same.
   it.each([
     [400, 'Invalid request data', 'error', 'refused'],
     [401, 'Authentication required', 'warn', 'refused'],
-    [403, 'Forbidden', 'warn', 'refused'],
+    [403, 'Forbidden', 'error', 'refused'],
     [429, 'Too many requests', 'warn', 'refused'],
     [408, 'Request to content timed out', 'error', 'unavailable'],
-  ] as const)('a forwarded %i is logged on the server at %s, as %s', async (status, message, level, kind) => {
+  ] as const)('a forwarded %i writes one server line, at %s, as %s', async (status, message, level, kind) => {
     workerAnswers(status, message);
     await rejection(list());
     const event = kind === 'refused' ? refused : unavailable;
-    const other = level === 'error' ? logger.warn : logger.error;
-    expect(logger[level]).toHaveBeenCalledWith(
-      event,
-      expect.objectContaining({
-        status,
-        page: 1,
-        limit: 24,
-        statusFilter: 'all',
-      })
-    );
-    expect(other).not.toHaveBeenCalledWith(event, expect.anything());
+    expect(lines().map(([at, name]) => [at, name])).toEqual([[level, event]]);
+    expect(lines()[0]?.[2]).toMatchObject({
+      status,
+      page: 1,
+      limit: 24,
+      statusFilter: 'all',
+    });
+  });
+
+  // The field the worker refused is how a contract bug is found: the
+  // message alone is always "Invalid request data".
+  it('a contract bug names the field the worker refused', async () => {
+    workerAnswers(400, 'Invalid request data');
+    await rejection(list());
+    expect(lines()[0]?.[2]).toMatchObject({ details: REFUSED_FIELDS });
+  });
+
+  it('a sign-out names no field', async () => {
+    workerAnswers(401, 'Authentication required');
+    await rejection(list());
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]?.[2]).not.toHaveProperty('details');
   });
 
   it('says a search was on, never what was searched for', async () => {
-    workerAnswers(403, 'Forbidden');
+    workerAnswers(401, 'Authentication required');
     await rejection(list('private notes'));
-    expect(logger.warn).toHaveBeenCalledWith(
-      refused,
-      expect.objectContaining({ hasSearch: true })
-    );
-    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain(
-      'private notes'
-    );
+    expect(lines()[0]?.[2]).toMatchObject({ hasSearch: true });
+    expect(JSON.stringify(lines())).not.toContain('private notes');
   });
 
   it('a 5xx is not forwarded: it stays an unexpected error for handleError', async () => {
@@ -302,10 +327,7 @@ describe.each([
     const err = await rejection(list());
     expect(err).not.toHaveProperty('body');
     // handleError logs it; a line here would log it twice.
-    for (const event of [refused, unavailable]) {
-      expect(logger.error).not.toHaveBeenCalledWith(event, expect.anything());
-      expect(logger.warn).not.toHaveBeenCalledWith(event, expect.anything());
-    }
+    expect(lines()).toEqual([]);
   });
 });
 

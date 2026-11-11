@@ -47,7 +47,8 @@ export const listMedia = query(mediaQuerySchema, async (params) => {
   // A 4xx keeps its status, so the library can say a refusal is one
   // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit logs
   // no forwarded 4xx, so it is logged here, for the library, the pickers and
-  // the dashboard, with the args that tell them apart.
+  // the dashboard, with the args that tell most of them apart (a picker's
+  // first page and the library on Ready, that type and Newest ask alike).
   return forwardClientErrors(() =>
     logRefusedRead(
       { refused: 'media.list_refused', unavailable: 'media.list_unavailable' },

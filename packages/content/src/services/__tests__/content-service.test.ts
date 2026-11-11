@@ -2618,25 +2618,34 @@ describe('ContentService', () => {
       });
 
       it('breaks a tie newest first, then by id, so pages never repeat or skip a row', async () => {
-        const [owner] = await seedTestUsers(db, 1);
         // Five pieces at 0 views: one tie, broken by when each was made.
         // Two share a moment, so only the id orders them, and they sit at
         // places 2 and 3: across the page 1/2 boundary, where a missing id
         // key repeats one and skips the other. The pair is one written
         // before the other whose ids sort the other way, so a tie left in
-        // write order is wrong every run, not by chance (5 random ids have
-        // such a pair in all but 1 run in 120). The other three are dated
+        // write order is wrong every run, not by chance. 5 random ids lack
+        // such a pair 1 draw in 120, so that draw is made again (a fresh
+        // owner: the list is theirs alone). The other three are dated
         // newest first in DESCENDING id order, so "newest first" is never id
         // order: an order that drops createdAt fails every run too, where
         // write order would pass it 5 runs in 120.
-        const ids = await piecesFor(owner!, 5);
-        const inverted =
-          ids.flatMap((first, i) =>
+        const draw = async () => {
+          const [owner] = await seedTestUsers(db, 1);
+          const ids = await piecesFor(owner!, 5);
+          const pair = ids.flatMap((first, i) =>
             ids
               .slice(i + 1)
               .filter((later) => later < first)
               .map((later) => [first, later] as const)
-          )[0] ?? ([ids[1]!, ids[2]!] as const);
+          )[0];
+          return { owner: owner!, ids, pair };
+        };
+        let drawn = await draw();
+        for (let again = 0; !drawn.pair && again < 4; again++) {
+          drawn = await draw();
+        }
+        const { owner, ids, pair: inverted } = drawn;
+        if (!inverted) throw new Error('5 draws without an inverted pair');
         const others = ids
           .filter((id) => !inverted.includes(id))
           .sort()
