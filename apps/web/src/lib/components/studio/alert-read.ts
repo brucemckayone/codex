@@ -1,16 +1,19 @@
 /**
- * What LoadFailedAlert reads and retries: a remote query, or a list read from
- * the page's LOAD. The creator content list fails in its load rather than in
- * a remote query. Build its read in a `$derived`, so it is rebuilt whenever
- * the page's data changes:
+ * What LoadFailedAlert (and createLoadRetry) reads and retries: a remote
+ * query, or a list read from the page's LOAD. The account payment page fails
+ * in its load rather than in a remote query. Build its read in a `$derived`,
+ * so it is rebuilt whenever the page's data changes:
  *
- *   const listRead = $derived(
+ *   const purchasesRead = $derived(
  *     loadRead({
- *       current: data.failed ? undefined : data.content,
- *       error: data.failed ? m.studio_content_load_failed() : undefined,
- *       refresh: () => invalidate('cache:studio-page:content'),
+ *       current: data.loadFailed ? undefined : data.purchases,
+ *       error: data.loadFailed ? m.account_payments_load_failed() : undefined,
+ *       refresh: () => invalidate('account:purchases'),
  *     })
  *   );
+ *
+ * The load must catch its own failure (a failed reload still lands as new
+ * `data`) and `depends()` on the key `refresh` invalidates, or a Retry waits.
  *
  * Only `loadRead` makes one, and the alert tells it from a remote query by
  * its tag. Pass a remote query to the alert as it is: a plain object wrapping
