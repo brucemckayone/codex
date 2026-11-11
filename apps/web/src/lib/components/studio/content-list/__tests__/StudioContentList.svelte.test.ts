@@ -429,7 +429,38 @@ describe('StudioContentList: Show more', () => {
     expect(logReadFailure).toHaveBeenCalledWith(
       'studio_content.show_more_failed',
       expect.any(Error),
-      expect.objectContaining({ page: 2, sort: 'updated', hasSearch: false })
+      expect.objectContaining({
+        page: 2,
+        statusFilter: 'all',
+        sortBy: 'updatedAt',
+        hasSearch: false,
+      })
+    );
+  });
+
+  test('a page that fails after the view moved logs the view it was read for', async () => {
+    s.first = { current: pageOf([piece(1)], 2), error: undefined };
+    let fail: (error: Error) => void = () => {};
+    s.later.set(
+      2,
+      new Promise<never>((_, reject) => {
+        fail = reject;
+      })
+    );
+    render('?type=video');
+
+    button(/Show more/)?.click();
+    flushSync();
+    // The creator moves to Drafts while page 2 of the videos is in flight.
+    nav.url = new URL('https://studio.test/studio/content?status=draft');
+    flushSync();
+    fail(new Error('Down'));
+    await settle();
+
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.show_more_failed',
+      expect.any(Error),
+      expect.objectContaining({ page: 2, statusFilter: 'all', type: 'video' })
     );
   });
 });

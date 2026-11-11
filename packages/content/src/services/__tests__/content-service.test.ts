@@ -2619,20 +2619,33 @@ describe('ContentService', () => {
 
       it('breaks a tie newest first, then by id, so pages never repeat or skip a row', async () => {
         const [owner] = await seedTestUsers(db, 1);
-        // Five pieces at 0 views: one tie. Made on four days, the last two
-        // at the same moment, so only the id can order those two.
+        // Five pieces at 0 views: one tie, broken by when each was made.
+        // Two share a moment, so only the id orders them, and they sit at
+        // places 2 and 3: across the page 1/2 boundary, where a missing id
+        // key repeats one and skips the other. The pair is one written
+        // before the other whose ids sort the other way, so a tie left in
+        // write order is wrong every run, not by chance (5 random ids have
+        // such a pair in all but 1 run in 120).
         const ids = await piecesFor(owner!, 5);
-        const made = [
-          '2026-01-01T00:00:00Z',
-          '2026-01-02T00:00:00Z',
-          '2026-01-03T00:00:00Z',
-          '2026-01-04T00:00:00Z',
-          '2026-01-04T00:00:00Z',
-        ];
-        for (const [index, id] of ids.entries()) {
+        const inverted =
+          ids.flatMap((first, i) =>
+            ids
+              .slice(i + 1)
+              .filter((later) => later < first)
+              .map((later) => [first, later] as const)
+          )[0] ?? ([ids[1]!, ids[2]!] as const);
+        const others = ids.filter((id) => !inverted.includes(id));
+        const made = new Map<string, string>([
+          [others[0]!, '2026-01-05T00:00:00Z'],
+          [inverted[0], '2026-01-04T00:00:00Z'],
+          [inverted[1], '2026-01-04T00:00:00Z'],
+          [others[1]!, '2026-01-02T00:00:00Z'],
+          [others[2]!, '2026-01-01T00:00:00Z'],
+        ]);
+        for (const [id, at] of made) {
           await db
             .update(content)
-            .set({ createdAt: new Date(made[index]!) })
+            .set({ createdAt: new Date(at) })
             .where(eq(content.id, id));
         }
 
@@ -2651,9 +2664,10 @@ describe('ContentService', () => {
         );
 
         // Newest first, the same on every page; the id orders the two made
-        // at the same moment.
-        const sameMoment = [ids[3]!, ids[4]!].sort();
-        expect(paged).toEqual([...sameMoment, ids[2], ids[1], ids[0]]);
+        // at the same moment, and each row shows exactly once.
+        const sameMoment = [...inverted].sort();
+        expect(paged).toEqual([others[0], ...sameMoment, others[1], others[2]]);
+        expect(new Set(paged).size).toBe(5);
       });
     });
   });

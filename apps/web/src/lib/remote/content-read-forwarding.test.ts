@@ -237,19 +237,41 @@ describe('getContent', () => {
  * with a Try again that could never work, and was logged as one.
  */
 describe.each([
-  ['listContent', () => remote.listContent({ page: 1, limit: 24 })],
-  ['listMedia', () => media.listMedia({ page: 1, limit: 24 })],
-] as const)('%s', (_name, list) => {
+  [
+    'listContent',
+    () => remote.listContent({ page: 1, limit: 24 }),
+    'content.list_refused',
+  ],
+  [
+    'listMedia',
+    () => media.listMedia({ page: 1, limit: 24 }),
+    'media.list_refused',
+  ],
+] as const)('%s', (_name, list, event) => {
   it('a 403 keeps its status', async () => {
     workerAnswers(403, 'Forbidden');
     const err = await rejection(list());
     expect(err).toMatchObject({ status: 403, body: { message: 'Forbidden' } });
   });
 
+  // Kit skips handleError for an HttpError: without this line a refused
+  // read reached no log at all, on a page that logs none of its own.
+  it('a forwarded 4xx is logged on the server, as kit no longer logs it', async () => {
+    workerAnswers(403, 'Forbidden');
+    await rejection(list());
+    expect(logger.error).toHaveBeenCalledWith(
+      event,
+      expect.objectContaining({ status: 403, page: 1 })
+    );
+  });
+
   it('a 5xx is not forwarded: it stays an unexpected error for handleError', async () => {
     workerAnswers(500, 'connection to Neon failed');
     const err = await rejection(list());
     expect(err).not.toHaveProperty('body');
+    // handleError logs it; a line here would log it twice.
+    expect(logger.error).not.toHaveBeenCalledWith(event, expect.anything());
+    expect(logger.warn).not.toHaveBeenCalledWith(event, expect.anything());
   });
 });
 

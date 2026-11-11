@@ -33,6 +33,7 @@ import { createServerApi } from '$lib/server/api';
 import { withoutRawBody } from '$lib/server/content-detail';
 import { ApiError } from '$lib/server/errors';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
+import { logRefusedRead } from '$lib/server/read-failure';
 import {
   contentSlugFromTitle,
   freeSlugCandidates,
@@ -71,10 +72,16 @@ export const listContent = query(
     }
 
     // A 4xx keeps its status, so the list can tell a refusal from an outage
-    // (`PagedList.refused`) and logs it as a warning; kit makes anything
-    // else a sanitised 500.
+    // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit
+    // logs no forwarded 4xx, so it is logged here, for every page that reads
+    // this (the dashboard's counts log nothing of their own).
     return forwardClientErrors(() =>
-      api.content.list(searchParams.toString() ? searchParams : undefined)
+      logRefusedRead(
+        'content.list_refused',
+        { organizationId: params?.organizationId ?? null, page: params?.page },
+        () =>
+          api.content.list(searchParams.toString() ? searchParams : undefined)
+      )
     );
   }
 );

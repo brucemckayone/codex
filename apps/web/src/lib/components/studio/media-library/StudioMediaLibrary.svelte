@@ -20,7 +20,7 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { boundSearchParam, gateSearchQuery } from '@codex/validation';
+  import { boundSearchParam, gateSearchQuery, type MediaQueryInput } from '@codex/validation';
   import { page } from '$app/state';
   import { mediaStatus } from '$lib/client/media-status.svelte';
   import { uploadQueue } from '$lib/client/upload-queue.svelte';
@@ -93,10 +93,12 @@
   // Codex-a6ofh.3.1): it holds the last list while a changed filter loads (the
   // page dims instead of flashing a skeleton), appends "Show more" only to the
   // view it was read for, and treats a failed read as a state, never empty.
-  const list = new PagedList({
+  // Args pinned: kit types `listMedia`'s input `void | …`, so inferred args
+  // would have no `page` for the Show-more log.
+  const list = new PagedList<MediaQueryInput, MediaPage>({
     args: (pageNumber) => libraryListArgs(view, search, pageNumber),
     read: listMedia,
-    onMoreFailed: (error, page) => logReadFailure('studio_media.show_more_failed', error, { page }),
+    onMoreFailed: (error, args) => logReadFailure('studio_media.show_more_failed', error, { page: args.page }),
   });
   const summary = getMediaSummary();
 

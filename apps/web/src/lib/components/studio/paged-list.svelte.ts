@@ -37,8 +37,11 @@ export interface PagedListOptions<Args, Page> {
   args: (page: number) => Args;
   /** The remote query for those args (`listContent`, `listMedia`). */
   read: (args: Args) => RemoteQuery<Page>;
-  /** A "Show more" that failed, and the page it asked for: the caller logs it. */
-  onMoreFailed: (error: unknown, page: number) => void;
+  /**
+   * A "Show more" that failed, with the args it read: the caller logs it as
+   * asked, since the creator may have moved to another view while it waited.
+   */
+  onMoreFailed: (error: unknown, args: Args) => void;
 }
 
 /** A row of a page: `Page['items']`'s element type. */
@@ -175,15 +178,14 @@ export class PagedList<Args, Page extends ListPage<{ id: string }>> {
   async showMore(): Promise<void> {
     const key = this.key;
     const pages = this.#extraPages;
-    const page = pages.length + 2;
-    const args = this.#options.args(page);
+    const args = this.#options.args(pages.length + 2);
     this.#moreLoadingFor = key;
     this.#moreFailedFor = null;
     try {
       const next = await this.#options.read(args);
       if (key === this.key) this.#extra = { key, pages: [...pages, next] };
     } catch (error) {
-      this.#options.onMoreFailed(error, page);
+      this.#options.onMoreFailed(error, args);
       if (key === this.key) this.#moreFailedFor = key;
     } finally {
       if (this.#moreLoadingFor === key) this.#moreLoadingFor = null;

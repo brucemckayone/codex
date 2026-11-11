@@ -301,7 +301,11 @@ describe('PagedList: Show more', () => {
     await list.showMore();
     flushSync();
     expect(list.moreFailed).toBe(true);
-    expect(onMoreFailed).toHaveBeenCalledWith(expect.any(Error), 2); // and which page
+    // With the args it read, so the log says which page of which view.
+    expect(onMoreFailed).toHaveBeenCalledWith(expect.any(Error), {
+      view: 'a',
+      page: 2,
+    });
     expect(ids()).toEqual(['a1']);
   });
 });

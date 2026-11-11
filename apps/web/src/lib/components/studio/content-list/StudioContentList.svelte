@@ -16,7 +16,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { boundSearchParam, gateSearchQuery } from '@codex/validation';
+  import { boundSearchParam, type ContentQueryInput, gateSearchQuery } from '@codex/validation';
   import { page } from '$app/state';
   import { Button } from '$lib/components/ui';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
@@ -72,25 +72,28 @@
   const layout = $derived(phone.current ? 'grid' : view.view);
 
   // ── Reads ─────────────────────────────────────────────────────────────
-  // What a failure log says about the view: its facets and sort, and whether
-  // a search was on, never the search text.
-  const viewLog = () => ({
-    statusFilter: view.status,
-    type: view.type,
-    access: view.access,
-    sort: view.sort,
-    hasSearch: search !== null,
+  // What a failure log says about a read, from the args it was made with:
+  // its page, facets and sort, and whether it searched, never the text.
+  const readLog = (args: ContentQueryInput) => ({
+    page: args.page,
+    statusFilter: args.status ?? 'all',
+    type: args.contentType ?? 'all',
+    access: args.accessType ?? 'any',
+    sortBy: args.sortBy,
+    hasSearch: args.search !== undefined,
   });
 
-  const list = new PagedList({
+  // Args pinned: kit types `listContent`'s input `void | …`, so inferred args
+  // would not be the parsed ones `readLog` reads.
+  type ContentPage = Awaited<ReturnType<typeof listContent>>;
+  const list = new PagedList<ContentQueryInput, ContentPage>({
     args: (pageNumber) => contentListArgs(view, search, organizationId, pageNumber),
     read: listContent,
-    onMoreFailed: (error, pageNumber) =>
+    onMoreFailed: (error, args) =>
       logReadFailure('studio_content.show_more_failed', error, {
         studio,
         organizationId,
-        page: pageNumber,
-        ...viewLog(),
+        ...readLog(args),
       }),
   });
 
@@ -104,7 +107,7 @@
     logReadFailure(kept ? 'studio_content.list_refetch_failed' : 'studio_content.list_unread', error, {
       studio,
       organizationId,
-      ...untrack(viewLog),
+      ...untrack(() => readLog(contentListArgs(view, search, organizationId, 1))),
     });
   });
 

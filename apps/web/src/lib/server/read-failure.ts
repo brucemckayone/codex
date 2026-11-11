@@ -54,3 +54,29 @@ export function logReadFailure(
     error: error instanceof Error ? error.message : String(error),
   });
 }
+
+/**
+ * Runs a remote read whose 4xx goes on to the page (`forwardClientErrors`),
+ * logging that 4xx first. Kit skips `handleError`, and so its server log, for
+ * an `HttpError`, so a forwarded refusal was logged nowhere unless every page
+ * that reads it logged its own (Codex-a6ofh.3.1 review). A 5xx is left to
+ * escape to `handleError`, which logs it.
+ */
+export async function logRefusedRead<T>(
+  message: string,
+  context: Record<string, unknown>,
+  read: () => Promise<T>
+): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (
+      ApiError.isApiError(error) &&
+      error.status >= 400 &&
+      error.status < 500
+    ) {
+      logReadFailure(message, context, error);
+    }
+    throw error;
+  }
+}

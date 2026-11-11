@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
+import { logRefusedRead } from '$lib/server/read-failure';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Media List Query
@@ -43,8 +44,13 @@ export const listMedia = query(mediaQuerySchema, async (params) => {
     if (value !== undefined) searchParams.set(key, String(value));
   }
   // A 4xx keeps its status, so the library can say a refusal is one
-  // (`PagedList.refused`); kit makes anything else a sanitised 500.
-  return forwardClientErrors(() => api.media.list(searchParams));
+  // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit logs
+  // no forwarded 4xx, so it is logged here, for the library and the pickers.
+  return forwardClientErrors(() =>
+    logRefusedRead('media.list_refused', { page: params.page }, () =>
+      api.media.list(searchParams)
+    )
+  );
 });
 
 /**
