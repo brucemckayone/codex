@@ -17,6 +17,8 @@
  * } from '@codex/purchase';
  * import { createDbClient } from '@codex/database';
  *
+ * // Outside procedure() only (a webhook handler that runs its own DB, a
+ * // script). In a procedure() handler, use ctx.services.purchase instead.
  * // Always the factory: it pins the API version. Never `new Stripe(...)`.
  * const stripe = createStripeClient(c.env.STRIPE_SECRET_KEY);
  * const purchaseService = new PurchaseService(
