@@ -100,6 +100,7 @@ export const listContent = query(
 function listContentLog(params: ContentQueryInput | undefined) {
   return {
     organizationId: params?.organizationId ?? null,
+    scope: params?.scope ?? 'all',
     page: params?.page,
     limit: params?.limit,
     statusFilter: params?.status ?? 'all',
@@ -111,6 +112,18 @@ function listContentLog(params: ContentQueryInput | undefined) {
     hasCategory: params?.category !== undefined,
   };
 }
+
+/**
+ * How the creator's content is filed (Codex-a6ofh.3.2): the personal
+ * studio's "Where" menu counts. Decoration: the list reads its rows on its
+ * own, so a failure here leaves the menu without numbers, and is logged by
+ * the list.
+ */
+export const getContentWhereCounts = query(async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.content.whereCounts();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Org Browse Query

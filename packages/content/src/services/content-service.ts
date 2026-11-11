@@ -60,7 +60,11 @@ import {
   ServiceUnavailableError,
   ValidationError,
 } from '@codex/service-errors';
-import type { PaginatedListResponse } from '@codex/shared-types';
+import type {
+  ContentWhereCounts,
+  ContentWhereOrg,
+  PaginatedListResponse,
+} from '@codex/shared-types';
 import {
   playedMediaItemId,
   posterFolderCount,
@@ -2510,6 +2514,48 @@ export class ContentService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'list');
+    }
+  }
+
+  /**
+   * How the creator's live content is filed (Codex-a6ofh.3.2): the personal
+   * studio's "Where" menu. One grouped count over their own rows, whatever
+   * the status, since the menu narrows the whole list. An org is named by
+   * its row, which a filed piece always has: the FK sets a piece personal
+   * when its org row goes, and orgs are soft-deleted. "Everywhere" sums
+   * every row, so it stays right even if an org went unnamed.
+   */
+  async whereCounts(creatorId: string): Promise<ContentWhereCounts> {
+    try {
+      const rows = await this.db
+        .select({
+          organizationId: content.organizationId,
+          name: organizations.name,
+          count: sql<number>`count(*)`.mapWith(Number),
+        })
+        .from(content)
+        .leftJoin(organizations, eq(organizations.id, content.organizationId))
+        .where(scopedNotDeleted(content, creatorId))
+        .groupBy(content.organizationId, organizations.name);
+
+      let all = 0;
+      let personal = 0;
+      const orgs: ContentWhereOrg[] = [];
+      for (const row of rows) {
+        all += row.count;
+        if (row.organizationId === null) personal = row.count;
+        else if (row.name !== null) {
+          orgs.push({
+            id: row.organizationId,
+            name: row.name,
+            count: row.count,
+          });
+        }
+      }
+      orgs.sort((a, b) => a.name.localeCompare(b.name));
+      return { all, personal, orgs };
+    } catch (error) {
+      this.handleError(error, 'whereCounts');
     }
   }
 

@@ -4,7 +4,7 @@
   Find anything in the content list (Codex-a6ofh.3.1, mockup L1 notes 2-5):
   row one is search over titles and descriptions (`/` focuses it) and the
   status; row two the Type, Access and Sort menus and the table/cards
-  toggle. Below `sm` the menus move into one sheet behind "Filters · N", as
+  toggle, led in the personal studio by its Where (mockup L4b). Below `sm` the menus move into one sheet behind "Filters · N", as
   the media library's do, and the view is always the cards.
 
   Presentational: the state comes from the URL (`list-url.ts`) and every
@@ -13,7 +13,7 @@
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import FacetMenu from '../list-toolbar/FacetMenu.svelte';
-  import type { ListFacet } from '../list-toolbar/list-option';
+  import type { ListFacet, ListOption } from '../list-toolbar/list-option';
   import ListFilterSheet from '../list-toolbar/ListFilterSheet.svelte';
   import ListSearchBox from '../list-toolbar/ListSearchBox.svelte';
   import ListSegment from '../list-toolbar/ListSegment.svelte';
@@ -37,12 +37,19 @@
     onSearchInput: (value: string) => void;
     onSearchClear: () => void;
     onChange: (patch: ContentListPatch) => void;
+    /**
+     * The personal studio's "Where" (Codex-a6ofh.3.2, mockup L4b):
+     * Everywhere, Personal, then each org, with counts when read. Left out
+     * in the org studio, whose list is its org.
+     */
+    whereOptions?: readonly ListOption[];
   }
 
-  const { view, searchValue, onSearchInput, onSearchClear, onChange }: Props = $props();
+  const { view, searchValue, onSearchInput, onSearchClear, onChange, whereOptions }: Props =
+    $props();
 
   /** The menus' facets: the status stays on screen on every width. */
-  const SHEET_FACETS: readonly ListFacet<'type' | 'access'>[] = [
+  const FILTER_FACETS: readonly ListFacet<'type' | 'access'>[] = [
     {
       key: 'type',
       title: () => m.media_filter_type_label(),
@@ -56,6 +63,21 @@
       fallback: CONTENT_LIST_DEFAULTS.access,
     },
   ];
+
+  /** The Where, stated once: the desktop menu and the phone sheet read it. */
+  const whereFacet = $derived<ListFacet<'where'> | undefined>(
+    whereOptions && {
+      key: 'where',
+      title: () => m.studio_content_where_label(),
+      options: whereOptions,
+      fallback: CONTENT_LIST_DEFAULTS.where,
+    }
+  );
+
+  /** On a phone the Where joins the sheet, first, as it leads on desktop. */
+  const sheetFacets = $derived<readonly ListFacet<'where' | 'type' | 'access'>[]>(
+    whereFacet ? [whereFacet, ...FILTER_FACETS] : FILTER_FACETS
+  );
 </script>
 
 <div class="toolbar">
@@ -80,6 +102,15 @@
   </div>
 
   <div class="toolbar-row toolbar-facets">
+    {#if whereFacet}
+      <FacetMenu
+        label={whereFacet.title()}
+        value={view.where}
+        options={whereFacet.options}
+        fallback={whereFacet.fallback}
+        onSelect={(where) => onChange({ where })}
+      />
+    {/if}
     <FacetMenu
       label={m.media_filter_type_label()}
       value={view.type}
@@ -117,7 +148,7 @@
     idPrefix="clt"
     title={m.studio_content_list_filters_title()}
     clearLabel={m.media_clear_filters()}
-    facets={SHEET_FACETS}
+    facets={sheetFacets}
     {view}
     sort={view.sort}
     sortFallback={CONTENT_LIST_DEFAULTS.sort}

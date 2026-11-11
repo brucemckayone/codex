@@ -9,6 +9,15 @@ export const CONTENT_STATUS = {
   ARCHIVED: 'archived',
 } as const;
 
+/**
+ * Where the studio list looks (`GET /api/content?scope=`, Codex-a6ofh.3.2):
+ * `personal` is the content filed under no org. Leaving it out is every org;
+ * one org is `organizationId`.
+ */
+export const CONTENT_LIST_SCOPE = {
+  PERSONAL: 'personal',
+} as const;
+
 /** What {@link hasBeenLive} reads of a piece; the web sends `publishedAt` as a string. */
 export interface PublicationState {
   status: string;

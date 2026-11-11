@@ -1,7 +1,8 @@
 /**
  * The content list's view, read from and written to the URL
  * (Codex-a6ofh.3.1; content-list.html L1 and L5:
- * `?status=&type=&access=&sort=&view=&search=`).
+ * `?status=&type=&access=&sort=&view=&search=`, and the personal studio's
+ * `?where=`, L4b, Codex-a6ofh.3.2).
  *
  * As the media library's (`library-url.ts`): every param has a default that
  * leaves the URL bare (a value equal to its default is dropped), and a value
@@ -13,11 +14,12 @@
 
 import {
   CONTENT_ACCESS_TYPE,
+  CONTENT_LIST_SCOPE,
   CONTENT_TYPES,
   type ContentAccessType,
 } from '@codex/constants';
 import type { ContentQueryInput } from '@codex/validation';
-import { pickParam } from '$lib/utils/filter-url';
+import { pickIdParam, pickParam } from '$lib/utils/filter-url';
 import { type ContentStatusFilter, readStatusFilter } from './content-status';
 
 /** One read of the list, and each "Show more": as the media library's. */
@@ -49,6 +51,11 @@ export type ListAccess = 'any' | ContentAccessType;
 export type ListSort = (typeof LIST_SORTS)[number];
 export type ListView = (typeof LIST_VIEWS)[number];
 
+/** "Where" lists the content filed under no org: the personal studio's own. */
+export const WHERE_PERSONAL = 'personal';
+/** "Where" lists everything, every org's pieces too: "Everywhere". */
+export const WHERE_ALL = 'all';
+
 export interface ContentListState {
   /** The search box as typed; what reaches the API is gated. */
   search: string;
@@ -57,6 +64,12 @@ export interface ContentListState {
   access: ListAccess;
   sort: ListSort;
   view: ListView;
+  /**
+   * The personal studio's "Where" (Codex-a6ofh.3.2, mockup L4b):
+   * `WHERE_PERSONAL`, `WHERE_ALL`, or one org's id. The org studio has no
+   * Where (its list is its org) and ignores it.
+   */
+  where: string;
 }
 
 /** Each param's bare-URL value, for `createListUrlWriter`'s `defaults`. */
@@ -66,6 +79,7 @@ export const CONTENT_LIST_DEFAULTS = {
   access: 'any',
   sort: 'updated',
   view: 'list',
+  where: WHERE_PERSONAL,
 } as const satisfies Omit<ContentListState, 'search'>;
 
 const SORT_ARGS: Record<
@@ -93,7 +107,34 @@ export function readContentListState(url: URL): ContentListState {
     ),
     sort: pickParam(LIST_SORTS, params.get('sort'), CONTENT_LIST_DEFAULTS.sort),
     view: pickParam(LIST_VIEWS, params.get('view'), CONTENT_LIST_DEFAULTS.view),
+    where: readWhere(params.get('where')),
   };
+}
+
+/** `?where=`: Everywhere, an org's id, or else the default, Personal. */
+function readWhere(raw: string | null): string {
+  if (raw === WHERE_ALL) return WHERE_ALL;
+  return pickIdParam(raw) ?? CONTENT_LIST_DEFAULTS.where;
+}
+
+/** True for a Where that is one org: the only one that shows part of it. */
+export function isOrgWhere(where: string): boolean {
+  return where !== WHERE_PERSONAL && where !== WHERE_ALL;
+}
+
+/**
+ * Where the read looks. The org studio's list is its org, whatever the URL
+ * says. The personal studio's is its Where: personal is `scope` (an
+ * organizationId cannot say "none"), an org is its id, Everywhere neither.
+ */
+function whereArgs(
+  where: string,
+  organizationId: string | null
+): Pick<ContentQueryInput, 'scope' | 'organizationId'> {
+  if (organizationId) return { organizationId };
+  if (where === WHERE_PERSONAL) return { scope: CONTENT_LIST_SCOPE.PERSONAL };
+  if (where === WHERE_ALL) return {};
+  return { organizationId: where };
 }
 
 /**
@@ -102,7 +143,7 @@ export function readContentListState(url: URL): ContentListState {
  * where the search-floor sweep looks for the gate; null leaves it out, so a
  * one- or two-letter keystroke lists everything rather than asking the
  * database for a pattern it cannot index. `organizationId` null is the
- * personal studio's list.
+ * personal studio's list, which then looks where `state.where` says.
  */
 export function contentListArgs(
   state: ContentListState,
@@ -113,7 +154,7 @@ export function contentListArgs(
   return {
     page,
     limit: CONTENT_LIST_PAGE_SIZE,
-    ...(organizationId && { organizationId }),
+    ...whereArgs(state.where, organizationId),
     ...(state.status !== 'all' && { status: state.status }),
     ...(state.type !== 'all' && { contentType: state.type }),
     ...(state.access !== 'any' && { accessType: state.access }),
@@ -124,17 +165,21 @@ export function contentListArgs(
 
 /**
  * True when the list shows part of the content ("No matches" rather than
- * "Make your first piece"): a facet (never the sort or the view), or a
- * (gated) search that reached the API.
+ * "Make your first piece"): a facet (never the sort or the view), a (gated)
+ * search that reached the API, or the personal studio's Where on one org.
+ * Personal, its default, is the studio's own whole list, not a narrowing:
+ * empty, it says "Make your first piece", which a piece made here fixes.
  */
 export function isContentListNarrowed(
   state: ContentListState,
-  search: string | null
+  search: string | null,
+  organizationId: string | null
 ): boolean {
   return (
     state.status !== CONTENT_LIST_DEFAULTS.status ||
     state.type !== CONTENT_LIST_DEFAULTS.type ||
     state.access !== CONTENT_LIST_DEFAULTS.access ||
+    (organizationId === null && isOrgWhere(state.where)) ||
     search !== null
   );
 }

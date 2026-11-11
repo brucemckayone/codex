@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  contentBrowseQuerySchema,
   contentQuerySchema,
   contentStatusEnum,
   contentTypeEnum,
@@ -862,6 +863,44 @@ describe('Query Schemas', () => {
       expect(() =>
         contentQuerySchema.parse({ creatorId: 'x:feat:true' })
       ).toThrow('Invalid user ID format');
+    });
+
+    // The personal studio's "Where" (Codex-a6ofh.3.2). The one scope is
+    // personal: "everywhere" is no scope, and an org is its organizationId.
+    it('takes scope=personal, and nothing else', () => {
+      expect(contentQuerySchema.parse({ scope: 'personal' }).scope).toBe(
+        'personal'
+      );
+      expect(contentQuerySchema.parse({}).scope).toBeUndefined();
+      for (const scope of ['all', 'org', '']) {
+        expect(contentQuerySchema.safeParse({ scope }).success).toBe(false);
+      }
+    });
+
+    it('refuses scope=personal beside an organizationId: two answers to where', () => {
+      const result = contentQuerySchema.safeParse({
+        scope: 'personal',
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['scope']);
+    });
+
+    it('browse refuses any scope: it means nothing across creators', () => {
+      const result = contentBrowseQuerySchema.safeParse({
+        scope: 'personal',
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['scope']);
+      // Still a browse: the org is required, the rest of the fields kept.
+      expect(
+        contentBrowseQuerySchema.safeParse({
+          organizationId: '3c111111-1111-4111-8111-111111111999',
+          sortBy: 'title',
+        }).success
+      ).toBe(true);
+      expect(contentBrowseQuerySchema.safeParse({}).success).toBe(false);
     });
 
     it('should reject page less than 1', () => {

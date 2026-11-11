@@ -1,5 +1,6 @@
 import {
   CONTENT_ACCESS_TYPE,
+  CONTENT_LIST_SCOPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
   isReservedSubdomain,
@@ -838,11 +839,11 @@ export const updateContentQuerySchema = z.object({
 });
 
 /**
- * Content query/filter schema
- * Used for listing and searching content
- * Extends pagination with content-specific filters and sorting
+ * The content list's query fields, unrefined: the studio and browse schemas
+ * below each refine or extend this, since a refined object can no longer be
+ * picked, omitted or extended over a key (zod 4).
  */
-export const contentQuerySchema = paginationSchema.extend({
+const contentQueryFields = paginationSchema.extend({
   // Filters
   status: contentStatusEnum.optional(),
   contentType: contentTypeEnum.optional(),
@@ -856,6 +857,13 @@ export const contentQuerySchema = paginationSchema.extend({
     .refine(hasNoNul, 'Category must not contain NUL')
     .optional(),
   organizationId: uuidSchema.optional(),
+  // Where the studio list looks (Codex-a6ofh.3.2, the personal studio's
+  // "Where"): `personal` is the content filed under no org, which an
+  // optional uuid cannot say (left out, it means every org, which is how
+  // the personal list showed org pieces as its own). Leaving it out is
+  // everything; one org is `organizationId`. The studio list's alone:
+  // browse refuses it below.
+  scope: z.literal(CONTENT_LIST_SCOPE.PERSONAL).optional(),
   // A user id (BetterAuth text), not a uuid: uuidSchema refused every real
   // one, so /explore's creator filter 400'd (Codex-osuqt).
   creatorId: userIdSchema.optional(),
@@ -877,6 +885,23 @@ export const contentQuerySchema = paginationSchema.extend({
   sortOrder: sortOrderEnum.default('desc'),
 });
 
+/**
+ * Content query/filter schema
+ * Used for listing and searching content
+ * Extends pagination with content-specific filters and sorting
+ *
+ * Personal and an org at once is two answers to "where": refused, never one
+ * silently winning. Here, so the web remote and the worker refuse it alike.
+ */
+export const contentQuerySchema = contentQueryFields.refine(
+  (q) => !(q.scope !== undefined && q.organizationId !== undefined),
+  {
+    message:
+      'scope=personal lists content outside any org: drop organizationId',
+    path: ['scope'],
+  }
+);
+
 export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
 
 /**
@@ -889,15 +914,16 @@ export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
  * `contentQuerySchema` is reserved for studio-style queries where the
  * caller is browsing their OWN content (creator dashboards, drafts).
  *
- * Codex-q3zuf-style multi-tenant boundary protection.
+ * Codex-q3zuf-style multi-tenant boundary protection. The org is required by
+ * its type, so the inferred input says so too.
+ *
+ * The studio list's "Where" means nothing across creators: a `scope` is
+ * refused, so a caller never believes it narrowed a browse (Codex-a6ofh.3.2).
  */
-export const contentBrowseQuerySchema = contentQuerySchema.refine(
-  (q) => q.organizationId !== undefined,
-  {
-    message: 'organizationId is required for cross-creator browsing',
-    path: ['organizationId'],
-  }
-);
+export const contentBrowseQuerySchema = contentQueryFields.extend({
+  organizationId: uuidSchema,
+  scope: z.never().optional(),
+});
 
 export type ContentBrowseQueryInput = z.infer<typeof contentBrowseQuerySchema>;
 

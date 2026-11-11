@@ -9,6 +9,7 @@
 <script lang="ts" generics="T extends string">
   import * as DropdownMenu from '$lib/components/ui/DropdownMenu';
   import { CheckIcon, ChevronDownIcon } from '$lib/components/ui/Icon';
+  import { formatCount } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
   import type { ListOption } from './list-option';
 
@@ -47,6 +48,9 @@
           {#if option.value === value}<CheckIcon size={14} />{/if}
         </span>
         {option.label()}
+        {#if option.count !== undefined}
+          <span class="toolbar-menu-count">{formatCount(option.count)}</span>
+        {/if}
       </DropdownMenu.Item>
     {/each}
   </DropdownMenu.Content>
@@ -100,5 +104,13 @@
     display: inline-flex;
     width: var(--space-4);
     color: var(--color-link);
+  }
+
+  /* An option's count sits at the row's end, its digits in columns. */
+  :global(.toolbar-menu-list .toolbar-menu-count) {
+    margin-inline-start: auto;
+    padding-inline-start: var(--space-4);
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
   }
 </style>

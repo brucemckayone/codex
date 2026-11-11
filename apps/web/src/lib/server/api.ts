@@ -78,6 +78,7 @@ import type {
   CheckSlugResponse,
   ContactSettingsResponse,
   ContentPortalUses,
+  ContentWhereCounts,
   CourseOffer,
   FeatureSettingsResponse,
   MediaLibrarySummary,
@@ -1128,6 +1129,13 @@ export function createServerApi(
           'content',
           `/api/content${params ? `?${params}` : ''}`
         ),
+
+      /**
+       * How the creator's content is filed (Codex-a6ofh.3.2): the personal
+       * studio's "Where" menu, "Everywhere 14 · Personal 3 · Studio Alpha 9".
+       */
+      whereCounts: () =>
+        request<ContentWhereCounts>('content', '/api/content/where-counts'),
 
       /**
        * Browse content (cross-creator within an org).

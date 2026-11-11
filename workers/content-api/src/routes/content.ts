@@ -41,6 +41,7 @@ import {
 import type {
   CheckSlugResponse,
   ContentPortalUses,
+  ContentWhereCounts,
   HonoEnv,
 } from '@codex/shared-types';
 import {
@@ -170,6 +171,24 @@ app.get(
         result.pagination
       );
     },
+  })
+);
+
+/**
+ * GET /api/content/where-counts
+ * How the creator's own content is filed (Codex-a6ofh.3.2): the personal
+ * studio's "Where" menu, "Everywhere 14 · Personal 3 · Studio Alpha 9"
+ * (mockup L4b). A static child, so above `/:id`, as `/browse` is.
+ *
+ * Returns: ContentWhereCounts (200)
+ * Security: Authenticated users, own content only, API rate limit (100 req/min)
+ */
+app.get(
+  '/where-counts',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx): Promise<ContentWhereCounts> =>
+      ctx.services.content.whereCounts(ctx.user.id),
   })
 );
 
@@ -310,10 +329,13 @@ app.get(
       // Studio-scope: returns the signed-in creator's content across all
       // their orgs (drafts list, dashboard). organizationId is optional.
       // Paged from its own argument, as /browse is (Codex-uuj1g).
-      const { page, limit, ...filters } = ctx.input.query;
+      // `scope=personal` is the content filed under no org, the service's
+      // `organizationId: null` (Codex-a6ofh.3.2); the schema refuses it
+      // beside an organizationId.
+      const { page, limit, scope, ...filters } = ctx.input.query;
       const result = await ctx.services.content.list(
         ctx.user.id,
-        filters,
+        scope ? { ...filters, organizationId: null } : filters,
         { page, limit },
         { scope: 'studio' }
       );

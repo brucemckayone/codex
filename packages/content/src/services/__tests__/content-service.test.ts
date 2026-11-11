@@ -2687,6 +2687,98 @@ describe('ContentService', () => {
     });
   });
 
+  /**
+   * The personal studio's "Where" (Codex-a6ofh.3.2): its list sent no org,
+   * which reads as every org, so org pieces showed as personal ones.
+   */
+  describe('where a piece is filed', () => {
+    async function orgFor(owner: string) {
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      await joinTeam(db, org.id, owner);
+      return org;
+    }
+
+    async function pieceFor(owner: string, organizationId?: string) {
+      const created = await service.create(
+        {
+          title: 'Filed piece',
+          slug: createUniqueSlug('filed'),
+          contentType: 'written',
+          tags: [],
+          ...(organizationId && { organizationId }),
+        },
+        owner
+      );
+      return created.id;
+    }
+
+    it('the personal list (organizationId null) holds no org piece', async () => {
+      const [owner] = await seedTestUsers(db, 1);
+      const org = await orgFor(owner!);
+      const personal = [await pieceFor(owner!), await pieceFor(owner!)];
+      await pieceFor(owner!, org.id);
+
+      const result = await service.list(
+        owner!,
+        { organizationId: null },
+        { page: 1, limit: 20 }
+      );
+
+      expect(result.items.map((item) => item.id).sort()).toEqual(
+        [...personal].sort()
+      );
+      expect(result.pagination.total).toBe(2);
+    });
+
+    it('counts the creator’s own live pieces by where each is filed', async () => {
+      const [owner, stranger] = await seedTestUsers(db, 2);
+      const alpha = await orgFor(owner!);
+      const beta = await orgFor(owner!);
+      await db
+        .update(organizations)
+        .set({ name: 'Alpha studio' })
+        .where(eq(organizations.id, alpha.id));
+      await db
+        .update(organizations)
+        .set({ name: 'Beta studio' })
+        .where(eq(organizations.id, beta.id));
+
+      await pieceFor(owner!);
+      const deleted = await pieceFor(owner!);
+      await service.delete(deleted, owner!);
+      await pieceFor(owner!, beta.id);
+      await pieceFor(owner!, alpha.id);
+      await pieceFor(owner!, alpha.id);
+      // Another creator's piece in the same org is never counted.
+      await joinTeam(db, alpha.id, stranger!);
+      await pieceFor(stranger!, alpha.id);
+
+      expect(await service.whereCounts(owner!)).toEqual({
+        all: 4,
+        personal: 1,
+        orgs: [
+          { id: alpha.id, name: 'Alpha studio', count: 2 },
+          { id: beta.id, name: 'Beta studio', count: 1 },
+        ],
+      });
+    });
+
+    it('a creator with nothing counts zero everywhere', async () => {
+      const [owner] = await seedTestUsers(db, 1);
+
+      expect(await service.whereCounts(owner!)).toEqual({
+        all: 0,
+        personal: 0,
+        orgs: [],
+      });
+    });
+  });
+
   describe('listPublic', () => {
     // Regression guard for the followers-only content body leak: listPublic
     // is a public, KV-cached endpoint, so any gated content's body text

@@ -8,11 +8,20 @@ import {
   CONTENT_STATUS,
   CONTENT_TYPES,
 } from '@codex/constants';
+import type { ContentWhereCounts } from '@codex/shared-types';
 import { LayoutGridIcon, LayoutListIcon } from '$lib/components/ui/Icon';
 import * as m from '$paraglide/messages';
 import type { ListOption, SegmentOption } from '../list-toolbar/list-option';
 import type { ContentStatusFilter } from './content-status';
-import type { ListAccess, ListSort, ListType, ListView } from './list-url';
+import {
+  isOrgWhere,
+  type ListAccess,
+  type ListSort,
+  type ListType,
+  type ListView,
+  WHERE_ALL,
+  WHERE_PERSONAL,
+} from './list-url';
 
 export const STATUS_OPTIONS: readonly ListOption<ContentStatusFilter>[] = [
   { value: 'all', label: () => m.studio_content_filter_all() },
@@ -78,3 +87,48 @@ export const VIEW_OPTIONS: readonly SegmentOption<ListView>[] = [
   { value: 'list', label: () => m.media_view_list(), icon: LayoutListIcon },
   { value: 'grid', label: () => m.media_view_grid(), icon: LayoutGridIcon },
 ];
+
+/**
+ * The personal studio's Where (Codex-a6ofh.3.2, mockup L4b): Everywhere,
+ * Personal, then each org the creator has pieces in. `counts` undefined
+ * (unread, or the read failed) gives no numbers, never a 0.
+ *
+ * An org the URL is on that the counts do not name (still unread, or no
+ * pieces there) is named from the layout's `orgs`, so the menu never shows
+ * an id. One neither names stays out: the trigger then reads the raw value,
+ * as any facet's stale param does.
+ */
+export function whereOptions(
+  counts: ContentWhereCounts | undefined,
+  where: string,
+  orgs: readonly { id: string; name: string }[]
+): ListOption[] {
+  const options: ListOption[] = [
+    {
+      value: WHERE_ALL,
+      label: () => m.studio_content_where_all(),
+      count: counts?.all,
+    },
+    {
+      value: WHERE_PERSONAL,
+      label: () => m.studio_content_where_personal(),
+      count: counts?.personal,
+    },
+    ...(counts?.orgs ?? []).map((org) => ({
+      value: org.id,
+      label: () => org.name,
+      count: org.count,
+    })),
+  ];
+  if (isOrgWhere(where) && !options.some((option) => option.value === where)) {
+    const name = orgs.find((org) => org.id === where)?.name;
+    if (name) {
+      options.push({
+        value: where,
+        label: () => name,
+        ...(counts && { count: 0 }),
+      });
+    }
+  }
+  return options;
+}

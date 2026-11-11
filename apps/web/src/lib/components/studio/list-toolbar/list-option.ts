@@ -10,10 +10,19 @@ import type { IconProps } from '$lib/components/ui/Icon/types';
 export interface ListOption<T extends string = string> {
   value: T;
   label: () => string;
+  /**
+   * How many it would show, beside the label (the personal studio's Where,
+   * mockup L4b). Left out when unknown: a count never read is no number,
+   * never a 0.
+   */
+  count?: number;
 }
 
-/** A segment's option (`ListSegment`): the view toggles carry an icon. */
-export type SegmentOption<T extends string = string> = ListOption<T> & {
+/** A segment's option (`ListSegment`): an icon, never a count. */
+export type SegmentOption<T extends string = string> = Omit<
+  ListOption<T>,
+  'count'
+> & {
   icon?: Component<IconProps>;
 };
 

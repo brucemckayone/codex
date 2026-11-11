@@ -24,7 +24,7 @@
     GlobeIcon,
   } from '$lib/components/ui/Icon';
   import { dismiss, isDismissed } from '$lib/collections/dismissals';
-  import { listContent } from '$lib/remote/content.remote';
+  import { getContentWhereCounts, listContent } from '$lib/remote/content.remote';
   import { listMedia } from '$lib/remote/media.remote';
   import { getActivityFeed } from '$lib/remote/admin.remote';
   import { getMyAgreementPortfolio } from '$lib/remote/agreements.remote';
@@ -36,13 +36,15 @@
 
   // Query-based data fetching — page shell renders immediately,
   // data loads in background with skeleton states.
-  // No organizationId = personal creator content only.
-  const contentQuery = $derived(listContent({ limit: 1 }));
+  // The content tile counts what the content list opens on, Personal: a
+  // list read with no scope spans every org, which counted org pieces the
+  // list leaves out (Codex-a6ofh.3.2). The same read as the list's Where.
+  const contentCounts = $derived(getContentWhereCounts());
   const mediaQuery = $derived(listMedia({ limit: 1 }));
   const activitiesQuery = $derived(getActivityFeed({ limit: 10 }));
 
   // Derive loading state: both stat queries must resolve
-  const statsLoading = $derived(contentQuery?.loading || mediaQuery?.loading);
+  const statsLoading = $derived(contentCounts?.loading || mediaQuery?.loading);
 
   // ── Revenue-share focus signals (WP-9 — Codex-k9no0) ────────────────────
   // Creator-side portfolio includes pending-action-required proposals
@@ -182,8 +184,8 @@
     <section class="stats-grid" aria-label="Dashboard statistics">
       <StatCard
         label={m.studio_stat_content()}
-        value={contentQuery?.current?.pagination?.total ?? '--'}
-        loading={!contentQuery?.current}
+        value={contentCounts?.current?.personal ?? '--'}
+        loading={!contentCounts?.current}
       />
       <StatCard
         label={m.studio_stat_media()}

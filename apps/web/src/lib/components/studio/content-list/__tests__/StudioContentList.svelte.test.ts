@@ -29,6 +29,7 @@ type Page = {
 
 const s = vi.hoisted(() => ({
   first: { current: undefined as unknown, error: undefined as unknown },
+  whereCounts: { current: undefined as unknown, error: undefined as unknown },
   later: new Map<number, unknown>(),
   refreshFirst: vi.fn(async () => {}),
 }));
@@ -61,7 +62,22 @@ const listContent = vi.hoisted(() => {
     return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
   });
 });
-vi.mock('$lib/remote/content.remote', () => ({ listContent }));
+/** The personal studio's Where counts (Codex-a6ofh.3.2): one query, as kit keeps one. */
+const getContentWhereCounts = vi.hoisted(() => {
+  const query = {
+    get current() {
+      return s.whereCounts.current;
+    },
+    get error() {
+      return s.whereCounts.error;
+    },
+  };
+  return vi.fn(() => query);
+});
+vi.mock('$lib/remote/content.remote', () => ({
+  listContent,
+  getContentWhereCounts,
+}));
 
 vi.mock('$lib/remote/subscription.remote', () => ({
   getMyConnectStatus: vi.fn(() => ({ current: undefined, error: undefined })),
@@ -103,11 +119,15 @@ function pageOf(
 
 let component: ReturnType<typeof mount> | null = null;
 
-function render(query = '', organizationId: string | null = ORG) {
+function render(
+  query = '',
+  organizationId: string | null = ORG,
+  orgs: { id: string; name: string }[] = []
+) {
   nav.url = new URL(`https://studio.test/studio/content${query}`);
   component = mount(StudioContentList, {
     target: document.body,
-    props: { organizationId, studioName: 'Studio Alpha' },
+    props: { organizationId, studioName: 'Studio Alpha', orgs },
   });
   flushSync();
 }
@@ -135,6 +155,8 @@ const listCalls = () =>
 beforeEach(() => {
   nav.to = null;
   s.first = { current: undefined, error: undefined };
+  s.whereCounts = { current: undefined, error: undefined };
+  getContentWhereCounts.mockClear();
   s.later.clear();
   listContent.mockClear();
   goto.mockClear();
@@ -249,8 +271,10 @@ describe('StudioContentList: the view, from the URL', () => {
     });
   });
 
-  test('the personal studio asks with no org, and has no Categories link', () => {
+  // The leak (Codex-a6ofh.3.2): asked with no org, the API lists every org.
+  test('the personal studio asks for its own pieces, and has no Categories link', () => {
     render('', null);
+    expect(listCalls()[0]).toMatchObject({ scope: 'personal' });
     expect(listCalls()[0]).not.toHaveProperty('organizationId');
     expect(document.querySelector('a[href="/studio/categories"]')).toBeNull();
   });
@@ -462,5 +486,104 @@ describe('StudioContentList: Show more', () => {
       expect.any(Error),
       expect.objectContaining({ page: 2, statusFilter: 'all', type: 'video' })
     );
+  });
+});
+
+/**
+ * The personal studio's Where (Codex-a6ofh.3.2, mockup L4b): Everywhere,
+ * Personal (the default), then each org it has pieces in, with counts.
+ */
+describe('StudioContentList: Where', () => {
+  const BETA = '6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+  const COUNTS = {
+    all: 14,
+    personal: 3,
+    orgs: [
+      { id: ORG, name: 'Studio Alpha', count: 9 },
+      { id: BETA, name: 'Studio Beta', count: 2 },
+    ],
+  };
+
+  const whereTrigger = () =>
+    [...document.querySelectorAll<HTMLElement>('.toolbar-menu')].find(
+      (menu) =>
+        menu.querySelector('.toolbar-menu-key')?.textContent?.trim() ===
+        m.studio_content_where_label()
+    );
+  const items = () =>
+    [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].map(
+      (item) => item.textContent?.replace(/\s+/g, ' ').trim()
+    );
+  async function openWhere() {
+    whereTrigger()?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+    );
+    await settle();
+  }
+
+  test('offers Everywhere, Personal and each org, with their counts', async () => {
+    s.whereCounts = { current: COUNTS, error: undefined };
+    render('', null);
+    await openWhere();
+    expect(items()).toEqual([
+      `${m.studio_content_where_all()} 14`,
+      `${m.studio_content_where_personal()} 3`,
+      'Studio Alpha 9',
+      'Studio Beta 2',
+    ]);
+  });
+
+  test('an org chosen is one navigation, by its id', async () => {
+    s.whereCounts = { current: COUNTS, error: undefined };
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    render('', null);
+    await openWhere();
+    [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+      .find((item) => item.textContent?.includes('Studio Beta'))
+      ?.click();
+    await settle();
+    expect(goto).toHaveBeenCalledTimes(1);
+    expect(goto).toHaveBeenCalledWith(
+      `/studio/content?where=${BETA}`,
+      expect.anything()
+    );
+  });
+
+  test('counts that failed leave the options without numbers, and are logged', async () => {
+    s.whereCounts = { current: undefined, error: new Error('down') };
+    render('', null);
+    await openWhere();
+    expect(items()).toEqual([
+      m.studio_content_where_all(),
+      m.studio_content_where_personal(),
+    ]);
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.where_counts_unread',
+      expect.any(Error),
+      expect.objectContaining({ studio: 'personal' })
+    );
+  });
+
+  test('an org the URL is on is named from the layout while the counts are unread', () => {
+    render(`?where=${ORG}`, null, [{ id: ORG, name: 'Studio Alpha' }]);
+    expect(whereTrigger()?.textContent).toContain('Studio Alpha');
+    expect(whereTrigger()?.textContent).not.toContain(ORG);
+    expect(listCalls()[0]).toMatchObject({ organizationId: ORG });
+    expect(listCalls()[0]).not.toHaveProperty('scope');
+  });
+
+  test('an org with no matches offers Clear filters, which goes back to Personal', async () => {
+    s.first = { current: pageOf([]), error: undefined };
+    render(`?where=${ORG}`, null);
+    expect(text()).toContain(m.studio_content_list_no_match());
+    button(m.media_clear_filters())?.click();
+    await settle();
+    expect(goto).toHaveBeenCalledWith('/studio/content', expect.anything());
+  });
+
+  test('the org studio has no Where, and reads no counts', () => {
+    render();
+    expect(whereTrigger()).toBeUndefined();
+    expect(getContentWhereCounts).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,7 @@
 -->
 <script lang="ts" generics="K extends string">
   import { CheckIcon } from '$lib/components/ui/Icon';
+  import { formatCount } from '$lib/utils/format';
   import type { ListOption } from './list-option';
 
   interface Facet {
@@ -49,6 +50,9 @@
           onclick={() => setFilter(facet.key, option.value)}
         >
           {option.label()}
+          {#if option.count !== undefined}
+            <span class="pill-count">{formatCount(option.count)}</span>
+          {/if}
         </button>
       {/each}
     </div>
@@ -78,3 +82,13 @@
     {/each}
   </ul>
 </section>
+
+<style>
+  /* A pill's count (the personal studio's Where): the pill's own colour, so
+     it reads on an active pill too, at body weight beside the label. */
+  .pill-count {
+    margin-inline-start: var(--space-1);
+    font-weight: var(--font-normal);
+    font-variant-numeric: tabular-nums;
+  }
+</style>

@@ -23,7 +23,7 @@
   import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
   import { FileIcon, SearchXIcon } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
-  import { listContent } from '$lib/remote/content.remote';
+  import { getContentWhereCounts, listContent } from '$lib/remote/content.remote';
   import { listTiers } from '$lib/remote/subscription.remote';
   import * as m from '$paraglide/messages';
   import ActionLink from '../ActionLink.svelte';
@@ -37,6 +37,7 @@
   import ContentListGrid from './ContentListGrid.svelte';
   import ContentListTable from './ContentListTable.svelte';
   import ContentListToolbar from './ContentListToolbar.svelte';
+  import { whereOptions } from './list-options';
   import {
     CONTENT_LIST_DEFAULTS,
     contentListArgs,
@@ -50,11 +51,16 @@
     organizationId: string | null;
     /** Shown in the browser tab: the org's name, or "My Studio". */
     studioName: string;
+    /**
+     * The personal studio's orgs (its layout's), to name the org its Where
+     * is on while the counts, which name the rest, are not read.
+     */
+    orgs?: readonly { id: string; name: string }[];
     /** Optional class forwarded to the root for layout composition (R13). */
     class?: string;
   }
 
-  const { organizationId, studioName, class: className }: Props = $props();
+  const { organizationId, studioName, orgs = [], class: className }: Props = $props();
 
   const studio = $derived(organizationId ? 'org' : 'personal');
 
@@ -65,7 +71,7 @@
   // Bounded first (Codex-osuqt): an over-long `?search=` is cut to the
   // API's limit, never refused as a 400 that no Try again could fix.
   const search = $derived(gateSearchQuery(boundSearchParam(view.search)));
-  const narrowed = $derived(isContentListNarrowed(view, search));
+  const narrowed = $derived(isContentListNarrowed(view, search, organizationId));
 
   // Below `sm` the cards are the only view, so the toggle is moot.
   const phone = new MediaQuery(MOBILE_QUERY);
@@ -76,6 +82,8 @@
   // its page, facets and sort, and whether it searched, never the text.
   const readLog = (args: ContentQueryInput) => ({
     page: args.page,
+    scope: args.scope ?? 'all',
+    listedOrganizationId: args.organizationId ?? null,
     statusFilter: args.status ?? 'all',
     type: args.contentType ?? 'all',
     access: args.accessType ?? 'any',
@@ -130,6 +138,22 @@
   );
   const tierName = (id: string) => tierNames.get(id);
 
+  // The personal studio's Where (Codex-a6ofh.3.2, mockup L4b): Everywhere,
+  // Personal, then each org it has pieces in. The counts are decoration:
+  // unread or failed, the options show without numbers. Made in `untrack`,
+  // one query for the page, as PagedList's first page is.
+  const whereCounts = $derived.by(() =>
+    organizationId === null ? untrack(() => getContentWhereCounts()) : null
+  );
+  $effect(() => {
+    if (whereCounts?.error != null) {
+      logReadFailure('studio_content.where_counts_unread', whereCounts.error, { studio });
+    }
+  });
+  const whereMenu = $derived(
+    organizationId === null ? whereOptions(whereCounts?.current, view.where, orgs) : undefined
+  );
+
   // ── What the body shows ───────────────────────────────────────────────
   // A filter or search the API refuses (a 4xx): Clear filters is the way out.
   const refusedView = $derived(list.refused && narrowed);
@@ -157,7 +181,7 @@
 
   function clearFilters() {
     searchInput.cancel();
-    setParams({ search: null, status: null, type: null, access: null });
+    setParams({ search: null, status: null, type: null, access: null, where: null });
   }
 </script>
 
@@ -197,6 +221,7 @@
       searchInput.clear();
     }}
     onChange={setParams}
+    whereOptions={whereMenu}
   />
 
   <!-- Mounted unconditionally: it renders nothing until the read fails. -->

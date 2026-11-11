@@ -11,6 +11,8 @@
  * the part of it worth pinning with tests.
  */
 
+import { uuidSchema } from '@codex/validation';
+
 /**
  * Apply a facet patch to `url` IN PLACE and return it, so successive patches
  * can accumulate on a single URL before a single navigation.
@@ -62,4 +64,13 @@ export function pickParam<T extends string>(
   fallback: T
 ): T {
   return options.find((option) => option === raw) ?? fallback;
+}
+
+/**
+ * A URL param read as an id (an item, an org), or null: only what the API's
+ * own `uuidSchema` takes passes, since a hand-typed `?item=x` would only be
+ * refused by the read.
+ */
+export function pickIdParam(raw: string | null): string | null {
+  return raw && uuidSchema.safeParse(raw).success ? raw : null;
 }

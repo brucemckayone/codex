@@ -34,6 +34,7 @@ const ORG_ID = '3c111111-1111-4111-8111-111111111999';
 
 const contentSpies = {
   list: vi.fn(),
+  whereCounts: vi.fn(),
   // The registry calls setCache() on the constructed instance whenever CACHE_KV
   // is bound (it is, in env=test), as content-publish-invalidation.test.ts notes.
   setCache: vi.fn(),
@@ -138,6 +139,69 @@ describe('content list routes page by the requested page and limit', () => {
 
     expect(res.status).toBe(200);
     expect(listCall().pagination).toEqual({ page: 1, limit: 100 });
+  });
+});
+
+/**
+ * The personal studio's "Where" (Codex-a6ofh.3.2). Its list sent no
+ * organizationId, which the service reads as every org, so org pieces showed
+ * under "personal". `scope=personal` is the service's `organizationId: null`.
+ */
+describe('GET /api/content scope (Codex-a6ofh.3.2)', () => {
+  beforeEach(() => {
+    contentSpies.list.mockReset();
+    contentSpies.list.mockResolvedValue({
+      items: [],
+      pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+    });
+  });
+
+  it('scope=personal lists the content filed under no org', async () => {
+    const res = await get('?scope=personal');
+
+    expect(res.status).toBe(200);
+    const { filters } = listCall();
+    expect(filters).toMatchObject({ organizationId: null });
+    expect(filters).not.toHaveProperty('scope');
+  });
+
+  it('no scope leaves the org open: everything', async () => {
+    const res = await get('');
+    expect(res.status).toBe(200);
+    expect(listCall().filters).not.toHaveProperty('organizationId');
+  });
+
+  it('scope=personal beside an organizationId is refused, never one winning', async () => {
+    const res = await get(`?scope=personal&organizationId=${ORG_ID}`);
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+
+  it('browse refuses a scope: it means nothing across creators', async () => {
+    const res = await get(`/browse?organizationId=${ORG_ID}&scope=personal`);
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/content/where-counts (Codex-a6ofh.3.2)', () => {
+  it('counts the signed-in creator’s own content, in the data envelope', async () => {
+    const counts = {
+      all: 14,
+      personal: 3,
+      orgs: [{ id: ORG_ID, name: 'Studio Alpha', count: 11 }],
+    };
+    contentSpies.whereCounts.mockReset();
+    contentSpies.whereCounts.mockResolvedValue(counts);
+
+    const res = await get('/where-counts');
+
+    // Above /:id: read as an id, it would be a 400.
+    expect(res.status).toBe(200);
+    expect(contentSpies.whereCounts).toHaveBeenCalledWith(USER.id);
+    expect(await res.json()).toEqual({ data: counts });
   });
 });
 
