@@ -59,9 +59,11 @@
  *
  * Not checked: a Retry written with `.then()` instead of `await`, a refresh
  * reached through another module, a function that awaits something
- * unrelated before its refresh, and a failure prop passed in a spread
- * (`<Note {...noteProps} onTryAgain={retry} />`): only props written out are
- * read.
+ * unrelated before its refresh, a failure prop passed in a spread
+ * (`<Note {...noteProps} onTryAgain={retry} />`; only props written out are
+ * read), and a failure prop named like a handler (`onboardingFailed`: any
+ * `on…` prop is taken as a callback). A failure-named `data-*` or `aria-*`
+ * attribute goes to the DOM, so it is never taken as a failure prop.
  *
  * Scanned: apps/web/src, without paraglide/, tests (`*.test.*`, `__tests__/`,
  * `src/tests/`) and fixtures (`__fixtures__/`). LoadFailedAlert.svelte owns

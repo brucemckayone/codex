@@ -71,10 +71,12 @@ export interface RetryFocus<R> {
 
 export interface RetryResult<R> {
   /**
-   * The read the caller holds once the answer is in. `null` when the answer
-   * itself made the caller let the read go (a thread a 403 refuses passes
-   * `null`). Letting it go BEFORE the answer is not this: that Retry resolves
-   * `null` as a whole (see `LoadRetry.retry`).
+   * The read the caller holds once the answer is in; `null` if it holds none
+   * then. A caller that lets the read go BECAUSE of the answer (a thread a
+   * 403 refuses passes `null`) usually lands as a supersession instead: its
+   * state write schedules the core's effect before the answer reaches the
+   * Retry, so `retry()` resolves `null` as a whole (see `LoadRetry.retry`).
+   * Treat the two alike.
    */
   read: R | null;
   /** Focus was still in `from`, or lost, once the outcome rendered. */

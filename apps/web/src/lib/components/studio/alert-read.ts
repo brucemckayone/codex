@@ -39,7 +39,8 @@ export interface LoadRead<T> extends QueryResult<T> {
    * Without one, any new data is taken as the answer. An object, compared by
    * identity: a primitive (`data.loadFailed`) would make every failed reload
    * "the same read", so a repeat failure would never be judged; Retry would
-   * just be offered again, with no "We still couldn't…".
+   * just be offered again, with no "We still couldn't…". Never `data`
+   * itself: kit merges a new one on every load's rerun, so it is no key.
    */
   readonly key?: object;
   readonly [LOAD_READ]: true;
