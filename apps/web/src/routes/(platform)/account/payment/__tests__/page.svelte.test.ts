@@ -6,10 +6,15 @@
  * is unchanged.
  *
  * Mounts the real `+page.svelte`; `$app/navigation`, `$app/state` and the
- * account remote module (it imports `$app/server`) are mocked.
+ * account remote module (it imports `$app/server`) are mocked. A Retry test
+ * runs `invalidate` as kit does (`kitInvalidate`).
  */
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import {
+  type KitInvalidate,
+  kitInvalidate,
+} from '$lib/components/studio/__fixtures__/kit-invalidate.mock.svelte';
 import type { PurchaseListItem } from '$lib/types';
 import * as m from '$paraglide/messages';
 import {
@@ -18,12 +23,13 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 
-const { invalidateMock } = vi.hoisted(() => ({
-  invalidateMock: vi.fn(() => Promise.resolve()),
+// Not a `vi.fn`: a spy attaches handlers to the promises it returns.
+const { nav } = vi.hoisted(() => ({
+  nav: { invalidate: (_key: string): Promise<void> => Promise.resolve() },
 }));
 vi.mock('$app/navigation', () => ({
   goto: vi.fn(),
-  invalidate: invalidateMock,
+  invalidate: (key: string) => nav.invalidate(key),
 }));
 vi.mock('$app/state', () => ({
   page: {
@@ -73,24 +79,27 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+/** The load's data, a new object each time, as each run of the load is. */
+function pageData(items: PurchaseListItem[], loadFailed = false) {
+  return {
+    purchases: {
+      items,
+      pagination: {
+        page: 1,
+        limit: 20,
+        total: items.length,
+        totalPages: 1,
+      },
+    },
+    filters: { status: null },
+    loadFailed,
+  };
+}
+
 function mountPage(items: PurchaseListItem[], loadFailed = false) {
   component = mount(PaymentPage, {
     target: document.body,
-    props: {
-      data: {
-        purchases: {
-          items,
-          pagination: {
-            page: 1,
-            limit: 20,
-            total: items.length,
-            totalPages: 1,
-          },
-        },
-        filters: { status: null },
-        loadFailed,
-      },
-    } as never,
+    props: { data: pageData(items, loadFailed) } as never,
   });
   flushSync();
 }
@@ -146,31 +155,6 @@ describe('purchase history: a failed read', () => {
     expect(document.querySelector('table')).toBeNull();
   });
 
-  test('Retry re-runs the load; a Retry that fails again says so and takes focus', async () => {
-    mountPage([], true);
-    const retry = document.querySelector(
-      '[data-testid="purchases-load-failed"] button'
-    ) as HTMLButtonElement;
-
-    retry.click();
-    flushSync();
-    expect(clean(retry)).toBe(m.money_setup_load_failed_retrying());
-    await Promise.resolve();
-    await Promise.resolve();
-    flushSync();
-
-    expect(invalidateMock).toHaveBeenCalledOnce();
-    expect(invalidateMock).toHaveBeenCalledWith('account:purchases');
-    expect(clean(document.querySelector('.load-failed__message'))).toBe(
-      m.account_payments_load_failed_again()
-    );
-    await vi.waitFor(() =>
-      expect(document.activeElement).toBe(
-        document.querySelector('.load-failed')
-      )
-    );
-  });
-
   test('a list that loaded empty still says no purchases yet', () => {
     mountPage([]);
 
@@ -178,6 +162,124 @@ describe('purchase history: a failed read', () => {
       document.querySelector('[data-testid="purchases-load-failed"]')
     ).toBeNull();
     expect(clean(document.body)).toContain(m.account_payments_none_history());
+  });
+});
+
+/**
+ * Retry reruns the load (`invalidate('account:purchases')`), and kit's
+ * invalidate resolves late (after the page's live remote queries) or early
+ * (overtaken, with the data unchanged). The page used to judge the Retry when
+ * it resolved (Codex-if444): an overtaken one said "We still couldn't…" about
+ * a reload that never ran, and a list that landed first unmounted the alert
+ * with the focused Retry inside it, dropping focus to <body> until the other
+ * queries settled. It is judged on the page's new data now (LoadFailedAlert).
+ */
+describe('purchase history: Retry, as kit runs invalidate', () => {
+  let kit: KitInvalidate<ReturnType<typeof pageData>>;
+
+  function mountFailed() {
+    kit = kitInvalidate(pageData([], true));
+    nav.invalidate = kit.invalidate;
+    component = mount(PaymentPage, {
+      target: document.body,
+      props: kit.props as never,
+    });
+    flushSync();
+  }
+
+  const alert = () =>
+    document.querySelector('[data-testid="purchases-load-failed"]');
+  const retryButton = () =>
+    alert()?.querySelector('button') as HTMLButtonElement | null;
+  const message = () => clean(alert()?.querySelector('.load-failed__message'));
+  const loadedStatus = () =>
+    [...document.querySelectorAll('[role="status"]')].find(
+      (node) => clean(node) === m.account_payments_load_retry_ok()
+    ) ?? null;
+  /** Lets the reload land and the Retry run on from it, focus included. */
+  const settle = async () => {
+    for (let turn = 0; turn < 3; turn++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    flushSync();
+  };
+
+  async function pressRetry() {
+    retryButton()?.focus();
+    retryButton()?.click();
+    await settle();
+  }
+
+  test('keeps the alert and the focused Retry while the load reruns; a second press sends nothing', async () => {
+    mountFailed();
+    await pressRetry();
+
+    expect(kit.keys()).toEqual(['account:purchases']);
+    expect(clean(retryButton())).toBe(m.money_setup_load_failed_retrying());
+    expect(alert()?.getAttribute('aria-busy')).toBe('true');
+    expect(document.activeElement).toBe(retryButton());
+
+    await pressRetry();
+    expect(kit.keys()).toHaveLength(1);
+  });
+
+  test('a reload that fails again says "We still couldn\'t…" and focuses the alert', async () => {
+    mountFailed();
+    await pressRetry();
+
+    kit.land(pageData([], true));
+    await settle();
+
+    expect(message()).toBe(m.account_payments_load_failed_again());
+    expect(document.activeElement).toBe(document.querySelector('.load-failed'));
+    expect(clean(retryButton())).toBe(m.money_setup_load_failed_retry());
+  });
+
+  test('a reload that loads shows the list and says so', async () => {
+    mountFailed();
+    await pressRetry();
+
+    kit.land(pageData([CONTENT]));
+    await settle();
+
+    expect(alert()).toBeNull();
+    expect(document.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(document.activeElement).toBe(loadedStatus());
+  });
+
+  test('a list that lands before the invalidate resolves ends the Retry then, with focus on the status line', async () => {
+    mountFailed();
+    await pressRetry();
+
+    // Kit lands the data, then waits on the page's live remote queries.
+    kit.landBeforeQueries(pageData([CONTENT]));
+    await settle();
+    expect(alert()).toBeNull();
+    expect(document.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(loadedStatus());
+
+    kit.queriesSettle();
+    await settle();
+    expect(loadedStatus()).not.toBeNull();
+  });
+
+  test('an overtaken reload claims nothing and offers Retry again; the run that lands later is announced', async () => {
+    mountFailed();
+    await pressRetry();
+
+    // A filter click or another invalidate overtook it: the data is unchanged.
+    kit.overtake();
+    await settle();
+    expect(message()).toBe(m.account_payments_load_failed());
+    expect(clean(retryButton())).toBe(m.money_setup_load_failed_retry());
+    expect(document.activeElement).toBe(retryButton());
+
+    // The run that overtook it lands the list.
+    kit.land(pageData([CONTENT]));
+    await settle();
+    expect(alert()).toBeNull();
+    expect(document.activeElement).toBe(loadedStatus());
   });
 });
 
