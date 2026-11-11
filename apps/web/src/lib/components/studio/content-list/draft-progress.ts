@@ -58,11 +58,16 @@ export function draftProgress(
     connectReady: payouts === 'ready',
     organizationId: row.organizationId ?? null,
   });
+  // The transcode's % as the row was read (Codex-a6ofh.3.1, owner: as of the
+  // read, no status socket on the list): "being prepared (64%)".
+  const gapMedia = row.mediaItem
+    ? {
+        status: row.mediaItem.status,
+        progress: row.mediaItem.transcodingProgress ?? null,
+      }
+    : null;
   const left = gaps.map((gap) => {
-    const shown = gapRow(gap, {
-      contentType,
-      media: media ? { status: media.status, progress: null } : null,
-    });
+    const shown = gapRow(gap, { contentType, media: gapMedia });
     // Not read (yet) is not "not set up": say so, and never call it ready.
     if (gap !== 'CREATOR_CONNECT_REQUIRED') return shown;
     if (payouts === 'unread')

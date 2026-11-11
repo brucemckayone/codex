@@ -77,7 +77,6 @@ import {
 import {
   and,
   asc,
-  desc,
   eq,
   ilike,
   inArray,
@@ -2429,13 +2428,19 @@ export class ContentService extends BaseService {
         }
       }
 
-      // Determine sort column and order
+      // Sort column and order (Codex-a6ofh.3.1). Descending puts NULLs LAST:
+      // Postgres puts them first, so "Recently published" led with every
+      // draft, which has no publishedAt. Then the id, so rows that tie (the
+      // many at 0 views or 0 sales) keep one order from page to page: offset
+      // paging over a tie may reorder it, and "Show more" could repeat a row
+      // or skip one.
       const sortColumn = filters.sortBy || 'createdAt';
       const sortOrder = filters.sortOrder || 'desc';
       const orderByClause =
         sortOrder === 'desc'
-          ? desc(content[sortColumn])
+          ? sql`${content[sortColumn]} DESC NULLS LAST`
           : asc(content[sortColumn]);
+      const orderBy = [orderByClause, asc(content.id)];
 
       const where = and(...whereConditions);
       const page = await paginatedQuery({
@@ -2452,7 +2457,7 @@ export class ContentService extends BaseService {
                 where,
                 limit,
                 offset,
-                orderBy: [orderByClause],
+                orderBy,
                 // Browse spans every creator in an org for ANY signed-in
                 // viewer, so it selects what the anonymous public list
                 // selects: no creator email, and (Codex-1bdx0) no raw R2 key,
@@ -2469,7 +2474,7 @@ export class ContentService extends BaseService {
                 where,
                 limit,
                 offset,
-                orderBy: [orderByClause],
+                orderBy,
                 // The studio scope is the signed-in creator's own rows, whole
                 // and with their email.
                 with: {

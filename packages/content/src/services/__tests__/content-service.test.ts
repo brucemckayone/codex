@@ -2562,6 +2562,84 @@ describe('ContentService', () => {
         expect(result.items.some((item) => item.id === contentId)).toBe(true);
       }
     });
+
+    // The studio list's sorts (Codex-a6ofh.3.1). Each test has a creator of
+    // its own, so the rows the other tests leave behind cannot reorder it.
+    describe('sort order', () => {
+      async function piecesFor(
+        owner: string,
+        count: number
+      ): Promise<string[]> {
+        const ids: string[] = [];
+        for (let i = 0; i < count; i++) {
+          const created = await service.create(
+            {
+              title: `Sorted ${i}`,
+              slug: createUniqueSlug(`sorted-${i}`),
+              contentType: 'written',
+              tags: [],
+            },
+            owner
+          );
+          ids.push(created.id);
+        }
+        return ids;
+      }
+
+      it('puts drafts never published LAST on "Recently published"', async () => {
+        const [owner] = await seedTestUsers(db, 1);
+        const [older, newer, draft] = await piecesFor(owner!, 3);
+        await db
+          .update(content)
+          .set({
+            status: 'published',
+            publishedAt: new Date('2026-01-01T00:00:00Z'),
+          })
+          .where(eq(content.id, older!));
+        await db
+          .update(content)
+          .set({
+            status: 'published',
+            publishedAt: new Date('2026-02-01T00:00:00Z'),
+          })
+          .where(eq(content.id, newer!));
+
+        const result = await service.list(owner!, {
+          sortBy: 'publishedAt',
+          sortOrder: 'desc',
+        });
+
+        // Postgres sorts NULL first descending: the draft led the list.
+        expect(result.items.map((item) => item.id)).toEqual([
+          newer,
+          older,
+          draft,
+        ]);
+      });
+
+      it('breaks a tie by id, so pages never repeat or skip a row', async () => {
+        const [owner] = await seedTestUsers(db, 1);
+        // Five pieces at 0 views: one tie, inserted in random-uuid order.
+        const ids = await piecesFor(owner!, 5);
+
+        const pages = [];
+        for (const page of [1, 2, 3]) {
+          pages.push(
+            await service.list(
+              owner!,
+              { sortBy: 'viewCount', sortOrder: 'desc' },
+              { page, limit: 2 }
+            )
+          );
+        }
+        const paged = pages.flatMap((result) =>
+          result.items.map((item) => item.id)
+        );
+
+        // The tie's order is the id's, the same on every page.
+        expect(paged).toEqual([...ids].sort());
+      });
+    });
   });
 
   describe('listPublic', () => {

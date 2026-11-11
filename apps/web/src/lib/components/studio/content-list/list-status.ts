@@ -6,7 +6,8 @@
  * progress, and it is put back with "Publish again". It looks as an
  * archived piece does, muted, as the mockup's Off sale row (content-list.html
  * L1); archived keeps its own word until the list renames it
- * (Codex-a6ofh.3.6). The row, the slab and the table all ask here.
+ * (Codex-a6ofh.3.6). ContentStatus (the table and the cards) and the
+ * Access cell's "Buyers keep access" both ask here.
  */
 import {
   CONTENT_STATUS,
@@ -14,6 +15,11 @@ import {
   type PublicationState,
 } from '@codex/constants';
 import * as m from '$paraglide/messages';
+
+/** Once live, and not on sale now: it keeps its buyers (owner, 2026-11-05). */
+export function isOffSale(piece: PublicationState): boolean {
+  return piece.status !== CONTENT_STATUS.PUBLISHED && hasBeenLive(piece);
+}
 
 /** How it looks: on sale, a draft on its way, or once live and off sale now. */
 export type ListStatusVariant = 'published' | 'draft' | 'off-sale';
@@ -31,7 +37,7 @@ export function listStatus(piece: PublicationState): {
       toggle: m.studio_content_form_unpublish(),
     };
   }
-  if (hasBeenLive(piece)) {
+  if (isOffSale(piece)) {
     return {
       label:
         piece.status === CONTENT_STATUS.ARCHIVED

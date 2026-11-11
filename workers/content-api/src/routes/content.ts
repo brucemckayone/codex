@@ -60,7 +60,11 @@ import {
   bumpOrgContentVersion,
   fanContentInvalidation,
 } from './content-invalidation';
-import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
+import {
+  resolveR2PublicBases,
+  toPublicItems,
+  withPosterUrls,
+} from './r2-public-urls';
 
 const app = new Hono<HonoEnv>();
 
@@ -313,7 +317,12 @@ app.get(
         { page, limit },
         { scope: 'studio' }
       );
-      return new PaginatedResult(result.items, result.pagination);
+      // The list's poster fallback (Codex-a6ofh.3.1): the row carries the
+      // poster's R2 key, which the page cannot resolve; the URL goes beside it.
+      return new PaginatedResult(
+        withPosterUrls(result.items, resolveR2PublicBases(ctx.env), ctx.obs),
+        result.pagination
+      );
     },
   })
 );

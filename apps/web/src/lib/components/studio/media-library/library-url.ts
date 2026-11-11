@@ -10,6 +10,7 @@
 
 import { MEDIA_LIBRARY_PAGE_SIZE } from '@codex/constants';
 import type { MediaQueryInput } from '@codex/validation';
+import { pickParam } from '$lib/utils/filter-url';
 
 /** Status menu (mockup M1 note 3): `processing` and `attention` are groups. */
 export const LIBRARY_STATUSES = [
@@ -46,7 +47,7 @@ export interface LibraryState {
   view: LibraryView;
 }
 
-/** Each param's bare-URL value, for `filterHref`'s `defaults`. */
+/** Each param's bare-URL value, for `createListUrlWriter`'s `defaults`. */
 export const LIBRARY_DEFAULTS = {
   mediaType: 'all',
   status: 'any',
@@ -66,31 +67,27 @@ const SORT_ARGS: Record<
   largest: { sortBy: 'fileSizeBytes', sortOrder: 'desc' },
 };
 
-function pick<T extends string>(
-  options: readonly T[],
-  raw: string | null,
-  fallback: T
-): T {
-  return options.find((option) => option === raw) ?? fallback;
-}
-
 export function readLibraryState(url: URL): LibraryState {
   const params = url.searchParams;
   return {
     q: params.get('q') ?? '',
-    mediaType: pick(
+    mediaType: pickParam(
       LIBRARY_TYPES,
       params.get('mediaType'),
       LIBRARY_DEFAULTS.mediaType
     ),
-    status: pick(
+    status: pickParam(
       LIBRARY_STATUSES,
       params.get('status'),
       LIBRARY_DEFAULTS.status
     ),
-    usage: pick(LIBRARY_USAGES, params.get('usage'), LIBRARY_DEFAULTS.usage),
-    sort: pick(LIBRARY_SORTS, params.get('sort'), LIBRARY_DEFAULTS.sort),
-    view: pick(LIBRARY_VIEWS, params.get('view'), LIBRARY_DEFAULTS.view),
+    usage: pickParam(
+      LIBRARY_USAGES,
+      params.get('usage'),
+      LIBRARY_DEFAULTS.usage
+    ),
+    sort: pickParam(LIBRARY_SORTS, params.get('sort'), LIBRARY_DEFAULTS.sort),
+    view: pickParam(LIBRARY_VIEWS, params.get('view'), LIBRARY_DEFAULTS.view),
   };
 }
 

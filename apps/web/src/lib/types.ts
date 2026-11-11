@@ -47,7 +47,13 @@ export interface ContentWithRelations
     name: string | null;
   };
   organization?: Organization | null;
-  mediaItem?: ServedMediaItem | null;
+  /**
+   * Its media as the row joins it. `thumbnailUrl` is the poster resolved from
+   * the row's key, which the studio list sends (Codex-a6ofh.3.1) so a piece
+   * with no cover shows its video's poster; absent elsewhere, so treat ABSENT
+   * as "not resolved", never as "no poster".
+   */
+  mediaItem?: (ServedMediaItem & { thumbnailUrl?: string | null }) | null;
   /**
    * The creator's video its thumbnail is a frame of, its own included
    * (Codex-tqvmx). Only the single read sends it; absent from a content-api

@@ -60,15 +60,15 @@ export const listContent = query(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
+    // Every arg the schema parsed, as listMedia does: the args ARE
+    // content-api's `contentQuerySchema`, so they cannot drift. The hand-picked
+    // copy this replaced dropped `contentType` and `accessType`, which the
+    // worker took all along, so the studio list's Type and Access menus
+    // changed nothing (Codex-a6ofh.3.1).
     const searchParams = new URLSearchParams();
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.limit) searchParams.set('limit', String(params.limit));
-    if (params?.status) searchParams.set('status', params.status);
-    if (params?.organizationId)
-      searchParams.set('organizationId', params.organizationId);
-    if (params?.search) searchParams.set('search', params.search);
-    if (params?.sortBy) searchParams.set('sortBy', params.sortBy);
-    if (params?.sortOrder) searchParams.set('sortOrder', params.sortOrder);
+    for (const [key, value] of Object.entries(params ?? {})) {
+      if (value !== undefined) searchParams.set(key, String(value));
+    }
 
     return api.content.list(searchParams.toString() ? searchParams : undefined);
   }

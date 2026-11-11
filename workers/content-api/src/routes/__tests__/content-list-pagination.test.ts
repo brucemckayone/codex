@@ -140,3 +140,42 @@ describe('content list routes page by the requested page and limit', () => {
     expect(listCall().pagination).toEqual({ page: 1, limit: 100 });
   });
 });
+
+describe('GET /api/content resolves each row’s poster (Codex-a6ofh.3.1)', () => {
+  it('sends mediaItem.thumbnailUrl beside the key, from the assets base', async () => {
+    const THUMB = 'creator-1/media-thumbnails/m1/md.webp';
+    contentSpies.list.mockReset();
+    contentSpies.list.mockResolvedValue({
+      items: [
+        {
+          id: 'c1',
+          title: 'Piece',
+          mediaItem: {
+            id: 'm1',
+            status: 'ready',
+            thumbnailKey: THUMB,
+            hlsPreviewKey: null,
+          },
+        },
+      ],
+      pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+
+    const res = await buildApp().fetch(
+      new Request('http://content-api.test/api/content'),
+      { ...testEnv, R2_PUBLIC_URL_BASE: 'http://localhost:4100' } as typeof env,
+      createExecutionContext()
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: {
+        mediaItem: { thumbnailKey: string; thumbnailUrl: string | null };
+      }[];
+    };
+    expect(body.items[0]?.mediaItem).toMatchObject({
+      thumbnailKey: THUMB,
+      thumbnailUrl: `http://localhost:4100/${THUMB}`,
+    });
+  });
+});

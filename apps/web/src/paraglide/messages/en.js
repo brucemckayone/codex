@@ -1079,14 +1079,6 @@ export const studio_sidebar_expand = () => `Expand sidebar`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_search_placeholder = () => `Search content...`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_search_clear = () => `Clear search`
 
 
@@ -1096,22 +1088,6 @@ export const studio_content_search_clear = () => `Clear search`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_search_empty = () => `No matching content`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_search_empty_description = () => `Try a different search term or clear the filter.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_search_clear_filter = () => `Clear search`
 
 
 /**
@@ -7759,22 +7735,6 @@ export const studio_content_create = () => `Create Content`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_empty = () => `No content yet. Create your first piece of content to get started.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_empty_description = () => `Create your first piece of content to get started.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_empty_title = () => `No content yet`
 
 
@@ -7791,47 +7751,7 @@ export const studio_content_empty_how = () => `Create a content page, attach you
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_col_title = () => `Title`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_col_type = () => `Type`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_col_status = () => `Status`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_col_created = () => `Created`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_col_actions = () => `Actions`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_edit = () => `Edit`
 
 
 /**
@@ -12275,22 +12195,6 @@ export const studio_drafts_payouts_checking = () => `Checking your payout setupâ
 
 
 /**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_drafts_continue = () => `Continue`
-
-
-/**
- * @param {{ title: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_drafts_continue_label = (params) => `Continue ${params.title}`
-
-
-/**
  * @param {{ when: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -12431,14 +12335,6 @@ export const studio_content_filter_archived = () => `Archived`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_filter_show_all = () => `Show all content`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_load_failed = () => `We couldn't load your content.`
 
 
@@ -12456,6 +12352,230 @@ export const studio_content_load_failed_again = () => `We still couldn't load yo
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_load_retry_ok = () => `Your content loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_command_bar_label = () => `Content actions`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_count = (params) => `${params.count} items`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_count_one = () => `1 item`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_count_narrowed = (params) => `${params.count} matching`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_search_label = () => `Search content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_access_paid = () => `Paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_access_course = () => `Portal only`
+
+
+/**
+ * @param {{ price: NonNullable<unknown>, tiers: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_access_price_or_tier = (params) => `${params.price} or ${params.tiers}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_access_purchase_and_tier = () => `Purchase + tier`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_access_buyers_keep = () => `Buyers keep access`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_access_no_tier = () => `In no tier yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_sort_updated = () => `Last updated`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_sort_published = () => `Recently published`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_sort_views = () => `Most viewed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_sort_sales = () => `Best selling`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_filters_title = () => `Filter content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_caption = () => `Your content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_col_content = () => `Content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_col_status = () => `Status`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_col_views = () => `Views`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_col_sales = () => `Sales`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_col_updated = () => `Updated`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_none = () => `None`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_views_count = (params) => `${params.count} views`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_sales_count = (params) => `${params.count} sales`
+
+
+/**
+ * @param {{ pct: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_scheduled_pct = (params) => `Goes live when ready Â· ${params.pct}%`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_loading = () => `Loading your content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_no_match = () => `Nothing matches these filters.`
 
 
 /**

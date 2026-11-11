@@ -1,0 +1,142 @@
+<!--
+  @component ContentListGrid
+
+  The content list as cards (Codex-a6ofh.3.1, mockup L5 `?view=grid`):
+  picture-led and calmer than the table, about six pieces a screen, so each
+  card carries its status, its access and one count (views, or sales for a
+  piece that sells), and the line that says what it needs. The same words as
+  the table (`row-facts`), so a piece reads the same in either view. The
+  phone's only view.
+-->
+<script lang="ts">
+  import type { ContentWithRelations } from '$lib/types';
+  import type { PayoutsRead } from '$lib/utils/connect-readiness';
+  import * as m from '$paraglide/messages';
+  import ContentRowLine from './ContentRowLine.svelte';
+  import ContentStatus from './ContentStatus.svelte';
+  import ContentThumb from './ContentThumb.svelte';
+  import {
+    accessWords,
+    rowHref,
+    rowLine,
+    salesShown,
+    type TierName,
+    viewsShown,
+  } from './row-facts';
+
+  interface Props {
+    items: ContentWithRelations[];
+    payouts: PayoutsRead;
+    tierName: TierName;
+  }
+
+  const { items, payouts, tierName }: Props = $props();
+
+  /** Mockup L5: a selling piece shows its sales, anything else its views. */
+  function countLine(row: ContentWithRelations): string | null {
+    const sales = salesShown(row);
+    if (sales !== null) return m.studio_content_list_sales_count({ count: sales });
+    const views = viewsShown(row);
+    return views === null ? null : m.studio_content_list_views_count({ count: views });
+  }
+</script>
+
+<ul class="content-grid" role="list">
+  {#each items as row (row.id)}
+    {@const line = rowLine(row, payouts)}
+    {@const counted = countLine(row)}
+    <li class="card" data-content-id={row.id}>
+      <ContentThumb piece={row} variant="card" />
+      <div class="card-body">
+        <a class="card-title" href={rowHref(row, line)}>
+          {row.title}
+        </a>
+        <span class="card-facts">
+          <ContentStatus piece={row} />
+          <span class="card-fact">{accessWords(row, tierName).label}</span>
+          {#if counted}<span class="card-fact">{counted}</span>{/if}
+        </span>
+        {#if line}<ContentRowLine {line} />{/if}
+      </div>
+    </li>
+  {/each}
+</ul>
+
+<style>
+  .content-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-2);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    transition: var(--transition-colors);
+  }
+
+  .card:hover {
+    border-color: var(--color-border-strong);
+  }
+
+  /* The whole card is the title's link: one tab stop, and its ring, for a
+     keyboard focus only (`:focus-within` ringed a mouse click too). */
+  .card:has(.card-title:focus-visible) {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    padding: 0 var(--space-1) var(--space-1);
+    min-width: 0;
+  }
+
+  .card-title {
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-title::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+
+  .card-title:focus-visible {
+    outline: none;
+  }
+
+  .card:hover .card-title {
+    color: var(--color-link);
+  }
+
+  .card-facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .card-fact {
+    white-space: nowrap;
+  }
+</style>

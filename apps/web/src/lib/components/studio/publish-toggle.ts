@@ -1,9 +1,9 @@
 /**
  * Shared publish/unpublish toggle helper.
  *
- * Encapsulates the API call + toast pattern used by ContentTable, the content
- * list and a live piece's Settings.
- * Each caller handles its own optimistic UI independently.
+ * Encapsulates the API call + toast pattern a live piece's Settings uses (the
+ * content list's inline toggle went in Codex-a6ofh.3.1; its row menu, E3.5,
+ * is the next caller). Each caller handles its own optimistic UI.
  */
 
 import { toast } from '$lib/components/ui/Toast/toast-store';

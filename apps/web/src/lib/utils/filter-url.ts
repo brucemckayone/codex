@@ -50,3 +50,16 @@ export function filterHref(
   const next = applyFilterPatch(new URL(url), patch, defaults);
   return `${next.pathname}${next.search}`;
 }
+
+/**
+ * A URL param read as one of the values a page offers: anything else (absent,
+ * stale, hand-typed) reads as `fallback`, so an old link shows the default
+ * view rather than a refusal.
+ */
+export function pickParam<T extends string>(
+  options: readonly T[],
+  raw: string | null,
+  fallback: T
+): T {
+  return options.find((option) => option === raw) ?? fallback;
+}
