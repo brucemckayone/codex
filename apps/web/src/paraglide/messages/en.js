@@ -26847,6 +26847,14 @@ export const support_try_again = () => `Try again`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_trying_again = () => `Trying again…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_loading_charge = () => `Loading the charge…`
 
 
