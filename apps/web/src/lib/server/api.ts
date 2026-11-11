@@ -1108,6 +1108,8 @@ export function createServerApi(
        * - accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'course' (optional list filter — a query KIND label, not the stored flags)
        * - category: string filter (max 120 chars, no NUL, optional)
        * - organizationId: UUID filter (optional)
+       * - scope: 'personal' (optional): content filed under no org; refused
+       *   beside organizationId. Omitting both lists every org's content.
        * - creatorId: user id filter (BetterAuth text, not a UUID; optional)
        * - search: text search (max 255 chars, optional)
        * - sortBy: 'createdAt' | 'updatedAt' | 'publishedAt' | 'title' | 'viewCount' | 'purchaseCount' (default: 'createdAt')

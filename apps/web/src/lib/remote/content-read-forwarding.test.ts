@@ -130,6 +130,7 @@ const remote = (await import('./content.remote')) as unknown as {
   uploadThumbnailForm: CoverForm;
   stageThumbnailForm: CoverForm;
   listContent: (args?: Record<string, unknown>) => Promise<unknown>;
+  getContentWhereCounts: () => Promise<unknown>;
 };
 const media = (await import('./media.remote')) as unknown as {
   listMedia: (args: Record<string, unknown>) => Promise<unknown>;
@@ -327,6 +328,78 @@ describe.each([
     const err = await rejection(list());
     expect(err).not.toHaveProperty('body');
     // handleError logs it; a line here would log it twice.
+    expect(lines()).toEqual([]);
+  });
+});
+
+/**
+ * A refused list read's line says where it looked (Codex-a6ofh.3.2 review):
+ * the API's one scope, one org, or everywhere, never "all" beside an org.
+ */
+describe('listContent: where a refused read looked', () => {
+  const ORG = '3c111111-1111-4111-8111-111111111999';
+
+  it.each([
+    ['personal', { scope: 'personal' }],
+    ['org', { organizationId: ORG }],
+    ['all', {}],
+  ] as const)('logs scope %s', async (scope, args) => {
+    workerAnswers(401, 'Authentication required');
+    await rejection(remote.listContent({ page: 1, limit: 24, ...args }));
+    expect(logger.warn).toHaveBeenCalledWith(
+      'content.list_refused',
+      expect.objectContaining({ scope })
+    );
+  });
+});
+
+/**
+ * The Where counts forward and log as the lists do (Codex-a6ofh.3.2
+ * review): they reached the page as kit's 500, so the personal dashboard's
+ * content tile paged an error for a sign-out or a rate limit, and the
+ * menu's client line called every cause an outage.
+ */
+describe('getContentWhereCounts', () => {
+  const REFUSED = 'content.where_counts_refused';
+  const UNAVAILABLE = 'content.where_counts_unavailable';
+
+  /** Every server line this read wrote, as [level, event, fields]. */
+  const lines = () =>
+    (['error', 'warn'] as const).flatMap((level) =>
+      vi
+        .mocked(logger[level])
+        .mock.calls.filter(
+          ([event]) => event === REFUSED || event === UNAVAILABLE
+        )
+        .map(([event, fields]) => [level, event, fields] as const)
+    );
+
+  it('a 401 keeps its status', async () => {
+    workerAnswers(401, 'Authentication required');
+    const err = await rejection(remote.getContentWhereCounts());
+    // The body is kit's HttpError's: a bare ApiError has a status too.
+    expect(err).toMatchObject({
+      status: 401,
+      body: { message: 'Authentication required' },
+    });
+  });
+
+  it.each([
+    [400, 'Invalid request data', 'error', REFUSED],
+    [401, 'Authentication required', 'warn', REFUSED],
+    [429, 'Too many requests', 'warn', REFUSED],
+    [408, 'Request to content timed out', 'error', UNAVAILABLE],
+  ] as const)('a forwarded %i writes one server line, at %s, as %s', async (status, message, level, event) => {
+    workerAnswers(status, message);
+    await rejection(remote.getContentWhereCounts());
+    expect(lines().map(([at, name]) => [at, name])).toEqual([[level, event]]);
+    expect(lines()[0]?.[2]).toMatchObject({ status });
+  });
+
+  it('a 5xx is not forwarded: it stays an unexpected error for handleError', async () => {
+    workerAnswers(500, 'connection to Neon failed');
+    const err = await rejection(remote.getContentWhereCounts());
+    expect(err).not.toHaveProperty('body');
     expect(lines()).toEqual([]);
   });
 });

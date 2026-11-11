@@ -75,8 +75,8 @@ export const listContent = query(
     // A 4xx keeps its status, so the list can tell a refusal from an outage
     // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit
     // logs no forwarded 4xx, so it is logged here, for every page that reads
-    // this (the dashboard's counts log nothing of their own), with the args
-    // that tell its readers apart.
+    // this (the dashboard's onboarding count logs nothing of its own), with
+    // the args that tell its readers apart.
     return forwardClientErrors(() =>
       logRefusedRead(
         {
@@ -100,7 +100,8 @@ export const listContent = query(
 function listContentLog(params: ContentQueryInput | undefined) {
   return {
     organizationId: params?.organizationId ?? null,
-    scope: params?.scope ?? 'all',
+    // Where it looked: the API's one scope, else one org, else everywhere.
+    scope: params?.scope ?? (params?.organizationId ? 'org' : 'all'),
     page: params?.page,
     limit: params?.limit,
     statusFilter: params?.status ?? 'all',
@@ -115,14 +116,27 @@ function listContentLog(params: ContentQueryInput | undefined) {
 
 /**
  * How the creator's content is filed (Codex-a6ofh.3.2): the personal
- * studio's "Where" menu counts. Decoration: the list reads its rows on its
- * own, so a failure here leaves the menu without numbers, and is logged by
- * the list.
+ * studio's "Where" menu counts, and the personal dashboard's content tile.
+ * Decoration for the list, which reads its rows on its own: a failure leaves
+ * the menu without numbers.
+ *
+ * Forwarded and logged as `listContent` is: a 4xx keeps its status and is
+ * logged here at a signed-in read's level (a sign-out or a rate limit must
+ * not page as an error); a 5xx escapes to kit's `handleError`, which logs it.
  */
 export const getContentWhereCounts = query(async () => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.content.whereCounts();
+  return forwardClientErrors(() =>
+    logRefusedRead(
+      {
+        refused: 'content.where_counts_refused',
+        unavailable: 'content.where_counts_unavailable',
+      },
+      {},
+      () => api.content.whereCounts()
+    )
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

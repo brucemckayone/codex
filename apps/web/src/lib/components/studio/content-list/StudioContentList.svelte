@@ -82,7 +82,7 @@
   // its page, facets and sort, and whether it searched, never the text.
   const readLog = (args: ContentQueryInput) => ({
     page: args.page,
-    scope: args.scope ?? 'all',
+    scope: args.scope ?? (args.organizationId ? 'org' : 'all'),
     listedOrganizationId: args.organizationId ?? null,
     statusFilter: args.status ?? 'all',
     type: args.contentType ?? 'all',

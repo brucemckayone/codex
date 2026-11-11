@@ -15,7 +15,11 @@ const mockLogger = vi.hoisted(() => ({
 }));
 vi.mock('$lib/observability', () => ({ logger: mockLogger }));
 
-import { apiErrorFields, logReadFailure } from './read-failure';
+import {
+  apiErrorFields,
+  logReadFailure,
+  logSignedInReadFailure,
+} from './read-failure';
 
 const details = [{ path: 'query.creatorId', message: 'Invalid user id' }];
 const apiError = (status: number) =>
@@ -58,5 +62,54 @@ describe('apiErrorFields', () => {
       ourRequestWasWrong: false,
       fields: { status: undefined, code: undefined, details: undefined },
     });
+  });
+});
+
+/**
+ * A signed-in read the page swallows (the personal studio's draft badge,
+ * Codex-a6ofh.3.2 review): no forwarded 4xx and no `handleError` will log
+ * it, so this does, at `logRefusedRead`'s signed-in levels. A sign-out or a
+ * rate limit must not page as an error.
+ */
+describe('logSignedInReadFailure', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const EVENTS = { refused: 'badge.refused', unavailable: 'badge.unavailable' };
+
+  /** Every line written, as [level, event]. */
+  const lines = () =>
+    (['error', 'warn'] as const).flatMap((level) =>
+      mockLogger[level].mock.calls.map(([event]) => [level, event])
+    );
+
+  it.each([
+    [401, 'warn', 'badge.refused'],
+    [429, 'warn', 'badge.refused'],
+    [400, 'error', 'badge.refused'],
+    [403, 'error', 'badge.refused'],
+    [408, 'error', 'badge.unavailable'],
+    [503, 'warn', 'badge.unavailable'],
+  ] as const)('a %i writes one line, at %s, as %s', (status, level, event) => {
+    logSignedInReadFailure(EVENTS, { scope: 'personal' }, apiError(status));
+
+    expect(lines()).toEqual([[level, event]]);
+    expect(mockLogger[level]).toHaveBeenCalledWith(
+      event,
+      expect.objectContaining({ scope: 'personal', status })
+    );
+  });
+
+  it('names the refused field for our own bad request, never for a sign-out', () => {
+    logSignedInReadFailure(EVENTS, {}, apiError(400));
+    logSignedInReadFailure(EVENTS, {}, apiError(401));
+
+    expect(mockLogger.error.mock.calls[0]?.[1]).toMatchObject({ details });
+    expect(mockLogger.warn.mock.calls[0]?.[1]).not.toHaveProperty('details');
+  });
+
+  it('logs a network failure as an outage warning', () => {
+    logSignedInReadFailure(EVENTS, {}, new TypeError('fetch failed'));
+
+    expect(lines()).toEqual([['warn', 'badge.unavailable']]);
   });
 });

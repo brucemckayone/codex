@@ -13,6 +13,7 @@ import { getCreatorOnboarding } from '$lib/remote/onboarding.remote';
 import { getMyOrganizations } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { logSignedInReadFailure } from '$lib/server/read-failure';
 import { buildPlatformUrl } from '$lib/utils/subdomain';
 import type { LayoutServerLoad } from './$types';
 
@@ -57,8 +58,19 @@ export const load: LayoutServerLoad = async ({
   const [profile, orgsResult, draftCount] = await Promise.all([
     getProfile().catch(() => null),
     getMyOrganizations().catch(() => []),
-    // Non-critical: the badge just won't show.
-    countPersonalDrafts(platform, cookies).catch(() => 0),
+    // Non-critical: the badge just won't show. Logged, so a refused scope or
+    // an outage is never read as "no drafts".
+    countPersonalDrafts(platform, cookies).catch((error: unknown) => {
+      logSignedInReadFailure(
+        {
+          refused: 'studio.draft_badge_refused',
+          unavailable: 'studio.draft_badge_unavailable',
+        },
+        { scope: CONTENT_LIST_SCOPE.PERSONAL },
+        error
+      );
+      return 0;
+    }),
   ]);
 
   const orgs = (orgsResult ?? []).map((o) => ({

@@ -9,10 +9,18 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '$lib/api/errors';
 
 const list = vi.hoisted(() =>
   vi.fn(async (_params?: URLSearchParams) => ({ pagination: { total: 2 } }))
 );
+const logger = vi.hoisted(() => ({
+  warn: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  debug: vi.fn(),
+}));
+vi.mock('$lib/observability', () => ({ logger }));
 
 // The remotes build a `query()` at module scope, which needs SvelteKit app
 // hooks a unit test has no access to.
@@ -62,6 +70,7 @@ function runLoad() {
 describe('personal studio layout', () => {
   beforeEach(() => {
     list.mockClear();
+    vi.clearAllMocks();
   });
 
   it('counts the personal drafts, as the list the badge opens shows them', async () => {
@@ -87,5 +96,49 @@ describe('personal studio layout', () => {
         },
       ],
     });
+  });
+
+  // The badge is decoration, so a failed read hides it, as no drafts would:
+  // the log is what tells them apart (Codex-a6ofh.3.2 review).
+  it('a refused badge read hides the badge and logs our bad request as an error', async () => {
+    list.mockRejectedValueOnce(
+      new ApiError(400, 'Invalid request data', 'VALIDATION_ERROR', [
+        { path: ['scope'], message: 'Invalid input' },
+      ])
+    );
+
+    const data = await runLoad();
+
+    expect(data).toMatchObject({ badgeCounts: { draftContent: 0 } });
+    expect(logger.error).toHaveBeenCalledWith(
+      'studio.draft_badge_refused',
+      expect.objectContaining({ scope: 'personal', status: 400 })
+    );
+  });
+
+  it('a sign-out mid-load is a warning, never an error', async () => {
+    list.mockRejectedValueOnce(
+      new ApiError(401, 'Authentication required', 'UNAUTHORIZED')
+    );
+
+    await runLoad();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      'studio.draft_badge_refused',
+      expect.objectContaining({ status: 401 })
+    );
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('an outage is logged as one', async () => {
+    list.mockRejectedValueOnce(new TypeError('fetch failed'));
+
+    const data = await runLoad();
+
+    expect(data).toMatchObject({ badgeCounts: { draftContent: 0 } });
+    expect(logger.warn).toHaveBeenCalledWith(
+      'studio.draft_badge_unavailable',
+      expect.objectContaining({ scope: 'personal' })
+    );
   });
 });

@@ -192,7 +192,12 @@ describe('StudioContentList: the three states', () => {
     expect(logReadFailure).toHaveBeenCalledWith(
       'studio_content.list_unread',
       expect.anything(),
-      expect.objectContaining({ studio: 'org', organizationId: ORG })
+      // Where it looked: one org, never "all" beside an org's id.
+      expect.objectContaining({
+        studio: 'org',
+        organizationId: ORG,
+        scope: 'org',
+      })
     );
   });
 

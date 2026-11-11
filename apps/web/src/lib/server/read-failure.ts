@@ -98,15 +98,33 @@ export async function logRefusedRead<T>(
   try {
     return await read();
   } catch (error) {
-    if (
-      ApiError.isApiError(error) &&
-      error.status >= 400 &&
-      error.status < 500
-    ) {
-      logRefusal(events, context, error);
-    }
+    if (isClientError(error)) logRefusal(events, context, error);
     throw error;
   }
+}
+
+/**
+ * Logs a SIGNED-IN read whose failure the page swallows (a badge that just
+ * does not show), so neither a forwarded 4xx nor `handleError` will: a 4xx at
+ * `logRefusedRead`'s levels, anything else (a 5xx, the network) as an outage,
+ * a warning under `unavailable`.
+ */
+export function logSignedInReadFailure(
+  events: RefusedReadEvents,
+  context: Record<string, unknown>,
+  error: unknown
+): void {
+  if (isClientError(error)) {
+    logRefusal(events, context, error);
+    return;
+  }
+  logReadFailure(events.unavailable, context, error);
+}
+
+function isClientError(error: unknown): error is ApiError {
+  return (
+    ApiError.isApiError(error) && error.status >= 400 && error.status < 500
+  );
 }
 
 function logRefusal(
