@@ -19,6 +19,10 @@
  * stays set, then the answer lands. `deferRefresh()` makes the next refresh a
  * kit-shaped one whose promise settles only when the test lands or fails it.
  *
+ * A slot never hands the page a NEW query, and kit does on a Retry of a read
+ * that failed. So a test of the payout alert's Retry takes the Connect read
+ * as kit hands it: `kitMyConnect()` / `kitOrgPayout()` (Codex-if444).
+ *
  * A `.svelte.ts` module (runes compiled), NOT a `*.test.*` file, so it is
  * never collected as a suite.
  */
@@ -30,6 +34,7 @@ import type {
   SubscriptionStats,
   SubscriptionTier,
 } from '$lib/types';
+import { type KitQuery, kitQuery } from './kit-query.mock.svelte';
 
 export interface QuerySlot<T> {
   current: T | undefined;
@@ -150,6 +155,15 @@ export const TWO_SUBSCRIBERS: SubscriptionStats = {
 
 let myConnect = makeSlot<ConnectAccountStatusResponse>();
 let orgPayout = makeSlot<OrganizationPayoutStatusResponse>();
+/**
+ * The Connect reads as kit hands them, in place of the slots until the next
+ * `reset()` (Codex-if444). A double of kit's query
+ * (`kit-query.mock.svelte`): a Retry of a failed read hands the page a new
+ * query, still loading, as kit does. A slot never swaps, which is how both
+ * payout alerts' Retry passed its tests while judging the wrong query.
+ */
+let myConnectKit: KitQuery<ConnectAccountStatusResponse> | null = null;
+let orgPayoutKit: KitQuery<OrganizationPayoutStatusResponse> | null = null;
 let tiers = makeSlot<SubscriptionTier[]>([]);
 let stats = makeSlot<SubscriptionStats>(TWO_SUBSCRIBERS);
 /**
@@ -198,6 +212,8 @@ const commands = [
 export function reset() {
   myConnect = makeSlot<ConnectAccountStatusResponse>();
   orgPayout = makeSlot<OrganizationPayoutStatusResponse>();
+  myConnectKit = null;
+  orgPayoutKit = null;
   tiers = makeSlot<SubscriptionTier[]>([]);
   stats = makeSlot<SubscriptionStats>(TWO_SUBSCRIBERS);
   accessSummary = makeSlot<unknown>();
@@ -213,6 +229,18 @@ export function reset() {
 
 export const myConnectSlot = () => myConnect;
 export const orgPayoutSlot = () => orgPayout;
+
+/** `getMyConnectStatus` as kit hands it, until the next `reset()`. */
+export function kitMyConnect(): KitQuery<ConnectAccountStatusResponse> {
+  myConnectKit = kitQuery();
+  return myConnectKit;
+}
+
+/** `getOrganizationPayoutStatus` as kit hands it, until the next `reset()`. */
+export function kitOrgPayout(): KitQuery<OrganizationPayoutStatusResponse> {
+  orgPayoutKit = kitQuery();
+  return orgPayoutKit;
+}
 export const tiersSlot = () => tiers;
 export const statsSlot = () => stats;
 export const accessSummarySlot = () => accessSummary;
@@ -243,9 +271,9 @@ export function tierItemsSlot(key: string): QuerySlot<unknown> {
 }
 
 // ── query() ─────────────────────────────────────────────────────────────
-export const getMyConnectStatus = vi.fn(() => myConnect);
+export const getMyConnectStatus = vi.fn(() => myConnectKit?.get() ?? myConnect);
 export const getOrganizationPayoutStatus = vi.fn(
-  (_organizationId: string) => orgPayout
+  (_organizationId: string) => orgPayoutKit?.get() ?? orgPayout
 );
 export const listTiers = vi.fn((_orgId: string) => tiers);
 export const getSubscriptionStats = vi.fn((_orgId: string) => stats);
