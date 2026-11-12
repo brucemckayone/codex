@@ -1,6 +1,7 @@
 import {
   CONTENT_ACCESS_TYPE,
   CONTENT_LIST_SCOPE,
+  CONTENT_MAX_CATEGORIES,
   CONTENT_STATUS,
   CONTENT_TYPES,
   isReservedSubdomain,
@@ -426,7 +427,7 @@ const baseContentSchema = z.object({
   // (including []) REPLACES the set. ContentService verifies every id lives in
   // the content's OWN space (IDOR guard). Capped so a payload can't fan out an
   // unbounded join write.
-  categoryIds: z.array(uuidSchema).max(20).optional(),
+  categoryIds: z.array(uuidSchema).max(CONTENT_MAX_CATEGORIES).optional(),
 
   // Tags (JSONB array)
   tags: tagsSchema,
@@ -848,14 +849,21 @@ const contentQueryFields = paginationSchema.extend({
   status: contentStatusEnum.optional(),
   contentType: contentTypeEnum.optional(),
   accessType: contentAccessTypeEnum.optional(),
-  // Up to the topic slug width, so a topic the public list accepts is accepted
-  // here too (100 refused a real 101-120 character slug on /explore's
-  // signed-in sorts). A NUL is refused: Postgres refuses NUL in text.
+  // A category (topic) by its slug: the pieces filed in it, in the org when
+  // one is given (/explore's topics). It matched the legacy free-text
+  // `content.category` column until Codex-a6ofh.3.3, so /explore's signed-in
+  // sorts filtered by a slug nothing held. Up to the topic slug width, so a
+  // topic the public list accepts is accepted here too (100 refused a real
+  // 101-120 character slug). A NUL is refused: Postgres refuses NUL in text.
   category: z
     .string()
     .max(TOPIC_SLUG_MAX)
     .refine(hasNoNul, 'Category must not contain NUL')
     .optional(),
+  // One category, by id (the org studio's Category facet, Codex-a6ofh.3.3):
+  // the pieces filed in it. `category` above is the same filter by the
+  // category's slug (/explore's topics).
+  categoryId: uuidSchema.optional(),
   organizationId: uuidSchema.optional(),
   // Where the studio list looks (Codex-a6ofh.3.2, the personal studio's
   // "Where"): `personal` is the content filed under no org, which an
@@ -893,14 +901,18 @@ const contentQueryFields = paginationSchema.extend({
  * Personal and an org at once is two answers to "where": refused, never one
  * silently winning. Here, so the web remote and the worker refuse it alike.
  */
-export const contentQuerySchema = contentQueryFields.refine(
-  (q) => !(q.scope !== undefined && q.organizationId !== undefined),
-  {
+export const contentQuerySchema = contentQueryFields
+  .extend({
+    // Each row's live categories too (Codex-a6ofh.3.3): the org studio's
+    // list names them. The badges and pickers that read this list leave it
+    // out, and skip the query. A studio read's alone: browse names none.
+    include: z.literal('categories').optional(),
+  })
+  .refine((q) => !(q.scope !== undefined && q.organizationId !== undefined), {
     message:
       'scope=personal lists content outside any org: drop organizationId',
     path: ['scope'],
-  }
-);
+  });
 
 export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
 
@@ -926,6 +938,20 @@ export const contentBrowseQuerySchema = contentQueryFields.extend({
 });
 
 export type ContentBrowseQueryInput = z.infer<typeof contentBrowseQuerySchema>;
+
+/**
+ * `POST /api/content/:id/categories` (Codex-a6ofh.3.3): categories to ADD to a
+ * piece, keeping the ones it has. A `categoryIds` save replaces the whole set,
+ * so the list's bulk "Add to category" uses this instead. At least one; at
+ * most the per-piece limit, which the service also holds the piece's total to.
+ */
+export const addContentCategoriesSchema = z.object({
+  categoryIds: z.array(uuidSchema).min(1).max(CONTENT_MAX_CATEGORIES),
+});
+
+export type AddContentCategoriesInput = z.infer<
+  typeof addContentCategoriesSchema
+>;
 
 /** Which items a library list keeps by what uses them (Codex-a6ofh.1.4). */
 export const MEDIA_USAGE_FILTERS = ['any', 'used', 'unused'] as const;

@@ -110,6 +110,30 @@ export function salesShown(row: ContentWithRelations): string | null {
     : null;
 }
 
+/**
+ * Its categories as a row names them (Codex-a6ofh.3.3, owner 2026-11-12):
+ * the first, then how many more ("Tutorials +2"), and every name for the
+ * tooltip and a screen reader. Null in none, or when the row was not sent
+ * them.
+ */
+export function categoryWords(
+  row: ContentWithRelations
+): { shown: string; all: string } | null {
+  const names = (row.categories ?? []).map((item) => item.name);
+  const [first] = names;
+  if (first === undefined) return null;
+  return {
+    shown:
+      names.length === 1
+        ? first
+        : m.studio_content_categories_more({
+            name: first,
+            count: names.length - 1,
+          }),
+    all: names.join(', '),
+  };
+}
+
 /** The line under the title: what the piece needs, if anything. */
 export type RowLine =
   /** A draft's two steps and what is left (Codex-a6ofh.2.6). */

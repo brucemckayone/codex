@@ -4,7 +4,8 @@
   Find anything in the content list (Codex-a6ofh.3.1, mockup L1 notes 2-5):
   row one is search over titles and descriptions (`/` focuses it) and the
   status; row two the Type, Access and Sort menus and the table/cards
-  toggle, led in the personal studio by its Where (mockup L4b). Below `sm` the menus move into one sheet behind "Filters · N", as
+  toggle, led in the personal studio by its Where (mockup L4b), with the
+  org studio's Category before the Sort (mockup L1 pin 4). Below `sm` the menus move into one sheet behind "Filters · N", as
   the media library's do, and the view is always the cards.
 
   Presentational: the state comes from the URL (`list-url.ts`) and every
@@ -43,10 +44,22 @@
      * in the org studio, whose list is its org.
      */
     whereOptions?: readonly ListOption[];
+    /**
+     * The org studio's Category (Codex-a6ofh.3.3, mockup L1 pin 4): Any,
+     * then the org's categories. Left out in the personal studio (owner).
+     */
+    categoryOptions?: readonly ListOption[];
   }
 
-  const { view, searchValue, onSearchInput, onSearchClear, onChange, whereOptions }: Props =
-    $props();
+  const {
+    view,
+    searchValue,
+    onSearchInput,
+    onSearchClear,
+    onChange,
+    whereOptions,
+    categoryOptions,
+  }: Props = $props();
 
   /** The menus' facets: the status stays on screen on every width. */
   const FILTER_FACETS: readonly ListFacet<'type' | 'access'>[] = [
@@ -74,10 +87,25 @@
     }
   );
 
-  /** On a phone the Where joins the sheet, first, as it leads on desktop. */
-  const sheetFacets = $derived<readonly ListFacet<'where' | 'type' | 'access'>[]>(
-    whereFacet ? [whereFacet, ...FILTER_FACETS] : FILTER_FACETS
+  /** The Category, stated once: the desktop menu and the phone sheet read it. */
+  const categoryFacet = $derived<ListFacet<'category'> | undefined>(
+    categoryOptions && {
+      key: 'category',
+      title: () => m.studio_content_category_label(),
+      options: categoryOptions,
+      fallback: CONTENT_LIST_DEFAULTS.category,
+    }
   );
+
+  /**
+   * The menus, in order: the desktop row draws them before the Sort, and a
+   * phone's sheet holds them. Where first, Category last.
+   */
+  const facets = $derived<readonly ListFacet<'where' | 'type' | 'access' | 'category'>[]>([
+    ...(whereFacet ? [whereFacet] : []),
+    ...FILTER_FACETS,
+    ...(categoryFacet ? [categoryFacet] : []),
+  ]);
 </script>
 
 <div class="toolbar">
@@ -102,29 +130,15 @@
   </div>
 
   <div class="toolbar-row toolbar-facets">
-    {#if whereFacet}
+    {#each facets as facet (facet.key)}
       <FacetMenu
-        label={whereFacet.title()}
-        value={view.where}
-        options={whereFacet.options}
-        fallback={whereFacet.fallback}
-        onSelect={(where) => onChange({ where })}
+        label={facet.title()}
+        value={view[facet.key]}
+        options={facet.options}
+        fallback={facet.fallback}
+        onSelect={(value) => onChange({ [facet.key]: value })}
       />
-    {/if}
-    <FacetMenu
-      label={m.media_filter_type_label()}
-      value={view.type}
-      options={TYPE_OPTIONS}
-      fallback={CONTENT_LIST_DEFAULTS.type}
-      onSelect={(type) => onChange({ type })}
-    />
-    <FacetMenu
-      label={m.studio_content_form_access_label()}
-      value={view.access}
-      options={ACCESS_OPTIONS}
-      fallback={CONTENT_LIST_DEFAULTS.access}
-      onSelect={(access) => onChange({ access })}
-    />
+    {/each}
     <FacetMenu
       label={m.media_sort_label()}
       value={view.sort}
@@ -148,7 +162,7 @@
     idPrefix="clt"
     title={m.studio_content_list_filters_title()}
     clearLabel={m.media_clear_filters()}
-    facets={sheetFacets}
+    {facets}
     {view}
     sort={view.sort}
     sortFallback={CONTENT_LIST_DEFAULTS.sort}

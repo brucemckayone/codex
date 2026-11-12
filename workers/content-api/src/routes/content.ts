@@ -45,6 +45,7 @@ import type {
   HonoEnv,
 } from '@codex/shared-types';
 import {
+  addContentCategoriesSchema,
   createIdParamsSchema,
   publishContentQuerySchema,
   updateContentQuerySchema,
@@ -314,6 +315,49 @@ app.patch(
 );
 
 /**
+ * POST /api/content/:id/categories
+ * File a piece in more categories, keeping the ones it has (Codex-a6ofh.3.3):
+ * the list's bulk "Add to category". A PATCH of `categoryIds` replaces the
+ * set, so it cannot add without reading each piece first.
+ *
+ * Security: Creator/Admin only, as PATCH; API rate limit (100 req/min). Each
+ * category must be in the piece's own space, and the piece's total stays at
+ * most CONTENT_MAX_CATEGORIES (400 otherwise).
+ * @returns {{ data: { categoryIds: string[] } }} its live categories after
+ */
+app.post(
+  '/:id/categories',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: {
+      params: createIdParamsSchema(),
+      body: addContentCategoriesSchema,
+    },
+    handler: async (ctx): Promise<{ categoryIds: string[] }> => {
+      const result = await ctx.services.content.addCategories(
+        ctx.input.params.id,
+        ctx.user.id,
+        ctx.input.body.categoryIds
+      );
+      // As PATCH: a never-live draft is in no cache. A live piece's public
+      // row carries its topic slugs, and the topic list counts it.
+      if (result.hasBeenLive) {
+        bumpOrgContentVersion(
+          ctx.env,
+          ctx.executionCtx,
+          result.organizationId,
+          ctx.obs
+        );
+      }
+      return { categoryIds: result.categoryIds };
+    },
+  })
+);
+
+/**
  * GET /api/content
  * List content with filters and pagination
  *
@@ -331,13 +375,14 @@ app.get(
       // Paged from its own argument, as /browse is (Codex-uuj1g).
       // `scope=personal` is the content filed under no org, the service's
       // `organizationId: null` (Codex-a6ofh.3.2); the schema refuses it
-      // beside an organizationId.
-      const { page, limit, scope, ...filters } = ctx.input.query;
+      // beside an organizationId. `include=categories` names each row's
+      // categories (the org studio's list, Codex-a6ofh.3.3).
+      const { page, limit, scope, include, ...filters } = ctx.input.query;
       const result = await ctx.services.content.list(
         ctx.user.id,
         scope ? { ...filters, organizationId: null } : filters,
         { page, limit },
-        { scope: 'studio' }
+        { scope: 'studio', withCategories: include === 'categories' }
       );
       // The list's poster fallback (Codex-a6ofh.3.1): the row carries the
       // poster's R2 key, which the page cannot resolve; the URL goes beside it.

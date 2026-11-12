@@ -18,6 +18,13 @@ export const CONTENT_LIST_SCOPE = {
   PERSONAL: 'personal',
 } as const;
 
+/**
+ * The most categories one piece can be filed in (Codex-a6ofh.3.3): the
+ * editor's save sets at most this many, and adding to a piece's set refuses
+ * past it, so the two writes keep one limit.
+ */
+export const CONTENT_MAX_CATEGORIES = 20;
+
 /** What {@link hasBeenLive} reads of a piece; the web sends `publishedAt` as a string. */
 export interface PublicationState {
   status: string;

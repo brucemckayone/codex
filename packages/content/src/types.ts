@@ -65,7 +65,10 @@ export interface ContentFilters {
     | 'subscribers'
     | 'team'
     | 'course';
+  /** A category's slug: the pieces filed in it (in the org, when given). */
   category?: string;
+  /** A category's id: the pieces filed in it (Codex-a6ofh.3.3). */
+  categoryId?: string;
   organizationId?: string | null;
   creatorId?: string;
   search?: string;
@@ -130,6 +133,13 @@ export interface ContentWithRelations extends Content {
    */
   categoryIds?: string[];
   /**
+   * The live categories it is filed in, in their order (`sortOrder`, then
+   * name); `[]` when in none. The studio list's rows carry it
+   * (Codex-a6ofh.3.3), from one read over the page; `get` sends
+   * `categoryIds`.
+   */
+  categories?: ContentCategoryRef[];
+  /**
    * The exact tiers that include this item (Codex-2hxff.91), by tier
    * `sortOrder`, inactive tiers included; `[]` when not behind the switch.
    * Every content read attaches it (`withTierWire`).
@@ -144,6 +154,12 @@ export interface ContentWithRelations extends Content {
 }
 
 export type { ServedMediaItem };
+
+/** A category a piece is filed in, as a list row names it (Codex-a6ofh.3.3). */
+export interface ContentCategoryRef {
+  id: string;
+  name: string;
+}
 
 /**
  * Media item with populated relations

@@ -68,6 +68,17 @@ export interface RefusedReadEvents {
   unavailable: string;
 }
 
+/** How one signed-in read's refusals log, beside its events. */
+export interface RefusedReadOptions {
+  /**
+   * The route also asks a platform role (`/api/categories`: creator or
+   * admin) that the page's own guard does not (the org studio admits any
+   * member above `member`, Codex-a6ofh.3.3), so a 403 is a viewer it turns
+   * away, not our request: warn, as a 401 is.
+   */
+  roleGated?: boolean;
+}
+
 /**
  * Runs a SIGNED-IN read whose 4xx goes on to the page (`forwardClientErrors`),
  * logging that 4xx first. Kit skips `handleError`, and so its server log, for
@@ -89,6 +100,7 @@ export interface RefusedReadEvents {
  *   it an outage; for the dashboard's counts this warn is the only trace.
  * - 408: the worker did not answer. An outage: error, under `unavailable`,
  *   never a "refusal".
+ * - 403, from a read that says it is `roleGated`: warn (see that option).
  * - Any other 4xx, a 403 among them: these routes gate on no role, so it is
  *   our request or a deploy skew, a contract bug. Error, with the worker's
  *   `details` naming the field it refused (`logReadFailure`).
@@ -98,12 +110,13 @@ export interface RefusedReadEvents {
 export async function logRefusedRead<T>(
   events: RefusedReadEvents,
   context: Record<string, unknown>,
-  read: () => Promise<T>
+  read: () => Promise<T>,
+  options: RefusedReadOptions = {}
 ): Promise<T> {
   try {
     return await read();
   } catch (error) {
-    if (isClientError(error)) logRefusal(events, context, error);
+    if (isClientError(error)) logRefusal(events, context, error, options);
     throw error;
   }
 }
@@ -138,7 +151,8 @@ function isClientError(error: unknown): error is ApiError {
 function logRefusal(
   events: RefusedReadEvents,
   context: Record<string, unknown>,
-  error: ApiError
+  error: ApiError,
+  options: RefusedReadOptions = {}
 ): void {
   const fields = {
     ...context,
@@ -146,15 +160,15 @@ function logRefusal(
     code: error.code,
     error: error.message,
   };
-  switch (error.status) {
-    case 401:
-    case 429:
-      logger.warn(events.refused, fields);
-      return;
-    case 408:
-      logger.error(events.unavailable, fields);
-      return;
-    default:
-      logReadFailure(events.refused, context, error);
+  if (
+    error.status === 401 ||
+    error.status === 429 ||
+    (error.status === 403 && options.roleGated === true)
+  ) {
+    logger.warn(events.refused, fields);
+  } else if (error.status === 408) {
+    logger.error(events.unavailable, fields);
+  } else {
+    logReadFailure(events.refused, context, error);
   }
 }

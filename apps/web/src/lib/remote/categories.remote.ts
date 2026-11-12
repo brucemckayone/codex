@@ -28,6 +28,8 @@ import {
 import { command, form, getRequestEvent, query } from '$app/server';
 import type { TopicItem } from '$lib/components/topic/topic-card.types';
 import { createServerApi } from '$lib/server/api';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
+import { logRefusedRead } from '$lib/server/read-failure';
 import { type StudioCategory, toStudioCategory } from './categories.types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,10 +40,17 @@ import { type StudioCategory, toStudioCategory } from './categories.types';
 const CATEGORY_LIST_LIMIT = 100;
 
 /**
- * List an org's categories for the studio management page.
+ * List an org's categories: the studio management page, the editor's
+ * picker, and the content list's Category facet (Codex-a6ofh.3.3).
  *
  * Ordered by the curator's `sortOrder` (backend default). Refreshed after every
  * mutation below so the UI stays authoritative without a manual reload.
+ *
+ * A 4xx keeps its status and is logged at a signed-in read's level, as the
+ * studio lists' reads are (`logRefusedRead`): kit made it a 500 and logged a
+ * sign-out as an error. The route asks a creator or admin, which an org
+ * studio member need not be, so a 403 warns too (`roleGated`). A 5xx
+ * escapes to `handleError`, which logs it.
  */
 export const getCategories = query(
   z.string().uuid(),
@@ -53,7 +62,17 @@ export const getCategories = query(
     params.set('organizationId', organizationId);
     params.set('limit', String(CATEGORY_LIST_LIMIT));
 
-    const result = await api.categories.list(params);
+    const result = await forwardClientErrors(() =>
+      logRefusedRead(
+        {
+          refused: 'categories.list_refused',
+          unavailable: 'categories.list_unavailable',
+        },
+        { organizationId },
+        () => api.categories.list(params),
+        { roleGated: true }
+      )
+    );
     return (result?.items ?? []).map(toStudioCategory);
   }
 );

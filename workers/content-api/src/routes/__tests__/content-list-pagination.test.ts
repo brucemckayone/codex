@@ -107,12 +107,21 @@ describe('content list routes page by the requested page and limit', () => {
     const { creatorId, filters, pagination, options } = listCall();
     expect(creatorId).toBe(USER.id);
     expect(pagination).toEqual({ page: 2, limit: 5 });
-    expect(options).toEqual({ scope: 'studio' });
+    expect(options).toEqual({ scope: 'studio', withCategories: false });
     expect(filters).not.toHaveProperty('page');
     expect(filters).not.toHaveProperty('limit');
 
     const body = (await res.json()) as { pagination: { page: number } };
     expect(body.pagination.page).toBe(2);
+  });
+
+  it('GET /api/content?include=categories asks for the rows’ categories (Codex-a6ofh.3.3)', async () => {
+    const res = await get('?include=categories');
+
+    expect(res.status).toBe(200);
+    const { filters, options } = listCall();
+    expect(options).toEqual({ scope: 'studio', withCategories: true });
+    expect(filters).not.toHaveProperty('include');
   });
 
   it('GET /api/content with no paging params passes the schema defaults', async () => {

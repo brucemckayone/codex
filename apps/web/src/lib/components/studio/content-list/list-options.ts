@@ -14,6 +14,7 @@ import * as m from '$paraglide/messages';
 import type { ListOption, SegmentOption } from '../list-toolbar/list-option';
 import type { ContentStatusFilter } from './content-status';
 import {
+  CATEGORY_ANY,
   isOrgWhere,
   type ListAccess,
   type ListSort,
@@ -129,6 +130,33 @@ export function whereOptions(
         ...(counts && { count: 0 }),
       });
     }
+  }
+  return options;
+}
+
+/**
+ * The org studio's Category (Codex-a6ofh.3.3, mockup L1 pin 4): Any, then
+ * the org's categories in their order. `categories` undefined (unread, or
+ * the read failed) offers Any alone. A category the URL is on that the read
+ * does not name (still unread, or since removed) is "This category", so the
+ * menu never shows an id.
+ */
+export function categoryOptions(
+  categories: readonly { id: string; name: string }[] | undefined,
+  category: string
+): ListOption[] {
+  const options: ListOption[] = [
+    { value: CATEGORY_ANY, label: () => m.studio_content_category_any() },
+    ...(categories ?? []).map((item) => ({
+      value: item.id,
+      label: () => item.name,
+    })),
+  ];
+  if (!options.some((option) => option.value === category)) {
+    options.push({
+      value: category,
+      label: () => m.studio_content_category_this(),
+    });
   }
   return options;
 }

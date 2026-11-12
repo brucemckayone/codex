@@ -30,6 +30,7 @@ type Page = {
 const s = vi.hoisted(() => ({
   first: { current: undefined as unknown, error: undefined as unknown },
   whereCounts: { current: undefined as unknown, error: undefined as unknown },
+  categories: { current: undefined as unknown, error: undefined as unknown },
   later: new Map<number, unknown>(),
   refreshFirst: vi.fn(async () => {}),
 }));
@@ -78,6 +79,19 @@ vi.mock('$lib/remote/content.remote', () => ({
   listContent,
   getContentWhereCounts,
 }));
+/** The org studio's categories (Codex-a6ofh.3.3): one query, as kit keeps one. */
+const getCategories = vi.hoisted(() => {
+  const query = {
+    get current() {
+      return s.categories.current;
+    },
+    get error() {
+      return s.categories.error;
+    },
+  };
+  return vi.fn((_organizationId: string) => query);
+});
+vi.mock('$lib/remote/categories.remote', () => ({ getCategories }));
 
 vi.mock('$lib/remote/subscription.remote', () => ({
   getMyConnectStatus: vi.fn(() => ({ current: undefined, error: undefined })),
@@ -157,6 +171,8 @@ beforeEach(() => {
   s.first = { current: undefined, error: undefined };
   s.whereCounts = { current: undefined, error: undefined };
   getContentWhereCounts.mockClear();
+  s.categories = { current: undefined, error: undefined };
+  getCategories.mockClear();
   s.later.clear();
   listContent.mockClear();
   goto.mockClear();
@@ -260,6 +276,7 @@ describe('StudioContentList: the view, from the URL', () => {
       page: 1,
       limit: 24,
       organizationId: ORG,
+      include: 'categories',
       sortBy: 'updatedAt',
       sortOrder: 'desc',
     });
@@ -590,5 +607,137 @@ describe('StudioContentList: Where', () => {
     render();
     expect(whereTrigger()).toBeUndefined();
     expect(getContentWhereCounts).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The org studio's Category (Codex-a6ofh.3.3, mockup L1 pin 4): the org's
+ * categories as a facet, and a Category column whose row reads the first
+ * name and how many more. The personal studio has neither (owner).
+ */
+describe('StudioContentList: Category', () => {
+  const TUTORIALS = '7c000000-0000-4000-8000-000000000001';
+  const LIVE = '7c000000-0000-4000-8000-000000000002';
+  const QA = '7c000000-0000-4000-8000-000000000003';
+  const CATEGORIES = [
+    { id: TUTORIALS, name: 'Tutorials' },
+    { id: LIVE, name: 'Live' },
+    { id: QA, name: 'Q&A' },
+  ];
+
+  const categoryTrigger = () =>
+    [...document.querySelectorAll<HTMLElement>('.toolbar-menu')].find(
+      (menu) =>
+        menu.querySelector('.toolbar-menu-key')?.textContent?.trim() ===
+        m.studio_content_category_label()
+    );
+  const items = () =>
+    [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].map(
+      (item) => item.textContent?.replace(/\s+/g, ' ').trim()
+    );
+  async function openCategory() {
+    categoryTrigger()?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+    );
+    await settle();
+  }
+
+  test('offers Any, then the org’s categories, read for its org', async () => {
+    s.categories = { current: CATEGORIES, error: undefined };
+    render();
+    await openCategory();
+    expect(getCategories).toHaveBeenCalledWith(ORG);
+    expect(items()).toEqual([
+      m.studio_content_category_any(),
+      'Tutorials',
+      'Live',
+      'Q&A',
+    ]);
+  });
+
+  test('a category chosen is one navigation, by its id', async () => {
+    s.categories = { current: CATEGORIES, error: undefined };
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    render();
+    await openCategory();
+    [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+      .find((item) => item.textContent?.includes('Live'))
+      ?.click();
+    await settle();
+    expect(goto).toHaveBeenCalledTimes(1);
+    expect(goto).toHaveBeenCalledWith(
+      `/studio/content?category=${LIVE}`,
+      expect.anything()
+    );
+  });
+
+  test('the URL’s category filters the read, and a miss offers Clear filters', async () => {
+    s.categories = { current: CATEGORIES, error: undefined };
+    s.first = { current: pageOf([]), error: undefined };
+    render(`?category=${QA}`);
+    expect(listCalls()[0]).toMatchObject({ categoryId: QA });
+    expect(categoryTrigger()?.textContent).toContain('Q&A');
+    expect(text()).toContain(m.studio_content_list_no_match());
+    button(m.media_clear_filters())?.click();
+    await settle();
+    expect(goto).toHaveBeenCalledWith('/studio/content', expect.anything());
+  });
+
+  test('categories that failed leave Any alone, name the URL’s one, and are logged', async () => {
+    s.categories = { current: undefined, error: new Error('down') };
+    render(`?category=${LIVE}`);
+    expect(categoryTrigger()?.textContent).toContain(
+      m.studio_content_category_this()
+    );
+    expect(categoryTrigger()?.textContent).not.toContain(LIVE);
+    await openCategory();
+    expect(items()).toEqual([
+      m.studio_content_category_any(),
+      m.studio_content_category_this(),
+    ]);
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.list_categories_unread',
+      expect.any(Error),
+      expect.objectContaining({ studio: 'org' })
+    );
+  });
+
+  test('a row reads its first category and how many more, and says them all', () => {
+    s.first = {
+      current: pageOf([
+        piece(1, { categories: CATEGORIES }),
+        piece(2, { categories: [] }),
+      ]),
+      error: undefined,
+    };
+    render();
+    const header = [...document.querySelectorAll('th')].map((th) =>
+      th.textContent?.trim()
+    );
+    expect(header).toContain(m.studio_content_category_label());
+    const filed = document.querySelector(
+      '[data-content-id] .content-categories'
+    );
+    expect(
+      filed?.querySelector('[aria-hidden="true"]')?.textContent?.trim()
+    ).toBe(m.studio_content_categories_more({ name: 'Tutorials', count: 2 }));
+    expect(filed?.getAttribute('title')).toBe('Tutorials, Live, Q&A');
+    expect(filed?.querySelector('.sr-only')?.textContent).toBe(
+      'Tutorials, Live, Q&A'
+    );
+  });
+
+  test('the personal studio has no Category, reads none, and ignores the URL’s', () => {
+    s.first = {
+      current: pageOf([piece(1, { categories: CATEGORIES })]),
+      error: undefined,
+    };
+    render(`?category=${LIVE}`, null);
+    expect(categoryTrigger()).toBeUndefined();
+    expect(getCategories).not.toHaveBeenCalled();
+    expect(listCalls()[0]).not.toHaveProperty('categoryId');
+    expect(listCalls()[0]).not.toHaveProperty('include');
+    expect(document.querySelector('[data-content-id]')).not.toBeNull();
+    expect(document.querySelector('.content-categories')).toBeNull();
   });
 });

@@ -11,7 +11,13 @@ import {
   PAID,
   withMedia,
 } from '../__fixtures__/draft-row';
-import { accessWords, rowLine, salesShown, viewsShown } from './row-facts';
+import {
+  accessWords,
+  categoryWords,
+  rowLine,
+  salesShown,
+  viewsShown,
+} from './row-facts';
 
 const TIERS: Record<string, string> = { t1: 'Standard', t2: 'Pro' };
 const known = (id: string) => TIERS[id];
@@ -270,5 +276,37 @@ describe('rowLine', () => {
     expect(
       rowLine(draftRow({ contentType: 'pdf' } as never), 'ready')
     ).toBeNull();
+  });
+});
+
+/** A row's categories (Codex-a6ofh.3.3, owner 2026-11-12): "First +N". */
+describe('categoryWords', () => {
+  const named = (...names: string[]) =>
+    names.map((name, i) => ({
+      id: `7c000000-0000-4000-8000-00000000000${i}`,
+      name,
+    }));
+
+  it('one category reads its name', () => {
+    expect(categoryWords(draftRow({ categories: named('Tutorials') }))).toEqual(
+      {
+        shown: 'Tutorials',
+        all: 'Tutorials',
+      }
+    );
+  });
+
+  it('several read the first and how many more, and say every name', () => {
+    expect(
+      categoryWords(draftRow({ categories: named('Tutorials', 'Live', 'Q&A') }))
+    ).toEqual({
+      shown: m.studio_content_categories_more({ name: 'Tutorials', count: 2 }),
+      all: 'Tutorials, Live, Q&A',
+    });
+  });
+
+  it('none, or none sent, is nothing', () => {
+    expect(categoryWords(draftRow({ categories: [] }))).toBeNull();
+    expect(categoryWords(draftRow())).toBeNull();
   });
 });

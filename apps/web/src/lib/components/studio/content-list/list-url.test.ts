@@ -1,6 +1,7 @@
 import { contentQuerySchema } from '@codex/validation';
 import { describe, expect, it } from 'vitest';
 import {
+  CATEGORY_ANY,
   CONTENT_LIST_DEFAULTS,
   CONTENT_LIST_PAGE_SIZE,
   contentListArgs,
@@ -38,6 +39,7 @@ describe('readContentListState', () => {
       sort: 'views',
       view: 'grid',
       where: WHERE_PERSONAL,
+      category: CATEGORY_ANY,
     });
   });
 
@@ -71,6 +73,7 @@ describe('contentListArgs', () => {
       page: 1,
       limit: CONTENT_LIST_PAGE_SIZE,
       organizationId: ORG,
+      include: 'categories',
       sortBy: 'updatedAt',
       sortOrder: 'desc',
     });
@@ -122,6 +125,7 @@ describe('contentListArgs', () => {
       page: 3,
       limit: CONTENT_LIST_PAGE_SIZE,
       organizationId: ORG,
+      include: 'categories',
       status: 'published',
       contentType: 'written',
       accessType: 'paid',
@@ -170,6 +174,45 @@ describe('narrowing', () => {
     expect(isContentListNarrowed(at(`?where=${ORG}`), null, null)).toBe(true);
     expect(isContentListNarrowed(at(`?where=${OTHER_ORG}`), null, ORG)).toBe(
       false
+    );
+  });
+});
+
+/**
+ * The org studio's Category (Codex-a6ofh.3.3): one category by id, or Any.
+ * The personal studio has none (owner, 2026-11-12) and ignores the param.
+ */
+describe('category', () => {
+  const CATEGORY = '7c000000-0000-4000-8000-000000000001';
+
+  it('reads an id, and anything else as Any', () => {
+    expect(at(`?category=${CATEGORY}`).category).toBe(CATEGORY);
+    for (const query of ['', '?category=tutorials', '?category=']) {
+      expect(at(query).category).toBe(CATEGORY_ANY);
+    }
+  });
+
+  it('the org studio asks for its pieces in it, and the schema takes the args', () => {
+    const args = contentListArgs(at(`?category=${CATEGORY}`), null, ORG, 1);
+    expect(args).toMatchObject({ organizationId: ORG, categoryId: CATEGORY });
+    expect(contentQuerySchema.safeParse(args).success).toBe(true);
+    expect(contentListArgs(at(''), null, ORG, 1)).not.toHaveProperty(
+      'categoryId'
+    );
+  });
+
+  it('the personal studio ignores it, and asks for no names', () => {
+    const args = contentListArgs(at(`?category=${CATEGORY}`), null, null, 1);
+    expect(args).not.toHaveProperty('categoryId');
+    expect(args).not.toHaveProperty('include');
+    expect(isContentListNarrowed(at(`?category=${CATEGORY}`), null, null)).toBe(
+      false
+    );
+  });
+
+  it('narrows the org studio’s list', () => {
+    expect(isContentListNarrowed(at(`?category=${CATEGORY}`), null, ORG)).toBe(
+      true
     );
   });
 });

@@ -5,8 +5,8 @@
 import type { ContentWhereCounts } from '@codex/shared-types';
 import { describe, expect, it } from 'vitest';
 import * as m from '$paraglide/messages';
-import { whereOptions } from './list-options';
-import { WHERE_ALL, WHERE_PERSONAL } from './list-url';
+import { categoryOptions, whereOptions } from './list-options';
+import { CATEGORY_ANY, WHERE_ALL, WHERE_PERSONAL } from './list-url';
 
 const ALPHA = '5f0c7b2e-1d3a-4c8e-9b6f-2a7d1e4c9b30';
 const BETA = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
@@ -80,5 +80,49 @@ describe('whereOptions', () => {
     const stranger = '6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
     const values = whereOptions(COUNTS, stranger, ORGS).map((o) => o.value);
     expect(values).not.toContain(stranger);
+  });
+});
+
+/** The org studio's Category facet (Codex-a6ofh.3.3, mockup L1 pin 4). */
+describe('categoryOptions', () => {
+  const TUTORIALS = '7c000000-0000-4000-8000-000000000001';
+  const LIVE = '7c000000-0000-4000-8000-000000000002';
+  const CATEGORIES = [
+    { id: TUTORIALS, name: 'Tutorials' },
+    { id: LIVE, name: 'Live' },
+  ];
+
+  it('leads with Any, then the categories in their order', () => {
+    expect(rows(categoryOptions(CATEGORIES, CATEGORY_ANY))).toEqual([
+      {
+        value: CATEGORY_ANY,
+        label: m.studio_content_category_any(),
+        count: undefined,
+      },
+      { value: TUTORIALS, label: 'Tutorials', count: undefined },
+      { value: LIVE, label: 'Live', count: undefined },
+    ]);
+  });
+
+  it('unread, it offers Any alone', () => {
+    expect(
+      categoryOptions(undefined, CATEGORY_ANY).map((o) => o.value)
+    ).toEqual([CATEGORY_ANY]);
+  });
+
+  it('names a URL category nothing names "This category", never its id', () => {
+    const stranger = '7c000000-0000-4000-8000-00000000dead';
+    for (const read of [undefined, CATEGORIES]) {
+      const last = rows(categoryOptions(read, stranger)).at(-1);
+      expect(last).toMatchObject({
+        value: stranger,
+        label: m.studio_content_category_this(),
+      });
+    }
+  });
+
+  it('never lists the URL category twice when the read names it', () => {
+    const values = categoryOptions(CATEGORIES, LIVE).map((o) => o.value);
+    expect(values.filter((value) => value === LIVE)).toHaveLength(1);
   });
 });

@@ -17,6 +17,7 @@ import { CacheType, type VersionedCache } from '@codex/cache';
 import { R2Service } from '@codex/cloudflare-clients';
 import {
   CONTENT_ACCESS_TYPE,
+  CONTENT_MAX_CATEGORIES,
   CONTENT_STATUS,
   CONTENT_TYPES,
   ERROR_CODES,
@@ -31,6 +32,7 @@ import {
   type PublishBlockedReason,
 } from '@codex/constants';
 import {
+  type DatabaseClient,
   isLockNotAvailable,
   isUniqueViolationOf,
   MEDIA_ITEM_RESPONSE_COLUMNS,
@@ -105,6 +107,7 @@ import {
 import type {
   CatalogueContentRow,
   Content,
+  ContentCategoryRef,
   ContentFilters,
   ContentWithRelations,
   DatabaseTransaction,
@@ -388,6 +391,13 @@ const CONTENT_SLUG_INDEXES = new Set([
   'idx_unique_content_slug_personal',
 ]);
 
+/**
+ * A studio list's options. `withCategories` names each row's live
+ * categories (Codex-a6ofh.3.3): only the org studio's list shows them, so
+ * the badges and pickers that read this list skip the query.
+ */
+type StudioListOptions = { scope?: 'studio'; withCategories?: boolean };
+
 export class ContentService extends BaseService {
   private cache?: VersionedCache;
   private readonly r2PublicUrlBase?: string;
@@ -487,15 +497,39 @@ export class ContentService extends BaseService {
       .delete(contentCategories)
       .where(eq(contentCategories.contentId, contentId));
 
-    // De-dupe incoming ids so a repeated id can't collide on the
-    // (contentId, categoryId) primary key.
-    const uniqueIds = [...new Set(categoryIds)];
-    if (uniqueIds.length === 0) return;
+    if (categoryIds.length === 0) return;
 
-    // Space scope: org content matches org categories (any curator in the org);
-    // personal content matches the creator's OWN personal categories — scoping
-    // by creatorId, NOT merely `organizationId IS NULL`, which would leak
-    // personal categories across creators.
+    const uniqueIds = await this.assertCategoriesInSpace(
+      tx,
+      categoryIds,
+      organizationId,
+      creatorId
+    );
+
+    await tx
+      .insert(contentCategories)
+      .values(uniqueIds.map((categoryId) => ({ contentId, categoryId })));
+  }
+
+  /**
+   * Refuses any category outside the piece's own space: the replace (a
+   * `categoryIds` save) and the add (`addCategories`) both file through it.
+   * Org content matches the org's categories (any curator in the org);
+   * personal content matches the creator's OWN personal categories, scoped
+   * by `creatorId`, NOT merely `organizationId IS NULL`, which would leak
+   * personal categories across creators. A soft-deleted or unknown id is
+   * refused too, never dropped.
+   *
+   * @returns the ids once each: a repeat would collide on the
+   *   (contentId, categoryId) key, and read here as a missing category
+   */
+  private async assertCategoriesInSpace(
+    tx: DatabaseTransaction,
+    ids: string[],
+    organizationId: string | null,
+    creatorId: string
+  ): Promise<string[]> {
+    const categoryIds = [...new Set(ids)];
     const spaceScope = organizationId
       ? eq(categories.organizationId, organizationId)
       : and(
@@ -508,24 +542,42 @@ export class ContentService extends BaseService {
       .from(categories)
       .where(
         and(
-          inArray(categories.id, uniqueIds),
+          inArray(categories.id, categoryIds),
           isNull(categories.deletedAt),
           spaceScope
         )
       );
 
-    if (inSpace.length !== uniqueIds.length) {
+    if (inSpace.length !== categoryIds.length) {
       const found = new Set(inSpace.map((row) => row.id));
-      const invalid = uniqueIds.filter((id) => !found.has(id));
+      const invalid = categoryIds.filter((id) => !found.has(id));
       throw new ValidationError(
         'One or more categories do not exist in this space',
         { invalidCategoryIds: invalid }
       );
     }
+    return categoryIds;
+  }
 
-    await tx
-      .insert(contentCategories)
-      .values(uniqueIds.map((categoryId) => ({ contentId, categoryId })));
+  /**
+   * The ids of the live categories a piece is filed in: its join rows
+   * outlive a category's soft delete, so the join to `categories` drops a
+   * dead one. In the caller's transaction when it holds the row.
+   */
+  private liveCategoryIds(
+    db: DatabaseClient | DatabaseTransaction,
+    contentId: string
+  ) {
+    return db
+      .select({ categoryId: contentCategories.categoryId })
+      .from(contentCategories)
+      .innerJoin(categories, eq(contentCategories.categoryId, categories.id))
+      .where(
+        and(
+          eq(contentCategories.contentId, contentId),
+          isNull(categories.deletedAt)
+        )
+      );
   }
 
   /**
@@ -795,15 +847,8 @@ export class ContentService extends BaseService {
       // Surface current category memberships (WP-5) so the studio edit form can
       // pre-select them — critical because update REPLACES the set, so a form
       // that submitted an empty selection would otherwise wipe every tag.
-      // Joins to `categories` + filters soft-deleted so a dead category (its
-      // join row lingers until hard delete) never shows as a live selection.
-      const membershipRows = await this.db
-        .select({ categoryId: contentCategories.categoryId })
-        .from(contentCategories)
-        .innerJoin(categories, eq(contentCategories.categoryId, categories.id))
-        .where(
-          and(eq(contentCategories.contentId, id), isNull(categories.deletedAt))
-        );
+      // A dead category never shows as a live selection.
+      const membershipRows = await this.liveCategoryIds(this.db, id);
 
       // The item's tiers (Codex-2hxff.91), so the editor's tier picker can
       // pre-tick them: the editor refuses to save a set it never read.
@@ -2299,6 +2344,7 @@ export class ContentService extends BaseService {
    * @param filters - Query filters (organizationId required for browse)
    * @param pagination - Pagination parameters
    * @param options.scope - 'studio' (default) | 'browse'
+   * @param options.withCategories - studio only: each row's `categories`
    * @returns Paginated content list with metadata
    * @throws ValidationError when scope='browse' and organizationId is missing
    *
@@ -2315,17 +2361,20 @@ export class ContentService extends BaseService {
   list(
     creatorId: string,
     filters?: ContentFilters,
-    paginationOrOptions?: PaginationParams | { scope?: 'studio' },
-    maybeOptions?: { scope?: 'studio' }
+    paginationOrOptions?: PaginationParams | StudioListOptions,
+    maybeOptions?: StudioListOptions
   ): Promise<PaginatedListResponse<ContentWithRelations>>;
   async list(
     creatorId: string,
     filters: ContentFilters = {},
-    paginationOrOptions: PaginationParams | { scope?: 'studio' | 'browse' } = {
+    paginationOrOptions:
+      | PaginationParams
+      | StudioListOptions
+      | { scope: 'browse' } = {
       page: 1,
       limit: PAGINATION.DEFAULT,
     },
-    maybeOptions?: { scope?: 'studio' | 'browse' }
+    maybeOptions?: StudioListOptions | { scope: 'browse' }
   ): Promise<
     PaginatedListResponse<ContentWithRelations | CatalogueContentRow>
   > {
@@ -2337,11 +2386,14 @@ export class ContentService extends BaseService {
     const pagination: PaginationParams = isPagination
       ? (paginationOrOptions as PaginationParams)
       : { page: 1, limit: PAGINATION.DEFAULT };
-    const options =
+    const options: StudioListOptions | { scope: 'browse' } =
       (isPagination
         ? maybeOptions
-        : (paginationOrOptions as { scope?: 'studio' | 'browse' })) ?? {};
+        : (paginationOrOptions as StudioListOptions | { scope: 'browse' })) ??
+      {};
     const scope = options.scope ?? 'studio';
+    const withCategories =
+      'withCategories' in options && options.withCategories === true;
 
     if (scope === 'browse' && !filters.organizationId) {
       // Hard fail-closed: browse-mode queries without an org filter are
@@ -2405,8 +2457,12 @@ export class ContentService extends BaseService {
                     : eq(content.courseOnly, true)
         );
       }
-      if (filters.category) {
-        whereConditions.push(eq(content.category, filters.category));
+      // A category, by id (the org studio's facet) or by slug (/explore's
+      // topics): its pieces, through `content_categories` as a semi-join, so
+      // a piece in several categories is still one row and the count stays
+      // right; a join would repeat it (Codex-a6ofh.3.3).
+      if (filters.categoryId || filters.category) {
+        whereConditions.push(inArray(content.id, this.filedIn(filters)));
       }
       if (filters.organizationId !== undefined) {
         if (filters.organizationId === null) {
@@ -2507,13 +2563,174 @@ export class ContentService extends BaseService {
             : item,
       });
       // Every content read carries its tiers (Codex-2hxff.91, design §4.1):
-      // one query over the page's ids.
+      // one query over the page's ids. The org studio's rows carry their
+      // categories too, the same way and beside it (Codex-a6ofh.3.3).
+      const [items, filed] = await Promise.all([
+        withTierWire(this.db, page.items),
+        withCategories ? this.categoriesOf(page.items) : null,
+      ]);
       return {
-        items: await withTierWire(this.db, page.items),
+        items: filed
+          ? items.map((row) => ({
+              ...row,
+              categories: filed.get(row.id) ?? [],
+            }))
+          : items,
         pagination: page.pagination,
       };
     } catch (error) {
       this.handleError(error, 'list');
+    }
+  }
+
+  /**
+   * The ids of the pieces filed in one category: by id, by slug, or both,
+   * in `filters.organizationId`'s categories when one is given. Only a live
+   * category files anything: its join rows outlive a soft delete. The outer
+   * query keeps the list's own scope, so a category id from elsewhere only
+   * ever finds nothing.
+   */
+  private filedIn(
+    filters: Pick<ContentFilters, 'categoryId' | 'category' | 'organizationId'>
+  ) {
+    const conditions: SQL[] = [isNull(categories.deletedAt)];
+    if (filters.categoryId) {
+      conditions.push(eq(categories.id, filters.categoryId));
+    }
+    if (filters.category) {
+      conditions.push(eq(categories.slug, filters.category));
+    }
+    if (filters.organizationId) {
+      conditions.push(eq(categories.organizationId, filters.organizationId));
+    }
+    return this.db
+      .select({ contentId: contentCategories.contentId })
+      .from(contentCategories)
+      .innerJoin(categories, eq(contentCategories.categoryId, categories.id))
+      .where(and(...conditions));
+  }
+
+  /**
+   * The live categories each row is filed in, by `sortOrder` then name,
+   * keyed by its id (a row in none has no key): one query over the page.
+   */
+  private async categoriesOf(
+    rows: Array<{ id: string }>
+  ): Promise<Map<string, ContentCategoryRef[]>> {
+    const byContent = new Map<string, ContentCategoryRef[]>();
+    if (rows.length === 0) return byContent;
+    const filed = await this.db
+      .select({
+        contentId: contentCategories.contentId,
+        id: categories.id,
+        name: categories.name,
+      })
+      .from(contentCategories)
+      .innerJoin(categories, eq(contentCategories.categoryId, categories.id))
+      .where(
+        and(
+          inArray(
+            contentCategories.contentId,
+            rows.map((row) => row.id)
+          ),
+          isNull(categories.deletedAt)
+        )
+      )
+      .orderBy(asc(categories.sortOrder), asc(categories.name));
+    for (const { contentId, id, name } of filed) {
+      const held = byContent.get(contentId);
+      if (held) held.push({ id, name });
+      else byContent.set(contentId, [{ id, name }]);
+    }
+    return byContent;
+  }
+
+  /**
+   * Files a piece in more categories, keeping the ones it has
+   * (Codex-a6ofh.3.3): the list's bulk "Add to category", which a
+   * `categoryIds` save cannot do without reading each piece's set first,
+   * since a save replaces it. Idempotent: a category it already has is kept,
+   * once. Each one must be in the piece's own space, and a piece holds at
+   * most `CONTENT_MAX_CATEGORIES`, as a save allows. The row is read locked,
+   * as `update` reads it, so two adds at once cannot both pass the limit.
+   *
+   * `hasBeenLive` is the caller's cache gate: a never-live draft is in no
+   * cache to bump.
+   *
+   * @throws {ContentNotFoundError} not the creator's, or deleted
+   * @throws {ValidationError} a category outside its space, or past the limit
+   */
+  async addCategories(
+    contentId: string,
+    creatorId: string,
+    categoryIds: string[]
+  ): Promise<{
+    categoryIds: string[];
+    organizationId: string | null;
+    hasBeenLive: boolean;
+  }> {
+    try {
+      const result = await this.db.transaction(async (tx) => {
+        const [piece] = await tx
+          .select({
+            organizationId: content.organizationId,
+            creatorId: content.creatorId,
+            status: content.status,
+            publishedAt: content.publishedAt,
+          })
+          .from(content)
+          .where(
+            and(eq(content.id, contentId), scopedNotDeleted(content, creatorId))
+          )
+          .for('no key update');
+        if (!piece) throw new ContentNotFoundError(contentId);
+
+        const adding = await this.assertCategoriesInSpace(
+          tx as DatabaseTransaction,
+          categoryIds,
+          piece.organizationId,
+          piece.creatorId
+        );
+
+        const held = await this.liveCategoryIds(
+          tx as DatabaseTransaction,
+          contentId
+        );
+        const after = [
+          ...new Set([...held.map((row) => row.categoryId), ...adding]),
+        ];
+        if (after.length > CONTENT_MAX_CATEGORIES) {
+          throw new ValidationError(
+            `A piece can be in at most ${CONTENT_MAX_CATEGORIES} categories`,
+            {
+              max: CONTENT_MAX_CATEGORIES,
+              filedIn: held.length,
+            }
+          );
+        }
+
+        await tx
+          .insert(contentCategories)
+          .values(adding.map((categoryId) => ({ contentId, categoryId })))
+          .onConflictDoNothing();
+
+        return {
+          categoryIds: after,
+          organizationId: piece.organizationId,
+          hasBeenLive: hasBeenLive(piece),
+        };
+      });
+      // As `update` does for a categories save: an org's public topic list
+      // counts its live pieces per category, so a changed set refreshes it.
+      // A never-live or personal piece is on no such list.
+      if (result.hasBeenLive && result.organizationId) {
+        void this.cache?.invalidate(
+          CacheType.CATEGORIES(result.organizationId)
+        );
+      }
+      return result;
+    } catch (error) {
+      this.handleError(error, 'addCategories');
     }
   }
 
@@ -2662,30 +2879,20 @@ export class ContentService extends BaseService {
         whereConditions.push(eq(content.featured, params.featured));
       }
 
-      // Optional category (topic) filter — restrict to content tagged with the
-      // given category slug within the SAME space as the listing. A membership
-      // subquery (content_categories ⋈ categories) yields the matching content
-      // ids and we match via `IN`, so the relational `findMany` below (with its
-      // media/creator/org relations) stays intact — no join reshaping needed.
-      //
+      // Optional category (topic) filter: the studio list's semi-join
+      // (`filedIn`), so the relational `findMany` below keeps its relations.
       // The org's own topics only (the guard above refuses a category with no
-      // org). Soft-deleted categories are excluded.
+      // org).
       if (params.category && params.orgId) {
-        const categoryContentIds = this.db
-          .select({ contentId: contentCategories.contentId })
-          .from(contentCategories)
-          .innerJoin(
-            categories,
-            eq(contentCategories.categoryId, categories.id)
+        whereConditions.push(
+          inArray(
+            content.id,
+            this.filedIn({
+              category: params.category,
+              organizationId: params.orgId,
+            })
           )
-          .where(
-            and(
-              eq(categories.slug, params.category),
-              isNull(categories.deletedAt),
-              eq(categories.organizationId, params.orgId)
-            )
-          );
-        whereConditions.push(inArray(content.id, categoryContentIds));
+        );
       }
 
       // Optional search on title/description

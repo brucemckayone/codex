@@ -23,6 +23,7 @@
   import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
   import { FileIcon, SearchXIcon } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
+  import { getCategories } from '$lib/remote/categories.remote';
   import { getContentWhereCounts, listContent } from '$lib/remote/content.remote';
   import { listTiers } from '$lib/remote/subscription.remote';
   import * as m from '$paraglide/messages';
@@ -37,7 +38,7 @@
   import ContentListGrid from './ContentListGrid.svelte';
   import ContentListTable from './ContentListTable.svelte';
   import ContentListToolbar from './ContentListToolbar.svelte';
-  import { whereOptions } from './list-options';
+  import { categoryOptions, whereOptions } from './list-options';
   import {
     CONTENT_LIST_DEFAULTS,
     contentListArgs,
@@ -154,6 +155,22 @@
     organizationId === null ? whereOptions(whereCounts?.current, view.where, orgs) : undefined
   );
 
+  // The org studio's Category (Codex-a6ofh.3.3): the org's categories, read
+  // once (untracked, as the counts above) and decoration as they are. A
+  // failure leaves the menu Any alone; the list reads its rows on its own.
+  const categories = $derived.by(() => {
+    const org = organizationId;
+    return org === null ? null : untrack(() => getCategories(org));
+  });
+  $effect(() => {
+    if (categories?.error != null) {
+      logReadFailure('studio_content.list_categories_unread', categories.error, { studio });
+    }
+  });
+  const categoryMenu = $derived(
+    categories ? categoryOptions(categories.current, view.category) : undefined
+  );
+
   // ── What the body shows ───────────────────────────────────────────────
   // A filter or search the API refuses (a 4xx): Clear filters is the way out.
   const refusedView = $derived(list.refused && narrowed);
@@ -181,7 +198,14 @@
 
   function clearFilters() {
     searchInput.cancel();
-    setParams({ search: null, status: null, type: null, access: null, where: null });
+    setParams({
+      search: null,
+      status: null,
+      type: null,
+      access: null,
+      where: null,
+      category: null,
+    });
   }
 </script>
 
@@ -222,6 +246,7 @@
     }}
     onChange={setParams}
     whereOptions={whereMenu}
+    categoryOptions={categoryMenu}
   />
 
   <!-- Mounted unconditionally: it renders nothing until the read fails. -->
@@ -286,9 +311,19 @@
       {/if}
     {:else}
       {#if layout === 'grid'}
-        <ContentListGrid items={list.items} payouts={payouts.current} {tierName} />
+        <ContentListGrid
+          items={list.items}
+          payouts={payouts.current}
+          {tierName}
+          showCategories={studio === 'org'}
+        />
       {:else}
-        <ContentListTable items={list.items} payouts={payouts.current} {tierName} />
+        <ContentListTable
+          items={list.items}
+          payouts={payouts.current}
+          {tierName}
+          showCategories={studio === 'org'}
+        />
       {/if}
 
       <PagedListMore {list} />

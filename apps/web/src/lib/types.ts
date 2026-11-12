@@ -73,6 +73,12 @@ export interface ContentWithRelations
    * `@codex/content` sends them; current memberships only.
    */
   categoryIds?: string[];
+  /**
+   * The live categories it is filed in, in their order; `[]` for none. The
+   * studio list's rows send them (Codex-a6ofh.3.3); absent elsewhere, so
+   * treat ABSENT as "not sent", never as "in none".
+   */
+  categories?: { id: string; name: string }[];
 }
 
 /**

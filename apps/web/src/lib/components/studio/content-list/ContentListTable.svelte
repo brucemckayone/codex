@@ -2,8 +2,9 @@
   @component ContentListTable
 
   The content list as a table (Codex-a6ofh.3.1, mockup L1): what a piece
-  is, its status, who can open it and for how much, its views and sales,
-  and when it last changed. Under each title, the one line that says what it
+  is, its status, who can open it and for how much, its categories in the
+  org studio (Codex-a6ofh.3.3), its views and sales, and when it last
+  changed. Under each title, the one line that says what it
   needs: a draft's two steps, a schedule, a refusal, or media gone from a
   live piece (`rowLine`). The title is the row's way in: a draft opens at
   the step it is on, anything that has been live opens the live editor.
@@ -16,11 +17,13 @@
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
   import { formatRelativeTime } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
+  import ContentCategories from './ContentCategories.svelte';
   import ContentRowLine from './ContentRowLine.svelte';
   import ContentStatus from './ContentStatus.svelte';
   import ContentThumb from './ContentThumb.svelte';
   import {
     accessWords,
+    categoryWords,
     rowHref,
     rowLine,
     salesShown,
@@ -32,9 +35,11 @@
     items: ContentWithRelations[];
     payouts: PayoutsRead;
     tierName: TierName;
+    /** The org studio's Category column (mockup L1); the personal studio has none. */
+    showCategories: boolean;
   }
 
-  const { items, payouts, tierName }: Props = $props();
+  const { items, payouts, tierName, showCategories }: Props = $props();
 </script>
 
 {#snippet count(value: string | null)}
@@ -52,6 +57,9 @@
       <Table.Head class="col-content">{m.studio_content_list_col_content()}</Table.Head>
       <Table.Head>{m.studio_content_list_col_status()}</Table.Head>
       <Table.Head>{m.studio_content_form_access_label()}</Table.Head>
+      {#if showCategories}
+        <Table.Head>{m.studio_content_category_label()}</Table.Head>
+      {/if}
       <Table.Head class="col-num">{m.studio_content_list_col_views()}</Table.Head>
       <Table.Head class="col-num">{m.studio_content_list_col_sales()}</Table.Head>
       <Table.Head>{m.studio_content_list_col_updated()}</Table.Head>
@@ -81,6 +89,16 @@
             {#if access.detail}<span class="access-detail">{access.detail}</span>{/if}
           </span>
         </Table.Cell>
+        {#if showCategories}
+          {@const filed = categoryWords(row)}
+          <Table.Cell>
+            {#if filed}
+              <ContentCategories {filed} />
+            {:else}
+              {@render count(null)}
+            {/if}
+          </Table.Cell>
+        {/if}
         <Table.Cell class="col-num">{@render count(viewsShown(row))}</Table.Cell>
         <Table.Cell class="col-num">{@render count(salesShown(row))}</Table.Cell>
         <Table.Cell class="col-date">{formatRelativeTime(row.updatedAt)}</Table.Cell>

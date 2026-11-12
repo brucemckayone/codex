@@ -12,11 +12,13 @@
   import type { ContentWithRelations } from '$lib/types';
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
   import * as m from '$paraglide/messages';
+  import ContentCategories from './ContentCategories.svelte';
   import ContentRowLine from './ContentRowLine.svelte';
   import ContentStatus from './ContentStatus.svelte';
   import ContentThumb from './ContentThumb.svelte';
   import {
     accessWords,
+    categoryWords,
     rowHref,
     rowLine,
     salesShown,
@@ -28,9 +30,11 @@
     items: ContentWithRelations[];
     payouts: PayoutsRead;
     tierName: TierName;
+    /** The org studio's categories, as its table shows them (Codex-a6ofh.3.3). */
+    showCategories: boolean;
   }
 
-  const { items, payouts, tierName }: Props = $props();
+  const { items, payouts, tierName, showCategories }: Props = $props();
 
   /** Mockup L5: a selling piece shows its sales, anything else its views. */
   function countLine(row: ContentWithRelations): string | null {
@@ -45,6 +49,7 @@
   {#each items as row (row.id)}
     {@const line = rowLine(row, payouts)}
     {@const counted = countLine(row)}
+    {@const filed = showCategories ? categoryWords(row) : null}
     <li class="card" data-content-id={row.id}>
       <ContentThumb piece={row} variant="card" />
       <div class="card-body">
@@ -54,6 +59,9 @@
         <span class="card-facts">
           <ContentStatus piece={row} />
           <span class="card-fact">{accessWords(row, tierName).label}</span>
+          {#if filed}
+            <span class="card-fact"><ContentCategories {filed} /></span>
+          {/if}
           {#if counted}<span class="card-fact">{counted}</span>{/if}
         </span>
         {#if line}<ContentRowLine {line} />{/if}

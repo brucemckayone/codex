@@ -1,8 +1,9 @@
 /**
  * The content list's view, read from and written to the URL
  * (Codex-a6ofh.3.1; content-list.html L1 and L5:
- * `?status=&type=&access=&sort=&view=&search=`, and the personal studio's
- * `?where=`, L4b, Codex-a6ofh.3.2).
+ * `?status=&type=&access=&sort=&view=&search=`, the personal studio's
+ * `?where=`, L4b, Codex-a6ofh.3.2, and the org studio's `?category=`,
+ * Codex-a6ofh.3.3).
  *
  * As the media library's (`library-url.ts`): every param has a default that
  * leaves the URL bare (a value equal to its default is dropped), and a value
@@ -55,6 +56,8 @@ export type ListView = (typeof LIST_VIEWS)[number];
 export const WHERE_PERSONAL = 'personal';
 /** "Where" lists everything, every org's pieces too: "Everywhere". */
 export const WHERE_ALL = 'all';
+/** "Category" lists every category's pieces, and those in none: "Any". */
+export const CATEGORY_ANY = 'any';
 
 export interface ContentListState {
   /** The search box as typed; what reaches the API is gated. */
@@ -70,6 +73,12 @@ export interface ContentListState {
    * Where (its list is its org) and ignores it.
    */
   where: string;
+  /**
+   * The org studio's Category (Codex-a6ofh.3.3, mockup L1 pin 4):
+   * `CATEGORY_ANY`, or one category's id. The personal studio has no
+   * Category (owner, 2026-11-12) and ignores it.
+   */
+  category: string;
 }
 
 /** Each param's bare-URL value, for `createListUrlWriter`'s `defaults`. */
@@ -80,6 +89,7 @@ export const CONTENT_LIST_DEFAULTS = {
   sort: 'updated',
   view: 'list',
   where: WHERE_PERSONAL,
+  category: CATEGORY_ANY,
 } as const satisfies Omit<ContentListState, 'search'>;
 
 const SORT_ARGS: Record<
@@ -108,6 +118,8 @@ export function readContentListState(url: URL): ContentListState {
     sort: pickParam(LIST_SORTS, params.get('sort'), CONTENT_LIST_DEFAULTS.sort),
     view: pickParam(LIST_VIEWS, params.get('view'), CONTENT_LIST_DEFAULTS.view),
     where: readWhere(params.get('where')),
+    category:
+      pickIdParam(params.get('category')) ?? CONTENT_LIST_DEFAULTS.category,
   };
 }
 
@@ -155,6 +167,10 @@ export function contentListArgs(
     page,
     limit: CONTENT_LIST_PAGE_SIZE,
     ...whereArgs(state.where, organizationId),
+    // The org studio's rows name their categories; its Category narrows.
+    ...(organizationId && { include: 'categories' as const }),
+    ...(organizationId &&
+      state.category !== CATEGORY_ANY && { categoryId: state.category }),
     ...(state.status !== 'all' && { status: state.status }),
     ...(state.type !== 'all' && { contentType: state.type }),
     ...(state.access !== 'any' && { accessType: state.access }),
@@ -166,7 +182,8 @@ export function contentListArgs(
 /**
  * True when the list shows part of the content ("No matches" rather than
  * "Make your first piece"): a facet (never the sort or the view), a (gated)
- * search that reached the API, or the personal studio's Where on one org.
+ * search that reached the API, the personal studio's Where on one org, or
+ * the org studio's Category.
  * Personal, its default, is the studio's own whole list, not a narrowing:
  * empty, it says "Make your first piece", which a piece made here fixes.
  */
@@ -180,6 +197,7 @@ export function isContentListNarrowed(
     state.type !== CONTENT_LIST_DEFAULTS.type ||
     state.access !== CONTENT_LIST_DEFAULTS.access ||
     (organizationId === null && isOrgWhere(state.where)) ||
+    (organizationId !== null && state.category !== CATEGORY_ANY) ||
     search !== null
   );
 }

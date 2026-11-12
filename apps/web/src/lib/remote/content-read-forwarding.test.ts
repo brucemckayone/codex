@@ -135,6 +135,9 @@ const remote = (await import('./content.remote')) as unknown as {
 const media = (await import('./media.remote')) as unknown as {
   listMedia: (args: Record<string, unknown>) => Promise<unknown>;
 };
+const categoriesRemote = (await import('./categories.remote')) as unknown as {
+  getCategories: (organizationId: string) => Promise<unknown>;
+};
 
 const CONTENT_ID = '55555555-5555-4555-8555-555555555555';
 const NOT_YOURS = 'Content not found';
@@ -328,6 +331,55 @@ describe.each([
     const err = await rejection(list());
     expect(err).not.toHaveProperty('body');
     // handleError logs it; a line here would log it twice.
+    expect(lines()).toEqual([]);
+  });
+});
+
+/**
+ * An org's categories forward and log as the lists do (Codex-a6ofh.3.3):
+ * the content list's Category facet joined the management page and the
+ * editor on this read, which let the worker's ApiError escape, so a
+ * sign-out reached kit as a 500 and was logged as an error.
+ */
+describe('getCategories', () => {
+  const ORG = '3c111111-1111-4111-8111-111111111999';
+  const REFUSED = 'categories.list_refused';
+  const UNAVAILABLE = 'categories.list_unavailable';
+
+  const lines = () =>
+    (['error', 'warn'] as const).flatMap((level) =>
+      vi
+        .mocked(logger[level])
+        .mock.calls.filter(
+          ([event]) => event === REFUSED || event === UNAVAILABLE
+        )
+        .map(([event, fields]) => [level, event, fields] as const)
+    );
+
+  it('a 403 keeps its status', async () => {
+    workerAnswers(403, 'Forbidden');
+    const err = await rejection(categoriesRemote.getCategories(ORG));
+    expect(err).toMatchObject({ status: 403, body: { message: 'Forbidden' } });
+  });
+
+  it.each([
+    [400, 'Invalid request data', 'error', REFUSED],
+    [401, 'Authentication required', 'warn', REFUSED],
+    // The route asks a creator or admin; an org studio member need not be.
+    [403, 'Forbidden', 'warn', REFUSED],
+    [429, 'Too many requests', 'warn', REFUSED],
+    [408, 'Request to content timed out', 'error', UNAVAILABLE],
+  ] as const)('a forwarded %i writes one server line, at %s, as %s', async (status, message, level, event) => {
+    workerAnswers(status, message);
+    await rejection(categoriesRemote.getCategories(ORG));
+    expect(lines().map(([at, name]) => [at, name])).toEqual([[level, event]]);
+    expect(lines()[0]?.[2]).toMatchObject({ status, organizationId: ORG });
+  });
+
+  it('a 5xx is not forwarded: it stays an unexpected error for handleError', async () => {
+    workerAnswers(500, 'connection to Neon failed');
+    const err = await rejection(categoriesRemote.getCategories(ORG));
+    expect(err).not.toHaveProperty('body');
     expect(lines()).toEqual([]);
   });
 });

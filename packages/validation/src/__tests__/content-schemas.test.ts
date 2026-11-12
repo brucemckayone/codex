@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addContentCategoriesSchema,
   contentBrowseQuerySchema,
   contentQuerySchema,
   contentStatusEnum,
@@ -886,6 +887,24 @@ describe('Query Schemas', () => {
       expect(result.error?.issues[0]?.path).toEqual(['scope']);
     });
 
+    // The org studio's Category facet (Codex-a6ofh.3.3).
+    it('takes one categoryId, a uuid, and refuses a slug in it', () => {
+      const id = '7c000000-0000-4000-8000-000000000001';
+      expect(contentQuerySchema.parse({ categoryId: id }).categoryId).toBe(id);
+      expect(
+        contentQuerySchema.safeParse({ categoryId: 'tutorials' }).success
+      ).toBe(false);
+    });
+
+    it('takes include=categories (the rows named) and nothing else there', () => {
+      expect(contentQuerySchema.parse({ include: 'categories' }).include).toBe(
+        'categories'
+      );
+      expect(contentQuerySchema.safeParse({ include: 'body' }).success).toBe(
+        false
+      );
+    });
+
     it('browse refuses any scope: it means nothing across creators', () => {
       const result = contentBrowseQuerySchema.safeParse({
         scope: 'personal',
@@ -1492,5 +1511,32 @@ describe('Codex-osuqt: the remote query refuses what the API refuses', () => {
     expect(
       publicContentArgsSchema.parse({ orgId: orgId.toUpperCase() }).orgId
     ).toBe(orgId);
+  });
+});
+
+/** `POST /api/content/:id/categories` (Codex-a6ofh.3.3): add, never replace. */
+describe('addContentCategoriesSchema', () => {
+  const ids = (n: number) =>
+    Array.from(
+      { length: n },
+      (_, i) => `7c000000-0000-4000-8000-${String(i).padStart(12, '0')}`
+    );
+
+  it('takes one to 20 category ids', () => {
+    expect(
+      addContentCategoriesSchema.safeParse({ categoryIds: ids(1) }).success
+    ).toBe(true);
+    expect(
+      addContentCategoriesSchema.safeParse({ categoryIds: ids(20) }).success
+    ).toBe(true);
+  });
+
+  it('refuses none, more than 20, and an id that is no uuid', () => {
+    for (const categoryIds of [[], ids(21), ['tutorials']]) {
+      expect(
+        addContentCategoriesSchema.safeParse({ categoryIds }).success
+      ).toBe(false);
+    }
+    expect(addContentCategoriesSchema.safeParse({}).success).toBe(false);
   });
 });

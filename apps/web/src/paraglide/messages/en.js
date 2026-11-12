@@ -12335,6 +12335,38 @@ export const studio_content_where_personal = () => `Personal`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_category_label = () => `Category`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_category_any = () => `Any`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_category_this = () => `This category`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_categories_more = (params) => `${params.name} +${params.count}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_filter_draft = () => `Drafts`
 
 
