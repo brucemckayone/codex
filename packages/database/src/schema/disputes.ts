@@ -1,3 +1,4 @@
+import type { DisputeAppealStatus } from '@codex/constants';
 import { relations, sql } from 'drizzle-orm';
 import {
   check,
@@ -35,6 +36,11 @@ import { subscriptions } from './subscriptions';
  * §3): Stripe can turn a lost dispute into a won one, and the row then moves
  * lost → won once. `late_won_at` marks it, and the loss's applied time is
  * kept in `lost_applied_at` when the undo clears `outcome_applied_at`.
+ *
+ * **An appeal** of a lost chargeback (API 2026-10-28.endive) is recorded,
+ * and acted on, as `lost`, and kept in `appeal_status`, never in `status`:
+ * the sale stays held and the loss is applied as before (Codex-wzaoh; owner
+ * D34).
  */
 export const disputes = pgTable(
   'disputes',
@@ -112,6 +118,19 @@ export const disputes = pgTable(
     refundedOutsideStripeAt: timestamp('refunded_outside_stripe_at', {
       withTimezone: true,
     }),
+    /**
+     * The appeal of a lost chargeback, while it runs (owner D34):
+     * `appeal_needs_response`, then `appeal_under_review`. Set only on a
+     * `lost` row, in code: no CHECK holds it, since a CHECK binds an older
+     * worker after a rollback too, and its late win doesn't clear the mark.
+     * It follows Stripe's appeal; the bank's decision (a late win, or a
+     * `lost` read live from Stripe) clears it, and the hourly reconcile
+     * clears one left stale. Support shows "Appeal…" only under Lost, while
+     * the appeal runs. Null for every other dispute.
+     */
+    appealStatus: varchar('appeal_status', {
+      length: 32,
+    }).$type<DisputeAppealStatus>(),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -159,6 +178,11 @@ export const disputes = pgTable(
     check(
       'check_disputes_buyer_told',
       sql`${table.buyerToldAt} IS NULL OR ${table.lateWonAt} IS NOT NULL`
+    ),
+    // DISPUTE_APPEAL_STATUSES (@codex/constants), written out.
+    check(
+      'check_disputes_appeal_status',
+      sql`${table.appealStatus} IS NULL OR ${table.appealStatus} IN ('appeal_needs_response', 'appeal_under_review')`
     ),
   ]
 );

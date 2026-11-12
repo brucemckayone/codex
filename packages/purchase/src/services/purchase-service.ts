@@ -24,12 +24,15 @@
 import { isEnvName } from '@codex/agreements';
 import {
   ACCESS_TYPES,
+  appealMarkOn,
   CHECKOUT_SESSION_KIND,
   CONTENT_STATUS,
   CURRENCY,
   canBeSold,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
+  type DisputeAppealStatus,
+  disputeAppealOf,
   isForeignStripeEnvironment,
   PRICE_LIMITS,
   PURCHASE_STATUS,
@@ -936,7 +939,11 @@ export class PurchaseService extends BaseService {
             this.stripe.checkout.sessions.create(
               {
                 mode: 'payment',
-                payment_method_types: ['card'],
+                // Card-only (owner D32): ecom-api grants only a `paid`
+                // session, so a delayed method would take the money and
+                // grant nothing. API 2026-09-30.endive removed
+                // `payment_method_types`; this keeps the restriction.
+                allowed_payment_method_types: ['card'],
                 customer: resolvedCustomerId,
                 line_items: [
                   {
@@ -1697,7 +1704,11 @@ export class PurchaseService extends BaseService {
             this.stripe.checkout.sessions.create(
               {
                 mode: 'payment',
-                payment_method_types: ['card'],
+                // Card-only (owner D32): ecom-api grants only a `paid`
+                // session, so a delayed method would take the money and
+                // grant nothing. API 2026-09-30.endive removed
+                // `payment_method_types`; this keeps the restriction.
+                allowed_payment_method_types: ['card'],
                 customer: resolvedCustomerId,
                 line_items: [
                   {
@@ -3530,6 +3541,17 @@ export class PurchaseService extends BaseService {
    * after the late win's `won` is the harmless case). Every other move out of
    * a final status is refused silently.
    *
+   * An appeal of a lost chargeback (owner D34) is not a status. Stripe's
+   * `appeal_*` is reachable only from `lost`, and the money is lost either
+   * way, so it is recorded as `lost`, and the lost row is marked with the
+   * appeal (`followDisputeAppeal`): the loss is applied as any loss is. The
+   * bank's decision clears the mark: a late win in its own statement, or a
+   * `lost` with no appeal. But such a `lost` may be an event older than the
+   * appeal, so unless the caller read it `live` from Stripe, the row comes
+   * back unchanged with `appealCheck: true`, for the caller to read the live
+   * dispute and record that instead. An appeal not read live comes back the
+   * same way: it may be older than the decision.
+   *
    * Returns the row as it now stands, which is what the caller acts on, not
    * the event's snapshot: callers never compare statuses. A status Stripe
    * adds later is logged and not written.
@@ -3543,9 +3565,15 @@ export class PurchaseService extends BaseService {
     status: string;
     reason: string | null;
     stripeCreatedAt: Date;
-  }): Promise<(Dispute & { refusedLost?: true }) | undefined> {
+    /** The status was read from Stripe just now, not taken from an event. */
+    live?: boolean;
+  }): Promise<
+    (Dispute & { refusedLost?: true; appealCheck?: true }) | undefined
+  > {
     try {
-      const { status } = dispute;
+      const { live = false } = dispute;
+      const appeal = disputeAppealOf(dispute.status);
+      const status = appeal ? 'lost' : dispute.status;
       if (!DISPUTE_STATUS_RANK.has(status)) {
         this.obs.warn('Dispute has a status the disputes table does not know', {
           disputeId: dispute.stripeDisputeId,
@@ -3589,20 +3617,126 @@ export class PurchaseService extends BaseService {
         .from(disputes)
         .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
         .limit(1);
-      if (current && status === 'lost' && current.status === 'won') {
+      if (!current) return current;
+      if (status === 'lost' && current.status === 'won') {
         return { ...current, refusedLost: true };
       }
-      return current;
+      return await this.followDisputeAppeal(current, { status, appeal, live });
     } catch (error) {
       this.handleError(error, 'recordDispute');
     }
   }
 
   /**
+   * The appeal's mark, as Stripe's status has it (owner D34). On a lost row
+   * it follows Stripe's appeal, and is cleared once the bank decides. A mark
+   * on any other row is stale, left by a late win that didn't clear it (an
+   * older worker's, after a rollback, or release step R18 (a)'s by hand): it
+   * is cleared. A mark only ever lives on a lost row in code; the database
+   * doesn't hold it, so an older worker still records its late wins.
+   *
+   * An appeal is marked only from Stripe's live status. One from an event may
+   * be older than the bank's decision, so it comes back unchanged with
+   * `appealCheck: true`, as a stale `lost` does. The webhook already reads an
+   * appeal event live before recording it; this keeps the rule here too.
+   */
+  private async followDisputeAppeal(
+    current: Dispute,
+    recorded: {
+      status: string;
+      appeal: DisputeAppealStatus | null;
+      live: boolean;
+    }
+  ): Promise<Dispute & { appealCheck?: true }> {
+    if (recorded.appeal) {
+      if (!recorded.live) return { ...current, appealCheck: true };
+      return await this.markDisputeAppeal(current, recorded.appeal);
+    }
+    if (current.appealStatus === null) return current;
+    // A mark this row can't carry (it isn't lost) is stale.
+    if (appealMarkOn(current.status, current.appealStatus) === null)
+      return await this.clearDisputeAppeal(current);
+    // An older status for a lost row: the upsert refused it.
+    if (recorded.status !== 'lost') return current;
+    // A `lost` with no appeal, on a row whose appeal ran: the bank's
+    // decision, or an event older than the appeal. Only Stripe's live status
+    // tells them apart.
+    if (!recorded.live) return { ...current, appealCheck: true };
+    return await this.clearDisputeAppeal(current);
+  }
+
+  /**
+   * Mark a lost chargeback's appeal as Stripe has it (owner D34). It follows
+   * Stripe back as well as forward: Stripe can ask for more evidence, which
+   * moves `appeal_under_review` back to `appeal_needs_response`. Only a
+   * live read reaches here (`followDisputeAppeal`), so the only stale write
+   * left is a race, which the hourly reconcile repairs. The same stage again
+   * writes nothing, and a row that isn't lost is never marked. A write is
+   * logged at info, so a repair leaves a trace.
+   */
+  private async markDisputeAppeal(
+    row: Dispute,
+    appeal: DisputeAppealStatus
+  ): Promise<Dispute> {
+    const [marked] = await this.db
+      .update(disputes)
+      .set({ appealStatus: appeal, updatedAt: new Date() })
+      .where(
+        and(
+          eq(disputes.stripeDisputeId, row.stripeDisputeId),
+          eq(disputes.status, 'lost'),
+          sql`${disputes.appealStatus} IS DISTINCT FROM ${appeal}`
+        )
+      )
+      .returning();
+    if (marked) {
+      this.obs.info('A lost dispute was marked with its appeal', {
+        disputeId: row.stripeDisputeId,
+        appeal,
+        was: row.appealStatus,
+      });
+    } else if (row.status !== 'lost') {
+      this.obs.warn(
+        'Stripe reports an appeal of a dispute recorded as neither lost nor won: not marked',
+        { disputeId: row.stripeDisputeId, status: row.status, appeal }
+      );
+    }
+    return marked ?? row;
+  }
+
+  /**
+   * Clear an appeal's mark: the bank decided, or the mark is stale (owner
+   * D34). Only while the row is still marked, so a late win or another
+   * clear in between is left alone, `updated_at` included. Whatever status
+   * the row has moved to, a mark still on it is cleared: off `lost`, a mark
+   * is never right. A write is logged at info, so a repair leaves a trace.
+   */
+  private async clearDisputeAppeal(marked: Dispute): Promise<Dispute> {
+    const [cleared] = await this.db
+      .update(disputes)
+      .set({ appealStatus: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(disputes.stripeDisputeId, marked.stripeDisputeId),
+          isNotNull(disputes.appealStatus)
+        )
+      )
+      .returning();
+    if (cleared) {
+      this.obs.info("A dispute's appeal mark was cleared", {
+        disputeId: marked.stripeDisputeId,
+        was: marked.appealStatus,
+      });
+    }
+    return cleared ?? marked;
+  }
+
+  /**
    * A late win: a lost row becomes won (late-win data design §3.3). The
    * loss's applied time moves to `lost_applied_at` (null when the loss never
    * finished) and `outcome_applied_at` is cleared, so the undo runs as an
-   * unapplied win and the reconcile retries it hourly until it is marked.
+   * unapplied win and the reconcile retries it hourly until it is marked. An
+   * appeal's mark is cleared with it: the bank has decided (owner D34).
    * Every SET reads the row as it was, in one statement. `$now` is bound, and
    * `updated_at` takes it too: the reconcile's grace reads it (premise 31).
    * Undefined when the row is not lost: a second delivery.
@@ -3618,6 +3752,7 @@ export class PurchaseService extends BaseService {
         lateWonAt: now,
         lostAppliedAt: sql`${disputes.outcomeAppliedAt}`,
         outcomeAppliedAt: null,
+        appealStatus: null,
         updatedAt: now,
       })
       .where(
@@ -4734,7 +4869,9 @@ export class PurchaseService extends BaseService {
   /**
    * The recorded state of these disputes, for the reconcile to compare with
    * Stripe's (Codex-2hxff.58). A dispute with no row is simply absent.
-   * `lateWonAt` marks a late win (Codex-2hxff.70).
+   * `lateWonAt` marks a late win (Codex-2hxff.70), and `appealStatus` an
+   * appeal's mark, which the reconcile repairs when Stripe disagrees (owner
+   * D34).
    */
   async findDisputeRecords(
     stripeDisputeIds: string[]
@@ -4742,7 +4879,11 @@ export class PurchaseService extends BaseService {
     Array<
       Pick<
         Dispute,
-        'stripeDisputeId' | 'status' | 'outcomeAppliedAt' | 'lateWonAt'
+        | 'stripeDisputeId'
+        | 'status'
+        | 'outcomeAppliedAt'
+        | 'lateWonAt'
+        | 'appealStatus'
       >
     >
   > {
@@ -4754,11 +4895,60 @@ export class PurchaseService extends BaseService {
           status: disputes.status,
           outcomeAppliedAt: disputes.outcomeAppliedAt,
           lateWonAt: disputes.lateWonAt,
+          appealStatus: disputes.appealStatus,
         })
         .from(disputes)
         .where(inArray(disputes.stripeDisputeId, stripeDisputeIds));
     } catch (error) {
       this.handleError(error, 'findDisputeRecords');
+    }
+  }
+
+  /**
+   * Clear every appeal mark on an applied dispute that isn't lost (owner
+   * D34). Only a loss is appealed, so such a mark is always stale: an older
+   * worker's late win after a rollback leaves one, as does release step R18
+   * (a)'s hand
+   * UPDATE run after the deploy. It needs no Stripe read and moves no money,
+   * so the hourly reconcile runs it first on every run, the 08:00 one
+   * included, whatever the dispute's age.
+   *
+   * Only on an applied row. A row still being settled (an older worker's
+   * late win whose undo hasn't finished) is the reconcile's retry of
+   * unsettled rows to settle, and its live record clears the mark. If that
+   * record is refused (Stripe has it lost now) or never runs, the mark waits
+   * until the row is applied, and this step clears it then. Leaving it alone
+   * here keeps `updated_at` still, so that retry's grace never skips it.
+   *
+   * A platform reconcile, like `findDisputeRecords`, so it has no creator
+   * scope: the disputes ledger is the platform's, keyed by Stripe's dispute
+   * ids, not owned by a creator. Returns the disputes cleared.
+   */
+  async clearStaleDisputeAppealMarks(): Promise<string[]> {
+    try {
+      const cleared = await this.db
+        .update(disputes)
+        .set({ appealStatus: null, updatedAt: new Date() })
+        .where(
+          and(
+            ne(disputes.status, 'lost'),
+            isNotNull(disputes.appealStatus),
+            isNotNull(disputes.outcomeAppliedAt)
+          )
+        )
+        // The whole row: `.returning({ id })` does not type-check on the
+        // `Database | DatabaseWs` union (TS2554), only on a transaction.
+        .returning();
+      const disputeIds = cleared.map((row) => row.stripeDisputeId);
+      if (disputeIds.length > 0) {
+        this.obs.info(
+          'Stale appeal marks were cleared from disputes that are not lost',
+          { count: disputeIds.length, disputeIds }
+        );
+      }
+      return disputeIds;
+    } catch (error) {
+      this.handleError(error, 'clearStaleDisputeAppealMarks');
     }
   }
 

@@ -26,6 +26,7 @@ import {
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
   DISPUTE_INQUIRY_STATUSES,
+  type DisputeAppealStatus,
 } from '@codex/constants';
 import { formatShareBps } from '$lib/components/studio/ownership/ownership-view';
 import { formatPrice } from '$lib/utils/format';
@@ -354,6 +355,20 @@ export function disputeStatus(status: string): BadgeTreatment {
         label: m.support_dispute_other({ status: humanise(status) }),
         variant: 'neutral',
       };
+  }
+}
+
+/**
+ * A lost chargeback's appeal while it runs (owner D34), under its Lost
+ * badge: the platform answers it in Stripe, so the needs-response label
+ * says where.
+ */
+export function disputeAppeal(appeal: DisputeAppealStatus): string {
+  switch (appeal) {
+    case 'appeal_needs_response':
+      return m.support_chargeback_appeal_needs_response();
+    case 'appeal_under_review':
+      return m.support_chargeback_appeal_under_review();
   }
 }
 

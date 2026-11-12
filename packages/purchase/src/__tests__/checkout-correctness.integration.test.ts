@@ -213,6 +213,48 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
         new RegExp(`^checkout_${row?.id}_cus_test_`)
       );
     });
+
+    // Owner D32 (Codex-wzaoh): one-off Checkout stays card-only. ecom-api's
+    // checkout.session.completed grants only a `paid` session, so a delayed
+    // method (a bank debit) would take the buyer's money and grant nothing.
+    // API 2026-09-30.endive refuses `payment_method_types` with a 400;
+    // `allowed_payment_method_types` is what keeps the restriction.
+    it.each([
+      [
+        'content',
+        async (service: PurchaseService, customerId: string) => {
+          const item = await insertContent();
+          await service.createCheckoutSession(
+            { contentId: item.id, ...URLS },
+            customerId
+          );
+        },
+      ],
+      [
+        'a course',
+        async (service: PurchaseService, customerId: string) => {
+          const course = await insertCourse();
+          await service.createCourseCheckoutSession(
+            { courseId: course.id, ...URLS },
+            customerId
+          );
+        },
+      ],
+    ])('a checkout for %s accepts cards only, through the endive parameter', async (_label, checkout) => {
+      const { service, stripe } = fresh();
+      const customerId = await buyer();
+
+      await checkout(service, customerId);
+
+      expect(stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
+      const [params] = callOf<Stripe.Checkout.SessionCreateParams>(
+        stripe.checkout.sessions.create,
+        0
+      );
+      expect(params?.allowed_payment_method_types).toStrictEqual(['card']);
+      // The removed parameter is not sent.
+      expect(params).not.toHaveProperty('payment_method_types');
+    });
   });
 
   describe('one open checkout per buyer and item', () => {

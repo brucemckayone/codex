@@ -29,7 +29,7 @@
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",
     "hono": "^4.6.20",
-    "stripe": "^19.2.0",
+    "stripe": "^23.1.0",
     "vite-plugin-dts": "^4.5.4"
   },
   "devDependencies": {

@@ -866,6 +866,7 @@ describe('a blocked charge', () => {
             respondBy: null,
             lostOn: null,
             lateWonOn: null,
+            appealStatus: null,
             settling: false,
           },
         ],
