@@ -12,6 +12,10 @@
  * runs the page's Save, and the canvas is inert.
  */
 
+import {
+  TOKEN_OVERRIDE_MAX_ENTRIES,
+  updateBrandingSchema,
+} from '@codex/validation';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   flushSync,
@@ -63,6 +67,8 @@ import {
   updateBrandingCommand,
 } from '$lib/components/brand-studio/__fixtures__/branding-remote.mock.svelte';
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
+import { toast } from '$lib/components/ui/Toast/toast-store';
+import { logger } from '$lib/observability';
 import BrandPage from '../+page.svelte';
 
 const KEY = 'codex:brand-editor';
@@ -187,5 +193,146 @@ describe('leaving with unsaved changes', () => {
     expect(cancel).toHaveBeenCalled();
     expect(brandEditor.pending?.primaryColor).toBe('#111111');
     expect(sessionStorage.getItem(KEY)).not.toBeNull();
+  });
+});
+
+describe('a stored override the save would refuse (Codex-403d3)', () => {
+  /** The page, with a brand whose stored overrides are as given. */
+  function mountStored(
+    tokenOverrides: Record<string, unknown>,
+    darkTokenOverrides: Record<string, unknown>
+  ) {
+    component = mount(BrandPage, {
+      target: document.body,
+      props: { data: { org: ORG } } as never,
+    });
+    flushSync();
+    brandingRemote().land({
+      ...BRANDING,
+      tokenOverrides: JSON.stringify(tokenOverrides),
+      darkTokenOverrides: JSON.stringify(darkTokenOverrides),
+    });
+    flushSync();
+  }
+
+  const clickSave = async () => {
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="stub-save"]')
+      ?.click();
+    await settle();
+  };
+
+  test('is dropped on load, so Save sends a map the schema accepts', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    updateBrandingCommand.mockResolvedValue({});
+    mountStored(
+      {
+        'heading-color': '#112233',
+        'x; position: fixed': 'red',
+        'shadow-color': 'red; scale: 3',
+        // Older JSON may hold a number, which has always rendered.
+        'text-scale': 1.2,
+      },
+      { 'heading-color': 'url(https://evil.example/x.png)' }
+    );
+
+    expect(brandEditor.saved?.tokenOverrides).toEqual({
+      'heading-color': '#112233',
+      'text-scale': '1.2',
+    });
+    expect(brandEditor.saved?.darkTokenOverrides).toBeNull();
+    expect(brandEditor.isDirty).toBe(false);
+    const drops = warn.mock.calls.filter(([message]) =>
+      String(message).includes('the save would refuse')
+    );
+    // The org and the well-formed keys, so a support read can find them;
+    // never a value, and never a key that is itself crafted.
+    expect(drops.map(([, context]) => context)).toEqual([
+      {
+        organizationId: ORG.id,
+        field: 'tokenOverrides',
+        dropped: 2,
+        keys: ['shadow-color'],
+      },
+      {
+        organizationId: ORG.id,
+        field: 'darkTokenOverrides',
+        dropped: 1,
+        keys: ['heading-color'],
+      },
+    ]);
+
+    brandEditor.updateField('primaryColor', '#111111');
+    flushSync();
+    await clickSave();
+
+    expect(updateBrandingCommand).toHaveBeenCalledTimes(1);
+    const sent = updateBrandingCommand.mock.calls[0]?.[0];
+    expect(sent?.tokenOverrides).toBe(
+      JSON.stringify({ 'heading-color': '#112233', 'text-scale': '1.2' })
+    );
+    expect(sent?.darkTokenOverrides).toBe('');
+    // The brand stays saveable: what the page sends, the worker accepts.
+    expect(
+      updateBrandingSchema.safeParse({
+        tokenOverrides: sent?.tokenOverrides,
+        darkTokenOverrides: sent?.darkTokenOverrides,
+      }).success
+    ).toBe(true);
+  });
+
+  test('keeps the first entries up to the limit on load, so the brand still saves', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    updateBrandingCommand.mockResolvedValue({});
+    const stored = Object.fromEntries(
+      Array.from({ length: TOKEN_OVERRIDE_MAX_ENTRIES + 1 }, (_, i) => [
+        `key-${i}`,
+        'red',
+      ])
+    );
+    mountStored(stored, {});
+
+    const kept = brandEditor.saved?.tokenOverrides ?? {};
+    expect(Object.keys(kept)).toHaveLength(TOKEN_OVERRIDE_MAX_ENTRIES);
+    expect(kept).not.toHaveProperty(`key-${TOKEN_OVERRIDE_MAX_ENTRIES}`);
+    const drops = warn.mock.calls.filter(([message]) =>
+      String(message).includes('the save would refuse')
+    );
+    expect(drops.map(([, context]) => context)).toEqual([
+      {
+        organizationId: ORG.id,
+        field: 'tokenOverrides',
+        dropped: 1,
+        keys: [`key-${TOKEN_OVERRIDE_MAX_ENTRIES}`],
+      },
+    ]);
+
+    brandEditor.updateField('primaryColor', '#111111');
+    flushSync();
+    await clickSave();
+    const sent = updateBrandingCommand.mock.calls[0]?.[0];
+    expect(
+      updateBrandingSchema.safeParse({ tokenOverrides: sent?.tokenOverrides })
+        .success
+    ).toBe(true);
+  });
+
+  test('a refused save shows the forwarded message, not a generic failure', async () => {
+    const error = vi.spyOn(toast, 'error');
+    // What the command throws for a forwarded 4xx: kit's HttpError, which is
+    // not an Error, so `err.message` never reached the toast before. The
+    // worker's message is generic; its `details` name the key for an API
+    // client, and the studio never sends a refused entry (its load drops
+    // them), so the toast shows the message alone.
+    updateBrandingCommand.mockRejectedValue({
+      status: 400,
+      body: { message: 'Invalid request data' },
+    });
+    mountStored({ 'heading-color': '#112233' }, {});
+    brandEditor.updateField('primaryColor', '#111111');
+    flushSync();
+    await clickSave();
+
+    expect(error).toHaveBeenCalledWith('Invalid request data');
   });
 });

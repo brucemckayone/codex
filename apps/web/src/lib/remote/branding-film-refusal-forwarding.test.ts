@@ -2,7 +2,7 @@
 
 /**
  * A refused intro-film pick reaches the studio in the worker's words
- * (Codex-376dl review).
+ * (Codex-376dl review), and so does a refused brand save (Codex-403d3).
  *
  * The worker refuses an unfinished video with a 422 and a sentence for the
  * creator ("This video is still processing. Pick it once it is ready.").
@@ -60,6 +60,10 @@ const remote = (await import('./branding.remote')) as unknown as {
     mediaItemId: string;
   }) => Promise<unknown>;
   unlinkIntroVideo: (orgId: string) => Promise<unknown>;
+  updateBrandingCommand: (input: {
+    orgId: string;
+    tokenOverrides?: string;
+  }) => Promise<unknown>;
 };
 
 const ORG_ID = '33333333-3333-4333-8333-333333333333';
@@ -131,5 +135,24 @@ describe('the intro film commands', () => {
     await remote.linkIntroVideo({ orgId: ORG_ID, mediaItemId: MEDIA_ID });
     await remote.unlinkIntroVideo(ORG_ID);
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the brand save command (Codex-403d3)', () => {
+  it("a refused save keeps the worker's words, not an unexpected 500", async () => {
+    // The worker refuses an override that would leave its declaration with a
+    // 400. Before, the ApiError escaped and the studio said "Failed to save".
+    workerAnswers(400, 'Invalid request data');
+    const err = await rejection(
+      remote.updateBrandingCommand({
+        orgId: ORG_ID,
+        tokenOverrides: '{"heading-color":"red; scale: 3"}',
+      })
+    );
+    expect(err).toMatchObject({
+      status: 400,
+      body: { message: 'Invalid request data' },
+    });
+    expect(queryErrorMessage(err, 'fallback')).toBe('Invalid request data');
   });
 });

@@ -11,6 +11,11 @@
 import { describe, expect, it } from 'vitest';
 import { hexColorSchema, timezoneSchema } from '../primitives';
 import {
+  staysInOneDeclaration,
+  TOKEN_OVERRIDE_MAX_ENTRIES,
+  TOKEN_OVERRIDE_VALUE_MAX,
+} from '../schemas/brand-tokens';
+import {
   ALLOWED_LOGO_MIME_TYPES,
   allSettingsSchema,
   brandingSettingsSchema,
@@ -179,6 +184,192 @@ describe('updateBrandingSchema', () => {
     expect(() =>
       updateBrandingSchema.parse({ primaryColorHex: 'invalid' })
     ).toThrow('Color must be hex format (#RRGGBB)');
+  });
+});
+
+describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
+  type Field = 'tokenOverrides' | 'darkTokenOverrides';
+
+  /** Each issue's path, or [] when the value is accepted. */
+  function problems(field: Field, value: unknown) {
+    const result = updateBrandingSchema.safeParse({ [field]: value });
+    return result.success ? [] : result.error.issues.map((issue) => issue.path);
+  }
+
+  /** What the brand editor writes: its own keys and value shapes. */
+  const EDITOR_MAP = {
+    'heading-color': '#1A2B3C',
+    'shader-preset': 'haze',
+    'shader-intensity': '0.60',
+    'font-body': 'Playfair Display',
+    'hero-hide-title': 'true',
+    'hero-title-blend': 'normal',
+    'text-scale': null,
+  };
+
+  it.each<Field>([
+    'tokenOverrides',
+    'darkTokenOverrides',
+  ])('accepts what the brand editor saves (%s)', (field) => {
+    expect(problems(field, JSON.stringify(EDITOR_MAP))).toEqual([]);
+  });
+
+  it.each([
+    ['an rgba() colour', 'rgba(0, 0, 0, 0.1)'],
+    ['an oklch() colour', 'oklch(0.3 0.02 250 / 0.4)'],
+    ['a color-mix()', 'color-mix(in oklch, #fff 20%, transparent)'],
+    ['calc() over var()', 'calc(var(--space-2) * 1.5)'],
+    ['a quoted family list', '"Playfair Display", serif'],
+    ['a family with a bracketed word', 'Foo Sans (Display)'],
+    ['a stored number', 1.2],
+  ])('accepts %s, as older stored colours and numbers hold', (_l, value) => {
+    expect(
+      problems('tokenOverrides', JSON.stringify({ 'shadow-color': value }))
+    ).toEqual([]);
+  });
+
+  it('accepts a clear: null, an empty string, or nothing', () => {
+    expect(problems('tokenOverrides', null)).toEqual([]);
+    expect(problems('tokenOverrides', '')).toEqual([]);
+    expect(updateBrandingSchema.parse({})).toEqual({});
+  });
+
+  it('passes stored text that is not JSON back unchanged (Codex-cijzb)', () => {
+    // The brand page re-sends a stored map it could not read, so a failed
+    // read can't blank it. Nothing renders it: every reader parses it first.
+    expect(updateBrandingSchema.parse({ tokenOverrides: '{not json' })).toEqual(
+      { tokenOverrides: '{not json' }
+    );
+  });
+
+  it.each([
+    ['a value that starts a new declaration', 'heading-color', 'red; scale: 3'],
+    ['a key that carries a declaration', 'x; position: fixed', 'red'],
+    ['a camelCase key', 'headingColor', 'red'],
+    ['the reserved logo key', 'shader-logo-url', 'https://pub-a.r2.dev/l.svg'],
+    ['a url()', 'heading-color', 'url(https://evil.example/x.png)'],
+    ['a URL( in capitals', 'heading-color', 'URL(https://evil.example/x.png)'],
+    ['an image-set()', 'surface', 'image-set("https://pub-a.r2.dev/p.png" 1x)'],
+    [
+      'a -webkit-image-set()',
+      'surface',
+      '-webkit-image-set("https://x/p.png" 1x)',
+    ],
+    ['a cross-fade()', 'surface', 'cross-fade("https://x/a.png", red 50%)'],
+    ['a src()', 'surface', 'src("https://x/p.png")'],
+    ['an image()', 'surface', 'image("https://x/p.png")'],
+    ['an element()', 'surface', 'element(#hero)'],
+    ['an expression()', 'heading-color', 'expression(alert(1))'],
+    ['an @import', 'heading-color', '@import "x.css"'],
+    ['an opening brace', 'heading-color', 'red{'],
+    ['a closing brace', 'heading-color', 'red}'],
+    ['an opening angle bracket', 'heading-color', 'red<'],
+    ['a closing angle bracket', 'heading-color', 'red>'],
+    ['a comment', 'heading-color', 'red /* x */'],
+    ['an unclosed single quote', 'glass-tint', "'unclosed"],
+    ['an unclosed double quote', 'glass-tint', '"unclosed'],
+    ['an unclosed bracket', 'heading-color', 'calc(1px + 2px'],
+    ['a stray closing bracket', 'heading-color', 'red)'],
+    ['a mismatched bracket', 'heading-color', 'calc(1px]'],
+    ['an unclosed square bracket', 'heading-color', 'red ['],
+    [
+      'an astral function name, as the browser reads it',
+      'heading-color',
+      `${String.fromCodePoint(0x1f600)}(x)`,
+    ],
+    ['a font family with quotes', 'font-body', '"Inter"'],
+    ['a dark-font name with quotes', 'font-heading', 'a"b\'c"d'],
+    ['a backslash escape', 'heading-color', 'red\\3b position: fixed'],
+    ['a control character', 'heading-color', 'red\n'],
+    ['a value over 200 characters', 'heading-color', 'a'.repeat(201)],
+    ['a boolean', 'text-scale', true],
+    ['an object', 'heading-color', { nested: 'red' }],
+  ])('refuses %s, naming its key', (_label, key, value) => {
+    const map = { 'shader-preset': 'haze', [key]: value };
+    expect(problems('tokenOverrides', JSON.stringify(map))).toEqual([
+      ['tokenOverrides', key],
+    ]);
+  });
+
+  it('refuses a number JSON cannot hold finitely', () => {
+    expect(problems('tokenOverrides', '{"text-scale": 1e400}')).toEqual([
+      ['tokenOverrides', 'text-scale'],
+    ]);
+  });
+
+  it('applies the same rule to the dark map, the logo key included', () => {
+    const map = {
+      'heading-color': 'red; position: fixed',
+      'shader-logo-url': 'https://pub-a.r2.dev/l.svg',
+    };
+    expect(problems('darkTokenOverrides', JSON.stringify(map))).toEqual([
+      ['darkTokenOverrides', 'heading-color'],
+      ['darkTokenOverrides', 'shader-logo-url'],
+    ]);
+  });
+
+  it('keeps a value of exactly 200 characters', () => {
+    const map = { 'heading-color': 'a'.repeat(200) };
+    expect(problems('tokenOverrides', JSON.stringify(map))).toEqual([]);
+  });
+
+  it.each([
+    '[]',
+    '"red"',
+    '5',
+    'null',
+  ])('refuses JSON that is not an object: %s', (json) => {
+    expect(problems('tokenOverrides', json)).toEqual([['tokenOverrides']]);
+  });
+
+  it('reads a worst-case value in one pass, so a crafted map costs no seconds', () => {
+    // A long name, a space, then empty brackets: each bracket's name is
+    // empty, so the value passes. A backward regex per bracket costs about
+    // brackets x name^2, which this shape maximises under the 200 cap: 1.5 ms
+    // a value, and over a second for a full map, on every render (review r3).
+    const worst = `${'a'.repeat(132)} ${'()'.repeat(33)}`;
+    const plain = 'a'.repeat(worst.length);
+    expect(worst.length).toBeLessThanOrEqual(TOKEN_OVERRIDE_VALUE_MAX);
+    expect(staysInOneDeclaration(worst)).toBe(true);
+    const mapOf = (value: string) =>
+      JSON.stringify(
+        Object.fromEntries(
+          Array.from({ length: TOKEN_OVERRIDE_MAX_ENTRIES }, (_, i) => [
+            `key-${i}`,
+            value,
+          ])
+        )
+      );
+    /** The fastest of three saves of `map`: noise only ever adds time. */
+    const fastest = (map: string) => {
+      let best = Number.POSITIVE_INFINITY;
+      for (let run = 0; run < 3; run++) {
+        const started = performance.now();
+        expect(problems('tokenOverrides', map)).toEqual([]);
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+    // Relative to a same-size map of plain values, timed in the same run, so
+    // the bound holds on any machine: one pass costs about the same as the
+    // plain map, the backward regex about 200 times more.
+    const plainMs = fastest(mapOf(plain));
+    expect(fastest(mapOf(worst))).toBeLessThan(plainMs * 10 + 50);
+  });
+
+  it('refuses a map past the entry limit, and keeps one at it', () => {
+    const map = (size: number) =>
+      JSON.stringify(
+        Object.fromEntries(
+          Array.from({ length: size }, (_, i) => [`key-${i}`, 'red'])
+        )
+      );
+    expect(problems('tokenOverrides', map(TOKEN_OVERRIDE_MAX_ENTRIES))).toEqual(
+      []
+    );
+    expect(
+      problems('tokenOverrides', map(TOKEN_OVERRIDE_MAX_ENTRIES + 1))
+    ).toEqual([['tokenOverrides']]);
   });
 });
 
