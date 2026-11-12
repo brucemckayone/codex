@@ -12,7 +12,8 @@
   it was lost.
 
   A lost chargeback being appealed (owner D34) stays Lost, with the appeal's
-  stage under it (`appealStatus`) until the bank decides.
+  stage under it (`appealStatus`) until the bank decides, and, while a
+  response is due, Stripe's deadline for it.
 
   @prop {ChargebackRow[]} chargebacks
 -->
@@ -58,11 +59,11 @@
   {:else}
     {@const badge = disputeStatus(row.status)}
     <Badge variant={badge.variant}>{badge.label}</Badge>
-    {#if row.respondBy}
-      <span class="cell-sub">{m.support_respond_by({ date: formatShortDay(row.respondBy) })}</span>
-    {/if}
     {#if row.appealStatus}
       <span class="cell-sub" data-testid="chargeback-appeal">{disputeAppeal(row.appealStatus)}</span>
+    {/if}
+    {#if row.respondBy}
+      <span class="cell-sub">{m.support_respond_by({ date: formatShortDay(row.respondBy) })}</span>
     {/if}
   {/if}
 {/snippet}

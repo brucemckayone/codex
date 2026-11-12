@@ -27,8 +27,8 @@ import {
  * permission errors are a key or account misconfiguration, not bad data: a
  * retry succeeds once it is fixed, so Stripe should keep redelivering.
  * Since stripe-node 23, a response body that stalls or is cut off mid-read is
- * a StripeConnectionError, so it is retried; it was a StripeAPIError with a
- * non-5xx status, so permanent (Codex-wzaoh).
+ * a StripeConnectionError, so it is retried; it was a StripeAPIError with no
+ * statusCode, which the 5xx test reads as permanent (Codex-wzaoh).
  */
 const TRANSIENT_STRIPE_TYPES = new Set([
   'StripeAPIError',
@@ -142,10 +142,17 @@ function isTransientAt(error: unknown, depth: number): boolean {
     // Check for Stripe SDK error types
     const stripeType = (error as { type?: string }).type;
     if (stripeType && TRANSIENT_STRIPE_TYPES.has(stripeType)) {
-      // StripeAPIError is only transient for 5xx status codes
+      // StripeAPIError is only transient for 5xx status codes, or with no
+      // status at all for a body that arrived whole but isn't JSON (a proxy's
+      // HTML 502, say): stripe-node's "Invalid JSON received from the Stripe
+      // API", which carries the parse failure as `raw.exception`.
       if (stripeType === 'StripeAPIError') {
-        const statusCode = (error as { statusCode?: number }).statusCode;
-        return statusCode !== undefined && statusCode >= 500;
+        const { statusCode, raw } = error as {
+          statusCode?: number;
+          raw?: { exception?: unknown };
+        };
+        if (statusCode === undefined) return raw?.exception !== undefined;
+        return statusCode >= 500;
       }
       return true;
     }

@@ -9,7 +9,11 @@
  * shared with other sessions, so nothing here ever cleans a whole table.
  */
 
-import { CONTENT_TYPES, PURCHASE_STATUS } from '@codex/constants';
+import {
+  CONTENT_TYPES,
+  type DisputeAppealStatus,
+  PURCHASE_STATUS,
+} from '@codex/constants';
 import {
   agreementProposals,
   connectBalances,
@@ -1462,6 +1466,48 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         ])
       );
       expect(detail.chargebacks).toHaveLength(2);
+    });
+
+    it("an appeal that needs a response shows Stripe's deadline, none when Stripe gives none; one under review is not asked (owner D34)", async () => {
+      const { chargeId, purchase } = await purchaseCharge();
+      const dated = await dispute(chargeId, 'lost', purchase.id);
+      const undated = await dispute(chargeId, 'lost', purchase.id);
+      const reviewing = await dispute(chargeId, 'lost', purchase.id);
+      const mark = (id: string, appealStatus: DisputeAppealStatus) =>
+        db
+          .update(disputes)
+          .set({ appealStatus })
+          .where(eq(disputes.stripeDisputeId, id));
+      await mark(dated, 'appeal_needs_response');
+      await mark(undated, 'appeal_needs_response');
+      await mark(reviewing, 'appeal_under_review');
+      const dueBy = nowSeconds() + 5 * DAY;
+      fake.disputeDueBy.set(dated, dueBy);
+      fake.disputeDueBy.set(reviewing, dueBy);
+
+      const detail = await service.getChargeDetail(chargeId);
+      const respondBy = new Map(
+        detail.chargebacks.map((row) => [row.id, row.respondBy])
+      );
+
+      expect(respondBy.get(dated)).toBe(new Date(dueBy * 1000).toISOString());
+      expect(respondBy.get(undated)).toBeNull();
+      expect(respondBy.get(reviewing)).toBeNull();
+    });
+
+    it('a mark on a row that is not lost is stale (an older late win, after a rollback), so it is not shown', async () => {
+      const { chargeId, purchase } = await purchaseCharge();
+      const id = await dispute(chargeId, 'won', purchase.id);
+      await db
+        .update(disputes)
+        .set({ appealStatus: 'appeal_under_review' })
+        .where(eq(disputes.stripeDisputeId, id));
+
+      const detail = await service.getChargeDetail(chargeId);
+
+      expect(detail.chargebacks).toEqual([
+        expect.objectContaining({ id, status: 'won', appealStatus: null }),
+      ]);
     });
 
     it("a late win's history lines carry the loss date and the step's kind; a normal win's and a plain loss's do not (S3)", async () => {

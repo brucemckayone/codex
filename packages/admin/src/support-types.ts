@@ -398,7 +398,7 @@ export interface ChargebackRow {
   status: string;
   reason: string | null;
   createdAt: string;
-  /** Stripe's evidence deadline, while a response is due. */
+  /** Stripe's evidence deadline, while a response is due, an appeal's too. */
   respondBy: string | null;
   /** A late win's loss: when it was applied (`lost_applied_at`). */
   lostOn: string | null;
@@ -406,7 +406,8 @@ export interface ChargebackRow {
   lateWonOn: string | null;
   /**
    * A lost chargeback's appeal while it runs (`appeal_status`; owner D34):
-   * `status` stays `lost`. Null once the bank decides, and for any other row.
+   * `status` stays `lost`. Null once the bank decides, and for any row that
+   * isn't lost, where a mark is stale.
    */
   appealStatus: DisputeAppealStatus | null;
   /** Won, and the creators' pay-back not yet applied: refunds wait for it. */

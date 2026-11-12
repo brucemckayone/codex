@@ -1263,14 +1263,23 @@ export class SupportService extends BaseService {
       });
   }
 
-  /** The charge's disputes; one awaiting an answer gets its deadline from Stripe. */
+  /**
+   * The charge's disputes; one awaiting an answer, an appeal's included, gets
+   * its deadline from Stripe. An appeal's mark is shown on a lost row only:
+   * on any other it is stale (a rollback's late win), and the hourly
+   * reconcile clears it (owner D34).
+   */
   private async chargebackRows(
     rows: ReadonlyArray<typeof disputes.$inferSelect>
   ): Promise<ChargebackRow[]> {
     const result: ChargebackRow[] = [];
     for (const row of rows) {
+      const appealStatus = row.status === 'lost' ? row.appealStatus : null;
       let respondBy: string | null = null;
-      if (AWAITING_RESPONSE.has(row.status)) {
+      if (
+        AWAITING_RESPONSE.has(row.status) ||
+        appealStatus === 'appeal_needs_response'
+      ) {
         const dispute = await this.stripe.disputes.retrieve(
           row.stripeDisputeId
         );
@@ -1286,7 +1295,7 @@ export class SupportService extends BaseService {
         respondBy,
         lostOn: toIso(row.lostAppliedAt),
         lateWonOn: toIso(row.lateWonAt),
-        appealStatus: row.appealStatus,
+        appealStatus,
         settling: isSettlingWin(row),
       });
     }

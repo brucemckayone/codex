@@ -1,5 +1,5 @@
 {
-  "id": "927efccd-29f2-4b13-a06c-c30780982973",
+  "id": "e9e4eb9c-bded-4b85-a8d5-bc852e1983a1",
   "prevId": "44243d6b-62ca-43df-8cfd-4463e269dc78",
   "version": "7",
   "dialect": "postgresql",
@@ -3433,10 +3433,6 @@
         "check_disputes_appeal_status": {
           "name": "check_disputes_appeal_status",
           "value": "\"disputes\".\"appeal_status\" IS NULL OR \"disputes\".\"appeal_status\" IN ('appeal_needs_response', 'appeal_under_review')"
-        },
-        "check_disputes_appeal_lost": {
-          "name": "check_disputes_appeal_lost",
-          "value": "\"disputes\".\"appeal_status\" IS NULL OR \"disputes\".\"status\" = 'lost'"
         }
       },
       "isRLSEnabled": false

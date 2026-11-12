@@ -15,10 +15,11 @@
  *   - a loss date kept with no late win (`check_disputes_lost_applied`);
  *   - a told buyer with no late win (`check_disputes_buyer_told`).
  *
- * And 0130's two appeal CHECKs (Codex-wzaoh; owner D34): `appeal_status` is
- * NULL or one of `DISPUTE_APPEAL_STATUSES` (`check_disputes_appeal_status`),
- * and set only on a lost row (`check_disputes_appeal_lost`), so a late win
- * that kept the mark is refused.
+ * And 0130's appeal CHECK (Codex-wzaoh; owner D34): `appeal_status` is NULL
+ * or one of `DISPUTE_APPEAL_STATUSES` (`check_disputes_appeal_status`). That
+ * a mark lives only on a lost row is held in code, NOT here: a CHECK binds
+ * an older worker after a rollback too, and its late win, which doesn't
+ * clear the mark, must still be recorded (review round 1, F1).
  *
  * Real DB. Skips when DB_METHOD is not configured (fee-config-schema.test.ts).
  */
@@ -178,60 +179,43 @@ describe.skipIf(!HAS_DB)('0126 late win: the disputes CHECKs', () => {
   });
 });
 
-describe.skipIf(!HAS_DB)('0130 dispute appeals: the disputes CHECKs', () => {
-  it('accepts no appeal and each appeal stage on a lost row, and a late win that clears it; refuses any other value, and a mark on a row that is not lost', async () => {
+describe.skipIf(!HAS_DB)('0130 dispute appeals: the disputes CHECK', () => {
+  it('accepts no appeal and each appeal stage, and an older worker’s late win that keeps the mark; refuses any other value', async () => {
     const { dbWs } = await import('../index');
     const { DISPUTE_APPEAL_STATUSES } = await import('@codex/constants');
     const tag = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const id = (name: string) => `du_appeal_${name}_${tag}`;
     const day = (n: number) => new Date(Date.UTC(2026, 10, n, 12));
-    const insert = (name: string, status: string, appeal: string | null) =>
+    const insert = (name: string, appeal: string | null) =>
       sql`INSERT INTO disputes (stripe_dispute_id, stripe_charge_id, amount_cents, currency, stripe_created_at, status, appeal_status)
-          VALUES (${id(name)}, ${`ch_appeal_${name}_${tag}`}, 1000, 'gbp', ${day(1)}, ${status}, ${appeal})`;
+          VALUES (${id(name)}, ${`ch_appeal_${name}_${tag}`}, 1000, 'gbp', ${day(1)}, 'lost', ${appeal})`;
 
     const accepted: string[] = [];
     const refused: Record<string, { code?: string; constraint?: string }> = {};
     try {
       await dbWs.transaction(async (tx) => {
         for (const appeal of [null, ...DISPUTE_APPEAL_STATUSES]) {
-          await tx.execute(insert(appeal ?? 'none', 'lost', appeal));
+          await tx.execute(insert(appeal ?? 'none', appeal));
           accepted.push(appeal ?? 'none');
         }
-        // recordLateWin's move, on an appealed row: one SET clears the mark.
+        // 0126–0129's recordLateWin, which predates the mark: lost → won,
+        // the mark left in place. The newer code clears it when it next
+        // records the row, and the hourly reconcile finds it.
         await tx.execute(
-          sql`UPDATE disputes SET status = 'won', late_won_at = ${day(20)}, lost_applied_at = outcome_applied_at, outcome_applied_at = NULL, appeal_status = NULL
+          sql`UPDATE disputes SET status = 'won', late_won_at = ${day(20)}, lost_applied_at = outcome_applied_at, outcome_applied_at = NULL
               WHERE stripe_dispute_id = ${id('appeal_under_review')} AND status = 'lost'`
         );
-        accepted.push('late win clearing the mark');
+        accepted.push('an older late win keeping the mark');
 
-        const refuse = async (
-          name: string,
-          statement: ReturnType<typeof sql>
-        ) => {
+        for (const appeal of ['lost', 'under_review', 'appeal_won']) {
           try {
             await tx.transaction(async (savepoint) => {
-              await savepoint.execute(statement);
+              await savepoint.execute(insert(appeal, appeal));
             });
           } catch (error) {
-            refused[name] = refusal(error);
+            refused[appeal] = refusal(error);
           }
-        };
-        for (const appeal of ['lost', 'under_review', 'appeal_won']) {
-          await refuse(appeal, insert(appeal, 'lost', appeal));
         }
-        await refuse(
-          'a mark on a won row',
-          insert('won', 'won', 'appeal_under_review')
-        );
-        await refuse(
-          'a mark on an open chargeback',
-          insert('open', 'under_review', 'appeal_needs_response')
-        );
-        await refuse(
-          'a late win that keeps the mark',
-          sql`UPDATE disputes SET status = 'won', late_won_at = ${day(20)}
-              WHERE stripe_dispute_id = ${id('appeal_needs_response')}`
-        );
         throw new Rollback();
       });
     } catch (error) {
@@ -242,17 +226,13 @@ describe.skipIf(!HAS_DB)('0130 dispute appeals: the disputes CHECKs', () => {
       'none',
       'appeal_needs_response',
       'appeal_under_review',
-      'late win clearing the mark',
+      'an older late win keeping the mark',
     ]);
-    const value = { code: '23514', constraint: 'check_disputes_appeal_status' };
-    const onLost = { code: '23514', constraint: 'check_disputes_appeal_lost' };
+    const check = { code: '23514', constraint: 'check_disputes_appeal_status' };
     expect(refused).toEqual({
-      lost: value,
-      under_review: value,
-      appeal_won: value,
-      'a mark on a won row': onLost,
-      'a mark on an open chargeback': onLost,
-      'a late win that keeps the mark': onLost,
+      lost: check,
+      under_review: check,
+      appeal_won: check,
     });
   });
 });

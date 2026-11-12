@@ -100,6 +100,21 @@ export const DISPUTE_APPEAL_STATUSES = [
 ] as const;
 export type DisputeAppealStatus = (typeof DISPUTE_APPEAL_STATUSES)[number];
 
+/** Stripe's appeal stage, when `status` is one; null otherwise (owner D34). */
+export function disputeAppealOf(status: string): DisputeAppealStatus | null {
+  return DISPUTE_APPEAL_STATUSES.find((appeal) => appeal === status) ?? null;
+}
+
+/**
+ * Whether Stripe's dispute status settles as a loss (owner D34): `lost`, or
+ * an appeal of it, which only a loss reaches. The platform has lost the
+ * money either way, so the dispute record, the hourly reconcile and the
+ * won-reported-lost alert all read an appeal as `lost`.
+ */
+export function settlesAsLost(status: string): boolean {
+  return status === 'lost' || disputeAppealOf(status) !== null;
+}
+
 /**
  * The Stripe metadata key naming the environment that created an object — the
  * worker's `ENVIRONMENT` (`production`, `development`, `test`).

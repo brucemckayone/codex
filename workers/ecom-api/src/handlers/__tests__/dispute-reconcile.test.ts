@@ -42,6 +42,10 @@ import {
 const NOW = new Date('2026-10-23T12:00:00Z');
 const seconds = (date: Date) => Math.floor(date.getTime() / 1000);
 const FINAL = ['won', 'lost', 'warning_closed', 'prevented'];
+const APPEALS: readonly string[] = [
+  'appeal_needs_response',
+  'appeal_under_review',
+];
 const RANK: Record<string, number> = {
   warning_needs_response: 0,
   warning_under_review: 1,
@@ -160,16 +164,19 @@ function ledger(
         stripeDisputeId: string;
         status: string;
         amountCents: number;
-        appeal?: string | null;
         live?: boolean;
       }) => {
-        // As ours: a status the table does not know is logged, not written.
-        if (!(d.status in RANK)) return undefined;
+        // As ours, given Stripe's raw status: an appeal is recorded as lost,
+        // with the appeal marked (owner D34); a status the table does not
+        // know is logged, not written.
+        const appeal = APPEALS.includes(d.status) ? d.status : null;
+        const status = appeal ? 'lost' : d.status;
+        if (!(status in RANK)) return undefined;
         const row = rows.get(d.stripeDisputeId);
         if (!row) {
           rows.set(d.stripeDisputeId, {
             stripeDisputeId: d.stripeDisputeId,
-            status: d.status,
+            status,
             amountCents: d.amountCents,
             outcomeAppliedAt: null,
             updatedAt: new Date(),
@@ -177,10 +184,10 @@ function ledger(
             lateWonAt: null,
             appealStatus: null,
           });
-        } else if ((RANK[d.status] ?? -1) > (RANK[row.status] ?? -1)) {
-          row.status = d.status;
+        } else if ((RANK[status] ?? -1) > (RANK[row.status] ?? -1)) {
+          row.status = status;
           row.updatedAt = new Date();
-        } else if (row.status === 'lost' && d.status === 'won') {
+        } else if (row.status === 'lost' && status === 'won') {
           // The late win's move (Codex-2hxff.70): the outcome is cleared
           // for the undo, which marks it again.
           row.status = 'won';
@@ -189,14 +196,17 @@ function ledger(
           row.appealStatus = null;
           row.updatedAt = new Date();
         }
-        // An appeal marks the lost row; a `lost` with none clears the mark,
-        // once it is read live (owner D34).
+        // The mark follows Stripe's appeal on a lost row; a `lost` with none
+        // clears it once read live; a mark on any other row is stale, and
+        // cleared (owner D34).
         const now = rows.get(d.stripeDisputeId);
-        if (now && d.status === 'lost' && now.status === 'lost') {
-          if (d.appeal) now.appealStatus = d.appeal;
-          else if (now.appealStatus && !d.live) {
-            return { ...now, appealCheck: true };
-          } else now.appealStatus = null;
+        if (!now) return undefined;
+        if (appeal && now.status === 'lost') now.appealStatus = appeal;
+        else if (!appeal && now.appealStatus && now.status !== 'lost') {
+          now.appealStatus = null;
+        } else if (!appeal && now.appealStatus && status === 'lost') {
+          if (!d.live) return { ...now, appealCheck: true };
+          now.appealStatus = null;
         }
         return { ...now };
       }
@@ -483,11 +493,15 @@ describe('runDisputeReconcile', () => {
 
     const result = await run();
 
-    expect(purchase.recordDispute).toHaveBeenCalledWith(
+    // Read from Stripe once: processDispute is told it is live.
+    expect(stripe.disputes.retrieve).toHaveBeenCalledExactlyOnceWith(
+      'dp_appeal'
+    );
+    expect(purchase.recordDispute).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         stripeDisputeId: 'dp_appeal',
-        status: 'lost',
-        appeal: 'appeal_under_review',
+        status: 'appeal_under_review',
+        live: true,
       })
     );
     expect(purchase.processLostDispute).toHaveBeenCalledWith(
@@ -527,6 +541,141 @@ describe('runDisputeReconcile', () => {
       status: 'lost',
       appealStatus: 'appeal_needs_response',
       outcomeAppliedAt: expect.any(Date),
+    });
+  });
+
+  describe('appeal marks on applied rows (owner D34; review round 1, F2)', () => {
+    const applied = new Date(NOW.getTime() - 20 * 24 * 3600 * 1000);
+
+    it('a mark whose event was missed is set: one live read, and no outcome step runs', async () => {
+      const { rows, purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_mark',
+          status: 'lost',
+          outcomeAppliedAt: applied,
+        },
+      ]);
+      const stripe = stripeStub({
+        events: [event(dispute('dp_mark', 'appeal_needs_response'))],
+      });
+      const { run } = reconcile({ purchase, stripe });
+
+      await run();
+
+      expect(stripe.disputes.retrieve).toHaveBeenCalledExactlyOnceWith(
+        'dp_mark'
+      );
+      expect(rows.get('dp_mark')).toMatchObject({
+        status: 'lost',
+        appealStatus: 'appeal_needs_response',
+        outcomeAppliedAt: applied,
+      });
+      expect(purchase.processLostDispute).not.toHaveBeenCalled();
+      expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+    });
+
+    it('a decision that was missed clears the mark, in one live read', async () => {
+      const { rows, purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_decided',
+          status: 'lost',
+          outcomeAppliedAt: applied,
+          appealStatus: 'appeal_under_review',
+        },
+      ]);
+      const stripe = stripeStub({
+        events: [event(dispute('dp_decided', 'lost'))],
+      });
+      const { run } = reconcile({ purchase, stripe });
+
+      await run();
+
+      expect(stripe.disputes.retrieve).toHaveBeenCalledExactlyOnceWith(
+        'dp_decided'
+      );
+      expect(rows.get('dp_decided')).toMatchObject({
+        status: 'lost',
+        appealStatus: null,
+      });
+      expect(purchase.processLostDispute).not.toHaveBeenCalled();
+    });
+
+    it("a mark left stale on a won row (an older worker's late win) is cleared, and nothing is re-paid", async () => {
+      const { rows, purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_stale',
+          status: 'won',
+          outcomeAppliedAt: applied,
+          lateWonAt: applied,
+          appealStatus: 'appeal_under_review',
+        },
+      ]);
+      const stripe = stripeStub({
+        events: [event(dispute('dp_stale', 'won'))],
+      });
+      const { run } = reconcile({ purchase, stripe });
+
+      await run();
+
+      expect(rows.get('dp_stale')).toMatchObject({
+        status: 'won',
+        appealStatus: null,
+      });
+      expect(purchase.settleWonDispute).not.toHaveBeenCalled();
+      expect(purchase.repayWonDispute).not.toHaveBeenCalled();
+    });
+
+    it('rows whose mark agrees with Stripe are not read', async () => {
+      const { purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_appealing',
+          status: 'lost',
+          outcomeAppliedAt: applied,
+          appealStatus: 'appeal_under_review',
+        },
+        {
+          stripeDisputeId: 'dp_lost',
+          status: 'lost',
+          outcomeAppliedAt: applied,
+        },
+        {
+          stripeDisputeId: 'dp_won',
+          status: 'won',
+          outcomeAppliedAt: applied,
+        },
+      ]);
+      const stripe = stripeStub({
+        events: [
+          event(dispute('dp_appealing', 'appeal_under_review')),
+          event(dispute('dp_lost', 'lost')),
+          event(dispute('dp_won', 'won')),
+        ],
+      });
+      const { run } = reconcile({ purchase, stripe });
+
+      await run();
+
+      expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+      expect(purchase.recordDispute).not.toHaveBeenCalled();
+    });
+
+    it('the 08:00 run (lateWins off) leaves a mark Stripe disagrees with for the next hour', async () => {
+      const { rows, purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_morning',
+          status: 'lost',
+          outcomeAppliedAt: applied,
+        },
+      ]);
+      const stripe = stripeStub({
+        events: [event(dispute('dp_morning', 'appeal_needs_response'))],
+      });
+      const { run } = reconcile({ purchase, stripe, lateWins: false });
+
+      await run();
+
+      expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+      expect(rows.get('dp_morning')?.appealStatus).toBeNull();
     });
   });
 

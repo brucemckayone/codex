@@ -504,6 +504,12 @@ RETURNING stripe_dispute_id, status, outcome_applied_at;
 COMMIT;
 ```
 
+Run after the `0130` deploy, the SET should also clear `appeal_status`
+(`appeal_status = NULL`). If it doesn't, nothing refuses the write. The row
+keeps a stale appeal mark, which support doesn't show on a won row and which
+the hourly reconcile clears while the dispute has an event in its 4-day
+window ([the `0130` section](#the-stripe-upgrade-to-2026-10-28endive-and-dispute-appeals-migration-0130)).
+
 It returns one line per id. A missing line means the id was mistyped or is no
 longer lost: check it before going on. Each row is now an applied win:
 
@@ -824,31 +830,42 @@ This release moves stripe-node to 23.1.0 and the pin, `STRIPE_API_VERSION`
 standing `apiVersion` check above first.
 
 `0130` is drizzle-kit DDL, unedited. It adds `disputes.appeal_status`,
-nullable with no default, and two CHECKs: `check_disputes_appeal_status`
-(NULL, `appeal_needs_response` or `appeal_under_review`) and
-`check_disputes_appeal_lost` (NULL, or the row is `lost`). Adding the column
-rewrites nothing. Each CHECK scans `disputes` once under a lock: a moment on
-today's table, and every existing row is NULL, so both pass.
+nullable with no default, and one CHECK, `check_disputes_appeal_status`
+(NULL, `appeal_needs_response` or `appeal_under_review`). Adding the column
+rewrites nothing. The CHECK scans `disputes` once under a lock: a moment on
+today's table, and every existing row is NULL, so it passes.
 
-The only write that moves a row off `lost` is the late win, which clears
-the mark in the same SET; nothing else sets `status`, but the forward-only
-upsert, which never leaves `lost`. R18 (a)'s hand UPDATE to `won` runs
-before the deploy, so before the column exists. Run after it, it must also
-set `appeal_status = NULL`, or `check_disputes_appeal_lost` refuses it and
-nothing is written.
+A mark lives only on a `lost` row, and the code holds that, not the
+database. The mark is written only where the row is `lost`, and the late
+win, the one write that moves a row off `lost`, clears it in the same SET.
+There is deliberately no CHECK tying the mark to `lost`. A CHECK stays on a
+workers rollback, and the older workers' late win moves `lost` to `won`
+without knowing the column: the CHECK would refuse it, the refusal reads as
+permanent, and the late win would never be recorded (review round 1, F1).
+So a mark can be left on a won row: by R18 (a)'s hand UPDATE run after the
+deploy, or by a late win the older workers record after a rollback. It is
+stale but harmless. Support shows the appeal line only under Lost, and the
+next record of the dispute or the hourly reconcile clears it.
 
 An appeal of a lost chargeback is recorded as `lost`, and acted on as
 `lost`, with the appeal kept in `appeal_status`, never in `status`. So the
 sale stays held, and a loss never applied is applied through the appeal. The
-bank's decision clears the mark: a late win, or a `lost` read live from
-Stripe, since a `lost` event may be older than the appeal (owner D34;
-[dispute record](dispute-record.md), §4, "An appeal").
+mark follows Stripe's live appeal stage, forward or back, since Stripe can
+ask for more evidence. The bank's decision clears it: a late win, or a
+`lost` read live from Stripe, since a `lost` event may be older than the
+appeal. The hourly reconcile re-reads a dispute whose mark disagrees with
+Stripe and puts it right (owner D34; [dispute record](dispute-record.md),
+§4, "An appeal").
 
 **stripe-node 23 (census S4).** A Stripe response body that stalls or is cut
 off mid-read is now a `StripeConnectionError`. Before, it was a
-`StripeAPIError` with a non-5xx status, so the webhook classifier called it
-permanent. Now it is transient: a webhook that meets one answers 5xx and
-Stripe redelivers. Nothing to do, and nobody outside sees it.
+`StripeAPIError` with no `statusCode`, which the classifier's 5xx test read
+as permanent. Now it is transient: a webhook that meets one answers 5xx and
+Stripe redelivers. A body that arrives whole but isn't JSON (a proxy's HTML
+502, say) is still a `StripeAPIError` with no `statusCode`, carrying the
+parse error in `raw.exception`; the classifier now reads that one as
+transient too (review round 1, F6). Nothing to do, and nobody outside sees
+either.
 
 ### R23 — the same release: the sandbox's webhook endpoints to endive (owner)
 
@@ -873,21 +890,54 @@ secret changes. Put the new one in the matching worker secret
 `_CONNECT`) before you disable the old endpoint. Otherwise its deliveries
 fail the signature check.
 
+### R23 (owner, Dashboard check): the wallets one-off Checkout shows
+
+At endive, one-off Checkout (`mode: 'payment'`) no longer sends
+`payment_method_types`. It sends `allowed_payment_method_types: ['card']`
+(owner D32), which filters what the account's default payment method
+configuration offers, as subscription checkouts already do. So which wallets
+appear now follows that configuration. Apple Pay and Google Pay are card
+wallets and pass the card filter; Link is its own method and doesn't.
+
+The sandbox's default configuration, read in TEST mode on 2026-11-12: card
+on, Apple Pay on, Google Pay unavailable and off, Link on. So one-off
+Checkout shows card and Apple Pay. Link isn't shown, and Google Pay isn't
+shown unless it is turned on.
+
+**Check** in the Stripe Dashboard (Settings → Payments → Payment methods,
+the default configuration) that card and Apple Pay are on, and turn Google
+Pay on if it should be offered. Do the same on the live account before it
+takes payments.
+
 ### Rollback
 
-The column and the CHECK stay on a workers rollback. The old workers never
-read or write `appeal_status`. If the endpoints are already on endive, the
-old workers log an appeal status as one the table doesn't know and drop it.
-The row stays `lost` and the sale stays held, as before this release, but a
-loss never applied waits for the bank's decision instead of being applied
-through the appeal.
+The column and its CHECK stay on a workers rollback. The CHECK binds
+nothing there: it tests only `appeal_status`, which the old workers never
+read or write. If the endpoints are already on endive, the old workers log
+an appeal status as one the table doesn't know and drop it. The row stays
+`lost` and the sale stays held, as before this release, but a loss never
+applied waits for the bank's decision instead of being applied through the
+appeal.
 
-A decision the old workers record doesn't clear a mark made before the
-rollback, so support would show a finished appeal as running. Before rolling
-forward again, list the marks and check each dispute in Stripe:
+The old workers' late win still works: no CHECK ties the mark to `lost`
+(F1 above). But it, and any decision the old workers record, leaves a mark
+made before the rollback in place. On a won row the mark is harmless:
+support shows the appeal line only under Lost. On a lost row support would
+show a decided appeal as running.
+
+After rolling forward, the hourly reconcile repairs these. It re-reads each
+dispute with an event in its 4-day window whose mark disagrees with Stripe,
+and marks or clears it. The 08:00 run leaves them to the next hour. A mark
+on a dispute with no event in that window waits for the dispute's next
+event. So, a run or two after rolling forward, list the marks left and check
+each dispute in Stripe:
 
     SELECT stripe_dispute_id, status, appeal_status, updated_at
     FROM disputes WHERE appeal_status IS NOT NULL;
 
-A mark whose appeal Stripe has decided is cleared by hand, with the owner's
-OK.
+A mark on a won row, or on a lost one whose appeal Stripe has decided, is
+cleared by hand, with the owner's OK:
+
+    UPDATE disputes SET appeal_status = NULL, updated_at = now()
+     WHERE stripe_dispute_id IN ('du_…') AND appeal_status IS NOT NULL
+    RETURNING stripe_dispute_id, status, appeal_status;

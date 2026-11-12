@@ -417,6 +417,32 @@ describe('A lost chargeback being appealed (owner D34)', () => {
     expect(row && appealOf(row)).toBeNull();
     expect(text()).not.toContain('Appeal');
   });
+
+  test("an appeal that needs a response shows Stripe's deadline after it; none when Stripe gives none", () => {
+    render(ChargebacksCard, {
+      chargebacks: [
+        chargebackRow({
+          ...lost,
+          id: 'du_dated',
+          appealStatus: 'appeal_needs_response',
+          respondBy: '2026-12-05T09:00:00.000Z',
+        }),
+        chargebackRow({
+          ...lost,
+          id: 'du_undated',
+          appealStatus: 'appeal_needs_response',
+        }),
+      ],
+    });
+    const [dated, undated] = rows().map(
+      (row) => row.textContent?.replace(/\s+/g, ' ') ?? ''
+    );
+    expect(dated).toContain(
+      'Appeal: needs a response in Stripe Respond by 5 Dec'
+    );
+    expect(undated).toContain('Appeal: needs a response in Stripe');
+    expect(undated).not.toContain('Respond by');
+  });
 });
 
 // The mockup's own words (late-win support/charge-page.html), not the

@@ -21,6 +21,8 @@
  *    chargeback whose opening failed. The last 15 minutes are left to the
  *    webhook, which Stripe is still delivering. A loss already applied whose
  *    snapshot says won is a late win, and is settled too (Codex-2hxff.70).
+ *    So is an applied row whose appeal mark Stripe disagrees with (owner
+ *    D34): the live read marks or clears it, and nothing else runs.
  * 2. **Our rows** with a final status whose outcome was never applied, of any
  *    age, but not written in the last 15 minutes (the webhook's). This
  *    catches an outcome step that keeps failing (owner decision 2026-10-23,
@@ -37,7 +39,9 @@
  *
  * The 08:00 London run, which pays the banks and has no subrequests to spare,
  * finds no new late wins (`lateWins: false`): no source 3, and source 1 leaves
- * applied losses alone. The next hour's run picks them up. Source 2 still
+ * applied rows alone, appeal marks included. The next hour's run picks them
+ * up. Each dispute settled is read from Stripe once: `processDispute` is told
+ * it is live (`receivedLive`). Source 2 still
  * retries a late win already being undone, as it retries any unapplied row.
  *
  * A dispute is acted on when we have no row, when its record would move to a
@@ -59,10 +63,11 @@
  */
 
 import {
-  DISPUTE_APPEAL_STATUSES,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
   DISPUTE_INQUIRY_STATUSES,
+  disputeAppealOf,
+  settlesAsLost,
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
 import { LateWinRefundRefusedError, WinSettlingError } from '@codex/purchase';
@@ -243,7 +248,9 @@ export async function runDisputeReconcile(
     const effects = reopening ? withoutNewBlock(deps.effects) : deps.effects;
     try {
       if (
-        (await processDispute(live, { ...deps, effects }, TRIGGER)) === 'acted'
+        (await processDispute(live, { ...deps, effects }, TRIGGER, {
+          receivedLive: true,
+        })) === 'acted'
       ) {
         result.acted++;
       }
@@ -504,11 +511,11 @@ function stageOf(status: string): number {
   ) {
     return CHARGEBACK_STAGE;
   }
-  // An appeal (`appeal_*`) is reachable only from `lost`, so it is closed as
-  // `lost` is: the loss is applied through it (owner D34).
+  // An appeal (`appeal_*`) settles as lost, so it is closed as `lost` is: the
+  // loss is applied through it (owner D34).
   if (
     (DISPUTE_CLOSED_STATUSES as readonly string[]).includes(status) ||
-    (DISPUTE_APPEAL_STATUSES as readonly string[]).includes(status)
+    settlesAsLost(status)
   ) {
     return CLOSED_STAGE;
   }
@@ -523,17 +530,32 @@ function stageOf(status: string): number {
  * later stage. An open inquiry at the same stage has nothing to retry.
  *
  * An applied outcome is done, but for a loss whose snapshot says won: a late
- * win (Codex-2hxff.70), unless `lateWins` is off. A late win already undone,
- * or settled by hand (release step R18), is won and applied: left alone.
+ * win (Codex-2hxff.70). A late win already undone, or settled by hand
+ * (release step R18), is won and applied: left alone. And for an appeal's
+ * mark that Stripe disagrees with (owner D34): one whose event was missed, a
+ * decision missed, a mark set again by a race with the decision, or one left
+ * stale on a won row by a rollback's late win. A mark lives only on a lost
+ * row, and follows Stripe's appeal there. Rows that agree are not read. With
+ * `lateWins` off (the 08:00 run), applied rows are left alone.
  */
 function needsSettling(
   stripeStatus: string,
-  record: { status: string; outcomeAppliedAt: Date | null } | undefined,
+  record:
+    | {
+        status: string;
+        outcomeAppliedAt: Date | null;
+        appealStatus: string | null;
+      }
+    | undefined,
   lateWins: boolean
 ): boolean {
   if (!record) return true;
   if (record.outcomeAppliedAt) {
-    return lateWins && record.status === 'lost' && stripeStatus === 'won';
+    if (!lateWins) return false;
+    if (record.status === 'lost' && stripeStatus === 'won') return true;
+    const mark =
+      record.status === 'lost' ? disputeAppealOf(stripeStatus) : null;
+    return record.appealStatus !== mark;
   }
   const recordedStage = stageOf(record.status);
   return (

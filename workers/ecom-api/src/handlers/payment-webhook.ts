@@ -28,11 +28,12 @@
 import { AccessRevocation, type RevocationReason } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
 import {
-  DISPUTE_APPEAL_STATUSES,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
+  disputeAppealOf,
   isForeignStripeEnvironment,
   STRIPE_EVENTS,
+  settlesAsLost,
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
 import {
@@ -795,21 +796,24 @@ async function handleDispute(
  * ask Stripe first, but only for a charge with no payout rows: nothing to
  * claw back.)
  *
- * **An appeal** of a lost chargeback (`appeal_*`; owner D34) is reachable
- * only from `lost`, and the platform has lost the money either way: it is
- * recorded, and acted on, as lost, with the appeal marked on the row. So a
- * loss never applied is applied through an appeal, and a late win undoes it
- * as any late win. Stripe does not deliver events in order, so an appeal is
- * recorded at the dispute's live status (`liveDispute`), never the event's.
- * A `lost` for a row whose appeal ran may be an event older than the appeal:
- * the record asks (`appealCheck`), and the live status is recorded instead.
+ * **An appeal** of a lost chargeback (`appeal_*`; owner D34) is recorded,
+ * and acted on, as lost, with the appeal marked on the row (the record does
+ * this: `recordDispute`). So a loss never applied is applied through an
+ * appeal, and a late win undoes it as any late win. Stripe does not deliver
+ * events in order, so an appeal is recorded at the dispute's live status
+ * (`liveDispute`), never the event's. A `lost` for a row whose appeal ran may
+ * be an event older than the appeal: the record asks (`appealCheck`), and
+ * the live status is recorded instead.
  *
  * `trigger` names the caller in the log: the event type, or the reconcile.
+ * `receivedLive` says the dispute was just read from Stripe (the reconcile's
+ * is), so it is not read again.
  */
 export async function processDispute(
   received: Stripe.Dispute,
   deps: DisputeDeps,
-  trigger: string
+  trigger: string,
+  { receivedLive = false }: { receivedLive?: boolean } = {}
 ): Promise<DisputeOutcome> {
   const { stripe, purchase, subscription, environment, obs, effects } = deps;
   const chargeId =
@@ -834,41 +838,38 @@ export async function processDispute(
   const paymentIntentId =
     extractPaymentIntentId(charge.payment_intent) ??
     extractPaymentIntentId(received.payment_intent);
-  const record = (read: Stripe.Dispute, live: boolean) => {
-    const appeal = isOneOf(read.status, DISPUTE_APPEAL_STATUSES)
-      ? read.status
-      : null;
-    return purchase.recordDispute({
+  const record = (read: Stripe.Dispute, live: boolean) =>
+    purchase.recordDispute({
       stripeDisputeId: read.id,
       stripeChargeId: charge.id,
       paymentIntentId: paymentIntentId ?? null,
       amountCents: read.amount,
       currency: read.currency,
-      // An appeal is reachable only from `lost`, and the money is lost
-      // either way: it is recorded, and acted on, as lost (owner D34).
-      status: appeal ? 'lost' : read.status,
-      appeal,
+      status: read.status,
       live,
       reason: read.reason ?? null,
       stripeCreatedAt: new Date(read.created * 1000),
     });
-  };
 
-  const appealEvent = isOneOf(received.status, DISPUTE_APPEAL_STATUSES);
+  // An appeal's event is read live: Stripe does not deliver in order.
+  const appealEvent =
+    !receivedLive && disputeAppealOf(received.status) !== null;
   let dispute = appealEvent ? await liveDispute(stripe, received.id) : received;
-  let recorded = await record(dispute, appealEvent);
-  // A `lost` for a row whose appeal ran: the decision, or an event older than
-  // the appeal. Stripe says which.
+  let live = receivedLive || appealEvent;
+  let recorded = await record(dispute, live);
+  // A `lost` event for a row whose appeal ran: the decision, or an event
+  // older than the appeal. Stripe says which. Never asked of a live status.
   if (recorded?.appealCheck) {
     dispute = await liveDispute(stripe, dispute.id);
-    recorded = await record(dispute, true);
+    live = true;
+    recorded = await record(dispute, live);
   }
   // The record refused a won dispute's move to lost, which Stripe documents
   // no way to make (Codex-2hxff.70, design §3.3). A late win's `lost` event
   // arriving after its `won` one is the usual cause, and no fault: only a
   // dispute Stripe says is lost NOW is alerted. Nothing changes either way.
   if (recorded?.refusedLost) {
-    await alertIfWonReportedLost(stripe, obs, dispute.id);
+    await alertIfWonReportedLost(stripe, obs, dispute, live);
   }
   // An applied outcome stops here: a late win settled by hand under release
   // step R18 included, so nothing is restored, re-paid, refunded or sent.
@@ -1357,8 +1358,10 @@ function logAccessRestoredNotSent(
  * Stripe does not deliver events in order, so an `appeal_needs_response` can
  * arrive after the `appeal_under_review`, after the bank's decision, or an
  * old `lost` after the appeal began: recording the live status, never the
- * event's, keeps a stale one from writing anything wrong. A failed read is
- * retried: a 503 has Stripe redeliver the event.
+ * event's, keeps a stale one from writing anything wrong. A transient read
+ * failure is a 503, so Stripe redelivers the event. A permanent one (a 404,
+ * say) is left as it is: the classifier acknowledges it, and the hourly
+ * reconcile re-reads the dispute.
  */
 async function liveDispute(
   stripe: Stripe,
@@ -1367,6 +1370,7 @@ async function liveDispute(
   try {
     return await stripe.disputes.retrieve(disputeId);
   } catch (error) {
+    if (!isTransientError(error)) throw error;
     throw new ServiceUnavailableError(
       'An appealed dispute could not be read from Stripe; it is retried',
       { disputeId },
@@ -1377,23 +1381,22 @@ async function liveDispute(
 
 /**
  * A won dispute's record refused a `lost` (design §11, "Won reported lost").
- * Stripe is read once: a late `lost` event that the win overtook is no
- * fault, so only a dispute Stripe now says is lost, or under an appeal,
- * which only a loss reaches, is alerted, ids only.
+ * Stripe is read at most once, and not at all when the dispute held is live
+ * already (an appeal's, a re-read, or the reconcile's). A late `lost` event
+ * that the win overtook is no fault, so only a dispute Stripe now says is
+ * lost, or under an appeal, which only a loss reaches, is alerted, ids only.
  */
 async function alertIfWonReportedLost(
   stripe: Stripe,
   obs: ObservabilityClient | undefined,
-  disputeId: string
+  held: Stripe.Dispute,
+  heldIsLive: boolean
 ): Promise<void> {
-  const live = await stripe.disputes.retrieve(disputeId);
-  // An appeal is reachable only from `lost` (owner D34).
-  const lostNow =
-    live.status === 'lost' || isOneOf(live.status, DISPUTE_APPEAL_STATUSES);
-  if (!lostNow) return;
+  const now = heldIsLive ? held : await stripe.disputes.retrieve(held.id);
+  if (!settlesAsLost(now.status)) return;
   obs?.error(
     'A won dispute was reported lost: nothing changed, check it in Stripe',
-    { errorId: crypto.randomUUID(), disputeId }
+    { errorId: crypto.randomUUID(), disputeId: held.id }
   );
 }
 

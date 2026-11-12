@@ -121,10 +121,12 @@ export const disputes = pgTable(
     /**
      * The appeal of a lost chargeback, while it runs (owner D34):
      * `appeal_needs_response`, then `appeal_under_review`. Set only on a
-     * `lost` row (`check_disputes_appeal_lost`) and only forward; the bank's
-     * decision (a late win, or a `lost` read live from Stripe) clears it, so
-     * support shows "Appeal…" only while the appeal runs. Null for every
-     * other dispute.
+     * `lost` row, in code: no CHECK holds it, since a CHECK binds an older
+     * worker after a rollback too, and its late win doesn't clear the mark.
+     * It follows Stripe's appeal; the bank's decision (a late win, or a
+     * `lost` read live from Stripe) clears it, and the hourly reconcile
+     * clears one left stale. Support shows "Appeal…" only under Lost, while
+     * the appeal runs. Null for every other dispute.
      */
     appealStatus: varchar('appeal_status', {
       length: 32,
@@ -181,12 +183,6 @@ export const disputes = pgTable(
     check(
       'check_disputes_appeal_status',
       sql`${table.appealStatus} IS NULL OR ${table.appealStatus} IN ('appeal_needs_response', 'appeal_under_review')`
-    ),
-    // An appeal's mark is only ever on a lost row. The one move away from
-    // `lost` is the late win, which clears the mark in the same SET.
-    check(
-      'check_disputes_appeal_lost',
-      sql`${table.appealStatus} IS NULL OR ${table.status} = 'lost'`
     ),
   ]
 );
