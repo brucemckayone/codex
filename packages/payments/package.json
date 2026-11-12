@@ -26,7 +26,7 @@
     "@codex/database": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "drizzle-orm": "0.44.7",
-    "stripe": "^19.2.0"
+    "stripe": "^23.1.0"
   },
   "devDependencies": {
     "@codex/test-utils": "workspace:*",

@@ -87,7 +87,8 @@ reconciliation months later.
 
 ### Stripe SDK version
 
-Pinned to `'2025-10-29.clover'` (Stripe Node v19.3.1). When upgrading, read the
+Pinned to `'2026-10-28.endive'` (Stripe Node v23.1.0), as `STRIPE_API_VERSION` in
+`packages/purchase/src/stripe-client.ts`. When upgrading, read the
 Stripe changelog and use the `stripe-best-practices` skill which includes migration
 guidance.
 
@@ -98,7 +99,7 @@ guidance.
 ```typescript
 // packages/purchase/src/stripe-client.ts
 export function createStripeClient(apiKey: string): Stripe {
-  return new Stripe(apiKey, { apiVersion: '2025-10-29.clover' });
+  return new Stripe(apiKey, { apiVersion: STRIPE_API_VERSION }); // '2026-10-28.endive'
 }
 ```
 

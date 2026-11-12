@@ -171,6 +171,7 @@ export { verifyPurchase } from './services/verify-purchase';
 // Stripe client factory
 export {
   createStripeClient,
+  STRIPE_API_VERSION,
   verifyWebhookSignature,
 } from './stripe-client';
 // Types

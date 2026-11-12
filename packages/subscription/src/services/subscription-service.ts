@@ -3688,8 +3688,9 @@ export class SubscriptionService extends BaseService {
    * otherwise Stripe re-runs the calc against `Date.now()` and the user gets
    * charged a different amount than they confirmed. A switch into yearly
    * billing cannot be pinned that way (Stripe refuses `proration_date` with
-   * `billing_cycle_anchor: 'now'`), so its preview also returns a `quote` the
-   * page echoes back, and the commit re-checks it (Codex-2hxff.96). So does
+   * `billing_cycle_anchor: { type: 'now' }`), so its preview also returns a
+   * `quote` the page echoes back, and the commit re-checks it
+   * (Codex-2hxff.96). So does
    * C(b) when it charges: pinned, but at a yearly Price the commit's price
    * check never reads (Codex-2hxff.103).
    *
@@ -3788,8 +3789,9 @@ export class SubscriptionService extends BaseService {
    *
    * Most changes are pinned to `at` by `proration_date`, which the write
    * repeats. A switch into yearly billing starts a new period today: it
-   * passes `billing_cycle_anchor: 'now'` instead, because Stripe refuses
-   * `proration_date` with it, so its credit runs to the moment of the write.
+   * passes `billing_cycle_anchor: { type: 'now' }` instead, because Stripe
+   * refuses `proration_date` with it, so its credit runs to the moment of the
+   * write.
    * Its `quote` holds what the dialog showed, for the re-check
    * (Codex-2hxff.96). Stripe bills that new period as an ordinary line beside
    * the credit, not a proration, so it shows every line of the invoice: the
@@ -3819,7 +3821,7 @@ export class SubscriptionService extends BaseService {
         items: [{ id: plan.item.id, price: plan.newPriceId }],
         proration_behavior: 'always_invoice',
         ...(newPeriod
-          ? { billing_cycle_anchor: 'now' as const }
+          ? { billing_cycle_anchor: { type: 'now' } }
           : { proration_date: at }),
       },
     });
@@ -4356,7 +4358,7 @@ export class SubscriptionService extends BaseService {
           // dialog said (Codex-2hxff.96). Stripe refuses proration_date with
           // this anchor, so the credit runs to this write; `changeTier`
           // re-checked the dialog's figures just before it.
-          ...(newPeriod && { billing_cycle_anchor: 'now' as const }),
+          ...(newPeriod && { billing_cycle_anchor: { type: 'now' } }),
           // A charge now must clear before the subscription changes. On 402
           // Stripe reverts the price update; we map it to
           // SubscriptionPaymentRequiredError and the row stays untouched.
@@ -5098,7 +5100,7 @@ export class SubscriptionService extends BaseService {
    *     `subscriptions.update(cancel_at_period_end: false)`.
    *
    * On success:
-   *   - Stripe call with `billing_cycle_anchor: 'unchanged'` keeps the
+   *   - Stripe call with `billing_cycle_anchor: { type: 'unchanged' }` keeps the
    *     existing cycle so the user isn't silently re-billed.
    *   - DB: `status` set to what Stripe's response reports (normally
    *     'active'), `updatedAt` bumped.
@@ -5160,7 +5162,7 @@ export class SubscriptionService extends BaseService {
       // first, and do nothing.
       const resumed = await this.stripe.subscriptions.resume(
         sub.stripeSubscriptionId,
-        { billing_cycle_anchor: 'unchanged' },
+        { billing_cycle_anchor: { type: 'unchanged' } },
         {
           idempotencyKey: `resume_${sub.stripeSubscriptionId}_${sub.updatedAt.getTime()}`,
         }

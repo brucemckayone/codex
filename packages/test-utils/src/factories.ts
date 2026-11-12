@@ -663,7 +663,9 @@ export function createMockStripeCheckoutEvent(
     id: eventId,
     object: 'event',
     type: 'checkout.session.completed',
-    api_version: '2025-10-29.clover',
+    // @codex/purchase's STRIPE_API_VERSION; not imported, as purchase's tests
+    // depend on this package.
+    api_version: '2026-10-28.endive',
     created: Math.floor(Date.now() / 1000),
     data: {
       object: {
@@ -744,7 +746,9 @@ export function createMockStripePaymentIntentEvent(
     id: eventId,
     object: 'event',
     type: 'payment_intent.succeeded',
-    api_version: '2025-10-29.clover',
+    // @codex/purchase's STRIPE_API_VERSION; not imported, as purchase's tests
+    // depend on this package.
+    api_version: '2026-10-28.endive',
     created: Math.floor(Date.now() / 1000),
     data: {
       object: {

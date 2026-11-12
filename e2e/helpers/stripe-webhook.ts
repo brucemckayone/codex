@@ -8,7 +8,7 @@
  * HMAC-SHA256 signatures, ensuring compatibility with Stripe's verification logic.
  */
 
-import { createStripeClient } from '@codex/purchase';
+import { createStripeClient, STRIPE_API_VERSION } from '@codex/purchase';
 
 /**
  * Checkout session object as embedded in webhook events
@@ -135,7 +135,7 @@ export function createCheckoutCompletedEvent(
   return {
     id: `evt_test_${timestamp}_${Math.random().toString(36).slice(2)}`,
     object: 'event',
-    api_version: '2025-10-29.clover', // Matches Stripe client API version
+    api_version: STRIPE_API_VERSION, // The version createStripeClient pins
     created: timestamp,
     livemode: false,
     type: 'checkout.session.completed',
@@ -210,7 +210,7 @@ export function createStripeEvent<T>(
   return {
     id: `evt_test_${timestamp}_${Math.random().toString(36).slice(2)}`,
     object: 'event',
-    api_version: '2025-10-29.clover', // Matches Stripe client API version
+    api_version: STRIPE_API_VERSION, // The version createStripeClient pins
     created: timestamp,
     livemode: false,
     type,

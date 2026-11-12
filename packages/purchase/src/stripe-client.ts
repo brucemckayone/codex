@@ -24,15 +24,20 @@
 import Stripe from 'stripe';
 
 /**
- * Stripe API version
- * Internal constant - updated when upgrading Stripe API version
- * Current: 2025-10-29.clover (pinned by Stripe Node v19.3.1)
+ * Stripe API version: the one every request is made at. Updated when
+ * upgrading the Stripe API version.
+ * Current: 2026-10-28.endive, the version stripe-node 23.1.0 pins (its
+ * `esm/apiVersion.js`).
+ *
+ * Exported so test fixtures that build a Stripe event can say the version
+ * the platform asks for. A webhook payload itself is rendered at the
+ * endpoint's own API version, which is set in the Stripe Dashboard.
  *
  * Before an upgrade, run packages/subscription/scripts/test-clock-paid-price.ts
  * on the new version: a switch after an early price move relies on Stripe
  * crediting the invoiced line, not the item's current Price (Codex-2hxff.95).
  */
-const STRIPE_API_VERSION = '2025-10-29.clover';
+export const STRIPE_API_VERSION = '2026-10-28.endive';
 
 /**
  * Create configured Stripe client instance

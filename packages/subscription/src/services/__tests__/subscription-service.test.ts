@@ -2214,7 +2214,11 @@ describe('SubscriptionService', () => {
         subscription_details: Record<string, unknown>;
       };
       if (switches) {
-        expect(params.subscription_details.billing_cycle_anchor).toBe('now');
+        // API 2026-09-30.endive takes the anchor as an object; the string
+        // form is refused.
+        expect(params.subscription_details.billing_cycle_anchor).toStrictEqual({
+          type: 'now',
+        });
         expect(params.subscription_details.proration_date).toBeUndefined();
         // Every line, the amount due and the next bill's London date.
         expect(preview.quote).toMatch(
@@ -2952,7 +2956,7 @@ describe('SubscriptionService', () => {
     });
 
     // A switch into yearly billing cannot be pinned by proration_date (Stripe
-    // refuses it with billing_cycle_anchor 'now'), so the commit previews it
+    // refuses it with billing_cycle_anchor { type: 'now' }), so the commit previews it
     // again and refuses any figure the dialog did not show (Codex-2hxff.96).
     describe.each([
       { change: 'the same tier, annual (interval_switch)', target: 1 },
@@ -3062,7 +3066,8 @@ describe('SubscriptionService', () => {
         );
 
         const params = writes()[0]![1] as Record<string, unknown>;
-        expect(params.billing_cycle_anchor).toBe('now');
+        // The endive object form (API 2026-09-30.endive refuses the string).
+        expect(params.billing_cycle_anchor).toStrictEqual({ type: 'now' });
         expect(params.proration_date).toBeUndefined();
       });
 
@@ -3463,12 +3468,15 @@ describe('SubscriptionService', () => {
 
       await service.resumeSubscription(otherCreatorId, org.id);
 
-      // Stripe resume must be called with billing_cycle_anchor='unchanged'
-      // to preserve the existing cycle (avoids surprise re-billing) and
-      // with an idempotency key per packages/subscription/CLAUDE.md.
+      // Stripe resume must be called with billing_cycle_anchor
+      // { type: 'unchanged' } (the endive object form) to preserve the
+      // existing cycle (avoids surprise re-billing) and with an idempotency
+      // key per packages/subscription/CLAUDE.md.
       expect(stripe.subscriptions.resume).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ billing_cycle_anchor: 'unchanged' }),
+        expect.objectContaining({
+          billing_cycle_anchor: { type: 'unchanged' },
+        }),
         expect.objectContaining({
           idempotencyKey: expect.stringContaining('resume_'),
         })

@@ -30,6 +30,7 @@
  */
 
 import { closeDbPool, dbHttp, schema } from '@codex/database';
+import { STRIPE_API_VERSION } from '@codex/purchase';
 import {
   authFixture,
   expectSuccessResponse,
@@ -62,7 +63,7 @@ function createChargeRefundedEvent(params: {
   return {
     id: `evt_test_refund_${timestamp}_${Math.random().toString(36).slice(2)}`,
     object: 'event' as const,
-    api_version: '2025-10-29.clover',
+    api_version: STRIPE_API_VERSION,
     created: timestamp,
     livemode: false,
     type: 'charge.refunded' as const,

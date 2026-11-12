@@ -936,7 +936,11 @@ export class PurchaseService extends BaseService {
             this.stripe.checkout.sessions.create(
               {
                 mode: 'payment',
-                payment_method_types: ['card'],
+                // Card-only (owner D32): ecom-api grants only a `paid`
+                // session, so a delayed method would take the money and
+                // grant nothing. API 2026-09-30.endive removed
+                // `payment_method_types`; this keeps the restriction.
+                allowed_payment_method_types: ['card'],
                 customer: resolvedCustomerId,
                 line_items: [
                   {
@@ -1697,7 +1701,11 @@ export class PurchaseService extends BaseService {
             this.stripe.checkout.sessions.create(
               {
                 mode: 'payment',
-                payment_method_types: ['card'],
+                // Card-only (owner D32): ecom-api grants only a `paid`
+                // session, so a delayed method would take the money and
+                // grant nothing. API 2026-09-30.endive removed
+                // `payment_method_types`; this keeps the restriction.
+                allowed_payment_method_types: ['card'],
                 customer: resolvedCustomerId,
                 line_items: [
                   {

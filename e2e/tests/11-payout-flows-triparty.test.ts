@@ -34,6 +34,7 @@
  */
 
 import { closeDbPool, dbHttp, schema } from '@codex/database';
+import { STRIPE_API_VERSION } from '@codex/purchase';
 import {
   authFixture,
   expectSuccessResponse,
@@ -90,7 +91,7 @@ function createAccountUpdatedEvent(params: {
   return {
     id: `evt_test_acct_${timestamp}_${Math.random().toString(36).slice(2)}`,
     object: 'event' as const,
-    api_version: '2025-10-29.clover',
+    api_version: STRIPE_API_VERSION,
     created: timestamp,
     livemode: false,
     type: 'account.updated' as const,

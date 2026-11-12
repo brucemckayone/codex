@@ -95,7 +95,8 @@ describe('verifyStripeSignature middleware', () => {
     id: 'evt_test_123',
     object: 'event',
     type: STRIPE_EVENTS.CHECKOUT_COMPLETED,
-    api_version: '2025-10-29.clover',
+    // @codex/purchase's STRIPE_API_VERSION, written out: this file mocks the module.
+    api_version: '2026-10-28.endive',
     created: Date.now() / 1000,
     data: {
       object: {

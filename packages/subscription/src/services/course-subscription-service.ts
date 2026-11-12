@@ -2030,7 +2030,7 @@ export class CourseSubscriptionService extends BaseService {
   /**
    * Refund one paid invoice of a duplicate by its charge, whether or not the
    * duplicate is settled. A delayed payment method (Bacs Direct Debit and
-   * others; subscription checkouts don't restrict `payment_method_types`)
+   * others; subscription checkouts don't restrict their payment methods)
    * can be paid after the settle found nothing to refund. The key is the one
    * `cancelAndRefundDuplicate` uses, so a refund it made is not made twice. A
    * failure is retryable, as in {@link settleDuplicate}. What customer credit

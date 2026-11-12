@@ -97,8 +97,10 @@ export function mapStripeSubscriptionStatus(
   const item = stripeSubscription.items?.data?.[0];
   const price = item?.price;
   const rawInterval = price?.recurring?.interval;
+  // The literals, not `rawInterval`: stripe-node 22+ types enums as open
+  // unions (`| OtherString`), which an equality check does not narrow away.
   const billingInterval: BillingInterval | null =
-    rawInterval === 'month' || rawInterval === 'year' ? rawInterval : null;
+    rawInterval === 'month' ? 'month' : rawInterval === 'year' ? 'year' : null;
 
   const periodStart = item?.current_period_start ?? 0;
   const periodEnd = item?.current_period_end ?? 0;
