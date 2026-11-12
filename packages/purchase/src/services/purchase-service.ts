@@ -4905,18 +4905,20 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Clear every appeal mark on a dispute that isn't lost (owner D34). Only a
-   * loss is appealed, so such a mark is always stale: an older worker's late
-   * win after a rollback leaves one, as does release step R18 (a)'s hand
+   * Clear every appeal mark on an applied dispute that isn't lost (owner
+   * D34). Only a loss is appealed, so such a mark is always stale: an older
+   * worker's late win after a rollback leaves one, as does release step R18
+   * (a)'s hand
    * UPDATE run after the deploy. It needs no Stripe read and moves no money,
    * so the hourly reconcile runs it first on every run, the 08:00 one
    * included, whatever the dispute's age.
    *
    * Only on an applied row. A row still being settled (an older worker's
    * late win whose undo hasn't finished) is the reconcile's retry of
-   * unsettled rows to settle, and its live record clears the mark. Leaving
-   * it alone here keeps `updated_at` still, so that retry's grace never
-   * skips it.
+   * unsettled rows to settle, and its live record clears the mark. If that
+   * record is refused (Stripe has it lost now) or never runs, the mark waits
+   * until the row is applied, and this step clears it then. Leaving it alone
+   * here keeps `updated_at` still, so that retry's grace never skips it.
    *
    * A platform reconcile, like `findDisputeRecords`, so it has no creator
    * scope: the disputes ledger is the platform's, keyed by Stripe's dispute

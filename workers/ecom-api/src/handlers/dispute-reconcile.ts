@@ -12,10 +12,11 @@
  * - a chargeback whose opening failed after it was recorded leaves the buyer
  *   with access, the subscription billing, and the paid slices unreversed.
  *
- * First, with no Stripe read, every appeal mark left on a dispute that isn't
- * lost is cleared (owner D34): such a mark is always stale, so its age
- * doesn't matter, and it moves no money, so this runs every hour, the 08:00
- * run included.
+ * First, with no Stripe read, every appeal mark left on an applied dispute
+ * that isn't lost is cleared (owner D34): such a mark is always stale, so its
+ * age doesn't matter, and it moves no money, so this runs every hour, the
+ * 08:00 run included. One still being settled is left to source 2, whose
+ * live record clears it.
  *
  * Then three sources. Each dispute is re-read from Stripe, then run through
  * the webhook's own `processDispute`:
@@ -215,7 +216,7 @@ export interface DisputeReconcileResult {
    * after the account default moves to the pin (release step R23).
    */
   snapshotsBelowPin: number;
-  /** Appeal marks cleared from disputes that are not lost (owner D34). */
+  /** Appeal marks cleared from applied disputes that are not lost (D34). */
   staleMarksCleared: number;
 }
 

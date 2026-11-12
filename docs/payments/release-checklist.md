@@ -936,7 +936,11 @@ Stripe allows a rollback for 72 hours after it.
   whatever its type, so this needn't wait for a dispute. Read its API version
   on the event in the Dashboard, or read-only through the API (`events.list`
   with `limit: 1`, its `api_version`), as the 2026-11-12 probe did when it
-  found the sandbox's 100 newest events at `2025-09-30.clover`;
+  found the sandbox's 100 newest events at `2025-09-30.clover`. Check that
+  event's `created` is after the upgrade: the call returns the newest event
+  overall, so on a quiet sandbox it is an older one, which reads as a failed
+  upgrade. If it is older, wait for any event, or cause one with a harmless
+  TEST-mode update, and read again;
 - as a cross-check only, from four days after the upgrade: on a reconcile run
   whose "dispute reconcile completed" log shows `fromEvents` of 1 or more,
   `snapshotsBelowPin` is 0. A run with `fromEvents: 0` shows 0 whatever the
@@ -982,7 +986,8 @@ show a decided appeal as running.
 After rolling forward, the hourly reconcile repairs these. Its first step
 clears every mark on an applied row that isn't lost, whatever its age, with
 no Stripe read, on every run; a won row still being undone has its mark
-cleared by the retry that settles it. A mark on a lost row needs Stripe's word: the reconcile
+cleared by the reconcile's next retry of it, when it records the live
+status, whether or not that retry finishes the undo. A mark on a lost row needs Stripe's word: the reconcile
 re-reads each lost dispute with an event in its 4-day window whose mark
 disagrees with Stripe, and marks or clears it, and the 08:00 run leaves those
 to the next hour. A lost row's mark on a dispute with no event in that window
