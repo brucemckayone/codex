@@ -1,4 +1,10 @@
-import { isSafeCssValue } from '@codex/validation';
+import {
+  isSafeCssValue,
+  RESERVED_TOKEN_OVERRIDE_KEYS,
+  staysInOneDeclaration,
+  TOKEN_OVERRIDE_MAX_ENTRIES,
+  tokenOverrideText,
+} from '@codex/validation';
 import { browser } from '$app/environment';
 import { brandFontProperty, withFallback } from './font-fallbacks';
 import {
@@ -421,10 +427,26 @@ const RETIRED_OVERRIDE_KEYS = new Set(['text-on-brand']);
 /**
  * Whether an override key becomes a CSS custom property: not an
  * attribute-only key (`hero-hide-*` drive data-* attributes, set by the org
- * layout) and not a retired one.
+ * layout), not a retired one, and not one the layouts set themselves
+ * (`shader-logo-url`, whose dark variant ShaderHero would fetch, Codex-403d3).
  */
 function emitsCssVar(key: string): boolean {
-  return !key.startsWith('hero-hide-') && !RETIRED_OVERRIDE_KEYS.has(key);
+  return (
+    !key.startsWith('hero-hide-') &&
+    !RETIRED_OVERRIDE_KEYS.has(key) &&
+    !RESERVED_TOKEN_OVERRIDE_KEYS.has(key)
+  );
+}
+
+/**
+ * The entries a stored override map renders from: at most
+ * TOKEN_OVERRIDE_MAX_ENTRIES, the same ones the brand editor keeps on load,
+ * so what renders is what the next save keeps.
+ */
+function renderedEntries(
+  overrides: Readonly<Record<string, unknown>>
+): [string, unknown][] {
+  return Object.entries(overrides).slice(0, TOKEN_OVERRIDE_MAX_ENTRIES);
 }
 
 /** CSS properties set by the base CSS_VAR_MAPPINGS (not token overrides). */
@@ -684,11 +706,13 @@ export function injectBrandVars(state: BrandEditorState): void {
  * mount without flickering from the default preset.
  */
 export function tokenOverridesToCssVars(
-  overrides: Record<string, string | null | undefined>
+  overrides: Readonly<Record<string, unknown>>
 ): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value == null) continue;
+  for (const [key, stored] of renderedEntries(overrides)) {
+    // Null skips; a stored number renders in its plain form.
+    const value = tokenOverrideText(stored);
+    if (value === null) continue;
     // Skip attribute-only, retired and field-owned keys (lightOverrideProp).
     const prop = lightOverrideProp(key);
     if (!prop) continue;
@@ -732,22 +756,25 @@ export function injectTokenOverrides(
  * paint without flicker.
  */
 export function darkTokenOverridesToCssVars(
-  overrides: Record<string, string | null | undefined>
+  overrides: Readonly<Record<string, unknown>>
 ): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value == null) continue;
+  for (const [key, stored] of renderedEntries(overrides)) {
+    // Null skips; a stored number renders in its plain form.
+    const value = tokenOverrideText(stored);
+    if (value === null) continue;
     if (!emitsCssVar(key)) continue;
-    // A stored row can hold any JSON, and quoteFamily would throw on a number.
-    if (typeof value !== 'string') continue;
     const baseProp = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
+    const prop = `${baseProp}${DARK_TOKEN_SUFFIX}`;
+    // The value as saved meets the save's own rule, so a family the save
+    // kept is never dropped for the length its quoting and fallback add.
+    if (!isSafeDeclaration([prop, value])) continue;
     // Font families must be quoted (see quoteFamily); everything else stays raw.
     const emitted = FONT_OVERRIDE_KEYS.has(key) ? quoteFamily(value) : value;
-    const prop = `${baseProp}${DARK_TOKEN_SUFFIX}`;
-    // Checked as emitted, since the quoted family is what reaches the style.
-    if (!isSafeDeclaration([prop, emitted])) continue;
+    // The quoted family is what reaches the style, so it must still close.
+    if (!staysInOneDeclaration(emitted)) continue;
     out[prop] = emitted;
   }
   return out;

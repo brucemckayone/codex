@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { hexColorSchema, timezoneSchema } from '../primitives';
+import { TOKEN_OVERRIDE_MAX_ENTRIES } from '../schemas/brand-tokens';
 import {
   ALLOWED_LOGO_MIME_TYPES,
   allSettingsSchema,
@@ -185,7 +186,7 @@ describe('updateBrandingSchema', () => {
 describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
   type Field = 'tokenOverrides' | 'darkTokenOverrides';
 
-  /** Each issue's path and message, or [] when the value is accepted. */
+  /** Each issue's path, or [] when the value is accepted. */
   function problems(field: Field, value: unknown) {
     const result = updateBrandingSchema.safeParse({ [field]: value });
     return result.success ? [] : result.error.issues.map((issue) => issue.path);
@@ -196,9 +197,9 @@ describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
     'heading-color': '#1A2B3C',
     'shader-preset': 'haze',
     'shader-intensity': '0.60',
-    'shadow-color': 'oklch(0.3 0.02 250 / 0.4)',
-    'font-body': '"Playfair Display", serif',
+    'font-body': 'Playfair Display',
     'hero-hide-title': 'true',
+    'hero-title-blend': 'normal',
     'text-scale': null,
   };
 
@@ -207,6 +208,20 @@ describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
     'darkTokenOverrides',
   ])('accepts what the brand editor saves (%s)', (field) => {
     expect(problems(field, JSON.stringify(EDITOR_MAP))).toEqual([]);
+  });
+
+  it.each([
+    ['an rgba() colour', 'rgba(0, 0, 0, 0.1)'],
+    ['an oklch() colour', 'oklch(0.3 0.02 250 / 0.4)'],
+    ['a color-mix()', 'color-mix(in oklch, #fff 20%, transparent)'],
+    ['calc() over var()', 'calc(var(--space-2) * 1.5)'],
+    ['a quoted family list', '"Playfair Display", serif'],
+    ['a family with a bracketed word', 'Foo Sans (Display)'],
+    ['a stored number', 1.2],
+  ])('accepts %s, as older stored colours and numbers hold', (_l, value) => {
+    expect(
+      problems('tokenOverrides', JSON.stringify({ 'shadow-color': value }))
+    ).toEqual([]);
   });
 
   it('accepts a clear: null, an empty string, or nothing', () => {
@@ -227,14 +242,35 @@ describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
     ['a value that starts a new declaration', 'heading-color', 'red; scale: 3'],
     ['a key that carries a declaration', 'x; position: fixed', 'red'],
     ['a camelCase key', 'headingColor', 'red'],
+    ['the reserved logo key', 'shader-logo-url', 'https://pub-a.r2.dev/l.svg'],
     ['a url()', 'heading-color', 'url(https://evil.example/x.png)'],
     ['a URL( in capitals', 'heading-color', 'URL(https://evil.example/x.png)'],
+    ['an image-set()', 'surface', 'image-set("https://pub-a.r2.dev/p.png" 1x)'],
+    [
+      'a -webkit-image-set()',
+      'surface',
+      '-webkit-image-set("https://x/p.png" 1x)',
+    ],
+    ['a cross-fade()', 'surface', 'cross-fade("https://x/a.png", red 50%)'],
+    ['a src()', 'surface', 'src("https://x/p.png")'],
+    ['an image()', 'surface', 'image("https://x/p.png")'],
+    ['an element()', 'surface', 'element(#hero)'],
+    ['an expression()', 'heading-color', 'expression(alert(1))'],
+    ['an @import', 'heading-color', '@import "x.css"'],
+    ['an opening brace', 'heading-color', 'red{'],
     ['a closing brace', 'heading-color', 'red}'],
-    ['an angle bracket', 'heading-color', 'red</style>'],
+    ['an opening angle bracket', 'heading-color', 'red<'],
+    ['a closing angle bracket', 'heading-color', 'red>'],
+    ['a comment', 'heading-color', 'red /* x */'],
+    ['an unclosed single quote', 'glass-tint', "'unclosed"],
+    ['an unclosed double quote', 'glass-tint', '"unclosed'],
+    ['an unclosed bracket', 'heading-color', 'calc(1px + 2px'],
+    ['a stray closing bracket', 'heading-color', 'red)'],
+    ['a mismatched bracket', 'heading-color', 'calc(1px]'],
     ['a backslash escape', 'heading-color', 'red\\3b position: fixed'],
     ['a control character', 'heading-color', 'red\n'],
     ['a value over 200 characters', 'heading-color', 'a'.repeat(201)],
-    ['a number', 'text-scale', 1.2],
+    ['a boolean', 'text-scale', true],
     ['an object', 'heading-color', { nested: 'red' }],
   ])('refuses %s, naming its key', (_label, key, value) => {
     const map = { 'shader-preset': 'haze', [key]: value };
@@ -243,10 +279,20 @@ describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
     ]);
   });
 
-  it('applies the same rule to the dark map', () => {
-    const map = { 'heading-color': 'red; position: fixed' };
+  it('refuses a number JSON cannot hold finitely', () => {
+    expect(problems('tokenOverrides', '{"text-scale": 1e400}')).toEqual([
+      ['tokenOverrides', 'text-scale'],
+    ]);
+  });
+
+  it('applies the same rule to the dark map, the logo key included', () => {
+    const map = {
+      'heading-color': 'red; position: fixed',
+      'shader-logo-url': 'https://pub-a.r2.dev/l.svg',
+    };
     expect(problems('darkTokenOverrides', JSON.stringify(map))).toEqual([
       ['darkTokenOverrides', 'heading-color'],
+      ['darkTokenOverrides', 'shader-logo-url'],
     ]);
   });
 
@@ -264,15 +310,19 @@ describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
     expect(problems('tokenOverrides', json)).toEqual([['tokenOverrides']]);
   });
 
-  it('refuses more than 100 entries, and keeps 100', () => {
+  it('refuses a map past the entry limit, and keeps one at it', () => {
     const map = (size: number) =>
       JSON.stringify(
         Object.fromEntries(
           Array.from({ length: size }, (_, i) => [`key-${i}`, 'red'])
         )
       );
-    expect(problems('tokenOverrides', map(100))).toEqual([]);
-    expect(problems('tokenOverrides', map(101))).toEqual([['tokenOverrides']]);
+    expect(problems('tokenOverrides', map(TOKEN_OVERRIDE_MAX_ENTRIES))).toEqual(
+      []
+    );
+    expect(
+      problems('tokenOverrides', map(TOKEN_OVERRIDE_MAX_ENTRIES + 1))
+    ).toEqual([['tokenOverrides']]);
   });
 });
 

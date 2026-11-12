@@ -213,6 +213,21 @@ describe('brandOverridesToCssVars', () => {
       expect(Object.values(vars).join(' ')).not.toContain(value);
     });
 
+    it.each([
+      ['a breakout', 'Inter"; position: fixed; x: "'],
+      ['an unclosed quote', "Inter'"],
+      ['a block', 'Inter} body{display:none'],
+    ])('drops a core font family carrying %s, which only the last check stops', (_label, value) => {
+      // A family is only quoted (quoteFamily), never checked on the way:
+      // the filter over the whole result is its one guard (Codex-403d3).
+      const vars = brandOverridesToCssVars({
+        fontBody: value,
+        fontHeading: value,
+      });
+      expect(vars).not.toHaveProperty('--brand-font-body');
+      expect(vars).not.toHaveProperty('--brand-font-heading');
+    });
+
     it('drops a token whose NAME would inject', () => {
       const vars = brandOverridesToCssVars({
         tokenOverrides: {

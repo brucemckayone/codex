@@ -24,8 +24,10 @@
   import { page } from '$app/state';
   import {
     type HeroLayout,
+    TOKEN_OVERRIDE_KEY,
     TOKEN_OVERRIDE_MAX_ENTRIES,
     tokenOverrideEntryProblem,
+    tokenOverrideText,
   } from '@codex/validation';
   import type { BrandingSettingsResponse } from '@codex/shared-types';
   import { brandEditor, createBrandPreviewSender } from '$lib/brand-editor';
@@ -288,8 +290,11 @@
       });
       toast.success('Brand settings saved');
     } catch (err) {
+      // The command forwards a worker 4xx with its message (an HttpError is
+      // not an Error, so `err.message` never reached the toast).
       toast.error(
-        err instanceof Error ? err.message : 'Failed to save brand settings'
+        queryErrorMessage(err, 'Failed to save brand settings') ??
+          'Failed to save brand settings'
       );
     } finally {
       saving = false;
@@ -367,28 +372,33 @@
   }
 
   // A stored entry the save would refuse (Codex-403d3): a key that isn't
-  // lowercase kebab, or a value that would leave its own CSS declaration. It
-  // is dropped here, so the next Save never sends it back and the brand stays
-  // saveable (owner's pick). Nothing is lost that showed: the mappers never
-  // render such an entry either. Logged as a count, never the values.
+  // lowercase kebab, a reserved key, a value that would leave its own CSS
+  // declaration or fetch, or an entry past the limit. It is dropped here, so
+  // the next Save never sends it back and the brand stays saveable (owner's
+  // pick). Nothing is lost that showed: the mappers render the same first
+  // entries and refuse the same ones. A stored number is kept as its text,
+  // as it renders. Logged with the org and the keys, never the values.
   function keepSavable(
     field: string,
     stored: object
   ): Record<string, string | null> | null {
+    const entries = Object.entries(stored);
+    const dropped = entries.slice(TOKEN_OVERRIDE_MAX_ENTRIES).map(([key]) => key);
     const kept: Record<string, string | null> = {};
-    let dropped = 0;
-    for (const [key, value] of Object.entries(stored)) {
-      const full = Object.keys(kept).length >= TOKEN_OVERRIDE_MAX_ENTRIES;
-      if (full || tokenOverrideEntryProblem(key, value)) {
-        dropped++;
+    for (const [key, value] of entries.slice(0, TOKEN_OVERRIDE_MAX_ENTRIES)) {
+      if (tokenOverrideEntryProblem(key, value)) {
+        dropped.push(key);
         continue;
       }
-      kept[key] = typeof value === 'string' ? value : null;
+      kept[key] = tokenOverrideText(value);
     }
-    if (dropped > 0) {
+    if (dropped.length > 0) {
       logger.warn('studio/brand: stored token overrides the save would refuse were dropped', {
+        organizationId: orgId,
         field,
-        dropped,
+        dropped: dropped.length,
+        // Only keys that are well-formed, so a crafted key is never logged.
+        keys: dropped.filter((key) => TOKEN_OVERRIDE_KEY.test(key)).slice(0, 20),
       });
     }
     return Object.keys(kept).length > 0 ? kept : null;
