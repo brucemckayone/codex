@@ -13,6 +13,14 @@ import zlib from 'node:zlib';
 const PROJECT_ROOT = path.resolve(import.meta.dirname, '../../../../');
 const CACHE_DIR = path.join(PROJECT_ROOT, '.cache/seed-images');
 
+/**
+ * How long a seed image download may take. A host that stalls rather than
+ * erroring would otherwise hold each call for undici's 300 s, and with about
+ * 48 of them in a row the seed step times out, though each one falls back
+ * (Codex-6fnfs review).
+ */
+export const FETCH_TIMEOUT_MS = 5000;
+
 type Rgb = readonly [number, number, number];
 
 /** Top and bottom colours of a thumbnail, dark enough for white text. */
@@ -171,7 +179,9 @@ export async function fetchPortraitImage(
     PORTRAIT_URLS[seed] ??
     `https://randomuser.me/api/portraits/men/${Math.abs(hashCode(seed)) % 99}.jpg`;
 
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Failed to fetch portrait: ${url} (${response.status})`);
   }
@@ -197,7 +207,9 @@ export async function fetchUrlImage(
     return fs.readFileSync(cachePath);
   }
 
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Failed to fetch image: ${url} (${response.status})`);
   }

@@ -11,9 +11,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { THUMBNAIL_SEEDS } from '../seed/constants';
-import { generateThumbnailPng } from '../seed/placeholders';
+import {
+  FETCH_TIMEOUT_MS,
+  fetchPortraitImage,
+  fetchUrlImage,
+  generateThumbnailPng,
+} from '../seed/placeholders';
 
 interface Chunk {
   type: string;
@@ -105,5 +110,34 @@ describe('the seed', () => {
       );
 
     expect(fetchesPicsum).toEqual([]);
+  });
+});
+
+describe('the downloads that remain', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('give up after a timeout, so a stalled host cannot hold the seed', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+
+    // Keys no cache holds, so each call reaches the network.
+    await expect(
+      fetchUrlImage(
+        'https://example.invalid/a.png',
+        `uncached-${Date.now()}.png`
+      )
+    ).rejects.toThrow();
+    await expect(
+      fetchPortraitImage(`uncached-${Date.now()}`, 200)
+    ).rejects.toThrow();
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetch.mock.calls) {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    }
+    expect(FETCH_TIMEOUT_MS).toBeLessThanOrEqual(10_000);
   });
 });
