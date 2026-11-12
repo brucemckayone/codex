@@ -186,7 +186,7 @@ export class UploadQueue {
    * delete): closing the tab now would leave the row behind, so the guard holds.
    */
   readonly #discarding = new Set<Promise<void>>();
-  /** How each upload this tab ran ended, kept past its row ({@link ended}). */
+  /** How each upload this tab ran ended, kept past its row ({@link wordOn}). */
   readonly #ended = new SvelteMap<string, UploadEnd>();
   /** Bumped by {@link reset}: an upload begun before it belongs to the last user. */
   #generation = 0;

@@ -136,11 +136,9 @@ export function chosenView(
   if (view.kind !== 'uploading' && view.kind !== 'stopped') return view;
   if (word === 'stopped') return { kind: 'stopped' };
   if (word !== null && view.kind === 'stopped') {
-    return {
-      kind: 'uploading',
-      pct: live?.upload?.pct ?? null,
-      elsewhere: false,
-    };
+    // No number: a stopped report's % no longer moves, and this tab's own
+    // progress is the tray's to show.
+    return { kind: 'uploading', pct: null, elsewhere: false };
   }
   return view;
 }

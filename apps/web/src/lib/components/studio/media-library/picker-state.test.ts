@@ -182,7 +182,7 @@ describe('chosenView', () => {
       ).toEqual({ kind: 'uploading', pct: null, elsewhere: false });
       expect(
         chosenView({ status: 'uploading', createdAt: old }, closed, NOW, word)
-      ).toEqual({ kind: 'uploading', pct: 100, elsewhere: false });
+      ).toEqual({ kind: 'uploading', pct: null, elsewhere: false });
     }
   });
 
