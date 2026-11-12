@@ -63,8 +63,9 @@
      * The viewer holds a platform role the category routes admit
      * (`readsCategoryRoutes`). An org studio admits team members without
      * one: their list asks for no categories and offers no Category menu.
+     * Required, so an org caller cannot lose the facet by leaving it out.
      */
-    canReadCategories?: boolean;
+    canReadCategories: boolean;
     /** Optional class forwarded to the root for layout composition (R13). */
     class?: string;
   }
@@ -73,7 +74,7 @@
     organizationId,
     studioName,
     orgs = [],
-    canReadCategories = false,
+    canReadCategories,
     class: className,
   }: Props = $props();
 
