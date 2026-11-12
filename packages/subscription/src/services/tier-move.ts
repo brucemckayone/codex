@@ -424,8 +424,8 @@ export function startsNewPeriod(
  * page echoes back to change-tier: every line's amount, the amount due today
  * and the next bill's London date (Codex-2hxff.96, "re-check at confirm").
  * Stripe refuses `proration_date` with `billing_cycle_anchor: { type: 'now' }`,
- * so the write cannot be pinned to the preview. It is previewed again just before
- * the write and refused when this string differs. The format is
+ * so the write cannot be pinned to the preview. It is previewed again just
+ * before the write and refused when this string differs. The format is
  * `tierChangeQuoteSchema` in @codex/validation.
  */
 export function tierChangeQuote(figures: {

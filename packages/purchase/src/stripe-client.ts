@@ -2,7 +2,7 @@
  * Stripe Client Factory
  *
  * Centralized Stripe client initialization and webhook verification.
- * Provides single source of truth for Stripe API version and configuration.
+ * Every client is made here, at `STRIPE_API_VERSION` from @codex/constants.
  *
  * Usage:
  * ```typescript

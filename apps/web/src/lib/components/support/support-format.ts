@@ -360,7 +360,8 @@ export function disputeStatus(status: string): BadgeTreatment {
 
 /**
  * A lost chargeback's appeal while it runs (owner D34), under its Lost
- * badge: the platform answers it in Stripe, so the first says where.
+ * badge: the platform answers it in Stripe, so the needs-response label
+ * says where.
  */
 export function disputeAppeal(appeal: DisputeAppealStatus): string {
   switch (appeal) {

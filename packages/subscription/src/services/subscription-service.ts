@@ -3690,9 +3690,8 @@ export class SubscriptionService extends BaseService {
    * billing cannot be pinned that way (Stripe refuses `proration_date` with
    * `billing_cycle_anchor: { type: 'now' }`), so its preview also returns a
    * `quote` the page echoes back, and the commit re-checks it
-   * (Codex-2hxff.96). So does
-   * C(b) when it charges: pinned, but at a yearly Price the commit's price
-   * check never reads (Codex-2hxff.103).
+   * (Codex-2hxff.96). So does C(b) when it charges: pinned, but at a yearly
+   * Price the commit's price check never reads (Codex-2hxff.103).
    *
    * Reuses the same tier-existence + price-configured guards as `changeTier()`
    * so a preview that succeeds is a strong signal the commit will too,
@@ -3791,8 +3790,7 @@ export class SubscriptionService extends BaseService {
    * repeats. A switch into yearly billing starts a new period today: it
    * passes `billing_cycle_anchor: { type: 'now' }` instead, because Stripe
    * refuses `proration_date` with it, so its credit runs to the moment of the
-   * write.
-   * Its `quote` holds what the dialog showed, for the re-check
+   * write. Its `quote` holds what the dialog showed, for the re-check
    * (Codex-2hxff.96). Stripe bills that new period as an ordinary line beside
    * the credit, not a proration, so it shows every line of the invoice: the
    * lines then add up to the charge, and the re-check compares them all. A
@@ -5100,8 +5098,8 @@ export class SubscriptionService extends BaseService {
    *     `subscriptions.update(cancel_at_period_end: false)`.
    *
    * On success:
-   *   - Stripe call with `billing_cycle_anchor: { type: 'unchanged' }` keeps the
-   *     existing cycle so the user isn't silently re-billed.
+   *   - Stripe call with `billing_cycle_anchor: { type: 'unchanged' }` keeps
+   *     the existing cycle so the user isn't silently re-billed.
    *   - DB: `status` set to what Stripe's response reports (normally
    *     'active'), `updatedAt` bumped.
    *   - Orchestrator hook fires with reason `'subscription_resumed'` —

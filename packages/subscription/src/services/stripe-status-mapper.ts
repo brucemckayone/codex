@@ -86,6 +86,24 @@ export function resolveStatus(
 }
 
 /**
+ * A price's recurring interval as ours: `month` or `year`, else null. It
+ * returns the literals, not `interval`: stripe-node 22+ types enums as open
+ * unions (`| OtherString`), which an equality check does not narrow away.
+ */
+function billingIntervalOf(
+  interval: string | undefined
+): BillingInterval | null {
+  switch (interval) {
+    case 'month':
+      return 'month';
+    case 'year':
+      return 'year';
+    default:
+      return null;
+  }
+}
+
+/**
  * Extract all fields that ever need to be mirrored from Stripe into the
  * Codex subscriptions row. `fallbackStatus` is the current DB status so the
  * mapper never silently discards state on an unmapped Stripe enum.
@@ -96,11 +114,7 @@ export function mapStripeSubscriptionStatus(
 ): MappedStripeSubscription {
   const item = stripeSubscription.items?.data?.[0];
   const price = item?.price;
-  const rawInterval = price?.recurring?.interval;
-  // The literals, not `rawInterval`: stripe-node 22+ types enums as open
-  // unions (`| OtherString`), which an equality check does not narrow away.
-  const billingInterval: BillingInterval | null =
-    rawInterval === 'month' ? 'month' : rawInterval === 'year' ? 'year' : null;
+  const billingInterval = billingIntervalOf(price?.recurring?.interval);
 
   const periodStart = item?.current_period_start ?? 0;
   const periodEnd = item?.current_period_end ?? 0;
