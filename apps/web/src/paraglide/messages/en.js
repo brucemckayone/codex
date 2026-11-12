@@ -26847,6 +26847,14 @@ export const support_try_again = () => `Try again`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_trying_again = () => `Trying again…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_loading_charge = () => `Loading the charge…`
 
 
@@ -32344,6 +32352,14 @@ export const fee_note_meta_list_unsent = () => `Sales before each date keep toda
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const fee_note_check_failed = () => `We couldn't check for upcoming fee changes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_check_none = () => `No upcoming fee changes.`
 
 
 /**

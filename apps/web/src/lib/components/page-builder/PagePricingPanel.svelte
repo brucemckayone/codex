@@ -37,6 +37,7 @@
   import PlanPicker from '$lib/components/studio/plan-picker/PlanPicker.svelte';
   import { itemGaps, joinNames } from '$lib/components/studio/plan-picker/select-from-tier';
   import PriceChangeNote from '$lib/components/studio/PriceChangeNote.svelte';
+  import { createLoadRetry } from '$lib/components/studio/load-retry.svelte';
   import {
     dismissalKey,
     type PriceNoteCheck,
@@ -233,22 +234,71 @@
       .join(' ') || undefined
   );
 
-  /** Check again or Try again: one read per press, never two at once. */
-  async function readPlanChanges(note?: PriceNoteView) {
+  // Try again on the failed note (P10) is judged on the read the panel
+  // holds: kit drops a read that failed, so it hands the panel a NEW query,
+  // still loading (Codex-if444). The note, and its focused Try again, stay
+  // until it answers.
+  const planRetry = createLoadRetry(() => planChangesQuery);
+  /**
+   * Check again or Try again is out, and a press of either does nothing. One
+   * press, one re-read; a Try again of a failed read sends two, the stray one
+   * kit's doing (see `createLoadRetry`).
+   */
+  const planBusy = $derived(planReading || planRetry.busy);
+  let planWayNode = $state<HTMLElement | null>(null);
+  /** Repeat failures read out without a focus move; keys the note's words. */
+  let planRepeats = $state(0);
+
+  const failedPlanNote = () =>
+    planWayNode?.querySelector<HTMLElement>(
+      '[data-testid="price-change-note-failed"]'
+    );
+
+  /**
+   * Check again (one note): a re-read of a read that has loaded, which kit
+   * makes in place, so this press's own read is the answer.
+   */
+  async function readPlanChanges(note: PriceNoteView) {
     const query = planChangesQuery;
-    if (!query || planReading) return;
+    if (!query || planBusy) return;
     planReading = true;
     const at = new Date().toISOString();
     try {
       await query.refresh();
-      planCheck =
-        note && !query.error ? { key: note.key, at, lastRunAt: note.lastRunAt } : null;
+      planCheck = !query.error
+        ? { key: note.key, at, lastRunAt: note.lastRunAt }
+        : null;
     } catch {
       // The query keeps the error, and the failed line says so (P10).
       planCheck = null;
     } finally {
       planReading = false;
     }
+  }
+
+  /**
+   * Try again (the failed read). Focus then goes to what the read now says:
+   * the failed note's words (it failed again: read out once more), the first
+   * note, or, with nothing going out, the monthly price, as after Dismiss.
+   */
+  async function retryPlanChanges() {
+    if (planReading) return;
+    const result = await planRetry.retry({
+      from: failedPlanNote,
+      settled: () => {
+        planCheck = null;
+        return () =>
+          planChangesFailed
+            ? failedPlanNote()?.querySelector<HTMLElement>(
+                '[data-testid="price-note-status"]'
+              )
+            : (planWayNode?.querySelector<HTMLElement>(
+                '[data-testid="price-change-note"] [data-testid="price-note-status"]'
+              ) ?? monthlyInput);
+      },
+    });
+    // Focus moved on during it, and the words are the same: read them again.
+    if (result && !result.focusFree && planChangesFailed) planRepeats += 1;
   }
 
   function dismissPlanNote(note: PriceNoteView) {
@@ -347,7 +397,11 @@
   </div>
 
   <!-- ── Course subscription: a real Stripe plan, monthly + annual ─────────── -->
-  <div class="way way--stacked" class:way--on={draft.subscriptionEnabled}>
+  <div
+    class="way way--stacked"
+    class:way--on={draft.subscriptionEnabled}
+    bind:this={planWayNode}
+  >
     <div class="way__row">
       <button
         type="button"
@@ -408,18 +462,20 @@
           <span><b>{planHint.lead}</b> {planHint.body}</span>
         </p>
       {/if}
-      {#if planChangesFailed}
+      <!-- Kept while Try again runs (see `planRetry`). -->
+      {#if planChangesFailed || planRetry.retrying}
         <PriceChangeNote
           failed
-          busy={planReading}
-          onTryAgain={() => readPlanChanges()}
+          busy={planBusy}
+          repeats={planRepeats}
+          onTryAgain={retryPlanChanges}
           data-testid="price-change-note-failed"
         />
       {/if}
       {#each planNotes as note (note.key)}
         <PriceChangeNote
           view={note}
-          busy={planReading}
+          busy={planBusy}
           onCheckAgain={() => readPlanChanges(note)}
           onDismiss={() => dismissPlanNote(note)}
         />
