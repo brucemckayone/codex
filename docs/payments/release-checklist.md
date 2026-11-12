@@ -848,9 +848,10 @@ permanent, and the late win would never be recorded. So a mark can be
 left on a won row: by R18 (a)'s hand UPDATE run after the deploy, or by a
 late win the older workers record after a rollback. It is stale but
 harmless: support shows the appeal line only under Lost. The hourly
-reconcile's first step clears every mark on a row that isn't lost, in the
-database with no Stripe read, whatever the dispute's age, on every run, the
-08:00 one included. The next record of the dispute clears it too, unless
+reconcile's first step clears every mark on an applied row that isn't lost,
+in the database with no Stripe read, whatever the dispute's age, on every
+run, the 08:00 one included. A row still being settled is left to the
+reconcile's retry of unsettled rows, whose live record clears the mark. The next record of the dispute clears it too, unless
 that record is a `lost` or an appeal, which a won row refuses
 (`refusedLost`) without looking at the mark.
 
@@ -917,16 +918,29 @@ Workbench → Overview → API version, upgrade the account to
 `2026-10-28.endive`. Our code pins every request, so this changes only how
 Stripe renders the events it stores from then on, and anything that calls
 Stripe or receives its events without setting a version. Check Workbench's
-list of API versions in use first: anything there other than our pin and the
-5 endpoints is such a caller, and must be found before the upgrade. Stripe
-allows a rollback for 72 hours after it.
+list of API versions in use first, and find each such caller before the
+upgrade:
+- requests at `2025-10-29.clover` are our own workers from before the
+  deploy (the old pin), not an unknown caller;
+- requests or receivers at the current default, `2025-09-30.clover`, set no
+  version: those are the callers to find. Local development's
+  `stripe listen` forwarder (`/webhooks/stripe/dev`) is one: it renders at
+  the account default unless run with `--latest`, so its payloads change
+  shape at the upgrade.
+
+Stripe allows a rollback for 72 hours after it.
 
 **Verify:**
-- a dispute event created after the upgrade renders at `2026-10-28.endive`
-  (its `api_version`, read-only, as in the 2026-11-12 probe that found the
-  sandbox's recent events at `2025-09-30.clover`);
-- four days later, the reconcile's "dispute reconcile completed" log shows
-  `snapshotsBelowPin: 0`.
+- the newest event created after the upgrade, of any type, renders at
+  `2026-10-28.endive`. Every stored event renders at the account default,
+  whatever its type, so this needn't wait for a dispute. Read its API version
+  on the event in the Dashboard, or read-only through the API (`events.list`
+  with `limit: 1`, its `api_version`), as the 2026-11-12 probe did when it
+  found the sandbox's 100 newest events at `2025-09-30.clover`;
+- as a cross-check only, from four days after the upgrade: on a reconcile run
+  whose "dispute reconcile completed" log shows `fromEvents` of 1 or more,
+  `snapshotsBelowPin` is 0. A run with `fromEvents: 0` shows 0 whatever the
+  default, so on its own it proves nothing.
 
 ### R24 — the same release: the wallets one-off Checkout shows (owner)
 
@@ -966,8 +980,9 @@ support shows the appeal line only under Lost. On a lost row support would
 show a decided appeal as running.
 
 After rolling forward, the hourly reconcile repairs these. Its first step
-clears every mark on a row that isn't lost, whatever its age, with no Stripe
-read, on every run. A mark on a lost row needs Stripe's word: the reconcile
+clears every mark on an applied row that isn't lost, whatever its age, with
+no Stripe read, on every run; a won row still being undone has its mark
+cleared by the retry that settles it. A mark on a lost row needs Stripe's word: the reconcile
 re-reads each lost dispute with an event in its 4-day window whose mark
 disagrees with Stripe, and marks or clears it, and the 08:00 run leaves those
 to the next hour. A lost row's mark on a dispute with no event in that window

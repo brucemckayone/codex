@@ -4912,6 +4912,12 @@ export class PurchaseService extends BaseService {
    * so the hourly reconcile runs it first on every run, the 08:00 one
    * included, whatever the dispute's age.
    *
+   * Only on an applied row. A row still being settled (an older worker's
+   * late win whose undo hasn't finished) is the reconcile's retry of
+   * unsettled rows to settle, and its live record clears the mark. Leaving
+   * it alone here keeps `updated_at` still, so that retry's grace never
+   * skips it.
+   *
    * A platform reconcile, like `findDisputeRecords`, so it has no creator
    * scope: the disputes ledger is the platform's, keyed by Stripe's dispute
    * ids, not owned by a creator. Returns the disputes cleared.
@@ -4922,7 +4928,11 @@ export class PurchaseService extends BaseService {
         .update(disputes)
         .set({ appealStatus: null, updatedAt: new Date() })
         .where(
-          and(ne(disputes.status, 'lost'), isNotNull(disputes.appealStatus))
+          and(
+            ne(disputes.status, 'lost'),
+            isNotNull(disputes.appealStatus),
+            isNotNull(disputes.outcomeAppliedAt)
+          )
         )
         // The whole row: `.returning({ id })` does not type-check on the
         // `Database | DatabaseWs` union (TS2554), only on a transaction.

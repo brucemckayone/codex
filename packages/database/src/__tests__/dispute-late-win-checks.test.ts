@@ -19,7 +19,7 @@
  * or one of `DISPUTE_APPEAL_STATUSES` (`check_disputes_appeal_status`). That
  * a mark lives only on a lost row is held in code, NOT here: a CHECK binds
  * an older worker after a rollback too, and its late win, which doesn't
- * clear the mark, must still be recorded (review round 1, F1).
+ * clear the mark, must still be recorded.
  *
  * Real DB. Skips when DB_METHOD is not configured (fee-config-schema.test.ts).
  */

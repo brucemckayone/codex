@@ -1175,29 +1175,48 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
     ]);
   });
 
-  it('clearStaleDisputeAppealMarks clears the mark on every dispute that is not lost, and leaves a lost one marked; it logs what it cleared, and nothing when there is none', async () => {
+  it('clearStaleDisputeAppealMarks clears the mark on every applied dispute that is not lost, and leaves a lost one, and a won one still being undone, marked; it logs what it cleared, and nothing when there is none', async () => {
     const seeded = await seedPurchase(1000);
     const wonId = `dp_stale_won_${seeded.tag}`;
+    const undoingId = `dp_stale_undoing_${seeded.tag}`;
     const lostId = `dp_stale_lost_${seeded.tag}`;
-    createdDisputeIds.push(wonId, lostId);
+    createdDisputeIds.push(wonId, undoingId, lostId);
     const service = makeService();
-    for (const disputeId of [wonId, lostId]) {
+    for (const disputeId of [wonId, undoingId, lostId]) {
       await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
       await service.recordDispute(
         liveFor(seeded, disputeId, 'appeal_under_review')
       );
     }
-    // An older worker's late win: lost → won, the mark left in place.
+    // An older worker's late win: lost → won, the mark left in place. Its
+    // undo has finished on one (applied), and is still to run on the other,
+    // which the reconcile's retry of unsettled rows settles, its live record
+    // clearing the mark; this step leaves it, so that retry's grace never
+    // skips it.
     await db
       .update(disputes)
-      .set({ status: 'won', lateWonAt: new Date() })
+      .set({
+        status: 'won',
+        lateWonAt: new Date(),
+        outcomeAppliedAt: new Date(),
+      })
       .where(eq(disputes.stripeDisputeId, wonId));
+    await db
+      .update(disputes)
+      .set({ status: 'won', lateWonAt: new Date(), outcomeAppliedAt: null })
+      .where(eq(disputes.stripeDisputeId, undoingId));
     const info = vi.spyOn(appealSteps(service).obs, 'info');
 
     const clearedIds = await service.clearStaleDisputeAppealMarks();
 
     expect(clearedIds).toContain(wonId);
+    expect(clearedIds).not.toContain(undoingId);
     expect(clearedIds).not.toContain(lostId);
+    expect(await readDisputeRow(undoingId)).toMatchObject({
+      status: 'won',
+      appealStatus: 'appeal_under_review',
+      outcomeAppliedAt: null,
+    });
     expect(await readDisputeRow(wonId)).toMatchObject({
       status: 'won',
       appealStatus: null,

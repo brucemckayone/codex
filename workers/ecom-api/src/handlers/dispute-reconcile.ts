@@ -481,8 +481,6 @@ async function disputesPage(
 interface DisputeSnapshot {
   id: string;
   status: string;
-  /** When the event was created, in Stripe's seconds. */
-  created: number;
   /** The event rendered below our pin (owner D35). */
   renderedBelowPin: boolean;
 }
@@ -552,7 +550,6 @@ async function furthestDisputeSnapshots(
         furthest.set(dispute.id, {
           id: dispute.id,
           status: dispute.status,
-          created: event.created,
           renderedBelowPin: renderedBelowPin(event.api_version),
         });
       }
