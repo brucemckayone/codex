@@ -335,7 +335,8 @@
       backgroundColor: b.backgroundColorHex,
       fontBody: b.fontBody,
       fontHeading: b.fontHeading,
-      radius: Number(b.radiusValue) || 0.5,
+      // 0 is a real radius ("Sharp"), so not `|| 0.5` (Codex-jxa7t).
+      radius: Number.isFinite(b.radiusValue) ? b.radiusValue : 0.5,
       density: Number(b.densityValue) || 1,
       logoUrl: b.logoUrl,
       tokenOverrides:
