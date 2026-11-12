@@ -348,7 +348,7 @@ describe('ContentService — category tagging (WP-5)', () => {
 
   // A move to another space keeps the old join rows until the set is next
   // saved (Codex-a6ofh.3.3 review): they name nothing, and count for nothing.
-  it('a piece moved out of its org names none of that org’s categories', async () => {
+  it('a piece moved out of its org names none of that org’s categories, and is filed in none', async () => {
     const token = uniqueToken();
     const left = await createCategory(`Left behind ${token}`, orgAId);
     const piece = await createOrgAContent([left.id]);
@@ -368,6 +368,15 @@ describe('ContentService — category tagging (WP-5)', () => {
       (await contentService.get(piece.id, creatorId))?.categoryIds
     ).toEqual([]);
     expect(await membershipIds(piece.id)).toEqual([left.id]);
+
+    // Nor does the filter count it, with no org to pin the category's space.
+    const filtered = await contentService.list(
+      creatorId,
+      { categoryId: left.id },
+      { page: 1, limit: 100 }
+    );
+    expect(filtered.items).toEqual([]);
+    expect(filtered.pagination.total).toBe(0);
   });
 
   it('a personal piece names its creator’s own personal categories', async () => {
@@ -400,6 +409,12 @@ describe('ContentService — category tagging (WP-5)', () => {
     expect(
       (await contentService.get(piece.id, creatorId))?.categoryIds
     ).toEqual([own.id]);
+    const filtered = await contentService.list(
+      creatorId,
+      { categoryId: own.id },
+      { page: 1, limit: 100 }
+    );
+    expect(filtered.items.map((r) => r.id)).toEqual([piece.id]);
   });
 
   it('names no row unless asked: the badges and pickers skip the query', async () => {

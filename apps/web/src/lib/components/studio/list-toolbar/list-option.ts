@@ -29,15 +29,16 @@ export type SegmentOption<T extends string = string> = Omit<
 /**
  * A facet whose choices could not be read (Codex-a6ofh.3.3, owner): its
  * menu and its sheet say so after what they can offer, with a Try again,
- * so a failed read never reads as a list with nothing to pick.
+ * so a failed read never reads as a list with nothing to pick. One per
+ * facet, made where the read is held (`createFacetRetry`): the menu and the
+ * sheet show the same state, and a sheet closed mid-retry reopens on it.
  */
 export interface FacetUnread {
-  /** What could not be read: "Couldn't load the categories." */
-  failed: () => string;
-  /** The same once a Try again failed too, so a repeat is told apart. */
-  failedAgain: () => string;
-  /** Reads the choices again; rejects when that read fails too. */
-  retry: () => Promise<unknown>;
+  /** What it says: failed, trying again, or failed again. */
+  readonly words: string;
+  readonly retrying: boolean;
+  /** Reads again, once at a time; true when the read came back. */
+  retry(): Promise<boolean>;
 }
 
 /** A facet in a list's phone sheet: its URL param, heading and choices. */

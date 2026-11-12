@@ -25,12 +25,11 @@
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { getCategories } from '$lib/remote/categories.remote';
   import { getContentWhereCounts, listContent } from '$lib/remote/content.remote';
-  import { isReadOutage } from '$lib/remote/query-result';
   import { listTiers } from '$lib/remote/subscription.remote';
   import * as m from '$paraglide/messages';
   import ActionLink from '../ActionLink.svelte';
   import LoadFailedAlert from '../LoadFailedAlert.svelte';
-  import type { FacetUnread } from '../list-toolbar/list-option';
+  import { createFacetRetry } from '../list-toolbar/facet-retry.svelte';
   import { createListSearch, createListUrlWriter } from '../list-url-writer';
   import { logReadFailure } from '../media-library/log-read-failure';
   import { PagedList } from '../paged-list.svelte';
@@ -60,11 +59,23 @@
      * is on while the counts, which name the rest, are not read.
      */
     orgs?: readonly { id: string; name: string }[];
+    /**
+     * The viewer holds a platform role the category routes admit
+     * (`readsCategoryRoutes`). An org studio admits team members without
+     * one: their list asks for no categories and offers no Category menu.
+     */
+    canReadCategories?: boolean;
     /** Optional class forwarded to the root for layout composition (R13). */
     class?: string;
   }
 
-  const { organizationId, studioName, orgs = [], class: className }: Props = $props();
+  const {
+    organizationId,
+    studioName,
+    orgs = [],
+    canReadCategories = false,
+    class: className,
+  }: Props = $props();
 
   const studio = $derived(organizationId ? 'org' : 'personal');
 
@@ -159,14 +170,16 @@
   );
 
   // The org studio's Category (Codex-a6ofh.3.3): the org's categories, read
-  // once (untracked, as the counts above). The rows name their own either
-  // way. A read that failed is never shown as an org with none (owner): an
-  // outage says so in the menu, with a Try again; a refusal (a member
-  // without the creator or admin role the route asks) has no menu at all,
-  // unless the URL is on a category, which the menu then clears.
+  // once (untracked, as the counts above), for a viewer the route admits.
+  // The rows name their own either way. A read that failed is never shown
+  // as an org with none (owner): the menu says so, with a Try again. One
+  // that is not read (a member without the role) has no menu, unless the
+  // URL is on a category, which the menu then clears.
   const categories = $derived.by(() => {
     const org = organizationId;
-    return org === null ? null : untrack(() => getCategories(org));
+    return org === null || !canReadCategories
+      ? null
+      : untrack(() => getCategories(org));
   });
   $effect(() => {
     if (categories?.error != null) {
@@ -176,25 +189,21 @@
       });
     }
   });
-  const categoriesFailed = $derived(
-    categories !== null && categories.current === undefined && categories.error != null
-  );
-  const categoriesOut = $derived(categoriesFailed && isReadOutage(categories?.error));
   const categoryMenu = $derived(
-    categories === null ||
-      (categoriesFailed && !categoriesOut && view.category === CATEGORY_ANY)
+    organizationId === null || (categories === null && view.category === CATEGORY_ANY)
       ? undefined
-      : categoryOptions(categories.current, view.category)
+      : categoryOptions(categories?.current, view.category)
   );
   // Refreshed in place: the query is held untracked, so the derivation keeps
-  // it rather than making a new one.
-  const categoryUnread = $derived<FacetUnread | undefined>(
-    categoriesOut && categories
-      ? {
-          failed: () => m.studio_content_categories_unread(),
-          failedAgain: () => m.studio_content_categories_unread_again(),
-          retry: () => categories.refresh(),
-        }
+  // it rather than making a new one. Its failures are logged above.
+  const categoriesRetry = createFacetRetry({
+    failed: () => m.studio_content_categories_unread(),
+    failedAgain: () => m.studio_content_categories_unread_again(),
+    read: () => categories?.refresh() ?? Promise.resolve(),
+  });
+  const categoryUnread = $derived(
+    categories !== null && categories.current === undefined && categories.error != null
+      ? categoriesRetry
       : undefined
   );
 

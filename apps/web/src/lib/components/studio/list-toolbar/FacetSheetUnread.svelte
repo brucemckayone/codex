@@ -2,12 +2,12 @@
   @component FacetSheetUnread
 
   A phone sheet facet whose choices could not be read (Codex-a6ofh.3.3,
-  owner): what failed, and a Try again, after the pills it can offer. The
-  words are the desktop menu's (`createFacetRetry`).
+  owner): what failed, and a Try again, after the pills it can offer. Its
+  state is the facet's own (`createFacetRetry`), shared with the desktop
+  menu, so a sheet closed mid-retry reopens on it.
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
-  import { createFacetRetry } from './facet-retry.svelte';
   import type { FacetUnread } from './list-option';
 
   interface Props {
@@ -15,17 +15,15 @@
   }
 
   const { unread }: Props = $props();
-
-  const facetRetry = createFacetRetry(() => unread);
 </script>
 
 <div class="facet-unread">
-  <p class="facet-unread-words" role="status">{facetRetry.words}</p>
+  <p class="facet-unread-words" role="status">{unread.words}</p>
   <button
     type="button"
     class="facet-unread-retry"
-    aria-busy={facetRetry.retrying}
-    onclick={() => void facetRetry.retry()}
+    aria-busy={unread.retrying}
+    onclick={() => void unread.retry()}
   >
     {m.common_try_again()}
   </button>

@@ -1,7 +1,8 @@
 /**
  * The phone sheet's word on a facet it could not read (Codex-a6ofh.3.3,
  * owner): what failed, then "Trying again…" while a Try again runs, then the
- * failed-again words if it fails too, as the desktop menu says them.
+ * failed-again words if it fails too. Its state is the facet's own
+ * (`createFacetRetry`), so a sheet closed mid-retry reopens on it.
  */
 import { afterEach, describe, expect, test } from 'vitest';
 import * as m from '$paraglide/messages';
@@ -11,14 +12,17 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import FacetSheetUnread from './FacetSheetUnread.svelte';
+import { createFacetRetry } from './facet-retry.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
 
-afterEach(() => {
+function close() {
   if (component) unmount(component);
   component = null;
   document.body.innerHTML = '';
-});
+}
+
+afterEach(close);
 
 const settle = async () => {
   for (let i = 0; i < 3; i++)
@@ -33,38 +37,36 @@ const retryButton = () =>
 /** An unread facet whose each Try again waits for the test to settle it. */
 function unreadFacet() {
   const reads: Array<{ ok: () => void; fail: (error: unknown) => void }> = [];
-  return {
-    reads,
-    unread: {
-      failed: () => 'Couldn’t load the things.',
-      failedAgain: () => 'Still couldn’t load the things.',
-      retry: () =>
-        new Promise<void>((ok, fail) => {
-          reads.push({ ok, fail });
-        }),
-    },
-  };
+  const unread = createFacetRetry({
+    failed: () => 'Couldn’t load the things.',
+    failedAgain: () => 'Still couldn’t load the things.',
+    read: () =>
+      new Promise<void>((ok, fail) => {
+        reads.push({ ok, fail });
+      }),
+  });
+  return { reads, unread };
+}
+
+function open(unread: ReturnType<typeof unreadFacet>['unread']) {
+  component = mount(FacetSheetUnread, {
+    target: document.body,
+    props: { unread },
+  });
+  flushSync();
 }
 
 describe('FacetSheetUnread', () => {
   test('says what failed, with a Try again', () => {
     const { unread } = unreadFacet();
-    component = mount(FacetSheetUnread, {
-      target: document.body,
-      props: { unread },
-    });
-    flushSync();
+    open(unread);
     expect(words()).toBe('Couldn’t load the things.');
     expect(retryButton()?.textContent?.trim()).toBe(m.common_try_again());
   });
 
   test('says it is trying, once at a time, then that it failed again', async () => {
     const { unread, reads } = unreadFacet();
-    component = mount(FacetSheetUnread, {
-      target: document.body,
-      props: { unread },
-    });
-    flushSync();
+    open(unread);
 
     retryButton()?.click();
     retryButton()?.click();
@@ -77,5 +79,25 @@ describe('FacetSheetUnread', () => {
     await settle();
     expect(words()).toBe('Still couldn’t load the things.');
     expect(retryButton()?.getAttribute('aria-busy')).toBe('false');
+  });
+
+  test('a sheet closed mid-retry reopens on it, and sends no second read', async () => {
+    const { unread, reads } = unreadFacet();
+    open(unread);
+    retryButton()?.click();
+    flushSync();
+    close();
+
+    open(unread);
+    expect(words()).toBe(m.studio_list_facet_retrying());
+    retryButton()?.click();
+    flushSync();
+    expect(reads).toHaveLength(1);
+
+    reads[0]?.fail(new Error('still down'));
+    await settle();
+    close();
+    open(unread);
+    expect(words()).toBe('Still couldn’t load the things.');
   });
 });

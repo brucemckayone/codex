@@ -137,12 +137,18 @@ let component: ReturnType<typeof mount> | null = null;
 function render(
   query = '',
   organizationId: string | null = ORG,
-  orgs: { id: string; name: string }[] = []
+  orgs: { id: string; name: string }[] = [],
+  canReadCategories = true
 ) {
   nav.url = new URL(`https://studio.test/studio/content${query}`);
   component = mount(StudioContentList, {
     target: document.body,
-    props: { organizationId, studioName: 'Studio Alpha', orgs },
+    props: {
+      organizationId,
+      studioName: 'Studio Alpha',
+      orgs,
+      canReadCategories,
+    },
   });
   flushSync();
 }
@@ -764,24 +770,43 @@ describe('StudioContentList: Category', () => {
     expect(tryAgain()).toBeDefined();
   });
 
-  test('a refusal (no creator or admin role) has no Category menu, unless the URL is on one', async () => {
-    const refused = {
-      status: 403,
-      body: { message: 'Insufficient permissions' },
-    };
+  test('a refusal to a viewer the route admits says so too: the guards disagree', async () => {
     const q = categoriesRead();
     render();
-    q.fail(refused);
+    q.fail({ status: 403, body: { message: 'Forbidden' } });
     await settle();
+    await openCategory();
+    expect(items()).toEqual([m.studio_content_category_any()]);
+    expect(note()).toBe(m.studio_content_categories_unread());
+    expect(tryAgain()).toBeDefined();
+  });
+
+  test('a Try again answered by a refusal says it failed again, never nothing', async () => {
+    const q = categoriesRead();
+    render();
+    const held = q.held();
+    q.fail();
+    await settle();
+    await openCategory();
+    tryAgain()?.click();
+    await settle();
+    q.fail({ status: 401, body: { message: 'Authentication required' } }, held);
+    await settle();
+    expect(categoryTrigger()).toBeDefined();
+    expect(note()).toBe(m.studio_content_categories_unread_again());
+  });
+
+  test('a member without the role is asked for none and has no menu, unless the URL is on one', async () => {
+    render('', ORG, [], false);
+    expect(getCategories).not.toHaveBeenCalled();
     expect(categoryTrigger()).toBeUndefined();
+    expect(listCalls()[0]).toMatchObject({ include: 'categories' });
     if (component) unmount(component);
     component = null;
     document.body.innerHTML = '';
 
-    const onOne = categoriesRead();
-    render(`?category=${LIVE}`);
-    onOne.fail(refused);
-    await settle();
+    render(`?category=${LIVE}`, ORG, [], false);
+    expect(getCategories).not.toHaveBeenCalled();
     await openCategory();
     expect(items()).toEqual([
       m.studio_content_category_any(),

@@ -20,7 +20,7 @@
  * - Validation: packages/validation/src/content/category-schemas.ts
  */
 
-import { AUTH_ROLES } from '@codex/constants';
+import { readsCategoryRoutes } from '@codex/constants';
 import {
   createCategorySchema,
   updateCategorySchema,
@@ -40,12 +40,6 @@ import { type StudioCategory, toStudioCategory } from './categories.types';
 /** Management list caps at the pagination max (100); mutations refresh this. */
 const CATEGORY_LIST_LIMIT = 100;
 
-/** The platform roles `GET /api/categories` admits (content-api `categories.ts`). */
-const CATEGORY_READER_ROLES: readonly string[] = [
-  AUTH_ROLES.CREATOR,
-  AUTH_ROLES.ADMIN,
-];
-
 /**
  * List an org's categories: the studio management page, the editor's
  * picker, and the content list's Category facet (Codex-a6ofh.3.3).
@@ -64,7 +58,6 @@ export const getCategories = query(
   async (organizationId): Promise<StudioCategory[]> => {
     const { platform, cookies, locals } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    const role = locals.user?.role;
 
     const params = new URLSearchParams();
     params.set('organizationId', organizationId);
@@ -79,8 +72,7 @@ export const getCategories = query(
         { organizationId },
         () => api.categories.list(params),
         {
-          viewerLacksRole:
-            role === undefined || !CATEGORY_READER_ROLES.includes(role),
+          viewerLacksRole: !readsCategoryRoutes(locals.user?.role),
         }
       )
     );

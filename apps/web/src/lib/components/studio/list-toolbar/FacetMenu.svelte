@@ -14,7 +14,6 @@
   import { CheckIcon, ChevronDownIcon } from '$lib/components/ui/Icon';
   import { formatCount } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
-  import { createFacetRetry } from './facet-retry.svelte';
   import type { FacetUnread, ListOption } from './list-option';
 
   interface Props {
@@ -35,10 +34,9 @@
 
   const menuKey = $props.id();
   let open = $state(false);
-  const facetRetry = createFacetRetry(() => unread);
 
   async function retry() {
-    if (!(await facetRetry.retry()) || !open) return;
+    if (!unread || !(await unread.retry()) || !open) return;
     // The pressed item went with the failure, leaving focus on the menu
     // itself: it goes to the first choice. One arrowed to meanwhile (the
     // read can take seconds) keeps it.
@@ -82,8 +80,8 @@
     {/each}
     {#if unread}
       <DropdownMenu.Separator />
-      <p class="toolbar-menu-note" role="status">{facetRetry.words}</p>
-      <DropdownMenu.Item keepOpen aria-busy={facetRetry.retrying} onclick={retry}>
+      <p class="toolbar-menu-note" role="status">{unread.words}</p>
+      <DropdownMenu.Item keepOpen aria-busy={unread.retrying} onclick={retry}>
         <span class="toolbar-menu-check" aria-hidden="true"></span>
         {m.common_try_again()}
       </DropdownMenu.Item>

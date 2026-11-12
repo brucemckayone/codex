@@ -2599,14 +2599,16 @@ export class ContentService extends BaseService {
   /**
    * The ids of the pieces filed in one category: by id, by slug, or both,
    * in `filters.organizationId`'s categories when one is given. Only a live
-   * category files anything: its join rows outlive a soft delete. The outer
+   * category in its piece's own space files anything (`filedInItsSpace`):
+   * join rows outlive a soft delete, and a move to another space. The outer
    * query keeps the list's own scope, so a category id from elsewhere only
-   * ever finds nothing.
+   * ever finds nothing. The subquery's own `content` is its join, not the
+   * outer list's row.
    */
   private filedIn(
     filters: Pick<ContentFilters, 'categoryId' | 'category' | 'organizationId'>
   ) {
-    const conditions: SQL[] = [isNull(categories.deletedAt)];
+    const conditions: SQL[] = [filedInItsSpace()];
     if (filters.categoryId) {
       conditions.push(eq(categories.id, filters.categoryId));
     }
@@ -2620,6 +2622,7 @@ export class ContentService extends BaseService {
       .select({ contentId: contentCategories.contentId })
       .from(contentCategories)
       .innerJoin(categories, eq(contentCategories.categoryId, categories.id))
+      .innerJoin(content, eq(contentCategories.contentId, content.id))
       .where(and(...conditions));
   }
 
