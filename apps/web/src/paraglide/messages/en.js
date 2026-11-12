@@ -22935,6 +22935,22 @@ export const studio_page_editor_recovery_discarded = () => `Unsaved changes from
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_brand_recovery_restored = () => `Restored your unsaved brand changes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_brand_recovery_discarded = () => `Unsaved changes from an earlier session weren’t restored because your brand has changed since.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_stale_banner = () => `This page was saved in another tab or on another device. Reload to keep editing.`
 
 
@@ -26840,6 +26856,14 @@ export const support_reload_error_body = () => `What's shown may be out of date.
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_try_again = () => `Try again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_trying_again = () => `Trying again…`
 
 
 /**
@@ -32360,6 +32384,14 @@ export const fee_note_meta_list_unsent = () => `Sales before each date keep toda
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const fee_note_check_failed = () => `We couldn't check for upcoming fee changes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_check_none = () => `No upcoming fee changes.`
 
 
 /**

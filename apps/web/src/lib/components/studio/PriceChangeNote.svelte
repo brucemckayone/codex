@@ -10,12 +10,16 @@
   only, never names (M3).
 
   The cost rule: the counts change only on the hourly run, so the note never
-  re-reads by itself. Check again and Try again are one read per press, and a
-  press while one is out does nothing.
+  re-reads by itself. Check again and Try again read once more per press (a
+  Try again of a failed read sends two: kit's doing, see `createLoadRetry`),
+  and a press while one is out does nothing.
 
   @prop {PriceNoteView} [view] - The note. Leave out with `failed`.
   @prop {boolean} [failed] - The read failed (P10): the line and Try again.
   @prop {boolean} [busy] - A read is out.
+  @prop {number} [repeats] - With `failed`: a new number reads the line out
+    again. The page bumps it for a repeat failure while focus is elsewhere,
+    as the words are the same and nothing moves to them.
   @prop {string} [name] - The tier, for the buttons' names on a page of rows.
 -->
 <script lang="ts">
@@ -33,6 +37,7 @@
     view?: PriceNoteView;
     failed?: boolean;
     busy?: boolean;
+    repeats?: number;
     name?: string;
     onCheckAgain?: () => void;
     onDismiss?: () => void;
@@ -44,6 +49,7 @@
     view,
     failed = false,
     busy = false,
+    repeats = 0,
     name,
     onCheckAgain,
     onDismiss,
@@ -114,13 +120,15 @@
     data-testid={testId}
   >
     <span class="price-note__icon" aria-hidden="true"><Icon size="1em" /></span>
+    <!-- Polite when failed: a repeat failure is inserted again (`repeats`). -->
     <p
       class="price-note__text"
       tabindex="-1"
+      aria-live={failed ? 'polite' : undefined}
       {@attach landedDone ? focusOnAppear : undefined}
       data-testid="price-note-status"
     >
-      {#if shown.lead}<b>{shown.lead}</b>{' '}{/if}{shown.text}
+      {#key repeats}{#if shown.lead}<b>{shown.lead}</b>{' '}{/if}{shown.text}{/key}
     </p>
     {#if shown.bar !== null}
       <div

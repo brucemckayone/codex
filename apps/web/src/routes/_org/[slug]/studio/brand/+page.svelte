@@ -160,7 +160,14 @@
     const unreadable: Record<string, string> = {};
     const initialState = toBrandEditorState(current, unreadable);
     unreadableRaw = unreadable;
-    brandEditor.open(orgId, initialState);
+    // A restored draft was edited from exactly this brand (the store checks).
+    // A discarded one was not, and one Save would have reverted a newer save.
+    const recovery = brandEditor.open(orgId, initialState);
+    if (recovery === 'restored') {
+      toast.info(m.studio_brand_recovery_restored());
+    } else if (recovery === 'discarded') {
+      toast.warning(m.studio_brand_recovery_discarded());
+    }
     // One non-blocking notice if any saved field couldn't be read — surfaced
     // BEFORE the admin can overwrite it by saving. handleSave preserves the raw
     // value, so this warns rather than signalling data loss.
@@ -270,7 +277,8 @@
           : (unreadableRaw.darkTokenOverrides ?? ''),
         heroLayout: payload.heroLayout as HeroLayout,
       });
-      brandEditor.markSaved();
+      // What it sent: an edit made while it was in flight stays unsaved.
+      brandEditor.markSaved(payload);
       await invalidate('cache:org-versions').catch(() => {
         /* non-critical — save succeeded; worst case the user reloads */
       });
@@ -285,9 +293,21 @@
   }
 
   // Preserve the unsaved-changes guard the retired overlay used to provide.
-  beforeNavigate(({ cancel }) => {
-    if (brandEditor.isDirty) {
-      if (!confirm('You have unsaved brand changes. Discard?')) cancel();
+  // A confirmed Discard clears the tab's draft too: leaving keeps it otherwise,
+  // for the next open to offer (Codex-0keaj).
+  beforeNavigate(({ type, cancel }) => {
+    if (!brandEditor.isDirty) return;
+    // A reload, tab close or typed URL: cancelling shows the browser's own
+    // prompt, and the draft stays for the reload it exists for. confirm() is
+    // not called there (browsers block it during unload, but may not).
+    if (type === 'leave') {
+      cancel();
+      return;
+    }
+    if (confirm('You have unsaved brand changes. Discard?')) {
+      brandEditor.discard();
+    } else {
+      cancel();
     }
   });
 

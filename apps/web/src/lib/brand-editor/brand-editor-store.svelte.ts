@@ -5,10 +5,12 @@
  * Uses $state/$derived/$effect — NOT svelte/store.
  *
  * CSS injection happens automatically via $effect when pending values change.
- * sessionStorage persistence happens via $effect for crash recovery.
+ * An unsaved brand is kept in sessionStorage for crash recovery (see below).
  */
 
 import { browser } from '$app/environment';
+import { logger } from '$lib/observability';
+import { canonicalJson, hash } from '$lib/utils/fingerprint';
 import {
   clearBrandVars,
   injectBrandVars,
@@ -26,6 +28,119 @@ import type {
 // ── Constants ─────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'codex:brand-editor';
+
+// ── Crash recovery ────────────────────────────────────────────────────────
+// The tab keeps its unsaved brand in sessionStorage, so a reload or a crash
+// does not lose it. A draft is only safe to restore over the brand it was
+// edited FROM: once someone has saved the brand since, the draft is stale,
+// and one Save would write the older brand over the newer one. So the row
+// carries a fingerprint of the saved brand it was written against, and `open`
+// restores it only when that still matches what the server holds. This is
+// the page editor's rule (page-builder-store) (Codex-0keaj).
+
+/** What {@link open} did with the tab's crash-recovery row. */
+export type RecoveryOutcome = 'none' | 'restored' | 'discarded';
+
+interface RecoveryRow {
+  orgId: string;
+  /**
+   * {@link fingerprint} of the saved brand the draft was edited from. Absent
+   * from a row an older editor wrote, which is then never restored.
+   */
+  baseline?: string;
+  pending: BrandEditorState;
+  level?: unknown;
+}
+
+/** An upper-cased hex, or null for none, as the server stores a colour. */
+function storedColour(value: string | null): string | null {
+  return value?.trim().toUpperCase() || null;
+}
+
+/**
+ * A saved brand's fingerprint, taken the way the SERVER hands the brand back,
+ * so a brand this tab saved matches its own next load. Save is lossy in known
+ * ways, each normalised here:
+ * - colours are trimmed and upper-cased (`hexColorSchema`); empty is null;
+ * - fonts are trimmed; empty is null;
+ * - a radius or density of 0 reads back as the default (`|| 0.5`, `|| 1`);
+ * - an empty dark token map is not sent, so it reads back as null, and an
+ *   empty token map reads back as `{}`;
+ * - an unset hero layout reads back as 'default';
+ * - key order is ignored, as a precaution: the stored text keeps it.
+ *
+ * The logo is left out. Save never sends it (the logo control commits on
+ * pick), so the server's is always current, and a draft never brings one.
+ */
+function fingerprint(brand: BrandEditorState): string {
+  return hash(
+    canonicalJson({
+      ...brand,
+      logoUrl: undefined,
+      primaryColor: storedColour(brand.primaryColor) ?? '#C24129',
+      secondaryColor: storedColour(brand.secondaryColor),
+      accentColor: storedColour(brand.accentColor),
+      backgroundColor: storedColour(brand.backgroundColor),
+      fontBody: brand.fontBody?.trim() || null,
+      fontHeading: brand.fontHeading?.trim() || null,
+      radius: Number(brand.radius) || 0.5,
+      density: Number(brand.density) || 1,
+      tokenOverrides: brand.tokenOverrides ?? {},
+      darkTokenOverrides:
+        brand.darkTokenOverrides &&
+        Object.keys(brand.darkTokenOverrides).length > 0
+          ? brand.darkTokenOverrides
+          : null,
+      heroLayout: brand.heroLayout || 'default',
+    })
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * An override map. Its values are not checked: the saved brand carries the
+ * same ones (older stored JSON may hold a number), so a draft holding them is
+ * no less usable than the brand itself.
+ */
+function isMap(value: unknown): boolean {
+  return isRecord(value);
+}
+
+function isTextOrNull(value: unknown): boolean {
+  return value === null || typeof value === 'string';
+}
+
+/** Every field of {@link BrandEditorState}, so a restored draft is one. */
+function isBrandEditorState(value: unknown): value is BrandEditorState {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.primaryColor === 'string' &&
+    isTextOrNull(value.secondaryColor) &&
+    isTextOrNull(value.accentColor) &&
+    isTextOrNull(value.backgroundColor) &&
+    isTextOrNull(value.fontBody) &&
+    isTextOrNull(value.fontHeading) &&
+    Number.isFinite(value.radius) &&
+    Number.isFinite(value.density) &&
+    isTextOrNull(value.logoUrl) &&
+    isMap(value.tokenOverrides) &&
+    (value.darkOverrides === null || isMap(value.darkOverrides)) &&
+    (value.darkTokenOverrides === null || isMap(value.darkTokenOverrides)) &&
+    typeof value.heroLayout === 'string'
+  );
+}
+
+function isRecoveryRow(value: unknown): value is RecoveryRow {
+  return (
+    isRecord(value) &&
+    typeof value.orgId === 'string' &&
+    (value.baseline === undefined || typeof value.baseline === 'string') &&
+    isBrandEditorState(value.pending)
+  );
+}
 
 // ── Internal State ────────────────────────────────────────────────────────
 
@@ -59,6 +174,11 @@ const isDirty = $derived.by(() => {
   return JSON.stringify(state.saved) !== JSON.stringify(state.pending);
 });
 
+/** Moves only when `saved` does, never once per edit. */
+const savedFingerprint = $derived(
+  state.saved ? fingerprint(state.saved) : null
+);
+
 const currentLevel = $derived(LEVELS[state.level]);
 const breadcrumbs = $derived(getBreadcrumb(state.level));
 
@@ -67,6 +187,8 @@ const breadcrumbs = $derived(getBreadcrumb(state.level));
 // root — it runs at import time, outside any component lifecycle.
 
 let effectsInitialized = false;
+/** A failed draft write is logged once per page load, not once per edit. */
+let writeFailureLogged = false;
 
 function initEffects() {
   if (effectsInitialized) return;
@@ -88,20 +210,36 @@ function initEffects() {
       if (darkHeading) loadGoogleFont(darkHeading);
     });
 
-    // sessionStorage persistence — crash recovery
+    // sessionStorage crash recovery. Guarded on `orgId`, so a preview frame
+    // (applyPreviewVars) never writes a row.
     $effect(() => {
       if (!browser || !state.orgId || !state.pending) return;
+      // Only UNSAVED work gets a row. A clean one could only restore the saved
+      // brand, or, once someone saved over it, a stale copy: an editor left
+      // open untouched used to revert another admin's save on reload + Save.
+      if (!isDirty || !savedFingerprint) {
+        clearStorage();
+        return;
+      }
+      const row: RecoveryRow = {
+        orgId: state.orgId,
+        baseline: savedFingerprint,
+        pending: state.pending,
+        level: state.level,
+      };
       try {
-        sessionStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            orgId: state.orgId,
-            pending: state.pending,
-            level: state.level,
-          })
-        );
-      } catch {
-        // sessionStorage full or unavailable — silently ignore
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(row));
+      } catch (error) {
+        // sessionStorage full or unavailable: crash recovery is best-effort.
+        // Drop the older row, which a reload would restore as if it were all
+        // of this work, and say once that recovery is off for this tab.
+        clearStorage();
+        if (!writeFailureLogged) {
+          writeFailureLogged = true;
+          logger.warn('Brand editor draft could not be kept', {
+            reason: errorName(error),
+          });
+        }
       }
     });
   });
@@ -109,11 +247,18 @@ function initEffects() {
 
 // ── Actions ───────────────────────────────────────────────────────────────
 
-function open(orgId: string, saved: BrandEditorState): void {
+/**
+ * Open the editor on `saved`, then restore the tab's unsaved draft of this
+ * org's brand if it has one that is still safe to restore (see
+ * {@link recover}). Returns what happened to that draft, for the caller to say.
+ */
+function open(orgId: string, saved: BrandEditorState): RecoveryOutcome {
   initEffects();
   state.orgId = orgId;
   state.saved = structuredClone(saved);
+  state.pending = structuredClone(saved);
   state.level = 'home';
+  state.panel = 'open';
 
   // Seed editingTheme from the user's current theme preference so the
   // editor opens viewing the palette they're actually in. Falls back
@@ -126,58 +271,71 @@ function open(orgId: string, saved: BrandEditorState): void {
     setThemePreview(state.editingTheme);
   }
 
-  // Try to restore pending state from sessionStorage (crash recovery)
-  if (browser) {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const restored = JSON.parse(raw);
-        if (restored.orgId === orgId && restored.pending) {
-          // Merge server-saved tokenOverrides into restored state
-          // so fine-tune values persist even if sessionStorage is stale
-          if (
-            saved.tokenOverrides &&
-            Object.keys(saved.tokenOverrides).length > 0
-          ) {
-            restored.pending.tokenOverrides = {
-              ...saved.tokenOverrides,
-              ...(restored.pending.tokenOverrides ?? {}),
-            };
-          }
-          if (saved.darkOverrides && !restored.pending.darkOverrides) {
-            restored.pending.darkOverrides = saved.darkOverrides;
-          }
-          // Codex-wwedk: same merge pattern for darkTokenOverrides — preserve
-          // server values for keys the in-flight session hasn't touched.
-          if (
-            saved.darkTokenOverrides &&
-            Object.keys(saved.darkTokenOverrides).length > 0
-          ) {
-            restored.pending.darkTokenOverrides = {
-              ...saved.darkTokenOverrides,
-              ...(restored.pending.darkTokenOverrides ?? {}),
-            };
-          } else if (
-            !restored.pending.darkTokenOverrides &&
-            saved.darkTokenOverrides
-          ) {
-            restored.pending.darkTokenOverrides = saved.darkTokenOverrides;
-          }
-          state.pending = restored.pending;
-          // Guard against a stale/removed level id in persisted state — fall
-          // back to home rather than indexing LEVELS with an unknown key.
-          state.level = isLevelId(restored.level) ? restored.level : 'home';
-          state.panel = 'open';
-          return;
-        }
-      }
-    } catch {
-      // Corrupt data — ignore
-    }
+  try {
+    return recover(orgId, saved);
+  } catch (error) {
+    // Not expected: the row is parsed and checked first. The saved brand
+    // stands, and the log says why.
+    return unusable(errorName(error));
   }
+}
 
-  state.pending = structuredClone(saved);
-  state.panel = 'open';
+/** An error's name, for a log: a storage DOMException is not always an Error. */
+function errorName(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'name' in error) {
+    return typeof error.name === 'string' ? error.name : 'unknown';
+  }
+  return 'unknown';
+}
+
+/**
+ * A row this editor cannot use. A row is written only while something is
+ * unsaved (the previous release also wrote one on every open, so just after
+ * a deploy this can fire once for a row with nothing in it), so it is
+ * reported as discarded, and the page says so, rather than dropped without a
+ * word. Logged, because a shape change between releases would otherwise turn
+ * recovery off for everyone unseen.
+ */
+function unusable(reason: string): RecoveryOutcome {
+  clearStorage();
+  logger.warn('Brand editor draft could not be restored', { reason });
+  return 'discarded';
+}
+
+/**
+ * Restore the tab's unsaved draft of `orgId`'s brand, but only over the brand
+ * it was edited from. A row written against a different saved brand is
+ * DISCARDED: someone has saved since, and restoring the draft would let one
+ * Save write the older brand over the newer one. A restored draft was edited
+ * from exactly this brand, so nothing of the server's is merged into it.
+ *
+ * The draft never brings its logo. The logo control commits on pick, so the
+ * server's logo is current, and Save never sends one.
+ */
+function recover(orgId: string, saved: BrandEditorState): RecoveryOutcome {
+  if (!browser) return 'none';
+  const raw = storedRow();
+  if (!raw) return 'none';
+  let row: unknown;
+  try {
+    row = JSON.parse(raw);
+  } catch {
+    return unusable('not JSON');
+  }
+  if (!isRecoveryRow(row)) return unusable('not a brand draft');
+  if (row.orgId !== orgId) return 'none';
+  const baseline = fingerprint(saved);
+  const draft: BrandEditorState = { ...row.pending, logoUrl: saved.logoUrl };
+  // Nothing in it that the saved brand does not already say.
+  if (fingerprint(draft) === baseline) return 'none';
+  if (row.baseline !== baseline) {
+    clearStorage();
+    return 'discarded';
+  }
+  state.pending = draft;
+  // A level id the editor no longer has falls back to home.
+  state.level = isLevelId(row.level) ? row.level : 'home';
+  return 'restored';
 }
 
 function close(): void {
@@ -194,7 +352,11 @@ function close(): void {
   // open, and clearBrandVars would then strip the org layout's own brand with
   // `isClosed` unchanged, so nothing writes it back (Codex-q01h8).
   if (state.panel !== 'closed') clearBrandVars();
-  clearStorage();
+  // The row is kept. A draft the admin never saw (the read failed, so the
+  // editor never opened) or never chose to throw away (a teardown with no
+  // prompt) comes back on the next open, and only over the brand it was
+  // edited from. Save, Reset all, an editor with nothing unsaved, and the
+  // page's confirmed "Discard?" clear it.
   state.panel = 'closed';
   state.pending = null;
   state.saved = null;
@@ -463,10 +625,25 @@ function getSavePayload(): BrandEditorState | null {
     : null;
 }
 
-function markSaved(): void {
+/**
+ * The save landed: `saved` becomes `sent`, the payload the save read
+ * (`getSavePayload`). An edit made while the save was in flight is not in it,
+ * so it stays unsaved, rather than being counted saved and never sent.
+ */
+function markSaved(sent: BrandEditorState): void {
   if (!state.pending) return;
-  state.saved = $state.snapshot(state.pending) as BrandEditorState;
+  state.saved = $state.snapshot(sent) as BrandEditorState;
   clearStorage();
+}
+
+/** The tab's row as stored; null when there is none or storage is blocked. */
+function storedRow(): string | null {
+  try {
+    return sessionStorage.getItem(STORAGE_KEY);
+  } catch {
+    // Blocked storage holds no draft, so there is nothing to offer.
+    return null;
+  }
 }
 
 function clearStorage(): void {

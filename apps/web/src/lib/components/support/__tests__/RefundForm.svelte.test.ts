@@ -30,6 +30,11 @@ vi.mock(
   () => import('../__fixtures__/support-remote.mock.svelte')
 );
 
+import type { RefundPreview } from '@codex/admin';
+import type {
+  KitQuery,
+  KitRead,
+} from '$lib/components/studio/__fixtures__/kit-query.mock.svelte';
 import {
   CHARGE_ID,
   chargeDetail,
@@ -42,6 +47,7 @@ import {
   getRefundPreview,
   httpError,
   issueSupportRefund,
+  kitPreview,
   previewSlot,
   reset,
 } from '../__fixtures__/support-remote.mock.svelte';
@@ -870,5 +876,242 @@ describe('a blocked charge', () => {
     expect(
       document.querySelector('[data-testid="refund-inquiry"]')?.textContent
     ).toContain(m.support_form_inquiry());
+  });
+});
+
+/**
+ * Try again on a preview whose read failed, as kit runs it (Codex-if444). Kit
+ * drops a read that failed, so Try again hands the form a NEW preview query,
+ * still loading. The form used to await the refreshed query's stray read: the
+ * failed alert, with its focused Try again (a `loading` Button, so disabled),
+ * went for the skeleton, and focus was judged on the wrong read. Each of the
+ * four ends moves focus to what the preview now says (R2-L2).
+ */
+describe('Try again on a failed preview, as kit runs it (R2-L2)', () => {
+  let kit: KitQuery<RefundPreview>;
+
+  const failedAlert = () =>
+    document.querySelector<HTMLElement>('[data-testid="preview-error"]');
+  const tryAgain = () =>
+    failedAlert()?.querySelector('button') as HTMLButtonElement | null;
+  /**
+   * Lets reads settle and Try again run on from them, focus moves included.
+   * Timers are fake here, and Svelte's `tick()` (async mode) resolves on a
+   * timer, which the fake clock sets 1 ms ahead when it is set during a turn.
+   * A read that lands takes two of them (kit's query settles after a
+   * `tick()`, and Try again ticks before it moves focus), so the clock moves
+   * 1 ms a turn: well short of the 300 ms preview debounce.
+   */
+  async function settle() {
+    for (let turn = 0; turn < 4; turn++) await vi.advanceTimersByTimeAsync(1);
+    flushSync();
+  }
+
+  async function failedAt750() {
+    kit = kitPreview(ARGS_750);
+    mountForm();
+    choosePart('7.50');
+    await wait(300);
+    kit.fail(httpError(500, 'boom'));
+    await settle();
+    expect(failedAlert()).not.toBeNull();
+  }
+
+  /** Presses Try again; returns the refreshed query WRAPPED (it is thenable). */
+  async function pressTryAgain(): Promise<{
+    refreshed: KitRead<RefundPreview>;
+  }> {
+    const refreshed = kit.held();
+    tryAgain()?.focus();
+    tryAgain()?.click();
+    await settle();
+    expect(kit.refreshes(refreshed)).toBe(1);
+    expect(kit.held()).not.toBe(refreshed);
+    expect(kit.held().loading).toBe(true);
+    return { refreshed };
+  }
+
+  test('keeps the alert and its focused Try again, busy and enabled, while the new read loads', async () => {
+    await failedAt750();
+    await pressTryAgain();
+
+    expect(failedAlert()).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="preview-pending"]')
+    ).toBeNull();
+    expect(document.activeElement).toBe(tryAgain());
+    expect(tryAgain()?.getAttribute('aria-busy')).toBe('true');
+    expect(tryAgain()?.disabled).toBe(false);
+  });
+
+  test('fails again: the alert stays and takes focus, so why is read out', async () => {
+    await failedAt750();
+    const { refreshed } = await pressTryAgain();
+
+    // The stray fetch's failure is not the answer.
+    kit.fail(httpError(500, 'boom'), refreshed);
+    await settle();
+    expect(tryAgain()?.getAttribute('aria-busy')).toBe('true');
+
+    kit.fail(httpError(500, 'boom'));
+    await settle();
+    expect(document.activeElement).toBe(failedAlert());
+  });
+
+  test('lands: the lines show and focus moves to the preview heading', async () => {
+    await failedAt750();
+    const { refreshed } = await pressTryAgain();
+
+    kit.land(preview());
+    await settle();
+
+    expect(refreshed.loading).toBe(true);
+    expect(failedAlert()).toBeNull();
+    expect(
+      document.querySelector('[data-testid="preview-lines"]')
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-preview-heading]')
+    );
+  });
+
+  test('refused: the refused alert takes focus, and the charge is reloaded', async () => {
+    await failedAt750();
+    await pressTryAgain();
+
+    kit.fail(httpError(409, 'Conflict'));
+    await settle();
+
+    expect(failedAlert()).toBeNull();
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="preview-refused"]')
+    );
+    expect(onStale).toHaveBeenCalledTimes(1);
+  });
+
+  test('session ended: the session alert takes focus, with no Try again', async () => {
+    await failedAt750();
+    await pressTryAgain();
+
+    kit.fail(httpError(404, 'Not Found'));
+    await settle();
+
+    const ended = document.querySelector('[data-testid="session-ended"]');
+    expect(failedAlert()).toBeNull();
+    expect(ended?.querySelector('button')).toBeNull();
+    expect(document.activeElement).toBe(ended);
+  });
+
+  test('says "Trying again…" while it runs, and "Try again" once it has answered', async () => {
+    await failedAt750();
+    await pressTryAgain();
+    expect(tryAgain()?.textContent?.trim()).toBe(m.support_trying_again());
+
+    kit.fail(httpError(500, 'boom'));
+    await settle();
+    expect(tryAgain()?.textContent?.trim()).toBe(m.support_try_again());
+  });
+
+  test('a second press while it runs sends nothing', async () => {
+    await failedAt750();
+    const { refreshed } = await pressTryAgain();
+
+    tryAgain()?.click();
+    await settle();
+    expect(kit.refreshes(refreshed)).toBe(1);
+    expect(kit.refreshes(kit.held())).toBe(0);
+  });
+
+  test('a stray fetch that lands first is not the answer; the held read failing again is', async () => {
+    await failedAt750();
+    const { refreshed } = await pressTryAgain();
+
+    kit.land(preview(), refreshed);
+    await settle();
+    expect(failedAlert()).not.toBeNull();
+    expect(document.querySelector('[data-testid="preview-lines"]')).toBeNull();
+    expect(tryAgain()?.getAttribute('aria-busy')).toBe('true');
+
+    kit.fail(httpError(500, 'boom'));
+    await settle();
+    expect(document.activeElement).toBe(failedAlert());
+  });
+
+  test('a new amount during it is a new preview: its lines show, and focus stays in the amount', async () => {
+    await failedAt750();
+    await pressTryAgain();
+    const kit800 = kitPreview({ ...ARGS_750, amountCents: 800 });
+
+    amountInput()?.focus();
+    choosePart('8.00');
+    // Not "Couldn't load" over the new amount while its preview waits.
+    expect(failedAlert()).toBeNull();
+    await wait(300);
+    kit800.land(preview({ amountCents: 800 }));
+    await settle();
+
+    expect(
+      document.querySelector('[data-testid="preview-lines"]')
+    ).not.toBeNull();
+    expect(failedAlert()).toBeNull();
+    expect(document.activeElement).toBe(amountInput());
+  });
+
+  test('focus moved on during it stays put when the lines land', async () => {
+    await failedAt750();
+    await pressTryAgain();
+
+    amountInput()?.focus();
+    kit.land(preview());
+    await settle();
+
+    expect(
+      document.querySelector('[data-testid="preview-lines"]')
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(amountInput());
+  });
+
+  test('focus moved on during it stays put on a repeat failure, and the alert is read out again', async () => {
+    await failedAt750();
+    await pressTryAgain();
+    const words = () => failedAlert()?.querySelector('p') ?? null;
+    const before = words();
+
+    amountInput()?.focus();
+    kit.fail(httpError(500, 'boom'));
+    await settle();
+
+    expect(document.activeElement).toBe(amountInput());
+    // The same words, so `role="alert"` reads them only if inserted again.
+    expect(words()?.textContent).toBe(before?.textContent);
+    expect(words()).not.toBe(before);
+  });
+
+  test('focus moved on during it stays put when the amount is refused', async () => {
+    await failedAt750();
+    await pressTryAgain();
+
+    amountInput()?.focus();
+    kit.fail(httpError(409, 'Conflict'));
+    await settle();
+
+    expect(
+      document.querySelector('[data-testid="preview-refused"]')
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(amountInput());
+  });
+
+  test('focus moved on during it stays put when the session has ended', async () => {
+    await failedAt750();
+    await pressTryAgain();
+
+    amountInput()?.focus();
+    kit.fail(httpError(404, 'Not Found'));
+    await settle();
+
+    expect(
+      document.querySelector('[data-testid="session-ended"]')
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(amountInput());
   });
 });
