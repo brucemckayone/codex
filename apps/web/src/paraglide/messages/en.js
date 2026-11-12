@@ -27311,6 +27311,22 @@ export const support_chargeback_lost_on = (params) => `Lost ${params.date}`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_appeal_needs_response = () => `Appeal: needs a response in Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_appeal_under_review = () => `Appeal under review`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_dispute_needs_response = () => `Needs response`
 
 
