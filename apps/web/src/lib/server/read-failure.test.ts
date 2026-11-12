@@ -87,7 +87,8 @@ describe('logSignedInReadFailure', () => {
     [429, 'warn', 'badge.refused'],
     [400, 'error', 'badge.refused'],
     [403, 'error', 'badge.refused'],
-    [408, 'error', 'badge.unavailable'],
+    // Every outage at one level: a slow worker and a dead one log alike.
+    [408, 'warn', 'badge.unavailable'],
     [503, 'warn', 'badge.unavailable'],
   ] as const)('a %i writes one line, at %s, as %s', (status, level, event) => {
     logSignedInReadFailure(EVENTS, { scope: 'personal' }, apiError(status));

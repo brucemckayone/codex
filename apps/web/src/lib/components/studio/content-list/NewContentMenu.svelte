@@ -7,11 +7,11 @@
   drafts are read when the menu first opens; a read that fails says so and
   offers Try again, and is never "no drafts". Both studios' lists use it.
 
-  @prop {string | null} organizationId - The org whose drafts it offers; null in the personal studio
+  @prop {string | null} organizationId - The org whose drafts it offers; null in the personal studio, which offers its personal drafts (filed under no org), as its list shows them (Codex-a6ofh.3.2)
   @prop {PayoutsRead} payouts - The page's one payouts read, for each draft's step
 -->
 <script lang="ts">
-  import { hasBeenLive } from '@codex/constants';
+  import { CONTENT_LIST_SCOPE, hasBeenLive } from '@codex/constants';
   import * as m from '$paraglide/messages';
   import * as DropdownMenu from '$lib/components/ui/DropdownMenu';
   import {
@@ -68,7 +68,9 @@
     const org = organizationId;
     return untrack(() =>
       listContent({
-        ...(org && { organizationId: org }),
+        // The personal studio's drafts are its list's, Personal: so "All
+        // drafts (n)" opens a list of n (Codex-a6ofh.3.2).
+        ...(org ? { organizationId: org } : { scope: CONTENT_LIST_SCOPE.PERSONAL }),
         status: 'draft',
         page: 1,
         limit: MENU_DRAFTS,

@@ -105,16 +105,19 @@ export async function logRefusedRead<T>(
 
 /**
  * Logs a SIGNED-IN read whose failure the page swallows (a badge that just
- * does not show), so neither a forwarded 4xx nor `handleError` will: a 4xx at
- * `logRefusedRead`'s levels, anything else (a 5xx, the network) as an outage,
- * a warning under `unavailable`.
+ * does not show), so neither a forwarded 4xx nor `handleError` will: a
+ * refusal at `logRefusedRead`'s levels, and every outage (a 5xx, the network,
+ * and a 408, the client's own timeout) at one level, a warning under
+ * `unavailable`. `logRefusedRead` errors a 408 because its other outages
+ * escape to `handleError`, which errors them; here none does, so a slow
+ * worker and a dead one log alike (Codex-a6ofh.3.2 review round 2).
  */
 export function logSignedInReadFailure(
   events: RefusedReadEvents,
   context: Record<string, unknown>,
   error: unknown
 ): void {
-  if (isClientError(error)) {
+  if (isClientError(error) && error.status !== 408) {
     logRefusal(events, context, error);
     return;
   }

@@ -114,11 +114,15 @@ describe('NewContentMenu', () => {
     expect(trigger()?.getAttribute('aria-label')).toBe('New');
   });
 
-  test('the personal studio asks for no org', async () => {
+  // The personal list opens on Personal (Codex-a6ofh.3.2): drafts asked for
+  // with no org spanned every org, so "All drafts (3)" opened a list of 1.
+  test('the personal studio offers its personal drafts, as its list shows them', async () => {
     render(null);
     await openMenu();
 
-    expect(listContent.mock.calls[0]?.[0]).not.toHaveProperty('organizationId');
+    const args = listContent.mock.calls[0]?.[0];
+    expect(args).toMatchObject({ scope: 'personal', status: 'draft' });
+    expect(args).not.toHaveProperty('organizationId');
   });
 
   test('says it is finding the drafts, and offers the three kinds meanwhile', async () => {
