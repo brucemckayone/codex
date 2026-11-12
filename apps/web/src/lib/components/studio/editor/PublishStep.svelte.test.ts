@@ -77,7 +77,7 @@ const live = vi.hoisted(() => ({
       progress?: number | null;
       errorCode?: string | null;
       attemptsLeft?: number;
-      upload?: { here: boolean; pct: number | null } | null;
+      upload?: { here: boolean; pct: number | null; stopped?: boolean } | null;
     }
   >(),
 }));
@@ -413,6 +413,49 @@ describe('PublishStep · what is missing', () => {
       m.studio_publish_gap_upload_stopped({ type: 'video' })
     );
     expect(text()).toContain('still uploading');
+  });
+
+  test('an upload a tab reports stopped, inside its line, says so, and nothing waits for it', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: false, pct: 40, stopped: true },
+    });
+    render();
+    expect(text()).toContain(
+      m.studio_publish_gap_upload_stopped({ type: 'video' })
+    );
+    expect(publishButton()?.textContent?.trim()).not.toBe(
+      m.studio_publish_button_when_ready()
+    );
+    expect(publishButton()?.disabled).toBe(true);
+  });
+
+  test('an upload in this tab’s own queue, unheard by the socket, past its line, is still uploading', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000),
+    };
+    uploadQueue.items = [
+      { key: 'k1', id: MEDIA_ID, status: 'uploading', progress: 30 } as never,
+    ];
+    try {
+      render();
+      expect(text()).not.toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(text()).toContain('still uploading');
+    } finally {
+      uploadQueue.items = [];
+    }
   });
 
   test('media gone (deleted, or not theirs) is listed, with the way back to writing', () => {

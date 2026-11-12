@@ -40,11 +40,16 @@ interface PublishMedia {
   deleted: boolean;
   progress: number | null;
   /**
-   * Still uploading (not stalled), uploaded or transcoding: what the server
-   * schedules a publish when ready for (`isMediaOnItsWay`, Codex-a6ofh.2.7).
+   * Uploaded, transcoding, or an upload inside the server's stall line: what
+   * the server schedules a publish when ready for (`isMediaOnItsWay`,
+   * Codex-a6ofh.2.7). Never with `stalled`: nothing waits for a stop.
    */
   onItsWay: boolean;
-  /** An upload that stopped (`isUploadStalled`): it needs new media. */
+  /**
+   * An upload that stopped, by the tile's rule (`describeTile`) once this
+   * tab is not sending it: a tab's report first, then the clock line. It
+   * needs new media.
+   */
   stalled: boolean;
   /**
    * Failed, and a Try again can still get it there: the tile's rule
@@ -155,20 +160,25 @@ export function createPublishReads(options: PublishReadsOptions) {
     const deleted = mediaRow.deletedAt != null;
     const failure =
       status === MEDIA_STATUS.FAILED ? describeTile(mediaRow, live, 0) : null;
+    const here = !deleted && uploadingHere(mediaId, status, live);
+    // This tab still sending it is uploading, whatever the clock or the
+    // socket says; else the tile's rule (`describeTile`) decides.
+    const stalled =
+      !deleted &&
+      !here &&
+      status === MEDIA_STATUS.UPLOADING &&
+      describeTile(mediaRow, live, 0).kind === 'stopped';
     return {
       status,
       deleted,
       progress: live?.progress ?? mediaRow.transcodingProgress ?? null,
       onItsWay:
-        !deleted && isMediaOnItsWay({ status, createdAt: mediaRow.createdAt }),
-      // The tile's rule (`describeTile`): a tab still sending it is
-      // uploading, whatever the clock says; one that reports it stopped has.
-      stalled:
         !deleted &&
-        status === MEDIA_STATUS.UPLOADING &&
-        describeTile(mediaRow, live, 0).kind === 'stopped',
+        !stalled &&
+        isMediaOnItsWay({ status, createdAt: mediaRow.createdAt }),
+      stalled,
       canRetry: !deleted && failure?.kind === 'failed' && failure.canRetry,
-      uploadingHere: !deleted && uploadingHere(mediaId, status, live),
+      uploadingHere: here,
     };
   });
 

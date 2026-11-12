@@ -139,7 +139,11 @@ type GapMedia = {
   status: string;
   progress: number | null;
   onItsWay?: boolean;
-  /** An upload that stopped (`isUploadStalled`): it needs new media. */
+  /**
+   * An upload that stopped: it needs new media. The list judges it by the
+   * clock line (`isUploadStalled`); the Publish screen by the tile's rule,
+   * which hears this tab and the socket first.
+   */
   stalled?: boolean;
 } | null;
 
