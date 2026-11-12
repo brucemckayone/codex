@@ -247,6 +247,20 @@ describe('gapRow', () => {
     });
   });
 
+  // Owner, 2026-11-12: a stopped upload never gets there by waiting, as the
+  // content list's "Needs you" and the media library say.
+  it('an upload that stopped says so, and is put right on the Write step', () => {
+    expect(
+      gapRow('MEDIA_NOT_READY', {
+        contentType: 'video',
+        media: { status: 'uploading', progress: null, stalled: true },
+      })
+    ).toMatchObject({
+      words: m.studio_publish_gap_upload_stopped({ type: 'video' }),
+      fix: 'write',
+    });
+  });
+
   it('the price row names the minimum in pounds', () => {
     expect(gapRow('PRICE_REQUIRED', VIDEO).words).toBe(
       m.studio_publish_gap_price({ price: '£1.00' })

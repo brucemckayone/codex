@@ -2,6 +2,7 @@
  * A draft's progress, from the row the content list holds (Codex-a6ofh.2.6):
  * the Publish step's own checks, so the list never disagrees with it.
  */
+import { MEDIA_UPLOAD_STALLED_AFTER_MS } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
 import type { ContentWithRelations } from '$lib/types';
 import { draftRow, PAID, withMedia } from '../__fixtures__/draft-row';
@@ -42,6 +43,34 @@ describe('draftProgress: Write', () => {
 
     expect(progress?.writeDone).toBe(false);
     expect(progress?.left[0]?.words).toContain('audio couldn’t be prepared');
+  });
+
+  it('a video whose upload stopped goes back to Write, and says so', () => {
+    const upload = (createdAt: Date) =>
+      draftProgress(
+        draftRow({
+          mediaItemId: 'm1',
+          mediaItem: {
+            id: 'm1',
+            status: 'uploading',
+            deletedAt: null,
+            createdAt: createdAt.toISOString(),
+          } as never,
+        }),
+        'ready'
+      );
+    const stopped = upload(
+      new Date(Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000)
+    );
+    expect(stopped?.writeDone).toBe(false);
+    expect(stopped?.href).toBe('/studio/content/c1/edit');
+    expect(stopped?.left[0]?.words).toBe(
+      'The video’s upload stopped. Choose another, or upload it again.'
+    );
+    // Still within its line, it is still uploading: Publish waits for it.
+    const uploading = upload(new Date());
+    expect(uploading?.writeDone).toBe(true);
+    expect(uploading?.left[0]?.words).toContain('still uploading');
   });
 
   it('a video still being prepared has done its writing: Publish waits for it', () => {

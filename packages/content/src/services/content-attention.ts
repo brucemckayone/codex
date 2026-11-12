@@ -74,10 +74,20 @@ const draftInHand = allOf(isDraft, sql`not ${scheduled}`, sql`not ${refused}`);
 /** A video or audio piece: one that plays its media. */
 const playsMedia = sql`${content.contentType} in (${CONTENT_TYPES.VIDEO}, ${CONTENT_TYPES.AUDIO})`;
 
-/** The piece's media item matches `condition`. */
+/**
+ * The piece's media item, the creator's own, matches `condition`. Only their
+ * own: the gate reads no other creator's item (`mediaReadiness`).
+ */
 function itsMedia(condition: SQL): SQL {
-  return sql`exists (select 1 from ${mediaItems} where ${mediaItems.id} = ${content.mediaItemId} and ${condition})`;
+  return sql`exists (select 1 from ${mediaItems} where ${mediaItems.id} = ${content.mediaItemId} and ${mediaItems.creatorId} = ${content.creatorId} and ${condition})`;
 }
+
+/**
+ * A link to another creator's media item, left by the old PATCH hole
+ * (Codex-vmi6m). The gate refuses it as not found, whatever its status, so
+ * the draft needs new media.
+ */
+const playsOthersMedia = sql`exists (select 1 from ${mediaItems} where ${mediaItems.id} = ${content.mediaItemId} and ${mediaItems.creatorId} <> ${content.creatorId})`;
 
 /** Media nothing can play. */
 const deletedOrFailed = sql`(${mediaItems.deletedAt} is not null or ${mediaItems.status} = ${MEDIA_STATUS.FAILED})`;
@@ -111,7 +121,6 @@ const onTheTeam = sql`(${content.organizationId} is null or exists (select 1 fro
  */
 const filledForItsType = sql`((${playsMedia} and ${itsMedia(
   allOf(
-    sql`${mediaItems.creatorId} = ${content.creatorId}`,
     sql`${mediaItems.deletedAt} is null`,
     sql`${mediaItems.status} = ${MEDIA_STATUS.READY}`
   )
@@ -183,7 +192,11 @@ export function attentionCondition(
     case 'didnt-go-live':
       return allOf(isDraft, sql`not ${scheduled}`, refused);
     case 'media-gone':
-      return allOf(draftInHand, playsMedia, itsMedia(mediaGone(now)));
+      return allOf(
+        draftInHand,
+        playsMedia,
+        sql`(${itsMedia(mediaGone(now))} or ${playsOthersMedia})`
+      );
     case 'processing':
       return allOf(draftInHand, playsMedia, itsMedia(mediaOnItsWay(now)));
   }

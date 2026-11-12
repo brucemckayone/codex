@@ -162,6 +162,7 @@ describe('ContentService — Needs you (Codex-a6ofh.3.4)', () => {
 
   it('counts each kind, a piece in one kind at most, and the filter lists exactly what it counted', async () => {
     const creatorId = await newCreator();
+    const otherId = await newCreator();
     const stalledAt = new Date(
       Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000
     );
@@ -199,6 +200,15 @@ describe('ContentService — Needs you (Codex-a6ofh.3.4)', () => {
         await videoDraft(creatorId, {
           status: MEDIA_STATUS.UPLOADING,
           createdAt: stalledAt,
+        }),
+        // Another creator's item, still processing (the old PATCH hole,
+        // Codex-vmi6m): the gate refuses it as not found, so it needs new
+        // media, and is never on its way.
+        await piece(creatorId, {
+          contentType: CONTENT_TYPES.VIDEO,
+          mediaItemId: await media(otherId, {
+            status: MEDIA_STATUS.TRANSCODING,
+          }),
         }),
       ],
       processing: [
@@ -244,14 +254,37 @@ describe('ContentService — Needs you (Codex-a6ofh.3.4)', () => {
 
     const personal = await videoDraft(creatorId, ready);
     const inOrg = await videoDraft(creatorId, ready, { organizationId: orgId });
+    // The other creator has a piece of every kind; none is this creator's.
+    const failed = { status: MEDIA_STATUS.FAILED } as const;
+    const transcoding = { status: MEDIA_STATUS.TRANSCODING } as const;
+    await videoDraft(otherId, failed, LIVE);
+    await videoDraft(otherId, transcoding, { publishRequestedAt: new Date() });
+    await videoDraft(otherId, failed, {
+      publishBlockedReason: ERROR_CODES.MEDIA_FAILED,
+    });
+    await videoDraft(otherId, failed);
+    await videoDraft(otherId, transcoding);
     await videoDraft(otherId, ready);
 
-    expect((await service.attentionCounts(creatorId)).ready).toBe(2);
+    const none = Object.fromEntries(
+      CONTENT_ATTENTION_KINDS.map((kind) => [kind, 0])
+    );
+    expect(await service.attentionCounts(creatorId)).toEqual({
+      ...none,
+      ready: 2,
+    });
+    for (const kind of CONTENT_ATTENTION_KINDS) {
+      expect(await listed(creatorId, kind), kind).toEqual(
+        kind === 'ready' ? sorted([personal, inOrg]) : []
+      );
+    }
+    expect(await service.attentionCounts(otherId)).toEqual(
+      Object.fromEntries(CONTENT_ATTENTION_KINDS.map((kind) => [kind, 1]))
+    );
     expect((await service.attentionCounts(creatorId, null)).ready).toBe(1);
     expect((await service.attentionCounts(creatorId, orgId)).ready).toBe(1);
     expect(await listed(creatorId, 'ready', null)).toEqual([personal]);
     expect(await listed(creatorId, 'ready', orgId)).toEqual([inOrg]);
-    expect((await service.attentionCounts(otherId)).ready).toBe(1);
   });
 
   it('ready holds every publish rule, and agrees with the publish gate on every draft', async () => {

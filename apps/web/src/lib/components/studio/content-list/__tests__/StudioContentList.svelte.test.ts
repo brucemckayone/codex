@@ -1041,4 +1041,54 @@ describe('StudioContentList: Needs you (Codex-a6ofh.3.4)', () => {
       'ready',
     ]);
   });
+
+  // Codex-a6ofh.3.4 review: a list the chip narrows can always be let go.
+  test('the chip in use stays, by name, while the counts are read and when they could not be', async () => {
+    const q = kitQuery<typeof COUNTS>();
+    getContentAttention.mockImplementationOnce(() => q.get() as never);
+    render('?needs=ready');
+    expect(chips()).toEqual([
+      {
+        kind: 'ready',
+        words: m.studio_content_needs_ready_named(),
+        pressed: 'true',
+      },
+    ]);
+
+    q.fail();
+    await settle();
+    expect(chips().map((c) => c.kind)).toEqual(['ready']);
+    expect(strip()?.querySelector('[role="status"]')?.textContent?.trim()).toBe(
+      m.studio_content_needs_unread()
+    );
+    chip('ready')?.click();
+    await Promise.resolve();
+    expect(navigatedTo().has('needs')).toBe(false);
+  });
+
+  test('each Where’s read says its own: a Try again that failed is not the next Where’s', async () => {
+    const everywhere = kitQuery<typeof COUNTS>();
+    const personal = kitQuery<typeof COUNTS>();
+    getContentAttention
+      .mockImplementationOnce(() => everywhere.get() as never)
+      .mockImplementationOnce(() => personal.get() as never);
+    const note = () =>
+      strip()?.querySelector('[role="status"]')?.textContent?.trim();
+    render('?where=all', null);
+    const held = everywhere.held();
+    everywhere.fail();
+    await settle();
+    strip()?.querySelector<HTMLButtonElement>('.unread-note-retry')?.click();
+    await settle();
+    everywhere.fail(undefined, held);
+    await settle();
+    expect(note()).toBe(m.studio_content_needs_unread_again());
+
+    nav.url = new URL('https://studio.test/studio/content');
+    flushSync();
+    expect(getContentAttention).toHaveBeenLastCalledWith({ scope: 'personal' });
+    personal.fail();
+    await settle();
+    expect(note()).toBe(m.studio_content_needs_unread());
+  });
 });

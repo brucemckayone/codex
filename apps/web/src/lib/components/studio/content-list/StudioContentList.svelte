@@ -243,10 +243,15 @@
       });
     }
   });
-  const attentionRetry = createFacetRetry({
-    failed: () => m.studio_content_needs_unread(),
-    failedAgain: () => m.studio_content_needs_unread_again(),
-    read: () => attention.refresh(),
+  // One per query, as the query is one per Where: a Try again that failed on
+  // one Where never makes the next Where's first failure "Still couldn't".
+  const attentionRetry = $derived.by(() => {
+    const query = attention;
+    return createFacetRetry({
+      failed: () => m.studio_content_needs_unread(),
+      failedAgain: () => m.studio_content_needs_unread_again(),
+      read: () => query.refresh(),
+    });
   });
   const attentionUnread = $derived(
     attention.current === undefined && attention.error != null ? attentionRetry : undefined

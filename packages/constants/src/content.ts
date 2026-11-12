@@ -124,6 +124,21 @@ export function uploadStallsAt(createdAt: Date | string): number {
 }
 
 /**
+ * An upload that stopped: still `uploading` past {@link uploadStallsAt}'s
+ * line. Nothing makes it ready by itself, so a draft playing it needs new
+ * media, and its checklist says the upload stopped (owner, 2026-11-12).
+ */
+export function isUploadStalled(
+  media: { status: string; createdAt: Date | string },
+  now: Date = new Date()
+): boolean {
+  return (
+    media.status === MEDIA_STATUS.UPLOADING &&
+    uploadStallsAt(media.createdAt) < now.getTime()
+  );
+}
+
+/**
  * The media library's status groups (Codex-a6ofh.1.4, data-design §1.1),
  * defined once so the worker's `status` filter and the web's tiles cannot
  * drift. `attention` is also every upload stalled past
@@ -171,8 +186,7 @@ export function isMediaOnItsWay(
     return true;
   }
   return (
-    media.status === MEDIA_STATUS.UPLOADING &&
-    uploadStallsAt(media.createdAt) >= now.getTime()
+    media.status === MEDIA_STATUS.UPLOADING && !isUploadStalled(media, now)
   );
 }
 

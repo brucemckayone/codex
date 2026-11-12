@@ -6,7 +6,7 @@
  * left is put right on the Write step, and Continue opens the step still to
  * do.
  */
-import { hasBeenLive } from '@codex/constants';
+import { hasBeenLive, isUploadStalled } from '@codex/constants';
 import type { ContentWithRelations } from '$lib/types';
 import type { PayoutsRead } from '$lib/utils/connect-readiness';
 import * as m from '$paraglide/messages';
@@ -64,6 +64,7 @@ export function draftProgress(
     ? {
         status: row.mediaItem.status,
         progress: row.mediaItem.transcodingProgress ?? null,
+        stalled: isUploadStalled(row.mediaItem),
       }
     : null;
   const left = gaps.map((gap) => {

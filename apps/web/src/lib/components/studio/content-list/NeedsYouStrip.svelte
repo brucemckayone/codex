@@ -5,9 +5,10 @@
   of the creator's pieces need them, by kind, counted across every page where
   the list looks. Each chip lists its own pieces (`?needs=`); the chip in use
   is pressed, and pressing it again lists them all. A chip with none is
-  hidden, but the one in use stays, so it can always be let go; no chip, no
-  strip. A read that failed says so, with a Try again (owner): it is never
-  shown as nothing needing you.
+  hidden, but the one in use stays, so it can always be let go: by name,
+  while the counts are being read or could not be. No chip, no strip. A read
+  that failed says so, with a Try again (owner): it is never shown as
+  nothing needing you.
 -->
 <script lang="ts">
   import {
@@ -21,7 +22,7 @@
   import * as m from '$paraglide/messages';
   import type { FacetUnread } from '../list-toolbar/list-option';
   import UnreadNote from '../list-toolbar/UnreadNote.svelte';
-  import type { ListNeeds } from './list-url';
+  import { type ListNeeds, NEEDS_NONE } from './list-url';
 
   interface Props {
     /** The counts; undefined until read (and while a failed read is `unread`). */
@@ -40,6 +41,8 @@
     icon: Component<IconProps>;
     one: () => string;
     many: (inputs: { count: number }) => string;
+    /** The kind without its count: the chip in use while none is read. */
+    named: () => string;
   }
 
   // The row line's own colours (ContentRowLine): what has gone, or didn't
@@ -50,53 +53,63 @@
       icon: AlertTriangleIcon,
       one: m.studio_content_needs_live_media_gone_one,
       many: m.studio_content_needs_live_media_gone,
+      named: m.studio_content_needs_live_media_gone_named,
     },
     scheduled: {
       tone: 'info',
       icon: ClockIcon,
       one: m.studio_content_needs_scheduled_one,
       many: m.studio_content_needs_scheduled,
+      named: m.studio_content_needs_scheduled_named,
     },
     'didnt-go-live': {
       tone: 'error',
       icon: AlertTriangleIcon,
       one: m.studio_content_needs_didnt_go_live_one,
       many: m.studio_content_needs_didnt_go_live,
+      named: m.studio_content_needs_didnt_go_live_named,
     },
     'media-gone': {
       tone: 'error',
       icon: AlertTriangleIcon,
       one: m.studio_content_needs_media_gone_one,
       many: m.studio_content_needs_media_gone,
+      named: m.studio_content_needs_media_gone_named,
     },
     processing: {
       tone: 'info',
       icon: ClockIcon,
       one: m.studio_content_needs_processing_one,
       many: m.studio_content_needs_processing,
+      named: m.studio_content_needs_processing_named,
     },
     ready: {
       tone: 'success',
       icon: CheckCircleIcon,
       one: m.studio_content_needs_ready_one,
       many: m.studio_content_needs_ready,
+      named: m.studio_content_needs_ready_named,
     },
   };
 
-  const chips = $derived(
-    counts
-      ? CONTENT_ATTENTION_KINDS.filter((kind) => counts[kind] > 0 || kind === active).map(
-          (kind) => ({ kind, count: counts[kind], ...CHIP[kind] })
-        )
-      : []
-  );
+  const chips = $derived.by(() => {
+    if (counts) {
+      return CONTENT_ATTENTION_KINDS.filter((kind) => counts[kind] > 0 || kind === active).map(
+        (kind) => {
+          const count = counts[kind];
+          const chip = CHIP[kind];
+          return { kind, ...chip, words: count === 1 ? chip.one() : chip.many({ count }) };
+        }
+      );
+    }
+    if (active === NEEDS_NONE) return [];
+    return [{ kind: active, ...CHIP[active], words: CHIP[active].named() }];
+  });
 
   const labelId = $props.id();
 </script>
 
-{#if unread}
-  <div class="needs-you"><UnreadNote {unread} /></div>
-{:else if chips.length > 0}
+{#if unread || chips.length > 0}
   <div class="needs-you" role="group" aria-labelledby={labelId}>
     <span class="needs-you-label" id={labelId}>{m.studio_content_needs_label()}</span>
     {#each chips as chip (chip.kind)}
@@ -109,9 +122,10 @@
         onclick={() => onSelect(chip.kind)}
       >
         <chip.icon size={14} aria-hidden="true" />
-        {chip.count === 1 ? chip.one() : chip.many({ count: chip.count })}
+        {chip.words}
       </button>
     {/each}
+    {#if unread}<UnreadNote {unread} />{/if}
   </div>
 {/if}
 
@@ -163,10 +177,12 @@
     background: var(--color-surface-secondary);
   }
 
+  /* Pressed by its ring, never a bolder label: wider words would move
+     every chip after it. */
   .needs-chip[aria-pressed='true'] {
     border-color: var(--color-text);
+    box-shadow: inset 0 0 0 var(--border-width) var(--color-text);
     background: var(--color-surface-secondary);
-    font-weight: var(--font-semibold);
   }
 
   .needs-chip:focus-visible {

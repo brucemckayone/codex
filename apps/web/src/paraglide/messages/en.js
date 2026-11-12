@@ -11507,6 +11507,14 @@ export const studio_publish_gap_uploading_when_ready = (params) => `The ${params
 
 
 /**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_upload_stopped = (params) => `The ${params.type}’s upload stopped. Choose another, or upload it again.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -12480,6 +12488,54 @@ export const studio_content_needs_ready_one = () => `1 draft ready to publish`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_needs_ready = (params) => `${params.count} drafts ready to publish`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_live_media_gone_named = () => `Live pieces whose media is gone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_scheduled_named = () => `Going live when ready`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_didnt_go_live_named = () => `Didn’t go live`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_media_gone_named = () => `Drafts that need new media`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_processing_named = () => `Waiting on processing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_ready_named = () => `Drafts ready to publish`
 
 
 /**

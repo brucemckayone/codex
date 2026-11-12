@@ -139,6 +139,8 @@ type GapMedia = {
   status: string;
   progress: number | null;
   onItsWay?: boolean;
+  /** An upload that stopped (`isUploadStalled`): it needs new media. */
+  stalled?: boolean;
 } | null;
 
 /**
@@ -180,13 +182,23 @@ export function gapRow(
     case 'MEDIA_REQUIRED':
       return { gap, words: m.studio_publish_gap_media({ type }), fix: 'write' };
     case 'MEDIA_NOT_READY':
-      return media?.status === MEDIA_STATUS.FAILED
-        ? {
-            gap,
-            words: m.studio_publish_gap_media_failed({ type }),
-            fix: 'write',
-          }
-        : { gap, words: mediaWaitWords(type, media), fix: null };
+      if (media?.status === MEDIA_STATUS.FAILED) {
+        return {
+          gap,
+          words: m.studio_publish_gap_media_failed({ type }),
+          fix: 'write',
+        };
+      }
+      // Stopped, it is never ready by waiting, as the "Needs you" chip and
+      // the media library say (owner, 2026-11-12).
+      if (media?.stalled) {
+        return {
+          gap,
+          words: m.studio_publish_gap_upload_stopped({ type }),
+          fix: 'write',
+        };
+      }
+      return { gap, words: mediaWaitWords(type, media), fix: null };
     case 'MEDIA_DELETED':
       return {
         gap,

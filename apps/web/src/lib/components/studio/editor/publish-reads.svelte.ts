@@ -9,7 +9,11 @@
  * watches the media while it is on its way.
  */
 
-import { isMediaOnItsWay, MEDIA_STATUS } from '@codex/constants';
+import {
+  isMediaOnItsWay,
+  isUploadStalled,
+  MEDIA_STATUS,
+} from '@codex/constants';
 import { mediaStatus } from '$lib/client/media-status.svelte';
 import { uploadQueue } from '$lib/client/upload-queue.svelte';
 import { getMediaItem } from '$lib/remote/media.remote';
@@ -44,6 +48,8 @@ interface PublishMedia {
    * schedules a publish when ready for (`isMediaOnItsWay`, Codex-a6ofh.2.7).
    */
   onItsWay: boolean;
+  /** An upload that stopped (`isUploadStalled`): it needs new media. */
+  stalled: boolean;
   /**
    * Failed, and a Try again can still get it there: the tile's rule
    * (`describeTile`), which is the server's `isTerminalTranscodeFailure`
@@ -142,6 +148,7 @@ export function createPublishReads(options: PublishReadsOptions) {
         deleted: true,
         progress: null,
         onItsWay: false,
+        stalled: false,
         canRetry: false,
         uploadingHere: false,
       };
@@ -158,6 +165,8 @@ export function createPublishReads(options: PublishReadsOptions) {
       progress: live?.progress ?? mediaRow.transcodingProgress ?? null,
       onItsWay:
         !deleted && isMediaOnItsWay({ status, createdAt: mediaRow.createdAt }),
+      stalled:
+        !deleted && isUploadStalled({ status, createdAt: mediaRow.createdAt }),
       canRetry: !deleted && failure?.kind === 'failed' && failure.canRetry,
       uploadingHere: !deleted && uploadingHere(mediaId, status, live),
     };
