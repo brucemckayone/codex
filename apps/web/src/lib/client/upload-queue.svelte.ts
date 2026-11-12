@@ -45,8 +45,11 @@ export type UploadStatus =
 /** Why a row failed; the tray words it. `direct`: the file is too big to retry through the worker. */
 export type UploadFailure = 'upload' | 'direct';
 
-/** How an upload this tab ran ended ({@link UploadQueue.ended}). */
+/** How an upload this tab ran ended, kept past its row. */
 type UploadEnd = 'finished' | 'let-go';
+
+/** This tab's own word on an upload ({@link UploadQueue.wordOn}). */
+export type UploadWord = 'sending' | 'stopped' | 'done' | null;
 
 export interface UploadItem {
   /** Stable for the row's life: the tray and the media grid key on it. */
@@ -221,15 +224,35 @@ export class UploadQueue {
   }
 
   /**
-   * How this tab's upload of `mediaId` ended, read reactively, and kept after
-   * its row leaves the tray: `'finished'` (every byte sent and completed), or
-   * `'let-go'` (cancelled, removed after failing, or tried again as new
-   * media; its media row is discarded). Null for one this tab has not ended,
-   * or never ran. The status object keeps this tab's last upload report
-   * until the socket closes, so once the row is gone only this says which.
+   * This tab's own word on its upload of `mediaId`, read reactively: the one
+   * reader for every surface that judges an upload this tab may be running
+   * (the Publish screen, the Write step's media field). It beats the status
+   * socket's: `upload.here` is only ever this queue's own report echoed back
+   * (`reportUpload` has no other caller), and the status object keeps it
+   * until the socket closes, after the upload failed or was let go of too.
+   *
+   * Its row first: sending the bytes (`'sending'`: uploading or completing),
+   * sent them all (`'done'`: the server moves it on), or will not
+   * (`'stopped'`: failed, and the tray offers Try again while the server's
+   * row waits in uploading). Once the row has left the tray, how it ended
+   * still says which: finished is `'done'`, and let go of (cancelled,
+   * removed after failing, or tried again as new media, its media row
+   * discarded) is `'stopped'`. Null for an upload this tab has no word on.
    */
-  ended(mediaId: string): UploadEnd | null {
-    return this.#ended.get(mediaId) ?? null;
+  wordOn(mediaId: string): UploadWord {
+    const row = this.items.find((item) => item.id === mediaId);
+    switch (row?.status) {
+      case 'uploading':
+      case 'completing':
+        return 'sending';
+      case 'error':
+        return 'stopped';
+      case 'done':
+        return 'done';
+    }
+    const end = this.#ended.get(mediaId);
+    if (end === 'finished') return 'done';
+    return end === 'let-go' ? 'stopped' : null;
   }
 
   /** Called with the media id each time an upload finishes. */

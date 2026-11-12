@@ -128,6 +128,8 @@ vi.mock('$lib/client/upload-queue.svelte', () => ({
     onComplete: vi.fn(() => () => {}),
     cancel: vi.fn(),
     add: vi.fn(),
+    // An empty queue has no word on any upload.
+    wordOn: () => null,
   },
 }));
 

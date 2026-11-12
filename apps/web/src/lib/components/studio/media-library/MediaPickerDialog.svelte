@@ -407,7 +407,7 @@
     },
     get view() {
       const item = chosen?.current;
-      return item ? chosenView(item, mediaStatus.items.get(item.id), stallClock.now) : null;
+      return item ? chosenView(item, mediaStatus.items.get(item.id), stallClock.now, uploadQueue.wordOn(item.id)) : null;
     },
     get uploadNote() {
       return uploadNote;
@@ -546,7 +546,7 @@
   {:else if chosen?.current}
     {@const item = chosen.current}
     <!-- The library's own rules: a failed or stopped item never reads as processing. -->
-    {@const view = chosenView(item, mediaStatus.items.get(item.id), stallClock.now)}
+    {@const view = chosenView(item, mediaStatus.items.get(item.id), stallClock.now, uploadQueue.wordOn(item.id))}
     {@const reason = tileReason(view)}
     <div class="field-card" data-status={tilePill(view)}>
       {@render thumb(item, '6rem')}

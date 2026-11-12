@@ -85,6 +85,14 @@ vi.mock('$lib/client/upload-queue.svelte', () => ({
     cancel: (key: string) => cancel(key),
     retry: vi.fn(),
     remove: vi.fn(),
+    // The real queue's word by its rows (its memory past a row is pinned in
+    // upload-queue.test.ts).
+    wordOn: (mediaId: string) => {
+      const status = queue.items.find((row) => row.id === mediaId)?.status;
+      if (status === 'uploading' || status === 'completing') return 'sending';
+      if (status === 'error') return 'stopped';
+      return status === 'done' ? 'done' : null;
+    },
   },
 }));
 
@@ -261,6 +269,31 @@ describe('MediaSlot · the chosen media', () => {
     expect(button('Change Svelte runes deep dive')).toBeDefined();
     button('Remove Svelte runes deep dive')?.click();
     expect(onchange).toHaveBeenCalledWith(null);
+  });
+
+  // Owner, 2026-11-12 (one reader): the Publish screen sends the creator
+  // here to fix a stopped upload, so the slot says what it says. Mounted
+  // afresh (the Write step again), the slot follows no upload, and the
+  // status socket still echoes this tab's last report: only the queue knows.
+  test('an upload this tab’s queue gave up on says it stopped, with Choose another', () => {
+    library.items = [item('uploading')];
+    queue.items = [
+      {
+        key: 'k-failed',
+        id: MEDIA_ID,
+        status: 'error',
+        title: 'Svelte runes deep dive',
+        progress: 60,
+        mediaType: 'video',
+        failure: null,
+      },
+    ];
+    render({ value: MEDIA_ID });
+    expect(
+      document.querySelector('.slot-message[role="alert"]')
+    ).not.toBeNull();
+    expect(button(m.studio_editor_media_choose_another())).toBeDefined();
+    expect(text()).not.toContain('Uploading');
   });
 
   test('removed from the keyboard: focus stays in the slot, on Choose from library', async () => {

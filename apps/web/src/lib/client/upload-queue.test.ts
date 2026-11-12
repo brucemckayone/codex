@@ -586,8 +586,8 @@ describe('UploadQueue: try again and remove', () => {
 
   // The status object keeps this tab's last upload report until the socket
   // closes, so once a row leaves the tray only the queue knows how it ended
-  // (E3.4 review r6): a finished one cleared is not one let go of.
-  it('remembers how each upload ended, past its row: finished, or let go of', async () => {
+  // (E3.4 review r6, r7): a finished one cleared is not one let go of.
+  it('its word on an upload: the row first, then how it ended once the row has gone', async () => {
     const { queue, transfers } = harness({
       completeUpload: vi
         .fn()
@@ -600,28 +600,28 @@ describe('UploadQueue: try again and remove', () => {
     transfers[1]?.resolve();
     await flush();
     expect(queue.items.map((i) => i.status)).toEqual(['error', 'done']);
-    // A failed row still in the tray has not ended: Try again may yet.
-    expect(queue.ended('media-1')).toBeNull();
-    expect(queue.ended('media-2')).toBe('finished');
+    // Its row says it: a failed one has stopped (Try again makes new media).
+    expect(queue.wordOn('media-1')).toBe('stopped');
+    expect(queue.wordOn('media-2')).toBe('done');
     queue.clearCompleted();
-    expect(queue.ended('media-2')).toBe('finished');
+    expect(queue.wordOn('media-2')).toBe('done');
 
     queue.retry('row-1');
-    expect(queue.ended('media-1')).toBe('let-go');
+    expect(queue.wordOn('media-1')).toBe('stopped');
     await flush();
     expect(queue.items[0]).toMatchObject({
       status: 'uploading',
       id: 'media-3',
     });
-    expect(queue.ended('media-3')).toBeNull();
+    expect(queue.wordOn('media-3')).toBe('sending');
     queue.cancel('row-1');
-    expect(queue.ended('media-3')).toBe('let-go');
+    expect(queue.wordOn('media-3')).toBe('stopped');
 
     // A user switch: the last user's uploads are no word on this one's.
     queue.reset();
-    expect(queue.ended('media-1')).toBeNull();
-    expect(queue.ended('media-2')).toBeNull();
-    expect(queue.ended('media-3')).toBeNull();
+    expect(queue.wordOn('media-1')).toBeNull();
+    expect(queue.wordOn('media-2')).toBeNull();
+    expect(queue.wordOn('media-3')).toBeNull();
   });
 
   it('a failed row removed from the tray is let go of; a finished one removed stays finished', async () => {
@@ -639,8 +639,8 @@ describe('UploadQueue: try again and remove', () => {
     queue.remove('row-1');
     queue.remove('row-2');
     expect(queue.items).toHaveLength(0);
-    expect(queue.ended('media-1')).toBe('let-go');
-    expect(queue.ended('media-2')).toBe('finished');
+    expect(queue.wordOn('media-1')).toBe('stopped');
+    expect(queue.wordOn('media-2')).toBe('done');
   });
 
   it('a finish that lands after a user switch is not remembered for the new user', async () => {
@@ -657,7 +657,7 @@ describe('UploadQueue: try again and remove', () => {
     queue.reset();
     completing.resolve({});
     await flush();
-    expect(queue.ended('media-1')).toBeNull();
+    expect(queue.wordOn('media-1')).toBeNull();
   });
 });
 

@@ -5,7 +5,7 @@
  */
 import type { MediaItemState } from '@codex/validation';
 import type { Attachment } from 'svelte/attachments';
-import type { UploadItem } from '$lib/client/upload-queue.svelte';
+import type { UploadItem, UploadWord } from '$lib/client/upload-queue.svelte';
 import type { getMediaItem } from '$lib/remote/media.remote';
 import { describeTile, type TileMedia, type TileView } from './tile-state';
 
@@ -119,11 +119,28 @@ export function followUpload(
  * failed or stopped item reads as it does on its tile, never as processing.
  * The dialog's `now` is a real clock (its one stall timer), so it is also the
  * clock the stall rule reads.
+ *
+ * While it uploads, this tab's own word on it (`uploadQueue.wordOn`, owner
+ * 2026-11-12: one reader) comes first, as on the Publish screen, which sends
+ * the creator here to fix a stopped one: an upload this tab gave up on or
+ * let go of has stopped, whatever the socket still says, and one it is
+ * sending or sent has not, whatever the clock says.
  */
 export function chosenView(
   media: TileMedia,
   live: MediaItemState | undefined,
-  now: number
+  now: number,
+  word: UploadWord
 ): TileView {
-  return describeTile(media, live, now, now);
+  const view = describeTile(media, live, now, now);
+  if (view.kind !== 'uploading' && view.kind !== 'stopped') return view;
+  if (word === 'stopped') return { kind: 'stopped' };
+  if (word !== null && view.kind === 'stopped') {
+    return {
+      kind: 'uploading',
+      pct: live?.upload?.pct ?? null,
+      elsewhere: false,
+    };
+  }
+  return view;
 }

@@ -2377,7 +2377,7 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
       progress: null,
       upload: { here: true, pct: 30 },
     });
-    const ended = vi.spyOn(uploadQueue, 'ended').mockReturnValue('let-go');
+    const word = vi.spyOn(uploadQueue, 'wordOn').mockReturnValue('stopped');
     try {
       render(scheduled());
       await vi.advanceTimersByTimeAsync(0);
@@ -2388,7 +2388,7 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
       expect(text()).toContain(m.studio_publish_scheduled_close());
       expect(text()).not.toContain(m.studio_publish_scheduled_keep_open());
     } finally {
-      ended.mockRestore();
+      word.mockRestore();
     }
   });
 
@@ -2406,7 +2406,7 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
       progress: null,
       upload: { here: false, pct: 100, stopped: true },
     });
-    const ended = vi.spyOn(uploadQueue, 'ended').mockReturnValue('finished');
+    const word = vi.spyOn(uploadQueue, 'wordOn').mockReturnValue('done');
     try {
       render(scheduled());
       await vi.advanceTimersByTimeAsync(0);
@@ -2416,7 +2416,7 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
       expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
       expect(text()).not.toContain(m.studio_publish_scheduled_keep_open());
     } finally {
-      ended.mockRestore();
+      word.mockRestore();
     }
   });
 
@@ -2442,7 +2442,7 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
       expect(bannerText()).toContain(stopped);
       // Remove: the row goes and its media is discarded, which the queue
       // remembers; the socket still echoes the report until it closes.
-      const ended = vi.spyOn(uploadQueue, 'ended').mockReturnValue('let-go');
+      const word = vi.spyOn(uploadQueue, 'wordOn').mockReturnValue('stopped');
       try {
         uploadQueue.items = [];
         await vi.advanceTimersByTimeAsync(20);
@@ -2451,7 +2451,7 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
           m.studio_publish_scheduled_heading()
         );
       } finally {
-        ended.mockRestore();
+        word.mockRestore();
       }
     } finally {
       uploadQueue.items = [];
@@ -2471,7 +2471,7 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
       progress: null,
       upload: { here: true, pct: 100 },
     });
-    const ended = vi.spyOn(uploadQueue, 'ended').mockReturnValue('finished');
+    const word = vi.spyOn(uploadQueue, 'wordOn').mockReturnValue('done');
     try {
       render(draft());
       expect(text()).not.toContain(
@@ -2481,7 +2481,7 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
         m.studio_publish_button_when_ready()
       );
     } finally {
-      ended.mockRestore();
+      word.mockRestore();
     }
   });
 

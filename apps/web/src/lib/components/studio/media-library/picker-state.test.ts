@@ -108,13 +108,15 @@ describe('chosenView', () => {
   const NOW = Date.parse('2026-11-03T12:00:00Z');
 
   it('reads a failed item as failed and a ready one as ready, never as processing', () => {
-    expect(chosenView({ status: 'failed' }, undefined, NOW).kind).toBe(
+    expect(chosenView({ status: 'failed' }, undefined, NOW, null).kind).toBe(
       'failed'
     );
-    expect(chosenView({ status: 'ready' }, undefined, NOW).kind).toBe('ready');
-    expect(chosenView({ status: 'transcoding' }, undefined, NOW).kind).toBe(
-      'processing'
+    expect(chosenView({ status: 'ready' }, undefined, NOW, null).kind).toBe(
+      'ready'
     );
+    expect(
+      chosenView({ status: 'transcoding' }, undefined, NOW, null).kind
+    ).toBe('processing');
   });
 
   it('reads an upload left past the stall threshold as stopped, a recent one as uploading', () => {
@@ -123,11 +125,73 @@ describe('chosenView', () => {
     ).toISOString();
     const recent = new Date(NOW - 60_000).toISOString();
     expect(
-      chosenView({ status: 'uploading', createdAt: old }, undefined, NOW).kind
+      chosenView({ status: 'uploading', createdAt: old }, undefined, NOW, null)
+        .kind
     ).toBe('stopped');
     expect(
-      chosenView({ status: 'uploading', createdAt: recent }, undefined, NOW)
+      chosenView(
+        { status: 'uploading', createdAt: recent },
+        undefined,
+        NOW,
+        null
+      ).kind
+    ).toBe('uploading');
+  });
+
+  // Owner, 2026-11-12 (one reader): while it uploads, this tab's own word
+  // on it comes first, as on the Publish screen, which sends the creator to
+  // this field to fix a stopped upload.
+  it('reads an upload this tab gave up on or let go of as stopped, though the socket still says it is uploading here', () => {
+    const recent = new Date(NOW - 60_000).toISOString();
+    const echo = {
+      mediaId: 'm1',
+      lifecycle: 'uploading',
+      upload: { pct: 60, here: true, stopped: false },
+    } as never;
+    expect(
+      chosenView({ status: 'uploading', createdAt: recent }, echo, NOW, null)
         .kind
     ).toBe('uploading');
+    expect(
+      chosenView(
+        { status: 'uploading', createdAt: recent },
+        echo,
+        NOW,
+        'stopped'
+      ).kind
+    ).toBe('stopped');
+  });
+
+  it('reads an upload this tab is sending or sent as uploading, whatever the clock or the socket says', () => {
+    const old = new Date(
+      NOW - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000
+    ).toISOString();
+    const closed = {
+      mediaId: 'm1',
+      lifecycle: 'uploading',
+      upload: { pct: 100, here: false, stopped: true },
+    } as never;
+    for (const word of ['sending', 'done'] as const) {
+      expect(
+        chosenView(
+          { status: 'uploading', createdAt: old },
+          undefined,
+          NOW,
+          word
+        )
+      ).toEqual({ kind: 'uploading', pct: null, elsewhere: false });
+      expect(
+        chosenView({ status: 'uploading', createdAt: old }, closed, NOW, word)
+      ).toEqual({ kind: 'uploading', pct: 100, elsewhere: false });
+    }
+  });
+
+  it('leaves an item past uploading to the tile rule, whatever this tab says', () => {
+    expect(
+      chosenView({ status: 'ready' }, undefined, NOW, 'stopped').kind
+    ).toBe('ready');
+    expect(chosenView({ status: 'failed' }, undefined, NOW, 'done').kind).toBe(
+      'failed'
+    );
   });
 });

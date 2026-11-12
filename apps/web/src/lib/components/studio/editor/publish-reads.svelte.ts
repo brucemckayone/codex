@@ -65,33 +65,6 @@ interface PublishMedia {
 
 export type PublishReads = ReturnType<typeof createPublishReads>;
 
-/**
- * This tab's own word on the upload, as the library's ghost tile and the
- * picker take it, its row first: its queue is sending the bytes
- * (`'sending'`: uploading or completing), sent them all (`'done'`: the
- * server moves it on), or will not (`'stopped'`: a row that failed, for
- * which the tray offers Try again while the server's row waits in
- * uploading). Once the row has left the tray, the queue's memory of how it
- * ended (`ended`) still says which: the status object keeps this tab's last
- * report until the socket closes, so the socket cannot. Null for an upload
- * this tab has no word on.
- */
-function uploadHere(mediaId: string): 'sending' | 'stopped' | 'done' | null {
-  const row = uploadQueue.items.find((item) => item.id === mediaId);
-  switch (row?.status) {
-    case 'uploading':
-    case 'completing':
-      return 'sending';
-    case 'error':
-      return 'stopped';
-    case 'done':
-      return 'done';
-  }
-  const end = uploadQueue.ended(mediaId);
-  if (end === 'finished') return 'done';
-  return end === 'let-go' ? 'stopped' : null;
-}
-
 export function createPublishReads(options: PublishReadsOptions) {
   const { values } = options;
 
@@ -171,7 +144,7 @@ export function createPublishReads(options: PublishReadsOptions) {
     const deleted = mediaRow.deletedAt != null;
     const failure =
       status === MEDIA_STATUS.FAILED ? describeTile(mediaRow, live, 0) : null;
-    const upload = deleted ? null : uploadHere(mediaId);
+    const upload = deleted ? null : uploadQueue.wordOn(mediaId);
     const clock = stallClock.now;
     // This tab's queue first, whatever the clock or the socket says: still
     // sending is uploading, sent is the server's to move on, and failed or
