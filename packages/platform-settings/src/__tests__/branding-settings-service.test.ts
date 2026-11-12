@@ -164,7 +164,9 @@ describe('BrandingSettingsService', () => {
       await db.insert(schema.platformSettings).values({ organizationId });
       await db
         .insert(schema.brandingSettings)
-        .values({ organizationId, radiusValue: 'not-a-number' });
+        // radius_value is varchar(10). 'abc' fits, and parseFloat reads no
+        // number from it ('1rem' would read as 1).
+        .values({ organizationId, radiusValue: 'abc' });
 
       expect((await createService().get()).radiusValue).toBe(0.5);
     });

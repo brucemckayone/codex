@@ -74,12 +74,6 @@ export interface LogoOrphanRecorder {
 }
 
 /**
- * BrandingSettingsService
- *
- * Handles branding configuration (logo, colors) for an organization.
- * Uses composition pattern - instantiated by PlatformSettingsService.
- */
-/**
  * A stored radius (varchar), or the 0.5 default when the text isn't a number.
  * 0 is a real radius, the Shape slider's "Sharp" end, so `|| 0.5` read every
  * saved 0 back as 0.5 (Codex-jxa7t). Density keeps `|| 1`: its minimum is 0.75.
@@ -89,6 +83,12 @@ function storedRadius(text: string): number {
   return Number.isFinite(radius) ? radius : 0.5;
 }
 
+/**
+ * BrandingSettingsService
+ *
+ * Handles branding configuration (logo, colors) for an organization.
+ * Uses composition pattern - instantiated by PlatformSettingsService.
+ */
 export class BrandingSettingsService extends BaseService {
   private readonly organizationId: string;
   private readonly r2?: R2Service;
