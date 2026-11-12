@@ -38,8 +38,8 @@
   import { logReadFailure } from './log-read-failure';
   import { type PickerSegment, pickerListArgs } from './picker-args';
   import { chosenView, type Following, followUpload, type PickerField } from './picker-state';
+  import { createStallClock } from './stall-clock.svelte';
   import { rejectionReason, tileReason } from './tile-copy';
-  import { uploadStallsAt } from '@codex/constants';
   import { tilePill } from './tile-state';
   import { watchMediaItem } from './watch-media-item.svelte';
 
@@ -180,22 +180,8 @@
   }
 
   // The stall rule reads the clock: one timer, for the moment the chosen
-  // upload would stall, rather than a clock ticking all the while. The
-  // clock lands on the line at least: a timer is not the wall clock.
-  /** The longest delay setTimeout keeps (2^31 - 1 ms). */
-  const MAX_TIMEOUT_MS = 2_147_483_647;
-  let clock = $state(Date.now());
-  $effect(() => {
-    const item = chosen?.current;
-    if (item?.status !== 'uploading' || !item.createdAt) return;
-    const at = uploadStallsAt(item.createdAt);
-    const wait = at - Date.now();
-    // Past setTimeout's limit a browser fires at once, which the clamp would
-    // turn into a false "stopped": arm nothing; the next re-read checks again.
-    if (!Number.isFinite(at) || wait >= MAX_TIMEOUT_MS) return;
-    const timer = setTimeout(() => (clock = Math.max(Date.now(), at + 1)), Math.max(0, wait) + 1);
-    return () => clearTimeout(timer);
-  });
+  // upload would stall (`createStallClock`).
+  const stallClock = createStallClock(() => chosen?.current);
 
   // ── An upload started here ────────────────────────────────────────────
   // While this field is open, an upload it started is attached the moment
@@ -421,7 +407,7 @@
     },
     get view() {
       const item = chosen?.current;
-      return item ? chosenView(item, mediaStatus.items.get(item.id), clock) : null;
+      return item ? chosenView(item, mediaStatus.items.get(item.id), stallClock.now) : null;
     },
     get uploadNote() {
       return uploadNote;
@@ -560,7 +546,7 @@
   {:else if chosen?.current}
     {@const item = chosen.current}
     <!-- The library's own rules: a failed or stopped item never reads as processing. -->
-    {@const view = chosenView(item, mediaStatus.items.get(item.id), clock)}
+    {@const view = chosenView(item, mediaStatus.items.get(item.id), stallClock.now)}
     {@const reason = tileReason(view)}
     <div class="field-card" data-status={tilePill(view)}>
       {@render thumb(item, '6rem')}

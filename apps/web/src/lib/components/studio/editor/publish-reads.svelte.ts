@@ -21,6 +21,7 @@ import {
   payoutSetupHref,
 } from '$lib/utils/connect-readiness';
 import { logReadFailure } from '../media-library/log-read-failure';
+import { createStallClock } from '../media-library/stall-clock.svelte';
 import { describeTile } from '../media-library/tile-state';
 import { watchMediaItem } from '../media-library/watch-media-item.svelte';
 import { createPayoutsRead } from '../payouts-read.svelte';
@@ -46,9 +47,10 @@ interface PublishMedia {
    */
   onItsWay: boolean;
   /**
-   * An upload that stopped: this tab's queue gave up on it, or, with no row
-   * for it here, the tile's rule (`describeTile`) says so, a tab's report
-   * first, then the clock line. It needs new media.
+   * An upload that stopped: this tab's queue gave up on it or let go of it,
+   * or, with no row for it here, the tile's rule (`describeTile`) says so, a
+   * tab's report first, then the clock line (`createStallClock`). It needs
+   * new media.
    */
   stalled: boolean;
   /**
@@ -66,19 +68,23 @@ export type PublishReads = ReturnType<typeof createPublishReads>;
 /**
  * This tab's own word on the upload, as the library's ghost tile and the
  * picker take it: its queue is sending the bytes (`'sending'`: uploading or
- * completing), or gave up on them (`'failed'`: the tray offers Try again,
- * and the server's row waits in uploading meanwhile). Null when this tab's
- * queue has no row for it. The socket's `upload.here` is only ever this
- * queue's own report echoed back (`reportUpload` has no other caller), and
- * it outlives a row that failed: the status object hears of a stop only
- * when the socket closes.
+ * completing), gave up on them (`'failed'`: the tray offers Try again, and
+ * the server's row waits in uploading meanwhile), or sent them all
+ * (`'done'`: the server moves it on). Null when this tab's queue has no row
+ * for it.
  */
-function uploadHere(mediaId: string): 'sending' | 'failed' | null {
-  const row = uploadQueue.items.find((item) => item.id === mediaId);
-  if (row?.status === 'uploading' || row?.status === 'completing') {
-    return 'sending';
+function uploadHere(mediaId: string): 'sending' | 'failed' | 'done' | null {
+  switch (uploadQueue.items.find((item) => item.id === mediaId)?.status) {
+    case 'uploading':
+    case 'completing':
+      return 'sending';
+    case 'error':
+      return 'failed';
+    case 'done':
+      return 'done';
+    default:
+      return null;
   }
-  return row?.status === 'error' ? 'failed' : null;
 }
 
 export function createPublishReads(options: PublishReadsOptions) {
@@ -123,6 +129,8 @@ export function createPublishReads(options: PublishReadsOptions) {
       ? (content.mediaItem ?? null)
       : null;
   });
+  /** The stall line crossed while the step is open is seen: no read brings it. */
+  const stallClock = createStallClock(() => mediaRow);
   /** Deleted, or no longer theirs: the read says so. */
   const mediaGone = $derived(remoteErrorStatus(mediaQuery?.error) === 404);
   /** Never read: the arrival's status is not taken for the media's now. */
@@ -159,15 +167,22 @@ export function createPublishReads(options: PublishReadsOptions) {
     const failure =
       status === MEDIA_STATUS.FAILED ? describeTile(mediaRow, live, 0) : null;
     const upload = deleted ? null : uploadHere(mediaId);
+    const clock = stallClock.now;
     // This tab's queue first, whatever the clock or the socket says: still
-    // sending is uploading, and given up on has stopped. With no row here,
-    // the tile's rule (`describeTile`) decides.
+    // sending is uploading, given up on has stopped, and sent is the
+    // server's to move on. With no row here, the socket saying this tab
+    // sends it is the status object still holding an upload this tab let go
+    // of (cancelled, removed, or tried again as new media): one document has
+    // one socket and one queue (`reportUpload`'s only caller), and the
+    // object releases an upload only when the socket closes. Else the tile's
+    // rule (`describeTile`) decides.
     const stalled =
       !deleted &&
       status === MEDIA_STATUS.UPLOADING &&
       (upload === 'failed' ||
         (upload === null &&
-          describeTile(mediaRow, live, 0).kind === 'stopped'));
+          (live?.upload?.here === true ||
+            describeTile(mediaRow, live, 0, clock).kind === 'stopped')));
     return {
       status,
       deleted,
@@ -175,7 +190,10 @@ export function createPublishReads(options: PublishReadsOptions) {
       onItsWay:
         !deleted &&
         !stalled &&
-        isMediaOnItsWay({ status, createdAt: mediaRow.createdAt }),
+        isMediaOnItsWay(
+          { status, createdAt: mediaRow.createdAt },
+          new Date(clock)
+        ),
       stalled,
       canRetry: !deleted && failure?.kind === 'failed' && failure.canRetry,
       uploadingHere: upload === 'sending',
