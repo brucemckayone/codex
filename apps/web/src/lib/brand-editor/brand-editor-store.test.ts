@@ -209,8 +209,11 @@ function serverCopy(sent: BrandEditorState): BrandEditorState {
     backgroundColor: stored.backgroundColorHex ?? null,
     fontBody: stored.fontBody ?? null,
     fontHeading: stored.fontHeading ?? null,
-    // Stored as text, read back with parseFloat(…) || default.
-    radius: Number.parseFloat(String(stored.radiusValue)) || 0.5,
+    // Stored as text and read back with parseFloat: a radius that isn't a
+    // number is 0.5 (a 0 stays 0, Codex-jxa7t), a density of 0 is 1.
+    radius: Number.isFinite(Number.parseFloat(String(stored.radiusValue)))
+      ? Number.parseFloat(String(stored.radiusValue))
+      : 0.5,
     density: Number.parseFloat(String(stored.densityValue)) || 1,
     logoUrl: sent.logoUrl,
     tokenOverrides: filled(sent.tokenOverrides) ?? {},
@@ -470,6 +473,13 @@ describe('brandEditor — crash recovery (Codex-0keaj)', () => {
     expect(brandEditor.open(ORG_ID, reloaded)).toBe('restored');
     expect(brandEditor.pending?.logoUrl).toBe('https://cdn.example/new.png');
     expect(brandEditor.pending?.primaryColor).toBe('#111111');
+  });
+
+  it('restores a draft whose only change is a radius of 0 (Codex-jxa7t)', () => {
+    editThenCrash(() => brandEditor.updateField('radius', 0));
+
+    expect(brandEditor.open(ORG_ID, makeSaved())).toBe('restored');
+    expect(brandEditor.pending?.radius).toBe(0);
   });
 
   it('a draft that only changed the logo has nothing to restore', () => {
