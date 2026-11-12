@@ -59,7 +59,12 @@ export function logReadFailure(
 export interface RefusedReadEvents {
   /** The worker said no: the session, a role, a rate limit, or our request. */
   refused: string;
-  /** The worker did not answer in time: the api client's own abort (408). */
+  /**
+   * The worker did not answer. For `logRefusedRead`, the api client's own
+   * abort (408), since its 5xx escapes to `handleError`; for
+   * `logSignedInReadFailure`, any outage (a 408, a 5xx, the network). The
+   * line's `status` tells them apart.
+   */
   unavailable: string;
 }
 
