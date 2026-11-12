@@ -1,44 +1,134 @@
 /**
  * Embedded placeholder media files for R2 seeding.
  *
- * Content thumbnails: real photographs fetched from picsum.photos (cached locally).
+ * Content thumbnails: generated PNG gradients, one per seed string (no network).
  * Avatars/logos: SVG generators (realistic for these use cases).
  * HLS/waveform: minimal format-specific placeholders.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, '../../../../');
 const CACHE_DIR = path.join(PROJECT_ROOT, '.cache/seed-images');
 
+type Rgb = readonly [number, number, number];
+
+/** Top and bottom colours of a thumbnail, dark enough for white text. */
+const THUMBNAIL_GRADIENTS: ReadonlyArray<readonly [Rgb, Rgb]> = [
+  [
+    [79, 70, 229],
+    [30, 27, 75],
+  ], // indigo
+  [
+    [8, 145, 178],
+    [12, 74, 110],
+  ], // cyan
+  [
+    [5, 150, 105],
+    [6, 78, 59],
+  ], // emerald
+  [
+    [217, 119, 6],
+    [120, 53, 15],
+  ], // amber
+  [
+    [219, 39, 119],
+    [80, 7, 36],
+  ], // rose
+  [
+    [124, 58, 237],
+    [46, 16, 101],
+  ], // violet
+  [
+    [71, 85, 105],
+    [15, 23, 42],
+  ], // slate
+  [
+    [194, 65, 12],
+    [67, 20, 7],
+  ], // orange
+];
+const DEFAULT_GRADIENT: readonly [Rgb, Rgb] = [
+  [79, 70, 229],
+  [30, 27, 75],
+];
+
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+/** The CRC-32 table PNG chunk checksums use. */
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes: Buffer): number {
+  let c = 0xffffffff;
+  for (const byte of bytes) {
+    c = (CRC_TABLE[(c ^ byte) & 0xff] ?? 0) ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([length, body, crc]);
+}
+
 /**
- * Fetch a real photograph from picsum.photos with local file caching.
- * Uses a deterministic seed so re-running always produces the same image.
- * Cached in .cache/seed-images/ to avoid re-downloading.
+ * A placeholder thumbnail: a `width`x`height` PNG, a top-to-bottom gradient
+ * in colours picked from `seed`, so the same seed always gives the same
+ * picture. The seed used to download a photo from picsum.photos for each
+ * thumbnail on every run, and CI's E2E failed whenever that site was down
+ * (Codex-6fnfs). No test reads a thumbnail's content, so a generated one
+ * does the job without the network.
  */
-export async function fetchRealImage(
+export function generateThumbnailPng(
   seed: string,
   width: number,
   height: number
-): Promise<Buffer> {
-  const cacheKey = `${seed}-${width}x${height}.jpg`;
-  const cachePath = path.join(CACHE_DIR, cacheKey);
-
-  if (fs.existsSync(cachePath)) {
-    return fs.readFileSync(cachePath);
+): Buffer {
+  const index = Math.abs(hashCode(seed)) % THUMBNAIL_GRADIENTS.length;
+  const [top, bottom] = THUMBNAIL_GRADIENTS[index] ?? DEFAULT_GRADIENT;
+  // Each row is a filter byte (0, none) then RGB triples.
+  const stride = width * 3 + 1;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const t = height > 1 ? y / (height - 1) : 0;
+    const mix = (from: number, to: number) =>
+      Math.round(from + (to - from) * t);
+    const colour = [
+      mix(top[0], bottom[0]),
+      mix(top[1], bottom[1]),
+      mix(top[2], bottom[2]),
+    ];
+    for (let x = 0; x < width; x++) {
+      raw.set(colour, y * stride + 1 + x * 3);
+    }
   }
-
-  const url = `https://picsum.photos/seed/${seed}/${width}/${height}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${url} (${response.status})`);
-  }
-  const buffer = Buffer.from(await response.arrayBuffer());
-
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-  fs.writeFileSync(cachePath, buffer);
-  return buffer;
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // colour type: RGB (compression, filter, interlace stay 0)
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', zlib.deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
 }
 
 /**
