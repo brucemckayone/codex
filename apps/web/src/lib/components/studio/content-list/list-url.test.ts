@@ -5,7 +5,6 @@ import {
 } from '@codex/validation';
 import { describe, expect, it } from 'vitest';
 import {
-  attentionArgs,
   CATEGORY_ANY,
   CONTENT_LIST_DEFAULTS,
   CONTENT_LIST_PAGE_SIZE,
@@ -17,6 +16,7 @@ import {
   readContentListState,
   WHERE_ALL,
   WHERE_PERSONAL,
+  whereArgs,
 } from './list-url';
 
 const ORG = '5f0c7b2e-1d3a-4c8e-9b6f-2a7d1e4c9b30';
@@ -276,18 +276,17 @@ describe('needs: a "Needs you" chip (Codex-a6ofh.3.4)', () => {
   });
 });
 
-describe('attentionArgs (Codex-a6ofh.3.4)', () => {
+describe('whereArgs: where the "Needs you" counts look (Codex-a6ofh.3.4)', () => {
   it('looks where the list looks, and the schema takes it', () => {
-    expect(attentionArgs(WHERE_PERSONAL, ORG)).toEqual({ organizationId: ORG });
-    expect(attentionArgs(WHERE_PERSONAL, null)).toEqual({ scope: 'personal' });
-    expect(attentionArgs(WHERE_ALL, null)).toEqual({});
-    expect(attentionArgs(OTHER_ORG, null)).toEqual({
+    expect(whereArgs(WHERE_PERSONAL, ORG)).toEqual({ organizationId: ORG });
+    expect(whereArgs(WHERE_PERSONAL, null)).toEqual({ scope: 'personal' });
+    expect(whereArgs(WHERE_ALL, null)).toEqual({});
+    expect(whereArgs(OTHER_ORG, null)).toEqual({
       organizationId: OTHER_ORG,
     });
     for (const where of [WHERE_PERSONAL, WHERE_ALL, OTHER_ORG]) {
       expect(
-        contentAttentionQuerySchema.safeParse(attentionArgs(where, null))
-          .success
+        contentAttentionQuerySchema.safeParse(whereArgs(where, null)).success
       ).toBe(true);
     }
   });

@@ -21,6 +21,7 @@ import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
 import { logRefusedRead } from '$lib/server/read-failure';
+import { searchParamsOf } from '$lib/server/search-params';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Media List Query
@@ -40,10 +41,7 @@ export const listMedia = query(mediaQuerySchema, async (params) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
-  const searchParams = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) searchParams.set(key, String(value));
-  }
+  const searchParams = searchParamsOf(params);
   // A 4xx keeps its status, so the library can say a refusal is one
   // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit logs
   // no forwarded 4xx, so it is logged here, for the library, the pickers and

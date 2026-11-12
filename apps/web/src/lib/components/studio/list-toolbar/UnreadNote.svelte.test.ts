@@ -1,8 +1,9 @@
 /**
- * The phone sheet's word on a facet it could not read (Codex-a6ofh.3.3,
- * owner): what failed, then "Trying again…" while a Try again runs, then the
- * failed-again words if it fails too. Its state is the facet's own
- * (`createFacetRetry`), so a sheet closed mid-retry reopens on it.
+ * The word on a list read that failed (Codex-a6ofh.3.3, owner): a phone sheet
+ * facet's, and the content list's "Needs you". What failed, then "Trying
+ * again…" while a Try again runs, then the failed-again words if it fails
+ * too. Its state is the caller's (`createFacetRetry`), so a sheet closed
+ * mid-retry reopens on it.
  */
 import { afterEach, describe, expect, test } from 'vitest';
 import * as m from '$paraglide/messages';
@@ -11,8 +12,8 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
-import FacetSheetUnread from './FacetSheetUnread.svelte';
 import { createFacetRetry } from './facet-retry.svelte';
+import UnreadNote from './UnreadNote.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
 
@@ -32,7 +33,7 @@ const settle = async () => {
 const words = () =>
   document.querySelector('[role="status"]')?.textContent?.trim();
 const retryButton = () =>
-  document.querySelector<HTMLButtonElement>('.facet-unread-retry');
+  document.querySelector<HTMLButtonElement>('.unread-note-retry');
 
 /** An unread facet whose each Try again waits for the test to settle it. */
 function unreadFacet() {
@@ -49,14 +50,14 @@ function unreadFacet() {
 }
 
 function open(unread: ReturnType<typeof unreadFacet>['unread']) {
-  component = mount(FacetSheetUnread, {
+  component = mount(UnreadNote, {
     target: document.body,
     props: { unread },
   });
   flushSync();
 }
 
-describe('FacetSheetUnread', () => {
+describe('UnreadNote', () => {
   test('says what failed, with a Try again', () => {
     const { unread } = unreadFacet();
     open(unread);

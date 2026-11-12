@@ -100,6 +100,7 @@ export {
 // Poster frames used as content thumbnails (Codex-tqvmx)
 export {
   holdsPosterFolderOf,
+  namesPosterFolderOf,
   type PosterFrameSource,
   playedMediaItemId,
   posterFolderCount,

@@ -48,13 +48,14 @@
   import ContentListToolbar from './ContentListToolbar.svelte';
   import { categoryOptions, whereOptions } from './list-options';
   import {
-    attentionArgs,
     CATEGORY_ANY,
     CONTENT_LIST_DEFAULTS,
     contentListArgs,
+    FACETS_CLEARED,
     isContentListNarrowed,
     needsPatch,
     readContentListState,
+    whereArgs,
   } from './list-url';
   import NeedsYouStrip from './NeedsYouStrip.svelte';
   import NewContentMenu from './NewContentMenu.svelte';
@@ -104,12 +105,16 @@
   const layout = $derived(phone.current ? 'grid' : view.view);
 
   // ── Reads ─────────────────────────────────────────────────────────────
-  // What a failure log says about a read, from the args it was made with:
-  // its page, facets and sort, and whether it searched, never the text.
-  const readLog = (args: ContentQueryInput) => ({
-    page: args.page,
+  // Where a failed read looked, from its args: never over the studio's own.
+  const whereLog = (args: Pick<ContentQueryInput, 'scope' | 'organizationId'>) => ({
     scope: args.scope ?? (args.organizationId ? 'org' : 'all'),
     listedOrganizationId: args.organizationId ?? null,
+  });
+  // What a failure log says about a list read: where it looked, its page,
+  // facets and sort, and whether it searched, never the text.
+  const readLog = (args: ContentQueryInput) => ({
+    page: args.page,
+    ...whereLog(args),
     statusFilter: args.status ?? 'all',
     type: args.contentType ?? 'all',
     access: args.accessType ?? 'any',
@@ -224,19 +229,17 @@
   // above, so a Try again refreshes it in place. A read that failed says so
   // (owner): it is never shown as nothing needing you.
   const attentionWhere = $derived(view.where);
+  const attentionArgs = $derived(whereArgs(attentionWhere, organizationId));
   const attention = $derived.by(() => {
-    const args = attentionArgs(attentionWhere, organizationId);
+    const args = attentionArgs;
     return untrack(() => getContentAttention(args));
   });
   $effect(() => {
     if (attention.error != null) {
-      // Where it looked, as `readLog` names it: never over the studio's own.
-      const args = untrack(() => attentionArgs(attentionWhere, organizationId));
       logReadFailure('studio_content.attention_unread', attention.error, {
         studio,
         organizationId,
-        scope: args.scope ?? (args.organizationId ? 'org' : 'all'),
-        listedOrganizationId: args.organizationId ?? null,
+        ...untrack(() => whereLog(attentionArgs)),
       });
     }
   });
@@ -276,15 +279,7 @@
 
   function clearFilters() {
     searchInput.cancel();
-    setParams({
-      search: null,
-      status: null,
-      type: null,
-      access: null,
-      where: null,
-      category: null,
-      needs: null,
-    });
+    setParams({ ...FACETS_CLEARED, where: null, needs: null });
   }
 
   // A chip pressed lists its pieces and only those (`needsPatch`): a search

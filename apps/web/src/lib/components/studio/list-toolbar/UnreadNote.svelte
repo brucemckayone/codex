@@ -1,10 +1,10 @@
 <!--
-  @component FacetSheetUnread
+  @component UnreadNote
 
-  A phone sheet facet whose choices could not be read (Codex-a6ofh.3.3,
-  owner): what failed, and a Try again, after the pills it can offer. Its
-  state is the facet's own (`createFacetRetry`), shared with the desktop
-  menu, so a sheet closed mid-retry reopens on it.
+  A list read that could not be read (owner, Codex-a6ofh.3.3): what failed,
+  and a Try again. A phone sheet facet shows it after the pills it can offer;
+  the content list's "Needs you" shows it in place of its chips. Its state is
+  the caller's (`createFacetRetry`), so a sheet closed mid-retry reopens on it.
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
@@ -17,11 +17,11 @@
   const { unread }: Props = $props();
 </script>
 
-<div class="facet-unread">
-  <p class="facet-unread-words" role="status">{unread.words}</p>
+<div class="unread-note">
+  <p class="unread-note-words" role="status">{unread.words}</p>
   <button
     type="button"
-    class="facet-unread-retry"
+    class="unread-note-retry"
     aria-busy={unread.retrying}
     onclick={() => void unread.retry()}
   >
@@ -30,21 +30,20 @@
 </div>
 
 <style>
-  .facet-unread {
+  .unread-note {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
-    margin-top: var(--space-2);
   }
 
-  .facet-unread-words {
+  .unread-note-words {
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
   }
 
-  .facet-unread-retry {
+  .unread-note-retry {
     padding: var(--space-1) var(--space-2);
     border: none;
     border-radius: var(--radius-sm);
@@ -55,11 +54,11 @@
     cursor: pointer;
   }
 
-  .facet-unread-retry:hover {
+  .unread-note-retry:hover {
     text-decoration: underline;
   }
 
-  .facet-unread-retry:focus-visible {
+  .unread-note-retry:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }

@@ -16,18 +16,16 @@
  * (`readyAmong`). A parity test runs the real gate on fixture drafts and
  * fails if the two disagree: a rule added to the gate must be added here.
  *
- * For a `select().from(content)` only. Drizzle's relational query
- * (`db.query.content.findMany`) renders every column of a raw `sql` in its
- * where as the root table's, the EXISTS subqueries' `media_items` columns
- * included, so a list filters by these through a semi-join of their own
- * (`ContentService.needsCondition`).
+ * For a `select().from(content)` only, never a relational query's where
+ * (`ContentService.needsCondition` says why).
  */
 import {
+  CONTENT_ATTENTION_KINDS,
   CONTENT_STATUS,
   CONTENT_TYPES,
   type ContentAttentionKind,
   MEDIA_STATUS,
-  MEDIA_UPLOAD_STALLED_AFTER_MS,
+  MEDIA_STATUS_GROUPS,
   ORGANIZATION_STATUS,
   ORGANIZATION_TEAM_ROLES,
   PRICE_LIMITS,
@@ -41,10 +39,17 @@ import {
   stripeConnectAccounts,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { holdsPosterFolderOf } from '@codex/transcoding';
+import { holdsPosterFolderOf, namesPosterFolderOf } from '@codex/transcoding';
 import { hasArticleBody } from '@codex/validation';
 import { inArray, type SQL, sql } from 'drizzle-orm';
 import type { Content } from '../types';
+import { stalledUpload } from './media-service';
+
+/** The kinds SQL decides alone: all but `ready`. */
+export type SqlAttentionKind = Exclude<ContentAttentionKind, 'ready'>;
+export const SQL_ATTENTION_KINDS = CONTENT_ATTENTION_KINDS.filter(
+  (kind): kind is SqlAttentionKind => kind !== 'ready'
+);
 
 /** Every part holds: `(a and b and …)`. */
 function allOf(...parts: SQL[]): SQL {
@@ -57,12 +62,14 @@ const isDraft = allOf(
   sql`${content.publishedAt} is null`
 );
 
+/** Asked to go live when its media is ready (Publish when ready). */
+const scheduled = sql`(${content.publishRequestedAt} is not null)`;
+
+/** A schedule refused at go-live, which says why. */
+const refused = sql`(coalesce(${content.publishBlockedReason}, '') <> '')`;
+
 /** A draft neither scheduled nor refused a schedule: one still in hand. */
-const draftInHand = allOf(
-  isDraft,
-  sql`${content.publishRequestedAt} is null`,
-  sql`coalesce(${content.publishBlockedReason}, '') = ''`
-);
+const draftInHand = allOf(isDraft, sql`not ${scheduled}`, sql`not ${refused}`);
 
 /** A video or audio piece: one that plays its media. */
 const playsMedia = sql`${content.contentType} in (${CONTENT_TYPES.VIDEO}, ${CONTENT_TYPES.AUDIO})`;
@@ -72,19 +79,24 @@ function itsMedia(condition: SQL): SQL {
   return sql`exists (select 1 from ${mediaItems} where ${mediaItems.id} = ${content.mediaItemId} and ${condition})`;
 }
 
-/** When an upload started before this, it has stalled (`isMediaOnItsWay`). */
-function stalledBefore(now: Date): SQL {
-  return sql`${new Date(now.getTime() - MEDIA_UPLOAD_STALLED_AFTER_MS).toISOString()}::timestamptz`;
-}
+/** Media nothing can play. */
+const deletedOrFailed = sql`(${mediaItems.deletedAt} is not null or ${mediaItems.status} = ${MEDIA_STATUS.FAILED})`;
 
-/** Deleted, failed, or a stalled upload: nothing makes it ready by itself. */
+/** Media nothing makes ready by itself: gone, or a stalled upload. */
 function mediaGone(now: Date): SQL {
-  return sql`(${mediaItems.deletedAt} is not null or ${mediaItems.status} = ${MEDIA_STATUS.FAILED} or (${mediaItems.status} = ${MEDIA_STATUS.UPLOADING} and ${mediaItems.createdAt} < ${stalledBefore(now)}))`;
+  return sql`(${deletedOrFailed} or ${stalledUpload(now)})`;
 }
 
 /** On its way to ready, as Publish when ready reads it (`isMediaOnItsWay`). */
 function mediaOnItsWay(now: Date): SQL {
-  return sql`(${mediaItems.deletedAt} is null and (${mediaItems.status} in (${MEDIA_STATUS.UPLOADED}, ${MEDIA_STATUS.TRANSCODING}) or (${mediaItems.status} = ${MEDIA_STATUS.UPLOADING} and ${mediaItems.createdAt} >= ${stalledBefore(now)})))`;
+  return allOf(
+    sql`${mediaItems.deletedAt} is null`,
+    inArray(mediaItems.status, [
+      MEDIA_STATUS.UPLOADING,
+      ...MEDIA_STATUS_GROUPS.processing,
+    ]),
+    sql`not ${stalledUpload(now)}`
+  );
 }
 
 // ── `ready`: assertPublishable's rules, one predicate each ────────────────
@@ -120,9 +132,10 @@ const paidIfEarning = sql`(not (coalesce(${content.priceCents}, 0) > 0 or ${cont
 
 /**
  * `assertThumbnailFrameNotDeleted`: the thumbnail is no frame of one of the
- * creator's deleted videos, the media it plays aside (`posterFramesOf`).
+ * creator's deleted videos, the media it plays aside (`posterFramesOf`,
+ * whose skip comes first, as in the gate).
  */
-const coverNotFromADeletedVideo = sql`not exists (select 1 from ${mediaItems} where ${mediaItems.creatorId} = ${content.creatorId} and ${holdsPosterFolderOf(content.thumbnailUrl)} and ${mediaItems.id} is distinct from (case when ${playsMedia} then ${content.mediaItemId} end) and ${mediaItems.deletedAt} is not null)`;
+const coverNotFromADeletedVideo = sql`(${content.thumbnailUrl} is null or not (${namesPosterFolderOf(content.thumbnailUrl, content.creatorId)}) or not exists (select 1 from ${mediaItems} where ${mediaItems.creatorId} = ${content.creatorId} and ${holdsPosterFolderOf(content.thumbnailUrl)} and ${mediaItems.id} is distinct from (case when ${playsMedia} then ${content.mediaItemId} end) and ${mediaItems.deletedAt} is not null))`;
 
 /**
  * A draft in hand that passes every rule but an article's body, which the
@@ -138,17 +151,16 @@ export const readyCandidate: SQL = allOf(
   coverNotFromADeletedVideo
 );
 
-/** What `readyAmong` reads of a candidate. */
-export type ReadyCandidateRow = Pick<
-  Content,
-  'id' | 'contentType' | 'contentBody' | 'contentBodyJson'
->;
-
 /**
  * The candidates that are ready: all but an article with nothing to read,
  * judged as publish judges it (`contentGaps`).
  */
-export function readyAmong(rows: readonly ReadyCandidateRow[]): string[] {
+export function readyAmong(
+  rows: readonly Pick<
+    Content,
+    'id' | 'contentType' | 'contentBody' | 'contentBodyJson'
+  >[]
+): string[] {
   return rows
     .filter(
       (row) =>
@@ -158,30 +170,18 @@ export function readyAmong(rows: readonly ReadyCandidateRow[]): string[] {
     .map((row) => row.id);
 }
 
-/**
- * The SQL for one kind, but `ready`, whose last rule is JavaScript
- * (`readyCandidate` + `readyAmong`).
- */
+/** The SQL for one kind but `ready` (`readyCandidate` + `readyAmong`). */
 export function attentionCondition(
-  kind: Exclude<ContentAttentionKind, 'ready'>,
+  kind: SqlAttentionKind,
   now: Date = new Date()
 ): SQL {
   switch (kind) {
     case 'live-media-gone':
-      return allOf(
-        sql`not ${isDraft}`,
-        itsMedia(
-          sql`(${mediaItems.deletedAt} is not null or ${mediaItems.status} = ${MEDIA_STATUS.FAILED})`
-        )
-      );
+      return allOf(sql`not ${isDraft}`, itsMedia(deletedOrFailed));
     case 'scheduled':
-      return allOf(isDraft, sql`${content.publishRequestedAt} is not null`);
+      return allOf(isDraft, scheduled);
     case 'didnt-go-live':
-      return allOf(
-        isDraft,
-        sql`${content.publishRequestedAt} is null`,
-        sql`coalesce(${content.publishBlockedReason}, '') <> ''`
-      );
+      return allOf(isDraft, sql`not ${scheduled}`, refused);
     case 'media-gone':
       return allOf(draftInHand, playsMedia, itsMedia(mediaGone(now)));
     case 'processing':

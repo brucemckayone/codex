@@ -42,6 +42,7 @@ import {
   paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
+  withOrgScope,
 } from '@codex/database';
 import {
   categories,
@@ -128,6 +129,8 @@ import {
   attentionCondition,
   readyAmong,
   readyCandidate,
+  SQL_ATTENTION_KINDS,
+  type SqlAttentionKind,
 } from './content-attention';
 import {
   assertTiersInOrg,
@@ -416,7 +419,7 @@ function filedUnder(
   if (organizationId === undefined) return undefined;
   return organizationId === null
     ? isNull(content.organizationId)
-    : eq(content.organizationId, organizationId);
+    : withOrgScope(content, organizationId);
 }
 
 /**
@@ -2437,6 +2440,11 @@ export class ContentService extends BaseService {
         'organizationId is required for browse-mode content list'
       );
     }
+    if (scope === 'browse' && filters.needs) {
+      throw new ValidationError(
+        "needs filters a creator's own pieces: browse spans creators"
+      );
+    }
 
     try {
       // Build WHERE conditions. Studio scope filters by the signed-in
@@ -2502,14 +2510,8 @@ export class ContentService extends BaseService {
       if (filedWhere) {
         whereConditions.push(filedWhere);
       }
-      // What the pieces need (Codex-a6ofh.3.4): a "Needs you" chip's, by the
-      // rule `attentionCounts` counts with, so the chip lists what it said.
+      // A "Needs you" chip's pieces (`needsCondition`).
       if (filters.needs) {
-        if (scope === 'browse') {
-          throw new ValidationError(
-            "needs filters a creator's own pieces: browse spans creators"
-          );
-        }
         whereConditions.push(
           await this.needsCondition(
             filters.needs,
@@ -2831,60 +2833,55 @@ export class ContentService extends BaseService {
   }
 
   /**
-   * How many of the creator's pieces need them, by kind: the content list's
-   * "Needs you" (Codex-a6ofh.3.4). Where the list looks (`organizationId`, as
-   * `list()` reads it), and nothing else of its filters: the counts are a
-   * to-do, not a view (owner, 2026-11-12). Each kind by the rule the list's
-   * `needs` filter uses (./content-attention.ts), so a chip lists the pieces
-   * it counted, on every page.
+   * How many of the creator's pieces need them, by kind, by the rules in
+   * ./content-attention.ts: the content list's "Needs you" (Codex-a6ofh.3.4).
+   * Where the list looks (`organizationId`, as `list()` reads it), and
+   * nothing else of its filters: the counts are a to-do, not a view (owner,
+   * 2026-11-12).
    */
   async attentionCounts(
     creatorId: string,
-    where: Pick<ContentFilters, 'organizationId'> = {},
-    now: Date = new Date()
+    organizationId?: string | null
   ): Promise<ContentAttentionCounts> {
-    const count = (kind: Exclude<ContentAttentionKind, 'ready'>) =>
-      sql<number>`count(*) filter (where ${attentionCondition(kind, now)})`.mapWith(
-        Number
-      );
+    const now = new Date();
+    const counts = Object.fromEntries(
+      SQL_ATTENTION_KINDS.map((kind) => [
+        kind,
+        sql<number>`count(*) filter (where ${attentionCondition(kind, now)})`.mapWith(
+          Number
+        ),
+      ])
+    ) as Record<SqlAttentionKind, SQL<number>>;
     try {
       const [[row], ready] = await Promise.all([
         this.db
-          .select({
-            liveMediaGone: count('live-media-gone'),
-            scheduled: count('scheduled'),
-            didntGoLive: count('didnt-go-live'),
-            mediaGone: count('media-gone'),
-            processing: count('processing'),
-          })
+          .select(counts)
           .from(content)
           .where(
             and(
               scopedNotDeleted(content, creatorId),
-              filedUnder(where.organizationId)
+              filedUnder(organizationId)
             )
           ),
-        this.readyIds(creatorId, where.organizationId),
+        this.readyIds(creatorId, organizationId),
       ]);
-      return {
-        'live-media-gone': row?.liveMediaGone ?? 0,
-        scheduled: row?.scheduled ?? 0,
-        'didnt-go-live': row?.didntGoLive ?? 0,
-        'media-gone': row?.mediaGone ?? 0,
-        processing: row?.processing ?? 0,
-        ready: ready.length,
-      };
+      if (!row) {
+        // An aggregate with no GROUP BY returns its one row over no pieces.
+        throw new InternalServiceError('The attention counts read no row');
+      }
+      return { ...row, ready: ready.length };
     } catch (error) {
       this.handleError(error, 'attentionCounts');
     }
   }
 
   /**
-   * The list's `needs` filter: the rule its chip counted by, as a semi-join
-   * over a select of its own. Never the predicate itself in the list's
-   * `findMany` where: drizzle's relational query renders every column of a
-   * raw `sql` there as the root table's, so `media_items.id` in its EXISTS
-   * read as `content.id`, and the filter matched nothing (Codex-a6ofh.3.4).
+   * The list's `needs` filter: the rule its chip counted by, so the chip
+   * lists what it said, as a semi-join over a select of its own. Never the
+   * predicate itself in the list's `findMany` where: drizzle's relational
+   * query renders every column of a raw `sql` there as the root table's, so
+   * `media_items.id` in its EXISTS read as `content.id`, and the filter
+   * matched nothing (Codex-a6ofh.3.4).
    */
   private async needsCondition(
     kind: ContentAttentionKind,

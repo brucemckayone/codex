@@ -20,6 +20,7 @@
   import type { IconProps } from '$lib/components/ui/Icon/types';
   import * as m from '$paraglide/messages';
   import type { FacetUnread } from '../list-toolbar/list-option';
+  import UnreadNote from '../list-toolbar/UnreadNote.svelte';
   import type { ListNeeds } from './list-url';
 
   interface Props {
@@ -34,53 +35,58 @@
 
   const { counts, active, unread, onSelect }: Props = $props();
 
-  type Tone = 'error' | 'info' | 'success';
+  interface Chip {
+    tone: 'error' | 'info' | 'success';
+    icon: Component<IconProps>;
+    one: () => string;
+    many: (inputs: { count: number }) => string;
+  }
 
   // The row line's own colours (ContentRowLine): what has gone, or didn't
   // go live, in error; what is on its way, in info; what is ready, in success.
-  const CHIP: Record<ContentAttentionKind, { tone: Tone; icon: Component<IconProps> }> = {
-    'live-media-gone': { tone: 'error', icon: AlertTriangleIcon },
-    scheduled: { tone: 'info', icon: ClockIcon },
-    'didnt-go-live': { tone: 'error', icon: AlertTriangleIcon },
-    'media-gone': { tone: 'error', icon: AlertTriangleIcon },
-    processing: { tone: 'info', icon: ClockIcon },
-    ready: { tone: 'success', icon: CheckCircleIcon },
+  const CHIP: Record<ContentAttentionKind, Chip> = {
+    'live-media-gone': {
+      tone: 'error',
+      icon: AlertTriangleIcon,
+      one: m.studio_content_needs_live_media_gone_one,
+      many: m.studio_content_needs_live_media_gone,
+    },
+    scheduled: {
+      tone: 'info',
+      icon: ClockIcon,
+      one: m.studio_content_needs_scheduled_one,
+      many: m.studio_content_needs_scheduled,
+    },
+    'didnt-go-live': {
+      tone: 'error',
+      icon: AlertTriangleIcon,
+      one: m.studio_content_needs_didnt_go_live_one,
+      many: m.studio_content_needs_didnt_go_live,
+    },
+    'media-gone': {
+      tone: 'error',
+      icon: AlertTriangleIcon,
+      one: m.studio_content_needs_media_gone_one,
+      many: m.studio_content_needs_media_gone,
+    },
+    processing: {
+      tone: 'info',
+      icon: ClockIcon,
+      one: m.studio_content_needs_processing_one,
+      many: m.studio_content_needs_processing,
+    },
+    ready: {
+      tone: 'success',
+      icon: CheckCircleIcon,
+      one: m.studio_content_needs_ready_one,
+      many: m.studio_content_needs_ready,
+    },
   };
-
-  function words(kind: ContentAttentionKind, count: number): string {
-    const one = count === 1;
-    switch (kind) {
-      case 'live-media-gone':
-        return one
-          ? m.studio_content_needs_live_media_gone_one()
-          : m.studio_content_needs_live_media_gone({ count });
-      case 'scheduled':
-        return one
-          ? m.studio_content_needs_scheduled_one()
-          : m.studio_content_needs_scheduled({ count });
-      case 'didnt-go-live':
-        return one
-          ? m.studio_content_needs_didnt_go_live_one()
-          : m.studio_content_needs_didnt_go_live({ count });
-      case 'media-gone':
-        return one
-          ? m.studio_content_needs_media_gone_one()
-          : m.studio_content_needs_media_gone({ count });
-      case 'processing':
-        return one
-          ? m.studio_content_needs_processing_one()
-          : m.studio_content_needs_processing({ count });
-      case 'ready':
-        return one
-          ? m.studio_content_needs_ready_one()
-          : m.studio_content_needs_ready({ count });
-    }
-  }
 
   const chips = $derived(
     counts
       ? CONTENT_ATTENTION_KINDS.filter((kind) => counts[kind] > 0 || kind === active).map(
-          (kind) => ({ kind, count: counts[kind] })
+          (kind) => ({ kind, count: counts[kind], ...CHIP[kind] })
         )
       : []
   );
@@ -89,32 +95,21 @@
 </script>
 
 {#if unread}
-  <div class="needs-you">
-    <p class="needs-you-note" role="status">{unread.words}</p>
-    <button
-      type="button"
-      class="needs-you-retry"
-      aria-busy={unread.retrying}
-      onclick={() => void unread.retry()}
-    >
-      {m.common_try_again()}
-    </button>
-  </div>
+  <div class="needs-you"><UnreadNote {unread} /></div>
 {:else if chips.length > 0}
   <div class="needs-you" role="group" aria-labelledby={labelId}>
     <span class="needs-you-label" id={labelId}>{m.studio_content_needs_label()}</span>
     {#each chips as chip (chip.kind)}
-      {@const Icon = CHIP[chip.kind].icon}
       <button
         type="button"
         class="needs-chip"
-        data-tone={CHIP[chip.kind].tone}
+        data-tone={chip.tone}
         data-kind={chip.kind}
         aria-pressed={chip.kind === active}
         onclick={() => onSelect(chip.kind)}
       >
-        <Icon size={14} aria-hidden="true" />
-        {words(chip.kind, chip.count)}
+        <chip.icon size={14} aria-hidden="true" />
+        {chip.count === 1 ? chip.one() : chip.many({ count: chip.count })}
       </button>
     {/each}
   </div>
@@ -174,29 +169,8 @@
     font-weight: var(--font-semibold);
   }
 
-  .needs-chip:focus-visible,
-  .needs-you-retry:focus-visible {
+  .needs-chip:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
-  }
-
-  .needs-you-note {
-    margin: 0;
-    color: var(--color-text-secondary);
-  }
-
-  .needs-you-retry {
-    padding: var(--space-1) var(--space-2);
-    border: none;
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--color-link);
-    font: inherit;
-    font-weight: var(--font-semibold);
-    cursor: pointer;
-  }
-
-  .needs-you-retry:hover {
-    text-decoration: underline;
   }
 </style>

@@ -36,6 +36,7 @@ import { withoutRawBody } from '$lib/server/content-detail';
 import { ApiError } from '$lib/server/errors';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
 import { logRefusedRead } from '$lib/server/read-failure';
+import { searchParamsOf } from '$lib/server/search-params';
 import {
   contentSlugFromTitle,
   freeSlugCandidates,
@@ -63,15 +64,7 @@ export const listContent = query(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
-    // Every arg the schema parsed, as listMedia does: the args ARE
-    // content-api's `contentQuerySchema`, so they cannot drift. The hand-picked
-    // copy this replaced dropped `contentType` and `accessType`, which the
-    // worker took all along, so the studio list's Type and Access menus
-    // changed nothing (Codex-a6ofh.3.1).
-    const searchParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(params ?? {})) {
-      if (value !== undefined) searchParams.set(key, String(value));
-    }
+    const searchParams = searchParamsOf(params);
 
     // A 4xx keeps its status, so the list can tell a refusal from an outage
     // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit
@@ -155,11 +148,7 @@ export const getContentAttention = query(
   async (params) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    const searchParams = new URLSearchParams();
-    if (params.organizationId) {
-      searchParams.set('organizationId', params.organizationId);
-    }
-    if (params.scope) searchParams.set('scope', params.scope);
+    const searchParams = searchParamsOf(params);
     return forwardClientErrors(() =>
       logRefusedRead(
         {

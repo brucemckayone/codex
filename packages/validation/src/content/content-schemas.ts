@@ -899,12 +899,22 @@ const contentQueryFields = paginationSchema.extend({
 });
 
 /**
+ * Personal and an org at once is two answers to "where": refused, never one
+ * silently winning. In the schemas, so the web remote and the worker refuse
+ * it alike.
+ */
+function oneWhere(q: { scope?: string; organizationId?: string }): boolean {
+  return !(q.scope !== undefined && q.organizationId !== undefined);
+}
+const ONE_WHERE_REFUSAL = {
+  message: 'scope=personal reads content outside any org: drop organizationId',
+  path: ['scope'],
+};
+
+/**
  * Content query/filter schema
  * Used for listing and searching content
  * Extends pagination with content-specific filters and sorting
- *
- * Personal and an org at once is two answers to "where": refused, never one
- * silently winning. Here, so the web remote and the worker refuse it alike.
  */
 export const contentQuerySchema = contentQueryFields
   .extend({
@@ -913,11 +923,7 @@ export const contentQuerySchema = contentQueryFields
     // out, and skip the query. A studio read's alone: browse names none.
     include: z.literal('categories').optional(),
   })
-  .refine((q) => !(q.scope !== undefined && q.organizationId !== undefined), {
-    message:
-      'scope=personal lists content outside any org: drop organizationId',
-    path: ['scope'],
-  });
+  .refine(oneWhere, ONE_WHERE_REFUSAL);
 
 export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
 
@@ -949,17 +955,13 @@ export type ContentBrowseQueryInput = z.infer<typeof contentBrowseQuerySchema>;
 /**
  * `GET /api/content/attention` (Codex-a6ofh.3.4): where the "Needs you"
  * counts look, as the studio list says it: one org (`organizationId`), the
- * pieces under none (`scope=personal`), or, with neither, everywhere. Both
- * at once is refused, as the list refuses it. The list's other filters
- * leave the counts alone (owner): they are a to-do, not a view.
+ * pieces under none (`scope=personal`), or, with neither, everywhere; both
+ * at once is refused (`oneWhere`). The list's other filters leave the counts
+ * alone (owner): they are a to-do, not a view.
  */
 export const contentAttentionQuerySchema = contentQueryFields
   .pick({ organizationId: true, scope: true })
-  .refine((q) => !(q.scope !== undefined && q.organizationId !== undefined), {
-    message:
-      'scope=personal counts content outside any org: drop organizationId',
-    path: ['scope'],
-  });
+  .refine(oneWhere, ONE_WHERE_REFUSAL);
 
 export type ContentAttentionQueryInput = z.infer<
   typeof contentAttentionQuerySchema

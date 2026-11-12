@@ -5,6 +5,7 @@
  * the view from the URL reaching the read, a row's words, "Show more"
  * appending the next page, and the cards.
  */
+import { CONTENT_ATTENTION_KINDS } from '@codex/constants';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { ContentWithRelations } from '$lib/types';
 import * as m from '$paraglide/messages';
@@ -36,6 +37,25 @@ const s = vi.hoisted(() => ({
   later: new Map<number, unknown>(),
   refreshFirst: vi.fn(async () => {}),
 }));
+/**
+ * A query kit holds for the page, over `s[slot]`: one object, as kit keeps
+ * one per args, so a re-derive that asks again is not a new read.
+ */
+const heldQuery = vi.hoisted(
+  () =>
+    (
+      slot: 'first' | 'whereCounts' | 'categories' | 'attention',
+      refresh: () => Promise<void> = async () => {}
+    ) => ({
+      get current() {
+        return s[slot].current;
+      },
+      get error() {
+        return s[slot].error;
+      },
+      refresh,
+    })
+);
 
 vi.mock('$app/state', () => import('../../__fixtures__/app-state.svelte'));
 
@@ -44,50 +64,23 @@ const goto = vi.hoisted(() =>
 );
 vi.mock('$app/navigation', () => ({ goto }));
 
-/**
- * Page 1 is the view's query, one object as kit keeps one per args (so a
- * re-derive that asks again is not a new read); a later page is the promise
- * "Show more" awaits.
- */
+/** Page 1 is the view's held query; a later page is the promise "Show more" awaits. */
 const listContent = vi.hoisted(() => {
-  const firstQuery = {
-    get current() {
-      return s.first.current;
-    },
-    get error() {
-      return s.first.error;
-    },
-    refresh: () => s.refreshFirst(),
-  };
+  const firstQuery = heldQuery('first', () => s.refreshFirst());
   return vi.fn((args?: { page?: number }) => {
     if ((args?.page ?? 1) === 1) return firstQuery;
     const next = s.later.get(args?.page ?? 1);
     return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
   });
 });
-/** The personal studio's Where counts (Codex-a6ofh.3.2): one query, as kit keeps one. */
+/** The personal studio's Where counts (Codex-a6ofh.3.2). */
 const getContentWhereCounts = vi.hoisted(() => {
-  const query = {
-    get current() {
-      return s.whereCounts.current;
-    },
-    get error() {
-      return s.whereCounts.error;
-    },
-  };
+  const query = heldQuery('whereCounts');
   return vi.fn(() => query);
 });
-/** "Needs you" (Codex-a6ofh.3.4): one query per Where, as kit keeps one. */
+/** "Needs you" (Codex-a6ofh.3.4). */
 const getContentAttention = vi.hoisted(() => {
-  const query = {
-    get current() {
-      return s.attention.current;
-    },
-    get error() {
-      return s.attention.error;
-    },
-    refresh: async () => {},
-  };
+  const query = heldQuery('attention');
   return vi.fn((_args?: unknown) => query);
 });
 vi.mock('$lib/remote/content.remote', () => ({
@@ -95,16 +88,9 @@ vi.mock('$lib/remote/content.remote', () => ({
   getContentWhereCounts,
   getContentAttention,
 }));
-/** The org studio's categories (Codex-a6ofh.3.3): one query, as kit keeps one. */
+/** The org studio's categories (Codex-a6ofh.3.3). */
 const getCategories = vi.hoisted(() => {
-  const query = {
-    get current() {
-      return s.categories.current;
-    },
-    get error() {
-      return s.categories.error;
-    },
-  };
+  const query = heldQuery('categories');
   return vi.fn((_organizationId: string) => query);
 });
 vi.mock('$lib/remote/categories.remote', () => ({ getCategories }));
@@ -962,14 +948,9 @@ describe('StudioContentList: Needs you (Codex-a6ofh.3.4)', () => {
     component = null;
 
     s.attention = {
-      current: {
-        'live-media-gone': 0,
-        scheduled: 0,
-        'didnt-go-live': 0,
-        'media-gone': 0,
-        processing: 0,
-        ready: 0,
-      },
+      current: Object.fromEntries(
+        CONTENT_ATTENTION_KINDS.map((kind) => [kind, 0])
+      ),
       error: undefined,
     };
     render();
@@ -1039,7 +1020,7 @@ describe('StudioContentList: Needs you (Codex-a6ofh.3.4)', () => {
       })
     );
 
-    strip()?.querySelector<HTMLButtonElement>('.needs-you-retry')?.click();
+    strip()?.querySelector<HTMLButtonElement>('.unread-note-retry')?.click();
     await settle();
     expect(q.refreshes(held)).toBe(1);
     q.fail(undefined, held);
@@ -1048,7 +1029,7 @@ describe('StudioContentList: Needs you (Codex-a6ofh.3.4)', () => {
       m.studio_content_needs_unread_again()
     );
 
-    strip()?.querySelector<HTMLButtonElement>('.needs-you-retry')?.click();
+    strip()?.querySelector<HTMLButtonElement>('.unread-note-retry')?.click();
     await settle();
     q.land(COUNTS, held);
     await settle();

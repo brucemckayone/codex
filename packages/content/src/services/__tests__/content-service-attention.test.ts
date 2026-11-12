@@ -247,13 +247,8 @@ describe('ContentService — Needs you (Codex-a6ofh.3.4)', () => {
     await videoDraft(otherId, ready);
 
     expect((await service.attentionCounts(creatorId)).ready).toBe(2);
-    expect(
-      (await service.attentionCounts(creatorId, { organizationId: null })).ready
-    ).toBe(1);
-    expect(
-      (await service.attentionCounts(creatorId, { organizationId: orgId }))
-        .ready
-    ).toBe(1);
+    expect((await service.attentionCounts(creatorId, null)).ready).toBe(1);
+    expect((await service.attentionCounts(creatorId, orgId)).ready).toBe(1);
     expect(await listed(creatorId, 'ready', null)).toEqual([personal]);
     expect(await listed(creatorId, 'ready', orgId)).toEqual([inOrg]);
     expect((await service.attentionCounts(otherId)).ready).toBe(1);

@@ -21,10 +21,7 @@ import {
   type ContentAccessType,
   type ContentAttentionKind,
 } from '@codex/constants';
-import type {
-  ContentAttentionQueryInput,
-  ContentQueryInput,
-} from '@codex/validation';
+import type { ContentQueryInput } from '@codex/validation';
 import { pickIdParam, pickParam } from '$lib/utils/filter-url';
 import type { ListUrlPatch } from '../list-url-writer';
 import { type ContentStatusFilter, readStatusFilter } from './content-status';
@@ -156,11 +153,13 @@ export function isOrgWhere(where: string): boolean {
 }
 
 /**
- * Where the read looks. The org studio's list is its org, whatever the URL
- * says. The personal studio's is its Where: personal is `scope` (an
- * organizationId cannot say "none"), an org is its id, Everywhere neither.
+ * Where the read looks: the list's, and the "Needs you" counts' alone (a
+ * to-do, not a view: owner, Codex-a6ofh.3.4). The org studio's list is its
+ * org, whatever the URL says. The personal studio's is its Where: personal
+ * is `scope` (an organizationId cannot say "none"), an org is its id,
+ * Everywhere neither.
  */
-function whereArgs(
+export function whereArgs(
   where: string,
   organizationId: string | null
 ): Pick<ContentQueryInput, 'scope' | 'organizationId'> {
@@ -202,35 +201,29 @@ export function contentListArgs(
 }
 
 /**
- * `getContentAttention`'s args: where the list looks, and nothing else of
- * its view. The counts are a to-do, not a view (owner, Codex-a6ofh.3.4), so
- * a facet or a search leaves them alone.
+ * What narrows a view within its Where, cleared: the search, the status and
+ * the facets. Clear filters and a "Needs you" chip both write it; neither
+ * touches the sort or the view.
  */
-export function attentionArgs(
-  where: ContentListState['where'],
-  organizationId: string | null
-): ContentAttentionQueryInput {
-  return whereArgs(where, organizationId);
-}
+export const FACETS_CLEARED = {
+  search: null,
+  status: null,
+  type: null,
+  access: null,
+  category: null,
+} as const satisfies ListUrlPatch;
 
 /**
  * A "Needs you" chip pressed: its pieces, and only those, so the rows shown
- * are the number it said. The status, facets and search go (Where, sort and
- * view stay); pressing the chip in use again shows the whole list.
+ * are the number it said; the Where stays. Pressing the chip in use again
+ * shows the whole list.
  */
 export function needsPatch(
   kind: ContentAttentionKind,
   state: ContentListState
 ): ListUrlPatch {
   if (state.needs === kind) return { needs: null };
-  return {
-    needs: kind,
-    search: null,
-    status: null,
-    type: null,
-    access: null,
-    category: null,
-  };
+  return { ...FACETS_CLEARED, needs: kind };
 }
 
 /**

@@ -233,22 +233,22 @@ describe('GET /api/content/attention (Codex-a6ofh.3.4)', () => {
 
     // Above /:id: read as an id, it would be a 400.
     expect(res.status).toBe(200);
-    expect(contentSpies.attentionCounts).toHaveBeenCalledWith(USER.id, {
-      organizationId: ORG_ID,
-    });
+    expect(contentSpies.attentionCounts).toHaveBeenCalledWith(USER.id, ORG_ID);
     expect(await res.json()).toEqual({ data: counts });
   });
 
   it('scope=personal counts the pieces filed under no org; neither, everywhere', async () => {
     expect((await get('/attention?scope=personal')).status).toBe(200);
-    expect(contentSpies.attentionCounts).toHaveBeenLastCalledWith(USER.id, {
-      organizationId: null,
-    });
+    expect(contentSpies.attentionCounts).toHaveBeenLastCalledWith(
+      USER.id,
+      null
+    );
 
     expect((await get('/attention')).status).toBe(200);
-    expect(contentSpies.attentionCounts).toHaveBeenLastCalledWith(USER.id, {
-      organizationId: undefined,
-    });
+    expect(contentSpies.attentionCounts).toHaveBeenLastCalledWith(
+      USER.id,
+      undefined
+    );
   });
 
   it('scope=personal beside an organizationId is refused, as the list refuses it', async () => {

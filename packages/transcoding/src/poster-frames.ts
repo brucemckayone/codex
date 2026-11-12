@@ -32,6 +32,19 @@ export function holdsPosterFolderOf(url: SQLWrapper | string): SQL {
 }
 
 /**
+ * {@link posterFramesOf}'s skip, in SQL: `url` names a poster folder of
+ * `creatorId`'s at all. A query that checks frames per row tests this first,
+ * as the gate does, so a row with no such folder never runs the subquery.
+ * Null for a null `url`.
+ */
+export function namesPosterFolderOf(
+  url: SQLWrapper,
+  creatorId: SQLWrapper
+): SQL {
+  return sql`strpos(${url}, '/' || ${creatorId} || ${POSTER_FOLDER}::text) > 0`;
+}
+
+/**
  * How many poster folders `url` names: its `/media-thumbnails/` segments.
  * Each is a frame of the creator's video only when {@link posterFramesOf}
  * finds that video, so a URL whose count exceeds the videos found names a

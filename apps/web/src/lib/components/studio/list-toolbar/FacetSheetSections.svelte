@@ -11,8 +11,8 @@
 <script lang="ts" generics="K extends string">
   import { CheckIcon } from '$lib/components/ui/Icon';
   import { formatCount } from '$lib/utils/format';
-  import FacetSheetUnread from './FacetSheetUnread.svelte';
   import type { FacetUnread, ListOption } from './list-option';
+  import UnreadNote from './UnreadNote.svelte';
 
   interface Facet {
     key: K;
@@ -59,7 +59,7 @@
         </button>
       {/each}
     </div>
-    {#if facet.unread}<FacetSheetUnread unread={facet.unread} />{/if}
+    {#if facet.unread}<div class="facet-unread"><UnreadNote unread={facet.unread} /></div>{/if}
   </section>
 {/each}
 
@@ -94,5 +94,10 @@
     margin-inline-start: var(--space-1);
     font-weight: var(--font-normal);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* A facet that could not be read: its note sits below the pills. */
+  .facet-unread {
+    margin-top: var(--space-2);
   }
 </style>

@@ -219,9 +219,10 @@ app.get(
     input: { query: contentAttentionQuerySchema },
     handler: async (ctx): Promise<ContentAttentionCounts> => {
       const { scope, organizationId } = ctx.input.query;
-      return ctx.services.content.attentionCounts(ctx.user.id, {
-        organizationId: scope ? null : organizationId,
-      });
+      return ctx.services.content.attentionCounts(
+        ctx.user.id,
+        scope ? null : organizationId
+      );
     },
   })
 );
