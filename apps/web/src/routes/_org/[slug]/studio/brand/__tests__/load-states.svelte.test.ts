@@ -71,6 +71,7 @@ import {
   RAIL_GROUPS,
 } from '$lib/components/brand-studio/rail/rail-model';
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
+import { toast } from '$lib/components/ui/Toast/toast-store';
 import { logger } from '$lib/observability';
 import BrandPage from '../+page.svelte';
 
@@ -173,7 +174,7 @@ describe('once the branding read lands', () => {
   });
 
   test('the rail waits for the store, not the read: no editor until it opens', () => {
-    vi.spyOn(brandEditor, 'open').mockImplementation(() => {});
+    vi.spyOn(brandEditor, 'open').mockImplementation(() => 'none');
     mountPage();
     brandingRemote().land(BRANDING);
     flushSync();
@@ -264,5 +265,90 @@ describe('Retry', () => {
     expect(document.activeElement?.classList.contains('load-failed')).toBe(
       true
     );
+  });
+});
+
+/**
+ * A draft from an earlier session (Codex-0keaj). The store restores the tab's
+ * unsaved brand only over the brand it was edited from; the page says which
+ * way it went, since a restored draft is unsaved work and a discarded one was
+ * edited from a brand someone has saved over since.
+ */
+describe('a draft from an earlier session', () => {
+  const KEY = 'codex:brand-editor';
+
+  /** Open the page, edit, then "reload": the tab keeps its row. */
+  function editThenReload() {
+    mountPage();
+    brandingRemote().land(BRANDING);
+    flushSync();
+    brandEditor.updateField('primaryColor', '#111111');
+    flushSync();
+    const row = sessionStorage.getItem(KEY);
+    expect(row).not.toBeNull();
+    if (component) unmount(component);
+    component = null;
+    if (row) sessionStorage.setItem(KEY, row);
+    // A reload starts with an empty kit cache: a new branding query.
+    reset();
+  }
+
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  test('a restored draft says so', () => {
+    const info = vi.spyOn(toast, 'info');
+    editThenReload();
+
+    mountPage();
+    brandingRemote().land(BRANDING);
+    flushSync();
+
+    expect(brandEditor.pending?.primaryColor).toBe('#111111');
+    expect(info).toHaveBeenCalledWith(m.studio_brand_recovery_restored());
+  });
+
+  test('a draft of a brand saved since is not restored, and says so', () => {
+    const warning = vi.spyOn(toast, 'warning');
+    editThenReload();
+
+    mountPage();
+    brandingRemote().land({ ...BRANDING, accentColorHex: '#22AA22' });
+    flushSync();
+
+    expect(brandEditor.pending?.primaryColor).toBe(BRANDING.primaryColorHex);
+    expect(warning).toHaveBeenCalledWith(m.studio_brand_recovery_discarded());
+  });
+
+  test('a draft the admin never saw, because the read failed, waits for the next open', () => {
+    const info = vi.spyOn(toast, 'info');
+    editThenReload();
+
+    // The read fails, and the admin goes elsewhere before Retry.
+    mountFailed();
+    if (component) unmount(component);
+    component = null;
+    reset();
+    expect(sessionStorage.getItem(KEY)).not.toBeNull();
+
+    mountPage();
+    brandingRemote().land(BRANDING);
+    flushSync();
+
+    expect(brandEditor.pending?.primaryColor).toBe('#111111');
+    expect(info).toHaveBeenCalledWith(m.studio_brand_recovery_restored());
+  });
+
+  test('nothing to restore says nothing', () => {
+    const info = vi.spyOn(toast, 'info');
+    const warning = vi.spyOn(toast, 'warning');
+
+    mountPage();
+    brandingRemote().land(BRANDING);
+    flushSync();
+
+    expect(info).not.toHaveBeenCalled();
+    expect(warning).not.toHaveBeenCalled();
   });
 });
