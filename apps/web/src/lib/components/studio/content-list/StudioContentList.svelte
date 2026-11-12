@@ -25,10 +25,12 @@
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { getCategories } from '$lib/remote/categories.remote';
   import { getContentWhereCounts, listContent } from '$lib/remote/content.remote';
+  import { isReadOutage } from '$lib/remote/query-result';
   import { listTiers } from '$lib/remote/subscription.remote';
   import * as m from '$paraglide/messages';
   import ActionLink from '../ActionLink.svelte';
   import LoadFailedAlert from '../LoadFailedAlert.svelte';
+  import type { FacetUnread } from '../list-toolbar/list-option';
   import { createListSearch, createListUrlWriter } from '../list-url-writer';
   import { logReadFailure } from '../media-library/log-read-failure';
   import { PagedList } from '../paged-list.svelte';
@@ -40,6 +42,7 @@
   import ContentListToolbar from './ContentListToolbar.svelte';
   import { categoryOptions, whereOptions } from './list-options';
   import {
+    CATEGORY_ANY,
     CONTENT_LIST_DEFAULTS,
     contentListArgs,
     isContentListNarrowed,
@@ -156,19 +159,43 @@
   );
 
   // The org studio's Category (Codex-a6ofh.3.3): the org's categories, read
-  // once (untracked, as the counts above) and decoration as they are. A
-  // failure leaves the menu Any alone; the list reads its rows on its own.
+  // once (untracked, as the counts above). The rows name their own either
+  // way. A read that failed is never shown as an org with none (owner): an
+  // outage says so in the menu, with a Try again; a refusal (a member
+  // without the creator or admin role the route asks) has no menu at all,
+  // unless the URL is on a category, which the menu then clears.
   const categories = $derived.by(() => {
     const org = organizationId;
     return org === null ? null : untrack(() => getCategories(org));
   });
   $effect(() => {
     if (categories?.error != null) {
-      logReadFailure('studio_content.list_categories_unread', categories.error, { studio });
+      logReadFailure('studio_content.list_categories_unread', categories.error, {
+        studio,
+        organizationId,
+      });
     }
   });
+  const categoriesFailed = $derived(
+    categories !== null && categories.current === undefined && categories.error != null
+  );
+  const categoriesOut = $derived(categoriesFailed && isReadOutage(categories?.error));
   const categoryMenu = $derived(
-    categories ? categoryOptions(categories.current, view.category) : undefined
+    categories === null ||
+      (categoriesFailed && !categoriesOut && view.category === CATEGORY_ANY)
+      ? undefined
+      : categoryOptions(categories.current, view.category)
+  );
+  // Refreshed in place: the query is held untracked, so the derivation keeps
+  // it rather than making a new one.
+  const categoryUnread = $derived<FacetUnread | undefined>(
+    categoriesOut && categories
+      ? {
+          failed: () => m.studio_content_categories_unread(),
+          failedAgain: () => m.studio_content_categories_unread_again(),
+          retry: () => categories.refresh(),
+        }
+      : undefined
   );
 
   // ── What the body shows ───────────────────────────────────────────────
@@ -247,6 +274,7 @@
     onChange={setParams}
     whereOptions={whereMenu}
     categoryOptions={categoryMenu}
+    {categoryUnread}
   />
 
   <!-- Mounted unconditionally: it renders nothing until the read fails. -->

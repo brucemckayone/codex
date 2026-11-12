@@ -88,6 +88,9 @@ const makeQuery = (fn: (...args: unknown[]) => unknown) => {
     { __: { type: 'query', id: '', name: '' } }
   );
 };
+/** The signed-in viewer's platform role (getCategories reads it). */
+const viewer = vi.hoisted(() => ({ role: 'creator' as string | undefined }));
+
 vi.mock('$app/server', () => ({
   command: vi.fn((...args: unknown[]) => makeRemote('command', lastArg(args))),
   form: vi.fn((...args: unknown[]) => makeRemote('form', lastArg(args))),
@@ -105,6 +108,7 @@ vi.mock('$app/server', () => ({
   getRequestEvent: vi.fn(() => ({
     platform: { env: {} },
     cookies: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    locals: { user: viewer.role === undefined ? null : { role: viewer.role } },
   })),
 }));
 
@@ -213,6 +217,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   refreshes.clear();
   cache.clear();
+  viewer.role = 'creator';
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -365,8 +370,8 @@ describe('getCategories', () => {
   it.each([
     [400, 'Invalid request data', 'error', REFUSED],
     [401, 'Authentication required', 'warn', REFUSED],
-    // The route asks a creator or admin; an org studio member need not be.
-    [403, 'Forbidden', 'warn', REFUSED],
+    // A creator holds the route's role: a 403 is the guards disagreeing.
+    [403, 'Forbidden', 'error', REFUSED],
     [429, 'Too many requests', 'warn', REFUSED],
     [408, 'Request to content timed out', 'error', UNAVAILABLE],
   ] as const)('a forwarded %i writes one server line, at %s, as %s', async (status, message, level, event) => {
@@ -374,6 +379,18 @@ describe('getCategories', () => {
     await rejection(categoriesRemote.getCategories(ORG));
     expect(lines().map(([at, name]) => [at, name])).toEqual([[level, event]]);
     expect(lines()[0]?.[2]).toMatchObject({ status, organizationId: ORG });
+  });
+
+  it.each([
+    ['a customer', 'customer'],
+    ['no role read', undefined],
+  ] as const)('a 403 for %s, whom the route turns away by role, warns', async (_who, role) => {
+    viewer.role = role;
+    workerAnswers(403, 'Insufficient permissions');
+    await rejection(categoriesRemote.getCategories(ORG));
+    expect(lines().map(([at, name]) => [at, name])).toEqual([
+      ['warn', REFUSED],
+    ]);
   });
 
   it('a 5xx is not forwarded: it stays an unexpected error for handleError', async () => {

@@ -15,6 +15,7 @@ import {
 } from '$tests/utils/component-test-utils.svelte';
 import { nav } from '../../__fixtures__/app-state.svelte';
 import { draftRow, LIVE, PAID, withMedia } from '../../__fixtures__/draft-row';
+import { kitQuery } from '../../__fixtures__/kit-query.mock.svelte';
 import { editHref, publishStepHref } from '../../editor/editor-url';
 
 type Page = {
@@ -683,9 +684,28 @@ describe('StudioContentList: Category', () => {
     expect(goto).toHaveBeenCalledWith('/studio/content', expect.anything());
   });
 
-  test('categories that failed leave Any alone, name the URL’s one, and are logged', async () => {
-    s.categories = { current: undefined, error: new Error('down') };
+  /** The menu's words when its categories are unread, and its Try again. */
+  const note = () =>
+    document.querySelector('.toolbar-menu-note')?.textContent?.trim();
+  const tryAgain = () =>
+    [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent?.trim() === m.common_try_again()
+    );
+
+  /** The categories read as kit holds it: one query, failed or landed. */
+  function categoriesRead() {
+    const q = kitQuery<typeof CATEGORIES>();
+    getCategories.mockImplementationOnce(() => q.get() as never);
+    return q;
+  }
+
+  // Owner, 2026-11-12: a read that failed is never shown as an org with
+  // no categories.
+  test('an outage says so after what it can offer, named the URL’s one, and is logged', async () => {
+    const q = categoriesRead();
     render(`?category=${LIVE}`);
+    q.fail();
+    await settle();
     expect(categoryTrigger()?.textContent).toContain(
       m.studio_content_category_this()
     );
@@ -695,11 +715,79 @@ describe('StudioContentList: Category', () => {
       m.studio_content_category_any(),
       m.studio_content_category_this(),
     ]);
+    expect(note()).toBe(m.studio_content_categories_unread());
+    expect(tryAgain()).toBeDefined();
     expect(logReadFailure).toHaveBeenCalledWith(
       'studio_content.list_categories_unread',
-      expect.any(Error),
-      expect.objectContaining({ studio: 'org' })
+      expect.objectContaining({ status: 500 }),
+      expect.objectContaining({ studio: 'org', organizationId: ORG })
     );
+  });
+
+  test('Try again reads the held query again, and its categories replace the note', async () => {
+    const q = categoriesRead();
+    render();
+    const held = q.held();
+    q.fail();
+    await settle();
+    await openCategory();
+    tryAgain()?.click();
+    await settle();
+    expect(q.refreshes(held)).toBe(1);
+    expect(note()).toBe(m.studio_list_facet_retrying());
+
+    // The page holds its query untracked: kit refreshes it in place.
+    q.land(CATEGORIES, held);
+    await settle();
+    expect(items()).toEqual([
+      m.studio_content_category_any(),
+      'Tutorials',
+      'Live',
+      'Q&A',
+    ]);
+    expect(note()).toBeUndefined();
+    expect(tryAgain()).toBeUndefined();
+  });
+
+  test('a Try again that fails too says so', async () => {
+    const q = categoriesRead();
+    render();
+    const held = q.held();
+    q.fail();
+    await settle();
+    await openCategory();
+    tryAgain()?.click();
+    await settle();
+    q.fail(undefined, held);
+    await settle();
+    expect(note()).toBe(m.studio_content_categories_unread_again());
+    expect(tryAgain()).toBeDefined();
+  });
+
+  test('a refusal (no creator or admin role) has no Category menu, unless the URL is on one', async () => {
+    const refused = {
+      status: 403,
+      body: { message: 'Insufficient permissions' },
+    };
+    const q = categoriesRead();
+    render();
+    q.fail(refused);
+    await settle();
+    expect(categoryTrigger()).toBeUndefined();
+    if (component) unmount(component);
+    component = null;
+    document.body.innerHTML = '';
+
+    const onOne = categoriesRead();
+    render(`?category=${LIVE}`);
+    onOne.fail(refused);
+    await settle();
+    await openCategory();
+    expect(items()).toEqual([
+      m.studio_content_category_any(),
+      m.studio_content_category_this(),
+    ]);
+    expect(tryAgain()).toBeUndefined();
   });
 
   test('a row reads its first category and how many more, and says them all', () => {

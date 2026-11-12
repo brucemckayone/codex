@@ -398,6 +398,22 @@ const CONTENT_SLUG_INDEXES = new Set([
  */
 type StudioListOptions = { scope?: 'studio'; withCategories?: boolean };
 
+/**
+ * A live category in its piece's own space, the rule
+ * `assertCategoriesInSpace` files by: the piece's org's categories, or a
+ * personal piece's creator's own personal ones. For a read that joins
+ * `content_categories` to both `categories` and `content`. A piece moved
+ * to another space keeps its old join rows until its set is next saved,
+ * and those name nothing (Codex-a6ofh.3.3 review).
+ */
+function filedInItsSpace(): SQL {
+  // `sql`, not and()/or(): those answer `SQL | undefined`, and and() drops
+  // an undefined argument silently.
+  const orgs = eq(categories.organizationId, content.organizationId);
+  const ownPersonal = sql`(${content.organizationId} is null and ${categories.organizationId} is null and ${categories.creatorId} = ${content.creatorId})`;
+  return sql`(${isNull(categories.deletedAt)} and (${orgs} or ${ownPersonal}))`;
+}
+
 export class ContentService extends BaseService {
   private cache?: VersionedCache;
   private readonly r2PublicUrlBase?: string;
@@ -553,16 +569,15 @@ export class ContentService extends BaseService {
       const invalid = categoryIds.filter((id) => !found.has(id));
       throw new ValidationError(
         'One or more categories do not exist in this space',
-        { invalidCategoryIds: invalid }
+        { code: ERROR_CODES.CATEGORY_NOT_IN_SPACE, invalidCategoryIds: invalid }
       );
     }
     return categoryIds;
   }
 
   /**
-   * The ids of the live categories a piece is filed in: its join rows
-   * outlive a category's soft delete, so the join to `categories` drops a
-   * dead one. In the caller's transaction when it holds the row.
+   * The ids of the live categories a piece is filed in, in its own space
+   * (`filedInItsSpace`). In the caller's transaction when it holds the row.
    */
   private liveCategoryIds(
     db: DatabaseClient | DatabaseTransaction,
@@ -572,11 +587,9 @@ export class ContentService extends BaseService {
       .select({ categoryId: contentCategories.categoryId })
       .from(contentCategories)
       .innerJoin(categories, eq(contentCategories.categoryId, categories.id))
+      .innerJoin(content, eq(contentCategories.contentId, content.id))
       .where(
-        and(
-          eq(contentCategories.contentId, contentId),
-          isNull(categories.deletedAt)
-        )
+        and(eq(contentCategories.contentId, contentId), filedInItsSpace())
       );
   }
 
@@ -2611,8 +2624,9 @@ export class ContentService extends BaseService {
   }
 
   /**
-   * The live categories each row is filed in, by `sortOrder` then name,
-   * keyed by its id (a row in none has no key): one query over the page.
+   * The live categories each row is filed in, in its own space
+   * (`filedInItsSpace`), by `sortOrder` then name, keyed by its id (a row in
+   * none has no key): one query over the page.
    */
   private async categoriesOf(
     rows: Array<{ id: string }>
@@ -2627,13 +2641,14 @@ export class ContentService extends BaseService {
       })
       .from(contentCategories)
       .innerJoin(categories, eq(contentCategories.categoryId, categories.id))
+      .innerJoin(content, eq(contentCategories.contentId, content.id))
       .where(
         and(
           inArray(
             contentCategories.contentId,
             rows.map((row) => row.id)
           ),
-          isNull(categories.deletedAt)
+          filedInItsSpace()
         )
       )
       .orderBy(asc(categories.sortOrder), asc(categories.name));
@@ -2654,8 +2669,8 @@ export class ContentService extends BaseService {
    * most `CONTENT_MAX_CATEGORIES`, as a save allows. The row is read locked,
    * as `update` reads it, so two adds at once cannot both pass the limit.
    *
-   * `hasBeenLive` is the caller's cache gate: a never-live draft is in no
-   * cache to bump.
+   * `changed && hasBeenLive` is the caller's cache gate: a never-live draft
+   * is in no cache to bump, and an add that filed nothing new changed none.
    *
    * @throws {ContentNotFoundError} not the creator's, or deleted
    * @throws {ValidationError} a category outside its space, or past the limit
@@ -2668,6 +2683,7 @@ export class ContentService extends BaseService {
     categoryIds: string[];
     organizationId: string | null;
     hasBeenLive: boolean;
+    changed: boolean;
   }> {
     try {
       const result = await this.db.transaction(async (tx) => {
@@ -2703,27 +2719,30 @@ export class ContentService extends BaseService {
           throw new ValidationError(
             `A piece can be in at most ${CONTENT_MAX_CATEGORIES} categories`,
             {
+              code: ERROR_CODES.CATEGORY_LIMIT_REACHED,
               max: CONTENT_MAX_CATEGORIES,
               filedIn: held.length,
             }
           );
         }
 
-        await tx
+        const inserted = await tx
           .insert(contentCategories)
           .values(adding.map((categoryId) => ({ contentId, categoryId })))
-          .onConflictDoNothing();
+          .onConflictDoNothing()
+          .returning();
 
         return {
           categoryIds: after,
           organizationId: piece.organizationId,
           hasBeenLive: hasBeenLive(piece),
+          changed: inserted.length > 0,
         };
       });
       // As `update` does for a categories save: an org's public topic list
       // counts its live pieces per category, so a changed set refreshes it.
       // A never-live or personal piece is on no such list.
-      if (result.hasBeenLive && result.organizationId) {
+      if (result.changed && result.hasBeenLive && result.organizationId) {
         void this.cache?.invalidate(
           CacheType.CATEGORIES(result.organizationId)
         );

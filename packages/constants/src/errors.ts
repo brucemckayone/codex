@@ -35,6 +35,12 @@ export const ERROR_CODES = {
   // (Codex-a6ofh.2.8). Stored as `content.publish_blocked_reason`; no
   // publish ever refuses with it.
   MEDIA_FAILED: 'MEDIA_FAILED',
+  // The `details.code` of a filing refused (Codex-a6ofh.3.3): a category
+  // outside the piece's own space (unknown and deleted ones alike), and an
+  // add past CONTENT_MAX_CATEGORIES. The list's bulk "Add to category" tells
+  // them apart per piece.
+  CATEGORY_NOT_IN_SPACE: 'CATEGORY_NOT_IN_SPACE',
+  CATEGORY_LIMIT_REACHED: 'CATEGORY_LIMIT_REACHED',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   NOT_FOUND: 'NOT_FOUND',

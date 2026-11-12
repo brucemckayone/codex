@@ -20,6 +20,7 @@
  * - Validation: packages/validation/src/content/category-schemas.ts
  */
 
+import { AUTH_ROLES } from '@codex/constants';
 import {
   createCategorySchema,
   updateCategorySchema,
@@ -39,6 +40,12 @@ import { type StudioCategory, toStudioCategory } from './categories.types';
 /** Management list caps at the pagination max (100); mutations refresh this. */
 const CATEGORY_LIST_LIMIT = 100;
 
+/** The platform roles `GET /api/categories` admits (content-api `categories.ts`). */
+const CATEGORY_READER_ROLES: readonly string[] = [
+  AUTH_ROLES.CREATOR,
+  AUTH_ROLES.ADMIN,
+];
+
 /**
  * List an org's categories: the studio management page, the editor's
  * picker, and the content list's Category facet (Codex-a6ofh.3.3).
@@ -49,14 +56,15 @@ const CATEGORY_LIST_LIMIT = 100;
  * A 4xx keeps its status and is logged at a signed-in read's level, as the
  * studio lists' reads are (`logRefusedRead`): kit made it a 500 and logged a
  * sign-out as an error. The route asks a creator or admin, which an org
- * studio member need not be, so a 403 warns too (`roleGated`). A 5xx
- * escapes to `handleError`, which logs it.
+ * studio member need not be: that viewer's 403 warns (`viewerLacksRole`),
+ * and anyone else's errors. A 5xx escapes to `handleError`, which logs it.
  */
 export const getCategories = query(
   z.string().uuid(),
   async (organizationId): Promise<StudioCategory[]> => {
-    const { platform, cookies } = getRequestEvent();
+    const { platform, cookies, locals } = getRequestEvent();
     const api = createServerApi(platform, cookies);
+    const role = locals.user?.role;
 
     const params = new URLSearchParams();
     params.set('organizationId', organizationId);
@@ -70,7 +78,10 @@ export const getCategories = query(
         },
         { organizationId },
         () => api.categories.list(params),
-        { roleGated: true }
+        {
+          viewerLacksRole:
+            role === undefined || !CATEGORY_READER_ROLES.includes(role),
+        }
       )
     );
     return (result?.items ?? []).map(toStudioCategory);

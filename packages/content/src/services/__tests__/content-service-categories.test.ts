@@ -23,7 +23,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { CacheType } from '@codex/cache';
-import { CONTENT_MAX_CATEGORIES } from '@codex/constants';
+import { CONTENT_MAX_CATEGORIES, ERROR_CODES } from '@codex/constants';
 import {
   categories,
   content,
@@ -346,6 +346,62 @@ describe('ContentService — category tagging (WP-5)', () => {
     expect(rows.find((r) => r.id === unfiled.id)?.categories).toEqual([]);
   });
 
+  // A move to another space keeps the old join rows until the set is next
+  // saved (Codex-a6ofh.3.3 review): they name nothing, and count for nothing.
+  it('a piece moved out of its org names none of that org’s categories', async () => {
+    const token = uniqueToken();
+    const left = await createCategory(`Left behind ${token}`, orgAId);
+    const piece = await createOrgAContent([left.id]);
+    await db
+      .update(content)
+      .set({ organizationId: null })
+      .where(eq(content.id, piece.id));
+
+    const page = await contentService.list(
+      creatorId,
+      { organizationId: null },
+      { page: 1, limit: 100 },
+      { withCategories: true }
+    );
+    expect(page.items.find((r) => r.id === piece.id)?.categories).toEqual([]);
+    expect(
+      (await contentService.get(piece.id, creatorId))?.categoryIds
+    ).toEqual([]);
+    expect(await membershipIds(piece.id)).toEqual([left.id]);
+  });
+
+  it('a personal piece names its creator’s own personal categories', async () => {
+    const token = uniqueToken();
+    const own = await categoriesService.create(
+      { name: `Own ${token}` },
+      { creatorId }
+    );
+    const piece = await contentService.create(
+      {
+        title: `Personal ${token}`,
+        slug: createUniqueSlug('personal-content'),
+        contentType: 'written',
+        contentBody: 'This is the written content body.',
+        tags: [],
+        categoryIds: [own.id],
+      },
+      creatorId
+    );
+
+    const page = await contentService.list(
+      creatorId,
+      { organizationId: null },
+      { page: 1, limit: 100 },
+      { withCategories: true }
+    );
+    expect(page.items.find((r) => r.id === piece.id)?.categories).toEqual([
+      { id: own.id, name: own.name },
+    ]);
+    expect(
+      (await contentService.get(piece.id, creatorId))?.categoryIds
+    ).toEqual([own.id]);
+  });
+
   it('names no row unless asked: the badges and pickers skip the query', async () => {
     const cat = await createCategory(`Unasked ${uniqueToken()}`, orgAId);
     const piece = await createOrgAContent([cat.id]);
@@ -414,8 +470,15 @@ describe('ContentService — category tagging (WP-5)', () => {
 
     await watched.publish(piece.id, creatorId);
     invalidate.mockClear();
-    await watched.addCategories(piece.id, creatorId, [onLive.id]);
+    const added = await watched.addCategories(piece.id, creatorId, [onLive.id]);
+    expect(added.changed).toBe(true);
     expect(invalidate).toHaveBeenCalledWith(CacheType.CATEGORIES(orgAId));
+
+    // One it already holds files nothing new, and bumps nothing.
+    invalidate.mockClear();
+    const again = await watched.addCategories(piece.id, creatorId, [onLive.id]);
+    expect(again).toMatchObject({ changed: false, hasBeenLive: true });
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it('adding a category it has is a no-op, kept once', async () => {
@@ -438,7 +501,10 @@ describe('ContentService — category tagging (WP-5)', () => {
       contentService.addCategories(piece.id, creatorId, [ours.id, theirs.id])
     ).rejects.toMatchObject({
       code: 'VALIDATION_ERROR',
-      context: { invalidCategoryIds: [theirs.id] },
+      context: {
+        code: ERROR_CODES.CATEGORY_NOT_IN_SPACE,
+        invalidCategoryIds: [theirs.id],
+      },
     });
     expect(await membershipIds(piece.id)).toEqual([]);
   });
@@ -477,7 +543,10 @@ describe('ContentService — category tagging (WP-5)', () => {
     // At the limit, plus one: refused, and nothing is written.
     await expect(
       contentService.addCategories(piece.id, creatorId, [cats[max]!.id])
-    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', context: { max } });
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      context: { code: ERROR_CODES.CATEGORY_LIMIT_REACHED, max },
+    });
     expect(await membershipIds(piece.id)).toHaveLength(max);
   });
 });

@@ -71,12 +71,14 @@ export interface RefusedReadEvents {
 /** How one signed-in read's refusals log, beside its events. */
 export interface RefusedReadOptions {
   /**
-   * The route also asks a platform role (`/api/categories`: creator or
-   * admin) that the page's own guard does not (the org studio admits any
-   * member above `member`, Codex-a6ofh.3.3), so a 403 is a viewer it turns
-   * away, not our request: warn, as a 401 is.
+   * The route asks a platform role the viewer does not hold
+   * (`/api/categories`: creator or admin), which the page's own guard does
+   * not ask: the org studio admits any member above `member`
+   * (Codex-a6ofh.3.3). Its 403 is that refusal, not our request: warn, as
+   * a 401 is. Any other 403, for a viewer who holds the role, stays an
+   * error: the two guards disagree.
    */
-  roleGated?: boolean;
+  viewerLacksRole?: boolean;
 }
 
 /**
@@ -100,7 +102,8 @@ export interface RefusedReadOptions {
  *   it an outage; for the dashboard's counts this warn is the only trace.
  * - 408: the worker did not answer. An outage: error, under `unavailable`,
  *   never a "refusal".
- * - 403, from a read that says it is `roleGated`: warn (see that option).
+ * - 403, for a viewer the read says lacks the route's role: warn (see
+ *   `viewerLacksRole`).
  * - Any other 4xx, a 403 among them: these routes gate on no role, so it is
  *   our request or a deploy skew, a contract bug. Error, with the worker's
  *   `details` naming the field it refused (`logReadFailure`).
@@ -163,7 +166,7 @@ function logRefusal(
   if (
     error.status === 401 ||
     error.status === 429 ||
-    (error.status === 403 && options.roleGated === true)
+    (error.status === 403 && options.viewerLacksRole === true)
   ) {
     logger.warn(events.refused, fields);
   } else if (error.status === 408) {

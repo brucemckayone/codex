@@ -14,7 +14,7 @@
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import FacetMenu from '../list-toolbar/FacetMenu.svelte';
-  import type { ListFacet, ListOption } from '../list-toolbar/list-option';
+  import type { FacetUnread, ListFacet, ListOption } from '../list-toolbar/list-option';
   import ListFilterSheet from '../list-toolbar/ListFilterSheet.svelte';
   import ListSearchBox from '../list-toolbar/ListSearchBox.svelte';
   import ListSegment from '../list-toolbar/ListSegment.svelte';
@@ -49,6 +49,8 @@
      * then the org's categories. Left out in the personal studio (owner).
      */
     categoryOptions?: readonly ListOption[];
+    /** Set when the org's categories could not be read: the menu says so. */
+    categoryUnread?: FacetUnread;
   }
 
   const {
@@ -59,6 +61,7 @@
     onChange,
     whereOptions,
     categoryOptions,
+    categoryUnread,
   }: Props = $props();
 
   /** The menus' facets: the status stays on screen on every width. */
@@ -94,6 +97,7 @@
       title: () => m.studio_content_category_label(),
       options: categoryOptions,
       fallback: CONTENT_LIST_DEFAULTS.category,
+      unread: categoryUnread,
     }
   );
 
@@ -136,6 +140,7 @@
         value={view[facet.key]}
         options={facet.options}
         fallback={facet.fallback}
+        unread={facet.unread}
         onSelect={(value) => onChange({ [facet.key]: value })}
       />
     {/each}

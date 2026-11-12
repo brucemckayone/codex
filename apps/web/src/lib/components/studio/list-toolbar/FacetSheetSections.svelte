@@ -3,19 +3,22 @@
 
   A studio list's phone sheet, inside FilterDrawer's `sections` snippet
   (Codex-a6ofh.3.1; the media library's since Codex-a6ofh.1.6, mockup M7a):
-  one pill group per facet, then the sorts as a checked list. FilterDrawer
+  one pill group per facet (one whose choices could not be read says so,
+  with a Try again), then the sorts as a checked list. FilterDrawer
   owns the staging (Apply / Cancel on a phone) and styles these through its
   `:global()` class hooks, so this is markup only.
 -->
 <script lang="ts" generics="K extends string">
   import { CheckIcon } from '$lib/components/ui/Icon';
   import { formatCount } from '$lib/utils/format';
-  import type { ListOption } from './list-option';
+  import FacetSheetUnread from './FacetSheetUnread.svelte';
+  import type { FacetUnread, ListOption } from './list-option';
 
   interface Facet {
     key: K;
     title: () => string;
     options: readonly ListOption[];
+    unread?: FacetUnread;
   }
 
   interface Props {
@@ -56,6 +59,7 @@
         </button>
       {/each}
     </div>
+    {#if facet.unread}<FacetSheetUnread unread={facet.unread} />{/if}
   </section>
 {/each}
 

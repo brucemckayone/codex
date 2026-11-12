@@ -86,6 +86,7 @@ describe('POST /api/content/:id/categories', () => {
       categoryIds: ['had', CATEGORY],
       organizationId: ORG_ID,
       hasBeenLive: false,
+      changed: true,
     });
 
     const res = await post(`/${CONTENT_ID}/categories`, {
@@ -108,6 +109,7 @@ describe('POST /api/content/:id/categories', () => {
       categoryIds: [CATEGORY],
       organizationId: ORG_ID,
       hasBeenLive: true,
+      changed: true,
     });
     await post(`/${CONTENT_ID}/categories`, { categoryIds: [CATEGORY] });
     expect(bumpOrgContentVersion).toHaveBeenCalledTimes(1);
@@ -119,8 +121,23 @@ describe('POST /api/content/:id/categories', () => {
       categoryIds: [CATEGORY],
       organizationId: ORG_ID,
       hasBeenLive: false,
+      changed: true,
     });
     await post(`/${CONTENT_ID}/categories`, { categoryIds: [CATEGORY] });
+    expect(bumpOrgContentVersion).not.toHaveBeenCalled();
+  });
+
+  it('bumps nothing for an add that filed nothing new, live or not', async () => {
+    contentSpies.addCategories.mockResolvedValue({
+      categoryIds: [CATEGORY],
+      organizationId: ORG_ID,
+      hasBeenLive: true,
+      changed: false,
+    });
+    const res = await post(`/${CONTENT_ID}/categories`, {
+      categoryIds: [CATEGORY],
+    });
+    expect(res.status).toBe(200);
     expect(bumpOrgContentVersion).not.toHaveBeenCalled();
   });
 

@@ -12367,6 +12367,30 @@ export const studio_content_categories_more = (params) => `${params.name} +${par
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_categories_unread = () => `Couldn’t load the categories.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_categories_unread_again = () => `Still couldn’t load the categories.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_list_facet_retrying = () => `Trying again…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_filter_draft = () => `Drafts`
 
 

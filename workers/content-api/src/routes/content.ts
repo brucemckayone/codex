@@ -14,6 +14,7 @@
  * - POST   /api/content/:id/unpublish - Unpublish content
  * - DELETE /api/content/:id        - Soft delete
  * - POST   /api/content/:id/thumbnail - Upload content thumbnail
+ * - POST   /api/content/:id/categories - Add categories (keeps the set)
  */
 
 import { AUTH_ROLES, CONTENT_STATUS } from '@codex/constants';
@@ -343,8 +344,9 @@ app.post(
         ctx.input.body.categoryIds
       );
       // As PATCH: a never-live draft is in no cache. A live piece's public
-      // row carries its topic slugs, and the topic list counts it.
-      if (result.hasBeenLive) {
+      // row carries its topic slugs, and the topic list counts it. An add
+      // that filed nothing new (each one already held) changed neither.
+      if (result.hasBeenLive && result.changed) {
         bumpOrgContentVersion(
           ctx.env,
           ctx.executionCtx,

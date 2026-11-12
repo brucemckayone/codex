@@ -26,6 +26,20 @@ export type SegmentOption<T extends string = string> = Omit<
   icon?: Component<IconProps>;
 };
 
+/**
+ * A facet whose choices could not be read (Codex-a6ofh.3.3, owner): its
+ * menu and its sheet say so after what they can offer, with a Try again,
+ * so a failed read never reads as a list with nothing to pick.
+ */
+export interface FacetUnread {
+  /** What could not be read: "Couldn't load the categories." */
+  failed: () => string;
+  /** The same once a Try again failed too, so a repeat is told apart. */
+  failedAgain: () => string;
+  /** Reads the choices again; rejects when that read fails too. */
+  retry: () => Promise<unknown>;
+}
+
 /** A facet in a list's phone sheet: its URL param, heading and choices. */
 export interface ListFacet<K extends string = string> {
   key: K;
@@ -33,4 +47,6 @@ export interface ListFacet<K extends string = string> {
   options: readonly ListOption[];
   /** The param's bare-URL value: the sheet's Clear all, and its count. */
   fallback: string;
+  /** Set when its choices could not be read. */
+  unread?: FacetUnread;
 }
