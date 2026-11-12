@@ -35,6 +35,7 @@ const ORG_ID = '3c111111-1111-4111-8111-111111111999';
 const contentSpies = {
   list: vi.fn(),
   whereCounts: vi.fn(),
+  attentionCounts: vi.fn(),
   // The registry calls setCache() on the constructed instance whenever CACHE_KV
   // is bound (it is, in env=test), as content-publish-invalidation.test.ts notes.
   setCache: vi.fn(),
@@ -192,6 +193,69 @@ describe('GET /api/content scope (Codex-a6ofh.3.2)', () => {
 
     expect(res.status).toBe(400);
     expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+
+  it('needs=<kind> reaches the service: a "Needs you" chip (Codex-a6ofh.3.4)', async () => {
+    const res = await get('?needs=ready&scope=personal');
+
+    expect(res.status).toBe(200);
+    expect(listCall().filters).toMatchObject({
+      needs: 'ready',
+      organizationId: null,
+    });
+  });
+
+  it('a needs that is no kind is refused', async () => {
+    const res = await get('?needs=urgent');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/content/attention (Codex-a6ofh.3.4)', () => {
+  const counts = {
+    'live-media-gone': 1,
+    scheduled: 0,
+    'didnt-go-live': 2,
+    'media-gone': 0,
+    processing: 3,
+    ready: 4,
+  };
+
+  beforeEach(() => {
+    contentSpies.attentionCounts.mockReset();
+    contentSpies.attentionCounts.mockResolvedValue(counts);
+  });
+
+  it('counts the signed-in creator’s pieces in one org, in the data envelope', async () => {
+    const res = await get(`/attention?organizationId=${ORG_ID}`);
+
+    // Above /:id: read as an id, it would be a 400.
+    expect(res.status).toBe(200);
+    expect(contentSpies.attentionCounts).toHaveBeenCalledWith(USER.id, {
+      organizationId: ORG_ID,
+    });
+    expect(await res.json()).toEqual({ data: counts });
+  });
+
+  it('scope=personal counts the pieces filed under no org; neither, everywhere', async () => {
+    expect((await get('/attention?scope=personal')).status).toBe(200);
+    expect(contentSpies.attentionCounts).toHaveBeenLastCalledWith(USER.id, {
+      organizationId: null,
+    });
+
+    expect((await get('/attention')).status).toBe(200);
+    expect(contentSpies.attentionCounts).toHaveBeenLastCalledWith(USER.id, {
+      organizationId: undefined,
+    });
+  });
+
+  it('scope=personal beside an organizationId is refused, as the list refuses it', async () => {
+    const res = await get(`/attention?scope=personal&organizationId=${ORG_ID}`);
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.attentionCounts).not.toHaveBeenCalled();
   });
 });
 

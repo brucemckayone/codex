@@ -17,6 +17,7 @@ import {
   CONTENT_THUMBNAIL_MIME_TYPES,
   type ContentQueryInput,
   checkContentSlugSchema,
+  contentAttentionQuerySchema,
   contentDraftSchema,
   contentQuerySchema,
   PAGINATION_MAX_LIMIT,
@@ -111,6 +112,8 @@ function listContentLog(params: ContentQueryInput | undefined) {
     sortOrder: params?.sortOrder,
     hasSearch: params?.search !== undefined,
     hasCategory: params?.category !== undefined,
+    // A "Needs you" chip's kind (Codex-a6ofh.3.4): one of a fixed list.
+    needs: params?.needs ?? 'none',
   };
 }
 
@@ -138,6 +141,43 @@ export const getContentWhereCounts = query(async () => {
     )
   );
 });
+
+/**
+ * What the creator's own pieces need, by kind (Codex-a6ofh.3.4): the content
+ * list's "Needs you" strip, counted across every page where the list looks.
+ * The list reads its rows on its own; a failed read is said by the strip,
+ * never shown as nothing needing you.
+ *
+ * Forwarded and logged as `getContentWhereCounts` is.
+ */
+export const getContentAttention = query(
+  contentAttentionQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const searchParams = new URLSearchParams();
+    if (params.organizationId) {
+      searchParams.set('organizationId', params.organizationId);
+    }
+    if (params.scope) searchParams.set('scope', params.scope);
+    return forwardClientErrors(() =>
+      logRefusedRead(
+        {
+          refused: 'content.attention_refused',
+          unavailable: 'content.attention_unavailable',
+        },
+        {
+          organizationId: params.organizationId ?? null,
+          scope: params.scope ?? (params.organizationId ? 'org' : 'all'),
+        },
+        () =>
+          api.content.attention(
+            searchParams.toString() ? searchParams : undefined
+          )
+      )
+    );
+  }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Org Browse Query

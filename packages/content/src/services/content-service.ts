@@ -20,6 +20,8 @@ import {
   CONTENT_MAX_CATEGORIES,
   CONTENT_STATUS,
   CONTENT_TYPES,
+  type ContentAttentionCounts,
+  type ContentAttentionKind,
   ERROR_CODES,
   hasBeenLive,
   isMediaOnItsWay,
@@ -122,6 +124,11 @@ import type {
   SettleOutcome,
   StoppedDraft,
 } from '../types';
+import {
+  attentionCondition,
+  readyAmong,
+  readyCandidate,
+} from './content-attention';
 import {
   assertTiersInOrg,
   type ContentTierWire,
@@ -397,6 +404,20 @@ const CONTENT_SLUG_INDEXES = new Set([
  * the badges and pickers that read this list skip the query.
  */
 type StudioListOptions = { scope?: 'studio'; withCategories?: boolean };
+
+/**
+ * Where a studio read looks: one org's pieces, those filed under none
+ * (`null`, the personal studio), or, `undefined`, everywhere. The list and
+ * the "Needs you" counts read the same pieces by it (Codex-a6ofh.3.4).
+ */
+function filedUnder(
+  organizationId: string | null | undefined
+): SQL | undefined {
+  if (organizationId === undefined) return undefined;
+  return organizationId === null
+    ? isNull(content.organizationId)
+    : eq(content.organizationId, organizationId);
+}
 
 /**
  * A live category in its piece's own space, the rule
@@ -2477,14 +2498,25 @@ export class ContentService extends BaseService {
       if (filters.categoryId || filters.category) {
         whereConditions.push(inArray(content.id, this.filedIn(filters)));
       }
-      if (filters.organizationId !== undefined) {
-        if (filters.organizationId === null) {
-          whereConditions.push(isNull(content.organizationId));
-        } else {
-          whereConditions.push(
-            eq(content.organizationId, filters.organizationId)
+      const filedWhere = filedUnder(filters.organizationId);
+      if (filedWhere) {
+        whereConditions.push(filedWhere);
+      }
+      // What the pieces need (Codex-a6ofh.3.4): a "Needs you" chip's, by the
+      // rule `attentionCounts` counts with, so the chip lists what it said.
+      if (filters.needs) {
+        if (scope === 'browse') {
+          throw new ValidationError(
+            "needs filters a creator's own pieces: browse spans creators"
           );
         }
+        whereConditions.push(
+          await this.needsCondition(
+            filters.needs,
+            creatorId,
+            filters.organizationId
+          )
+        );
       }
       if (filters.creatorId) {
         whereConditions.push(eq(content.creatorId, filters.creatorId));
@@ -2796,6 +2828,109 @@ export class ContentService extends BaseService {
     } catch (error) {
       this.handleError(error, 'whereCounts');
     }
+  }
+
+  /**
+   * How many of the creator's pieces need them, by kind: the content list's
+   * "Needs you" (Codex-a6ofh.3.4). Where the list looks (`organizationId`, as
+   * `list()` reads it), and nothing else of its filters: the counts are a
+   * to-do, not a view (owner, 2026-11-12). Each kind by the rule the list's
+   * `needs` filter uses (./content-attention.ts), so a chip lists the pieces
+   * it counted, on every page.
+   */
+  async attentionCounts(
+    creatorId: string,
+    where: Pick<ContentFilters, 'organizationId'> = {},
+    now: Date = new Date()
+  ): Promise<ContentAttentionCounts> {
+    const count = (kind: Exclude<ContentAttentionKind, 'ready'>) =>
+      sql<number>`count(*) filter (where ${attentionCondition(kind, now)})`.mapWith(
+        Number
+      );
+    try {
+      const [[row], ready] = await Promise.all([
+        this.db
+          .select({
+            liveMediaGone: count('live-media-gone'),
+            scheduled: count('scheduled'),
+            didntGoLive: count('didnt-go-live'),
+            mediaGone: count('media-gone'),
+            processing: count('processing'),
+          })
+          .from(content)
+          .where(
+            and(
+              scopedNotDeleted(content, creatorId),
+              filedUnder(where.organizationId)
+            )
+          ),
+        this.readyIds(creatorId, where.organizationId),
+      ]);
+      return {
+        'live-media-gone': row?.liveMediaGone ?? 0,
+        scheduled: row?.scheduled ?? 0,
+        'didnt-go-live': row?.didntGoLive ?? 0,
+        'media-gone': row?.mediaGone ?? 0,
+        processing: row?.processing ?? 0,
+        ready: ready.length,
+      };
+    } catch (error) {
+      this.handleError(error, 'attentionCounts');
+    }
+  }
+
+  /**
+   * The list's `needs` filter: the rule its chip counted by, as a semi-join
+   * over a select of its own. Never the predicate itself in the list's
+   * `findMany` where: drizzle's relational query renders every column of a
+   * raw `sql` there as the root table's, so `media_items.id` in its EXISTS
+   * read as `content.id`, and the filter matched nothing (Codex-a6ofh.3.4).
+   */
+  private async needsCondition(
+    kind: ContentAttentionKind,
+    creatorId: string,
+    organizationId: string | null | undefined
+  ): Promise<SQL> {
+    if (kind !== 'ready') {
+      return inArray(
+        content.id,
+        this.db
+          .select({ id: content.id })
+          .from(content)
+          .where(
+            and(scopedNotDeleted(content, creatorId), attentionCondition(kind))
+          )
+      );
+    }
+    const ids = await this.readyIds(creatorId, organizationId);
+    return ids.length > 0 ? inArray(content.id, ids) : sql`false`;
+  }
+
+  /**
+   * The creator's drafts in hand that would go live now, where the list
+   * looks: the SQL candidates, then an article's body, read as publish
+   * reads it (`readyAmong`). Bounded by the creator's drafts.
+   */
+  private async readyIds(
+    creatorId: string,
+    organizationId: string | null | undefined
+  ): Promise<string[]> {
+    const rows = await this.db
+      .select({
+        id: content.id,
+        contentType: content.contentType,
+        contentBody: content.contentBody,
+        contentBodyJson: content.contentBodyJson,
+      })
+      .from(content)
+      .where(
+        and(
+          scopedNotDeleted(content, creatorId),
+          filedUnder(organizationId),
+          readyCandidate
+        )
+      );
+    return readyAmong(rows);
   }
 
   /**

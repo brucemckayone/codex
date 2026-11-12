@@ -5,7 +5,11 @@
  * All types are inferred from database schema or explicitly defined.
  */
 
-import type { MediaStatusGroup, PublishBlockedReason } from '@codex/constants';
+import type {
+  ContentAttentionKind,
+  MediaStatusGroup,
+  PublishBlockedReason,
+} from '@codex/constants';
 import type { DatabaseClient, dbHttp } from '@codex/database';
 import type {
   Content,
@@ -69,6 +73,8 @@ export interface ContentFilters {
   category?: string;
   /** A category's id: the pieces filed in it (Codex-a6ofh.3.3). */
   categoryId?: string;
+  /** What the pieces need: a "Needs you" chip's (Codex-a6ofh.3.4). */
+  needs?: ContentAttentionKind;
   organizationId?: string | null;
   creatorId?: string;
   search?: string;

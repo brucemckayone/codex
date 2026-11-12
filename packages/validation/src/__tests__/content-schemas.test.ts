@@ -1,6 +1,8 @@
+import { CONTENT_ATTENTION_KINDS } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
 import {
   addContentCategoriesSchema,
+  contentAttentionQuerySchema,
   contentBrowseQuerySchema,
   contentQuerySchema,
   contentStatusEnum,
@@ -922,6 +924,24 @@ describe('Query Schemas', () => {
       expect(contentBrowseQuerySchema.safeParse({}).success).toBe(false);
     });
 
+    it('takes each "Needs you" kind as needs, and nothing else (Codex-a6ofh.3.4)', () => {
+      for (const kind of CONTENT_ATTENTION_KINDS) {
+        expect(contentQuerySchema.parse({ needs: kind }).needs).toBe(kind);
+      }
+      expect(contentQuerySchema.safeParse({ needs: 'urgent' }).success).toBe(
+        false
+      );
+    });
+
+    it('browse refuses needs: a creator’s own pieces mean nothing across creators', () => {
+      const result = contentBrowseQuerySchema.safeParse({
+        needs: 'ready',
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['needs']);
+    });
+
     it('should reject page less than 1', () => {
       expect(() => contentQuerySchema.parse({ page: 0 })).toThrow();
     });
@@ -934,6 +954,39 @@ describe('Query Schemas', () => {
       expect(() =>
         contentQuerySchema.parse({ sortBy: 'invalidField' })
       ).toThrow();
+    });
+  });
+
+  describe('contentAttentionQuerySchema (Codex-a6ofh.3.4)', () => {
+    const ORG = '3c111111-1111-4111-8111-111111111999';
+
+    it('looks where the list looks: one org, personal, or everywhere', () => {
+      expect(
+        contentAttentionQuerySchema.parse({ organizationId: ORG })
+      ).toEqual({ organizationId: ORG });
+      expect(contentAttentionQuerySchema.parse({ scope: 'personal' })).toEqual({
+        scope: 'personal',
+      });
+      expect(contentAttentionQuerySchema.parse({})).toEqual({});
+    });
+
+    it('refuses scope=personal beside an organizationId, as the list does', () => {
+      const result = contentAttentionQuerySchema.safeParse({
+        scope: 'personal',
+        organizationId: ORG,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['scope']);
+    });
+
+    it('drops the list’s other filters: the counts are a to-do, not a view', () => {
+      expect(
+        contentAttentionQuerySchema.parse({ organizationId: ORG, search: 'x' })
+      ).toEqual({ organizationId: ORG });
+      expect(
+        contentAttentionQuerySchema.safeParse({ organizationId: 'not-a-uuid' })
+          .success
+      ).toBe(false);
     });
   });
 

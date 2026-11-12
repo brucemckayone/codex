@@ -56,7 +56,12 @@ import type {
   AgreementWithShare,
   CreatorOrganizationAgreement,
 } from '@codex/agreements';
-import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
+import {
+  COOKIES,
+  type ContentAttentionCounts,
+  HEADERS,
+  MIME_TYPES,
+} from '@codex/constants';
 import type {
   Category,
   CourseSubscriptionPlan,
@@ -1138,6 +1143,17 @@ export function createServerApi(
        */
       whereCounts: () =>
         request<ContentWhereCounts>('content', '/api/content/where-counts'),
+
+      /**
+       * What the creator's own pieces need, by kind (Codex-a6ofh.3.4): the
+       * content list's "Needs you" counts, where the list looks
+       * (`organizationId`, or `scope=personal`, or neither).
+       */
+      attention: (params?: URLSearchParams) =>
+        request<ContentAttentionCounts>(
+          'content',
+          `/api/content/attention${params ? `?${params}` : ''}`
+        ),
 
       /**
        * Browse content (cross-creator within an org).

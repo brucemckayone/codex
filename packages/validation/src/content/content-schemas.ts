@@ -1,5 +1,6 @@
 import {
   CONTENT_ACCESS_TYPE,
+  CONTENT_ATTENTION_KINDS,
   CONTENT_LIST_SCOPE,
   CONTENT_MAX_CATEGORIES,
   CONTENT_STATUS,
@@ -872,6 +873,10 @@ const contentQueryFields = paginationSchema.extend({
   // everything; one org is `organizationId`. The studio list's alone:
   // browse refuses it below.
   scope: z.literal(CONTENT_LIST_SCOPE.PERSONAL).optional(),
+  // What the pieces need (Codex-a6ofh.3.4, a "Needs you" chip): one of the
+  // kinds `GET /api/content/attention` counts, matched by the same rule, so
+  // a chip lists what it counted. The studio list's alone: browse refuses it.
+  needs: z.enum(CONTENT_ATTENTION_KINDS).optional(),
   // A user id (BetterAuth text), not a uuid: uuidSchema refused every real
   // one, so /explore's creator filter 400'd (Codex-osuqt).
   creatorId: userIdSchema.optional(),
@@ -935,9 +940,30 @@ export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
 export const contentBrowseQuerySchema = contentQueryFields.extend({
   organizationId: uuidSchema,
   scope: z.never().optional(),
+  // What a creator's own pieces need means nothing across creators either.
+  needs: z.never().optional(),
 });
 
 export type ContentBrowseQueryInput = z.infer<typeof contentBrowseQuerySchema>;
+
+/**
+ * `GET /api/content/attention` (Codex-a6ofh.3.4): where the "Needs you"
+ * counts look, as the studio list says it: one org (`organizationId`), the
+ * pieces under none (`scope=personal`), or, with neither, everywhere. Both
+ * at once is refused, as the list refuses it. The list's other filters
+ * leave the counts alone (owner): they are a to-do, not a view.
+ */
+export const contentAttentionQuerySchema = contentQueryFields
+  .pick({ organizationId: true, scope: true })
+  .refine((q) => !(q.scope !== undefined && q.organizationId !== undefined), {
+    message:
+      'scope=personal counts content outside any org: drop organizationId',
+    path: ['scope'],
+  });
+
+export type ContentAttentionQueryInput = z.infer<
+  typeof contentAttentionQuerySchema
+>;
 
 /**
  * `POST /api/content/:id/categories` (Codex-a6ofh.3.3): categories to ADD to a

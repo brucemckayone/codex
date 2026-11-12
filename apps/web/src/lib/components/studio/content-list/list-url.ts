@@ -2,8 +2,8 @@
  * The content list's view, read from and written to the URL
  * (Codex-a6ofh.3.1; content-list.html L1 and L5:
  * `?status=&type=&access=&sort=&view=&search=`, the personal studio's
- * `?where=`, L4b, Codex-a6ofh.3.2, and the org studio's `?category=`,
- * Codex-a6ofh.3.3).
+ * `?where=`, L4b, Codex-a6ofh.3.2, the org studio's `?category=`,
+ * Codex-a6ofh.3.3, and a "Needs you" chip's `?needs=`, Codex-a6ofh.3.4).
  *
  * As the media library's (`library-url.ts`): every param has a default that
  * leaves the URL bare (a value equal to its default is dropped), and a value
@@ -15,12 +15,18 @@
 
 import {
   CONTENT_ACCESS_TYPE,
+  CONTENT_ATTENTION_KINDS,
   CONTENT_LIST_SCOPE,
   CONTENT_TYPES,
   type ContentAccessType,
+  type ContentAttentionKind,
 } from '@codex/constants';
-import type { ContentQueryInput } from '@codex/validation';
+import type {
+  ContentAttentionQueryInput,
+  ContentQueryInput,
+} from '@codex/validation';
 import { pickIdParam, pickParam } from '$lib/utils/filter-url';
+import type { ListUrlPatch } from '../list-url-writer';
 import { type ContentStatusFilter, readStatusFilter } from './content-status';
 
 /** One read of the list, and each "Show more": as the media library's. */
@@ -46,11 +52,15 @@ export const LIST_SORTS = [
   'sales',
 ] as const;
 const LIST_VIEWS = ['list', 'grid'] as const;
+/** "Needs you" narrows to no chip's pieces: the whole list. */
+export const NEEDS_NONE = 'none';
+const LIST_NEEDS = [NEEDS_NONE, ...CONTENT_ATTENTION_KINDS] as const;
 
 export type ListType = (typeof LIST_TYPES)[number];
 export type ListAccess = 'any' | ContentAccessType;
 export type ListSort = (typeof LIST_SORTS)[number];
 export type ListView = (typeof LIST_VIEWS)[number];
+export type ListNeeds = (typeof LIST_NEEDS)[number];
 
 /** "Where" lists the content filed under no org: the personal studio's own. */
 export const WHERE_PERSONAL = 'personal';
@@ -79,6 +89,11 @@ export interface ContentListState {
    * Category (owner, 2026-11-12) and ignores it.
    */
   category: string;
+  /**
+   * A "Needs you" chip's kind (Codex-a6ofh.3.4), or `NEEDS_NONE`: the
+   * pieces it counted, in both studios.
+   */
+  needs: ListNeeds;
 }
 
 /** Each param's bare-URL value, for `createListUrlWriter`'s `defaults`. */
@@ -90,6 +105,7 @@ export const CONTENT_LIST_DEFAULTS = {
   view: 'list',
   where: WHERE_PERSONAL,
   category: CATEGORY_ANY,
+  needs: NEEDS_NONE,
 } as const satisfies Omit<ContentListState, 'search'>;
 
 const SORT_ARGS: Record<
@@ -120,6 +136,11 @@ export function readContentListState(url: URL): ContentListState {
     where: readWhere(params.get('where')),
     category:
       pickIdParam(params.get('category')) ?? CONTENT_LIST_DEFAULTS.category,
+    needs: pickParam(
+      LIST_NEEDS,
+      params.get('needs'),
+      CONTENT_LIST_DEFAULTS.needs
+    ),
   };
 }
 
@@ -174,16 +195,49 @@ export function contentListArgs(
     ...(state.status !== 'all' && { status: state.status }),
     ...(state.type !== 'all' && { contentType: state.type }),
     ...(state.access !== 'any' && { accessType: state.access }),
+    ...(state.needs !== NEEDS_NONE && { needs: state.needs }),
     ...(search && { search }),
     ...SORT_ARGS[state.sort],
   };
 }
 
 /**
+ * `getContentAttention`'s args: where the list looks, and nothing else of
+ * its view. The counts are a to-do, not a view (owner, Codex-a6ofh.3.4), so
+ * a facet or a search leaves them alone.
+ */
+export function attentionArgs(
+  where: ContentListState['where'],
+  organizationId: string | null
+): ContentAttentionQueryInput {
+  return whereArgs(where, organizationId);
+}
+
+/**
+ * A "Needs you" chip pressed: its pieces, and only those, so the rows shown
+ * are the number it said. The status, facets and search go (Where, sort and
+ * view stay); pressing the chip in use again shows the whole list.
+ */
+export function needsPatch(
+  kind: ContentAttentionKind,
+  state: ContentListState
+): ListUrlPatch {
+  if (state.needs === kind) return { needs: null };
+  return {
+    needs: kind,
+    search: null,
+    status: null,
+    type: null,
+    access: null,
+    category: null,
+  };
+}
+
+/**
  * True when the list shows part of the content ("No matches" rather than
  * "Make your first piece"): a facet (never the sort or the view), a (gated)
- * search that reached the API, the personal studio's Where on one org, or
- * the org studio's Category.
+ * search that reached the API, the personal studio's Where on one org, the
+ * org studio's Category, or a "Needs you" chip.
  * Personal, its default, is the studio's own whole list, not a narrowing:
  * empty, it says "Make your first piece", which a piece made here fixes.
  */
@@ -198,6 +252,7 @@ export function isContentListNarrowed(
     state.access !== CONTENT_LIST_DEFAULTS.access ||
     (organizationId === null && isOrgWhere(state.where)) ||
     (organizationId !== null && state.category !== CATEGORY_ANY) ||
+    state.needs !== CONTENT_LIST_DEFAULTS.needs ||
     search !== null
   );
 }

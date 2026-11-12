@@ -1,12 +1,19 @@
-import { contentQuerySchema } from '@codex/validation';
+import { CONTENT_ATTENTION_KINDS } from '@codex/constants';
+import {
+  contentAttentionQuerySchema,
+  contentQuerySchema,
+} from '@codex/validation';
 import { describe, expect, it } from 'vitest';
 import {
+  attentionArgs,
   CATEGORY_ANY,
   CONTENT_LIST_DEFAULTS,
   CONTENT_LIST_PAGE_SIZE,
   contentListArgs,
   isContentListNarrowed,
   LIST_SORTS,
+  NEEDS_NONE,
+  needsPatch,
   readContentListState,
   WHERE_ALL,
   WHERE_PERSONAL,
@@ -29,7 +36,7 @@ describe('readContentListState', () => {
   it('reads each param the list offers', () => {
     expect(
       at(
-        '?status=draft&type=audio&access=subscribers&sort=views&view=grid&search=runes'
+        '?status=draft&type=audio&access=subscribers&sort=views&view=grid&search=runes&needs=media-gone'
       )
     ).toEqual({
       search: 'runes',
@@ -40,6 +47,7 @@ describe('readContentListState', () => {
       view: 'grid',
       where: WHERE_PERSONAL,
       category: CATEGORY_ANY,
+      needs: 'media-gone',
     });
   });
 
@@ -214,5 +222,73 @@ describe('category', () => {
     expect(isContentListNarrowed(at(`?category=${CATEGORY}`), null, ORG)).toBe(
       true
     );
+  });
+});
+
+describe('needs: a "Needs you" chip (Codex-a6ofh.3.4)', () => {
+  it('reads each kind, and anything else as none', () => {
+    for (const kind of CONTENT_ATTENTION_KINDS) {
+      expect(at(`?needs=${kind}`).needs).toBe(kind);
+    }
+    expect(at('?needs=urgent').needs).toBe(NEEDS_NONE);
+    expect(at('').needs).toBe(NEEDS_NONE);
+  });
+
+  it('asks for the chip’s pieces, in both studios, as args the API takes', () => {
+    for (const organizationId of [ORG, null]) {
+      const args = contentListArgs(at('?needs=ready'), null, organizationId, 1);
+      expect(args).toMatchObject({ needs: 'ready' });
+      expect(contentQuerySchema.safeParse(args).success).toBe(true);
+    }
+    expect(contentListArgs(at(''), null, ORG, 1)).not.toHaveProperty('needs');
+  });
+
+  it('narrows the list, so an empty one offers Clear filters', () => {
+    expect(isContentListNarrowed(at('?needs=processing'), null, ORG)).toBe(
+      true
+    );
+    expect(isContentListNarrowed(at('?needs=processing'), null, null)).toBe(
+      true
+    );
+  });
+
+  it('a chip pressed clears the status, facets and search, and leaves Where, sort and view to the URL', () => {
+    const view = at(
+      `?status=draft&type=video&access=paid&category=${ORG}&search=lesson&sort=title&view=grid&where=all`
+    );
+    expect(needsPatch('ready', view)).toEqual({
+      needs: 'ready',
+      search: null,
+      status: null,
+      type: null,
+      access: null,
+      category: null,
+    });
+  });
+
+  it('the chip in use pressed again lets it go, and nothing else', () => {
+    expect(needsPatch('ready', at('?needs=ready&type=video'))).toEqual({
+      needs: null,
+    });
+    expect(needsPatch('processing', at('?needs=ready'))).toMatchObject({
+      needs: 'processing',
+    });
+  });
+});
+
+describe('attentionArgs (Codex-a6ofh.3.4)', () => {
+  it('looks where the list looks, and the schema takes it', () => {
+    expect(attentionArgs(WHERE_PERSONAL, ORG)).toEqual({ organizationId: ORG });
+    expect(attentionArgs(WHERE_PERSONAL, null)).toEqual({ scope: 'personal' });
+    expect(attentionArgs(WHERE_ALL, null)).toEqual({});
+    expect(attentionArgs(OTHER_ORG, null)).toEqual({
+      organizationId: OTHER_ORG,
+    });
+    for (const where of [WHERE_PERSONAL, WHERE_ALL, OTHER_ORG]) {
+      expect(
+        contentAttentionQuerySchema.safeParse(attentionArgs(where, null))
+          .success
+      ).toBe(true);
+    }
   });
 });

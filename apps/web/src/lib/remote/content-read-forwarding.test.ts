@@ -135,6 +135,7 @@ const remote = (await import('./content.remote')) as unknown as {
   stageThumbnailForm: CoverForm;
   listContent: (args?: Record<string, unknown>) => Promise<unknown>;
   getContentWhereCounts: () => Promise<unknown>;
+  getContentAttention: (args: Record<string, unknown>) => Promise<unknown>;
 };
 const media = (await import('./media.remote')) as unknown as {
   listMedia: (args: Record<string, unknown>) => Promise<unknown>;
@@ -470,6 +471,42 @@ describe('getContentWhereCounts', () => {
     const err = await rejection(remote.getContentWhereCounts());
     expect(err).not.toHaveProperty('body');
     expect(lines()).toEqual([]);
+  });
+});
+
+/**
+ * The "Needs you" counts forward and log as the Where counts do
+ * (Codex-a6ofh.3.4), asking where the list looks.
+ */
+describe('getContentAttention', () => {
+  const ORG = '3c111111-1111-4111-8111-111111111999';
+  const REFUSED = 'content.attention_refused';
+
+  it.each([
+    [{ organizationId: ORG }, `organizationId=${ORG}`, 'org'],
+    [{ scope: 'personal' }, 'scope=personal', 'personal'],
+    [{}, '', 'all'],
+  ] as const)('asks where the list looks: %o', async (args, query, scope) => {
+    const fetch = workerAnswers(401, 'Authentication required');
+    await rejection(remote.getContentAttention({ ...args }));
+    const [url] = fetch.mock.calls[0] ?? [];
+    const asked = new URL(String(url));
+    expect(asked.pathname).toBe('/api/content/attention');
+    expect(asked.search.replace(/^\?/, '')).toBe(query);
+    expect(logger.warn).toHaveBeenCalledWith(
+      REFUSED,
+      expect.objectContaining({ scope, status: 401 })
+    );
+  });
+
+  it('a 400 keeps its status, and is an error: the args were ours', async () => {
+    workerAnswers(400, 'Invalid request data');
+    const err = await rejection(remote.getContentAttention({}));
+    expect(err).toMatchObject({ status: 400 });
+    expect(logger.error).toHaveBeenCalledWith(
+      REFUSED,
+      expect.objectContaining({ status: 400 })
+    );
   });
 });
 

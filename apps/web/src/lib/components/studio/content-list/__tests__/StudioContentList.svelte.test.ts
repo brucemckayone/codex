@@ -32,6 +32,7 @@ const s = vi.hoisted(() => ({
   first: { current: undefined as unknown, error: undefined as unknown },
   whereCounts: { current: undefined as unknown, error: undefined as unknown },
   categories: { current: undefined as unknown, error: undefined as unknown },
+  attention: { current: undefined as unknown, error: undefined as unknown },
   later: new Map<number, unknown>(),
   refreshFirst: vi.fn(async () => {}),
 }));
@@ -76,9 +77,23 @@ const getContentWhereCounts = vi.hoisted(() => {
   };
   return vi.fn(() => query);
 });
+/** "Needs you" (Codex-a6ofh.3.4): one query per Where, as kit keeps one. */
+const getContentAttention = vi.hoisted(() => {
+  const query = {
+    get current() {
+      return s.attention.current;
+    },
+    get error() {
+      return s.attention.error;
+    },
+    refresh: async () => {},
+  };
+  return vi.fn((_args?: unknown) => query);
+});
 vi.mock('$lib/remote/content.remote', () => ({
   listContent,
   getContentWhereCounts,
+  getContentAttention,
 }));
 /** The org studio's categories (Codex-a6ofh.3.3): one query, as kit keeps one. */
 const getCategories = vi.hoisted(() => {
@@ -180,6 +195,8 @@ beforeEach(() => {
   getContentWhereCounts.mockClear();
   s.categories = { current: undefined, error: undefined };
   getCategories.mockClear();
+  s.attention = { current: undefined, error: undefined };
+  getContentAttention.mockClear();
   s.later.clear();
   listContent.mockClear();
   goto.mockClear();
@@ -852,5 +869,195 @@ describe('StudioContentList: Category', () => {
     expect(listCalls()[0]).not.toHaveProperty('include');
     expect(document.querySelector('[data-content-id]')).not.toBeNull();
     expect(document.querySelector('.content-categories')).toBeNull();
+  });
+});
+
+describe('StudioContentList: Needs you (Codex-a6ofh.3.4)', () => {
+  const COUNTS = {
+    'live-media-gone': 1,
+    scheduled: 0,
+    'didnt-go-live': 2,
+    'media-gone': 0,
+    processing: 3,
+    ready: 1,
+  };
+  const strip = () => document.querySelector('.needs-you');
+  const chips = () =>
+    [...document.querySelectorAll<HTMLButtonElement>('.needs-chip')].map(
+      (chip) => ({
+        kind: chip.dataset.kind,
+        words: chip.textContent?.trim(),
+        pressed: chip.getAttribute('aria-pressed'),
+      })
+    );
+  const chip = (kind: string) =>
+    document.querySelector<HTMLButtonElement>(
+      `.needs-chip[data-kind="${kind}"]`
+    );
+  /** The params of the one navigation the page made. */
+  function navigatedTo(): URLSearchParams {
+    expect(goto).toHaveBeenCalledTimes(1);
+    const [href] = goto.mock.calls[0] ?? [];
+    return new URL(String(href), 'https://studio.test').searchParams;
+  }
+
+  test('reads the counts where the list looks: the org studio its org, the personal its Where', () => {
+    render();
+    expect(getContentAttention).toHaveBeenLastCalledWith({
+      organizationId: ORG,
+    });
+    if (component) unmount(component);
+    component = null;
+
+    render('', null);
+    expect(getContentAttention).toHaveBeenLastCalledWith({ scope: 'personal' });
+    if (component) unmount(component);
+    component = null;
+
+    render('?where=all', null);
+    expect(getContentAttention).toHaveBeenLastCalledWith({});
+  });
+
+  test('the counts ask for no facet, search or chip of the view: a to-do, not a view', () => {
+    render('?type=video&search=lesson&needs=ready');
+    expect(getContentAttention).toHaveBeenCalledTimes(1);
+    expect(getContentAttention).toHaveBeenLastCalledWith({
+      organizationId: ORG,
+    });
+  });
+
+  test('a chip for each kind with pieces, in the row line’s order, in plain words', () => {
+    s.attention = { current: COUNTS, error: undefined };
+    render();
+    expect(strip()?.getAttribute('role')).toBe('group');
+    expect(strip()?.textContent).toContain(m.studio_content_needs_label());
+    expect(chips()).toEqual([
+      {
+        kind: 'live-media-gone',
+        words: m.studio_content_needs_live_media_gone_one(),
+        pressed: 'false',
+      },
+      {
+        kind: 'didnt-go-live',
+        words: m.studio_content_needs_didnt_go_live({ count: 2 }),
+        pressed: 'false',
+      },
+      {
+        kind: 'processing',
+        words: m.studio_content_needs_processing({ count: 3 }),
+        pressed: 'false',
+      },
+      {
+        kind: 'ready',
+        words: m.studio_content_needs_ready_one(),
+        pressed: 'false',
+      },
+    ]);
+  });
+
+  test('nothing needing you is no strip; unread yet is none either', () => {
+    render();
+    expect(strip()).toBeNull();
+    if (component) unmount(component);
+    component = null;
+
+    s.attention = {
+      current: {
+        'live-media-gone': 0,
+        scheduled: 0,
+        'didnt-go-live': 0,
+        'media-gone': 0,
+        processing: 0,
+        ready: 0,
+      },
+      error: undefined,
+    };
+    render();
+    expect(strip()).toBeNull();
+  });
+
+  test('a chip lists its pieces and only those: status, facets and search go; Where, sort and view stay', async () => {
+    s.attention = { current: COUNTS, error: undefined };
+    render(
+      '?where=all&status=draft&type=video&access=paid&search=lesson&sort=title&view=grid',
+      null
+    );
+    chip('ready')?.click();
+    await Promise.resolve();
+    const params = navigatedTo();
+    expect(params.get('needs')).toBe('ready');
+    expect(params.get('where')).toBe('all');
+    expect(params.get('sort')).toBe('title');
+    expect(params.get('view')).toBe('grid');
+    for (const gone of ['status', 'type', 'access', 'search', 'category']) {
+      expect(params.has(gone), gone).toBe(false);
+    }
+  });
+
+  test('the URL’s chip filters the read, is pressed, stays at none, and pressing it lists them all', async () => {
+    s.attention = { current: { ...COUNTS, ready: 0 }, error: undefined };
+    render('?needs=ready&sort=title');
+    expect(listCalls()[0]).toMatchObject({ needs: 'ready' });
+    expect(chip('ready')?.getAttribute('aria-pressed')).toBe('true');
+    expect(chip('ready')?.textContent?.trim()).toBe(
+      m.studio_content_needs_ready({ count: 0 })
+    );
+    chip('ready')?.click();
+    await Promise.resolve();
+    const params = navigatedTo();
+    expect(params.has('needs')).toBe(false);
+    expect(params.get('sort')).toBe('title');
+  });
+
+  test('Clear filters lets a chip go too', async () => {
+    s.first = { current: pageOf([]), error: undefined };
+    render('?needs=processing');
+    button(m.media_clear_filters())?.click();
+    await Promise.resolve();
+    expect(navigatedTo().has('needs')).toBe(false);
+  });
+
+  // Owner, 2026-11-12: a read that failed is never shown as nothing needing you.
+  test('a failed read says so, with a Try again, and is logged', async () => {
+    const q = kitQuery<typeof COUNTS>();
+    getContentAttention.mockImplementationOnce(() => q.get() as never);
+    render('?where=all', null);
+    const held = q.held();
+    q.fail();
+    await settle();
+    expect(strip()?.querySelector('[role="status"]')?.textContent?.trim()).toBe(
+      m.studio_content_needs_unread()
+    );
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.attention_unread',
+      expect.objectContaining({ status: 500 }),
+      expect.objectContaining({
+        studio: 'personal',
+        organizationId: null,
+        scope: 'all',
+        listedOrganizationId: null,
+      })
+    );
+
+    strip()?.querySelector<HTMLButtonElement>('.needs-you-retry')?.click();
+    await settle();
+    expect(q.refreshes(held)).toBe(1);
+    q.fail(undefined, held);
+    await settle();
+    expect(strip()?.querySelector('[role="status"]')?.textContent?.trim()).toBe(
+      m.studio_content_needs_unread_again()
+    );
+
+    strip()?.querySelector<HTMLButtonElement>('.needs-you-retry')?.click();
+    await settle();
+    q.land(COUNTS, held);
+    await settle();
+    expect(strip()?.querySelector('[role="status"]')).toBeNull();
+    expect(chips().map((c) => c.kind)).toEqual([
+      'live-media-gone',
+      'didnt-go-live',
+      'processing',
+      'ready',
+    ]);
   });
 });

@@ -25,6 +25,34 @@ export const CONTENT_LIST_SCOPE = {
  */
 export const CONTENT_MAX_CATEGORIES = 20;
 
+/**
+ * What a piece needs from its creator: the content list's "Needs you" chips
+ * (Codex-a6ofh.3.4, owner 2026-11-12), and its `?needs=` filter. A piece is
+ * one kind at most, taken in this order, the order the row's own line reads
+ * it (the web's `rowLine`), so a chip, its rows and their words agree:
+ *
+ * - `live-media-gone`: it has been live and its media is deleted or failed;
+ * - `scheduled`: a draft set to go live when its media is ready;
+ * - `didnt-go-live`: a draft whose scheduled publish was refused;
+ * - `media-gone`: a draft whose media is deleted, failed, or a stalled upload,
+ *   which nothing makes ready by itself ("need new media");
+ * - `processing`: a draft whose media is on its way ({@link isMediaOnItsWay});
+ * - `ready`: a draft that passes every publish rule now.
+ */
+export const CONTENT_ATTENTION_KINDS = [
+  'live-media-gone',
+  'scheduled',
+  'didnt-go-live',
+  'media-gone',
+  'processing',
+  'ready',
+] as const;
+
+export type ContentAttentionKind = (typeof CONTENT_ATTENTION_KINDS)[number];
+
+/** `GET /api/content/attention`: how many of the creator's pieces are each kind. */
+export type ContentAttentionCounts = Record<ContentAttentionKind, number>;
+
 /** What {@link hasBeenLive} reads of a piece; the web sends `publishedAt` as a string. */
 export interface PublicationState {
   status: string;

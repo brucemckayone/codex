@@ -11,11 +11,14 @@
   as if it had all been deleted.
 
   The URL is the view (`list-url.ts`): status, type, access, sort, view and
-  search, so a link reproduces it. Below `sm` it is always the cards.
+  search, so a link reproduces it. Below `sm` it is always the cards. Above
+  the rows, "Needs you" (Codex-a6ofh.3.4) counts what the creator's pieces
+  need, and each of its chips lists those pieces.
 -->
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
+  import type { ContentAttentionKind } from '@codex/constants';
   import { boundSearchParam, type ContentQueryInput, gateSearchQuery } from '@codex/validation';
   import { page } from '$app/state';
   import { Button } from '$lib/components/ui';
@@ -24,7 +27,11 @@
   import { FileIcon, SearchXIcon } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { getCategories } from '$lib/remote/categories.remote';
-  import { getContentWhereCounts, listContent } from '$lib/remote/content.remote';
+  import {
+    getContentAttention,
+    getContentWhereCounts,
+    listContent,
+  } from '$lib/remote/content.remote';
   import { listTiers } from '$lib/remote/subscription.remote';
   import * as m from '$paraglide/messages';
   import ActionLink from '../ActionLink.svelte';
@@ -41,12 +48,15 @@
   import ContentListToolbar from './ContentListToolbar.svelte';
   import { categoryOptions, whereOptions } from './list-options';
   import {
+    attentionArgs,
     CATEGORY_ANY,
     CONTENT_LIST_DEFAULTS,
     contentListArgs,
     isContentListNarrowed,
+    needsPatch,
     readContentListState,
   } from './list-url';
+  import NeedsYouStrip from './NeedsYouStrip.svelte';
   import NewContentMenu from './NewContentMenu.svelte';
 
   interface Props {
@@ -208,6 +218,37 @@
       : undefined
   );
 
+  // "Needs you" (Codex-a6ofh.3.4): what the creator's pieces need, counted
+  // where the list looks and nothing else of its view (owner: a to-do, not a
+  // view), so only a new Where reads again. Held untracked, as the counts
+  // above, so a Try again refreshes it in place. A read that failed says so
+  // (owner): it is never shown as nothing needing you.
+  const attentionWhere = $derived(view.where);
+  const attention = $derived.by(() => {
+    const args = attentionArgs(attentionWhere, organizationId);
+    return untrack(() => getContentAttention(args));
+  });
+  $effect(() => {
+    if (attention.error != null) {
+      // Where it looked, as `readLog` names it: never over the studio's own.
+      const args = untrack(() => attentionArgs(attentionWhere, organizationId));
+      logReadFailure('studio_content.attention_unread', attention.error, {
+        studio,
+        organizationId,
+        scope: args.scope ?? (args.organizationId ? 'org' : 'all'),
+        listedOrganizationId: args.organizationId ?? null,
+      });
+    }
+  });
+  const attentionRetry = createFacetRetry({
+    failed: () => m.studio_content_needs_unread(),
+    failedAgain: () => m.studio_content_needs_unread_again(),
+    read: () => attention.refresh(),
+  });
+  const attentionUnread = $derived(
+    attention.current === undefined && attention.error != null ? attentionRetry : undefined
+  );
+
   // ── What the body shows ───────────────────────────────────────────────
   // A filter or search the API refuses (a 4xx): Clear filters is the way out.
   const refusedView = $derived(list.refused && narrowed);
@@ -242,7 +283,15 @@
       access: null,
       where: null,
       category: null,
+      needs: null,
     });
+  }
+
+  // A chip pressed lists its pieces and only those (`needsPatch`): a search
+  // still waiting to be written would put its text back over them.
+  function showNeeds(kind: ContentAttentionKind) {
+    searchInput.cancel();
+    setParams(needsPatch(kind, view));
   }
 </script>
 
@@ -285,6 +334,13 @@
     whereOptions={whereMenu}
     categoryOptions={categoryMenu}
     {categoryUnread}
+  />
+
+  <NeedsYouStrip
+    counts={attention.current}
+    active={view.needs}
+    unread={attentionUnread}
+    onSelect={showNeeds}
   />
 
   <!-- Mounted unconditionally: it renders nothing until the read fails. -->

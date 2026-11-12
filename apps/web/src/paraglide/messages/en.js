@@ -12383,6 +12383,126 @@ export const studio_content_categories_unread_again = () => `Still couldn’t lo
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_label = () => `Needs you`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_live_media_gone_one = () => `1 live piece’s media is gone`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_live_media_gone = (params) => `${params.count} live pieces’ media is gone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_scheduled_one = () => `1 goes live when ready`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_scheduled = (params) => `${params.count} go live when ready`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_didnt_go_live_one = () => `1 didn’t go live`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_didnt_go_live = (params) => `${params.count} didn’t go live`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_media_gone_one = () => `1 draft needs new media`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_media_gone = (params) => `${params.count} drafts need new media`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_processing_one = () => `1 waiting on processing`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_processing = (params) => `${params.count} waiting on processing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_ready_one = () => `1 draft ready to publish`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_ready = (params) => `${params.count} drafts ready to publish`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_unread = () => `Couldn’t check what needs you.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_unread_again = () => `Still couldn’t check what needs you.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_list_facet_retrying = () => `Trying again…`
 
 

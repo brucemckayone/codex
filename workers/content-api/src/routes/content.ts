@@ -10,6 +10,8 @@
  * - GET    /api/content/:id        - Get by ID
  * - PATCH  /api/content/:id        - Update content
  * - GET    /api/content            - List with filters
+ * - GET    /api/content/where-counts - Where the creator's content is filed
+ * - GET    /api/content/attention  - "Needs you" counts, by kind
  * - POST   /api/content/:id/publish   - Publish content
  * - POST   /api/content/:id/unpublish - Unpublish content
  * - DELETE /api/content/:id        - Soft delete
@@ -17,7 +19,11 @@
  * - POST   /api/content/:id/categories - Add categories (keeps the set)
  */
 
-import { AUTH_ROLES, CONTENT_STATUS } from '@codex/constants';
+import {
+  AUTH_ROLES,
+  CONTENT_STATUS,
+  type ContentAttentionCounts,
+} from '@codex/constants';
 import type {
   CancelPublishRequestResponse,
   ContentResponse,
@@ -47,6 +53,7 @@ import type {
 } from '@codex/shared-types';
 import {
   addContentCategoriesSchema,
+  contentAttentionQuerySchema,
   createIdParamsSchema,
   publishContentQuerySchema,
   updateContentQuerySchema,
@@ -191,6 +198,31 @@ app.get(
     policy: { auth: 'required' },
     handler: async (ctx): Promise<ContentWhereCounts> =>
       ctx.services.content.whereCounts(ctx.user.id),
+  })
+);
+
+/**
+ * GET /api/content/attention
+ * What the creator's own pieces need, by kind (Codex-a6ofh.3.4): the content
+ * list's "Needs you" chips, counted across every page by the rule the list's
+ * `needs` filter uses. Where the list looks: `organizationId`, or
+ * `scope=personal` (the service's `organizationId: null`), or neither for
+ * everywhere. A static child, so above `/:id`.
+ *
+ * Returns: ContentAttentionCounts (200)
+ * Security: Authenticated users, own content only, API rate limit (100 req/min)
+ */
+app.get(
+  '/attention',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: contentAttentionQuerySchema },
+    handler: async (ctx): Promise<ContentAttentionCounts> => {
+      const { scope, organizationId } = ctx.input.query;
+      return ctx.services.content.attentionCounts(ctx.user.id, {
+        organizationId: scope ? null : organizationId,
+      });
+    },
   })
 );
 
