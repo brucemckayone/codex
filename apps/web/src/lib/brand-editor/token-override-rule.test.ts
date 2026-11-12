@@ -99,20 +99,23 @@ function refusals(source: string, map: Record<string, unknown> | undefined) {
 }
 
 /**
- * The fine-tune colour panel's keys. They are declared inside the component
- * (`{ key: '…' }` rows), so they are read from its source.
+ * The keys the fine-tune colour panel and the header-layout panel write.
+ * They are declared inside the components (`{ key: '…' }` rows, and a
+ * colour's `linkedKey`), so they are read from their source.
  */
-function fineTuneColourKeys(): string[] {
-  const source = readFileSync(
-    join(
-      import.meta.dirname,
-      '../components/brand-editor/levels/BrandEditorFineTuneColors.svelte'
-    ),
-    'utf8'
-  );
-  return [...source.matchAll(/\bkey: '([^']+)'/g)].map(
-    (match) => match[1] ?? ''
-  );
+function panelKeys(): string[] {
+  return [
+    'BrandEditorFineTuneColors.svelte',
+    'BrandEditorHeaderLayout.svelte',
+  ].flatMap((file) => {
+    const source = readFileSync(
+      join(import.meta.dirname, '../components/brand-editor/levels', file),
+      'utf8'
+    );
+    return [...source.matchAll(/\b(?:key|linkedKey): '([^']+)'/g)].map(
+      (match) => match[1] ?? ''
+    );
+  });
 }
 
 describe('what the brand editor writes passes its own save rule (Codex-403d3)', () => {
@@ -146,8 +149,10 @@ describe('what the brand editor writes passes its own save rule (Codex-403d3)', 
   });
 
   it('every key it can write fits under the entry limit, with room', () => {
-    const colourKeys = fineTuneColourKeys();
-    expect(colourKeys.length).toBeGreaterThan(20);
+    const colourKeys = panelKeys();
+    expect(colourKeys.length).toBeGreaterThan(40);
+    expect(colourKeys).toContain('hero-hide-title');
+    expect(colourKeys).toContain('hero-title-blend');
     const keys = new Set<string>([
       ...ALL_HERO_FX_SHADER_KEYS,
       ...BRAND_PREFIX_KEYS,

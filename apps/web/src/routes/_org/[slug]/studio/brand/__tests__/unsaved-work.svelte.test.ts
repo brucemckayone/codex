@@ -12,7 +12,10 @@
  * runs the page's Save, and the canvas is inert.
  */
 
-import { updateBrandingSchema } from '@codex/validation';
+import {
+  TOKEN_OVERRIDE_MAX_ENTRIES,
+  updateBrandingSchema,
+} from '@codex/validation';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   flushSync,
@@ -278,10 +281,49 @@ describe('a stored override the save would refuse (Codex-403d3)', () => {
     ).toBe(true);
   });
 
-  test("a refused save shows the worker's words, not a generic failure", async () => {
+  test('keeps the first entries up to the limit on load, so the brand still saves', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    updateBrandingCommand.mockResolvedValue({});
+    const stored = Object.fromEntries(
+      Array.from({ length: TOKEN_OVERRIDE_MAX_ENTRIES + 1 }, (_, i) => [
+        `key-${i}`,
+        'red',
+      ])
+    );
+    mountStored(stored, {});
+
+    const kept = brandEditor.saved?.tokenOverrides ?? {};
+    expect(Object.keys(kept)).toHaveLength(TOKEN_OVERRIDE_MAX_ENTRIES);
+    expect(kept).not.toHaveProperty(`key-${TOKEN_OVERRIDE_MAX_ENTRIES}`);
+    const drops = warn.mock.calls.filter(([message]) =>
+      String(message).includes('the save would refuse')
+    );
+    expect(drops.map(([, context]) => context)).toEqual([
+      {
+        organizationId: ORG.id,
+        field: 'tokenOverrides',
+        dropped: 1,
+        keys: [`key-${TOKEN_OVERRIDE_MAX_ENTRIES}`],
+      },
+    ]);
+
+    brandEditor.updateField('primaryColor', '#111111');
+    flushSync();
+    await clickSave();
+    const sent = updateBrandingCommand.mock.calls[0]?.[0];
+    expect(
+      updateBrandingSchema.safeParse({ tokenOverrides: sent?.tokenOverrides })
+        .success
+    ).toBe(true);
+  });
+
+  test('a refused save shows the forwarded message, not a generic failure', async () => {
     const error = vi.spyOn(toast, 'error');
     // What the command throws for a forwarded 4xx: kit's HttpError, which is
-    // not an Error, so `err.message` never reached the toast before.
+    // not an Error, so `err.message` never reached the toast before. The
+    // worker's message is generic; its `details` name the key for an API
+    // client, and the studio never sends a refused entry (its load drops
+    // them), so the toast shows the message alone.
     updateBrandingCommand.mockRejectedValue({
       status: 400,
       body: { message: 'Invalid request data' },

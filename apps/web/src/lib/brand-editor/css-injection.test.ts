@@ -690,6 +690,23 @@ describe('an override that would leave its own declaration (Codex-403d3)', () =>
     expect(emitted[0]?.length).toBeGreaterThan(200);
   });
 
+  it('refuses what the save refuses: a quoted family and an over-long key', () => {
+    // Both are refused by the save's rule, so neither may render: a family
+    // with quotes would leave its quoted name open, and a key over 64
+    // characters would render here yet be dropped by the editor's load.
+    const longKey = `k-${'a'.repeat(63)}`;
+    expect(
+      darkTokenOverridesToCssVars({
+        'font-body': 'a"b\'c"d',
+        [longKey]: 'red',
+        ...SAFE,
+      })
+    ).toEqual(darkTokenOverridesToCssVars(SAFE));
+    expect(tokenOverridesToCssVars({ [longKey]: 'red', ...SAFE })).toEqual(
+      tokenOverridesToCssVars(SAFE)
+    );
+  });
+
   it('renders a stored number in its plain form, and skips any other non-text', () => {
     const number = tokenOverridesToCssVars({ 'text-scale': 1.2 });
     expect(number).toEqual(tokenOverridesToCssVars({ 'text-scale': '1.2' }));

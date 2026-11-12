@@ -14,7 +14,9 @@ import { z } from 'zod';
  * before this rule, an org admin could save `{"x": "red; scale: 3"}` and
  * every visitor got that CSS.
  *
- * The same rule is checked three times, so a stored row is covered too:
+ * One function, {@link tokenOverrideEntryProblem}, decides every entry, and
+ * it is called three times, so a stored row is covered too and the three
+ * can never disagree:
  * - on save, by {@link tokenOverridesJsonSchema};
  * - at render, by the web app's mappers (`css-injection.ts`);
  * - on load, by the brand editor, which drops what the save would refuse so
@@ -44,6 +46,16 @@ export const TOKEN_OVERRIDE_MAX_ENTRIES = 1024;
  */
 export const RESERVED_TOKEN_OVERRIDE_KEYS: ReadonlySet<string> = new Set([
   'shader-logo-url',
+]);
+
+/**
+ * Keys whose value is a font family name. The renderer quotes a family
+ * itself (`quoteFamily`), so the name may hold no quote: one inside would
+ * leave the quoted name open.
+ */
+export const TOKEN_OVERRIDE_FONT_KEYS: ReadonlySet<string> = new Set([
+  'font-body',
+  'font-heading',
 ]);
 
 /**
@@ -83,7 +95,7 @@ const ALLOWED_CSS_FUNCTIONS: ReadonlySet<string> = new Set([
 ]);
 
 /** The run of identifier characters that ends a string. */
-const TRAILING_NAME = /[\w\u0080-￿-]*$/u;
+const TRAILING_NAME = /[\w\u0080-\uffff-]*$/u;
 
 const CLOSERS: Readonly<Record<string, string>> = { ')': '(', ']': '[' };
 
@@ -160,6 +172,9 @@ export function tokenOverrideEntryProblem(
   if (!isSafeCssValue(text)) {
     return `A token override value is one CSS value of at most ${TOKEN_OVERRIDE_VALUE_MAX} characters`;
   }
+  if (TOKEN_OVERRIDE_FONT_KEYS.has(key) && /["']/.test(text)) {
+    return 'A font family is a name, without quotes';
+  }
   return null;
 }
 
@@ -173,7 +188,9 @@ export function tokenOverrideEntryProblem(
  *   it, so it can't reach a style.
  * - **JSON must be an object** of at most {@link TOKEN_OVERRIDE_MAX_ENTRIES}
  *   entries, each passing {@link tokenOverrideEntryProblem}. A failing entry
- *   is a 400 that names its key: nothing is stripped, so a save never
+ *   is a 400 whose `details` name the key, for an API client. The studio
+ *   never sends one, since its load drops whatever this refuses, and its
+ *   toast shows only the message. Nothing is stripped, so a save never
  *   reports what it didn't keep.
  */
 export const tokenOverridesJsonSchema = z

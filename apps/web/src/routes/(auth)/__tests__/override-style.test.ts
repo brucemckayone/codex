@@ -55,6 +55,9 @@ const BRANDING = {
     darkTokenOverrides: JSON.stringify({
       'heading-color': 'blue; scale: 3',
       'shader-logo-url': 'https://pub-a.r2.dev/l.svg',
+      // A safe dark entry: the shell must render the dark set at all, as
+      // Codex-wwedk fixed (only the light set used to reach it).
+      'shadow-color': '#112233',
     }),
     darkModeOverrides: null,
   },
@@ -77,8 +80,10 @@ function shellStyle(): string {
 }
 
 describe('the (auth) layout brand style (Codex-403d3)', () => {
-  it("renders the brand's safe override, so the check below reads a real style", () => {
-    expect(shellStyle()).toMatch(/--brand-shader-preset:\s*haze/);
+  it("renders the brand's safe overrides, light and dark, so the checks below read a real style", () => {
+    const style = shellStyle();
+    expect(style).toMatch(/--brand-shader-preset:\s*haze/);
+    expect(style).toMatch(/--(?:brand|color)-shadow-color-dark:\s*#112233/);
   });
 
   it('carries no declaration that is not a custom property', () => {
