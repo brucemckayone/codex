@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appealMarkOn,
   DISPUTE_APPEAL_STATUSES,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
@@ -38,5 +39,22 @@ describe('dispute appeals (Codex-wzaoh; owner D34)', () => {
     ]) {
       expect(settlesAsLost(status)).toBe(false);
     }
+  });
+
+  it('a mark counts on a lost row only: on any other row it is stale', () => {
+    for (const appeal of DISPUTE_APPEAL_STATUSES) {
+      expect(appealMarkOn('lost', appeal)).toBe(appeal);
+      for (const status of [
+        'won',
+        'warning_closed',
+        'prevented',
+        ...DISPUTE_INQUIRY_STATUSES,
+        ...DISPUTE_CHARGEBACK_OPEN_STATUSES,
+      ]) {
+        expect(appealMarkOn(status, appeal)).toBeNull();
+      }
+    }
+    expect(appealMarkOn('lost', null)).toBeNull();
+    expect(appealMarkOn('won', null)).toBeNull();
   });
 });

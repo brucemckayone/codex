@@ -199,12 +199,21 @@ describe.skipIf(!HAS_DB)('0130 dispute appeals: the disputes CHECK', () => {
           accepted.push(appeal ?? 'none');
         }
         // 0126–0129's recordLateWin, which predates the mark: lost → won,
-        // the mark left in place. The newer code clears it when it next
-        // records the row, and the hourly reconcile finds it.
-        await tx.execute(
+        // the mark left in place. The newer code clears it on the hourly
+        // reconcile's first step. It must have written the row: a WHERE
+        // that matched nothing would prove nothing.
+        const lateWin = await tx.execute(
           sql`UPDATE disputes SET status = 'won', late_won_at = ${day(20)}, lost_applied_at = outcome_applied_at, outcome_applied_at = NULL
-              WHERE stripe_dispute_id = ${id('appeal_under_review')} AND status = 'lost'`
+              WHERE stripe_dispute_id = ${id('appeal_under_review')} AND status = 'lost'
+              RETURNING stripe_dispute_id, status, appeal_status`
         );
+        expect(lateWin.rows).toEqual([
+          {
+            stripe_dispute_id: id('appeal_under_review'),
+            status: 'won',
+            appeal_status: 'appeal_under_review',
+          },
+        ]);
         accepted.push('an older late win keeping the mark');
 
         for (const appeal of ['lost', 'under_review', 'appeal_won']) {

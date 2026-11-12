@@ -12,8 +12,13 @@
  * - a chargeback whose opening failed after it was recorded leaves the buyer
  *   with access, the subscription billing, and the paid slices unreversed.
  *
- * Three sources. Each dispute is re-read from Stripe, then run through the
- * webhook's own `processDispute`:
+ * First, with no Stripe read, every appeal mark left on a dispute that isn't
+ * lost is cleared (owner D34): such a mark is always stale, so its age
+ * doesn't matter, and it moves no money, so this runs every hour, the 08:00
+ * run included.
+ *
+ * Then three sources. Each dispute is re-read from Stripe, then run through
+ * the webhook's own `processDispute`:
  * 1. **Stripe's events** (`charge.dispute.*`) of the last 4 days: the 3-day
  *    retry span plus slack, well inside Stripe's 30-day event retention. Each
  *    dispute's furthest snapshot is compared with our row. This catches missed
@@ -21,8 +26,11 @@
  *    chargeback whose opening failed. The last 15 minutes are left to the
  *    webhook, which Stripe is still delivering. A loss already applied whose
  *    snapshot says won is a late win, and is settled too (Codex-2hxff.70).
- *    So is an applied row whose appeal mark Stripe disagrees with (owner
- *    D34): the live read marks or clears it, and nothing else runs.
+ *    So is an applied lost row whose appeal mark Stripe disagrees with (owner
+ *    D34): the live read marks or clears it, and nothing else runs. A listed
+ *    event keeps the rendering it was created with, at the account's default
+ *    API version then, not at our pin (owner D35; see
+ *    `furthestDisputeSnapshots`).
  * 2. **Our rows** with a final status whose outcome was never applied, of any
  *    age, but not written in the last 15 minutes (the webhook's). This
  *    catches an outcome step that keeps failing (owner decision 2026-10-23,
@@ -63,10 +71,12 @@
  */
 
 import {
+  appealMarkOn,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
   DISPUTE_INQUIRY_STATUSES,
   disputeAppealOf,
+  STRIPE_API_VERSION,
   settlesAsLost,
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
@@ -199,6 +209,14 @@ export interface DisputeReconcileResult {
   /** Disputes acted on, and ones whose handling failed. */
   acted: number;
   failed: number;
+  /**
+   * Source 1's snapshots rendered below our pin, at an older account default
+   * (owner D35): there, an appeal may read as `lost`. Falls to 0 four days
+   * after the account default moves to the pin (release step R23).
+   */
+  snapshotsBelowPin: number;
+  /** Appeal marks cleared from disputes that are not lost (owner D34). */
+  staleMarksCleared: number;
 }
 
 export async function runDisputeReconcile(
@@ -212,6 +230,8 @@ export async function runDisputeReconcile(
     fromLostRows: 0,
     acted: 0,
     failed: 0,
+    snapshotsBelowPin: 0,
+    staleMarksCleared: 0,
   };
   const handled = new Set<string>();
 
@@ -260,6 +280,21 @@ export async function runDisputeReconcile(
     }
   };
 
+  // ── 0. Stale appeal marks, in the database only (owner D34) ─────────────
+  try {
+    result.staleMarksCleared = (
+      await purchase.clearStaleDisputeAppealMarks()
+    ).length;
+  } catch (error) {
+    obs.error(
+      'The hourly dispute reconcile could not clear stale appeal marks; the rest of this run goes on, and the next run retries',
+      {
+        errorId: crypto.randomUUID(),
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+  }
+
   // ── 1. Stripe's events ──────────────────────────────────────────────────
   const snapshots = await furthestDisputeSnapshots(
     stripe,
@@ -268,6 +303,9 @@ export async function runDisputeReconcile(
     obs
   );
   result.fromEvents = snapshots.size;
+  result.snapshotsBelowPin = [...snapshots.values()].filter(
+    (snapshot) => snapshot.renderedBelowPin
+  ).length;
   if (snapshots.size > 0) {
     try {
       const recorded = new Map(
@@ -437,19 +475,51 @@ async function disputesPage(
 }
 
 /**
+ * A dispute as one of Stripe's listed events had it: not a live dispute, and
+ * not rendered at our pin. Only `stageOf` and `needsSettling` read it.
+ */
+interface DisputeSnapshot {
+  id: string;
+  status: string;
+  /** When the event was created, in Stripe's seconds. */
+  created: number;
+  /** The event rendered below our pin (owner D35). */
+  renderedBelowPin: boolean;
+}
+
+const PIN_DATE = STRIPE_API_VERSION.slice(0, 10);
+
+/**
+ * Whether an event rendered below our pin: the date part of its
+ * `api_version` is earlier than the pin's. An event that names no version
+ * counts as below.
+ */
+function renderedBelowPin(apiVersion: string | null | undefined): boolean {
+  return (apiVersion ?? '').slice(0, 10) < PIN_DATE;
+}
+
+/**
  * Each dispute's furthest snapshot among the `charge.dispute.*` events
  * created in [from, to]: the one at the latest stage, the newest within a
  * stage (Stripe lists newest first, and orders events created in the same
  * second arbitrarily). A page that cannot be read is alerted; the disputes on
  * the pages before it are still returned.
+ *
+ * A stored event keeps the rendering it was created with: the account's
+ * default API version at that time, never our request pin (owner D35). So
+ * each snapshot notes whether it rendered below the pin. Below endive, an
+ * appeal may read as `lost`; `needsSettling` explains what that costs. Once
+ * the account default is endive (release step R23), no new event renders
+ * below the pin, and the count the run logs (`snapshotsBelowPin`) falls to 0
+ * when the last older event leaves the 4-day window.
  */
 async function furthestDisputeSnapshots(
   stripe: Stripe,
   from: Date,
   to: Date,
   obs: ObservabilityClient
-): Promise<Map<string, Stripe.Dispute>> {
-  const furthest = new Map<string, Stripe.Dispute>();
+): Promise<Map<string, DisputeSnapshot>> {
+  const furthest = new Map<string, DisputeSnapshot>();
   let startingAfter: string | undefined;
   for (let page = 0; page < DISPUTE_EVENT_MAX_PAGES; page++) {
     let events: Stripe.ApiList<Stripe.Event>;
@@ -475,11 +545,16 @@ async function furthestDisputeSnapshots(
       return furthest;
     }
     for (const event of events.data) {
-      const dispute = event.data.object as Stripe.Dispute;
+      const dispute = event.data.object;
       if (dispute.object !== 'dispute') continue;
       const seen = furthest.get(dispute.id);
       if (!seen || stageOf(dispute.status) > stageOf(seen.status)) {
-        furthest.set(dispute.id, dispute);
+        furthest.set(dispute.id, {
+          id: dispute.id,
+          status: dispute.status,
+          created: event.created,
+          renderedBelowPin: renderedBelowPin(event.api_version),
+        });
       }
     }
     const last = events.data[events.data.length - 1];
@@ -533,10 +608,22 @@ function stageOf(status: string): number {
  * win (Codex-2hxff.70). A late win already undone, or settled by hand
  * (release step R18), is won and applied: left alone. And for an appeal's
  * mark that Stripe disagrees with (owner D34): one whose event was missed, a
- * decision missed, a mark set again by a race with the decision, or one left
- * stale on a won row by a rollback's late win. A mark lives only on a lost
- * row, and follows Stripe's appeal there. Rows that agree are not read. With
+ * decision missed, or a mark set again by a race with the decision. A mark
+ * lives only on a lost row, and follows Stripe's appeal there; one on any
+ * other row is cleared before source 1 without a read, and is compared here
+ * the same way in case that clear failed. Rows that agree are not read. With
  * `lateWins` off (the 08:00 run), applied rows are left alone.
+ *
+ * The status compared is a listed event's, kept as it was rendered when the
+ * event was created, at the account's default API version then (owner D35).
+ * Below endive, an appeal may read as `lost`. That costs little here:
+ * - an appeal a snapshot does show is real, and is used;
+ * - a `lost` on a MARKED row disagrees with the mark, so the row is re-read
+ *   live: the bank's decision is recorded, or the mark kept;
+ * - a `lost` on an UNMARKED lost row agrees, and isn't read. An appeal it
+ *   hides is missed until a snapshot shows it, which no older one can.
+ * Once the account default is endive (release step R23), new events show
+ * appeals, and this gap closes when the older ones leave the 4-day window.
  */
 function needsSettling(
   stripeStatus: string,
@@ -553,9 +640,10 @@ function needsSettling(
   if (record.outcomeAppliedAt) {
     if (!lateWins) return false;
     if (record.status === 'lost' && stripeStatus === 'won') return true;
-    const mark =
-      record.status === 'lost' ? disputeAppealOf(stripeStatus) : null;
-    return record.appealStatus !== mark;
+    return (
+      record.appealStatus !==
+      appealMarkOn(record.status, disputeAppealOf(stripeStatus))
+    );
   }
   const recordedStage = stageOf(record.status);
   return (

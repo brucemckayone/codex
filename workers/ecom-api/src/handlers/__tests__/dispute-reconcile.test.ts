@@ -19,6 +19,7 @@
  * services' own behaviour is covered by their integration suites.
  */
 
+import { STRIPE_API_VERSION } from '@codex/constants';
 import {
   LateWinRefundRefusedError,
   type PurchaseService,
@@ -90,10 +91,22 @@ function dispute(
   } as Stripe.Dispute;
 }
 
-function event(snapshot: Stripe.Dispute, id = `evt_${snapshot.id}`) {
+/**
+ * A listed event, rendered at `apiVersion`: the account's default API version
+ * when the event was created, which it keeps (owner D35). Our pin unless a
+ * test says otherwise, so every fixture is calibrated.
+ */
+function event(
+  snapshot: Stripe.Dispute,
+  id = `evt_${snapshot.id}`,
+  apiVersion: string | null = STRIPE_API_VERSION
+) {
   return {
     id,
+    object: 'event',
     type: 'charge.dispute.updated',
+    api_version: apiVersion,
+    created: snapshot.created,
     data: { object: snapshot },
   } as unknown as Stripe.Event;
 }
@@ -201,8 +214,11 @@ function ledger(
         // cleared (owner D34).
         const now = rows.get(d.stripeDisputeId);
         if (!now) return undefined;
-        if (appeal && now.status === 'lost') now.appealStatus = appeal;
-        else if (!appeal && now.appealStatus && now.status !== 'lost') {
+        if (appeal && now.status === 'lost') {
+          // An appeal is marked only when read live.
+          if (!d.live) return { ...now, appealCheck: true };
+          now.appealStatus = appeal;
+        } else if (!appeal && now.appealStatus && now.status !== 'lost') {
           now.appealStatus = null;
         } else if (!appeal && now.appealStatus && status === 'lost') {
           if (!d.live) return { ...now, appealCheck: true };
@@ -211,6 +227,19 @@ function ledger(
         return { ...now };
       }
     ),
+    // The reconcile's first step: a mark on a row that isn't lost is stale,
+    // and cleared with no Stripe read (owner D34).
+    clearStaleDisputeAppealMarks: vi.fn(async () => {
+      const cleared: string[] = [];
+      for (const row of rows.values()) {
+        if (row.status !== 'lost' && row.appealStatus !== null) {
+          row.appealStatus = null;
+          row.updatedAt = new Date();
+          cleared.push(row.stripeDisputeId);
+        }
+      }
+      return cleared;
+    }),
     markDisputeOutcomeApplied: vi.fn(markApplied),
     settleWonDispute: vi.fn(async (id: string) => {
       await markApplied(id, { status: 'won' });
@@ -393,6 +422,8 @@ describe('runDisputeReconcile', () => {
       fromLostRows: 0,
       acted: 1,
       failed: 0,
+      snapshotsBelowPin: 0,
+      staleMarksCleared: 0,
     });
   });
 
@@ -677,6 +708,247 @@ describe('runDisputeReconcile', () => {
       expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
       expect(rows.get('dp_morning')?.appealStatus).toBeNull();
     });
+
+    it('an applied won row is not read for an appeal its snapshot shows: a mark counts on a lost row only', async () => {
+      const { rows, purchase } = ledger([
+        { stripeDisputeId: 'dp_won', status: 'won', outcomeAppliedAt: applied },
+      ]);
+      const stripe = stripeStub({
+        events: [event(dispute('dp_won', 'appeal_under_review'))],
+      });
+
+      await reconcile({ purchase, stripe }).run();
+
+      expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+      expect(rows.get('dp_won')).toMatchObject({
+        status: 'won',
+        appealStatus: null,
+      });
+    });
+  });
+
+  describe('snapshots rendered below our pin, at an older account default (owner D35)', () => {
+    const applied = new Date(NOW.getTime() - 20 * 24 * 3600 * 1000);
+    const CLOVER = '2025-09-30.clover';
+
+    it('a below-pin `lost` on a marked applied row is re-read, and the live `lost` clears the mark', async () => {
+      const { rows, purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_marked',
+          status: 'lost',
+          outcomeAppliedAt: applied,
+          appealStatus: 'appeal_under_review',
+        },
+      ]);
+      const stripe = stripeStub({
+        events: [event(dispute('dp_marked', 'lost'), 'evt_dp_marked', CLOVER)],
+      });
+
+      const result = await reconcile({ purchase, stripe }).run();
+
+      expect(stripe.disputes.retrieve).toHaveBeenCalledExactlyOnceWith(
+        'dp_marked'
+      );
+      expect(rows.get('dp_marked')).toMatchObject({
+        status: 'lost',
+        appealStatus: null,
+      });
+      expect(result.snapshotsBelowPin).toBe(1);
+    });
+
+    it('a below-pin `lost` on an unmarked applied lost row is not read: it agrees with the row', async () => {
+      const { rows, purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_plain',
+          status: 'lost',
+          outcomeAppliedAt: applied,
+        },
+      ]);
+      const stripe = stripeStub({
+        events: [event(dispute('dp_plain', 'lost'), 'evt_dp_plain', CLOVER)],
+      });
+
+      await reconcile({ purchase, stripe }).run();
+
+      expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+      expect(rows.get('dp_plain')?.appealStatus).toBeNull();
+    });
+
+    it('a below-pin snapshot that does show an appeal is real: the unmarked row is read and marked', async () => {
+      const { rows, purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_shown',
+          status: 'lost',
+          outcomeAppliedAt: applied,
+        },
+      ]);
+      const stripe = stripeStub({
+        events: [
+          event(
+            dispute('dp_shown', 'appeal_needs_response'),
+            'evt_dp_shown',
+            CLOVER
+          ),
+        ],
+      });
+
+      await reconcile({ purchase, stripe }).run();
+
+      expect(stripe.disputes.retrieve).toHaveBeenCalledExactlyOnceWith(
+        'dp_shown'
+      );
+      expect(rows.get('dp_shown')).toMatchObject({
+        status: 'lost',
+        appealStatus: 'appeal_needs_response',
+      });
+    });
+
+    it('snapshotsBelowPin counts the kept snapshots rendered below the pin, one naming no version included; pin-rendered and newer ones are not counted, and the count reaches the completed log', async () => {
+      const ids = [
+        'dp_clover',
+        'dp_null',
+        'dp_absent',
+        'dp_pin',
+        'dp_newer',
+        'dp_kept',
+      ];
+      const { purchase } = ledger(
+        ids.map((stripeDisputeId) => ({
+          stripeDisputeId,
+          status: 'lost',
+          outcomeAppliedAt: applied,
+        }))
+      );
+      const absent = event(dispute('dp_absent', 'lost'));
+      delete (absent as { api_version?: unknown }).api_version;
+      const stripe = stripeStub({
+        events: [
+          event(dispute('dp_clover', 'lost'), 'evt_dp_clover', CLOVER),
+          event(dispute('dp_null', 'lost'), 'evt_dp_null', null),
+          absent,
+          event(dispute('dp_pin', 'lost')),
+          event(dispute('dp_newer', 'lost'), 'evt_dp_newer', '2027-03-31.next'),
+          // Newest first: the kept snapshot is the later stage, at the pin;
+          // the older one below the pin is not the one kept.
+          event(dispute('dp_kept', 'lost'), 'evt_dp_kept_2'),
+          event(dispute('dp_kept', 'needs_response'), 'evt_dp_kept_1', CLOVER),
+        ],
+      });
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      const result = await run();
+
+      expect(result).toMatchObject({ fromEvents: 6, snapshotsBelowPin: 3 });
+      expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+      expect(obs.info).toHaveBeenCalledWith(
+        'dispute reconcile completed',
+        expect.objectContaining({ fromEvents: 6, snapshotsBelowPin: 3 })
+      );
+    });
+  });
+
+  describe('stale appeal marks, cleared in the database first (owner D34)', () => {
+    const longAgo = new Date(NOW.getTime() - 300 * 24 * 3600 * 1000);
+    const staleWon = {
+      stripeDisputeId: 'dp_stale_won',
+      status: 'won',
+      outcomeAppliedAt: longAgo,
+      lateWonAt: longAgo,
+      updatedAt: longAgo,
+      stripeCreatedAt: longAgo,
+      appealStatus: 'appeal_under_review',
+    };
+
+    it('a mark on a row that is not lost is cleared before Stripe is read, with no Stripe read of its own, whatever its age; the count reaches the result and the completed log', async () => {
+      const { rows, purchase } = ledger([staleWon]);
+      const stripe = stripeStub();
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      const result = await run();
+
+      expect(purchase.clearStaleDisputeAppealMarks).toHaveBeenCalledOnce();
+      expect(
+        purchase.clearStaleDisputeAppealMarks.mock.invocationCallOrder[0]
+      ).toBeLessThan(stripe.events.list.mock.invocationCallOrder[0] ?? 0);
+      expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+      expect(rows.get('dp_stale_won')).toMatchObject({
+        status: 'won',
+        appealStatus: null,
+      });
+      expect(result.staleMarksCleared).toBe(1);
+      expect(obs.info).toHaveBeenCalledWith(
+        'dispute reconcile completed',
+        expect.objectContaining({ staleMarksCleared: 1 })
+      );
+    });
+
+    it("a lost row's mark is left alone: only Stripe can say the appeal ended", async () => {
+      const { rows, purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_appealing',
+          status: 'lost',
+          outcomeAppliedAt: longAgo,
+          appealStatus: 'appeal_under_review',
+        },
+      ]);
+      const stripe = stripeStub();
+
+      const result = await reconcile({ purchase, stripe }).run();
+
+      expect(rows.get('dp_appealing')?.appealStatus).toBe(
+        'appeal_under_review'
+      );
+      expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+      expect(result.staleMarksCleared).toBe(0);
+    });
+
+    it('the 08:00 run (lateWins off) clears them too: it moves no money', async () => {
+      const { rows, purchase } = ledger([staleWon]);
+      const stripe = stripeStub();
+
+      const result = await reconcile({
+        purchase,
+        stripe,
+        lateWins: false,
+      }).run();
+
+      expect(rows.get('dp_stale_won')?.appealStatus).toBeNull();
+      expect(result.staleMarksCleared).toBe(1);
+    });
+
+    it('a clear that fails is alerted and the run goes on: source 1 still settles, and repairs a stale mark it meets', async () => {
+      const { rows, purchase } = ledger([staleWon]);
+      purchase.clearStaleDisputeAppealMarks.mockRejectedValueOnce(
+        new Error('database down (test)')
+      );
+      const stripe = stripeStub({
+        events: [
+          event(dispute('dp_stale_won', 'won')),
+          event(dispute('dp_new', 'needs_response')),
+        ],
+      });
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      const result = await run();
+
+      expect(obs.error).toHaveBeenCalledWith(
+        'The hourly dispute reconcile could not clear stale appeal marks; the rest of this run goes on, and the next run retries',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          error: 'database down (test)',
+        })
+      );
+      expect(stripe.disputes.retrieve).toHaveBeenCalledWith('dp_new');
+      expect(rows.get('dp_new')?.status).toBe('needs_response');
+      // The uniform comparison still sees the won row's stale mark.
+      expect(stripe.disputes.retrieve).toHaveBeenCalledWith('dp_stale_won');
+      expect(rows.get('dp_stale_won')).toMatchObject({
+        status: 'won',
+        appealStatus: null,
+      });
+      expect(purchase.repayWonDispute).not.toHaveBeenCalled();
+      expect(result.staleMarksCleared).toBe(0);
+    });
   });
 
   it('an open chargeback is re-run, since nothing records that its opening finished, but writes no second streaming block', async () => {
@@ -824,6 +1096,8 @@ describe('runDisputeReconcile', () => {
       fromLostRows: 0,
       acted: 1,
       failed: 0,
+      snapshotsBelowPin: 0,
+      staleMarksCleared: 0,
     });
 
     const second = await run();
@@ -836,6 +1110,8 @@ describe('runDisputeReconcile', () => {
       fromLostRows: 0,
       acted: 0,
       failed: 0,
+      snapshotsBelowPin: 0,
+      staleMarksCleared: 0,
     });
   });
 
@@ -890,6 +1166,8 @@ describe('runDisputeReconcile', () => {
       fromLostRows: 0,
       acted: 1,
       failed: 1,
+      snapshotsBelowPin: 0,
+      staleMarksCleared: 0,
     });
   });
 

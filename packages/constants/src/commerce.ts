@@ -116,6 +116,19 @@ export function settlesAsLost(status: string): boolean {
 }
 
 /**
+ * The appeal mark a dispute row may carry (owner D34): the appeal on a
+ * `lost` row, and none on any other. Only a loss is appealed, so a mark on a
+ * row that isn't lost is stale. The dispute record, the hourly reconcile and
+ * support all read a mark through this.
+ */
+export function appealMarkOn(
+  rowStatus: string,
+  appeal: DisputeAppealStatus | null
+): DisputeAppealStatus | null {
+  return rowStatus === 'lost' ? appeal : null;
+}
+
+/**
  * The Stripe metadata key naming the environment that created an object — the
  * worker's `ENVIRONMENT` (`production`, `development`, `test`).
  *
