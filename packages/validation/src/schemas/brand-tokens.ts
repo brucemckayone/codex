@@ -94,8 +94,12 @@ const ALLOWED_CSS_FUNCTIONS: ReadonlySet<string> = new Set([
   'var',
 ]);
 
-/** The run of identifier characters that ends a string. */
-const TRAILING_NAME = /[\w\u0080-\uffff-]*$/u;
+/**
+ * A character of a CSS identifier, as the browser reads a function's name:
+ * ASCII letters, digits, `_` and `-`, and any character from U+0080 up,
+ * astral ones included.
+ */
+const NAME_CHAR = /[\w\u0080-\u{10ffff}-]/u;
 
 const CLOSERS: Readonly<Record<string, string>> = { ')': '(', ']': '[' };
 
@@ -105,24 +109,39 @@ const CLOSERS: Readonly<Record<string, string>> = { ')': '(', ']': '[' };
  * and quotes and brackets that close. An unclosed quote or bracket would
  * otherwise swallow the declarations after it, since the style is split only
  * at a top-level `;`.
+ *
+ * One pass, reading each character once: the name before a `(` is the
+ * identifier run collected on the way. This runs on every entry of every
+ * render, and a backward regex per `(` (quadratic in the name) let one
+ * crafted map cost seconds of CPU per page (Codex-403d3 review).
  */
 export function staysInOneDeclaration(value: string): boolean {
   if (UNSAFE_CSS_VALUE.test(value)) return false;
   const open: string[] = [];
   let quote: string | null = null;
-  for (let i = 0; i < value.length; i++) {
-    const char = value[i];
+  // The identifier run that ends just before the current character.
+  let name = '';
+  // By code point, so the name is the one the browser reads.
+  for (const char of value) {
     if (quote) {
       if (char === quote) quote = null;
       continue;
     }
+    if (NAME_CHAR.test(char)) {
+      name += char;
+      continue;
+    }
+    if (
+      char === '(' &&
+      name &&
+      !ALLOWED_CSS_FUNCTIONS.has(name.toLowerCase())
+    ) {
+      return false;
+    }
+    name = '';
     if (char === '"' || char === "'") {
       quote = char;
-    } else if (char === '(') {
-      const name = TRAILING_NAME.exec(value.slice(0, i))?.[0] ?? '';
-      if (name && !ALLOWED_CSS_FUNCTIONS.has(name.toLowerCase())) return false;
-      open.push(char);
-    } else if (char === '[') {
+    } else if (char === '(' || char === '[') {
       open.push(char);
     } else if (char === ')' || char === ']') {
       if (open.pop() !== CLOSERS[char]) return false;

@@ -437,11 +437,16 @@ function emitsCssVar(key: string): boolean {
 /**
  * The entries a stored override map renders from: at most
  * TOKEN_OVERRIDE_MAX_ENTRIES, the same ones the brand editor keeps on load,
- * so what renders is what the next save keeps.
+ * so what renders is what the next save keeps. Only from a plain object: the
+ * layouts' parse hands on any JSON, and a string or an array has keys too,
+ * which the save and the editor's load refuse.
  */
 function renderedEntries(
   overrides: Readonly<Record<string, unknown>>
 ): [string, unknown][] {
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
+    return [];
+  }
   return Object.entries(overrides).slice(0, TOKEN_OVERRIDE_MAX_ENTRIES);
 }
 

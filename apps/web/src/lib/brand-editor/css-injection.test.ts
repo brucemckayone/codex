@@ -720,6 +720,15 @@ describe('an override that would leave its own declaration (Codex-403d3)', () =>
     expect(tokenOverridesToCssVars(odd)).toEqual({});
   });
 
+  it('renders nothing from stored JSON that is not an object', () => {
+    // The layouts' parse hands on any JSON; a string or an array has keys
+    // too, which the save and the editor's load refuse.
+    for (const stored of [['red'], 'abc']) {
+      expect(tokenOverridesToCssVars(stored as never)).toEqual({});
+      expect(darkTokenOverridesToCssVars(stored as never)).toEqual({});
+    }
+  });
+
   it('renders at most the entries the brand editor keeps on load', () => {
     const map = Object.fromEntries(
       Array.from({ length: TOKEN_OVERRIDE_MAX_ENTRIES + 1 }, (_, i) => [

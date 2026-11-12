@@ -10,7 +10,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { hexColorSchema, timezoneSchema } from '../primitives';
-import { TOKEN_OVERRIDE_MAX_ENTRIES } from '../schemas/brand-tokens';
+import {
+  staysInOneDeclaration,
+  TOKEN_OVERRIDE_MAX_ENTRIES,
+  TOKEN_OVERRIDE_VALUE_MAX,
+} from '../schemas/brand-tokens';
 import {
   ALLOWED_LOGO_MIME_TYPES,
   allSettingsSchema,
@@ -311,6 +315,27 @@ describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
     'null',
   ])('refuses JSON that is not an object: %s', (json) => {
     expect(problems('tokenOverrides', json)).toEqual([['tokenOverrides']]);
+  });
+
+  it('reads a worst-case value in one pass, so a crafted map costs no seconds', () => {
+    // A long name, a space, then empty brackets: each bracket's name is
+    // empty, so the value passes. A backward regex per bracket took about
+    // 1.5 ms on it, and 1.4 s for a full map, on every render (review r3).
+    const worst = `${'a'.repeat(132)} ${'()'.repeat(33)}`;
+    expect(worst.length).toBeLessThanOrEqual(TOKEN_OVERRIDE_VALUE_MAX);
+    expect(staysInOneDeclaration(worst)).toBe(true);
+    const map = JSON.stringify(
+      Object.fromEntries(
+        Array.from({ length: TOKEN_OVERRIDE_MAX_ENTRIES }, (_, i) => [
+          `key-${i}`,
+          worst,
+        ])
+      )
+    );
+    const started = performance.now();
+    expect(problems('tokenOverrides', map)).toEqual([]);
+    // One pass takes milliseconds; the bound leaves room for a slow runner.
+    expect(performance.now() - started).toBeLessThan(400);
   });
 
   it('refuses a map past the entry limit, and keeps one at it', () => {
