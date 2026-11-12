@@ -46,9 +46,9 @@ interface PublishMedia {
    */
   onItsWay: boolean;
   /**
-   * An upload that stopped, by the tile's rule (`describeTile`) once this
-   * tab is not sending it: a tab's report first, then the clock line. It
-   * needs new media.
+   * An upload that stopped: this tab's queue gave up on it, or, with no row
+   * for it here, the tile's rule (`describeTile`) says so, a tab's report
+   * first, then the clock line. It needs new media.
    */
   stalled: boolean;
   /**
@@ -57,30 +57,28 @@ interface PublishMedia {
    * turned round.
    */
   canRetry: boolean;
-  /** Uploading from this tab: closing it stops the upload. */
+  /** This tab's queue is sending it: closing the tab stops the upload. */
   uploadingHere: boolean;
 }
 
 export type PublishReads = ReturnType<typeof createPublishReads>;
 
 /**
- * This tab is sending its bytes: by its own queue first, as the status
- * socket hears of an upload only while it is open, then by the socket's
- * word for one this tab began.
+ * This tab's own word on the upload, as the library's ghost tile and the
+ * picker take it: its queue is sending the bytes (`'sending'`: uploading or
+ * completing), or gave up on them (`'failed'`: the tray offers Try again,
+ * and the server's row waits in uploading meanwhile). Null when this tab's
+ * queue has no row for it. The socket's `upload.here` is only ever this
+ * queue's own report echoed back (`reportUpload` has no other caller), and
+ * it outlives a row that failed: the status object hears of a stop only
+ * when the socket closes.
  */
-function uploadingHere(
-  mediaId: string,
-  status: string,
-  live: { upload?: { here: boolean } | null } | undefined
-): boolean {
-  const queued = uploadQueue.items.some(
-    (item) =>
-      item.id === mediaId &&
-      (item.status === 'uploading' || item.status === 'completing')
-  );
-  return (
-    queued || (status === MEDIA_STATUS.UPLOADING && live?.upload?.here === true)
-  );
+function uploadHere(mediaId: string): 'sending' | 'failed' | null {
+  const row = uploadQueue.items.find((item) => item.id === mediaId);
+  if (row?.status === 'uploading' || row?.status === 'completing') {
+    return 'sending';
+  }
+  return row?.status === 'error' ? 'failed' : null;
 }
 
 export function createPublishReads(options: PublishReadsOptions) {
@@ -160,14 +158,16 @@ export function createPublishReads(options: PublishReadsOptions) {
     const deleted = mediaRow.deletedAt != null;
     const failure =
       status === MEDIA_STATUS.FAILED ? describeTile(mediaRow, live, 0) : null;
-    const here = !deleted && uploadingHere(mediaId, status, live);
-    // This tab still sending it is uploading, whatever the clock or the
-    // socket says; else the tile's rule (`describeTile`) decides.
+    const upload = deleted ? null : uploadHere(mediaId);
+    // This tab's queue first, whatever the clock or the socket says: still
+    // sending is uploading, and given up on has stopped. With no row here,
+    // the tile's rule (`describeTile`) decides.
     const stalled =
       !deleted &&
-      !here &&
       status === MEDIA_STATUS.UPLOADING &&
-      describeTile(mediaRow, live, 0).kind === 'stopped';
+      (upload === 'failed' ||
+        (upload === null &&
+          describeTile(mediaRow, live, 0).kind === 'stopped'));
     return {
       status,
       deleted,
@@ -178,7 +178,7 @@ export function createPublishReads(options: PublishReadsOptions) {
         isMediaOnItsWay({ status, createdAt: mediaRow.createdAt }),
       stalled,
       canRetry: !deleted && failure?.kind === 'failed' && failure.canRetry,
-      uploadingHere: here,
+      uploadingHere: upload === 'sending',
     };
   });
 

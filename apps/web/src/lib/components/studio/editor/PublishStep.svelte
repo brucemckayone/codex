@@ -322,6 +322,8 @@
         return reads.media?.canRetry
           ? m.studio_publish_scheduled_media_failed({ type })
           : m.studio_publish_blocked_media_failed({ type });
+      case 'stopped':
+        return m.studio_publish_gap_upload_stopped({ type });
       case 'stale':
         return schedule.readFailed ? '' : m.studio_publish_scheduled_settling({ type });
       case 'waiting':

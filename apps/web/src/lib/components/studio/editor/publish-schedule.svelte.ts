@@ -42,6 +42,12 @@ interface ScheduleMedia {
   deleted: boolean;
   /** Failed, and a Try again can still get it there. */
   canRetry: boolean;
+  /**
+   * Its upload stopped: nothing will make it ready until another file is
+   * chosen, or this one sent again (owner, 2026-11-12). The schedule waits
+   * on regardless, until the media is failed for it.
+   */
+  stalled: boolean;
 }
 
 interface PublishScheduleOptions {
@@ -64,6 +70,7 @@ type ScheduleView =
   | 'blocked'
   | 'gone'
   | 'failed'
+  | 'stopped'
   | 'stale'
   | 'waiting'
   | null;
@@ -155,6 +162,8 @@ export function createPublishSchedule(options: PublishScheduleOptions) {
     const media = options.media();
     if (media?.deleted) return 'gone';
     if (media?.status === MEDIA_STATUS.FAILED) return 'failed';
+    // Never "goes live by itself": the checklist leaves the wait to this.
+    if (media?.stalled) return 'stopped';
     return stale ? 'stale' : 'waiting';
   });
 
