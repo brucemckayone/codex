@@ -182,6 +182,100 @@ describe('updateBrandingSchema', () => {
   });
 });
 
+describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
+  type Field = 'tokenOverrides' | 'darkTokenOverrides';
+
+  /** Each issue's path and message, or [] when the value is accepted. */
+  function problems(field: Field, value: unknown) {
+    const result = updateBrandingSchema.safeParse({ [field]: value });
+    return result.success ? [] : result.error.issues.map((issue) => issue.path);
+  }
+
+  /** What the brand editor writes: its own keys and value shapes. */
+  const EDITOR_MAP = {
+    'heading-color': '#1A2B3C',
+    'shader-preset': 'haze',
+    'shader-intensity': '0.60',
+    'shadow-color': 'oklch(0.3 0.02 250 / 0.4)',
+    'font-body': '"Playfair Display", serif',
+    'hero-hide-title': 'true',
+    'text-scale': null,
+  };
+
+  it.each<Field>([
+    'tokenOverrides',
+    'darkTokenOverrides',
+  ])('accepts what the brand editor saves (%s)', (field) => {
+    expect(problems(field, JSON.stringify(EDITOR_MAP))).toEqual([]);
+  });
+
+  it('accepts a clear: null, an empty string, or nothing', () => {
+    expect(problems('tokenOverrides', null)).toEqual([]);
+    expect(problems('tokenOverrides', '')).toEqual([]);
+    expect(updateBrandingSchema.parse({})).toEqual({});
+  });
+
+  it('passes stored text that is not JSON back unchanged (Codex-cijzb)', () => {
+    // The brand page re-sends a stored map it could not read, so a failed
+    // read can't blank it. Nothing renders it: every reader parses it first.
+    expect(updateBrandingSchema.parse({ tokenOverrides: '{not json' })).toEqual(
+      { tokenOverrides: '{not json' }
+    );
+  });
+
+  it.each([
+    ['a value that starts a new declaration', 'heading-color', 'red; scale: 3'],
+    ['a key that carries a declaration', 'x; position: fixed', 'red'],
+    ['a camelCase key', 'headingColor', 'red'],
+    ['a url()', 'heading-color', 'url(https://evil.example/x.png)'],
+    ['a URL( in capitals', 'heading-color', 'URL(https://evil.example/x.png)'],
+    ['a closing brace', 'heading-color', 'red}'],
+    ['an angle bracket', 'heading-color', 'red</style>'],
+    ['a backslash escape', 'heading-color', 'red\\3b position: fixed'],
+    ['a control character', 'heading-color', 'red\n'],
+    ['a value over 200 characters', 'heading-color', 'a'.repeat(201)],
+    ['a number', 'text-scale', 1.2],
+    ['an object', 'heading-color', { nested: 'red' }],
+  ])('refuses %s, naming its key', (_label, key, value) => {
+    const map = { 'shader-preset': 'haze', [key]: value };
+    expect(problems('tokenOverrides', JSON.stringify(map))).toEqual([
+      ['tokenOverrides', key],
+    ]);
+  });
+
+  it('applies the same rule to the dark map', () => {
+    const map = { 'heading-color': 'red; position: fixed' };
+    expect(problems('darkTokenOverrides', JSON.stringify(map))).toEqual([
+      ['darkTokenOverrides', 'heading-color'],
+    ]);
+  });
+
+  it('keeps a value of exactly 200 characters', () => {
+    const map = { 'heading-color': 'a'.repeat(200) };
+    expect(problems('tokenOverrides', JSON.stringify(map))).toEqual([]);
+  });
+
+  it.each([
+    '[]',
+    '"red"',
+    '5',
+    'null',
+  ])('refuses JSON that is not an object: %s', (json) => {
+    expect(problems('tokenOverrides', json)).toEqual([['tokenOverrides']]);
+  });
+
+  it('refuses more than 100 entries, and keeps 100', () => {
+    const map = (size: number) =>
+      JSON.stringify(
+        Object.fromEntries(
+          Array.from({ length: size }, (_, i) => [`key-${i}`, 'red'])
+        )
+      );
+    expect(problems('tokenOverrides', map(100))).toEqual([]);
+    expect(problems('tokenOverrides', map(101))).toEqual([['tokenOverrides']]);
+  });
+});
+
 describe('updateContactSchema', () => {
   describe('valid inputs', () => {
     it('should accept valid contact update with all fields', () => {

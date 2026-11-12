@@ -16,11 +16,7 @@
   import AuthShaderPane from '$lib/components/auth/AuthShaderPane.svelte';
   import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
   import { groundLuminanceVars, paintableColour } from '$lib/brand-editor/ground';
-  import {
-    darkTokenOverridesToCssVars,
-    parseDarkColorOverrides,
-    tokenOverridesToCssVars,
-  } from '$lib/brand-editor';
+  import { parseDarkColorOverrides, tokenOverrideStyle } from '$lib/brand-editor';
   import type { LayoutData } from './$types';
 
   interface Props {
@@ -92,25 +88,18 @@
     }
   };
 
-  const tokenOverrideStyle = $derived.by(() => {
-    // Light AND dark override sets, same as the org layout. The dark set is
-    // emitted as `--brand-{key}-dark` / `--color-{key}-dark` so org-brand.css's
-    // dark gate can pick it up; emitting only the light set left per-theme
-    // fine-tuning inert on the auth shell.
-    const lightOverrides = parseOverrides(branding?.brandFineTune?.tokenOverrides);
-    const darkOverrides = parseOverrides(
-      branding?.brandFineTune?.darkTokenOverrides
-    );
-    if (!lightOverrides && !darkOverrides) return undefined;
-    const vars: Record<string, string> = {};
-    if (lightOverrides) Object.assign(vars, tokenOverridesToCssVars(lightOverrides));
-    if (darkOverrides) {
-      Object.assign(vars, darkTokenOverridesToCssVars(darkOverrides));
-    }
-    const entries = Object.entries(vars);
-    if (entries.length === 0) return undefined;
-    return entries.map(([prop, value]) => `${prop}: ${value}`).join('; ');
-  });
+  // Light AND dark override sets, built by the org layout's own
+  // tokenOverrideStyle. The dark set is emitted as `--brand-{key}-dark` /
+  // `--color-{key}-dark` so org-brand.css's dark gate can pick it up; emitting
+  // only the light set left per-theme fine-tuning inert on the auth shell. Its
+  // mappers drop an entry that would leave its own declaration (Codex-403d3):
+  // this shell was a second copy of the join, unchecked.
+  const overrideStyle = $derived(
+    tokenOverrideStyle(
+      parseOverrides(branding?.brandFineTune?.tokenOverrides),
+      parseOverrides(branding?.brandFineTune?.darkTokenOverrides)
+    )
+  );
 
   // Expose org name to child auth pages so they can render
   // "Welcome back to {org}" instead of the generic "Welcome back".
@@ -142,7 +131,7 @@
   style:--brand-font-body={brandFontBody ? `'${brandFontBody}'` : undefined}
   style:--brand-font-heading={brandFontHeading ? `'${brandFontHeading}'` : undefined}
   style:--brand-shader-logo-url={brandLogoUrl}
-  style={tokenOverrideStyle}
+  style={overrideStyle}
 >
   <!-- On an org host, login and sign-up are that org's pages, so they hold the
        page-load bar HERE, where it inherits this element's brand remap (dark:

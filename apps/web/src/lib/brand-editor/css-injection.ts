@@ -1,3 +1,4 @@
+import { isSafeCssValue } from '@codex/validation';
 import { browser } from '$app/environment';
 import { brandFontProperty, withFallback } from './font-fallbacks';
 import {
@@ -454,6 +455,26 @@ const LAYOUT_OWNED_PROPS = new Set([
   '--brand-shader-logo-url',
 ]);
 
+/** A custom property an override may set: `--` and kebab-case, nothing else. */
+const SAFE_PROPERTY = /^--[a-z0-9-]+$/;
+
+/**
+ * Whether a `prop: value` pair stays inside its own declaration
+ * (Codex-403d3). Overrides come from an org admin's saved JSON, and the
+ * mappers below are how every one reaches a style: the org and auth layouts'
+ * server-rendered `style` attribute on every public page, and setProperty.
+ * So they check each entry here, at the sink, which also covers rows stored
+ * before the save schema checked them. The page builder's core fields use it
+ * too (`brand-overrides.ts`).
+ */
+export function isSafeDeclaration([prop, value]: [string, unknown]): boolean {
+  return (
+    typeof value === 'string' &&
+    SAFE_PROPERTY.test(prop) &&
+    isSafeCssValue(value)
+  );
+}
+
 /** The property a LIGHT override key writes, or null when it writes none. */
 function lightOverrideProp(key: string): string | null {
   if (!emitsCssVar(key)) return null;
@@ -671,6 +692,7 @@ export function tokenOverridesToCssVars(
     // Skip attribute-only, retired and field-owned keys (lightOverrideProp).
     const prop = lightOverrideProp(key);
     if (!prop) continue;
+    if (!isSafeDeclaration([prop, value])) continue;
     out[prop] = value;
   }
   return out;
@@ -716,12 +738,17 @@ export function darkTokenOverridesToCssVars(
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
     if (!emitsCssVar(key)) continue;
+    // A stored row can hold any JSON, and quoteFamily would throw on a number.
+    if (typeof value !== 'string') continue;
     const baseProp = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
     // Font families must be quoted (see quoteFamily); everything else stays raw.
     const emitted = FONT_OVERRIDE_KEYS.has(key) ? quoteFamily(value) : value;
-    out[`${baseProp}${DARK_TOKEN_SUFFIX}`] = emitted;
+    const prop = `${baseProp}${DARK_TOKEN_SUFFIX}`;
+    // Checked as emitted, since the quoted family is what reaches the style.
+    if (!isSafeDeclaration([prop, emitted])) continue;
+    out[prop] = emitted;
   }
   return out;
 }

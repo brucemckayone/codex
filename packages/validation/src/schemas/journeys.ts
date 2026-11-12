@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createSlugSchema, priceCentsSchema, uuidSchema } from '../primitives';
+import { TOKEN_OVERRIDE_KEY, TOKEN_OVERRIDE_MAX_ENTRIES } from './brand-tokens';
 import {
   buttonActionSchema,
   COLOUR_SCHEME_IDS,
@@ -419,10 +420,10 @@ const brandValueSchema = z.string().max(200);
 
 /** A brand editor token-override map (`tokenOverrides` / `darkTokenOverrides`). */
 const brandTokenMapSchema = z
-  .record(z.string().regex(/^[a-z0-9-]{1,64}$/), brandValueSchema.nullable())
+  .record(z.string().regex(TOKEN_OVERRIDE_KEY), brandValueSchema.nullable())
   .refine(
-    (map) => Object.keys(map).length <= 100,
-    'Too many token overrides (100 limit)'
+    (map) => Object.keys(map).length <= TOKEN_OVERRIDE_MAX_ENTRIES,
+    `Too many token overrides (${TOKEN_OVERRIDE_MAX_ENTRIES} limit)`
   );
 
 /**

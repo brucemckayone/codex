@@ -63,6 +63,7 @@ import {
   updateBrandingCommand,
 } from '$lib/components/brand-studio/__fixtures__/branding-remote.mock.svelte';
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
+import { logger } from '$lib/observability';
 import BrandPage from '../+page.svelte';
 
 const KEY = 'codex:brand-editor';
@@ -187,5 +188,56 @@ describe('leaving with unsaved changes', () => {
     expect(cancel).toHaveBeenCalled();
     expect(brandEditor.pending?.primaryColor).toBe('#111111');
     expect(sessionStorage.getItem(KEY)).not.toBeNull();
+  });
+});
+
+describe('a stored override the save would refuse (Codex-403d3)', () => {
+  test('is dropped on load, so Save never sends it back', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    updateBrandingCommand.mockResolvedValue({});
+    component = mount(BrandPage, {
+      target: document.body,
+      props: { data: { org: ORG } } as never,
+    });
+    flushSync();
+    brandingRemote().land({
+      ...BRANDING,
+      tokenOverrides: JSON.stringify({
+        'heading-color': '#112233',
+        'x; position: fixed': 'red',
+        'shadow-color': 'red; scale: 3',
+      }),
+      darkTokenOverrides: JSON.stringify({
+        'heading-color': 'url(https://evil.example/x.png)',
+      }),
+    });
+    flushSync();
+
+    expect(brandEditor.saved?.tokenOverrides).toEqual({
+      'heading-color': '#112233',
+    });
+    expect(brandEditor.saved?.darkTokenOverrides).toBeNull();
+    expect(brandEditor.isDirty).toBe(false);
+    const drops = warn.mock.calls.filter(([message]) =>
+      String(message).includes('the save would refuse')
+    );
+    expect(drops.map(([, context]) => context)).toEqual([
+      { field: 'tokenOverrides', dropped: 2 },
+      { field: 'darkTokenOverrides', dropped: 1 },
+    ]);
+
+    brandEditor.updateField('primaryColor', '#111111');
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="stub-save"]')
+      ?.click();
+    await settle();
+
+    expect(updateBrandingCommand).toHaveBeenCalledTimes(1);
+    const sent = updateBrandingCommand.mock.calls[0]?.[0];
+    expect(sent?.tokenOverrides).toBe(
+      JSON.stringify({ 'heading-color': '#112233' })
+    );
+    expect(sent?.darkTokenOverrides).toBe('');
   });
 });

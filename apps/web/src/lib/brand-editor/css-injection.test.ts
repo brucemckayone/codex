@@ -645,3 +645,49 @@ describe('injectBrandVars paints the canonical hex', () => {
     );
   });
 });
+
+describe('an override that would leave its own declaration (Codex-403d3)', () => {
+  // An org admin's saved JSON, as it might be stored before the save schema
+  // checked it: two entries that would add declarations of their own, one
+  // that would fetch, and one an editor control really writes.
+  const CRAFTED = {
+    'heading-color': 'red; position: fixed; inset: 0',
+    'x: 1; position': 'red',
+    'shadow-color': 'url(https://evil.example/x.png)',
+    'shader-preset': 'haze',
+  };
+  const SAFE = { 'shader-preset': 'haze' };
+
+  it('the light mapper drops it and keeps the rest', () => {
+    expect(tokenOverridesToCssVars(CRAFTED)).toEqual(
+      tokenOverridesToCssVars(SAFE)
+    );
+    expect(Object.keys(tokenOverridesToCssVars(SAFE))).toHaveLength(1);
+  });
+
+  it('the dark mapper drops it, checking a font family as quoted', () => {
+    expect(
+      darkTokenOverridesToCssVars({
+        ...CRAFTED,
+        'font-body': 'Inter"; position: fixed',
+      })
+    ).toEqual(darkTokenOverridesToCssVars(SAFE));
+  });
+
+  it('skips a value that is not text, where the dark font quoting threw', () => {
+    const stored = { 'font-body': 1, 'text-scale': 1.2 } as unknown as Record<
+      string,
+      string
+    >;
+    expect(darkTokenOverridesToCssVars(stored)).toEqual({});
+    expect(tokenOverridesToCssVars(stored)).toEqual({});
+  });
+
+  it('the server-rendered style carries no declaration but its own', () => {
+    const style = tokenOverrideStyle(CRAFTED, {
+      'heading-color': 'blue; scale: 3',
+    });
+    expect(style).toBe(tokenOverrideStyle(SAFE, null));
+    expect(style?.split(';')).toHaveLength(1);
+  });
+});
