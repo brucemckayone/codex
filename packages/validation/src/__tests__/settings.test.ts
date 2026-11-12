@@ -272,6 +272,11 @@ describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
     ['a stray closing bracket', 'heading-color', 'red)'],
     ['a mismatched bracket', 'heading-color', 'calc(1px]'],
     ['an unclosed square bracket', 'heading-color', 'red ['],
+    [
+      'an astral function name, as the browser reads it',
+      'heading-color',
+      `${String.fromCodePoint(0x1f600)}(x)`,
+    ],
     ['a font family with quotes', 'font-body', '"Inter"'],
     ['a dark-font name with quotes', 'font-heading', 'a"b\'c"d'],
     ['a backslash escape', 'heading-color', 'red\\3b position: fixed'],
@@ -319,23 +324,37 @@ describe('updateBrandingSchema token overrides (Codex-403d3)', () => {
 
   it('reads a worst-case value in one pass, so a crafted map costs no seconds', () => {
     // A long name, a space, then empty brackets: each bracket's name is
-    // empty, so the value passes. A backward regex per bracket took about
-    // 1.5 ms on it, and 1.4 s for a full map, on every render (review r3).
+    // empty, so the value passes. A backward regex per bracket costs about
+    // brackets x name^2, which this shape maximises under the 200 cap: 1.5 ms
+    // a value, and over a second for a full map, on every render (review r3).
     const worst = `${'a'.repeat(132)} ${'()'.repeat(33)}`;
+    const plain = 'a'.repeat(worst.length);
     expect(worst.length).toBeLessThanOrEqual(TOKEN_OVERRIDE_VALUE_MAX);
     expect(staysInOneDeclaration(worst)).toBe(true);
-    const map = JSON.stringify(
-      Object.fromEntries(
-        Array.from({ length: TOKEN_OVERRIDE_MAX_ENTRIES }, (_, i) => [
-          `key-${i}`,
-          worst,
-        ])
-      )
-    );
-    const started = performance.now();
-    expect(problems('tokenOverrides', map)).toEqual([]);
-    // One pass takes milliseconds; the bound leaves room for a slow runner.
-    expect(performance.now() - started).toBeLessThan(400);
+    const mapOf = (value: string) =>
+      JSON.stringify(
+        Object.fromEntries(
+          Array.from({ length: TOKEN_OVERRIDE_MAX_ENTRIES }, (_, i) => [
+            `key-${i}`,
+            value,
+          ])
+        )
+      );
+    /** The fastest of three saves of `map`: noise only ever adds time. */
+    const fastest = (map: string) => {
+      let best = Number.POSITIVE_INFINITY;
+      for (let run = 0; run < 3; run++) {
+        const started = performance.now();
+        expect(problems('tokenOverrides', map)).toEqual([]);
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+    // Relative to a same-size map of plain values, timed in the same run, so
+    // the bound holds on any machine: one pass costs about the same as the
+    // plain map, the backward regex about 200 times more.
+    const plainMs = fastest(mapOf(plain));
+    expect(fastest(mapOf(worst))).toBeLessThan(plainMs * 10 + 50);
   });
 
   it('refuses a map past the entry limit, and keeps one at it', () => {
