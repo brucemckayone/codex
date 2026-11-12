@@ -3,8 +3,9 @@
 
   A list read that could not be read (owner, Codex-a6ofh.3.3): what failed,
   and a Try again. A phone sheet facet shows it after the pills it can offer;
-  the content list's "Needs you" shows it in place of its chips. Its state is
-  the caller's (`createFacetRetry`), so a sheet closed mid-retry reopens on it.
+  the content list's "Needs you", after the chip in use, in the same group.
+  Its state is the caller's (`createFacetRetry`), so a sheet closed mid-retry
+  reopens on it.
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';

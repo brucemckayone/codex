@@ -75,11 +75,22 @@ const draftInHand = allOf(isDraft, sql`not ${scheduled}`, sql`not ${refused}`);
 const playsMedia = sql`${content.contentType} in (${CONTENT_TYPES.VIDEO}, ${CONTENT_TYPES.AUDIO})`;
 
 /**
- * The piece's media item, the creator's own, matches `condition`. Only their
- * own: the gate reads no other creator's item (`mediaReadiness`).
+ * The media item the piece links, whoever's it is, matches `condition`: what
+ * a live piece's stream plays, which reads the linked row unscoped.
+ */
+function linkedMedia(condition: SQL): SQL {
+  return sql`exists (select 1 from ${mediaItems} where ${mediaItems.id} = ${content.mediaItemId} and ${condition})`;
+}
+
+/**
+ * The piece's media item, the creator's own, matches `condition`: what a
+ * draft's publish reads, since the gate reads no other creator's item
+ * (`mediaReadiness`).
  */
 function itsMedia(condition: SQL): SQL {
-  return sql`exists (select 1 from ${mediaItems} where ${mediaItems.id} = ${content.mediaItemId} and ${mediaItems.creatorId} = ${content.creatorId} and ${condition})`;
+  return linkedMedia(
+    allOf(sql`${mediaItems.creatorId} = ${content.creatorId}`, condition)
+  );
 }
 
 /**
@@ -87,7 +98,9 @@ function itsMedia(condition: SQL): SQL {
  * (Codex-vmi6m). The gate refuses it as not found, whatever its status, so
  * the draft needs new media.
  */
-const playsOthersMedia = sql`exists (select 1 from ${mediaItems} where ${mediaItems.id} = ${content.mediaItemId} and ${mediaItems.creatorId} <> ${content.creatorId})`;
+const playsOthersMedia = linkedMedia(
+  sql`${mediaItems.creatorId} <> ${content.creatorId}`
+);
 
 /** Media nothing can play. */
 const deletedOrFailed = sql`(${mediaItems.deletedAt} is not null or ${mediaItems.status} = ${MEDIA_STATUS.FAILED})`;
@@ -185,8 +198,9 @@ export function attentionCondition(
   now: Date = new Date()
 ): SQL {
   switch (kind) {
+    // Never gated, a live piece plays what it links, whoever's it is.
     case 'live-media-gone':
-      return allOf(sql`not ${isDraft}`, itsMedia(deletedOrFailed));
+      return allOf(sql`not ${isDraft}`, linkedMedia(deletedOrFailed));
     case 'scheduled':
       return allOf(isDraft, scheduled);
     case 'didnt-go-live':

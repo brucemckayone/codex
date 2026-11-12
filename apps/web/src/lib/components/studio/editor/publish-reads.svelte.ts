@@ -9,11 +9,7 @@
  * watches the media while it is on its way.
  */
 
-import {
-  isMediaOnItsWay,
-  isUploadStalled,
-  MEDIA_STATUS,
-} from '@codex/constants';
+import { isMediaOnItsWay, MEDIA_STATUS } from '@codex/constants';
 import { mediaStatus } from '$lib/client/media-status.svelte';
 import { uploadQueue } from '$lib/client/upload-queue.svelte';
 import { getMediaItem } from '$lib/remote/media.remote';
@@ -165,8 +161,12 @@ export function createPublishReads(options: PublishReadsOptions) {
       progress: live?.progress ?? mediaRow.transcodingProgress ?? null,
       onItsWay:
         !deleted && isMediaOnItsWay({ status, createdAt: mediaRow.createdAt }),
+      // The tile's rule (`describeTile`): a tab still sending it is
+      // uploading, whatever the clock says; one that reports it stopped has.
       stalled:
-        !deleted && isUploadStalled({ status, createdAt: mediaRow.createdAt }),
+        !deleted &&
+        status === MEDIA_STATUS.UPLOADING &&
+        describeTile(mediaRow, live, 0).kind === 'stopped',
       canRetry: !deleted && failure?.kind === 'failed' && failure.canRetry,
       uploadingHere: !deleted && uploadingHere(mediaId, status, live),
     };

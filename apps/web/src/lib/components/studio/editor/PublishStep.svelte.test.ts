@@ -4,6 +4,7 @@
  * and Publish saves what is on screen, then publishes. A refusal the server
  * sends anyway is listed by its code, or said in its own words.
  */
+import { MEDIA_UPLOAD_STALLED_AFTER_MS } from '@codex/constants';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { uploadQueue } from '$lib/client/upload-queue.svelte';
 import {
@@ -374,6 +375,44 @@ describe('PublishStep · what is missing', () => {
       m.studio_publish_gap_media_failed({ type: 'video' })
     );
     expect(publishButton()?.disabled).toBe(true);
+  });
+
+  // Owner, 2026-11-12: an upload that stopped says so, by the tile's rule.
+  test('an upload no tab reports, past its stall line, says it stopped, with the way back to writing', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000),
+    };
+    render();
+    expect(text()).toContain(
+      m.studio_publish_gap_upload_stopped({ type: 'video' })
+    );
+    expect(
+      [...document.querySelectorAll<HTMLAnchorElement>('.publish-gap-fix')].map(
+        (link) => link.getAttribute('href')
+      )
+    ).toEqual(['/studio/content/c1/edit']);
+  });
+
+  test('an upload this tab still sends, past its stall line, is still uploading', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000),
+    };
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: true, pct: 30 },
+    });
+    render();
+    expect(text()).not.toContain(
+      m.studio_publish_gap_upload_stopped({ type: 'video' })
+    );
+    expect(text()).toContain('still uploading');
   });
 
   test('media gone (deleted, or not theirs) is listed, with the way back to writing', () => {

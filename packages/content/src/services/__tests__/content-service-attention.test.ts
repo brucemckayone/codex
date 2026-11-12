@@ -175,6 +175,13 @@ describe('ContentService — Needs you (Codex-a6ofh.3.4)', () => {
           LIVE
         ),
         await videoDraft(creatorId, { status: MEDIA_STATUS.FAILED }, LIVE),
+        // Never gated, a live piece plays what it links, whoever's it is: a
+        // link to another creator's failed item is gone for its viewers.
+        await piece(creatorId, {
+          ...LIVE,
+          contentType: CONTENT_TYPES.VIDEO,
+          mediaItemId: await media(otherId, { status: MEDIA_STATUS.FAILED }),
+        }),
       ],
       // A schedule waits on media still processing: scheduled, not processing.
       scheduled: [
