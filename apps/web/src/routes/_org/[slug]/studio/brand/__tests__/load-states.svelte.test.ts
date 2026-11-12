@@ -173,6 +173,14 @@ describe('once the branding read lands', () => {
     expect(stubs()).toHaveLength(2);
   });
 
+  test('a saved radius of 0 opens as 0, not the default (Codex-jxa7t)', () => {
+    mountPage();
+    brandingRemote().land({ ...BRANDING, radiusValue: 0 });
+    flushSync();
+
+    expect(brandEditor.pending?.radius).toBe(0);
+  });
+
   test('the rail waits for the store, not the read: no editor until it opens', () => {
     vi.spyOn(brandEditor, 'open').mockImplementation(() => 'none');
     mountPage();

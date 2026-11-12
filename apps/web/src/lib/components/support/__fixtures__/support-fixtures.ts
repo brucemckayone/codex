@@ -294,6 +294,7 @@ export function chargebackRow(
     respondBy: '2026-11-05T09:00:00.000Z',
     lostOn: null,
     lateWonOn: null,
+    appealStatus: null,
     settling: false,
     ...overrides,
   };

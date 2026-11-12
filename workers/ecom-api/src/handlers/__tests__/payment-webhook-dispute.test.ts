@@ -61,9 +61,11 @@ import { LateWinRefundRefusedError } from '@codex/purchase';
 import {
   BusinessLogicError,
   InternalServiceError,
+  ServiceUnavailableError,
 } from '@codex/service-errors';
 import { invalidateForUser } from '@codex/subscription';
 import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
+import { isTransientError } from '../../utils/error-classification';
 import { handlePaymentWebhook } from '../payment-webhook';
 
 type KVMock = {
@@ -270,6 +272,8 @@ describe('handlePaymentWebhook — disputes', () => {
       amountCents: 1999,
       currency: 'gbp',
       status: 'needs_response',
+      // The event's own status, not read live (owner D34).
+      live: false,
       reason: 'fraudulent',
       stripeCreatedAt: new Date(1_790_000_000 * 1000),
     });
@@ -1735,6 +1739,332 @@ describe('handlePaymentWebhook — disputes', () => {
 
       expect(mockDisputeRetrieve).not.toHaveBeenCalled();
       expect(bundle.mock._obs.error).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('an appeal of a lost chargeback (Codex-wzaoh; owner D34)', () => {
+    const appealEvent = (status: string) =>
+      ({
+        ...createDisputeEvent({ status }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_UPDATED,
+      }) as Stripe.Event;
+    /** The dispute as Stripe has it now. */
+    const liveAs = (status: string) =>
+      mockDisputeRetrieve.mockResolvedValueOnce({
+        id: 'dp_test_dispute',
+        object: 'dispute',
+        charge: 'ch_test',
+        payment_intent: 'pi_test_dispute',
+        amount: 1999,
+        currency: 'gbp',
+        reason: 'fraudulent',
+        status,
+        created: 1_790_000_000,
+      });
+    const outcomeSteps = () => [
+      purchase.processDispute,
+      purchase.processLostDispute,
+      purchase.settleWonDispute,
+      purchase.restoreAfterLateWin,
+      purchase.clawBackPurchaseCharge,
+      purchase.markDisputeOutcomeApplied,
+      subscription.pauseForDispute,
+      subscription.cancelForLostDispute,
+      subscription.restoreAfterDispute,
+      mockReverseSubscription,
+    ];
+
+    const appliedAt = new Date('2026-11-01T09:00:00Z');
+    const lostEvent = () =>
+      ({
+        ...createDisputeEvent({ status: 'lost' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      }) as Stripe.Event;
+    const stripeDown = () =>
+      Object.assign(new Error('socket hang up (test)'), {
+        type: 'StripeConnectionError',
+      });
+    /** What the handler threw, or undefined. */
+    const thrownBy = (run: Promise<unknown>) =>
+      run.then(
+        () => undefined,
+        (error: unknown) => error
+      );
+
+    it("records the LIVE appeal, never the event's, as lost with its appeal; an applied loss stops at the record", async () => {
+      liveAs('appeal_under_review');
+      recordedAs('lost', {
+        appealStatus: 'appeal_under_review',
+        outcomeAppliedAt: appliedAt,
+      });
+      const bundle = buildContext();
+
+      await handlePaymentWebhook(
+        appealEvent('appeal_needs_response'),
+        mockStripe,
+        bundle.context
+      );
+
+      expect(mockDisputeRetrieve).toHaveBeenCalledExactlyOnceWith(
+        'dp_test_dispute'
+      );
+      // Stripe's raw status: the record reads an appeal as lost.
+      expect(purchase.recordDispute).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          stripeDisputeId: 'dp_test_dispute',
+          status: 'appeal_under_review',
+          live: true,
+        })
+      );
+      for (const step of outcomeSteps()) {
+        expect(step).not.toHaveBeenCalled();
+      }
+      expect(mockRevoke).not.toHaveBeenCalled();
+      expect(mockRelease).toHaveBeenCalledOnce();
+    });
+
+    it('a loss never applied is applied through its appeal: the lost path runs and marks it lost', async () => {
+      liveAs('appeal_under_review');
+      recordedAs('lost', {
+        appealStatus: 'appeal_under_review',
+        outcomeAppliedAt: null,
+      });
+      const bundle = buildContext();
+
+      await handlePaymentWebhook(
+        appealEvent('appeal_under_review'),
+        mockStripe,
+        bundle.context
+      );
+
+      expect(purchase.recordDispute).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ status: 'appeal_under_review', live: true })
+      );
+      expect(purchase.processLostDispute).toHaveBeenCalledWith(
+        'pi_test_dispute',
+        1999,
+        'dp_test_dispute'
+      );
+      expect(
+        purchase.markDisputeOutcomeApplied
+      ).toHaveBeenCalledExactlyOnceWith('dp_test_dispute', { status: 'lost' });
+    });
+
+    it('an old appeal event after the bank decided records the decision Stripe has now, and that runs as usual', async () => {
+      liveAs('lost');
+      const bundle = buildContext();
+
+      await handlePaymentWebhook(
+        appealEvent('appeal_needs_response'),
+        mockStripe,
+        bundle.context
+      );
+
+      expect(purchase.recordDispute).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ status: 'lost', live: true })
+      );
+      expect(purchase.processLostDispute).toHaveBeenCalledWith(
+        'pi_test_dispute',
+        1999,
+        'dp_test_dispute'
+      );
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
+        'dp_test_dispute',
+        { status: 'lost' }
+      );
+    });
+
+    it("a failed live read of an appeal throws a retryable 503 carrying Stripe's error, and nothing is recorded", async () => {
+      const down = stripeDown();
+      mockDisputeRetrieve.mockRejectedValueOnce(down);
+      const bundle = buildContext();
+
+      const failure = await thrownBy(
+        handlePaymentWebhook(
+          appealEvent('appeal_under_review'),
+          mockStripe,
+          bundle.context
+        )
+      );
+
+      expect(failure).toBeInstanceOf(ServiceUnavailableError);
+      expect(failure).toMatchObject({
+        statusCode: 503,
+        context: { disputeId: 'dp_test_dispute' },
+      });
+      expect((failure as Error).cause).toBe(down);
+      expect(isTransientError(failure)).toBe(true);
+      expect(purchase.recordDispute).not.toHaveBeenCalled();
+      expect(mockRelease).toHaveBeenCalledOnce();
+    });
+
+    it("a stale `lost` event during an appeal records Stripe's live status instead: the appeal runs on, and its mark stays", async () => {
+      recordedAs('lost', {
+        appealStatus: 'appeal_under_review',
+        appealCheck: true,
+        outcomeAppliedAt: appliedAt,
+      });
+      liveAs('appeal_under_review');
+      recordedAs('lost', {
+        appealStatus: 'appeal_under_review',
+        outcomeAppliedAt: appliedAt,
+      });
+      const bundle = buildContext();
+
+      await handlePaymentWebhook(lostEvent(), mockStripe, bundle.context);
+
+      expect(mockDisputeRetrieve).toHaveBeenCalledExactlyOnceWith(
+        'dp_test_dispute'
+      );
+      expect(purchase.recordDispute).toHaveBeenCalledTimes(2);
+      expect(purchase.recordDispute).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ status: 'lost', live: false })
+      );
+      expect(purchase.recordDispute).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ status: 'appeal_under_review', live: true })
+      );
+      for (const step of outcomeSteps()) {
+        expect(step).not.toHaveBeenCalled();
+      }
+    });
+
+    it.each([
+      'lost',
+      'won',
+    ])("a `lost` event after an appeal, once the bank decided %s: Stripe's live decision is recorded, read once, and runs", async (decision) => {
+      recordedAs('lost', {
+        appealStatus: 'appeal_under_review',
+        appealCheck: true,
+        outcomeAppliedAt: appliedAt,
+      });
+      liveAs(decision);
+      const bundle = buildContext();
+
+      await handlePaymentWebhook(lostEvent(), mockStripe, bundle.context);
+
+      expect(mockDisputeRetrieve).toHaveBeenCalledExactlyOnceWith(
+        'dp_test_dispute'
+      );
+      expect(purchase.recordDispute).toHaveBeenCalledTimes(2);
+      expect(purchase.recordDispute).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ status: decision, live: true })
+      );
+      // The record echoes it, unapplied: its own path runs.
+      expect(
+        decision === 'lost'
+          ? purchase.processLostDispute
+          : purchase.settleWonDispute
+      ).toHaveBeenCalled();
+    });
+
+    it('a failed live read for a stale-or-not `lost` under appeal throws a retryable 503, and nothing more is recorded or done', async () => {
+      recordedAs('lost', {
+        appealStatus: 'appeal_under_review',
+        appealCheck: true,
+        outcomeAppliedAt: null,
+      });
+      const down = stripeDown();
+      mockDisputeRetrieve.mockRejectedValueOnce(down);
+      const bundle = buildContext();
+
+      const failure = await thrownBy(
+        handlePaymentWebhook(lostEvent(), mockStripe, bundle.context)
+      );
+
+      expect(failure).toBeInstanceOf(ServiceUnavailableError);
+      expect((failure as Error).cause).toBe(down);
+      expect(isTransientError(failure)).toBe(true);
+      expect(purchase.recordDispute).toHaveBeenCalledOnce();
+      for (const step of outcomeSteps()) {
+        expect(step).not.toHaveBeenCalled();
+      }
+    });
+
+    it.each([
+      ['a `lost` event, read once for the alert', () => lostEvent()],
+      [
+        'an appeal event, read live once and not again for the alert',
+        () => appealEvent('appeal_needs_response'),
+      ],
+    ])('a won dispute Stripe now has under appeal is a won reported lost: alerted at error, nothing changes; %s', async (_case, eventOf) => {
+      recordedAs('won', { refusedLost: true, outcomeAppliedAt: appliedAt });
+      liveAs('appeal_under_review');
+      const bundle = buildContext();
+
+      await handlePaymentWebhook(eventOf(), mockStripe, bundle.context);
+
+      expect(mockDisputeRetrieve).toHaveBeenCalledExactlyOnceWith(
+        'dp_test_dispute'
+      );
+      expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+        'A won dispute was reported lost: nothing changed, check it in Stripe',
+        { errorId: expect.any(String), disputeId: 'dp_test_dispute' }
+      );
+      for (const step of outcomeSteps()) {
+        expect(step).not.toHaveBeenCalled();
+      }
+    });
+
+    it("a permanent failure reading an appeal (Stripe's 404) is left as it is: acknowledged, never a 503, and nothing is recorded", async () => {
+      const missing = Object.assign(new Error('No such dispute (test)'), {
+        type: 'StripeInvalidRequestError',
+        statusCode: 404,
+        code: 'resource_missing',
+      });
+      mockDisputeRetrieve.mockRejectedValueOnce(missing);
+      const bundle = buildContext();
+
+      const failure = await thrownBy(
+        handlePaymentWebhook(
+          appealEvent('appeal_under_review'),
+          mockStripe,
+          bundle.context
+        )
+      );
+
+      expect(failure).toBe(missing);
+      expect(isTransientError(failure)).toBe(false);
+      expect(purchase.recordDispute).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'appeal_needs_response',
+      'appeal_under_review',
+    ])("an %s event for another environment's charge reads no dispute and records nothing", async (status) => {
+      mockRetrieve.mockResolvedValueOnce({
+        id: 'ch_test',
+        amount: 1999,
+        payment_intent: 'pi_test_dispute',
+        metadata: { codex_env: 'development' },
+      });
+      const bundle = buildContext({ ENVIRONMENT: 'production' });
+
+      await handlePaymentWebhook(
+        appealEvent(status),
+        mockStripe,
+        bundle.context
+      );
+
+      expect(mockDisputeRetrieve).not.toHaveBeenCalled();
+      expect(purchase.recordDispute).not.toHaveBeenCalled();
+    });
+
+    it("any other status records the event's own and reads no live dispute", async () => {
+      for (const status of ['needs_response', 'lost', 'won']) {
+        const bundle = buildContext();
+        await handlePaymentWebhook(
+          appealEvent(status),
+          mockStripe,
+          bundle.context
+        );
+        expect(purchase.recordDispute).toHaveBeenLastCalledWith(
+          expect.objectContaining({ status })
+        );
+      }
+      expect(mockDisputeRetrieve).not.toHaveBeenCalled();
     });
   });
 });

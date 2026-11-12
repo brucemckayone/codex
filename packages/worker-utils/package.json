@@ -56,6 +56,7 @@
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7",
     "hono": "^4.7.8",
+    "stripe": "^23.1.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {

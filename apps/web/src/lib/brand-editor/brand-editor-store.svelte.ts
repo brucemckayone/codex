@@ -63,7 +63,8 @@ function storedColour(value: string | null): string | null {
  * ways, each normalised here:
  * - colours are trimmed and upper-cased (`hexColorSchema`); empty is null;
  * - fonts are trimmed; empty is null;
- * - a radius or density of 0 reads back as the default (`|| 0.5`, `|| 1`);
+ * - a radius that isn't a number reads back as 0.5 (a 0 stays 0), and a
+ *   density of 0 as 1 (`|| 1`);
  * - an empty dark token map is not sent, so it reads back as null, and an
  *   empty token map reads back as `{}`;
  * - an unset hero layout reads back as 'default';
@@ -83,7 +84,7 @@ function fingerprint(brand: BrandEditorState): string {
       backgroundColor: storedColour(brand.backgroundColor),
       fontBody: brand.fontBody?.trim() || null,
       fontHeading: brand.fontHeading?.trim() || null,
-      radius: Number(brand.radius) || 0.5,
+      radius: Number.isFinite(brand.radius) ? brand.radius : 0.5,
       density: Number(brand.density) || 1,
       tokenOverrides: brand.tokenOverrides ?? {},
       darkTokenOverrides:

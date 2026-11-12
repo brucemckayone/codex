@@ -404,9 +404,9 @@ export function waitsForBilling(kind: TierChangeKind): boolean {
 /**
  * A switch INTO yearly billing. It starts a new period today (owner
  * decision, Codex-2hxff.96), so its preview and its write pass
- * `billing_cycle_anchor: 'now'`. Our subscriptions are in Stripe's flexible
- * billing mode (the default from API 2025-09-30.clover), which never resets
- * the anchor by itself. A switch into monthly is not one: it is made as
+ * `billing_cycle_anchor: { type: 'now' }`. Our subscriptions are in Stripe's
+ * flexible billing mode (the default from API 2025-09-30.clover), which never
+ * resets the anchor by itself. A switch into monthly is not one: it is made as
  * before, and Codex-2hxff.97 makes it wait for the year's end.
  */
 export function startsNewPeriod(
@@ -423,9 +423,9 @@ export function startsNewPeriod(
  * What the dialog showed for a switch into yearly billing, as one string the
  * page echoes back to change-tier: every line's amount, the amount due today
  * and the next bill's London date (Codex-2hxff.96, "re-check at confirm").
- * Stripe refuses `proration_date` with `billing_cycle_anchor: 'now'`, so the
- * write cannot be pinned to the preview. It is previewed again just before
- * the write and refused when this string differs. The format is
+ * Stripe refuses `proration_date` with `billing_cycle_anchor: { type: 'now' }`,
+ * so the write cannot be pinned to the preview. It is previewed again just
+ * before the write and refused when this string differs. The format is
  * `tierChangeQuoteSchema` in @codex/validation.
  */
 export function tierChangeQuote(figures: {

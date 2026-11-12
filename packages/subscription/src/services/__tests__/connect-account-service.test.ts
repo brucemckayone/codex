@@ -1241,6 +1241,148 @@ describe('ConnectAccountService', () => {
       expect(result.requirementsFetchFailed).toBe(false);
     });
 
+    // Owner D33 (Codex-wzaoh): API 2026-09-30.endive also reports errors for
+    // eventually-due requirements. Studio's list stays due-now only.
+    it('lists only the errors for requirements due now: currently or past due (D33)', async () => {
+      const dueOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('status-due-now'),
+            })
+          )
+          .returning()
+      );
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(dueOrg.id, creatorId, {
+              status: 'restricted',
+              chargesEnabled: true,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
+
+      (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: inserted.stripeAccountId,
+        charges_enabled: true,
+        payouts_enabled: false,
+        requirements: {
+          currently_due: ['business_profile.url', 'individual.dob.day'],
+          eventually_due: ['company.tax_id'],
+          // `individual.dob.day` is in both lists; `external_account` is
+          // past due only.
+          past_due: ['individual.dob.day', 'external_account'],
+          pending_verification: [],
+          current_deadline: 1_800_000_000,
+          disabled_reason: null,
+          errors: [
+            {
+              requirement: 'company.tax_id',
+              code: 'invalid_tax_id_format',
+              reason: 'Eventually due only.',
+            },
+            {
+              requirement: 'business_profile.url',
+              code: 'invalid_url_format',
+              reason: 'Currently due.',
+            },
+            {
+              requirement: 'individual.dob.day',
+              code: 'invalid_dob_age_under_minimum',
+              reason: 'Currently and past due.',
+            },
+            {
+              requirement: 'external_account',
+              code: 'verification_failed_other',
+              reason: 'Past due only.',
+            },
+          ],
+        },
+      } as unknown as Stripe.Account);
+
+      const result = await service.getStatusForUser(creatorId);
+
+      // The eventually-due error is dropped; the others are kept, each once,
+      // in Stripe's order.
+      expect(result.requirements?.errors).toStrictEqual([
+        {
+          requirement: 'business_profile.url',
+          code: 'invalid_url_format',
+          reason: 'Currently due.',
+        },
+        {
+          requirement: 'individual.dob.day',
+          code: 'invalid_dob_age_under_minimum',
+          reason: 'Currently and past due.',
+        },
+        {
+          requirement: 'external_account',
+          code: 'verification_failed_other',
+          reason: 'Past due only.',
+        },
+      ]);
+      // The requirement itself still reaches the payload's own list.
+      expect(result.requirements?.eventuallyDue).toEqual(['company.tax_id']);
+    });
+
+    it('lists no errors when every error is for an eventually-due requirement (D33)', async () => {
+      const laterOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('status-due-later'),
+            })
+          )
+          .returning()
+      );
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(laterOrg.id, creatorId, {
+              status: 'restricted',
+              chargesEnabled: true,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
+
+      (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: inserted.stripeAccountId,
+        charges_enabled: true,
+        payouts_enabled: false,
+        requirements: {
+          currently_due: ['business_profile.url'],
+          eventually_due: ['company.tax_id'],
+          past_due: [],
+          pending_verification: [],
+          current_deadline: null,
+          disabled_reason: null,
+          errors: [
+            {
+              requirement: 'company.tax_id',
+              code: 'invalid_tax_id_format',
+              reason: 'Eventually due only.',
+            },
+          ],
+        },
+      } as unknown as Stripe.Account);
+
+      const result = await service.getStatusForUser(creatorId);
+
+      expect(result.requirements?.currentlyDue).toEqual([
+        'business_profile.url',
+      ]);
+      expect(result.requirements?.errors).toStrictEqual([]);
+    });
+
     it('flags requirementsFetchFailed=true when the Stripe retrieve fails (Codex-y2htq)', async () => {
       const failOrg = takeFirst(
         await db
