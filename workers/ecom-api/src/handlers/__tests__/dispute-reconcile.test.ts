@@ -63,6 +63,8 @@ interface Row {
   stripeCreatedAt: Date;
   /** Set by the lost → won move (Codex-2hxff.70). */
   lateWonAt: Date | null;
+  /** A lost chargeback's appeal (owner D34). */
+  appealStatus: string | null;
 }
 
 function dispute(
@@ -105,6 +107,7 @@ function ledger(
         updatedAt: new Date(NOW.getTime() - 10 * 24 * 3600 * 1000),
         stripeCreatedAt: new Date(NOW.getTime() - 40 * 24 * 3600 * 1000),
         lateWonAt: null,
+        appealStatus: null,
         ...row,
       },
     ])
@@ -157,7 +160,11 @@ function ledger(
         stripeDisputeId: string;
         status: string;
         amountCents: number;
+        appeal?: string | null;
+        live?: boolean;
       }) => {
+        // As ours: a status the table does not know is logged, not written.
+        if (!(d.status in RANK)) return undefined;
         const row = rows.get(d.stripeDisputeId);
         if (!row) {
           rows.set(d.stripeDisputeId, {
@@ -168,6 +175,7 @@ function ledger(
             updatedAt: new Date(),
             stripeCreatedAt: new Date(),
             lateWonAt: null,
+            appealStatus: null,
           });
         } else if ((RANK[d.status] ?? -1) > (RANK[row.status] ?? -1)) {
           row.status = d.status;
@@ -178,9 +186,19 @@ function ledger(
           row.status = 'won';
           row.lateWonAt = new Date();
           row.outcomeAppliedAt = null;
+          row.appealStatus = null;
           row.updatedAt = new Date();
         }
-        return { ...rows.get(d.stripeDisputeId) };
+        // An appeal marks the lost row; a `lost` with none clears the mark,
+        // once it is read live (owner D34).
+        const now = rows.get(d.stripeDisputeId);
+        if (now && d.status === 'lost' && now.status === 'lost') {
+          if (d.appeal) now.appealStatus = d.appeal;
+          else if (now.appealStatus && !d.live) {
+            return { ...now, appealCheck: true };
+          } else now.appealStatus = null;
+        }
+        return { ...now };
       }
     ),
     markDisputeOutcomeApplied: vi.fn(markApplied),
@@ -452,6 +470,64 @@ describe('runDisputeReconcile', () => {
       purchase.clawBackPurchaseCharge.mock.invocationCallOrder[0] ?? Infinity
     );
     expect(rows.get('dp_lost')?.outcomeAppliedAt).toBeInstanceOf(Date);
+  });
+
+  it('an unapplied loss whose live dispute is under appeal is applied, as lost; the appeal is marked (owner D34)', async () => {
+    const { rows, purchase } = ledger([
+      { stripeDisputeId: 'dp_appeal', status: 'lost' },
+    ]);
+    const stripe = stripeStub({
+      disputes: [dispute('dp_appeal', 'appeal_under_review')],
+    });
+    const { run } = reconcile({ purchase, stripe });
+
+    const result = await run();
+
+    expect(purchase.recordDispute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeDisputeId: 'dp_appeal',
+        status: 'lost',
+        appeal: 'appeal_under_review',
+      })
+    );
+    expect(purchase.processLostDispute).toHaveBeenCalledWith(
+      'pi_dp_appeal',
+      1999,
+      'dp_appeal'
+    );
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
+      'dp_appeal',
+      { status: 'lost' }
+    );
+    expect(rows.get('dp_appeal')).toMatchObject({
+      status: 'lost',
+      appealStatus: 'appeal_under_review',
+      outcomeAppliedAt: expect.any(Date),
+    });
+    expect(result).toMatchObject({ fromRows: 1, acted: 1, failed: 0 });
+  });
+
+  it('a row recorded as an open inquiry whose chargeback and loss were missed, with only its appeal in the events, is recorded lost and applied', async () => {
+    const { rows, purchase } = ledger([
+      { stripeDisputeId: 'dp_inq_appeal', status: 'warning_under_review' },
+    ]);
+    const stripe = stripeStub({
+      events: [event(dispute('dp_inq_appeal', 'appeal_needs_response'))],
+    });
+    const { run } = reconcile({ purchase, stripe });
+
+    await run();
+
+    expect(purchase.processLostDispute).toHaveBeenCalledWith(
+      'pi_dp_inq_appeal',
+      1999,
+      'dp_inq_appeal'
+    );
+    expect(rows.get('dp_inq_appeal')).toMatchObject({
+      status: 'lost',
+      appealStatus: 'appeal_needs_response',
+      outcomeAppliedAt: expect.any(Date),
+    });
   });
 
   it('an open chargeback is re-run, since nothing records that its opening finished, but writes no second streaming block', async () => {

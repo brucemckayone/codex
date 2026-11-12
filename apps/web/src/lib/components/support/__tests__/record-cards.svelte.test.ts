@@ -356,6 +356,7 @@ describe('Chargebacks', () => {
           respondBy: '2026-11-01T09:00:00.000Z',
           lostOn: null,
           lateWonOn: null,
+          appealStatus: null,
           settling: false,
         },
       ],
@@ -370,6 +371,51 @@ describe('Chargebacks', () => {
   test('none: "None on this charge."', () => {
     render(ChargebacksCard, { chargebacks: [] });
     expect(text()).toContain(m.support_chargebacks_none());
+  });
+});
+
+// The agreed words (WP0 brief, owner D34), not the messages: a word changed
+// in en.json alone must fail here.
+describe('A lost chargeback being appealed (owner D34)', () => {
+  const lost = { status: 'lost', respondBy: null } as const;
+  const rows = () => [
+    ...document.querySelectorAll('[data-testid="chargeback-row"]'),
+  ];
+  const appealOf = (row: Element) =>
+    row
+      .querySelector('[data-testid="chargeback-appeal"]')
+      ?.textContent?.trim() ?? null;
+
+  test('it stays Lost, with the appeal stage under the badge', () => {
+    render(ChargebacksCard, {
+      chargebacks: [
+        chargebackRow({
+          ...lost,
+          id: 'du_needs',
+          appealStatus: 'appeal_needs_response',
+        }),
+        chargebackRow({
+          ...lost,
+          id: 'du_review',
+          appealStatus: 'appeal_under_review',
+        }),
+      ],
+    });
+    const [needs, review] = rows();
+    expect(needs && appealOf(needs)).toBe('Appeal: needs a response in Stripe');
+    expect(review && appealOf(review)).toBe('Appeal under review');
+    for (const row of [needs, review]) {
+      expect(row?.querySelector('[data-variant]')?.textContent?.trim()).toBe(
+        m.support_dispute_lost()
+      );
+    }
+  });
+
+  test('no appeal: a plain loss shows no appeal line', () => {
+    render(ChargebacksCard, { chargebacks: [chargebackRow(lost)] });
+    const [row] = rows();
+    expect(row && appealOf(row)).toBeNull();
+    expect(text()).not.toContain('Appeal');
   });
 });
 

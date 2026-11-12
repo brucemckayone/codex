@@ -33,8 +33,8 @@
  * the account.updated simulation respectively. Tests skip cleanly without them.
  */
 
+import { STRIPE_API_VERSION } from '@codex/constants';
 import { closeDbPool, dbHttp, schema } from '@codex/database';
-import { STRIPE_API_VERSION } from '@codex/purchase';
 import {
   authFixture,
   expectSuccessResponse,

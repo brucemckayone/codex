@@ -28,8 +28,10 @@ import {
   CONTENT_STATUS,
   CURRENCY,
   canBeSold,
+  DISPUTE_APPEAL_STATUSES,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
+  type DisputeAppealStatus,
   isForeignStripeEnvironment,
   PRICE_LIMITS,
   PURCHASE_STATUS,
@@ -3538,6 +3540,15 @@ export class PurchaseService extends BaseService {
    * after the late win's `won` is the harmless case). Every other move out of
    * a final status is refused silently.
    *
+   * An appeal of a lost chargeback (owner D34) is not a status. The caller
+   * records Stripe's `appeal_*` as `lost` with its `appeal`, and the lost row
+   * is marked, forward only (`markDisputeAppeal`), so the loss is applied as
+   * any loss is. The bank's decision clears the mark: a late win in its own
+   * statement, or a `lost` with no appeal. But such a `lost` may be an event
+   * older than the appeal, so unless the caller read it `live` from Stripe,
+   * the row comes back unchanged with `appealCheck: true`, for the caller to
+   * read the live dispute and record that instead.
+   *
    * Returns the row as it now stands, which is what the caller acts on, not
    * the event's snapshot: callers never compare statuses. A status Stripe
    * adds later is logged and not written.
@@ -3551,9 +3562,15 @@ export class PurchaseService extends BaseService {
     status: string;
     reason: string | null;
     stripeCreatedAt: Date;
-  }): Promise<(Dispute & { refusedLost?: true }) | undefined> {
+    /** With `status: 'lost'`: Stripe's appeal of the loss, if one runs. */
+    appeal?: DisputeAppealStatus | null;
+    /** The status was read from Stripe just now, not taken from an event. */
+    live?: boolean;
+  }): Promise<
+    (Dispute & { refusedLost?: true; appealCheck?: true }) | undefined
+  > {
     try {
-      const { status } = dispute;
+      const { status, appeal = null, live = false } = dispute;
       if (!DISPUTE_STATUS_RANK.has(status)) {
         this.obs.warn('Dispute has a status the disputes table does not know', {
           disputeId: dispute.stripeDisputeId,
@@ -3600,17 +3617,73 @@ export class PurchaseService extends BaseService {
       if (current && status === 'lost' && current.status === 'won') {
         return { ...current, refusedLost: true };
       }
-      return current;
+      // Only a `lost` touches an appeal's mark (owner D34), and the mark is
+      // written only on a lost row.
+      if (status !== 'lost' || !current) return current;
+      if (appeal) return await this.markDisputeAppeal(current, appeal);
+      if (current.appealStatus === null) return current;
+      // A `lost` with no appeal, on a row whose appeal ran: the bank's
+      // decision, or an event older than the appeal. Only Stripe's live
+      // status tells them apart.
+      if (!live) return { ...current, appealCheck: true };
+      return await this.clearDisputeAppeal(current);
     } catch (error) {
       this.handleError(error, 'recordDispute');
     }
   }
 
   /**
+   * Mark a lost chargeback's appeal (owner D34), on a lost row only: a won
+   * row, or a closed inquiry, is left as it is. `appeal_status` moves
+   * forward only, in `DISPUTE_APPEAL_STATUSES` order, so a redelivery or an
+   * older appeal event writes nothing. `status` stays `lost`.
+   */
+  private async markDisputeAppeal(
+    row: Dispute,
+    appeal: DisputeAppealStatus
+  ): Promise<Dispute> {
+    const earlier = DISPUTE_APPEAL_STATUSES.slice(
+      0,
+      DISPUTE_APPEAL_STATUSES.indexOf(appeal)
+    );
+    // Written as one SQL OR, not `or()`, which can be undefined.
+    const notThisFarYet =
+      earlier.length > 0
+        ? sql`(${disputes.appealStatus} IS NULL OR ${inArray(disputes.appealStatus, earlier)})`
+        : isNull(disputes.appealStatus);
+    const [marked] = await this.db
+      .update(disputes)
+      .set({ appealStatus: appeal, updatedAt: new Date() })
+      .where(
+        and(
+          eq(disputes.stripeDisputeId, row.stripeDisputeId),
+          eq(disputes.status, 'lost'),
+          notThisFarYet
+        )
+      )
+      .returning();
+    return marked ?? row;
+  }
+
+  /**
+   * The bank decided an appealed loss: its mark is cleared (owner D34). Only
+   * a marked row reaches here, and a mark is only ever on a lost row.
+   */
+  private async clearDisputeAppeal(marked: Dispute): Promise<Dispute> {
+    const [cleared] = await this.db
+      .update(disputes)
+      .set({ appealStatus: null, updatedAt: new Date() })
+      .where(eq(disputes.stripeDisputeId, marked.stripeDisputeId))
+      .returning();
+    return cleared ?? marked;
+  }
+
+  /**
    * A late win: a lost row becomes won (late-win data design §3.3). The
    * loss's applied time moves to `lost_applied_at` (null when the loss never
    * finished) and `outcome_applied_at` is cleared, so the undo runs as an
-   * unapplied win and the reconcile retries it hourly until it is marked.
+   * unapplied win and the reconcile retries it hourly until it is marked. An
+   * appeal's mark is cleared with it: the bank has decided (owner D34).
    * Every SET reads the row as it was, in one statement. `$now` is bound, and
    * `updated_at` takes it too: the reconcile's grace reads it (premise 31).
    * Undefined when the row is not lost: a second delivery.
@@ -3626,6 +3699,7 @@ export class PurchaseService extends BaseService {
         lateWonAt: now,
         lostAppliedAt: sql`${disputes.outcomeAppliedAt}`,
         outcomeAppliedAt: null,
+        appealStatus: null,
         updatedAt: now,
       })
       .where(

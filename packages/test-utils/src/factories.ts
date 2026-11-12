@@ -29,6 +29,7 @@ import {
   CONTENT_TYPES,
   MEDIA_STATUS,
   MEDIA_TYPES,
+  STRIPE_API_VERSION,
 } from '@codex/constants';
 import type {
   Content,
@@ -663,9 +664,7 @@ export function createMockStripeCheckoutEvent(
     id: eventId,
     object: 'event',
     type: 'checkout.session.completed',
-    // @codex/purchase's STRIPE_API_VERSION; not imported, as purchase's tests
-    // depend on this package.
-    api_version: '2026-10-28.endive',
+    api_version: STRIPE_API_VERSION,
     created: Math.floor(Date.now() / 1000),
     data: {
       object: {
@@ -746,9 +745,7 @@ export function createMockStripePaymentIntentEvent(
     id: eventId,
     object: 'event',
     type: 'payment_intent.succeeded',
-    // @codex/purchase's STRIPE_API_VERSION; not imported, as purchase's tests
-    // depend on this package.
-    api_version: '2026-10-28.endive',
+    api_version: STRIPE_API_VERSION,
     created: Math.floor(Date.now() / 1000),
     data: {
       object: {

@@ -11,6 +11,9 @@
   and the card says so in one sentence; after, it is success and says when
   it was lost.
 
+  A lost chargeback being appealed (owner D34) stays Lost, with the appeal's
+  stage under it (`appealStatus`) until the bank decides.
+
   @prop {ChargebackRow[]} chargebacks
 -->
 <script lang="ts">
@@ -20,7 +23,13 @@
   import * as Card from '$lib/components/ui/Card';
   import * as Table from '$lib/components/ui/Table';
   import { formatPrice } from '$lib/utils/format';
-  import { disputeStatus, formatDay, formatShortDay, humanise } from './support-format';
+  import {
+    disputeAppeal,
+    disputeStatus,
+    formatDay,
+    formatShortDay,
+    humanise,
+  } from './support-format';
 
   interface Props {
     chargebacks: ChargebackRow[];
@@ -51,6 +60,9 @@
     <Badge variant={badge.variant}>{badge.label}</Badge>
     {#if row.respondBy}
       <span class="cell-sub">{m.support_respond_by({ date: formatShortDay(row.respondBy) })}</span>
+    {/if}
+    {#if row.appealStatus}
+      <span class="cell-sub" data-testid="chargeback-appeal">{disputeAppeal(row.appealStatus)}</span>
     {/if}
   {/if}
 {/snippet}

@@ -1,3 +1,17 @@
+/**
+ * The Stripe API version every request is made at: the one stripe-node 23.1.0
+ * pins (its `esm/apiVersion.js`). `createStripeClient`
+ * (packages/purchase/src/stripe-client.ts) passes it, and test fixtures that
+ * build a Stripe event say it. A webhook payload itself is rendered at the
+ * endpoint's own API version, which is set in the Stripe Dashboard.
+ *
+ * Before changing it, run packages/subscription/scripts/test-clock-paid-price.ts
+ * on the new version: a switch after an early price move relies on Stripe
+ * crediting the invoiced line, not the item's current Price (Codex-2hxff.95;
+ * docs/payments/release-checklist.md, the standing apiVersion check).
+ */
+export const STRIPE_API_VERSION = '2026-10-28.endive';
+
 export const STRIPE_EVENTS = {
   // Purchase (Phase 1)
   CHECKOUT_COMPLETED: 'checkout.session.completed',
@@ -69,6 +83,22 @@ export const DISPUTE_CLOSED_STATUSES = [
   'warning_closed',
   'prevented',
 ] as const;
+
+/**
+ * A lost chargeback the platform appealed (API 2026-10-28.endive; Stripe
+ * changelog `endive/2026-10-28/evidence-submission-appeal-dispute-decisions`).
+ * Stripe reports the appeal in the dispute's status, reachable only from
+ * `lost`; we record it, and act on it, as `lost`, and keep the appeal in
+ * `disputes.appeal_status`, never in `status` (Codex-wzaoh; owner D34). In
+ * order: a response is due, then it is under review. The bank's decision
+ * (`won`, or `lost` read live) clears it.
+ * `check_disputes_appeal_status` lists the same values.
+ */
+export const DISPUTE_APPEAL_STATUSES = [
+  'appeal_needs_response',
+  'appeal_under_review',
+] as const;
+export type DisputeAppealStatus = (typeof DISPUTE_APPEAL_STATUSES)[number];
 
 /**
  * The Stripe metadata key naming the environment that created an object — the

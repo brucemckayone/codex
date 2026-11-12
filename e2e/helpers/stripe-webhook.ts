@@ -8,7 +8,8 @@
  * HMAC-SHA256 signatures, ensuring compatibility with Stripe's verification logic.
  */
 
-import { createStripeClient, STRIPE_API_VERSION } from '@codex/purchase';
+import { STRIPE_API_VERSION } from '@codex/constants';
+import { createStripeClient } from '@codex/purchase';
 
 /**
  * Checkout session object as embedded in webhook events

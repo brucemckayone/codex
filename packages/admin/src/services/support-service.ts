@@ -1286,6 +1286,7 @@ export class SupportService extends BaseService {
         respondBy,
         lostOn: toIso(row.lostAppliedAt),
         lateWonOn: toIso(row.lateWonAt),
+        appealStatus: row.appealStatus,
         settling: isSettlingWin(row),
       });
     }

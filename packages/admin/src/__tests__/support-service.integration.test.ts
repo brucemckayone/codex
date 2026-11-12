@@ -1442,6 +1442,28 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(after.refundable.blocked).toBeNull();
     });
 
+    it("an appealed loss's row carries the appeal while it runs, and a plain loss's carries none (owner D34)", async () => {
+      const { chargeId, purchase } = await purchaseCharge();
+      const appealed = await dispute(chargeId, 'lost', purchase.id);
+      const plain = await dispute(chargeId, 'lost', purchase.id);
+      await db
+        .update(disputes)
+        .set({ appealStatus: 'appeal_under_review' })
+        .where(eq(disputes.stripeDisputeId, appealed));
+
+      const detail = await service.getChargeDetail(chargeId);
+
+      expect(
+        detail.chargebacks.map((row) => [row.id, row.status, row.appealStatus])
+      ).toEqual(
+        expect.arrayContaining([
+          [appealed, 'lost', 'appeal_under_review'],
+          [plain, 'lost', null],
+        ])
+      );
+      expect(detail.chargebacks).toHaveLength(2);
+    });
+
     it("a late win's history lines carry the loss date and the step's kind; a normal win's and a plain loss's do not (S3)", async () => {
       const late = await purchaseCharge(30 * DAY);
       const normal = await purchaseCharge();

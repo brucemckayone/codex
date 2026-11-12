@@ -23,6 +23,7 @@ Today only `charge.dispute.created` is handled, and only for a purchase. It mark
 - **Won:** the disputed amount comes back to the platform. A transfer reversal cannot be undone, so the creators are paid again with a **new transfer**.
 - **Lost:** the money stays with the buyer. A dispute on a partly refunded charge can end `lost` and still return the part already refunded.
 - **A disputed charge cannot be refunded** until the bank decides for the platform.
+- **An appeal** (API `2026-10-28.endive`; changelog `evidence-submission-appeal-dispute-decisions`): a lost chargeback can be appealed. Its status becomes `appeal_needs_response`, then `appeal_under_review`, until the bank decides again, `won` or `lost`.
 
 ## 3. The records
 
@@ -41,9 +42,10 @@ It is shaped like `refunds`.
 | `lost_applied_at` | the loss's `outcome_applied_at`, kept when the late win clears that column; null when the loss never finished. Support's "lost on …" |
 | `late_win_refund_id` | the `re_…` refund the late win made of a first payment, for a buyer who had bought the item again (§10) |
 | `buyer_told_at` | the buyer's "access is back" email was claimed, before it was sent, so it goes once |
+| `appeal_status` | (0130) a lost chargeback's appeal while it runs: `appeal_needs_response`, then `appeal_under_review`. Set only on a `lost` row and only forward; the bank's decision (a late win, or a live `lost`) clears it (§4, "An appeal"; owner D34). Null for every other dispute |
 | `refunded_outside_stripe_at` | (0127) when the buyer was refunded outside Stripe. From then on, support's refund route refuses the charge (`REFUNDED_OUTSIDE_STRIPE`; owner decision 2026-11-08, "Block it in code"). Three writers: the runbook step that settles the charge by hand ([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)); support settling the late win's own failed refund as refunded elsewhere while the charge's succeeded Stripe refunds don't cover it (a pending one doesn't count) ([purchases](purchases.md#refunds)); and a manual UPDATE, with the owner's OK, for a buyer refunded another way that the settle never saw ([R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone)). No date is overwritten: the runbook step runs only on a charge with no refund recorded, so it never meets a set date, and the other two guard with `IS NULL` |
 
-Checks (0126), none of which can be NULL: `late_won_at` is set only on a `won` row, and `late_win_refund_id` and `lost_applied_at` only on a late win.
+Checks (0126), none of which can be NULL: `late_won_at` is set only on a `won` row, and `late_win_refund_id` and `lost_applied_at` only on a late win. Checks (0130): `appeal_status` is NULL or one of `DISPUTE_APPEAL_STATUSES` (`check_disputes_appeal_status`), and set only on a `lost` row (`check_disputes_appeal_lost`). The late win is the one move off `lost`, and it clears the mark in the same SET.
 
 ### The reversal: `payout_reversals` with `cause_type = 'dispute'`
 
@@ -101,6 +103,17 @@ The dispute endpoint already takes `charge.dispute.created`, `.updated` and `.cl
 | Won (`won`, funds reinstated) | Restored: `disputedAt` cleared, content access and the entitlement restored | One re-pay row per reversed slice; held slices released; any dispute debt in `refund_reviews` closed |
 | Lost (`lost`) | Ends for good: the purchase becomes `refunded` (Q3) and leaves the library, and the streaming block is written with reason `'refund'`, for a dispute that opened already lost and was never paused. A subscription is cancelled | Reversals stand; held slices are cut by the dispute's share, and become `cancelled_by_dispute` when nothing is left (Q3) |
 | Lost after a partial refund | As lost | As lost; Stripe reinstates the refunded part, and the refunds already clawed it back |
+
+**An appeal** of a lost chargeback (Codex-wzaoh; owner D34, 2026-11-12) is a mark on the lost row, never a status. Stripe's `appeal_*` statuses are reachable only from `lost`, and the platform has lost the money either way, so an appeal is recorded, and acted on, as `lost`, with the appeal marked (`appeal_status`): the sale is held and the loss applied exactly as any loss (§3, the hold), and a late win undoes it as today (§10). The webhook passes Stripe's appeal as `status: 'lost'` with its `appeal`; the hourly reconcile counts an appeal as closed, as `lost` is (`stageOf`).
+
+Stripe does not deliver events in order, so an appeal is recorded at the dispute's live status, read from Stripe (`liveDispute`, `payment-webhook.ts`), never the event's. A failed read is a 503, and Stripe redelivers.
+
+- **An appeal:** the row is recorded `lost` (created, or moved forward from an open chargeback whose `lost` was missed), and the mark moves forward only (`markDisputeAppeal`): a redelivery, or an older appeal event arriving late, writes nothing. A loss never applied is then applied, and the hourly reconcile retries it as any unapplied loss, so it never sits through an appeal unapplied. A won row, or a closed inquiry, is never marked: a won one comes back `refusedLost`, alerted if Stripe has it lost or under appeal now.
+- **A `lost` for a marked row** may be the bank's decision or an event older than the appeal. The record changes nothing and comes back `appealCheck`; the webhook reads the live dispute, one extra read in that case only, and records that: still an appeal keeps or moves the mark; `lost` clears it; `won` is a late win, whose one statement clears it.
+- **The reconcile** already hands `processDispute` a live dispute, so one under appeal is read from Stripe once more there, and a marked row's `lost` once more again for `appealCheck`. Appeals are rare, so the reads are left in.
+- **An appeal on a row that isn't lost** (an open chargeback whose `lost` was missed, or no row at all) is recorded `lost` and applied, as above, so it never sits at its open stage through the appeal. Only a won row refuses it, and a closed inquiry is left as it is.
+
+Support's chargeback row carries `appealStatus`, and the card shows "Appeal: needs a response in Stripe" or "Appeal under review" under the Lost badge while the appeal runs, then "Won late" or "Lost" as before.
 
 **A late win** (Stripe turns `lost` into `won`) is recorded and the loss undone (Codex-2hxff.70, §10). It replaces "alert only" (owner decision 2026-10-25), under which the row stayed `lost` and a person undid the loss by hand.
 

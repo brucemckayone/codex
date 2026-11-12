@@ -59,6 +59,7 @@
  */
 
 import {
+  DISPUTE_APPEAL_STATUSES,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
   DISPUTE_INQUIRY_STATUSES,
@@ -503,7 +504,12 @@ function stageOf(status: string): number {
   ) {
     return CHARGEBACK_STAGE;
   }
-  if ((DISPUTE_CLOSED_STATUSES as readonly string[]).includes(status)) {
+  // An appeal (`appeal_*`) is reachable only from `lost`, so it is closed as
+  // `lost` is: the loss is applied through it (owner D34).
+  if (
+    (DISPUTE_CLOSED_STATUSES as readonly string[]).includes(status) ||
+    (DISPUTE_APPEAL_STATUSES as readonly string[]).includes(status)
+  ) {
     return CLOSED_STAGE;
   }
   // A status Stripe added since: `recordDispute` logs and skips it.

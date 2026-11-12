@@ -3411,6 +3411,8 @@
   "support_chargeback_won_late": "Won late",
   "support_chargeback_paying_back": "Paying the creators back",
   "support_chargeback_lost_on": "Lost {date}",
+  "support_chargeback_appeal_needs_response": "Appeal: needs a response in Stripe",
+  "support_chargeback_appeal_under_review": "Appeal under review",
   "support_dispute_needs_response": "Needs response",
   "support_dispute_under_review": "Under review",
   "support_dispute_warning_needs_response": "Inquiry: needs response",

@@ -88,7 +88,8 @@ reconciliation months later.
 ### Stripe SDK version
 
 Pinned to `'2026-10-28.endive'` (Stripe Node v23.1.0), as `STRIPE_API_VERSION` in
-`packages/purchase/src/stripe-client.ts`. When upgrading, read the
+`@codex/constants` (`packages/constants/src/commerce.ts`), which
+`createStripeClient` and the test fixtures import. When upgrading, read the
 Stripe changelog and use the `stripe-best-practices` skill which includes migration
 guidance.
 

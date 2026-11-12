@@ -26,6 +26,9 @@ import {
  * Stripe error type strings (from stripe-node SDK). Authentication and
  * permission errors are a key or account misconfiguration, not bad data: a
  * retry succeeds once it is fixed, so Stripe should keep redelivering.
+ * Since stripe-node 23, a response body that stalls or is cut off mid-read is
+ * a StripeConnectionError, so it is retried; it was a StripeAPIError with a
+ * non-5xx status, so permanent (Codex-wzaoh).
  */
 const TRANSIENT_STRIPE_TYPES = new Set([
   'StripeAPIError',

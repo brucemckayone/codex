@@ -21,23 +21,11 @@
  * ```
  */
 
+// The API version every request is made at. It lives in @codex/constants,
+// beside the commerce constants, so test fixtures can say it without
+// depending on this package; read its doc before changing it.
+import { STRIPE_API_VERSION } from '@codex/constants';
 import Stripe from 'stripe';
-
-/**
- * Stripe API version: the one every request is made at. Updated when
- * upgrading the Stripe API version.
- * Current: 2026-10-28.endive, the version stripe-node 23.1.0 pins (its
- * `esm/apiVersion.js`).
- *
- * Exported so test fixtures that build a Stripe event can say the version
- * the platform asks for. A webhook payload itself is rendered at the
- * endpoint's own API version, which is set in the Stripe Dashboard.
- *
- * Before an upgrade, run packages/subscription/scripts/test-clock-paid-price.ts
- * on the new version: a switch after an early price move relies on Stripe
- * crediting the invoiced line, not the item's current Price (Codex-2hxff.95).
- */
-export const STRIPE_API_VERSION = '2026-10-28.endive';
 
 /**
  * Create configured Stripe client instance

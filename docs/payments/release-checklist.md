@@ -17,9 +17,9 @@ price-change email check were removed once production had applied all three
 read those sections with `git log -p -- docs/payments/release-checklist.md`.
 
 **Standing check: a release that changes the Stripe `apiVersion`.** It isn't
-removed after one release. Before merging a change to the pin in
-`packages/purchase/src/stripe-client.ts`, run the switch-credit proof in Stripe
-TEST mode:
+removed after one release. Before merging a change to the pin,
+`STRIPE_API_VERSION` in `packages/constants/src/commerce.ts`, run the
+switch-credit proof in Stripe TEST mode:
 
     pnpm exec tsx --env-file=.env.dev packages/subscription/scripts/test-clock-paid-price.ts
 
@@ -814,3 +814,80 @@ until someone removes them:
 
 Nothing reads any of them, so the order doesn't matter, and leaving them
 does no harm beyond clutter.
+
+---
+
+## The Stripe upgrade to `2026-10-28.endive`, and dispute appeals (migration `0130`)
+
+This release moves stripe-node to 23.1.0 and the pin, `STRIPE_API_VERSION`
+(`@codex/constants`), to `2026-10-28.endive` (`Codex-wzaoh`). Run the
+standing `apiVersion` check above first.
+
+`0130` is drizzle-kit DDL, unedited. It adds `disputes.appeal_status`,
+nullable with no default, and two CHECKs: `check_disputes_appeal_status`
+(NULL, `appeal_needs_response` or `appeal_under_review`) and
+`check_disputes_appeal_lost` (NULL, or the row is `lost`). Adding the column
+rewrites nothing. Each CHECK scans `disputes` once under a lock: a moment on
+today's table, and every existing row is NULL, so both pass.
+
+The only write that moves a row off `lost` is the late win, which clears
+the mark in the same SET; nothing else sets `status`, but the forward-only
+upsert, which never leaves `lost`. R18 (a)'s hand UPDATE to `won` runs
+before the deploy, so before the column exists. Run after it, it must also
+set `appeal_status = NULL`, or `check_disputes_appeal_lost` refuses it and
+nothing is written.
+
+An appeal of a lost chargeback is recorded as `lost`, and acted on as
+`lost`, with the appeal kept in `appeal_status`, never in `status`. So the
+sale stays held, and a loss never applied is applied through the appeal. The
+bank's decision clears the mark: a late win, or a `lost` read live from
+Stripe, since a `lost` event may be older than the appeal (owner D34;
+[dispute record](dispute-record.md), §4, "An appeal").
+
+**stripe-node 23 (census S4).** A Stripe response body that stalls or is cut
+off mid-read is now a `StripeConnectionError`. Before, it was a
+`StripeAPIError` with a non-5xx status, so the webhook classifier called it
+permanent. Now it is transient: a webhook that meets one answers 5xx and
+Stripe redelivers. Nothing to do, and nobody outside sees it.
+
+### R23 — the same release: the sandbox's webhook endpoints to endive (owner)
+
+A webhook payload renders at its endpoint's API version, not at the pin. So
+the owner moves the sandbox's 5 endpoints to `2026-10-28.endive` in this
+release, in the Stripe Dashboard (Developers → Webhooks):
+
+1. dispute (`/webhooks/stripe/dispute`)
+2. payment (`/webhooks/stripe/payment`)
+3. booking (`/webhooks/stripe/booking`)
+4. subscription (`/webhooks/stripe/subscription`)
+5. connect (`/webhooks/stripe/connect`)
+
+**Order.** Before or after the deploy is fine. Every read that changes
+shape at endive is tolerant of both versions (census A21). Appeals only
+arrive once the dispute endpoint is on endive. Until then, a lost
+chargeback that is appealed shows as Lost, as today.
+
+**If an endpoint can only change version by being made again**, its signing
+secret changes. Put the new one in the matching worker secret
+(`STRIPE_WEBHOOK_SECRET_DISPUTE`, `_PAYMENT`, `_BOOKING`, `_SUBSCRIPTION` or
+`_CONNECT`) before you disable the old endpoint. Otherwise its deliveries
+fail the signature check.
+
+### Rollback
+
+The column and the CHECK stay on a workers rollback. The old workers never
+read or write `appeal_status`. If the endpoints are already on endive, the
+old workers log an appeal status as one the table doesn't know and drop it.
+The row stays `lost` and the sale stays held, as before this release, but a
+loss never applied waits for the bank's decision instead of being applied
+through the appeal.
+
+A decision the old workers record doesn't clear a mark made before the
+rollback, so support would show a finished appeal as running. Before rolling
+forward again, list the marks and check each dispute in Stripe:
+
+    SELECT stripe_dispute_id, status, appeal_status, updated_at
+    FROM disputes WHERE appeal_status IS NOT NULL;
+
+A mark whose appeal Stripe has decided is cleared by hand, with the owner's
+OK.

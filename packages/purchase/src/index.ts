@@ -169,11 +169,7 @@ export {
 // The content-purchase read other domains go through (rule A8, Codex-2hxff.55)
 export { verifyPurchase } from './services/verify-purchase';
 // Stripe client factory
-export {
-  createStripeClient,
-  STRIPE_API_VERSION,
-  verifyWebhookSignature,
-} from './stripe-client';
+export { createStripeClient, verifyWebhookSignature } from './stripe-client';
 // Types
 export type {
   CheckoutSessionResult,
