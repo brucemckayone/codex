@@ -19,6 +19,7 @@
  * whole flow with fakes; {@link uploadQueue} is the one wired to the real ones.
  */
 import { FILE_SIZES } from '@codex/constants';
+import { SvelteMap } from 'svelte/reactivity';
 import { mediaStatus } from '$lib/client/media-status.svelte';
 import { registerUserScopedReset } from '$lib/client/user-scoped-state';
 import { checkMediaFile } from '$lib/components/studio/media-upload-file';
@@ -43,6 +44,9 @@ export type UploadStatus =
 
 /** Why a row failed; the tray words it. `direct`: the file is too big to retry through the worker. */
 export type UploadFailure = 'upload' | 'direct';
+
+/** How an upload this tab ran ended ({@link UploadQueue.ended}). */
+type UploadEnd = 'finished' | 'let-go';
 
 export interface UploadItem {
   /** Stable for the row's life: the tray and the media grid key on it. */
@@ -179,6 +183,8 @@ export class UploadQueue {
    * delete): closing the tab now would leave the row behind, so the guard holds.
    */
   readonly #discarding = new Set<Promise<void>>();
+  /** How each upload this tab ran ended, kept past its row ({@link ended}). */
+  readonly #ended = new SvelteMap<string, UploadEnd>();
   /** Bumped by {@link reset}: an upload begun before it belongs to the last user. */
   #generation = 0;
   #releaseGuard: (() => void) | null = null;
@@ -214,6 +220,18 @@ export class UploadQueue {
     return estimateSecondsLeft(item.startedAt, this.#deps.now(), item.progress);
   }
 
+  /**
+   * How this tab's upload of `mediaId` ended, read reactively, and kept after
+   * its row leaves the tray: `'finished'` (every byte sent and completed), or
+   * `'let-go'` (cancelled, removed after failing, or tried again as new
+   * media; its media row is discarded). Null for one this tab has not ended,
+   * or never ran. The status object keeps this tab's last upload report
+   * until the socket closes, so once the row is gone only this says which.
+   */
+  ended(mediaId: string): UploadEnd | null {
+    return this.#ended.get(mediaId) ?? null;
+  }
+
   /** Called with the media id each time an upload finishes. */
   onComplete(listener: (mediaId: string) => void): () => void {
     this.#listeners.add(listener);
@@ -238,6 +256,7 @@ export class UploadQueue {
     this.rejections = [];
     this.#savedTitles.clear();
     this.#titleSaves.clear();
+    this.#ended.clear();
     this.#syncGuard();
   }
 
@@ -457,6 +476,10 @@ export class UploadQueue {
       item.status = 'done';
       item.progress = 100;
       completedId = created.id;
+      // Not for one a user switch let run on: it was the last user's.
+      if (generation === this.#generation) {
+        this.#ended.set(created.id, 'finished');
+      }
     } catch (error) {
       if (item.id) this.#deps.live.endUpload(item.id);
       // Only a cancel the creator made is quiet. Any other abort (the browser
@@ -594,6 +617,8 @@ export class UploadQueue {
    */
   #discard(mediaId: string | null): Promise<void> {
     if (!mediaId) return Promise.resolve();
+    // Said before the delete: it will not finish, whether or not that lands.
+    this.#ended.set(mediaId, 'let-go');
     // A draft may have saved it by now: the media picker attaches the id the
     // moment createMedia returns it (Codex-a6ofh.1.8), and a delete without
     // the usage fingerprint is refused (409) once anything uses the item. A

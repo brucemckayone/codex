@@ -47,10 +47,10 @@ interface PublishMedia {
    */
   onItsWay: boolean;
   /**
-   * An upload that stopped: this tab's queue gave up on it or let go of it,
-   * or, with no row for it here, the tile's rule (`describeTile`) says so, a
-   * tab's report first, then the clock line (`createStallClock`). It needs
-   * new media.
+   * An upload that stopped: this tab's queue says so (a row that failed, or
+   * an upload it let go of), or, with no word from it, the tile's rule
+   * (`describeTile`) does, a tab's report first, then the clock line
+   * (`createStallClock`). It needs new media.
    */
   stalled: boolean;
   /**
@@ -67,24 +67,29 @@ export type PublishReads = ReturnType<typeof createPublishReads>;
 
 /**
  * This tab's own word on the upload, as the library's ghost tile and the
- * picker take it: its queue is sending the bytes (`'sending'`: uploading or
- * completing), gave up on them (`'failed'`: the tray offers Try again, and
- * the server's row waits in uploading meanwhile), or sent them all
- * (`'done'`: the server moves it on). Null when this tab's queue has no row
- * for it.
+ * picker take it, its row first: its queue is sending the bytes
+ * (`'sending'`: uploading or completing), sent them all (`'done'`: the
+ * server moves it on), or will not (`'stopped'`: a row that failed, for
+ * which the tray offers Try again while the server's row waits in
+ * uploading). Once the row has left the tray, the queue's memory of how it
+ * ended (`ended`) still says which: the status object keeps this tab's last
+ * report until the socket closes, so the socket cannot. Null for an upload
+ * this tab has no word on.
  */
-function uploadHere(mediaId: string): 'sending' | 'failed' | 'done' | null {
-  switch (uploadQueue.items.find((item) => item.id === mediaId)?.status) {
+function uploadHere(mediaId: string): 'sending' | 'stopped' | 'done' | null {
+  const row = uploadQueue.items.find((item) => item.id === mediaId);
+  switch (row?.status) {
     case 'uploading':
     case 'completing':
       return 'sending';
     case 'error':
-      return 'failed';
+      return 'stopped';
     case 'done':
       return 'done';
-    default:
-      return null;
   }
+  const end = uploadQueue.ended(mediaId);
+  if (end === 'finished') return 'done';
+  return end === 'let-go' ? 'stopped' : null;
 }
 
 export function createPublishReads(options: PublishReadsOptions) {
@@ -169,20 +174,15 @@ export function createPublishReads(options: PublishReadsOptions) {
     const upload = deleted ? null : uploadHere(mediaId);
     const clock = stallClock.now;
     // This tab's queue first, whatever the clock or the socket says: still
-    // sending is uploading, given up on has stopped, and sent is the
-    // server's to move on. With no row here, the socket saying this tab
-    // sends it is the status object still holding an upload this tab let go
-    // of (cancelled, removed, or tried again as new media): one document has
-    // one socket and one queue (`reportUpload`'s only caller), and the
-    // object releases an upload only when the socket closes. Else the tile's
-    // rule (`describeTile`) decides.
+    // sending is uploading, sent is the server's to move on, and failed or
+    // let go of has stopped. With no word from it, the tile's rule
+    // (`describeTile`) decides.
     const stalled =
       !deleted &&
       status === MEDIA_STATUS.UPLOADING &&
-      (upload === 'failed' ||
+      (upload === 'stopped' ||
         (upload === null &&
-          (live?.upload?.here === true ||
-            describeTile(mediaRow, live, 0, clock).kind === 'stopped')));
+          describeTile(mediaRow, live, 0, clock).kind === 'stopped'));
     return {
       status,
       deleted,

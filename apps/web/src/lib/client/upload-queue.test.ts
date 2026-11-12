@@ -583,6 +583,82 @@ describe('UploadQueue: try again and remove', () => {
     queue.remove('row-1');
     expect(queue.items).toHaveLength(1);
   });
+
+  // The status object keeps this tab's last upload report until the socket
+  // closes, so once a row leaves the tray only the queue knows how it ended
+  // (E3.4 review r6): a finished one cleared is not one let go of.
+  it('remembers how each upload ended, past its row: finished, or let go of', async () => {
+    const { queue, transfers } = harness({
+      completeUpload: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('500'))
+        .mockResolvedValue({}),
+    });
+    queue.add([video('a.mov'), video('b.mov')]);
+    await flush();
+    transfers[0]?.resolve();
+    transfers[1]?.resolve();
+    await flush();
+    expect(queue.items.map((i) => i.status)).toEqual(['error', 'done']);
+    // A failed row still in the tray has not ended: Try again may yet.
+    expect(queue.ended('media-1')).toBeNull();
+    expect(queue.ended('media-2')).toBe('finished');
+    queue.clearCompleted();
+    expect(queue.ended('media-2')).toBe('finished');
+
+    queue.retry('row-1');
+    expect(queue.ended('media-1')).toBe('let-go');
+    await flush();
+    expect(queue.items[0]).toMatchObject({
+      status: 'uploading',
+      id: 'media-3',
+    });
+    expect(queue.ended('media-3')).toBeNull();
+    queue.cancel('row-1');
+    expect(queue.ended('media-3')).toBe('let-go');
+
+    // A user switch: the last user's uploads are no word on this one's.
+    queue.reset();
+    expect(queue.ended('media-1')).toBeNull();
+    expect(queue.ended('media-2')).toBeNull();
+    expect(queue.ended('media-3')).toBeNull();
+  });
+
+  it('a failed row removed from the tray is let go of; a finished one removed stays finished', async () => {
+    const { queue, transfers } = harness({
+      completeUpload: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('500'))
+        .mockResolvedValue({}),
+    });
+    queue.add([video('a.mov'), video('b.mov')]);
+    await flush();
+    transfers[0]?.resolve();
+    transfers[1]?.resolve();
+    await flush();
+    queue.remove('row-1');
+    queue.remove('row-2');
+    expect(queue.items).toHaveLength(0);
+    expect(queue.ended('media-1')).toBe('let-go');
+    expect(queue.ended('media-2')).toBe('finished');
+  });
+
+  it('a finish that lands after a user switch is not remembered for the new user', async () => {
+    const completing = Promise.withResolvers<unknown>();
+    const { queue, transfers } = harness({
+      completeUpload: vi.fn(() => completing.promise),
+    });
+    queue.add([video()]);
+    await flush();
+    transfers[0]?.resolve();
+    await flush();
+    expect(queue.items[0]?.status).toBe('completing');
+    // reset() aborts only queued and uploading rows: this one completes on.
+    queue.reset();
+    completing.resolve({});
+    await flush();
+    expect(queue.ended('media-1')).toBeNull();
+  });
 });
 
 describe('UploadQueue: rename', () => {

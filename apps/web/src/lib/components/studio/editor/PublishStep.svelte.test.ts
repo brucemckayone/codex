@@ -498,12 +498,13 @@ describe('PublishStep · what is missing', () => {
       title: 'Winter Light',
       createdAt: new Date(),
     };
-    // Completed, but the status object still says uploading, and still holds
-    // this tab's last report: the server moves it on in a moment.
+    // Completed, but the status object still says uploading, and the socket
+    // has since closed, so it says the upload stopped: the queue's row is the
+    // word that counts, and the server moves it on in a moment.
     live.items.set(MEDIA_ID, {
       lifecycle: 'uploading',
       progress: null,
-      upload: { here: true, pct: 100 },
+      upload: { here: false, pct: 100, stopped: true },
     });
     uploadQueue.items = [
       { key: 'k1', id: MEDIA_ID, status: 'done', progress: 100 } as never,
@@ -2361,29 +2362,62 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
     }
   });
 
-  test('the socket saying "here" with no row in this tab’s queue: this tab let go of it, so it stopped, and the tab can close', async () => {
+  test('an upload this tab let go of (its row gone, the socket still saying "here"): stopped, and the tab can close', async () => {
     media.item = {
       id: MEDIA_ID,
       status: 'uploading',
       title: 'Winter Light',
       createdAt: new Date(),
     };
-    // Only this tab's queue reports an upload, so the row left it (cancelled,
-    // removed, or tried again as new media): nothing is sending, and the
-    // status object holds the report until the socket closes.
+    // Cancelled, removed after failing, or tried again as new media: the
+    // status object holds this tab's last report until the socket closes,
+    // so only the queue's memory says it will not finish.
     live.items.set(MEDIA_ID, {
       lifecycle: 'uploading',
       progress: null,
       upload: { here: true, pct: 30 },
     });
-    render(scheduled());
-    await vi.advanceTimersByTimeAsync(0);
-    expect(bannerText()).toContain(
-      m.studio_publish_gap_upload_stopped({ type: 'video' })
-    );
-    expect(bannerText()).not.toContain(m.studio_publish_scheduled_heading());
-    expect(text()).toContain(m.studio_publish_scheduled_close());
-    expect(text()).not.toContain(m.studio_publish_scheduled_keep_open());
+    const ended = vi.spyOn(uploadQueue, 'ended').mockReturnValue('let-go');
+    try {
+      render(scheduled());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bannerText()).toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(bannerText()).not.toContain(m.studio_publish_scheduled_heading());
+      expect(text()).toContain(m.studio_publish_scheduled_close());
+      expect(text()).not.toContain(m.studio_publish_scheduled_keep_open());
+    } finally {
+      ended.mockRestore();
+    }
+  });
+
+  test('a finished upload cleared from the tray, its lifecycle behind, is not stopped, even once the socket says so', async () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    // Sent and completed; the tray's Clear took the row; the socket closed,
+    // so the object says stopped, its lifecycle not yet moved on.
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: false, pct: 100, stopped: true },
+    });
+    const ended = vi.spyOn(uploadQueue, 'ended').mockReturnValue('finished');
+    try {
+      render(scheduled());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bannerText()).not.toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+      expect(text()).not.toContain(m.studio_publish_scheduled_keep_open());
+    } finally {
+      ended.mockRestore();
+    }
   });
 
   test('a failed upload removed from the tray while scheduled stays stopped, never "goes live by itself"', async () => {
@@ -2406,14 +2440,48 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
       await vi.advanceTimersByTimeAsync(0);
       const stopped = m.studio_publish_gap_upload_stopped({ type: 'video' });
       expect(bannerText()).toContain(stopped);
-      // Remove: the row goes, its media is discarded, and the socket still
-      // echoes the report until it closes.
-      uploadQueue.items = [];
-      await vi.advanceTimersByTimeAsync(20);
-      expect(bannerText()).toContain(stopped);
-      expect(bannerText()).not.toContain(m.studio_publish_scheduled_heading());
+      // Remove: the row goes and its media is discarded, which the queue
+      // remembers; the socket still echoes the report until it closes.
+      const ended = vi.spyOn(uploadQueue, 'ended').mockReturnValue('let-go');
+      try {
+        uploadQueue.items = [];
+        await vi.advanceTimersByTimeAsync(20);
+        expect(bannerText()).toContain(stopped);
+        expect(bannerText()).not.toContain(
+          m.studio_publish_scheduled_heading()
+        );
+      } finally {
+        ended.mockRestore();
+      }
     } finally {
       uploadQueue.items = [];
+    }
+  });
+
+  test('a finished upload cleared from the tray, with no other report, stays on its way: Publish when ready', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    // The r5 regression: the socket's stale "here" after Clear read as stopped.
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: true, pct: 100 },
+    });
+    const ended = vi.spyOn(uploadQueue, 'ended').mockReturnValue('finished');
+    try {
+      render(draft());
+      expect(text()).not.toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(publishButton()?.textContent?.trim()).toBe(
+        m.studio_publish_button_when_ready()
+      );
+    } finally {
+      ended.mockRestore();
     }
   });
 
