@@ -17,9 +17,13 @@ import {
   categories,
   content,
   contentCategories,
+  courseStages,
+  courses,
+  entitlements,
   mediaItems,
   organizations,
   purchases,
+  stagePractices,
 } from '@codex/database/schema';
 import type { ContentBulkResult } from '@codex/shared-types';
 import {
@@ -52,6 +56,7 @@ describe('ContentService: bulk actions', () => {
   const mediaIds: string[] = [];
   const purchaseIds: string[] = [];
   const categoryIds: string[] = [];
+  const courseIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -71,6 +76,18 @@ describe('ContentService: bulk actions', () => {
   });
 
   afterAll(async () => {
+    if (courseIds.length > 0) {
+      await db
+        .delete(entitlements)
+        .where(inArray(entitlements.courseId, courseIds));
+      // Stages and their practices go with their course (cascade).
+      await db.delete(courses).where(inArray(courses.id, courseIds));
+    }
+    if (contentIds.length > 0) {
+      await db
+        .delete(entitlements)
+        .where(inArray(entitlements.contentId, contentIds));
+    }
     if (purchaseIds.length > 0) {
       await db.delete(purchases).where(inArray(purchases.id, purchaseIds));
     }
@@ -287,6 +304,100 @@ describe('ContentService: bulk actions', () => {
       expect((await stored(sold.id)).deletedAt).toBeNull();
       expect((await stored(unsold.id)).deletedAt).not.toBeNull();
       expect(report.touched.map((t) => t.id)).toEqual([unsold.id]);
+    });
+
+    /** A course in the org whose one live stage holds the piece. */
+    async function inCourse(contentId: string) {
+      const course = takeFirst(
+        await db
+          .insert(courses)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            slug: `bulk-course-${randomUUID().slice(0, 8)}`,
+            title: 'Bulk course',
+            status: 'published',
+          })
+          .returning()
+      );
+      courseIds.push(course.id);
+      const stage = takeFirst(
+        await db
+          .insert(courseStages)
+          .values({ courseId: course.id, name: 'Stage', sortOrder: 1 })
+          .returning()
+      );
+      await db
+        .insert(stagePractices)
+        .values({ stageId: stage.id, contentId, sortOrder: 0 });
+      return course.id;
+    }
+
+    it('counts course buyers and grants as buyers; a course subscriber or a revoked grant is not one', async () => {
+      const inBoughtCourse = await live({ organizationId: orgId });
+      await db.insert(entitlements).values({
+        userId: buyerId,
+        organizationId: orgId,
+        courseId: await inCourse(inBoughtCourse.id),
+        source: 'course_purchase',
+      });
+      const given = await live({ organizationId: orgId });
+      await db.insert(entitlements).values({
+        userId: buyerId,
+        organizationId: orgId,
+        contentId: given.id,
+        source: 'grant',
+      });
+      const inSubscribedCourse = await live({ organizationId: orgId });
+      await db.insert(entitlements).values({
+        userId: secondBuyerId,
+        organizationId: orgId,
+        courseId: await inCourse(inSubscribedCourse.id),
+        source: 'course_subscription',
+      });
+      const revoked = await live({ organizationId: orgId });
+      await db.insert(entitlements).values({
+        userId: buyerId,
+        organizationId: orgId,
+        contentId: revoked.id,
+        source: 'grant',
+        revokedAt: new Date(),
+      });
+
+      const report = await service.deleteMany(
+        [inBoughtCourse.id, given.id, inSubscribedCourse.id, revoked.id],
+        creatorId
+      );
+
+      expect(outcomes(report.results)).toEqual([
+        'refused',
+        'refused',
+        'done',
+        'done',
+      ]);
+      expect(refusalCode(report.results[0])).toBe(
+        ERROR_CODES.CONTENT_HAS_BUYERS
+      );
+    });
+
+    it('counts a person once, however many ways they hold it', async () => {
+      const sold = await live({ organizationId: orgId });
+      await bought(sold.id);
+      await db.insert(entitlements).values({
+        userId: buyerId,
+        organizationId: orgId,
+        contentId: sold.id,
+        source: 'content_purchase',
+      });
+
+      const report = await service.deleteMany([sold.id], creatorId);
+
+      const [refused] = report.results;
+      expect(
+        refused && 'error' in refused
+          ? (refused.error.details as { buyers?: number }).buyers
+          : null
+      ).toBe(1);
     });
 
     it('counts only completed purchases, a refunded one is no buyer', async () => {

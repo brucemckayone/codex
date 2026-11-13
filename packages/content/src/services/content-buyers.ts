@@ -11,8 +11,24 @@
  * it (Codex-r7os5), so every real piece reads 0 there.
  */
 import { PURCHASE_STATUS } from '@codex/constants';
-import { content, purchases } from '@codex/database/schema';
-import { and, count, eq, inArray, type SQL, sql } from 'drizzle-orm';
+import {
+  content,
+  courseStages,
+  entitlements,
+  purchases,
+  stagePractices,
+} from '@codex/database/schema';
+import {
+  and,
+  count,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type { Database, DatabaseTransaction } from '../types';
 
 /** A completed purchase of the piece `contentId` names (a column or an id). */
@@ -23,19 +39,74 @@ const boughtBy = (contentId: SQL | string | typeof content.id) =>
   );
 
 /**
- * How many people bought one piece. Read inside the caller's transaction,
- * after its lock on the piece, so the refusal is judged on the server, never
- * on a number the list showed.
+ * Entitlement sources a buyer holds a piece by (owner 2026-11-13: course
+ * buyers count): the piece's own purchase or a manual grant of it, and a
+ * course's purchase or manual grant. A course subscription is a subscriber,
+ * not a buyer, as a tier subscription is. The access decision reads the
+ * same rows (`hasStoredContentEntitlement`, `contentReachableViaOwnedCourse`).
  */
-export async function countBuyers(
+const CONTENT_HELD_BY: string[] = ['content_purchase', 'grant'];
+const COURSE_HELD_BY: string[] = ['course_purchase', 'grant'];
+
+/**
+ * How many people would lose a piece they paid for, or were given, if it
+ * went (a bulk delete, owner D-b4) or moved to Followers or Team only (R1):
+ * its buyers, anyone with a live stored grant of it, and anyone who bought
+ * or was given a course one of whose live stages holds it. Counted as
+ * people, once each however many ways they hold it. Read inside the
+ * caller's transaction, after its lock on the piece, so the refusal is
+ * judged on the server, never on a number the list showed.
+ */
+export async function countHolders(
   db: Database | DatabaseTransaction,
   contentId: string
 ): Promise<number> {
-  const [row] = await db
-    .select({ buyers: count() })
+  const now = new Date();
+  const live = and(
+    isNull(entitlements.revokedAt),
+    or(isNull(entitlements.expiresAt), gt(entitlements.expiresAt, now))
+  );
+  const coursesHolding = db
+    .select({ courseId: courseStages.courseId })
+    .from(stagePractices)
+    .innerJoin(courseStages, eq(stagePractices.stageId, courseStages.id))
+    .where(
+      and(
+        eq(stagePractices.contentId, contentId),
+        isNull(courseStages.deletedAt)
+      )
+    );
+  const holders = db
+    .select({ userId: purchases.customerId })
     .from(purchases)
-    .where(boughtBy(contentId));
-  return row?.buyers ?? 0;
+    .where(boughtBy(contentId))
+    .union(
+      db
+        .select({ userId: entitlements.userId })
+        .from(entitlements)
+        .where(
+          and(
+            eq(entitlements.contentId, contentId),
+            inArray(entitlements.source, CONTENT_HELD_BY),
+            live
+          )
+        )
+    )
+    .union(
+      db
+        .select({ userId: entitlements.userId })
+        .from(entitlements)
+        .where(
+          and(
+            inArray(entitlements.courseId, coursesHolding),
+            inArray(entitlements.source, COURSE_HELD_BY),
+            live
+          )
+        )
+    )
+    .as('holders');
+  const [row] = await db.select({ people: count() }).from(holders);
+  return row?.people ?? 0;
 }
 
 /**

@@ -143,7 +143,7 @@ import {
   SQL_ATTENTION_KINDS,
   type SqlAttentionKind,
 } from './content-attention';
-import { buyerCountsOf, byBuyers, countBuyers } from './content-buyers';
+import { buyerCountsOf, byBuyers, countHolders } from './content-buyers';
 import {
   assertTiersInOrg,
   type ContentTierWire,
@@ -1215,7 +1215,7 @@ export class ContentService extends BaseService {
           return existing;
         }
         if (bulk?.refuseIfBought) {
-          const buyers = await countBuyers(tx as DatabaseTransaction, id);
+          const buyers = await countHolders(tx as DatabaseTransaction, id);
           if (buyers > 0) throw new ContentHasBuyersError(id, buyers);
         }
 
@@ -2487,7 +2487,7 @@ export class ContentService extends BaseService {
    * here, under the row's lock, never taken from the list. A buyer still in
    * checkout is not counted: completing a purchase takes no lock this waits
    * on, so it can land after the count (a delete one at a time never counts
-   * at all). That gap is the purchase path's to close.
+   * at all). That gap is the purchase path's to close (Codex-z1t3c).
    */
   private async deleteAndReport(
     id: string,
@@ -2507,7 +2507,7 @@ export class ContentService extends BaseService {
           throw new ContentNotFoundError(id);
         }
         if (bulk) {
-          const buyers = await countBuyers(tx as DatabaseTransaction, id);
+          const buyers = await countHolders(tx as DatabaseTransaction, id);
           if (buyers > 0) throw new ContentHasBuyersError(id, buyers);
         }
 
