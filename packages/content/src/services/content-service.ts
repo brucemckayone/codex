@@ -1403,16 +1403,6 @@ export class ContentService extends BaseService {
             { contentId: id }
           );
         }
-        // After every rule: a change refused for its own reason never reads
-        // as "people have it", which, put right, would not let it through.
-        // A course-only piece is let through: the access decision answers
-        // course-only before Followers or Team only, so its course holders
-        // keep it, and nobody else had it.
-        if (bulk?.refuseIfBought && !effCourseOnly) {
-          const holders = await countHolders(tx as DatabaseTransaction, id);
-          if (holders > 0) throw new ContentHasBuyersError(id, holders);
-        }
-
         // Access-policy invariant: NON-FREE ⟺ at least one active gate.
         // A partial PATCH can clear the sole gate WITHOUT restating `isFree`
         // (the Zod refine can't reason across a partial — it never sees the
@@ -1568,6 +1558,17 @@ export class ContentService extends BaseService {
               isTierGated: effGated,
             });
           }
+        }
+
+        // Last, before the write: a change any rule above refuses for its
+        // own reason (the org, the tier rules, an empty live piece, the
+        // payouts gate) never reads as "people have it", which, put right,
+        // would not let it through. A course-only piece is let through: the
+        // access decision answers course-only before Followers or Team only,
+        // so its course holders keep it, and nobody else had it.
+        if (bulk?.refuseIfBought && !effCourseOnly) {
+          const holders = await countHolders(tx as DatabaseTransaction, id);
+          if (holders > 0) throw new ContentHasBuyersError(id, holders);
         }
 
         // A publish-when-ready schedule waits only on media that will get

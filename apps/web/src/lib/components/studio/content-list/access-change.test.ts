@@ -90,6 +90,17 @@ describe('accessChangeLines', () => {
     );
   });
 
+  it('says everyone keeps watching on a line about several pieces, though one is held', () => {
+    const lines = accessChangeLines([sold('a', 800, 3), sold('b', 800)], {
+      kind: 'paid',
+      priceCents: 1200,
+      tierIds: null,
+    });
+    expect(lines[0]?.text).toBe(
+      `${m.studio_content_access_reprice_many({ count: 2, to: '£12.00' })} ${m.studio_content_access_buyers_keep_all()}`
+    );
+  });
+
   it('Buy once says each piece keeps its tiers, when one has some', () => {
     const lines = accessChangeLines(
       [piece('a', { isFree: false, isTierGated: true })],

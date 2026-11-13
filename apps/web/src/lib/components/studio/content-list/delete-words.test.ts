@@ -43,7 +43,13 @@ describe('unpublishOffer', () => {
     });
   });
 
-  it('offers the ones kept and counts the ones not, in a mix', () => {
+  it('names which ones, in a mix, so the creator can tell what goes', () => {
+    // One of each: each by its title, never "it" for one of two.
+    expect(unpublishOffer([held('a'), freeLesson('c')])).toEqual({
+      ids: ['a'],
+      words: `${m.studio_content_delete_unpublish_keeps_named({ title: 'Piece a' })} ${m.studio_content_delete_unpublish_ends_named({ title: 'Piece c' })}`,
+    });
+    // A few: by their titles.
     const offer = unpublishOffer([
       held('a'),
       held('b'),
@@ -52,10 +58,15 @@ describe('unpublishOffer', () => {
     ]);
     expect(offer.ids).toEqual(['a', 'b']);
     expect(offer.words).toBe(
-      `${m.studio_content_delete_unpublish_keeps_them()} ${m.studio_content_delete_unpublish_ends_some({ count: 2 })}`
+      `${m.studio_content_delete_unpublish_keeps_named_many({ titles: '“Piece a” and “Piece b”' })} ${m.studio_content_delete_unpublish_ends_named_many({ titles: '“Piece c” and “Piece d”' })}`
     );
-    expect(unpublishOffer([held('a'), freeLesson('c')]).words).toBe(
-      `${m.studio_content_delete_unpublish_keeps_it()} ${m.studio_content_delete_unpublish_ends_some_one()}`
+  });
+
+  it('counts them past a few', () => {
+    const many = ['a', 'b', 'c', 'd'].map((id) => held(id));
+    const offer = unpublishOffer([...many, freeLesson('e')]);
+    expect(offer.words).toBe(
+      `${m.studio_content_delete_unpublish_keeps_some({ count: 4 })} ${m.studio_content_delete_unpublish_ends_named({ title: 'Piece e' })}`
     );
   });
 
@@ -64,8 +75,8 @@ describe('unpublishOffer', () => {
       unpublishOffer([held('a', { status: 'draft' }), freeLesson('b')])
     ).toEqual({
       ids: [],
-      // Only the live one is weighed; with a draft beside it, "one of them".
-      words: m.studio_content_delete_unpublish_ends_some_one(),
+      // Only the live one is weighed; beside a draft, it is named.
+      words: m.studio_content_delete_unpublish_ends_named({ title: 'Piece b' }),
     });
     expect(unpublishOffer([held('a', { status: 'draft' })])).toEqual({
       ids: [],

@@ -9,6 +9,7 @@
 import { CONTENT_STATUS } from '@codex/constants';
 import type { ContentWithRelations } from '$lib/types';
 import * as m from '$paraglide/messages';
+import { joinNames } from '../plan-picker/select-from-tier';
 import { keepsWhenUnpublished } from './row-facts';
 
 /** A piece the dialog weighs, as the list holds it. */
@@ -38,34 +39,66 @@ export function unpublishOffer(kept: readonly DeletePiece[]): UnpublishOffer {
     (piece) => piece.status === CONTENT_STATUS.PUBLISHED
   );
   const keeps = live.filter(keepsWhenUnpublished);
-  const ends = live.length - keeps.length;
+  const ends = live.filter((piece) => !keepsWhenUnpublished(piece));
   const parts: string[] = [];
-  if (keeps.length > 0) {
+  const [keepsOne] = keeps;
+  if (keepsOne) {
     parts.push(
-      keeps.length === 1
-        ? m.studio_content_delete_unpublish_keeps_it()
-        : m.studio_content_delete_unpublish_keeps_them()
+      whichOf(kept, keeps, {
+        it: m.studio_content_delete_unpublish_keeps_it,
+        them: m.studio_content_delete_unpublish_keeps_them,
+        named: m.studio_content_delete_unpublish_keeps_named,
+        namedMany: m.studio_content_delete_unpublish_keeps_named_many,
+        some: m.studio_content_delete_unpublish_keeps_some,
+      })
     );
   }
-  if (ends > 0) {
-    // "It" only when it is the one piece left alone; "them" when it is all
-    // of them; else how many, since the others are offered.
-    if (kept.length === 1) {
-      parts.push(m.studio_content_delete_unpublish_ends_it());
-    } else if (ends === kept.length) {
-      parts.push(m.studio_content_delete_unpublish_ends_them());
-    } else {
-      parts.push(
-        ends === 1
-          ? m.studio_content_delete_unpublish_ends_some_one()
-          : m.studio_content_delete_unpublish_ends_some({ count: ends })
-      );
-    }
+  if (ends.length > 0) {
+    parts.push(
+      whichOf(kept, ends, {
+        it: m.studio_content_delete_unpublish_ends_it,
+        them: m.studio_content_delete_unpublish_ends_them,
+        named: m.studio_content_delete_unpublish_ends_named,
+        namedMany: m.studio_content_delete_unpublish_ends_named_many,
+        some: m.studio_content_delete_unpublish_ends_some,
+      })
+    );
   }
   return {
     ids: keeps.map((piece) => piece.id),
     words: parts.length > 0 ? parts.join(' ') : null,
   };
+}
+
+/** Up to this many are named; more are counted. */
+const NAMED_UP_TO = 3;
+
+/**
+ * Words for some of the pieces left alone, so the creator can tell which:
+ * "it" when it is the only one, "them" when it is all of them, their titles
+ * when they are a few of several, else how many.
+ */
+function whichOf(
+  kept: readonly DeletePiece[],
+  these: readonly DeletePiece[],
+  words: {
+    it: () => string;
+    them: () => string;
+    named: (args: { title: string }) => string;
+    namedMany: (args: { titles: string }) => string;
+    some: (args: { count: number }) => string;
+  }
+): string {
+  const [only] = these;
+  if (kept.length === 1) return words.it();
+  if (these.length === kept.length) return words.them();
+  if (only && these.length === 1) return words.named({ title: only.title });
+  if (these.length <= NAMED_UP_TO) {
+    return words.namedMany({
+      titles: joinNames(these.map((piece) => `“${piece.title}”`)),
+    });
+  }
+  return words.some({ count: these.length });
 }
 
 /** The dialog's warning for the pieces people have: who, and what each way does. */

@@ -34131,6 +34131,30 @@ export const studio_content_delete_unpublish_keeps_them = () => `Unpublishing th
 
 
 /**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_keeps_named = (params) => `Unpublishing “${params.title}” takes it off sale, and they keep watching.`
+
+
+/**
+ * @param {{ titles: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_keeps_named_many = (params) => `Unpublishing ${params.titles} takes them off sale, and they keep watching.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_keeps_some = (params) => `Unpublishing ${params.count} of them takes them off sale, and they keep watching.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -34147,19 +34171,27 @@ export const studio_content_delete_unpublish_ends_them = () => `Unpublishing the
 
 
 /**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_ends_named = (params) => `Unpublishing “${params.title}” would end their playback too.`
+
+
+/**
+ * @param {{ titles: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_ends_named_many = (params) => `Unpublishing ${params.titles} would end their playback too.`
+
+
+/**
  * @param {{ count: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_some = (params) => `Unpublishing ${params.count} of them would end their playback too, so those aren’t offered.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_some_one = () => `Unpublishing one of them would end their playback too, so it isn’t offered.`
+export const studio_content_delete_unpublish_ends_some = (params) => `Unpublishing ${params.count} of them would end their playback too.`
 
 
 /**

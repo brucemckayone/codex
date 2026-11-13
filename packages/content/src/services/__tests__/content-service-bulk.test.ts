@@ -323,16 +323,22 @@ describe('ContentService: bulk actions', () => {
       ) as { warn: (...args: unknown[]) => void };
       const warns = vi.spyOn(logger, 'warn');
 
+      // Both restored however the run ends: the spy is on every logger. A
+      // restore clears the spy's calls, so they are counted first.
+      let warned = -1;
       const report = await service
         .unpublishMany([first.id, second.id, third.id], creatorId)
-        .finally(() => clock.mockRestore());
+        .finally(() => {
+          clock.mockRestore();
+          warned = warns.mock.calls.length;
+          warns.mockRestore();
+        });
 
       expect(outcomes(report.results)).toEqual(['done', 'failed', 'failed']);
       expect(report.results[1]).toMatchObject({
         error: { code: 'SERVICE_UNAVAILABLE' },
       });
-      expect(warns).toHaveBeenCalledTimes(1);
-      warns.mockRestore();
+      expect(warned).toBe(1);
       expect((await stored(second.id)).status).toBe('published');
       expect((await stored(third.id)).status).toBe('published');
     });
@@ -624,6 +630,24 @@ describe('ContentService: bulk actions', () => {
       const [refused] = report.results;
       expect(refused && 'error' in refused ? refused.error.code : null).toBe(
         ERROR_CODES.VALIDATION_ERROR
+      );
+    });
+
+    it('a held piece the payouts gate refuses says the gate, never "people have it"', async () => {
+      // Followers with a price: the creator has no payout account, so the
+      // gate refuses it, whoever has the piece.
+      const shown = await live({ organizationId: orgId });
+      await bought(shown.id);
+
+      const report = await service.accessMany([shown.id], creatorId, {
+        ...followers,
+        isPurchasable: true,
+        priceCents: 1200,
+      });
+
+      expect(outcomes(report.results)).toEqual(['refused']);
+      expect(refusalCode(report.results[0])).toBe(
+        ERROR_CODES.CREATOR_CONNECT_REQUIRED
       );
     });
 

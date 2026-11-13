@@ -62,15 +62,14 @@ export interface AccessLine {
 }
 
 /**
- * That the people who have them keep watching. A number only for one piece:
- * counts are each piece's, so one course's buyers are in every lesson's,
- * and a sum would count each of them once a lesson.
+ * That the people who have them keep watching. A number only when the line
+ * is about one piece: counts are each piece's, so one course's buyers are
+ * in every lesson's, and a sum would count each of them once a lesson.
  */
 function buyersKeep(pieces: readonly AccessPiece[]): string | null {
-  const held = pieces.filter(isHeld);
-  const [only] = held;
+  const [only] = pieces.filter(isHeld);
   if (!only) return null;
-  if (held.length > 1) return m.studio_content_access_buyers_keep_all();
+  if (pieces.length > 1) return m.studio_content_access_buyers_keep_all();
   const buyers = only.holderCount ?? 0;
   return buyers === 1
     ? m.studio_content_access_buyers_keep_one()
