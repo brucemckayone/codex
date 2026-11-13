@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as m from '$paraglide/messages';
+import { joinNames } from '../plan-picker/select-from-tier';
 import { type DeletePiece, heldNotice, unpublishOffer } from './delete-words';
 
 function held(id: string, fields: Partial<DeletePiece> = {}): DeletePiece {
@@ -43,13 +44,12 @@ describe('unpublishOffer', () => {
     });
   });
 
-  it('names which ones, in a mix, so the creator can tell what goes', () => {
-    // One of each: each by its title, never "it" for one of two.
+  it('in a mix, names the ones that stay up first, then the ones the button takes down', () => {
+    // One of each: each by its title; the button's "it" is the last named.
     expect(unpublishOffer([held('a'), freeLesson('c')])).toEqual({
       ids: ['a'],
-      words: `${m.studio_content_delete_unpublish_keeps_named({ title: 'Piece a' })} ${m.studio_content_delete_unpublish_ends_named({ title: 'Piece c' })}`,
+      words: `${m.studio_content_delete_unpublish_ends_named_stays({ title: 'Piece c' })} ${m.studio_content_delete_unpublish_keeps_named({ title: 'Piece a' })}`,
     });
-    // A few: by their titles.
     const offer = unpublishOffer([
       held('a'),
       held('b'),
@@ -58,15 +58,28 @@ describe('unpublishOffer', () => {
     ]);
     expect(offer.ids).toEqual(['a', 'b']);
     expect(offer.words).toBe(
-      `${m.studio_content_delete_unpublish_keeps_named_many({ titles: '“Piece a” and “Piece b”' })} ${m.studio_content_delete_unpublish_ends_named_many({ titles: '“Piece c” and “Piece d”' })}`
+      `${m.studio_content_delete_unpublish_ends_named_many_stays({ titles: joinNames(['“Piece c”', '“Piece d”']) })} ${m.studio_content_delete_unpublish_keeps_named_many({ titles: joinNames(['“Piece a”', '“Piece b”']) })}`
     );
   });
 
-  it('counts them past a few', () => {
-    const many = ['a', 'b', 'c', 'd'].map((id) => held(id));
-    const offer = unpublishOffer([...many, freeLesson('e')]);
+  it('names every piece, however many, so two groups never read alike', () => {
+    // Four of each (a selection holds up to 15): never "4 of them" twice.
+    const keeps = ['a', 'b', 'c', 'd'].map((id) => held(id));
+    const ends = ['e', 'f', 'g', 'h'].map((id) => freeLesson(id));
+    const offer = unpublishOffer([...keeps, ...ends]);
+    const titles = (ids: string[]) =>
+      joinNames(ids.map((id) => `“Piece ${id}”`));
+    expect(offer.ids).toEqual(['a', 'b', 'c', 'd']);
     expect(offer.words).toBe(
-      `${m.studio_content_delete_unpublish_keeps_some({ count: 4 })} ${m.studio_content_delete_unpublish_ends_named({ title: 'Piece e' })}`
+      `${m.studio_content_delete_unpublish_ends_named_many_stays({ titles: titles(['e', 'f', 'g', 'h']) })} ${m.studio_content_delete_unpublish_keeps_named_many({ titles: titles(['a', 'b', 'c', 'd']) })}`
+    );
+    // Beside a draft, the live ones are named, not counted.
+    expect(
+      unpublishOffer([...keeps, held('z', { status: 'draft' })]).words
+    ).toBe(
+      m.studio_content_delete_unpublish_keeps_named_many({
+        titles: titles(['a', 'b', 'c', 'd']),
+      })
     );
   });
 

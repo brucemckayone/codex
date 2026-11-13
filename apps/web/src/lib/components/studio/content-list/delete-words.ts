@@ -33,7 +33,14 @@ export interface UnpublishOffer {
   words: string | null;
 }
 
-/** The dialog's Unpublish instead, for the pieces it leaves alone. */
+/**
+ * The dialog's Unpublish instead, for the pieces it leaves alone. Only the
+ * live ones are weighed: a draft is not on sale. In a mix, the ones that
+ * would lose it come first and are said to stay up; then the ones the
+ * button takes down, last, beside the button, so its "it" or "them" can
+ * only be those. Pieces are named, never counted: two counts read alike
+ * and name nothing, and a bulk action holds at most CONTENT_BULK_MAX.
+ */
 export function unpublishOffer(kept: readonly DeletePiece[]): UnpublishOffer {
   const live = kept.filter(
     (piece) => piece.status === CONTENT_STATUS.PUBLISHED
@@ -41,26 +48,29 @@ export function unpublishOffer(kept: readonly DeletePiece[]): UnpublishOffer {
   const keeps = live.filter(keepsWhenUnpublished);
   const ends = live.filter((piece) => !keepsWhenUnpublished(piece));
   const parts: string[] = [];
-  const [keepsOne] = keeps;
-  if (keepsOne) {
+  if (ends.length > 0) {
+    parts.push(
+      keeps.length > 0
+        ? // A mix: some of several, so always by name.
+          named(ends, {
+            named: m.studio_content_delete_unpublish_ends_named_stays,
+            namedMany: m.studio_content_delete_unpublish_ends_named_many_stays,
+          })
+        : whichOf(kept, ends, {
+            it: m.studio_content_delete_unpublish_ends_it,
+            them: m.studio_content_delete_unpublish_ends_them,
+            named: m.studio_content_delete_unpublish_ends_named,
+            namedMany: m.studio_content_delete_unpublish_ends_named_many,
+          })
+    );
+  }
+  if (keeps.length > 0) {
     parts.push(
       whichOf(kept, keeps, {
         it: m.studio_content_delete_unpublish_keeps_it,
         them: m.studio_content_delete_unpublish_keeps_them,
         named: m.studio_content_delete_unpublish_keeps_named,
         namedMany: m.studio_content_delete_unpublish_keeps_named_many,
-        some: m.studio_content_delete_unpublish_keeps_some,
-      })
-    );
-  }
-  if (ends.length > 0) {
-    parts.push(
-      whichOf(kept, ends, {
-        it: m.studio_content_delete_unpublish_ends_it,
-        them: m.studio_content_delete_unpublish_ends_them,
-        named: m.studio_content_delete_unpublish_ends_named,
-        namedMany: m.studio_content_delete_unpublish_ends_named_many,
-        some: m.studio_content_delete_unpublish_ends_some,
       })
     );
   }
@@ -70,35 +80,32 @@ export function unpublishOffer(kept: readonly DeletePiece[]): UnpublishOffer {
   };
 }
 
-/** Up to this many are named; more are counted. */
-const NAMED_UP_TO = 3;
+interface NamedWords {
+  named: (args: { title: string }) => string;
+  namedMany: (args: { titles: string }) => string;
+}
 
 /**
  * Words for some of the pieces left alone, so the creator can tell which:
- * "it" when it is the only one, "them" when it is all of them, their titles
- * when they are a few of several, else how many.
+ * "it" when it is the only one, "them" when it is all of them, else by name.
  */
 function whichOf(
   kept: readonly DeletePiece[],
   these: readonly DeletePiece[],
-  words: {
-    it: () => string;
-    them: () => string;
-    named: (args: { title: string }) => string;
-    namedMany: (args: { titles: string }) => string;
-    some: (args: { count: number }) => string;
-  }
+  words: NamedWords & { it: () => string; them: () => string }
 ): string {
-  const [only] = these;
   if (kept.length === 1) return words.it();
   if (these.length === kept.length) return words.them();
+  return named(these, words);
+}
+
+/** One piece by its title; several by theirs ("“A”, “B” and “C”"). */
+function named(these: readonly DeletePiece[], words: NamedWords): string {
+  const [only] = these;
   if (only && these.length === 1) return words.named({ title: only.title });
-  if (these.length <= NAMED_UP_TO) {
-    return words.namedMany({
-      titles: joinNames(these.map((piece) => `“${piece.title}”`)),
-    });
-  }
-  return words.some({ count: these.length });
+  return words.namedMany({
+    titles: joinNames(these.map((piece) => `“${piece.title}”`)),
+  });
 }
 
 /** The dialog's warning for the pieces people have: who, and what each way does. */

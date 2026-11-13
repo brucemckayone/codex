@@ -34147,14 +34147,6 @@ export const studio_content_delete_unpublish_keeps_named_many = (params) => `Unp
 
 
 /**
- * @param {{ count: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_keeps_some = (params) => `Unpublishing ${params.count} of them takes them off sale, and they keep watching.`
-
-
-/**
  * 
  * @returns {string}
  */
@@ -34187,11 +34179,19 @@ export const studio_content_delete_unpublish_ends_named_many = (params) => `Unpu
 
 
 /**
- * @param {{ count: NonNullable<unknown> }} params
+ * @param {{ title: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_some = (params) => `Unpublishing ${params.count} of them would end their playback too.`
+export const studio_content_delete_unpublish_ends_named_stays = (params) => `Unpublishing “${params.title}” would end their playback too, so it stays up.`
+
+
+/**
+ * @param {{ titles: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_ends_named_many_stays = (params) => `Unpublishing ${params.titles} would end their playback too, so they stay up.`
 
 
 /**
