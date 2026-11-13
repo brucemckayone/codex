@@ -5,17 +5,10 @@
  * The server still judges each piece; these only say what to expect.
  */
 import type { ContentWithRelations } from '$lib/types';
-import type { ContentAccessKind } from '$lib/utils/content-access';
 import { formatPrice } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
-
-/** What the sheet holds: the editor's own access group (`DraftAccess`). */
-export interface AccessChoice {
-  kind: ContentAccessKind;
-  priceCents: number;
-  /** The tiers ticked; null leaves each piece's own (Buy once, D-b5). */
-  tierIds: string[] | null;
-}
+import type { DraftAccess } from '../editor/draft-session.svelte';
+import { isBought } from './row-facts';
 
 export type AccessPiece = Pick<
   ContentWithRelations,
@@ -125,7 +118,7 @@ function stopsSoldLine(
  */
 export function accessChangeLines(
   pieces: readonly AccessPiece[],
-  choice: AccessChoice
+  choice: DraftAccess
 ): AccessLine[] {
   const lines: (AccessLine | null)[] = [];
   switch (choice.kind) {
@@ -149,7 +142,7 @@ export function accessChangeLines(
       break;
     case 'followers':
     case 'team': {
-      const bought = pieces.filter((piece) => (piece.buyerCount ?? 0) > 0);
+      const bought = pieces.filter(isBought);
       const [only] = bought;
       if (only) {
         lines.push({
@@ -162,7 +155,7 @@ export function accessChangeLines(
       }
       lines.push(
         stopsSoldLine(
-          pieces.filter((piece) => (piece.buyerCount ?? 0) === 0),
+          pieces.filter((piece) => !isBought(piece)),
           false
         )
       );

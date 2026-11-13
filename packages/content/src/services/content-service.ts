@@ -83,6 +83,7 @@ import type {
   UpdateContentInput,
 } from '@codex/validation';
 import {
+  CONTENT_ACCESS_GROUP_FIELDS,
   createContentSchema,
   createPlatformImageUrlSchema,
   PLATFORM_IMAGE_URL_MESSAGE,
@@ -433,26 +434,16 @@ type AddedCategories = {
   changed: boolean;
 };
 
-/** The orgs a bulk action's pieces are filed in, each once. */
-export function orgsOf(pieces: BulkTouchedPiece[]): string[] {
-  return [
-    ...new Set(
-      pieces.flatMap((piece) =>
-        piece.organizationId ? [piece.organizationId] : []
-      )
-    ),
-  ];
-}
-
-/** The access columns a bulk access change sets (`contentAccessGroupSchema`). */
-const ACCESS_COLUMNS = [
-  'isFree',
-  'isPurchasable',
-  'priceCents',
-  'isTierGated',
-  'isFollowerGated',
-  'isTeamOnly',
-] as const;
+/** The access columns a bulk access change sets: the group's, but the tier set. */
+type AccessColumn = Exclude<
+  keyof typeof CONTENT_ACCESS_GROUP_FIELDS,
+  'includedInTierIds'
+>;
+const ACCESS_COLUMNS = (
+  Object.keys(CONTENT_ACCESS_GROUP_FIELDS) as Array<
+    keyof typeof CONTENT_ACCESS_GROUP_FIELDS
+  >
+).filter((key): key is AccessColumn => key !== 'includedInTierIds');
 
 /**
  * Whether a piece's access already reads as an update sends it
@@ -1054,35 +1045,46 @@ export class ContentService extends BaseService {
     droppedThumbnailUrl: string | null;
     hasBeenLive: boolean;
   }> {
-    const { unchanged: _unchanged, ...report } = await this.applyUpdate(
+    const { row, droppedThumbnailUrl, hasBeenLive } = await this.applyUpdate(
       id,
       input,
       creatorId,
       options
     );
-    return report;
+    try {
+      const [wired] = await withTierWire(this.db, [row]);
+      return {
+        content: wired ?? {
+          ...row,
+          includedInTierIds: [],
+          includedInTierId: row.legacyIncludedInTierId,
+        },
+        droppedThumbnailUrl,
+        hasBeenLive,
+      };
+    } catch (error) {
+      this.handleError(error, 'update');
+    }
   }
 
   /**
-   * The update itself, and, for a bulk access change (Codex-a6ofh.3.5), two
-   * more things a piece can come back as. `skipIfHeld`: a piece whose access
-   * already reads as sent is left unwritten and reported `unchanged`.
-   * `refuseIfBought`: a piece people bought is left alone
-   * (`ContentHasBuyersError`), for a move to Followers or Team only, which
-   * would end their playback (owner R1). Both are judged on the locked row.
+   * The update itself, without its tier wire. `bulk` is a piece of a bulk
+   * access change (Codex-a6ofh.3.5): it writes no cache (the route does,
+   * once), a piece whose access already reads as sent is left unwritten and
+   * reported `unchanged`, and with `refuseIfBought` a piece people bought is
+   * left alone (`ContentHasBuyersError`), for a move to Followers or Team
+   * only, which would end their playback (owner R1). Judged on the locked row.
    */
   private async applyUpdate(
     id: string,
     input: UpdateContentInput,
     creatorId: string,
-    { asDraft = false }: UpdateContentOptions = {},
     {
-      quiet = false,
-      skipIfHeld = false,
-      refuseIfBought = false,
-    }: QuietOption & { skipIfHeld?: boolean; refuseIfBought?: boolean } = {}
+      asDraft = false,
+      bulk,
+    }: UpdateContentOptions & { bulk?: { refuseIfBought: boolean } } = {}
   ): Promise<{
-    content: Content & ContentTierWire;
+    row: Content;
     droppedThumbnailUrl: string | null;
     hasBeenLive: boolean;
     unchanged: boolean;
@@ -1193,7 +1195,7 @@ export class ContentService extends BaseService {
         wasLive = hasBeenLive(existing);
 
         if (
-          skipIfHeld &&
+          bulk &&
           (await accessAlreadyHeld(
             tx as DatabaseTransaction,
             existing,
@@ -1203,7 +1205,7 @@ export class ContentService extends BaseService {
           unchanged = true;
           return existing;
         }
-        if (refuseIfBought) {
+        if (bulk?.refuseIfBought) {
           const buyers = await countBuyers(tx as DatabaseTransaction, id);
           if (buyers > 0) throw new ContentHasBuyersError(id, buyers);
         }
@@ -1603,7 +1605,7 @@ export class ContentService extends BaseService {
       // trigger_unpublish_on_org_delete (migration 0004), which resets its
       // status and publishedAt, and its buyers still hold it. An update
       // cannot set either, so the row after it can only read less live.
-      const bumps = wasLive && !quiet && !unchanged;
+      const bumps = wasLive && !bulk && !unchanged;
       if (bumps) {
         void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
       }
@@ -1642,13 +1644,8 @@ export class ContentService extends BaseService {
         );
       }
       const thumbnailMoved = previousThumbnailUrl !== result.thumbnailUrl;
-      const [wired] = await withTierWire(this.db, [result]);
       return {
-        content: wired ?? {
-          ...result,
-          includedInTierIds: [],
-          includedInTierId: result.legacyIncludedInTierId,
-        },
+        row: result,
         droppedThumbnailUrl: thumbnailMoved ? previousThumbnailUrl : null,
         hasBeenLive: wasLive,
         unchanged,
@@ -2993,7 +2990,9 @@ export class ContentService extends BaseService {
   // Bulk actions (Codex-a6ofh.3.5, owner 2026-11-12: "Bulk endpoints, one
   // bump"). Each runs every piece through its own method, in its own
   // transaction, so one refused piece never undoes the others; makes each
-  // cache write it owns once, after the loop; and reports each piece.
+  // reports each piece. They write no cache: each piece runs `quiet`, and the
+  // route refreshes each key once after the loop (`afterBulkChange`), since
+  // KV takes about one write a second to a key and these are its only caller.
   // ==========================================================================
 
   /**
@@ -3004,7 +3003,7 @@ export class ContentService extends BaseService {
     ids: string[],
     creatorId: string
   ): Promise<ContentBulkReport> {
-    const report = await this.eachPiece(ids, async (id) => {
+    return this.eachPiece(ids, async (id) => {
       const { row, wentLive } = await this.publishAndReport(
         id,
         creatorId,
@@ -3017,8 +3016,6 @@ export class ContentService extends BaseService {
           row.status === CONTENT_STATUS.PUBLISHED ? 'unchanged' : 'scheduled',
       };
     });
-    this.bumpCatalogueOnce(report.touched);
-    return report;
   }
 
   /** Take each piece down; one already a draft is `unchanged`. */
@@ -3026,7 +3023,7 @@ export class ContentService extends BaseService {
     ids: string[],
     creatorId: string
   ): Promise<ContentBulkReport> {
-    const report = await this.eachPiece(ids, async (id) => {
+    return this.eachPiece(ids, async (id) => {
       const { row, wasLive, changed } = await this.unpublishAndReport(
         id,
         creatorId,
@@ -3035,8 +3032,6 @@ export class ContentService extends BaseService {
       if (!changed) return { outcome: 'unchanged' };
       return { outcome: 'done', touched: wasLive ? row : undefined };
     });
-    this.bumpCatalogueOnce(report.touched);
-    return report;
   }
 
   /**
@@ -3066,7 +3061,7 @@ export class ContentService extends BaseService {
     creatorId: string,
     categoryIds: string[]
   ): Promise<ContentBulkReport> {
-    const report = await this.eachPiece(ids, async (id) => {
+    return this.eachPiece(ids, async (id) => {
       const added = await this.addCategoriesAndReport(
         id,
         creatorId,
@@ -3081,10 +3076,6 @@ export class ContentService extends BaseService {
           : undefined,
       };
     });
-    for (const organizationId of orgsOf(report.touched)) {
-      void this.cache?.invalidate(CacheType.CATEGORIES(organizationId));
-    }
-    return report;
   }
 
   /**
@@ -3102,27 +3093,17 @@ export class ContentService extends BaseService {
   ): Promise<ContentBulkReport> {
     const endsBuyersPlayback =
       access.isFollowerGated === true || access.isTeamOnly === true;
-    const report = await this.eachPiece(ids, async (id) => {
+    return this.eachPiece(ids, async (id) => {
       const {
-        content: row,
+        row,
         hasBeenLive: live,
         unchanged,
-      } = await this.applyUpdate(
-        id,
-        access,
-        creatorId,
-        {},
-        {
-          quiet: true,
-          skipIfHeld: true,
-          refuseIfBought: endsBuyersPlayback,
-        }
-      );
+      } = await this.applyUpdate(id, access, creatorId, {
+        bulk: { refuseIfBought: endsBuyersPlayback },
+      });
       if (unchanged) return { outcome: 'unchanged' };
       return { outcome: 'done', touched: live ? row : undefined };
     });
-    this.bumpCatalogueOnce(report.touched);
-    return report;
   }
 
   /**
@@ -3158,21 +3139,6 @@ export class ContentService extends BaseService {
       }
     }
     return { results, touched };
-  }
-
-  /**
-   * The catalogue keys a publish, an unpublish or an access change writes
-   * per piece (`COLLECTION_CONTENT_PUBLISHED`, each org's
-   * `COLLECTION_ORG_CONTENT`), each once for the whole action.
-   */
-  private bumpCatalogueOnce(touched: BulkTouchedPiece[]): void {
-    if (touched.length === 0) return;
-    void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
-    for (const organizationId of orgsOf(touched)) {
-      void this.cache?.invalidate(
-        CacheType.COLLECTION_ORG_CONTENT(organizationId)
-      );
-    }
   }
 
   /**

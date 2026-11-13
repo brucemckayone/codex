@@ -109,10 +109,19 @@ export function viewsShown(row: ContentWithRelations): string | null {
  * taken off sale keeps its buyers, so it keeps its count.
  */
 export function salesShown(row: ContentWithRelations): string | null {
-  const buyers = row.buyerCount ?? 0;
-  return hasBeenLive(row) && (row.isPurchasable || buyers > 0)
-    ? formatCount(buyers)
+  return hasBeenLive(row) && (row.isPurchasable || isBought(row))
+    ? formatCount(row.buyerCount ?? 0)
     : null;
+}
+
+/**
+ * Someone bought it (owner R2, the list's `buyerCount`): a bulk delete, or a
+ * move to Followers or Team only, leaves it alone.
+ */
+export function isBought(
+  row: Pick<ContentWithRelations, 'buyerCount'>
+): boolean {
+  return (row.buyerCount ?? 0) > 0;
 }
 
 /**

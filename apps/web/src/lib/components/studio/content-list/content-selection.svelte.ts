@@ -1,8 +1,8 @@
 /**
  * The content list's selection (Codex-a6ofh.3.5, data-design §4.2): the ids
  * of rows on the page, at most CONTENT_BULK_MAX (owner D-b3, one request per
- * action). At the cap the other boxes wait. The list clears it when its view
- * changes, and keeps only the rows still shown after a re-read.
+ * action). At the cap the other boxes wait. The list makes a new one when
+ * its view changes, and keeps only the rows still shown after a re-read.
  */
 import { CONTENT_BULK_MAX } from '@codex/constants';
 
@@ -54,7 +54,14 @@ export class ContentSelection {
   /** Only these, of what is held: after an action, the pieces it left. */
   keepOnly(ids: Iterable<string>): void {
     const keep = new Set(ids);
-    this.#ids = this.#ids.filter((held) => keep.has(held));
+    const next = this.#ids.filter((held) => keep.has(held));
+    // Unchanged, the same array: what reads the selection is not woken.
+    if (next.length !== this.#ids.length) this.#ids = next;
+  }
+
+  /** One off, if held: a piece deleted from its row's menu. */
+  drop(id: string): void {
+    if (this.has(id)) this.#ids = this.#ids.filter((held) => held !== id);
   }
 
   clear(): void {

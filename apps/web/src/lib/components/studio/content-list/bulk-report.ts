@@ -42,40 +42,56 @@ export type BulkPiece = Pick<
 /** The pieces sent, by id. */
 export type BulkPieces = ReadonlyMap<string, BulkPiece>;
 
-const SUMMARY: Record<
+/** Each action's words: while it runs, then what it did. */
+const WORDS: Record<
   ContentBulkAction,
   {
+    busy: (args: { count: number; category: string }) => string;
     all: (args: { count: number; category: string }) => string;
     some: (args: { done: number; total: number; category: string }) => string;
     problems: (args: { count: number }) => string;
   }
 > = {
   publish: {
+    busy: m.studio_content_bulk_busy_publish,
     all: m.studio_content_bulk_published_all,
     some: m.studio_content_bulk_published_some,
     problems: m.studio_content_bulk_problems_publish,
   },
   unpublish: {
+    busy: m.studio_content_bulk_busy_unpublish,
     all: m.studio_content_bulk_unpublished_all,
     some: m.studio_content_bulk_unpublished_some,
     problems: m.studio_content_bulk_problems_unpublish,
   },
   delete: {
+    busy: m.studio_content_bulk_busy_delete,
     all: m.studio_content_bulk_deleted_all,
     some: m.studio_content_bulk_deleted_some,
     problems: m.studio_content_bulk_problems_delete,
   },
   categories: {
+    busy: m.studio_content_bulk_busy_categories,
     all: m.studio_content_bulk_filed_all,
     some: m.studio_content_bulk_filed_some,
     problems: m.studio_content_bulk_problems_categories,
   },
   access: {
+    busy: m.studio_content_bulk_busy_access,
     all: m.studio_content_bulk_access_all,
     some: m.studio_content_bulk_access_some,
     problems: m.studio_content_bulk_problems_access,
   },
 };
+
+/** What the bar's live region says while an action runs: "Publishing 3…". */
+export function bulkBusyWords(
+  action: ContentBulkAction,
+  count: number,
+  category = ''
+): string {
+  return WORDS[action].busy({ count, category });
+}
 
 /** The code a refusal carries: the gate's own (`details.code`), else its class. */
 function refusalCode(error: { code: string; details?: unknown }): string {
@@ -141,7 +157,7 @@ export function bulkReport(
       ? [problemOf(r, pieces.get(r.id))]
       : []
   );
-  const summary = SUMMARY[action];
+  const summary = WORDS[action];
   const parts = [
     done === total
       ? summary.all({ count: total, category })

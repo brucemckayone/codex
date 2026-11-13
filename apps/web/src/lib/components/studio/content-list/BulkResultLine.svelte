@@ -4,7 +4,8 @@
   What a bulk action did (Codex-a6ofh.3.5, mockup L2): one line, and Show
   for the pieces that did not go through, each in the Publish checklist's
   words where it has them, with the way to put it right. A polite live
-  region, so the line is heard when it lands.
+  region, so the line is heard when it lands. Mounted afresh for each
+  result (`{#key}`), so a new one starts folded.
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
@@ -19,11 +20,6 @@
 
   const uid = $props.id();
   let shown = $state(false);
-  // A new result starts folded.
-  $effect.pre(() => {
-    void line;
-    shown = false;
-  });
 </script>
 
 <div class="bulk-result" role="status">

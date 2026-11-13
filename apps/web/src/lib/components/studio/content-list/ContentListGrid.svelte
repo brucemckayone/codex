@@ -16,6 +16,7 @@
   import * as m from '$paraglide/messages';
   import ContentCategories from './ContentCategories.svelte';
   import ContentRowLine from './ContentRowLine.svelte';
+  import ContentSelectBox from './ContentSelectBox.svelte';
   import ContentStatus from './ContentStatus.svelte';
   import ContentThumb from './ContentThumb.svelte';
   import type { ContentSelection } from './content-selection.svelte';
@@ -37,8 +38,8 @@
     showCategories: boolean;
     /** The bulk selection: a box on each card. */
     selection: ContentSelection;
-    /** A card's ⋯ menu. */
-    rowMenu: Snippet<[ContentWithRelations]>;
+    /** A card's ⋯ menu, given the row and where its title opens it. */
+    rowMenu: Snippet<[ContentWithRelations, string]>;
   }
 
   const { items, payouts, tierName, showCategories, selection, rowMenu }: Props = $props();
@@ -55,13 +56,13 @@
 <ul class="content-grid" role="list">
   {#each items as row (row.id)}
     {@const line = rowLine(row, payouts)}
+    {@const href = rowHref(row, line)}
     {@const counted = countLine(row)}
     {@const filed = showCategories ? categoryWords(row) : null}
-    {@const picked = selection.has(row.id)}
-    <li class="card" data-content-id={row.id} data-selected={picked || undefined}>
+    <li class="card" data-content-id={row.id} data-selected={selection.has(row.id) || undefined}>
       <ContentThumb piece={row} variant="card" />
       <div class="card-body">
-        <a class="card-title" href={rowHref(row, line)}>
+        <a class="card-title" {href}>
           {row.title}
         </a>
         <span class="card-facts">
@@ -75,17 +76,8 @@
         {#if line}<ContentRowLine {line} />{/if}
       </div>
       <!-- After the title's link, so they sit above the card-wide link. -->
-      <span class="card-tool card-select">
-        <input
-          type="checkbox"
-          class="card-check"
-          checked={picked}
-          disabled={!picked && selection.full}
-          aria-label={m.studio_content_bulk_select_row({ title: row.title })}
-          onchange={() => selection.toggle(row.id)}
-        />
-      </span>
-      <span class="card-tool card-menu">{@render rowMenu(row)}</span>
+      <span class="card-tool card-select"><ContentSelectBox {selection} {row} /></span>
+      <span class="card-tool card-menu">{@render rowMenu(row, href)}</span>
     </li>
   {/each}
 </ul>
@@ -141,23 +133,6 @@
 
   .card-menu {
     right: var(--space-3);
-  }
-
-  .card-check {
-    width: var(--space-4);
-    height: var(--space-4);
-    margin: 0;
-    accent-color: var(--color-interactive);
-    cursor: pointer;
-  }
-
-  .card-check:disabled {
-    cursor: not-allowed;
-  }
-
-  .card-check:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
   }
 
   /* The whole card is the title's link: one tab stop, and its ring, for a

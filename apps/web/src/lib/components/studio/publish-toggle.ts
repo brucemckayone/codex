@@ -1,9 +1,10 @@
 /**
  * Shared publish/unpublish toggle helper.
  *
- * Encapsulates the API call + toast pattern a live piece's Settings uses (the
- * content list's inline toggle went in Codex-a6ofh.3.1; its row menu, E3.5,
- * is the next caller). Each caller handles its own optimistic UI.
+ * Encapsulates the API call + toast pattern a live piece's Settings uses. The
+ * content list's row menu goes through the bulk endpoint instead
+ * (Codex-a6ofh.3.5), so its result line reads as the bulk bar's. Each caller
+ * handles its own optimistic UI.
  */
 
 import { toast } from '$lib/components/ui/Toast/toast-store';

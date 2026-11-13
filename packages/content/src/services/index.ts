@@ -21,6 +21,7 @@ export {
   invalidateContentAccessMany,
   invalidateOrgMembership,
   invalidatePlanSubscriberLibraries,
+  orgsOf,
   type WaitUntilFn,
 } from './content-invalidation';
 // Content Service
@@ -28,7 +29,6 @@ export {
   CATALOGUE_CONTENT_COLUMNS,
   ContentService,
   type ContentServiceConfig,
-  orgsOf,
   PUBLIC_CREATOR_COLUMNS,
   PUBLIC_MEDIA_ITEM_COLUMNS,
   PUBLIC_ORGANIZATION_COLUMNS,

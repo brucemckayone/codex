@@ -204,17 +204,7 @@ export const DEFAULT_MAX_LIBRARY_FANOUT = 500;
 export async function invalidateContentAccess(
   args: InvalidateContentAccessArgs
 ): Promise<void> {
-  const {
-    db,
-    cache,
-    waitUntil,
-    contentId,
-    organizationId,
-    reason,
-    logger,
-    includeFollowers = false,
-    maxFanout = DEFAULT_MAX_LIBRARY_FANOUT,
-  } = args;
+  const { contentId, organizationId, reason } = args;
 
   if (typeof contentId !== 'string' || contentId.length === 0) {
     throw new ValidationError(
@@ -223,30 +213,107 @@ export async function invalidateContentAccess(
     );
   }
 
-  // --- Catalogue bumps (always) -------------------------------------------
-  bumpWithLogger(
+  await invalidateContentAccessMany({
+    ...args,
+    pieces: [{ id: contentId, organizationId }],
+    logContext: { contentId, organizationId },
+  });
+}
+
+/** A piece whose people to refresh, and the org it is filed in, if any. */
+export interface InvalidatedPiece {
+  id: string;
+  organizationId: string | null;
+}
+
+/** The orgs pieces are filed in, each once. */
+export function orgsOf(pieces: readonly InvalidatedPiece[]): string[] {
+  return [
+    ...new Set(
+      pieces.flatMap((piece) =>
+        piece.organizationId ? [piece.organizationId] : []
+      )
+    ),
+  ];
+}
+
+/** Arguments for {@link invalidateContentAccessMany}. */
+export interface InvalidateContentAccessManyArgs
+  extends Pick<
+    InvalidateContentAccessArgs,
+    | 'db'
+    | 'cache'
+    | 'waitUntil'
+    | 'reason'
+    | 'logger'
+    | 'includeFollowers'
+    | 'maxFanout'
+  > {
+  pieces: readonly InvalidatedPiece[];
+  /**
+   * Bump the catalogue keys (`COLLECTION_CONTENT_PUBLISHED`, each org's
+   * `COLLECTION_ORG_CONTENT`) too. Default true. A bulk action's route bumps
+   * them itself, once (`afterBulkChange`), so it passes false: KV takes
+   * about one write a second to a key.
+   */
+  catalogue?: boolean;
+  /** Merged into every log line, e.g. the one piece's id. */
+  logContext?: Record<string, unknown>;
+}
+
+/**
+ * {@link invalidateContentAccess} for any number of pieces (a bulk action's,
+ * Codex-a6ofh.3.5). Each catalogue key is bumped once, however many pieces
+ * share it, and each user's library once, however many of the pieces they
+ * hold. The users are the union of every piece's, read once per source:
+ * the pieces' buyers, and their orgs' subscribers, team and (opt-in)
+ * followers. Above `maxFanout` users in all, the per-user bumps are skipped
+ * (logged).
+ */
+export async function invalidateContentAccessMany(
+  args: InvalidateContentAccessManyArgs
+): Promise<void> {
+  const {
+    db,
     cache,
     waitUntil,
-    CacheType.COLLECTION_CONTENT_PUBLISHED,
-    { reason, contentId, key: 'content:published' },
-    logger
-  );
+    pieces,
+    reason,
+    logger,
+    includeFollowers = false,
+    maxFanout = DEFAULT_MAX_LIBRARY_FANOUT,
+    catalogue = true,
+    logContext = { pieces: pieces.length },
+  } = args;
+  if (pieces.length === 0) return;
+  const contentIds = [...new Set(pieces.map((piece) => piece.id))];
+  const organizationIds = orgsOf(pieces);
 
-  if (organizationId) {
+  // --- Catalogue bumps ------------------------------------------------------
+  if (catalogue) {
     bumpWithLogger(
       cache,
       waitUntil,
-      CacheType.COLLECTION_ORG_CONTENT(organizationId),
-      { reason, contentId, key: 'org:content' },
+      CacheType.COLLECTION_CONTENT_PUBLISHED,
+      { reason, ...logContext, key: 'content:published' },
       logger
     );
+    for (const organizationId of organizationIds) {
+      bumpWithLogger(
+        cache,
+        waitUntil,
+        CacheType.COLLECTION_ORG_CONTENT(organizationId),
+        { reason, ...logContext, organizationId, key: 'org:content' },
+        logger
+      );
+    }
   }
 
   // --- Resolve affected user set ------------------------------------------
   const affectedUserIds = await resolveAffectedUsers({
     db,
-    contentIds: [contentId],
-    organizationIds: organizationId ? [organizationId] : [],
+    contentIds,
+    organizationIds,
     includeFollowers,
   });
 
@@ -256,8 +323,7 @@ export async function invalidateContentAccess(
 
   if (affectedUserIds.size > maxFanout) {
     logger?.warn('content-invalidation: fanout skipped (cap exceeded)', {
-      contentId,
-      organizationId,
+      ...logContext,
       reason,
       userCount: affectedUserIds.size,
       maxFanout,
@@ -271,105 +337,16 @@ export async function invalidateContentAccess(
       cache,
       waitUntil,
       CacheType.COLLECTION_USER_LIBRARY(userId),
-      { reason, contentId, organizationId, userId, key: 'user:library' },
+      { reason, ...logContext, userId, key: 'user:library' },
       logger
     );
   }
 
   logger?.info?.('content-invalidation: fanout complete', {
-    contentId,
-    organizationId,
+    ...logContext,
     reason,
     userCount: affectedUserIds.size,
   });
-}
-
-/** Arguments for {@link invalidateContentAccessMany}. */
-export interface InvalidateContentAccessManyArgs {
-  db: Database;
-  cache: VersionedCache;
-  waitUntil: WaitUntilFn;
-  /** The pieces that changed, each with the org it is filed in, if any. */
-  pieces: Array<{ contentId: string; organizationId: string | null }>;
-  reason: ContentInvalidationReason;
-  logger?: InvalidationLogger;
-  /** Override the fanout cap (default {@link DEFAULT_MAX_LIBRARY_FANOUT}). */
-  maxFanout?: number;
-}
-
-/**
- * {@link invalidateContentAccess} for a bulk action's pieces
- * (Codex-a6ofh.3.5). Each catalogue key is bumped once, not once a piece: KV
- * takes about one write a second to a key, so fifteen bumps of one key lose
- * writes. Each user's library is bumped once too, however many of the pieces
- * they hold. The users are the union of every piece's, read once per source:
- * the pieces' buyers, and each org's subscribers and team. Above `maxFanout`
- * users in all, the per-user bumps are skipped (logged), as for one piece.
- */
-export async function invalidateContentAccessMany(
-  args: InvalidateContentAccessManyArgs
-): Promise<void> {
-  const {
-    db,
-    cache,
-    waitUntil,
-    pieces,
-    reason,
-    logger,
-    maxFanout = DEFAULT_MAX_LIBRARY_FANOUT,
-  } = args;
-  if (pieces.length === 0) return;
-  const contentIds = [...new Set(pieces.map((piece) => piece.contentId))];
-  const organizationIds = [
-    ...new Set(
-      pieces.flatMap((piece) =>
-        piece.organizationId ? [piece.organizationId] : []
-      )
-    ),
-  ];
-
-  bumpWithLogger(
-    cache,
-    waitUntil,
-    CacheType.COLLECTION_CONTENT_PUBLISHED,
-    { reason, pieces: contentIds.length, key: 'content:published' },
-    logger
-  );
-  for (const organizationId of organizationIds) {
-    bumpWithLogger(
-      cache,
-      waitUntil,
-      CacheType.COLLECTION_ORG_CONTENT(organizationId),
-      { reason, organizationId, key: 'org:content' },
-      logger
-    );
-  }
-
-  const affectedUserIds = await resolveAffectedUsers({
-    db,
-    contentIds,
-    organizationIds,
-    includeFollowers: false,
-  });
-  if (affectedUserIds.size === 0) return;
-  if (affectedUserIds.size > maxFanout) {
-    logger?.warn('content-invalidation: fanout skipped (cap exceeded)', {
-      pieces: contentIds.length,
-      reason,
-      userCount: affectedUserIds.size,
-      maxFanout,
-    });
-    return;
-  }
-  for (const userId of affectedUserIds) {
-    bumpWithLogger(
-      cache,
-      waitUntil,
-      CacheType.COLLECTION_USER_LIBRARY(userId),
-      { reason, userId, key: 'user:library' },
-      logger
-    );
-  }
 }
 
 // ============================================================================

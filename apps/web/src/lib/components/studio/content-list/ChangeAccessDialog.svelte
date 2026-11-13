@@ -23,14 +23,11 @@
   @prop busy     The change is under way
 -->
 <script lang="ts">
-  import { untrack } from 'svelte';
-  import { PRICE_LIMITS } from '@codex/constants';
   import { Button } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
   import { InfoIcon, AlertTriangleIcon } from '$lib/components/ui/Icon';
   import { listTiers } from '$lib/remote/subscription.remote';
-  import type { SubscriptionTier } from '$lib/types';
-  import type { PayoutsRead } from '$lib/utils/connect-readiness';
+  import { connectQueryState, type PayoutsRead } from '$lib/utils/connect-readiness';
   import {
     accessGroupToFlags,
     type ContentAccessKind,
@@ -38,7 +35,9 @@
   } from '$lib/utils/content-access';
   import * as m from '$paraglide/messages';
   import AccessSection from '../content-form/AccessSection.svelte';
-  import { priceText } from '../editor/publish-access';
+  import type { DraftAccess } from '../editor/draft-session.svelte';
+  import { priceCentsOf, priceText } from '../editor/publish-access';
+  import { accessGaps } from '../editor/publish-gaps';
   import { logReadFailure } from '../media-library/log-read-failure';
   import { selectFromTier, toggleTierId } from '../plan-picker/select-from-tier';
   import {
@@ -65,74 +64,59 @@
   // The org's tiers, as the editor reads them: kit shares one query per org.
   const tiersQuery = $derived(organizationId ? listTiers(organizationId) : null);
   $effect(() => {
-    if (tiersQuery?.error != null) {
-      logReadFailure('studio_content.bulk_access_tiers_unread', tiersQuery.error, {
-        organizationId: untrack(() => organizationId),
-      });
+    const error = tiersQuery?.error;
+    if (error != null) {
+      logReadFailure('studio_content.bulk_access_tiers_unread', error, { organizationId });
     }
   });
-  const tiers = $derived<SubscriptionTier[]>(tiersQuery?.current ?? []);
-  const tiersState = $derived.by((): 'loading' | 'loaded' | 'failed' => {
-    if (tiersQuery === null) return 'loaded';
-    if (tiersQuery.current !== undefined) return 'loaded';
-    return tiersQuery.error != null ? 'failed' : 'loading';
-  });
+  const tiersRead = $derived(connectQueryState(tiersQuery));
+  const tiers = $derived(tiersRead.kind === 'ok' ? tiersRead.status : []);
+  const tiersState = $derived(
+    tiersQuery === null || tiersRead.kind === 'ok' ? 'loaded' : tiersRead.kind
+  );
 
   // ── What the sheet holds ──────────────────────────────────────────────
-  // Set afresh each time it opens, from the pieces: their one kind when
-  // they share it (else Free), and their one price when they share it.
-  let kind = $state<ContentAccessKind>('free');
-  let typedPrice = $state('');
-  // Null: every tier ticked (D-b6), until the creator changes one.
-  let picked = $state<string[] | null>(null);
-  let openedFor: readonly unknown[] | null = null;
-  $effect.pre(() => {
-    const now = pieces;
-    if (now === openedFor) return;
-    openedFor = now;
-    if (now === null) return;
-    const kinds = new Set(now.map((piece) => deriveContentAccessKind(piece)));
+  // Set afresh each time it opens, from the pieces: their one kind when they
+  // share it (else Free), their one price when they share it, and every
+  // tier ticked (D-b6). Writable: the creator's changes hold until the next
+  // opening, as each re-derives only from the pieces.
+  const start = $derived.by(() => {
+    const kinds = new Set(selected.map((piece) => deriveContentAccessKind(piece)));
     const [only] = kinds;
-    const startKind = kinds.size === 1 && only ? only : 'free';
-    const price = sharedPrice(now);
-    untrack(() => {
-      kind = startKind;
-      typedPrice = price === null ? '' : priceText(price);
-      picked = null;
-    });
+    const price = sharedPrice(selected);
+    return {
+      kind: kinds.size === 1 && only ? only : ('free' as ContentAccessKind),
+      typedPrice: price === null ? '' : priceText(price),
+      // Null: every tier ticked, until the creator changes one.
+      tierIds: null as string[] | null,
+    };
   });
+  let kind = $derived(start.kind);
+  let typedPrice = $derived(start.typedPrice);
+  let picked = $derived(start.tierIds);
 
   const tierIds = $derived(picked ?? tiers.map((tier) => tier.id));
-  const priceCents = $derived.by(() => {
-    const pounds = parseFloat(typedPrice || '0');
-    return Number.isNaN(pounds) ? 0 : Math.round(pounds * 100);
-  });
+  const priceCents = $derived(priceCentsOf(typedPrice));
 
   /** Kinds that belong to an org fall back to Free when the selection has none. */
   const effectiveKind = $derived<ContentAccessKind>(
     organizationId === null && kind !== 'free' && kind !== 'paid' ? 'free' : kind
   );
-  const choice = $derived({
+  // Buy once leaves each piece's tiers as they are (null): only Subscribers
+  // sends a set.
+  const choice = $derived<DraftAccess>({
     kind: effectiveKind,
     priceCents: effectiveKind === 'paid' || effectiveKind === 'subscribers' ? priceCents : 0,
     tierIds: effectiveKind === 'subscribers' ? tierIds : null,
   });
   const lines = $derived(accessChangeLines(selected, choice));
 
-  // What the Publish step refuses before asking, here too.
-  const blocked = $derived.by(() => {
-    if (effectiveKind === 'paid') {
-      return !connectReady || priceCents < PRICE_LIMITS.MIN_CENTS;
-    }
-    if (effectiveKind === 'subscribers') {
-      return (
-        !connectReady ||
-        tiersState !== 'loaded' ||
-        (priceCents > 0 && priceCents < PRICE_LIMITS.MIN_CENTS)
-      );
-    }
-    return false;
-  });
+  // What the Publish step refuses before asking, here too, by its own rule;
+  // and Subscribers waits for the tiers it ticks.
+  const blocked = $derived(
+    accessGaps(choice, organizationId, connectReady).length > 0 ||
+      (effectiveKind === 'subscribers' && tiersState !== 'loaded')
+  );
 
   function submit() {
     if (blocked || busy) return;

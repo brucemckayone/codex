@@ -23,7 +23,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { type ContentAttentionKind, CONTENT_STATUS } from '@codex/constants';
+  import { type ContentAttentionKind, CONTENT_STATUS, ERROR_CODES } from '@codex/constants';
   import type { ContentBulkAction } from '@codex/shared-types';
   import { boundSearchParam, type ContentQueryInput, gateSearchQuery } from '@codex/validation';
   import { page } from '$app/state';
@@ -42,7 +42,7 @@
     listContent,
     runContentBulk,
   } from '$lib/remote/content.remote';
-  import { remoteErrorStatus } from '$lib/remote/query-result';
+  import { remoteErrorCode, remoteErrorStatus } from '$lib/remote/query-result';
   import type { ContentWithRelations } from '$lib/types';
   import type { accessGroupToFlags } from '$lib/utils/content-access';
   import { listTiers } from '$lib/remote/subscription.remote';
@@ -51,13 +51,14 @@
   import { pieceHref } from '../editor/editor-url';
   import LoadFailedAlert from '../LoadFailedAlert.svelte';
   import { createFacetRetry } from '../list-toolbar/facet-retry.svelte';
+  import type { FacetUnread } from '../list-toolbar/list-option';
   import { createListSearch, createListUrlWriter } from '../list-url-writer';
   import { logReadFailure } from '../media-library/log-read-failure';
   import { PagedList } from '../paged-list.svelte';
   import PagedListMore from '../PagedListMore.svelte';
   import { createPayoutsRead } from '../payouts-read.svelte';
   import BulkResultLine from './BulkResultLine.svelte';
-  import { type BulkProblem, bulkReport } from './bulk-report';
+  import { type BulkProblem, bulkBusyWords, bulkReport } from './bulk-report';
   import ChangeAccessDialog from './ChangeAccessDialog.svelte';
   import ContentBulkBar from './ContentBulkBar.svelte';
   import ContentRowMenu from './ContentRowMenu.svelte';
@@ -80,7 +81,6 @@
   } from './list-url';
   import NeedsYouStrip from './NeedsYouStrip.svelte';
   import NewContentMenu from './NewContentMenu.svelte';
-  import { rowHref, rowLine } from './row-facts';
 
   interface Props {
     /** The org studio's org; null lists the personal studio's content. */
@@ -293,16 +293,11 @@
   });
 
   // ── Bulk actions and the row menu (Codex-a6ofh.3.5) ──────────────────
-  const selection = new ContentSelection();
-  // A changed view (Where, a filter, the sort, the search) starts afresh: the
-  // selection holds only rows it shows. A re-read keeps the rows still shown.
-  $effect(() => {
+  // A new one for each view (Where, a filter, the sort, the search): the
+  // selection holds only rows it shows.
+  const selection = $derived.by(() => {
     void list.key;
-    untrack(() => selection.clear());
-  });
-  $effect(() => {
-    const shown = new Set(list.items.map((row) => row.id));
-    untrack(() => selection.keepOnly(shown));
+    return new ContentSelection();
   });
   /** The selected rows, in the list's order: the order they are sent in. */
   const picked = $derived(list.items.filter((row) => selection.has(row.id)));
@@ -312,71 +307,84 @@
     studio === 'org' ? (categories?.current ?? undefined) : undefined
   );
 
-  const BUSY: Record<ContentBulkAction, (count: number, category: string) => string> = {
-    publish: (count) => m.studio_content_bulk_busy_publish({ count }),
-    unpublish: (count) => m.studio_content_bulk_busy_unpublish({ count }),
-    delete: (count) => m.studio_content_bulk_busy_delete({ count }),
-    categories: (count, category) => m.studio_content_bulk_busy_categories({ count, category }),
-    access: (count) => m.studio_content_bulk_busy_access({ count }),
-  };
-
   let busy = $state<string | null>(null);
   let result = $state<{ line: string; problems: BulkProblem[] } | null>(null);
   let deleteTarget = $state<DeleteTarget | null>(null);
   let accessPieces = $state<ContentWithRelations[] | null>(null);
 
-  // The list and "Needs you" read again in place, as held: kit drops a query
-  // whose first read failed, so `invalidateAll` would skip it (E3.1). The
-  // Where counts too, in the personal studio, since a delete moves them.
-  let refreshFailed = $state(false);
-  let refreshRetrying = $state(false);
-  let refreshFailedAgain = $state(false);
-  async function refreshAfterChange(): Promise<void> {
-    void attention.refresh().catch(() => undefined);
-    void whereCounts?.refresh().catch(() => undefined);
+  // A re-read after a change that failed: the rows shown are the last that
+  // arrived. One Try again for each failure, so a later one starts afresh.
+  let stale = $state<FacetUnread | null>(null);
+
+  /**
+   * The list read again in place, as held: kit drops a query whose first
+   * read failed, so `invalidateAll` would skip it (E3.1). Rejects when it
+   * fails, for the Try again. The selection keeps the rows still shown.
+   */
+  async function readListAgain(): Promise<void> {
     try {
       await list.refresh();
-      refreshFailed = false;
+      stale = null;
+      selection.keepOnly(list.items.map((row) => row.id));
     } catch (error) {
-      refreshFailed = true;
       logReadFailure('studio_content.refresh_after_change_failed', error, {
         studio,
         organizationId,
       });
+      stale ??= createFacetRetry({
+        failed: () => m.studio_content_refresh_failed(),
+        failedAgain: () => m.studio_content_refresh_failed_again(),
+        read: readListAgain,
+      });
+      throw error;
     }
   }
-  async function retryRefresh() {
-    if (refreshRetrying) return;
-    refreshRetrying = true;
-    await refreshAfterChange();
-    refreshFailedAgain = refreshFailed;
-    refreshRetrying = false;
-  }
-
-  type BulkCall =
-    | { action: 'publish' | 'unpublish' | 'delete' }
-    | { action: 'categories'; categoryIds: string[]; category: string }
-    | { action: 'access'; access: ReturnType<typeof accessGroupToFlags> };
 
   /**
-   * One request for the action, then the line that says what it did. The
-   * pieces that did not go through stay selected (`keep`). A request that
-   * failed as a whole may still have changed some: the list is read again.
+   * What a change moves, read again: the list always; "Needs you" unless it
+   * only filed pieces (categories are none of its counts); the Where
+   * counts only for a delete, the one change that moves a piece out of one.
    */
-  async function runBulk(rows: readonly ContentWithRelations[], call: BulkCall): Promise<boolean> {
-    if (busy !== null || rows.length === 0) return false;
+  async function refreshAfterChange(action: ContentBulkAction): Promise<void> {
+    if (action !== 'categories') void attention.refresh().catch(() => undefined);
+    if (action === 'delete') void whereCounts?.refresh().catch(() => undefined);
+    await readListAgain().catch(() => undefined);
+  }
+
+  /**
+   * The command's body without its ids: the rows give those. Kit types the
+   * argument `void | …`; each action's body keeps its own fields.
+   */
+  type BulkBody = Exclude<Parameters<typeof runContentBulk>[0], void>;
+  type BulkCall = BulkBody extends infer Body ? (Body extends unknown ? Omit<Body, 'ids'> : never) : never;
+
+  interface BulkOptions {
+    /** The category's name, for the line: Add to category. */
+    category?: string;
+    /**
+     * The rows are the selection's (the bulk bar, its Delete…): afterwards
+     * it holds only the pieces that did not go through. A row menu's
+     * leaves the selection as it is.
+     */
+    fromSelection?: boolean;
+  }
+
+  /**
+   * One request for the action, then the line that says what it did. A
+   * request that failed as a whole may still have changed some: the list
+   * is read again either way.
+   */
+  async function runBulk(
+    rows: readonly ContentWithRelations[],
+    call: BulkCall,
+    { category = '', fromSelection = true }: BulkOptions = {}
+  ): Promise<void> {
+    if (busy !== null || rows.length === 0) return;
     const ids = rows.map((row) => row.id);
-    const category = call.action === 'categories' ? call.category : '';
-    busy = BUSY[call.action](ids.length, category);
+    busy = bulkBusyWords(call.action, ids.length, category);
     result = null;
     try {
-      const body =
-        call.action === 'categories'
-          ? { action: call.action, ids, categoryIds: call.categoryIds }
-          : call.action === 'access'
-            ? { action: call.action, ids, access: call.access }
-            : { action: call.action, ids };
-      const { results } = await runContentBulk(body);
+      const { results } = await runContentBulk({ ...call, ids });
       const report = bulkReport(
         call.action,
         results,
@@ -384,8 +392,7 @@
         category
       );
       result = { line: report.line, problems: report.problems };
-      selection.keepOnly(report.keep);
-      return true;
+      if (fromSelection) selection.keepOnly(report.keep);
     } catch (error) {
       logReadFailure('studio_content.bulk_failed', error, {
         studio,
@@ -400,10 +407,9 @@
             : m.studio_content_bulk_request_failed(),
         problems: [],
       };
-      return false;
     } finally {
       busy = null;
-      await refreshAfterChange();
+      await refreshAfterChange(call.action);
     }
   }
 
@@ -422,24 +428,29 @@
     // One at a time stays possible for a piece people bought (owner D-b4):
     // the per-piece delete, which the server does not refuse for buyers.
     const { piece } = target;
-    busy = BUSY.delete(1, '');
+    busy = bulkBusyWords('delete', 1);
     try {
-      await deleteContent(piece.id);
+      await deleteContent(piece.id).catch((error: unknown) => {
+        // Gone already (another tab): what was asked for is so.
+        if (remoteErrorCode(error) !== ERROR_CODES.CONTENT_NOT_FOUND) throw error;
+      });
       result = { line: m.studio_content_deleted_one({ title: piece.title }), problems: [] };
+      selection.drop(piece.id);
       deleteTarget = null;
     } catch (error) {
       logReadFailure('studio_content.row_delete_failed', error, { studio, contentId: piece.id });
       toast.error(remoteErrorMessage(error) ?? m.studio_content_delete_failed({ title: piece.title }));
     } finally {
       busy = null;
-      await refreshAfterChange();
+      await refreshAfterChange('delete');
     }
   }
 
   async function unpublishInstead(ids: string[]) {
+    const fromSelection = deleteTarget?.mode === 'many';
     const rows = list.items.filter((row) => ids.includes(row.id));
     deleteTarget = null;
-    await runBulk(rows, { action: 'unpublish' });
+    await runBulk(rows, { action: 'unpublish' }, { fromSelection });
   }
 
   async function submitAccess(access: ReturnType<typeof accessGroupToFlags>) {
@@ -550,18 +561,17 @@
     </div>
   {/if}
 
-  {#if refreshFailed && list.landed}
+  {#if stale && list.landed}
+    {@const retry = stale}
     <!-- A re-read after a change failed: these rows are the last that arrived. -->
     <div class="stale" role="alert">
-      <p class="stale-text">
-        {refreshFailedAgain ? m.studio_content_refresh_failed_again() : m.studio_content_refresh_failed()}
-      </p>
+      <p class="stale-text">{retry.words}</p>
       <Button
         size="sm"
         variant="secondary"
-        loading={refreshRetrying}
-        disabled={refreshRetrying}
-        onclick={retryRefresh}
+        loading={retry.retrying}
+        disabled={retry.retrying}
+        onclick={() => retry.retry()}
       >
         {m.common_try_again()}
       </Button>
@@ -579,14 +589,16 @@
       onPublish={() => runBulk(bulkDrafts, { action: 'publish' })}
       onUnpublish={() => runBulk(bulkLive, { action: 'unpublish' })}
       onAddCategory={(category) =>
-        runBulk(picked, { action: 'categories', categoryIds: [category.id], category: category.name })}
+        runBulk(picked, { action: 'categories', categoryIds: [category.id] }, { category: category.name })}
       onChangeAccess={() => (accessPieces = picked)}
       onDelete={() => (deleteTarget = { mode: 'many', pieces: picked })}
       onClear={() => selection.clear()}
     />
   {/if}
   {#if result}
-    <BulkResultLine line={result.line} problems={result.problems} />
+    {#key result}
+      <BulkResultLine line={result.line} problems={result.problems} />
+    {/key}
   {/if}
 
   <div
@@ -659,14 +671,14 @@
   </div>
 </div>
 
-{#snippet rowMenu(row: ContentWithRelations)}
+{#snippet rowMenu(row: ContentWithRelations, editHref: string)}
   <ContentRowMenu
     {row}
-    editHref={rowHref(row, rowLine(row, payouts.current))}
+    {editHref}
     liveHref={liveHref(row)}
     busy={busy !== null}
-    onPublish={() => runBulk([row], { action: 'publish' })}
-    onUnpublish={() => runBulk([row], { action: 'unpublish' })}
+    onPublish={() => runBulk([row], { action: 'publish' }, { fromSelection: false })}
+    onUnpublish={() => runBulk([row], { action: 'unpublish' }, { fromSelection: false })}
     onDelete={() => (deleteTarget = { mode: 'one', piece: row })}
   />
 {/snippet}

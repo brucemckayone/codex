@@ -637,10 +637,10 @@ describe('invalidateContentAccessMany', () => {
       cache,
       waitUntil,
       pieces: [
-        { contentId: CONTENT_ID, organizationId: ORG_ID },
-        { contentId: OTHER_CONTENT, organizationId: ORG_ID },
-        { contentId: 'p3', organizationId: OTHER_ORG },
-        { contentId: 'p4', organizationId: null },
+        { id: CONTENT_ID, organizationId: ORG_ID },
+        { id: OTHER_CONTENT, organizationId: ORG_ID },
+        { id: 'p3', organizationId: OTHER_ORG },
+        { id: 'p4', organizationId: null },
       ],
       reason: 'content_deleted',
     });
@@ -668,8 +668,8 @@ describe('invalidateContentAccessMany', () => {
       cache,
       waitUntil,
       pieces: [
-        { contentId: CONTENT_ID, organizationId: ORG_ID },
-        { contentId: OTHER_CONTENT, organizationId: ORG_ID },
+        { id: CONTENT_ID, organizationId: ORG_ID },
+        { id: OTHER_CONTENT, organizationId: ORG_ID },
       ],
       reason: 'content_updated',
     });
@@ -695,7 +695,7 @@ describe('invalidateContentAccessMany', () => {
       db,
       cache,
       waitUntil,
-      pieces: [{ contentId: CONTENT_ID, organizationId: null }],
+      pieces: [{ id: CONTENT_ID, organizationId: null }],
       reason: 'content_unpublished',
     });
     await Promise.all(promises);
@@ -723,7 +723,7 @@ describe('invalidateContentAccessMany', () => {
       db,
       cache,
       waitUntil,
-      pieces: [{ contentId: CONTENT_ID, organizationId: null }],
+      pieces: [{ id: CONTENT_ID, organizationId: null }],
       reason: 'content_deleted',
       logger,
       maxFanout: 2,
@@ -737,6 +737,32 @@ describe('invalidateContentAccessMany', () => {
     expect(logger.warn).toHaveBeenCalledWith(
       'content-invalidation: fanout skipped (cap exceeded)',
       expect.objectContaining({ userCount: 3, maxFanout: 2 })
+    );
+  });
+
+  it('leaves the catalogue keys to its caller with catalogue: false', async () => {
+    const db = makeDb({ purchases: [{ customerId: 'u-buyer' }] });
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+
+    await invalidateContentAccessMany({
+      db,
+      cache,
+      waitUntil,
+      pieces: [{ id: CONTENT_ID, organizationId: ORG_ID }],
+      reason: 'content_published',
+      catalogue: false,
+    });
+    await Promise.all(promises);
+
+    expect(invalidate).not.toHaveBeenCalledWith(
+      CacheType.COLLECTION_CONTENT_PUBLISHED
+    );
+    expect(invalidate).not.toHaveBeenCalledWith(
+      CacheType.COLLECTION_ORG_CONTENT(ORG_ID)
+    );
+    expect(invalidate).toHaveBeenCalledWith(
+      CacheType.COLLECTION_USER_LIBRARY('u-buyer')
     );
   });
 

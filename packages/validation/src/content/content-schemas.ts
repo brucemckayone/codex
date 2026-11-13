@@ -1001,14 +1001,28 @@ export const contentBulkSchema = z.object({ ids: contentBulkIdsField });
 export type ContentBulkInput = z.infer<typeof contentBulkSchema>;
 
 /** `POST /api/content/bulk/categories`: the categories go to every piece. */
-export const contentBulkCategoriesSchema = z.object({
-  ids: contentBulkIdsField,
+export const contentBulkCategoriesSchema = contentBulkSchema.extend({
   categoryIds: addContentCategoriesSchema.shape.categoryIds,
 });
 
 export type ContentBulkCategoriesInput = z.infer<
   typeof contentBulkCategoriesSchema
 >;
+
+/**
+ * The fields of an update's access group (owner D-b2), as a `.pick` mask:
+ * the bulk access body is these and nothing else, and the service's
+ * "already reads so" check compares these.
+ */
+export const CONTENT_ACCESS_GROUP_FIELDS = {
+  isFree: true,
+  isPurchasable: true,
+  priceCents: true,
+  isTierGated: true,
+  includedInTierIds: true,
+  isFollowerGated: true,
+  isTeamOnly: true,
+} as const;
 
 /**
  * Who can watch, and nothing else: the access group of an update (owner
@@ -1018,15 +1032,7 @@ export type ContentBulkCategoriesInput = z.infer<
  * a title or a slug can't ride along on a bulk change.
  */
 export const contentAccessGroupSchema = baseContentSchema
-  .pick({
-    isFree: true,
-    isPurchasable: true,
-    priceCents: true,
-    isTierGated: true,
-    includedInTierIds: true,
-    isFollowerGated: true,
-    isTeamOnly: true,
-  })
+  .pick(CONTENT_ACCESS_GROUP_FIELDS)
   .partial()
   .strict()
   .refine((access) => Object.keys(access).length > 0, {
@@ -1047,8 +1053,7 @@ export const contentAccessGroupSchema = baseContentSchema
 export type ContentAccessGroupInput = z.infer<typeof contentAccessGroupSchema>;
 
 /** `POST /api/content/bulk/access`: one access for every piece. */
-export const contentBulkAccessSchema = z.object({
-  ids: contentBulkIdsField,
+export const contentBulkAccessSchema = contentBulkSchema.extend({
   access: contentAccessGroupSchema,
 });
 

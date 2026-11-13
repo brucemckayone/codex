@@ -19,7 +19,7 @@ import { accessGroupToFlags } from '$lib/utils/content-access';
 import { formatPrice } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import { TYPE_WORD } from './canvas-text';
-import type { DraftValues } from './draft-session.svelte';
+import type { DraftAccess, DraftValues } from './draft-session.svelte';
 import type { EditorContentType } from './editor-url';
 
 /** A row of the checklist: a refusal's own code, or a title still to type. */
@@ -69,10 +69,26 @@ export function publishGaps(facts: PublishFacts): PublishGap[] {
     gaps.push('MEDIA_NOT_READY');
   }
   if (facts.coverDeleted) gaps.push('THUMBNAIL_MEDIA_DELETED');
+  gaps.push(
+    ...accessGaps(values.access, facts.organizationId, facts.connectReady)
+  );
+  return gaps;
+}
 
-  // The same flags a save sends, so the rules read what would go live.
-  const { access } = values;
-  const flags = accessGroupToFlags(access, facts.organizationId);
+/**
+ * What the access group alone is refused for: a price under £1, a plan
+ * switch with none ticked, and an earning piece without payouts. Judged on
+ * the same flags a save sends, so the rules read what would go live. The
+ * Publish step's last rows, and what holds the content list's Change access
+ * sheet back (Codex-a6ofh.3.5), so both judge by one rule.
+ */
+export function accessGaps(
+  access: DraftAccess,
+  organizationId: string | null,
+  connectReady: boolean
+): PublishGap[] {
+  const flags = accessGroupToFlags(access, organizationId);
+  const gaps: PublishGap[] = [];
   if (flags.isPurchasable && (flags.priceCents ?? 0) < PRICE_LIMITS.MIN_CENTS) {
     gaps.push('PRICE_REQUIRED');
   }
@@ -84,7 +100,7 @@ export function publishGaps(facts: PublishFacts): PublishGap[] {
   ) {
     gaps.push('TIER_REQUIRED_TO_PUBLISH');
   }
-  if (!facts.connectReady && earnsByFlags(flags)) {
+  if (!connectReady && earnsByFlags(flags)) {
     gaps.push('CREATOR_CONNECT_REQUIRED');
   }
   return gaps;

@@ -38,4 +38,15 @@ describe('ContentSelection', () => {
     selection.keepOnly(['p2', 'p4', 'gone']);
     expect(selection.ids).toEqual(['p2', 'p4']);
   });
+
+  it('keeps the same ids when nothing goes, and drops one piece on its own', () => {
+    const selection = new ContentSelection();
+    for (const id of ids(3)) selection.toggle(id);
+    const before = selection.ids;
+    selection.keepOnly(ids(5));
+    expect(selection.ids).toBe(before);
+    selection.drop('p2');
+    selection.drop('never-held');
+    expect(selection.ids).toEqual(['p1', 'p3']);
+  });
 });

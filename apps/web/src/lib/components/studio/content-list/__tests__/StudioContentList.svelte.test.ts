@@ -1257,6 +1257,75 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
 
     expect(text()).toContain(m.studio_content_refresh_failed());
     expect(button(m.common_try_again())).toBeDefined();
+
+    // A Try again that fails says so again; one that reads the list ends it.
+    s.refreshFirst.mockRejectedValueOnce(new Error('still down'));
+    button(m.common_try_again())?.click();
+    await settle();
+    expect(text()).toContain(m.studio_content_refresh_failed_again());
+
+    button(m.common_try_again())?.click();
+    await settle();
+    expect(text()).not.toContain(m.studio_content_refresh_failed_again());
+    expect(text()).not.toContain(m.studio_content_refresh_failed());
+  });
+
+  // The row menu (Melt): opened from the keyboard, as its own suite does.
+  async function rowMenuItem(title: string, item: string) {
+    document
+      .querySelector<HTMLElement>(
+        `[aria-label="${m.studio_content_row_actions({ title })}"]`
+      )
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+    await settle();
+    return [
+      ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ].find((el) => el.textContent?.trim() === item);
+  }
+
+  test('a row menu acts on its row alone, and leaves the selection as it was', async () => {
+    const rows = [piece(1), piece(2)];
+    s.first = { current: pageOf(rows), error: undefined };
+    runContentBulk.mockResolvedValue({
+      results: [{ id: rows[1]?.id, outcome: 'done' }],
+    });
+    render();
+    pageBox()?.click();
+    flushSync();
+
+    (await rowMenuItem('Piece 2', m.studio_content_row_publish()))?.click();
+    await settle();
+
+    expect(runContentBulk).toHaveBeenCalledWith({
+      action: 'publish',
+      ids: [rows[1]?.id],
+    });
+    expect(text()).toContain(m.studio_content_bulk_selected({ count: 2 }));
+  });
+
+  test('a row deleted elsewhere already reads as deleted, and leaves the selection', async () => {
+    const rows = [piece(1), piece(2)];
+    s.first = { current: pageOf(rows), error: undefined };
+    deleteContent.mockRejectedValueOnce({
+      status: 404,
+      body: { message: 'Content not found', code: 'CONTENT_NOT_FOUND' },
+    });
+    render();
+    pageBox()?.click();
+    flushSync();
+
+    (await rowMenuItem('Piece 1', m.studio_content_row_delete()))?.click();
+    await settle();
+    button(m.studio_content_delete_confirm())?.click();
+    await settle();
+
+    expect(deleteContent).toHaveBeenCalledWith(rows[0]?.id);
+    expect(text()).toContain(
+      m.studio_content_deleted_one({ title: 'Piece 1' })
+    );
+    expect(text()).toContain(m.studio_content_bulk_selected({ count: 1 }));
   });
 
   test('a changed view clears the selection', async () => {

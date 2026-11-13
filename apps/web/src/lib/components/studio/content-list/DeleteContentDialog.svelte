@@ -31,6 +31,7 @@
   import * as Dialog from '$lib/components/ui/Dialog';
   import { AlertTriangleIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
+  import { isBought } from './row-facts';
 
   interface Props {
     target: DeleteTarget | null;
@@ -44,13 +45,12 @@
 
   const { target, busy, onDelete, onUnpublish, onClose }: Props = $props();
 
-  const bought = (piece: DeletePiece) => (piece.buyerCount ?? 0) > 0;
   const live = (piece: DeletePiece) => piece.status === CONTENT_STATUS.PUBLISHED;
 
   const pieces = $derived(
     target === null ? [] : target.mode === 'many' ? target.pieces : [target.piece]
   );
-  const kept = $derived(pieces.filter(bought));
+  const kept = $derived(pieces.filter(isBought));
   const going = $derived(pieces.length - kept.length);
   const keptLive = $derived(kept.filter(live).map((piece) => piece.id));
   const [onlyKept] = $derived(kept);
