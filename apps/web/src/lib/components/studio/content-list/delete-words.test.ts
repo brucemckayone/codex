@@ -11,6 +11,7 @@ function held(id: string, fields: Partial<DeletePiece> = {}): DeletePiece {
   return {
     id,
     title: `Piece ${id}`,
+    slug: `piece-${id}`,
     status: 'published',
     holderCount: 3,
     courseOnly: false,
@@ -44,11 +45,18 @@ describe('unpublishOffer', () => {
     });
   });
 
+  it('when every one is kept, they keep it; "them" is all of them', () => {
+    expect(unpublishOffer([held('a'), held('b')])).toEqual({
+      ids: ['a', 'b'],
+      words: m.studio_content_delete_unpublish_keeps_them(),
+    });
+  });
+
   it('in a mix, names the ones that stay up first, then the ones the button takes down', () => {
     // One of each: each by its title; the button's "it" is the last named.
     expect(unpublishOffer([held('a'), freeLesson('c')])).toEqual({
       ids: ['a'],
-      words: `${m.studio_content_delete_unpublish_ends_named_stays({ title: 'Piece c' })} ${m.studio_content_delete_unpublish_keeps_named({ title: 'Piece a' })}`,
+      words: `${m.studio_content_delete_unpublish_ends_named_stays({ name: '“Piece c”' })} ${m.studio_content_delete_unpublish_keeps_named({ name: '“Piece a”' })}`,
     });
     const offer = unpublishOffer([
       held('a'),
@@ -83,14 +91,41 @@ describe('unpublishOffer', () => {
     );
   });
 
+  it('gives a shared title its address, so two of a name never read alike', () => {
+    const paid = held('p', { title: 'Introduction', slug: 'intro-paid' });
+    const free = held('f', {
+      title: 'Introduction',
+      slug: 'intro-free',
+      priceCents: null,
+    });
+    expect(unpublishOffer([paid, free, held('a')])).toEqual({
+      ids: ['p', 'a'],
+      words: `${m.studio_content_delete_unpublish_ends_named_stays({ name: '“Introduction” (/intro-free)' })} ${m.studio_content_delete_unpublish_keeps_named_many({ titles: joinNames(['“Introduction” (/intro-paid)', '“Piece a”']) })}`,
+    });
+  });
+
   it('says nothing of unpublishing a draft', () => {
     expect(
       unpublishOffer([held('a', { status: 'draft' }), freeLesson('b')])
     ).toEqual({
       ids: [],
       // Only the live one is weighed; beside a draft, it is named.
-      words: m.studio_content_delete_unpublish_ends_named({ title: 'Piece b' }),
+      words: m.studio_content_delete_unpublish_ends_named({
+        name: '“Piece b”',
+      }),
     });
+    // Two that would lose it, beside a draft: by name, both of them.
+    expect(
+      unpublishOffer([
+        held('z', { status: 'draft' }),
+        freeLesson('b'),
+        freeLesson('c'),
+      ]).words
+    ).toBe(
+      m.studio_content_delete_unpublish_ends_named_many({
+        titles: joinNames(['“Piece b”', '“Piece c”']),
+      })
+    );
     expect(unpublishOffer([held('a', { status: 'draft' })])).toEqual({
       ids: [],
       words: null,

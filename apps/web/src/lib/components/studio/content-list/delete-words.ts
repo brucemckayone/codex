@@ -17,6 +17,7 @@ export type DeletePiece = Pick<
   ContentWithRelations,
   | 'id'
   | 'title'
+  | 'slug'
   | 'status'
   | 'holderCount'
   | 'courseOnly'
@@ -47,16 +48,17 @@ export function unpublishOffer(kept: readonly DeletePiece[]): UnpublishOffer {
   );
   const keeps = live.filter(keepsWhenUnpublished);
   const ends = live.filter((piece) => !keepsWhenUnpublished(piece));
+  const nameOf = namer(kept);
   const parts: string[] = [];
   if (ends.length > 0) {
     parts.push(
       keeps.length > 0
         ? // A mix: some of several, so always by name.
-          named(ends, {
+          named(ends, nameOf, {
             named: m.studio_content_delete_unpublish_ends_named_stays,
             namedMany: m.studio_content_delete_unpublish_ends_named_many_stays,
           })
-        : whichOf(kept, ends, {
+        : whichOf(kept, ends, nameOf, {
             it: m.studio_content_delete_unpublish_ends_it,
             them: m.studio_content_delete_unpublish_ends_them,
             named: m.studio_content_delete_unpublish_ends_named,
@@ -66,7 +68,7 @@ export function unpublishOffer(kept: readonly DeletePiece[]): UnpublishOffer {
   }
   if (keeps.length > 0) {
     parts.push(
-      whichOf(kept, keeps, {
+      whichOf(kept, keeps, nameOf, {
         it: m.studio_content_delete_unpublish_keeps_it,
         them: m.studio_content_delete_unpublish_keeps_them,
         named: m.studio_content_delete_unpublish_keeps_named,
@@ -81,8 +83,25 @@ export function unpublishOffer(kept: readonly DeletePiece[]): UnpublishOffer {
 }
 
 interface NamedWords {
-  named: (args: { title: string }) => string;
+  named: (args: { name: string }) => string;
   namedMany: (args: { titles: string }) => string;
+}
+
+/**
+ * How the dialog names a piece it leaves alone: its title, quoted. Titles
+ * are not unique, and in a mix two pieces called the same would get
+ * opposite sentences, so a title shared among them also gives each its
+ * address, as the list shows it under the title: “Introduction” (/intro).
+ */
+function namer(kept: readonly DeletePiece[]): (piece: DeletePiece) => string {
+  const uses = new Map<string, number>();
+  for (const piece of kept) {
+    uses.set(piece.title, (uses.get(piece.title) ?? 0) + 1);
+  }
+  return (piece) =>
+    (uses.get(piece.title) ?? 0) > 1
+      ? `“${piece.title}” (/${piece.slug})`
+      : `“${piece.title}”`;
 }
 
 /**
@@ -92,20 +111,23 @@ interface NamedWords {
 function whichOf(
   kept: readonly DeletePiece[],
   these: readonly DeletePiece[],
+  nameOf: (piece: DeletePiece) => string,
   words: NamedWords & { it: () => string; them: () => string }
 ): string {
   if (kept.length === 1) return words.it();
   if (these.length === kept.length) return words.them();
-  return named(these, words);
+  return named(these, nameOf, words);
 }
 
-/** One piece by its title; several by theirs ("“A”, “B” and “C”"). */
-function named(these: readonly DeletePiece[], words: NamedWords): string {
+/** One piece by its name; several by theirs ("“A”, “B” and “C”"). */
+function named(
+  these: readonly DeletePiece[],
+  nameOf: (piece: DeletePiece) => string,
+  words: NamedWords
+): string {
   const [only] = these;
-  if (only && these.length === 1) return words.named({ title: only.title });
-  return words.namedMany({
-    titles: joinNames(these.map((piece) => `“${piece.title}”`)),
-  });
+  if (only && these.length === 1) return words.named({ name: nameOf(only) });
+  return words.namedMany({ titles: joinNames(these.map(nameOf)) });
 }
 
 /** The dialog's warning for the pieces people have: who, and what each way does. */

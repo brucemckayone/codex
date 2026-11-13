@@ -34131,11 +34131,11 @@ export const studio_content_delete_unpublish_keeps_them = () => `Unpublishing th
 
 
 /**
- * @param {{ title: NonNullable<unknown> }} params
+ * @param {{ name: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_keeps_named = (params) => `Unpublishing “${params.title}” takes it off sale, and they keep watching.`
+export const studio_content_delete_unpublish_keeps_named = (params) => `Unpublishing ${params.name} takes it off sale, and they keep watching.`
 
 
 /**
@@ -34163,11 +34163,11 @@ export const studio_content_delete_unpublish_ends_them = () => `Unpublishing the
 
 
 /**
- * @param {{ title: NonNullable<unknown> }} params
+ * @param {{ name: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_named = (params) => `Unpublishing “${params.title}” would end their playback too.`
+export const studio_content_delete_unpublish_ends_named = (params) => `Unpublishing ${params.name} would end their playback too.`
 
 
 /**
@@ -34179,11 +34179,11 @@ export const studio_content_delete_unpublish_ends_named_many = (params) => `Unpu
 
 
 /**
- * @param {{ title: NonNullable<unknown> }} params
+ * @param {{ name: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_named_stays = (params) => `Unpublishing “${params.title}” would end their playback too, so it stays up.`
+export const studio_content_delete_unpublish_ends_named_stays = (params) => `Unpublishing ${params.name} would end their playback too, so it stays up.`
 
 
 /**
