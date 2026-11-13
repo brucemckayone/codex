@@ -10,7 +10,7 @@ import { CONTENT_STATUS } from '@codex/constants';
 import type { ContentWithRelations } from '$lib/types';
 import * as m from '$paraglide/messages';
 import { joinNames } from '../plan-picker/select-from-tier';
-import { keepsWhenUnpublished } from './row-facts';
+import { isHeld, keepsWhenUnpublished } from './row-facts';
 
 /** A piece the dialog weighs, as the list holds it. */
 export type DeletePiece = Pick<
@@ -35,20 +35,22 @@ export interface UnpublishOffer {
 }
 
 /**
- * The dialog's Unpublish instead, for the pieces it leaves alone. Only the
- * live ones are weighed: a draft is not on sale. In a mix, the ones that
+ * The dialog's Unpublish instead, for the pieces it leaves alone, given
+ * every piece it was opened on (so a deleted one can share a title with a
+ * kept one, see `namer`). Only the live ones are weighed: a draft is not on sale. In a mix, the ones that
  * would lose it come first and are said to stay up; then the ones the
  * button takes down, last, beside the button, so its "it" or "them" can
  * only be those. Pieces are named, never counted: two counts read alike
  * and name nothing, and a bulk action holds at most CONTENT_BULK_MAX.
  */
-export function unpublishOffer(kept: readonly DeletePiece[]): UnpublishOffer {
+export function unpublishOffer(pieces: readonly DeletePiece[]): UnpublishOffer {
+  const kept = pieces.filter(isHeld);
   const live = kept.filter(
     (piece) => piece.status === CONTENT_STATUS.PUBLISHED
   );
   const keeps = live.filter(keepsWhenUnpublished);
   const ends = live.filter((piece) => !keepsWhenUnpublished(piece));
-  const nameOf = namer(kept);
+  const nameOf = namer(pieces);
   const parts: string[] = [];
   if (ends.length > 0) {
     parts.push(
@@ -88,14 +90,15 @@ interface NamedWords {
 }
 
 /**
- * How the dialog names a piece it leaves alone: its title, quoted. Titles
- * are not unique, and in a mix two pieces called the same would get
- * opposite sentences, so a title shared among them also gives each its
- * address, as the list shows it under the title: “Introduction” (/intro).
+ * How the dialog names a piece: its title, quoted. Titles are not unique,
+ * and two pieces of one name can go opposite ways (one deleted, one left
+ * alone; one kept up, one that stays up), so a title any two of the
+ * dialog's pieces share also gives each its address: “Introduction”
+ * (/intro). The table shows it under the title; the grid shows titles only.
  */
-function namer(kept: readonly DeletePiece[]): (piece: DeletePiece) => string {
+function namer(pieces: readonly DeletePiece[]): (piece: DeletePiece) => string {
   const uses = new Map<string, number>();
-  for (const piece of kept) {
+  for (const piece of pieces) {
     uses.set(piece.title, (uses.get(piece.title) ?? 0) + 1);
   }
   return (piece) =>
@@ -137,15 +140,17 @@ export interface HeldNotice {
 }
 
 /**
- * The warning, by how the dialog was opened: the row menu's one piece says
- * by how many people; the bulk bar's names the one it leaves alone, or
- * counts them. Null when nobody has any of them.
+ * The warning, by how the dialog was opened (given every piece it was
+ * opened on): the row menu's one piece says by how many people; the bulk
+ * bar's names the one it leaves alone, or counts them. Null when nobody
+ * has any of them.
  */
 export function heldNotice(
   mode: 'one' | 'many',
-  kept: readonly DeletePiece[],
+  pieces: readonly DeletePiece[],
   unpublishWords: string | null
 ): HeldNotice | null {
+  const kept = pieces.filter(isHeld);
   const [only] = kept;
   if (!only) return null;
   const withUnpublish = (text: string) =>
@@ -162,7 +167,9 @@ export function heldNotice(
   }
   if (kept.length === 1) {
     return {
-      title: m.studio_content_delete_kept_one_title({ title: only.title }),
+      title: m.studio_content_delete_kept_one_title({
+        name: namer(pieces)(only),
+      }),
       body: withUnpublish(
         people === 1
           ? m.studio_content_delete_kept_one_body_single()

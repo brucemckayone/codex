@@ -104,6 +104,25 @@ describe('unpublishOffer', () => {
     });
   });
 
+  it('gives a title shared with a deleted piece its address too', () => {
+    const kept = held('b', { title: 'Introduction', slug: 'intro' });
+    const going = held('o', {
+      title: 'Introduction',
+      slug: 'intro-old',
+      holderCount: 0,
+    });
+    // The deleted one is weighed for names only: nobody has it.
+    expect(unpublishOffer([going, kept, freeLesson('c')])).toEqual({
+      ids: ['b'],
+      words: `${m.studio_content_delete_unpublish_ends_named_stays({ name: '“Piece c”' })} ${m.studio_content_delete_unpublish_keeps_named({ name: '“Introduction” (/intro)' })}`,
+    });
+    expect(heldNotice('many', [going, kept], null)?.title).toBe(
+      m.studio_content_delete_kept_one_title({
+        name: '“Introduction” (/intro)',
+      })
+    );
+  });
+
   it('says nothing of unpublishing a draft', () => {
     expect(
       unpublishOffer([held('a', { status: 'draft' }), freeLesson('b')])
@@ -148,7 +167,7 @@ describe('heldNotice', () => {
 
   it('the bulk bar names the one it leaves alone, or counts them', () => {
     expect(heldNotice('many', [held('a')], null)).toEqual({
-      title: m.studio_content_delete_kept_one_title({ title: 'Piece a' }),
+      title: m.studio_content_delete_kept_one_title({ name: '“Piece a”' }),
       body: m.studio_content_delete_kept_one_body({ count: 3 }),
     });
     expect(heldNotice('many', [held('a'), held('b')], null)).toEqual({
@@ -159,5 +178,12 @@ describe('heldNotice', () => {
 
   it('is nothing when nobody has any of them', () => {
     expect(heldNotice('many', [], null)).toBeNull();
+    expect(
+      heldNotice('many', [held('a', { holderCount: 0 })], null)
+    ).toBeNull();
+    expect(unpublishOffer([held('a', { holderCount: 0 })])).toEqual({
+      ids: [],
+      words: null,
+    });
   });
 });

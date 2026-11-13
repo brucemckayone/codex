@@ -4257,7 +4257,7 @@
   "studio_content_delete_many_title": "Delete {count} pieces?",
   "studio_content_delete_many_body": "{count} will be deleted. Nobody can watch a deleted piece, and this can’t be undone.",
   "studio_content_delete_many_body_one": "1 will be deleted. Nobody can watch a deleted piece, and this can’t be undone.",
-  "studio_content_delete_kept_one_title": "“{title}” will be left alone.",
+  "studio_content_delete_kept_one_title": "{name} will be left alone.",
   "studio_content_delete_kept_one_body": "{count} people have it, bought or given, and deleting it would end their playback.",
   "studio_content_delete_kept_one_body_single": "1 person has it, bought or given, and deleting it would end their playback.",
   "studio_content_delete_kept_title": "{count} pieces will be left alone.",

@@ -34075,11 +34075,11 @@ export const studio_content_delete_many_body_one = () => `1 will be deleted. Nob
 
 
 /**
- * @param {{ title: NonNullable<unknown> }} params
+ * @param {{ name: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_one_title = (params) => `“${params.title}” will be left alone.`
+export const studio_content_delete_kept_one_title = (params) => `${params.name} will be left alone.`
 
 
 /**

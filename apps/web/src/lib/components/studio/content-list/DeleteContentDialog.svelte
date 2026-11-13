@@ -53,8 +53,8 @@
   );
   const kept = $derived(pieces.filter(isHeld));
   const going = $derived(pieces.length - kept.length);
-  const offer = $derived(unpublishOffer(kept));
-  const notice = $derived(heldNotice(target?.mode ?? 'many', kept, offer.words));
+  const offer = $derived(unpublishOffer(pieces));
+  const notice = $derived(heldNotice(target?.mode ?? 'many', pieces, offer.words));
 </script>
 
 {#snippet heldAlert(held: HeldNotice)}
