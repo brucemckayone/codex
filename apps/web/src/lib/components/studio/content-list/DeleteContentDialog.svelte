@@ -51,8 +51,9 @@
   const pieces = $derived(
     target === null ? [] : target.mode === 'many' ? target.pieces : [target.piece]
   );
-  const kept = $derived(pieces.filter(isHeld));
-  const going = $derived(pieces.length - kept.length);
+  // Every piece goes to the wording, never only the kept ones: it names a
+  // title a deleted piece shares with a kept one by its address.
+  const going = $derived(pieces.filter((piece) => !isHeld(piece)).length);
   const offer = $derived(unpublishOffer(pieces));
   const notice = $derived(heldNotice(target?.mode ?? 'many', pieces, offer.words));
 </script>

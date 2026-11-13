@@ -1378,6 +1378,26 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
     expect(text()).toContain(m.studio_content_bulk_selected({ count: 1 }));
   });
 
+  test('the Delete dialog gives a kept piece its address when a deleted one shares its title', () => {
+    const rows = [
+      piece(1, { title: 'Introduction', slug: 'intro-old' }),
+      piece(2, { title: 'Introduction', slug: 'intro', holderCount: 3 }),
+    ];
+    s.first = { current: pageOf(rows), error: undefined };
+    render();
+    pageBox()?.click();
+    flushSync();
+    button(m.studio_content_bulk_delete())?.click();
+    flushSync();
+
+    expect(text()).toContain(
+      m.studio_content_delete_kept_one_title({
+        name: '“Introduction” (/intro)',
+      })
+    );
+    expect(button(m.studio_content_delete_count({ count: 1 }))).toBeDefined();
+  });
+
   test('the Delete dialog stays busy until the list is read again, so it cannot send twice', async () => {
     const rows = [piece(1), piece(2)];
     s.first = { current: pageOf(rows), error: undefined };
