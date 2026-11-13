@@ -67,6 +67,7 @@ import {
   ValidationError,
 } from '@codex/service-errors';
 import type {
+  ContentBulkAction,
   ContentBulkResult,
   ContentWhereCounts,
   ContentWhereOrg,
@@ -420,11 +421,17 @@ const CONTENT_SLUG_INDEXES = new Set([
 type StudioListOptions = { scope?: 'studio'; withCategories?: boolean };
 
 /**
- * A bulk action's piece (Codex-a6ofh.3.5): `quiet` skips the per-piece cache
- * writes, which the bulk method makes once after its loop instead. KV takes
- * about one write a second to a key, so fifteen bumps of one key lose writes.
+ * A bulk action's piece (Codex-a6ofh.3.5). `bulk` skips the per-piece cache
+ * writes, which the route makes once after the loop: KV takes about one
+ * write a second to a key, so fifteen bumps of one key lose writes. It also
+ * waits at most a second for a row another request holds
+ * ({@link BULK_LOCK_WAIT}), so one held row is that piece's `failed`, never a
+ * stall that runs the whole request past its time.
  */
-type QuietOption = { quiet?: boolean };
+type BulkPieceOption = { bulk?: boolean };
+
+/** A bulk piece's lock wait: fifteen of them stay well inside the call's time. */
+const BULK_LOCK_WAIT = sql`SET LOCAL lock_timeout = '1s'`;
 
 /** What `addCategories` filed, and the caller's cache gate. */
 type AddedCategories = {
@@ -1070,7 +1077,8 @@ export class ContentService extends BaseService {
   /**
    * The update itself, without its tier wire. `bulk` is a piece of a bulk
    * access change (Codex-a6ofh.3.5): it writes no cache (the route does,
-   * once), a piece whose access already reads as sent is left unwritten and
+   * once), waits at most a second for its row ({@link BulkPieceOption}), a
+   * piece whose access already reads as sent is left unwritten and
    * reported `unchanged`, and with `refuseIfBought` a piece people bought is
    * left alone (`ContentHasBuyersError`), for a move to Followers or Team
    * only, which would end their playback (owner R1). Judged on the locked row.
@@ -1108,6 +1116,7 @@ export class ContentService extends BaseService {
 
     try {
       const result = await this.db.transaction(async (tx) => {
+        if (bulk) await tx.execute(BULK_LOCK_WAIT);
         // Verify content exists and belongs to creator, reading the row
         // LOCKED (review round 2). Every decision below reads `existing`,
         // and the write always sets the switch, so from an unlocked read a
@@ -1317,6 +1326,17 @@ export class ContentService extends BaseService {
           restValidated.isFollowerGated ?? existing.isFollowerGated;
         const effIsTeamOnly = restValidated.isTeamOnly ?? existing.isTeamOnly;
         const effCourseOnly = restValidated.courseOnly ?? existing.courseOnly;
+        // Create's org rules, on the EFFECTIVE row (owner R3): followers and
+        // the team are an org's, so either gate on a personal piece shuts
+        // everyone out. The schema sees only a partial that states the org.
+        if (resultingOrgId == null && (effIsFollowerGated || effIsTeamOnly)) {
+          throw new ValidationError(
+            effIsFollowerGated
+              ? 'Followers-only content requires an organisation'
+              : 'Team-only content requires an organisation',
+            { contentId: id }
+          );
+        }
         if (effGated && restValidated.isFree === true) {
           throw new ValidationError(
             'Tier-gated content cannot be free — an item in no tier is closed, not free.',
@@ -1810,11 +1830,12 @@ export class ContentService extends BaseService {
     id: string,
     creatorId: string,
     options: PublishOptions,
-    { quiet = false }: QuietOption = {}
+    { bulk = false }: BulkPieceOption = {}
   ): Promise<{ row: Content; wentLive: boolean }> {
     try {
       let wentLive = false;
       const result = await this.db.transaction(async (tx) => {
+        if (bulk) await tx.execute(BULK_LOCK_WAIT);
         // A scheduled go-live gives up any one lock it waits 5 s on (each of
         // its row, media, membership and thumbnail locks), for the next run:
         // a lock held elsewhere must not run a settle past the 30 s its
@@ -1906,7 +1927,7 @@ export class ContentService extends BaseService {
 
       // Bump content catalogue version keys (fire-and-forget; invalidate
       // swallows errors). A scheduled draft changed nothing public.
-      if (!quiet && result.status === CONTENT_STATUS.PUBLISHED) {
+      if (!bulk && result.status === CONTENT_STATUS.PUBLISHED) {
         void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
         if (result.organizationId) {
           void this.cache?.invalidate(
@@ -2390,10 +2411,11 @@ export class ContentService extends BaseService {
   private async unpublishAndReport(
     id: string,
     creatorId: string,
-    { quiet = false }: QuietOption = {}
+    { bulk = false }: BulkPieceOption = {}
   ): Promise<{ row: Content; wasLive: boolean; changed: boolean }> {
     try {
       const result = await this.db.transaction(async (tx) => {
+        if (bulk) await tx.execute(BULK_LOCK_WAIT);
         const [existing] = await tx
           .select()
           .from(content)
@@ -2425,7 +2447,7 @@ export class ContentService extends BaseService {
       });
 
       // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
-      if (!quiet) {
+      if (!bulk) {
         void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
         if (result.row.organizationId) {
           void this.cache?.invalidate(
@@ -2459,20 +2481,22 @@ export class ContentService extends BaseService {
   }
 
   /**
-   * `delete`, returning the org the piece was filed in. With
-   * `refuseIfBought` (a bulk delete, owner D-b4), a piece people bought is
-   * left alone (`ContentHasBuyersError`): deleting it would end their
-   * playback. Counted here, under the row's lock, never taken from the list.
-   * A purchase completing in the instant between the count and the commit is
-   * not seen, which a delete one at a time never checks for at all.
+   * `delete`, returning the org the piece was filed in. A `bulk` delete
+   * (owner D-b4) leaves alone a piece people bought
+   * (`ContentHasBuyersError`): deleting it would end their playback. Counted
+   * here, under the row's lock, never taken from the list. A buyer still in
+   * checkout is not counted: completing a purchase takes no lock this waits
+   * on, so it can land after the count (a delete one at a time never counts
+   * at all). That gap is the purchase path's to close.
    */
   private async deleteAndReport(
     id: string,
     creatorId: string,
-    { refuseIfBought = false }: { refuseIfBought?: boolean } = {}
+    { bulk = false }: BulkPieceOption = {}
   ): Promise<{ organizationId: string | null }> {
     try {
       return await this.db.transaction(async (tx) => {
+        if (bulk) await tx.execute(BULK_LOCK_WAIT);
         const [existing] = await tx
           .select({ organizationId: content.organizationId })
           .from(content)
@@ -2482,7 +2506,7 @@ export class ContentService extends BaseService {
         if (!existing) {
           throw new ContentNotFoundError(id);
         }
-        if (refuseIfBought) {
+        if (bulk) {
           const buyers = await countBuyers(tx as DatabaseTransaction, id);
           if (buyers > 0) throw new ContentHasBuyersError(id, buyers);
         }
@@ -2906,15 +2930,16 @@ export class ContentService extends BaseService {
     return this.addCategoriesAndReport(contentId, creatorId, categoryIds);
   }
 
-  /** {@link addCategories}, `quiet` for a bulk add (Codex-a6ofh.3.5). */
+  /** {@link addCategories}, or a piece of a bulk add ({@link BulkPieceOption}). */
   private async addCategoriesAndReport(
     contentId: string,
     creatorId: string,
     categoryIds: string[],
-    { quiet = false }: QuietOption = {}
+    { bulk = false }: BulkPieceOption = {}
   ): Promise<AddedCategories> {
     try {
       const result = await this.db.transaction(async (tx) => {
+        if (bulk) await tx.execute(BULK_LOCK_WAIT);
         const [piece] = await tx
           .select({
             organizationId: content.organizationId,
@@ -2971,7 +2996,7 @@ export class ContentService extends BaseService {
       // counts its live pieces per category, so a changed set refreshes it.
       // A never-live or personal piece is on no such list.
       if (
-        !quiet &&
+        !bulk &&
         result.changed &&
         result.hasBeenLive &&
         result.organizationId
@@ -2990,7 +3015,7 @@ export class ContentService extends BaseService {
   // Bulk actions (Codex-a6ofh.3.5, owner 2026-11-12: "Bulk endpoints, one
   // bump"). Each runs every piece through its own method, in its own
   // transaction, so one refused piece never undoes the others; makes each
-  // reports each piece. They write no cache: each piece runs `quiet`, and the
+  // reports each piece. They write no cache: each piece runs `bulk`, and the
   // route refreshes each key once after the loop (`afterBulkChange`), since
   // KV takes about one write a second to a key and these are its only caller.
   // ==========================================================================
@@ -3003,12 +3028,12 @@ export class ContentService extends BaseService {
     ids: string[],
     creatorId: string
   ): Promise<ContentBulkReport> {
-    return this.eachPiece(ids, async (id) => {
+    return this.eachPiece('publish', ids, async (id) => {
       const { row, wentLive } = await this.publishAndReport(
         id,
         creatorId,
         { whenReady: true },
-        { quiet: true }
+        { bulk: true }
       );
       if (wentLive) return { outcome: 'done', touched: row };
       return {
@@ -3023,11 +3048,11 @@ export class ContentService extends BaseService {
     ids: string[],
     creatorId: string
   ): Promise<ContentBulkReport> {
-    return this.eachPiece(ids, async (id) => {
+    return this.eachPiece('unpublish', ids, async (id) => {
       const { row, wasLive, changed } = await this.unpublishAndReport(
         id,
         creatorId,
-        { quiet: true }
+        { bulk: true }
       );
       if (!changed) return { outcome: 'unchanged' };
       return { outcome: 'done', touched: wasLive ? row : undefined };
@@ -3043,9 +3068,9 @@ export class ContentService extends BaseService {
     ids: string[],
     creatorId: string
   ): Promise<ContentBulkReport> {
-    return this.eachPiece(ids, async (id) => {
+    return this.eachPiece('delete', ids, async (id) => {
       const { organizationId } = await this.deleteAndReport(id, creatorId, {
-        refuseIfBought: true,
+        bulk: true,
       });
       return { outcome: 'done', touched: { id, organizationId } };
     });
@@ -3061,12 +3086,12 @@ export class ContentService extends BaseService {
     creatorId: string,
     categoryIds: string[]
   ): Promise<ContentBulkReport> {
-    return this.eachPiece(ids, async (id) => {
+    return this.eachPiece('categories', ids, async (id) => {
       const added = await this.addCategoriesAndReport(
         id,
         creatorId,
         categoryIds,
-        { quiet: true }
+        { bulk: true }
       );
       if (!added.changed) return { outcome: 'unchanged' };
       return {
@@ -3093,7 +3118,7 @@ export class ContentService extends BaseService {
   ): Promise<ContentBulkReport> {
     const endsBuyersPlayback =
       access.isFollowerGated === true || access.isTeamOnly === true;
-    return this.eachPiece(ids, async (id) => {
+    return this.eachPiece('access', ids, async (id) => {
       const {
         row,
         hasBeenLive: live,
@@ -3109,9 +3134,11 @@ export class ContentService extends BaseService {
   /**
    * One bulk action's loop: each piece through `one`, in the order sent. A
    * piece's 4xx is its `refused`, with the error the per-piece route would
-   * send; anything else is `failed`, logged, with no internal detail.
+   * send; anything else is `failed`, with no internal detail, and logged
+   * with the piece and the action, since the request itself answers 200.
    */
   private async eachPiece(
+    action: ContentBulkAction,
     ids: string[],
     one: (id: string) => Promise<{
       outcome: 'done' | 'scheduled' | 'unchanged';
@@ -3131,6 +3158,13 @@ export class ContentService extends BaseService {
         const { statusCode, response } = mapErrorToResponse(error, {
           obs: this.obs,
         });
+        if (statusCode >= 500) {
+          this.obs.error('content bulk piece failed', {
+            action,
+            contentId: id,
+            code: response.error.code,
+          });
+        }
         results.push({
           id,
           outcome: statusCode < 500 ? 'refused' : 'failed',

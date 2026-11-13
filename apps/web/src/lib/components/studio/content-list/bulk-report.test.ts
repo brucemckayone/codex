@@ -143,6 +143,20 @@ describe('bulkReport', () => {
     expect(report.keep).toEqual(['a', 'b']);
   });
 
+  it('a delete that finds a piece already gone counts it deleted', () => {
+    const report = bulkReport(
+      'delete',
+      [
+        { id: 'a', outcome: 'done' },
+        refused('b', { code: 'CONTENT_NOT_FOUND' }),
+      ],
+      pieces
+    );
+    expect(report.line).toBe(m.studio_content_bulk_deleted_all({ count: 2 }));
+    expect(report.problems).toEqual([]);
+    expect(report.keep).toEqual([]);
+  });
+
   it('names the category for Add to category', () => {
     const report = bulkReport(
       'categories',

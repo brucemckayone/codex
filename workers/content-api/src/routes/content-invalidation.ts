@@ -121,7 +121,7 @@ export function fanContentInvalidation(
  * however many of the pieces it covers. The catalogue keys are left to
  * {@link afterBulkChange}, which bumps each once.
  */
-export function fanContentInvalidationMany(
+function fanContentInvalidationMany(
   env: HonoEnv['Bindings'],
   executionCtx: ExecutionContext,
   pieces: BulkTouchedPiece[],

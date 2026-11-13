@@ -372,7 +372,8 @@
   /**
    * One request for the action, then the line that says what it did. A
    * request that failed as a whole may still have changed some: the list
-   * is read again either way.
+   * is read again either way. Busy until that read settles, so a dialog
+   * still open cannot send the action again over the rows it changed.
    */
   async function runBulk(
     rows: readonly ContentWithRelations[],
@@ -408,8 +409,8 @@
         problems: [],
       };
     } finally {
-      busy = null;
       await refreshAfterChange(call.action);
+      busy = null;
     }
   }
 
@@ -439,10 +440,14 @@
       deleteTarget = null;
     } catch (error) {
       logReadFailure('studio_content.row_delete_failed', error, { studio, contentId: piece.id });
-      toast.error(remoteErrorMessage(error) ?? m.studio_content_delete_failed({ title: piece.title }));
+      // A refusal's own words; anything else (a 5xx's are sanitised, a
+      // network failure's are the browser's) names the piece instead.
+      const status = remoteErrorStatus(error);
+      const refusal = status !== undefined && status < 500 ? remoteErrorMessage(error) : null;
+      toast.error(refusal ?? m.studio_content_delete_failed({ title: piece.title }));
     } finally {
-      busy = null;
       await refreshAfterChange('delete');
+      busy = null;
     }
   }
 
@@ -459,10 +464,14 @@
     accessPieces = null;
   }
 
-  /** A piece's public address while it is live: its org's, or its creator's. */
+  /**
+   * A piece's public address while it is live: its org's, or its creator's.
+   * Absolute: on the org's own host the builder gives a path, and a path
+   * copied to share opens nothing (SlugField resolves it the same way).
+   */
   function liveHref(row: ContentWithRelations): string | null {
     if (row.status !== CONTENT_STATUS.PUBLISHED) return null;
-    return pieceHref(
+    const href = pieceHref(
       page.url,
       {
         orgSlug: row.organization?.slug ?? null,
@@ -470,6 +479,7 @@
       },
       { slug: row.slug, id: row.id }
     );
+    return href === null ? null : new URL(href, page.url).href;
   }
 
   // ── Writing the view back to the URL ──────────────────────────────────

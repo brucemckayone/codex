@@ -82,7 +82,6 @@ import type {
   BrandingSettingsResponse,
   CheckSlugResponse,
   ContactSettingsResponse,
-  ContentBulkAction,
   ContentBulkResponse,
   ContentPortalUses,
   ContentWhereCounts,
@@ -124,6 +123,9 @@ import type {
   CancelSubscriptionInput,
   ChangeTierInput,
   ConnectMeOnboardInput,
+  ContentBulkAccessInput,
+  ContentBulkCategoriesInput,
+  ContentBulkInput,
   CreateCategoryInput,
   CreateCheckoutInput,
   CreatePortalSessionInput,
@@ -652,6 +654,20 @@ const REQUEST_TIMEOUT_MS = 10000;
  * 408, rather than as a silent give-up in the browser.
  */
 const COURSE_FILM_TIMEOUT_MS = 6000;
+
+/**
+ * How long a bulk action may take (Codex-a6ofh.3.5): up to CONTENT_BULK_MAX
+ * pieces, one transaction each, in turn, and each waits at most a second on
+ * a row held elsewhere. The default would cut a slow run off as a 408 while
+ * the worker went on changing pieces the page then calls not done.
+ */
+const CONTENT_BULK_TIMEOUT_MS = 30000;
+
+/** A bulk action and its body: the action names the route, the rest is sent. */
+export type ContentBulkRequest =
+  | ({ action: 'publish' | 'unpublish' | 'delete' } & ContentBulkInput)
+  | ({ action: 'categories' } & ContentBulkCategoriesInput)
+  | ({ action: 'access' } & ContentBulkAccessInput);
 
 /** `fetch` options, plus a per-call timeout for a caller that gives up sooner. */
 type RequestOptions = RequestInit & { timeoutMs?: number };
@@ -1248,12 +1264,13 @@ export function createServerApi(
        * One action on up to CONTENT_BULK_MAX of the creator's pieces
        * (Codex-a6ofh.3.5), a result for each: `publish`, `unpublish` and
        * `delete` take `{ ids }`, `categories` `{ ids, categoryIds }`, and
-       * `access` `{ ids, access }`.
+       * `access` `{ ids, access }`, typed by the action.
        */
-      bulk: (action: ContentBulkAction, body: unknown) =>
+      bulk: ({ action, ...body }: ContentBulkRequest) =>
         request<ContentBulkResponse>('content', `/api/content/bulk/${action}`, {
           method: 'POST',
           body: JSON.stringify(body),
+          timeoutMs: CONTENT_BULK_TIMEOUT_MS,
         }),
 
       /**

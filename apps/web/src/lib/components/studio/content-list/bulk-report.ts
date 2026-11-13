@@ -142,12 +142,31 @@ function problemOf(
   return { id: result.id, title, words: result.error.message, fixHref: null };
 }
 
+/**
+ * A piece a delete found already gone (another tab) is what was asked for,
+ * as the row menu's delete reads it: done, never "left alone".
+ */
+function goneIsDeleted(
+  action: ContentBulkAction,
+  results: readonly ContentBulkResult[]
+): readonly ContentBulkResult[] {
+  if (action !== 'delete') return results;
+  return results.map(
+    (result): ContentBulkResult =>
+      result.outcome === 'refused' &&
+      refusalCode(result.error) === ERROR_CODES.CONTENT_NOT_FOUND
+        ? { id: result.id, outcome: 'done' }
+        : result
+  );
+}
+
 export function bulkReport(
   action: ContentBulkAction,
-  results: readonly ContentBulkResult[],
+  sent: readonly ContentBulkResult[],
   pieces: BulkPieces,
   category = ''
 ): BulkReport {
+  const results = goneIsDeleted(action, sent);
   const total = results.length;
   const done = results.filter((r) => r.outcome === 'done').length;
   const scheduled = results.filter((r) => r.outcome === 'scheduled');

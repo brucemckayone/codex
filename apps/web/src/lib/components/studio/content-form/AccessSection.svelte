@@ -343,7 +343,11 @@
 </div>
 
 <style>
+  /* Laid out by its own width, not the screen's: the Publish step's column
+     and the content list's Change access sheet (Codex-a6ofh.3.5) are not
+     the same width at the same screen size. */
   .access-root {
+    container: access / inline-size;
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
@@ -355,8 +359,22 @@
     gap: var(--space-3);
   }
 
-  /* One short row (mockup w4): every option side by side, its line under it. */
+  /* Too narrow for five a row: at most three, so a label never runs into
+     its tick (a column is at least a third, and at least 10rem). */
   @media (--breakpoint-sm) {
+    .access-grid {
+      grid-template-columns: repeat(
+        auto-fill,
+        minmax(min(100%, max(10rem, calc((100% - 2 * var(--space-3)) / 3))), 1fr)
+      );
+    }
+  }
+
+  /* One short row (mockup w4) where all five fit: every option side by
+     side, its line under it. Five need 45.5rem: "Subscribers" takes 8.5rem
+     with its padding and tick, and four gaps the rest (the Publish step's
+     column at 1440 is just over it). */
+  @container access (min-width: 45.5rem) {
     .access-grid {
       grid-template-columns: none;
       grid-auto-flow: column;

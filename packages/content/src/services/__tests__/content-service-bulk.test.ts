@@ -34,7 +34,7 @@ import {
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { eq, inArray } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { NewContent } from '../../types';
 import { CategoriesService } from '../categories-service';
 import { ContentService } from '../content-service';
@@ -209,6 +209,47 @@ describe('ContentService: bulk actions', () => {
   });
 
   describe('unpublishMany', () => {
+    it('a row held elsewhere is its own failure within seconds, logged by id; the rest go through', async () => {
+      const held = await live();
+      const free = await live();
+      // An editor's save holding the row, until released.
+      let release = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding = () => {};
+      const isHeld = new Promise<void>((resolve) => {
+        holding = resolve;
+      });
+      const holder = db.transaction(async (tx) => {
+        await tx
+          .select({ id: content.id })
+          .from(content)
+          .where(eq(content.id, held.id))
+          .for('update');
+        holding();
+        await released;
+      });
+      await isHeld;
+      const obs = (service as unknown as { obs: { error: () => void } }).obs;
+      const logged = vi.spyOn(obs, 'error');
+
+      const started = Date.now();
+      const report = await service
+        .unpublishMany([held.id, free.id], creatorId)
+        .finally(release);
+      await holder;
+
+      expect(outcomes(report.results)).toEqual(['failed', 'done']);
+      expect(Date.now() - started).toBeLessThan(5000);
+      expect((await stored(held.id)).status).toBe('published');
+      expect(logged).toHaveBeenCalledWith(
+        'content bulk piece failed',
+        expect.objectContaining({ action: 'unpublish', contentId: held.id })
+      );
+      logged.mockRestore();
+    });
+
     it('takes the live down and leaves a draft unwritten', async () => {
       const shown = await live({ organizationId: orgId });
       const draft = await piece();
@@ -352,6 +393,27 @@ describe('ContentService: bulk actions', () => {
       expect(report.touched).toEqual([
         { id: unsold.id, organizationId: orgId },
       ]);
+    });
+
+    it("refuses Followers or Team only on a personal piece: both are an org's (R3)", async () => {
+      const personal = await piece();
+
+      const report = await service.accessMany(
+        [personal.id],
+        creatorId,
+        followers
+      );
+      const team = await service.accessMany([personal.id], creatorId, {
+        ...followers,
+        isFollowerGated: false,
+        isTeamOnly: true,
+      });
+
+      expect(outcomes(report.results)).toEqual(['refused']);
+      expect(outcomes(team.results)).toEqual(['refused']);
+      const after = await stored(personal.id);
+      expect(after.isFollowerGated).toBe(false);
+      expect(after.isTeamOnly).toBe(false);
     });
 
     it('Buy once keeps a bought piece: its buyers keep their playback', async () => {

@@ -1305,6 +1305,33 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
     expect(text()).toContain(m.studio_content_bulk_selected({ count: 2 }));
   });
 
+  test("Copy link copies the piece's whole address, on the org's own host too", async () => {
+    // The list reads only the org's slug for the address.
+    const organization = {
+      id: ORG,
+      name: 'Studio Alpha',
+      slug: 'studio-alpha',
+    } as unknown as ContentWithRelations['organization'];
+    const row = piece(1, { ...LIVE, organization });
+    s.first = { current: pageOf([row]), error: undefined };
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    render();
+    // On the org's own subdomain, where the builder gives a bare path.
+    nav.url = new URL('https://studio-alpha.lvh.me/studio/content');
+    await settle();
+
+    (await rowMenuItem('Piece 1', m.studio_content_row_copy_link()))?.click();
+    await settle();
+
+    expect(writeText).toHaveBeenCalledWith(
+      'https://studio-alpha.lvh.me/content/piece-1'
+    );
+  });
+
   test('a row deleted elsewhere already reads as deleted, and leaves the selection', async () => {
     const rows = [piece(1), piece(2)];
     s.first = { current: pageOf(rows), error: undefined };
@@ -1326,6 +1353,40 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
       m.studio_content_deleted_one({ title: 'Piece 1' })
     );
     expect(text()).toContain(m.studio_content_bulk_selected({ count: 1 }));
+  });
+
+  test('the Delete dialog stays busy until the list is read again, so it cannot send twice', async () => {
+    const rows = [piece(1), piece(2)];
+    s.first = { current: pageOf(rows), error: undefined };
+    runContentBulk.mockResolvedValue({
+      results: rows.map((row) => ({ id: row.id, outcome: 'done' })),
+    });
+    let reread = () => {};
+    s.refreshFirst.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          reread = resolve;
+        })
+    );
+    render();
+    pageBox()?.click();
+    flushSync();
+    button(m.studio_content_bulk_delete())?.click();
+    flushSync();
+
+    button(m.studio_content_delete_count({ count: 2 }))?.click();
+    await settle();
+    // Sent, the re-read still out: the dialog's Delete waits.
+    expect(button(m.studio_content_delete_count({ count: 2 }))?.disabled).toBe(
+      true
+    );
+    button(m.studio_content_delete_count({ count: 2 }))?.click();
+    await settle();
+    expect(runContentBulk).toHaveBeenCalledTimes(1);
+
+    reread();
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
   test('a changed view clears the selection', async () => {

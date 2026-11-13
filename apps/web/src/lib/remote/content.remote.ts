@@ -505,10 +505,10 @@ const contentBulkCommandSchema = z.discriminatedUnion('action', [
 
 export const runContentBulk = command(
   contentBulkCommandSchema,
-  async ({ action, ...body }) => {
+  async (input) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return forwardClientErrors(() => api.content.bulk(action, body));
+    return forwardClientErrors(() => api.content.bulk(input));
   }
 );
 
