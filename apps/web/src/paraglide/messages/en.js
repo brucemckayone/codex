@@ -7735,7 +7735,47 @@ export const studio_content_create = () => `Create Content`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_empty_title = () => `No content yet`
+export const studio_content_empty_title = () => `Make your first piece`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_first_uploads = (params) => `You have ${params.count} uploads that aren't used anywhere yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_first_uploads_one = () => `You have an upload that isn't used anywhere yet.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_first_from_this = (params) => `Start a piece from “${params.title}”`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_first_from_upload = () => `Create from an upload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_first_write_article = () => `Write an article`
 
 
 /**
@@ -12591,7 +12631,7 @@ export const studio_content_filter_off_sale = () => `Off sale`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_load_failed = () => `We couldn't load your content.`
+export const studio_content_load_failed = () => `We couldn't load your content. Nothing has changed.`
 
 
 /**
@@ -12832,6 +12872,38 @@ export const studio_content_list_loading = () => `Loading your content`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_list_no_match = () => `Nothing matches these filters.`
+
+
+/**
+ * @param {{ filters: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_no_match_named = (params) => `Nothing matches ${params.filters}.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, value: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_filter_named = (params) => `${params.title}: ${params.value}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_list_search_facet = () => `Search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_status_facet = () => `Status`
 
 
 /**

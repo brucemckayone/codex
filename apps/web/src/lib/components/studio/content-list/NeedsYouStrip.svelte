@@ -23,6 +23,7 @@
   import type { FacetUnread } from '../list-toolbar/list-option';
   import UnreadNote from '../list-toolbar/UnreadNote.svelte';
   import { type ListNeeds, NEEDS_NONE } from './list-url';
+  import { NEEDS_NAMED } from './narrowed-words';
 
   interface Props {
     /** The counts; undefined until read (and while a failed read is `unread`). */
@@ -53,42 +54,42 @@
       icon: AlertTriangleIcon,
       one: m.studio_content_needs_live_media_gone_one,
       many: m.studio_content_needs_live_media_gone,
-      named: m.studio_content_needs_live_media_gone_named,
+      named: NEEDS_NAMED['live-media-gone'],
     },
     scheduled: {
       tone: 'info',
       icon: ClockIcon,
       one: m.studio_content_needs_scheduled_one,
       many: m.studio_content_needs_scheduled,
-      named: m.studio_content_needs_scheduled_named,
+      named: NEEDS_NAMED['scheduled'],
     },
     'didnt-go-live': {
       tone: 'error',
       icon: AlertTriangleIcon,
       one: m.studio_content_needs_didnt_go_live_one,
       many: m.studio_content_needs_didnt_go_live,
-      named: m.studio_content_needs_didnt_go_live_named,
+      named: NEEDS_NAMED['didnt-go-live'],
     },
     'media-gone': {
       tone: 'error',
       icon: AlertTriangleIcon,
       one: m.studio_content_needs_media_gone_one,
       many: m.studio_content_needs_media_gone,
-      named: m.studio_content_needs_media_gone_named,
+      named: NEEDS_NAMED['media-gone'],
     },
     processing: {
       tone: 'info',
       icon: ClockIcon,
       one: m.studio_content_needs_processing_one,
       many: m.studio_content_needs_processing,
-      named: m.studio_content_needs_processing_named,
+      named: NEEDS_NAMED['processing'],
     },
     ready: {
       tone: 'success',
       icon: CheckCircleIcon,
       one: m.studio_content_needs_ready_one,
       many: m.studio_content_needs_ready,
-      named: m.studio_content_needs_ready_named,
+      named: NEEDS_NAMED['ready'],
     },
   };
 

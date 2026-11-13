@@ -35,6 +35,7 @@ const s = vi.hoisted(() => ({
   whereCounts: { current: undefined as unknown, error: undefined as unknown },
   categories: { current: undefined as unknown, error: undefined as unknown },
   attention: { current: undefined as unknown, error: undefined as unknown },
+  media: { current: undefined as unknown, error: undefined as unknown },
   later: new Map<number, unknown>(),
   refreshFirst: vi.fn(async () => {}),
 }));
@@ -45,7 +46,7 @@ const s = vi.hoisted(() => ({
 const heldQuery = vi.hoisted(
   () =>
     (
-      slot: 'first' | 'whereCounts' | 'categories' | 'attention',
+      slot: 'first' | 'whereCounts' | 'categories' | 'attention' | 'media',
       refresh: () => Promise<void> = async () => {}
     ) => ({
       get current() {
@@ -108,6 +109,10 @@ vi.mock('$lib/remote/subscription.remote', () => ({
     error: undefined,
   })),
 }));
+
+// The first piece's unused uploads (Codex-a6ofh.3.6).
+const listMedia = vi.hoisted(() => vi.fn(() => heldQuery('media')));
+vi.mock('$lib/remote/media.remote', () => ({ listMedia }));
 
 const logReadFailure = vi.hoisted(() => vi.fn());
 vi.mock('../../media-library/log-read-failure', () => ({ logReadFailure }));
@@ -189,6 +194,8 @@ beforeEach(() => {
   getCategories.mockClear();
   s.attention = { current: undefined, error: undefined };
   getContentAttention.mockClear();
+  s.media = { current: undefined, error: undefined };
+  listMedia.mockClear();
   s.later.clear();
   listContent.mockClear();
   goto.mockClear();
@@ -275,10 +282,81 @@ describe('StudioContentList: the three states', () => {
     ).not.toBeNull();
   });
 
+  test('the first piece offers up to three unused uploads, each starting a piece (Codex-a6ofh.3.6)', () => {
+    s.first = { current: pageOf([]), error: undefined };
+    s.media = {
+      current: {
+        items: [
+          {
+            id: 'm1',
+            title: 'Studio tour',
+            mediaType: 'video',
+            thumbnailUrl: null,
+          },
+          {
+            id: 'm2',
+            title: 'Interview',
+            mediaType: 'audio',
+            thumbnailUrl: null,
+          },
+        ],
+        pagination: { page: 1, limit: 3, total: 4, totalPages: 2 },
+      },
+      error: undefined,
+    };
+    render();
+
+    expect(listMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ usage: 'unused', status: 'ready', limit: 3 })
+    );
+    expect(text()).toContain(m.studio_content_first_uploads({ count: 4 }));
+    const from = document.querySelector<HTMLAnchorElement>(
+      `a[aria-label="${m.studio_content_first_from_this({ title: 'Interview' })}"]`
+    );
+    expect(from?.getAttribute('href')).toBe(
+      '/studio/content/new?media=m2&type=audio'
+    );
+    expect(
+      document.querySelector('a[href="/studio/media?usage=unused"]')
+        ?.textContent
+    ).toContain(m.studio_content_first_from_upload());
+    expect(
+      document.querySelector('a[href="/studio/content/new?type=written"]')
+    ).not.toBeNull();
+  });
+
+  test('an unread uploads list leaves the plain first piece, and is logged', () => {
+    s.first = { current: pageOf([]), error: undefined };
+    s.media = { current: undefined, error: { status: 503 } };
+    render();
+
+    expect(text()).toContain(m.studio_content_empty_how());
+    expect(
+      document.querySelector('a[href="/studio/content/new"]')
+    ).not.toBeNull();
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.first_piece_uploads_unread',
+      { status: 503 },
+      expect.objectContaining({ studio: 'org' })
+    );
+  });
+
+  test('a list with pieces never reads the uploads', () => {
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    render();
+    expect(listMedia).not.toHaveBeenCalled();
+  });
+
   test('a filter with no matches offers to clear it, not to start over', async () => {
     s.first = { current: pageOf([]), error: undefined };
     render('?type=audio&access=paid');
-    expect(text()).toContain(m.studio_content_list_no_match());
+    // Named as the menus name them (Codex-a6ofh.3.6, mockup L3).
+    expect(text()).toContain(
+      m.studio_content_list_no_match_named({
+        filters: 'Type: Audio + Access: Paid',
+      })
+    );
+    expect(listMedia).not.toHaveBeenCalled();
     expect(text()).not.toContain(m.studio_content_empty_title());
 
     button(m.media_clear_filters())?.click();
@@ -709,7 +787,9 @@ describe('StudioContentList: Category', () => {
     render(`?category=${QA}`);
     expect(listCalls()[0]).toMatchObject({ categoryId: QA });
     expect(categoryTrigger()?.textContent).toContain('Q&A');
-    expect(text()).toContain(m.studio_content_list_no_match());
+    expect(text()).toContain(
+      m.studio_content_list_no_match_named({ filters: 'Category: Q&A' })
+    );
     button(m.media_clear_filters())?.click();
     await settle();
     expect(goto).toHaveBeenCalledWith('/studio/content', expect.anything());

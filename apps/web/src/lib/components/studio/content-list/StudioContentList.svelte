@@ -30,7 +30,7 @@
   import { Button } from '$lib/components/ui';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
-  import { FileIcon, SearchXIcon } from '$lib/components/ui/Icon';
+  import { SearchXIcon } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { remoteErrorMessage } from '$lib/page-builder/builder-save';
@@ -53,6 +53,8 @@
   import { createFacetRetry } from '../list-toolbar/facet-retry.svelte';
   import type { FacetUnread } from '../list-toolbar/list-option';
   import ListStaleNotice from '../list-toolbar/ListStaleNotice.svelte';
+  import FirstPieceEmpty from './FirstPieceEmpty.svelte';
+  import { narrowedBy, noMatchWords } from './narrowed-words';
   import { createListSearch, createListUrlWriter } from '../list-url-writer';
   import { logReadFailure } from '../media-library/log-read-failure';
   import { PagedList } from '../paged-list.svelte';
@@ -632,7 +634,12 @@
       {#if narrowed}
         <EmptyState
           title={m.studio_content_search_empty()}
-          description={m.studio_content_list_no_match()}
+          description={noMatchWords(
+            narrowedBy(view, search, organizationId, {
+              where: whereMenu,
+              categories: categoryMenu,
+            })
+          )}
           icon={SearchXIcon}
         >
           {#snippet action()}
@@ -640,15 +647,7 @@
           {/snippet}
         </EmptyState>
       {:else}
-        <EmptyState
-          title={m.studio_content_empty_title()}
-          description={m.studio_content_empty_how()}
-          icon={FileIcon}
-        >
-          {#snippet action()}
-            <ActionLink href="/studio/content/new">{m.studio_content_create()}</ActionLink>
-          {/snippet}
-        </EmptyState>
+        <FirstPieceEmpty {studio} />
       {/if}
     {:else}
       {#if layout === 'grid'}
