@@ -96,6 +96,38 @@ export function hasBeenLive(piece: PublicationState): boolean {
   return piece.status !== CONTENT_STATUS.DRAFT || piece.publishedAt != null;
 }
 
+/**
+ * Where a piece is in its life, as the studio list's status tabs ask
+ * (Codex-a6ofh.3.6, owner 2026-11-13): a draft that was never live, a piece
+ * on sale, or one that was live and is not on sale now ({@link hasBeenLive}
+ * and not published: archived, or a draft again). Its buyers keep an
+ * off-sale piece. Derived from `status` and `publishedAt`, never stored;
+ * `GET /api/content?lifecycle=` asks the same in SQL.
+ */
+export const CONTENT_LIFECYCLE = {
+  DRAFT: 'draft',
+  PUBLISHED: 'published',
+  OFF_SALE: 'off-sale',
+} as const;
+
+export type ContentLifecycle =
+  (typeof CONTENT_LIFECYCLE)[keyof typeof CONTENT_LIFECYCLE];
+
+export const CONTENT_LIFECYCLES = [
+  CONTENT_LIFECYCLE.DRAFT,
+  CONTENT_LIFECYCLE.PUBLISHED,
+  CONTENT_LIFECYCLE.OFF_SALE,
+] as const;
+
+export function contentLifecycle(piece: PublicationState): ContentLifecycle {
+  if (piece.status === CONTENT_STATUS.PUBLISHED) {
+    return CONTENT_LIFECYCLE.PUBLISHED;
+  }
+  return hasBeenLive(piece)
+    ? CONTENT_LIFECYCLE.OFF_SALE
+    : CONTENT_LIFECYCLE.DRAFT;
+}
+
 export const MEDIA_STATUS = {
   UPLOADING: 'uploading',
   UPLOADED: 'uploaded',

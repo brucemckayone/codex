@@ -1570,7 +1570,7 @@
   "studio_list_facet_retrying": "Trying again…",
   "studio_content_filter_draft": "Drafts",
   "studio_content_filter_published": "Published",
-  "studio_content_filter_archived": "Archived",
+  "studio_content_filter_off_sale": "Off sale",
   "studio_content_load_failed": "We couldn't load your content.",
   "studio_content_load_failed_again": "We still couldn't load your content.",
   "studio_content_load_retry_ok": "Your content loaded.",

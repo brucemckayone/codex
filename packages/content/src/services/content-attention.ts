@@ -21,9 +21,11 @@
  */
 import {
   CONTENT_ATTENTION_KINDS,
+  CONTENT_LIFECYCLE,
   CONTENT_STATUS,
   CONTENT_TYPES,
   type ContentAttentionKind,
+  type ContentLifecycle,
   MEDIA_STATUS,
   MEDIA_STATUS_GROUPS,
   ORGANIZATION_STATUS,
@@ -61,6 +63,26 @@ const isDraft = allOf(
   sql`${content.status} = ${CONTENT_STATUS.DRAFT}`,
   sql`${content.publishedAt} is null`
 );
+
+/**
+ * `contentLifecycle` (`@codex/constants`) in SQL: the studio list's status
+ * tabs (Codex-a6ofh.3.6). A draft is `isDraft`, the same never-live draft
+ * the "Needs you" kinds count, so a tab and a chip agree; off sale is the
+ * rest of the pieces not on sale (archived, or a draft once live).
+ */
+export function lifecycleCondition(lifecycle: ContentLifecycle): SQL {
+  switch (lifecycle) {
+    case CONTENT_LIFECYCLE.DRAFT:
+      return isDraft;
+    case CONTENT_LIFECYCLE.PUBLISHED:
+      return sql`(${content.status} = ${CONTENT_STATUS.PUBLISHED})`;
+    case CONTENT_LIFECYCLE.OFF_SALE:
+      return allOf(
+        sql`${content.status} <> ${CONTENT_STATUS.PUBLISHED}`,
+        sql`not ${isDraft}`
+      );
+  }
+}
 
 /** Asked to go live when its media is ready (Publish when ready). */
 const scheduled = sql`(${content.publishRequestedAt} is not null)`;

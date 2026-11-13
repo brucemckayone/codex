@@ -138,6 +138,7 @@ import type {
 } from '../types';
 import {
   attentionCondition,
+  lifecycleCondition,
   readyAmong,
   readyCandidate,
   SQL_ATTENTION_KINDS,
@@ -2696,6 +2697,11 @@ export class ContentService extends BaseService {
         "needs filters a creator's own pieces: browse spans creators"
       );
     }
+    if (scope === 'browse' && filters.lifecycle) {
+      throw new ValidationError(
+        "lifecycle filters a creator's own pieces: browse lists what is on sale"
+      );
+    }
 
     try {
       // Build WHERE conditions. Studio scope filters by the signed-in
@@ -2726,6 +2732,11 @@ export class ContentService extends BaseService {
       // Add filters
       if (filters.status) {
         whereConditions.push(eq(content.status, filters.status));
+      }
+      // A status tab (`lifecycleCondition`): a never-live draft, on sale, or
+      // off sale. On the where, before the count, so the totals are its.
+      if (filters.lifecycle) {
+        whereConditions.push(lifecycleCondition(filters.lifecycle));
       }
       if (filters.contentType) {
         whereConditions.push(eq(content.contentType, filters.contentType));

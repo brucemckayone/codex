@@ -2,6 +2,7 @@ import {
   CONTENT_ACCESS_TYPE,
   CONTENT_ATTENTION_KINDS,
   CONTENT_BULK_MAX,
+  CONTENT_LIFECYCLES,
   CONTENT_LIST_SCOPE,
   CONTENT_MAX_CATEGORIES,
   CONTENT_STATUS,
@@ -849,6 +850,12 @@ export const updateContentQuerySchema = z.object({
 const contentQueryFields = paginationSchema.extend({
   // Filters
   status: contentStatusEnum.optional(),
+  // Where a piece is in its life (Codex-a6ofh.3.6, the studio list's status
+  // tabs): a draft never live, on sale, or off sale (once live and not on
+  // sale now: archived, or a draft again, its buyers keeping it). `status`
+  // is the stored column, which files an unpublished piece among the drafts;
+  // both at once is refused below. The studio list's alone: browse refuses it.
+  lifecycle: z.enum(CONTENT_LIFECYCLES).optional(),
   contentType: contentTypeEnum.optional(),
   accessType: contentAccessTypeEnum.optional(),
   // A category (topic) by its slug: the pieces filed in it, in the org when
@@ -912,6 +919,15 @@ const ONE_WHERE_REFUSAL = {
   path: ['scope'],
 };
 
+/** A stored status and a lifecycle at once would be two answers to "which": refused. */
+function oneStatus(q: { status?: string; lifecycle?: string }): boolean {
+  return !(q.status !== undefined && q.lifecycle !== undefined);
+}
+const ONE_STATUS_REFUSAL = {
+  message: 'lifecycle and status both narrow by status: send one',
+  path: ['lifecycle'],
+};
+
 /**
  * Content query/filter schema
  * Used for listing and searching content
@@ -924,7 +940,8 @@ export const contentQuerySchema = contentQueryFields
     // out, and skip the query. A studio read's alone: browse names none.
     include: z.literal('categories').optional(),
   })
-  .refine(oneWhere, ONE_WHERE_REFUSAL);
+  .refine(oneWhere, ONE_WHERE_REFUSAL)
+  .refine(oneStatus, ONE_STATUS_REFUSAL);
 
 export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
 
@@ -949,6 +966,8 @@ export const contentBrowseQuerySchema = contentQueryFields.extend({
   scope: z.never().optional(),
   // What a creator's own pieces need means nothing across creators either.
   needs: z.never().optional(),
+  // Nor do its off-sale pieces: browse lists what is on sale.
+  lifecycle: z.never().optional(),
 });
 
 export type ContentBrowseQueryInput = z.infer<typeof contentBrowseQuerySchema>;

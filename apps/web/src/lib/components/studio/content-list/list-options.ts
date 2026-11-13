@@ -5,7 +5,7 @@
  */
 import {
   CONTENT_ACCESS_TYPE,
-  CONTENT_STATUS,
+  CONTENT_LIFECYCLE,
   CONTENT_TYPES,
 } from '@codex/constants';
 import type { ContentWhereCounts } from '@codex/shared-types';
@@ -26,14 +26,17 @@ import {
 
 export const STATUS_OPTIONS: readonly ListOption<ContentStatusFilter>[] = [
   { value: 'all', label: () => m.studio_content_filter_all() },
-  { value: CONTENT_STATUS.DRAFT, label: () => m.studio_content_filter_draft() },
   {
-    value: CONTENT_STATUS.PUBLISHED,
+    value: CONTENT_LIFECYCLE.DRAFT,
+    label: () => m.studio_content_filter_draft(),
+  },
+  {
+    value: CONTENT_LIFECYCLE.PUBLISHED,
     label: () => m.studio_content_filter_published(),
   },
   {
-    value: CONTENT_STATUS.ARCHIVED,
-    label: () => m.studio_content_filter_archived(),
+    value: CONTENT_LIFECYCLE.OFF_SALE,
+    label: () => m.studio_content_filter_off_sale(),
   },
 ];
 

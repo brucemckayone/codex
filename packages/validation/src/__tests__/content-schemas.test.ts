@@ -1,4 +1,4 @@
-import { CONTENT_ATTENTION_KINDS } from '@codex/constants';
+import { CONTENT_ATTENTION_KINDS, CONTENT_LIFECYCLES } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
 import {
   addContentCategoriesSchema,
@@ -944,6 +944,39 @@ describe('Query Schemas', () => {
       });
       expect(result.success).toBe(false);
       expect(result.error?.issues[0]?.path).toEqual(['needs']);
+    });
+
+    it('takes each lifecycle, and nothing else (Codex-a6ofh.3.6)', () => {
+      for (const lifecycle of CONTENT_LIFECYCLES) {
+        expect(contentQuerySchema.parse({ lifecycle }).lifecycle).toBe(
+          lifecycle
+        );
+      }
+      // The stored status's word is not a lifecycle.
+      expect(
+        contentQuerySchema.safeParse({ lifecycle: 'archived' }).success
+      ).toBe(false);
+    });
+
+    it('refuses a lifecycle beside a status: two answers to which', () => {
+      const result = contentQuerySchema.safeParse({
+        lifecycle: 'off-sale',
+        status: 'draft',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['lifecycle']);
+      expect(contentQuerySchema.safeParse({ status: 'draft' }).success).toBe(
+        true
+      );
+    });
+
+    it('browse refuses a lifecycle: it lists what is on sale', () => {
+      const result = contentBrowseQuerySchema.safeParse({
+        lifecycle: 'off-sale',
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['lifecycle']);
     });
 
     it('should reject page less than 1', () => {

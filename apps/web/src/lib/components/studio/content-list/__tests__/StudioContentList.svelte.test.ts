@@ -305,7 +305,7 @@ describe('StudioContentList: the view, from the URL', () => {
     expect(listCalls()[0]).toMatchObject({
       contentType: 'audio',
       accessType: 'subscribers',
-      status: 'published',
+      lifecycle: 'published',
       sortBy: 'viewCount',
       sortOrder: 'desc',
     });
@@ -336,6 +336,19 @@ describe('StudioContentList: the view, from the URL', () => {
     ].map((radio) => radio.textContent?.trim());
     expect(checked).toContain(m.studio_content_filter_draft());
     expect(checked).not.toContain(m.studio_content_filter_all());
+  });
+
+  test('an old Archived link opens Off sale, and asks the API for it (Codex-a6ofh.3.6)', () => {
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    render('?status=archived');
+    expect(listCalls()[0]).toMatchObject({ lifecycle: 'off-sale' });
+    expect(listCalls()[0]).not.toHaveProperty('status');
+    const checked = [
+      ...document.querySelectorAll<HTMLElement>(
+        '[role="radio"][aria-checked="true"]'
+      ),
+    ].map((radio) => radio.textContent?.trim());
+    expect(checked).toContain(m.studio_content_filter_off_sale());
   });
 
   test('a facet written while typing keeps what was typed in the box', () => {

@@ -191,7 +191,8 @@ export function contentListArgs(
     ...(organizationId && { include: 'categories' as const }),
     ...(organizationId &&
       state.category !== CATEGORY_ANY && { categoryId: state.category }),
-    ...(state.status !== 'all' && { status: state.status }),
+    // A tab is a lifecycle (`content-status.ts`), asked of the API as one.
+    ...(state.status !== 'all' && { lifecycle: state.status }),
     ...(state.type !== 'all' && { contentType: state.type }),
     ...(state.access !== 'any' && { accessType: state.access }),
     ...(state.needs !== NEEDS_NONE && { needs: state.needs }),

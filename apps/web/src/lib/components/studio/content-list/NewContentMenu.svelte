@@ -11,7 +11,7 @@
   @prop {PayoutsRead} payouts - The page's one payouts read, for each draft's step
 -->
 <script lang="ts">
-  import { CONTENT_LIST_SCOPE, hasBeenLive } from '@codex/constants';
+  import { CONTENT_LIFECYCLE, CONTENT_LIST_SCOPE } from '@codex/constants';
   import * as m from '$paraglide/messages';
   import * as DropdownMenu from '$lib/components/ui/DropdownMenu';
   import {
@@ -71,7 +71,12 @@
         // The personal studio's drafts are its list's, Personal: so "All
         // drafts (n)" opens a list of n (Codex-a6ofh.3.2).
         ...(org ? { organizationId: org } : { scope: CONTENT_LIST_SCOPE.PERSONAL }),
-        status: 'draft',
+        // The drafts to continue are the drafts never live: one live once is
+        // off sale, opens in the live editor, and has no step to continue
+        // (Codex-a6ofh.2, the epic review). Asked of the query, the Drafts
+        // tab's own (Codex-a6ofh.3.6), so the newest few are never all off
+        // sale and "All drafts (n)" opens a list of n.
+        lifecycle: CONTENT_LIFECYCLE.DRAFT,
         page: 1,
         limit: MENU_DRAFTS,
         sortBy: 'updatedAt',
@@ -81,14 +86,6 @@
   });
   // A value wins (a failed refresh keeps the last one), then a failure, then loading.
   const drafts = $derived(draftsQuery?.current?.items ?? null);
-  /**
-   * The drafts to continue: a piece that has been live and is a draft again
-   * is off sale, opens in the live editor, and has no step to continue
-   * (Codex-a6ofh.2, the epic review). Filtered here, from the page read: when
-   * the newest few are all off sale, none is offered. The list's Drafts and
-   * Off sale filters (Codex-a6ofh.3.6) move this to the query.
-   */
-  const toContinue = $derived(drafts?.filter((row) => !hasBeenLive(row)) ?? null);
   const draftTotal = $derived(draftsQuery?.current?.pagination.total ?? 0);
   const failed = $derived(drafts === null && draftsQuery?.error != null);
   $effect(() => {
@@ -156,9 +153,9 @@
   </DropdownMenu.Trigger>
 
   <DropdownMenu.Content class="new-menu" data-new-menu={menuKey}>
-    {#if toContinue && toContinue.length > 0}
+    {#if drafts && drafts.length > 0}
       <p class="new-menu-heading" aria-hidden="true">{m.studio_new_menu_drafts()}</p>
-      {#each toContinue as row (row.id)}
+      {#each drafts as row (row.id)}
         {@const progress = draftProgress(row, payouts)}
         <DropdownMenu.Item href={progress?.href ?? editHref(row.id)}>
           <span class="new-menu-draft">

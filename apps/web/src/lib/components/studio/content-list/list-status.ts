@@ -5,7 +5,7 @@
  * 2026-11-05: `hasBeenLive`), it opens in the live editor, it has no draft
  * progress, and it is put back with "Publish again". It looks as an
  * archived piece does, muted, as the mockup's Off sale row (content-list.html
- * L1); archived keeps its own word until the list renames it
+ * L1); an archived piece is Off sale too, the tab that lists both
  * (Codex-a6ofh.3.6). ContentStatus (the table and the cards) and the
  * Access cell's "Buyers keep access" both ask here.
  */
@@ -39,10 +39,7 @@ export function listStatus(piece: PublicationState): {
   }
   if (isOffSale(piece)) {
     return {
-      label:
-        piece.status === CONTENT_STATUS.ARCHIVED
-          ? m.studio_content_status_archived()
-          : m.studio_live_badge_unpublished(),
+      label: m.studio_live_badge_unpublished(),
       variant: 'off-sale',
       toggle: m.studio_live_republish(),
     };

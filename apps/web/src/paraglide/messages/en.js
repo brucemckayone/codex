@@ -12583,7 +12583,7 @@ export const studio_content_filter_published = () => `Published`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_filter_archived = () => `Archived`
+export const studio_content_filter_off_sale = () => `Off sale`
 
 
 /**

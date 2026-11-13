@@ -5,7 +5,11 @@
  * Redirects unauthenticated users to login and non-creators to homepage.
  * Loads creator profile and organization list for the sidebar/switcher.
  */
-import { CONTENT_LIST_SCOPE, STUDIO_ROLES } from '@codex/constants';
+import {
+  CONTENT_LIFECYCLE,
+  CONTENT_LIST_SCOPE,
+  STUDIO_ROLES,
+} from '@codex/constants';
 import { redirect } from '@sveltejs/kit';
 import { shouldResumeInWizard } from '$lib/onboarding/onboarding-flow';
 import { getProfile } from '$lib/remote/account.remote';
@@ -110,7 +114,8 @@ async function countPersonalDrafts(
 ): Promise<number> {
   const result = await createServerApi(...api).content.list(
     new URLSearchParams({
-      status: 'draft',
+      // The drafts never live, the Drafts tab's (Codex-a6ofh.3.6).
+      lifecycle: CONTENT_LIFECYCLE.DRAFT,
       scope: CONTENT_LIST_SCOPE.PERSONAL,
       limit: '1',
       page: '1',

@@ -9,6 +9,7 @@
  * Redirects to home if not a privileged member. A membership read that FAILS is
  * a retryable 503, never that redirect: a failure is not an answer.
  */
+import { CONTENT_LIFECYCLE } from '@codex/constants';
 import { error, redirect } from '@sveltejs/kit';
 import { ApiError } from '$lib/api/errors';
 import { logger } from '$lib/observability';
@@ -164,12 +165,14 @@ export const load: LayoutServerLoad = async ({
     redirect(302, '/?error=access_denied');
   }
 
-  // Draft count: lightweight call after auth check — limit=1 just to get pagination.total
+  // Draft count: lightweight call after auth check — limit=1 just to get pagination.total.
+  // The drafts never live, the Drafts tab's own set, so the badge and the
+  // home's "Continue a draft" count what the tab lists (Codex-a6ofh.3.6).
   let draftCount = 0;
   try {
     const draftParams = new URLSearchParams();
     draftParams.set('organizationId', org.id);
-    draftParams.set('status', 'draft');
+    draftParams.set('lifecycle', CONTENT_LIFECYCLE.DRAFT);
     draftParams.set('limit', '1');
     draftParams.set('page', '1');
     const draftResult = await api.content.list(draftParams);

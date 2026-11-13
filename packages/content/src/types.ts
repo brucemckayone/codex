@@ -7,6 +7,7 @@
 
 import type {
   ContentAttentionKind,
+  ContentLifecycle,
   MediaStatusGroup,
   PublishBlockedReason,
 } from '@codex/constants';
@@ -78,6 +79,11 @@ export interface BulkTouchedPiece {
  */
 export interface ContentFilters {
   status?: 'draft' | 'published' | 'archived';
+  /**
+   * Where the pieces are in their life (Codex-a6ofh.3.6, the status tabs):
+   * a never-live draft, on sale, or off sale. Studio only.
+   */
+  lifecycle?: ContentLifecycle;
   contentType?: 'video' | 'audio' | 'written';
   accessType?:
     | 'free'

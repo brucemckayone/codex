@@ -36,11 +36,11 @@ describe('listStatus', () => {
     });
   });
 
-  it('archived keeps its word, and looks and goes back as off sale', () => {
+  it('archived is Off sale too, the tab that lists it (Codex-a6ofh.3.6)', () => {
     expect(
       listStatus({ status: 'archived', publishedAt: '2026-11-01' })
     ).toEqual({
-      label: m.studio_content_status_archived(),
+      label: m.studio_live_badge_unpublished(),
       variant: 'off-sale',
       toggle: m.studio_live_republish(),
     });

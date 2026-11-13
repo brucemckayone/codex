@@ -134,7 +134,7 @@ describe('contentListArgs', () => {
       limit: CONTENT_LIST_PAGE_SIZE,
       organizationId: ORG,
       include: 'categories',
-      status: 'published',
+      lifecycle: 'published',
       contentType: 'written',
       accessType: 'paid',
       search: 'runes',

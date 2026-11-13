@@ -78,7 +78,9 @@ describe('personal studio layout', () => {
 
     expect(list).toHaveBeenCalledTimes(1);
     const params = list.mock.calls[0]?.[0];
-    expect(params?.get('status')).toBe('draft');
+    // The drafts never live, the Drafts tab's set (Codex-a6ofh.3.6).
+    expect(params?.get('lifecycle')).toBe('draft');
+    expect(params?.has('status')).toBe(false);
     expect(params?.get('scope')).toBe('personal');
     expect(params?.has('organizationId')).toBe(false);
     expect(data).toMatchObject({ badgeCounts: { draftContent: 2 } });
