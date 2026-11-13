@@ -23,13 +23,13 @@ function piece(id: string, fields: Partial<AccessPiece> = {}): AccessPiece {
     isTierGated: false,
     isFollowerGated: false,
     isTeamOnly: false,
-    buyerCount: 0,
+    holderCount: 0,
     ...fields,
   };
 }
 
-const sold = (id: string, priceCents: number, buyerCount = 0) =>
-  piece(id, { isFree: false, isPurchasable: true, priceCents, buyerCount });
+const sold = (id: string, priceCents: number, holderCount = 0) =>
+  piece(id, { isFree: false, isPurchasable: true, priceCents, holderCount });
 
 describe('selectionOrg (owner R3)', () => {
   it('is the org every piece is in', () => {

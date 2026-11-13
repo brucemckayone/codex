@@ -109,19 +109,21 @@ export function viewsShown(row: ContentWithRelations): string | null {
  * taken off sale keeps its buyers, so it keeps its count.
  */
 export function salesShown(row: ContentWithRelations): string | null {
-  return hasBeenLive(row) && (row.isPurchasable || isBought(row))
-    ? formatCount(row.buyerCount ?? 0)
+  const buyers = row.buyerCount ?? 0;
+  return hasBeenLive(row) && (row.isPurchasable || buyers > 0)
+    ? formatCount(buyers)
     : null;
 }
 
 /**
- * Someone bought it (owner R2, the list's `buyerCount`): a bulk delete, or a
- * move to Followers or Team only, leaves it alone.
+ * Someone has it, paid for or given, through the piece or a course that
+ * holds it (the list's `holderCount`, owner 2026-11-13): a bulk delete, or a
+ * move to Followers or Team only, leaves it alone, as the server does.
  */
-export function isBought(
-  row: Pick<ContentWithRelations, 'buyerCount'>
+export function isHeld(
+  row: Pick<ContentWithRelations, 'holderCount'>
 ): boolean {
-  return (row.buyerCount ?? 0) > 0;
+  return (row.holderCount ?? 0) > 0;
 }
 
 /**

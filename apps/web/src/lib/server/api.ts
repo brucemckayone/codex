@@ -664,7 +664,7 @@ const COURSE_FILM_TIMEOUT_MS = 6000;
 const CONTENT_BULK_TIMEOUT_MS = 30000;
 
 /** A bulk action and its body: the action names the route, the rest is sent. */
-export type ContentBulkRequest =
+type ContentBulkRequest =
   | ({ action: 'publish' | 'unpublish' | 'delete' } & ContentBulkInput)
   | ({ action: 'categories' } & ContentBulkCategoriesInput)
   | ({ action: 'access' } & ContentBulkAccessInput);

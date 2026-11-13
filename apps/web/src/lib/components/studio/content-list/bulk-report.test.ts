@@ -106,7 +106,7 @@ describe('bulkReport', () => {
         refused(
           'c',
           { code: 'CONTENT_HAS_BUYERS', buyers: 3 },
-          'Bought by 3 people, so it was left alone.'
+          '3 people have it, bought or given, so it was left alone.'
         ),
       ],
       pieces
@@ -115,7 +115,7 @@ describe('bulkReport', () => {
       `${m.studio_content_bulk_deleted_some({ done: 1, total: 2 })} ${m.studio_content_bulk_problems_delete({ count: 1 })}`
     );
     expect(report.problems[0]?.words).toBe(
-      'Bought by 3 people, so it was left alone.'
+      '3 people have it, bought or given, so it was left alone.'
     );
     expect(report.problems[0]?.fixHref).toBeNull();
   });

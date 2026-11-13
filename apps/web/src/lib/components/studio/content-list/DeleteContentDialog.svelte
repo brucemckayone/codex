@@ -3,14 +3,15 @@
 
   Delete… from the content list (Codex-a6ofh.3.5, owner D-b4, mockup L2c).
 
-  - Many (the bulk bar): says how many go. A piece people bought is left
+  - Many (the bulk bar): says how many go. A piece people have is left
     alone, since deleting it would end their playback; the dialog names it
     (or counts them) and offers Unpublish instead, which keeps their playback.
     The server judges each piece again, and the result line says what it did.
-  - One (the row menu): a piece people bought says by how many, with
+  - One (the row menu): a piece people have says by how many, with
     Unpublish instead first. Deleting it one at a time stays possible.
 
-  The counts are the list's (`buyerCount`); the server counts for itself.
+  "Have" is bought or given, through the piece or a course that holds it.
+  The counts are the list's (`holderCount`); the server counts for itself.
 
   @prop target   What is being deleted; null closes it
   @prop busy     The delete or the unpublish is under way
@@ -18,7 +19,7 @@
 <script lang="ts" module>
   import type { ContentWithRelations } from '$lib/types';
 
-  export type DeletePiece = Pick<ContentWithRelations, 'id' | 'title' | 'status' | 'buyerCount'>;
+  export type DeletePiece = Pick<ContentWithRelations, 'id' | 'title' | 'status' | 'holderCount'>;
 
   export type DeleteTarget =
     | { mode: 'many'; pieces: DeletePiece[] }
@@ -31,7 +32,7 @@
   import * as Dialog from '$lib/components/ui/Dialog';
   import { AlertTriangleIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
-  import { isBought } from './row-facts';
+  import { isHeld } from './row-facts';
 
   interface Props {
     target: DeleteTarget | null;
@@ -50,7 +51,7 @@
   const pieces = $derived(
     target === null ? [] : target.mode === 'many' ? target.pieces : [target.piece]
   );
-  const kept = $derived(pieces.filter(isBought));
+  const kept = $derived(pieces.filter(isHeld));
   const going = $derived(pieces.length - kept.length);
   const keptLive = $derived(kept.filter(live).map((piece) => piece.id));
   const [onlyKept] = $derived(kept);
@@ -78,7 +79,7 @@
       <div class="delete-body">
         {#if target?.mode === 'one'}
           {#if onlyKept}
-            {@const buyers = onlyKept.buyerCount ?? 0}
+            {@const buyers = onlyKept.holderCount ?? 0}
             <Alert variant="warning">
               <p class="delete-alert">
                 <AlertTriangleIcon size={16} />
@@ -109,7 +110,7 @@
                 <AlertTriangleIcon size={16} />
                 <span>
                   {#if kept.length === 1}
-                    {@const buyers = onlyKept.buyerCount ?? 0}
+                    {@const buyers = onlyKept.holderCount ?? 0}
                     <b>{m.studio_content_delete_kept_one_title({ title: onlyKept.title })}</b>
                     {buyers === 1
                       ? m.studio_content_delete_kept_one_body_single()

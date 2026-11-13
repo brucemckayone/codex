@@ -76,6 +76,10 @@ describe('ContentService: bulk actions', () => {
   });
 
   afterAll(async () => {
+    // Purchases first: a course purchase holds its course (restrict).
+    if (purchaseIds.length > 0) {
+      await db.delete(purchases).where(inArray(purchases.id, purchaseIds));
+    }
     if (courseIds.length > 0) {
       await db
         .delete(entitlements)
@@ -87,9 +91,6 @@ describe('ContentService: bulk actions', () => {
       await db
         .delete(entitlements)
         .where(inArray(entitlements.contentId, contentIds));
-    }
-    if (purchaseIds.length > 0) {
-      await db.delete(purchases).where(inArray(purchases.id, purchaseIds));
     }
     if (contentIds.length > 0) {
       await db
@@ -226,7 +227,7 @@ describe('ContentService: bulk actions', () => {
   });
 
   describe('unpublishMany', () => {
-    it('a row held elsewhere is its own failure within seconds, logged by id; the rest go through', async () => {
+    it('a row held elsewhere is its own try-again within seconds, never a fault; the rest go through', async () => {
       const held = await live();
       const free = await live();
       // An editor's save holding the row, until released.
@@ -248,8 +249,11 @@ describe('ContentService: bulk actions', () => {
         await released;
       });
       await isHeld;
-      const obs = (service as unknown as { obs: { error: () => void } }).obs;
-      const logged = vi.spyOn(obs, 'error');
+      const obs = (
+        service as unknown as { obs: { error: () => void; warn: () => void } }
+      ).obs;
+      const faults = vi.spyOn(obs, 'error');
+      const tryAgains = vi.spyOn(obs, 'warn');
 
       const started = Date.now();
       const report = await service
@@ -258,13 +262,41 @@ describe('ContentService: bulk actions', () => {
       await holder;
 
       expect(outcomes(report.results)).toEqual(['failed', 'done']);
+      // A typed try-again (503), logged as one, never as a fault.
+      expect(report.results[0]).toMatchObject({
+        error: { code: 'SERVICE_UNAVAILABLE' },
+      });
+      expect(faults).not.toHaveBeenCalled();
+      expect(tryAgains).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          context: expect.objectContaining({ contentId: held.id }),
+        })
+      );
       expect(Date.now() - started).toBeLessThan(5000);
       expect((await stored(held.id)).status).toBe('published');
-      expect(logged).toHaveBeenCalledWith(
-        'content bulk piece failed',
-        expect.objectContaining({ action: 'unpublish', contentId: held.id })
-      );
-      logged.mockRestore();
+      faults.mockRestore();
+      tryAgains.mockRestore();
+    });
+
+    it('past its deadline starts no more pieces: the rest are failed, untried', async () => {
+      const first = await live();
+      const second = await live();
+      // The loop's start reads 0; every later read is a minute on.
+      let reads = 0;
+      const clock = vi
+        .spyOn(Date, 'now')
+        .mockImplementation(() => (reads++ === 0 ? 0 : 60_000));
+
+      const report = await service
+        .unpublishMany([first.id, second.id], creatorId)
+        .finally(() => clock.mockRestore());
+
+      expect(outcomes(report.results)).toEqual(['done', 'failed']);
+      expect(report.results[1]).toMatchObject({
+        error: { code: 'SERVICE_UNAVAILABLE' },
+      });
+      expect((await stored(second.id)).status).toBe('published');
     });
 
     it('takes the live down and leaves a draft unwritten', async () => {
@@ -378,6 +410,44 @@ describe('ContentService: bulk actions', () => {
       expect(refusalCode(report.results[0])).toBe(
         ERROR_CODES.CONTENT_HAS_BUYERS
       );
+    });
+
+    it('counts a course buyer whose purchase is under dispute: a win gives the course back', async () => {
+      const lesson = await live({ organizationId: orgId });
+      const courseId = await inCourse(lesson.id);
+      const row = takeFirst(
+        await db
+          .insert(purchases)
+          .values({
+            customerId: buyerId,
+            courseId,
+            amountPaidCents: 2400,
+            currency: 'gbp',
+            platformFeeCents: 0,
+            organizationFeeCents: 0,
+            creatorPayoutCents: 2400,
+            stripePaymentIntentId: `pi_${randomUUID()}`,
+            status: 'completed',
+            purchasedAt: new Date(),
+            disputedAt: new Date(),
+          })
+          .returning({ id: purchases.id })
+      );
+      purchaseIds.push(row.id);
+      // The dispute revoked the course's grant.
+      await db.insert(entitlements).values({
+        userId: buyerId,
+        organizationId: orgId,
+        courseId,
+        source: 'course_purchase',
+        sourceRef: row.id,
+        revokedAt: new Date(),
+      });
+
+      const report = await service.deleteMany([lesson.id], creatorId);
+
+      expect(outcomes(report.results)).toEqual(['refused']);
+      expect((await stored(lesson.id)).deletedAt).toBeNull();
     });
 
     it('counts a person once, however many ways they hold it', async () => {
@@ -573,6 +643,31 @@ describe('ContentService: bulk actions', () => {
         none.id,
       ]);
       expect(page.items.map((row) => row.buyerCount)).toEqual([2, 1, 0]);
+      expect(page.items.map((row) => row.holderCount)).toEqual([2, 1, 0]);
+    });
+
+    it('carries the holders a delete would leave alone, beside the buyers', async () => {
+      const tag = `holders-${randomUUID().slice(0, 8)}`;
+      const given = await live({
+        title: `${tag} given`,
+        organizationId: orgId,
+      });
+      await db.insert(entitlements).values({
+        userId: buyerId,
+        organizationId: orgId,
+        contentId: given.id,
+        source: 'grant',
+      });
+
+      const page = await service.list(
+        creatorId,
+        { search: tag },
+        { page: 1, limit: 10 }
+      );
+
+      expect(
+        page.items.map((row) => [row.buyerCount, row.holderCount])
+      ).toEqual([[0, 1]]);
     });
   });
 });

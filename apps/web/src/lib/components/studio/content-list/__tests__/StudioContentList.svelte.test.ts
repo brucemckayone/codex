@@ -7,6 +7,7 @@
  */
 import { CONTENT_ATTENTION_KINDS } from '@codex/constants';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { toast } from '$lib/components/ui/Toast/toast-store';
 import type { ContentWithRelations } from '$lib/types';
 import * as m from '$paraglide/messages';
 import {
@@ -1195,7 +1196,7 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
           outcome: 'refused',
           error: {
             code: 'CONFLICT',
-            message: 'Bought by 2 people, so it was left alone.',
+            message: '2 people have it, bought or given, so it was left alone.',
             details: { code: 'CONTENT_HAS_BUYERS', buyers: 2 },
           },
         },
@@ -1217,7 +1218,9 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
     expect(box('Piece 2')?.checked).toBe(true);
     button(m.studio_content_bulk_show())?.click();
     flushSync();
-    expect(text()).toContain('Bought by 2 people, so it was left alone.');
+    expect(text()).toContain(
+      '2 people have it, bought or given, so it was left alone.'
+    );
   });
 
   test('a request that failed as a whole says so, and reads the list again', async () => {
@@ -1330,6 +1333,26 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
     expect(writeText).toHaveBeenCalledWith(
       'https://studio-alpha.lvh.me/content/piece-1'
     );
+  });
+
+  test("a row delete that timed out names the piece, never the client's own words", async () => {
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    deleteContent.mockRejectedValueOnce({
+      status: 408,
+      body: { message: 'Request to content/api/content/x timed out' },
+    });
+    const said = vi.spyOn(toast, 'error');
+    render();
+
+    (await rowMenuItem('Piece 1', m.studio_content_row_delete()))?.click();
+    await settle();
+    button(m.studio_content_delete_confirm())?.click();
+    await settle();
+
+    expect(said).toHaveBeenCalledWith(
+      m.studio_content_delete_failed({ title: 'Piece 1' })
+    );
+    said.mockRestore();
   });
 
   test('a row deleted elsewhere already reads as deleted, and leaves the selection', async () => {

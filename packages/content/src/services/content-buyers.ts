@@ -1,13 +1,16 @@
 /**
- * Who bought a piece (Codex-a6ofh.3.5, owner D-b4 and R2): a `purchases` row
- * for it with `status = completed`, disputed ones included. The access
- * predicate (`verifyPurchase`) leaves a disputed purchase out of playback,
- * but a won dispute gives it back, so a delete would still take it from
- * them. One completed purchase per customer and piece (the partial unique
- * index `uq_purchases_completed_customer_content`) makes a row count a count
- * of people.
+ * Who has a piece (Codex-a6ofh.3.5). Two counts:
  *
- * `content.purchase_count` is not this: nothing but the seed scripts writes
+ * - Its buyers (owner R2, the studio list's Sales): `purchases` rows for it
+ *   with `status = completed`, disputed ones included. The access predicate
+ *   (`verifyPurchase`) leaves a disputed purchase out of playback, but a won
+ *   dispute gives it back. One completed purchase per customer and piece
+ *   (`uq_purchases_completed_customer_content`) makes a row count people.
+ * - Its holders (owner D-b4, R1, 2026-11-13): everyone who would lose it,
+ *   paid for or given, through the piece or a course that holds it. What a
+ *   bulk delete, or a move to Followers or Team only, leaves alone.
+ *
+ * `content.purchase_count` is neither: nothing but the seed scripts writes
  * it (Codex-r7os5), so every real piece reads 0 there.
  */
 import { PURCHASE_STATUS } from '@codex/constants';
@@ -39,7 +42,7 @@ const boughtBy = (contentId: SQL | string | typeof content.id) =>
   );
 
 /**
- * Entitlement sources a buyer holds a piece by (owner 2026-11-13: course
+ * Entitlement sources a holder holds a piece by (owner 2026-11-13: course
  * buyers count): the piece's own purchase or a manual grant of it, and a
  * course's purchase or manual grant. A course subscription is a subscriber,
  * not a buyer, as a tier subscription is. The access decision reads the
@@ -49,44 +52,60 @@ const CONTENT_HELD_BY: string[] = ['content_purchase', 'grant'];
 const COURSE_HELD_BY: string[] = ['course_purchase', 'grant'];
 
 /**
- * How many people would lose a piece they paid for, or were given, if it
- * went (a bulk delete, owner D-b4) or moved to Followers or Team only (R1):
- * its buyers, anyone with a live stored grant of it, and anyone who bought
- * or was given a course one of whose live stages holds it. Counted as
- * people, once each however many ways they hold it. Read inside the
- * caller's transaction, after its lock on the piece, so the refusal is
- * judged on the server, never on a number the list showed.
+ * How many people would lose each piece, paid for or given, if it went (a
+ * bulk delete, owner D-b4) or moved to Followers or Team only (R1), by id,
+ * in one read: its buyers, anyone with a live stored grant of it, and anyone
+ * who bought or was given a course one of whose live stages holds it. A
+ * course buyer whose purchase is under dispute counts, as a disputed buyer
+ * of the piece does: the dispute revoked the course's grant, and a win gives
+ * it back. Each person once per piece, however many ways they hold it. A
+ * piece nobody holds has no key.
  */
-export async function countHolders(
+export async function holderCountsOf(
   db: Database | DatabaseTransaction,
-  contentId: string
-): Promise<number> {
+  contentIds: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (contentIds.length === 0) return counts;
   const now = new Date();
   const live = and(
     isNull(entitlements.revokedAt),
     or(isNull(entitlements.expiresAt), gt(entitlements.expiresAt, now))
   );
-  const coursesHolding = db
-    .select({ courseId: courseStages.courseId })
+  // Each piece's courses: those whose live stages hold it.
+  const held = db
+    .select({
+      contentId: stagePractices.contentId,
+      courseId: courseStages.courseId,
+    })
     .from(stagePractices)
     .innerJoin(courseStages, eq(stagePractices.stageId, courseStages.id))
     .where(
       and(
-        eq(stagePractices.contentId, contentId),
+        inArray(stagePractices.contentId, contentIds),
         isNull(courseStages.deletedAt)
       )
-    );
+    )
+    .as('held');
   const holders = db
-    .select({ userId: purchases.customerId })
+    .select({ contentId: purchases.contentId, userId: purchases.customerId })
     .from(purchases)
-    .where(boughtBy(contentId))
+    .where(
+      and(
+        inArray(purchases.contentId, contentIds),
+        eq(purchases.status, PURCHASE_STATUS.COMPLETED)
+      )
+    )
     .union(
       db
-        .select({ userId: entitlements.userId })
+        .select({
+          contentId: entitlements.contentId,
+          userId: entitlements.userId,
+        })
         .from(entitlements)
         .where(
           and(
-            eq(entitlements.contentId, contentId),
+            inArray(entitlements.contentId, contentIds),
             inArray(entitlements.source, CONTENT_HELD_BY),
             live
           )
@@ -94,19 +113,39 @@ export async function countHolders(
     )
     .union(
       db
-        .select({ userId: entitlements.userId })
+        .select({ contentId: held.contentId, userId: entitlements.userId })
         .from(entitlements)
-        .where(
-          and(
-            inArray(entitlements.courseId, coursesHolding),
-            inArray(entitlements.source, COURSE_HELD_BY),
-            live
-          )
-        )
+        .innerJoin(held, eq(entitlements.courseId, held.courseId))
+        .where(and(inArray(entitlements.source, COURSE_HELD_BY), live))
+    )
+    .union(
+      db
+        .select({ contentId: held.contentId, userId: purchases.customerId })
+        .from(purchases)
+        .innerJoin(held, eq(purchases.courseId, held.courseId))
+        .where(eq(purchases.status, PURCHASE_STATUS.COMPLETED))
     )
     .as('holders');
-  const [row] = await db.select({ people: count() }).from(holders);
-  return row?.people ?? 0;
+  const rows = await db
+    .select({ contentId: holders.contentId, people: count() })
+    .from(holders)
+    .groupBy(holders.contentId);
+  for (const { contentId, people } of rows) {
+    if (contentId) counts.set(contentId, people);
+  }
+  return counts;
+}
+
+/**
+ * One piece's holders ({@link holderCountsOf}), read inside the caller's
+ * transaction, after its lock on the piece, so a refusal is judged on the
+ * server, never on a number the list showed.
+ */
+export async function countHolders(
+  db: Database | DatabaseTransaction,
+  contentId: string
+): Promise<number> {
+  return (await holderCountsOf(db, [contentId])).get(contentId) ?? 0;
 }
 
 /**

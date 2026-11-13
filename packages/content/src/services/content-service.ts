@@ -143,7 +143,12 @@ import {
   SQL_ATTENTION_KINDS,
   type SqlAttentionKind,
 } from './content-attention';
-import { buyerCountsOf, byBuyers, countHolders } from './content-buyers';
+import {
+  buyerCountsOf,
+  byBuyers,
+  countHolders,
+  holderCountsOf,
+} from './content-buyers';
 import {
   assertTiersInOrg,
   type ContentTierWire,
@@ -266,6 +271,38 @@ class ScheduledRowLockedError extends ServiceUnavailableError {
     );
     this.lockedOn = lockedRelation(cause);
   }
+}
+
+/**
+ * A bulk piece gave up a lock another request held ({@link BULK_LOCK_WAIT}):
+ * the outcome the wait exists for, so a typed 503 (logged as a try-again),
+ * never an unhandled 500. The piece's result is `failed`; nothing of it was
+ * written.
+ */
+class BulkPieceBusyError extends ServiceUnavailableError {
+  readonly lockedOn: string | undefined;
+  constructor(contentId: string, cause: unknown) {
+    super(
+      'Being changed elsewhere just now; try again',
+      { contentId },
+      { cause }
+    );
+    this.lockedOn = lockedRelation(cause);
+  }
+}
+
+/** A bulk piece left untried at {@link BULK_DEADLINE_MS}: a try-again, never written. */
+class BulkOutOfTimeError extends ServiceUnavailableError {
+  constructor(contentId: string) {
+    super('Not tried: this action ran out of time; try again', { contentId });
+  }
+}
+
+/** A bulk piece's given-up lock as {@link BulkPieceBusyError}; anything else as it was. */
+function asBulkBusy(error: unknown, bulk: boolean, contentId: string): unknown {
+  return bulk && isLockNotAvailable(error)
+    ? new BulkPieceBusyError(contentId, error)
+    : error;
 }
 
 /**
@@ -430,8 +467,20 @@ type StudioListOptions = { scope?: 'studio'; withCategories?: boolean };
  */
 type BulkPieceOption = { bulk?: boolean };
 
-/** A bulk piece's lock wait: fifteen of them stay well inside the call's time. */
+/**
+ * A bulk piece's wait on each lock it takes (a publish takes up to four: its
+ * row, media, membership and cover). The loop stops starting pieces at
+ * {@link BULK_DEADLINE_MS}, so one request stays inside the call's 30 s.
+ */
 const BULK_LOCK_WAIT = sql`SET LOCAL lock_timeout = '1s'`;
+
+/**
+ * After this long a bulk action starts no more pieces: those left are
+ * `failed`, not tried, so a request held up by locks ends with its results
+ * (and its one cache refresh) inside the web call's 30 s, never as a 408
+ * while pieces were still changing.
+ */
+const BULK_DEADLINE_MS = 20_000;
 
 /** What `addCategories` filed, and the caller's cache gate. */
 type AddedCategories = {
@@ -1214,11 +1263,6 @@ export class ContentService extends BaseService {
           unchanged = true;
           return existing;
         }
-        if (bulk?.refuseIfBought) {
-          const buyers = await countHolders(tx as DatabaseTransaction, id);
-          if (buyers > 0) throw new ContentHasBuyersError(id, buyers);
-        }
-
         // A URL in this content's own thumbnail folders is written only by an
         // upload. One the payload sends that differs from the row's names an
         // upload since replaced, whose files are deleted, so a stale form
@@ -1328,7 +1372,8 @@ export class ContentService extends BaseService {
         const effCourseOnly = restValidated.courseOnly ?? existing.courseOnly;
         // Create's org rules, on the EFFECTIVE row (owner R3): followers and
         // the team are an org's, so either gate on a personal piece shuts
-        // everyone out. The schema sees only a partial that states the org.
+        // everyone out. Only create's schema has them; for an update this is
+        // the one check.
         if (resultingOrgId == null && (effIsFollowerGated || effIsTeamOnly)) {
           throw new ValidationError(
             effIsFollowerGated
@@ -1336,6 +1381,12 @@ export class ContentService extends BaseService {
               : 'Team-only content requires an organisation',
             { contentId: id }
           );
+        }
+        // After the rules: a change refused for its own reason never reads
+        // as "people have it", which, put right, would not let it through.
+        if (bulk?.refuseIfBought) {
+          const holders = await countHolders(tx as DatabaseTransaction, id);
+          if (holders > 0) throw new ContentHasBuyersError(id, holders);
         }
         if (effGated && restValidated.isFree === true) {
           throw new ValidationError(
@@ -1681,7 +1732,7 @@ export class ContentService extends BaseService {
       if (isUniqueViolationOf(error, CONTENT_SLUG_INDEXES)) {
         throw new SlugConflictError(validated.slug ?? previousSlug ?? '');
       }
-      this.handleError(error, 'update');
+      this.handleError(asBulkBusy(error, bulk !== undefined, id), 'update');
     }
   }
 
@@ -1943,7 +1994,7 @@ export class ContentService extends BaseService {
       if (options.fromSchedule && isLockNotAvailable(error)) {
         throw new ScheduledRowLockedError(id, error);
       }
-      this.handleError(error, 'publish');
+      this.handleError(asBulkBusy(error, bulk, id), 'publish');
     }
   }
 
@@ -2460,7 +2511,7 @@ export class ContentService extends BaseService {
       if (error instanceof ContentNotFoundError) {
         throw error;
       }
-      this.handleError(error, 'unpublish');
+      this.handleError(asBulkBusy(error, bulk, id), 'unpublish');
     }
   }
 
@@ -2507,8 +2558,8 @@ export class ContentService extends BaseService {
           throw new ContentNotFoundError(id);
         }
         if (bulk) {
-          const buyers = await countHolders(tx as DatabaseTransaction, id);
-          if (buyers > 0) throw new ContentHasBuyersError(id, buyers);
+          const holders = await countHolders(tx as DatabaseTransaction, id);
+          if (holders > 0) throw new ContentHasBuyersError(id, holders);
         }
 
         await tx
@@ -2524,7 +2575,7 @@ export class ContentService extends BaseService {
       if (error instanceof ContentNotFoundError) {
         throw error;
       }
-      this.handleError(error, 'delete');
+      this.handleError(asBulkBusy(error, bulk, id), 'delete');
     }
   }
 
@@ -2816,22 +2867,22 @@ export class ContentService extends BaseService {
       // Every content read carries its tiers (Codex-2hxff.91, design §4.1):
       // one query over the page's ids. The org studio's rows carry their
       // categories too, the same way and beside it (Codex-a6ofh.3.3), and
-      // every studio row its buyers (Codex-a6ofh.3.5); a browse row never.
-      const [items, filed, buyers] = await Promise.all([
+      // every studio row its buyers and its holders (Codex-a6ofh.3.5): the
+      // Sales column, and what a bulk delete or a move to Followers or Team
+      // only would leave alone. A browse row never.
+      const pageIds = page.items.map((row) => row.id);
+      const [items, filed, buyers, holders] = await Promise.all([
         withTierWire(this.db, page.items),
         withCategories ? this.categoriesOf(page.items) : null,
-        scope === 'studio'
-          ? buyerCountsOf(
-              this.db,
-              page.items.map((row) => row.id)
-            )
-          : null,
+        scope === 'studio' ? buyerCountsOf(this.db, pageIds) : null,
+        scope === 'studio' ? holderCountsOf(this.db, pageIds) : null,
       ]);
       return {
         items: items.map((row) => ({
           ...row,
           ...(filed ? { categories: filed.get(row.id) ?? [] } : {}),
           ...(buyers ? { buyerCount: buyers.get(row.id) ?? 0 } : {}),
+          ...(holders ? { holderCount: holders.get(row.id) ?? 0 } : {}),
         })),
         pagination: page.pagination,
       };
@@ -3007,7 +3058,7 @@ export class ContentService extends BaseService {
       }
       return result;
     } catch (error) {
-      this.handleError(error, 'addCategories');
+      this.handleError(asBulkBusy(error, bulk, contentId), 'addCategories');
     }
   }
 
@@ -3136,6 +3187,7 @@ export class ContentService extends BaseService {
    * piece's 4xx is its `refused`, with the error the per-piece route would
    * send; anything else is `failed`, with no internal detail, and logged
    * with the piece and the action, since the request itself answers 200.
+   * Past {@link BULK_DEADLINE_MS} the rest are `failed` without a try.
    */
   private async eachPiece(
     action: ContentBulkAction,
@@ -3147,7 +3199,25 @@ export class ContentService extends BaseService {
   ): Promise<ContentBulkReport> {
     const results: ContentBulkResult[] = [];
     const touched: BulkTouchedPiece[] = [];
-    for (const id of ids) {
+    const started = Date.now();
+    for (const [index, id] of ids.entries()) {
+      // Out of time: the rest are not started, said once (BULK_DEADLINE_MS).
+      if (index > 0 && Date.now() - started > BULK_DEADLINE_MS) {
+        const notTried = ids.slice(index);
+        this.obs.warn('content bulk out of time; the rest not tried', {
+          action,
+          notTried: notTried.length,
+        });
+        for (const rest of notTried) {
+          results.push({
+            id: rest,
+            outcome: 'failed',
+            error: mapErrorToResponse(new BulkOutOfTimeError(rest)).response
+              .error,
+          });
+        }
+        break;
+      }
       try {
         const { outcome, touched: piece } = await one(id);
         results.push({ id, outcome });
@@ -3158,7 +3228,9 @@ export class ContentService extends BaseService {
         const { statusCode, response } = mapErrorToResponse(error, {
           obs: this.obs,
         });
-        if (statusCode >= 500) {
+        // A 503 is a try-again the mapper logs as one (a row held
+        // elsewhere); any other 5xx is a fault, named by piece and action.
+        if (statusCode >= 500 && statusCode !== 503) {
           this.obs.error('content bulk piece failed', {
             action,
             contentId: id,

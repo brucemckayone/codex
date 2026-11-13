@@ -167,11 +167,17 @@ export interface ContentWithRelations extends Content {
   /**
    * How many people bought it: completed purchases, disputed ones included
    * (Codex-a6ofh.3.5, owner R2). The studio list's rows carry it, from one
-   * grouped read over the page, for its Sales column and its delete
-   * warnings. A public row never does. Not `purchaseCount`, which nothing
-   * writes (Codex-r7os5).
+   * grouped read over the page, for its Sales column. A public row never
+   * does. Not `purchaseCount`, which nothing writes (Codex-r7os5).
    */
   buyerCount?: number;
+  /**
+   * How many people would lose it, paid for or given, through the piece or
+   * a course that holds it (Codex-a6ofh.3.5, owner 2026-11-13): what a bulk
+   * delete, or a move to Followers or Team only, leaves alone. The studio
+   * list's rows only, beside `buyerCount`.
+   */
+  holderCount?: number;
   /**
    * The exact tiers that include this item (Codex-2hxff.91), by tier
    * `sortOrder`, inactive tiers included; `[]` when not behind the switch.

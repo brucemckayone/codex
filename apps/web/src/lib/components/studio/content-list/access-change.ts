@@ -8,7 +8,7 @@ import type { ContentWithRelations } from '$lib/types';
 import { formatPrice } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import type { DraftAccess } from '../editor/draft-session.svelte';
-import { isBought } from './row-facts';
+import { isHeld } from './row-facts';
 
 export type AccessPiece = Pick<
   ContentWithRelations,
@@ -21,7 +21,7 @@ export type AccessPiece = Pick<
   | 'isTierGated'
   | 'isFollowerGated'
   | 'isTeamOnly'
-  | 'buyerCount'
+  | 'holderCount'
 >;
 
 /**
@@ -61,7 +61,7 @@ export interface AccessLine {
 }
 
 const buyersOf = (pieces: readonly AccessPiece[]) =>
-  pieces.reduce((sum, piece) => sum + (piece.buyerCount ?? 0), 0);
+  pieces.reduce((sum, piece) => sum + (piece.holderCount ?? 0), 0);
 
 function buyersKeep(pieces: readonly AccessPiece[]): string | null {
   const buyers = buyersOf(pieces);
@@ -142,7 +142,7 @@ export function accessChangeLines(
       break;
     case 'followers':
     case 'team': {
-      const bought = pieces.filter(isBought);
+      const bought = pieces.filter(isHeld);
       const [only] = bought;
       if (only) {
         lines.push({
@@ -155,7 +155,7 @@ export function accessChangeLines(
       }
       lines.push(
         stopsSoldLine(
-          pieces.filter((piece) => !isBought(piece)),
+          pieces.filter((piece) => !isHeld(piece)),
           false
         )
       );

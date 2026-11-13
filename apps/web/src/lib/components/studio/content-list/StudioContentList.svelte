@@ -42,7 +42,7 @@
     listContent,
     runContentBulk,
   } from '$lib/remote/content.remote';
-  import { remoteErrorCode, remoteErrorStatus } from '$lib/remote/query-result';
+  import { isReadOutage, remoteErrorCode, remoteErrorStatus } from '$lib/remote/query-result';
   import type { ContentWithRelations } from '$lib/types';
   import type { accessGroupToFlags } from '$lib/utils/content-access';
   import { listTiers } from '$lib/remote/subscription.remote';
@@ -440,10 +440,10 @@
       deleteTarget = null;
     } catch (error) {
       logReadFailure('studio_content.row_delete_failed', error, { studio, contentId: piece.id });
-      // A refusal's own words; anything else (a 5xx's are sanitised, a
-      // network failure's are the browser's) names the piece instead.
-      const status = remoteErrorStatus(error);
-      const refusal = status !== undefined && status < 500 ? remoteErrorMessage(error) : null;
+      // A refusal's own words; an outage (a 5xx's words are sanitised, a
+      // timeout's or a network failure's are ours or the browser's) names
+      // the piece instead.
+      const refusal = isReadOutage(error) ? null : remoteErrorMessage(error);
       toast.error(refusal ?? m.studio_content_delete_failed({ title: piece.title }));
     } finally {
       await refreshAfterChange('delete');

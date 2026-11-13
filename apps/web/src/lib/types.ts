@@ -83,10 +83,17 @@ export interface ContentWithRelations
   categories?: { id: string; name: string }[];
   /**
    * How many people bought it: completed purchases, disputed ones included
-   * (Codex-a6ofh.3.5). The studio list's rows only: its Sales column and its
-   * delete warnings read it. `purchaseCount` is never written (Codex-r7os5).
+   * (Codex-a6ofh.3.5). The studio list's rows only: its Sales column reads
+   * it. `purchaseCount` is never written (Codex-r7os5).
    */
   buyerCount?: number;
+  /**
+   * How many people would lose it, paid for or given, through the piece or
+   * a course that holds it (owner 2026-11-13). The studio list's rows only:
+   * the delete and Change access warnings read it, as the server's refusal
+   * counts.
+   */
+  holderCount?: number;
 }
 
 /**

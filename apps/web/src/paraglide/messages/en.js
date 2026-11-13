@@ -33983,7 +33983,7 @@ export const studio_content_access_reprice_many = (params) => `Changes the price
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_access_buyers_keep_one = () => `Its 1 buyer keeps watching.`
+export const studio_content_access_buyers_keep_one = () => `The 1 person who has it keeps watching.`
 
 
 /**
@@ -33991,7 +33991,7 @@ export const studio_content_access_buyers_keep_one = () => `Its 1 buyer keeps wa
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_access_buyers_keep = (params) => `Their ${params.count} buyers keep watching.`
+export const studio_content_access_buyers_keep = (params) => `The ${params.count} people who have them keep watching.`
 
 
 /**
@@ -34023,7 +34023,7 @@ export const studio_content_access_stops_sold = (params) => `${params.count} pie
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_access_left_alone_one = (params) => `“${params.title}” will be left alone: people bought it, and this would end their playback.`
+export const studio_content_access_left_alone_one = (params) => `“${params.title}” will be left alone: people have it, bought or given, and this would end their playback.`
 
 
 /**
@@ -34031,7 +34031,7 @@ export const studio_content_access_left_alone_one = (params) => `“${params.tit
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_access_left_alone = (params) => `${params.count} pieces people bought will be left alone: this would end their playback.`
+export const studio_content_access_left_alone = (params) => `${params.count} pieces people have, bought or given, will be left alone: this would end their playback.`
 
 
 /**
@@ -34071,7 +34071,7 @@ export const studio_content_delete_kept_one_title = (params) => `“${params.tit
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_one_body = (params) => `${params.count} people bought it, and deleting it would end their playback. Unpublishing takes it off sale, and they keep watching.`
+export const studio_content_delete_kept_one_body = (params) => `${params.count} people have it, bought or given, and deleting it would end their playback. Unpublishing takes it off sale, and they keep watching.`
 
 
 /**
@@ -34079,7 +34079,7 @@ export const studio_content_delete_kept_one_body = (params) => `${params.count} 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_one_body_single = () => `1 person bought it, and deleting it would end their playback. Unpublishing takes it off sale, and they keep watching.`
+export const studio_content_delete_kept_one_body_single = () => `1 person has it, bought or given, and deleting it would end their playback. Unpublishing takes it off sale, and they keep watching.`
 
 
 /**
@@ -34095,7 +34095,7 @@ export const studio_content_delete_kept_title = (params) => `${params.count} pie
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_body = () => `People bought them, and deleting them would end their playback. Unpublishing takes them off sale, and they keep watching.`
+export const studio_content_delete_kept_body = () => `People have them, bought or given, and deleting them would end their playback. Unpublishing takes them off sale, and they keep watching.`
 
 
 /**
@@ -34143,7 +34143,7 @@ export const studio_content_delete_one_body = () => `Nobody can watch a deleted 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_bought_title = (params) => `Bought by ${params.count} people.`
+export const studio_content_delete_bought_title = (params) => `${params.count} people have it.`
 
 
 /**
@@ -34151,7 +34151,7 @@ export const studio_content_delete_bought_title = (params) => `Bought by ${param
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_bought_title_one = () => `Bought by 1 person.`
+export const studio_content_delete_bought_title_one = () => `1 person has it.`
 
 
 /**
