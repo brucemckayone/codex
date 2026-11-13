@@ -45,6 +45,8 @@ export interface ContentWithRelations
     /** Absent on the anonymous public list, which never selects it. */
     email?: string;
     name: string | null;
+    /** The studio list's rows only: a personal piece's address is under it. */
+    username?: string | null;
   };
   organization?: Organization | null;
   /**
@@ -79,6 +81,12 @@ export interface ContentWithRelations
    * treat ABSENT as "not sent", never as "in none".
    */
   categories?: { id: string; name: string }[];
+  /**
+   * How many people bought it: completed purchases, disputed ones included
+   * (Codex-a6ofh.3.5). The studio list's rows only: its Sales column and its
+   * delete warnings read it. `purchaseCount` is never written (Codex-r7os5).
+   */
+  buyerCount?: number;
 }
 
 /**

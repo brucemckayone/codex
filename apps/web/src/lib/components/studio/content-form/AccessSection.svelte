@@ -65,6 +65,12 @@
      * status resolves.
      */
     connectReady?: boolean;
+    /**
+     * Offer the optional tiers on One-time purchase (the editor's hybrid).
+     * The content list's bulk change turns it off: each piece keeps its own
+     * tiers there (Codex-a6ofh.3.5, owner D-b5).
+     */
+    offerPaidTiers?: boolean;
   }
 
   const {
@@ -80,6 +86,7 @@
     onTierToggle,
     onSelectFromTier,
     connectReady = true,
+    offerPaidTiers = true,
   }: Props = $props();
 
   // The worker refuses 1p–99p (Codex-2hxff.32); warn before the save does.
@@ -166,7 +173,8 @@
   // whose list failed, even if the org has no active tier left.
   const showTier = $derived(
     isSubscribers ||
-      (accessTypeVal === 'paid' &&
+      (offerPaidTiers &&
+        accessTypeVal === 'paid' &&
         (hasTiers || selectedTierIds.length > 0 || tiersState === 'failed'))
   );
 

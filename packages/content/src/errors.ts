@@ -243,6 +243,24 @@ export class ContentAlreadyLiveError extends ConflictError {
   }
 }
 
+/**
+ * 409 with `details.code: 'CONTENT_HAS_BUYERS'` (Codex-a6ofh.3.5, owner
+ * D-b4): a bulk delete, or a bulk move to Followers or Team only, left this
+ * piece alone because people bought it, and either would end their playback.
+ * `details.buyers` is how many. Unpublish, Free, Buy once and Subscribers keep
+ * a buyer's playback, so none of those refuses.
+ */
+export class ContentHasBuyersError extends ConflictError {
+  constructor(contentId: string, buyers: number) {
+    super(
+      buyers === 1
+        ? 'Bought by 1 person, so it was left alone.'
+        : `Bought by ${buyers} people, so it was left alone.`,
+      { contentId, code: ERROR_CODES.CONTENT_HAS_BUYERS, buyers }
+    );
+  }
+}
+
 export class SlugConflictError extends ConflictError {
   constructor(slug: string) {
     super('Content with this slug already exists', { slug });

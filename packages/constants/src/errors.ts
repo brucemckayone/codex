@@ -41,6 +41,11 @@ export const ERROR_CODES = {
   // them apart per piece.
   CATEGORY_NOT_IN_SPACE: 'CATEGORY_NOT_IN_SPACE',
   CATEGORY_LIMIT_REACHED: 'CATEGORY_LIMIT_REACHED',
+  // The `details.code` of a delete, or a move to Followers or Team only,
+  // refused because people bought the piece (Codex-a6ofh.3.5, owner D-b4):
+  // either would end their playback. Bulk actions skip such a piece; its
+  // `details.buyers` says how many.
+  CONTENT_HAS_BUYERS: 'CONTENT_HAS_BUYERS',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   NOT_FOUND: 'NOT_FOUND',

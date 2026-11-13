@@ -14,11 +14,17 @@
   search, so a link reproduces it. Below `sm` it is always the cards. Above
   the rows, "Needs you" (Codex-a6ofh.3.4) counts what the creator's pieces
   need, and each of its chips lists those pieces.
+
+  Bulk actions and the row menu (Codex-a6ofh.3.5, mockup L2, data-design
+  §4.2): up to CONTENT_BULK_MAX rows selected, one request per action, a
+  result for each piece, and a line that says what it did. Afterwards the
+  list and "Needs you" are read again in place.
 -->
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import type { ContentAttentionKind } from '@codex/constants';
+  import { type ContentAttentionKind, CONTENT_STATUS } from '@codex/constants';
+  import type { ContentBulkAction } from '@codex/shared-types';
   import { boundSearchParam, type ContentQueryInput, gateSearchQuery } from '@codex/validation';
   import { page } from '$app/state';
   import { Button } from '$lib/components/ui';
@@ -26,15 +32,23 @@
   import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
   import { FileIcon, SearchXIcon } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
+  import { remoteErrorMessage } from '$lib/page-builder/builder-save';
   import { getCategories } from '$lib/remote/categories.remote';
   import {
+    deleteContent,
     getContentAttention,
     getContentWhereCounts,
     listContent,
+    runContentBulk,
   } from '$lib/remote/content.remote';
+  import { remoteErrorStatus } from '$lib/remote/query-result';
+  import type { ContentWithRelations } from '$lib/types';
+  import type { accessGroupToFlags } from '$lib/utils/content-access';
   import { listTiers } from '$lib/remote/subscription.remote';
   import * as m from '$paraglide/messages';
   import ActionLink from '../ActionLink.svelte';
+  import { pieceHref } from '../editor/editor-url';
   import LoadFailedAlert from '../LoadFailedAlert.svelte';
   import { createFacetRetry } from '../list-toolbar/facet-retry.svelte';
   import { createListSearch, createListUrlWriter } from '../list-url-writer';
@@ -42,6 +56,13 @@
   import { PagedList } from '../paged-list.svelte';
   import PagedListMore from '../PagedListMore.svelte';
   import { createPayoutsRead } from '../payouts-read.svelte';
+  import BulkResultLine from './BulkResultLine.svelte';
+  import { type BulkProblem, bulkReport } from './bulk-report';
+  import ChangeAccessDialog from './ChangeAccessDialog.svelte';
+  import ContentBulkBar from './ContentBulkBar.svelte';
+  import ContentRowMenu from './ContentRowMenu.svelte';
+  import { ContentSelection } from './content-selection.svelte';
+  import DeleteContentDialog, { type DeleteTarget } from './DeleteContentDialog.svelte';
   import ContentListCommandBar from './ContentListCommandBar.svelte';
   import ContentListGrid from './ContentListGrid.svelte';
   import ContentListTable from './ContentListTable.svelte';
@@ -59,6 +80,7 @@
   } from './list-url';
   import NeedsYouStrip from './NeedsYouStrip.svelte';
   import NewContentMenu from './NewContentMenu.svelte';
+  import { rowHref, rowLine } from './row-facts';
 
   interface Props {
     /** The org studio's org; null lists the personal studio's content. */
@@ -270,6 +292,175 @@
       : m.studio_content_list_count({ count: list.total });
   });
 
+  // ── Bulk actions and the row menu (Codex-a6ofh.3.5) ──────────────────
+  const selection = new ContentSelection();
+  // A changed view (Where, a filter, the sort, the search) starts afresh: the
+  // selection holds only rows it shows. A re-read keeps the rows still shown.
+  $effect(() => {
+    void list.key;
+    untrack(() => selection.clear());
+  });
+  $effect(() => {
+    const shown = new Set(list.items.map((row) => row.id));
+    untrack(() => selection.keepOnly(shown));
+  });
+  /** The selected rows, in the list's order: the order they are sent in. */
+  const picked = $derived(list.items.filter((row) => selection.has(row.id)));
+
+  // The org's categories for Add to category: the Category menu's own read.
+  const addCategories = $derived(
+    studio === 'org' ? (categories?.current ?? undefined) : undefined
+  );
+
+  const BUSY: Record<ContentBulkAction, (count: number, category: string) => string> = {
+    publish: (count) => m.studio_content_bulk_busy_publish({ count }),
+    unpublish: (count) => m.studio_content_bulk_busy_unpublish({ count }),
+    delete: (count) => m.studio_content_bulk_busy_delete({ count }),
+    categories: (count, category) => m.studio_content_bulk_busy_categories({ count, category }),
+    access: (count) => m.studio_content_bulk_busy_access({ count }),
+  };
+
+  let busy = $state<string | null>(null);
+  let result = $state<{ line: string; problems: BulkProblem[] } | null>(null);
+  let deleteTarget = $state<DeleteTarget | null>(null);
+  let accessPieces = $state<ContentWithRelations[] | null>(null);
+
+  // The list and "Needs you" read again in place, as held: kit drops a query
+  // whose first read failed, so `invalidateAll` would skip it (E3.1). The
+  // Where counts too, in the personal studio, since a delete moves them.
+  let refreshFailed = $state(false);
+  let refreshRetrying = $state(false);
+  let refreshFailedAgain = $state(false);
+  async function refreshAfterChange(): Promise<void> {
+    void attention.refresh().catch(() => undefined);
+    void whereCounts?.refresh().catch(() => undefined);
+    try {
+      await list.refresh();
+      refreshFailed = false;
+    } catch (error) {
+      refreshFailed = true;
+      logReadFailure('studio_content.refresh_after_change_failed', error, {
+        studio,
+        organizationId,
+      });
+    }
+  }
+  async function retryRefresh() {
+    if (refreshRetrying) return;
+    refreshRetrying = true;
+    await refreshAfterChange();
+    refreshFailedAgain = refreshFailed;
+    refreshRetrying = false;
+  }
+
+  type BulkCall =
+    | { action: 'publish' | 'unpublish' | 'delete' }
+    | { action: 'categories'; categoryIds: string[]; category: string }
+    | { action: 'access'; access: ReturnType<typeof accessGroupToFlags> };
+
+  /**
+   * One request for the action, then the line that says what it did. The
+   * pieces that did not go through stay selected (`keep`). A request that
+   * failed as a whole may still have changed some: the list is read again.
+   */
+  async function runBulk(rows: readonly ContentWithRelations[], call: BulkCall): Promise<boolean> {
+    if (busy !== null || rows.length === 0) return false;
+    const ids = rows.map((row) => row.id);
+    const category = call.action === 'categories' ? call.category : '';
+    busy = BUSY[call.action](ids.length, category);
+    result = null;
+    try {
+      const body =
+        call.action === 'categories'
+          ? { action: call.action, ids, categoryIds: call.categoryIds }
+          : call.action === 'access'
+            ? { action: call.action, ids, access: call.access }
+            : { action: call.action, ids };
+      const { results } = await runContentBulk(body);
+      const report = bulkReport(
+        call.action,
+        results,
+        new Map(rows.map((row) => [row.id, row] as const)),
+        category
+      );
+      result = { line: report.line, problems: report.problems };
+      selection.keepOnly(report.keep);
+      return true;
+    } catch (error) {
+      logReadFailure('studio_content.bulk_failed', error, {
+        studio,
+        organizationId,
+        action: call.action,
+        count: ids.length,
+      });
+      result = {
+        line:
+          remoteErrorStatus(error) === 429
+            ? m.studio_content_bulk_rate_limited()
+            : m.studio_content_bulk_request_failed(),
+        problems: [],
+      };
+      return false;
+    } finally {
+      busy = null;
+      await refreshAfterChange();
+    }
+  }
+
+  const bulkDrafts = $derived(picked.filter((row) => row.status !== CONTENT_STATUS.PUBLISHED));
+  const bulkLive = $derived(picked.filter((row) => row.status === CONTENT_STATUS.PUBLISHED));
+
+  // Delete…: the bulk bar's names how many; the row menu's, one piece.
+  async function confirmDelete() {
+    const target = deleteTarget;
+    if (target === null) return;
+    if (target.mode === 'many') {
+      await runBulk(picked, { action: 'delete' });
+      deleteTarget = null;
+      return;
+    }
+    // One at a time stays possible for a piece people bought (owner D-b4):
+    // the per-piece delete, which the server does not refuse for buyers.
+    const { piece } = target;
+    busy = BUSY.delete(1, '');
+    try {
+      await deleteContent(piece.id);
+      result = { line: m.studio_content_deleted_one({ title: piece.title }), problems: [] };
+      deleteTarget = null;
+    } catch (error) {
+      logReadFailure('studio_content.row_delete_failed', error, { studio, contentId: piece.id });
+      toast.error(remoteErrorMessage(error) ?? m.studio_content_delete_failed({ title: piece.title }));
+    } finally {
+      busy = null;
+      await refreshAfterChange();
+    }
+  }
+
+  async function unpublishInstead(ids: string[]) {
+    const rows = list.items.filter((row) => ids.includes(row.id));
+    deleteTarget = null;
+    await runBulk(rows, { action: 'unpublish' });
+  }
+
+  async function submitAccess(access: ReturnType<typeof accessGroupToFlags>) {
+    const rows = accessPieces ?? [];
+    await runBulk(rows, { action: 'access', access });
+    accessPieces = null;
+  }
+
+  /** A piece's public address while it is live: its org's, or its creator's. */
+  function liveHref(row: ContentWithRelations): string | null {
+    if (row.status !== CONTENT_STATUS.PUBLISHED) return null;
+    return pieceHref(
+      page.url,
+      {
+        orgSlug: row.organization?.slug ?? null,
+        creatorUsername: row.creator?.username ?? null,
+      },
+      { slug: row.slug, id: row.id }
+    );
+  }
+
   // ── Writing the view back to the URL ──────────────────────────────────
   const setParams = createListUrlWriter(CONTENT_LIST_DEFAULTS);
 
@@ -359,6 +550,45 @@
     </div>
   {/if}
 
+  {#if refreshFailed && list.landed}
+    <!-- A re-read after a change failed: these rows are the last that arrived. -->
+    <div class="stale" role="alert">
+      <p class="stale-text">
+        {refreshFailedAgain ? m.studio_content_refresh_failed_again() : m.studio_content_refresh_failed()}
+      </p>
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={refreshRetrying}
+        disabled={refreshRetrying}
+        onclick={retryRefresh}
+      >
+        {m.common_try_again()}
+      </Button>
+    </div>
+  {/if}
+
+  {#if selection.size > 0}
+    <ContentBulkBar
+      count={selection.size}
+      max={selection.max}
+      {busy}
+      canPublish={bulkDrafts.length > 0}
+      canUnpublish={bulkLive.length > 0}
+      categories={addCategories}
+      onPublish={() => runBulk(bulkDrafts, { action: 'publish' })}
+      onUnpublish={() => runBulk(bulkLive, { action: 'unpublish' })}
+      onAddCategory={(category) =>
+        runBulk(picked, { action: 'categories', categoryIds: [category.id], category: category.name })}
+      onChangeAccess={() => (accessPieces = picked)}
+      onDelete={() => (deleteTarget = { mode: 'many', pieces: picked })}
+      onClear={() => selection.clear()}
+    />
+  {/if}
+  {#if result}
+    <BulkResultLine line={result.line} problems={result.problems} />
+  {/if}
+
   <div
     class="list-body"
     role="region"
@@ -410,6 +640,8 @@
           payouts={payouts.current}
           {tierName}
           showCategories={studio === 'org'}
+          {selection}
+          {rowMenu}
         />
       {:else}
         <ContentListTable
@@ -417,6 +649,8 @@
           payouts={payouts.current}
           {tierName}
           showCategories={studio === 'org'}
+          {selection}
+          {rowMenu}
         />
       {/if}
 
@@ -424,6 +658,34 @@
     {/if}
   </div>
 </div>
+
+{#snippet rowMenu(row: ContentWithRelations)}
+  <ContentRowMenu
+    {row}
+    editHref={rowHref(row, rowLine(row, payouts.current))}
+    liveHref={liveHref(row)}
+    busy={busy !== null}
+    onPublish={() => runBulk([row], { action: 'publish' })}
+    onUnpublish={() => runBulk([row], { action: 'unpublish' })}
+    onDelete={() => (deleteTarget = { mode: 'one', piece: row })}
+  />
+{/snippet}
+
+<DeleteContentDialog
+  target={deleteTarget}
+  busy={busy !== null}
+  onDelete={confirmDelete}
+  onUnpublish={unpublishInstead}
+  onClose={() => (deleteTarget = null)}
+/>
+
+<ChangeAccessDialog
+  pieces={accessPieces}
+  payouts={payouts.current}
+  busy={busy !== null}
+  onSubmit={submitAccess}
+  onClose={() => (accessPieces = null)}
+/>
 
 <style>
   .content-list {
@@ -456,6 +718,23 @@
     font-weight: var(--font-normal);
     letter-spacing: normal;
     color: var(--color-text-secondary);
+  }
+
+  .stale {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-status-warning-border);
+    border-radius: var(--radius-md);
+    background: var(--color-status-warning-surface);
+  }
+
+  .stale-text {
+    flex: 1;
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text);
   }
 
   .list-body {

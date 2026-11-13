@@ -7,8 +7,11 @@
 
 import { CacheType, VersionedCache } from '@codex/cache';
 import {
+  type BulkTouchedPiece,
   type ContentInvalidationReason,
   invalidateContentAccess,
+  invalidateContentAccessMany,
+  orgsOf,
 } from '@codex/content';
 import { createDbClient } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
@@ -134,6 +137,71 @@ export function fanContentInvalidation(
         });
       })
   );
+}
+
+/**
+ * {@link fanContentInvalidation} for a bulk action's pieces (Codex-a6ofh.3.5):
+ * one background task on one DB client, which bumps each catalogue key and
+ * each user's library once, however many of the pieces it covers.
+ */
+export function fanContentInvalidationMany(
+  env: HonoEnv['Bindings'],
+  executionCtx: ExecutionContext,
+  pieces: BulkTouchedPiece[],
+  reason: ContentInvalidationReason,
+  obs?: ObservabilityClient
+): void {
+  if (!env.CACHE_KV || pieces.length === 0) return;
+  const cache = new VersionedCache({
+    kv: env.CACHE_KV,
+    waitUntil: (promise) => executionCtx.waitUntil(promise),
+    obs,
+  });
+  const waitUntil = executionCtx.waitUntil.bind(executionCtx);
+  executionCtx.waitUntil(
+    Promise.resolve()
+      .then(() =>
+        invalidateContentAccessMany({
+          db: createDbClient(env),
+          cache,
+          waitUntil,
+          pieces: pieces.map((piece) => ({
+            contentId: piece.id,
+            organizationId: piece.organizationId,
+          })),
+          reason,
+          logger: obs,
+        })
+      )
+      .catch((err: unknown) => {
+        obs?.warn('content-invalidation: fanout failed', {
+          pieces: pieces.length,
+          reason,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+  );
+}
+
+/**
+ * After a bulk action (Codex-a6ofh.3.5): each org it changed refreshed once,
+ * then, with a `reason`, the people its pieces reach. Fifteen per-piece bumps
+ * would write one KV key fifteen times, and KV keeps about one write a second
+ * to a key, so the last ones would be lost and public pages stay stale.
+ */
+export function afterBulkChange(
+  env: HonoEnv['Bindings'],
+  executionCtx: ExecutionContext,
+  touched: BulkTouchedPiece[],
+  reason: ContentInvalidationReason | null,
+  obs?: ObservabilityClient
+): void {
+  for (const organizationId of orgsOf(touched)) {
+    bumpOrgContentVersion(env, executionCtx, organizationId, obs);
+  }
+  if (reason) {
+    fanContentInvalidationMany(env, executionCtx, touched, reason, obs);
+  }
 }
 
 /**

@@ -18,6 +18,9 @@ import {
   type ContentQueryInput,
   checkContentSlugSchema,
   contentAttentionQuerySchema,
+  contentBulkAccessSchema,
+  contentBulkCategoriesSchema,
+  contentBulkSchema,
   contentDraftSchema,
   contentQuerySchema,
   PAGINATION_MAX_LIMIT,
@@ -483,6 +486,31 @@ export const deleteContent = command(z.string().uuid(), async (id) => {
     detailCodes: [ERROR_CODES.CONTENT_NOT_FOUND],
   });
 });
+
+/**
+ * One action on the content list's selection (Codex-a6ofh.3.5, owner
+ * "Bulk endpoints, one bump"): `POST /api/content/bulk/<action>`, at most
+ * CONTENT_BULK_MAX pieces, a result for each, in the order sent. A piece's
+ * own refusal is in its result; the call itself fails only for its body,
+ * the sign-in or the rate limit, which keep their words
+ * ({@link forwardClientErrors}).
+ */
+const contentBulkCommandSchema = z.discriminatedUnion('action', [
+  contentBulkSchema.extend({
+    action: z.enum(['publish', 'unpublish', 'delete']),
+  }),
+  contentBulkCategoriesSchema.extend({ action: z.literal('categories') }),
+  contentBulkAccessSchema.extend({ action: z.literal('access') }),
+]);
+
+export const runContentBulk = command(
+  contentBulkCommandSchema,
+  async ({ action, ...body }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return forwardClientErrors(() => api.content.bulk(action, body));
+  }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Content Status Transitions

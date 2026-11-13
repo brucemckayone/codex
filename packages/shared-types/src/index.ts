@@ -35,6 +35,13 @@ export type {
   SortOrder,
   StudioIntroFilm,
 } from './api-responses';
+// The studio list's bulk actions, one result per piece (Codex-a6ofh.3.5)
+export type {
+  ContentBulkAction,
+  ContentBulkOutcome,
+  ContentBulkResponse,
+  ContentBulkResult,
+} from './content-bulk';
 // Where a creator's content is filed: the personal "Where" menu (Codex-a6ofh.3.2)
 export type { ContentWhereCounts, ContentWhereOrg } from './content-where';
 // Financial types (revenue splits, fees, payouts)

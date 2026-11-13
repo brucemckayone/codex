@@ -62,10 +62,12 @@ import type { ServiceConfig } from '@codex/service-errors';
 import {
   BaseService,
   isServiceError,
+  mapErrorToResponse,
   ServiceUnavailableError,
   ValidationError,
 } from '@codex/service-errors';
 import type {
+  ContentBulkResult,
   ContentWhereCounts,
   ContentWhereOrg,
   PaginatedListResponse,
@@ -75,7 +77,11 @@ import {
   posterFolderCount,
   posterFramesOf,
 } from '@codex/transcoding';
-import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
+import type {
+  ContentAccessGroupInput,
+  CreateContentInput,
+  UpdateContentInput,
+} from '@codex/validation';
 import {
   createContentSchema,
   createPlatformImageUrlSchema,
@@ -100,6 +106,7 @@ import {
 } from 'drizzle-orm';
 import {
   ContentAlreadyLiveError,
+  ContentHasBuyersError,
   ContentNotFoundError,
   ContentTypeMismatchError,
   InternalServiceError,
@@ -108,8 +115,10 @@ import {
   SlugConflictError,
 } from '../errors';
 import type {
+  BulkTouchedPiece,
   CatalogueContentRow,
   Content,
+  ContentBulkReport,
   ContentCategoryRef,
   ContentFilters,
   ContentWithRelations,
@@ -132,6 +141,7 @@ import {
   SQL_ATTENTION_KINDS,
   type SqlAttentionKind,
 } from './content-attention';
+import { buyerCountsOf, byBuyers, countBuyers } from './content-buyers';
 import {
   assertTiersInOrg,
   type ContentTierWire,
@@ -407,6 +417,66 @@ const CONTENT_SLUG_INDEXES = new Set([
  * the badges and pickers that read this list skip the query.
  */
 type StudioListOptions = { scope?: 'studio'; withCategories?: boolean };
+
+/**
+ * A bulk action's piece (Codex-a6ofh.3.5): `quiet` skips the per-piece cache
+ * writes, which the bulk method makes once after its loop instead. KV takes
+ * about one write a second to a key, so fifteen bumps of one key lose writes.
+ */
+type QuietOption = { quiet?: boolean };
+
+/** What `addCategories` filed, and the caller's cache gate. */
+type AddedCategories = {
+  categoryIds: string[];
+  organizationId: string | null;
+  hasBeenLive: boolean;
+  changed: boolean;
+};
+
+/** The orgs a bulk action's pieces are filed in, each once. */
+export function orgsOf(pieces: BulkTouchedPiece[]): string[] {
+  return [
+    ...new Set(
+      pieces.flatMap((piece) =>
+        piece.organizationId ? [piece.organizationId] : []
+      )
+    ),
+  ];
+}
+
+/** The access columns a bulk access change sets (`contentAccessGroupSchema`). */
+const ACCESS_COLUMNS = [
+  'isFree',
+  'isPurchasable',
+  'priceCents',
+  'isTierGated',
+  'isFollowerGated',
+  'isTeamOnly',
+] as const;
+
+/**
+ * Whether a piece's access already reads as an update sends it
+ * (Codex-a6ofh.3.5): every access column it states is the row's, and the
+ * tier set, when it states one, is the piece's ticks. A bulk change then
+ * writes nothing and reports the piece `unchanged`.
+ */
+async function accessAlreadyHeld(
+  tx: DatabaseTransaction,
+  existing: Content,
+  sent: UpdateContentInput
+): Promise<boolean> {
+  for (const column of ACCESS_COLUMNS) {
+    if (sent[column] !== undefined && sent[column] !== existing[column]) {
+      return false;
+    }
+  }
+  if (sent.includedInTierIds === undefined) return true;
+  const held = new Set(await readTickIds(tx, existing.id));
+  return (
+    held.size === sent.includedInTierIds.length &&
+    sent.includedInTierIds.every((tierId) => held.has(tierId))
+  );
+}
 
 /**
  * Where a studio read looks: one org's pieces, those filed under none
@@ -978,14 +1048,48 @@ export class ContentService extends BaseService {
     id: string,
     input: UpdateContentInput,
     creatorId: string,
-    { asDraft = false }: UpdateContentOptions = {}
+    options: UpdateContentOptions = {}
   ): Promise<{
     content: Content & ContentTierWire;
     droppedThumbnailUrl: string | null;
     hasBeenLive: boolean;
   }> {
+    const { unchanged: _unchanged, ...report } = await this.applyUpdate(
+      id,
+      input,
+      creatorId,
+      options
+    );
+    return report;
+  }
+
+  /**
+   * The update itself, and, for a bulk access change (Codex-a6ofh.3.5), two
+   * more things a piece can come back as. `skipIfHeld`: a piece whose access
+   * already reads as sent is left unwritten and reported `unchanged`.
+   * `refuseIfBought`: a piece people bought is left alone
+   * (`ContentHasBuyersError`), for a move to Followers or Team only, which
+   * would end their playback (owner R1). Both are judged on the locked row.
+   */
+  private async applyUpdate(
+    id: string,
+    input: UpdateContentInput,
+    creatorId: string,
+    { asDraft = false }: UpdateContentOptions = {},
+    {
+      quiet = false,
+      skipIfHeld = false,
+      refuseIfBought = false,
+    }: QuietOption & { skipIfHeld?: boolean; refuseIfBought?: boolean } = {}
+  ): Promise<{
+    content: Content & ContentTierWire;
+    droppedThumbnailUrl: string | null;
+    hasBeenLive: boolean;
+    unchanged: boolean;
+  }> {
     // Validate input
     const validated = updateContentSchema.parse(input);
+    let unchanged = false;
 
     // Same external-host gate as create() (Codex-8so68). `updateContentSchema`
     // is a partial, so an absent `thumbnailUrl` is a no-op and an explicit
@@ -1087,6 +1191,22 @@ export class ContentService extends BaseService {
         previousThumbnailUrl = existing.thumbnailUrl;
         previousSlug = existing.slug;
         wasLive = hasBeenLive(existing);
+
+        if (
+          skipIfHeld &&
+          (await accessAlreadyHeld(
+            tx as DatabaseTransaction,
+            existing,
+            validated
+          ))
+        ) {
+          unchanged = true;
+          return existing;
+        }
+        if (refuseIfBought) {
+          const buyers = await countBuyers(tx as DatabaseTransaction, id);
+          if (buyers > 0) throw new ContentHasBuyersError(id, buyers);
+        }
 
         // A URL in this content's own thumbnail folders is written only by an
         // upload. One the payload sends that differs from the row's names an
@@ -1483,10 +1603,11 @@ export class ContentService extends BaseService {
       // trigger_unpublish_on_org_delete (migration 0004), which resets its
       // status and publishedAt, and its buyers still hold it. An update
       // cannot set either, so the row after it can only read less live.
-      if (wasLive) {
+      const bumps = wasLive && !quiet && !unchanged;
+      if (bumps) {
         void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
       }
-      if (wasLive && result.organizationId) {
+      if (bumps && result.organizationId) {
         void this.cache?.invalidate(
           CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
         );
@@ -1530,6 +1651,7 @@ export class ContentService extends BaseService {
         },
         droppedThumbnailUrl: thumbnailMoved ? previousThumbnailUrl : null,
         hasBeenLive: wasLive,
+        unchanged,
       };
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
@@ -1690,7 +1812,8 @@ export class ContentService extends BaseService {
   private async publishAndReport(
     id: string,
     creatorId: string,
-    options: PublishOptions
+    options: PublishOptions,
+    { quiet = false }: QuietOption = {}
   ): Promise<{ row: Content; wentLive: boolean }> {
     try {
       let wentLive = false;
@@ -1786,7 +1909,7 @@ export class ContentService extends BaseService {
 
       // Bump content catalogue version keys (fire-and-forget; invalidate
       // swallows errors). A scheduled draft changed nothing public.
-      if (result.status === CONTENT_STATUS.PUBLISHED) {
+      if (!quiet && result.status === CONTENT_STATUS.PUBLISHED) {
         void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
         if (result.organizationId) {
           void this.cache?.invalidate(
@@ -2252,14 +2375,40 @@ export class ContentService extends BaseService {
     id: string,
     creatorId: string
   ): Promise<Content & ContentTierWire> {
+    const { row } = await this.unpublishAndReport(id, creatorId);
+    try {
+      // Its tiers (Codex-2hxff.91), as every content read carries them.
+      const [wired] = await withTierWire(this.db, [row]);
+      return wired ?? { ...row, includedInTierIds: [], includedInTierId: null };
+    } catch (error) {
+      this.handleError(error, 'unpublish');
+    }
+  }
+
+  /**
+   * `unpublish` without its tier wire, and whether the piece was live, so a
+   * bulk unpublish can tell "taken down" from "already a draft"
+   * (Codex-a6ofh.3.5). A draft is left as it is: nothing to write.
+   */
+  private async unpublishAndReport(
+    id: string,
+    creatorId: string,
+    { quiet = false }: QuietOption = {}
+  ): Promise<{ row: Content; wasLive: boolean; changed: boolean }> {
     try {
       const result = await this.db.transaction(async (tx) => {
-        const existing = await tx.query.content.findFirst({
-          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
-        });
+        const [existing] = await tx
+          .select()
+          .from(content)
+          .where(and(eq(content.id, id), scopedNotDeleted(content, creatorId)))
+          .for('no key update');
 
         if (!existing) {
           throw new ContentNotFoundError(id);
+        }
+        const wasLive = existing.status === CONTENT_STATUS.PUBLISHED;
+        if (existing.status === CONTENT_STATUS.DRAFT) {
+          return { row: existing, wasLive, changed: false };
         }
 
         const [unpublished] = await tx
@@ -2275,22 +2424,19 @@ export class ContentService extends BaseService {
           throw new ContentNotFoundError(id);
         }
 
-        return unpublished;
+        return { row: unpublished, wasLive, changed: true };
       });
 
       // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
-      void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
-      if (result.organizationId) {
-        void this.cache?.invalidate(
-          CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
-        );
+      if (!quiet) {
+        void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+        if (result.row.organizationId) {
+          void this.cache?.invalidate(
+            CacheType.COLLECTION_ORG_CONTENT(result.row.organizationId)
+          );
+        }
       }
-
-      // Its tiers (Codex-2hxff.91), as every content read carries them.
-      const [wired] = await withTierWire(this.db, [result]);
-      return (
-        wired ?? { ...result, includedInTierIds: [], includedInTierId: null }
-      );
+      return result;
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
@@ -2312,14 +2458,36 @@ export class ContentService extends BaseService {
    * @throws {ContentNotFoundError} If content doesn't exist
    */
   async delete(id: string, creatorId: string): Promise<void> {
+    await this.deleteAndReport(id, creatorId);
+  }
+
+  /**
+   * `delete`, returning the org the piece was filed in. With
+   * `refuseIfBought` (a bulk delete, owner D-b4), a piece people bought is
+   * left alone (`ContentHasBuyersError`): deleting it would end their
+   * playback. Counted here, under the row's lock, never taken from the list.
+   * A purchase completing in the instant between the count and the commit is
+   * not seen, which a delete one at a time never checks for at all.
+   */
+  private async deleteAndReport(
+    id: string,
+    creatorId: string,
+    { refuseIfBought = false }: { refuseIfBought?: boolean } = {}
+  ): Promise<{ organizationId: string | null }> {
     try {
-      await this.db.transaction(async (tx) => {
-        const existing = await tx.query.content.findFirst({
-          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
-        });
+      return await this.db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({ organizationId: content.organizationId })
+          .from(content)
+          .where(and(eq(content.id, id), scopedNotDeleted(content, creatorId)))
+          .for('no key update');
 
         if (!existing) {
           throw new ContentNotFoundError(id);
+        }
+        if (refuseIfBought) {
+          const buyers = await countBuyers(tx as DatabaseTransaction, id);
+          if (buyers > 0) throw new ContentHasBuyersError(id, buyers);
         }
 
         await tx
@@ -2329,6 +2497,7 @@ export class ContentService extends BaseService {
             updatedAt: new Date(),
           })
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)));
+        return existing;
       });
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
@@ -2543,12 +2712,18 @@ export class ContentService extends BaseService {
       // order the creator recognises; the id is random, so it only comes
       // last, to keep one order from page to page: offset paging over a tie
       // may reorder it, and "Show more" could repeat a row or skip one.
+      //
+      // The studio's "sales" sort is by buyers (Codex-a6ofh.3.5, owner R2):
+      // `purchase_count` has no writer (Codex-r7os5), so it read 0 for every
+      // real piece. Browse keeps the column until that bead moves it.
       const sortColumn = filters.sortBy || 'createdAt';
       const sortOrder = filters.sortOrder || 'desc';
       const orderByClause =
-        sortOrder === 'desc'
-          ? sql`${content[sortColumn]} DESC NULLS LAST`
-          : asc(content[sortColumn]);
+        scope === 'studio' && sortColumn === 'purchaseCount'
+          ? byBuyers(this.db, sortOrder)
+          : sortOrder === 'desc'
+            ? sql`${content[sortColumn]} DESC NULLS LAST`
+            : asc(content[sortColumn]);
       const orderBy = [
         orderByClause,
         ...(sortColumn === 'createdAt' ? [] : [desc(content.createdAt)]),
@@ -2589,11 +2764,19 @@ export class ContentService extends BaseService {
                 offset,
                 orderBy,
                 // The studio scope is the signed-in creator's own rows, whole
-                // and with their email.
+                // and with their email, and their username, which a personal
+                // piece's address is under (the row menu's Copy link).
                 with: {
                   mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
                   organization: true,
-                  creator: { columns: { id: true, email: true, name: true } },
+                  creator: {
+                    columns: {
+                      id: true,
+                      email: true,
+                      name: true,
+                      username: true,
+                    },
+                  },
                 },
               }),
         countQuery: { db: this.db, table: content, where },
@@ -2611,18 +2794,24 @@ export class ContentService extends BaseService {
       });
       // Every content read carries its tiers (Codex-2hxff.91, design §4.1):
       // one query over the page's ids. The org studio's rows carry their
-      // categories too, the same way and beside it (Codex-a6ofh.3.3).
-      const [items, filed] = await Promise.all([
+      // categories too, the same way and beside it (Codex-a6ofh.3.3), and
+      // every studio row its buyers (Codex-a6ofh.3.5); a browse row never.
+      const [items, filed, buyers] = await Promise.all([
         withTierWire(this.db, page.items),
         withCategories ? this.categoriesOf(page.items) : null,
+        scope === 'studio'
+          ? buyerCountsOf(
+              this.db,
+              page.items.map((row) => row.id)
+            )
+          : null,
       ]);
       return {
-        items: filed
-          ? items.map((row) => ({
-              ...row,
-              categories: filed.get(row.id) ?? [],
-            }))
-          : items,
+        items: items.map((row) => ({
+          ...row,
+          ...(filed ? { categories: filed.get(row.id) ?? [] } : {}),
+          ...(buyers ? { buyerCount: buyers.get(row.id) ?? 0 } : {}),
+        })),
         pagination: page.pagination,
       };
     } catch (error) {
@@ -2716,12 +2905,17 @@ export class ContentService extends BaseService {
     contentId: string,
     creatorId: string,
     categoryIds: string[]
-  ): Promise<{
-    categoryIds: string[];
-    organizationId: string | null;
-    hasBeenLive: boolean;
-    changed: boolean;
-  }> {
+  ): Promise<AddedCategories> {
+    return this.addCategoriesAndReport(contentId, creatorId, categoryIds);
+  }
+
+  /** {@link addCategories}, `quiet` for a bulk add (Codex-a6ofh.3.5). */
+  private async addCategoriesAndReport(
+    contentId: string,
+    creatorId: string,
+    categoryIds: string[],
+    { quiet = false }: QuietOption = {}
+  ): Promise<AddedCategories> {
     try {
       const result = await this.db.transaction(async (tx) => {
         const [piece] = await tx
@@ -2779,7 +2973,12 @@ export class ContentService extends BaseService {
       // As `update` does for a categories save: an org's public topic list
       // counts its live pieces per category, so a changed set refreshes it.
       // A never-live or personal piece is on no such list.
-      if (result.changed && result.hasBeenLive && result.organizationId) {
+      if (
+        !quiet &&
+        result.changed &&
+        result.hasBeenLive &&
+        result.organizationId
+      ) {
         void this.cache?.invalidate(
           CacheType.CATEGORIES(result.organizationId)
         );
@@ -2787,6 +2986,192 @@ export class ContentService extends BaseService {
       return result;
     } catch (error) {
       this.handleError(error, 'addCategories');
+    }
+  }
+
+  // ==========================================================================
+  // Bulk actions (Codex-a6ofh.3.5, owner 2026-11-12: "Bulk endpoints, one
+  // bump"). Each runs every piece through its own method, in its own
+  // transaction, so one refused piece never undoes the others; makes each
+  // cache write it owns once, after the loop; and reports each piece.
+  // ==========================================================================
+
+  /**
+   * Publish each piece, publish when ready included (owner D-b1): media on
+   * its way schedules it. Every rule `publish` holds applies to each.
+   */
+  async publishMany(
+    ids: string[],
+    creatorId: string
+  ): Promise<ContentBulkReport> {
+    const report = await this.eachPiece(ids, async (id) => {
+      const { row, wentLive } = await this.publishAndReport(
+        id,
+        creatorId,
+        { whenReady: true },
+        { quiet: true }
+      );
+      if (wentLive) return { outcome: 'done', touched: row };
+      return {
+        outcome:
+          row.status === CONTENT_STATUS.PUBLISHED ? 'unchanged' : 'scheduled',
+      };
+    });
+    this.bumpCatalogueOnce(report.touched);
+    return report;
+  }
+
+  /** Take each piece down; one already a draft is `unchanged`. */
+  async unpublishMany(
+    ids: string[],
+    creatorId: string
+  ): Promise<ContentBulkReport> {
+    const report = await this.eachPiece(ids, async (id) => {
+      const { row, wasLive, changed } = await this.unpublishAndReport(
+        id,
+        creatorId,
+        { quiet: true }
+      );
+      if (!changed) return { outcome: 'unchanged' };
+      return { outcome: 'done', touched: wasLive ? row : undefined };
+    });
+    this.bumpCatalogueOnce(report.touched);
+    return report;
+  }
+
+  /**
+   * Soft-delete each piece, leaving alone any piece people bought (owner
+   * D-b4, `CONTENT_HAS_BUYERS`). Every deleted piece is `touched`: the route
+   * clears its cover's files and its people's libraries.
+   */
+  async deleteMany(
+    ids: string[],
+    creatorId: string
+  ): Promise<ContentBulkReport> {
+    return this.eachPiece(ids, async (id) => {
+      const { organizationId } = await this.deleteAndReport(id, creatorId, {
+        refuseIfBought: true,
+      });
+      return { outcome: 'done', touched: { id, organizationId } };
+    });
+  }
+
+  /**
+   * File each piece in more categories, as `addCategories` does: each one's
+   * space and its 20-category limit hold. One that held them all is
+   * `unchanged`; only a live piece that changed is `touched`.
+   */
+  async addCategoriesMany(
+    ids: string[],
+    creatorId: string,
+    categoryIds: string[]
+  ): Promise<ContentBulkReport> {
+    const report = await this.eachPiece(ids, async (id) => {
+      const added = await this.addCategoriesAndReport(
+        id,
+        creatorId,
+        categoryIds,
+        { quiet: true }
+      );
+      if (!added.changed) return { outcome: 'unchanged' };
+      return {
+        outcome: 'done',
+        touched: added.hasBeenLive
+          ? { id, organizationId: added.organizationId }
+          : undefined,
+      };
+    });
+    for (const organizationId of orgsOf(report.touched)) {
+      void this.cache?.invalidate(CacheType.CATEGORIES(organizationId));
+    }
+    return report;
+  }
+
+  /**
+   * Set who can watch each piece (owner D-b2): an update of the access
+   * fields alone, under every rule an editor save is held to (the payouts
+   * gate on a live piece included). A piece that already reads so is
+   * `unchanged`. A move to Followers or Team only leaves alone any piece
+   * people bought (owner R1, `CONTENT_HAS_BUYERS`): both end their playback.
+   * Only a piece that has been live is `touched`, as `PATCH` refreshes.
+   */
+  async accessMany(
+    ids: string[],
+    creatorId: string,
+    access: ContentAccessGroupInput
+  ): Promise<ContentBulkReport> {
+    const endsBuyersPlayback =
+      access.isFollowerGated === true || access.isTeamOnly === true;
+    const report = await this.eachPiece(ids, async (id) => {
+      const {
+        content: row,
+        hasBeenLive: live,
+        unchanged,
+      } = await this.applyUpdate(
+        id,
+        access,
+        creatorId,
+        {},
+        {
+          quiet: true,
+          skipIfHeld: true,
+          refuseIfBought: endsBuyersPlayback,
+        }
+      );
+      if (unchanged) return { outcome: 'unchanged' };
+      return { outcome: 'done', touched: live ? row : undefined };
+    });
+    this.bumpCatalogueOnce(report.touched);
+    return report;
+  }
+
+  /**
+   * One bulk action's loop: each piece through `one`, in the order sent. A
+   * piece's 4xx is its `refused`, with the error the per-piece route would
+   * send; anything else is `failed`, logged, with no internal detail.
+   */
+  private async eachPiece(
+    ids: string[],
+    one: (id: string) => Promise<{
+      outcome: 'done' | 'scheduled' | 'unchanged';
+      touched?: BulkTouchedPiece;
+    }>
+  ): Promise<ContentBulkReport> {
+    const results: ContentBulkResult[] = [];
+    const touched: BulkTouchedPiece[] = [];
+    for (const id of ids) {
+      try {
+        const { outcome, touched: piece } = await one(id);
+        results.push({ id, outcome });
+        if (piece) {
+          touched.push({ id: piece.id, organizationId: piece.organizationId });
+        }
+      } catch (error) {
+        const { statusCode, response } = mapErrorToResponse(error, {
+          obs: this.obs,
+        });
+        results.push({
+          id,
+          outcome: statusCode < 500 ? 'refused' : 'failed',
+          error: response.error,
+        });
+      }
+    }
+    return { results, touched };
+  }
+
+  /**
+   * The catalogue keys a publish, an unpublish or an access change writes
+   * per piece (`COLLECTION_CONTENT_PUBLISHED`, each org's
+   * `COLLECTION_ORG_CONTENT`), each once for the whole action.
+   */
+  private bumpCatalogueOnce(touched: BulkTouchedPiece[]): void {
+    if (touched.length === 0) return;
+    void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+    for (const organizationId of orgsOf(touched)) {
+      void this.cache?.invalidate(
+        CacheType.COLLECTION_ORG_CONTENT(organizationId)
+      );
     }
   }
 

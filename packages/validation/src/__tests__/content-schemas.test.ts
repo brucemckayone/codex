@@ -2,8 +2,12 @@ import { CONTENT_ATTENTION_KINDS } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
 import {
   addContentCategoriesSchema,
+  contentAccessGroupSchema,
   contentAttentionQuerySchema,
   contentBrowseQuerySchema,
+  contentBulkAccessSchema,
+  contentBulkCategoriesSchema,
+  contentBulkSchema,
   contentQuerySchema,
   contentStatusEnum,
   contentTypeEnum,
@@ -1591,5 +1595,88 @@ describe('addContentCategoriesSchema', () => {
       ).toBe(false);
     }
     expect(addContentCategoriesSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+/** The content list's bulk actions (Codex-a6ofh.3.5, owner D-b3). */
+describe('contentBulkSchema', () => {
+  const ids = (n: number) =>
+    Array.from(
+      { length: n },
+      (_, i) => `5b000000-0000-4000-8000-${String(i).padStart(12, '0')}`
+    );
+
+  it('takes one to 15 pieces', () => {
+    expect(contentBulkSchema.safeParse({ ids: ids(1) }).success).toBe(true);
+    expect(contentBulkSchema.safeParse({ ids: ids(15) }).success).toBe(true);
+  });
+
+  it('refuses none, a sixteenth, a repeat and an id that is no uuid', () => {
+    const [first = ''] = ids(1);
+    for (const sent of [[], ids(16), [first, first], ['draft-video']]) {
+      expect(contentBulkSchema.safeParse({ ids: sent }).success).toBe(false);
+    }
+  });
+
+  it('takes 1 to 20 categories with the pieces', () => {
+    const categoryIds = ids(2);
+    expect(
+      contentBulkCategoriesSchema.safeParse({ ids: ids(3), categoryIds })
+        .success
+    ).toBe(true);
+    expect(
+      contentBulkCategoriesSchema.safeParse({ ids: ids(3), categoryIds: [] })
+        .success
+    ).toBe(false);
+  });
+});
+
+/** Who can watch, and nothing else (owner D-b2). */
+describe('contentAccessGroupSchema', () => {
+  it('takes an access kind as the editor sends it', () => {
+    expect(
+      contentAccessGroupSchema.safeParse({
+        isFree: false,
+        isPurchasable: true,
+        priceCents: 1200,
+        isFollowerGated: false,
+        isTeamOnly: false,
+      }).success
+    ).toBe(true);
+  });
+
+  it('refuses a field that is not access, so a title cannot ride along', () => {
+    expect(
+      contentAccessGroupSchema.safeParse({ isFree: true, title: 'New' }).success
+    ).toBe(false);
+  });
+
+  it('refuses nothing at all', () => {
+    expect(contentAccessGroupSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('holds every cross-field rule an update is held to', () => {
+    for (const access of [
+      // A price is a gate: a priced piece is never free.
+      { isFree: true, priceCents: 500 },
+      // Tiers beside a gate the decision applies first.
+      { isTierGated: true, isFollowerGated: true },
+      // A closed tier piece is never free.
+      { isTierGated: true, isFree: true },
+      // Non-free with no gate at all would read as public.
+      { isFree: false },
+    ]) {
+      expect(contentAccessGroupSchema.safeParse(access).success).toBe(false);
+      expect(updateContentSchema.safeParse(access).success).toBe(false);
+    }
+  });
+
+  it('goes inside the bulk body as `access`', () => {
+    expect(
+      contentBulkAccessSchema.safeParse({
+        ids: ['5b000000-0000-4000-8000-000000000001'],
+        access: { isFree: true, isPurchasable: false, priceCents: null },
+      }).success
+    ).toBe(true);
   });
 });

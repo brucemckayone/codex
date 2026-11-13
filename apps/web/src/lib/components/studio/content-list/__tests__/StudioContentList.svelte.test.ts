@@ -83,10 +83,15 @@ const getContentAttention = vi.hoisted(() => {
   const query = heldQuery('attention');
   return vi.fn((_args?: unknown) => query);
 });
+/** The bulk actions (Codex-a6ofh.3.5): one request, a result per piece. */
+const runContentBulk = vi.hoisted(() => vi.fn());
+const deleteContent = vi.hoisted(() => vi.fn(async (_id: string) => {}));
 vi.mock('$lib/remote/content.remote', () => ({
   listContent,
   getContentWhereCounts,
   getContentAttention,
+  runContentBulk,
+  deleteContent,
 }));
 /** The org studio's categories (Codex-a6ofh.3.3). */
 const getCategories = vi.hoisted(() => {
@@ -188,6 +193,8 @@ beforeEach(() => {
   goto.mockClear();
   logReadFailure.mockClear();
   s.refreshFirst.mockClear();
+  runContentBulk.mockReset();
+  deleteContent.mockClear();
 });
 
 afterEach(() => {
@@ -410,7 +417,8 @@ describe('StudioContentList: the rows', () => {
           ...PAID,
           priceCents: 499,
           viewCount: 812,
-          purchaseCount: 57,
+          // Its buyers (owner R2): purchase_count is never written.
+          buyerCount: 57,
         } as never),
         piece(2, {
           ...LIVE,
@@ -1090,5 +1098,177 @@ describe('StudioContentList: Needs you (Codex-a6ofh.3.4)', () => {
     personal.fail();
     await settle();
     expect(note()).toBe(m.studio_content_needs_unread());
+  });
+});
+
+describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
+  const box = (title: string) =>
+    document.querySelector<HTMLInputElement>(
+      `input[aria-label="${m.studio_content_bulk_select_row({ title })}"]`
+    );
+  const pageBox = () =>
+    document.querySelector<HTMLInputElement>('th input[type="checkbox"]');
+
+  test('selecting rows shows the bar, with Publish for drafts and Unpublish for live ones', () => {
+    s.first = {
+      current: pageOf([piece(1), piece(2, { ...LIVE })]),
+      error: undefined,
+    };
+    render();
+    expect(document.querySelector('.bulk-bar')).toBeNull();
+
+    box('Piece 1')?.click();
+    flushSync();
+    expect(text()).toContain(m.studio_content_bulk_selected({ count: 1 }));
+    expect(button(m.studio_content_bulk_publish())).toBeDefined();
+    expect(button(m.studio_content_bulk_unpublish())).toBeUndefined();
+
+    box('Piece 2')?.click();
+    flushSync();
+    expect(text()).toContain(m.studio_content_bulk_selected({ count: 2 }));
+    expect(button(m.studio_content_bulk_unpublish())).toBeDefined();
+  });
+
+  test('holds at most 15: the page box stops there, and the other boxes wait', () => {
+    s.first = {
+      current: pageOf(
+        Array.from({ length: 20 }, (_, i) => piece(i + 1)),
+        20
+      ),
+      error: undefined,
+    };
+    render();
+
+    pageBox()?.click();
+    flushSync();
+    expect(text()).toContain(m.studio_content_bulk_selected({ count: 15 }));
+    expect(text()).toContain(m.studio_content_bulk_cap({ max: 15 }));
+    expect(box('Piece 16')?.disabled).toBe(true);
+    expect(box('Piece 1')?.disabled).toBe(false);
+  });
+
+  test('Publish sends the selected drafts in one request, says what happened, and reads the list again', async () => {
+    const drafts = [piece(1), piece(2, { contentType: 'video' })];
+    s.first = { current: pageOf(drafts), error: undefined };
+    runContentBulk.mockResolvedValue({
+      results: [
+        { id: drafts[0]?.id, outcome: 'done' },
+        { id: drafts[1]?.id, outcome: 'scheduled' },
+      ],
+    });
+    render();
+    box('Piece 1')?.click();
+    box('Piece 2')?.click();
+    flushSync();
+
+    button(m.studio_content_bulk_publish())?.click();
+    await settle();
+
+    expect(runContentBulk).toHaveBeenCalledTimes(1);
+    expect(runContentBulk).toHaveBeenCalledWith({
+      action: 'publish',
+      ids: drafts.map((row) => row.id),
+    });
+    expect(text()).toContain(
+      m.studio_content_bulk_published_some({ done: 1, total: 2 })
+    );
+    expect(text()).toContain(
+      m.studio_content_bulk_scheduled_one({
+        title: 'Piece 2',
+        type: m.studio_editor_type_video(),
+      })
+    );
+    // Read again in place, the held query refreshed.
+    expect(s.refreshFirst).toHaveBeenCalled();
+    // Nothing was refused, so nothing stays selected.
+    expect(document.querySelector('.bulk-bar')).toBeNull();
+  });
+
+  test('a refused piece stays selected, and Show says why in its own words', async () => {
+    const rows = [piece(1), piece(2)];
+    s.first = { current: pageOf(rows), error: undefined };
+    runContentBulk.mockResolvedValue({
+      results: [
+        { id: rows[0]?.id, outcome: 'done' },
+        {
+          id: rows[1]?.id,
+          outcome: 'refused',
+          error: {
+            code: 'CONFLICT',
+            message: 'Bought by 2 people, so it was left alone.',
+            details: { code: 'CONTENT_HAS_BUYERS', buyers: 2 },
+          },
+        },
+      ],
+    });
+    render();
+    pageBox()?.click();
+    flushSync();
+    button(m.studio_content_bulk_delete())?.click();
+    flushSync();
+    button(m.studio_content_delete_count({ count: 2 }))?.click();
+    await settle();
+
+    expect(runContentBulk).toHaveBeenCalledWith({
+      action: 'delete',
+      ids: rows.map((row) => row.id),
+    });
+    expect(text()).toContain(m.studio_content_bulk_selected({ count: 1 }));
+    expect(box('Piece 2')?.checked).toBe(true);
+    button(m.studio_content_bulk_show())?.click();
+    flushSync();
+    expect(text()).toContain('Bought by 2 people, so it was left alone.');
+  });
+
+  test('a request that failed as a whole says so, and reads the list again', async () => {
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    runContentBulk.mockRejectedValue({
+      status: 503,
+      body: { message: 'Down' },
+    });
+    render();
+    box('Piece 1')?.click();
+    flushSync();
+
+    button(m.studio_content_bulk_publish())?.click();
+    await settle();
+
+    expect(text()).toContain(m.studio_content_bulk_request_failed());
+    expect(s.refreshFirst).toHaveBeenCalled();
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.bulk_failed',
+      expect.anything(),
+      expect.objectContaining({ action: 'publish', count: 1 })
+    );
+  });
+
+  test('a re-read after a change that fails says so, with Try again', async () => {
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    runContentBulk.mockResolvedValue({
+      results: [{ id: piece(1).id, outcome: 'done' }],
+    });
+    s.refreshFirst.mockRejectedValueOnce(new Error('down'));
+    render();
+    box('Piece 1')?.click();
+    flushSync();
+
+    button(m.studio_content_bulk_publish())?.click();
+    await settle();
+
+    expect(text()).toContain(m.studio_content_refresh_failed());
+    expect(button(m.common_try_again())).toBeDefined();
+  });
+
+  test('a changed view clears the selection', async () => {
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    render();
+    box('Piece 1')?.click();
+    flushSync();
+    expect(document.querySelector('.bulk-bar')).not.toBeNull();
+
+    nav.url = new URL('https://studio.test/studio/content?status=draft');
+    await settle();
+
+    expect(document.querySelector('.bulk-bar')).toBeNull();
   });
 });

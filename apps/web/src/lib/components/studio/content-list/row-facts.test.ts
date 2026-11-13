@@ -148,7 +148,7 @@ describe('accessWords', () => {
 
 describe('views and sales', () => {
   it('counts nothing for a draft that has never been live', () => {
-    const row = draftRow({ ...PAID, viewCount: 3, purchaseCount: 1 } as never);
+    const row = draftRow({ ...PAID, viewCount: 3, buyerCount: 1 } as never);
     expect(viewsShown(row)).toBeNull();
     expect(salesShown(row)).toBeNull();
   });
@@ -160,13 +160,24 @@ describe('views and sales', () => {
     expect(viewsShown(draftRow({ ...LIVE, viewCount: 0 } as never))).toBe('0');
   });
 
-  it('counts sales only for a piece that can be bought', () => {
+  it('counts the buyers, never the unwritten purchase_count (owner R2)', () => {
     expect(
-      salesShown(draftRow({ ...LIVE, purchaseCount: 57 } as never))
-    ).toBeNull();
-    expect(
-      salesShown(draftRow({ ...LIVE, ...PAID, purchaseCount: 57 } as never))
+      salesShown(
+        draftRow({
+          ...LIVE,
+          ...PAID,
+          buyerCount: 57,
+          purchaseCount: 0,
+        } as never)
+      )
     ).toBe('57');
+    expect(salesShown(draftRow({ ...LIVE, ...PAID } as never))).toBe('0');
+  });
+
+  it('counts a piece that can be bought, or that people bought', () => {
+    expect(salesShown(draftRow({ ...LIVE } as never))).toBeNull();
+    // Taken off sale since: its buyers keep it, so it keeps its count.
+    expect(salesShown(draftRow({ ...LIVE, buyerCount: 4 } as never))).toBe('4');
   });
 
   it('keeps counting an off-sale piece', () => {
@@ -175,7 +186,7 @@ describe('views and sales', () => {
       ...PAID,
       status: 'archived',
       viewCount: 2180,
-      purchaseCount: 96,
+      buyerCount: 96,
     } as never);
     expect(viewsShown(row)).toBe('2,180');
     expect(salesShown(row)).toBe('96');

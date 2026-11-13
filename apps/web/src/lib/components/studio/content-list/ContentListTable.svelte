@@ -8,10 +8,12 @@
   needs: a draft's two steps, a schedule, a refusal, or media gone from a
   live piece (`rowLine`). The title is the row's way in: a draft opens at
   the step it is on, anything that has been live opens the live editor.
+  Each row has a box for the bulk bar and a ⋯ menu (Codex-a6ofh.3.5, L2).
 
   Presentational: the rows and the tier names come from StudioContentList.
 -->
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import * as Table from '$lib/components/ui/Table';
   import type { ContentWithRelations } from '$lib/types';
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
@@ -21,6 +23,7 @@
   import ContentRowLine from './ContentRowLine.svelte';
   import ContentStatus from './ContentStatus.svelte';
   import ContentThumb from './ContentThumb.svelte';
+  import type { ContentSelection } from './content-selection.svelte';
   import {
     accessWords,
     categoryWords,
@@ -37,9 +40,16 @@
     tierName: TierName;
     /** The org studio's Category column (mockup L1); the personal studio has none. */
     showCategories: boolean;
+    /** The bulk selection: a box on each row, and the header's for the page. */
+    selection: ContentSelection;
+    /** A row's ⋯ menu. */
+    rowMenu: Snippet<[ContentWithRelations]>;
   }
 
-  const { items, payouts, tierName, showCategories }: Props = $props();
+  const { items, payouts, tierName, showCategories, selection, rowMenu }: Props = $props();
+
+  const onPage = $derived(items.filter((row) => selection.has(row.id)).length);
+  const allOn = $derived(onPage > 0 && (onPage === items.length || selection.full));
 </script>
 
 {#snippet count(value: string | null)}
@@ -54,6 +64,20 @@
   <caption class="sr-only">{m.studio_content_list_caption()}</caption>
   <Table.Header>
     <Table.Row>
+      <Table.Head class="col-select">
+        <input
+          type="checkbox"
+          class="row-check"
+          checked={allOn}
+          indeterminate={onPage > 0 && !allOn}
+          aria-label={m.studio_content_bulk_select_page({ max: selection.max })}
+          onchange={(event) =>
+            selection.setPage(
+              items.map((row) => row.id),
+              event.currentTarget.checked
+            )}
+        />
+      </Table.Head>
       <Table.Head class="col-content">{m.studio_content_list_col_content()}</Table.Head>
       <Table.Head>{m.studio_content_list_col_status()}</Table.Head>
       <Table.Head>{m.studio_content_form_access_label()}</Table.Head>
@@ -63,13 +87,27 @@
       <Table.Head class="col-num">{m.studio_content_list_col_views()}</Table.Head>
       <Table.Head class="col-num">{m.studio_content_list_col_sales()}</Table.Head>
       <Table.Head>{m.studio_content_list_col_updated()}</Table.Head>
+      <Table.Head class="col-actions">
+        <span class="sr-only">{m.media_col_actions()}</span>
+      </Table.Head>
     </Table.Row>
   </Table.Header>
   <Table.Body>
     {#each items as row (row.id)}
       {@const line = rowLine(row, payouts)}
       {@const access = accessWords(row, tierName)}
-      <Table.Row data-content-id={row.id}>
+      {@const picked = selection.has(row.id)}
+      <Table.Row data-content-id={row.id} data-selected={picked || undefined}>
+        <Table.Cell class="col-select">
+          <input
+            type="checkbox"
+            class="row-check"
+            checked={picked}
+            disabled={!picked && selection.full}
+            aria-label={m.studio_content_bulk_select_row({ title: row.title })}
+            onchange={() => selection.toggle(row.id)}
+          />
+        </Table.Cell>
         <Table.Cell class="col-content">
           <div class="row-content">
             <ContentThumb piece={row} />
@@ -102,6 +140,7 @@
         <Table.Cell class="col-num">{@render count(viewsShown(row))}</Table.Cell>
         <Table.Cell class="col-num">{@render count(salesShown(row))}</Table.Cell>
         <Table.Cell class="col-date">{formatRelativeTime(row.updatedAt)}</Table.Cell>
+        <Table.Cell class="col-actions">{@render rowMenu(row)}</Table.Cell>
       </Table.Row>
     {/each}
   </Table.Body>
@@ -128,6 +167,36 @@
   :global(.content-table .col-date) {
     white-space: nowrap;
     color: var(--color-text-secondary);
+  }
+
+  :global(.content-table .col-select) {
+    width: var(--space-10);
+  }
+
+  :global(.content-table .col-actions) {
+    width: var(--space-12);
+    text-align: right;
+  }
+
+  :global(.content-table tr[data-selected]) {
+    background: var(--color-interactive-subtle);
+  }
+
+  .row-check {
+    width: var(--space-4);
+    height: var(--space-4);
+    margin: 0;
+    accent-color: var(--color-interactive);
+    cursor: pointer;
+  }
+
+  .row-check:disabled {
+    cursor: not-allowed;
+  }
+
+  .row-check:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   .row-content {

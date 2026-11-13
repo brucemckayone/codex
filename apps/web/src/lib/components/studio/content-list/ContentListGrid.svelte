@@ -6,9 +6,11 @@
   card carries its status, its access and one count (views, or sales for a
   piece that sells), and the line that says what it needs. The same words as
   the table (`row-facts`), so a piece reads the same in either view. The
-  phone's only view.
+  phone's only view. Each card has a box for the bulk bar and a ⋯ menu
+  (Codex-a6ofh.3.5), over its picture.
 -->
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import type { ContentWithRelations } from '$lib/types';
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
   import * as m from '$paraglide/messages';
@@ -16,6 +18,7 @@
   import ContentRowLine from './ContentRowLine.svelte';
   import ContentStatus from './ContentStatus.svelte';
   import ContentThumb from './ContentThumb.svelte';
+  import type { ContentSelection } from './content-selection.svelte';
   import {
     accessWords,
     categoryWords,
@@ -32,9 +35,13 @@
     tierName: TierName;
     /** The org studio's categories, as its table shows them (Codex-a6ofh.3.3). */
     showCategories: boolean;
+    /** The bulk selection: a box on each card. */
+    selection: ContentSelection;
+    /** A card's ⋯ menu. */
+    rowMenu: Snippet<[ContentWithRelations]>;
   }
 
-  const { items, payouts, tierName, showCategories }: Props = $props();
+  const { items, payouts, tierName, showCategories, selection, rowMenu }: Props = $props();
 
   /** Mockup L5: a selling piece shows its sales, anything else its views. */
   function countLine(row: ContentWithRelations): string | null {
@@ -50,7 +57,8 @@
     {@const line = rowLine(row, payouts)}
     {@const counted = countLine(row)}
     {@const filed = showCategories ? categoryWords(row) : null}
-    <li class="card" data-content-id={row.id}>
+    {@const picked = selection.has(row.id)}
+    <li class="card" data-content-id={row.id} data-selected={picked || undefined}>
       <ContentThumb piece={row} variant="card" />
       <div class="card-body">
         <a class="card-title" href={rowHref(row, line)}>
@@ -66,6 +74,18 @@
         </span>
         {#if line}<ContentRowLine {line} />{/if}
       </div>
+      <!-- After the title's link, so they sit above the card-wide link. -->
+      <span class="card-tool card-select">
+        <input
+          type="checkbox"
+          class="card-check"
+          checked={picked}
+          disabled={!picked && selection.full}
+          aria-label={m.studio_content_bulk_select_row({ title: row.title })}
+          onchange={() => selection.toggle(row.id)}
+        />
+      </span>
+      <span class="card-tool card-menu">{@render rowMenu(row)}</span>
     </li>
   {/each}
 </ul>
@@ -94,6 +114,50 @@
 
   .card:hover {
     border-color: var(--color-border-strong);
+  }
+
+  .card[data-selected] {
+    border-color: var(--color-interactive);
+    background: var(--color-interactive-subtle);
+  }
+
+  /* Over the picture's corners, on a surface so they read on any frame. */
+  .card-tool {
+    position: absolute;
+    top: var(--space-3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .card-select {
+    left: var(--space-3);
+    width: var(--space-8);
+    height: var(--space-8);
+  }
+
+  .card-menu {
+    right: var(--space-3);
+  }
+
+  .card-check {
+    width: var(--space-4);
+    height: var(--space-4);
+    margin: 0;
+    accent-color: var(--color-interactive);
+    cursor: pointer;
+  }
+
+  .card-check:disabled {
+    cursor: not-allowed;
+  }
+
+  .card-check:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   /* The whole card is the title's link: one tab stop, and its ring, for a

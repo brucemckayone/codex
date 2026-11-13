@@ -245,8 +245,8 @@ export async function invalidateContentAccess(
   // --- Resolve affected user set ------------------------------------------
   const affectedUserIds = await resolveAffectedUsers({
     db,
-    contentId,
-    organizationId,
+    contentIds: [contentId],
+    organizationIds: organizationId ? [organizationId] : [],
     includeFollowers,
   });
 
@@ -282,6 +282,94 @@ export async function invalidateContentAccess(
     reason,
     userCount: affectedUserIds.size,
   });
+}
+
+/** Arguments for {@link invalidateContentAccessMany}. */
+export interface InvalidateContentAccessManyArgs {
+  db: Database;
+  cache: VersionedCache;
+  waitUntil: WaitUntilFn;
+  /** The pieces that changed, each with the org it is filed in, if any. */
+  pieces: Array<{ contentId: string; organizationId: string | null }>;
+  reason: ContentInvalidationReason;
+  logger?: InvalidationLogger;
+  /** Override the fanout cap (default {@link DEFAULT_MAX_LIBRARY_FANOUT}). */
+  maxFanout?: number;
+}
+
+/**
+ * {@link invalidateContentAccess} for a bulk action's pieces
+ * (Codex-a6ofh.3.5). Each catalogue key is bumped once, not once a piece: KV
+ * takes about one write a second to a key, so fifteen bumps of one key lose
+ * writes. Each user's library is bumped once too, however many of the pieces
+ * they hold. The users are the union of every piece's, read once per source:
+ * the pieces' buyers, and each org's subscribers and team. Above `maxFanout`
+ * users in all, the per-user bumps are skipped (logged), as for one piece.
+ */
+export async function invalidateContentAccessMany(
+  args: InvalidateContentAccessManyArgs
+): Promise<void> {
+  const {
+    db,
+    cache,
+    waitUntil,
+    pieces,
+    reason,
+    logger,
+    maxFanout = DEFAULT_MAX_LIBRARY_FANOUT,
+  } = args;
+  if (pieces.length === 0) return;
+  const contentIds = [...new Set(pieces.map((piece) => piece.contentId))];
+  const organizationIds = [
+    ...new Set(
+      pieces.flatMap((piece) =>
+        piece.organizationId ? [piece.organizationId] : []
+      )
+    ),
+  ];
+
+  bumpWithLogger(
+    cache,
+    waitUntil,
+    CacheType.COLLECTION_CONTENT_PUBLISHED,
+    { reason, pieces: contentIds.length, key: 'content:published' },
+    logger
+  );
+  for (const organizationId of organizationIds) {
+    bumpWithLogger(
+      cache,
+      waitUntil,
+      CacheType.COLLECTION_ORG_CONTENT(organizationId),
+      { reason, organizationId, key: 'org:content' },
+      logger
+    );
+  }
+
+  const affectedUserIds = await resolveAffectedUsers({
+    db,
+    contentIds,
+    organizationIds,
+    includeFollowers: false,
+  });
+  if (affectedUserIds.size === 0) return;
+  if (affectedUserIds.size > maxFanout) {
+    logger?.warn('content-invalidation: fanout skipped (cap exceeded)', {
+      pieces: contentIds.length,
+      reason,
+      userCount: affectedUserIds.size,
+      maxFanout,
+    });
+    return;
+  }
+  for (const userId of affectedUserIds) {
+    bumpWithLogger(
+      cache,
+      waitUntil,
+      CacheType.COLLECTION_USER_LIBRARY(userId),
+      { reason, userId, key: 'user:library' },
+      logger
+    );
+  }
 }
 
 // ============================================================================
@@ -449,14 +537,16 @@ export function invalidateOrgMembership(
 
 interface ResolveArgs {
   db: Database;
-  contentId: string;
-  organizationId: string | null;
+  /** The pieces whose buyers count: at least one. */
+  contentIds: string[];
+  /** The orgs whose subscribers, team and followers count; may be empty. */
+  organizationIds: string[];
   includeFollowers: boolean;
 }
 
 /**
  * Union-query the set of user ids whose library currently includes (or could
- * include) this content. Mirrors the decision tree in
+ * include) these pieces: their buyers, and their orgs' people. Mirrors the decision tree in
  * `ContentAccessService.hasContentAccess` so the invalidation fanout is a
  * superset of users who could be holding the item.
  *
@@ -468,14 +558,15 @@ interface ResolveArgs {
  * The per-source queries run in parallel for minimum latency.
  */
 async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
-  const { db, contentId, organizationId, includeFollowers } = args;
+  const { db, contentIds, organizationIds, includeFollowers } = args;
 
   const emptyUserRows: Promise<Array<{ userId: string }>> = Promise.resolve([]);
+  const hasOrg = organizationIds.length > 0;
 
   const purchasePromise = db.query.purchases
     .findMany({
       where: and(
-        eq(purchases.contentId, contentId),
+        inArray(purchases.contentId, contentIds),
         eq(purchases.status, PURCHASE_STATUS.COMPLETED)
       ),
       columns: { customerId: true },
@@ -485,10 +576,10 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
       rows.map((r) => ({ userId: r.customerId }))
     );
 
-  const subscriberPromise: Promise<Array<{ userId: string }>> = organizationId
+  const subscriberPromise: Promise<Array<{ userId: string }>> = hasOrg
     ? db.query.subscriptions.findMany({
         where: and(
-          eq(subscriptions.organizationId, organizationId),
+          inArray(subscriptions.organizationId, organizationIds),
           inArray(subscriptions.status, [
             ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
           ]),
@@ -498,10 +589,10 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
       })
     : emptyUserRows;
 
-  const managementPromise: Promise<Array<{ userId: string }>> = organizationId
+  const managementPromise: Promise<Array<{ userId: string }>> = hasOrg
     ? db.query.organizationMemberships.findMany({
         where: and(
-          eq(organizationMemberships.organizationId, organizationId),
+          inArray(organizationMemberships.organizationId, organizationIds),
           eq(organizationMemberships.status, 'active'),
           inArray(organizationMemberships.role, ORGANIZATION_TEAM_ROLES)
         ),
@@ -510,9 +601,9 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
     : emptyUserRows;
 
   const followerPromise: Promise<Array<{ userId: string }>> =
-    organizationId && includeFollowers
+    hasOrg && includeFollowers
       ? db.query.organizationFollowers.findMany({
-          where: eq(organizationFollowers.organizationId, organizationId),
+          where: inArray(organizationFollowers.organizationId, organizationIds),
           columns: { userId: true },
         })
       : emptyUserRows;

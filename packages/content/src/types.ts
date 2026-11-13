@@ -19,6 +19,7 @@ import type {
   Organization,
   ServedMediaItem,
 } from '@codex/database/schema';
+import type { ContentBulkResult } from '@codex/shared-types';
 
 /**
  * Database client type — re-exported from `@codex/database` so consumers
@@ -55,6 +56,22 @@ export type {
   PublicContentOrganization,
   PublicMediaItem,
 };
+
+/**
+ * A bulk action's report (Codex-a6ofh.3.5): each piece's result, for the
+ * response, and the pieces whose public face changed, for the route's cache
+ * work, which runs once per org after the loop.
+ */
+export interface ContentBulkReport {
+  results: ContentBulkResult[];
+  touched: BulkTouchedPiece[];
+}
+
+/** A piece a bulk action changed, and the org it is filed in, if any. */
+export interface BulkTouchedPiece {
+  id: string;
+  organizationId: string | null;
+}
 
 /**
  * Content query filters
@@ -123,6 +140,8 @@ export interface ContentWithRelations extends Content {
     /** Absent on the anonymous public list (`listPublic`), which never selects it. */
     email?: string;
     name: string | null;
+    /** The studio list's rows only: a personal piece's address is under it. */
+    username?: string | null;
   };
   organization?: Organization | null;
   mediaItem?: ServedMediaItem | null;
@@ -145,6 +164,14 @@ export interface ContentWithRelations extends Content {
    * `categoryIds`.
    */
   categories?: ContentCategoryRef[];
+  /**
+   * How many people bought it: completed purchases, disputed ones included
+   * (Codex-a6ofh.3.5, owner R2). The studio list's rows carry it, from one
+   * grouped read over the page, for its Sales column and its delete
+   * warnings. A public row never does. Not `purchaseCount`, which nothing
+   * writes (Codex-r7os5).
+   */
+  buyerCount?: number;
   /**
    * The exact tiers that include this item (Codex-2hxff.91), by tier
    * `sortOrder`, inactive tiers included; `[]` when not behind the switch.

@@ -1,6 +1,7 @@
 import {
   CONTENT_ACCESS_TYPE,
   CONTENT_ATTENTION_KINDS,
+  CONTENT_BULK_MAX,
   CONTENT_LIST_SCOPE,
   CONTENT_MAX_CATEGORIES,
   CONTENT_STATUS,
@@ -980,6 +981,78 @@ export const addContentCategoriesSchema = z.object({
 export type AddContentCategoriesInput = z.infer<
   typeof addContentCategoriesSchema
 >;
+
+/**
+ * The pieces a bulk action takes (Codex-a6ofh.3.5): 1 to CONTENT_BULK_MAX
+ * ids, each once. A repeat is refused, never collapsed, so the answer keeps
+ * one result per id sent, in order.
+ */
+const contentBulkIdsField = z
+  .array(uuidSchema)
+  .min(1, 'Choose at least one piece')
+  .max(CONTENT_BULK_MAX, `At most ${CONTENT_BULK_MAX} pieces at a time`)
+  .refine((ids) => new Set(ids).size === ids.length, {
+    message: 'The same piece is listed twice',
+  });
+
+/** `POST /api/content/bulk/{publish,unpublish,delete}`. */
+export const contentBulkSchema = z.object({ ids: contentBulkIdsField });
+
+export type ContentBulkInput = z.infer<typeof contentBulkSchema>;
+
+/** `POST /api/content/bulk/categories`: the categories go to every piece. */
+export const contentBulkCategoriesSchema = z.object({
+  ids: contentBulkIdsField,
+  categoryIds: addContentCategoriesSchema.shape.categoryIds,
+});
+
+export type ContentBulkCategoriesInput = z.infer<
+  typeof contentBulkCategoriesSchema
+>;
+
+/**
+ * Who can watch, and nothing else: the access group of an update (owner
+ * D-b2). Its fields are `updateContentSchema`'s own, and the whole of it is
+ * parsed by that schema too, so every cross-field rule an editor save is held
+ * to holds here, and a rule added there applies here without a copy. Strict:
+ * a title or a slug can't ride along on a bulk change.
+ */
+export const contentAccessGroupSchema = baseContentSchema
+  .pick({
+    isFree: true,
+    isPurchasable: true,
+    priceCents: true,
+    isTierGated: true,
+    includedInTierIds: true,
+    isFollowerGated: true,
+    isTeamOnly: true,
+  })
+  .partial()
+  .strict()
+  .refine((access) => Object.keys(access).length > 0, {
+    message: 'Say who can watch',
+  })
+  .superRefine((access, ctx) => {
+    const asUpdate = updateContentSchema.safeParse(access);
+    if (asUpdate.success) return;
+    for (const issue of asUpdate.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      });
+    }
+  });
+
+export type ContentAccessGroupInput = z.infer<typeof contentAccessGroupSchema>;
+
+/** `POST /api/content/bulk/access`: one access for every piece. */
+export const contentBulkAccessSchema = z.object({
+  ids: contentBulkIdsField,
+  access: contentAccessGroupSchema,
+});
+
+export type ContentBulkAccessInput = z.infer<typeof contentBulkAccessSchema>;
 
 /** Which items a library list keeps by what uses them (Codex-a6ofh.1.4). */
 export const MEDIA_USAGE_FILTERS = ['any', 'used', 'unused'] as const;

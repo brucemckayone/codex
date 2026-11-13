@@ -103,10 +103,15 @@ export function viewsShown(row: ContentWithRelations): string | null {
   return hasBeenLive(row) ? formatCount(row.viewCount ?? 0) : null;
 }
 
-/** Sales for a piece that can be bought and has been live; else nothing to count. */
+/**
+ * Sales for a piece that has been live and was ever bought or is for sale;
+ * else nothing to count. Its buyers (Codex-a6ofh.3.5, owner R2): a piece
+ * taken off sale keeps its buyers, so it keeps its count.
+ */
 export function salesShown(row: ContentWithRelations): string | null {
-  return hasBeenLive(row) && row.isPurchasable
-    ? formatCount(row.purchaseCount ?? 0)
+  const buyers = row.buyerCount ?? 0;
+  return hasBeenLive(row) && (row.isPurchasable || buyers > 0)
+    ? formatCount(buyers)
     : null;
 }
 

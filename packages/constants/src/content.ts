@@ -26,6 +26,14 @@ export const CONTENT_LIST_SCOPE = {
 export const CONTENT_MAX_CATEGORIES = 20;
 
 /**
+ * The most pieces one bulk action takes (Codex-a6ofh.3.5, owner D-b3): the
+ * content list holds at most this many selected, and each `POST
+ * /api/content/bulk/*` refuses more. One request then stays inside a worker's
+ * time, and a bulk delete removes at most this many per `strict` hit.
+ */
+export const CONTENT_BULK_MAX = 15;
+
+/**
  * What a piece needs from its creator: the content list's "Needs you" chips
  * (Codex-a6ofh.3.4, owner 2026-11-12), and its `?needs=` filter. A piece is
  * one kind at most, taken in this order, the order the row's own line reads

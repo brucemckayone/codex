@@ -82,6 +82,8 @@ import type {
   BrandingSettingsResponse,
   CheckSlugResponse,
   ContactSettingsResponse,
+  ContentBulkAction,
+  ContentBulkResponse,
   ContentPortalUses,
   ContentWhereCounts,
   CourseOffer,
@@ -1240,6 +1242,18 @@ export function createServerApi(
       delete: (id: string) =>
         request<void>('content', `/api/content/${id}`, {
           method: 'DELETE',
+        }),
+
+      /**
+       * One action on up to CONTENT_BULK_MAX of the creator's pieces
+       * (Codex-a6ofh.3.5), a result for each: `publish`, `unpublish` and
+       * `delete` take `{ ids }`, `categories` `{ ids, categoryIds }`, and
+       * `access` `{ ids, access }`.
+       */
+      bulk: (action: ContentBulkAction, body: unknown) =>
+        request<ContentBulkResponse>('content', `/api/content/bulk/${action}`, {
+          method: 'POST',
+          body: JSON.stringify(body),
         }),
 
       /**
