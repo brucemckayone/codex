@@ -3,13 +3,16 @@
 
   A piece's picture in the content list (Codex-a6ofh.3.1, mockup L1 note 6):
   its own cover, or its video's poster when it has none (`getDisplayThumbnail`;
-  the old row never read the poster), else its type's icon. A corner badge
+  the old row never read the poster), else its type's icon. A picture that
+  fails to load shows the icon in the same box (`FallbackImage`, Codex-a6ofh.3.6),
+  never the browser's broken-image glyph. A corner badge
   names the type and, for media, the running time. Decorative: the title
   beside or under it names the piece.
 
   `card` fills a grid card's width (L5); the default is the table row's.
 -->
 <script lang="ts">
+  import { FallbackImage } from '$lib/components/ui';
   import { FileTextIcon, FilmIcon, MusicIcon } from '$lib/components/ui/Icon';
   import type { ContentWithRelations } from '$lib/types';
   import { formatDuration } from '$lib/utils/format';
@@ -38,17 +41,17 @@
 </script>
 
 <span class="thumb" data-variant={variant} aria-hidden="true">
-  {#if src}
-    <img
-      {src}
-      srcset={getThumbnailSrcset(src) || undefined}
-      sizes={coverCropSizes(sizes, 16 / 9, src)}
-      alt=""
-      loading="lazy"
-    />
-  {:else}
-    <Icon size={variant === 'card' ? 32 : 18} />
-  {/if}
+  <FallbackImage
+    {src}
+    srcset={src ? getThumbnailSrcset(src) || undefined : undefined}
+    sizes={src ? coverCropSizes(sizes, 16 / 9, src) : undefined}
+    alt=""
+    loading="lazy"
+  >
+    {#snippet fallback()}
+      <Icon size={variant === 'card' ? 32 : 18} />
+    {/snippet}
+  </FallbackImage>
   <span class="thumb-badge">
     {#if duration}{duration}{:else}<Icon size={12} />{/if}
   </span>
@@ -74,7 +77,8 @@
     border-radius: var(--radius-md);
   }
 
-  .thumb img {
+  /* Rendered by FallbackImage, so reached from this box. */
+  .thumb :global(img) {
     width: 100%;
     height: 100%;
     object-fit: cover;
