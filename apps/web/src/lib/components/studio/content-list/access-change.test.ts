@@ -23,6 +23,7 @@ function piece(id: string, fields: Partial<AccessPiece> = {}): AccessPiece {
     isTierGated: false,
     isFollowerGated: false,
     isTeamOnly: false,
+    courseOnly: false,
     holderCount: 0,
     ...fields,
   };
@@ -77,6 +78,18 @@ describe('accessChangeLines', () => {
     ]);
   });
 
+  it('says everyone keeps watching for several pieces people have, never a sum of people', () => {
+    // One course's buyers are in each lesson's count: 3 + 4 is not 7 people.
+    const lines = accessChangeLines([sold('a', 800, 3), sold('b', 800, 4)], {
+      kind: 'paid',
+      priceCents: 1200,
+      tierIds: null,
+    });
+    expect(lines[0]?.text).toBe(
+      `${m.studio_content_access_reprice_many({ count: 2, to: '£12.00' })} ${m.studio_content_access_buyers_keep_all()}`
+    );
+  });
+
   it('Buy once says each piece keeps its tiers, when one has some', () => {
     const lines = accessChangeLines(
       [piece('a', { isFree: false, isTierGated: true })],
@@ -117,6 +130,14 @@ describe('accessChangeLines', () => {
     });
     // Only the unbought piece stops being sold; the bought one stays as it is.
     expect(lines[1]?.text).toBe(m.studio_content_access_stops_sold_one());
+  });
+
+  it('Followers lets a course-only piece through: its course holders keep it', () => {
+    const lines = accessChangeLines(
+      [piece('a', { courseOnly: true, holderCount: 2 })],
+      { kind: 'followers', priceCents: 0, tierIds: null }
+    );
+    expect(lines.filter((line) => line.tone === 'warning')).toEqual([]);
   });
 
   it('says nothing for a change that touches no price', () => {

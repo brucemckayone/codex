@@ -33899,6 +33899,14 @@ export const studio_content_bulk_unnamed = () => `A piece`
 
 
 /**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_bulk_not_done = (params) => `${params.count} not done: try again.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -33991,7 +33999,15 @@ export const studio_content_access_buyers_keep_one = () => `The 1 person who has
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_access_buyers_keep = (params) => `The ${params.count} people who have them keep watching.`
+export const studio_content_access_buyers_keep = (params) => `The ${params.count} people who have it keep watching.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_access_buyers_keep_all = () => `Everyone who has them keeps watching.`
 
 
 /**
@@ -34071,7 +34087,7 @@ export const studio_content_delete_kept_one_title = (params) => `“${params.tit
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_one_body = (params) => `${params.count} people have it, bought or given, and deleting it would end their playback. Unpublishing takes it off sale, and they keep watching.`
+export const studio_content_delete_kept_one_body = (params) => `${params.count} people have it, bought or given, and deleting it would end their playback.`
 
 
 /**
@@ -34079,7 +34095,7 @@ export const studio_content_delete_kept_one_body = (params) => `${params.count} 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_one_body_single = () => `1 person has it, bought or given, and deleting it would end their playback. Unpublishing takes it off sale, and they keep watching.`
+export const studio_content_delete_kept_one_body_single = () => `1 person has it, bought or given, and deleting it would end their playback.`
 
 
 /**
@@ -34095,7 +34111,55 @@ export const studio_content_delete_kept_title = (params) => `${params.count} pie
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_body = () => `People have them, bought or given, and deleting them would end their playback. Unpublishing takes them off sale, and they keep watching.`
+export const studio_content_delete_kept_body = () => `People have them, bought or given, and deleting them would end their playback.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_keeps_it = () => `Unpublishing it takes it off sale, and they keep watching.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_keeps_them = () => `Unpublishing them takes them off sale, and they keep watching.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_ends_it = () => `Unpublishing it would end their playback too.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_ends_them = () => `Unpublishing them would end their playback too.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_ends_some = (params) => `Unpublishing ${params.count} of them would end their playback too, so those aren’t offered.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_delete_unpublish_ends_some_one = () => `Unpublishing one of them would end their playback too, so it isn’t offered.`
 
 
 /**
@@ -34159,7 +34223,7 @@ export const studio_content_delete_bought_title_one = () => `1 person has it.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_bought_body = () => `Deleting ends their playback, and it can’t be undone. Unpublish takes it off sale, and they keep watching.`
+export const studio_content_delete_bought_body = () => `Deleting ends their playback, and it can’t be undone.`
 
 
 /**

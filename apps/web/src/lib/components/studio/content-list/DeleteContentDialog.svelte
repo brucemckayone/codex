@@ -5,21 +5,23 @@
 
   - Many (the bulk bar): says how many go. A piece people have is left
     alone, since deleting it would end their playback; the dialog names it
-    (or counts them) and offers Unpublish instead, which keeps their playback.
-    The server judges each piece again, and the result line says what it did.
+    (or counts them) and offers Unpublish instead where that keeps their
+    playback. The server judges each piece again, and the result line says
+    what it did.
   - One (the row menu): a piece people have says by how many, with
-    Unpublish instead first. Deleting it one at a time stays possible.
+    Unpublish instead first where it keeps their playback. Deleting it one
+    at a time stays possible.
 
   "Have" is bought or given, through the piece or a course that holds it.
   The counts are the list's (`holderCount`); the server counts for itself.
+  Unpublishing a Free piece ends it for them too (Codex-dz997), so the
+  dialog says that, and does not offer it (`unpublishOffer`).
 
   @prop target   What is being deleted; null closes it
   @prop busy     The delete or the unpublish is under way
 -->
 <script lang="ts" module>
-  import type { ContentWithRelations } from '$lib/types';
-
-  export type DeletePiece = Pick<ContentWithRelations, 'id' | 'title' | 'status' | 'holderCount'>;
+  import type { DeletePiece } from './delete-words';
 
   export type DeleteTarget =
     | { mode: 'many'; pieces: DeletePiece[] }
@@ -27,11 +29,11 @@
 </script>
 
 <script lang="ts">
-  import { CONTENT_STATUS } from '@codex/constants';
   import { Alert, Button } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
   import { AlertTriangleIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
+  import { type HeldNotice, heldNotice, unpublishOffer } from './delete-words';
   import { isHeld } from './row-facts';
 
   interface Props {
@@ -39,23 +41,30 @@
     busy: boolean;
     /** Delete them all: the server leaves each bought piece alone. */
     onDelete: () => void;
-    /** Unpublish these instead: the bought pieces that are live. */
+    /** Unpublish these instead: the live pieces left alone whose people keep them. */
     onUnpublish: (ids: string[]) => void;
     onClose: () => void;
   }
 
   const { target, busy, onDelete, onUnpublish, onClose }: Props = $props();
 
-  const live = (piece: DeletePiece) => piece.status === CONTENT_STATUS.PUBLISHED;
-
   const pieces = $derived(
     target === null ? [] : target.mode === 'many' ? target.pieces : [target.piece]
   );
   const kept = $derived(pieces.filter(isHeld));
   const going = $derived(pieces.length - kept.length);
-  const keptLive = $derived(kept.filter(live).map((piece) => piece.id));
-  const [onlyKept] = $derived(kept);
+  const offer = $derived(unpublishOffer(kept));
+  const notice = $derived(heldNotice(target?.mode ?? 'many', kept, offer.words));
 </script>
+
+{#snippet heldAlert(held: HeldNotice)}
+  <Alert variant="warning">
+    <p class="delete-alert">
+      <AlertTriangleIcon size={16} />
+      <span><b>{held.title}</b> {held.body}</span>
+    </p>
+  </Alert>
+{/snippet}
 
 <Dialog.Root
   open={target !== null}
@@ -78,21 +87,8 @@
     <Dialog.Body>
       <div class="delete-body">
         {#if target?.mode === 'one'}
-          {#if onlyKept}
-            {@const buyers = onlyKept.holderCount ?? 0}
-            <Alert variant="warning">
-              <p class="delete-alert">
-                <AlertTriangleIcon size={16} />
-                <span>
-                  <b>
-                    {buyers === 1
-                      ? m.studio_content_delete_bought_title_one()
-                      : m.studio_content_delete_bought_title({ count: buyers })}
-                  </b>
-                  {m.studio_content_delete_bought_body()}
-                </span>
-              </p>
-            </Alert>
+          {#if notice}
+            {@render heldAlert(notice)}
           {:else}
             <p class="delete-text">{m.studio_content_delete_one_body()}</p>
           {/if}
@@ -104,24 +100,8 @@
                 : m.studio_content_delete_many_body({ count: going })}
             </p>
           {/if}
-          {#if onlyKept}
-            <Alert variant="warning">
-              <p class="delete-alert">
-                <AlertTriangleIcon size={16} />
-                <span>
-                  {#if kept.length === 1}
-                    {@const buyers = onlyKept.holderCount ?? 0}
-                    <b>{m.studio_content_delete_kept_one_title({ title: onlyKept.title })}</b>
-                    {buyers === 1
-                      ? m.studio_content_delete_kept_one_body_single()
-                      : m.studio_content_delete_kept_one_body({ count: buyers })}
-                  {:else}
-                    <b>{m.studio_content_delete_kept_title({ count: kept.length })}</b>
-                    {m.studio_content_delete_kept_body()}
-                  {/if}
-                </span>
-              </p>
-            </Alert>
+          {#if notice}
+            {@render heldAlert(notice)}
           {/if}
         {/if}
       </div>
@@ -130,8 +110,8 @@
       <Button variant="ghost" disabled={busy} onclick={onClose}>{m.common_cancel()}</Button>
       <span class="delete-gap"></span>
       {#if target?.mode === 'one'}
-        {#if onlyKept && keptLive.length > 0}
-          <Button variant="primary" disabled={busy} onclick={() => onUnpublish(keptLive)}>
+        {#if offer.ids.length > 0}
+          <Button variant="primary" disabled={busy} onclick={() => onUnpublish(offer.ids)}>
             {m.studio_content_delete_unpublish_instead()}
           </Button>
         {/if}
@@ -139,9 +119,9 @@
           {m.studio_content_delete_confirm()}
         </Button>
       {:else}
-        {#if keptLive.length > 0}
-          <Button variant="secondary" disabled={busy} onclick={() => onUnpublish(keptLive)}>
-            {keptLive.length === 1
+        {#if offer.ids.length > 0}
+          <Button variant="secondary" disabled={busy} onclick={() => onUnpublish(offer.ids)}>
+            {offer.ids.length === 1
               ? m.studio_content_delete_unpublish_it()
               : m.studio_content_delete_unpublish_them()}
           </Button>

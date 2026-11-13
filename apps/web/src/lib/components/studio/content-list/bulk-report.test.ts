@@ -143,6 +143,28 @@ describe('bulkReport', () => {
     expect(report.keep).toEqual(['a', 'b']);
   });
 
+  it('a try-again says why in its own words, and is not done, never "left alone"', () => {
+    const notReached = 'Not reached: the action ran out of time. Try again.';
+    const report = bulkReport(
+      'delete',
+      [
+        { id: 'a', outcome: 'done' },
+        {
+          id: 'b',
+          outcome: 'failed',
+          error: { code: 'SERVICE_UNAVAILABLE', message: notReached },
+        },
+      ],
+      pieces
+    );
+    expect(report.line).toBe(
+      `${m.studio_content_bulk_deleted_some({ done: 1, total: 2 })} ${m.studio_content_bulk_not_done({ count: 1 })}`
+    );
+    expect(report.problems[0]?.words).toBe(notReached);
+    // Still selected: trying again is one click.
+    expect(report.keep).toEqual(['b']);
+  });
+
   it('a delete that finds a piece already gone counts it deleted', () => {
     const report = bulkReport(
       'delete',

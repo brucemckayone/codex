@@ -21,6 +21,7 @@ export type AccessPiece = Pick<
   | 'isTierGated'
   | 'isFollowerGated'
   | 'isTeamOnly'
+  | 'courseOnly'
   | 'holderCount'
 >;
 
@@ -60,16 +61,29 @@ export interface AccessLine {
   text: string;
 }
 
-const buyersOf = (pieces: readonly AccessPiece[]) =>
-  pieces.reduce((sum, piece) => sum + (piece.holderCount ?? 0), 0);
-
+/**
+ * That the people who have them keep watching. A number only for one piece:
+ * counts are each piece's, so one course's buyers are in every lesson's,
+ * and a sum would count each of them once a lesson.
+ */
 function buyersKeep(pieces: readonly AccessPiece[]): string | null {
-  const buyers = buyersOf(pieces);
-  if (buyers === 0) return null;
+  const held = pieces.filter(isHeld);
+  const [only] = held;
+  if (!only) return null;
+  if (held.length > 1) return m.studio_content_access_buyers_keep_all();
+  const buyers = only.holderCount ?? 0;
   return buyers === 1
     ? m.studio_content_access_buyers_keep_one()
     : m.studio_content_access_buyers_keep({ count: buyers });
 }
+
+/**
+ * Left alone by a move to Followers or Team only (owner R1): a piece people
+ * have, unless it is course-only, which the access decision answers before
+ * either gate, so its course holders keep it, as the server judges it.
+ */
+const leftAloneByGate = (piece: AccessPiece) =>
+  isHeld(piece) && !piece.courseOnly;
 
 function withBuyers(text: string, pieces: readonly AccessPiece[]): string {
   const keep = buyersKeep(pieces);
@@ -142,7 +156,7 @@ export function accessChangeLines(
       break;
     case 'followers':
     case 'team': {
-      const bought = pieces.filter(isHeld);
+      const bought = pieces.filter(leftAloneByGate);
       const [only] = bought;
       if (only) {
         lines.push({
@@ -155,7 +169,7 @@ export function accessChangeLines(
       }
       lines.push(
         stopsSoldLine(
-          pieces.filter((piece) => !isHeld(piece)),
+          pieces.filter((piece) => !leftAloneByGate(piece)),
           false
         )
       );

@@ -127,6 +127,29 @@ export function isHeld(
 }
 
 /**
+ * Whether the people who have a piece keep it once it is unpublished, as
+ * the access decision answers it: a purchase, a grant and a course outlive
+ * unpublishing, but they are only asked of a course-only, Subscribers or
+ * priced piece. A Free piece plays for everyone through no one's purchase,
+ * so unpublishing ends it for all of them (Codex-dz997, owner 2026-11-13);
+ * a Followers or Team only piece is theirs by relationship.
+ */
+export function keepsWhenUnpublished(
+  row: Pick<
+    ContentWithRelations,
+    | 'courseOnly'
+    | 'isTeamOnly'
+    | 'isFollowerGated'
+    | 'isTierGated'
+    | 'priceCents'
+  >
+): boolean {
+  if (row.courseOnly) return true;
+  if (row.isTeamOnly || row.isFollowerGated) return false;
+  return row.isTierGated || (row.priceCents ?? 0) > 0;
+}
+
+/**
  * Its categories as a row names them (Codex-a6ofh.3.3, owner 2026-11-12):
  * the first, then how many more ("Tutorials +2"), and every name for the
  * tooltip and a screen reader. Null in none, or when the row was not sent

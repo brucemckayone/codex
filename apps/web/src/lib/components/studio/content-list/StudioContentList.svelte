@@ -52,6 +52,7 @@
   import LoadFailedAlert from '../LoadFailedAlert.svelte';
   import { createFacetRetry } from '../list-toolbar/facet-retry.svelte';
   import type { FacetUnread } from '../list-toolbar/list-option';
+  import ListStaleNotice from '../list-toolbar/ListStaleNotice.svelte';
   import { createListSearch, createListUrlWriter } from '../list-url-writer';
   import { logReadFailure } from '../media-library/log-read-failure';
   import { PagedList } from '../paged-list.svelte';
@@ -574,18 +575,12 @@
   {#if stale && list.landed}
     {@const retry = stale}
     <!-- A re-read after a change failed: these rows are the last that arrived. -->
-    <div class="stale" role="alert">
-      <p class="stale-text">{retry.words}</p>
-      <Button
-        size="sm"
-        variant="secondary"
-        loading={retry.retrying}
-        disabled={retry.retrying}
-        onclick={() => retry.retry()}
-      >
-        {m.common_try_again()}
-      </Button>
-    </div>
+    <ListStaleNotice
+      words={retry.words}
+      retryLabel={m.common_try_again()}
+      retrying={retry.retrying}
+      onRetry={() => retry.retry()}
+    />
   {/if}
 
   {#if selection.size > 0}
@@ -740,23 +735,6 @@
     font-weight: var(--font-normal);
     letter-spacing: normal;
     color: var(--color-text-secondary);
-  }
-
-  .stale {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-status-warning-border);
-    border-radius: var(--radius-md);
-    background: var(--color-status-warning-surface);
-  }
-
-  .stale-text {
-    flex: 1;
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text);
   }
 
   .list-body {

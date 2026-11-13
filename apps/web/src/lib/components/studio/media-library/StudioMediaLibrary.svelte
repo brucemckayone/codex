@@ -26,6 +26,7 @@
   import { uploadQueue } from '$lib/client/upload-queue.svelte';
   import MediaUpload from '$lib/components/studio/MediaUpload.svelte';
   import { Button } from '$lib/components/ui';
+  import ListStaleNotice from '../list-toolbar/ListStaleNotice.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
   import { AlertTriangleIcon, FilmIcon, SearchXIcon, UploadIcon } from '$lib/components/ui/Icon';
@@ -506,14 +507,12 @@
 {#snippet rows()}
   {#if list.failed}
     <!-- A refetch failed: these rows are the last that arrived. -->
-    <div class="stale" role="alert">
-      <p class="stale-text">
-        {retryFailed ? m.media_library_retry_failed() : m.media_library_stale()}
-      </p>
-      <Button size="sm" variant="secondary" loading={retrying} disabled={retrying} onclick={retryList}>
-        {m.media_library_retry()}
-      </Button>
-    </div>
+    <ListStaleNotice
+      words={retryFailed ? m.media_library_retry_failed() : m.media_library_stale()}
+      retryLabel={m.media_library_retry()}
+      {retrying}
+      onRetry={retryList}
+    />
   {/if}
   {#if layout === 'list'}
     {#if selection.length > 0}
@@ -723,23 +722,6 @@
     border-color: var(--color-border);
     background: var(--color-surface-secondary);
     color: var(--color-text-secondary);
-  }
-
-  .stale {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-status-warning-border);
-    border-radius: var(--radius-md);
-    background: var(--color-status-warning-surface);
-  }
-
-  .stale-text {
-    flex: 1;
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text);
   }
 
   .retry-failed {

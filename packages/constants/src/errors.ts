@@ -54,6 +54,9 @@ export const ERROR_CODES = {
   CONFLICT: 'CONFLICT',
   BUSINESS_LOGIC_ERROR: 'BUSINESS_LOGIC_ERROR',
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
+  // `ServiceUnavailableError`'s: a try-again, e.g. a bulk piece held
+  // elsewhere or not reached in time (Codex-a6ofh.3.5).
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
 } as const;
 
 /**

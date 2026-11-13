@@ -527,7 +527,7 @@
   }
 
   /* The tile's own controls stay above the stretched open button. */
-  .tile :global(.media-actions-trigger),
+  .tile :global(.row-actions-trigger),
   .tile :global(.use-chip),
   .tile-cta {
     position: relative;

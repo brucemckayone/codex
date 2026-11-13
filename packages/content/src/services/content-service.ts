@@ -275,15 +275,16 @@ class ScheduledRowLockedError extends ServiceUnavailableError {
 
 /**
  * A bulk piece gave up a lock another request held ({@link BULK_LOCK_WAIT}):
- * the outcome the wait exists for, so a typed 503 (logged as a try-again),
- * never an unhandled 500. The piece's result is `failed`; nothing of it was
- * written.
+ * the outcome the wait exists for, so a typed 503, never an unhandled 500.
+ * The piece's result is `failed`; nothing of it was written. `eachPiece`
+ * logs it as a try-again, with the action and the table it waited on. Its
+ * message is the creator's: the bulk line's Show reads it out.
  */
 class BulkPieceBusyError extends ServiceUnavailableError {
   readonly lockedOn: string | undefined;
   constructor(contentId: string, cause: unknown) {
     super(
-      'Being changed elsewhere just now; try again',
+      'It was being changed elsewhere just then. Try again.',
       { contentId },
       { cause }
     );
@@ -291,10 +292,15 @@ class BulkPieceBusyError extends ServiceUnavailableError {
   }
 }
 
-/** A bulk piece left untried at {@link BULK_DEADLINE_MS}: a try-again, never written. */
+/**
+ * A bulk piece left untried at {@link BULK_DEADLINE_MS}: a try-again, never
+ * written. Its message is the creator's, as {@link BulkPieceBusyError}'s is.
+ */
 class BulkOutOfTimeError extends ServiceUnavailableError {
   constructor(contentId: string) {
-    super('Not tried: this action ran out of time; try again', { contentId });
+    super('Not reached: the action ran out of time. Try again.', {
+      contentId,
+    });
   }
 }
 
@@ -1382,12 +1388,6 @@ export class ContentService extends BaseService {
             { contentId: id }
           );
         }
-        // After the rules: a change refused for its own reason never reads
-        // as "people have it", which, put right, would not let it through.
-        if (bulk?.refuseIfBought) {
-          const holders = await countHolders(tx as DatabaseTransaction, id);
-          if (holders > 0) throw new ContentHasBuyersError(id, holders);
-        }
         if (effGated && restValidated.isFree === true) {
           throw new ValidationError(
             'Tier-gated content cannot be free — an item in no tier is closed, not free.',
@@ -1402,6 +1402,15 @@ export class ContentService extends BaseService {
             'Tier-gated content cannot also be followers-only, team-only or course-only',
             { contentId: id }
           );
+        }
+        // After every rule: a change refused for its own reason never reads
+        // as "people have it", which, put right, would not let it through.
+        // A course-only piece is let through: the access decision answers
+        // course-only before Followers or Team only, so its course holders
+        // keep it, and nobody else had it.
+        if (bulk?.refuseIfBought && !effCourseOnly) {
+          const holders = await countHolders(tx as DatabaseTransaction, id);
+          if (holders > 0) throw new ContentHasBuyersError(id, holders);
         }
 
         // Access-policy invariant: NON-FREE ⟺ at least one active gate.
@@ -3209,12 +3218,12 @@ export class ContentService extends BaseService {
           notTried: notTried.length,
         });
         for (const rest of notTried) {
-          results.push({
-            id: rest,
-            outcome: 'failed',
-            error: mapErrorToResponse(new BulkOutOfTimeError(rest)).response
-              .error,
-          });
+          // The warn above says it; the mapper would say it once a piece.
+          const { response } = mapErrorToResponse(
+            new BulkOutOfTimeError(rest),
+            { logError: false }
+          );
+          results.push({ id: rest, outcome: 'failed', error: response.error });
         }
         break;
       }
@@ -3225,11 +3234,22 @@ export class ContentService extends BaseService {
           touched.push({ id: piece.id, organizationId: piece.organizationId });
         }
       } catch (error) {
+        // A given-up lock is a try-again, said here with the action and the
+        // table it waited on, which the mapper's line would leave out.
+        const busy = error instanceof BulkPieceBusyError;
         const { statusCode, response } = mapErrorToResponse(error, {
           obs: this.obs,
+          logError: !busy,
         });
-        // A 503 is a try-again the mapper logs as one (a row held
-        // elsewhere); any other 5xx is a fault, named by piece and action.
+        if (busy) {
+          this.obs.warn('content bulk piece busy; a try-again', {
+            action,
+            contentId: id,
+            lockedOn: error.lockedOn,
+          });
+        }
+        // Any other 503 is a try-again the mapper logs as one; any other
+        // 5xx is a fault, named by piece and action.
         if (statusCode >= 500 && statusCode !== 503) {
           this.obs.error('content bulk piece failed', {
             action,

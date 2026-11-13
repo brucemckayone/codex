@@ -14,6 +14,7 @@ import {
 import {
   accessWords,
   categoryWords,
+  keepsWhenUnpublished,
   rowLine,
   salesShown,
   viewsShown,
@@ -319,5 +320,26 @@ describe('categoryWords', () => {
   it('none, or none sent, is nothing', () => {
     expect(categoryWords(draftRow({ categories: [] }))).toBeNull();
     expect(categoryWords(draftRow())).toBeNull();
+  });
+});
+
+describe('keepsWhenUnpublished (Codex-dz997)', () => {
+  it('keeps a priced, Subscribers or course-only piece for the people who have it', () => {
+    expect(keepsWhenUnpublished(draftRow({ priceCents: 800 }))).toBe(true);
+    expect(keepsWhenUnpublished(draftRow({ isTierGated: true }))).toBe(true);
+    // Course-only wins over every other gate, as the access decision has it.
+    expect(
+      keepsWhenUnpublished(draftRow({ courseOnly: true, isTeamOnly: true }))
+    ).toBe(true);
+  });
+
+  it('ends a Free piece for everyone, and a Followers or Team only one', () => {
+    expect(keepsWhenUnpublished(draftRow({ priceCents: null }))).toBe(false);
+    expect(
+      keepsWhenUnpublished(draftRow({ isFollowerGated: true, priceCents: 800 }))
+    ).toBe(false);
+    expect(
+      keepsWhenUnpublished(draftRow({ isTeamOnly: true, isTierGated: true }))
+    ).toBe(false);
   });
 });

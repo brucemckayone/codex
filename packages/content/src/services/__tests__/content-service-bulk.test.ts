@@ -167,6 +167,33 @@ describe('ContentService: bulk actions', () => {
     purchaseIds.push(row.id);
   }
 
+  /** A course in the org whose one live stage holds the piece. */
+  async function inCourse(contentId: string) {
+    const course = takeFirst(
+      await db
+        .insert(courses)
+        .values({
+          organizationId: orgId,
+          creatorId,
+          slug: `bulk-course-${randomUUID().slice(0, 8)}`,
+          title: 'Bulk course',
+          status: 'published',
+        })
+        .returning()
+    );
+    courseIds.push(course.id);
+    const stage = takeFirst(
+      await db
+        .insert(courseStages)
+        .values({ courseId: course.id, name: 'Stage', sortOrder: 1 })
+        .returning()
+    );
+    await db
+      .insert(stagePractices)
+      .values({ stageId: stage.id, contentId, sortOrder: 0 });
+    return course.id;
+  }
+
   const stored = async (id: string) =>
     takeFirst(await db.select().from(content).where(eq(content.id, id)));
 
@@ -262,41 +289,52 @@ describe('ContentService: bulk actions', () => {
       await holder;
 
       expect(outcomes(report.results)).toEqual(['failed', 'done']);
-      // A typed try-again (503), logged as one, never as a fault.
+      // A typed try-again (503), logged once as one, never as a fault, with
+      // the action and the table it waited on.
       expect(report.results[0]).toMatchObject({
         error: { code: 'SERVICE_UNAVAILABLE' },
       });
       expect(faults).not.toHaveBeenCalled();
-      expect(tryAgains).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          context: expect.objectContaining({ contentId: held.id }),
-        })
-      );
+      expect(tryAgains).toHaveBeenCalledTimes(1);
+      expect(tryAgains).toHaveBeenCalledWith(expect.any(String), {
+        action: 'unpublish',
+        contentId: held.id,
+        lockedOn: 'content',
+      });
       expect(Date.now() - started).toBeLessThan(5000);
       expect((await stored(held.id)).status).toBe('published');
       faults.mockRestore();
       tryAgains.mockRestore();
     });
 
-    it('past its deadline starts no more pieces: the rest are failed, untried', async () => {
+    it('past its deadline starts no more pieces: the rest are failed, untried, said once', async () => {
       const first = await live();
       const second = await live();
+      const third = await live();
       // The loop's start reads 0; every later read is a minute on.
       let reads = 0;
       const clock = vi
         .spyOn(Date, 'now')
         .mockImplementation(() => (reads++ === 0 ? 0 : 60_000));
+      // Every logger's warn, the service's and the error mapper's own: both
+      // are one class, so its prototype's.
+      const logger = Object.getPrototypeOf(
+        (service as unknown as { obs: object }).obs
+      ) as { warn: (...args: unknown[]) => void };
+      const warns = vi.spyOn(logger, 'warn');
 
       const report = await service
-        .unpublishMany([first.id, second.id], creatorId)
+        .unpublishMany([first.id, second.id, third.id], creatorId)
         .finally(() => clock.mockRestore());
 
-      expect(outcomes(report.results)).toEqual(['done', 'failed']);
+      expect(outcomes(report.results)).toEqual(['done', 'failed', 'failed']);
       expect(report.results[1]).toMatchObject({
         error: { code: 'SERVICE_UNAVAILABLE' },
       });
+      expect(warns).toHaveBeenCalledTimes(1);
+      warns.mockRestore();
       expect((await stored(second.id)).status).toBe('published');
+      expect((await stored(third.id)).status).toBe('published');
     });
 
     it('takes the live down and leaves a draft unwritten', async () => {
@@ -337,33 +375,6 @@ describe('ContentService: bulk actions', () => {
       expect((await stored(unsold.id)).deletedAt).not.toBeNull();
       expect(report.touched.map((t) => t.id)).toEqual([unsold.id]);
     });
-
-    /** A course in the org whose one live stage holds the piece. */
-    async function inCourse(contentId: string) {
-      const course = takeFirst(
-        await db
-          .insert(courses)
-          .values({
-            organizationId: orgId,
-            creatorId,
-            slug: `bulk-course-${randomUUID().slice(0, 8)}`,
-            title: 'Bulk course',
-            status: 'published',
-          })
-          .returning()
-      );
-      courseIds.push(course.id);
-      const stage = takeFirst(
-        await db
-          .insert(courseStages)
-          .values({ courseId: course.id, name: 'Stage', sortOrder: 1 })
-          .returning()
-      );
-      await db
-        .insert(stagePractices)
-        .values({ stageId: stage.id, contentId, sortOrder: 0 });
-      return course.id;
-    }
 
     it('counts course buyers and grants as buyers; a course subscriber or a revoked grant is not one', async () => {
       const inBoughtCourse = await live({ organizationId: orgId });
@@ -574,6 +585,46 @@ describe('ContentService: bulk actions', () => {
       expect(report.touched).toEqual([
         { id: unsold.id, organizationId: orgId },
       ]);
+    });
+
+    it('lets a course-only piece move to Followers: its course holders keep it', async () => {
+      const lesson = await live({ organizationId: orgId, courseOnly: true });
+      await db.insert(entitlements).values({
+        userId: buyerId,
+        organizationId: orgId,
+        courseId: await inCourse(lesson.id),
+        source: 'course_purchase',
+      });
+
+      const report = await service.accessMany(
+        [lesson.id],
+        creatorId,
+        followers
+      );
+
+      expect(outcomes(report.results)).toEqual(['done']);
+      expect((await stored(lesson.id)).isFollowerGated).toBe(true);
+    });
+
+    it('a change its own rule refuses is never refused as "people have it"', async () => {
+      // A partial group: the Subscribers switch stays on, so the move to
+      // Followers breaks the tier rule, whoever has the piece.
+      const gated = await piece({
+        organizationId: orgId,
+        isFree: false,
+        isTierGated: true,
+      });
+      await bought(gated.id);
+
+      const report = await service.accessMany([gated.id], creatorId, {
+        isFollowerGated: true,
+      });
+
+      expect(outcomes(report.results)).toEqual(['refused']);
+      const [refused] = report.results;
+      expect(refused && 'error' in refused ? refused.error.code : null).toBe(
+        ERROR_CODES.VALIDATION_ERROR
+      );
     });
 
     it("refuses Followers or Team only on a personal piece: both are an org's (R3)", async () => {

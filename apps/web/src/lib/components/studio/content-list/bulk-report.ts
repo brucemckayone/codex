@@ -109,10 +109,15 @@ function problemOf(
 ): BulkProblem {
   const title = piece?.title ?? m.studio_content_bulk_unnamed();
   if (result.outcome === 'failed') {
+    // A try-again (503: held elsewhere, or not reached in time) says which,
+    // in words written for the creator; any other failure is a fault.
+    const tryAgain = result.error.code === ERROR_CODES.SERVICE_UNAVAILABLE;
     return {
       id: result.id,
       title,
-      words: m.studio_content_bulk_failed_piece(),
+      words: tryAgain
+        ? result.error.message
+        : m.studio_content_bulk_failed_piece(),
       fixHref: null,
     };
   }
@@ -171,6 +176,8 @@ export function bulkReport(
   const done = results.filter((r) => r.outcome === 'done').length;
   const scheduled = results.filter((r) => r.outcome === 'scheduled');
   const unchanged = results.filter((r) => r.outcome === 'unchanged').length;
+  const refused = results.filter((r) => r.outcome === 'refused').length;
+  const failed = results.filter((r) => r.outcome === 'failed').length;
   const problems = results.flatMap((r) =>
     r.outcome === 'refused' || r.outcome === 'failed'
       ? [problemOf(r, pieces.get(r.id))]
@@ -201,8 +208,10 @@ export function bulkReport(
   }
   if (unchanged > 0)
     parts.push(m.studio_content_bulk_unchanged({ count: unchanged }));
-  if (problems.length > 0)
-    parts.push(summary.problems({ count: problems.length }));
+  // Refused is the piece's own reason ("left alone": people have it);
+  // failed is a try-again, never read as one.
+  if (refused > 0) parts.push(summary.problems({ count: refused }));
+  if (failed > 0) parts.push(m.studio_content_bulk_not_done({ count: failed }));
   return {
     line: parts.join(' '),
     problems,
