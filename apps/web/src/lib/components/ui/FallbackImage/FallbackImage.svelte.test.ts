@@ -130,8 +130,9 @@ describe('FallbackImage', () => {
     expect(logged).not.toContain('media-2');
   });
 
-  // Each record says the tab's total so far, beside its own burst: a burst
-  // that the client log drops is still counted in the next one it sends.
+  // Each record says the tab's total so far, beside its own burst, so a
+  // later burst the client log drops is still counted by the next record it
+  // does send (the component's docblock says when that is).
   test('a later burst says the tab’s total so far', () => {
     fail('/creator-1/content-thumbnails/a/one.webp');
     fail('/creator-1/content-thumbnails/b/two.webp');
@@ -146,6 +147,24 @@ describe('FallbackImage', () => {
       );
     expect(records.map(({ burst }) => burst)).toEqual([2, 1]);
     expect(records[1]?.failed).toBe((records[0]?.failed ?? 0) + 1);
+  });
+
+  // A burst still gathering when the page goes would die with its timer
+  // (review round 4): it is sent as the page goes.
+  test('a page that goes mid-burst sends it, without waiting', () => {
+    fail('/creator-1/content-thumbnails/d/four.webp');
+    expect(logger.warn).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'image.fallback_shown',
+      expect.objectContaining({ burst: 1, kinds: { 'content-thumbnails': 1 } })
+    );
+    // Its timer finds nothing left to send.
+    vi.advanceTimersByTime(2000);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 
   // The proof is at the sink, not the logger (review round 3): the client

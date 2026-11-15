@@ -23,6 +23,14 @@
   sample. Each file counts once. Host, kind and file name only, never the
   path, which holds the owner's ids.
 
+  Its limits, as the client log sets them. A LATER burst inside that same
+  few minutes (a second page of dead tiles) is one the client log drops:
+  it reaches the server only as the tab's `failed` total on the next record
+  that does go, or as the log's own `dropped` count. That is enough to see
+  pictures failing, and of which kind; the client log is lossy on purpose.
+  A burst still gathering when the page goes (a reload, a tab closed, a
+  link out) is sent as it goes, on `pagehide`, or when the tab is hidden.
+
   @prop src       The picture, or none
   @prop srcset    Its files to choose from (`getThumbnailSrcset`)
   @prop sizes     The slot's width, so the browser picks the file for it
@@ -45,6 +53,12 @@
   /** The failures gathering for the next record, if any. */
   let burst: { count: number; kinds: Record<string, number>; sample: Where } | null =
     null;
+  /** Whether a page going sends its burst: listened for at the first one. */
+  let listening = false;
+
+  function sendWhenHidden(): void {
+    if (document.visibilityState === 'hidden') sendBurst();
+  }
 
   function whereOf(shown: string): Where {
     try {
@@ -68,6 +82,12 @@
     if (burst === null) {
       burst = { count: 0, kinds: {}, sample: where };
       setTimeout(sendBurst, BURST_MS);
+    }
+    // Here, never at import: the module runs on the server too.
+    if (!listening) {
+      listening = true;
+      window.addEventListener('pagehide', sendBurst);
+      document.addEventListener('visibilitychange', sendWhenHidden);
     }
     burst.count += 1;
     burst.kinds[where.kind] = (burst.kinds[where.kind] ?? 0) + 1;

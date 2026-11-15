@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   flushSync,
   mount,
@@ -6,6 +6,11 @@ import {
 } from '$tests/utils/component-test-utils.svelte';
 import { draftRow } from '../../__fixtures__/draft-row';
 import ContentThumb from '../ContentThumb.svelte';
+
+// A failed cover is logged after its burst (`FallbackImage`), never here.
+vi.mock('$lib/observability', () => ({
+  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
 
 /**
  * ContentThumb (Codex-a6ofh.3.6): a cover whose file fails to load shows the
@@ -15,7 +20,15 @@ describe('ContentThumb', () => {
   let component: ReturnType<typeof mount> | null = null;
   let target: HTMLElement;
 
+  // A failed cover starts FallbackImage's burst timer: each test sends what
+  // it gathered, so none is left running into the next file.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     if (component) unmount(component);
     component = null;
     target?.remove();
