@@ -211,6 +211,33 @@ describe('GET /api/content scope (Codex-a6ofh.3.2)', () => {
     expect(res.status).toBe(400);
     expect(contentSpies.list).not.toHaveBeenCalled();
   });
+
+  it('lifecycle=off-sale reaches the service: a status tab (Codex-a6ofh.3.6)', async () => {
+    const res = await get(`?lifecycle=off-sale&organizationId=${ORG_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(listCall().filters).toMatchObject({
+      lifecycle: 'off-sale',
+      organizationId: ORG_ID,
+    });
+    expect(listCall().filters).not.toHaveProperty('status');
+  });
+
+  it('a lifecycle beside a status is refused, never one winning', async () => {
+    const res = await get('?lifecycle=draft&status=draft');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+
+  it('browse refuses a lifecycle: it lists what is on sale', async () => {
+    const res = await get(
+      `/browse?organizationId=${ORG_ID}&lifecycle=off-sale`
+    );
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /api/content/attention (Codex-a6ofh.3.4)', () => {
