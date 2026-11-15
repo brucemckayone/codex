@@ -312,6 +312,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       duplicatePayment: false,
       itemTitle: expect.any(String),
       lateWinKeptThrough: null,
+      itemUnavailable: false,
     });
     expect(stripe.refunds.list).toHaveBeenCalledWith(
       expect.objectContaining({ charge: seeded.charge.id })
@@ -442,6 +443,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       duplicatePayment: false,
       itemTitle: expect.any(String),
       lateWinKeptThrough: null,
+      itemUnavailable: false,
     });
   });
 

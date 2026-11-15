@@ -300,6 +300,45 @@ the code back, also run `DROP INDEX uq_purchases_completed_customer_content,
 uq_purchases_completed_customer_course;`. The `checkout_sessions` table and
 the new column can stay.
 
+### A payment for content deleted or made team-only before it landed
+
+A buyer can still be in Stripe Checkout when the content is deleted (one at a
+time or in bulk) or moved to Team only (by PATCH or bulk access). Access then
+refuses them, so completing the sale would charge a buyer who cannot watch.
+It is blocked and refunded in full instead (`Codex-z1t3c`; owner D44 and
+2026-11-15: "block and refund", a line in the existing refund email, and no
+checkout expiry).
+
+- **Completion reads the content `FOR SHARE`**, after the buyer's item lock.
+  A delete or an access change holds the row `FOR NO KEY UPDATE` until it
+  commits, and the two conflict, so the completion waits, then reads what was
+  committed. The purchase INSERT's own `FOR KEY SHARE` never conflicted with
+  it, which is how such a sale used to complete. Deleted (`deleted_at` set) or
+  team-only (`is_team_only`) makes it a **blocked sale**. The self-heal's
+  rebuild reads it the same way.
+- **A blocked sale is recorded as a duplicate is**: `pending`, no access row,
+  no entitlement, no payout slice, its split kept for the record, and left
+  out of Sales and its totals. Its marker is `refund_reason = 'item_unavailable'`
+  (no migration). None of Stripe's refund reasons is that, and every writer of
+  the refund fields keeps it, so a later refund never writes Stripe's reason
+  over it. It is blocked whoever owns the item: no buyer can watch it.
+- **After the commit** it is refunded in full under
+  `refund_unavailable_<PaymentIntent>`, with no refund reason (none of
+  Stripe's fits). A refusal leaves it `pending`, logged, and thrown as
+  retryable, and the hourly owed-refund sweep retries it with the duplicates.
+  Support finds the ones still owed with
+  `refund_reason = 'item_unavailable' AND status = 'pending'`.
+- **No receipt** is sent. Its `charge.refunded` sends the usual refund email
+  with the line "{item} is no longer available, so we've refunded you in
+  full." The success page shows it as no longer active, never as a purchase
+  still being recorded.
+- **It never grants access later.** Settling a failed refund of it as
+  "creators re-paid" leaves access as it is (reason `unavailable`). A late
+  win refunds it, as for a duplicate, when the loss had refunded it.
+- **Courses have no such gap.** No code soft-deletes a course, and a course's
+  buyers keep it when it is unpublished or taken off sale (`Codex-yo4px`), so
+  a course archived while Checkout is open is still a sale its buyer can use.
+
 ## After payment
 
 The buyer lands on a page that confirms against **our** record, not just

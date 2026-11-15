@@ -389,6 +389,45 @@ describe('handleCheckoutCompleted', () => {
         expect.anything()
       );
     });
+
+    it('a blocked sale of unavailable content sends no receipt and bumps no library (Codex-z1t3c)', async () => {
+      mockCompletePurchase.mockResolvedValueOnce({
+        id: 'purchase_gone',
+        customerId: 'user_123',
+        contentId: 'content_456',
+        status: 'refunded',
+        duplicateOfPurchaseId: null,
+        refundReason: 'item_unavailable',
+      });
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_gone',
+        paymentStatus: 'paid',
+        metadata,
+      }) as unknown as Stripe.Event;
+      // A buyer email, so a receipt or its link's read could happen.
+      (event.data.object as Stripe.Checkout.Session).customer_details = {
+        email: 'buyer@example.com',
+        name: 'Buyer',
+      } as Stripe.Checkout.Session.CustomerDetails;
+      const { context, mock } = createContext();
+      const executionCtx = attachExecutionCtx(mock);
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith('cs_gone');
+      expect(executionCtx.waitUntil).not.toHaveBeenCalled();
+      expect(mockFindItemLink).not.toHaveBeenCalled();
+      expect(mockClaimReceipt).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(mock._obs.warn).toHaveBeenCalledWith(
+        'Payment for unavailable content refunded instead of sold',
+        expect.objectContaining({ purchaseId: 'purchase_gone' })
+      );
+      expect(mock._obs.info).not.toHaveBeenCalledWith(
+        'Purchase completed successfully',
+        expect.anything()
+      );
+    });
   });
 
   describe('payment intent validation', () => {

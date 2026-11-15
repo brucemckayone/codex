@@ -810,6 +810,7 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
         duplicatePayment: true,
         itemTitle: item.title,
         lateWinKeptThrough: null,
+        itemUnavailable: false,
       });
       const [access] = await db
         .select()

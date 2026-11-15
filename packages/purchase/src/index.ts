@@ -135,6 +135,7 @@ export {
 export {
   type BuyerPurchase,
   isDuplicatePayment,
+  isUnavailableBlock,
   type PurchaseMailer,
   PurchaseService,
   type RefundAccessKept,

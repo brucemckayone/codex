@@ -207,6 +207,11 @@ interface RefundedPurchase {
    * the buyer keeps the item through the purchase they made since.
    */
   lateWinKeptThrough?: { purchasedAt: string } | null;
+  /**
+   * A blocked sale's refund (Codex-z1t3c): the item was deleted or made
+   * team-only before the payment landed, so it was refunded in full.
+   */
+  itemUnavailable?: boolean;
 }
 
 type RefundCancellation = NonNullable<
@@ -294,11 +299,18 @@ function purchaseNote(
  *   ended.
  * - A late win refunds the FIRST payment of a buyer who bought it again
  *   (Codex-2hxff.70, Q1): the purchase they made since stands.
+ *
+ * Before both: a payment that landed after its item was deleted or made
+ * team-only was blocked and refunded in full (Codex-z1t3c; owner
+ * 2026-11-15): the item is gone, so it says that, never "you still have it".
  */
 function purchaseAccessNote(
   purchase: RefundedPurchase,
   contentTitle: string
 ): string {
+  if (purchase.itemUnavailable) {
+    return `${contentTitle} is no longer available, so we've refunded you in full.`;
+  }
   if (purchase.duplicatePayment && !purchase.accessEnded) {
     return `You still have ${contentTitle}. This refunds a second payment for it.`;
   }
@@ -1091,8 +1103,12 @@ async function undoLateWin(
   await restoreSubscriptionAfterWin(subscription, effects, disputeInput);
   const repaid = await purchase.repayWonDispute(dispute.id);
 
+  // A blocked sale (Codex-z1t3c) granted nothing, as a duplicate did: the
+  // late win refunds it if the loss did (`refundedByTheLoss`).
   const refund: LateWinRefundStep =
-    restored?.outcome === 'rebought' || restored?.outcome === 'duplicate'
+    restored?.outcome === 'rebought' ||
+    restored?.outcome === 'duplicate' ||
+    restored?.outcome === 'unavailable'
       ? await refundFirstPayment(deps, dispute.id, charge, recorded.purchaseId)
       : 'none';
   if (refund === 'pending') {

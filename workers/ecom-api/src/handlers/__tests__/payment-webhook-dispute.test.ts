@@ -1410,6 +1410,33 @@ describe('handlePaymentWebhook — disputes', () => {
       );
     });
 
+    it('a late-won blocked sale of unavailable content is refunded as a duplicate is: it granted nothing (Codex-z1t3c)', async () => {
+      recordedLateWin();
+      restoredAs('unavailable');
+
+      const bundle = await deliver();
+
+      expect(calls).toEqual([
+        'restore purchase',
+        'restore',
+        'repay',
+        'refund',
+        'mark',
+      ]);
+      expect(purchase.refundFirstPaymentAfterLateWin).toHaveBeenCalledWith(
+        'dp_test_dispute',
+        { id: 'ch_test', amountCents: 1999 },
+        'test'
+      );
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(mockClear).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.info).toHaveBeenCalledWith(
+        'Late win: loss undone',
+        expect.objectContaining({ outcome: 'unavailable', refund: 'done' })
+      );
+    });
+
     it("nothing is marked while the refund is pending at Stripe: its re-pay rows stay held for the hourly reconcile's next run", async () => {
       recordedLateWin();
       restoredAs('rebought');

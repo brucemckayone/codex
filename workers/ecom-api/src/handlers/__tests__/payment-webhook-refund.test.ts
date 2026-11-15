@@ -612,6 +612,50 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     );
   });
 
+  it('a blocked sale’s refund email says the item is no longer available and was refunded in full (Codex-z1t3c)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      // A blocked sale ended no access of its own; the line is the item's.
+      accessEnded: true,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: true,
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Winter Light',
+        accessNote:
+          "Winter Light is no longer available, so we've refunded you in full.",
+      }),
+    ]);
+  });
+
+  it('an ordinary refund’s email never reads the no-longer-available line', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: true,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: false,
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        accessNote: 'Your access to Winter Light has ended.',
+      }),
+    ]);
+    expect(emails()[0]?.accessNote).not.toContain('no longer available');
+  });
+
   it('a duplicate payment’s refund email says the buyer still has the item, and why (Codex-2hxff.14)', async () => {
     mockProcessRefund.mockResolvedValueOnce({
       userId: 'u',

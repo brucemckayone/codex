@@ -490,16 +490,62 @@ type PurchaseListStatus = (typeof PURCHASE_LIST_STATUSES)[number];
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 
 /**
- * A new purchase row's outcome: completed, or, for a second payment for an
- * item the buyer owns, a duplicate of that purchase (Codex-2hxff.14). A
- * duplicate stays `pending` until Stripe has refunded it, so no reader counts
- * money as returned that is not. Its split columns keep what the sale would
- * have paid; no slice is ever recorded for it.
+ * The `refund_reason` that marks a blocked sale (Codex-z1t3c,
+ * `isUnavailableBlock`). It is none of Stripe's refund reasons, which are the
+ * only ones any refund writes, so nothing else ever writes it.
  */
-function purchaseOutcomeFields(duplicateOfPurchaseId: string | undefined) {
+const ITEM_UNAVAILABLE = 'item_unavailable';
+
+/**
+ * A new purchase row's outcome: completed, or, for a second payment for an
+ * item the buyer owns, a duplicate of that purchase (Codex-2hxff.14), or, for
+ * a payment whose content was deleted or made team-only before it landed, a
+ * blocked sale (Codex-z1t3c). Either stays `pending` until Stripe has
+ * refunded it, so no reader counts money as returned that is not. Its split
+ * columns keep what the sale would have paid; no slice is ever recorded for
+ * it. An unavailable item is blocked whoever owns it: no buyer can watch it,
+ * so the refund email says that, not "you still have it".
+ */
+function purchaseOutcomeFields(
+  duplicateOfPurchaseId: string | undefined,
+  itemUnavailable: boolean
+) {
+  if (itemUnavailable) {
+    return { status: PURCHASE_STATUS.PENDING, refundReason: ITEM_UNAVAILABLE };
+  }
   return duplicateOfPurchaseId
     ? { status: PURCHASE_STATUS.PENDING, duplicateOfPurchaseId }
     : { status: PURCHASE_STATUS.COMPLETED };
+}
+
+/**
+ * A row the self-heal rebuilds (`ensurePurchaseDataPresent`): completion's
+ * outcome, and over it, when the charge is refunded in full, the refund. That
+ * row was never granted, so nothing is left to revoke. A blocked sale's
+ * marker outlives Stripe's reason (Codex-z1t3c).
+ */
+function selfHealOutcomeFields(
+  duplicateOfPurchaseId: string | undefined,
+  itemUnavailable: boolean,
+  refundedInFull:
+    | {
+        refundAmountCents: number;
+        stripeRefundId: string | null;
+        refundReason: string | null;
+      }
+    | undefined
+) {
+  const outcome = purchaseOutcomeFields(duplicateOfPurchaseId, itemUnavailable);
+  if (!refundedInFull) return outcome;
+  return {
+    ...outcome,
+    ...refundedInFull,
+    refundReason: itemUnavailable
+      ? ITEM_UNAVAILABLE
+      : refundedInFull.refundReason,
+    status: PURCHASE_STATUS.REFUNDED,
+    refundedAt: new Date(),
+  };
 }
 
 /**
@@ -537,6 +583,81 @@ export function isDuplicatePayment(
 }
 
 /**
+ * A payment that landed after its content was deleted or made team-only
+ * (Codex-z1t3c; owner 2026-11-15, "block and refund"): a blocked sale. It
+ * grants and pays nothing, and is `pending` while its refund is owed and
+ * `refunded` once Stripe has made it, as a duplicate is. The marker is
+ * `refund_reason` (no migration): written at insert, and kept by every later
+ * writer of the refund fields (`keepUnavailableMarker`), which would
+ * otherwise write Stripe's reason over it.
+ */
+export function isUnavailableBlock(
+  purchase: Pick<Purchase, 'refundReason'>
+): boolean {
+  return purchase.refundReason === ITEM_UNAVAILABLE;
+}
+
+/**
+ * What kind of payment that grants and pays nothing this is, if it is one: a
+ * blocked sale of unavailable content, a duplicate, or null for a sale. A
+ * row is one or the other: an unavailable item is blocked whoever owns it.
+ */
+function blockedKind(
+  purchase: Pick<Purchase, 'duplicateOfPurchaseId' | 'refundReason'>
+): 'unavailable' | 'duplicate' | null {
+  if (isUnavailableBlock(purchase)) return 'unavailable';
+  return isDuplicatePayment(purchase) ? 'duplicate' : null;
+}
+
+/** A payment that grants and pays nothing: a duplicate, or a blocked sale. */
+function isBlockedPayment(
+  purchase: Pick<Purchase, 'duplicateOfPurchaseId' | 'refundReason'>
+): boolean {
+  return blockedKind(purchase) !== null;
+}
+
+/**
+ * The refund reason to write over a purchase's: `reason`, unless the
+ * purchase is a blocked sale, whose marker outlives every refund of it.
+ */
+function keepUnavailableMarker(
+  purchase: Pick<Purchase, 'refundReason'>,
+  reason: string | null
+): string | null {
+  return isUnavailableBlock(purchase) ? ITEM_UNAVAILABLE : reason;
+}
+
+/**
+ * Every purchase but a blocked sale. IS DISTINCT FROM, never `<>`: that is
+ * NULL for every row without a refund reason, which would drop them all.
+ */
+function notUnavailableBlock(): SQL {
+  return sql`${purchases.refundReason} IS DISTINCT FROM ${ITEM_UNAVAILABLE}`;
+}
+
+/**
+ * How each kind of blocked payment is refunded (`refundBlockedPayment`): its
+ * Stripe reason, its idempotency key, and its log lines. None of Stripe's
+ * reasons fits an item no longer available, so its refund sends none.
+ */
+const BLOCKED_REFUNDS = {
+  duplicate: {
+    reason: 'duplicate',
+    keyPrefix: 'refund_duplicate_',
+    refused: 'Duplicate payment could not be refunded',
+    retried: 'Duplicate payment refund failed; it will be retried',
+    refunded: 'Duplicate payment refunded',
+  },
+  unavailable: {
+    reason: undefined,
+    keyPrefix: 'refund_unavailable_',
+    refused: 'Payment for unavailable content could not be refunded',
+    retried: 'Unavailable content refund failed; it will be retried',
+    refunded: 'Payment for unavailable content refunded',
+  },
+} as const;
+
+/**
  * Where a checkout session stands (Codex-2hxff.22). Our row, once there is
  * one, is the truth; until then Stripe's session is. A completed purchase
  * with an open bank dispute grants no access, as in `verifyPurchase`.
@@ -545,11 +666,18 @@ function checkoutSessionState(
   session: Pick<Stripe.Checkout.Session, 'payment_status'>,
   sessionStatus: CheckoutSessionVerifyResult['sessionStatus'],
   purchase:
-    | Pick<Purchase, 'status' | 'disputedAt' | 'duplicateOfPurchaseId'>
+    | Pick<
+        Purchase,
+        'status' | 'disputedAt' | 'duplicateOfPurchaseId' | 'refundReason'
+      >
     | undefined
 ): CheckoutSessionState {
   if (purchase) {
     if (isDuplicatePayment(purchase)) return 'duplicate';
+    // A blocked sale (Codex-z1t3c) will never be unlocked: the page shows it
+    // no longer active, whether or not its refund has landed yet, rather
+    // than checking for a purchase that will never come.
+    if (isUnavailableBlock(purchase)) return 'refunded';
     if (purchase.status === PURCHASE_STATUS.COMPLETED) {
       return purchase.disputedAt ? 'paused' : 'unlocked';
     }
@@ -589,6 +717,7 @@ export type RefundAccessKept =
   | 'not_refunded'
   | 'dispute_holds'
   | 'duplicate'
+  | 'unavailable'
   | 'rebought'
   | 'still_refunded';
 
@@ -1161,11 +1290,44 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Refund a duplicate payment in full (owner decision "Block, then refund")
-   * and mark it `refunded`. Safe to repeat: a replayed webhook asks Stripe
-   * again under the same key, and a charge already refunded counts as done.
-   * Its `charge.refunded` then records the refund and emails the buyer that
-   * they keep the item.
+   * Is the item a sale is for unavailable to its buyer (Codex-z1t3c)? Read
+   * after the buyer's item lock. Content is, deleted or team-only (access
+   * refuses both: `isNull(deletedAt)`, `team_only`), read under FOR SHARE.
+   *
+   * FOR SHARE conflicts with the FOR NO KEY UPDATE that a delete, or a PATCH
+   * or bulk access change, holds on the row, so a completion waits for one in
+   * flight and then reads what it committed. The purchase INSERT's own FOR
+   * KEY SHARE never conflicts with it, which is how a sale used to land on
+   * content deleted while its Checkout was open.
+   *
+   * By id only, unscoped by design: the id is the signed session's, as in
+   * `resolvePurchaseSplit`, and a `deletedAt` predicate would read a deleted
+   * row as no row. False when there is no row: that split read refuses it.
+   *
+   * A course never is: no code writes `courses.deleted_at`, and its buyers
+   * keep it unpublished or off sale (Codex-yo4px), so it reads nothing.
+   */
+  private async isItemUnavailable(
+    tx: Tx,
+    target: { contentId: string } | { courseId: string }
+  ): Promise<boolean> {
+    if (!('contentId' in target)) return false;
+    const [row] = await tx
+      .select({ deletedAt: content.deletedAt, isTeamOnly: content.isTeamOnly })
+      .from(content)
+      .where(eq(content.id, target.contentId))
+      .for('share');
+    return row !== undefined && (row.deletedAt !== null || row.isTeamOnly);
+  }
+
+  /**
+   * Refund a blocked payment in full and mark it `refunded`: a duplicate
+   * (owner decision "Block, then refund"), or a blocked sale of content
+   * deleted or made team-only before the payment landed (Codex-z1t3c). Safe
+   * to repeat: a replayed webhook asks Stripe again under the same key (one
+   * per kind, `BLOCKED_REFUNDS`), and a charge already refunded counts as
+   * done. Its `charge.refunded` then records the refund and emails the buyer
+   * why: they keep the item, or it is no longer available.
    *
    * If Stripe refuses, the row stays `pending`: the buyer is owed the money,
    * and nothing reports it as returned. The failure is logged with Stripe's
@@ -1173,29 +1335,29 @@ export class PurchaseService extends BaseService {
    * event through its retry window: a refusal such as a low platform balance
    * can clear. One that never clears (a disputed charge) ends with the
    * dispute, or with support (owner decision: a failed refund is held for
-   * support).
+   * support). The hourly sweep retries it too (`settleOwedDuplicates`).
    */
-  private async refundDuplicatePayment(purchase: Purchase): Promise<Purchase> {
+  private async refundBlockedPayment(purchase: Purchase): Promise<Purchase> {
+    const kind = BLOCKED_REFUNDS[blockedKind(purchase) ?? 'duplicate'];
     let refundId: string | null;
     try {
       ({ refundId } = await issueRefund(this.stripe, {
         paymentIntentId: purchase.stripePaymentIntentId,
-        reason: 'duplicate',
-        idempotencyKey: `refund_duplicate_${purchase.stripePaymentIntentId}`,
+        reason: kind.reason,
+        idempotencyKey: `${kind.keyPrefix}${purchase.stripePaymentIntentId}`,
         environment: this.environment,
       }));
     } catch (error) {
-      this.obs.error('Duplicate payment could not be refunded', {
+      this.obs.error(kind.refused, {
         errorId: crypto.randomUUID(),
         purchaseId: purchase.id,
         stripePaymentIntentId: purchase.stripePaymentIntentId,
         code: stripeErrorCode(error),
         error: error instanceof Error ? error.message : String(error),
       });
-      throw new ServiceUnavailableError(
-        'Duplicate payment refund failed; it will be retried',
-        { purchaseId: purchase.id }
-      );
+      throw new ServiceUnavailableError(kind.retried, {
+        purchaseId: purchase.id,
+      });
     }
     // A bound instant, not now(): the query text stays the same on every
     // request, so Hyperdrive can cache it (data-access contract, rule 6).
@@ -1210,7 +1372,7 @@ export class PurchaseService extends BaseService {
       })
       .where(eq(purchases.id, purchase.id))
       .returning();
-    this.obs.warn('Duplicate payment refunded', {
+    this.obs.warn(kind.refunded, {
       purchaseId: purchase.id,
       stripePaymentIntentId: purchase.stripePaymentIntentId,
       contentId: purchase.contentId,
@@ -1221,21 +1383,23 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * After the commit: a duplicate payment is refunded unless it already has
-   * been, and pays no one, so it never reaches the payout slices.
+   * After the commit: a blocked payment (`isBlockedPayment`) is refunded
+   * unless it already has been, and pays no one, so it never reaches the
+   * payout slices.
    */
-  private async settleDuplicatePayment(purchase: Purchase): Promise<Purchase> {
+  private async settleBlockedPayment(purchase: Purchase): Promise<Purchase> {
     return purchase.status === PURCHASE_STATUS.REFUNDED
       ? purchase
-      : this.refundDuplicatePayment(purchase);
+      : this.refundBlockedPayment(purchase);
   }
 
   /**
-   * The hourly sweep's retry of duplicate refunds still owed (Codex-2hxff.15).
-   * The webhook retries a refused one only while Stripe redelivers; after that
-   * a `pending` duplicate would sit unseen. Each is tried once and one failure
-   * never stops the rest (`refundDuplicatePayment` has logged it). What stays
-   * owed is returned for the sweep to alert on and support to settle.
+   * The hourly sweep's retry of blocked refunds still owed (Codex-2hxff.15):
+   * duplicates, and blocked sales of unavailable content (Codex-z1t3c). The
+   * webhook retries a refused one only while Stripe redelivers; after that a
+   * `pending` one would sit unseen. Each is tried once and one failure never
+   * stops the rest (`refundBlockedPayment` has logged it). What stays owed is
+   * returned for the sweep to alert on and support to settle.
    */
   async settleOwedDuplicates(params: {
     olderThanMs: number;
@@ -1249,7 +1413,10 @@ export class PurchaseService extends BaseService {
       .from(purchases)
       .where(
         and(
-          isNotNull(purchases.duplicateOfPurchaseId),
+          either(
+            isNotNull(purchases.duplicateOfPurchaseId),
+            eq(purchases.refundReason, ITEM_UNAVAILABLE)
+          ),
           eq(purchases.status, PURCHASE_STATUS.PENDING),
           lt(purchases.createdAt, new Date(Date.now() - params.olderThanMs))
         )
@@ -1261,7 +1428,7 @@ export class PurchaseService extends BaseService {
     const stillOwed: Array<{ id: string; stripePaymentIntentId: string }> = [];
     for (const purchase of owed) {
       try {
-        await this.refundDuplicatePayment(purchase);
+        await this.refundBlockedPayment(purchase);
         settled++;
       } catch (error) {
         // A refused refund was logged as it was thrown; anything else (the
@@ -1351,16 +1518,23 @@ export class PurchaseService extends BaseService {
    * §7): the date of the purchase they keep it through, for the refund
    * email's note. Null for any other refund, or once no other purchase
    * grants the item. Null for a late-won duplicate payment too: what it
-   * refunds is the second payment, and `duplicatePayment` says so.
+   * refunds is the second payment, and `duplicatePayment` says so. Null for a
+   * blocked sale (Codex-z1t3c): it refunds an item no longer available, and
+   * `itemUnavailable` says so.
    */
   private async lateWinKeptThrough(
     purchase: Pick<
       Purchase,
-      'id' | 'customerId' | 'contentId' | 'courseId' | 'duplicateOfPurchaseId'
+      | 'id'
+      | 'customerId'
+      | 'contentId'
+      | 'courseId'
+      | 'duplicateOfPurchaseId'
+      | 'refundReason'
     >,
     refundId: string | undefined
   ): Promise<{ purchasedAt: string } | null> {
-    if (!refundId || isDuplicatePayment(purchase)) return null;
+    if (!refundId || isBlockedPayment(purchase)) return null;
     const [lateWin] = await this.db
       .select({ id: disputes.id })
       .from(disputes)
@@ -1450,6 +1624,12 @@ export class PurchaseService extends BaseService {
         );
         if (replay) return { purchase: replay, isNew: false } as const;
         const isDuplicate = duplicateOf !== undefined;
+        // Content deleted or made team-only while Checkout was open is a
+        // blocked sale, refunded after the commit (Codex-z1t3c). Read under
+        // FOR SHARE, so a delete or access change in flight is waited out.
+        const itemUnavailable = await this.isItemUnavailable(tx, {
+          contentId: metadata.contentId,
+        });
 
         // Codex-xz61z (I5): pin `purchasedAt` once, so a replay cannot land
         // on the other side of an agreement boundary mid-millisecond.
@@ -1466,6 +1646,7 @@ export class PurchaseService extends BaseService {
             stripePaymentIntentId,
             stripeApplicationFeeCents: metadata.stripeApplicationFeeCents,
             duplicatePayment: isDuplicate,
+            itemUnavailable,
           });
 
         // Step 4: Create purchase record
@@ -1488,7 +1669,7 @@ export class PurchaseService extends BaseService {
             // The creator agreement this sale was split by, if any
             // (Codex-2hxff.19 AGR-06).
             creatorOrgAgreementId: agreement?.agreementId ?? null,
-            ...purchaseOutcomeFields(duplicateOf),
+            ...purchaseOutcomeFields(duplicateOf, itemUnavailable),
           })
           .returning();
 
@@ -1498,9 +1679,10 @@ export class PurchaseService extends BaseService {
           });
         }
 
-        // A duplicate grants nothing (the first purchase did) and pays no
-        // one; the post-commit step refunds it, as for a replay of it.
-        if (isDuplicate) {
+        // A duplicate grants nothing (the first purchase did), a blocked sale
+        // nothing (no one can watch it), and neither pays anyone; the
+        // post-commit step refunds it, as for a replay of it.
+        if (isDuplicate || itemUnavailable) {
           return { purchase, isNew: false } as const;
         }
 
@@ -1516,10 +1698,11 @@ export class PurchaseService extends BaseService {
         } as const;
       });
 
-      // A duplicate payment, first delivery or replay, is refunded and pays
-      // no one: no slices, and no repair of slices it never had.
-      if (isDuplicatePayment(txResult.purchase)) {
-        return this.settleDuplicatePayment(txResult.purchase);
+      // A duplicate payment or a blocked sale, first delivery or replay, is
+      // refunded and pays no one: no slices, and no repair of slices it
+      // never had.
+      if (isBlockedPayment(txResult.purchase)) {
+        return this.settleBlockedPayment(txResult.purchase);
       }
 
       // Step 6 (post-commit): record the slices in the payouts ledger and
@@ -1844,6 +2027,9 @@ export class PurchaseService extends BaseService {
             stripePaymentIntentId,
             stripeApplicationFeeCents: metadata.stripeApplicationFeeCents,
             duplicatePayment: isDuplicate,
+            // A course is never deleted (no writer sets its `deleted_at`),
+            // and its buyers keep it unpublished or off sale (Codex-yo4px).
+            itemUnavailable: false,
           });
 
         const [purchase] = await tx
@@ -1863,7 +2049,7 @@ export class PurchaseService extends BaseService {
             // Fee configuration replaced platform agreements (as above).
             platformAgreementId: null,
             creatorOrgAgreementId: agreement?.agreementId ?? null,
-            ...purchaseOutcomeFields(duplicateOf),
+            ...purchaseOutcomeFields(duplicateOf, false),
           })
           .returning();
 
@@ -1892,8 +2078,8 @@ export class PurchaseService extends BaseService {
       });
 
       // A duplicate payment, first delivery or replay: refund it, pay no one.
-      if (isDuplicatePayment(txResult.purchase)) {
-        return this.settleDuplicatePayment(txResult.purchase);
+      if (isBlockedPayment(txResult.purchase)) {
+        return this.settleBlockedPayment(txResult.purchase);
       }
 
       // Post-commit payouts — REUSE the Option-B fan-out verbatim. A course
@@ -1993,6 +2179,8 @@ export class PurchaseService extends BaseService {
       stripeApplicationFeeCents?: number | null;
       /** Computed for the record; a duplicate is refunded, never paid out. */
       duplicatePayment: boolean;
+      /** Likewise for a blocked sale of unavailable content (Codex-z1t3c). */
+      itemUnavailable: boolean;
     }
   ): Promise<{
     creatorId: string;
@@ -2097,6 +2285,7 @@ export class PurchaseService extends BaseService {
       agreementApplied: agreement !== null,
       source: 'contentId' in target ? 'content_purchase' : 'course_purchase',
       duplicatePayment: params.duplicatePayment,
+      itemUnavailable: params.itemUnavailable,
     });
 
     const { stripeApplicationFeeCents } = params;
@@ -2800,6 +2989,10 @@ export class PurchaseService extends BaseService {
    *   caller records the partial refund on it (P-1: access is kept). The
    *   replay records the slices and claws the refund back from them, so each
    *   payee nets what a refund after the payout leaves.
+   * - **Its content deleted or team-only** (Codex-z1t3c): it is written as
+   *   the blocked sale completion would write, granting nothing, `refunded`
+   *   if refunded in full and `pending` otherwise. The replay refunds what is
+   *   left, as it does for one written by completion.
    *
    * Returns the purchase, or `null` when the session/metadata cannot be resolved
    * (caller then exits cleanly with 200, exactly as the old drop branch did).
@@ -2870,6 +3063,8 @@ export class PurchaseService extends BaseService {
       // a completion of the buyer's other payment for the item cannot both
       // write a completed purchase. A buyer who already owns the item paid
       // twice: this one is rebuilt as the duplicate it is, granting nothing.
+      // Content deleted or made team-only is rebuilt as the blocked sale it
+      // is, under the same FOR SHARE read as completion (Codex-z1t3c).
       return await this.db.transaction(async (tx) => {
         const { replay, ownerId } = await this.lockForItem(
           tx,
@@ -2878,12 +3073,14 @@ export class PurchaseService extends BaseService {
           paymentIntentId
         );
         if (replay) return replay;
+        const itemUnavailable = await this.isItemUnavailable(tx, target);
         const split = await this.resolvePurchaseSplit(tx, {
           target,
           amountCents: amountPaidCents,
           at: offerAt,
           stripePaymentIntentId: paymentIntentId,
           duplicatePayment: ownerId !== undefined,
+          itemUnavailable,
         });
         const [inserted] = await tx
           .insert(purchases)
@@ -2900,13 +3097,7 @@ export class PurchaseService extends BaseService {
             creatorPayoutCents: split.revenueSplit.creatorPayoutCents,
             platformAgreementId: null,
             creatorOrgAgreementId: split.agreement?.agreementId ?? null,
-            ...purchaseOutcomeFields(ownerId),
-            // Refunded already: never granted, so nothing is left to revoke.
-            ...(refundedInFull && {
-              ...refundedInFull,
-              status: PURCHASE_STATUS.REFUNDED,
-              refundedAt: new Date(),
-            }),
+            ...selfHealOutcomeFields(ownerId, itemUnavailable, refundedInFull),
           })
           .returning();
         if (!inserted) {
@@ -2914,7 +3105,9 @@ export class PurchaseService extends BaseService {
             stripePaymentIntentId: paymentIntentId,
           });
         }
-        if (ownerId === undefined && !refundedInFull) {
+        // Only a sale is granted: not a duplicate, a blocked sale
+        // (Codex-z1t3c), or one refunded before it landed.
+        if (inserted.status === PURCHASE_STATUS.COMPLETED) {
           await this.grantPurchaseAccess(tx, inserted);
         }
         this.obs.info('Purchase self-heal: rebuilt from its checkout session', {
@@ -2922,6 +3115,7 @@ export class PurchaseService extends BaseService {
           paymentIntentId,
           ...itemIds,
           duplicatePayment: ownerId !== undefined,
+          itemUnavailable,
           refundedInFull: refundedInFull !== undefined,
         });
         return inserted;
@@ -2989,6 +3183,11 @@ export class PurchaseService extends BaseService {
          * says so (late-win data design §7). Null otherwise.
          */
         lateWinKeptThrough: { purchasedAt: string } | null;
+        /**
+         * A blocked sale's refund (Codex-z1t3c): its content was deleted or
+         * made team-only before the payment landed, and the email says so.
+         */
+        itemUnavailable: boolean;
       }
     | undefined
   > {
@@ -3023,6 +3222,16 @@ export class PurchaseService extends BaseService {
         this.obs.warn('Refund for unknown purchase', { paymentIntentId });
         return;
       }
+      // Stripe's reason, except over a blocked sale's marker (Codex-z1t3c).
+      // The marker is written only at insert, so the row read above decides.
+      const recordedFields = {
+        ...refundFields,
+        refundReason: keepUnavailableMarker(
+          purchase,
+          refundFields.refundReason
+        ),
+      };
+      const itemUnavailable = isUnavailableBlock(purchase);
 
       // The charge's refunds recorded before this purchase existed
       // (Codex-aa08z) are its own: link them, so what stands is counted.
@@ -3057,6 +3266,7 @@ export class PurchaseService extends BaseService {
             purchase,
             refundDetails.stripeRefundId
           ),
+          itemUnavailable,
         };
       }
 
@@ -3066,7 +3276,7 @@ export class PurchaseService extends BaseService {
         // restatement owns a refund that failed (MED-2).
         await this.db
           .update(purchases)
-          .set(refundFields)
+          .set(recordedFields)
           .where(
             and(
               eq(purchases.id, purchase.id),
@@ -3086,7 +3296,7 @@ export class PurchaseService extends BaseService {
           await tx
             .update(purchases)
             .set({
-              ...refundFields,
+              ...recordedFields,
               status: PURCHASE_STATUS.REFUNDED,
               refundedAt: new Date(),
             })
@@ -3096,9 +3306,10 @@ export class PurchaseService extends BaseService {
           // purchases grant no contentAccess row (they use entitlements). The
           // row is per buyer and item, shared by every purchase of it, so it
           // stays while another completed purchase still grants it
-          // (Codex-2hxff.14).
+          // (Codex-2hxff.14). A blocked sale granted no row (Codex-z1t3c), so
+          // a row the buyer has for the item is another grant's.
           keptElsewhere = await this.keepsItemElsewhere(tx, purchase);
-          if (purchase.contentId && !keptElsewhere) {
+          if (purchase.contentId && !keptElsewhere && !itemUnavailable) {
             await tx
               .update(contentAccess)
               .set({ deletedAt: new Date() })
@@ -3154,6 +3365,7 @@ export class PurchaseService extends BaseService {
         itemTitle: await this.itemTitle(purchase),
         // The late win's refund only meets a purchase already refunded.
         lateWinKeptThrough: null,
+        itemUnavailable,
       };
     } catch (error) {
       this.handleError(error, 'processRefund');
@@ -3896,7 +4108,9 @@ export class PurchaseService extends BaseService {
    *   left alone. The first payment is refunded next
    *   (`refundFirstPaymentAfterLateWin`);
    * - `duplicate`: a duplicate payment, which never granted anything, stays
-   *   as it is;
+   *   as it is. The first payment is refunded next, if the loss refunded it;
+   * - `unavailable`: likewise, a blocked sale of unavailable content
+   *   (Codex-z1t3c);
    * - `still_refunded`: the refunds that still stand cover what was paid. It
    *   stays refunded, with its refund fields restated;
    * - `dispute_holds`: another chargeback on it is open or lost. Nothing is
@@ -3967,20 +4181,22 @@ export class PurchaseService extends BaseService {
       chargeId
     );
     if (reason === 'dispute_holds') return 'dispute_holds';
-    // A purchase neither completed nor refunded can only be a duplicate the
-    // loss never got to: no other pending or failed purchase has a charge.
-    if (reason === 'not_refunded' && !isDuplicatePayment(purchase)) {
-      throw new InternalServiceError(
-        'A late win found its purchase in a status it cannot restore from',
-        { purchaseId: purchase.id, status: purchase.status }
-      );
-    }
-    if (reason === 'duplicate' || reason === 'not_refunded') {
+    // A duplicate, or a blocked sale (Codex-z1t3c), granted nothing: pending
+    // (the loss never got to it) or refunded, it stays as it is.
+    const blocked = blockedKind(purchase);
+    if (blocked) {
       await tx
         .update(purchases)
         .set({ disputedAt: null, updatedAt: now })
         .where(eq(purchases.id, purchase.id));
-      return 'duplicate';
+      return blocked;
+    }
+    // Any other purchase neither completed nor refunded has no charge.
+    if (reason === 'not_refunded') {
+      throw new InternalServiceError(
+        'A late win found its purchase in a status it cannot restore from',
+        { purchaseId: purchase.id, status: purchase.status }
+      );
     }
     if (reason === 'rebought' || reason === 'still_refunded') {
       await tx
@@ -4046,6 +4262,8 @@ export class PurchaseService extends BaseService {
    *   purchase or by the charge (`disputedAt` stays set after a loss, which
    *   also makes it `refunded`): the dispute decides the access;
    * - `duplicate`: a duplicate payment, which never granted anything;
+   * - `unavailable`: a blocked sale of content deleted or made team-only
+   *   before its payment landed (Codex-z1t3c), which never granted anything;
    * - `rebought`: the buyer bought the item again since, and that purchase
    *   grants it: a buyer holds one completed purchase per item
    *   (`uq_purchases_completed_customer_content`);
@@ -4170,9 +4388,10 @@ export class PurchaseService extends BaseService {
       return { reason: 'not_refunded', standing: none };
     }
     if (purchase.disputedAt) return { reason: 'dispute_holds', standing: none };
-    if (isDuplicatePayment(purchase)) {
-      return { reason: 'duplicate', standing: none };
-    }
+    // Before any restatement of the refund fields, so a blocked sale's marker
+    // stays (Codex-z1t3c).
+    const blocked = blockedKind(purchase);
+    if (blocked) return { reason: blocked, standing: none };
     const [holding] = await db
       .select({ id: disputes.id })
       .from(disputes)
@@ -4679,7 +4898,9 @@ export class PurchaseService extends BaseService {
       chargeId
     );
     if ((refundAmountCents ?? 0) >= purchase.amountPaidCents) return false;
-    if (isDuplicatePayment(purchase)) return true;
+    // Neither granted the item (a blocked sale: Codex-z1t3c), so either is
+    // refunded whatever else the buyer holds.
+    if (isBlockedPayment(purchase)) return true;
     return this.keepsItemElsewhere(this.db, purchase);
   }
 
@@ -4697,7 +4918,10 @@ export class PurchaseService extends BaseService {
     await this.db.transaction(async (tx) => {
       if (!(await lockedLateWin(tx, stripeDisputeId))) return;
       const [purchase] = await tx
-        .select({ status: purchases.status })
+        .select({
+          status: purchases.status,
+          refundReason: purchases.refundReason,
+        })
         .from(purchases)
         .where(eq(purchases.id, purchaseId))
         .for('update');
@@ -4709,7 +4933,12 @@ export class PurchaseService extends BaseService {
       );
       await tx
         .update(purchases)
-        .set({ ...standing, updatedAt: new Date() })
+        .set({
+          ...standing,
+          // A late-won blocked sale keeps its marker (Codex-z1t3c).
+          refundReason: keepUnavailableMarker(purchase, standing.refundReason),
+          updatedAt: new Date(),
+        })
         .where(eq(purchases.id, purchaseId));
     });
   }
@@ -5492,11 +5721,13 @@ export class PurchaseService extends BaseService {
     // `content` join is always present; course sales get their own reporting
     // surface (WP-7) rather than being force-fit into the content columns.
     // A duplicate payment is no sale: it is refunded and pays no one
-    // (Codex-2hxff.14).
+    // (Codex-2hxff.14). Nor is a blocked sale of unavailable content
+    // (Codex-z1t3c).
     const conditions = [
       ...scope,
       isNotNull(purchases.contentId),
       isNull(purchases.duplicateOfPurchaseId),
+      notUnavailableBlock(),
     ];
 
     if (validated.status === 'disputed') {
@@ -5603,11 +5834,13 @@ export class PurchaseService extends BaseService {
   ): Promise<SalesStats> {
     // Content-only, to match the ledger (course sales report separately, WP-7)
     // so the header tiles and the table below them agree. Duplicate payments
-    // are excluded there too: refunded, they would inflate gross and refunds.
+    // and blocked sales (Codex-z1t3c) are excluded there too: refunded, they
+    // would inflate gross and refunds.
     const conditions = [
       ...scope,
       isNotNull(purchases.contentId),
       isNull(purchases.duplicateOfPurchaseId),
+      notUnavailableBlock(),
       ...purchaseDateWindow(validated.fromDate, validated.toDate),
     ];
 
