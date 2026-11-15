@@ -497,16 +497,25 @@ type AddedCategories = {
   changed: boolean;
 };
 
-/** The access columns a bulk access change sets: the group's, but the tier set. */
 type AccessColumn = Exclude<
   keyof typeof CONTENT_ACCESS_GROUP_FIELDS,
   'includedInTierIds'
 >;
-const ACCESS_COLUMNS = (
-  Object.keys(CONTENT_ACCESS_GROUP_FIELDS) as Array<
-    keyof typeof CONTENT_ACCESS_GROUP_FIELDS
-  >
-).filter((key): key is AccessColumn => key !== 'includedInTierIds');
+
+/**
+ * The access columns a bulk access change sets: the group's, but the tier
+ * set. Read when asked, never at import: a test elsewhere that mocks
+ * `@codex/validation` whole and loads this module on the way (ecom-api's
+ * checkout test, Codex-a6ofh.3 CI) failed to load at all when this ran at
+ * the top of the file.
+ */
+function accessColumns(): AccessColumn[] {
+  return (
+    Object.keys(CONTENT_ACCESS_GROUP_FIELDS) as Array<
+      keyof typeof CONTENT_ACCESS_GROUP_FIELDS
+    >
+  ).filter((key): key is AccessColumn => key !== 'includedInTierIds');
+}
 
 /**
  * Whether a piece's access already reads as an update sends it
@@ -519,7 +528,7 @@ async function accessAlreadyHeld(
   existing: Content,
   sent: UpdateContentInput
 ): Promise<boolean> {
-  for (const column of ACCESS_COLUMNS) {
+  for (const column of accessColumns()) {
     if (sent[column] !== undefined && sent[column] !== existing[column]) {
       return false;
     }
