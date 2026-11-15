@@ -268,9 +268,10 @@ function mediaStatusCondition(
 /**
  * An upload that stopped before it finished: still `uploading` past
  * `MEDIA_UPLOAD_STALLED_AFTER_MS` from the row's creation. The `attention`
- * filter and the summary's `stopped` count read this one boundary.
+ * filter, the summary's `stopped` count and the content list's "Needs you"
+ * (./content-attention.ts) read this one boundary.
  */
-function stalledUpload(now: Date): SQL {
+export function stalledUpload(now: Date): SQL {
   const stalledBefore = new Date(now.getTime() - MEDIA_UPLOAD_STALLED_AFTER_MS);
   return sql`(${eq(mediaItems.status, MEDIA_STATUS.UPLOADING)} and ${lt(mediaItems.createdAt, stalledBefore)})`;
 }

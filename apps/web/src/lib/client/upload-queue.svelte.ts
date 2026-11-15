@@ -19,6 +19,7 @@
  * whole flow with fakes; {@link uploadQueue} is the one wired to the real ones.
  */
 import { FILE_SIZES } from '@codex/constants';
+import { SvelteMap } from 'svelte/reactivity';
 import { mediaStatus } from '$lib/client/media-status.svelte';
 import { registerUserScopedReset } from '$lib/client/user-scoped-state';
 import { checkMediaFile } from '$lib/components/studio/media-upload-file';
@@ -43,6 +44,12 @@ export type UploadStatus =
 
 /** Why a row failed; the tray words it. `direct`: the file is too big to retry through the worker. */
 export type UploadFailure = 'upload' | 'direct';
+
+/** How an upload this tab ran ended, kept past its row. */
+type UploadEnd = 'finished' | 'let-go';
+
+/** This tab's own word on an upload ({@link UploadQueue.wordOn}). */
+export type UploadWord = 'sending' | 'stopped' | 'done' | null;
 
 export interface UploadItem {
   /** Stable for the row's life: the tray and the media grid key on it. */
@@ -179,6 +186,8 @@ export class UploadQueue {
    * delete): closing the tab now would leave the row behind, so the guard holds.
    */
   readonly #discarding = new Set<Promise<void>>();
+  /** How each upload this tab ran ended, kept past its row ({@link wordOn}). */
+  readonly #ended = new SvelteMap<string, UploadEnd>();
   /** Bumped by {@link reset}: an upload begun before it belongs to the last user. */
   #generation = 0;
   #releaseGuard: (() => void) | null = null;
@@ -214,6 +223,38 @@ export class UploadQueue {
     return estimateSecondsLeft(item.startedAt, this.#deps.now(), item.progress);
   }
 
+  /**
+   * This tab's own word on its upload of `mediaId`, read reactively: the one
+   * reader for every surface that judges an upload this tab may be running
+   * (the Publish screen, the Write step's media field). It beats the status
+   * socket's: `upload.here` is only ever this queue's own report echoed back
+   * (`reportUpload` has no other caller), and the status object keeps it
+   * until the socket closes, after the upload failed or was let go of too.
+   *
+   * Its row first: sending the bytes (`'sending'`: uploading or completing),
+   * sent them all (`'done'`: the server moves it on), or will not
+   * (`'stopped'`: failed, and the tray offers Try again while the server's
+   * row waits in uploading). Once the row has left the tray, how it ended
+   * still says which: finished is `'done'`, and let go of (cancelled,
+   * removed after failing, or tried again as new media, its media row
+   * discarded) is `'stopped'`. Null for an upload this tab has no word on.
+   */
+  wordOn(mediaId: string): UploadWord {
+    const row = this.items.find((item) => item.id === mediaId);
+    switch (row?.status) {
+      case 'uploading':
+      case 'completing':
+        return 'sending';
+      case 'error':
+        return 'stopped';
+      case 'done':
+        return 'done';
+    }
+    const end = this.#ended.get(mediaId);
+    if (end === 'finished') return 'done';
+    return end === 'let-go' ? 'stopped' : null;
+  }
+
   /** Called with the media id each time an upload finishes. */
   onComplete(listener: (mediaId: string) => void): () => void {
     this.#listeners.add(listener);
@@ -238,6 +279,7 @@ export class UploadQueue {
     this.rejections = [];
     this.#savedTitles.clear();
     this.#titleSaves.clear();
+    this.#ended.clear();
     this.#syncGuard();
   }
 
@@ -457,6 +499,10 @@ export class UploadQueue {
       item.status = 'done';
       item.progress = 100;
       completedId = created.id;
+      // Not for one a user switch let run on: it was the last user's.
+      if (generation === this.#generation) {
+        this.#ended.set(created.id, 'finished');
+      }
     } catch (error) {
       if (item.id) this.#deps.live.endUpload(item.id);
       // Only a cancel the creator made is quiet. Any other abort (the browser
@@ -594,6 +640,8 @@ export class UploadQueue {
    */
   #discard(mediaId: string | null): Promise<void> {
     if (!mediaId) return Promise.resolve();
+    // Said before the delete: it will not finish, whether or not that lands.
+    this.#ended.set(mediaId, 'let-go');
     // A draft may have saved it by now: the media picker attaches the id the
     // moment createMedia returns it (Codex-a6ofh.1.8), and a delete without
     // the usage fingerprint is refused (409) once anything uses the item. A

@@ -575,11 +575,9 @@ describe('every borderless field keeps a focus cue that holds 3:1 (Codex-c5prp)'
     expect(cues('lib/components/ui/FilterBar/FilterBar.svelte')).toEqual([
       'box',
     ]);
+    // The two studio lists' boxes, one component since Codex-a6ofh.3.1.
     expect(
-      cues('lib/components/studio/content-list/ContentListCommandBar.svelte')
-    ).toEqual(['box']);
-    expect(
-      cues('lib/components/studio/media-library/MediaLibraryToolbar.svelte')
+      cues('lib/components/studio/list-toolbar/ListSearchBox.svelte')
     ).toEqual(['box']);
     expect(
       cues('lib/components/brand-editor/color-picker/ColorInput.svelte')

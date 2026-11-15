@@ -12,6 +12,7 @@
 
 import {
   deleteMediaInputSchema,
+  type MediaQueryInput,
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/validation';
@@ -19,6 +20,8 @@ import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
+import { logRefusedRead } from '$lib/server/read-failure';
+import { searchParamsOf } from '$lib/server/search-params';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Media List Query
@@ -38,12 +41,38 @@ export const listMedia = query(mediaQuerySchema, async (params) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
-  const searchParams = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) searchParams.set(key, String(value));
-  }
-  return api.media.list(searchParams);
+  const searchParams = searchParamsOf(params);
+  // A 4xx keeps its status, so the library can say a refusal is one
+  // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit logs
+  // no forwarded 4xx, so it is logged here, for the library, the pickers and
+  // the dashboard, with the args that tell most of them apart (a picker's
+  // first page and the library on Ready, that type and Newest ask alike).
+  return forwardClientErrors(() =>
+    logRefusedRead(
+      { refused: 'media.list_refused', unavailable: 'media.list_unavailable' },
+      listMediaLog(params),
+      () => api.media.list(searchParams)
+    )
+  );
 });
+
+/**
+ * What a refused media read logs of its args: each filter by name, never the
+ * search text (only whether there was one). Named one by one, so a new
+ * free-text arg is not logged by default.
+ */
+function listMediaLog(params: MediaQueryInput) {
+  return {
+    page: params.page,
+    limit: params.limit,
+    statusFilter: params.status ?? 'all',
+    mediaType: params.mediaType ?? 'all',
+    usage: params.usage,
+    sortBy: params.sortBy,
+    sortOrder: params.sortOrder,
+    hasSearch: params.search !== undefined,
+  };
+}
 
 /**
  * The whole library in four numbers (Codex-a6ofh.1.6): `{ total, totalBytes,

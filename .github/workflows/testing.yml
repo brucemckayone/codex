@@ -1095,7 +1095,10 @@ jobs:
        needs.changes.outputs.shared-types == 'true' ||
        needs.changes.outputs.workflows == 'true' ||
        needs.changes.outputs.seed == 'true')
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not -latest: Playwright ^1.56 refuses ubuntu-26.04
+    # ("does not support chromium on ubuntu26.04-x64"), which -latest
+    # became after 11-12. Unpin when Playwright supports it (Codex-wxfj8).
+    runs-on: ubuntu-24.04
     # About 2x the p95 of 40 green runs (42.4 min). The default is 360,
     # so a wedged job could hold the PR for six hours (Codex-j7x4u).
     timeout-minutes: 90

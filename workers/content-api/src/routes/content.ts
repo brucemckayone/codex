@@ -10,13 +10,22 @@
  * - GET    /api/content/:id        - Get by ID
  * - PATCH  /api/content/:id        - Update content
  * - GET    /api/content            - List with filters
+ * - GET    /api/content/where-counts - Where the creator's content is filed
+ * - GET    /api/content/attention  - "Needs you" counts, by kind
  * - POST   /api/content/:id/publish   - Publish content
  * - POST   /api/content/:id/unpublish - Unpublish content
  * - DELETE /api/content/:id        - Soft delete
  * - POST   /api/content/:id/thumbnail - Upload content thumbnail
+ * - POST   /api/content/:id/categories - Add categories (keeps the set)
+ * - POST   /api/content/bulk/{publish,unpublish,delete,categories,access}
+ *          - One action on up to CONTENT_BULK_MAX pieces, a result for each
  */
 
-import { AUTH_ROLES, CONTENT_STATUS } from '@codex/constants';
+import {
+  AUTH_ROLES,
+  CONTENT_STATUS,
+  type ContentAttentionCounts,
+} from '@codex/constants';
 import type {
   CancelPublishRequestResponse,
   ContentResponse,
@@ -40,10 +49,17 @@ import {
 } from '@codex/image-processing';
 import type {
   CheckSlugResponse,
+  ContentBulkResponse,
   ContentPortalUses,
+  ContentWhereCounts,
   HonoEnv,
 } from '@codex/shared-types';
 import {
+  addContentCategoriesSchema,
+  contentAttentionQuerySchema,
+  contentBulkAccessSchema,
+  contentBulkCategoriesSchema,
+  contentBulkSchema,
   createIdParamsSchema,
   publishContentQuerySchema,
   updateContentQuerySchema,
@@ -56,11 +72,16 @@ import {
 import { Hono } from 'hono';
 import { cleanupContentThumbnailOnDelete } from './content-cleanup';
 import {
+  afterBulkChange,
   afterContentPublished,
   bumpOrgContentVersion,
   fanContentInvalidation,
 } from './content-invalidation';
-import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
+import {
+  resolveR2PublicBases,
+  toPublicItems,
+  withPosterUrls,
+} from './r2-public-urls';
 
 const app = new Hono<HonoEnv>();
 
@@ -165,6 +186,242 @@ app.get(
         toPublicItems(result.items, resolveR2PublicBases(ctx.env), ctx.obs),
         result.pagination
       );
+    },
+  })
+);
+
+/**
+ * GET /api/content/where-counts
+ * How the creator's own content is filed (Codex-a6ofh.3.2): the personal
+ * studio's "Where" menu, "Everywhere 14 · Personal 3 · Studio Alpha 9"
+ * (mockup L4b). A static child, so above `/:id`, as `/browse` is.
+ *
+ * Returns: ContentWhereCounts (200)
+ * Security: Authenticated users, own content only, API rate limit (100 req/min)
+ */
+app.get(
+  '/where-counts',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx): Promise<ContentWhereCounts> =>
+      ctx.services.content.whereCounts(ctx.user.id),
+  })
+);
+
+/**
+ * GET /api/content/attention
+ * What the creator's own pieces need, by kind (Codex-a6ofh.3.4): the content
+ * list's "Needs you" chips, counted across every page by the rule the list's
+ * `needs` filter uses. Where the list looks: `organizationId`, or
+ * `scope=personal` (the service's `organizationId: null`), or neither for
+ * everywhere. A static child, so above `/:id`.
+ *
+ * Returns: ContentAttentionCounts (200)
+ * Security: Authenticated users, own content only, API rate limit (100 req/min)
+ */
+app.get(
+  '/attention',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: contentAttentionQuerySchema },
+    handler: async (ctx): Promise<ContentAttentionCounts> => {
+      const { scope, organizationId } = ctx.input.query;
+      return ctx.services.content.attentionCounts(
+        ctx.user.id,
+        scope ? null : organizationId
+      );
+    },
+  })
+);
+
+// ============================================================================
+// Bulk actions (Codex-a6ofh.3.5, owner 2026-11-12: "Bulk endpoints, one
+// bump"): the content list's selection, at most CONTENT_BULK_MAX pieces. Each
+// piece goes through its own route's rules in its own transaction and gets a
+// result of its own; the request fails only for its body, auth or the rate
+// limit. One bulk call is one rate-limit hit. The caches are refreshed once
+// per org after the loop (`afterBulkChange`), on the per-piece routes' own
+// conditions. Static children, so above every `/:id` route: with `/:id/publish`
+// first, `/bulk/publish` was read as the piece "bulk".
+// ============================================================================
+
+/**
+ * POST /api/content/bulk/publish
+ * Publish each piece, publish when ready included (owner D-b1): one whose
+ * media is on its way is `scheduled`.
+ *
+ * Security: Creator/Admin only, own pieces (another's is not found), API
+ * rate limit (100 req/min)
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/publish',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { body: contentBulkSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.publishMany(
+        ctx.input.body.ids,
+        ctx.user.id
+      );
+      afterBulkChange(
+        ctx.env,
+        ctx.executionCtx,
+        touched,
+        'content_published',
+        ctx.obs
+      );
+      return { results };
+    },
+  })
+);
+
+/**
+ * POST /api/content/bulk/unpublish
+ * Take each piece down; a draft is `unchanged`. Buyers keep playback.
+ *
+ * Security: Creator/Admin only, own pieces, API rate limit (100 req/min)
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/unpublish',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { body: contentBulkSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.unpublishMany(
+        ctx.input.body.ids,
+        ctx.user.id
+      );
+      afterBulkChange(
+        ctx.env,
+        ctx.executionCtx,
+        touched,
+        'content_unpublished',
+        ctx.obs
+      );
+      return { results };
+    },
+  })
+);
+
+/**
+ * POST /api/content/bulk/delete
+ * Soft-delete each piece. One people bought is left alone (owner D-b4):
+ * `refused`, `CONTENT_HAS_BUYERS`. Each deleted cover's files are cleared in
+ * the background, so the answer does not wait on R2.
+ *
+ * Security: Creator/Admin only, own pieces, strict rate limit (20/min): one
+ * call deletes at most CONTENT_BULK_MAX pieces
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/delete',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+      rateLimit: 'strict',
+    },
+    input: { body: contentBulkSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.deleteMany(
+        ctx.input.body.ids,
+        ctx.user.id
+      );
+      // Codex-ko8ko, as a delete one at a time: never strand a cover's R2
+      // objects. Each cleanup is best-effort and never throws, and
+      // `background` holds the request's DB open for its orphan records.
+      ctx.background(
+        Promise.allSettled(
+          touched.map(({ id }) =>
+            cleanupContentThumbnailOnDelete(
+              ctx.services.imageProcessing,
+              id,
+              ctx.user.id,
+              ctx.obs
+            )
+          )
+        )
+      );
+      afterBulkChange(
+        ctx.env,
+        ctx.executionCtx,
+        touched,
+        'content_deleted',
+        ctx.obs
+      );
+      return { results };
+    },
+  })
+);
+
+/**
+ * POST /api/content/bulk/categories
+ * File each piece in more categories, keeping the ones it has, as
+ * `POST /:id/categories`: each one's space and 20-category limit hold.
+ *
+ * Security: Creator/Admin only, own pieces, API rate limit (100 req/min)
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/categories',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { body: contentBulkCategoriesSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.addCategoriesMany(
+        ctx.input.body.ids,
+        ctx.user.id,
+        ctx.input.body.categoryIds
+      );
+      // As the per-piece route: the org caches, no library fan-out.
+      afterBulkChange(ctx.env, ctx.executionCtx, touched, null, ctx.obs);
+      return { results };
+    },
+  })
+);
+
+/**
+ * POST /api/content/bulk/access
+ * Set who can watch each piece (owner D-b2): `PATCH /:id` with the access
+ * fields alone, under its rules. A move to Followers or Team only leaves
+ * alone a piece people bought (owner R1, `CONTENT_HAS_BUYERS`).
+ *
+ * Security: Creator/Admin only, own pieces, API rate limit (100 req/min)
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/access',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { body: contentBulkAccessSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.accessMany(
+        ctx.input.body.ids,
+        ctx.user.id,
+        ctx.input.body.access
+      );
+      afterBulkChange(
+        ctx.env,
+        ctx.executionCtx,
+        touched,
+        'content_updated',
+        ctx.obs
+      );
+      return { results };
     },
   })
 );
@@ -291,6 +548,50 @@ app.patch(
 );
 
 /**
+ * POST /api/content/:id/categories
+ * File a piece in more categories, keeping the ones it has (Codex-a6ofh.3.3):
+ * the list's bulk "Add to category". A PATCH of `categoryIds` replaces the
+ * set, so it cannot add without reading each piece first.
+ *
+ * Security: Creator/Admin only, as PATCH; API rate limit (100 req/min). Each
+ * category must be in the piece's own space, and the piece's total stays at
+ * most CONTENT_MAX_CATEGORIES (400 otherwise).
+ * @returns {{ data: { categoryIds: string[] } }} its live categories after
+ */
+app.post(
+  '/:id/categories',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: {
+      params: createIdParamsSchema(),
+      body: addContentCategoriesSchema,
+    },
+    handler: async (ctx): Promise<{ categoryIds: string[] }> => {
+      const result = await ctx.services.content.addCategories(
+        ctx.input.params.id,
+        ctx.user.id,
+        ctx.input.body.categoryIds
+      );
+      // As PATCH: a never-live draft is in no cache. A live piece's public
+      // row carries its topic slugs, and the topic list counts it. An add
+      // that filed nothing new (each one already held) changed neither.
+      if (result.hasBeenLive && result.changed) {
+        bumpOrgContentVersion(
+          ctx.env,
+          ctx.executionCtx,
+          result.organizationId,
+          ctx.obs
+        );
+      }
+      return { categoryIds: result.categoryIds };
+    },
+  })
+);
+
+/**
  * GET /api/content
  * List content with filters and pagination
  *
@@ -306,14 +607,23 @@ app.get(
       // Studio-scope: returns the signed-in creator's content across all
       // their orgs (drafts list, dashboard). organizationId is optional.
       // Paged from its own argument, as /browse is (Codex-uuj1g).
-      const { page, limit, ...filters } = ctx.input.query;
+      // `scope=personal` is the content filed under no org, the service's
+      // `organizationId: null` (Codex-a6ofh.3.2); the schema refuses it
+      // beside an organizationId. `include=categories` names each row's
+      // categories (the org studio's list, Codex-a6ofh.3.3).
+      const { page, limit, scope, include, ...filters } = ctx.input.query;
       const result = await ctx.services.content.list(
         ctx.user.id,
-        filters,
+        scope ? { ...filters, organizationId: null } : filters,
         { page, limit },
-        { scope: 'studio' }
+        { scope: 'studio', withCategories: include === 'categories' }
       );
-      return new PaginatedResult(result.items, result.pagination);
+      // The list's poster fallback (Codex-a6ofh.3.1): the row carries the
+      // poster's R2 key, which the page cannot resolve; the URL goes beside it.
+      return new PaginatedResult(
+        withPosterUrls(result.items, resolveR2PublicBases(ctx.env), ctx.obs),
+        result.pagination
+      );
     },
   })
 );

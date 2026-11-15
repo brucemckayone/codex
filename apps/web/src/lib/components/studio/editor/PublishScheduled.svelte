@@ -6,7 +6,8 @@
   piece's own fields say (`createPublishSchedule`):
   - scheduled: it goes live by itself when the media is ready. The media
     failing while scheduled offers Try again (the schedule carries on) while
-    one can help, and another file; gone, only another file. Ready but not
+    one can help, and another file; gone, or its upload stopped, only
+    another file (or, stopped, this one sent again from Write). Ready but not
     yet seen live: Check again. Cancel is offered throughout, so a wait that
     is stuck can always be ended here;
   - live: it went live while the step was open, with View once its saved
@@ -173,6 +174,13 @@
       {/if}
       {@render anotherFile()}
     </div>
+  </Alert>
+{:else if schedule.view === 'stopped'}
+  <!-- Its upload stopped: it will not get there itself (owner, 2026-11-12),
+       so the words are the checklist's, and only another file can help. -->
+  <Alert variant="warning" role="presentation">
+    <p class="schedule-lead">{m.studio_publish_gap_upload_stopped({ type })}</p>
+    <div class="schedule-actions">{@render anotherFile()}</div>
   </Alert>
 {:else if schedule.view === 'stale'}
   <Alert variant="info" role="presentation">

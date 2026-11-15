@@ -80,10 +80,12 @@ export {
   DEFAULT_MAX_LIBRARY_FANOUT,
   goLiveColumns,
   invalidateContentAccess,
+  invalidateContentAccessMany,
   invalidateOrgMembership,
   invalidatePlanSubscriberLibraries,
   MediaItemService,
   notClosedToNewViewers,
+  orgsOf,
   PUBLIC_CREATOR_COLUMNS,
   PUBLIC_MEDIA_ITEM_COLUMNS,
   PUBLIC_ORGANIZATION_COLUMNS,
@@ -98,8 +100,10 @@ export {
 
 export type { ServiceConfig } from '@codex/service-errors';
 export type {
+  BulkTouchedPiece,
   CancelPublishRequestResponse,
   Content,
+  ContentBulkReport,
   ContentFilters,
   ContentListResponse,
   ContentResponse,
@@ -152,6 +156,7 @@ export {
   ConflictError,
   ContentAlreadyLiveError,
   ContentBodyRequiredError,
+  ContentHasBuyersError,
   ContentNotFoundError,
   ContentServiceError,
   ContentTypeMismatchError,

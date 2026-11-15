@@ -20,13 +20,15 @@ export function withKind(
   return { kind, priceCents: 0, tierIds: access.tierIds === null ? null : [] };
 }
 
-/** The price as typed, in pounds: the form's rule, so what cannot be read is £0. */
-export function withPrice(access: DraftAccess, text: string): DraftAccess {
+/** A price as typed, in pounds, in pence: the form's rule, so what cannot be read is £0. */
+export function priceCentsOf(text: string): number {
   const pounds = parseFloat(text || '0');
-  return {
-    ...access,
-    priceCents: Number.isNaN(pounds) ? 0 : Math.round(pounds * 100),
-  };
+  return Number.isNaN(pounds) ? 0 : Math.round(pounds * 100);
+}
+
+/** The price as typed: {@link priceCentsOf}. */
+export function withPrice(access: DraftAccess, text: string): DraftAccess {
+  return { ...access, priceCents: priceCentsOf(text) };
 }
 
 /** The price field's words for a price: `12.00`. */

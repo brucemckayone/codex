@@ -1,5 +1,10 @@
 import {
   CONTENT_ACCESS_TYPE,
+  CONTENT_ATTENTION_KINDS,
+  CONTENT_BULK_MAX,
+  CONTENT_LIFECYCLES,
+  CONTENT_LIST_SCOPE,
+  CONTENT_MAX_CATEGORIES,
   CONTENT_STATUS,
   CONTENT_TYPES,
   isReservedSubdomain,
@@ -425,7 +430,7 @@ const baseContentSchema = z.object({
   // (including []) REPLACES the set. ContentService verifies every id lives in
   // the content's OWN space (IDOR guard). Capped so a payload can't fan out an
   // unbounded join write.
-  categoryIds: z.array(uuidSchema).max(20).optional(),
+  categoryIds: z.array(uuidSchema).max(CONTENT_MAX_CATEGORIES).optional(),
 
   // Tags (JSONB array)
   tags: tagsSchema,
@@ -838,24 +843,48 @@ export const updateContentQuerySchema = z.object({
 });
 
 /**
- * Content query/filter schema
- * Used for listing and searching content
- * Extends pagination with content-specific filters and sorting
+ * The content list's query fields, unrefined: the studio and browse schemas
+ * below each refine or extend this, since a refined object can no longer be
+ * picked, omitted or extended over a key (zod 4).
  */
-export const contentQuerySchema = paginationSchema.extend({
+const contentQueryFields = paginationSchema.extend({
   // Filters
   status: contentStatusEnum.optional(),
+  // Where a piece is in its life (Codex-a6ofh.3.6, the studio list's status
+  // tabs): a draft never live, on sale, or off sale (once live and not on
+  // sale now: archived, or a draft again, its buyers keeping it). `status`
+  // is the stored column, which files an unpublished piece among the drafts;
+  // both at once is refused below. The studio list's alone: browse refuses it.
+  lifecycle: z.enum(CONTENT_LIFECYCLES).optional(),
   contentType: contentTypeEnum.optional(),
   accessType: contentAccessTypeEnum.optional(),
-  // Up to the topic slug width, so a topic the public list accepts is accepted
-  // here too (100 refused a real 101-120 character slug on /explore's
-  // signed-in sorts). A NUL is refused: Postgres refuses NUL in text.
+  // A category (topic) by its slug: the pieces filed in it, in the org when
+  // one is given (/explore's topics). It matched the legacy free-text
+  // `content.category` column until Codex-a6ofh.3.3, so /explore's signed-in
+  // sorts filtered by a slug nothing held. Up to the topic slug width, so a
+  // topic the public list accepts is accepted here too (100 refused a real
+  // 101-120 character slug). A NUL is refused: Postgres refuses NUL in text.
   category: z
     .string()
     .max(TOPIC_SLUG_MAX)
     .refine(hasNoNul, 'Category must not contain NUL')
     .optional(),
+  // One category, by id (the org studio's Category facet, Codex-a6ofh.3.3):
+  // the pieces filed in it. `category` above is the same filter by the
+  // category's slug (/explore's topics).
+  categoryId: uuidSchema.optional(),
   organizationId: uuidSchema.optional(),
+  // Where the studio list looks (Codex-a6ofh.3.2, the personal studio's
+  // "Where"): `personal` is the content filed under no org, which an
+  // optional uuid cannot say (left out, it means every org, which is how
+  // the personal list showed org pieces as its own). Leaving it out is
+  // everything; one org is `organizationId`. The studio list's alone:
+  // browse refuses it below.
+  scope: z.literal(CONTENT_LIST_SCOPE.PERSONAL).optional(),
+  // What the pieces need (Codex-a6ofh.3.4, a "Needs you" chip): one of the
+  // kinds `GET /api/content/attention` counts, matched by the same rule, so
+  // a chip lists what it counted. The studio list's alone: browse refuses it.
+  needs: z.enum(CONTENT_ATTENTION_KINDS).optional(),
   // A user id (BetterAuth text), not a uuid: uuidSchema refused every real
   // one, so /explore's creator filter 400'd (Codex-osuqt).
   creatorId: userIdSchema.optional(),
@@ -877,6 +906,43 @@ export const contentQuerySchema = paginationSchema.extend({
   sortOrder: sortOrderEnum.default('desc'),
 });
 
+/**
+ * Personal and an org at once is two answers to "where": refused, never one
+ * silently winning. In the schemas, so the web remote and the worker refuse
+ * it alike.
+ */
+function oneWhere(q: { scope?: string; organizationId?: string }): boolean {
+  return !(q.scope !== undefined && q.organizationId !== undefined);
+}
+const ONE_WHERE_REFUSAL = {
+  message: 'scope=personal reads content outside any org: drop organizationId',
+  path: ['scope'],
+};
+
+/** A stored status and a lifecycle at once would be two answers to "which": refused. */
+function oneStatus(q: { status?: string; lifecycle?: string }): boolean {
+  return !(q.status !== undefined && q.lifecycle !== undefined);
+}
+const ONE_STATUS_REFUSAL = {
+  message: 'lifecycle and status both narrow by status: send one',
+  path: ['lifecycle'],
+};
+
+/**
+ * Content query/filter schema
+ * Used for listing and searching content
+ * Extends pagination with content-specific filters and sorting
+ */
+export const contentQuerySchema = contentQueryFields
+  .extend({
+    // Each row's live categories too (Codex-a6ofh.3.3): the org studio's
+    // list names them. The badges and pickers that read this list leave it
+    // out, and skip the query. A studio read's alone: browse names none.
+    include: z.literal('categories').optional(),
+  })
+  .refine(oneWhere, ONE_WHERE_REFUSAL)
+  .refine(oneStatus, ONE_STATUS_REFUSAL);
+
 export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
 
 /**
@@ -889,17 +955,128 @@ export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
  * `contentQuerySchema` is reserved for studio-style queries where the
  * caller is browsing their OWN content (creator dashboards, drafts).
  *
- * Codex-q3zuf-style multi-tenant boundary protection.
+ * Codex-q3zuf-style multi-tenant boundary protection. The org is required by
+ * its type, so the inferred input says so too.
+ *
+ * The studio list's "Where" means nothing across creators: a `scope` is
+ * refused, so a caller never believes it narrowed a browse (Codex-a6ofh.3.2).
  */
-export const contentBrowseQuerySchema = contentQuerySchema.refine(
-  (q) => q.organizationId !== undefined,
-  {
-    message: 'organizationId is required for cross-creator browsing',
-    path: ['organizationId'],
-  }
-);
+export const contentBrowseQuerySchema = contentQueryFields.extend({
+  organizationId: uuidSchema,
+  scope: z.never().optional(),
+  // What a creator's own pieces need means nothing across creators either.
+  needs: z.never().optional(),
+  // Nor do its off-sale pieces: browse lists what is on sale.
+  lifecycle: z.never().optional(),
+});
 
 export type ContentBrowseQueryInput = z.infer<typeof contentBrowseQuerySchema>;
+
+/**
+ * `GET /api/content/attention` (Codex-a6ofh.3.4): where the "Needs you"
+ * counts look, as the studio list says it: one org (`organizationId`), the
+ * pieces under none (`scope=personal`), or, with neither, everywhere; both
+ * at once is refused (`oneWhere`). The list's other filters leave the counts
+ * alone (owner): they are a to-do, not a view.
+ */
+export const contentAttentionQuerySchema = contentQueryFields
+  .pick({ organizationId: true, scope: true })
+  .refine(oneWhere, ONE_WHERE_REFUSAL);
+
+export type ContentAttentionQueryInput = z.infer<
+  typeof contentAttentionQuerySchema
+>;
+
+/**
+ * `POST /api/content/:id/categories` (Codex-a6ofh.3.3): categories to ADD to a
+ * piece, keeping the ones it has. A `categoryIds` save replaces the whole set,
+ * so the list's bulk "Add to category" uses this instead. At least one; at
+ * most the per-piece limit, which the service also holds the piece's total to.
+ */
+export const addContentCategoriesSchema = z.object({
+  categoryIds: z.array(uuidSchema).min(1).max(CONTENT_MAX_CATEGORIES),
+});
+
+export type AddContentCategoriesInput = z.infer<
+  typeof addContentCategoriesSchema
+>;
+
+/**
+ * The pieces a bulk action takes (Codex-a6ofh.3.5): 1 to CONTENT_BULK_MAX
+ * ids, each once. A repeat is refused, never collapsed, so the answer keeps
+ * one result per id sent, in order.
+ */
+const contentBulkIdsField = z
+  .array(uuidSchema)
+  .min(1, 'Choose at least one piece')
+  .max(CONTENT_BULK_MAX, `At most ${CONTENT_BULK_MAX} pieces at a time`)
+  .refine((ids) => new Set(ids).size === ids.length, {
+    message: 'The same piece is listed twice',
+  });
+
+/** `POST /api/content/bulk/{publish,unpublish,delete}`. */
+export const contentBulkSchema = z.object({ ids: contentBulkIdsField });
+
+export type ContentBulkInput = z.infer<typeof contentBulkSchema>;
+
+/** `POST /api/content/bulk/categories`: the categories go to every piece. */
+export const contentBulkCategoriesSchema = contentBulkSchema.extend({
+  categoryIds: addContentCategoriesSchema.shape.categoryIds,
+});
+
+export type ContentBulkCategoriesInput = z.infer<
+  typeof contentBulkCategoriesSchema
+>;
+
+/**
+ * The fields of an update's access group (owner D-b2), as a `.pick` mask:
+ * the bulk access body is these and nothing else, and the service's
+ * "already reads so" check compares these.
+ */
+export const CONTENT_ACCESS_GROUP_FIELDS = {
+  isFree: true,
+  isPurchasable: true,
+  priceCents: true,
+  isTierGated: true,
+  includedInTierIds: true,
+  isFollowerGated: true,
+  isTeamOnly: true,
+} as const;
+
+/**
+ * Who can watch, and nothing else: the access group of an update (owner
+ * D-b2). Its fields are `updateContentSchema`'s own, and the whole of it is
+ * parsed by that schema too, so every cross-field rule an editor save is held
+ * to holds here, and a rule added there applies here without a copy. Strict:
+ * a title or a slug can't ride along on a bulk change.
+ */
+export const contentAccessGroupSchema = baseContentSchema
+  .pick(CONTENT_ACCESS_GROUP_FIELDS)
+  .partial()
+  .strict()
+  .refine((access) => Object.keys(access).length > 0, {
+    message: 'Say who can watch',
+  })
+  .superRefine((access, ctx) => {
+    const asUpdate = updateContentSchema.safeParse(access);
+    if (asUpdate.success) return;
+    for (const issue of asUpdate.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      });
+    }
+  });
+
+export type ContentAccessGroupInput = z.infer<typeof contentAccessGroupSchema>;
+
+/** `POST /api/content/bulk/access`: one access for every piece. */
+export const contentBulkAccessSchema = contentBulkSchema.extend({
+  access: contentAccessGroupSchema,
+});
+
+export type ContentBulkAccessInput = z.infer<typeof contentBulkAccessSchema>;
 
 /** Which items a library list keeps by what uses them (Codex-a6ofh.1.4). */
 export const MEDIA_USAGE_FILTERS = ['any', 'used', 'unused'] as const;

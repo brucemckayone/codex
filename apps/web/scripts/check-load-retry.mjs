@@ -98,22 +98,6 @@ export const OWNER = 'lib/components/studio/LoadFailedAlert.svelte';
  */
 export const ALLOWLIST = [
   {
-    file: 'src/lib/components/studio/content-list/NewContentMenu.svelte',
-    rule: 'derived-refresh',
-    expect: 1,
-    bead: 'Codex-a6ofh.3',
-    reason:
-      'The drafts Try again judges `failedAgain` on the new query; E3 fixes it and deletes this line',
-  },
-  {
-    file: 'src/lib/components/studio/media-library/StudioMediaLibrary.svelte',
-    rule: 'derived-refresh',
-    expect: 1,
-    bead: 'Codex-a6ofh.3',
-    reason:
-      "retryList judges the stray read's rejection; fixed on E3's branch, which deletes this line",
-  },
-  {
     file: 'src/lib/components/studio/media-library/MediaPickerDialog.svelte',
     rule: 'derived-refresh',
     expect: 1,

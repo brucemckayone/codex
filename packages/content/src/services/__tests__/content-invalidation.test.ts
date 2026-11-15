@@ -28,6 +28,7 @@ import {
   DEFAULT_MAX_LIBRARY_FANOUT,
   type InvalidationLogger,
   invalidateContentAccess,
+  invalidateContentAccessMany,
   invalidateOrgMembership,
   invalidatePlanSubscriberLibraries,
   type WaitUntilFn,
@@ -612,5 +613,173 @@ describe('invalidatePlanSubscriberLibraries', () => {
       CacheType.COLLECTION_ORG_CREATORS(ORG_SLUG)
     );
     await Promise.all(promises);
+  });
+});
+
+// ============================================================================
+// Tests — invalidateContentAccessMany (Codex-a6ofh.3.5)
+// ============================================================================
+
+describe('invalidateContentAccessMany', () => {
+  const OTHER_CONTENT = '33333333-3333-3333-3333-333333333333';
+  const OTHER_ORG = '44444444-4444-4444-4444-444444444444';
+
+  const callsTo = (invalidate: ReturnType<typeof vi.fn>, key: string) =>
+    invalidate.mock.calls.filter((args) => args[0] === key).length;
+
+  it('bumps each catalogue key once, however many pieces share it', async () => {
+    const db = makeDb();
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+
+    await invalidateContentAccessMany({
+      db,
+      cache,
+      waitUntil,
+      pieces: [
+        { id: CONTENT_ID, organizationId: ORG_ID },
+        { id: OTHER_CONTENT, organizationId: ORG_ID },
+        { id: 'p3', organizationId: OTHER_ORG },
+        { id: 'p4', organizationId: null },
+      ],
+      reason: 'content_deleted',
+    });
+    await Promise.all(promises);
+
+    expect(callsTo(invalidate, CacheType.COLLECTION_CONTENT_PUBLISHED)).toBe(1);
+    expect(callsTo(invalidate, CacheType.COLLECTION_ORG_CONTENT(ORG_ID))).toBe(
+      1
+    );
+    expect(
+      callsTo(invalidate, CacheType.COLLECTION_ORG_CONTENT(OTHER_ORG))
+    ).toBe(1);
+  });
+
+  it("bumps each user's library once, a buyer of two pieces and a member alike", async () => {
+    const db = makeDb({
+      purchases: [{ customerId: 'u-buyer' }, { customerId: 'u-buyer' }],
+      organizationMemberships: [{ userId: 'u-buyer' }, { userId: 'u-team' }],
+    });
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+
+    await invalidateContentAccessMany({
+      db,
+      cache,
+      waitUntil,
+      pieces: [
+        { id: CONTENT_ID, organizationId: ORG_ID },
+        { id: OTHER_CONTENT, organizationId: ORG_ID },
+      ],
+      reason: 'content_updated',
+    });
+    await Promise.all(promises);
+
+    expect(
+      callsTo(invalidate, CacheType.COLLECTION_USER_LIBRARY('u-buyer'))
+    ).toBe(1);
+    expect(
+      callsTo(invalidate, CacheType.COLLECTION_USER_LIBRARY('u-team'))
+    ).toBe(1);
+    // One read per source, never one per piece.
+    expect(db.query.purchases.findMany).toHaveBeenCalledTimes(1);
+    expect(db.query.organizationMemberships.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads no org people for pieces filed under no org', async () => {
+    const db = makeDb();
+    const { cache } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+
+    await invalidateContentAccessMany({
+      db,
+      cache,
+      waitUntil,
+      pieces: [{ id: CONTENT_ID, organizationId: null }],
+      reason: 'content_unpublished',
+    });
+    await Promise.all(promises);
+
+    expect(db.query.subscriptions.findMany).not.toHaveBeenCalled();
+    expect(db.query.organizationMemberships.findMany).not.toHaveBeenCalled();
+  });
+
+  it('skips the per-user bumps above the cap, and says so', async () => {
+    const db = makeDb({
+      purchases: [
+        { customerId: 'a' },
+        { customerId: 'b' },
+        { customerId: 'c' },
+      ],
+    });
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+    const logger = {
+      warn: vi.fn(),
+      info: vi.fn(),
+    } as unknown as InvalidationLogger;
+
+    await invalidateContentAccessMany({
+      db,
+      cache,
+      waitUntil,
+      pieces: [{ id: CONTENT_ID, organizationId: null }],
+      reason: 'content_deleted',
+      logger,
+      maxFanout: 2,
+    });
+    await Promise.all(promises);
+
+    const userBumps = invalidate.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].startsWith('user:')
+    );
+    expect(userBumps).toHaveLength(0);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'content-invalidation: fanout skipped (cap exceeded)',
+      expect.objectContaining({ userCount: 3, maxFanout: 2 })
+    );
+  });
+
+  it('leaves the catalogue keys to its caller with catalogue: false', async () => {
+    const db = makeDb({ purchases: [{ customerId: 'u-buyer' }] });
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+
+    await invalidateContentAccessMany({
+      db,
+      cache,
+      waitUntil,
+      pieces: [{ id: CONTENT_ID, organizationId: ORG_ID }],
+      reason: 'content_published',
+      catalogue: false,
+    });
+    await Promise.all(promises);
+
+    expect(invalidate).not.toHaveBeenCalledWith(
+      CacheType.COLLECTION_CONTENT_PUBLISHED
+    );
+    expect(invalidate).not.toHaveBeenCalledWith(
+      CacheType.COLLECTION_ORG_CONTENT(ORG_ID)
+    );
+    expect(invalidate).toHaveBeenCalledWith(
+      CacheType.COLLECTION_USER_LIBRARY('u-buyer')
+    );
+  });
+
+  it('does nothing for no pieces', async () => {
+    const db = makeDb();
+    const { cache, invalidate } = makeCache();
+    const { waitUntil } = makeWaitUntil();
+
+    await invalidateContentAccessMany({
+      db,
+      cache,
+      waitUntil,
+      pieces: [],
+      reason: 'content_deleted',
+    });
+
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(db.query.purchases.findMany).not.toHaveBeenCalled();
   });
 });

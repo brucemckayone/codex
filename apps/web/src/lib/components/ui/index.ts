@@ -6,6 +6,7 @@ export { Badge } from './Badge/index';
 export { Button } from './Button/index';
 export * as Card from './Card/index';
 export { default as EmptyState } from './EmptyState/EmptyState.svelte';
+export { default as FallbackImage } from './FallbackImage/FallbackImage.svelte';
 // Feedback
 export { default as ConfirmDialog } from './Feedback/ConfirmDialog.svelte';
 export { default as ErrorBoundary } from './Feedback/ErrorBoundary/ErrorBoundary.svelte';

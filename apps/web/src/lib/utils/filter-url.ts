@@ -11,6 +11,8 @@
  * the part of it worth pinning with tests.
  */
 
+import { uuidSchema } from '@codex/validation';
+
 /**
  * Apply a facet patch to `url` IN PLACE and return it, so successive patches
  * can accumulate on a single URL before a single navigation.
@@ -49,4 +51,26 @@ export function filterHref(
 ): string {
   const next = applyFilterPatch(new URL(url), patch, defaults);
   return `${next.pathname}${next.search}`;
+}
+
+/**
+ * A URL param read as one of the values a page offers: anything else (absent,
+ * stale, hand-typed) reads as `fallback`, so an old link shows the default
+ * view rather than a refusal.
+ */
+export function pickParam<T extends string>(
+  options: readonly T[],
+  raw: string | null,
+  fallback: T
+): T {
+  return options.find((option) => option === raw) ?? fallback;
+}
+
+/**
+ * A URL param read as an id (an item, an org), or null: only what the API's
+ * own `uuidSchema` takes passes, since a hand-typed `?item=x` would only be
+ * refused by the read.
+ */
+export function pickIdParam(raw: string | null): string | null {
+  return raw && uuidSchema.safeParse(raw).success ? raw : null;
 }

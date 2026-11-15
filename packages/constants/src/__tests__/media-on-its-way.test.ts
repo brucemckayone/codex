@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 // Through the package index, as the publish gate imports it.
 import {
   isMediaOnItsWay,
+  isUploadStalled,
   MEDIA_STATUS,
   MEDIA_UPLOAD_STALLED_AFTER_MS,
 } from '../index';
@@ -43,5 +44,28 @@ describe('isMediaOnItsWay (Publish when ready, Codex-a6ofh.2.7)', () => {
     MEDIA_STATUS.FAILED,
   ])('%s is not on its way: nothing is left to wait for', (status) => {
     expect(isMediaOnItsWay({ status, createdAt: ago(1000) }, NOW)).toBe(false);
+  });
+});
+
+describe('isUploadStalled (owner, 2026-11-12: an upload that stopped)', () => {
+  it('an upload stops past its stall line, never at it', () => {
+    const upload = (createdAt: Date | string) =>
+      isUploadStalled({ status: MEDIA_STATUS.UPLOADING, createdAt }, NOW);
+    expect(upload(ago(MEDIA_UPLOAD_STALLED_AFTER_MS))).toBe(false);
+    expect(upload(ago(MEDIA_UPLOAD_STALLED_AFTER_MS + 1))).toBe(true);
+    expect(upload(ago(MEDIA_UPLOAD_STALLED_AFTER_MS + 1).toISOString())).toBe(
+      true
+    );
+  });
+
+  it.each([
+    MEDIA_STATUS.UPLOADED,
+    MEDIA_STATUS.TRANSCODING,
+    MEDIA_STATUS.READY,
+    MEDIA_STATUS.FAILED,
+  ])('%s never reads as a stopped upload, however old', (status) => {
+    expect(
+      isUploadStalled({ status, createdAt: ago(30 * 24 * 3600 * 1000) }, NOW)
+    ).toBe(false);
   });
 });

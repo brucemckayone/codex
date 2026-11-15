@@ -1,0 +1,184 @@
+/**
+ * What the Delete dialog offers for the pieces it leaves alone, because
+ * people have them (Codex-a6ofh.3.5, owner D-b4): Unpublish instead takes
+ * down the live ones whose people keep them, and the dialog says so. It
+ * also says when unpublishing would end their playback too, since a Free
+ * piece is nobody's purchase (Codex-dz997, owner 2026-11-13): that one is
+ * not offered.
+ */
+import { CONTENT_STATUS } from '@codex/constants';
+import type { ContentWithRelations } from '$lib/types';
+import * as m from '$paraglide/messages';
+import { joinNames } from '../plan-picker/select-from-tier';
+import { isHeld, keepsWhenUnpublished } from './row-facts';
+
+/** A piece the dialog weighs, as the list holds it. */
+export type DeletePiece = Pick<
+  ContentWithRelations,
+  | 'id'
+  | 'title'
+  | 'slug'
+  | 'status'
+  | 'holderCount'
+  | 'courseOnly'
+  | 'isTeamOnly'
+  | 'isFollowerGated'
+  | 'isTierGated'
+  | 'priceCents'
+>;
+
+export interface UnpublishOffer {
+  /** The live pieces Unpublish instead takes down: their people keep them. */
+  ids: string[];
+  /** What unpublishing does for the people who have them; null when none is live. */
+  words: string | null;
+}
+
+/**
+ * The dialog's Unpublish instead, for the pieces it leaves alone, given
+ * every piece it was opened on (so a deleted one can share a title with a
+ * kept one, see `namer`). Only the live ones are weighed: a draft is not on sale. In a mix, the ones that
+ * would lose it come first and are said to stay up; then the ones the
+ * button takes down, last, beside the button, so its "it" or "them" can
+ * only be those. Pieces are named, never counted: two counts read alike
+ * and name nothing, and a bulk action holds at most CONTENT_BULK_MAX.
+ */
+export function unpublishOffer(pieces: readonly DeletePiece[]): UnpublishOffer {
+  const kept = pieces.filter(isHeld);
+  const live = kept.filter(
+    (piece) => piece.status === CONTENT_STATUS.PUBLISHED
+  );
+  const keeps = live.filter(keepsWhenUnpublished);
+  const ends = live.filter((piece) => !keepsWhenUnpublished(piece));
+  const nameOf = namer(pieces);
+  const parts: string[] = [];
+  if (ends.length > 0) {
+    parts.push(
+      keeps.length > 0
+        ? // A mix: some of several, so always by name.
+          named(ends, nameOf, {
+            named: m.studio_content_delete_unpublish_ends_named_stays,
+            namedMany: m.studio_content_delete_unpublish_ends_named_many_stays,
+          })
+        : whichOf(kept, ends, nameOf, {
+            it: m.studio_content_delete_unpublish_ends_it,
+            them: m.studio_content_delete_unpublish_ends_them,
+            named: m.studio_content_delete_unpublish_ends_named,
+            namedMany: m.studio_content_delete_unpublish_ends_named_many,
+          })
+    );
+  }
+  if (keeps.length > 0) {
+    parts.push(
+      whichOf(kept, keeps, nameOf, {
+        it: m.studio_content_delete_unpublish_keeps_it,
+        them: m.studio_content_delete_unpublish_keeps_them,
+        named: m.studio_content_delete_unpublish_keeps_named,
+        namedMany: m.studio_content_delete_unpublish_keeps_named_many,
+      })
+    );
+  }
+  return {
+    ids: keeps.map((piece) => piece.id),
+    words: parts.length > 0 ? parts.join(' ') : null,
+  };
+}
+
+interface NamedWords {
+  named: (args: { name: string }) => string;
+  namedMany: (args: { titles: string }) => string;
+}
+
+/**
+ * How the dialog names a piece: its title, quoted. Titles are not unique,
+ * and two pieces of one name can go opposite ways (one deleted, one left
+ * alone; one kept up, one that stays up), so a title any two of the
+ * dialog's pieces share also gives each its address: “Introduction”
+ * (/intro). The table shows it under the title; the grid shows titles only.
+ */
+function namer(pieces: readonly DeletePiece[]): (piece: DeletePiece) => string {
+  const uses = new Map<string, number>();
+  for (const piece of pieces) {
+    uses.set(piece.title, (uses.get(piece.title) ?? 0) + 1);
+  }
+  return (piece) =>
+    (uses.get(piece.title) ?? 0) > 1
+      ? `“${piece.title}” (/${piece.slug})`
+      : `“${piece.title}”`;
+}
+
+/**
+ * Words for some of the pieces left alone, so the creator can tell which:
+ * "it" when it is the only one, "them" when it is all of them, else by name.
+ */
+function whichOf(
+  kept: readonly DeletePiece[],
+  these: readonly DeletePiece[],
+  nameOf: (piece: DeletePiece) => string,
+  words: NamedWords & { it: () => string; them: () => string }
+): string {
+  if (kept.length === 1) return words.it();
+  if (these.length === kept.length) return words.them();
+  return named(these, nameOf, words);
+}
+
+/** One piece by its name; several by theirs ("“A”, “B” and “C”"). */
+function named(
+  these: readonly DeletePiece[],
+  nameOf: (piece: DeletePiece) => string,
+  words: NamedWords
+): string {
+  const [only] = these;
+  if (only && these.length === 1) return words.named({ name: nameOf(only) });
+  return words.namedMany({ titles: joinNames(these.map(nameOf)) });
+}
+
+/** The dialog's warning for the pieces people have: who, and what each way does. */
+export interface HeldNotice {
+  title: string;
+  body: string;
+}
+
+/**
+ * The warning, by how the dialog was opened (given every piece it was
+ * opened on): the row menu's one piece says by how many people; the bulk
+ * bar's names the one it leaves alone, or counts them. Null when nobody
+ * has any of them.
+ */
+export function heldNotice(
+  mode: 'one' | 'many',
+  pieces: readonly DeletePiece[],
+  unpublishWords: string | null
+): HeldNotice | null {
+  const kept = pieces.filter(isHeld);
+  const [only] = kept;
+  if (!only) return null;
+  const withUnpublish = (text: string) =>
+    unpublishWords ? `${text} ${unpublishWords}` : text;
+  const people = only.holderCount ?? 0;
+  if (mode === 'one') {
+    return {
+      title:
+        people === 1
+          ? m.studio_content_delete_bought_title_one()
+          : m.studio_content_delete_bought_title({ count: people }),
+      body: withUnpublish(m.studio_content_delete_bought_body()),
+    };
+  }
+  if (kept.length === 1) {
+    return {
+      title: m.studio_content_delete_kept_one_title({
+        name: namer(pieces)(only),
+      }),
+      body: withUnpublish(
+        people === 1
+          ? m.studio_content_delete_kept_one_body_single()
+          : m.studio_content_delete_kept_one_body({ count: people })
+      ),
+    };
+  }
+  return {
+    title: m.studio_content_delete_kept_title({ count: kept.length }),
+    body: withUnpublish(m.studio_content_delete_kept_body()),
+  };
+}

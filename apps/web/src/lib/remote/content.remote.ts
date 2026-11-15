@@ -15,7 +15,12 @@ import {
   CONTENT_THUMBNAIL_MAX_BYTES,
   CONTENT_THUMBNAIL_MAX_MB,
   CONTENT_THUMBNAIL_MIME_TYPES,
+  type ContentQueryInput,
   checkContentSlugSchema,
+  contentAttentionQuerySchema,
+  contentBulkAccessSchema,
+  contentBulkCategoriesSchema,
+  contentBulkSchema,
   contentDraftSchema,
   contentQuerySchema,
   PAGINATION_MAX_LIMIT,
@@ -33,6 +38,8 @@ import { createServerApi } from '$lib/server/api';
 import { withoutRawBody } from '$lib/server/content-detail';
 import { ApiError } from '$lib/server/errors';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
+import { logRefusedRead } from '$lib/server/read-failure';
+import { searchParamsOf } from '$lib/server/search-params';
 import {
   contentSlugFromTitle,
   freeSlugCandidates,
@@ -60,17 +67,112 @@ export const listContent = query(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
-    const searchParams = new URLSearchParams();
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.limit) searchParams.set('limit', String(params.limit));
-    if (params?.status) searchParams.set('status', params.status);
-    if (params?.organizationId)
-      searchParams.set('organizationId', params.organizationId);
-    if (params?.search) searchParams.set('search', params.search);
-    if (params?.sortBy) searchParams.set('sortBy', params.sortBy);
-    if (params?.sortOrder) searchParams.set('sortOrder', params.sortOrder);
+    const searchParams = searchParamsOf(params);
 
-    return api.content.list(searchParams.toString() ? searchParams : undefined);
+    // A 4xx keeps its status, so the list can tell a refusal from an outage
+    // (`PagedList.refused`); kit makes anything else a sanitised 500. Kit
+    // logs no forwarded 4xx, so it is logged here, for every page that reads
+    // this (the dashboard's onboarding count logs nothing of its own), with
+    // the args that tell its readers apart.
+    return forwardClientErrors(() =>
+      logRefusedRead(
+        {
+          refused: 'content.list_refused',
+          unavailable: 'content.list_unavailable',
+        },
+        listContentLog(params),
+        () =>
+          api.content.list(searchParams.toString() ? searchParams : undefined)
+      )
+    );
+  }
+);
+
+/**
+ * What a refused list read logs of its args: each filter by name, so the
+ * dashboard's count, the New menu's drafts and the list read apart. Never the
+ * text a creator typed: a search or a category slug is only "was there one".
+ * Named one by one, so a new free-text arg is not logged by default.
+ */
+function listContentLog(params: ContentQueryInput | undefined) {
+  return {
+    organizationId: params?.organizationId ?? null,
+    // Where it looked: the API's one scope, else one org, else everywhere.
+    scope: params?.scope ?? (params?.organizationId ? 'org' : 'all'),
+    page: params?.page,
+    limit: params?.limit,
+    statusFilter: params?.status ?? 'all',
+    // A status tab, or the New menu's drafts (Codex-a6ofh.3.6): one of a
+    // fixed list, as the tabs ask it.
+    lifecycle: params?.lifecycle ?? 'all',
+    contentType: params?.contentType ?? 'all',
+    accessType: params?.accessType ?? 'any',
+    sortBy: params?.sortBy,
+    sortOrder: params?.sortOrder,
+    hasSearch: params?.search !== undefined,
+    // The legacy slug, or the org studio's Category facet (Codex-a6ofh.3.3).
+    hasCategory:
+      params?.category !== undefined || params?.categoryId !== undefined,
+    // A "Needs you" chip's kind (Codex-a6ofh.3.4): one of a fixed list.
+    needs: params?.needs ?? 'none',
+  };
+}
+
+/**
+ * How the creator's content is filed (Codex-a6ofh.3.2): the personal
+ * studio's "Where" menu counts, and the personal dashboard's content tile.
+ * Decoration for the list, which reads its rows on its own: a failure leaves
+ * the menu without numbers.
+ *
+ * Forwarded and logged as `listContent` is: a 4xx keeps its status and is
+ * logged here at a signed-in read's level (a sign-out or a rate limit must
+ * not page as an error); a 5xx escapes to kit's `handleError`, which logs it.
+ */
+export const getContentWhereCounts = query(async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return forwardClientErrors(() =>
+    logRefusedRead(
+      {
+        refused: 'content.where_counts_refused',
+        unavailable: 'content.where_counts_unavailable',
+      },
+      {},
+      () => api.content.whereCounts()
+    )
+  );
+});
+
+/**
+ * What the creator's own pieces need, by kind (Codex-a6ofh.3.4): the content
+ * list's "Needs you" strip, counted across every page where the list looks.
+ * The list reads its rows on its own; a failed read is said by the strip,
+ * never shown as nothing needing you.
+ *
+ * Forwarded and logged as `getContentWhereCounts` is.
+ */
+export const getContentAttention = query(
+  contentAttentionQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const searchParams = searchParamsOf(params);
+    return forwardClientErrors(() =>
+      logRefusedRead(
+        {
+          refused: 'content.attention_refused',
+          unavailable: 'content.attention_unavailable',
+        },
+        {
+          organizationId: params.organizationId ?? null,
+          scope: params.scope ?? (params.organizationId ? 'org' : 'all'),
+        },
+        () =>
+          api.content.attention(
+            searchParams.toString() ? searchParams : undefined
+          )
+      )
+    );
   }
 );
 
@@ -389,6 +491,31 @@ export const deleteContent = command(z.string().uuid(), async (id) => {
     detailCodes: [ERROR_CODES.CONTENT_NOT_FOUND],
   });
 });
+
+/**
+ * One action on the content list's selection (Codex-a6ofh.3.5, owner
+ * "Bulk endpoints, one bump"): `POST /api/content/bulk/<action>`, at most
+ * CONTENT_BULK_MAX pieces, a result for each, in the order sent. A piece's
+ * own refusal is in its result; the call itself fails only for its body,
+ * the sign-in or the rate limit, which keep their words
+ * ({@link forwardClientErrors}).
+ */
+const contentBulkCommandSchema = z.discriminatedUnion('action', [
+  contentBulkSchema.extend({
+    action: z.enum(['publish', 'unpublish', 'delete']),
+  }),
+  contentBulkCategoriesSchema.extend({ action: z.literal('categories') }),
+  contentBulkAccessSchema.extend({ action: z.literal('access') }),
+]);
+
+export const runContentBulk = command(
+  contentBulkCommandSchema,
+  async (input) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return forwardClientErrors(() => api.content.bulk(input));
+  }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Content Status Transitions

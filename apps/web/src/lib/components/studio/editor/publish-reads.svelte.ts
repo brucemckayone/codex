@@ -21,6 +21,7 @@ import {
   payoutSetupHref,
 } from '$lib/utils/connect-readiness';
 import { logReadFailure } from '../media-library/log-read-failure';
+import { createStallClock } from '../media-library/stall-clock.svelte';
 import { describeTile } from '../media-library/tile-state';
 import { watchMediaItem } from '../media-library/watch-media-item.svelte';
 import { createPayoutsRead } from '../payouts-read.svelte';
@@ -40,41 +41,29 @@ interface PublishMedia {
   deleted: boolean;
   progress: number | null;
   /**
-   * Still uploading (not stalled), uploaded or transcoding: what the server
-   * schedules a publish when ready for (`isMediaOnItsWay`, Codex-a6ofh.2.7).
+   * Uploaded, transcoding, or an upload inside the server's stall line: what
+   * the server schedules a publish when ready for (`isMediaOnItsWay`,
+   * Codex-a6ofh.2.7). Never with `stalled`: nothing waits for a stop.
    */
   onItsWay: boolean;
+  /**
+   * An upload that stopped: this tab's queue says so (a row that failed, or
+   * an upload it let go of), or, with no word from it, the tile's rule
+   * (`describeTile`) does, a tab's report first, then the clock line
+   * (`createStallClock`). It needs new media.
+   */
+  stalled: boolean;
   /**
    * Failed, and a Try again can still get it there: the tile's rule
    * (`describeTile`), which is the server's `isTerminalTranscodeFailure`
    * turned round.
    */
   canRetry: boolean;
-  /** Uploading from this tab: closing it stops the upload. */
+  /** This tab's queue is sending it: closing the tab stops the upload. */
   uploadingHere: boolean;
 }
 
 export type PublishReads = ReturnType<typeof createPublishReads>;
-
-/**
- * This tab is sending its bytes: by its own queue first, as the status
- * socket hears of an upload only while it is open, then by the socket's
- * word for one this tab began.
- */
-function uploadingHere(
-  mediaId: string,
-  status: string,
-  live: { upload?: { here: boolean } | null } | undefined
-): boolean {
-  const queued = uploadQueue.items.some(
-    (item) =>
-      item.id === mediaId &&
-      (item.status === 'uploading' || item.status === 'completing')
-  );
-  return (
-    queued || (status === MEDIA_STATUS.UPLOADING && live?.upload?.here === true)
-  );
-}
 
 export function createPublishReads(options: PublishReadsOptions) {
   const { values } = options;
@@ -118,6 +107,8 @@ export function createPublishReads(options: PublishReadsOptions) {
       ? (content.mediaItem ?? null)
       : null;
   });
+  /** The stall line crossed while the step is open is seen: no read brings it. */
+  const stallClock = createStallClock(() => mediaRow);
   /** Deleted, or no longer theirs: the read says so. */
   const mediaGone = $derived(remoteErrorStatus(mediaQuery?.error) === 404);
   /** Never read: the arrival's status is not taken for the media's now. */
@@ -142,6 +133,7 @@ export function createPublishReads(options: PublishReadsOptions) {
         deleted: true,
         progress: null,
         onItsWay: false,
+        stalled: false,
         canRetry: false,
         uploadingHere: false,
       };
@@ -152,14 +144,32 @@ export function createPublishReads(options: PublishReadsOptions) {
     const deleted = mediaRow.deletedAt != null;
     const failure =
       status === MEDIA_STATUS.FAILED ? describeTile(mediaRow, live, 0) : null;
+    const upload = deleted ? null : uploadQueue.wordOn(mediaId);
+    const clock = stallClock.now;
+    // This tab's queue first, whatever the clock or the socket says: still
+    // sending is uploading, sent is the server's to move on, and failed or
+    // let go of has stopped. With no word from it, the tile's rule
+    // (`describeTile`) decides.
+    const stalled =
+      !deleted &&
+      status === MEDIA_STATUS.UPLOADING &&
+      (upload === 'stopped' ||
+        (upload === null &&
+          describeTile(mediaRow, live, 0, clock).kind === 'stopped'));
     return {
       status,
       deleted,
       progress: live?.progress ?? mediaRow.transcodingProgress ?? null,
       onItsWay:
-        !deleted && isMediaOnItsWay({ status, createdAt: mediaRow.createdAt }),
+        !deleted &&
+        !stalled &&
+        isMediaOnItsWay(
+          { status, createdAt: mediaRow.createdAt },
+          new Date(clock)
+        ),
+      stalled,
       canRetry: !deleted && failure?.kind === 'failed' && failure.canRetry,
-      uploadingHere: !deleted && uploadingHere(mediaId, status, live),
+      uploadingHere: upload === 'sending',
     };
   });
 

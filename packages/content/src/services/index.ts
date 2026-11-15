@@ -13,12 +13,15 @@ export {
   type ContentInvalidationReason,
   DEFAULT_MAX_LIBRARY_FANOUT,
   type InvalidateContentAccessArgs,
+  type InvalidateContentAccessManyArgs,
   type InvalidateOrgMembershipArgs,
   type InvalidatePlanSubscriberLibrariesArgs,
   type InvalidationLogger,
   invalidateContentAccess,
+  invalidateContentAccessMany,
   invalidateOrgMembership,
   invalidatePlanSubscriberLibraries,
+  orgsOf,
   type WaitUntilFn,
 } from './content-invalidation';
 // Content Service

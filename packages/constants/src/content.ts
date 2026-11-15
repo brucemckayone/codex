@@ -9,6 +9,58 @@ export const CONTENT_STATUS = {
   ARCHIVED: 'archived',
 } as const;
 
+/**
+ * Where the studio list looks (`GET /api/content?scope=`, Codex-a6ofh.3.2):
+ * `personal` is the content filed under no org. Leaving it out is every org;
+ * one org is `organizationId`.
+ */
+export const CONTENT_LIST_SCOPE = {
+  PERSONAL: 'personal',
+} as const;
+
+/**
+ * The most categories one piece can be filed in (Codex-a6ofh.3.3): the
+ * editor's save sets at most this many, and adding to a piece's set refuses
+ * past it, so the two writes keep one limit.
+ */
+export const CONTENT_MAX_CATEGORIES = 20;
+
+/**
+ * The most pieces one bulk action takes (Codex-a6ofh.3.5, owner D-b3): the
+ * content list holds at most this many selected, and each `POST
+ * /api/content/bulk/*` refuses more. One request then stays inside a worker's
+ * time, and a bulk delete removes at most this many per `strict` hit.
+ */
+export const CONTENT_BULK_MAX = 15;
+
+/**
+ * What a piece needs from its creator: the content list's "Needs you" chips
+ * (Codex-a6ofh.3.4, owner 2026-11-12), and its `?needs=` filter. A piece is
+ * one kind at most, taken in this order, the order the row's own line reads
+ * it (the web's `rowLine`), so a chip, its rows and their words agree:
+ *
+ * - `live-media-gone`: it has been live and its media is deleted or failed;
+ * - `scheduled`: a draft set to go live when its media is ready;
+ * - `didnt-go-live`: a draft whose scheduled publish was refused;
+ * - `media-gone`: a draft whose media is deleted, failed, or a stalled upload,
+ *   which nothing makes ready by itself ("need new media");
+ * - `processing`: a draft whose media is on its way ({@link isMediaOnItsWay});
+ * - `ready`: a draft that passes every publish rule now.
+ */
+export const CONTENT_ATTENTION_KINDS = [
+  'live-media-gone',
+  'scheduled',
+  'didnt-go-live',
+  'media-gone',
+  'processing',
+  'ready',
+] as const;
+
+export type ContentAttentionKind = (typeof CONTENT_ATTENTION_KINDS)[number];
+
+/** `GET /api/content/attention`: how many of the creator's pieces are each kind. */
+export type ContentAttentionCounts = Record<ContentAttentionKind, number>;
+
 /** What {@link hasBeenLive} reads of a piece; the web sends `publishedAt` as a string. */
 export interface PublicationState {
   status: string;
@@ -44,6 +96,38 @@ export function hasBeenLive(piece: PublicationState): boolean {
   return piece.status !== CONTENT_STATUS.DRAFT || piece.publishedAt != null;
 }
 
+/**
+ * Where a piece is in its life, as the studio list's status tabs ask
+ * (Codex-a6ofh.3.6, owner 2026-11-13): a draft that was never live, a piece
+ * on sale, or one that was live and is not on sale now ({@link hasBeenLive}
+ * and not published: archived, or a draft again). Its buyers keep an
+ * off-sale piece. Derived from `status` and `publishedAt`, never stored;
+ * `GET /api/content?lifecycle=` asks the same in SQL.
+ */
+export const CONTENT_LIFECYCLE = {
+  DRAFT: 'draft',
+  PUBLISHED: 'published',
+  OFF_SALE: 'off-sale',
+} as const;
+
+export type ContentLifecycle =
+  (typeof CONTENT_LIFECYCLE)[keyof typeof CONTENT_LIFECYCLE];
+
+export const CONTENT_LIFECYCLES = [
+  CONTENT_LIFECYCLE.DRAFT,
+  CONTENT_LIFECYCLE.PUBLISHED,
+  CONTENT_LIFECYCLE.OFF_SALE,
+] as const;
+
+export function contentLifecycle(piece: PublicationState): ContentLifecycle {
+  if (piece.status === CONTENT_STATUS.PUBLISHED) {
+    return CONTENT_LIFECYCLE.PUBLISHED;
+  }
+  return hasBeenLive(piece)
+    ? CONTENT_LIFECYCLE.OFF_SALE
+    : CONTENT_LIFECYCLE.DRAFT;
+}
+
 export const MEDIA_STATUS = {
   UPLOADING: 'uploading',
   UPLOADED: 'uploaded',
@@ -77,6 +161,21 @@ export const MEDIA_UPLOAD_STALLED_AFTER_MS =
  */
 export function uploadStallsAt(createdAt: Date | string): number {
   return new Date(createdAt).getTime() + MEDIA_UPLOAD_STALLED_AFTER_MS;
+}
+
+/**
+ * An upload that stopped: still `uploading` past {@link uploadStallsAt}'s
+ * line. Nothing makes it ready by itself, so a draft playing it needs new
+ * media, and its checklist says the upload stopped (owner, 2026-11-12).
+ */
+export function isUploadStalled(
+  media: { status: string; createdAt: Date | string },
+  now: Date = new Date()
+): boolean {
+  return (
+    media.status === MEDIA_STATUS.UPLOADING &&
+    uploadStallsAt(media.createdAt) < now.getTime()
+  );
 }
 
 /**
@@ -127,8 +226,7 @@ export function isMediaOnItsWay(
     return true;
   }
   return (
-    media.status === MEDIA_STATUS.UPLOADING &&
-    uploadStallsAt(media.createdAt) >= now.getTime()
+    media.status === MEDIA_STATUS.UPLOADING && !isUploadStalled(media, now)
   );
 }
 

@@ -17,6 +17,7 @@ import {
   listContent,
   refreshListContent,
   resetListContent,
+  useKitQuery,
 } from '../../__fixtures__/list-content.mock.svelte';
 import NewContentMenu from '../NewContentMenu.svelte';
 
@@ -100,7 +101,7 @@ describe('NewContentMenu', () => {
 
     expect(listContent).toHaveBeenCalledWith({
       organizationId: 'org-1',
-      status: 'draft',
+      lifecycle: 'draft',
       page: 1,
       limit: 3,
       sortBy: 'updatedAt',
@@ -113,11 +114,15 @@ describe('NewContentMenu', () => {
     expect(trigger()?.getAttribute('aria-label')).toBe('New');
   });
 
-  test('the personal studio asks for no org', async () => {
+  // The personal list opens on Personal (Codex-a6ofh.3.2): drafts asked for
+  // with no org spanned every org, so "All drafts (3)" opened a list of 1.
+  test('the personal studio offers its personal drafts, as its list shows them', async () => {
     render(null);
     await openMenu();
 
-    expect(listContent.mock.calls[0]?.[0]).not.toHaveProperty('organizationId');
+    const args = listContent.mock.calls[0]?.[0];
+    expect(args).toMatchObject({ scope: 'personal', lifecycle: 'draft' });
+    expect(args).not.toHaveProperty('organizationId');
   });
 
   test('says it is finding the drafts, and offers the three kinds meanwhile', async () => {
@@ -160,27 +165,31 @@ describe('NewContentMenu', () => {
     expect(menuText()).not.toContain('Finding your drafts…');
   });
 
-  // Codex-a6ofh.2, the epic review: the list asks for status=draft, which an
-  // unpublished piece has too. It is off sale and opens in the live editor,
-  // so it is no draft to continue.
-  test('a piece unpublished since is not offered as a draft to continue', async () => {
+  // Codex-a6ofh.2, the epic review: an unpublished piece is a draft by its
+  // stored status, but off sale: it opens in the live editor, so it is no
+  // draft to continue. The menu asks for the drafts never live, the Drafts
+  // tab's own set (Codex-a6ofh.3.6). Filtered after a page of three, the
+  // newest three all off sale offered none, and "All drafts (n)" counted
+  // pieces the tab leaves out.
+  test('asks for the drafts never live, and offers each one it gets', async () => {
     render();
     await openMenu();
+    const args = listContent.mock.calls[0]?.[0];
+    expect(args).toMatchObject({ lifecycle: 'draft' });
+    expect(args).not.toHaveProperty('status');
+
     landContent(
       [
         draftRow({ id: 'c1', title: 'Runes deep dive' }),
-        draftRow({
-          id: 'c2',
-          title: 'Off sale now',
-          publishedAt: new Date('2026-11-01T09:00:00.000Z'),
-        }),
+        draftRow({ id: 'c2', title: 'Signals primer' }),
       ],
-      2
+      5
     );
     await settle();
 
     expect(menuText()).toContain('Runes deep dive');
-    expect(menuText()).not.toContain('Off sale now');
+    expect(menuText()).toContain('Signals primer');
+    expect(menuText()).toContain('All drafts (5)');
   });
 
   test('no drafts: straight to the kinds, with nothing said about drafts', async () => {
@@ -252,6 +261,29 @@ describe('NewContentMenu', () => {
     fail({ status: 503, body: { message: 'Still down' } });
     await settle();
 
+    expect(menuText()).toContain('Still couldn’t load your drafts.');
+    expect(isOpen()).toBe(true);
+  });
+
+  // As kit does it (Codex-if444's census): a Try again on a query whose
+  // first read failed hands a menu that tracks the query a new one, still
+  // loading, and the read it was judging fails again unseen.
+  test('a Try again that fails again says so, though kit hands over a new query', async () => {
+    const kit = useKitQuery();
+    render();
+    await openMenu();
+    const held = kit.held();
+    kit.fail();
+    await settle();
+    expect(menuText()).toContain('Couldn’t load your drafts.');
+
+    document.querySelector<HTMLElement>('.new-menu-retry')?.click();
+    await settle();
+    expect(kit.refreshes(held)).toBe(1);
+    expect(kit.held()).not.toBe(held); // kit made a new one; the menu keeps its own
+
+    kit.fail({ status: 503, body: { message: 'Still down' } }, held);
+    await settle();
     expect(menuText()).toContain('Still couldn’t load your drafts.');
     expect(isOpen()).toBe(true);
   });

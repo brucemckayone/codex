@@ -2562,6 +2562,221 @@ describe('ContentService', () => {
         expect(result.items.some((item) => item.id === contentId)).toBe(true);
       }
     });
+
+    // The studio list's sorts (Codex-a6ofh.3.1). Each test has a creator of
+    // its own, so the rows the other tests leave behind cannot reorder it.
+    describe('sort order', () => {
+      async function piecesFor(
+        owner: string,
+        count: number
+      ): Promise<string[]> {
+        const ids: string[] = [];
+        for (let i = 0; i < count; i++) {
+          const created = await service.create(
+            {
+              title: `Sorted ${i}`,
+              slug: createUniqueSlug(`sorted-${i}`),
+              contentType: 'written',
+              tags: [],
+            },
+            owner
+          );
+          ids.push(created.id);
+        }
+        return ids;
+      }
+
+      it('puts drafts never published LAST on "Recently published"', async () => {
+        const [owner] = await seedTestUsers(db, 1);
+        const [older, newer, draft] = await piecesFor(owner!, 3);
+        await db
+          .update(content)
+          .set({
+            status: 'published',
+            publishedAt: new Date('2026-01-01T00:00:00Z'),
+          })
+          .where(eq(content.id, older!));
+        await db
+          .update(content)
+          .set({
+            status: 'published',
+            publishedAt: new Date('2026-02-01T00:00:00Z'),
+          })
+          .where(eq(content.id, newer!));
+
+        const result = await service.list(owner!, {
+          sortBy: 'publishedAt',
+          sortOrder: 'desc',
+        });
+
+        // Postgres sorts NULL first descending: the draft led the list.
+        expect(result.items.map((item) => item.id)).toEqual([
+          newer,
+          older,
+          draft,
+        ]);
+      });
+
+      it('breaks a tie newest first, then by id, so pages never repeat or skip a row', async () => {
+        // Five pieces at 0 views: one tie, broken by when each was made.
+        // Two share a moment, so only the id orders them, and they sit at
+        // places 2 and 3: across the page 1/2 boundary, where a missing id
+        // key repeats one and skips the other. The pair is one written
+        // before the other whose ids sort the other way, so a tie left in
+        // write order is wrong every run, not by chance. 5 random ids lack
+        // such a pair 1 draw in 120, so that draw is made again (a fresh
+        // owner: the list is theirs alone). The other three are dated
+        // newest first in DESCENDING id order, so "newest first" is never id
+        // order: an order that drops createdAt fails every run too, where
+        // write order would pass it 5 runs in 120.
+        const draw = async () => {
+          const [owner] = await seedTestUsers(db, 1);
+          const ids = await piecesFor(owner!, 5);
+          const pair = ids.flatMap((first, i) =>
+            ids
+              .slice(i + 1)
+              .filter((later) => later < first)
+              .map((later) => [first, later] as const)
+          )[0];
+          return { owner: owner!, ids, pair };
+        };
+        let drawn = await draw();
+        for (let again = 0; !drawn.pair && again < 4; again++) {
+          drawn = await draw();
+        }
+        const { owner, ids, pair: inverted } = drawn;
+        if (!inverted) throw new Error('5 draws without an inverted pair');
+        const others = ids
+          .filter((id) => !inverted.includes(id))
+          .sort()
+          .reverse();
+        const made = new Map<string, string>([
+          [others[0]!, '2026-01-05T00:00:00Z'],
+          [inverted[0], '2026-01-04T00:00:00Z'],
+          [inverted[1], '2026-01-04T00:00:00Z'],
+          [others[1]!, '2026-01-02T00:00:00Z'],
+          [others[2]!, '2026-01-01T00:00:00Z'],
+        ]);
+        for (const [id, at] of made) {
+          await db
+            .update(content)
+            .set({ createdAt: new Date(at) })
+            .where(eq(content.id, id));
+        }
+
+        const pages = [];
+        for (const page of [1, 2, 3]) {
+          pages.push(
+            await service.list(
+              owner!,
+              { sortBy: 'viewCount', sortOrder: 'desc' },
+              { page, limit: 2 }
+            )
+          );
+        }
+        const paged = pages.flatMap((result) =>
+          result.items.map((item) => item.id)
+        );
+
+        // Newest first, the same on every page; the id orders the two made
+        // at the same moment, and each row shows exactly once (five ids, all
+        // distinct, so a repeat or a skip fails this too).
+        const sameMoment = [...inverted].sort();
+        expect(paged).toEqual([others[0], ...sameMoment, others[1], others[2]]);
+      });
+    });
+  });
+
+  /**
+   * The personal studio's "Where" (Codex-a6ofh.3.2): its list sent no org,
+   * which reads as every org, so org pieces showed as personal ones.
+   */
+  describe('where a piece is filed', () => {
+    async function orgFor(owner: string) {
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      await joinTeam(db, org.id, owner);
+      return org;
+    }
+
+    async function pieceFor(owner: string, organizationId?: string) {
+      const created = await service.create(
+        {
+          title: 'Filed piece',
+          slug: createUniqueSlug('filed'),
+          contentType: 'written',
+          tags: [],
+          ...(organizationId && { organizationId }),
+        },
+        owner
+      );
+      return created.id;
+    }
+
+    it('the personal list (organizationId null) holds no org piece', async () => {
+      const [owner] = await seedTestUsers(db, 1);
+      const org = await orgFor(owner!);
+      const personal = [await pieceFor(owner!), await pieceFor(owner!)];
+      await pieceFor(owner!, org.id);
+
+      const result = await service.list(
+        owner!,
+        { organizationId: null },
+        { page: 1, limit: 20 }
+      );
+
+      expect(result.items.map((item) => item.id).sort()).toEqual(
+        [...personal].sort()
+      );
+      expect(result.pagination.total).toBe(2);
+    });
+
+    it('counts the creator’s own live pieces by where each is filed', async () => {
+      const [owner, stranger] = await seedTestUsers(db, 2);
+      const alpha = await orgFor(owner!);
+      const beta = await orgFor(owner!);
+      await db
+        .update(organizations)
+        .set({ name: 'Alpha studio' })
+        .where(eq(organizations.id, alpha.id));
+      await db
+        .update(organizations)
+        .set({ name: 'Beta studio' })
+        .where(eq(organizations.id, beta.id));
+
+      await pieceFor(owner!);
+      const deleted = await pieceFor(owner!);
+      await service.delete(deleted, owner!);
+      await pieceFor(owner!, beta.id);
+      await pieceFor(owner!, alpha.id);
+      await pieceFor(owner!, alpha.id);
+      // Another creator's piece in the same org is never counted.
+      await joinTeam(db, alpha.id, stranger!);
+      await pieceFor(stranger!, alpha.id);
+
+      expect(await service.whereCounts(owner!)).toEqual({
+        all: 4,
+        personal: 1,
+        orgs: [
+          { id: alpha.id, name: 'Alpha studio', count: 2 },
+          { id: beta.id, name: 'Beta studio', count: 1 },
+        ],
+      });
+    });
+
+    it('a creator with nothing counts zero everywhere', async () => {
+      const [owner] = await seedTestUsers(db, 1);
+
+      expect(await service.whereCounts(owner!)).toEqual({
+        all: 0,
+        personal: 0,
+        orgs: [],
+      });
+    });
   });
 
   describe('listPublic', () => {
