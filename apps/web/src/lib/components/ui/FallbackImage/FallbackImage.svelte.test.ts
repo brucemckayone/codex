@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   createRawSnippet,
   flushSync,
@@ -6,6 +6,11 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import FallbackImage from './FallbackImage.svelte';
+
+vi.mock('$lib/observability', () => ({
+  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+const { logger } = await import('$lib/observability');
 
 /**
  * FallbackImage (Codex-a6ofh.3.6): a missing or failed picture shows the
@@ -80,6 +85,29 @@ describe('FallbackImage', () => {
     expect(img()).toBe(before);
     expect(img()?.style.display).toBe('none');
     expect(shownFallback()).not.toBeNull();
+  });
+
+  // With the broken glyph gone, a failure would be silent (review): it is
+  // logged once per file, by host and file name, never its path.
+  test('a failure is logged once, by host and file, never the path', () => {
+    vi.mocked(logger.warn).mockClear();
+    render({ src: 'https://cdn.example.test/creator-1/media-2/gone.webp' });
+    img()?.dispatchEvent(new Event('error'));
+    flushSync();
+    unmount(component);
+    target.remove();
+    render({ src: 'https://cdn.example.test/creator-1/media-2/gone.webp' });
+    img()?.dispatchEvent(new Event('error'));
+    flushSync();
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('image.fallback_shown', {
+      host: 'cdn.example.test',
+      file: 'gone.webp',
+    });
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain(
+      'creator-1'
+    );
   });
 
   test('a new picture after a failure is tried afresh', () => {

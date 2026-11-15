@@ -102,6 +102,9 @@ function listContentLog(params: ContentQueryInput | undefined) {
     page: params?.page,
     limit: params?.limit,
     statusFilter: params?.status ?? 'all',
+    // A status tab, or the New menu's drafts (Codex-a6ofh.3.6): one of a
+    // fixed list, as the tabs ask it.
+    lifecycle: params?.lifecycle ?? 'all',
     contentType: params?.contentType ?? 'all',
     accessType: params?.accessType ?? 'any',
     sortBy: params?.sortBy,

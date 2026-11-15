@@ -17,6 +17,7 @@ import { getMyOrganizations } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { resolveMembershipWithRetry } from '$lib/server/membership-retry';
+import { logSignedInReadFailure } from '$lib/server/read-failure';
 import type { LayoutServerLoad } from './$types';
 
 /**
@@ -177,8 +178,18 @@ export const load: LayoutServerLoad = async ({
     draftParams.set('page', '1');
     const draftResult = await api.content.list(draftParams);
     draftCount = draftResult?.pagination?.total ?? 0;
-  } catch {
-    // Non-critical — badge just won't show
+  } catch (failure) {
+    // The badge just won't show, but a refusal or an outage is logged, never
+    // read as "no drafts" in silence: the personal studio's own rule
+    // (Codex-a6ofh.3.2), missed here until the count became the Drafts tab's.
+    logSignedInReadFailure(
+      {
+        refused: 'studio.draft_badge_refused',
+        unavailable: 'studio.draft_badge_unavailable',
+      },
+      { scope: 'org', organizationId: org.id },
+      failure
+    );
   }
 
   const orgs = (orgsResult ?? []).map((o) => ({

@@ -145,6 +145,8 @@
     page: args.page,
     ...whereLog(args),
     statusFilter: args.status ?? 'all',
+    // The tab (Codex-a6ofh.3.6): the tabs ask a lifecycle, not a status.
+    lifecycle: args.lifecycle ?? 'all',
     type: args.contentType ?? 'all',
     access: args.accessType ?? 'any',
     sortBy: args.sortBy,

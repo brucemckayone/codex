@@ -2734,9 +2734,13 @@ export class ContentService extends BaseService {
         whereConditions.push(eq(content.status, filters.status));
       }
       // A status tab (`lifecycleCondition`): a never-live draft, on sale, or
-      // off sale. On the where, before the count, so the totals are its.
+      // off sale. On the where, before the count, so the totals are its; as
+      // a semi-join, as `needs` is, since this where feeds a relational
+      // query (`ownPieces`). Studio only: browse refused it above.
       if (filters.lifecycle) {
-        whereConditions.push(lifecycleCondition(filters.lifecycle));
+        whereConditions.push(
+          this.ownPieces(creatorId, lifecycleCondition(filters.lifecycle))
+        );
       }
       if (filters.contentType) {
         whereConditions.push(eq(content.contentType, filters.contentType));
@@ -3378,18 +3382,28 @@ export class ContentService extends BaseService {
     organizationId: string | null | undefined
   ): Promise<SQL> {
     if (kind !== 'ready') {
-      return inArray(
-        content.id,
-        this.db
-          .select({ id: content.id })
-          .from(content)
-          .where(
-            and(scopedNotDeleted(content, creatorId), attentionCondition(kind))
-          )
-      );
+      return this.ownPieces(creatorId, attentionCondition(kind));
     }
     const ids = await this.readyIds(creatorId, organizationId);
     return ids.length > 0 ? inArray(content.id, ids) : sql`false`;
+  }
+
+  /**
+   * A `content-attention` predicate (a "Needs you" kind, a status tab) as
+   * the list's where can take it: the creator's pieces it holds for, as a
+   * semi-join over a select of their own. Never the predicate itself in the
+   * `findMany` where, which renders a raw `sql`'s columns as the root
+   * table's (`needsCondition` says how that bit), so a predicate that reads
+   * another table one day cannot quietly match the wrong pieces.
+   */
+  private ownPieces(creatorId: string, condition: SQL): SQL {
+    return inArray(
+      content.id,
+      this.db
+        .select({ id: content.id })
+        .from(content)
+        .where(and(scopedNotDeleted(content, creatorId), condition))
+    );
   }
 
   /**

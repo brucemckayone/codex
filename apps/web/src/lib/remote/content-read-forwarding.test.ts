@@ -342,6 +342,35 @@ describe.each([
 });
 
 /**
+ * A status tab asks a lifecycle, not a status (Codex-a6ofh.3.6): a refused
+ * Drafts or Off sale read names the tab it asked, so it is told apart from
+ * a read of the whole list (review: it logged `statusFilter: 'all'`).
+ */
+describe('listContent: the tab it asked', () => {
+  const lines = () =>
+    vi
+      .mocked(logger.warn)
+      .mock.calls.filter(([event]) => event === 'content.list_refused');
+
+  it('a refused tab read names its lifecycle', async () => {
+    workerAnswers(401, 'Authentication required');
+    await rejection(
+      remote.listContent({ page: 1, limit: 24, lifecycle: 'off-sale' })
+    );
+    expect(lines()[0]?.[1]).toMatchObject({
+      lifecycle: 'off-sale',
+      statusFilter: 'all',
+    });
+  });
+
+  it('a read of every piece says so', async () => {
+    workerAnswers(401, 'Authentication required');
+    await rejection(remote.listContent({ page: 1, limit: 24 }));
+    expect(lines()[0]?.[1]).toMatchObject({ lifecycle: 'all' });
+  });
+});
+
+/**
  * An org's categories forward and log as the lists do (Codex-a6ofh.3.3):
  * the content list's Category facet joined the management page and the
  * editor on this read, which let the worker's ApiError escape, so a

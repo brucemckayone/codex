@@ -68,7 +68,8 @@ const isDraft = allOf(
  * `contentLifecycle` (`@codex/constants`) in SQL: the studio list's status
  * tabs (Codex-a6ofh.3.6). A draft is `isDraft`, the same never-live draft
  * the "Needs you" kinds count, so a tab and a chip agree; off sale is the
- * rest of the pieces not on sale (archived, or a draft once live).
+ * rest of the pieces not on sale (archived, or a draft once live). The list
+ * takes it as the kinds are taken, through `ContentService.ownPieces`.
  */
 export function lifecycleCondition(lifecycle: ContentLifecycle): SQL {
   switch (lifecycle) {

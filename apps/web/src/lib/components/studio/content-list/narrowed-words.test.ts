@@ -67,11 +67,13 @@ describe('narrowedBy', () => {
     ).toEqual([named(m.studio_content_where_label(), 'Studio Alpha')]);
   });
 
-  it('leaves out a filter whose choice it has no name for yet', () => {
+  // Naming only the type would say videos alone match nothing, and hide the
+  // category that narrows the list (review): "these filters" says no less.
+  it('names none when one filter has no name yet', () => {
     // The categories not read: the menu has no Q&A to name.
     expect(
       narrowedBy(state(`?category=${CAT}&type=video`), null, ORG, ORG_FACETS)
-    ).toEqual([named(m.media_filter_type_label(), 'Video')]);
+    ).toEqual([]);
   });
 
   it('names nothing on the whole list', () => {

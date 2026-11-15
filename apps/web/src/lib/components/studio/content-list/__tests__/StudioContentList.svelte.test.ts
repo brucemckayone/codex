@@ -623,7 +623,29 @@ describe('StudioContentList: Show more', () => {
     expect(logReadFailure).toHaveBeenCalledWith(
       'studio_content.show_more_failed',
       expect.any(Error),
-      expect.objectContaining({ page: 2, statusFilter: 'all', type: 'video' })
+      expect.objectContaining({
+        page: 2,
+        lifecycle: 'all',
+        statusFilter: 'all',
+        type: 'video',
+      })
+    );
+  });
+
+  // The tabs ask a lifecycle (Codex-a6ofh.3.6 review): a Drafts page that
+  // failed names the tab, not a read of every piece.
+  test('a page that failed on a tab names the tab', async () => {
+    s.first = { current: pageOf([piece(1)], 2), error: undefined };
+    s.later.set(2, new Error('Down'));
+    render('?status=draft');
+
+    button(/Show more/)?.click();
+    await settle();
+
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.show_more_failed',
+      expect.any(Error),
+      expect.objectContaining({ page: 2, lifecycle: 'draft' })
     );
   });
 });
