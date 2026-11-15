@@ -46,7 +46,7 @@ export const STATUS_OPTIONS: readonly ListOption<ContentStatusFilter>[] = [
   },
 ];
 
-export const TYPE_OPTIONS: readonly ListOption<ListType>[] = [
+const TYPE_OPTIONS: readonly ListOption<ListType>[] = [
   { value: 'all', label: () => m.media_filter_any() },
   { value: CONTENT_TYPES.VIDEO, label: () => m.content_type_video() },
   { value: CONTENT_TYPES.AUDIO, label: () => m.content_type_audio() },
@@ -54,7 +54,7 @@ export const TYPE_OPTIONS: readonly ListOption<ListType>[] = [
 ];
 
 /** Mockup L1 note 3: Free, Paid, Subscribers, Followers, Team, Portal only. */
-export const ACCESS_OPTIONS: readonly ListOption<ListAccess>[] = [
+const ACCESS_OPTIONS: readonly ListOption<ListAccess>[] = [
   { value: 'any', label: () => m.media_filter_any() },
   {
     value: CONTENT_ACCESS_TYPE.FREE,
