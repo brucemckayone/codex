@@ -366,7 +366,27 @@ describe('listContent: the tab it asked', () => {
   it('a read of every piece says so', async () => {
     workerAnswers(401, 'Authentication required');
     await rejection(remote.listContent({ page: 1, limit: 24 }));
-    expect(lines()[0]?.[1]).toMatchObject({ lifecycle: 'all' });
+    expect(lines()[0]?.[1]).toMatchObject({
+      lifecycle: 'all',
+      hasCategory: false,
+    });
+  });
+
+  // The org studio's Category facet sends `categoryId`, not the legacy
+  // `category` slug (review round 2): its refusal says a category narrowed.
+  it('a refused category read says a category was asked, never which', async () => {
+    const category = '3c111111-1111-4111-8111-111111111aaa';
+    workerAnswers(401, 'Authentication required');
+    await rejection(
+      remote.listContent({
+        page: 1,
+        limit: 24,
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+        categoryId: category,
+      })
+    );
+    expect(lines()[0]?.[1]).toMatchObject({ hasCategory: true });
+    expect(JSON.stringify(lines())).not.toContain(category);
   });
 });
 

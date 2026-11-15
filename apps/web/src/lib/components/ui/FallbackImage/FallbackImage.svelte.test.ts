@@ -88,26 +88,53 @@ describe('FallbackImage', () => {
   });
 
   // With the broken glyph gone, a failure would be silent (review): it is
-  // logged once per file, by host and file name, never its path.
-  test('a failure is logged once, by host and file, never the path', () => {
+  // logged once per file, by host, kind and file name, never its path.
+  test('a failure is logged once, by host, kind and file, never the path', () => {
     vi.mocked(logger.warn).mockClear();
-    render({ src: 'https://cdn.example.test/creator-1/media-2/gone.webp' });
+    const gone =
+      'https://cdn.example.test/creator-1/media-thumbnails/media-2/gone.webp';
+    render({ src: gone });
     img()?.dispatchEvent(new Event('error'));
     flushSync();
     unmount(component);
     target.remove();
-    render({ src: 'https://cdn.example.test/creator-1/media-2/gone.webp' });
+    render({ src: gone });
     img()?.dispatchEvent(new Event('error'));
     flushSync();
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
-    expect(logger.warn).toHaveBeenCalledWith('image.fallback_shown', {
-      host: 'cdn.example.test',
-      file: 'gone.webp',
-    });
-    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain(
-      'creator-1'
+    expect(logger.warn).toHaveBeenCalledWith(
+      'image.fallback_shown',
+      expect.objectContaining({
+        host: 'cdn.example.test',
+        kind: 'media-thumbnails',
+        file: 'gone.webp',
+      })
     );
+    const logged = JSON.stringify(vi.mocked(logger.warn).mock.calls);
+    expect(logged).not.toContain('creator-1');
+    expect(logged).not.toContain('media-2');
+  });
+
+  // The client log keeps a sample, so each record says how many files have
+  // failed in the tab so far (review round 2): one dead tile reads apart
+  // from a sweep that removed thirty.
+  test('each record counts the files failed so far', () => {
+    vi.mocked(logger.warn).mockClear();
+    render({ src: '/content-thumbnails/a/one.webp' });
+    img()?.dispatchEvent(new Event('error'));
+    flushSync();
+    unmount(component);
+    target.remove();
+    render({ src: '/content-thumbnails/b/two.webp' });
+    img()?.dispatchEvent(new Event('error'));
+    flushSync();
+
+    const counts = vi
+      .mocked(logger.warn)
+      .mock.calls.map(([, fields]) => (fields as { failed: number }).failed);
+    expect(counts).toHaveLength(2);
+    expect(counts[1]).toBe(counts[0] + 1);
   });
 
   test('a new picture after a failure is tried afresh', () => {

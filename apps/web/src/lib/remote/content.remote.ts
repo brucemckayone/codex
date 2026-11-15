@@ -110,7 +110,9 @@ function listContentLog(params: ContentQueryInput | undefined) {
     sortBy: params?.sortBy,
     sortOrder: params?.sortOrder,
     hasSearch: params?.search !== undefined,
-    hasCategory: params?.category !== undefined,
+    // The legacy slug, or the org studio's Category facet (Codex-a6ofh.3.3).
+    hasCategory:
+      params?.category !== undefined || params?.categoryId !== undefined,
     // A "Needs you" chip's kind (Codex-a6ofh.3.4): one of a fixed list.
     needs: params?.needs ?? 'none',
   };

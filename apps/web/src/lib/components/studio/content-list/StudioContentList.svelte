@@ -140,15 +140,18 @@
     listedOrganizationId: args.organizationId ?? null,
   });
   // What a failure log says about a list read: where it looked, its page,
-  // facets and sort, and whether it searched, never the text.
+  // each filter `contentListArgs` sends and the sort, and whether it searched
+  // or narrowed to a category, never the text or the id. A filter left out
+  // here logs its failure as a read of every piece (Codex-a6ofh.3.6 review).
   const readLog = (args: ContentQueryInput) => ({
     page: args.page,
     ...whereLog(args),
-    statusFilter: args.status ?? 'all',
-    // The tab (Codex-a6ofh.3.6): the tabs ask a lifecycle, not a status.
+    // The tab: the tabs ask a lifecycle, never a status.
     lifecycle: args.lifecycle ?? 'all',
     type: args.contentType ?? 'all',
     access: args.accessType ?? 'any',
+    needs: args.needs ?? 'none',
+    hasCategory: args.categoryId !== undefined,
     sortBy: args.sortBy,
     hasSearch: args.search !== undefined,
   });

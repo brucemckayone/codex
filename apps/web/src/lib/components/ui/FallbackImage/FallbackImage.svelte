@@ -13,10 +13,13 @@
   The caller sizes the box; the image fills it, cropped to cover, as every
   thumbnail box here wants, so no caller reaches in with `:global(img)`.
 
-  A failure is logged, once per file (`image.fallback_shown`): with the
-  broken glyph gone, a stored picture that no longer loads (an object the
-  sweep removed, a variant never written, a CDN miss) would look exactly
-  like a piece with none. Its host and file name only, never the path,
+  A failure is logged (`image.fallback_shown`): with the broken glyph gone,
+  a stored picture that no longer loads (an object the sweep removed, a
+  variant never written, a CDN miss) would look exactly like a piece with
+  none. This tab sends each file once at most, and the client log keeps a
+  sample of those (one per few minutes, `client-log.ts`), so each record
+  says how many files have failed in the tab so far. Its host, the kind of
+  picture (the `…thumbnails` folder) and the file name only, never the path,
   which holds the owner's ids.
 
   @prop src       The picture, or none
@@ -33,14 +36,20 @@
   function logFailure(shown: string): void {
     if (logged.has(shown)) return;
     logged.add(shown);
-    let where: { host: string; file: string | undefined };
+    let where: { host: string; kind: string; file: string | undefined };
     try {
       const url = new URL(shown, window.location.href);
-      where = { host: url.host, file: url.pathname.split('/').pop() };
+      const segments = url.pathname.split('/');
+      where = {
+        host: url.host,
+        // A folder word, never an id: `content-thumbnails`, `media-thumbnails`.
+        kind: segments.find((part) => part.endsWith('thumbnails')) ?? 'other',
+        file: segments.at(-1),
+      };
     } catch {
-      where = { host: 'unparsed', file: undefined };
+      where = { host: 'unparsed', kind: 'other', file: undefined };
     }
-    logger.warn('image.fallback_shown', where);
+    logger.warn('image.fallback_shown', { ...where, failed: logged.size });
   }
 </script>
 

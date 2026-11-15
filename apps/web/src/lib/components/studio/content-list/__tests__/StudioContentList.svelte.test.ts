@@ -594,7 +594,9 @@ describe('StudioContentList: Show more', () => {
       expect.any(Error),
       expect.objectContaining({
         page: 2,
-        statusFilter: 'all',
+        lifecycle: 'all',
+        needs: 'none',
+        hasCategory: false,
         sortBy: 'updatedAt',
         hasSearch: false,
       })
@@ -626,7 +628,6 @@ describe('StudioContentList: Show more', () => {
       expect.objectContaining({
         page: 2,
         lifecycle: 'all',
-        statusFilter: 'all',
         type: 'video',
       })
     );
@@ -646,6 +647,23 @@ describe('StudioContentList: Show more', () => {
       'studio_content.show_more_failed',
       expect.any(Error),
       expect.objectContaining({ page: 2, lifecycle: 'draft' })
+    );
+  });
+
+  // A chip's read is the one with a step of its own (`needs=ready` reads
+  // article bodies): its failure names the chip, not a read of every piece.
+  test('a page that failed on a chip names the chip', async () => {
+    s.first = { current: pageOf([piece(1)], 2), error: undefined };
+    s.later.set(2, new Error('Down'));
+    render('?needs=ready');
+
+    button(/Show more/)?.click();
+    await settle();
+
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.show_more_failed',
+      expect.any(Error),
+      expect.objectContaining({ page: 2, needs: 'ready' })
     );
   });
 });
