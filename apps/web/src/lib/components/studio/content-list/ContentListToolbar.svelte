@@ -163,18 +163,31 @@
     />
   </div>
 
-  <ListFilterSheet
-    idPrefix="clt"
-    title={m.studio_content_list_filters_title()}
-    clearLabel={m.media_clear_filters()}
-    {facets}
-    {view}
-    sort={view.sort}
-    sortFallback={CONTENT_LIST_DEFAULTS.sort}
-    sortLabel={m.media_sort_label()}
-    sortOptions={SORT_OPTIONS}
-    {onChange}
-  />
+  <!-- A phone's second row: the Filters sheet, and the view beside it
+       (List is rows there, Grid the cards; owner 2026-11-15). -->
+  <div class="toolbar-phone">
+    <ListFilterSheet
+      idPrefix="clt"
+      title={m.studio_content_list_filters_title()}
+      clearLabel={m.media_clear_filters()}
+      {facets}
+      {view}
+      sort={view.sort}
+      sortFallback={CONTENT_LIST_DEFAULTS.sort}
+      sortLabel={m.media_sort_label()}
+      sortOptions={SORT_OPTIONS}
+      {onChange}
+    />
+    <span class="toolbar-phone-view">
+      <ListSegment
+        label={m.media_view_label()}
+        value={view.view}
+        options={VIEW_OPTIONS}
+        iconsOnly
+        onSelect={(next) => onChange({ view: next })}
+      />
+    </span>
+  </div>
 </div>
 
 <style>
@@ -198,9 +211,30 @@
   }
 
   /* ── Phone: search + status, then one Filters button ───────── */
+  /* On a wide screen the row adds nothing: the sheet's trigger and this
+     view are hidden, and the facets row holds the view. */
+  .toolbar-phone {
+    display: contents;
+  }
+
+  .toolbar-phone-view {
+    display: none;
+  }
+
   @media (--below-sm) {
     .toolbar-facets {
       display: none;
+    }
+
+    .toolbar-phone {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-2);
+    }
+
+    .toolbar-phone-view {
+      display: inline-flex;
     }
   }
 </style>

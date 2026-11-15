@@ -1608,7 +1608,7 @@
   "studio_content_list_loading": "Loading your content",
   "studio_content_list_no_match": "Nothing matches these filters.",
   "studio_content_list_no_match_named": "Nothing matches {filters}.",
-  "studio_content_list_filter_named": "{title}: {value}",
+  "studio_content_list_filter_named": "{title}:\u00a0{value}",
   "studio_content_list_search_facet": "Search",
   "studio_content_status_facet": "Status",
   "studio_publish_gaps_left": "{count} left to do before it can go live.",

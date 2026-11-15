@@ -53,6 +53,7 @@
   import { createFacetRetry } from '../list-toolbar/facet-retry.svelte';
   import type { FacetUnread } from '../list-toolbar/list-option';
   import ListStaleNotice from '../list-toolbar/ListStaleNotice.svelte';
+  import ContentListRows from './ContentListRows.svelte';
   import FirstPieceEmpty from './FirstPieceEmpty.svelte';
   import { narrowedBy, noMatchWords } from './narrowed-words';
   import { createListSearch, createListUrlWriter } from '../list-url-writer';
@@ -125,9 +126,11 @@
   const search = $derived(gateSearchQuery(boundSearchParam(view.search)));
   const narrowed = $derived(isContentListNarrowed(view, search, organizationId));
 
-  // Below `sm` the cards are the only view, so the toggle is moot.
+  // Below `sm` the list is rows, not the table (mockup L4a, owner
+  // 2026-11-15): the title takes the width, the facts one line. Grid is the
+  // cards on every width.
   const phone = new MediaQuery(MOBILE_QUERY);
-  const layout = $derived(phone.current ? 'grid' : view.view);
+  const layout = $derived(view.view === 'grid' ? 'grid' : phone.current ? 'rows' : 'table');
 
   // ── Reads ─────────────────────────────────────────────────────────────
   // Where a failed read looked, from its args: never over the studio's own.
@@ -656,6 +659,14 @@
           payouts={payouts.current}
           {tierName}
           showCategories={studio === 'org'}
+          {selection}
+          {rowMenu}
+        />
+      {:else if layout === 'rows'}
+        <ContentListRows
+          items={list.items}
+          payouts={payouts.current}
+          {tierName}
           {selection}
           {rowMenu}
         />

@@ -113,14 +113,21 @@
 </EmptyState>
 
 <style>
+  /* A third of the measure each, centred: one or two uploads sit in the
+     middle, as the words above them do. */
   .first-uploads {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    justify-content: center;
     gap: var(--space-2);
     width: min(100%, var(--measure-narrow));
     margin: 0 auto var(--space-3);
     padding: 0;
     list-style: none;
+  }
+
+  .first-uploads > li {
+    flex: 0 1 calc((100% - 2 * var(--space-2)) / 3);
+    min-width: 0;
   }
 
   .first-upload {

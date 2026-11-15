@@ -5,15 +5,14 @@
   picture-led and calmer than the table, about six pieces a screen, so each
   card carries its status, its access and one count (views, or sales for a
   piece that sells), and the line that says what it needs. The same words as
-  the table (`row-facts`), so a piece reads the same in either view. The
-  phone's only view. Each card has a box for the bulk bar and a ⋯ menu
+  the table (`row-facts`), so a piece reads the same in either view. A
+  phone's Grid; its List is `ContentListRows` (owner 2026-11-15). Each card has a box for the bulk bar and a ⋯ menu
   (Codex-a6ofh.3.5), over its picture.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { ContentWithRelations } from '$lib/types';
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
-  import * as m from '$paraglide/messages';
   import ContentCategories from './ContentCategories.svelte';
   import ContentRowLine from './ContentRowLine.svelte';
   import ContentSelectBox from './ContentSelectBox.svelte';
@@ -23,11 +22,10 @@
   import {
     accessWords,
     categoryWords,
+    countWords,
     rowHref,
     rowLine,
-    salesShown,
     type TierName,
-    viewsShown,
   } from './row-facts';
 
   interface Props {
@@ -44,20 +42,13 @@
 
   const { items, payouts, tierName, showCategories, selection, rowMenu }: Props = $props();
 
-  /** Mockup L5: a selling piece shows its sales, anything else its views. */
-  function countLine(row: ContentWithRelations): string | null {
-    const sales = salesShown(row);
-    if (sales !== null) return m.studio_content_list_sales_count({ count: sales });
-    const views = viewsShown(row);
-    return views === null ? null : m.studio_content_list_views_count({ count: views });
-  }
 </script>
 
 <ul class="content-grid" role="list">
   {#each items as row (row.id)}
     {@const line = rowLine(row, payouts)}
     {@const href = rowHref(row, line)}
-    {@const counted = countLine(row)}
+    {@const counted = countWords(row)}
     {@const filed = showCategories ? categoryWords(row) : null}
     <li class="card" data-content-id={row.id} data-selected={selection.has(row.id) || undefined}>
       <ContentThumb piece={row} variant="card" />

@@ -12887,7 +12887,7 @@ export const studio_content_list_no_match_named = (params) => `Nothing matches $
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_list_filter_named = (params) => `${params.title}: ${params.value}`
+export const studio_content_list_filter_named = (params) => `${params.title}: ${params.value}`
 
 
 /**

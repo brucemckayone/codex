@@ -243,3 +243,17 @@ export function rowHref(
 ): string {
   return line?.kind === 'progress' ? line.progress.href : editHref(row.id);
 }
+
+/**
+ * The one count a card or a phone row shows (mockup L5, L4a): a selling
+ * piece its sales, anything else its views; nothing for a draft never live.
+ */
+export function countWords(row: ContentWithRelations): string | null {
+  const sales = salesShown(row);
+  if (sales !== null)
+    return m.studio_content_list_sales_count({ count: sales });
+  const views = viewsShown(row);
+  return views === null
+    ? null
+    : m.studio_content_list_views_count({ count: views });
+}

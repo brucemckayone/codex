@@ -7,6 +7,7 @@
  */
 import { CONTENT_ATTENTION_KINDS } from '@codex/constants';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
 import { toast } from '$lib/components/ui/Toast/toast-store';
 import type { ContentWithRelations } from '$lib/types';
 import * as m from '$paraglide/messages';
@@ -353,7 +354,13 @@ describe('StudioContentList: the three states', () => {
     // Named as the menus name them (Codex-a6ofh.3.6, mockup L3).
     expect(text()).toContain(
       m.studio_content_list_no_match_named({
-        filters: 'Type: Audio + Access: Paid',
+        filters: [
+          m.studio_content_list_filter_named({ title: 'Type', value: 'Audio' }),
+          m.studio_content_list_filter_named({
+            title: 'Access',
+            value: 'Paid',
+          }),
+        ].join(' + '),
       })
     );
     expect(listMedia).not.toHaveBeenCalled();
@@ -788,7 +795,12 @@ describe('StudioContentList: Category', () => {
     expect(listCalls()[0]).toMatchObject({ categoryId: QA });
     expect(categoryTrigger()?.textContent).toContain('Q&A');
     expect(text()).toContain(
-      m.studio_content_list_no_match_named({ filters: 'Category: Q&A' })
+      m.studio_content_list_no_match_named({
+        filters: m.studio_content_list_filter_named({
+          title: 'Category',
+          value: 'Q&A',
+        }),
+      })
     );
     button(m.media_clear_filters())?.click();
     await settle();
@@ -1536,5 +1548,62 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
     await settle();
 
     expect(document.querySelector('.bulk-bar')).toBeNull();
+  });
+});
+
+// Mockup L4a (owner 2026-11-15): below `sm` the List is rows, not the table.
+describe('StudioContentList: on a phone', () => {
+  const wide = window.matchMedia;
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: (query: string) => ({
+        matches: query === MOBILE_QUERY,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => true,
+      }),
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: wide,
+    });
+  });
+
+  test('the list is rows, each with its facts on one line', () => {
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    render();
+    expect(document.querySelector('.content-table')).toBeNull();
+    const row = document.querySelector('.content-rows [data-content-id]');
+    expect(row?.querySelector('.crow-title')?.textContent?.trim()).toBe(
+      'Piece 1'
+    );
+    // A draft never live: its access, then when it was changed.
+    expect(row?.querySelector('.crow-fact')?.textContent).toMatch(/^Free · /);
+    // The box and the menu, as on the table.
+    expect(row?.querySelector('input[type="checkbox"]')).not.toBeNull();
+    expect(row?.querySelector('.row-actions-trigger')).not.toBeNull();
+  });
+
+  test('its Grid is the cards, and the view toggle is there to choose', () => {
+    s.first = { current: pageOf([piece(1)]), error: undefined };
+    render('?view=grid');
+    expect(
+      document.querySelector('.content-grid [data-content-id]')
+    ).not.toBeNull();
+    expect(document.querySelector('.content-rows')).toBeNull();
+    expect(
+      document.querySelector('.toolbar-phone-view [role="radiogroup"]')
+    ).not.toBeNull();
   });
 });

@@ -9,7 +9,9 @@
   names the type and, for media, the running time. Decorative: the title
   beside or under it names the piece.
 
-  `card` fills a grid card's width (L5); the default is the table row's.
+  `card` fills a grid card's width (L5); `compact` is a phone row's (L4a),
+  smaller and with no badge, which would cover most of its picture; the
+  default is the table row's.
 -->
 <script lang="ts">
   import { FallbackImage } from '$lib/components/ui';
@@ -21,7 +23,7 @@
 
   interface Props {
     piece: ContentWithRelations;
-    variant?: 'row' | 'card';
+    variant?: 'row' | 'card' | 'compact';
   }
 
   const { piece, variant = 'row' }: Props = $props();
@@ -52,9 +54,11 @@
       <Icon size={variant === 'card' ? 32 : 18} />
     {/snippet}
   </FallbackImage>
-  <span class="thumb-badge">
-    {#if duration}{duration}{:else}<Icon size={12} />{/if}
-  </span>
+  {#if variant !== 'compact'}
+    <span class="thumb-badge">
+      {#if duration}{duration}{:else}<Icon size={12} />{/if}
+    </span>
+  {/if}
 </span>
 
 <style>
@@ -75,6 +79,10 @@
   .thumb[data-variant='card'] {
     width: 100%;
     border-radius: var(--radius-md);
+  }
+
+  .thumb[data-variant='compact'] {
+    width: var(--space-14);
   }
 
   /* Rendered by FallbackImage, so reached from this box. */
