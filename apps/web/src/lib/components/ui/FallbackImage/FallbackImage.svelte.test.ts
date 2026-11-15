@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { createClientLogSink } from '$lib/client-log';
 import {
   createRawSnippet,
   flushSync,
@@ -20,7 +21,16 @@ describe('FallbackImage', () => {
   let component: ReturnType<typeof mount> | null = null;
   let target: HTMLElement;
 
+  // A failure's record waits for its burst to end: every test runs on fake
+  // timers and sends what it gathered, so no burst runs into the next test.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(logger.warn).mockReset();
+  });
+
   afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     if (component) unmount(component);
     component = null;
     target?.remove();
@@ -87,20 +97,23 @@ describe('FallbackImage', () => {
     expect(shownFallback()).not.toBeNull();
   });
 
+  /** Fails a picture at `src`, in a box of its own. */
+  function fail(src: string) {
+    if (component) unmount(component);
+    target?.remove();
+    render({ src });
+    img()?.dispatchEvent(new Event('error'));
+    flushSync();
+  }
+
   // With the broken glyph gone, a failure would be silent (review): it is
-  // logged once per file, by host, kind and file name, never its path.
+  // logged, by host, kind and file name, never its path.
   test('a failure is logged once, by host, kind and file, never the path', () => {
-    vi.mocked(logger.warn).mockClear();
     const gone =
       'https://cdn.example.test/creator-1/media-thumbnails/media-2/gone.webp';
-    render({ src: gone });
-    img()?.dispatchEvent(new Event('error'));
-    flushSync();
-    unmount(component);
-    target.remove();
-    render({ src: gone });
-    img()?.dispatchEvent(new Event('error'));
-    flushSync();
+    fail(gone);
+    fail(gone);
+    vi.advanceTimersByTime(2000);
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith(
@@ -109,6 +122,7 @@ describe('FallbackImage', () => {
         host: 'cdn.example.test',
         kind: 'media-thumbnails',
         file: 'gone.webp',
+        burst: 1,
       })
     );
     const logged = JSON.stringify(vi.mocked(logger.warn).mock.calls);
@@ -116,25 +130,54 @@ describe('FallbackImage', () => {
     expect(logged).not.toContain('media-2');
   });
 
-  // The client log keeps a sample, so each record says how many files have
-  // failed in the tab so far (review round 2): one dead tile reads apart
-  // from a sweep that removed thirty.
-  test('each record counts the files failed so far', () => {
-    vi.mocked(logger.warn).mockClear();
-    render({ src: '/content-thumbnails/a/one.webp' });
-    img()?.dispatchEvent(new Event('error'));
-    flushSync();
-    unmount(component);
-    target.remove();
-    render({ src: '/content-thumbnails/b/two.webp' });
-    img()?.dispatchEvent(new Event('error'));
-    flushSync();
+  // Each record says the tab's total so far, beside its own burst: a burst
+  // that the client log drops is still counted in the next one it sends.
+  test('a later burst says the tab’s total so far', () => {
+    fail('/creator-1/content-thumbnails/a/one.webp');
+    fail('/creator-1/content-thumbnails/b/two.webp');
+    vi.advanceTimersByTime(2000);
+    fail('/creator-1/content-thumbnails/c/three.webp');
+    vi.advanceTimersByTime(2000);
 
-    const counts = vi
+    const records = vi
       .mocked(logger.warn)
-      .mock.calls.map(([, fields]) => (fields as { failed: number }).failed);
-    expect(counts).toHaveLength(2);
-    expect(counts[1]).toBe(counts[0] + 1);
+      .mock.calls.map(
+        ([, fields]) => fields as { burst: number; failed: number }
+      );
+    expect(records.map(({ burst }) => burst)).toEqual([2, 1]);
+    expect(records[1]?.failed).toBe((records[0]?.failed ?? 0) + 1);
+  });
+
+  // The proof is at the sink, not the logger (review round 3): the client
+  // log sends a message's first record in a few minutes and drops the rest,
+  // so a grid's thirty dead tiles must reach it as one record that says
+  // thirty.
+  test('a burst of failures reaches the client log as one record of all of them', () => {
+    const sent: string[] = [];
+    const sink = createClientLogSink({
+      send: (body) => sent.push(body),
+      now: () => Date.now(),
+      path: () => '/studio/content',
+    });
+    vi.mocked(logger.warn).mockImplementation((message, metadata) =>
+      sink.forward({ level: 'warn', message, metadata, timestamp: new Date() })
+    );
+
+    for (let tile = 0; tile < 30; tile += 1) {
+      fail(`/creator-1/content-thumbnails/piece-${tile}/md.webp`);
+    }
+    fail('/creator-1/media-thumbnails/media-9/sm.webp');
+    vi.advanceTimersByTime(2000);
+
+    expect(sent).toHaveLength(1);
+    const body = JSON.parse(sent[0] ?? '{}') as {
+      metadata?: { burst?: number; kinds?: Record<string, number> };
+    };
+    expect(body.metadata?.burst).toBe(31);
+    expect(body.metadata?.kinds).toEqual({
+      'content-thumbnails': 30,
+      'media-thumbnails': 1,
+    });
   });
 
   test('a new picture after a failure is tried afresh', () => {

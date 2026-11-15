@@ -16,11 +16,12 @@
   A failure is logged (`image.fallback_shown`): with the broken glyph gone,
   a stored picture that no longer loads (an object the sweep removed, a
   variant never written, a CDN miss) would look exactly like a piece with
-  none. This tab sends each file once at most, and the client log keeps a
-  sample of those (one per few minutes, `client-log.ts`), so each record
-  says how many files have failed in the tab so far. Its host, the kind of
-  picture (the `…thumbnails` folder) and the file name only, never the path,
-  which holds the owner's ids.
+  none. A grid's dead tiles fail together, and the client log sends only
+  the first record of a message in a few minutes (`client-log.ts`), so the
+  failures of one burst are gathered into ONE record: how many, by kind of
+  picture (the `…thumbnails` folder), the tab's total, and one of them as a
+  sample. Each file counts once. Host, kind and file name only, never the
+  path, which holds the owner's ids.
 
   @prop src       The picture, or none
   @prop srcset    Its files to choose from (`getThumbnailSrcset`)
@@ -30,26 +31,58 @@
 <script module lang="ts">
   import { logger } from '$lib/observability';
 
-  /** The files already logged, so a remount or a re-render logs none twice. */
-  const logged = new Set<string>();
+  /** How long a burst gathers before its one record goes. */
+  const BURST_MS = 2000;
 
-  function logFailure(shown: string): void {
-    if (logged.has(shown)) return;
-    logged.add(shown);
-    let where: { host: string; kind: string; file: string | undefined };
+  interface Where {
+    host: string;
+    kind: string;
+    file: string | undefined;
+  }
+
+  /** The files already counted, so a remount or a re-render counts none twice. */
+  const logged = new Set<string>();
+  /** The failures gathering for the next record, if any. */
+  let burst: { count: number; kinds: Record<string, number>; sample: Where } | null =
+    null;
+
+  function whereOf(shown: string): Where {
     try {
       const url = new URL(shown, window.location.href);
       const segments = url.pathname.split('/');
-      where = {
+      return {
         host: url.host,
         // A folder word, never an id: `content-thumbnails`, `media-thumbnails`.
         kind: segments.find((part) => part.endsWith('thumbnails')) ?? 'other',
         file: segments.at(-1),
       };
     } catch {
-      where = { host: 'unparsed', kind: 'other', file: undefined };
+      return { host: 'unparsed', kind: 'other', file: undefined };
     }
-    logger.warn('image.fallback_shown', { ...where, failed: logged.size });
+  }
+
+  function logFailure(shown: string): void {
+    if (logged.has(shown)) return;
+    logged.add(shown);
+    const where = whereOf(shown);
+    if (burst === null) {
+      burst = { count: 0, kinds: {}, sample: where };
+      setTimeout(sendBurst, BURST_MS);
+    }
+    burst.count += 1;
+    burst.kinds[where.kind] = (burst.kinds[where.kind] ?? 0) + 1;
+  }
+
+  function sendBurst(): void {
+    if (burst === null) return;
+    const { count, kinds, sample } = burst;
+    burst = null;
+    logger.warn('image.fallback_shown', {
+      ...sample,
+      burst: count,
+      kinds,
+      failed: logged.size,
+    });
   }
 </script>
 

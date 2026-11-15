@@ -847,6 +847,27 @@ describe('StudioContentList: Category', () => {
     expect(goto).toHaveBeenCalledWith('/studio/content', expect.anything());
   });
 
+  // A failed category read names a category, never which (review round 3):
+  // without it, the read logged as one of every piece.
+  test('a page that failed in a category says a category narrowed it', async () => {
+    s.categories = { current: CATEGORIES, error: undefined };
+    s.first = { current: pageOf([piece(1)], 2), error: undefined };
+    s.later.set(2, new Error('Down'));
+    render(`?category=${QA}`);
+
+    button(/Show more/)?.click();
+    await settle();
+
+    expect(logReadFailure).toHaveBeenCalledWith(
+      'studio_content.show_more_failed',
+      expect.any(Error),
+      expect.objectContaining({ page: 2, hasCategory: true })
+    );
+    expect(JSON.stringify(vi.mocked(logReadFailure).mock.calls)).not.toContain(
+      QA
+    );
+  });
+
   /** The menu's words when its categories are unread, and its Try again. */
   const note = () =>
     document.querySelector('.toolbar-menu-note')?.textContent?.trim();
