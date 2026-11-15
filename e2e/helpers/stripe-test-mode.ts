@@ -78,7 +78,10 @@ export async function payCheckoutSession(
     currency: open.currency,
     ...(typeof open.customer === 'string' ? { customer: open.customer } : {}),
     payment_method: 'pm_card_visa',
-    payment_method_types: ['card'],
+    // API 2026-09-30.endive refuses `payment_method_types` here (400
+    // `payment_method_types_no_longer_supported`); this keeps the
+    // intent card-only, as the test card it confirms with is.
+    allowed_payment_method_types: ['card'],
     confirm: true,
     metadata: stripeEnvMetadata(E2E_STRIPE_ENVIRONMENT),
   });

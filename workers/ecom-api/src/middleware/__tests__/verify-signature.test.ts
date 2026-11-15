@@ -26,7 +26,11 @@ vi.mock('@codex/purchase', () => ({
   verifyWebhookSignature: vi.fn(),
 }));
 
-import { MIME_TYPES, STRIPE_EVENTS } from '@codex/constants';
+import {
+  MIME_TYPES,
+  STRIPE_API_VERSION,
+  STRIPE_EVENTS,
+} from '@codex/constants';
 import { createStripeClient, verifyWebhookSignature } from '@codex/purchase';
 import {
   _resetStripeClientCacheForTests,
@@ -95,7 +99,7 @@ describe('verifyStripeSignature middleware', () => {
     id: 'evt_test_123',
     object: 'event',
     type: STRIPE_EVENTS.CHECKOUT_COMPLETED,
-    api_version: '2025-10-29.clover',
+    api_version: STRIPE_API_VERSION,
     created: Date.now() / 1000,
     data: {
       object: {

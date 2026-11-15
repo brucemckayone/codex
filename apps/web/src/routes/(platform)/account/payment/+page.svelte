@@ -6,7 +6,8 @@
 	import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
 	import Button from '$lib/components/ui/Button/Button.svelte';
 	import { Alert, Card, EmptyState } from '$lib/components/ui';
-	import { tick } from 'svelte';
+	import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+	import { loadRead } from '$lib/components/studio/alert-read';
 	import { goto, invalidate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { portalSessionForm } from '$lib/remote/account.remote';
@@ -110,29 +111,23 @@
 	// formatPrice (GBP) and formatDate (en-GB) imported from $lib/utils/format
 
 	// --- A failed read (Codex-2hxff.22 WEB-05) ---
-	// The .45 pattern (`money_setup_load_failed*`): "We couldn't load your
-	// purchases." with Retry in place of the list, never the empty state.
-	// - Retry keeps the alert, and its focused button, in place while it runs:
-	//   the label reads "Retrying…" and a second click sends nothing.
-	// - A Retry that fails again says "We still couldn't…" and puts focus on
-	//   the alert, so the repeated text is read out.
-	// - A Retry that loads them moves focus to a status line that says so,
-	//   because the alert unmounts with the focused button inside it.
-	// The raw error is never rendered: the load logs it.
-	let retrying = $state(false);
-	let retryOutcome = $state<'ok' | 'failed' | null>(null);
-	let alertNode = $state<HTMLElement | null>(null);
-	let statusNode = $state<HTMLElement | null>(null);
-
-	async function retryLoad() {
-		if (retrying) return;
-		retrying = true;
-		await invalidate('account:purchases');
-		retryOutcome = data.loadFailed ? 'failed' : 'ok';
-		retrying = false;
-		await tick();
-		(retryOutcome === 'ok' ? statusNode : alertNode)?.focus();
-	}
+	// "We couldn't load your purchases." with Retry in place of the list, never
+	// the empty state (LoadFailedAlert). Retry reruns the load, and is judged
+	// on the data it lands, not on when `invalidate` resolves: kit resolves it
+	// late (after the page's live remote queries) or early (overtaken, with the
+	// data unchanged), and the page judged on that said "We still couldn't…"
+	// about a reload that never ran (Codex-if444). The raw error is never
+	// rendered: the load logs it. Keyed on this load's own output, which is new
+	// on each run of it: the platform layout reruns on every tab return
+	// (`cache:versions`), which is new `data` but not this Retry's answer.
+	const purchasesRead = $derived(
+		loadRead({
+			current: data.loadFailed ? undefined : data.purchases,
+			error: data.loadFailed ? m.account_payments_load_failed() : undefined,
+			refresh: () => invalidate('account:purchases'),
+			key: data.purchases,
+		})
+	);
 </script>
 
 <svelte:head>
@@ -192,32 +187,17 @@
 		</Card.Header>
 
 		<Card.Content>
-		<p
-			bind:this={statusNode}
-			class="sr-only"
-			role="status"
-			aria-live="polite"
-			tabindex="-1"
-		>
-			{retryOutcome === 'ok' && !data.loadFailed ? m.account_payments_load_retry_ok() : ''}
-		</p>
+		<!-- Mounted unconditionally (see LoadFailedAlert): its status line has to
+		     persist to announce a Retry that loads the list. -->
+		<LoadFailedAlert
+			query={purchasesRead}
+			message={m.account_payments_load_failed()}
+			againMessage={m.account_payments_load_failed_again()}
+			loadedMessage={m.account_payments_load_retry_ok()}
+			data-testid="purchases-load-failed"
+		/>
 		{#if data.loadFailed}
-			<div bind:this={alertNode} class="load-failed" tabindex="-1">
-				<Alert variant="error" data-testid="purchases-load-failed" aria-busy={retrying}>
-					<div class="load-failed__row">
-						<p class="load-failed__message">
-							{retryOutcome === 'failed'
-								? m.account_payments_load_failed_again()
-								: m.account_payments_load_failed()}
-						</p>
-						<Button variant="secondary" size="sm" onclick={retryLoad}>
-							{retrying
-								? m.money_setup_load_failed_retrying()
-								: m.money_setup_load_failed_retry()}
-						</Button>
-					</div>
-				</Alert>
-			</div>
+			<!-- The alert above stands in for the list and the empty state. -->
 		{:else if data.purchases.items && data.purchases.items.length > 0}
 			<div class="table-wrapper">
 				<Table.Root>
@@ -404,37 +384,6 @@
 	.discover-link:focus-visible {
 		outline: var(--border-width-thick) solid var(--color-focus);
 		outline-offset: var(--space-0-5);
-	}
-
-	/* A failed read: the alert stands in for the list. It takes focus after
-	   a Retry that failed again; shown for keyboard users. */
-	.load-failed:focus-visible {
-		outline: var(--border-width-thick) solid var(--color-focus);
-		outline-offset: var(--space-0-5);
-		border-radius: var(--radius-md);
-	}
-
-	.load-failed__row {
-		display: grid;
-		gap: var(--space-3);
-		align-items: start;
-	}
-
-	@media (--breakpoint-sm) {
-		.load-failed__row {
-			grid-template-columns: minmax(0, auto) auto;
-			justify-content: start;
-			align-items: center;
-			column-gap: var(--space-5);
-		}
-	}
-
-	.load-failed__message {
-		margin: 0;
-		font-size: var(--text-sm);
-		font-weight: var(--font-normal);
-		color: inherit;
-		text-wrap: pretty;
 	}
 
 	/* Pagination */

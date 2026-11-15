@@ -1,3 +1,17 @@
+/**
+ * The Stripe API version every request is made at: the one stripe-node 23.1.0
+ * pins (its `esm/apiVersion.js`). `createStripeClient`
+ * (packages/purchase/src/stripe-client.ts) passes it, and test fixtures that
+ * build a Stripe event say it. A webhook payload itself is rendered at the
+ * endpoint's own API version, which is set in the Stripe Dashboard.
+ *
+ * Before changing it, run packages/subscription/scripts/test-clock-paid-price.ts
+ * on the new version: a switch after an early price move relies on Stripe
+ * crediting the invoiced line, not the item's current Price (Codex-2hxff.95;
+ * docs/payments/release-checklist.md, the standing apiVersion check).
+ */
+export const STRIPE_API_VERSION = '2026-10-28.endive';
+
 export const STRIPE_EVENTS = {
   // Purchase (Phase 1)
   CHECKOUT_COMPLETED: 'checkout.session.completed',
@@ -69,6 +83,50 @@ export const DISPUTE_CLOSED_STATUSES = [
   'warning_closed',
   'prevented',
 ] as const;
+
+/**
+ * A lost chargeback the platform appealed (API 2026-10-28.endive; Stripe
+ * changelog `endive/2026-10-28/evidence-submission-appeal-dispute-decisions`).
+ * Stripe reports the appeal in the dispute's status, reachable only from
+ * `lost`; we record it, and act on it, as `lost`, and keep the appeal in
+ * `disputes.appeal_status`, never in `status` (Codex-wzaoh; owner D34). In
+ * order: a response is due, then it is under review. The bank's decision
+ * (`won`, or `lost` read live) clears it.
+ * `check_disputes_appeal_status` lists the same values.
+ */
+export const DISPUTE_APPEAL_STATUSES = [
+  'appeal_needs_response',
+  'appeal_under_review',
+] as const;
+export type DisputeAppealStatus = (typeof DISPUTE_APPEAL_STATUSES)[number];
+
+/** Stripe's appeal stage, when `status` is one; null otherwise (owner D34). */
+export function disputeAppealOf(status: string): DisputeAppealStatus | null {
+  return DISPUTE_APPEAL_STATUSES.find((appeal) => appeal === status) ?? null;
+}
+
+/**
+ * Whether Stripe's dispute status settles as a loss (owner D34): `lost`, or
+ * an appeal of it, which only a loss reaches. The platform has lost the
+ * money either way, so the dispute record, the hourly reconcile and the
+ * won-reported-lost alert all read an appeal as `lost`.
+ */
+export function settlesAsLost(status: string): boolean {
+  return status === 'lost' || disputeAppealOf(status) !== null;
+}
+
+/**
+ * The appeal mark a dispute row may carry (owner D34): the appeal on a
+ * `lost` row, and none on any other. Only a loss is appealed, so a mark on a
+ * row that isn't lost is stale. The dispute record, the hourly reconcile and
+ * support all read a mark through this.
+ */
+export function appealMarkOn(
+  rowStatus: string,
+  appeal: DisputeAppealStatus | null
+): DisputeAppealStatus | null {
+  return rowStatus === 'lost' ? appeal : null;
+}
 
 /**
  * The Stripe metadata key naming the environment that created an object — the

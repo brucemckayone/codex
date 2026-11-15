@@ -7,6 +7,10 @@
  * the page re-renders, exactly as in production. A rejected slot mirrors
  * kit's: `current` stays undefined, `error` is set, `loading` is false.
  *
+ * A slot never hands the form a NEW query, and kit does on a Try again of a
+ * preview whose read failed. So a test of that Try again takes the preview
+ * as kit hands it: `kitPreview(args)` (Codex-if444).
+ *
  * A `.svelte.ts` module (runes compiled), NOT a `*.test.*` file, so it is
  * never collected as a suite.
  */
@@ -32,6 +36,10 @@ import type {
   ToldAnotherWayResult,
 } from '@codex/admin';
 import { type Mock, vi } from 'vitest';
+import {
+  type KitQuery,
+  kitQuery,
+} from '$lib/components/studio/__fixtures__/kit-query.mock.svelte';
 import type { SupportCommandFailure } from '$lib/remote/support-failure';
 import type { IssueRefundAnswer } from '../refund-outcome';
 
@@ -103,8 +111,20 @@ export const searchSupportCharges = vi.fn(
   (args: { lookup: string; page?: number; limit?: number }) =>
     slotFor(searches, `${args.lookup}:${args.page ?? 1}`)
 );
-export const getRefundPreview = vi.fn((args: PreviewArgs) =>
-  slotFor(previews, previewKey(args))
+/** Previews as kit hands them, by key, in place of the slots until `reset()`. */
+const previewKits = new Map<string, KitQuery<RefundPreview>>();
+
+/** The preview for `args` as kit hands it, until the next `reset()`. */
+export function kitPreview(args: PreviewArgs): KitQuery<RefundPreview> {
+  const kit = kitQuery<RefundPreview>();
+  previewKits.set(previewKey(args), kit);
+  return kit;
+}
+
+export const getRefundPreview = vi.fn(
+  (args: PreviewArgs) =>
+    previewKits.get(previewKey(args))?.get() ??
+    slotFor(previews, previewKey(args))
 );
 export const getSupportQueueCounts = vi.fn(() => counts);
 export const listFailedRefunds = vi.fn(
@@ -251,6 +271,7 @@ export function reset() {
   charges.clear();
   searches.clear();
   previews.clear();
+  previewKits.clear();
   failedLists.clear();
   debtLists.clear();
   owedLists.clear();

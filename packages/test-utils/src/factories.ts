@@ -29,6 +29,7 @@ import {
   CONTENT_TYPES,
   MEDIA_STATUS,
   MEDIA_TYPES,
+  STRIPE_API_VERSION,
 } from '@codex/constants';
 import type {
   Content,
@@ -663,7 +664,7 @@ export function createMockStripeCheckoutEvent(
     id: eventId,
     object: 'event',
     type: 'checkout.session.completed',
-    api_version: '2025-10-29.clover',
+    api_version: STRIPE_API_VERSION,
     created: Math.floor(Date.now() / 1000),
     data: {
       object: {
@@ -744,7 +745,7 @@ export function createMockStripePaymentIntentEvent(
     id: eventId,
     object: 'event',
     type: 'payment_intent.succeeded',
-    api_version: '2025-10-29.clover',
+    api_version: STRIPE_API_VERSION,
     created: Math.floor(Date.now() / 1000),
     data: {
       object: {

@@ -24,6 +24,7 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+  import { createLoadRetry } from '$lib/components/studio/load-retry.svelte';
   import MoneySetupPrompt from '$lib/components/studio/MoneySetupPrompt.svelte';
   import MoneyStatBand from '$lib/components/studio/MoneyStatBand.svelte';
   import type { MoneyStat } from '$lib/components/studio/money-stat';
@@ -205,7 +206,14 @@
   const connectState = $derived(
     connectQueryState(connectQuery as QueryResult<ConnectStatusPayload>)
   );
-  const connectFailed = $derived(connectState.kind === 'failed');
+  // A Retry hands this page a NEW query that reads as loading until it
+  // settles (kit drops a query whose read failed; see LoadFailedAlert), so the
+  // page keeps its failed layout until then (Codex-if444). Read as loading, the
+  // Connect and Tiers cards went back to skeletons for the round trip.
+  let connectRetrying = $state(false);
+  const connectFailed = $derived(
+    connectState.kind === 'failed' || connectRetrying
+  );
   const connectStatus = $derived<ConnectStatusPayload>(
     connectState.kind === 'ok'
       ? connectState.status
@@ -216,8 +224,10 @@
   );
 
   // The real error goes to the logger (which redacts), never into the DOM.
+  // The read's own state, not `connectFailed`: the query a Retry is waiting
+  // on has no error yet, and logging it would record a failure with none.
   $effect(() => {
-    if (connectFailed) {
+    if (connectState.kind === 'failed') {
       logRawError(
         'payout account status failed to load',
         queryErrorMessage((connectQuery as QueryResult<unknown>).error)
@@ -248,45 +258,6 @@
       );
     }
   });
-
-  let connectRetrying = $state(false);
-  /** Outcome of the last Retry, for the copy and for where focus goes. */
-  let connectRetryOutcome = $state<'ok' | 'failed' | null>(null);
-  let connectLoadErrorNode = $state<HTMLElement | null>(null);
-  let connectRetryStatusNode = $state<HTMLElement | null>(null);
-
-  /**
-   * Retry the status read. No `loading` on the button: `Button` disables
-   * itself while loading, which drops focus to <body>. Its label says
-   * "Retrying…" instead, and a second click while one runs does nothing.
-   *
-   * The outcome is read from the query, not from whether `refresh()` threw:
-   * a failure stays on the query's own `.error`, which keeps the card failed
-   * and is logged above.
-   *
-   * Focus follows the OUTCOME, as in `handleRecheckStatus`. On success the
-   * alert unmounts with the focused Retry inside it, so focus goes to the
-   * status line that says the account loaded. A failed Retry changes the
-   * alert to "We still couldn't…", which a second one leaves as it is, so
-   * `role="alert"` alone would say nothing: focus goes back to the alert,
-   * which reads it out again.
-   */
-  async function retryConnectStatus() {
-    if (connectRetrying) return;
-    connectRetrying = true;
-    try {
-      await connectQuery.refresh();
-    } catch {
-      // Kept on `connectQuery.error`; see above.
-    }
-    connectRetryOutcome = connectFailed ? 'failed' : 'ok';
-    connectRetrying = false;
-    await tick();
-    (connectRetryOutcome === 'ok'
-      ? connectRetryStatusNode
-      : connectLoadErrorNode
-    )?.focus();
-  }
 
   /**
    * Connect readiness gate for tier creation. Mirrors the backend guard
@@ -341,12 +312,13 @@
   );
 
   // FIRST loads only, as on the subscribers page. A query's own `loading` is
-  // also true during every refresh: a Connect Retry, the post-create tier
-  // re-read and each `invalidateAll()` used to flip the Tiers card to
-  // skeletons and show the toggle OFF for the round trip. Connect counts
-  // through `connectState`, which stays `failed` while a Retry is in flight.
+  // also true during every refresh: the post-create tier re-read and each
+  // `invalidateAll()` used to flip the Tiers card to skeletons and show the
+  // toggle OFF for the round trip. A Connect Retry is no refresh in place:
+  // kit hands the page a NEW query, which reads as loading until it settles,
+  // so Connect's loading counts only while no Retry is running.
   const dataLoading = $derived(
-    connectState.kind === 'loading'
+    (connectState.kind === 'loading' && !connectRetrying)
     || isFirstLoad(tiersQuery as QueryResult<unknown> | null)
     || isFirstLoad(settingsQuery as QueryResult<unknown> | null)
   );
@@ -429,27 +401,66 @@
     return map;
   });
 
+  // Try again on the failed note (P10) is judged on the read the page holds:
+  // kit drops a read that failed, so it hands the page a NEW query, still
+  // loading (Codex-if444). The note, and its focused Try again, stay until it
+  // answers.
+  const priceRetry = createLoadRetry(() => priceChangesQuery);
   /**
-   * Check again (one note) or Try again (the failed read): one read per
-   * press, never two at once (the cost rule).
+   * Check again or Try again is out, and a press of either does nothing (the
+   * cost rule). One press, one re-read; a Try again of a failed read sends
+   * two, the stray one kit's doing (see `createLoadRetry`).
    */
-  async function readPriceChanges(note?: PriceNoteView) {
+  const priceBusy = $derived(priceReading || priceRetry.busy);
+  let priceFailedNode = $state<HTMLElement | null>(null);
+  /** Repeat failures read out without a focus move; keys the note's words. */
+  let priceRepeats = $state(0);
+
+  /**
+   * Check again (one note): a re-read of a read that has loaded, which kit
+   * makes in place, so this press's own read is the answer.
+   */
+  async function readPriceChanges(note: PriceNoteView) {
     const query = priceChangesQuery;
-    if (!query || priceReading) return;
+    if (!query || priceBusy) return;
     priceReading = true;
     const at = new Date().toISOString();
     try {
       await query.refresh();
-      priceCheck =
-        note && !query.error
-          ? { key: note.key, at, lastRunAt: note.lastRunAt }
-          : null;
+      priceCheck = !query.error
+        ? { key: note.key, at, lastRunAt: note.lastRunAt }
+        : null;
     } catch {
       // The query keeps the error, and the failed line says so (P10).
       priceCheck = null;
     } finally {
       priceReading = false;
     }
+  }
+
+  /**
+   * Try again (the failed read). Focus then goes to what the read now says:
+   * the failed note's words (it failed again: read out once more), the first
+   * note on a tier row, or, with nothing going out, the Tiers heading.
+   */
+  async function retryPriceChanges() {
+    if (priceReading) return;
+    const result = await priceRetry.retry({
+      from: () => priceFailedNode,
+      settled: () => {
+        priceCheck = null;
+        return () =>
+          priceChangesFailed
+            ? priceFailedNode?.querySelector<HTMLElement>(
+                '[data-testid="price-note-status"]'
+              )
+            : (document.querySelector<HTMLElement>(
+                '.tier-list [data-testid="price-note-status"]'
+              ) ?? document.querySelector<HTMLElement>('[data-tiers-heading]'));
+      },
+    });
+    // Focus moved on during it, and the words are the same: read them again.
+    if (result && !result.focusFree && priceChangesFailed) priceRepeats += 1;
   }
 
   function dismissPriceNote(note: PriceNoteView, tierId: string) {
@@ -1524,41 +1535,21 @@
       <Card.Description>{m.monetisation_connect_description()}</Card.Description>
     </Card.Header>
     <Card.Content>
-      <!-- Where focus goes after a Retry that loaded the account (see
-           `retryConnectStatus`): the alert holding the focused button has just
-           unmounted. Persistent, so its text change is announced too. -->
-      <p
-        bind:this={connectRetryStatusNode}
-        class="sr-only"
-        role="status"
-        aria-live="polite"
-        tabindex="-1"
-      >
-        {connectRetryOutcome === 'ok' ? m.money_setup_load_retry_ok() : ''}
-      </p>
+      <!-- Mounted unconditionally (see LoadFailedAlert): its status line has to
+           persist to announce a Retry that loads the account. -->
+      <LoadFailedAlert
+        query={connectQuery}
+        bind:retrying={connectRetrying}
+        message={m.money_setup_load_failed()}
+        againMessage={m.money_setup_load_failed_again()}
+        loadedMessage={m.money_setup_load_retry_ok()}
+        data-testid="connect-load-error"
+      />
       {#if connectFailed}
-        <!-- Ahead of `dataLoading`, so the Retry button stays mounted (and
-             focused) while its own retry is in flight. No set-up or continue
-             button: we can't tell which one this owner needs, and "Connect
-             Stripe Account" would restart onboarding for an account that may
-             be fully set up (Codex-2hxff.45). The wrapper takes focus after a
-             Retry that failed again, so the alert is read out again. -->
-        <div bind:this={connectLoadErrorNode} class="load-error-focus" tabindex="-1">
-          <Alert variant="error" data-testid="connect-load-error" aria-busy={connectRetrying}>
-            <div class="return-alert">
-              <p class="return-alert__description">
-                {connectRetryOutcome === 'failed'
-                  ? m.money_setup_load_failed_again()
-                  : m.money_setup_load_failed()}
-              </p>
-              <Button variant="secondary" size="sm" onclick={retryConnectStatus}>
-                {connectRetrying
-                  ? m.money_setup_load_failed_retrying()
-                  : m.money_setup_load_failed_retry()}
-              </Button>
-            </div>
-          </Alert>
-        </div>
+        <!-- The alert above stands in for the account, ahead of `dataLoading`.
+             No set-up or continue button: we can't tell which one this owner
+             needs, and "Connect Stripe Account" would restart onboarding for
+             an account that may be fully set up (Codex-2hxff.45). -->
       {:else if dataLoading}
         <Skeleton width="200px" height="var(--space-5)" />
       {:else}
@@ -1778,14 +1769,16 @@
              `.tier-info { flex: 1 }` absorbed every pixel of an 1808px column.
              Now the meaning-bearing clusters pack together on the left and only
              the row ACTIONS take the conventional right edge. -->
-        {#if priceChangesFailed}
+        {#if priceChangesFailed || priceRetry.retrying}
           <!-- P10: which tier changed is in the read that failed, so the
-               line sits once above the list, never as "no change". -->
-          <div class="tier-price-failed">
+               line sits once above the list, never as "no change". Kept
+               while Try again runs (see `priceRetry`). -->
+          <div class="tier-price-failed" bind:this={priceFailedNode}>
             <PriceChangeNote
               failed
-              busy={priceReading}
-              onTryAgain={() => readPriceChanges()}
+              busy={priceBusy}
+              repeats={priceRepeats}
+              onTryAgain={retryPriceChanges}
               data-testid="price-change-note-failed"
             />
           </div>
@@ -1923,7 +1916,7 @@
                     <PriceChangeNote
                       view={note}
                       name={tier.name}
-                      busy={priceReading}
+                      busy={priceBusy}
                       onCheckAgain={() => readPriceChanges(note)}
                       onDismiss={() => dismissPriceNote(note, tier.id)}
                     />
@@ -2447,13 +2440,6 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-4);
-  }
-
-  /* Takes focus after a Retry that failed again; shown for keyboard users. */
-  .load-error-focus:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
-    border-radius: var(--radius-md);
   }
 
   /* Return-from-Stripe / readiness alerts: text and CTA side by side, the CTA

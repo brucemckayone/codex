@@ -21,6 +21,8 @@ export {
   darkTokenOverridesToCssVars,
   injectDarkTokenOverrides,
   injectTokenOverrides,
+  // Codex-403d3: what keeps an override inside its own declaration.
+  isSafeDeclaration,
   tokenOverrideStyle,
   tokenOverridesToCssVars,
 } from './css-injection';

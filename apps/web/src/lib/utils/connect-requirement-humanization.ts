@@ -11,9 +11,9 @@
  * in production; the `humanizeRequirement` helper is the single hook the UI
  * calls — never inline these strings in components.
  *
- * Stripe API contract verified via Context7 + installed types (stripe@19.3.1)
- * on 2026-05-13: `Stripe.Account.Requirements.currently_due: Array<string> | null`
- * — see `node_modules/stripe/types/Accounts.d.ts:1228-1268`.
+ * Stripe API contract verified against the installed types (stripe@23.1.0)
+ * on 2026-11-12: `Stripe.Account.Requirements.currently_due: Array<string> | null`
+ * — see `Account.Requirements` in `stripe/esm/resources/Accounts.d.ts`.
  */
 export const REQUIREMENT_HUMANIZATION: Record<string, string> = {
   // ─── Business profile ─────────────────────────────────────────────────────

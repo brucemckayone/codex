@@ -25,6 +25,7 @@ import {
   type KitRead,
   kitQuery,
 } from './__fixtures__/kit-query.mock.svelte';
+import LoadFailedAlertBoundHarness from './__fixtures__/LoadFailedAlertBoundHarness.test.svelte';
 import LoadFailedAlertHarness from './__fixtures__/LoadFailedAlertHarness.test.svelte';
 import {
   type LoadReadDouble,
@@ -422,5 +423,86 @@ describe('the query prop', () => {
       // @ts-expect-error a remote query goes to the alert as it is
       loadRead(query);
     expect(typeof wrapKit).toBe('function');
+  });
+
+  test("loadRead's key is an object the load returns, never a primitive", () => {
+    const refresh = () => Promise.resolve();
+    const output = { items: [] };
+    const keyed = loadRead({
+      current: undefined,
+      error: 'x',
+      refresh,
+      key: output,
+    });
+    // A primitive (`data.loadFailed`) would make every failed reload "the
+    // same read", so a repeat failure would never be judged.
+    const primitive = loadRead({
+      current: undefined,
+      error: 'x',
+      refresh,
+      // @ts-expect-error `key` is an object, compared by identity
+      key: true,
+    });
+    expect(keyed.key).toBe(output);
+    expect(primitive.key).toBe(true);
+  });
+});
+
+/**
+ * A Retry the page let go of claims nothing, even after a repeat failure
+ * (Codex-if444 round 6). The "still" is the outcome of the Retry before it;
+ * kept, it would say "We still couldn't…" over a failure no Retry has had.
+ */
+describe('a Retry let go of after a repeat failure', () => {
+  test('leaves no "still" from the Retry before it', async () => {
+    const remote = mountFailed(403);
+    await retryOntoNewQuery(remote);
+    remote.fail();
+    await settle();
+    expect(messageNode()?.textContent).toContain("We still couldn't load it.");
+
+    // The next Retry: the page refuses the read, so it lets the query go.
+    await retryOntoNewQuery(remote);
+    remote.fail({ status: 403, body: { message: 'Forbidden' } });
+    await settle();
+    expect(alert()).toBeNull();
+
+    // The page stops refusing: the held query's failure shows again.
+    if (harness) harness.refuseStatus = undefined;
+    flushSync();
+    expect(messageNode()?.textContent).toContain("We couldn't load it.");
+    expect(messageNode()?.textContent).not.toContain("We still couldn't");
+  });
+});
+
+/**
+ * Unmounted mid-Retry while the page stays, on a page that binds `retrying`
+ * to keep its failed layout (Monetisation and Subscribers, should `isOwner`
+ * turn false). Nothing runs on to end `retrying`, so the page kept its failed
+ * layout up, and an alert mounted again said "We couldn't…" over a read that
+ * may be fine (Codex-if444 round 6).
+ */
+describe('unmounted mid-Retry, on a page that binds `retrying`', () => {
+  test("the page's bound `retrying` goes false", async () => {
+    const remote = kitQuery<unknown>();
+    const props = $state({ remote, show: true });
+    component = mount(LoadFailedAlertBoundHarness, {
+      target: document.body,
+      props,
+    });
+    flushSync();
+    remote.fail();
+    flushSync();
+    const pageRetrying = () =>
+      document.querySelector('[data-testid="page-retrying"]')?.textContent;
+
+    await retryOntoNewQuery(remote);
+    expect(pageRetrying()).toBe('true');
+
+    props.show = false;
+    flushSync();
+    await settle();
+    expect(alert()).toBeNull();
+    expect(pageRetrying()).toBe('false');
   });
 });

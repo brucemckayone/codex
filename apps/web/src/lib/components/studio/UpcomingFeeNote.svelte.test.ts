@@ -3,7 +3,10 @@
  * makes, and what it shows for each state of that read. The words are
  * upcoming-fee-view's, tested there.
  *
- * The remote query answers with a fixed slot shaped like kit's `Query`.
+ * The remote query answers with a fixed slot shaped like kit's `Query`. A
+ * test of Try again takes the read as kit hands it (`kitQuery`): a failed
+ * first read is dropped, so Try again hands the note a NEW query, still
+ * loading (Codex-if444).
  */
 
 import type { UpcomingFeeChange } from '@codex/purchase';
@@ -29,13 +32,20 @@ const fees = vi.hoisted(() => ({
     error: undefined,
     refresh: vi.fn(async () => {}),
   } as Slot,
+  /** Set by a Try again test: the read as kit hands it, in place of the slot. */
+  kit: null as null | { get(): unknown },
 }));
 
 vi.mock('$lib/remote/billing.remote', () => ({
-  getUpcomingFees: vi.fn(() => fees.slot),
+  getUpcomingFees: vi.fn(() => fees.kit?.get() ?? fees.slot),
 }));
 
 import { getUpcomingFees } from '$lib/remote/billing.remote';
+import {
+  type KitQuery,
+  type KitRead,
+  kitQuery,
+} from './__fixtures__/kit-query.mock.svelte';
 import UpcomingFeeNote from './UpcomingFeeNote.svelte';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
@@ -82,6 +92,7 @@ beforeEach(() => {
     error: undefined,
     refresh: vi.fn(async () => {}),
   };
+  fees.kit = null;
   vi.mocked(getUpcomingFees).mockClear();
 });
 
@@ -218,5 +229,179 @@ describe('UpcomingFeeNote', () => {
     expect(fees.slot.refresh).not.toHaveBeenCalled();
     failedLine()?.querySelector('button')?.click();
     await vi.waitFor(() => expect(fees.slot.refresh).toHaveBeenCalledTimes(1));
+  });
+});
+
+/**
+ * Try again as kit runs it (Codex-if444). A failed first read is dropped, so
+ * Try again hands the note a NEW query, still loading. The note used to
+ * await the refreshed query's stray read while it held the new one: the line,
+ * with the focused Try again inside it, unmounted for the round trip, and the
+ * busy mark followed the stray read, not the answer.
+ */
+describe('Try again, as kit runs it', () => {
+  let kit: KitQuery<UpcomingFeeChange[]>;
+
+  const tryAgainButton = () =>
+    failedLine()?.querySelector('button') as HTMLButtonElement | null;
+  const checkedNone = () =>
+    [...document.querySelectorAll('[role="status"]')].find(
+      (node) => node.textContent?.trim() === m.fee_note_check_none()
+    ) ?? null;
+  /** Lets reads settle and Try again run on from them, focus moves included. */
+  const settle = async () => {
+    for (let turn = 0; turn < 3; turn++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    flushSync();
+  };
+
+  function renderFailed() {
+    kit = kitQuery<UpcomingFeeChange[]>();
+    fees.kit = kit;
+    render({ organizationId: ORG });
+    kit.fail();
+    flushSync();
+  }
+
+  /** Presses Try again; returns the refreshed query WRAPPED (it is thenable). */
+  async function pressTryAgain(): Promise<{
+    refreshed: KitRead<UpcomingFeeChange[]>;
+  }> {
+    const refreshed = kit.held();
+    tryAgainButton()?.focus();
+    tryAgainButton()?.click();
+    await settle();
+    expect(kit.refreshes(refreshed)).toBe(1);
+    expect(kit.held()).not.toBe(refreshed);
+    expect(kit.held().loading).toBe(true);
+    return { refreshed };
+  }
+
+  test('keeps the line and its focused Try again, busy, while the new read loads', async () => {
+    renderFailed();
+    await pressTryAgain();
+
+    expect(failedLine()?.textContent).toContain(m.fee_note_check_failed());
+    expect(document.activeElement).toBe(tryAgainButton());
+    expect(tryAgainButton()?.getAttribute('aria-busy')).toBe('true');
+    expect(tryAgainButton()?.disabled).toBe(false);
+  });
+
+  test('a read that fails again keeps the line and puts focus on it, so it is read out again', async () => {
+    renderFailed();
+    const { refreshed } = await pressTryAgain();
+
+    // The stray fetch's failure is not the answer: still busy.
+    kit.fail(undefined, refreshed);
+    await settle();
+    expect(tryAgainButton()?.getAttribute('aria-busy')).toBe('true');
+
+    kit.fail();
+    await settle();
+    expect(failedLine()?.textContent).toContain(m.fee_note_check_failed());
+    expect(document.activeElement).toBe(failedLine());
+    expect(tryAgainButton()?.getAttribute('aria-busy')).toBeNull();
+  });
+
+  test('a read that lands with a rise shows the note and moves focus to it', async () => {
+    renderFailed();
+    const { refreshed } = await pressTryAgain();
+
+    kit.land([RISE]);
+    await settle();
+
+    // Judged on the held read: the stray fetch is still out.
+    expect(refreshed.loading).toBe(true);
+    expect(failedLine()).toBeNull();
+    expect(note()?.getAttribute('role')).toBe('note');
+    expect(document.activeElement).toBe(note());
+  });
+
+  test('a read that lands with nothing coming shows nothing (N12), and says so where focus goes', async () => {
+    renderFailed();
+    await pressTryAgain();
+
+    kit.land([]);
+    await settle();
+
+    expect(failedLine()).toBeNull();
+    expect(note()).toBeNull();
+    expect(checkedNone()?.classList.contains('sr-only')).toBe(true);
+    expect(document.activeElement).toBe(checkedNone());
+  });
+
+  /** Somewhere else on the page, for focus moved on during the read. */
+  function elsewhere(): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.textContent = 'Elsewhere';
+    document.body.appendChild(button);
+    return button;
+  }
+  /** The hidden line that says a Try again found nothing coming. */
+  const noneLine = () =>
+    document.querySelector<HTMLElement>('p.sr-only[role="status"]');
+  /** The failed line's words, the node `{#key repeats}` re-inserts. */
+  const failedWords = () =>
+    [...(failedLine()?.childNodes ?? [])].find(
+      (node) =>
+        node.nodeType === Node.TEXT_NODE &&
+        node.textContent?.includes(m.fee_note_check_failed())
+    ) ?? null;
+
+  test('the "nothing coming" line is in place before the answer, so its words are read out', async () => {
+    renderFailed();
+    const line = noneLine();
+    expect(line).not.toBeNull();
+    expect(line?.textContent?.trim()).toBe('');
+
+    await pressTryAgain();
+    kit.land([]);
+    await settle();
+
+    expect(noneLine()).toBe(line);
+    expect(line?.textContent?.trim()).toBe(m.fee_note_check_none());
+  });
+
+  test('focus moved on during it stays put on a repeat failure, and the line is read out again', async () => {
+    renderFailed();
+    const outside = elsewhere();
+    await pressTryAgain();
+    const before = failedWords();
+
+    outside.focus();
+    kit.fail();
+    await settle();
+
+    expect(document.activeElement).toBe(outside);
+    expect(failedWords()).not.toBeNull();
+    expect(failedWords()).not.toBe(before);
+  });
+
+  test('focus moved on during it stays put when a rise lands', async () => {
+    renderFailed();
+    const outside = elsewhere();
+    await pressTryAgain();
+
+    outside.focus();
+    kit.land([RISE]);
+    await settle();
+
+    expect(note()).not.toBeNull();
+    expect(document.activeElement).toBe(outside);
+  });
+
+  test('focus moved on during it stays put when nothing is coming, and the hidden line says so', async () => {
+    renderFailed();
+    const outside = elsewhere();
+    await pressTryAgain();
+
+    outside.focus();
+    kit.land([]);
+    await settle();
+
+    expect(note()).toBeNull();
+    expect(noneLine()?.textContent?.trim()).toBe(m.fee_note_check_none());
+    expect(document.activeElement).toBe(outside);
   });
 });

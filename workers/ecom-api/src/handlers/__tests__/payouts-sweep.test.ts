@@ -113,8 +113,11 @@ describe('ecom-api payouts-sweep handler', () => {
   let offSaleCancel: MockInstance<
     CourseSubscriptionService['cancelForCoursesOffSale']
   >;
-  // And the dispute reconcile's second source (Codex-2hxff.58): no row of
-  // ours is final and unapplied.
+  // And the dispute reconcile's first step (owner D34): no stale appeal mark
+  // to clear.
+  let staleMarks: MockInstance<PurchaseService['clearStaleDisputeAppealMarks']>;
+  // And its second source (Codex-2hxff.58): no row of ours is final and
+  // unapplied.
   let disputeRows: MockInstance<PurchaseService['findDisputesToReconcile']>;
   // And its third (Codex-2hxff.70): no lost row of ours to re-check.
   let lostRows: MockInstance<PurchaseService['findLostDisputesToRecheck']>;
@@ -155,6 +158,9 @@ describe('ecom-api payouts-sweep handler', () => {
     bankPayouts = vi
       .spyOn(SubscriptionService.prototype, 'runBankPayouts')
       .mockResolvedValue(null);
+    staleMarks = vi
+      .spyOn(PurchaseService.prototype, 'clearStaleDisputeAppealMarks')
+      .mockResolvedValue([]);
     disputeRows = vi
       .spyOn(PurchaseService.prototype, 'findDisputesToReconcile')
       .mockResolvedValue([]);
@@ -175,6 +181,7 @@ describe('ecom-api payouts-sweep handler', () => {
   afterEach(() => {
     clawbackRetry.mockRestore();
     offSaleCancel.mockRestore();
+    staleMarks.mockRestore();
     disputeRows.mockRestore();
     lostRows.mockRestore();
     bankPayouts.mockRestore();

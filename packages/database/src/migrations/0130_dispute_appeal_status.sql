@@ -1,0 +1,2 @@
+ALTER TABLE "disputes" ADD COLUMN "appeal_status" varchar(32);--> statement-breakpoint
+ALTER TABLE "disputes" ADD CONSTRAINT "check_disputes_appeal_status" CHECK ("disputes"."appeal_status" IS NULL OR "disputes"."appeal_status" IN ('appeal_needs_response', 'appeal_under_review'));

@@ -23,6 +23,7 @@
  */
 import {
   darkTokenOverridesToCssVars,
+  isSafeDeclaration,
   tokenOverridesToCssVars,
 } from '$lib/brand-editor';
 import { withFallback } from '$lib/brand-editor/font-fallbacks';
@@ -52,25 +53,6 @@ const CORE_DARK: Record<string, string> = {
 };
 
 const FONT_FIELDS = new Set(['fontBody', 'fontHeading']);
-
-/** A custom property the page may set: `--` and kebab-case, nothing else. */
-const SAFE_PROPERTY = /^--[a-z0-9-]+$/;
-
-/**
- * Anything that would carry a value out of its own declaration. These values
- * come from a creator-editable jsonb column and are joined into a `style`
- * attribute on the PUBLIC page, so a `;` starts a new declaration
- * (`red; position: fixed; inset: 0`) and `url(` fetches whatever it names —
- * nothing a colour, a family name or a scale needs. Checked here, at the sink,
- * so it also covers rows stored before the save schema was bounded.
- */
-const UNSAFE_VALUE = /[;{}<>\\]|url\(|expression\(|@import|\p{Cc}/iu;
-
-function isSafeDeclaration([prop, value]: [string, string]): boolean {
-  return (
-    SAFE_PROPERTY.test(prop) && value.length <= 200 && !UNSAFE_VALUE.test(value)
-  );
-}
 
 /**
  * Font-family values must be quoted when they contain whitespace/commas so the
@@ -150,18 +132,28 @@ export function brandOverridesToCssVars(
   const groundDark = groundLuminance(out['--brand-bg-dark'], 'dark');
   if (groundDark) out['--brand-ground-dark-y'] = groundDark;
 
-  // ── Fine-tune token overrides (canonical prefix split + null-skip) ──
-  if (overrides.tokenOverrides) {
-    Object.assign(out, tokenOverridesToCssVars(overrides.tokenOverrides));
-  }
-  if (overrides.darkTokenOverrides) {
-    Object.assign(
-      out,
-      darkTokenOverridesToCssVars(overrides.darkTokenOverrides)
-    );
-  }
+  // The core fields above have one check, here: a family is only quoted on
+  // the way (quoteFamily). These values come from a creator-editable jsonb
+  // column and are joined into a `style` attribute on the PUBLIC page, so they
+  // are checked at the sink, which covers rows stored before the save schema
+  // was bounded.
+  const core = Object.fromEntries(
+    Object.entries(out).filter(isSafeDeclaration)
+  );
 
-  return Object.fromEntries(Object.entries(out).filter(isSafeDeclaration));
+  // ── Fine-tune token overrides (canonical prefix split + null-skip) ──
+  // Their mappers decide each entry with the save's own rule, so they are
+  // added as they come. A second check here would drop a long dark family
+  // that the org layout keeps (Codex-403d3).
+  return {
+    ...core,
+    ...(overrides.tokenOverrides
+      ? tokenOverridesToCssVars(overrides.tokenOverrides)
+      : {}),
+    ...(overrides.darkTokenOverrides
+      ? darkTokenOverridesToCssVars(overrides.darkTokenOverrides)
+      : {}),
+  };
 }
 
 /** A page's own background per theme, where it sets one (owner, D7): what

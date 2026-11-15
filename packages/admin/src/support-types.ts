@@ -15,6 +15,8 @@
  * users are returned with `deleted: true`, for the page to label.
  */
 
+import type { DisputeAppealStatus } from '@codex/constants';
+
 /** What was paid for: a one-off purchase, or an invoice of a subscription. */
 export type SupportChargeKind =
   | 'purchase'
@@ -396,12 +398,18 @@ export interface ChargebackRow {
   status: string;
   reason: string | null;
   createdAt: string;
-  /** Stripe's evidence deadline, while a response is due. */
+  /** Stripe's evidence deadline, while a response is due, an appeal's too. */
   respondBy: string | null;
   /** A late win's loss: when it was applied (`lost_applied_at`). */
   lostOn: string | null;
   /** When a lost chargeback was won after all (`late_won_at`). */
   lateWonOn: string | null;
+  /**
+   * A lost chargeback's appeal while it runs (`appeal_status`; owner D34):
+   * `status` stays `lost`. Null once the bank decides, and for any row that
+   * isn't lost, where a mark is stale.
+   */
+  appealStatus: DisputeAppealStatus | null;
   /** Won, and the creators' pay-back not yet applied: refunds wait for it. */
   settling: boolean;
 }

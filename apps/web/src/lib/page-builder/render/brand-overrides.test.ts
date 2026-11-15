@@ -7,6 +7,7 @@
  * contract (so `JourneyRenderer` renders a plain wrapper with no overrides).
  */
 import { describe, expect, it } from 'vitest';
+import { darkTokenOverridesToCssVars } from '$lib/brand-editor';
 import { groundLuminance } from '$lib/brand-editor/ground';
 import type { BrandTokenOverrides } from '$lib/page-builder';
 import {
@@ -211,6 +212,35 @@ describe('brandOverridesToCssVars', () => {
       expect(vars).not.toHaveProperty('--brand-color');
       expect(vars).not.toHaveProperty('--brand-heading-weight');
       expect(Object.values(vars).join(' ')).not.toContain(value);
+    });
+
+    it.each([
+      ['a breakout', 'Inter"; position: fixed; x: "'],
+      ['an unclosed quote', "Inter'"],
+      ['a block', 'Inter} body{display:none'],
+    ])('drops a core font family carrying %s, which only the last check stops', (_label, value) => {
+      // A family is only quoted (quoteFamily), never checked on the way:
+      // the filter over the whole result is its one guard (Codex-403d3).
+      const vars = brandOverridesToCssVars({
+        fontBody: value,
+        fontHeading: value,
+      });
+      expect(vars).not.toHaveProperty('--brand-font-body');
+      expect(vars).not.toHaveProperty('--brand-font-heading');
+    });
+
+    it('keeps a long dark family the org layout keeps (Codex-403d3)', () => {
+      // 199 characters, which the save keeps: its token mapper decides it,
+      // and quoting takes it past 200, so a second check here dropped it.
+      const family = `${'A'.repeat(197)} B`;
+      const darkTokenOverrides = { 'font-body': family };
+      const vars = brandOverridesToCssVars({ darkTokenOverrides });
+      expect(vars['--brand-font-body-dark']).toBeDefined();
+      expect(vars['--brand-font-body-dark']).toBe(
+        darkTokenOverridesToCssVars(darkTokenOverrides)[
+          '--brand-font-body-dark'
+        ]
+      );
     });
 
     it('drops a token whose NAME would inject', () => {

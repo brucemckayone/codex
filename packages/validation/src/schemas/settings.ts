@@ -12,6 +12,7 @@ import {
   timezoneSchema,
   urlSchema,
 } from '../primitives';
+import { tokenOverridesJsonSchema } from './brand-tokens';
 
 /**
  * Platform Settings Validation Schemas
@@ -145,10 +146,12 @@ export const updateBrandingSchema = z.object({
   // Brand Editor fine-tune fields — text/heading/body weight, shadow scale/color,
   // and heading colour are stored as keys inside tokenOverrides JSON. The
   // previously broken-out columns were dropped in Codex-g49b4.
-  tokenOverrides: z.string().nullable().optional(), // JSON string
+  // A JSON object string; each entry must stay inside its own CSS declaration
+  // (Codex-403d3, see tokenOverridesJsonSchema).
+  tokenOverrides: tokenOverridesJsonSchema,
   darkModeOverrides: z.string().nullable().optional(), // JSON string: Partial<ThemeColors>
   // Codex-wwedk: dark-theme tokenOverrides JSON, parallel to tokenOverrides.
-  darkTokenOverrides: z.string().nullable().optional(), // JSON string: Record<string, string | null>
+  darkTokenOverrides: tokenOverridesJsonSchema,
   heroLayout: z.enum(HERO_LAYOUTS).optional(),
   pricingFaq: z.union([z.literal(null), z.string().min(1)]).optional(),
 });

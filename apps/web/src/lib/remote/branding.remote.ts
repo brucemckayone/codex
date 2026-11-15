@@ -141,20 +141,24 @@ export const updateBrandingCommand = command(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
-    const result = await api.org.updateBranding(orgId, {
-      primaryColorHex,
-      secondaryColorHex,
-      accentColorHex,
-      backgroundColorHex,
-      fontBody,
-      fontHeading,
-      radiusValue,
-      densityValue,
-      tokenOverrides,
-      darkModeOverrides,
-      darkTokenOverrides,
-      heroLayout,
-    });
+    // A refused save (a 4xx, e.g. an override the schema refuses) reaches the
+    // page with its message, not as an unexpected 500 (Codex-403d3).
+    const result = await forwardClientErrors(() =>
+      api.org.updateBranding(orgId, {
+        primaryColorHex,
+        secondaryColorHex,
+        accentColorHex,
+        backgroundColorHex,
+        fontBody,
+        fontHeading,
+        radiusValue,
+        densityValue,
+        tokenOverrides,
+        darkModeOverrides,
+        darkTokenOverrides,
+        heroLayout,
+      })
+    );
 
     await invalidateCache(platform, orgId);
 

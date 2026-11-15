@@ -48,6 +48,7 @@
  */
 
 import {
+  appealMarkOn,
   STRIPE_ENV_METADATA_KEY,
   STRIPE_REQUESTED_BY_METADATA_KEY,
   STRIPE_SUPPORT_KEY_METADATA_KEY,
@@ -1263,14 +1264,27 @@ export class SupportService extends BaseService {
       });
   }
 
-  /** The charge's disputes; one awaiting an answer gets its deadline from Stripe. */
+  /**
+   * The charge's disputes; one awaiting an answer, an appeal's included, gets
+   * its deadline from Stripe. An appeal's mark is shown on a lost row only:
+   * on any other it is stale (a rollback's late win), and the hourly
+   * reconcile clears it (owner D34).
+   *
+   * At the appeal stage, Stripe moves `evidence_details.due_by` to the appeal
+   * response deadline (https://docs.stripe.com/disputes/arbitration.md), so
+   * the same read gives an appeal that needs a response its deadline.
+   */
   private async chargebackRows(
     rows: ReadonlyArray<typeof disputes.$inferSelect>
   ): Promise<ChargebackRow[]> {
     const result: ChargebackRow[] = [];
     for (const row of rows) {
+      const appealStatus = appealMarkOn(row.status, row.appealStatus);
       let respondBy: string | null = null;
-      if (AWAITING_RESPONSE.has(row.status)) {
+      if (
+        AWAITING_RESPONSE.has(row.status) ||
+        appealStatus === 'appeal_needs_response'
+      ) {
         const dispute = await this.stripe.disputes.retrieve(
           row.stripeDisputeId
         );
@@ -1286,6 +1300,7 @@ export class SupportService extends BaseService {
         respondBy,
         lostOn: toIso(row.lostAppliedAt),
         lateWonOn: toIso(row.lateWonAt),
+        appealStatus,
         settling: isSettlingWin(row),
       });
     }

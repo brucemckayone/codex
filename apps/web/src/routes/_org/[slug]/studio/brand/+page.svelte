@@ -22,7 +22,13 @@
   import { onDestroy } from 'svelte';
   import { beforeNavigate, invalidate } from '$app/navigation';
   import { page } from '$app/state';
-  import type { HeroLayout } from '@codex/validation';
+  import {
+    type HeroLayout,
+    TOKEN_OVERRIDE_KEY,
+    TOKEN_OVERRIDE_MAX_ENTRIES,
+    tokenOverrideEntryProblem,
+    tokenOverrideText,
+  } from '@codex/validation';
   import type { BrandingSettingsResponse } from '@codex/shared-types';
   import { brandEditor, createBrandPreviewSender } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
@@ -160,7 +166,14 @@
     const unreadable: Record<string, string> = {};
     const initialState = toBrandEditorState(current, unreadable);
     unreadableRaw = unreadable;
-    brandEditor.open(orgId, initialState);
+    // A restored draft was edited from exactly this brand (the store checks).
+    // A discarded one was not, and one Save would have reverted a newer save.
+    const recovery = brandEditor.open(orgId, initialState);
+    if (recovery === 'restored') {
+      toast.info(m.studio_brand_recovery_restored());
+    } else if (recovery === 'discarded') {
+      toast.warning(m.studio_brand_recovery_discarded());
+    }
     // One non-blocking notice if any saved field couldn't be read — surfaced
     // BEFORE the admin can overwrite it by saving. handleSave preserves the raw
     // value, so this warns rather than signalling data loss.
@@ -270,14 +283,18 @@
           : (unreadableRaw.darkTokenOverrides ?? ''),
         heroLayout: payload.heroLayout as HeroLayout,
       });
-      brandEditor.markSaved();
+      // What it sent: an edit made while it was in flight stays unsaved.
+      brandEditor.markSaved(payload);
       await invalidate('cache:org-versions').catch(() => {
         /* non-critical — save succeeded; worst case the user reloads */
       });
       toast.success('Brand settings saved');
     } catch (err) {
+      // The command forwards a worker 4xx with its message (an HttpError is
+      // not an Error, so `err.message` never reached the toast).
       toast.error(
-        err instanceof Error ? err.message : 'Failed to save brand settings'
+        queryErrorMessage(err, 'Failed to save brand settings') ??
+          'Failed to save brand settings'
       );
     } finally {
       saving = false;
@@ -285,9 +302,21 @@
   }
 
   // Preserve the unsaved-changes guard the retired overlay used to provide.
-  beforeNavigate(({ cancel }) => {
-    if (brandEditor.isDirty) {
-      if (!confirm('You have unsaved brand changes. Discard?')) cancel();
+  // A confirmed Discard clears the tab's draft too: leaving keeps it otherwise,
+  // for the next open to offer (Codex-0keaj).
+  beforeNavigate(({ type, cancel }) => {
+    if (!brandEditor.isDirty) return;
+    // A reload, tab close or typed URL: cancelling shows the browser's own
+    // prompt, and the draft stays for the reload it exists for. confirm() is
+    // not called there (browsers block it during unload, but may not).
+    if (type === 'leave') {
+      cancel();
+      return;
+    }
+    if (confirm('You have unsaved brand changes. Discard?')) {
+      brandEditor.discard();
+    } else {
+      cancel();
     }
   });
 
@@ -306,7 +335,8 @@
       backgroundColor: b.backgroundColorHex,
       fontBody: b.fontBody,
       fontHeading: b.fontHeading,
-      radius: Number(b.radiusValue) || 0.5,
+      // 0 is a real radius ("Sharp"), so not `|| 0.5` (Codex-jxa7t).
+      radius: Number.isFinite(b.radiusValue) ? b.radiusValue : 0.5,
       density: Number(b.densityValue) || 1,
       logoUrl: b.logoUrl,
       tokenOverrides:
@@ -331,15 +361,48 @@
     unreadable: Record<string, string>
   ): Record<string, string | null> | null {
     if (!json) return null; // absent/empty — not an error
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(json) as Record<string, string | null>;
-      return parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0
-        ? parsed
-        : null;
+      parsed = JSON.parse(json);
     } catch {
       recordUnreadable(field, json, unreadable);
       return null;
     }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return keepSavable(field, parsed);
+  }
+
+  // A stored entry the save would refuse (Codex-403d3): a key that isn't
+  // lowercase kebab, a reserved key, a value that would leave its own CSS
+  // declaration or fetch, or an entry past the limit. It is dropped here, so
+  // the next Save never sends it back and the brand stays saveable (owner's
+  // pick). Nothing is lost that showed: the mappers render the same first
+  // entries and refuse the same ones. A stored number is kept as its text,
+  // as it renders. Logged with the org and the keys, never the values.
+  function keepSavable(
+    field: string,
+    stored: object
+  ): Record<string, string | null> | null {
+    const entries = Object.entries(stored);
+    const dropped = entries.slice(TOKEN_OVERRIDE_MAX_ENTRIES).map(([key]) => key);
+    const kept: Record<string, string | null> = {};
+    for (const [key, value] of entries.slice(0, TOKEN_OVERRIDE_MAX_ENTRIES)) {
+      if (tokenOverrideEntryProblem(key, value)) {
+        dropped.push(key);
+        continue;
+      }
+      kept[key] = tokenOverrideText(value);
+    }
+    if (dropped.length > 0) {
+      logger.warn('studio/brand: stored token overrides the save would refuse were dropped', {
+        organizationId: orgId,
+        field,
+        dropped: dropped.length,
+        // Only keys that are well-formed, so a crafted key is never logged.
+        keys: dropped.filter((key) => TOKEN_OVERRIDE_KEY.test(key)).slice(0, 20),
+      });
+    }
+    return Object.keys(kept).length > 0 ? kept : null;
   }
 
   function parseDarkOverrides(

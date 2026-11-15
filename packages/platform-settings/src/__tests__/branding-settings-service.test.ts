@@ -160,6 +160,17 @@ describe('BrandingSettingsService', () => {
   }
 
   describe('get()', () => {
+    it('reads a stored radius that is not a number as the 0.5 default', async () => {
+      await db.insert(schema.platformSettings).values({ organizationId });
+      await db
+        .insert(schema.brandingSettings)
+        // radius_value is varchar(10). 'abc' fits, and parseFloat reads no
+        // number from it ('1rem' would read as 1).
+        .values({ organizationId, radiusValue: 'abc' });
+
+      expect((await createService().get()).radiusValue).toBe(0.5);
+    });
+
     it('should return defaults when no branding settings exist', async () => {
       const service = createService();
 
@@ -191,6 +202,15 @@ describe('BrandingSettingsService', () => {
   });
 
   describe('update()', () => {
+    it('keeps a radius of 0, the "Sharp" end (Codex-jxa7t)', async () => {
+      const service = createService();
+
+      const saved = await service.update({ radiusValue: 0 });
+
+      expect(saved.radiusValue).toBe(0);
+      expect((await service.get()).radiusValue).toBe(0);
+    });
+
     it('should create branding settings via upsert when none exist', async () => {
       const service = createService();
 

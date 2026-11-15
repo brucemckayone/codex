@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TOKEN_OVERRIDE_MAX_ENTRIES } from '@codex/validation';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyLayoutBrandInputs,
@@ -643,5 +644,117 @@ describe('injectBrandVars paints the canonical hex', () => {
     expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe(
       groundLuminance('#000000', 'dark')
     );
+  });
+});
+
+describe('an override that would leave its own declaration (Codex-403d3)', () => {
+  // An org admin's saved JSON, as it might be stored before the save schema
+  // checked it: entries that would add declarations of their own, fetch an
+  // image, or swallow the entries after them, and one an editor control
+  // really writes.
+  const CRAFTED = {
+    'heading-color': 'red; position: fixed; inset: 0',
+    'x: 1; position': 'red',
+    'shadow-color': 'url(https://evil.example/x.png)',
+    surface: 'image-set("https://pub-a.r2.dev/p.png" 1x)',
+    'glass-tint': "'unclosed",
+    'shader-preset': 'haze',
+  };
+  const SAFE = { 'shader-preset': 'haze' };
+
+  it('the light mapper drops it and keeps the rest', () => {
+    expect(tokenOverridesToCssVars(CRAFTED)).toEqual(
+      tokenOverridesToCssVars(SAFE)
+    );
+    expect(Object.keys(tokenOverridesToCssVars(SAFE))).toHaveLength(1);
+  });
+
+  it('the dark mapper drops it, and the logo key ShaderHero would fetch', () => {
+    expect(
+      darkTokenOverridesToCssVars({
+        ...CRAFTED,
+        'font-body': 'Inter"; position: fixed',
+        'shader-logo-url': 'https://pub-a.r2.dev/l.svg',
+      })
+    ).toEqual(darkTokenOverridesToCssVars(SAFE));
+  });
+
+  it('keeps a dark family the save kept, though quoting takes it past 200', () => {
+    // 199 characters with a space: the save keeps it, and quoting adds two.
+    const family = `${'A'.repeat(197)} B`;
+    const emitted = Object.values(
+      darkTokenOverridesToCssVars({ 'font-body': family })
+    );
+    // quoteFamily quotes with single quotes here.
+    expect(emitted).toEqual([`'${family}'`]);
+    expect(emitted[0]?.length).toBeGreaterThan(200);
+  });
+
+  it('refuses what the save refuses: a quoted family and an over-long key', () => {
+    // Both are refused by the save's rule, so neither may render: a family
+    // with quotes would leave its quoted name open, and a key over 64
+    // characters would render here yet be dropped by the editor's load.
+    const longKey = `k-${'a'.repeat(63)}`;
+    expect(
+      darkTokenOverridesToCssVars({
+        'font-body': 'a"b\'c"d',
+        [longKey]: 'red',
+        ...SAFE,
+      })
+    ).toEqual(darkTokenOverridesToCssVars(SAFE));
+    expect(tokenOverridesToCssVars({ [longKey]: 'red', ...SAFE })).toEqual(
+      tokenOverridesToCssVars(SAFE)
+    );
+  });
+
+  it('renders a stored number in its plain form, and skips any other non-text', () => {
+    const number = tokenOverridesToCssVars({ 'text-scale': 1.2 });
+    expect(number).toEqual(tokenOverridesToCssVars({ 'text-scale': '1.2' }));
+    expect(Object.keys(number)).toHaveLength(1);
+    const odd = {
+      'font-body': true,
+      'text-scale': { nested: 1 },
+      'heading-weight': Number.NaN,
+    };
+    expect(darkTokenOverridesToCssVars(odd)).toEqual({});
+    expect(tokenOverridesToCssVars(odd)).toEqual({});
+  });
+
+  it('renders nothing from stored JSON that is not an object', () => {
+    // The layouts' parse hands on any JSON; a string or an array has keys
+    // too, which the save and the editor's load refuse.
+    for (const stored of [['red'], 'abc']) {
+      expect(tokenOverridesToCssVars(stored as never)).toEqual({});
+      expect(darkTokenOverridesToCssVars(stored as never)).toEqual({});
+    }
+  });
+
+  it('renders at most the entries the brand editor keeps on load', () => {
+    const map = Object.fromEntries(
+      Array.from({ length: TOKEN_OVERRIDE_MAX_ENTRIES + 1 }, (_, i) => [
+        `key-${i}`,
+        'red',
+      ])
+    );
+    const out = tokenOverridesToCssVars(map);
+    expect(Object.keys(out)).toHaveLength(TOKEN_OVERRIDE_MAX_ENTRIES);
+    expect(out).not.toHaveProperty(`--color-key-${TOKEN_OVERRIDE_MAX_ENTRIES}`);
+  });
+
+  it('the server-rendered style carries no declaration but its own', () => {
+    const style = tokenOverrideStyle(CRAFTED, {
+      'heading-color': 'blue; scale: 3',
+    });
+    expect(style).toBe(tokenOverrideStyle(SAFE, null));
+    expect(style?.split(';')).toHaveLength(1);
+  });
+
+  it('an unclosed quote no longer swallows the entries after it', () => {
+    expect(
+      tokenOverrideStyle(
+        { 'glass-tint': "'unclosed", 'heading-color': '#E11D48' },
+        null
+      )
+    ).toBe(tokenOverrideStyle({ 'heading-color': '#E11D48' }, null));
   });
 });

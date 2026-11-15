@@ -108,6 +108,23 @@ jobs:
       - name: Dialog structure gate (shared Dialog parts only)
         run: pnpm --filter web run check:dialog-structure
 
+      # Codex-if444: a read that failed is retried through the shared
+      # LoadFailedAlert, never by hand. Kit drops a $derived query whose read
+      # failed and hands the page a NEW one, so a Retry that awaits
+      # `X.refresh()` waits on the stray read and judges the wrong query
+      # (Monetisation and Subscribers called a repeat failure a success); a
+      # load read's awaited `invalidate()` resolves late or early. The gate
+      # fails on LoadFailedAlert's Retry label used anywhere else, and on a
+      # handler pressed from a failed state whose first await refreshes a
+      # $derived remote read. Its allowlist empties as the copies migrate. See
+      # apps/web/scripts/check-load-retry.mjs for the full rule.
+      # Self-test first, as for the gates above.
+      - name: Load-failure Retry gate self-test
+        run: pnpm --filter web run check:load-retry:test
+
+      - name: Load-failure Retry gate (shared LoadFailedAlert only)
+        run: pnpm --filter web run check:load-retry
+
       # Codex-ea1hd WP9: the data-access contract drift gate.
       #
       # Two grep-based rules over packages/*/src, workers/*/src and apps/*/src:
