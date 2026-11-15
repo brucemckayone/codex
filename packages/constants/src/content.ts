@@ -322,6 +322,131 @@ export function canBeSold(
 }
 
 /**
+ * The branch the access decision takes for a piece of content, in its order
+ * (`decidePolicyAccess`, packages/access/src/services/content-access/
+ * access-decision.ts, which switches on this). Orgless content behind the
+ * tier switch is refused to everyone, before any branch (Codex-up7bx); then
+ * course-only, team-only and followers-only, which never read a purchase; then
+ * the two arms that do, subscribers and paid; else free, open to everyone.
+ *
+ * One rule for access and for purchase completion (Codex-z1t3c), so a new
+ * branch is added here, and both the decision's `switch` and
+ * {@link contentRefusesBuyers}'s table fail to compile until it is handled.
+ */
+export type ContentAccessBranch =
+  | 'orgless_tier_gate'
+  | 'course_only'
+  | 'team_only'
+  | 'followers_only'
+  | 'subscribers'
+  | 'paid'
+  | 'free';
+
+export function contentAccessBranch(
+  c: Pick<
+    ContentAccessFlags,
+    | 'priceCents'
+    | 'courseOnly'
+    | 'isTeamOnly'
+    | 'isFollowerGated'
+    | 'isTierGated'
+  > & { organizationId: string | null }
+): ContentAccessBranch {
+  if (c.organizationId == null && c.isTierGated) return 'orgless_tier_gate';
+  if (c.courseOnly) return 'course_only';
+  if (c.isTeamOnly) return 'team_only';
+  if (c.isFollowerGated) return 'followers_only';
+  if (c.isTierGated) return 'subscribers';
+  if ((c.priceCents ?? 0) > 0) return 'paid';
+  return 'free';
+}
+
+/**
+ * Published now, or once: the access decision's publication rule. A row
+ * never published was never offered, so no arm reaches it, a buyer's included
+ * (Codex-nacky). Content detached from its organisation lands here too:
+ * migration 0004's trigger makes it a draft and nulls `published_at`
+ * (Codex-7ncbh). Not {@link hasBeenLive}, which also counts an archived row.
+ */
+export function isContentReleased(c: PublicationState): boolean {
+  return c.status === CONTENT_STATUS.PUBLISHED || c.publishedAt != null;
+}
+
+/**
+ * What a buyer's one-off purchase meets in each branch: `purchase`, an arm
+ * that reads it (and outlives unpublication: "one-off buyers keep what they
+ * bought", Codex-p3m5j); `everyone`, open while published, bought or not;
+ * `refused`, a branch that never reads a purchase. A `Record`, so a new
+ * branch fails the build until it is classified.
+ */
+const BUYER_IN_BRANCH: Record<
+  ContentAccessBranch,
+  'purchase' | 'everyone' | 'refused'
+> = {
+  orgless_tier_gate: 'refused',
+  course_only: 'refused',
+  team_only: 'refused',
+  followers_only: 'refused',
+  subscribers: 'purchase',
+  paid: 'purchase',
+  free: 'everyone',
+};
+
+/**
+ * What {@link contentRefusesBuyers} reads: the access policy, its
+ * publication, and whether the content or its organisation is soft-deleted.
+ * Every field is required, so a projection that leaves one out fails to
+ * compile rather than reading it as "allowed".
+ */
+export interface ContentBuyerFacts
+  extends Pick<
+      ContentAccessFlags,
+      | 'priceCents'
+      | 'courseOnly'
+      | 'isTeamOnly'
+      | 'isFollowerGated'
+      | 'isTierGated'
+    >,
+    PublicationState {
+  organizationId: string | null;
+  deletedAt: Date | string | null;
+  /** The content's organisation is soft-deleted; false for orgless content. */
+  organizationDeleted: boolean;
+}
+
+/**
+ * Would access refuse a BUYER of this content: someone whose only grant is a
+ * completed purchase of it? (Codex-z1t3c; owner 2026-11-15, D54, "match access
+ * exactly".) Purchase completion blocks and refunds a sale exactly when this
+ * holds, so a buyer is never charged for an item access will not open.
+ *
+ * It refuses when the content or its organisation is deleted (gone, to every
+ * arm: the access fetch's `deleted_at IS NULL` and `isOfDeletedOrg`), when it
+ * was never released (a draft, or detached from its organisation), when its
+ * branch never reads a purchase (orgless with a tier, course-only, team-only,
+ * followers-only), and when it is free and no longer published (the free arm
+ * does not outlive unpublication). A paid or subscribers item opens to its
+ * buyer published or withdrawn.
+ *
+ * @codex/access reads the same branch order ({@link contentAccessBranch}) and
+ * publication rule ({@link isContentReleased}), and its
+ * content-buyer-refusal test runs every case through both this and the real
+ * decision.
+ */
+export function contentRefusesBuyers(c: ContentBuyerFacts): boolean {
+  if (c.deletedAt != null || c.organizationDeleted) return true;
+  if (!isContentReleased(c)) return true;
+  switch (BUYER_IN_BRANCH[contentAccessBranch(c)]) {
+    case 'purchase':
+      return false;
+    case 'everyone':
+      return c.status !== CONTENT_STATUS.PUBLISHED;
+    case 'refused':
+      return true;
+  }
+}
+
+/**
  * The policy fields publicness depends on. Every field is REQUIRED but nullable,
  * so a full content row or a public list item satisfies it without a cast, and
  * a projection that leaves a gate out fails to type-check. Optional fields

@@ -29,6 +29,7 @@ import {
   CONTENT_STATUS,
   CURRENCY,
   canBeSold,
+  contentRefusesBuyers,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
   type DisputeAppealStatus,
@@ -55,6 +56,7 @@ import {
   emailTemplates,
   entitlements,
   moneyNotices,
+  organizations,
   payoutReversals,
   purchases,
   type RefundStatus,
@@ -499,8 +501,9 @@ const ITEM_UNAVAILABLE = 'item_unavailable';
 /**
  * A new purchase row's outcome: completed, or, for a second payment for an
  * item the buyer owns, a duplicate of that purchase (Codex-2hxff.14), or, for
- * a payment whose content was deleted or made team-only before it landed, a
- * blocked sale (Codex-z1t3c). Either stays `pending` until Stripe has
+ * a payment whose content access would refuse its buyer by the time it landed
+ * (deleted, team-only, its organisation deleted, detached: D54), a blocked
+ * sale (Codex-z1t3c). Either stays `pending` until Stripe has
  * refunded it, so no reader counts money as returned that is not. Its split
  * columns keep what the sale would have paid; no slice is ever recorded for
  * it. An unavailable item is blocked whoever owns it: no buyer can watch it,
@@ -583,8 +586,10 @@ export function isDuplicatePayment(
 }
 
 /**
- * A payment that landed after its content was deleted or made team-only
- * (Codex-z1t3c; owner 2026-11-15, "block and refund"): a blocked sale. It
+ * A payment that landed when access would refuse its buyer the content
+ * (`contentRefusesBuyers`: deleted, team-only, its organisation deleted,
+ * detached and more; Codex-z1t3c, owner 2026-11-15, "block and refund", and
+ * D54, "match access exactly"): a blocked sale. It
  * grants and pays nothing, and is `pending` while its refund is owed and
  * `refunded` once Stripe has made it, as a duplicate is. The marker is
  * `refund_reason` (no migration): written at insert, and kept by every later
@@ -1291,14 +1296,28 @@ export class PurchaseService extends BaseService {
 
   /**
    * Is the item a sale is for unavailable to its buyer (Codex-z1t3c)? Read
-   * after the buyer's item lock. Content is, deleted or team-only (access
-   * refuses both: `isNull(deletedAt)`, `team_only`), read under FOR SHARE.
+   * after the buyer's item lock. Content is when access would refuse its
+   * buyer: `contentRefusesBuyers` in @codex/constants, the rule access's own
+   * decision reads (owner D54, "match access exactly"). That covers deleted,
+   * team-only, course-only, followers-only, a deleted organisation, content
+   * detached from its organisation or never released, and any rule added
+   * there later.
    *
-   * FOR SHARE conflicts with the FOR NO KEY UPDATE that a delete, or a PATCH
-   * or bulk access change, holds on the row, so a completion waits for one in
-   * flight and then reads what it committed. The purchase INSERT's own FOR
-   * KEY SHARE never conflicts with it, which is how a sale used to land on
-   * content deleted while its Checkout was open.
+   * Both rows are read FOR SHARE, the content row and then its organisation's
+   * (child, then parent, the order every writer takes them). FOR SHARE
+   * conflicts with the FOR NO KEY UPDATE that a content delete, a PATCH or
+   * bulk access change, a detach, or an organisation delete or update holds,
+   * so a completion waits for one in flight and then reads what it committed.
+   * The purchase INSERT's own FOR KEY SHARE never conflicts with them, which
+   * is how a sale used to land on content gone while its Checkout was open.
+   * The organisation locked is the one the content names once its own lock
+   * is held, so a detach in flight is waited out first. No writer locks an
+   * organisation and then content: `OrganizationService.update` and `.delete`
+   * write the organisation row alone, and content writers reach it only by
+   * their foreign key's FOR KEY SHARE, which FOR SHARE does not block. So the
+   * two locks cannot deadlock. (A hard DELETE of an organisation would reach
+   * content second, through `content.organization_id`'s ON DELETE SET NULL;
+   * only test cleanup and scripts run one.)
    *
    * By id only, unscoped by design: the id is the signed session's, as in
    * `resolvePurchaseSplit`, and a `deletedAt` predicate would read a deleted
@@ -1313,17 +1332,38 @@ export class PurchaseService extends BaseService {
   ): Promise<boolean> {
     if (!('contentId' in target)) return false;
     const [row] = await tx
-      .select({ deletedAt: content.deletedAt, isTeamOnly: content.isTeamOnly })
+      .select({
+        organizationId: content.organizationId,
+        status: content.status,
+        publishedAt: content.publishedAt,
+        deletedAt: content.deletedAt,
+        priceCents: content.priceCents,
+        isTierGated: content.isTierGated,
+        courseOnly: content.courseOnly,
+        isTeamOnly: content.isTeamOnly,
+        isFollowerGated: content.isFollowerGated,
+      })
       .from(content)
       .where(eq(content.id, target.contentId))
       .for('share');
-    return row !== undefined && (row.deletedAt !== null || row.isTeamOnly);
+    if (!row) return false;
+    const [org] = row.organizationId
+      ? await tx
+          .select({ deletedAt: organizations.deletedAt })
+          .from(organizations)
+          .where(eq(organizations.id, row.organizationId))
+          .for('share')
+      : [];
+    return contentRefusesBuyers({
+      ...row,
+      organizationDeleted: org?.deletedAt != null,
+    });
   }
 
   /**
    * Refund a blocked payment in full and mark it `refunded`: a duplicate
-   * (owner decision "Block, then refund"), or a blocked sale of content
-   * deleted or made team-only before the payment landed (Codex-z1t3c). Safe
+   * (owner decision "Block, then refund"), or a blocked sale of content its
+   * buyer could not open by the time the payment landed (Codex-z1t3c). Safe
    * to repeat: a replayed webhook asks Stripe again under the same key (one
    * per kind, `BLOCKED_REFUNDS`), and a charge already refunded counts as
    * done. Its `charge.refunded` then records the refund and emails the buyer
@@ -1624,9 +1664,10 @@ export class PurchaseService extends BaseService {
         );
         if (replay) return { purchase: replay, isNew: false } as const;
         const isDuplicate = duplicateOf !== undefined;
-        // Content deleted or made team-only while Checkout was open is a
-        // blocked sale, refunded after the commit (Codex-z1t3c). Read under
-        // FOR SHARE, so a delete or access change in flight is waited out.
+        // Content its buyer could not open by now (deleted, team-only, its
+        // organisation deleted, detached: `contentRefusesBuyers`) is a blocked
+        // sale, refunded after the commit (Codex-z1t3c). Read under FOR SHARE,
+        // so a delete or access change in flight is waited out.
         const itemUnavailable = await this.isItemUnavailable(tx, {
           contentId: metadata.contentId,
         });
@@ -2989,7 +3030,8 @@ export class PurchaseService extends BaseService {
    *   caller records the partial refund on it (P-1: access is kept). The
    *   replay records the slices and claws the refund back from them, so each
    *   payee nets what a refund after the payout leaves.
-   * - **Its content deleted or team-only** (Codex-z1t3c): it is written as
+   * - **Content its buyer could not open** (Codex-z1t3c,
+   *   `contentRefusesBuyers`): it is written as
    *   the blocked sale completion would write, granting nothing, `refunded`
    *   if refunded in full and `pending` otherwise. The replay refunds what is
    *   left, as it does for one written by completion.
@@ -3063,8 +3105,8 @@ export class PurchaseService extends BaseService {
       // a completion of the buyer's other payment for the item cannot both
       // write a completed purchase. A buyer who already owns the item paid
       // twice: this one is rebuilt as the duplicate it is, granting nothing.
-      // Content deleted or made team-only is rebuilt as the blocked sale it
-      // is, under the same FOR SHARE read as completion (Codex-z1t3c).
+      // Content its buyer could not open is rebuilt as the blocked sale it
+      // is, under the same FOR SHARE reads as completion (Codex-z1t3c).
       return await this.db.transaction(async (tx) => {
         const { replay, ownerId } = await this.lockForItem(
           tx,
@@ -3184,8 +3226,9 @@ export class PurchaseService extends BaseService {
          */
         lateWinKeptThrough: { purchasedAt: string } | null;
         /**
-         * A blocked sale's refund (Codex-z1t3c): its content was deleted or
-         * made team-only before the payment landed, and the email says so.
+         * A blocked sale's refund (Codex-z1t3c): access would refuse its
+         * buyer the content by the time the payment landed, and the email
+         * says so.
          */
         itemUnavailable: boolean;
       }
@@ -4262,8 +4305,8 @@ export class PurchaseService extends BaseService {
    *   purchase or by the charge (`disputedAt` stays set after a loss, which
    *   also makes it `refunded`): the dispute decides the access;
    * - `duplicate`: a duplicate payment, which never granted anything;
-   * - `unavailable`: a blocked sale of content deleted or made team-only
-   *   before its payment landed (Codex-z1t3c), which never granted anything;
+   * - `unavailable`: a blocked sale of content its buyer could not open when
+   *   its payment landed (Codex-z1t3c), which never granted anything;
    * - `rebought`: the buyer bought the item again since, and that purchase
    *   grants it: a buyer holds one completed purchase per item
    *   (`uq_purchases_completed_customer_content`);

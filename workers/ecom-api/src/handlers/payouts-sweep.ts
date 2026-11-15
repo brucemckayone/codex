@@ -162,9 +162,11 @@ async function retryClawbacks(
  * Retry the refunds still owed on duplicates (Codex-2hxff.15): a second
  * purchase of an item, or a second subscription to an org or course plan,
  * whose refund was refused while Stripe redelivered its event, and then
- * stopped. Each kind runs on its own, so one failing never stops the others,
- * and nothing here fails the cron. What is still owed afterwards is alerted
- * with its ids, for support to settle.
+ * stopped. The purchase kind also retries blocked sales of an item its buyer
+ * could not open (Codex-z1t3c), so the alert names both. Each kind runs on
+ * its own, so one failing never stops the others, and nothing here fails the
+ * cron. What is still owed afterwards is alerted with its ids, for support to
+ * settle.
  */
 export async function runOwedDuplicatesSweep(
   services: Record<
@@ -191,7 +193,7 @@ export async function runOwedDuplicatesSweep(
       }
       if (result.stillOwed.length > 0) {
         obs.error(
-          'Duplicate refunds are still owed after the hourly retry: refund them by hand',
+          'Refunds are still owed after the hourly retry (a duplicate payment, or an item no longer available): refund them by hand',
           { errorId: crypto.randomUUID(), kind, stillOwed: result.stillOwed }
         );
       }

@@ -26,7 +26,7 @@ export type IssueRefundInput = RefundTarget & {
   /**
    * Stripe's own reason enum; `duplicate` for a second payment. Omitted when
    * none of Stripe's fits, rather than a false one: a payment for an item
-   * deleted or made team-only before it landed (Codex-z1t3c).
+   * its buyer could no longer open when it landed (Codex-z1t3c).
    */
   reason?: Stripe.RefundCreateParams.Reason;
   /** Stripe's `amount`, in pence, for a partial refund. Omitted: in full. */

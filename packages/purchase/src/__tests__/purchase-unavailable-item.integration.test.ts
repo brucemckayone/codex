@@ -1,22 +1,26 @@
 /**
- * A payment that lands after its content was deleted or made team-only
+ * A payment that lands after its content became unavailable to its buyer
  * (Codex-z1t3c; owner D44 and 2026-11-15: block and refund, a variant line in
- * the existing refund email, no checkout expiry).
+ * the existing refund email, no checkout expiry; D54: "match access exactly";
+ * D53: a dispute keeps the org-wide streaming block).
  *
  * The defect: completion took only the buyer's advisory lock, and its INSERT
- * only FOR KEY SHARE on the content, which never conflicts with the FOR NO
- * KEY UPDATE a delete or access change holds. So a sale completed on content
- * no buyer can watch, and nothing refunded it.
+ * only FOR KEY SHARE on the content and its organisation, which never
+ * conflicts with the FOR NO KEY UPDATE a delete or access change holds. So a
+ * sale completed on content no buyer can watch, and nothing refunded it.
  *
- * The fix, pinned here: completion reads the content FOR SHARE after the item
- * lock (so it waits out a delete in flight), and a deleted or team-only item
- * is recorded as a blocked sale (`refund_reason = 'item_unavailable'`):
- * pending, no grant, no slices, refunded in full after the commit under
- * `refund_unavailable_${pi}`, retried by the hourly sweep, kept out of
- * Sales, and never restored by support. A normal sale is unchanged.
+ * The fix, pinned here: completion reads the content and then its
+ * organisation FOR SHARE after the item lock (so it waits out a delete in
+ * flight), and content that access would refuse its buyer
+ * (`contentRefusesBuyers`: deleted, team-only, its organisation deleted,
+ * detached) is recorded as a
+ * blocked sale (`refund_reason = 'item_unavailable'`): pending, no grant, no
+ * slices, refunded in full after the commit under `refund_unavailable_${pi}`,
+ * retried by the hourly sweep, kept out of Sales, and never restored by
+ * support. A normal sale is unchanged.
  *
- * Real DB. Every row hangs off this file's own organisation and users, and is
- * deleted in afterAll (the sweep is global).
+ * Real DB. Every row hangs off this file's own organisations and users, and
+ * is deleted in afterAll (the sweep is global).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -117,6 +121,8 @@ describe('a purchase whose content became unavailable before it landed (Codex-z1
   let creatorId: string;
   let organizationId: string;
   const buyerIds: string[] = [];
+  /** Organisations a test deletes or detaches from: never the shared one. */
+  const ownOrgIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -150,9 +156,12 @@ describe('a purchase whose content became unavailable before it landed (Codex-z1
         .where(inArray(contentAccess.userId, buyerIds));
       await db.delete(purchases).where(inArray(purchases.customerId, buyerIds));
     }
-    await db.delete(content).where(eq(content.organizationId, organizationId));
+    // By creator: detached content has no organisation left to find it by.
+    await db.delete(content).where(eq(content.creatorId, creatorId));
     await db.delete(courses).where(eq(courses.organizationId, organizationId));
-    await db.delete(organizations).where(eq(organizations.id, organizationId));
+    await db
+      .delete(organizations)
+      .where(inArray(organizations.id, [organizationId, ...ownOrgIds]));
     await db.delete(users).where(inArray(users.id, [...buyerIds, creatorId]));
     await teardownTestDatabase();
   });
@@ -210,17 +219,41 @@ describe('a purchase whose content became unavailable before it landed (Codex-z1
     );
   }
 
+  /** An organisation of the test's own, to delete or detach from. */
+  async function ownOrg(): Promise<string> {
+    const id = takeFirst(
+      await db
+        .insert(organizations)
+        .values({
+          name: 'Unavailable Item Own Org',
+          slug: createUniqueSlug('z1t3c-own'),
+        })
+        .returning()
+    ).id;
+    ownOrgIds.push(id);
+    return id;
+  }
+
+  /** The delete, as `OrganizationService.delete` writes it. */
+  function deleteOrg(conn: Pick<Database, 'update'>, id: string) {
+    return conn
+      .update(organizations)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(organizations.id, id));
+  }
+
   function complete(
     service: PurchaseService,
     pi: string,
     customerId: string,
     contentId: string,
-    stripeChargeId?: string
+    stripeChargeId?: string,
+    orgId: string = organizationId
   ) {
     return service.completePurchase(pi, {
       customerId,
       contentId,
-      organizationId,
+      organizationId: orgId,
       amountPaidCents: 1500,
       currency: 'gbp',
       stripeChargeId,
@@ -327,6 +360,92 @@ describe('a purchase whose content became unavailable before it landed (Codex-z1
         customerId,
         item.id,
         `ch_team_${uid()}`
+      );
+
+      expect(result).toMatchObject({
+        status: 'refunded',
+        refundReason: 'item_unavailable',
+        refundAmountCents: 1500,
+      });
+      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+      expect(refundCall(stripe, 0)[1]).toEqual({
+        idempotencyKey: `refund_unavailable_${pi}`,
+      });
+      expect(await slicesOf(result.id)).toHaveLength(0);
+      expect(await grantsOf(customerId, item.id)).toEqual({
+        entitlements: 0,
+        access: 0,
+      });
+    });
+
+    // Owner D54, "match access exactly": access refuses a buyer the content of
+    // a deleted organisation (`isOfDeletedOrg`), so the sale is blocked too.
+    it('its organisation deleted before the payment lands: blocked and refunded the same way', async () => {
+      const { service, stripe } = fresh();
+      const orgId = await ownOrg();
+      const item = await insertContent({ organizationId: orgId });
+      await deleteOrg(db, orgId);
+      const customerId = await buyer();
+      const pi = `pi_org_gone_${uid()}`;
+
+      const result = await complete(
+        service,
+        pi,
+        customerId,
+        item.id,
+        `ch_org_gone_${uid()}`,
+        orgId
+      );
+
+      expect(result).toMatchObject({
+        status: 'refunded',
+        refundReason: 'item_unavailable',
+        refundAmountCents: 1500,
+      });
+      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+      expect(refundCall(stripe, 0)[1]).toEqual({
+        idempotencyKey: `refund_unavailable_${pi}`,
+      });
+      expect(await slicesOf(result.id)).toHaveLength(0);
+      expect(await grantsOf(customerId, item.id)).toEqual({
+        entitlements: 0,
+        access: 0,
+      });
+    });
+
+    // Detached: its organisation_id cleared, which migration 0004's trigger
+    // turns into a draft never released, so access refuses every buyer.
+    it('detached from its organisation before the payment lands: blocked and refunded the same way', async () => {
+      const { service, stripe } = fresh();
+      const orgId = await ownOrg();
+      const item = await insertContent({ organizationId: orgId });
+      await db
+        .update(content)
+        .set({ organizationId: null, updatedAt: new Date() })
+        .where(eq(content.id, item.id));
+      // The trigger did fire: what this test means by detached.
+      expect(
+        takeFirst(
+          await db
+            .select({
+              organizationId: content.organizationId,
+              status: content.status,
+              publishedAt: content.publishedAt,
+            })
+            .from(content)
+            .where(eq(content.id, item.id))
+        )
+      ).toEqual({ organizationId: null, status: 'draft', publishedAt: null });
+      const customerId = await buyer();
+      const pi = `pi_detached_${uid()}`;
+
+      const result = await complete(
+        service,
+        pi,
+        customerId,
+        item.id,
+        `ch_detached_${uid()}`,
+        orgId
       );
 
       expect(result).toMatchObject({
@@ -527,6 +646,92 @@ describe('a purchase whose content became unavailable before it landed (Codex-z1
       expect(await grantsOf(customerId, item.id)).toEqual({
         entitlements: 1,
         access: 1,
+      });
+    });
+
+    it('an organisation delete in flight: the completion waits on the organisation’s row lock, then reads the delete and blocks the sale', async () => {
+      const { stripe } = fresh();
+      const orgId = await ownOrg();
+      const item = await insertContent({ organizationId: orgId });
+      const customerId = await buyer();
+      const pi = `pi_org_race_${uid()}`;
+      const conn = await ownConnection();
+      let work = track(Promise.resolve());
+      try {
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`set local lock_timeout = '10s'`);
+          // Its UPDATE holds the organisation row FOR NO KEY UPDATE until it
+          // commits; the purchase INSERT's foreign-key FOR KEY SHARE alone
+          // would never wait for it.
+          await deleteOrg(tx, orgId);
+          const holder = await backendPid(tx);
+          work = track(
+            complete(
+              new PurchaseService(
+                { db: conn.db, environment: 'test', ...createTestMoneyDeps() },
+                stripe
+              ),
+              pi,
+              customerId,
+              item.id,
+              `ch_org_race_${uid()}`,
+              orgId
+            )
+          );
+          // Proof of the wait: blocked by this transaction, on
+          // `organizations`, the content row's own lock already held.
+          await untilWaiting(conn.pid, holder, 'organizations', work);
+        });
+
+        expect(await work.outcome).toMatchObject({
+          status: 'refunded',
+          refundReason: 'item_unavailable',
+        });
+      } finally {
+        await work.outcome;
+        await conn.cleanup();
+      }
+      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+      expect(await grantsOf(customerId, item.id)).toEqual({
+        entitlements: 0,
+        access: 0,
+      });
+    });
+  });
+
+  // Owner D53: a dispute on a blocked sale keeps today's org-wide streaming
+  // block. The realistic order: the blocked sale's refund is refused because
+  // the charge is disputed, and then the dispute's own webhook lands.
+  describe('a dispute on a blocked sale', () => {
+    it('ends access, so the webhook writes the org-wide streaming block, and keeps the marker', async () => {
+      const { service, stripe } = fresh();
+      vi.mocked(stripe.refunds.create).mockRejectedValueOnce(refusal());
+      const item = await insertContent({ deletedAt: new Date() });
+      const customerId = await buyer();
+      const pi = `pi_dispute_${uid()}`;
+      await expect(
+        complete(service, pi, customerId, item.id)
+      ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+
+      const disputed = await service.processDispute(pi, {
+        stripeDisputeId: `dp_blocked_${uid()}`,
+        disputeReason: 'product_unacceptable',
+      });
+
+      expect(disputed).toEqual({
+        userId: customerId,
+        orgId: organizationId,
+        accessEnded: true,
+      });
+      const row = await rowOf(pi);
+      expect(row.disputedAt).not.toBeNull();
+      expect(row).toMatchObject({
+        status: 'pending',
+        refundReason: 'item_unavailable',
+      });
+      expect(await grantsOf(customerId, item.id)).toEqual({
+        entitlements: 0,
+        access: 0,
       });
     });
   });

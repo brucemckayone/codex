@@ -339,9 +339,10 @@ export async function completeCheckoutSession(
       });
       return { kind: 'completed', purchase };
     }
-    // A payment for content deleted or made team-only while Checkout was
-    // open was refunded, not sold (Codex-z1t3c): nothing to receipt, and no
-    // library to bump. Its refund email says the item is gone.
+    // A payment for content its buyer could no longer open (deleted,
+    // team-only, its organisation deleted, detached) was refunded, not sold
+    // (Codex-z1t3c): nothing to receipt, and no library to bump. Its refund
+    // email says the item is gone.
     if (isUnavailableBlock(purchase)) {
       obs?.warn('Payment for unavailable content refunded instead of sold', {
         purchaseId: purchase.id,

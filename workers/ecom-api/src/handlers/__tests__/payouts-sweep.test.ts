@@ -917,8 +917,9 @@ describe('runOwedDuplicatesSweep', () => {
       kind: 'purchase',
       settled: 2,
     });
+    // It names both kinds the purchase sweep retries (Codex-z1t3c).
     expect(obs.error).toHaveBeenCalledExactlyOnceWith(
-      expect.stringContaining('still owed'),
+      'Refunds are still owed after the hourly retry (a duplicate payment, or an item no longer available): refund them by hand',
       {
         errorId: expect.any(String),
         kind: 'subscription',

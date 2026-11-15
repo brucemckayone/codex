@@ -208,8 +208,8 @@ interface RefundedPurchase {
    */
   lateWinKeptThrough?: { purchasedAt: string } | null;
   /**
-   * A blocked sale's refund (Codex-z1t3c): the item was deleted or made
-   * team-only before the payment landed, so it was refunded in full.
+   * A blocked sale's refund (Codex-z1t3c): its buyer could no longer open
+   * the item when the payment landed, so it was refunded in full.
    */
   itemUnavailable?: boolean;
 }
@@ -300,9 +300,10 @@ function purchaseNote(
  * - A late win refunds the FIRST payment of a buyer who bought it again
  *   (Codex-2hxff.70, Q1): the purchase they made since stands.
  *
- * Before both: a payment that landed after its item was deleted or made
- * team-only was blocked and refunded in full (Codex-z1t3c; owner
- * 2026-11-15): the item is gone, so it says that, never "you still have it".
+ * Before both: a payment that landed when its buyer could no longer open the
+ * item (deleted, team-only, its organisation deleted, detached) was blocked
+ * and refunded in full (Codex-z1t3c; owner 2026-11-15 and D54): the item is
+ * gone, so it says that, never "you still have it".
  */
 function purchaseAccessNote(
   purchase: RefundedPurchase,

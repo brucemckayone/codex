@@ -188,6 +188,10 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
             organizationId: orgId,
             contentType: 'written',
             slug: createUniqueSlug('late-win'),
+            // Published, as anything a checkout sells is: completion blocks a
+            // sale of content its buyer could not open (Codex-z1t3c, D54).
+            status: 'published',
+            publishedAt: new Date(),
           })
         )
         .returning()

@@ -797,7 +797,7 @@ export interface ResolvedFailedRefund {
  * - `not_refunded`: the purchase is in another status;
  * - `dispute_holds`: a chargeback is open or was lost on it;
  * - `duplicate`: a duplicate payment, which never granted anything;
- * - `unavailable`: a blocked sale of content deleted or made team-only before
+ * - `unavailable`: a blocked sale of content its buyer could not open when
  *   its payment landed (Codex-z1t3c), which never granted anything. The
  *   settle dialog has no copy of its own for it: it reads the generic line;
  * - `rebought`: the buyer bought the item again, and that purchase grants it;
