@@ -6,8 +6,9 @@
   card carries its status, its access and one count (views, or sales for a
   piece that sells), and the line that says what it needs. The same words as
   the table (`row-facts`), so a piece reads the same in either view. A
-  phone's Grid; its List is `ContentListRows` (owner 2026-11-15). Each card has a box for the bulk bar and a ⋯ menu
-  (Codex-a6ofh.3.5), over its picture.
+  phone's Grid too; its List is `ContentListRows` (owner 2026-11-15). Each
+  card has a box for the bulk bar and a ⋯ menu (Codex-a6ofh.3.5), over its
+  picture.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -41,7 +42,6 @@
   }
 
   const { items, payouts, tierName, showCategories, selection, rowMenu }: Props = $props();
-
 </script>
 
 <ul class="content-grid" role="list">

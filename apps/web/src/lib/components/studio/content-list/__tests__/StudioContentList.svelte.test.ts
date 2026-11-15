@@ -1602,8 +1602,11 @@ describe('StudioContentList: on a phone', () => {
       document.querySelector('.content-grid [data-content-id]')
     ).not.toBeNull();
     expect(document.querySelector('.content-rows')).toBeNull();
+    // One View toggle, on every width: a phone keeps it beside Filters.
     expect(
-      document.querySelector('.toolbar-phone-view [role="radiogroup"]')
-    ).not.toBeNull();
+      document.querySelectorAll(
+        `[role="radiogroup"][aria-label="${m.media_view_label()}"]`
+      )
+    ).toHaveLength(1);
   });
 });

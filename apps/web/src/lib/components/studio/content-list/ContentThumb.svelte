@@ -33,20 +33,23 @@
     piece.contentType === 'video' ? FilmIcon : piece.contentType === 'audio' ? MusicIcon : FileTextIcon
   );
   const duration = $derived(formatDuration(piece.mediaItem?.durationSeconds));
-  // The row's thumb is var(--space-20), 5rem, at every width. A card is its
-  // grid column: the whole width on a phone, half below md, a quarter above.
+  // The row's thumb is var(--space-20), 5rem, at every width, and a phone
+  // row's var(--space-14), 3.5rem. A card is its grid column: the whole
+  // width on a phone, half below md, a quarter above.
   const sizes = $derived(
     variant === 'card'
       ? '(max-width: 39.9375rem) 100vw, (max-width: 63.9375rem) 50vw, 25vw'
-      : '5rem'
+      : variant === 'compact'
+        ? '3.5rem'
+        : '5rem'
   );
 </script>
 
 <span class="thumb" data-variant={variant} aria-hidden="true">
   <FallbackImage
     {src}
-    srcset={src ? getThumbnailSrcset(src) || undefined : undefined}
-    sizes={src ? coverCropSizes(sizes, 16 / 9, src) : undefined}
+    srcset={getThumbnailSrcset(src) || undefined}
+    sizes={coverCropSizes(sizes, 16 / 9, src)}
     alt=""
     loading="lazy"
   >
@@ -83,13 +86,6 @@
 
   .thumb[data-variant='compact'] {
     width: var(--space-14);
-  }
-
-  /* Rendered by FallbackImage, so reached from this box. */
-  .thumb :global(img) {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   /* Text on the surface, as the old row's type chip: both flip with the

@@ -27,6 +27,7 @@ describe('FallbackImage', () => {
 
   function render(props: {
     src: string | null;
+    srcset?: string;
     sizes?: string;
     loading?: 'lazy' | 'eager';
   }) {
@@ -34,7 +35,13 @@ describe('FallbackImage', () => {
     document.body.appendChild(target);
     component = mount(FallbackImage, {
       target,
-      props: { alt: '', fallback, ...props },
+      props: {
+        alt: '',
+        fallback,
+        srcset: undefined,
+        sizes: undefined,
+        ...props,
+      },
     });
     flushSync();
   }
@@ -43,10 +50,16 @@ describe('FallbackImage', () => {
   const shownFallback = () => target.querySelector('.the-fallback');
 
   test('a picture shows, and the fallback does not', () => {
-    render({ src: '/cover.webp', sizes: '5rem', loading: 'lazy' });
+    render({
+      src: '/cover.webp',
+      srcset: '/cover.webp 400w',
+      sizes: '5rem',
+      loading: 'lazy',
+    });
     expect(img()?.getAttribute('src')).toBe('/cover.webp');
     expect(img()?.style.display).toBe('');
     // The rest of an img's attributes pass through.
+    expect(img()?.getAttribute('srcset')).toBe('/cover.webp 400w');
     expect(img()?.getAttribute('sizes')).toBe('5rem');
     expect(img()?.getAttribute('loading')).toBe('lazy');
     expect(shownFallback()).toBeNull();
@@ -70,7 +83,13 @@ describe('FallbackImage', () => {
   });
 
   test('a new picture after a failure is tried afresh', () => {
-    const props = $state({ alt: '', fallback, src: '/missing.webp' });
+    const props = $state({
+      alt: '',
+      fallback,
+      srcset: undefined,
+      sizes: undefined,
+      src: '/missing.webp',
+    });
     target = document.createElement('div');
     document.body.appendChild(target);
     component = mount(FallbackImage, { target, props });

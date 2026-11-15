@@ -10,19 +10,38 @@
  * Access cell's "Buyers keep access" both ask here.
  */
 import {
-  CONTENT_STATUS,
-  hasBeenLive,
+  CONTENT_LIFECYCLE,
+  type ContentLifecycle,
+  contentLifecycle,
   type PublicationState,
 } from '@codex/constants';
 import * as m from '$paraglide/messages';
 
 /** Once live, and not on sale now: it keeps its buyers (owner, 2026-11-05). */
 export function isOffSale(piece: PublicationState): boolean {
-  return piece.status !== CONTENT_STATUS.PUBLISHED && hasBeenLive(piece);
+  return contentLifecycle(piece) === CONTENT_LIFECYCLE.OFF_SALE;
 }
 
-/** How it looks: on sale, a draft on its way, or once live and off sale now. */
-export type ListStatusVariant = 'published' | 'draft' | 'off-sale';
+/** How it looks: its lifecycle, the one the list's tabs file it under. */
+export type ListStatusVariant = ContentLifecycle;
+
+const WORDS: Record<
+  ContentLifecycle,
+  { label: () => string; toggle: () => string }
+> = {
+  [CONTENT_LIFECYCLE.PUBLISHED]: {
+    label: m.studio_content_status_published,
+    toggle: m.studio_content_form_unpublish,
+  },
+  [CONTENT_LIFECYCLE.OFF_SALE]: {
+    label: m.studio_live_badge_unpublished,
+    toggle: m.studio_live_republish,
+  },
+  [CONTENT_LIFECYCLE.DRAFT]: {
+    label: m.studio_content_status_draft,
+    toggle: m.studio_content_form_publish,
+  },
+};
 
 export function listStatus(piece: PublicationState): {
   label: string;
@@ -30,23 +49,7 @@ export function listStatus(piece: PublicationState): {
   /** What its publish toggle says. */
   toggle: string;
 } {
-  if (piece.status === CONTENT_STATUS.PUBLISHED) {
-    return {
-      label: m.studio_content_status_published(),
-      variant: 'published',
-      toggle: m.studio_content_form_unpublish(),
-    };
-  }
-  if (isOffSale(piece)) {
-    return {
-      label: m.studio_live_badge_unpublished(),
-      variant: 'off-sale',
-      toggle: m.studio_live_republish(),
-    };
-  }
-  return {
-    label: m.studio_content_status_draft(),
-    variant: 'draft',
-    toggle: m.studio_content_form_publish(),
-  };
+  const variant = contentLifecycle(piece);
+  const words = WORDS[variant];
+  return { label: words.label(), variant, toggle: words.toggle() };
 }

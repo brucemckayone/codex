@@ -7815,14 +7815,6 @@ export const studio_content_status_draft = () => `Draft`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_status_archived = () => `Archived`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_error_title = () => `Content Error`
 
 
@@ -12896,14 +12888,6 @@ export const studio_content_list_filter_named = (params) => `${params.title}: $
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_list_search_facet = () => `Search`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_status_facet = () => `Status`
 
 
 /**

@@ -3,10 +3,12 @@
 
   Find anything in the content list (Codex-a6ofh.3.1, mockup L1 notes 2-5):
   row one is search over titles and descriptions (`/` focuses it) and the
-  status; row two the Type, Access and Sort menus and the table/cards
-  toggle, led in the personal studio by its Where (mockup L4b), with the
-  org studio's Category before the Sort (mockup L1 pin 4). Below `sm` the menus move into one sheet behind "Filters · N", as
-  the media library's do, and the view is always the cards.
+  status; row two the facet menus (`contentListFacets`: the personal
+  studio's Where first, mockup L4b; the org studio's Category last, mockup
+  L1 pin 4), the Sort and the table/cards toggle. Below `sm` the menus move
+  into one sheet behind "Filters · N", as the media library's do, and the
+  view stays beside it: List is rows there, Grid the cards (owner
+  2026-11-15).
 
   Presentational: the state comes from the URL (`list-url.ts`) and every
   change is a patch the parent writes back, so a link reproduces the view.
@@ -14,15 +16,14 @@
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import FacetMenu from '../list-toolbar/FacetMenu.svelte';
-  import type { FacetUnread, ListFacet, ListOption } from '../list-toolbar/list-option';
+  import type { ListFacet } from '../list-toolbar/list-option';
   import ListFilterSheet from '../list-toolbar/ListFilterSheet.svelte';
   import ListSearchBox from '../list-toolbar/ListSearchBox.svelte';
   import ListSegment from '../list-toolbar/ListSegment.svelte';
   import {
-    ACCESS_OPTIONS,
+    type ContentListFacetKey,
     SORT_OPTIONS,
     STATUS_OPTIONS,
-    TYPE_OPTIONS,
     VIEW_OPTIONS,
   } from './list-options';
   import { CONTENT_LIST_DEFAULTS, type ContentListState } from './list-url';
@@ -39,77 +40,13 @@
     onSearchClear: () => void;
     onChange: (patch: ContentListPatch) => void;
     /**
-     * The personal studio's "Where" (Codex-a6ofh.3.2, mockup L4b):
-     * Everywhere, Personal, then each org, with counts when read. Left out
-     * in the org studio, whose list is its org.
+     * The facet menus (`contentListFacets`): the desktop row draws them
+     * before the Sort, and a phone's sheet holds them.
      */
-    whereOptions?: readonly ListOption[];
-    /**
-     * The org studio's Category (Codex-a6ofh.3.3, mockup L1 pin 4): Any,
-     * then the org's categories. Left out in the personal studio (owner).
-     */
-    categoryOptions?: readonly ListOption[];
-    /** Set when the org's categories could not be read: the menu says so. */
-    categoryUnread?: FacetUnread;
+    facets: readonly ListFacet<ContentListFacetKey>[];
   }
 
-  const {
-    view,
-    searchValue,
-    onSearchInput,
-    onSearchClear,
-    onChange,
-    whereOptions,
-    categoryOptions,
-    categoryUnread,
-  }: Props = $props();
-
-  /** The menus' facets: the status stays on screen on every width. */
-  const FILTER_FACETS: readonly ListFacet<'type' | 'access'>[] = [
-    {
-      key: 'type',
-      title: () => m.media_filter_type_label(),
-      options: TYPE_OPTIONS,
-      fallback: CONTENT_LIST_DEFAULTS.type,
-    },
-    {
-      key: 'access',
-      title: () => m.studio_content_form_access_label(),
-      options: ACCESS_OPTIONS,
-      fallback: CONTENT_LIST_DEFAULTS.access,
-    },
-  ];
-
-  /** The Where, stated once: the desktop menu and the phone sheet read it. */
-  const whereFacet = $derived<ListFacet<'where'> | undefined>(
-    whereOptions && {
-      key: 'where',
-      title: () => m.studio_content_where_label(),
-      options: whereOptions,
-      fallback: CONTENT_LIST_DEFAULTS.where,
-    }
-  );
-
-  /** The Category, stated once: the desktop menu and the phone sheet read it. */
-  const categoryFacet = $derived<ListFacet<'category'> | undefined>(
-    categoryOptions && {
-      key: 'category',
-      title: () => m.studio_content_category_label(),
-      options: categoryOptions,
-      fallback: CONTENT_LIST_DEFAULTS.category,
-      unread: categoryUnread,
-    }
-  );
-
-  /**
-   * The menus, in order: the desktop row draws them before the Sort, and a
-   * phone's sheet holds them. Where first, Category last.
-   */
-  const facets = $derived<readonly ListFacet<'where' | 'type' | 'access' | 'category'>[]>([
-    ...(whereFacet ? [whereFacet] : []),
-    ...FILTER_FACETS,
-    ...(categoryFacet ? [categoryFacet] : []),
-  ]);
+  const { view, searchValue, onSearchInput, onSearchClear, onChange, facets }: Props = $props();
 </script>
 
 <div class="toolbar">
@@ -134,38 +71,7 @@
   </div>
 
   <div class="toolbar-row toolbar-facets">
-    {#each facets as facet (facet.key)}
-      <FacetMenu
-        label={facet.title()}
-        value={view[facet.key]}
-        options={facet.options}
-        fallback={facet.fallback}
-        unread={facet.unread}
-        onSelect={(value) => onChange({ [facet.key]: value })}
-      />
-    {/each}
-    <FacetMenu
-      label={m.media_sort_label()}
-      value={view.sort}
-      options={SORT_OPTIONS}
-      fallback={CONTENT_LIST_DEFAULTS.sort}
-      onSelect={(sort) => onChange({ sort })}
-    />
-
-    <span class="toolbar-sep" aria-hidden="true"></span>
-
-    <ListSegment
-      label={m.media_view_label()}
-      value={view.view}
-      options={VIEW_OPTIONS}
-      iconsOnly
-      onSelect={(next) => onChange({ view: next })}
-    />
-  </div>
-
-  <!-- A phone's second row: the Filters sheet, and the view beside it
-       (List is rows there, Grid the cards; owner 2026-11-15). -->
-  <div class="toolbar-phone">
+    <!-- Its trigger shows below `sm` only, where the menus hide. -->
     <ListFilterSheet
       idPrefix="clt"
       title={m.studio_content_list_filters_title()}
@@ -178,15 +84,35 @@
       sortOptions={SORT_OPTIONS}
       {onChange}
     />
-    <span class="toolbar-phone-view">
-      <ListSegment
-        label={m.media_view_label()}
-        value={view.view}
-        options={VIEW_OPTIONS}
-        iconsOnly
-        onSelect={(next) => onChange({ view: next })}
+    <span class="toolbar-menus">
+      {#each facets as facet (facet.key)}
+        <FacetMenu
+          label={facet.title()}
+          value={view[facet.key]}
+          options={facet.options}
+          fallback={facet.fallback}
+          unread={facet.unread}
+          onSelect={(value) => onChange({ [facet.key]: value })}
+        />
+      {/each}
+      <FacetMenu
+        label={m.media_sort_label()}
+        value={view.sort}
+        options={SORT_OPTIONS}
+        fallback={CONTENT_LIST_DEFAULTS.sort}
+        onSelect={(sort) => onChange({ sort })}
       />
+
+      <span class="toolbar-sep" aria-hidden="true"></span>
     </span>
+
+    <ListSegment
+      label={m.media_view_label()}
+      value={view.view}
+      options={VIEW_OPTIONS}
+      iconsOnly
+      onSelect={(next) => onChange({ view: next })}
+    />
   </div>
 </div>
 
@@ -210,31 +136,20 @@
     background: var(--color-border);
   }
 
-  /* ── Phone: search + status, then one Filters button ───────── */
-  /* On a wide screen the row adds nothing: the sheet's trigger and this
-     view are hidden, and the facets row holds the view. */
-  .toolbar-phone {
+  /* The menus sit in the row as if unwrapped; the wrapper is only so a
+     phone can hide them in one go. */
+  .toolbar-menus {
     display: contents;
   }
 
-  .toolbar-phone-view {
-    display: none;
-  }
-
+  /* ── Phone: search + status, then Filters and the view ─────── */
   @media (--below-sm) {
-    .toolbar-facets {
+    .toolbar-menus {
       display: none;
     }
 
-    .toolbar-phone {
-      display: flex;
-      align-items: center;
+    .toolbar-facets {
       justify-content: space-between;
-      gap: var(--space-2);
-    }
-
-    .toolbar-phone-view {
-      display: inline-flex;
     }
   }
 </style>

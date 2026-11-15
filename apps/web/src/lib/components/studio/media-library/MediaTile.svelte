@@ -160,10 +160,9 @@
   <div class="tile-thumb">
     <FallbackImage
       src={media.thumbnailUrl}
-      srcset={media.thumbnailUrl ? getThumbnailSrcset(media.thumbnailUrl) || undefined : undefined}
+      srcset={getThumbnailSrcset(media.thumbnailUrl) || undefined}
       sizes={TILE_SIZES}
       alt=""
-      class="thumb-img"
       loading="lazy"
     >
       {#snippet fallback()}
@@ -338,14 +337,6 @@
       );
     box-shadow:
       0 var(--space-1) var(--space-3) color-mix(in srgb, var(--color-text) 4%, transparent);
-  }
-
-  /* Rendered by FallbackImage, so reached from this box. */
-  .tile-thumb :global(.thumb-img) {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
   }
 
   .thumb-placeholder {

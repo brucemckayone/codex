@@ -240,13 +240,38 @@ export function isContentListNarrowed(
   search: string | null,
   organizationId: string | null
 ): boolean {
-  return (
-    state.status !== CONTENT_LIST_DEFAULTS.status ||
-    state.type !== CONTENT_LIST_DEFAULTS.type ||
-    state.access !== CONTENT_LIST_DEFAULTS.access ||
-    (organizationId === null && isOrgWhere(state.where)) ||
-    (organizationId !== null && state.category !== CATEGORY_ANY) ||
-    state.needs !== CONTENT_LIST_DEFAULTS.needs ||
-    search !== null
-  );
+  return narrowingFilters(state, search, organizationId).length > 0;
+}
+
+/** What can narrow the list, in the toolbar's order. */
+export type NarrowingFilter =
+  | 'status'
+  | 'where'
+  | 'type'
+  | 'access'
+  | 'category'
+  | 'needs'
+  | 'search';
+
+/**
+ * Each filter narrowing the list (`isContentListNarrowed` above), in the
+ * toolbar's order: the one rule, which the empty state names them by too
+ * (`narrowedBy`, Codex-a6ofh.3.6).
+ */
+export function narrowingFilters(
+  state: ContentListState,
+  search: string | null,
+  organizationId: string | null
+): NarrowingFilter[] {
+  const on: NarrowingFilter[] = [];
+  if (state.status !== CONTENT_LIST_DEFAULTS.status) on.push('status');
+  if (organizationId === null && isOrgWhere(state.where)) on.push('where');
+  if (state.type !== CONTENT_LIST_DEFAULTS.type) on.push('type');
+  if (state.access !== CONTENT_LIST_DEFAULTS.access) on.push('access');
+  if (organizationId !== null && state.category !== CATEGORY_ANY) {
+    on.push('category');
+  }
+  if (state.needs !== CONTENT_LIST_DEFAULTS.needs) on.push('needs');
+  if (search !== null) on.push('search');
+  return on;
 }

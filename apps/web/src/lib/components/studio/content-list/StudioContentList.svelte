@@ -7,11 +7,12 @@
   "Show more" appending the next page (`PagedList`, as the media library).
   Every read renders three states (data-design §0): a skeleton while nothing
   has arrived, the failure with Try again when the read failed, and the
-  data. A failed read never falls through to "No content yet", which reads
-  as if it had all been deleted.
+  data. A failed read never falls through to the first piece's "Make your
+  first piece", which would read as if it had all been deleted.
 
   The URL is the view (`list-url.ts`): status, type, access, sort, view and
-  search, so a link reproduces it. Below `sm` it is always the cards. Above
+  search, so a link reproduces it. Below `sm` its List is rows
+  (`ContentListRows`, mockup L4a) and its Grid the cards. Above
   the rows, "Needs you" (Codex-a6ofh.3.4) counts what the creator's pieces
   need, and each of its chips lists those pieces.
 
@@ -72,7 +73,7 @@
   import ContentListGrid from './ContentListGrid.svelte';
   import ContentListTable from './ContentListTable.svelte';
   import ContentListToolbar from './ContentListToolbar.svelte';
-  import { categoryOptions, whereOptions } from './list-options';
+  import { categoryOptions, contentListFacets, whereOptions } from './list-options';
   import {
     CATEGORY_ANY,
     CONTENT_LIST_DEFAULTS,
@@ -249,6 +250,12 @@
     categories !== null && categories.current === undefined && categories.error != null
       ? categoriesRetry
       : undefined
+  );
+
+  // The facet menus, stated once: the toolbar draws them, and the empty
+  // state names the ones narrowing the list by them.
+  const facets = $derived(
+    contentListFacets({ where: whereMenu, categories: categoryMenu, categoryUnread })
   );
 
   // "Needs you" (Codex-a6ofh.3.4): what the creator's pieces need, counted
@@ -549,9 +556,7 @@
       searchInput.clear();
     }}
     onChange={setParams}
-    whereOptions={whereMenu}
-    categoryOptions={categoryMenu}
-    {categoryUnread}
+    {facets}
   />
 
   <NeedsYouStrip
@@ -637,12 +642,7 @@
       {#if narrowed}
         <EmptyState
           title={m.studio_content_search_empty()}
-          description={noMatchWords(
-            narrowedBy(view, search, organizationId, {
-              where: whereMenu,
-              categories: categoryMenu,
-            })
-          )}
+          description={noMatchWords(narrowedBy(view, search, organizationId, facets))}
           icon={SearchXIcon}
         >
           {#snippet action()}

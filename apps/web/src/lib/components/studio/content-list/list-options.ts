@@ -11,10 +11,16 @@ import {
 import type { ContentWhereCounts } from '@codex/shared-types';
 import { LayoutGridIcon, LayoutListIcon } from '$lib/components/ui/Icon';
 import * as m from '$paraglide/messages';
-import type { ListOption, SegmentOption } from '../list-toolbar/list-option';
+import type {
+  FacetUnread,
+  ListFacet,
+  ListOption,
+  SegmentOption,
+} from '../list-toolbar/list-option';
 import type { ContentStatusFilter } from './content-status';
 import {
   CATEGORY_ANY,
+  CONTENT_LIST_DEFAULTS,
   isOrgWhere,
   type ListAccess,
   type ListSort,
@@ -162,4 +168,54 @@ export function categoryOptions(
     });
   }
   return options;
+}
+
+/** The list's menus that are facets: the sheet's, and what narrows by name. */
+export type ContentListFacetKey = 'where' | 'type' | 'access' | 'category';
+
+/**
+ * The list's facet menus, in the toolbar's order (Codex-a6ofh.3.6): Where
+ * first (the personal studio's, mockup L4b), Category last (the org
+ * studio's, mockup L1 pin 4). The desktop menus, the phone sheet and the
+ * empty state's "Nothing matches …" read these, so each facet's title and
+ * choices are stated once.
+ */
+export function contentListFacets(named: {
+  where?: readonly ListOption[];
+  categories?: readonly ListOption[];
+  categoryUnread?: FacetUnread;
+}): readonly ListFacet<ContentListFacetKey>[] {
+  const facets: ListFacet<ContentListFacetKey>[] = [];
+  if (named.where) {
+    facets.push({
+      key: 'where',
+      title: () => m.studio_content_where_label(),
+      options: named.where,
+      fallback: CONTENT_LIST_DEFAULTS.where,
+    });
+  }
+  facets.push(
+    {
+      key: 'type',
+      title: () => m.media_filter_type_label(),
+      options: TYPE_OPTIONS,
+      fallback: CONTENT_LIST_DEFAULTS.type,
+    },
+    {
+      key: 'access',
+      title: () => m.studio_content_form_access_label(),
+      options: ACCESS_OPTIONS,
+      fallback: CONTENT_LIST_DEFAULTS.access,
+    }
+  );
+  if (named.categories) {
+    facets.push({
+      key: 'category',
+      title: () => m.studio_content_category_label(),
+      options: named.categories,
+      fallback: CONTENT_LIST_DEFAULTS.category,
+      unread: named.categoryUnread,
+    });
+  }
+  return facets;
 }

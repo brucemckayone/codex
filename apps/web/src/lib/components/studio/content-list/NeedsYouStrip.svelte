@@ -42,8 +42,6 @@
     icon: Component<IconProps>;
     one: () => string;
     many: (inputs: { count: number }) => string;
-    /** The kind without its count: the chip in use while none is read. */
-    named: () => string;
   }
 
   // The row line's own colours (ContentRowLine): what has gone, or didn't
@@ -54,42 +52,36 @@
       icon: AlertTriangleIcon,
       one: m.studio_content_needs_live_media_gone_one,
       many: m.studio_content_needs_live_media_gone,
-      named: NEEDS_NAMED['live-media-gone'],
     },
     scheduled: {
       tone: 'info',
       icon: ClockIcon,
       one: m.studio_content_needs_scheduled_one,
       many: m.studio_content_needs_scheduled,
-      named: NEEDS_NAMED['scheduled'],
     },
     'didnt-go-live': {
       tone: 'error',
       icon: AlertTriangleIcon,
       one: m.studio_content_needs_didnt_go_live_one,
       many: m.studio_content_needs_didnt_go_live,
-      named: NEEDS_NAMED['didnt-go-live'],
     },
     'media-gone': {
       tone: 'error',
       icon: AlertTriangleIcon,
       one: m.studio_content_needs_media_gone_one,
       many: m.studio_content_needs_media_gone,
-      named: NEEDS_NAMED['media-gone'],
     },
     processing: {
       tone: 'info',
       icon: ClockIcon,
       one: m.studio_content_needs_processing_one,
       many: m.studio_content_needs_processing,
-      named: NEEDS_NAMED['processing'],
     },
     ready: {
       tone: 'success',
       icon: CheckCircleIcon,
       one: m.studio_content_needs_ready_one,
       many: m.studio_content_needs_ready,
-      named: NEEDS_NAMED['ready'],
     },
   };
 
@@ -104,7 +96,8 @@
       );
     }
     if (active === NEEDS_NONE) return [];
-    return [{ kind: active, ...CHIP[active], words: CHIP[active].named() }];
+    // The kind without its count: the chip in use while none is read.
+    return [{ kind: active, ...CHIP[active], words: NEEDS_NAMED[active]() }];
   });
 
   const labelId = $props.id();

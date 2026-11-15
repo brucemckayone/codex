@@ -83,9 +83,7 @@
               <span class="first-upload-thumb" aria-hidden="true">
                 <FallbackImage
                   src={media.thumbnailUrl}
-                  srcset={media.thumbnailUrl
-                    ? getThumbnailSrcset(media.thumbnailUrl) || undefined
-                    : undefined}
+                  srcset={getThumbnailSrcset(media.thumbnailUrl) || undefined}
                   sizes={TILE_SIZES}
                   alt=""
                   loading="lazy"
@@ -160,13 +158,6 @@
     border-radius: var(--radius-sm);
     background: var(--color-surface-secondary);
     color: var(--color-text-muted);
-  }
-
-  /* Rendered by FallbackImage, so reached from this box. */
-  .first-upload-thumb :global(img) {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
 
   .first-upload-title {

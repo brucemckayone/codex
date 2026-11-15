@@ -2,22 +2,22 @@
  * What narrows the content list, by name, for its empty state (Codex-a6ofh.3.6,
  * mockup L3 "Filters with no results"): "Nothing matches Type: Audio +
  * Access: Paid", never only "these filters". Each filter is said as its menu
- * says it, the menu's title and the option chosen; the search as typed.
+ * says it, from the same facets the toolbar draws (`contentListFacets`), and
+ * the search as typed.
  *
- * The same filters `isContentListNarrowed` counts, in the toolbar's order. A
- * filter whose option has no label to hand (a category or an org not read
- * yet) is left out: the caller says "these filters" when none is named.
+ * Which filters narrow is `narrowingFilters`'s rule, the one
+ * `isContentListNarrowed` reads. A filter whose choice has no label to hand
+ * (a category or an org not read yet) is left out: the caller says "these
+ * filters" when none is named.
  */
 import type { ContentAttentionKind } from '@codex/constants';
 import * as m from '$paraglide/messages';
-import type { ListOption } from '../list-toolbar/list-option';
-import { ACCESS_OPTIONS, STATUS_OPTIONS, TYPE_OPTIONS } from './list-options';
+import type { ListFacet, ListOption } from '../list-toolbar/list-option';
+import { type ContentListFacetKey, STATUS_OPTIONS } from './list-options';
 import {
-  CATEGORY_ANY,
-  CONTENT_LIST_DEFAULTS,
   type ContentListState,
-  isOrgWhere,
   NEEDS_NONE,
+  narrowingFilters,
 } from './list-url';
 
 /** A "Needs you" kind without its count, as its chip names it. */
@@ -30,54 +30,37 @@ export const NEEDS_NAMED: Record<ContentAttentionKind, () => string> = {
   ready: m.studio_content_needs_ready_named,
 };
 
-function labelOf<T extends string>(
-  options: readonly ListOption<T>[] | undefined,
+function labelOf(
+  options: readonly ListOption[] | undefined,
   value: string
 ): string | undefined {
   return options?.find((option) => option.value === value)?.label();
 }
 
-/**
- * Each filter narrowing the list, named. `where` and `categories` are the
- * menus' own options, when the studio has them.
- */
+/** Each filter narrowing the list, named, given the toolbar's facets. */
 export function narrowedBy(
   state: ContentListState,
   search: string | null,
   organizationId: string | null,
-  named: {
-    where?: readonly ListOption[];
-    categories?: readonly ListOption[];
-  } = {}
+  facets: readonly ListFacet<ContentListFacetKey>[]
 ): string[] {
   const parts: string[] = [];
   const add = (title: string, value: string | undefined) => {
     if (value) parts.push(m.studio_content_list_filter_named({ title, value }));
   };
-  if (state.status !== CONTENT_LIST_DEFAULTS.status) {
-    add(m.studio_content_status_facet(), labelOf(STATUS_OPTIONS, state.status));
-  }
-  if (organizationId === null && isOrgWhere(state.where)) {
-    add(m.studio_content_where_label(), labelOf(named.where, state.where));
-  }
-  if (state.type !== CONTENT_LIST_DEFAULTS.type) {
-    add(m.media_filter_type_label(), labelOf(TYPE_OPTIONS, state.type));
-  }
-  if (state.access !== CONTENT_LIST_DEFAULTS.access) {
-    add(
-      m.studio_content_form_access_label(),
-      labelOf(ACCESS_OPTIONS, state.access)
-    );
-  }
-  if (organizationId !== null && state.category !== CATEGORY_ANY) {
-    add(
-      m.studio_content_category_label(),
-      labelOf(named.categories, state.category)
-    );
-  }
-  if (state.needs !== NEEDS_NONE) parts.push(NEEDS_NAMED[state.needs]());
-  if (search !== null) {
-    add(m.studio_content_list_search_facet(), `“${search}”`);
+  for (const filter of narrowingFilters(state, search, organizationId)) {
+    if (filter === 'status') {
+      add(m.media_filter_status_label(), labelOf(STATUS_OPTIONS, state.status));
+    } else if (filter === 'needs') {
+      if (state.needs !== NEEDS_NONE) parts.push(NEEDS_NAMED[state.needs]());
+    } else if (filter === 'search') {
+      if (search !== null) {
+        add(m.studio_content_list_search_facet(), `“${search}”`);
+      }
+    } else {
+      const facet = facets.find((one) => one.key === filter);
+      if (facet) add(facet.title(), labelOf(facet.options, state[filter]));
+    }
   }
   return parts;
 }
