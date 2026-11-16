@@ -4558,6 +4558,11 @@ export class CourseJourneyService extends BaseService {
    * its reader through this read alone (no stream), so the dashboard and the
    * player both stop here. `courses.organization_id` is NOT NULL, so the join
    * always finds the org row.
+   *
+   * Purchase completion blocks and refunds a course sale exactly when this
+   * finds nothing for its buyer: `courseRefusesBuyers` in @codex/constants is
+   * this filter in TypeScript (Codex-z1t3c), and the course-buyer-refusal
+   * test holds the two together. Change both, or neither.
    */
   private async loadCourseSummaryById(
     courseId: string

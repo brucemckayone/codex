@@ -209,7 +209,7 @@ interface RefundedPurchase {
   lateWinKeptThrough?: { purchasedAt: string } | null;
   /**
    * A blocked sale's refund (Codex-z1t3c): its buyer could no longer open
-   * the item when the payment landed, so it was refunded in full.
+   * the item when the payment landed, so it is refunded in full.
    */
   itemUnavailable?: boolean;
 }
@@ -283,7 +283,13 @@ function purchaseNote(
     purchase?.itemTitle || charge.metadata?.contentTitle || 'Content';
   return {
     contentTitle,
-    accessNote: purchase ? purchaseAccessNote(purchase, contentTitle) : '',
+    accessNote: purchase
+      ? purchaseAccessNote(
+          purchase,
+          contentTitle,
+          charge.amount_refunded >= charge.amount
+        )
+      : '',
   };
 }
 
@@ -302,15 +308,22 @@ function purchaseNote(
  *
  * Before both: a payment that landed when its buyer could no longer open the
  * item (deleted, team-only, its organisation deleted, detached) was blocked
- * and refunded in full (Codex-z1t3c; owner 2026-11-15 and D54): the item is
- * gone, so it says that, never "you still have it".
+ * and is refunded in full (Codex-z1t3c; owner 2026-11-15 and D54): the item
+ * is gone, so it says that, never "you still have it". "In full" only once
+ * the charge is (`refundedInFull`). A partial refund of it (support's, the
+ * dashboard's, or one that beat the checkout) says the rest follows, which
+ * it does: the row stays `pending`, and the checkout's own refund or the
+ * hourly owed-refund sweep refunds what is left.
  */
 function purchaseAccessNote(
   purchase: RefundedPurchase,
-  contentTitle: string
+  contentTitle: string,
+  refundedInFull: boolean
 ): string {
   if (purchase.itemUnavailable) {
-    return `${contentTitle} is no longer available, so we've refunded you in full.`;
+    return refundedInFull
+      ? `${contentTitle} is no longer available, so we've refunded you in full.`
+      : `${contentTitle} is no longer available, so we're refunding your payment in full. The rest will follow.`;
   }
   if (purchase.duplicatePayment && !purchase.accessEnded) {
     return `You still have ${contentTitle}. This refunds a second payment for it.`;

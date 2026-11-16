@@ -211,6 +211,39 @@ describe('a row whose re-pay was refused for a later cause', () => {
     ).toContain(m.support_repay_off_late_win());
     expect(buttonIn(m.support_action_elsewhere())?.disabled).toBe(false);
   });
+
+  // Owner D55, widened to duplicates by D57: each kind says its own why. A
+  // duplicate's buyer kept the item, so its note never says it is gone.
+  test.each([
+    ['a blocked sale', 'unavailable', () => m.support_repay_off_unavailable()],
+    ['a duplicate', 'duplicate', () => m.support_repay_off_duplicate()],
+  ] as const)('%s\'s refund never offers Re-pay, says why in its own words, and still offers "refunded another way"', (_shape, blockedPayment, note) => {
+    const onSettle = vi.fn();
+    render(FailedRefundsTable, {
+      items: [failedRefund({ blockedPayment })],
+      onSettle,
+    });
+    const row = document.querySelector<HTMLElement>(
+      'table [data-testid="failed-refund-row"]'
+    );
+    const buttonIn = (label: string) =>
+      [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (b) => b.textContent?.includes(label)
+      );
+    // Known from the queue itself: nothing had to be refused first.
+    expect(repayBlockReason(failedRefund().refundId)).toBeNull();
+    expect(buttonIn(m.support_action_repay())?.disabled).toBe(true);
+    const off = row?.querySelector('[data-testid="repay-off"]')?.textContent;
+    expect(off).toContain(note());
+    if (blockedPayment === 'duplicate') {
+      expect(off).not.toContain('no longer available');
+    }
+    buttonIn(m.support_action_elsewhere())?.click();
+    expect(onSettle).toHaveBeenCalledWith(
+      failedRefund({ blockedPayment }),
+      'refunded_elsewhere'
+    );
+  });
 });
 
 describe('Creator debts table, one row per person', () => {
@@ -937,6 +970,109 @@ describe('Settling a failed refund', () => {
     expect(text()).not.toContain(
       m.support_repay_access_lead({ buyer: 'Daniel Price' })
     );
+  });
+
+  // Owner D55, widened to duplicates by D57: each kind in its own words.
+  test.each([
+    [
+      'a blocked sale',
+      'unavailable',
+      'unavailable_sale',
+      "There's no access to give back: the item was no longer available. Daniel Price is still owed this refund. Refund them another way.",
+    ],
+    [
+      'a duplicate',
+      'duplicate',
+      'duplicate_payment',
+      "There's no access to give back: this was a second payment for something Daniel Price already has. Daniel Price is still owed this refund. Refund them another way.",
+    ],
+  ] as const)("%s's refund, opened for re-paying: no access to give back, the buyer is still owed it, and nothing to submit", async (_shape, blockedPayment, problemCode, words) => {
+    const notices = renderDialog(
+      'creators_repaid',
+      failedRefund({ blockedPayment })
+    );
+    const problem = document.querySelector('[data-testid="settle-problem"]');
+    expect(problem?.getAttribute('data-problem')).toBe(problemCode);
+    expect(problem?.getAttribute('data-variant')).toBe('warning');
+    expect(problem?.textContent?.replace(/\s+/g, ' ').trim()).toBe(words);
+    expect(submit()?.disabled).toBe(true);
+    // Nothing is promised about access, and nothing is sent.
+    expect(text()).not.toContain(
+      m.support_repay_access_lead({ buyer: 'Daniel Price' })
+    );
+    typeNote('Re-pay.');
+    submit()?.click();
+    await settled();
+    expect(resolveFailedRefund).not.toHaveBeenCalled();
+    expect(notices).toHaveLength(0);
+  });
+
+  test.each([
+    [
+      'a blocked sale',
+      'unavailable',
+      'unavailable_sale',
+      () => m.support_repay_unavailable_lead(),
+    ],
+    [
+      'a duplicate',
+      'duplicate',
+      'duplicate_payment',
+      () => m.support_repay_duplicate_lead({ buyer: 'Daniel Price' }),
+    ],
+  ] as const)("%s's refund the server refuses (BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE, a page older than its flag): it says why by the kind it names, and Re-pay stays off", async (_shape, reason, problemCode, lead) => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE', reason })
+    );
+    const notices = renderDialog('creators_repaid');
+    typeNote('Re-pay.');
+    submit()?.click();
+    await settled();
+    const problem = document.querySelector('[data-testid="settle-problem"]');
+    expect(problem?.getAttribute('data-problem')).toBe(problemCode);
+    expect(problem?.textContent).toContain(lead());
+    expect(problem?.textContent).toContain(
+      m.support_repay_still_owed_body({ buyer: 'Daniel Price' })
+    );
+    expect(notices).toHaveLength(0);
+    expect(submit()?.disabled).toBe(true);
+    expect(repayBlockReason(failedRefund().refundId)).toBe(problemCode);
+  });
+
+  test.each([
+    ['a blocked sale', 'unavailable'],
+    ['a duplicate', 'duplicate'],
+  ] as const)("%s's refund is still settled refunded another way", async (_shape, blockedPayment) => {
+    resolveFailedRefund.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        refundId: failedRefund().refundId,
+        resolution: 'refunded_elsewhere',
+        resolvedAt: NOW.toISOString(),
+        repaid: [],
+        accessRestored: false,
+        accessNotRestoredReason: null,
+        systemSettled: [],
+      },
+    });
+    const notices = renderDialog(
+      'refunded_elsewhere',
+      failedRefund({ blockedPayment })
+    );
+    expect(document.querySelector('[data-testid="settle-problem"]')).toBeNull();
+    expect(submit()?.disabled).toBe(false);
+    submit()?.click();
+    await settled();
+    expect(resolveFailedRefund).toHaveBeenCalledWith({
+      refundId: failedRefund().refundId,
+      body: { resolution: 'refunded_elsewhere', note: '' },
+    });
+    expect(notices).toEqual([
+      {
+        variant: 'success',
+        text: m.support_settled_elsewhere({ buyer: 'Daniel Price' }),
+      },
+    ]);
   });
 
   test('a prediction the server couldn’t make says so, and promises nothing', () => {

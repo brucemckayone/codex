@@ -127,6 +127,8 @@ import {
   versionInForce,
 } from '@codex/payments';
 import {
+  type BlockedPaymentKind,
+  blockedKind,
   countsAgainstCharge,
   type FeeConfigService,
   type PurchaseService,
@@ -177,6 +179,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   AlreadySettledError,
+  BlockedPaymentRefundNotRepayableError,
   ChargebackSettlingError,
   ChargeChangedError,
   ChargeHasChargebackError,
@@ -1782,7 +1785,7 @@ export class SupportService extends BaseService {
           purchaseId: purchaseOf.get(refund.stripeChargeId) ?? null,
         }))
       );
-      const [taken, restoreBlocks] = await Promise.all([
+      const [taken, restoreBlocks, blockedPayments] = await Promise.all([
         this.takenFromPayees(rows.map(({ refund }) => refund.stripeRefundId)),
         // What the settle's restore would answer, by its own rule (read only).
         Promise.all(
@@ -1799,6 +1802,7 @@ export class SupportService extends BaseService {
             }
           )
         ),
+        this.blockedPaymentsAmong([...purchaseOf.values()]),
       ]);
       const items = rows.map(
         (
@@ -1834,6 +1838,10 @@ export class SupportService extends BaseService {
             takenFromPayeesCents: taken.get(refund.stripeRefundId) ?? 0,
             accessRestoreBlockedReason: restoreBlocks[index] ?? null,
             isLateWinRefund,
+            blockedPayment:
+              blockedPayments.get(
+                purchaseOf.get(refund.stripeChargeId) ?? ''
+              ) ?? null,
           };
         }
       );
@@ -2658,9 +2666,9 @@ export class SupportService extends BaseService {
    * `creators_repaid` is one transaction with the refund row locked: what its
    * clawback took is paid back (`repayFailedRefund`), a failed FULL purchase
    * refund gives the buyer access back, then the row is resolved. A late
-   * win's own refund is never `creators_repaid` (`refuseLateWinRefund`). A
-   * repeat of the same resolution returns the row as it stands; another is a
-   * 409.
+   * win's own refund is never `creators_repaid` (`refuseLateWinRefund`), nor
+   * is a blocked payment's (`refuseBlockedPaymentRefund`, owner D55, D57). A repeat of
+   * the same resolution returns the row as it stands; another is a 409.
    */
   async resolveFailedRefund(
     refundId: string,
@@ -2857,15 +2865,20 @@ export class SupportService extends BaseService {
       // our record only after Stripe made the refund, so it can be missing.
       await this.refuseLateWinRefund(this.db, found.stripeRefundId);
       await this.refuseIfMarkedLateWin(found);
-      prepared = await this.prepareRepay(
-        found.stripeRefundId,
-        found.stripeChargeId
-      );
+      // The purchase before anything is prepared: a blocked payment's refund
+      // is refused with nothing written (owner D55, D57). Its marker (the
+      // duplicate's original, the blocked sale's reason) is written at insert
+      // and never changes, so this one read decides.
       const { purchaseOf } = await this.purchasesOfRefunds(
         [{ chargeId: found.stripeChargeId, purchaseId }],
         'decide'
       );
       purchaseId = purchaseOf.get(found.stripeChargeId) ?? null;
+      await this.refuseBlockedPaymentRefund(found.stripeRefundId, purchaseId);
+      prepared = await this.prepareRepay(
+        found.stripeRefundId,
+        found.stripeChargeId
+      );
     }
 
     const outcome = await this.db.transaction(async (tx) => {
@@ -3029,6 +3042,65 @@ export class SupportService extends BaseService {
       stripeRefundId,
       await this.lateWinDisputeRecorded(db, stripeRefundId)
     );
+  }
+
+  /**
+   * A blocked payment's failed refund is never settled `creators_repaid`
+   * (`BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE`, 422; owner D55, widened to
+   * duplicates by D57): a duplicate (the buyer kept the item) or a blocked
+   * sale (Codex-z1t3c; they have nothing) paid no one and granted nothing, so
+   * nothing is re-paid and no access comes back, and the buyer is still owed
+   * the refund. `refunded_elsewhere` is still allowed. The queue never offers
+   * it (`blockedPayment`), so a call is a stale page or a direct one: logged
+   * at error, with an errorId and the kind.
+   */
+  private async refuseBlockedPaymentRefund(
+    stripeRefundId: string,
+    purchaseId: string | null
+  ): Promise<void> {
+    if (!purchaseId) return;
+    const kind = (await this.blockedPaymentsAmong([purchaseId])).get(
+      purchaseId
+    );
+    if (kind === undefined) return;
+    this.obs.error(
+      "A creators_repaid settlement of a blocked payment's refund was refused: the buyer is still owed it",
+      {
+        errorId: crypto.randomUUID(),
+        stripeRefundId,
+        purchaseId,
+        kind,
+      }
+    );
+    throw new BlockedPaymentRefundNotRepayableError(purchaseId, kind);
+  }
+
+  /**
+   * Which of these purchases are blocked payments, and of which kind
+   * (`blockedKind`): a duplicate, by its original, or a blocked sale of an
+   * unavailable item, by its marker (Codex-z1t3c). Sales are left out.
+   */
+  private async blockedPaymentsAmong(
+    purchaseIds: ReadonlyArray<string | null>
+  ): Promise<ReadonlyMap<string, BlockedPaymentKind>> {
+    const ids = [
+      ...new Set(purchaseIds.filter((id): id is string => id !== null)),
+    ];
+    if (ids.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        id: purchases.id,
+        refundReason: purchases.refundReason,
+        duplicateOfPurchaseId: purchases.duplicateOfPurchaseId,
+      })
+      .from(purchases)
+      .where(inArray(purchases.id, ids));
+    const kinds = new Map<string, BlockedPaymentKind>();
+    for (const row of rows) {
+      const kind = blockedKind(row);
+      if (kind !== null) kinds.set(row.id, kind);
+    }
+    return kinds;
   }
 
   /** Refuse the re-pay when the refund is the named late win's own. */

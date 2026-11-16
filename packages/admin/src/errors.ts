@@ -8,6 +8,7 @@
  * most admin operations reuse existing domain errors (NotFoundError, etc.)
  */
 
+import type { BlockedPaymentKind } from '@codex/purchase';
 import {
   BusinessLogicError,
   ConflictError,
@@ -225,6 +226,35 @@ export class LateWinRefundNotRepayableError extends BusinessLogicError {
     super(
       "This refund pays back a buyer who paid twice, so the creators can't be re-paid for it. Refund the buyer another way, then settle it as refunded elsewhere.",
       { code: 'LATE_WIN_REFUND_NOT_REPAYABLE', disputeId: stripeDisputeId }
+    );
+  }
+}
+
+/** Why there is no access to give back, per kind of blocked payment. */
+const NO_ACCESS_TO_GIVE_BACK: Record<BlockedPaymentKind, string> = {
+  duplicate: 'this was a second payment for something the buyer already has',
+  unavailable: 'the item was no longer available',
+};
+
+/**
+ * A "creators re-paid" settlement of a blocked payment's failed refund (owner
+ * D55; widened to duplicates by D57): a duplicate, a second payment for an
+ * item the buyer already has (Codex-2hxff.14), or a blocked sale of an item
+ * its buyer could no longer open when it landed (Codex-z1t3c). Either paid no
+ * one and granted nothing, so there is nothing to re-pay and no access to
+ * give back, and the buyer is still owed the refund: settling it so would
+ * close the row with the buyer charged. Refused for good, as a late win's own
+ * refund is (`LateWinRefundNotRepayableError`). Support refunds the buyer
+ * another way, then settles it as refunded elsewhere. Its message says why by
+ * kind: a duplicate's buyer kept the item. The context is the purchase's id
+ * and the kind as `reason` (`duplicate` or `unavailable`), which support's
+ * dialog reads for its words, as it reads `REPAY_BLOCKED_BY_LATER_CAUSE`'s.
+ */
+export class BlockedPaymentRefundNotRepayableError extends BusinessLogicError {
+  constructor(purchaseId: string, kind: BlockedPaymentKind) {
+    super(
+      `There's no access to give back: ${NO_ACCESS_TO_GIVE_BACK[kind]}. The buyer is still owed this refund. Refund them another way, then settle it as refunded elsewhere.`,
+      { code: 'BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE', purchaseId, reason: kind }
     );
   }
 }

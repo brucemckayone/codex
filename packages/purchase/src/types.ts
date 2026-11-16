@@ -294,7 +294,7 @@ export interface CheckoutSessionVerifyResult {
  * (Codex-2hxff.70; late-win data design §4.2). `restored` is the only
  * outcome that emails the buyer; the others say why access needed nothing:
  * they bought it again, the payment was a duplicate or a blocked sale of
- * unavailable content (Codex-z1t3c), a refund still stands, or another
+ * an unavailable item (Codex-z1t3c), a refund still stands, or another
  * dispute still holds the purchase.
  */
 export type LateWinRestoreOutcome =

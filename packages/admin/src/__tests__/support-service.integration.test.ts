@@ -408,6 +408,11 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       await db
         .delete(entitlements)
         .where(inArray(entitlements.sourceRef, created.purchaseIds));
+      // A duplicate names its original (ON DELETE RESTRICT): unlink first.
+      await db
+        .update(purchases)
+        .set({ duplicateOfPurchaseId: null })
+        .where(inArray(purchases.id, created.purchaseIds));
       await db
         .delete(purchases)
         .where(inArray(purchases.id, created.purchaseIds));
@@ -2455,6 +2460,187 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         reason: 'later_refunds',
       });
       expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
+    });
+
+    // Owner D55, widened to duplicates by D57: a blocked payment paid no one
+    // and granted nothing, so its failed refund is never "creators re-paid":
+    // the buyer is still owed it. A blocked sale (Codex-z1t3c) is a payment
+    // for an item its buyer could no longer open; a duplicate is a second
+    // payment for one the buyer already has, which they keep.
+    describe.each([
+      {
+        kind: 'unavailable' as const,
+        marker: { refundReason: 'item_unavailable' },
+        message:
+          "There's no access to give back: the item was no longer available. The buyer is still owed this refund. Refund them another way, then settle it as refunded elsewhere.",
+      },
+      {
+        kind: 'duplicate' as const,
+        marker: { refundReason: null },
+        message:
+          "There's no access to give back: this was a second payment for something the buyer already has. The buyer is still owed this refund. Refund them another way, then settle it as refunded elsewhere.",
+      },
+    ])("a blocked payment's refund, $kind (owner D55, D57)", ({
+      kind,
+      marker,
+      message,
+    }) => {
+      /**
+       * A purchase as completion writes a blocked payment of this kind,
+       * refunded after: no slices, no entitlement. A blocked sale's buyer has
+       * no access; a duplicate's keeps it through their first purchase.
+       */
+      async function blockedSaleCharge() {
+        const charge = await purchaseCharge();
+        await db
+          .delete(payouts)
+          .where(eq(payouts.purchaseId, charge.purchase.id));
+        await db
+          .delete(entitlements)
+          .where(eq(entitlements.sourceRef, charge.purchase.id));
+        const refunded = {
+          status: PURCHASE_STATUS.REFUNDED,
+          refundedAt: new Date(),
+          refundAmountCents: 1000,
+        };
+        if (kind === 'unavailable') {
+          await db
+            .delete(contentAccess)
+            .where(eq(contentAccess.contentId, charge.item.id));
+          await db
+            .update(purchases)
+            .set({ ...refunded, refundReason: 'item_unavailable' })
+            .where(eq(purchases.id, charge.purchase.id));
+          return charge;
+        }
+        // Refunded first, so the first purchase may be the completed one.
+        await db
+          .update(purchases)
+          .set(refunded)
+          .where(eq(purchases.id, charge.purchase.id));
+        const first = takeFirst(
+          await db
+            .insert(purchases)
+            .values({
+              customerId: buyerId,
+              contentId: charge.item.id,
+              organizationId: orgId,
+              status: PURCHASE_STATUS.COMPLETED,
+              amountPaidCents: 1000,
+              platformFeeCents: 100,
+              organizationFeeCents: 135,
+              creatorPayoutCents: 765,
+              stripePaymentIntentId: `pi_sup_first${uid()}`,
+              purchasedAt: new Date((nowSeconds() - 7200) * 1000),
+            })
+            .returning()
+        );
+        created.purchaseIds.push(first.id);
+        await db
+          .update(purchases)
+          .set({ duplicateOfPurchaseId: first.id })
+          .where(eq(purchases.id, charge.purchase.id));
+        return charge;
+      }
+
+      const refundRow = async (id: string) =>
+        takeFirst(await db.select().from(refunds).where(eq(refunds.id, id)));
+
+      const purchaseRow = async (id: string) =>
+        takeFirst(
+          await db.select().from(purchases).where(eq(purchases.id, id))
+        );
+
+      it('refuses creators_repaid (422) before Stripe is read, writes nothing, and logs it at error', async () => {
+        const charge = await blockedSaleCharge();
+        const failed = await failedRefund(charge, 1000);
+        const row = await refundRow(failed.id);
+        const sale = await purchaseRow(charge.purchase.id);
+        vi.mocked(fake.stripe.charges.retrieve).mockClear();
+        vi.mocked(fake.stripe.refunds.list).mockClear();
+
+        const error = await failureOf(
+          service.resolveFailedRefund(
+            failed.id,
+            { resolution: 'creators_repaid', note: 'Re-pay' },
+            supportId
+          )
+        );
+
+        expect(error.code).toBe('BUSINESS_LOGIC_ERROR');
+        expect(error.statusCode).toBe(422);
+        expect(error.message).toBe(message);
+        expect(error.context).toEqual({
+          code: 'BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE',
+          purchaseId: charge.purchase.id,
+          reason: kind,
+        });
+        // Refused before the re-pay's own reads of Stripe.
+        expect(fake.stripe.charges.retrieve).not.toHaveBeenCalled();
+        expect(fake.stripe.refunds.list).not.toHaveBeenCalled();
+        expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
+        expect(await refundRow(failed.id)).toEqual(row);
+        expect(await purchaseRow(charge.purchase.id)).toEqual(sale);
+        expect(serviceLog().error).toHaveBeenCalledWith(
+          "A creators_repaid settlement of a blocked payment's refund was refused: the buyer is still owed it",
+          {
+            errorId: expect.any(String),
+            stripeRefundId: failed.stripeRefundId,
+            purchaseId: charge.purchase.id,
+            kind,
+          }
+        );
+      });
+
+      it('still settles it refunded_elsewhere, granting nothing', async () => {
+        const charge = await blockedSaleCharge();
+        const failed = await failedRefund(charge, 1000);
+
+        const settled = await service.resolveFailedRefund(
+          failed.id,
+          { resolution: 'refunded_elsewhere', note: 'Bank transfer' },
+          supportId
+        );
+
+        expect(settled.settled).toMatchObject({
+          resolution: 'refunded_elsewhere',
+          repaid: [],
+          accessRestored: false,
+        });
+        expect(await refundRow(failed.id)).toMatchObject({
+          resolution: 'refunded_elsewhere',
+          resolvedByUserId: supportId,
+          resolutionNote: 'Bank transfer',
+        });
+        expect(await purchaseRow(charge.purchase.id)).toMatchObject({
+          status: PURCHASE_STATUS.REFUNDED,
+          ...marker,
+        });
+        expect(
+          await db
+            .select({ id: entitlements.id })
+            .from(entitlements)
+            .where(eq(entitlements.sourceRef, charge.purchase.id))
+        ).toEqual([]);
+      });
+
+      it("the queue marks a blocked payment's refund with its kind, and only it, so Re-pay is not offered", async () => {
+        const queueRowOf = async (refundId: string) => {
+          for (let page = 1; ; page++) {
+            const list = await service.listFailedRefunds({ page, limit: 50 });
+            const found = list.items.find((item) => item.refundId === refundId);
+            if (found || page >= list.pagination.totalPages) return found;
+          }
+        };
+        const blocked = await blockedSaleCharge();
+        const onBlocked = await failedRefund(blocked, 1000);
+        const ordinary = await purchaseCharge();
+        const onOrdinary = await failedRefund(ordinary, 1000);
+        await endAccess(ordinary);
+
+        expect((await queueRowOf(onBlocked.id))?.blockedPayment).toBe(kind);
+        expect((await queueRowOf(onOrdinary.id))?.blockedPayment).toBeNull();
+      });
     });
 
     describe('a late win\'s own refund (owner decision 6, 2026-11-08, "Block it in code")', () => {

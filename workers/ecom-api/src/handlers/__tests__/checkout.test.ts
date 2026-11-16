@@ -16,6 +16,7 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 import { CURRENCY } from '@codex/constants';
 import {
   AfterCommitError,
+  ServiceUnavailableError,
   UnsupportedCurrencyError,
   wrapError,
 } from '@codex/service-errors';
@@ -420,12 +421,45 @@ describe('handleCheckoutCompleted', () => {
       expect(mockClaimReceipt).not.toHaveBeenCalled();
       expect(sendEmailToWorker).not.toHaveBeenCalled();
       expect(mock._obs.warn).toHaveBeenCalledWith(
-        'Payment for unavailable content refunded instead of sold',
+        'Payment for an unavailable item refunded instead of sold',
         expect.objectContaining({ purchaseId: 'purchase_gone' })
       );
       expect(mock._obs.info).not.toHaveBeenCalledWith(
         'Purchase completed successfully',
         expect.anything()
+      );
+    });
+
+    it('a blocked sale of a course (its organisation deleted) sends no receipt either (Codex-z1t3c)', async () => {
+      mockCompletePurchase.mockResolvedValueOnce({
+        id: 'purchase_course_gone',
+        customerId: 'user_123',
+        courseId: 'c_1',
+        status: 'refunded',
+        duplicateOfPurchaseId: null,
+        refundReason: 'item_unavailable',
+      });
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_course_gone',
+        paymentStatus: 'paid',
+        metadata: { kind: 'course', customerId: 'user_123', courseId: 'c_1' },
+      }) as unknown as Stripe.Event;
+      (event.data.object as Stripe.Checkout.Session).customer_details = {
+        email: 'buyer@example.com',
+        name: 'Buyer',
+      } as Stripe.Checkout.Session.CustomerDetails;
+      const { context, mock } = createContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(mockClaimReceipt).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(mock._obs.warn).toHaveBeenCalledWith(
+        'Payment for an unavailable item refunded instead of sold',
+        expect.objectContaining({
+          purchaseId: 'purchase_course_gone',
+          courseId: 'c_1',
+        })
       );
     });
   });
@@ -1061,6 +1095,36 @@ describe('handleCheckoutCompleted', () => {
         expect.anything(),
         expect.objectContaining({ templateName: 'purchase-receipt' })
       );
+    });
+
+    // Codex-z1t3c: Stripe refusing a blocked payment's refund comes after its
+    // commit too, but it is not an AfterCommitError: completion rejects with
+    // it as `refundBlockedPayment` threw it, a plain retryable failure, so
+    // Stripe redelivers and the redelivery asks for the refund again, with
+    // nothing recorded for the session meanwhile.
+    it.each([
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ])('a refused refund of a blocked payment (%s) → rethrown as transient, the session not recorded paid', async (_kind, metadata) => {
+      const refused = new ServiceUnavailableError(
+        'Unavailable item refund failed; it will be retried',
+        { purchaseId: 'purchase_123' }
+      );
+      mockCompletePurchase.mockRejectedValueOnce(refused);
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_blocked_refused',
+        metadata,
+      }) as unknown as Stripe.Event;
+      const { context } = createContext({ CACHE_KV: kv() });
+
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, context)
+      ).rejects.toBe(refused);
+
+      expect(isTransientError(refused)).toBe(true);
+      expect(refused.code).toBe('SERVICE_UNAVAILABLE');
+      expect(mockMarkCheckoutSessionCompleted).not.toHaveBeenCalled();
+      expect(mockRelease).toHaveBeenCalledOnce();
     });
   });
 

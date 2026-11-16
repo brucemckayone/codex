@@ -182,6 +182,16 @@ export const PURCHASE_STATUS = {
   REFUNDED: 'refunded',
 } as const;
 
+/**
+ * The `purchases.refund_reason` that marks a blocked sale (Codex-z1t3c): a
+ * payment for an item its buyer could no longer open when it landed. It is
+ * none of Stripe's refund reasons, which are the only ones any refund writes,
+ * so nothing else ever writes it. A blocked sale stays `pending` until its
+ * refund lands, so a reader of pending purchases must leave it out
+ * (`refund_reason IS DISTINCT FROM` this, so NULL reasons survive).
+ */
+export const ITEM_UNAVAILABLE_REFUND_REASON = 'item_unavailable';
+
 /** `checkout_sessions.status` (Codex-2hxff.14). */
 export const CHECKOUT_SESSION_STATUS = {
   OPEN: 'open',

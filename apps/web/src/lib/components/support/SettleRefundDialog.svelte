@@ -20,7 +20,13 @@
   (`REFUND_CLAWBACK_NEEDS_PERSON`): support settles it by hand. A late win's own
   refund of the payment (`LATE_WIN_REFUND_NOT_REPAYABLE`, owner decision 6) is
   never re-paid: it pays back a buyer who paid twice, so support refunds the
-  buyer another way and marks it so. Whether re-paying gives the buyer access back is the
+  buyer another way and marks it so. Nor is a blocked payment's refund
+  (`blockedPayment`, `BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE`, owner D55,
+  widened to duplicates by D57): a duplicate or a blocked sale (Codex-z1t3c)
+  paid no one and granted nothing, so there is no access to give back and
+  the buyer is still owed it. The queue offers no Re-pay for one; opened for
+  one anyway, the dialog says so, in the words for its kind (a duplicate's
+  buyer kept the item), and offers nothing to submit. Whether re-paying gives the buyer access back is the
   server's prediction (`accessRestoreBlockedReason`, the restore's own rule,
   nothing locked), so the dialog says what it predicts and the confirmation
   says what happened (`accessNotRestoredReason`).
@@ -52,7 +58,7 @@
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import { formatPrice } from '$lib/utils/format';
   import { resolveFailedRefund } from '$lib/remote/support.remote';
-  import { markRepayBlocked } from './repay-blocks.svelte';
+  import { markRepayBlocked, REPAY_BLOCK_OF_PAYMENT } from './repay-blocks.svelte';
   import { isSessionEnded } from './session';
   import { formatList, formatShortDay, systemSettledSentence } from './support-format';
   import type { SettleNotice } from './settle-notice';
@@ -80,6 +86,8 @@
     | 'blocked_later_refunds'
     | 'needs_person'
     | 'late_win_refund'
+    | 'duplicate_payment'
+    | 'unavailable_sale'
     | 'session_ended'
     | 'failed';
 
@@ -87,12 +95,21 @@
   let busy = $state(false);
   let problem = $state<Problem | null>(null);
   let noteMissing = $state(false);
+  /** A blocked payment's refund is never re-paid (D55, D57): known before anything is sent. */
+  const blockedRepay = $derived(
+    resolution === 'creators_repaid' && item?.blockedPayment
+      ? REPAY_BLOCK_OF_PAYMENT[item.blockedPayment]
+      : null
+  );
+  const shown = $derived<Problem | null>(problem ?? blockedRepay);
   /** Refused for good: Submit is off, and nothing is said of what re-paying would do. */
   const refusedForGood = $derived(
-    problem === 'blocked_chargeback' ||
-      problem === 'blocked_later_refunds' ||
-      problem === 'needs_person' ||
-      problem === 'late_win_refund'
+    shown === 'blocked_chargeback' ||
+      shown === 'blocked_later_refunds' ||
+      shown === 'needs_person' ||
+      shown === 'late_win_refund' ||
+      shown === 'duplicate_payment' ||
+      shown === 'unavailable_sale'
   );
 
   const noteId = $props.id();
@@ -184,6 +201,16 @@
           lead: m.support_repay_late_win_lead(),
           body: m.support_repay_late_win_body(),
         };
+      case 'duplicate_payment':
+        return {
+          lead: m.support_repay_duplicate_lead({ buyer }),
+          body: m.support_repay_still_owed_body({ buyer }),
+        };
+      case 'unavailable_sale':
+        return {
+          lead: m.support_repay_unavailable_lead(),
+          body: m.support_repay_still_owed_body({ buyer }),
+        };
       case 'session_ended':
         return {
           lead: m.support_outcome_signed_out_lead(),
@@ -261,6 +288,12 @@
         // A late win's own refund: never re-paid, so Re-pay stays off too.
         markRepayBlocked(settling.refundId, 'late_win_refund');
         problem = 'late_win_refund';
+      } else if (answer.detailsCode === 'BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE') {
+        // A blocked payment's refund (D55, D57), on a page older than its
+        // flag. Its kind comes as `reason`; Re-pay stays off too.
+        const block = answer.reason === 'duplicate' ? 'duplicate_payment' : 'unavailable_sale';
+        markRepayBlocked(settling.refundId, block);
+        problem = block;
       } else if (answer.status === 400 && noteRequired) {
         noteMissing = true;
       } else if (answer.status === 401 || answer.status === 403) {
@@ -340,18 +373,18 @@
             error={noteMissing ? m.support_note_missing() : undefined}
           />
         </div>
-        {#if problem}
-          {@const said = problemText(problem)}
+        {#if shown}
+          {@const said = problemText(shown)}
           <Alert
-            variant={problem === 'clawback_running'
+            variant={shown === 'clawback_running'
               ? 'info'
-              : problem === 'failed'
+              : shown === 'failed'
                 ? 'error'
                 : 'warning'}
             tabindex={-1}
             data-settle-problem
             data-testid="settle-problem"
-            data-problem={problem}
+            data-problem={shown}
           >
             <p>
               {#if said.lead}<strong>{said.lead}</strong>{/if}

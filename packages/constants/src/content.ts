@@ -290,12 +290,13 @@ export function isGrantableContent(
  * purchase opens").
  *
  * The seller must have marked it purchasable at a price of at least
- * `PRICE_LIMITS.MIN_CENTS`, and its access rule must honour a purchase.
- * `decideContentAccess` reads a purchase only in the tier arm
- * (`subscribers_purchase`) and the paid arm (`paid_purchase`): course-only,
+ * `PRICE_LIMITS.MIN_CENTS`, and its access branch must read a purchase
+ * ({@link BUYER_IN_BRANCH}: the tier arm and the paid arm). Course-only,
  * team-only and followers-only content return before either, and orgless
- * content with a tier is denied to everyone (`orgless_tier_gate`). A test in
- * `@codex/access` ties the two, as it does for `isGrantableContent`.
+ * content with a tier is denied to everyone. Reading the branch table, not a
+ * list of flags, means a new branch cannot be sold into until it is
+ * classified (Codex-z1t3c). A test in `@codex/access` ties this to the
+ * decision, as it does for `isGrantableContent`.
  *
  * Lifecycle (published, not deleted) is not read here: checkout refuses those
  * with their own reasons.
@@ -314,10 +315,7 @@ export function canBeSold(
   return (
     c.isPurchasable &&
     (c.priceCents ?? 0) >= PRICE_LIMITS.MIN_CENTS &&
-    !c.courseOnly &&
-    !c.isTeamOnly &&
-    !c.isFollowerGated &&
-    !(c.organizationId == null && c.isTierGated)
+    BUYER_IN_BRANCH[contentAccessBranch(c)] === 'purchase'
   );
 }
 
@@ -443,7 +441,39 @@ export function contentRefusesBuyers(c: ContentBuyerFacts): boolean {
       return c.status !== CONTENT_STATUS.PUBLISHED;
     case 'refused':
       return true;
+    // Unreachable while `BUYER_IN_BRANCH` covers every branch (the compiler
+    // checks that). Fail closed anyway: a lookup that misses must never read
+    // as "a buyer may open it".
+    default:
+      return true;
   }
+}
+
+/**
+ * What {@link courseRefusesBuyers} reads: the course's publication, and
+ * whether it or its organisation is soft-deleted. Every field is required.
+ */
+export interface CourseBuyerFacts extends PublicationState {
+  deletedAt: Date | string | null;
+  /** The course's organisation is soft-deleted (a course always has one). */
+  organizationDeleted: boolean;
+}
+
+/**
+ * Would a course refuse a BUYER: someone whose only grant is a completed
+ * purchase of it (Codex-z1t3c; D54, "match access exactly")? A buyer's
+ * course entitlement admits them (`canEnterCourse`), but the dashboard and
+ * the in-course player both read the course through
+ * `loadCourseSummaryById` (@codex/access course-journey-service.ts), which
+ * finds nothing for a course that is deleted, whose organisation is deleted
+ * (owner decision 2026-10-25, "Nobody"; Codex-7ncbh), or that was never
+ * released. That read is this rule in SQL; the course-buyer-refusal test in
+ * @codex/access holds the two together. A course's buyers keep it
+ * unpublished, archived or off sale (Codex-yo4px, Codex-2hxff.65), so none
+ * of those refuses them.
+ */
+export function courseRefusesBuyers(c: CourseBuyerFacts): boolean {
+  return c.deletedAt != null || c.organizationDeleted || !isContentReleased(c);
 }
 
 /**

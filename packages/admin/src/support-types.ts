@@ -16,6 +16,7 @@
  */
 
 import type { DisputeAppealStatus } from '@codex/constants';
+import type { BlockedPaymentKind } from '@codex/purchase';
 
 /** What was paid for: a one-off purchase, or an invoice of a subscription. */
 export type SupportChargeKind =
@@ -537,6 +538,17 @@ export interface FailedRefundItem {
    * known only from Stripe's metadata reads false, and is still settled.
    */
   isLateWinRefund: boolean;
+  /**
+   * The refund of a blocked payment, by kind, or null for a sale's: a
+   * `duplicate`, a second payment for an item the buyer already has (they
+   * kept it), or `unavailable`, a payment for an item its buyer could no
+   * longer open (Codex-z1t3c; they have nothing). Either paid no one and
+   * granted nothing, so it is only ever settled refunded elsewhere:
+   * `creators_repaid` is refused (`BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE`,
+   * owner D55, widened to duplicates by D57), and the queue offers no Re-pay
+   * for it. The kind picks the queue's words.
+   */
+  blockedPayment: BlockedPaymentKind | null;
 }
 
 /** A payee's role on a slice, as the queue labels it. */
@@ -797,9 +809,10 @@ export interface ResolvedFailedRefund {
  * - `not_refunded`: the purchase is in another status;
  * - `dispute_holds`: a chargeback is open or was lost on it;
  * - `duplicate`: a duplicate payment, which never granted anything;
- * - `unavailable`: a blocked sale of content its buyer could not open when
- *   its payment landed (Codex-z1t3c), which never granted anything. The
- *   settle dialog has no copy of its own for it: it reads the generic line;
+ * - `unavailable`: a blocked sale of an item its buyer could not open when
+ *   its payment landed (Codex-z1t3c), which never granted anything. A
+ *   settlement no longer reaches it: `creators_repaid` is refused for a
+ *   blocked sale (owner D55), so only one settled before that reads it;
  * - `rebought`: the buyer bought the item again, and that purchase grants it;
  * - `still_refunded`: the refunds that still stand cover the payment;
  * - `no_purchase`: an invoice's charge, or one we hold no purchase for.

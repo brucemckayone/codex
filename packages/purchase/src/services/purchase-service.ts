@@ -30,10 +30,12 @@ import {
   CURRENCY,
   canBeSold,
   contentRefusesBuyers,
+  courseRefusesBuyers,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
   type DisputeAppealStatus,
   disputeAppealOf,
+  ITEM_UNAVAILABLE_REFUND_REASON,
   isForeignStripeEnvironment,
   PRICE_LIMITS,
   PURCHASE_STATUS,
@@ -43,6 +45,7 @@ import {
 } from '@codex/constants';
 import {
   type DatabaseClient,
+  isLockNotAvailable,
   isUniqueViolation,
   toIso,
   withPagination,
@@ -492,11 +495,30 @@ type PurchaseListStatus = (typeof PURCHASE_LIST_STATUSES)[number];
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 
 /**
- * The `refund_reason` that marks a blocked sale (Codex-z1t3c,
- * `isUnavailableBlock`). It is none of Stripe's refund reasons, which are the
- * only ones any refund writes, so nothing else ever writes it.
+ * Whether an item's organisation is soft-deleted; false for orgless content.
+ * Completion passes `'share'`: the row is then read FOR SHARE, so an
+ * organisation delete in flight is waited out (`isItemUnavailable`).
+ * Checkout creation reads it plainly: completion decides again.
  */
-const ITEM_UNAVAILABLE = 'item_unavailable';
+async function isOrganizationDeleted(
+  db: Tx | DatabaseClient,
+  organizationId: string | null,
+  lock?: 'share'
+): Promise<boolean> {
+  if (organizationId == null) return false;
+  const read = db
+    .select({ deletedAt: organizations.deletedAt })
+    .from(organizations)
+    .where(eq(organizations.id, organizationId));
+  const [org] = lock ? await read.for(lock) : await read;
+  return org?.deletedAt != null;
+}
+
+/**
+ * The `refund_reason` that marks a blocked sale (Codex-z1t3c,
+ * `isUnavailableBlock`), shared with the library's pending-purchase read.
+ */
+const ITEM_UNAVAILABLE = ITEM_UNAVAILABLE_REFUND_REASON;
 
 /**
  * A new purchase row's outcome: completed, or, for a second payment for an
@@ -603,15 +625,54 @@ export function isUnavailableBlock(
 }
 
 /**
- * What kind of payment that grants and pays nothing this is, if it is one: a
- * blocked sale of unavailable content, a duplicate, or null for a sale. A
- * row is one or the other: an unavailable item is blocked whoever owns it.
+ * The two kinds of payment that grant and pay nothing: a second payment for
+ * an item the buyer already owns (`duplicate`; they kept the item), and a
+ * blocked sale of an item no longer available (`unavailable`; they have
+ * nothing).
  */
-function blockedKind(
+export type BlockedPaymentKind = 'duplicate' | 'unavailable';
+
+/**
+ * What kind of payment that grants and pays nothing this is, if it is one: a
+ * blocked sale of an unavailable item, a duplicate, or null for a sale. A
+ * row is one or the other: an unavailable item is blocked whoever owns it.
+ * Support's queue reads it too (owner D55, D57).
+ */
+export function blockedKind(
   purchase: Pick<Purchase, 'duplicateOfPurchaseId' | 'refundReason'>
-): 'unavailable' | 'duplicate' | null {
+): BlockedPaymentKind | null {
   if (isUnavailableBlock(purchase)) return 'unavailable';
   return isDuplicatePayment(purchase) ? 'duplicate' : null;
+}
+
+/**
+ * A blocked payment the hourly sweep could not refund, for support to settle
+ * by hand. `blocked` says which: a duplicate (the buyer kept the item) or a
+ * sale of an item no longer available (the buyer has nothing).
+ */
+interface OwedBlockedRefund {
+  id: string;
+  stripePaymentIntentId: string;
+  blocked: BlockedPaymentKind | null;
+}
+
+/**
+ * A completion that gave up a lock another writer held past its
+ * `lock_timeout` (55P03, `isItemUnavailable`): rolled back, nothing written,
+ * so it is a 503 a retry clears (Stripe redelivers; the page checks again),
+ * never a permanent failure. Any other error is returned as it is.
+ */
+function retryableIfLockGivenUp(
+  error: unknown,
+  stripePaymentIntentId: string
+): unknown {
+  return isLockNotAvailable(error)
+    ? new ServiceUnavailableError(
+        'The item was being changed; the payment is completed on a retry',
+        { stripePaymentIntentId },
+        { cause: error }
+      )
+    : error;
 }
 
 /** A payment that grants and pays nothing: a duplicate, or a blocked sale. */
@@ -633,6 +694,21 @@ function keepUnavailableMarker(
 }
 
 /**
+ * A blocked payment the owed-refund sweep may ask Stripe to refund: a
+ * duplicate or a blocked sale, either one no dispute holds (owner D56,
+ * widened to duplicates by D57). Stripe refuses a refund of a disputed
+ * charge, so asking would only raise "refund them by hand" every hour for
+ * weeks, and the dispute decides it anyway: a loss records it refunded
+ * (`processLostDispute`), and a win clears `disputed_at`
+ * (`restoreDisputedPurchase`, or a late win's `restoreLateWonPurchase`), so
+ * the next sweep refunds it. One fragment, so no part can be dropped
+ * (`and()` and `or()` drop an undefined argument).
+ */
+function owedBlockedPayment(): SQL {
+  return sql`((${purchases.duplicateOfPurchaseId} IS NOT NULL OR ${purchases.refundReason} = ${ITEM_UNAVAILABLE}) AND ${purchases.disputedAt} IS NULL)`;
+}
+
+/**
  * Every purchase but a blocked sale. IS DISTINCT FROM, never `<>`: that is
  * NULL for every row without a refund reason, which would drop them all.
  */
@@ -644,6 +720,14 @@ function notUnavailableBlock(): SQL {
  * How each kind of blocked payment is refunded (`refundBlockedPayment`): its
  * Stripe reason, its idempotency key, and its log lines. None of Stripe's
  * reasons fits an item no longer available, so its refund sends none.
+ *
+ * The key is fixed per payment, so a replayed webhook or the hourly sweep
+ * never refunds twice. Stripe keeps the FIRST response under a key for
+ * about 24 hours, a refusal included, so a retry within that day is
+ * answered with the same refusal: Stripe is asked afresh only once the key
+ * has expired. A refusal that clears sooner (a low platform balance) is
+ * therefore refunded a day late, never twice. The duplicate path has kept
+ * this trade since Codex-2hxff.14 (docs/payments/purchases.md).
  */
 const BLOCKED_REFUNDS = {
   duplicate: {
@@ -654,11 +738,11 @@ const BLOCKED_REFUNDS = {
     refunded: 'Duplicate payment refunded',
   },
   unavailable: {
-    reason: undefined,
+    reason: null,
     keyPrefix: 'refund_unavailable_',
-    refused: 'Payment for unavailable content could not be refunded',
-    retried: 'Unavailable content refund failed; it will be retried',
-    refunded: 'Payment for unavailable content refunded',
+    refused: 'Payment for an unavailable item could not be refunded',
+    retried: 'Unavailable item refund failed; it will be retried',
+    refunded: 'Payment for an unavailable item refunded',
   },
 } as const;
 
@@ -962,6 +1046,21 @@ export class PurchaseService extends BaseService {
           validated.contentId,
           'not_sold_separately'
         );
+      }
+      // Nor what its buyer could not open (Codex-z1t3c): completion would
+      // block and refund it, and Stripe would keep its fee. The checks above
+      // leave one case of `contentRefusesBuyers`, a deleted organisation;
+      // anything added to that rule later is refused here too.
+      if (
+        contentRefusesBuyers({
+          ...contentRecord,
+          organizationDeleted: await isOrganizationDeleted(
+            this.db,
+            contentRecord.organizationId
+          ),
+        })
+      ) {
+        throw new ContentNotPurchasableError(validated.contentId, 'deleted');
       }
 
       // Step 2: Check for existing purchase
@@ -1296,41 +1395,65 @@ export class PurchaseService extends BaseService {
 
   /**
    * Is the item a sale is for unavailable to its buyer (Codex-z1t3c)? Read
-   * after the buyer's item lock. Content is when access would refuse its
-   * buyer: `contentRefusesBuyers` in @codex/constants, the rule access's own
-   * decision reads (owner D54, "match access exactly"). That covers deleted,
-   * team-only, course-only, followers-only, a deleted organisation, content
-   * detached from its organisation or never released, and any rule added
-   * there later.
+   * after the buyer's item lock. Owner D54, "match access exactly":
+   * - **Content** is when access would refuse its buyer:
+   *   `contentRefusesBuyers` in @codex/constants, the rule access's own
+   *   decision reads. That covers deleted, team-only, course-only,
+   *   followers-only, a deleted organisation, content detached from its
+   *   organisation or never released, and any rule added there later.
+   * - **A course** is when its dashboard and player would refuse its buyer:
+   *   `courseRefusesBuyers`, the rule `loadCourseSummaryById` (@codex/access)
+   *   holds in SQL. That covers a deleted organisation (its courses stay;
+   *   `OrganizationService.delete` soft-deletes the organisation alone), a
+   *   deleted course, and one never released. Its buyers keep it unpublished,
+   *   archived or off sale (Codex-yo4px).
    *
-   * Both rows are read FOR SHARE, the content row and then its organisation's
-   * (child, then parent, the order every writer takes them). FOR SHARE
-   * conflicts with the FOR NO KEY UPDATE that a content delete, a PATCH or
-   * bulk access change, a detach, or an organisation delete or update holds,
-   * so a completion waits for one in flight and then reads what it committed.
-   * The purchase INSERT's own FOR KEY SHARE never conflicts with them, which
-   * is how a sale used to land on content gone while its Checkout was open.
-   * The organisation locked is the one the content names once its own lock
-   * is held, so a detach in flight is waited out first. No writer locks an
-   * organisation and then content: `OrganizationService.update` and `.delete`
-   * write the organisation row alone, and content writers reach it only by
-   * their foreign key's FOR KEY SHARE, which FOR SHARE does not block. So the
-   * two locks cannot deadlock. (A hard DELETE of an organisation would reach
-   * content second, through `content.organization_id`'s ON DELETE SET NULL;
-   * only test cleanup and scripts run one.)
+   * Both rows are read FOR SHARE, the item's row and then its organisation's
+   * (child, then parent). FOR SHARE conflicts with the FOR NO KEY UPDATE
+   * that a content delete, a PATCH or bulk access change, a detach, a course
+   * edit, or an organisation delete or update holds, so a completion waits
+   * for one in flight and then reads what it committed. The purchase INSERT's
+   * own foreign-key FOR KEY SHARE never conflicts with them, which is how a
+   * sale used to land on an item gone while its Checkout was open. The
+   * organisation locked is the one the item's row names once its own lock is
+   * held, so a content detach in flight is waited out first.
+   *
+   * The two locks cannot deadlock. No writer locks an organisation and then
+   * content or a course: `OrganizationService.update` and `.delete` write the
+   * organisation row alone, with no other row locked, and content and course
+   * writers (the plan-access order: tiers, content, courses) reach it only by
+   * their foreign key's FOR KEY SHARE, which FOR SHARE does not block. A
+   * completion locks one item, never both kinds. (A hard DELETE of an
+   * organisation reaches the item second, through ON DELETE SET NULL on
+   * content and CASCADE on courses; only test cleanup and scripts run one.)
+   *
+   * The wait is bounded: `lock_timeout` is 5 s from here to the commit, as
+   * content's scheduled publish bounds its own (content-service.ts). The
+   * completion holds the buyer's advisory lock meanwhile, so an unbounded
+   * wait on a stuck writer would stall the webhook and queue every
+   * redelivery behind it. Past it, Postgres gives the lock up (55P03) and
+   * nothing is written; `retryableIfLockGivenUp` makes that a 503, so Stripe
+   * redelivers and the page checks again.
    *
    * By id only, unscoped by design: the id is the signed session's, as in
    * `resolvePurchaseSplit`, and a `deletedAt` predicate would read a deleted
    * row as no row. False when there is no row: that split read refuses it.
-   *
-   * A course never is: no code writes `courses.deleted_at`, and its buyers
-   * keep it unpublished or off sale (Codex-yo4px), so it reads nothing.
    */
   private async isItemUnavailable(
     tx: Tx,
     target: { contentId: string } | { courseId: string }
   ): Promise<boolean> {
-    if (!('contentId' in target)) return false;
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    return 'contentId' in target
+      ? this.isContentUnavailable(tx, target.contentId)
+      : this.isCourseUnavailable(tx, target.courseId);
+  }
+
+  /** The content arm of {@link isItemUnavailable}. */
+  private async isContentUnavailable(
+    tx: Tx,
+    contentId: string
+  ): Promise<boolean> {
     const [row] = await tx
       .select({
         organizationId: content.organizationId,
@@ -1344,19 +1467,42 @@ export class PurchaseService extends BaseService {
         isFollowerGated: content.isFollowerGated,
       })
       .from(content)
-      .where(eq(content.id, target.contentId))
+      .where(eq(content.id, contentId))
       .for('share');
     if (!row) return false;
-    const [org] = row.organizationId
-      ? await tx
-          .select({ deletedAt: organizations.deletedAt })
-          .from(organizations)
-          .where(eq(organizations.id, row.organizationId))
-          .for('share')
-      : [];
     return contentRefusesBuyers({
       ...row,
-      organizationDeleted: org?.deletedAt != null,
+      organizationDeleted: await isOrganizationDeleted(
+        tx,
+        row.organizationId,
+        'share'
+      ),
+    });
+  }
+
+  /** The course arm of {@link isItemUnavailable}. */
+  private async isCourseUnavailable(
+    tx: Tx,
+    courseId: string
+  ): Promise<boolean> {
+    const [row] = await tx
+      .select({
+        organizationId: courses.organizationId,
+        status: courses.status,
+        publishedAt: courses.publishedAt,
+        deletedAt: courses.deletedAt,
+      })
+      .from(courses)
+      .where(eq(courses.id, courseId))
+      .for('share');
+    if (!row) return false;
+    return courseRefusesBuyers({
+      ...row,
+      organizationDeleted: await isOrganizationDeleted(
+        tx,
+        row.organizationId,
+        'share'
+      ),
     });
   }
 
@@ -1378,7 +1524,16 @@ export class PurchaseService extends BaseService {
    * support). The hourly sweep retries it too (`settleOwedDuplicates`).
    */
   private async refundBlockedPayment(purchase: Purchase): Promise<Purchase> {
-    const kind = BLOCKED_REFUNDS[blockedKind(purchase) ?? 'duplicate'];
+    // Every caller holds a blocked row. One that is not would be an ordinary
+    // sale refunded in full with no revoke or clawback: refuse it instead.
+    const blocked = blockedKind(purchase);
+    if (blocked === null) {
+      throw new InternalServiceError(
+        'A sale that is not a blocked payment was sent to the blocked refund',
+        { purchaseId: purchase.id }
+      );
+    }
+    const kind = BLOCKED_REFUNDS[blocked];
     let refundId: string | null;
     try {
       ({ refundId } = await issueRefund(this.stripe, {
@@ -1435,28 +1590,28 @@ export class PurchaseService extends BaseService {
 
   /**
    * The hourly sweep's retry of blocked refunds still owed (Codex-2hxff.15):
-   * duplicates, and blocked sales of unavailable content (Codex-z1t3c). The
-   * webhook retries a refused one only while Stripe redelivers; after that a
-   * `pending` one would sit unseen. Each is tried once and one failure never
+   * duplicates, and blocked sales of unavailable items (Codex-z1t3c), except
+   * one a dispute holds, of either kind, which the dispute decides
+   * (`owedBlockedPayment`, owner D56 and D57). The webhook retries a refused
+   * one only while Stripe redelivers; after that a `pending` one would sit
+   * unseen. Each is tried once and one failure never
    * stops the rest (`refundBlockedPayment` has logged it). What stays owed is
-   * returned for the sweep to alert on and support to settle.
+   * returned for the sweep to alert on and support to settle, each with its
+   * kind: a duplicate's buyer kept the item, a blocked sale's has nothing.
    */
   async settleOwedDuplicates(params: {
     olderThanMs: number;
     limit: number;
   }): Promise<{
     settled: number;
-    stillOwed: Array<{ id: string; stripePaymentIntentId: string }>;
+    stillOwed: OwedBlockedRefund[];
   }> {
     const owed = await this.db
       .select()
       .from(purchases)
       .where(
         and(
-          either(
-            isNotNull(purchases.duplicateOfPurchaseId),
-            eq(purchases.refundReason, ITEM_UNAVAILABLE)
-          ),
+          owedBlockedPayment(),
           eq(purchases.status, PURCHASE_STATUS.PENDING),
           lt(purchases.createdAt, new Date(Date.now() - params.olderThanMs))
         )
@@ -1465,7 +1620,7 @@ export class PurchaseService extends BaseService {
       .limit(params.limit);
 
     let settled = 0;
-    const stillOwed: Array<{ id: string; stripePaymentIntentId: string }> = [];
+    const stillOwed: OwedBlockedRefund[] = [];
     for (const purchase of owed) {
       try {
         await this.refundBlockedPayment(purchase);
@@ -1474,15 +1629,17 @@ export class PurchaseService extends BaseService {
         // A refused refund was logged as it was thrown; anything else (the
         // row update after a refund Stripe made) is logged here.
         if (!(error instanceof ServiceUnavailableError)) {
-          this.obs.error('Owed duplicate refund could not be settled', {
+          this.obs.error('Owed blocked refund could not be settled', {
             errorId: crypto.randomUUID(),
             purchaseId: purchase.id,
+            kind: blockedKind(purchase),
             error: error instanceof Error ? error.message : String(error),
           });
         }
         stillOwed.push({
           id: purchase.id,
           stripePaymentIntentId: purchase.stripePaymentIntentId,
+          blocked: blockedKind(purchase),
         });
       }
     }
@@ -1743,6 +1900,10 @@ export class PurchaseService extends BaseService {
       // refunded and pays no one: no slices, and no repair of slices it
       // never had.
       if (isBlockedPayment(txResult.purchase)) {
+        // Returned, not awaited: a refused refund reaches the caller as it
+        // was thrown (retryable, logged once by `refundBlockedPayment`),
+        // never this catch, so it is not also logged as a purchase that
+        // failed to complete. The blocked row did commit.
         return this.settleBlockedPayment(txResult.purchase);
       }
 
@@ -1803,7 +1964,10 @@ export class PurchaseService extends BaseService {
           amountPaidCents: metadata.amountPaidCents,
         });
       }
-      this.handleError(error, 'completePurchase');
+      this.handleError(
+        retryableIfLockGivenUp(error, stripePaymentIntentId),
+        'completePurchase'
+      );
     }
   }
 
@@ -1858,6 +2022,20 @@ export class PurchaseService extends BaseService {
           'below_minimum_price',
           { priceCents: course.priceCents }
         );
+      }
+      // Nor a course its buyer could not open (Codex-z1t3c): its
+      // organisation deleted (`courseRefusesBuyers`; the checks above cover
+      // the rest). Completion would block and refund it.
+      if (
+        courseRefusesBuyers({
+          ...course,
+          organizationDeleted: await isOrganizationDeleted(
+            this.db,
+            course.organizationId
+          ),
+        })
+      ) {
+        throw new CourseNotPurchasableError(validated.courseId, 'deleted');
       }
 
       // Double-purchase guard: a buyer who owns the course cannot check out
@@ -2054,6 +2232,13 @@ export class PurchaseService extends BaseService {
         );
         if (replay) return { purchase: replay, isNew: false } as const;
         const isDuplicate = duplicateOf !== undefined;
+        // A course its buyer could not open by now (its organisation deleted,
+        // or never released: `courseRefusesBuyers`) is a blocked sale,
+        // refunded after the commit (Codex-z1t3c). Read under FOR SHARE, so
+        // an organisation delete in flight is waited out.
+        const itemUnavailable = await this.isItemUnavailable(tx, {
+          courseId: metadata.courseId,
+        });
 
         const purchasedAt = metadata.paidAt ?? new Date();
         // Courses are ALWAYS org-owned: the org is authoritative from the row.
@@ -2068,9 +2253,7 @@ export class PurchaseService extends BaseService {
             stripePaymentIntentId,
             stripeApplicationFeeCents: metadata.stripeApplicationFeeCents,
             duplicatePayment: isDuplicate,
-            // A course is never deleted (no writer sets its `deleted_at`),
-            // and its buyers keep it unpublished or off sale (Codex-yo4px).
-            itemUnavailable: false,
+            itemUnavailable,
           });
 
         const [purchase] = await tx
@@ -2090,7 +2273,7 @@ export class PurchaseService extends BaseService {
             // Fee configuration replaced platform agreements (as above).
             platformAgreementId: null,
             creatorOrgAgreementId: agreement?.agreementId ?? null,
-            ...purchaseOutcomeFields(duplicateOf, false),
+            ...purchaseOutcomeFields(duplicateOf, itemUnavailable),
           })
           .returning();
 
@@ -2100,8 +2283,10 @@ export class PurchaseService extends BaseService {
           });
         }
 
-        // A duplicate grants nothing and pays no one; refunded post-commit.
-        if (isDuplicate) {
+        // A duplicate grants nothing (the first purchase did), a blocked sale
+        // nothing (its buyer could not open it), and neither pays anyone;
+        // the post-commit step refunds it.
+        if (isDuplicate || itemUnavailable) {
           return { purchase, isNew: false } as const;
         }
 
@@ -2118,8 +2303,13 @@ export class PurchaseService extends BaseService {
         } as const;
       });
 
-      // A duplicate payment, first delivery or replay: refund it, pay no one.
+      // A duplicate payment or a blocked sale, first delivery or replay:
+      // refund it, pay no one.
       if (isBlockedPayment(txResult.purchase)) {
+        // Returned, not awaited: a refused refund reaches the caller as it
+        // was thrown (retryable, logged once by `refundBlockedPayment`),
+        // never this catch, so it is not also logged as a purchase that
+        // failed to complete. The blocked row did commit.
         return this.settleBlockedPayment(txResult.purchase);
       }
 
@@ -2173,7 +2363,10 @@ export class PurchaseService extends BaseService {
           amountPaidCents: metadata.amountPaidCents,
         });
       }
-      this.handleError(error, 'completeCoursePurchase');
+      this.handleError(
+        retryableIfLockGivenUp(error, stripePaymentIntentId),
+        'completeCoursePurchase'
+      );
     }
   }
 
@@ -2220,7 +2413,7 @@ export class PurchaseService extends BaseService {
       stripeApplicationFeeCents?: number | null;
       /** Computed for the record; a duplicate is refunded, never paid out. */
       duplicatePayment: boolean;
-      /** Likewise for a blocked sale of unavailable content (Codex-z1t3c). */
+      /** Likewise for a blocked sale of an unavailable item (Codex-z1t3c). */
       itemUnavailable: boolean;
     }
   ): Promise<{
@@ -3030,8 +3223,8 @@ export class PurchaseService extends BaseService {
    *   caller records the partial refund on it (P-1: access is kept). The
    *   replay records the slices and claws the refund back from them, so each
    *   payee nets what a refund after the payout leaves.
-   * - **Content its buyer could not open** (Codex-z1t3c,
-   *   `contentRefusesBuyers`): it is written as
+   * - **An item its buyer could not open** (Codex-z1t3c,
+   *   `contentRefusesBuyers` or `courseRefusesBuyers`): it is written as
    *   the blocked sale completion would write, granting nothing, `refunded`
    *   if refunded in full and `pending` otherwise. The replay refunds what is
    *   left, as it does for one written by completion.
@@ -3105,7 +3298,7 @@ export class PurchaseService extends BaseService {
       // a completion of the buyer's other payment for the item cannot both
       // write a completed purchase. A buyer who already owns the item paid
       // twice: this one is rebuilt as the duplicate it is, granting nothing.
-      // Content its buyer could not open is rebuilt as the blocked sale it
+      // An item its buyer could not open is rebuilt as the blocked sale it
       // is, under the same FOR SHARE reads as completion (Codex-z1t3c).
       return await this.db.transaction(async (tx) => {
         const { replay, ownerId } = await this.lockForItem(
@@ -3170,7 +3363,7 @@ export class PurchaseService extends BaseService {
         });
         if (raced) return raced;
       }
-      throw error;
+      throw retryableIfLockGivenUp(error, paymentIntentId);
     }
   }
 
@@ -4152,7 +4345,7 @@ export class PurchaseService extends BaseService {
    *   (`refundFirstPaymentAfterLateWin`);
    * - `duplicate`: a duplicate payment, which never granted anything, stays
    *   as it is. The first payment is refunded next, if the loss refunded it;
-   * - `unavailable`: likewise, a blocked sale of unavailable content
+   * - `unavailable`: likewise, a blocked sale of an unavailable item
    *   (Codex-z1t3c);
    * - `still_refunded`: the refunds that still stand cover what was paid. It
    *   stays refunded, with its refund fields restated;
@@ -4305,7 +4498,7 @@ export class PurchaseService extends BaseService {
    *   purchase or by the charge (`disputedAt` stays set after a loss, which
    *   also makes it `refunded`): the dispute decides the access;
    * - `duplicate`: a duplicate payment, which never granted anything;
-   * - `unavailable`: a blocked sale of content its buyer could not open when
+   * - `unavailable`: a blocked sale of an item its buyer could not open when
    *   its payment landed (Codex-z1t3c), which never granted anything;
    * - `rebought`: the buyer bought the item again since, and that purchase
    *   grants it: a buyer holds one completed purchase per item
@@ -4876,7 +5069,9 @@ export class PurchaseService extends BaseService {
     try {
       issued = await issueRefund(this.stripe, {
         chargeId: charge.id,
-        reason: 'duplicate',
+        // A duplicate's reason, but none for a blocked sale of an item no
+        // longer available: none of Stripe's fits it (Codex-z1t3c).
+        reason: isUnavailableBlock(purchase) ? null : 'duplicate',
         idempotencyKey: `late_win_refund_${stripeDisputeId}`,
         environment,
         metadata: { codex_late_win_dispute: stripeDisputeId },
@@ -5764,7 +5959,7 @@ export class PurchaseService extends BaseService {
     // `content` join is always present; course sales get their own reporting
     // surface (WP-7) rather than being force-fit into the content columns.
     // A duplicate payment is no sale: it is refunded and pays no one
-    // (Codex-2hxff.14). Nor is a blocked sale of unavailable content
+    // (Codex-2hxff.14). Nor is a blocked sale of an unavailable item
     // (Codex-z1t3c).
     const conditions = [
       ...scope,

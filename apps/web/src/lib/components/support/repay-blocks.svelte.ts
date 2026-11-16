@@ -8,7 +8,13 @@
  *   never helps;
  * - a late win's own refund of the payment (`LATE_WIN_REFUND_NOT_REPAYABLE`,
  *   owner decision 6, 2026-11-08): it pays back a buyer who paid twice, so
- *   it is only ever settled as refunded another way.
+ *   it is only ever settled as refunded another way;
+ * - a blocked payment's refund (`BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE`, owner
+ *   D55, widened to duplicates by D57): a duplicate (`duplicate_payment`, the
+ *   buyer kept the item) or a blocked sale of an item no longer available
+ *   (`unavailable_sale`, Codex-z1t3c) paid no one and granted nothing, so the
+ *   buyer is still owed it. The queue already knows one (`blockedPayment`);
+ *   this covers a page older than that.
  *
  * The server refuses either every time. Once it has said so for a row, the
  * queue disables that row's Re-pay and says why, and support settles it as
@@ -17,13 +23,25 @@
  * forgets it, and the server simply refuses again.
  */
 
+import type { FailedRefundItem } from '@codex/admin';
 import { SvelteMap } from 'svelte/reactivity';
 
 export type RepayBlockReason =
   | 'chargeback'
   | 'later_refunds'
   | 'needs_person'
-  | 'late_win_refund';
+  | 'late_win_refund'
+  | 'duplicate_payment'
+  | 'unavailable_sale';
+
+/** The block a blocked payment's refund always has, by its kind. */
+export const REPAY_BLOCK_OF_PAYMENT = {
+  duplicate: 'duplicate_payment',
+  unavailable: 'unavailable_sale',
+} as const satisfies Record<
+  NonNullable<FailedRefundItem['blockedPayment']>,
+  RepayBlockReason
+>;
 
 const blocks = new SvelteMap<string, RepayBlockReason>();
 

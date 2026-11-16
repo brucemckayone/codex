@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 // Through the package index: access and purchase completion import them there.
 import {
   type ContentBuyerFacts,
+  type CourseBuyerFacts,
   contentAccessBranch,
   contentRefusesBuyers,
+  courseRefusesBuyers,
   isContentReleased,
 } from '../index';
 
@@ -143,5 +145,43 @@ describe('contentRefusesBuyers (owner D54, "match access exactly")', () => {
     ],
   ])('refuses a buyer: %s', (_name, c) => {
     expect(contentRefusesBuyers(c)).toBe(true);
+  });
+});
+
+describe('courseRefusesBuyers (the course dashboard’s read, Codex-z1t3c)', () => {
+  /** Published, in a live org. Each case overrides what it needs. */
+  const bought: CourseBuyerFacts = {
+    status: 'published',
+    publishedAt: RELEASED,
+    deletedAt: null,
+    organizationDeleted: false,
+  };
+
+  it.each([
+    ['published', bought],
+    ['a legacy published row with no date', { ...bought, publishedAt: null }],
+    ['unpublished after release', { ...bought, status: 'draft' }],
+    [
+      'archived (taken off sale) after release',
+      { ...bought, status: 'archived' },
+    ],
+  ])('lets a buyer in: %s', (_name, c) => {
+    expect(courseRefusesBuyers(c)).toBe(false);
+  });
+
+  it.each([
+    ['its organisation deleted', { ...bought, organizationDeleted: true }],
+    ['deleted', { ...bought, deletedAt: new Date() }],
+    ['deleted, as a string date', { ...bought, deletedAt: RELEASED }],
+    [
+      'a draft never released',
+      { ...bought, status: 'draft', publishedAt: null },
+    ],
+    [
+      'archived, never released',
+      { ...bought, status: 'archived', publishedAt: null },
+    ],
+  ])('refuses a buyer: %s', (_name, c) => {
+    expect(courseRefusesBuyers(c)).toBe(true);
   });
 });

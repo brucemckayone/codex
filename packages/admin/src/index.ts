@@ -157,6 +157,7 @@ export type {
 export {
   AdminServiceError,
   AlreadySettledError,
+  BlockedPaymentRefundNotRepayableError,
   BusinessLogicError,
   ChargebackSettlingError,
   ChargeChangedError,

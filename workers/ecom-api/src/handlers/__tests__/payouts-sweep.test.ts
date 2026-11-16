@@ -917,13 +917,48 @@ describe('runOwedDuplicatesSweep', () => {
       kind: 'purchase',
       settled: 2,
     });
-    // It names both kinds the purchase sweep retries (Codex-z1t3c).
+    // A plan kind holds duplicates only, so its alert names nothing else.
     expect(obs.error).toHaveBeenCalledExactlyOnceWith(
-      'Refunds are still owed after the hourly retry (a duplicate payment, or an item no longer available): refund them by hand',
+      'Duplicate refunds are still owed after the hourly retry: refund them by hand',
       {
         errorId: expect.any(String),
         kind: 'subscription',
         stillOwed: [{ id: 'sub_row_1', stripeSubscriptionId: 'sub_dup_1' }],
+      }
+    );
+  });
+
+  it('the purchase alert names both kinds it retries, and each row says which it is (Codex-z1t3c)', async () => {
+    const stillOwed = [
+      { id: 'row_dup', stripePaymentIntentId: 'pi_dup', blocked: 'duplicate' },
+      {
+        id: 'row_gone',
+        stripePaymentIntentId: 'pi_gone',
+        blocked: 'unavailable',
+      },
+    ];
+    const { services } = settlers({
+      purchase: vi.fn().mockResolvedValue({ settled: 0, stillOwed }),
+      courseSubscription: vi.fn().mockResolvedValue({
+        settled: 0,
+        stillOwed: [{ id: 'csub_row_1' }],
+      }),
+    });
+    const { obs } = makeObs();
+
+    await runOwedDuplicatesSweep(services, obs);
+
+    expect(obs.error).toHaveBeenCalledTimes(2);
+    expect(obs.error).toHaveBeenCalledWith(
+      'Refunds are still owed after the hourly retry (a duplicate payment, or an item no longer available): refund them by hand',
+      { errorId: expect.any(String), kind: 'purchase', stillOwed }
+    );
+    expect(obs.error).toHaveBeenCalledWith(
+      'Duplicate refunds are still owed after the hourly retry: refund them by hand',
+      {
+        errorId: expect.any(String),
+        kind: 'courseSubscription',
+        stillOwed: [{ id: 'csub_row_1' }],
       }
     );
   });

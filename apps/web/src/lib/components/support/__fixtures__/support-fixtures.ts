@@ -250,6 +250,8 @@ export function failedRefund(
     accessRestoreBlockedReason: null,
     // An ordinary failed refund: not a late win's own.
     isLateWinRefund: false,
+    // Nor a blocked payment's (a duplicate or a blocked sale): Re-pay is on offer.
+    blockedPayment: null,
     ...overrides,
   };
 }

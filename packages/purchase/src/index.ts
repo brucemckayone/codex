@@ -133,7 +133,9 @@ export {
 } from './services/fee-config-service';
 // Service
 export {
+  type BlockedPaymentKind,
   type BuyerPurchase,
+  blockedKind,
   isDuplicatePayment,
   isUnavailableBlock,
   type PurchaseMailer,

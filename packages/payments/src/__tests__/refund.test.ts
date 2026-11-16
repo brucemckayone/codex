@@ -68,11 +68,12 @@ describe('issueRefund', () => {
     });
   });
 
-  it('a refund with no reason of Stripe’s sends Stripe none, not a false one (Codex-z1t3c)', async () => {
+  it('a refund with no reason of Stripe’s (null) sends Stripe none, not a false one (Codex-z1t3c)', async () => {
     const stripe = createMockStripe();
 
     await issueRefund(stripe, {
       paymentIntentId: 'pi_gone',
+      reason: null,
       idempotencyKey: 'refund_unavailable_pi_gone',
       environment: 'test',
     });

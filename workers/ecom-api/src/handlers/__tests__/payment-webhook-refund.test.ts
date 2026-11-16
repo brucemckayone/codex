@@ -635,6 +635,39 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     ]);
   });
 
+  it('a PARTIAL refund of a blocked sale never says "in full" was done: it says the rest will follow (Codex-z1t3c)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: true,
+    });
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_part', amountCents: 500 },
+    ]);
+    const bundle = buildContext();
+
+    // Support refunded £5.00 of £19.99; the blocked sale's own refund of
+    // the rest is still to come (the checkout's, or the hourly sweep's).
+    await handlePaymentWebhook(
+      createRefundEvent({ amount_refunded: 500 }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Winter Light',
+        refundAmount: '£5.00',
+        originalAmount: '£19.99',
+        accessNote:
+          "Winter Light is no longer available, so we're refunding your payment in full. The rest will follow.",
+      }),
+    ]);
+  });
+
   it('an ordinary refund’s email never reads the no-longer-available line', async () => {
     mockProcessRefund.mockResolvedValueOnce({
       userId: 'u',

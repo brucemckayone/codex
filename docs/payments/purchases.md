@@ -273,8 +273,18 @@ refund").
   through its retry window: a refusal such as a low platform balance can clear.
   One that never clears, such as a charge the buyer has disputed, ends with
   the dispute or is held for support (owner decision: a failed refund is held
-  for support). Support finds them with `duplicate_of_purchase_id IS NOT NULL
+  for support). The hourly owed-refund sweep retries it, except while a
+  dispute holds it (owner D56, widened to duplicates by D57): a loss records
+  it refunded (`processLostDispute`), and a win clears `disputed_at`
+  (`restoreDisputedPurchase`; a late win's undo too), so the next sweep
+  refunds it. Support finds them with `duplicate_of_purchase_id IS NOT NULL
   AND status = 'pending'`.
+- **Its failed refund is never "creators re-paid"** (owner D55, widened to
+  duplicates by D57): a duplicate paid no one, so there is nothing to re-pay,
+  and the buyer is still owed it. The refusal and the queue are a blocked
+  sale's (below), in a duplicate's own words: "There's no access to give
+  back: this was a second payment for something {buyer} already has. {buyer}
+  is still owed this refund. Refund them another way."
 - **No receipt** is sent for it. Its `charge.refunded` sends the usual refund
   email, naming the item: "You still have {item}. This refunds a second
   payment for it." Every refund email now names the purchase's own item; it
@@ -300,14 +310,15 @@ the code back, also run `DROP INDEX uq_purchases_completed_customer_content,
 uq_purchases_completed_customer_course;`. The `checkout_sessions` table and
 the new column can stay.
 
-### A payment for content its buyer could no longer open when it landed
+### A payment for an item its buyer could no longer open when it landed
 
 A buyer can still be in Stripe Checkout when the content is deleted (one at a
 time or in bulk), moved to Team only (by PATCH or bulk access), or its
-organisation is deleted or it is detached from it. Access then refuses them,
-so completing the sale would charge a buyer who cannot watch. It is blocked
-and refunded in full instead (`Codex-z1t3c`; owner D44 and 2026-11-15: "block
-and refund", a line in the existing refund email, and no checkout expiry).
+organisation is deleted or it is detached from it; or when a course's
+organisation is deleted. Access then refuses them, so completing the sale
+would charge a buyer who cannot watch. It is blocked and refunded in full
+instead (`Codex-z1t3c`; owner D44 and 2026-11-15: "block and refund", a line
+in the existing refund email, and no checkout expiry).
 
 - **The rule is access's own** (owner D54, "match access exactly"): a sale is
   blocked exactly when access would refuse a buyer whose only grant is that
@@ -322,18 +333,40 @@ and refund", a line in the existing refund email, and no checkout expiry).
   branch added there must be classified here before it compiles, and
   `content-buyer-refusal.integration.test.ts` in `@codex/access` runs every
   case through both the predicate and the real `canView`.
-- **Completion reads the content, then its organisation, `FOR SHARE`**, after
-  the buyer's item lock. A delete, an access change, a detach or an
-  organisation delete holds its row `FOR NO KEY UPDATE` until it commits, and
-  the two conflict, so the completion waits, then reads what was committed.
-  The purchase INSERT's own foreign-key `FOR KEY SHARE` never conflicted with
-  them, which is how such a sale used to complete. The organisation read is
-  the one the locked content row names, so a detach in flight is waited out
-  first. No writer locks an organisation and then its content
-  (`OrganizationService.update` and `.delete` write the organisation row
-  alone; content writers reach it only through their foreign key's
-  `FOR KEY SHARE`), so the order cannot deadlock. The self-heal's rebuild
-  reads it the same way.
+- **A course is blocked when its dashboard would refuse its buyer**:
+  `courseRefusesBuyers`, the rule `loadCourseSummaryById` (the dashboard's
+  and the in-course player's read) holds in SQL. That is its organisation
+  soft-deleted (`OrganizationService.delete` leaves its courses and their
+  entitlements in place, and nobody may open them: owner 2026-10-25,
+  `Codex-7ncbh`), the course soft-deleted (no code does that today), or a
+  course never released (not published, and no `published_at`). A course's
+  buyers keep it unpublished, archived or taken off sale (`Codex-yo4px`), so
+  none of those blocks it. `course-buyer-refusal.integration.test.ts` in
+  `@codex/access` holds the predicate and the dashboard together.
+- **Completion reads the item, then its organisation, `FOR SHARE`**, after
+  the buyer's item lock. A delete, an access change, a detach, a course edit
+  or an organisation delete holds its row `FOR NO KEY UPDATE` until it
+  commits, and the two conflict, so the completion waits, then reads what was
+  committed. The purchase INSERT's own foreign-key `FOR KEY SHARE` never
+  conflicted with them, which is how such a sale used to complete. The
+  organisation read is the one the locked item row names, so a content
+  detach in flight is waited out first. No writer locks an organisation and
+  then content or a course (`OrganizationService.update` and `.delete` write
+  the organisation row alone; content and course writers reach it only
+  through their foreign key's `FOR KEY SHARE`), and a completion locks one
+  item, so the order cannot deadlock. The self-heal's rebuild reads it the
+  same way, for content and courses alike. The wait is bounded: from these
+  reads to its commit the completion's `lock_timeout` is 5 seconds, because
+  it holds the buyer's item lock meanwhile and a stuck writer must not stall
+  the webhook. Past it, nothing is written and the completion is a 503
+  (`SERVICE_UNAVAILABLE`): Stripe redelivers, and the success page checks
+  again.
+- **Checkout creation refuses it too**, so no buyer is charged for one: content
+  through `contentRefusesBuyers` (`CONTENT_NOT_PURCHASABLE`, reason
+  `deleted`, once the existing checks pass, which leaves a deleted
+  organisation), and a course whose organisation is deleted
+  (`COURSE_NOT_PURCHASABLE`, reason `deleted`). Completion decides again, for
+  a Checkout already open.
 - **A blocked sale is recorded as a duplicate is**: `pending`, no access row,
   no entitlement, no payout slice, its split kept for the record, and left
   out of Sales and its totals. Its marker is `refund_reason = 'item_unavailable'`
@@ -342,24 +375,57 @@ and refund", a line in the existing refund email, and no checkout expiry).
   over it. It is blocked whoever owns the item: no buyer can watch it.
 - **After the commit** it is refunded in full under
   `refund_unavailable_<PaymentIntent>`, with no refund reason (none of
-  Stripe's fits). A refusal leaves it `pending`, logged, and thrown as
-  retryable, and the hourly owed-refund sweep retries it with the duplicates.
-  Support finds the ones still owed with
-  `refund_reason = 'item_unavailable' AND status = 'pending'`.
+  Stripe's fits). A refusal leaves it `pending`, logged once (not also as a
+  purchase that failed to complete: the row committed), and thrown as
+  retryable, and the hourly owed-refund sweep retries it with the duplicates,
+  except while a dispute holds it (owner D56): Stripe refuses that refund,
+  and the dispute decides it. A loss records it refunded; a win clears
+  `disputed_at`, and the next sweep refunds it.
+  Its alert for what is still owed names both kinds, and each row says
+  which it is (`blocked`: `duplicate`, the buyer kept the item, or
+  `unavailable`, the buyer has nothing). Support finds the ones still owed
+  with `refund_reason = 'item_unavailable' AND status = 'pending'`. The key is
+  fixed per payment, as `refund_duplicate_` is, so nothing is refunded twice;
+  but Stripe keeps the first response under a key for about 24 hours, a
+  refusal included, so a retry within that day gets the same refusal back.
+  A refusal that clears sooner is refunded about a day late, never twice.
+  With no amount, the refund is of what is left of the charge, so one made
+  after a partial refund returns the rest.
 - **No receipt** is sent. Its `charge.refunded` sends the usual refund email
   with the line "{item} is no longer available, so we've refunded you in
-  full." The success page shows it as no longer active, never as a purchase
-  still being recorded.
-- **It never grants access later.** Settling a failed refund of it as
-  "creators re-paid" leaves access as it is (reason `unavailable`). A late
-  win refunds it, as for a duplicate, when the loss had refunded it.
+  full." once the charge is refunded in full. A partial refund of it
+  (support's, the Dashboard's, or one that beat the checkout) says "{item} is
+  no longer available, so we're refunding your payment in full. The rest
+  will follow.": the row stays `pending`, so the checkout's own refund or the
+  hourly sweep refunds the rest. The success page shows it as no longer
+  active, never as a purchase still being recorded.
+- **It never grants access later, and its failed refund is never "creators
+  re-paid"** (owner D55; a duplicate's too, D57): 422
+  `BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE` (`refuseBlockedPaymentRefund`,
+  `@codex/admin`), with the kind as `reason` (`unavailable` or `duplicate`),
+  refused before anything is read from Stripe or written, and logged at
+  error with an `errorId` and the kind. The
+  sale paid no one and granted nothing, so there is nothing to re-pay and no
+  access to give back, and the buyer is still owed the money. Support's queue
+  marks the row with its kind (`blockedPayment`) and offers no Re-pay; the
+  dialog says "There's no access to give back: the item was no longer
+  available. {buyer} is still owed this refund. Refund them another way."
+  (a duplicate's says it was a second payment for something the buyer
+  already has). Only "refunded another way" settles it. A late win refunds it, as for a duplicate, when
+  the loss had refunded it.
 - **A dispute of it keeps the org-wide streaming block** (owner D53). It
   grants nothing, so the dispute ends access (`accessEnded: true`) and the
   webhook writes the organisation's `purchase_dispute` revocation as for any
   sale, unless the buyer holds the item through another purchase.
-- **Courses have no such gap.** No code soft-deletes a course, and a course's
-  buyers keep it when it is unpublished or taken off sale (`Codex-yo4px`), so
-  a course archived while Checkout is open is still a sale its buyer can use.
+- **It never hides the item in the buyer's library.** The library leaves a
+  purchase in flight (`pending`: the redirect beat the webhook) out of its
+  other arms, so the purchased arm owns it once it lands; a blocked sale is
+  not one (`refund_reason IS DISTINCT FROM 'item_unavailable'`, library.ts
+  `notAcquired`). So a follower still finds a followers-only item, and a
+  team member a team-only one, while its refund is owed.
+- **A course archived or taken off sale while Checkout is open** is still a
+  sale its buyer can use (`Codex-yo4px`), so it completes. Only the course
+  rule above blocks one.
 
 ## After payment
 

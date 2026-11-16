@@ -6,7 +6,10 @@
   balance again and the payees' shares are still taken back. Each row offers
   the two settlements; the page opens the confirm dialog. A row whose re-pay
   the server refused for a later cause (`repay-blocks.svelte.ts`) keeps Re-pay
-  disabled for the session, with the reason beside it.
+  disabled for the session, with the reason beside it. A blocked payment's
+  refund (`blockedPayment`, owner D55 and D57: a duplicate, or a blocked
+  sale) never offers Re-pay: it paid no one, and its buyer is still owed the
+  refund. The note beside it says which.
 
   @prop {FailedRefundItem[]} items
   @prop {(item, resolution) => void} onSettle
@@ -17,7 +20,11 @@
   import { Badge, Button } from '$lib/components/ui';
   import * as Table from '$lib/components/ui/Table';
   import { formatPrice } from '$lib/utils/format';
-  import { repayBlockReason } from './repay-blocks.svelte';
+  import {
+    REPAY_BLOCK_OF_PAYMENT,
+    type RepayBlockReason,
+    repayBlockReason,
+  } from './repay-blocks.svelte';
   import { formatDay, formatShortDay } from './support-format';
 
   interface Props {
@@ -66,6 +73,33 @@
     return m.support_failed_phone_part(dates);
   }
 
+  /**
+   * What keeps a row's Re-pay off, if anything: a refusal this session, or a
+   * blocked payment's refund, which is never re-paid (owner D55, D57).
+   */
+  function repayOff(item: FailedRefundItem): RepayBlockReason | null {
+    const blocked = item.blockedPayment;
+    return repayBlockReason(item.refundId) ?? (blocked ? REPAY_BLOCK_OF_PAYMENT[blocked] : null);
+  }
+
+  /** Why a row's Re-pay is off, said beside it. */
+  function repayOffNote(reason: RepayBlockReason): string {
+    switch (reason) {
+      case 'chargeback':
+        return m.support_repay_off_chargeback();
+      case 'needs_person':
+        return m.support_repay_off_needs_person();
+      case 'late_win_refund':
+        return m.support_repay_off_late_win();
+      case 'duplicate_payment':
+        return m.support_repay_off_duplicate();
+      case 'unavailable_sale':
+        return m.support_repay_off_unavailable();
+      case 'later_refunds':
+        return m.support_repay_off_later_refunds();
+    }
+  }
+
   function chargeHref(chargeId: string): string {
     return `/admin/refunds/${encodeURIComponent(chargeId)}`;
   }
@@ -79,7 +113,7 @@
 {/snippet}
 
 {#snippet actions(item: FailedRefundItem)}
-  {@const blockedBy = repayBlockReason(item.refundId)}
+  {@const blockedBy = repayOff(item)}
   <Button variant="secondary" size="sm" onclick={() => onSettle(item, 'refunded_elsewhere')}>
     {m.support_action_elsewhere()}
   </Button>
@@ -93,15 +127,7 @@
     {m.support_action_repay()}
   </Button>
   {#if blockedBy}
-    <span class="action-note" data-testid="repay-off">
-      {blockedBy === 'chargeback'
-        ? m.support_repay_off_chargeback()
-        : blockedBy === 'needs_person'
-          ? m.support_repay_off_needs_person()
-          : blockedBy === 'late_win_refund'
-            ? m.support_repay_off_late_win()
-            : m.support_repay_off_later_refunds()}
-    </span>
+    <span class="action-note" data-testid="repay-off">{repayOffNote(blockedBy)}</span>
   {/if}
 {/snippet}
 
