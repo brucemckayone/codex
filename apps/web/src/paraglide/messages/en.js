@@ -29259,6 +29259,30 @@ export const support_repay_late_win_body = () => `Refund the buyer another way, 
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_unavailable_lead = () => `There's no access to give back: the item was no longer available.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_duplicate_lead = (params) => `There's no access to give back: this was a second payment for something ${params.buyer} already has.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_still_owed_body = (params) => `${params.buyer} is still owed this refund. Refund them another way.`
+
+
+/**
  * @param {{ buyer: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -29352,6 +29376,22 @@ export const support_repay_off_needs_person = () => `Re-pay is off: this one nee
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_repay_off_late_win = () => `Re-pay is off: this refund pays back a buyer who paid twice. Settle it another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_unavailable = () => `Re-pay is off: the item was no longer available, so the buyer is still owed this refund. Settle it another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_duplicate = () => `Re-pay is off: this was a second payment for something the buyer already has, so they are still owed this refund. Settle it another way.`
 
 
 /**
