@@ -29283,6 +29283,14 @@ export const support_repay_still_owed_body = (params) => `${params.buyer} is sti
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_blocked_payment_lead = () => `There's no access to give back: this payment was blocked.`
+
+
+/**
  * @param {{ buyer: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -29392,6 +29400,14 @@ export const support_repay_off_unavailable = () => `Re-pay is off: the item was 
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_repay_off_duplicate = () => `Re-pay is off: this was a second payment for something the buyer already has, so they are still owed this refund. Settle it another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_blocked_payment = () => `Re-pay is off: this payment was blocked, so the buyer is still owed this refund. Settle it another way.`
 
 
 /**
