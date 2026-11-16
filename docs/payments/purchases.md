@@ -383,21 +383,35 @@ in the existing refund email, and no checkout expiry).
   except while a chargeback on it is OPEN (owner D56): Stripe refuses that
   refund, and the dispute decides it. The disputes table says so
   (`noOpenChargeback`, `@codex/payments` dispute-hold: a dispute names the
-  purchase by its PaymentIntent when it is recorded; an inquiry never holds
-  it), never the row's own `disputed_at`, which only a win clears. A loss
+  purchase by its PaymentIntent when it is recorded; one recorded before its
+  purchase existed is linked as the purchase lands, by completion or the
+  self-heal (by the charge, in the insert's transaction), or when the dispute
+  is next recorded; an inquiry never holds it), never the row's own
+  `disputed_at`, which only a win clears. A loss
   records it refunded; any other end (a win, `prevented`, a close we never
   recorded) leaves it owed, and the next sweep refunds it, so no end holds it
   forever. One an open chargeback has held for over 120 days (past Stripe's
   dispute lifecycle) is alerted at error by the sweep, once per run, with
   the purchase and dispute ids: "Blocked refunds still held by a chargeback
   after 120 days: check the dispute in Stripe, then refund them by hand".
-  It stays held while the dispute reads open.
+  It stays held while the dispute reads open. The check runs after the
+  sweep's refunds (each of the three sweeps) and can't stop them: a failure
+  logs its own error.
 - **A chargeback lost for less than the payment** (owner D59) records the
-  row refunded by what the bank returned, and nothing refunds the rest: an
-  error alert names the purchase, the dispute, the kind and the amount still
-  owed in pence (`owedCents`, GBP): "A lost chargeback refunded only part of
-  a blocked payment: refund the rest by hand". Support refunds the rest by
-  hand; there is no automatic refund. A loss in full alerts nothing.
+  row refunded by what the buyer has back: the refunds standing on the
+  charge (a pending blocked row records no part refund of its own) and the
+  chargeback, capped at what was paid. Nothing refunds the rest: an error
+  alert names the purchase, the dispute, the kind and the amount still owed
+  in pence (`owedCents`, GBP): "A lost chargeback refunded only part of a
+  blocked payment: refund the rest by hand". Because that alert is logged
+  once, the hourly sweep also reports every such payment from the stored
+  rows, once per run, after its refunds: "Blocked payments a lost chargeback
+  refunded only in part: refund the rest by hand", each with its
+  PaymentIntent, dispute, kind, `owedCents` and currency. Both read one
+  count (`unrecoveredAfterLoss`), and the report stops once support's refund
+  stands on the charge, so it needs no mark. Support refunds the rest by
+  hand; there is no automatic refund. A loss in full, or a loss won late,
+  alerts nothing.
   Its alert for what is still owed names both kinds, and each row says
   which it is (`blocked`: `duplicate`, the buyer kept the item, or
   `unavailable`, the buyer has nothing). Support finds the ones still owed

@@ -14,7 +14,8 @@
  *
  * Each sweep also reports, at error, any row an open chargeback has held past
  * `CHARGEBACK_HOLD_ALERT_DAYS`, longer than Stripe's dispute lifecycle: a
- * close we never recorded. Once per run, with the row and dispute ids.
+ * close we never recorded. Once per run, with the row and dispute ids, after
+ * the sweep's refunds: a report never stops them.
  */
 
 import { DISPUTE_CHARGEBACK_OPEN_STATUSES } from '@codex/constants';
@@ -76,7 +77,9 @@ interface HoldAlertLogger {
  * dispute and when Stripe opened it. `owed` selects the ids of the sweep's
  * owed rows, held or not. Nothing is refunded here: the row stays held while
  * the chargeback reads open, so support checks the dispute first. Up to
- * `limit` rows, the oldest first.
+ * `limit` rows, the oldest first. Never throws: a failed check is logged at
+ * error on its own, so the sweep that runs it (after its refunds) still
+ * returns what it settled.
  */
 export async function alertChargebacksHeldTooLong(
   deps: { db: Pick<DatabaseClient, 'select'>; obs: HoldAlertLogger },
@@ -92,30 +95,41 @@ export async function alertChargebacksHeldTooLong(
   const openedBefore = new Date(
     params.asOf.getTime() - CHARGEBACK_HOLD_ALERT_DAYS * DAY_MS
   );
-  const rows = await deps.db
-    .select({
-      id: column,
-      stripeDisputeId: disputes.stripeDisputeId,
-      openedAt: disputes.stripeCreatedAt,
-    })
-    .from(disputes)
-    .where(
-      and(
-        isOpenChargeback(),
-        lt(disputes.stripeCreatedAt, openedBefore),
-        inArray(column, params.owed)
+  try {
+    const rows = await deps.db
+      .select({
+        id: column,
+        stripeDisputeId: disputes.stripeDisputeId,
+        openedAt: disputes.stripeCreatedAt,
+      })
+      .from(disputes)
+      .where(
+        and(
+          isOpenChargeback(),
+          lt(disputes.stripeCreatedAt, openedBefore),
+          inArray(column, params.owed)
+        )
       )
-    )
-    .orderBy(asc(disputes.stripeCreatedAt))
-    .limit(params.limit);
-  if (rows.length === 0) return;
-  deps.obs.error(params.message, {
-    errorId: crypto.randomUUID(),
-    link: params.link,
-    held: rows.map((row) => ({
-      id: row.id,
-      stripeDisputeId: row.stripeDisputeId,
-      openedAt: row.openedAt.toISOString(),
-    })),
-  });
+      .orderBy(asc(disputes.stripeCreatedAt))
+      .limit(params.limit);
+    if (rows.length === 0) return;
+    deps.obs.error(params.message, {
+      errorId: crypto.randomUUID(),
+      link: params.link,
+      held: rows.map((row) => ({
+        id: row.id,
+        stripeDisputeId: row.stripeDisputeId,
+        openedAt: row.openedAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    deps.obs.error(
+      `Could not check for chargebacks held past ${CHARGEBACK_HOLD_ALERT_DAYS} days; the sweep's refunds are not affected`,
+      {
+        errorId: crypto.randomUUID(),
+        link: params.link,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+  }
 }

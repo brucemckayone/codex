@@ -2140,20 +2140,6 @@ export class CourseSubscriptionService extends BaseService {
       )
       .orderBy(asc(courseSubscriptions.createdAt))
       .limit(params.limit);
-    await alertChargebacksHeldTooLong(
-      { db: this.db, obs: this.obs },
-      {
-        link: 'courseSubscription',
-        owed: this.db
-          .select({ id: courseSubscriptions.id })
-          .from(courseSubscriptions)
-          .where(unsettled),
-        asOf: new Date(),
-        limit: params.limit,
-        message: `Duplicate course subscription refunds still held by a chargeback after ${CHARGEBACK_HOLD_ALERT_DAYS} days: check the dispute in Stripe, then refund them by hand`,
-      }
-    );
-
     let settled = 0;
     const stillOwed: Array<{ id: string; stripeSubscriptionId: string }> = [];
     for (const row of owed) {
@@ -2178,6 +2164,21 @@ export class CourseSubscriptionService extends BaseService {
         });
       }
     }
+    // After the refunds, which a failed check never stops (it logs its own
+    // error).
+    await alertChargebacksHeldTooLong(
+      { db: this.db, obs: this.obs },
+      {
+        link: 'courseSubscription',
+        owed: this.db
+          .select({ id: courseSubscriptions.id })
+          .from(courseSubscriptions)
+          .where(unsettled),
+        asOf: new Date(),
+        limit: params.limit,
+        message: `Duplicate course subscription refunds still held by a chargeback after ${CHARGEBACK_HOLD_ALERT_DAYS} days: check the dispute in Stripe, then refund them by hand`,
+      }
+    );
     return { settled, stillOwed };
   }
 
