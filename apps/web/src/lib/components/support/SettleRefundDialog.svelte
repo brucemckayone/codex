@@ -58,7 +58,11 @@
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import { formatPrice } from '$lib/utils/format';
   import { resolveFailedRefund } from '$lib/remote/support.remote';
-  import { markRepayBlocked, REPAY_BLOCK_OF_PAYMENT } from './repay-blocks.svelte';
+  import {
+    markRepayBlocked,
+    REPAY_BLOCK_OF_PAYMENT,
+    repayBlockOfRefusal,
+  } from './repay-blocks.svelte';
   import { isSessionEnded } from './session';
   import { formatList, formatShortDay, systemSettledSentence } from './support-format';
   import type { SettleNotice } from './settle-notice';
@@ -88,6 +92,7 @@
     | 'late_win_refund'
     | 'duplicate_payment'
     | 'unavailable_sale'
+    | 'blocked_payment'
     | 'session_ended'
     | 'failed';
 
@@ -109,7 +114,8 @@
       shown === 'needs_person' ||
       shown === 'late_win_refund' ||
       shown === 'duplicate_payment' ||
-      shown === 'unavailable_sale'
+      shown === 'unavailable_sale' ||
+      shown === 'blocked_payment'
   );
 
   const noteId = $props.id();
@@ -176,8 +182,30 @@
     }
   }
 
+  /**
+   * A blocked payment's refund (D55, D57): why there is no access to give
+   * back, by its kind; the buyer is still owed it, whichever.
+   */
+  const BLOCKED_PAYMENT_LEADS = {
+    duplicate_payment: (name: string) => m.support_repay_duplicate_lead({ buyer: name }),
+    unavailable_sale: () => m.support_repay_unavailable_lead(),
+    blocked_payment: () => m.support_repay_blocked_payment_lead(),
+  } as const;
+
+  function isBlockedPaymentProblem(
+    kind: Problem
+  ): kind is keyof typeof BLOCKED_PAYMENT_LEADS {
+    return Object.hasOwn(BLOCKED_PAYMENT_LEADS, kind);
+  }
+
   /** What a refusal says: a lead in bold, when it has one, then why. */
   function problemText(kind: Problem): { lead: string | null; body: string } {
+    if (isBlockedPaymentProblem(kind)) {
+      return {
+        lead: BLOCKED_PAYMENT_LEADS[kind](buyer),
+        body: m.support_repay_still_owed_body({ buyer }),
+      };
+    }
     switch (kind) {
       case 'clawback_running':
         return { lead: null, body: m.support_settle_clawback_running() };
@@ -200,16 +228,6 @@
         return {
           lead: m.support_repay_late_win_lead(),
           body: m.support_repay_late_win_body(),
-        };
-      case 'duplicate_payment':
-        return {
-          lead: m.support_repay_duplicate_lead({ buyer }),
-          body: m.support_repay_still_owed_body({ buyer }),
-        };
-      case 'unavailable_sale':
-        return {
-          lead: m.support_repay_unavailable_lead(),
-          body: m.support_repay_still_owed_body({ buyer }),
         };
       case 'session_ended':
         return {
@@ -291,7 +309,7 @@
       } else if (answer.detailsCode === 'BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE') {
         // A blocked payment's refund (D55, D57), on a page older than its
         // flag. Its kind comes as `reason`; Re-pay stays off too.
-        const block = answer.reason === 'duplicate' ? 'duplicate_payment' : 'unavailable_sale';
+        const block = repayBlockOfRefusal(answer.reason);
         markRepayBlocked(settling.refundId, block);
         problem = block;
       } else if (answer.status === 400 && noteRequired) {

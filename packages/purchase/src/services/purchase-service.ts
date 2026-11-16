@@ -68,7 +68,9 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  alertChargebacksHeldTooLong,
   assertGbpOnly,
+  CHARGEBACK_HOLD_ALERT_DAYS,
   type ClawbackCharge,
   type DisputeRepayResult,
   type IssueRefundResult,
@@ -76,6 +78,7 @@ import {
   type LedgerDeps,
   listChargeRefunds,
   listClawableRefunds,
+  noOpenChargeback,
   oldestWaitingPayoutId,
   recordPlatformFee,
   recordSlice,
@@ -658,9 +661,12 @@ interface OwedBlockedRefund {
 
 /**
  * A completion that gave up a lock another writer held past its
- * `lock_timeout` (55P03, `isItemUnavailable`): rolled back, nothing written,
- * so it is a 503 a retry clears (Stripe redelivers; the page checks again),
- * never a permanent failure. Any other error is returned as it is.
+ * `lock_timeout` (55P03; set by `isItemUnavailable` and in force to the
+ * commit, so any row the payment needs, not only the item's): rolled back,
+ * nothing written, so it is a 503 and retried (Stripe redelivers; the page
+ * checks again), never a permanent failure. Its message promises no outcome:
+ * the retry may still block and refund the payment. Any other error is
+ * returned as it is.
  */
 function retryableIfLockGivenUp(
   error: unknown,
@@ -668,7 +674,7 @@ function retryableIfLockGivenUp(
 ): unknown {
   return isLockNotAvailable(error)
     ? new ServiceUnavailableError(
-        'The item was being changed; the payment is completed on a retry',
+        'Another change held a row this payment needed; the payment is retried',
         { stripePaymentIntentId },
         { cause: error }
       )
@@ -694,18 +700,26 @@ function keepUnavailableMarker(
 }
 
 /**
- * A blocked payment the owed-refund sweep may ask Stripe to refund: a
- * duplicate or a blocked sale, either one no dispute holds (owner D56,
- * widened to duplicates by D57). Stripe refuses a refund of a disputed
- * charge, so asking would only raise "refund them by hand" every hour for
- * weeks, and the dispute decides it anyway: a loss records it refunded
- * (`processLostDispute`), and a win clears `disputed_at`
- * (`restoreDisputedPurchase`, or a late win's `restoreLateWonPurchase`), so
- * the next sweep refunds it. One fragment, so no part can be dropped
- * (`and()` and `or()` drop an undefined argument).
+ * A blocked payment still owed its refund: a duplicate or a blocked sale,
+ * `pending` until Stripe has refunded it. One fragment, so no part can be
+ * dropped (`and()` and `or()` drop an undefined argument).
+ */
+function owedBlockedRefund(): SQL {
+  return sql`((${purchases.duplicateOfPurchaseId} IS NOT NULL OR ${purchases.refundReason} = ${ITEM_UNAVAILABLE}) AND ${purchases.status} = ${PURCHASE_STATUS.PENDING})`;
+}
+
+/**
+ * One the owed-refund sweep may ask Stripe to refund: no chargeback on it is
+ * open (owner D56, widened to duplicates by D57; `noOpenChargeback`, read
+ * from the disputes table). Stripe refuses a refund of a disputed charge, so
+ * asking would only raise "refund them by hand" every hour for weeks, and the
+ * dispute decides it: a loss records it refunded (`processLostDispute`).
+ * Any other end (a win, `prevented`, a close never recorded) leaves it owed,
+ * and once the chargeback is no longer open the next sweep refunds it. Never
+ * `disputed_at`: only a win clears that, so another end held the row forever.
  */
 function owedBlockedPayment(): SQL {
-  return sql`((${purchases.duplicateOfPurchaseId} IS NOT NULL OR ${purchases.refundReason} = ${ITEM_UNAVAILABLE}) AND ${purchases.disputedAt} IS NULL)`;
+  return sql`(${owedBlockedRefund()} AND ${noOpenChargeback('purchase', purchases.id)})`;
 }
 
 /**
@@ -998,10 +1012,10 @@ export class PurchaseService extends BaseService {
         ),
       });
 
+      // No row and a deleted organisation (below) read the same to a client,
+      // as the course's do: "gone" says nothing of why.
       if (!contentRecord) {
-        throw new ContentNotPurchasableError(validated.contentId, 'deleted', {
-          reason: 'Content not found or deleted',
-        });
+        throw new ContentNotPurchasableError(validated.contentId, 'deleted');
       }
 
       // Codex-69t7c WP5: the Phase-1 "must belong to an organization" gate is
@@ -1017,10 +1031,7 @@ export class PurchaseService extends BaseService {
         throw new ContentNotPurchasableError(
           validated.contentId,
           'not_published',
-          {
-            reason: 'Content must be published to be purchasable',
-            status: contentRecord.status,
-          }
+          { status: contentRecord.status }
         );
       }
 
@@ -1591,13 +1602,15 @@ export class PurchaseService extends BaseService {
   /**
    * The hourly sweep's retry of blocked refunds still owed (Codex-2hxff.15):
    * duplicates, and blocked sales of unavailable items (Codex-z1t3c), except
-   * one a dispute holds, of either kind, which the dispute decides
+   * one an open chargeback holds, of either kind, which the dispute decides
    * (`owedBlockedPayment`, owner D56 and D57). The webhook retries a refused
    * one only while Stripe redelivers; after that a `pending` one would sit
    * unseen. Each is tried once and one failure never
    * stops the rest (`refundBlockedPayment` has logged it). What stays owed is
    * returned for the sweep to alert on and support to settle, each with its
    * kind: a duplicate's buyer kept the item, a blocked sale's has nothing.
+   * One an open chargeback has held past Stripe's dispute lifecycle is
+   * alerted at error, once per run (`alertChargebacksHeldTooLong`).
    */
   async settleOwedDuplicates(params: {
     olderThanMs: number;
@@ -1612,12 +1625,24 @@ export class PurchaseService extends BaseService {
       .where(
         and(
           owedBlockedPayment(),
-          eq(purchases.status, PURCHASE_STATUS.PENDING),
           lt(purchases.createdAt, new Date(Date.now() - params.olderThanMs))
         )
       )
       .orderBy(purchases.createdAt)
       .limit(params.limit);
+    await alertChargebacksHeldTooLong(
+      { db: this.db, obs: this.obs },
+      {
+        link: 'purchase',
+        owed: this.db
+          .select({ id: purchases.id })
+          .from(purchases)
+          .where(owedBlockedRefund()),
+        asOf: new Date(),
+        limit: params.limit,
+        message: `Blocked refunds still held by a chargeback after ${CHARGEBACK_HOLD_ALERT_DAYS} days: check the dispute in Stripe, then refund them by hand`,
+      }
+    );
 
     let settled = 0;
     const stillOwed: OwedBlockedRefund[] = [];
@@ -3424,6 +3449,20 @@ export class PurchaseService extends BaseService {
          * says so.
          */
         itemUnavailable: boolean;
+        /**
+         * The charge is refunded in full, by the refunds standing now (the
+         * caller's fresh total, never an event's snapshot): the email may
+         * say "in full".
+         */
+        refundedInFull: boolean;
+        /**
+         * A blocked sale refunded in part and still `pending`: the rest is
+         * owed, and its own refund or the hourly sweep makes it, so the
+         * email may say the rest follows. False once the row is refunded,
+         * whatever the charge's total (a refund that failed afterwards, say,
+         * is support's).
+         */
+        restOwed: boolean;
       }
     | undefined
   > {
@@ -3503,6 +3542,8 @@ export class PurchaseService extends BaseService {
             refundDetails.stripeRefundId
           ),
           itemUnavailable,
+          refundedInFull: isFull,
+          restOwed: false,
         };
       }
 
@@ -3602,6 +3643,13 @@ export class PurchaseService extends BaseService {
         // The late win's refund only meets a purchase already refunded.
         lateWinKeptThrough: null,
         itemUnavailable,
+        refundedInFull: isFull,
+        // A part refund leaves a pending row as it was (only a completed
+        // sale's amount is written): still owed the rest.
+        restOwed:
+          itemUnavailable &&
+          !isFull &&
+          purchase.status === PURCHASE_STATUS.PENDING,
       };
     } catch (error) {
       this.handleError(error, 'processRefund');
@@ -4748,6 +4796,37 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * A blocked payment (a duplicate, or a blocked sale) is owed back in full,
+   * so a chargeback LOST for less than it leaves the rest owed, and nothing
+   * refunds it: the row is `refunded` now, so no sweep selects it (owner D59).
+   * An error-level alert for support to refund the rest by hand, as the
+   * sweep's "refund them by hand" is, naming the payment, the dispute and the
+   * amount still owed. No automatic refund. Any other sale lost for less
+   * keeps the bank's decision.
+   */
+  private alertBlockedPaymentShortAfterLoss(
+    purchase: Purchase,
+    recoveredCents: number,
+    stripeDisputeId: string
+  ): void {
+    const kind = blockedKind(purchase);
+    const owedCents = purchase.amountPaidCents - recoveredCents;
+    if (kind === null || owedCents <= 0) return;
+    this.obs.error(
+      'A lost chargeback refunded only part of a blocked payment: refund the rest by hand',
+      {
+        errorId: crypto.randomUUID(),
+        purchaseId: purchase.id,
+        stripePaymentIntentId: purchase.stripePaymentIntentId,
+        stripeDisputeId,
+        kind,
+        owedCents,
+        currency: purchase.currency,
+      }
+    );
+  }
+
+  /**
    * A LOST dispute: the buyer keeps the money, so the purchase becomes
    * `refunded` and its access stays ended (owner decision Q3). The amount
    * refunded so far gains the disputed amount, capped at what was paid.
@@ -4783,6 +4862,11 @@ export class PurchaseService extends BaseService {
       };
 
       const now = new Date();
+      // What the buyer has back: earlier refunds, and the bank's chargeback.
+      const recoveredCents = Math.min(
+        purchase.amountPaidCents,
+        (purchase.refundAmountCents ?? 0) + disputedCents
+      );
       const applied = await this.db.transaction(async (tx) => {
         if (!(await disputeStillLost(tx, stripeDisputeId))) return 'not_lost';
         if (purchase.status === PURCHASE_STATUS.REFUNDED) return 'already';
@@ -4791,10 +4875,7 @@ export class PurchaseService extends BaseService {
           .set({
             status: PURCHASE_STATUS.REFUNDED,
             refundedAt: now,
-            refundAmountCents: Math.min(
-              purchase.amountPaidCents,
-              (purchase.refundAmountCents ?? 0) + disputedCents
-            ),
+            refundAmountCents: recoveredCents,
             updatedAt: now,
           })
           .where(eq(purchases.id, purchase.id));
@@ -4837,6 +4918,11 @@ export class PurchaseService extends BaseService {
           paymentIntentId,
           disputedCents,
         });
+        this.alertBlockedPaymentShortAfterLoss(
+          purchase,
+          recoveredCents,
+          stripeDisputeId
+        );
       }
       return scope;
     } catch (error) {

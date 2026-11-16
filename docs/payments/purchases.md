@@ -274,11 +274,13 @@ refund").
   One that never clears, such as a charge the buyer has disputed, ends with
   the dispute or is held for support (owner decision: a failed refund is held
   for support). The hourly owed-refund sweep retries it, except while a
-  dispute holds it (owner D56, widened to duplicates by D57): a loss records
-  it refunded (`processLostDispute`), and a win clears `disputed_at`
-  (`restoreDisputedPurchase`; a late win's undo too), so the next sweep
-  refunds it. Support finds them with `duplicate_of_purchase_id IS NOT NULL
-  AND status = 'pending'`.
+  chargeback on it is open (owner D56, widened to duplicates by D57), as a
+  blocked sale's (below). Support finds them with `duplicate_of_purchase_id
+  IS NOT NULL AND status = 'pending'`. A duplicate subscription to an org or
+  a course plan waits the same way, in its own sweep (owner D58): skipped
+  while a chargeback the dispute links to its row is open, and alerted at
+  error past 120 days. A plan duplicate's lost chargeback doesn't settle the
+  row, so the sweep asks Stripe again after one, as it did before D58.
 - **Its failed refund is never "creators re-paid"** (owner D55, widened to
   duplicates by D57): a duplicate paid no one, so there is nothing to re-pay,
   and the buyer is still owed it. The refusal and the queue are a blocked
@@ -378,9 +380,24 @@ in the existing refund email, and no checkout expiry).
   Stripe's fits). A refusal leaves it `pending`, logged once (not also as a
   purchase that failed to complete: the row committed), and thrown as
   retryable, and the hourly owed-refund sweep retries it with the duplicates,
-  except while a dispute holds it (owner D56): Stripe refuses that refund,
-  and the dispute decides it. A loss records it refunded; a win clears
-  `disputed_at`, and the next sweep refunds it.
+  except while a chargeback on it is OPEN (owner D56): Stripe refuses that
+  refund, and the dispute decides it. The disputes table says so
+  (`noOpenChargeback`, `@codex/payments` dispute-hold: a dispute names the
+  purchase by its PaymentIntent when it is recorded; an inquiry never holds
+  it), never the row's own `disputed_at`, which only a win clears. A loss
+  records it refunded; any other end (a win, `prevented`, a close we never
+  recorded) leaves it owed, and the next sweep refunds it, so no end holds it
+  forever. One an open chargeback has held for over 120 days (past Stripe's
+  dispute lifecycle) is alerted at error by the sweep, once per run, with
+  the purchase and dispute ids: "Blocked refunds still held by a chargeback
+  after 120 days: check the dispute in Stripe, then refund them by hand".
+  It stays held while the dispute reads open.
+- **A chargeback lost for less than the payment** (owner D59) records the
+  row refunded by what the bank returned, and nothing refunds the rest: an
+  error alert names the purchase, the dispute, the kind and the amount still
+  owed in pence (`owedCents`, GBP): "A lost chargeback refunded only part of
+  a blocked payment: refund the rest by hand". Support refunds the rest by
+  hand; there is no automatic refund. A loss in full alerts nothing.
   Its alert for what is still owed names both kinds, and each row says
   which it is (`blocked`: `duplicate`, the buyer kept the item, or
   `unavailable`, the buyer has nothing). Support finds the ones still owed
@@ -391,14 +408,22 @@ in the existing refund email, and no checkout expiry).
   A refusal that clears sooner is refunded about a day late, never twice.
   With no amount, the refund is of what is left of the charge, so one made
   after a partial refund returns the rest.
-- **No receipt** is sent. Its `charge.refunded` sends the usual refund email
-  with the line "{item} is no longer available, so we've refunded you in
-  full." once the charge is refunded in full. A partial refund of it
-  (support's, the Dashboard's, or one that beat the checkout) says "{item} is
-  no longer available, so we're refunding your payment in full. The rest
-  will follow.": the row stays `pending`, so the checkout's own refund or the
-  hourly sweep refunds the rest. The success page shows it as no longer
-  active, never as a purchase still being recorded.
+- **No receipt** is sent. Its `charge.refunded` sends the usual refund email,
+  worded from the refunds standing now (`processRefund`'s `refundedInFull`
+  and `restOwed`), never the event's snapshot, so an event retried after the
+  rest landed still says "in full":
+  - "{item} is no longer available, so we've refunded you in full." once the
+    charge is refunded in full;
+  - "{item} is no longer available, so we're refunding your payment in full.
+    The rest will follow." for a part refund (support's, the Dashboard's, or
+    one that beat the checkout) while the row is `pending`: the checkout's
+    own refund or the hourly sweep refunds the rest;
+  - "{item} is no longer available. This refunds part of your payment." for
+    a part refund when nothing more is coming (the row is refunded already:
+    a refund that failed after it is support's).
+
+  The success page shows it as no longer active, never as a purchase still
+  being recorded.
 - **It never grants access later, and its failed refund is never "creators
   re-paid"** (owner D55; a duplicate's too, D57): 422
   `BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE` (`refuseBlockedPaymentRefund`,

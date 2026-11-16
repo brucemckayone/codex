@@ -95,6 +95,8 @@
         return m.support_repay_off_duplicate();
       case 'unavailable_sale':
         return m.support_repay_off_unavailable();
+      case 'blocked_payment':
+        return m.support_repay_off_blocked_payment();
       case 'later_refunds':
         return m.support_repay_off_later_refunds();
     }

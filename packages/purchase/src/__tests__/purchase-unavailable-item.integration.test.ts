@@ -30,6 +30,7 @@ import {
   contentAccess,
   courseEnrollments,
   courses,
+  disputes,
   entitlements,
   organizations,
   payouts,
@@ -155,6 +156,8 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         .from(purchases)
         .where(inArray(purchases.customerId, buyerIds));
       await db.delete(payouts).where(inArray(payouts.purchaseId, mine));
+      // A dispute names its purchase (ON DELETE RESTRICT).
+      await db.delete(disputes).where(inArray(disputes.purchaseId, mine));
       await db
         .delete(courseEnrollments)
         .where(inArray(courseEnrollments.userId, buyerIds));
@@ -696,7 +699,13 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
           const failure = await work.outcome;
           waitedMs = Date.now() - startedAt;
           expect(failure).toBeInstanceOf(ServiceUnavailableError);
-          expect(failure).toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+          // Neutral: the wait may be any row the payment needed, and the
+          // retry may still block and refund it.
+          expect(failure).toMatchObject({
+            code: 'SERVICE_UNAVAILABLE',
+            message:
+              'Another change held a row this payment needed; the payment is retried',
+          });
         });
       } finally {
         await work.outcome;
@@ -816,122 +825,39 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         access: 0,
       });
     });
-
-    // Owner D56: the owed-refund sweep skips a blocked sale a dispute holds
-    // (Stripe refuses that refund), because the dispute decides it either
-    // way: a loss leaves nothing owed, and a win lets the next sweep refund.
-    it('a LOST dispute leaves nothing owed: the row is refunded, and the sweep never asks Stripe for it', async () => {
-      const { service, stripe } = fresh();
-      vi.mocked(stripe.refunds.create).mockRejectedValueOnce(refusal());
-      const item = await insertContent({ deletedAt: new Date() });
-      const customerId = await buyer();
-      const pi = `pi_dispute_lost_${uid()}`;
-      const disputeId = `dp_lost_${uid()}`;
-      await expect(
-        complete(service, pi, customerId, item.id)
-      ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-      await service.processDispute(pi, { stripeDisputeId: disputeId });
-
-      await service.processLostDispute(pi, 1500, disputeId);
-
-      expect(await rowOf(pi)).toMatchObject({
-        status: 'refunded',
-        refundReason: 'item_unavailable',
-        refundAmountCents: 1500,
-      });
-      vi.mocked(stripe.refunds.create).mockClear();
-      const swept = await service.settleOwedDuplicates({
-        olderThanMs: 0,
-        limit: 1000,
-      });
-      expect(swept.stillOwed.map((o) => o.stripePaymentIntentId)).not.toContain(
-        pi
-      );
-      expect(
-        vi
-          .mocked(stripe.refunds.create)
-          .mock.calls.map((_, index) => refundCall(stripe, index)[0])
-          .filter((params) => params?.payment_intent === pi)
-      ).toHaveLength(0);
-    });
-
-    it('while a dispute holds it, the sweep skips it: Stripe is not asked and nothing is alerted; a WON dispute clears its mark, so the next sweep refunds it', async () => {
-      const { service, stripe } = fresh();
-      vi.mocked(stripe.refunds.create).mockRejectedValueOnce(refusal());
-      const item = await insertContent({ deletedAt: new Date() });
-      const customerId = await buyer();
-      const pi = `pi_dispute_won_${uid()}`;
-      await expect(
-        complete(service, pi, customerId, item.id)
-      ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-      await service.processDispute(pi, { stripeDisputeId: `dp_won_${uid()}` });
-      const asksFor = () =>
-        vi
-          .mocked(stripe.refunds.create)
-          .mock.calls.map((_, index) => refundCall(stripe, index))
-          .filter(([params]) => params?.payment_intent === pi);
-
-      // Disputed: owed, but the dispute decides it (owner D56).
-      vi.mocked(stripe.refunds.create).mockRejectedValue(refusal());
-      const held = await service.settleOwedDuplicates({
-        olderThanMs: 0,
-        limit: 1000,
-      });
-      expect(held.stillOwed.map((o) => o.stripePaymentIntentId)).not.toContain(
-        pi
-      );
-      // Only the completion's own refusal: the sweep asked nothing.
-      expect(asksFor()).toHaveLength(1);
-      expect((await rowOf(pi)).status).toBe('pending');
-
-      await service.restoreDisputedPurchase(pi);
-
-      const row = await rowOf(pi);
-      expect(row.disputedAt).toBeNull();
-      expect(row).toMatchObject({
-        status: 'pending',
-        refundReason: 'item_unavailable',
-      });
-      // The win grants nothing back: a blocked sale never had a grant.
-      expect(await grantsOf(customerId, item.id)).toEqual({
-        entitlements: 0,
-        access: 0,
-      });
-      vi.mocked(stripe.refunds.create).mockResolvedValue({
-        id: `re_won_${uid()}`,
-      } as never);
-      await service.settleOwedDuplicates({ olderThanMs: 0, limit: 1000 });
-      const asks = asksFor();
-      expect(asks).toHaveLength(2);
-      expect(asks[1]?.[1]).toEqual({
-        idempotencyKey: `refund_unavailable_${pi}`,
-      });
-      expect(await rowOf(pi)).toMatchObject({
-        status: 'refunded',
-        refundReason: 'item_unavailable',
-      });
-    });
   });
 
-  // Owner D57: D56 covers a duplicate too. A disputed duplicate's refund is
-  // refused by Stripe like a blocked sale's, and its dispute decides it the
-  // same way: a loss records it refunded, a win clears its mark. Unlike a
-  // blocked sale, its buyer keeps the item through their first purchase.
-  describe('a dispute on a duplicate (D56 widened by D57)', () => {
-    /** A first purchase that completes, and a second payment Stripe will not refund. */
-    async function owedDuplicate(service: PurchaseService, stripe: Stripe) {
-      const item = await insertContent();
+  // Owner D56, widened to duplicates by D57: the owed-refund sweep leaves a
+  // blocked payment to a chargeback while it is OPEN (Stripe refuses that
+  // refund), read from the disputes table, and only then. A loss refunds the
+  // row; any other end lets the next sweep refund it, `prevented` and an end
+  // never recorded included, so nothing is held forever. One held past
+  // Stripe's dispute lifecycle is alerted. A loss for less than the payment
+  // leaves the rest owed, and support is alerted to refund it (owner D59).
+  describe.each([
+    { kind: 'unavailable' as const, key: 'refund_unavailable_' },
+    { kind: 'duplicate' as const, key: 'refund_duplicate_' },
+  ])('a chargeback on a blocked payment ($kind)', ({ kind, key }) => {
+    const HELD_ALERT =
+      'Blocked refunds still held by a chargeback after 120 days: check the dispute in Stripe, then refund them by hand';
+    const SHORT_ALERT =
+      'A lost chargeback refunded only part of a blocked payment: refund the rest by hand';
+
+    /** A blocked payment of this kind whose refund Stripe refused: owed. */
+    async function owedBlocked(service: PurchaseService, stripe: Stripe) {
+      const item = await insertContent(
+        kind === 'unavailable' ? { deletedAt: new Date() } : {}
+      );
       const customerId = await buyer();
-      await complete(service, `pi_dup_first_${uid()}`, customerId, item.id);
-      const pi = `pi_dup_dispute_${uid()}`;
+      if (kind === 'duplicate') {
+        await complete(service, `pi_first_${uid()}`, customerId, item.id);
+      }
+      const pi = `pi_chargeback_${kind}_${uid()}`;
       vi.mocked(stripe.refunds.create).mockRejectedValueOnce(refusal());
       await expect(
         complete(service, pi, customerId, item.id)
       ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-      expect(await rowOf(pi)).toMatchObject({
-        status: 'pending',
-        duplicateOfPurchaseId: expect.any(String),
-      });
+      expect((await rowOf(pi)).status).toBe('pending');
       const asksFor = () =>
         vi
           .mocked(stripe.refunds.create)
@@ -940,75 +866,209 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       return { item, customerId, pi, asksFor };
     }
 
-    it('a LOST dispute leaves nothing owed: the row is refunded, and the sweep never asks Stripe for it', async () => {
+    /** The dispute's record at `status`, as the webhook writes it. */
+    function recordChargeback(
+      service: PurchaseService,
+      pi: string,
+      disputeId: string,
+      status: string,
+      openedAt = new Date()
+    ) {
+      return service.recordDispute({
+        stripeDisputeId: disputeId,
+        stripeChargeId: `ch_${disputeId}`,
+        paymentIntentId: pi,
+        amountCents: 1500,
+        currency: 'gbp',
+        status,
+        reason: 'fraudulent',
+        stripeCreatedAt: openedAt,
+      });
+    }
+
+    /** A chargeback opened on it: recorded, then the purchase paused. */
+    async function openChargeback(
+      service: PurchaseService,
+      pi: string,
+      openedAt?: Date
+    ) {
+      const disputeId = `dp_${kind}_${uid()}`;
+      await recordChargeback(
+        service,
+        pi,
+        disputeId,
+        'needs_response',
+        openedAt
+      );
+      await service.processDispute(pi, { stripeDisputeId: disputeId });
+      return disputeId;
+    }
+
+    const sweep = (service: PurchaseService) =>
+      service.settleOwedDuplicates({ olderThanMs: 0, limit: 1000 });
+
+    /** The service's error lines. */
+    function errorsOf(service: PurchaseService) {
+      const { obs } = service as unknown as {
+        obs: { error: (message: string, meta?: object) => void };
+      };
+      return vi.spyOn(obs, 'error');
+    }
+
+    it('while the chargeback is open, the sweep skips it: Stripe is not asked and nothing is alerted; once won, the next sweep refunds it', async () => {
       const { service, stripe } = fresh();
-      const { item, customerId, pi, asksFor } = await owedDuplicate(
+      const { pi, asksFor } = await owedBlocked(service, stripe);
+      const disputeId = await openChargeback(service, pi);
+
+      vi.mocked(stripe.refunds.create).mockRejectedValue(refusal());
+      const held = await sweep(service);
+      expect(held.stillOwed.map((o) => o.stripePaymentIntentId)).not.toContain(
+        pi
+      );
+      // Only the completion's own refusal: the sweep asked nothing.
+      expect(asksFor()).toHaveLength(1);
+      expect((await rowOf(pi)).status).toBe('pending');
+
+      await recordChargeback(service, pi, disputeId, 'won');
+      await service.restoreDisputedPurchase(pi);
+      vi.mocked(stripe.refunds.create).mockResolvedValue({
+        id: `re_won_${uid()}`,
+      } as never);
+      await sweep(service);
+
+      const asks = asksFor();
+      expect(asks).toHaveLength(2);
+      expect(asks[1]?.[1]).toEqual({ idempotencyKey: `${key}${pi}` });
+      expect((await rowOf(pi)).status).toBe('refunded');
+    });
+
+    // The MEDIUM of review r2: these ends never clear `disputed_at` (only a
+    // win does) and never refund the row (only a loss does), so a skip keyed
+    // on the mark held it forever.
+    it.each([
+      'prevented',
+      'warning_closed',
+    ])('a chargeback that ends %s, which leaves its mark, no longer holds it: the next sweep refunds it', async (end) => {
+      const { service, stripe } = fresh();
+      const { pi, asksFor } = await owedBlocked(service, stripe);
+      const disputeId = await openChargeback(service, pi);
+      vi.mocked(stripe.refunds.create).mockRejectedValue(refusal());
+      await sweep(service);
+      expect(asksFor()).toHaveLength(1);
+
+      await recordChargeback(service, pi, disputeId, end);
+      expect((await rowOf(pi)).disputedAt).not.toBeNull();
+      vi.mocked(stripe.refunds.create).mockResolvedValue({
+        id: `re_${end}_${uid()}`,
+      } as never);
+      await sweep(service);
+
+      const asks = asksFor();
+      expect(asks).toHaveLength(2);
+      expect(asks[1]?.[1]).toEqual({ idempotencyKey: `${key}${pi}` });
+      expect((await rowOf(pi)).status).toBe('refunded');
+    });
+
+    it('a chargeback LOST in full leaves nothing owed: the row is refunded, the sweep never asks Stripe for it, and nobody is alerted', async () => {
+      const { service, stripe } = fresh();
+      const { item, customerId, pi, asksFor } = await owedBlocked(
         service,
         stripe
       );
-      const disputeId = `dp_dup_lost_${uid()}`;
-      await service.processDispute(pi, { stripeDisputeId: disputeId });
+      const disputeId = await openChargeback(service, pi);
+      await recordChargeback(service, pi, disputeId, 'lost');
+      const errors = errorsOf(service);
 
       await service.processLostDispute(pi, 1500, disputeId);
 
       expect(await rowOf(pi)).toMatchObject({
         status: 'refunded',
-        duplicateOfPurchaseId: expect.any(String),
         refundAmountCents: 1500,
       });
-      const swept = await service.settleOwedDuplicates({
-        olderThanMs: 0,
-        limit: 1000,
-      });
-      expect(swept.stillOwed.map((o) => o.stripePaymentIntentId)).not.toContain(
-        pi
-      );
-      // Only the completion's own refusal: the sweep asked nothing.
+      await sweep(service);
       expect(asksFor()).toHaveLength(1);
-      // The buyer keeps the item through their first purchase.
-      expect(await grantsOf(customerId, item.id)).toEqual({
-        entitlements: 1,
-        access: 1,
-      });
+      expect(errors.mock.calls.map(([message]) => message)).not.toContain(
+        SHORT_ALERT
+      );
+      // A duplicate's buyer keeps the item through their first purchase.
+      expect(await grantsOf(customerId, item.id)).toEqual(
+        kind === 'duplicate'
+          ? { entitlements: 1, access: 1 }
+          : { entitlements: 0, access: 0 }
+      );
     });
 
-    it('while a dispute holds it, the sweep skips it: Stripe is not asked and nothing is alerted; a WON dispute clears its mark, so the next sweep refunds it', async () => {
+    it('a chargeback LOST for less than the payment alerts support for the rest, by amount, and refunds nothing (owner D59)', async () => {
       const { service, stripe } = fresh();
-      const { pi, asksFor } = await owedDuplicate(service, stripe);
-      await service.processDispute(pi, {
-        stripeDisputeId: `dp_dup_won_${uid()}`,
-      });
+      const { pi, asksFor } = await owedBlocked(service, stripe);
+      const disputeId = await openChargeback(service, pi);
+      await recordChargeback(service, pi, disputeId, 'lost');
+      const errors = errorsOf(service);
 
-      // Disputed: owed, but the dispute decides it (owner D56, D57).
-      vi.mocked(stripe.refunds.create).mockRejectedValue(refusal());
-      const held = await service.settleOwedDuplicates({
-        olderThanMs: 0,
-        limit: 1000,
-      });
-      expect(held.stillOwed.map((o) => o.stripePaymentIntentId)).not.toContain(
-        pi
-      );
-      expect(asksFor()).toHaveLength(1);
-      expect((await rowOf(pi)).status).toBe('pending');
-
-      await service.restoreDisputedPurchase(pi);
+      await service.processLostDispute(pi, 500, disputeId);
 
       const row = await rowOf(pi);
-      expect(row.disputedAt).toBeNull();
-      expect(row).toMatchObject({
-        status: 'pending',
-        duplicateOfPurchaseId: expect.any(String),
+      expect(row).toMatchObject({ status: 'refunded', refundAmountCents: 500 });
+      expect(errors).toHaveBeenCalledWith(SHORT_ALERT, {
+        errorId: expect.any(String),
+        purchaseId: row.id,
+        stripePaymentIntentId: pi,
+        stripeDisputeId: disputeId,
+        kind,
+        owedCents: 1000,
+        currency: 'gbp',
       });
-      vi.mocked(stripe.refunds.create).mockResolvedValue({
-        id: `re_dup_won_${uid()}`,
-      } as never);
-      await service.settleOwedDuplicates({ olderThanMs: 0, limit: 1000 });
-      const asks = asksFor();
-      expect(asks).toHaveLength(2);
-      expect(asks[1]?.[1]).toEqual({
-        idempotencyKey: `refund_duplicate_${pi}`,
-      });
-      expect((await rowOf(pi)).status).toBe('refunded');
+      // A redelivery of the loss applies nothing again, and alerts nothing.
+      errors.mockClear();
+      await service.processLostDispute(pi, 500, disputeId);
+      expect(errors.mock.calls.map(([message]) => message)).not.toContain(
+        SHORT_ALERT
+      );
+      await sweep(service);
+      expect(asksFor()).toHaveLength(1);
+    });
+
+    it('a chargeback still open past 120 days is alerted at error with its ids, and the row is still left to it; a younger one is not alerted', async () => {
+      const { service, stripe } = fresh();
+      const old = await owedBlocked(service, stripe);
+      const oldDispute = await openChargeback(
+        service,
+        old.pi,
+        new Date(Date.now() - 121 * 24 * 60 * 60 * 1000)
+      );
+      const young = await owedBlocked(service, stripe);
+      const youngDispute = await openChargeback(
+        service,
+        young.pi,
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      );
+      vi.mocked(stripe.refunds.create).mockRejectedValue(refusal());
+      const errors = errorsOf(service);
+
+      const swept = await sweep(service);
+
+      const heldLines = errors.mock.calls.filter(
+        ([message]) => message === HELD_ALERT
+      );
+      expect(heldLines).toHaveLength(1);
+      const held = (
+        heldLines[0]?.[1] as {
+          held: Array<{ id: string; stripeDisputeId: string }>;
+        }
+      ).held;
+      expect(held).toContainEqual(
+        expect.objectContaining({
+          id: (await rowOf(old.pi)).id,
+          stripeDisputeId: oldDispute,
+        })
+      );
+      expect(held.map((h) => h.stripeDisputeId)).not.toContain(youngDispute);
+      // Still held while it reads open: support checks the dispute first.
+      expect(old.asksFor()).toHaveLength(1);
+      expect(swept.stillOwed.map((o) => o.stripePaymentIntentId)).not.toContain(
+        old.pi
+      );
+      expect((await rowOf(old.pi)).status).toBe('pending');
     });
   });
 
@@ -1172,6 +1232,42 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         entitlements: 0,
         access: 0,
       });
+    });
+
+    // The refund email's words come from these (review r2 LOW), so they are
+    // read from the refunds standing now, which the caller passes in.
+    it('says, from the standing total, whether the charge is refunded in full and whether the rest is still owed', async () => {
+      const { service, stripe } = fresh();
+      vi.mocked(stripe.refunds.create).mockRejectedValueOnce(refusal());
+      const item = await insertContent({ deletedAt: new Date() });
+      const customerId = await buyer();
+      const pi = `pi_words_${uid()}`;
+      await expect(
+        complete(service, pi, customerId, item.id)
+      ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+      const charge = { id: `ch_words_${uid()}`, amountCents: 1500 };
+
+      // Part of it, while the row is pending: the rest is owed, and comes.
+      expect(
+        await service.processRefund(pi, { charge, refundAmountCents: 500 })
+      ).toMatchObject({
+        itemUnavailable: true,
+        refundedInFull: false,
+        restOwed: true,
+      });
+      expect((await rowOf(pi)).status).toBe('pending');
+
+      // The rest lands: in full, nothing owed.
+      expect(
+        await service.processRefund(pi, { charge, refundAmountCents: 1500 })
+      ).toMatchObject({ refundedInFull: true, restOwed: false });
+      expect((await rowOf(pi)).status).toBe('refunded');
+
+      // Less stands after that (a refund failed): refunded, so nothing is
+      // promised, and not in full.
+      expect(
+        await service.processRefund(pi, { charge, refundAmountCents: 500 })
+      ).toMatchObject({ refundedInFull: false, restOwed: false });
     });
 
     it('a refund made elsewhere while it is owed is recorded with the marker kept, and revokes nothing the buyer holds', async () => {

@@ -66,9 +66,11 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  alertChargebacksHeldTooLong,
   assertGbpOnly,
   type BankPayoutRunSummary,
   bankOnFor,
+  CHARGEBACK_HOLD_ALERT_DAYS,
   type ClawbackCharge,
   type ClearedEpisode,
   claimPayoutAttempts,
@@ -79,6 +81,7 @@ import {
   type LedgerDeps,
   listClawableRefunds,
   londonDate,
+  noOpenChargeback,
   type OrganisationPayee,
   type PayeeAccounts,
   type PlatformFailureTally,
@@ -8241,18 +8244,35 @@ export class SubscriptionService extends BaseService {
     stillOwed: Array<{ id: string; stripeSubscriptionId: string }>;
   }> {
     const recordedBefore = new Date(Date.now() - options.olderThanMs);
+    // One an open chargeback holds is left to the dispute, and one held past
+    // Stripe's dispute lifecycle is alerted (owner D58; @codex/payments
+    // dispute-hold). One raw fragment, never undefined: `and()` would be.
+    const unsettled = sql`(${subscriptions.duplicateOfSubscriptionId} IS NOT NULL AND ${subscriptions.duplicateSettledAt} IS NULL)`;
     const owed = await this.db
       .select()
       .from(subscriptions)
       .where(
         and(
-          isNotNull(subscriptions.duplicateOfSubscriptionId),
-          isNull(subscriptions.duplicateSettledAt),
+          unsettled,
+          noOpenChargeback('subscription', subscriptions.id),
           lt(subscriptions.createdAt, recordedBefore)
         )
       )
       .orderBy(subscriptions.createdAt)
       .limit(options.limit);
+    await alertChargebacksHeldTooLong(
+      { db: this.db, obs: this.obs },
+      {
+        link: 'subscription',
+        owed: this.db
+          .select({ id: subscriptions.id })
+          .from(subscriptions)
+          .where(unsettled),
+        asOf: new Date(),
+        limit: options.limit,
+        message: `Duplicate subscription refunds still held by a chargeback after ${CHARGEBACK_HOLD_ALERT_DAYS} days: check the dispute in Stripe, then refund them by hand`,
+      }
+    );
 
     let settled = 0;
     const stillOwed: Array<{ id: string; stripeSubscriptionId: string }> = [];

@@ -201,6 +201,35 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
       expect(await sessionsFor(customerId)).toHaveLength(0);
     });
 
+    // Content of a deleted organisation and content with no row are both
+    // "gone": a client must not tell them apart, as it can't for courses.
+    it('refuses content of a deleted organisation exactly as content with no row', async () => {
+      const { service } = fresh();
+      const customerId = await buyer();
+      const refusalOf = async (contentId: string) => {
+        const refused = await service
+          .createCheckoutSession({ contentId, ...URLS }, customerId)
+          .catch((e: unknown) => e);
+        expect(refused).toBeInstanceOf(ContentNotPurchasableError);
+        const { message, context } = refused as ContentNotPurchasableError;
+        return { message, context: { ...context, contentId: '<id>' } };
+      };
+      const item = await insertContent({ organizationId: await deletedOrg() });
+
+      const ofDeletedOrg = await refusalOf(item.id);
+      const ofNoRow = await refusalOf(crypto.randomUUID());
+
+      expect(ofDeletedOrg).toEqual(ofNoRow);
+      expect(ofNoRow).toEqual({
+        message: 'Content is no longer available',
+        context: {
+          contentId: '<id>',
+          reason: 'deleted',
+          code: 'CONTENT_NOT_PURCHASABLE',
+        },
+      });
+    });
+
     it('refuses a course of a deleted organisation: no Stripe session, no reservation', async () => {
       const { service, stripe } = fresh();
       const course = await insertCourse({
@@ -886,6 +915,8 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
         itemTitle: item.title,
         lateWinKeptThrough: null,
         itemUnavailable: false,
+        refundedInFull: true,
+        restOwed: false,
       });
       const [access] = await db
         .select()

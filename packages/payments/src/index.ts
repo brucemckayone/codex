@@ -40,6 +40,14 @@ export {
 // GBP in, GBP out: the guard every path runs before it records a split
 // (Codex-2hxff.23 PAY-25)
 export { assertGbpOnly, isGbpOrUnset } from './currency';
+// An owed refund waits only while a chargeback on it is open, and one held
+// past Stripe's dispute lifecycle is alerted (owner D56, D57, D58)
+export {
+  alertChargebacksHeldTooLong,
+  CHARGEBACK_HOLD_ALERT_DAYS,
+  type ChargebackLink,
+  noOpenChargeback,
+} from './dispute-hold';
 // Who a fee rise waits for, and when it starts (Codex-2hxff.33)
 export * from './fee-notices';
 // The fee in force at a sale's own time: dated versions, the write's

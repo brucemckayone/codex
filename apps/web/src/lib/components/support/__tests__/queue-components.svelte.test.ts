@@ -1039,6 +1039,41 @@ describe('Settling a failed refund', () => {
     expect(repayBlockReason(failedRefund().refundId)).toBe(problemCode);
   });
 
+  // Review r2: a refusal naming neither kind (or none) gets words that fit
+  // both, never one kind's by default.
+  test.each([
+    ['no reason', null],
+    ['a reason it does not know', 'something_new'],
+  ] as const)('a blocked payment refusal with %s says only that the payment was blocked, and Re-pay stays off', async (_shape, reason) => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE', reason })
+    );
+    const notices = renderDialog('creators_repaid');
+    typeNote('Re-pay.');
+    submit()?.click();
+    await settled();
+    const problem = document.querySelector('[data-testid="settle-problem"]');
+    expect(problem?.getAttribute('data-problem')).toBe('blocked_payment');
+    const words = problem?.textContent?.replace(/\s+/g, ' ').trim();
+    expect(words).toBe(
+      "There's no access to give back: this payment was blocked. Daniel Price is still owed this refund. Refund them another way."
+    );
+    expect(words).not.toContain('no longer available');
+    expect(words).not.toContain('second payment');
+    expect(notices).toHaveLength(0);
+    expect(submit()?.disabled).toBe(true);
+    expect(repayBlockReason(failedRefund().refundId)).toBe('blocked_payment');
+  });
+
+  test('a row whose re-pay a kindless refusal blocked says so in words that fit both kinds', () => {
+    markRepayBlocked(failedRefund().refundId, 'blocked_payment');
+    render(FailedRefundsTable, { items: [failedRefund()], onSettle: vi.fn() });
+    const off = document.querySelector(
+      'table [data-testid="failed-refund-row"] [data-testid="repay-off"]'
+    )?.textContent;
+    expect(off).toContain(m.support_repay_off_blocked_payment());
+  });
+
   test.each([
     ['a blocked sale', 'unavailable'],
     ['a duplicate', 'duplicate'],

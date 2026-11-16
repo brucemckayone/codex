@@ -621,6 +621,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       itemTitle: 'Winter Light',
       lateWinKeptThrough: null,
       itemUnavailable: true,
+      refundedInFull: true,
+      restOwed: false,
     });
     const bundle = buildContext();
 
@@ -643,6 +645,9 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       itemTitle: 'Winter Light',
       lateWinKeptThrough: null,
       itemUnavailable: true,
+      refundedInFull: false,
+      // Still pending: its own refund, or the hourly sweep, makes the rest.
+      restOwed: true,
     });
     mockClaimRefundEmails.mockResolvedValueOnce([
       { stripeRefundId: 're_part', amountCents: 500 },
@@ -665,6 +670,69 @@ describe('handlePaymentWebhook — charge.refunded', () => {
         accessNote:
           "Winter Light is no longer available, so we're refunding your payment in full. The rest will follow.",
       }),
+    ]);
+  });
+
+  it('a part refund of a blocked sale with nothing more to come promises nothing: it says only that this refunds part (Codex-z1t3c)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: true,
+      // The row is refunded already (its refund failed afterwards, say):
+      // this hand-made part refund is all there is.
+      refundedInFull: false,
+      restOwed: false,
+    });
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_hand', amountCents: 500 },
+    ]);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createRefundEvent({ amount_refunded: 500 }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        accessNote:
+          'Winter Light is no longer available. This refunds part of your payment.',
+      }),
+    ]);
+  });
+
+  it('out of order, the words come from the fresh total, never the event’s snapshot: a stale part refund processed after the rest landed says "in full" (Codex-z1t3c)', async () => {
+    // The refunds standing now cover the charge, though this retried event's
+    // snapshot still shows only the first part.
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: true,
+      refundedInFull: true,
+      restOwed: false,
+    });
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_part', amountCents: 500 },
+      { stripeRefundId: 're_rest', amountCents: 1499 },
+    ]);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createRefundEvent({ amount_refunded: 500 }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(emails().map((data) => data.accessNote)).toEqual([
+      "Winter Light is no longer available, so we've refunded you in full.",
+      "Winter Light is no longer available, so we've refunded you in full.",
     ]);
   });
 

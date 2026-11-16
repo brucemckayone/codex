@@ -434,18 +434,22 @@ export interface ContentBuyerFacts
 export function contentRefusesBuyers(c: ContentBuyerFacts): boolean {
   if (c.deletedAt != null || c.organizationDeleted) return true;
   if (!isContentReleased(c)) return true;
-  switch (BUYER_IN_BRANCH[contentAccessBranch(c)]) {
+  const buyer = BUYER_IN_BRANCH[contentAccessBranch(c)];
+  switch (buyer) {
     case 'purchase':
       return false;
     case 'everyone':
       return c.status !== CONTENT_STATUS.PUBLISHED;
     case 'refused':
       return true;
-    // Unreachable while `BUYER_IN_BRANCH` covers every branch (the compiler
-    // checks that). Fail closed anyway: a lookup that misses must never read
-    // as "a buyer may open it".
-    default:
+    // A fourth kind of buyer fails to compile here (the `never`), as a new
+    // branch does in `BUYER_IN_BRANCH`. Fail closed anyway at runtime: a
+    // lookup that misses must never read as "a buyer may open it".
+    default: {
+      const _exhaustive: never = buyer;
+      void _exhaustive;
       return true;
+    }
   }
 }
 

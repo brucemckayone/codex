@@ -212,6 +212,10 @@ interface RefundedPurchase {
    * the item when the payment landed, so it is refunded in full.
    */
   itemUnavailable?: boolean;
+  /** The charge is refunded in full by the refunds standing now. */
+  refundedInFull?: boolean;
+  /** A blocked sale refunded in part, the rest still owed and to come. */
+  restOwed?: boolean;
 }
 
 type RefundCancellation = NonNullable<
@@ -283,13 +287,7 @@ function purchaseNote(
     purchase?.itemTitle || charge.metadata?.contentTitle || 'Content';
   return {
     contentTitle,
-    accessNote: purchase
-      ? purchaseAccessNote(
-          purchase,
-          contentTitle,
-          charge.amount_refunded >= charge.amount
-        )
-      : '',
+    accessNote: purchase ? purchaseAccessNote(purchase, contentTitle) : '',
   };
 }
 
@@ -309,21 +307,28 @@ function purchaseNote(
  * Before both: a payment that landed when its buyer could no longer open the
  * item (deleted, team-only, its organisation deleted, detached) was blocked
  * and is refunded in full (Codex-z1t3c; owner 2026-11-15 and D54): the item
- * is gone, so it says that, never "you still have it". "In full" only once
- * the charge is (`refundedInFull`). A partial refund of it (support's, the
- * dashboard's, or one that beat the checkout) says the rest follows, which
- * it does: the row stays `pending`, and the checkout's own refund or the
- * hourly owed-refund sweep refunds what is left.
+ * is gone, so it says that, never "you still have it". Its words come from
+ * the purchase's fresh total (`processRefund`), never the event's snapshot,
+ * so an event retried after the rest landed still says "in full":
+ * - "in full" once the refunds standing now cover the charge
+ *   (`refundedInFull`);
+ * - "the rest will follow" only while the rest is owed and still to come
+ *   (`restOwed`: the row is `pending`, so its own refund or the hourly
+ *   owed-refund sweep makes it);
+ * - otherwise a part refund that promises nothing (the row is refunded
+ *   already, and a refund after that is support's).
  */
 function purchaseAccessNote(
   purchase: RefundedPurchase,
-  contentTitle: string,
-  refundedInFull: boolean
+  contentTitle: string
 ): string {
   if (purchase.itemUnavailable) {
-    return refundedInFull
-      ? `${contentTitle} is no longer available, so we've refunded you in full.`
-      : `${contentTitle} is no longer available, so we're refunding your payment in full. The rest will follow.`;
+    if (purchase.refundedInFull) {
+      return `${contentTitle} is no longer available, so we've refunded you in full.`;
+    }
+    return purchase.restOwed
+      ? `${contentTitle} is no longer available, so we're refunding your payment in full. The rest will follow.`
+      : `${contentTitle} is no longer available. This refunds part of your payment.`;
   }
   if (purchase.duplicatePayment && !purchase.accessEnded) {
     return `You still have ${contentTitle}. This refunds a second payment for it.`;

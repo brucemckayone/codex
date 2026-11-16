@@ -313,6 +313,9 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       itemTitle: expect.any(String),
       lateWinKeptThrough: null,
       itemUnavailable: false,
+      // £3 of £10: a sale's part refund, so nothing is owed.
+      refundedInFull: false,
+      restOwed: false,
     });
     expect(stripe.refunds.list).toHaveBeenCalledWith(
       expect.objectContaining({ charge: seeded.charge.id })
@@ -444,6 +447,8 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       itemTitle: expect.any(String),
       lateWinKeptThrough: null,
       itemUnavailable: false,
+      refundedInFull: true,
+      restOwed: false,
     });
   });
 

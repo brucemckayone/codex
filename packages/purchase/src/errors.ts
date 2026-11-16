@@ -87,11 +87,12 @@ export class ContentNotPurchasableError extends BusinessLogicError {
       not_sold_separately: 'This content is not sold on its own',
     };
 
+    // The context first, so it can never overwrite the id, reason or code.
     super(messages[reason], {
+      ...context,
       contentId,
       reason,
       code: 'CONTENT_NOT_PURCHASABLE',
-      ...context,
     });
   }
 }
@@ -114,11 +115,12 @@ export class CourseNotPurchasableError extends BusinessLogicError {
         'Course is priced below the £1.00 minimum, so it cannot be sold',
     };
 
+    // The context first, so it can never overwrite the id, reason or code.
     super(messages[reason], {
+      ...context,
       courseId,
       reason,
       code: 'COURSE_NOT_PURCHASABLE',
-      ...context,
     });
   }
 }
