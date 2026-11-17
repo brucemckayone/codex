@@ -16,12 +16,14 @@
  * - `leaving` rows are written in the delete's own transaction, one per
  *   owner, so nobody who owned it at the delete is missed;
  * - `reminder` rows are added by the sweep a few days before the date;
- * - `staying` rows are added when the creator keeps the piece, for the people
- *   who were, or may have been, told it was leaving;
+ * - `staying` rows are added when the creator keeps the piece, for everyone
+ *   a `leaving` or `reminder` email of the round was tried for;
  * - `removed` rows are added by a platform admin's immediate delete.
- * Whoever writes or claims rows leaves out people whose account is deleted
+ * Whoever writes rows leaves out people whose account is deleted
  * (`users.deleted_at`): erasure scrubs the address but keeps the row, so
- * the cascade below never fires for them.
+ * the cascade below never fires for them. A person erased after their row
+ * was written is still claimed, and the send finds no address, so the row
+ * ends `abandoned` with `no_address` and a try, as the CHECKs ask.
  *
  * `round` separates one notice period from the next. It copies the piece's
  * `leaves_at` (for `removed`, the time of the admin delete), so a piece kept
@@ -36,8 +38,10 @@
 
 import {
   CONTENT_LEAVING_NOTICE_KINDS,
+  CONTENT_LEAVING_NOTICE_OPEN_STATES,
   CONTENT_LEAVING_NOTICE_REASONS,
   CONTENT_LEAVING_NOTICE_STATES,
+  CONTENT_LEAVING_NOTICE_TRIED_STATES,
   type ContentLeavingNoticeKind,
   type ContentLeavingNoticeReason,
   type ContentLeavingNoticeState,
@@ -70,22 +74,12 @@ function sqlWords(words: readonly string[]) {
   return sql.raw(words.map((word) => `'${word}'`).join(', '));
 }
 
-/**
- * The states the sweep still has to send. `unknown` is retried, as the fee
- * notices' is: a person may get a second email over never getting one.
- */
-const OPEN_STATES: readonly ContentLeavingNoticeState[] = [
-  'due',
-  'failed',
-  'unknown',
-];
-/** The states a try that did not send leaves, each with its reason. */
-const TRIED_STATES: readonly ContentLeavingNoticeState[] = [
-  'failed',
-  'unknown',
-  'abandoned',
-];
 const SENT: readonly ContentLeavingNoticeState[] = ['sent'];
+/** The states whose reason says how the last try was answered. */
+const ANSWERED_OR_NOT: readonly ContentLeavingNoticeState[] = [
+  'failed',
+  'unknown',
+];
 const CANCELLED: readonly ContentLeavingNoticeState[] = ['cancelled'];
 /** A takedown's `removed` email is its only one, so it is never cancelled. */
 const CANCELLABLE_KINDS: readonly ContentLeavingNoticeKind[] = [
@@ -114,6 +108,10 @@ export const contentLeavingNotices = pgTable(
       .$type<ContentLeavingNoticeState>()
       .notNull()
       .default('due'),
+    // Tries started. The sweep's claim adds one BEFORE it sends, as the fee
+    // notices' does, so a `due` row with a try is in flight or was cut off
+    // after sending. That makes `attempts > 0` the one test of whether a
+    // person may have been told: Keep writes a `staying` row from it.
     attempts: integer('attempts').notNull().default(0),
     // The sweep's lease clock: raw-SQL updates never fire `$onUpdate`, so
     // `updated_at` can't stand in for it.
@@ -145,7 +143,9 @@ export const contentLeavingNotices = pgTable(
     // order it takes them.
     index('idx_content_leaving_notices_open')
       .on(table.createdAt, table.id)
-      .where(sql`${table.state} IN (${sqlWords(OPEN_STATES)})`),
+      .where(
+        sql`${table.state} IN (${sqlWords(CONTENT_LEAVING_NOTICE_OPEN_STATES)})`
+      ),
     // A user delete's cascade, as fee_change_notices has.
     index('idx_content_leaving_notices_user').on(table.userId),
     check(
@@ -173,7 +173,14 @@ export const contentLeavingNotices = pgTable(
     // never told can be told apart from a bug.
     check(
       'check_content_leaving_notices_tried',
-      sql`${table.state} NOT IN (${sqlWords(TRIED_STATES)}) OR (${table.attempts} > 0 AND ${table.lastReason} IS NOT NULL)`
+      sql`${table.state} NOT IN (${sqlWords(CONTENT_LEAVING_NOTICE_TRIED_STATES)}) OR (${table.attempts} > 0 AND ${table.lastReason} IS NOT NULL)`
+    ),
+    // `unknown` is exactly a try with no usable answer, so its reason says
+    // so, and a `failed` one's says what the answer was. A 5xx recorded as
+    // a refusal would hide an email that may have gone.
+    check(
+      'check_content_leaving_notices_unanswered',
+      sql`${table.state} NOT IN (${sqlWords(ANSWERED_OR_NOT)}) OR (${table.state} = 'unknown') = (${table.lastReason} = 'unknown')`
     ),
     check(
       'check_content_leaving_notices_cancelled',

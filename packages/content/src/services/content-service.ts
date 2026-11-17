@@ -234,9 +234,12 @@ export const CATALOGUE_CONTENT_COLUMNS = {
   publishRequestedAt: false,
   publishBlockedReason: false,
   // The leaving notice (Codex-a6ofh.6), off the public wire from the
-  // columns' first day for the same reason. A leaving piece is never
-  // published, so its date is null on every catalogue row; whether owners
-  // may download is the creator's setting, read on the owners' own path.
+  // columns' first day for the same reason. The public list and browse
+  // hold only live rows, so the date is null there, but the withdrawn read
+  // serves exactly the leaving pieces: when owners need their date, select
+  // it on THAT read, never by dropping it here. `ownersCanDownload` is set
+  // on every row and must stay off. A `true` spread into this map turns
+  // drizzle's `columns` into include mode and drops every other column.
   leavesAt: false,
   ownersCanDownload: false,
 } as const satisfies Partial<Record<keyof Content, false>>;

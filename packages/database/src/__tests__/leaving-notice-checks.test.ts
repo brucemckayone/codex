@@ -8,24 +8,30 @@
  * regenerated, would pass every suite.
  *
  * Every write runs inside ONE transaction that is always rolled back, and
- * each refusal in its own savepoint and its own round, so one refusal that
- * wrongly passed can't make the next refused for the wrong reason:
+ * each write that may be refused in its own savepoint and its own round, so
+ * one refusal that wrongly passed can't make the next refused for the wrong
+ * reason:
  *   - content: a leave date is accepted on a piece that is neither published
  *     nor scheduled, and refused on one that is either, whichever is set
  *     first; `owners_can_download` is on by default; a leave date set in SQL
- *     and read into JS matches back exactly (millisecond precision);
+ *     and read into JS matches back exactly, and so does a round set from
+ *     the clock (millisecond precision);
  *   - notices: every kind and state the constants name is accepted, and
  *     anything else refused, a reason too; `sent` and `sent_at` come
- *     together; a try that did not send has attempts and a reason; a
- *     `removed` notice is never cancelled; one email of a kind per person
- *     per round, while a new round (a piece kept, then deleted again) is
- *     accepted.
- * The refusals are checked first, after the rollback, so a constraint that
+ *     together; a try that did not send has attempts and a reason, and the
+ *     reason fits the state; a `removed` notice is never cancelled; one
+ *     email of a kind per person per round, while a new round (a piece kept,
+ *     then deleted again) is accepted.
+ * The outcomes are checked first, after the rollback, so a constraint that
  * stopped refusing is named rather than showing up as a wrong row count.
  *
  * Real DB. Skips when DB_METHOD is not configured (fee-config-schema.test.ts).
  */
 
+import type {
+  ContentLeavingNoticeReason,
+  ContentLeavingNoticeState,
+} from '@codex/constants';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { getConstraintName } from '../utils/db-errors';
@@ -44,18 +50,34 @@ describe.skipIf(!HAS_DB)(
       const { content, contentLeavingNotices, users } = await import(
         '../schema'
       );
-      const { CONTENT_LEAVING_NOTICE_KINDS, CONTENT_LEAVING_NOTICE_STATES } =
-        await import('@codex/constants');
+      const {
+        CONTENT_LEAVING_NOTICE_KINDS,
+        CONTENT_LEAVING_NOTICE_REASONS,
+        CONTENT_LEAVING_NOTICE_STATES,
+        CONTENT_LEAVING_NOTICE_TRIED_STATES,
+      } = await import('@codex/constants');
       const tag = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const userId = `ln_checks_user_${tag}`;
       const leaves = new Date(Date.UTC(2026, 11, 17, 12));
       const later = new Date(Date.UTC(2027, 0, 20, 12));
-      const tried = new Set<string>(['failed', 'unknown', 'abandoned']);
+      /** The reason each tried state's model row gives, as the sweep would. */
+      const reasonFor: Partial<
+        Record<ContentLeavingNoticeState, ContentLeavingNoticeReason>
+      > = {
+        failed: 'refused',
+        unknown: 'unknown',
+        abandoned: 'no_address',
+      };
 
-      /** Each refused statement, by name, with the constraint that refused it. */
-      const refused: Record<string, string | null> = {};
+      /**
+       * Each write that may be refused, by name: null if it was accepted,
+       * else the constraint that refused it.
+       */
+      const outcome: Record<string, string | null> = {};
+      /** Every tried state with every reason, the same way. */
+      const pairs: Record<string, string | null> = {};
       let downloadDefault: boolean | undefined;
-      let matchedBack = -1;
+      const matchedBack = { piece: -1, notice: -1 };
       let kept = -1;
       try {
         await dbWs.transaction(async (tx) => {
@@ -86,16 +108,15 @@ describe.skipIf(!HAS_DB)(
             if (!row) throw new Error(`no row for ${name}`);
             return row;
           };
-          const refuse = async (
-            name: string,
-            statement: ReturnType<typeof sql>
-          ) => {
+          /** null if `statement` was accepted, else the refusing constraint. */
+          const attempt = async (statement: ReturnType<typeof sql>) => {
             try {
               await tx.transaction(async (savepoint) => {
                 await savepoint.execute(statement);
               });
+              return null;
             } catch (error) {
-              refused[name] = getConstraintName(error);
+              return getConstraintName(error);
             }
           };
 
@@ -111,51 +132,51 @@ describe.skipIf(!HAS_DB)(
           const scheduled = await piece('scheduled', 'draft', {
             publishRequestedAt: leaves,
           });
-          await refuse(
-            'a published piece with a leave date',
+          outcome['a published piece with a leave date'] = await attempt(
             sql`INSERT INTO content (creator_id, title, slug, content_type, status, leaves_at)
               VALUES (${userId}, 'x', ${`ln-checks-x-${tag}`}, 'video', 'published', ${leaves})`
           );
-          await refuse(
-            'a leave date set on a live piece',
+          outcome['a leave date set on a live piece'] = await attempt(
             sql`UPDATE content SET leaves_at = ${leaves} WHERE id = ${live.id}`
           );
-          await refuse(
-            'a leaving piece published',
+          outcome['a leaving piece published'] = await attempt(
             sql`UPDATE content SET status = 'published' WHERE id = ${archived.id}`
           );
-          await refuse(
-            'a leave date set on a scheduled piece',
+          outcome['a leave date set on a scheduled piece'] = await attempt(
             sql`UPDATE content SET leaves_at = ${leaves} WHERE id = ${scheduled.id}`
           );
-          await refuse(
-            'a leaving piece scheduled',
+          outcome['a leaving piece scheduled'] = await attempt(
             sql`UPDATE content SET publish_requested_at = ${leaves} WHERE id = ${archived.id}`
           );
 
-          // A date set in SQL, as the delete will set it, read into JS and
-          // matched back, as Keep will match its notices.
+          // Dates set from the clock in SQL, which keeps microseconds, read
+          // into JS, which keeps milliseconds, and matched back: the piece's
+          // date as the delete sets it and Keep matches it, and a takedown's
+          // round as the admin delete sets it.
           const timed = await piece('timed', 'archived');
           await tx.execute(
             sql`UPDATE content SET leaves_at = now() + interval '30 days' WHERE id = ${timed.id}`
+          );
+          await tx.execute(
+            sql`INSERT INTO content_leaving_notices (content_id, user_id, kind, round)
+              VALUES (${timed.id}, ${userId}, 'removed', now())`
           );
           const [read] = await tx
             .select({ leavesAt: content.leavesAt })
             .from(content)
             .where(eq(content.id, timed.id));
-          const readBack = read?.leavesAt;
-          if (!readBack) throw new Error('no leave date read back');
-          await tx.insert(contentLeavingNotices).values({
-            contentId: timed.id,
-            userId,
-            kind: 'leaving',
-            round: readBack,
-          });
+          const [readRound] = await tx
+            .select({ round: contentLeavingNotices.round })
+            .from(contentLeavingNotices)
+            .where(eq(contentLeavingNotices.contentId, timed.id));
+          if (!read?.leavesAt || !readRound) {
+            throw new Error('no date read back');
+          }
           const [byDate] = await tx
             .select({ n: sql<number>`count(*)::int` })
             .from(content)
             .where(
-              and(eq(content.id, timed.id), eq(content.leavesAt, readBack))
+              and(eq(content.id, timed.id), eq(content.leavesAt, read.leavesAt))
             );
           const [byRound] = await tx
             .select({ n: sql<number>`count(*)::int` })
@@ -163,24 +184,26 @@ describe.skipIf(!HAS_DB)(
             .where(
               and(
                 eq(contentLeavingNotices.contentId, timed.id),
-                eq(contentLeavingNotices.round, readBack)
+                eq(contentLeavingNotices.round, readRound.round)
               )
             );
-          matchedBack = (byDate?.n ?? 0) + (byRound?.n ?? 0);
+          matchedBack.piece = byDate?.n ?? 0;
+          matchedBack.notice = byRound?.n ?? 0;
 
           // Every kind in every state the constants name, a round per state so
           // the unique never fires here, except a cancelled `removed`.
           for (const kind of CONTENT_LEAVING_NOTICE_KINDS) {
             for (const [i, state] of CONTENT_LEAVING_NOTICE_STATES.entries()) {
               if (kind === 'removed' && state === 'cancelled') continue;
+              const reason = reasonFor[state] ?? null;
               await tx.insert(contentLeavingNotices).values({
                 contentId: archived.id,
                 userId,
                 kind,
                 round: new Date(leaves.getTime() + i * 1000),
                 state,
-                attempts: tried.has(state) ? 1 : 0,
-                lastReason: tried.has(state) ? 'unknown' : null,
+                attempts: reason ? 1 : 0,
+                lastReason: reason,
                 sentAt: state === 'sent' ? leaves : null,
               });
             }
@@ -196,7 +219,6 @@ describe.skipIf(!HAS_DB)(
           /** A notice that differs from a fresh, valid one only by `change`. */
           let fresh = 0;
           const notice = (
-            name: string,
             change: Partial<{
               kind: string;
               state: string;
@@ -216,40 +238,50 @@ describe.skipIf(!HAS_DB)(
               round: new Date(Date.UTC(2027, 5, 1, 12) + fresh * 1000),
               ...change,
             };
-            return refuse(
-              name,
+            return attempt(
               sql`INSERT INTO content_leaving_notices (content_id, user_id, kind, round, state, attempts, last_reason, sent_at)
                 VALUES (${archived.id}, ${userId}, ${row.kind}, ${row.round}, ${row.state}, ${row.attempts}, ${row.lastReason}, ${row.sentAt})`
             );
           };
-          await notice('an unknown kind', { kind: 'refunded' });
-          await notice('an unknown state', { state: 'bounced' });
-          await notice('an unknown reason', {
+          outcome['an unknown kind'] = await notice({ kind: 'refunded' });
+          outcome['an unknown state'] = await notice({ state: 'bounced' });
+          outcome['an unknown reason'] = await notice({
             state: 'failed',
             attempts: 1,
             // Fits the column, so only the CHECK can refuse it.
             lastReason: 'smtp_550',
           });
-          await notice('sent with no time', { state: 'sent' });
-          await notice('a time but not sent', { sentAt: leaves });
-          await notice('failed with no try', {
+          outcome['sent with no time'] = await notice({ state: 'sent' });
+          outcome['a time but not sent'] = await notice({ sentAt: leaves });
+          outcome['failed with no try'] = await notice({
             state: 'failed',
             lastReason: 'refused',
           });
-          await notice('abandoned with no reason', {
+          outcome['unknown with no try'] = await notice({ state: 'unknown' });
+          outcome['abandoned with no reason'] = await notice({
             state: 'abandoned',
             attempts: 5,
           });
-          await notice('a removed notice cancelled', {
+          outcome['a removed notice cancelled'] = await notice({
             kind: 'removed',
             state: 'cancelled',
           });
-          await notice('the same email twice in a round', { round: later });
-          await refuse(
-            'negative attempts',
+          outcome['the same email twice in a round'] = await notice({
+            round: later,
+          });
+          outcome['negative attempts'] = await attempt(
             sql`UPDATE content_leaving_notices SET attempts = -1
               WHERE content_id = ${archived.id} AND round = ${later}`
           );
+          for (const state of CONTENT_LEAVING_NOTICE_TRIED_STATES) {
+            for (const lastReason of CONTENT_LEAVING_NOTICE_REASONS) {
+              pairs[`${state} ${lastReason}`] = await notice({
+                state,
+                attempts: 1,
+                lastReason,
+              });
+            }
+          }
 
           const rows = await tx
             .select({ id: contentLeavingNotices.id })
@@ -262,7 +294,7 @@ describe.skipIf(!HAS_DB)(
         if (!(error instanceof Rollback)) throw error;
       }
 
-      expect(refused).toEqual({
+      expect(outcome).toEqual({
         'a published piece with a leave date':
           'check_content_leaving_not_published',
         'a leave date set on a live piece':
@@ -277,19 +309,39 @@ describe.skipIf(!HAS_DB)(
         'sent with no time': 'check_content_leaving_notices_sent',
         'a time but not sent': 'check_content_leaving_notices_sent',
         'failed with no try': 'check_content_leaving_notices_tried',
+        'unknown with no try': 'check_content_leaving_notices_tried',
         'abandoned with no reason': 'check_content_leaving_notices_tried',
         'a removed notice cancelled': 'check_content_leaving_notices_cancelled',
         'the same email twice in a round': 'uq_content_leaving_notices_person',
         'negative attempts': 'check_content_leaving_notices_attempts',
       });
+      // A refused, skipped or unaddressed try is `failed`; a try with no
+      // answer is `unknown`, never the other way; `abandoned` keeps any.
+      const unanswered = 'check_content_leaving_notices_unanswered';
+      expect(pairs).toEqual({
+        'failed refused': null,
+        'failed skipped': null,
+        'failed no_address': null,
+        'failed unknown': unanswered,
+        'unknown refused': unanswered,
+        'unknown skipped': unanswered,
+        'unknown no_address': unanswered,
+        'unknown unknown': null,
+        'abandoned refused': null,
+        'abandoned skipped': null,
+        'abandoned no_address': null,
+        'abandoned unknown': null,
+      });
       expect(downloadDefault).toBe(true);
-      // The piece by its date, and its notice by its round.
-      expect(matchedBack).toBe(2);
+      expect(matchedBack).toEqual({ piece: 1, notice: 1 });
+      // Every kind × state but a cancelled `removed`, the second round, and
+      // the eight accepted pairs.
       expect(kept).toBe(
         CONTENT_LEAVING_NOTICE_KINDS.length *
           CONTENT_LEAVING_NOTICE_STATES.length -
           1 +
-          1
+          1 +
+          8
       );
     });
   }

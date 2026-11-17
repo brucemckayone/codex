@@ -17,6 +17,7 @@ CREATE TABLE "content_leaving_notices" (
 	CONSTRAINT "check_content_leaving_notices_attempts" CHECK ("content_leaving_notices"."attempts" >= 0),
 	CONSTRAINT "check_content_leaving_notices_sent" CHECK (("content_leaving_notices"."state" IN ('sent')) = ("content_leaving_notices"."sent_at" IS NOT NULL)),
 	CONSTRAINT "check_content_leaving_notices_tried" CHECK ("content_leaving_notices"."state" NOT IN ('failed', 'unknown', 'abandoned') OR ("content_leaving_notices"."attempts" > 0 AND "content_leaving_notices"."last_reason" IS NOT NULL)),
+	CONSTRAINT "check_content_leaving_notices_unanswered" CHECK ("content_leaving_notices"."state" NOT IN ('failed', 'unknown') OR ("content_leaving_notices"."state" = 'unknown') = ("content_leaving_notices"."last_reason" = 'unknown')),
 	CONSTRAINT "check_content_leaving_notices_cancelled" CHECK ("content_leaving_notices"."state" NOT IN ('cancelled') OR "content_leaving_notices"."kind" IN ('leaving', 'reminder', 'staying'))
 );
 --> statement-breakpoint
