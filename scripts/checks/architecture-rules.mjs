@@ -14,4 +14,152 @@
  *   match  { kind, ... }: a kind from architecture-matchers.mjs.
  *   fix    The one fix an agent should apply, shown in every failure.
  */
-export const RULES = [];
+
+/** Production TypeScript: no tests, fixtures or declaration files. */
+const NOT_TESTS = [
+  '**/*.test.ts',
+  '**/*.spec.ts',
+  '**/*.type-check.ts',
+  '**/*.d.ts',
+  '**/__tests__/**',
+  '**/__mocks__/**',
+];
+
+/**
+ * The package layers, lowest first, measured from the dependency graph on
+ * 2026-11-17 (it has no cycles). Every `workers/*` and `apps/*` package is an
+ * implicit layer above these.
+ */
+export const LAYERS = [
+  {
+    name: 'Foundation',
+    // Ordered: a foundation package may depend on the ones BEFORE it. This is
+    // today's topological order; a new edge that breaks it fails.
+    ordered: true,
+    packages: [
+      '@codex/constants',
+      '@codex/shared-types',
+      '@codex/urls',
+      '@codex/observability',
+      '@codex/validation',
+      '@codex/database',
+      '@codex/service-errors',
+      '@codex/cache',
+      '@codex/cloudflare-clients',
+      '@codex/security',
+    ],
+  },
+  {
+    name: 'Domain core',
+    packages: [
+      '@codex/payments',
+      '@codex/agreements',
+      '@codex/transcoding',
+      '@codex/image-processing',
+      '@codex/platform-settings',
+      // Test infrastructure: foundation-only dependencies. apps/web lists it
+      // under dependencies, so it needs a layer below the apps.
+      '@codex/test-utils',
+    ],
+  },
+  {
+    name: 'Domain services',
+    packages: [
+      '@codex/purchase',
+      '@codex/subscription',
+      '@codex/organization',
+      '@codex/content',
+      '@codex/identity',
+      '@codex/notifications',
+    ],
+  },
+  {
+    name: 'Cross-domain readers',
+    packages: ['@codex/access', '@codex/admin'],
+  },
+  {
+    name: 'Composition',
+    packages: ['@codex/worker-utils'],
+  },
+];
+
+/** Same-layer edges that exist on purpose. Each new one is a decision. */
+export const SAME_LAYER_EDGES = [
+  {
+    from: '@codex/image-processing',
+    to: '@codex/transcoding',
+    reason:
+      "Image storage keys reuse transcoding's R2 key builders (getUserAvatarBaseKey, getContentThumbnailBaseKey).",
+  },
+  {
+    from: '@codex/subscription',
+    to: '@codex/purchase',
+    reason:
+      "Subscriptions reuse purchase's fee floor, checkout reservations and Stripe helpers.",
+  },
+  {
+    from: '@codex/content',
+    to: '@codex/organization',
+    reason:
+      'Only content tests import it today (2026-11-17); a candidate to move to devDependencies.',
+  },
+];
+
+export const RULES = [
+  {
+    id: 'A1',
+    title: 'Money moves only through the payments ledger',
+    why: 'Transfers, reversals, refunds and payouts move real money. When each module calls Stripe itself, the ledger, the clawback rules and the payout thresholds can be bypassed by whichever caller forgets them. The owners are the four @codex/payments modules that record every movement.',
+    scope: {
+      include: ['packages/*/src/**/*.ts', 'workers/*/src/**/*.ts'],
+      exclude: [
+        ...NOT_TESTS,
+        'packages/payments/src/payout-ledger.ts',
+        'packages/payments/src/clawback.ts',
+        'packages/payments/src/refund.ts',
+        'packages/payments/src/bank-payouts.ts',
+      ],
+    },
+    match: {
+      kind: 'call',
+      pattern:
+        /\.(?:transfers\.(?:create|createReversal)|refunds\.create|payouts\.create)\(/,
+    },
+    fix: 'Move the money through @codex/payments (payout-ledger, clawback, refund or bank-payouts); never call these Stripe APIs directly.',
+  },
+  {
+    id: 'LAYERS',
+    title: 'A package depends only on lower layers',
+    why: "Upward and sideways dependencies are how a payments package ends up importing purchase, and how a 9,000-line service becomes impossible to split. The layer map is today's graph, so the rule starts green and any new edge is a visible decision.",
+    scope: {
+      include: [
+        'packages/*/package.json',
+        'workers/*/package.json',
+        'apps/*/package.json',
+      ],
+    },
+    match: {
+      kind: 'package-graph',
+      layers: LAYERS,
+      sameLayerEdges: SAME_LAYER_EDGES,
+    },
+    fix: 'Move the shared code down a layer, or add the edge to SAME_LAYER_EDGES in scripts/checks/architecture-rules.mjs with its reason.',
+  },
+  {
+    id: 'SIZE',
+    title: 'A money file never grows; a new one stays under 800 lines',
+    why: 'The money services grew to 9,015 and 5,643 lines one urgent fix at a time. Pinning every large file at its size makes each change extract a module instead.',
+    scope: {
+      include: [
+        'packages/payments/src/**/*.ts',
+        'packages/purchase/src/**/*.ts',
+        'packages/subscription/src/**/*.ts',
+        'packages/agreements/src/**/*.ts',
+        'workers/ecom-api/src/**/*.ts',
+      ],
+      exclude: NOT_TESTS,
+    },
+    match: { kind: 'line-count', newFileMax: 800 },
+    fix: 'Extract the change into a new domain module instead of growing this file.',
+  },
+];

@@ -445,3 +445,184 @@ describe('the CLI against a real git repository', () => {
     assert.equal(r.status, 2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The registry's real rules
+// ---------------------------------------------------------------------------
+//
+// FIRES holds, for EVERY rule in the registry, a fixture tree that must make
+// it fail. A rule with no entry fails the first test, so a rule can't ship
+// without proof it can fire. The near-miss trees are the other half: a rule
+// that fires on a comment or a devDependency gets switched off within a week.
+
+const pkg = (name, deps = {}, extra = {}) =>
+  JSON.stringify({ name, dependencies: deps, ...extra }, null, 2);
+
+const FIRES = {
+  A1: {
+    'packages/purchase/src/services/x.ts':
+      'await this.stripe.transfers.create({ amount });\n',
+  },
+  LAYERS: {
+    'packages/constants/package.json': pkg('@codex/constants', {
+      '@codex/payments': 'workspace:*',
+    }),
+  },
+  SIZE: {
+    'packages/payments/src/new-module.ts': 'x\n'.repeat(801),
+  },
+};
+
+describe('the registry rules', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const byId = (id) => RULES.find((r) => r.id === id);
+  const newProblems = (rule, tree) =>
+    run([rule], tree, {}).problems.filter((p) => p.type === 'new');
+
+  test('the registry is valid, and every rule has a fixture that fires', () => {
+    validateRules(RULES);
+    assert.deepEqual(Object.keys(FIRES).sort(), RULES.map((r) => r.id).sort());
+    for (const rule of RULES) {
+      assert.ok(
+        newProblems(rule, FIRES[rule.id]).length > 0,
+        `${rule.id} did not fire on its fixture`
+      );
+    }
+  });
+
+  test('A1 ignores the owner modules, tests and comments', () => {
+    const a1 = byId('A1');
+    const call = 'await deps.stripe.transfers.create({ amount });\n';
+    assert.equal(
+      newProblems(a1, { 'packages/payments/src/payout-ledger.ts': call })
+        .length,
+      0
+    );
+    assert.equal(
+      newProblems(a1, { 'packages/purchase/src/__tests__/x.test.ts': call })
+        .length,
+      0
+    );
+    assert.equal(
+      newProblems(a1, { 'packages/purchase/src/x.ts': `/** ${call} */\n` })
+        .length,
+      0
+    );
+    assert.equal(
+      newProblems(a1, {
+        'workers/ecom-api/src/x.ts': 'await stripe.refunds.create({});\n',
+      }).length,
+      1
+    );
+  });
+
+  test('LAYERS: lower layers, listed edges and foundation order pass; the rest fail', () => {
+    const layers = byId('LAYERS');
+    const check = (file, json) => newProblems(layers, { [file]: json }).length;
+    assert.equal(
+      check(
+        'packages/purchase/package.json',
+        pkg('@codex/purchase', {
+          '@codex/payments': '*',
+          '@codex/database': '*',
+        })
+      ),
+      0
+    );
+    assert.equal(
+      check(
+        'packages/subscription/package.json',
+        pkg('@codex/subscription', { '@codex/purchase': '*' })
+      ),
+      0,
+      'listed edge'
+    );
+    assert.equal(
+      check(
+        'packages/purchase/package.json',
+        pkg('@codex/purchase', { '@codex/subscription': '*' })
+      ),
+      1,
+      'unlisted same-layer edge'
+    );
+    assert.equal(
+      check(
+        'packages/database/package.json',
+        pkg('@codex/database', { '@codex/observability': '*' })
+      ),
+      0,
+      'earlier in foundation'
+    );
+    assert.equal(
+      check(
+        'packages/urls/package.json',
+        pkg('@codex/urls', { '@codex/database': '*' })
+      ),
+      1,
+      'later in foundation'
+    );
+    assert.equal(
+      check(
+        'packages/payments/package.json',
+        pkg('@codex/payments', { '@codex/purchase': '*' })
+      ),
+      1,
+      'payments never imports purchase'
+    );
+    assert.equal(
+      check(
+        'packages/payments/package.json',
+        pkg(
+          '@codex/payments',
+          {},
+          { devDependencies: { '@codex/purchase': '*' } }
+        )
+      ),
+      0,
+      'devDependencies are not edges'
+    );
+    assert.equal(
+      check('packages/brand-new/package.json', pkg('@codex/brand-new', {})),
+      1,
+      'a new package must be placed'
+    );
+    assert.equal(
+      check(
+        'workers/ecom-api/package.json',
+        pkg('ecom-api', { '@codex/worker-utils': '*' })
+      ),
+      0,
+      'apps may use anything'
+    );
+    assert.equal(
+      check(
+        'packages/content/package.json',
+        pkg('@codex/content', { '@codex/media-api': '*' })
+      ),
+      1,
+      'nothing depends on an app'
+    );
+  });
+
+  test('SIZE allows 800 lines in a new file and pins tests out of scope', () => {
+    const size = byId('SIZE');
+    assert.equal(
+      newProblems(size, {
+        'packages/payments/src/new-module.ts': 'x\n'.repeat(800),
+      }).length,
+      0
+    );
+    assert.equal(
+      newProblems(size, {
+        'packages/payments/src/__tests__/big.test.ts': 'x\n'.repeat(5000),
+      }).length,
+      0
+    );
+    assert.equal(
+      newProblems(size, { 'packages/content/src/big.ts': 'x\n'.repeat(5000) })
+        .length,
+      0,
+      'not a money package'
+    );
+  });
+});

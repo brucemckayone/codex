@@ -106,4 +106,110 @@ export const MATCHERS = {
       return { found: countLines(text), hits: [] };
     },
   },
+
+  /**
+   * Workspace dependency edges against a layer map. Reads `dependencies` and
+   * `peerDependencies` only: a devDependency (test-utils in a test) is not an
+   * architectural edge. A package may depend on any package in a lower layer.
+   * Inside one layer it may depend on an EARLIER package when the layer is
+   * `ordered` (foundation, whose order is a fact of today's graph), otherwise
+   * only along a listed `sameLayerEdges` entry, so a new edge is a visible
+   * decision with a reason. Every `workers/*` and `apps/*` package sits in an
+   * implicit top layer that nothing may depend on.
+   */
+  'package-graph': {
+    validate(rule) {
+      const { layers, sameLayerEdges } = rule.match;
+      if (!Array.isArray(layers) || layers.length === 0) {
+        throw new Error(
+          `rule ${rule.id}: match.layers must be a non-empty array`
+        );
+      }
+      const placed = new Set();
+      for (const layer of layers) {
+        for (const name of layer.packages ?? []) {
+          if (placed.has(name)) {
+            throw new Error(`rule ${rule.id}: ${name} is in two layers`);
+          }
+          placed.add(name);
+        }
+      }
+      for (const edge of sameLayerEdges ?? []) {
+        if (!placed.has(edge.from) || !placed.has(edge.to) || !edge.reason) {
+          throw new Error(
+            `rule ${rule.id}: same-layer edge ${edge.from} -> ${edge.to} needs two placed packages and a reason`
+          );
+        }
+      }
+    },
+    whole(rule, { source, subjects }) {
+      const { layers, sameLayerEdges = [] } = rule.match;
+      const layerOf = new Map();
+      const rankOf = new Map();
+      layers.forEach((layer, i) => {
+        layer.packages.forEach((name, k) => {
+          layerOf.set(name, i);
+          rankOf.set(name, k);
+        });
+      });
+      const appLayer = layers.length;
+      const out = new Map();
+      for (const file of subjects) {
+        const text = source.read(file);
+        const { lineOf } = lineIndex(text);
+        const lineOfKey = (name) => {
+          const at = text.indexOf(`"${name}"`);
+          return at === -1 ? 1 : lineOf(at);
+        };
+        let pkg;
+        try {
+          pkg = JSON.parse(text);
+        } catch {
+          out.set(file, {
+            found: 1,
+            hits: [{ line: 1, text: 'package.json does not parse' }],
+          });
+          continue;
+        }
+        const isApp = /^(workers|apps)\//.test(file);
+        const self = pkg.name;
+        const selfLayer = isApp ? appLayer : layerOf.get(self);
+        const hits = [];
+        if (selfLayer === undefined) {
+          hits.push({
+            line: lineOfKey('name'),
+            text: `${self} is not in the layer map; place it in a layer`,
+          });
+        } else {
+          const deps = Object.keys({
+            ...pkg.dependencies,
+            ...pkg.peerDependencies,
+          }).filter((d) => d.startsWith('@codex/'));
+          for (const dep of deps) {
+            const depLayer = layerOf.get(dep);
+            let problem = null;
+            if (depLayer === undefined) {
+              problem = 'is not in the layer map (an app, or a new package)';
+            } else if (depLayer > selfLayer) {
+              problem = `is in layer ${depLayer}, above this package's layer ${selfLayer}`;
+            } else if (depLayer === selfLayer) {
+              const allowed = layers[selfLayer].ordered
+                ? rankOf.get(dep) < rankOf.get(self)
+                : sameLayerEdges.some((e) => e.from === self && e.to === dep);
+              if (!allowed) {
+                problem = layers[selfLayer].ordered
+                  ? `is later in the ordered layer ${selfLayer}`
+                  : `is in the same layer ${selfLayer}, with no listed edge`;
+              }
+            }
+            if (problem) {
+              hits.push({ line: lineOfKey(dep), text: `"${dep}" ${problem}` });
+            }
+          }
+        }
+        out.set(file, { found: hits.length, hits });
+      }
+      return out;
+    },
+  },
 };
