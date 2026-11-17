@@ -278,11 +278,11 @@
   }
 
   .hero-film__plays[data-plays='preview'] {
-    color: var(--color-warning-700);
+    color: var(--color-status-warning-text);
   }
 
   .hero-film__plays[data-plays='none'] {
-    color: var(--color-error-700);
+    color: var(--color-status-error-text);
   }
 
   .hero-film__actions {
@@ -319,6 +319,6 @@
   .hero-film__error {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-error-700);
+    color: var(--color-status-error-text);
   }
 </style>

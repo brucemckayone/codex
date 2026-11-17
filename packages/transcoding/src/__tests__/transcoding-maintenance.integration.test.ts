@@ -8,9 +8,14 @@
  * sessions' uploads. It deletes exactly the rows it made.
  */
 
-import { MEDIA_STATUS } from '@codex/constants';
-import { mediaItems, users } from '@codex/database/schema';
 import {
+  MAX_TRANSCODING_ATTEMPTS,
+  MEDIA_STATUS,
+  TRANSCODING_ERROR_CODES,
+} from '@codex/constants';
+import { content, mediaItems, users } from '@codex/database/schema';
+import {
+  createTestContentInput,
   createTestMediaItemInput,
   seedTestUsers,
   setupTestDatabase,
@@ -18,7 +23,7 @@ import {
   teardownTestDatabase,
 } from '@codex/test-utils';
 import type { MediaStatusResync } from '@codex/validation';
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import {
   afterAll,
   afterEach,
@@ -30,6 +35,7 @@ import {
   type Mock,
   vi,
 } from 'vitest';
+import type { ContentReadyNotifier } from '../content-ready';
 import type { JobStatusResult, RunPodApi } from '../runpod-api';
 import type { TranscodingAlerts } from '../services/transcoding-alerts';
 import { TranscodingMaintenance } from '../services/transcoding-maintenance';
@@ -1019,6 +1025,191 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
 
         expect(api.setWorkersMax).toHaveBeenCalledWith(5, expect.any(Number));
         expect(report.endpoint).toEqual({ kind: 'raised', from: 0, to: 5 });
+      });
+    });
+
+    // Publish when ready (Codex-a6ofh.2.8): the step that settles media with
+    // drafts scheduled on it, and the writes that tell content-api at once.
+    describe('publish when ready', () => {
+      let contentReady: {
+        mediaChanged: Mock<(mediaItemId: string) => void>;
+        settle: Mock<ContentReadyNotifier['settle']>;
+      };
+      const contentIds: string[] = [];
+
+      beforeEach(() => {
+        contentReady = {
+          mediaChanged: vi.fn(),
+          settle: vi.fn(async () => undefined),
+        };
+        const transcoding = new TranscodingService({
+          db,
+          environment: 'test',
+          runpodApiKey: 'test-key',
+          runpodEndpointId: 'test-endpoint',
+          webhookBaseUrl: 'https://media-api.test',
+          runpodApiBaseUrl: 'https://runpod.test/v2',
+          runpodWorkersMax: 5,
+          runpodApi: api as unknown as RunPodApi,
+          alerts: alerts as unknown as TranscodingAlerts,
+          contentReady,
+        } as TranscodingServiceFullConfig);
+        maintenance = new TranscodingMaintenance({
+          db,
+          environment: 'test',
+          transcoding,
+          originalExists,
+          alerts: alerts as unknown as TranscodingAlerts,
+          contentReady,
+        });
+      });
+
+      // Before the outer afterEach deletes the media these rows point at.
+      afterEach(async () => {
+        if (contentIds.length > 0) {
+          await db.delete(content).where(inArray(content.id, contentIds));
+          contentIds.length = 0;
+        }
+      });
+
+      async function scheduledOn(mediaItemId: string, scheduled = true) {
+        const row = takeFirst(
+          await db
+            .insert(content)
+            .values(
+              createTestContentInput(creatorId, {
+                contentType: 'video',
+                mediaItemId,
+                publishRequestedAt: scheduled ? ago(MINUTE) : null,
+              })
+            )
+            .returning(),
+          'inserted draft'
+        );
+        contentIds.push(row.id);
+        return row;
+      }
+
+      const settledIds = () =>
+        contentReady.settle.mock.calls.map(([mediaItemId]) => mediaItemId);
+
+      it('settles media that has settled: ready, deleted, or failed for good', async () => {
+        const ready = await insert({ status: MEDIA_STATUS.READY });
+        const deleted = await insert({
+          status: MEDIA_STATUS.TRANSCODING,
+          deletedAt: new Date(),
+        });
+        const corrupt = await insert({
+          status: MEDIA_STATUS.FAILED,
+          transcodingErrorCode: TRANSCODING_ERROR_CODES.CORRUPT_INPUT,
+          transcodingAttempts: 1,
+        });
+        const spent = await insert({
+          status: MEDIA_STATUS.FAILED,
+          transcodingErrorCode: TRANSCODING_ERROR_CODES.TIMED_OUT,
+          transcodingAttempts: MAX_TRANSCODING_ATTEMPTS,
+        });
+        for (const media of [ready, deleted, corrupt, spent]) {
+          await scheduledOn(media.id);
+        }
+
+        const report = await run();
+
+        // The sweep reads every row: other suites' rows may share the db, so
+        // these four by id, and the totals as at least theirs.
+        expect(settledIds()).toEqual(
+          expect.arrayContaining([ready.id, deleted.id, corrupt.id, spent.id])
+        );
+        expect(report.publishWhenReady?.failed).toBe(0);
+        expect(report.publishWhenReady?.deferred).toBe(0);
+        expect(report.publishWhenReady?.handedOver).toBe(settledIds().length);
+      });
+
+      // A lost call is most likely the latest write's, and an item content-api
+      // keeps waiting for good must not take every slot every run.
+      it('sends the most recently changed media first', async () => {
+        const older = await insert({
+          status: MEDIA_STATUS.READY,
+          updatedAt: ago(2 * HOUR),
+        });
+        const newer = await insert({
+          status: MEDIA_STATUS.READY,
+          updatedAt: ago(MINUTE),
+        });
+        await scheduledOn(older.id);
+        await scheduledOn(newer.id);
+
+        await run();
+
+        const order = settledIds();
+        expect(order.indexOf(newer.id)).toBeGreaterThanOrEqual(0);
+        expect(order.indexOf(newer.id)).toBeLessThan(order.indexOf(older.id));
+      });
+
+      it('leaves media still on its way, and media nothing is waiting on', async () => {
+        const transcodingMedia = await insert({
+          status: MEDIA_STATUS.TRANSCODING,
+          runpodJobId: 'job-still-going',
+        });
+        const retryable = await insert({
+          status: MEDIA_STATUS.FAILED,
+          transcodingErrorCode: TRANSCODING_ERROR_CODES.TIMED_OUT,
+          transcodingAttempts: 1,
+        });
+        const unscheduled = await insert({ status: MEDIA_STATUS.READY });
+        await scheduledOn(transcodingMedia.id);
+        await scheduledOn(retryable.id);
+        await scheduledOn(unscheduled.id, false);
+
+        await run();
+
+        for (const id of [transcodingMedia.id, retryable.id, unscheduled.id]) {
+          expect(settledIds()).not.toContain(id);
+        }
+      });
+
+      it('one item a draft is scheduled on twice is settled once', async () => {
+        const ready = await insert({ status: MEDIA_STATUS.READY });
+        await scheduledOn(ready.id);
+        await scheduledOn(ready.id);
+
+        await run();
+
+        expect(settledIds().filter((id) => id === ready.id)).toHaveLength(1);
+      });
+
+      it('a call that fails is counted, and the run goes on', async () => {
+        const first = await insert({ status: MEDIA_STATUS.READY });
+        const second = await insert({ status: MEDIA_STATUS.READY });
+        await scheduledOn(first.id);
+        await scheduledOn(second.id);
+        contentReady.settle.mockRejectedValueOnce(
+          new Error('content-api down')
+        );
+
+        const report = await run();
+
+        expect(settledIds()).toEqual(
+          expect.arrayContaining([first.id, second.id])
+        );
+        expect(report.publishWhenReady?.failed).toBe(1);
+        expect(report.publishWhenReady?.handedOver).toBe(
+          settledIds().length - 1
+        );
+        expect(report.failedSteps).not.toContain('publishWhenReady');
+      });
+
+      it('a write that fails an item tells content-api at once', async () => {
+        originalExists.mockResolvedValue(false);
+        const stalled = await insert({
+          status: MEDIA_STATUS.UPLOADING,
+          uploadedAt: null,
+          updatedAt: ago(25 * HOUR),
+        });
+
+        await run();
+
+        expect(contentReady.mediaChanged).toHaveBeenCalledWith(stalled.id);
       });
     });
   }

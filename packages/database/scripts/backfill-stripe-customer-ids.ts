@@ -39,7 +39,8 @@ import { fileURLToPath } from 'node:url';
 import { ObservabilityClient } from '@codex/observability';
 import { config } from 'dotenv';
 import { and, eq, gt, isNotNull, isNull } from 'drizzle-orm';
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
+import { createStripeClient } from '../../purchase/src/stripe-client';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,7 +52,6 @@ import { dbWs, schema, whereNotDeleted } from '../src';
 // ─── Configuration ─────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 100;
-const STRIPE_API_VERSION = '2025-10-29.clover' as const;
 const CHECKPOINT_DIR = path.resolve(__dirname, '../.backfill');
 const CHECKPOINT_FILE = path.join(
   CHECKPOINT_DIR,
@@ -95,11 +95,10 @@ interface RunStats {
 // ─── Stripe client (reused factory pattern; see note) ──────────────────────
 
 /**
- * We intentionally instantiate Stripe directly rather than importing
- * `createStripeClient` from `@codex/purchase`. `@codex/purchase` depends on
- * `@codex/database`, so depending on it here would create a circular
- * dependency. The existing `seed/commerce.ts` follows the same convention.
- * API version is pinned identically to `@codex/purchase/stripe-client.ts`.
+ * `createStripeClient` is imported by relative path, not from
+ * `@codex/purchase`: that package depends on `@codex/database`, so a package
+ * dependency here would be circular. It carries the platform's pinned API
+ * version, so a version bump changes one place.
  */
 function createStripeForBackfill(apiKey: string): Stripe {
   if (!apiKey) {
@@ -115,7 +114,7 @@ function createStripeForBackfill(apiKey: string): Stripe {
         'not this one-shot script.'
     );
   }
-  return new Stripe(apiKey, { apiVersion: STRIPE_API_VERSION });
+  return createStripeClient(apiKey);
 }
 
 // ─── Checkpoint helpers ────────────────────────────────────────────────────

@@ -1,3 +1,6 @@
+// The fixtures are TypeScript source written as plain strings, so a `${…}`
+// in one is code for the gate to scan, not a template this file forgot.
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: fixture strings are source code
 /**
  * Self-test for the data-access contract drift gate (Codex-ea1hd, WP9).
  *
@@ -26,10 +29,18 @@
  * the real file's shape moved.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   classifySearchFieldValue,
@@ -145,7 +156,7 @@ test('RULE 3 CATCHES an off-vocabulary value with no shared window', () => {
   assert.equal(violations[0].severity, 'off-vocabulary');
 });
 
-test('RULE 3 CATCHES headers.set(\'cache-control\', ...) — the R2-metadata discriminator must not over-waive', () => {
+test("RULE 3 CATCHES headers.set('cache-control', ...) — the R2-metadata discriminator must not over-waive", () => {
   // The quoted HTTP header name is textually distinct from the camelCase R2
   // PutOptions field, and that distinction is the whole discriminator. If it
   // ever starts matching, this response header goes unchecked.
@@ -180,8 +191,8 @@ test('RULE 3 PASSES a JSDoc block that DOCUMENTS the presets', () => {
     `${WORKER_SRC}/routes/documented.ts`,
     [
       '/**',
-      " * | `public`     | `public, max-age=60, s-maxage=60` |",
-      " * | `per-viewer` | `public, max-age=0, no-cache`     |",
+      ' * | `public`     | `public, max-age=60, s-maxage=60` |',
+      ' * | `per-viewer` | `public, max-age=0, no-cache`     |',
       ' *',
       " * The old value was 'public, max-age=0, s-maxage=300' and it leaked.",
       ' */',
@@ -285,7 +296,7 @@ test('RULE 4 CATCHES the exact defect WP4 fixed: kv.put(...).catch(() => {})', (
 test('RULE 4 CATCHES a floating write on a named KV binding', () => {
   writeFixture(
     `${WORKER_SRC}/auth.ts`,
-    "env.AUTH_SESSION_KV.put(`verification:${email}`, token);\n"
+    'env.AUTH_SESSION_KV.put(`verification:${email}`, token);\n'
   );
   const { violations } = scanKv();
   assert.equal(violations.length, 1);
@@ -360,10 +371,7 @@ test('RULE 4 CATCHES the INLINE optional-call form `cacheWrite?.(kv.put(...))`',
   // preserved the hole it came from: a caller passing nothing got `undefined`,
   // `?.(` called nothing, and the promise was cancelled while this rule reported
   // the file clean.
-  writeFixture(
-    `${WORKER_SRC}/optcall.ts`,
-    "cacheWrite?.(kv.put('k', 'v'));\n"
-  );
+  writeFixture(`${WORKER_SRC}/optcall.ts`, "cacheWrite?.(kv.put('k', 'v'));\n");
   const { violations } = scanKv();
   assert.equal(violations.length, 1);
   assert.equal(violations[0].text, 'kv.put(...)');
@@ -460,7 +468,7 @@ test('isCacheControlValue separates the header from its look-alikes', () => {
   assert.equal(isCacheControlValue('public'), false);
 });
 
-test('isKvReceiver matches the repo\'s KV binding names and nothing else', () => {
+test("isKvReceiver matches the repo's KV binding names and nothing else", () => {
   assert.equal(isKvReceiver('kv'), true);
   assert.equal(isKvReceiver('this.kv'), true);
   assert.equal(isKvReceiver('env.CACHE_KV'), true);
@@ -469,7 +477,6 @@ test('isKvReceiver matches the repo\'s KV binding names and nothing else', () =>
   assert.equal(isKvReceiver('this.r2'), false);
   assert.equal(isKvReceiver('storage'), false);
 });
-
 
 // ===========================================================================
 // The failure message's preset menu — derived, so it cannot go stale
@@ -522,7 +529,11 @@ test('readCachePresets FAILS SOFT on a file it cannot read or parse, and the men
 
 test('formatPresetMenu lists EVERY preset it is given, on both sides of the split', () => {
   const menu = formatPresetMenu([
-    { name: 'alpha', value: 'public, max-age=1, s-maxage=1', sharedWindow: true },
+    {
+      name: 'alpha',
+      value: 'public, max-age=1, s-maxage=1',
+      sharedWindow: true,
+    },
     { name: 'beta', value: 'private, no-store', sharedWindow: false },
   ]);
   assert.match(menu, /'alpha'\s+public, max-age=1, s-maxage=1/);
@@ -581,7 +592,8 @@ test('RULE 5 CATCHES a bare search: z.string()', () => {
 });
 
 test('RULE 5 CATCHES the z.string().trim().min(1) spelling that a literal `z.string().min` grep MISSES', () => {
-  const source = 'export const q = z.object({\n  search: z.string().trim().min(1),\n});\n';
+  const source =
+    'export const q = z.object({\n  search: z.string().trim().min(1),\n});\n';
   writeFixture(`${WORKER_SRC}/trimmed.ts`, source);
 
   // The blind spot, demonstrated on the same bytes: this is the audit command
@@ -594,7 +606,11 @@ test('RULE 5 CATCHES the z.string().trim().min(1) spelling that a literal `z.str
   );
 
   const { violations } = scanSearch();
-  assert.equal(violations.length, 1, 'the gate must NOT share the naive grep blind spot');
+  assert.equal(
+    violations.length,
+    1,
+    'the gate must NOT share the naive grep blind spot'
+  );
   assert.equal(violations[0].head, 'z.string().trim().min(1)');
   assert.equal(violations[0].kind, 'raw-zod');
 });
@@ -673,11 +689,17 @@ test('RULE 5 CATCHES every name in the stated family, including the ?q= spelling
 test('RULE 5 CATCHES a declaration whose value sits on the next line', () => {
   writeFixture(
     `${WORKER_SRC}/wrapped.ts`,
-    ['export const q = z.object({', '  search:', '    z.string(),', '});'].join('\n')
+    ['export const q = z.object({', '  search:', '    z.string(),', '});'].join(
+      '\n'
+    )
   );
   const { violations } = scanSearch();
   assert.equal(violations.length, 1);
-  assert.equal(violations[0].line, 2, 'reported at the KEY, which is where the fix goes');
+  assert.equal(
+    violations[0].line,
+    2,
+    'reported at the KEY, which is where the fix goes'
+  );
   assert.equal(violations[0].head, 'z.string()');
 });
 
@@ -686,7 +708,7 @@ test('RULE 5 CATCHES a declaration inside a .svelte module script', () => {
     `${WORKER_SRC}/Widget.svelte`,
     [
       '<script lang="ts">',
-      "  const argsSchema = z.object({ search: z.string() });",
+      '  const argsSchema = z.object({ search: z.string() });',
       '</script>',
       '<input />',
     ].join('\n')
@@ -725,7 +747,11 @@ test('RULE 5 PASSES the builder, and the one composed form the tree needs', () =
   );
   const { violations, declarationsFound } = scanSearch();
   assert.deepEqual(violations, []);
-  assert.equal(declarationsFound, 4, 'conforming declarations still COUNT — that count is what proves the rule has a subject');
+  assert.equal(
+    declarationsFound,
+    4,
+    'conforming declarations still COUNT — that count is what proves the rule has a subject'
+  );
 });
 
 test('RULE 5 PASSES search-keyed DATA: spreads, URL params, props types, an icon map', () => {
@@ -735,7 +761,7 @@ test('RULE 5 PASSES search-keyed DATA: spreads, URL params, props types, an icon
       'onFilterChange({ ...filters, search: value });',
       "onFilterChange({ ...filters, search: '' });",
       'const args = { ...(urlSearch && { search: urlSearch }) };',
-      "const p = new URLSearchParams({ search: q, limit: String(limit) });",
+      'const p = new URLSearchParams({ search: q, limit: String(limit) });',
       "const s = { search: page.url.searchParams.get('search') ?? '' };",
       'export const RAIL_ICONS = { search: SearchIcon };',
       'export interface Filters { search: string; contentType: string }',
@@ -744,7 +770,11 @@ test('RULE 5 PASSES search-keyed DATA: spreads, URL params, props types, an icon
     ].join('\n')
   );
   assert.deepEqual(scanSearch().violations, []);
-  assert.equal(scanSearch().declarationsFound, 0, 'none of these is a declaration');
+  assert.equal(
+    scanSearch().declarationsFound,
+    0,
+    'none of these is a declaration'
+  );
 });
 
 test('RULE 5 PASSES a z.infer / z.input / z.output TYPE position', () => {
@@ -904,9 +934,15 @@ test('searchValueHead quotes the expression and stops where it ends', () => {
   // A closer that belongs to the enclosing object is dropped; a closer that
   // belongs to the expression is kept, so the printed value stays recognisable
   // on sight rather than being mangled.
-  assert.equal(searchValueHead('z.string().optional() });'), 'z.string().optional()');
+  assert.equal(
+    searchValueHead('z.string().optional() });'),
+    'z.string().optional()'
+  );
   assert.equal(searchValueHead('z.string().max(5) });'), 'z.string().max(5)');
-  assert.equal(searchValueHead('z.string(),\n  page: z.number(),'), 'z.string()');
+  assert.equal(
+    searchValueHead('z.string(),\n  page: z.number(),'),
+    'z.string()'
+  );
   assert.equal(searchValueHead('localSearchSchema });'), 'localSearchSchema');
   assert.equal(searchValueHead('z.string()'), 'z.string()');
 });
@@ -985,7 +1021,11 @@ test('RULE 6 CATCHES `AND ... > NOW()` inside a sql template — the exact predi
   assert.equal(templatesFound, 1);
   assert.equal(violations.length, 1);
   assert.equal(violations[0].file, `${WORKER_SRC}/library.ts`);
-  assert.equal(violations[0].line, 5, 'reported where the token sits, which is where the fix goes');
+  assert.equal(
+    violations[0].line,
+    5,
+    'reported where the token sits, which is where the fix goes'
+  );
   assert.equal(violations[0].token, 'NOW(');
   assert.match(violations[0].text, /> NOW\(\)/);
 });
@@ -1111,7 +1151,11 @@ test('RULE 6 PASSES `now()` in a TypeScript comment OUTSIDE any template — two
   );
   const { violations, templatesFound } = scanClock();
   assert.deepEqual(violations, []);
-  assert.equal(templatesFound, 0, 'no template, no subject — the clock calls in JS are none of this rule\'s business');
+  assert.equal(
+    templatesFound,
+    0,
+    "no template, no subject — the clock calls in JS are none of this rule's business"
+  );
 });
 
 test('RULE 6 judges a NESTED sql template on its own tag, and skips interpolation bodies', () => {
@@ -1128,7 +1172,11 @@ test('RULE 6 judges a NESTED sql template on its own tag, and skips interpolatio
     ].join('\n')
   );
   const { violations, templatesFound } = scanClock();
-  assert.equal(templatesFound, 4, 'outer + separator on line 1, outer + inner on line 2');
+  assert.equal(
+    templatesFound,
+    4,
+    'outer + separator on line 1, outer + inner on line 2'
+  );
   assert.equal(violations.length, 1);
   assert.equal(violations[0].token, 'now(');
   assert.equal(violations[0].line, 2);
@@ -1142,7 +1190,11 @@ test('RULE 6 reports templatesFound === 0 for a tree with no sql template — th
   const { violations, filesScanned, templatesFound } = scanClock();
   assert.deepEqual(violations, []);
   assert.ok(filesScanned > 0, 'files were scanned...');
-  assert.equal(templatesFound, 0, '...but a plain template literal is not SQL — main() exits 1 on this state');
+  assert.equal(
+    templatesFound,
+    0,
+    '...but a plain template literal is not SQL — main() exits 1 on this state'
+  );
 });
 
 // ===========================================================================
@@ -1199,8 +1251,16 @@ test('sqlTemplateChunks splits the real library.ts nesting shape into its static
     ['t NOT IN (', ')'],
     'interpolation bodies are skipped, so only the SQL text is judged'
   );
-  assert.equal(template.end, code.length - 1, 'the closing backtick is the OUTER one');
-  assert.equal(sqlTemplateChunks('sql`never closed', 3), null, 'an unterminated template is skipped, not guessed');
+  assert.equal(
+    template.end,
+    code.length - 1,
+    'the closing backtick is the OUTER one'
+  );
+  assert.equal(
+    sqlTemplateChunks('sql`never closed', 3),
+    null,
+    'an unterminated template is skipped, not guessed'
+  );
 });
 
 test('RULE 6 against the REAL tree: it still finds `sql` templates to judge (this case reads packages/ workers/ apps/)', () => {
@@ -1346,4 +1406,27 @@ test('RULE 7 ignores a construction inside a comment or a docstring example', ()
   const { violations, constructionsFound } = scanSink();
   assert.equal(constructionsFound, 0);
   assert.deepEqual(violations, []);
+});
+
+test('RUNS when started through a symlink, rather than exiting 0 unchecked (Codex-noyrq)', () => {
+  // Node resolves import.meta.url through the link but not argv[1], so the old
+  // entry check skipped main() and exited 0 with no output. main() scans the
+  // real tree, so either verdict is fine here: the point is that it ran.
+  const dir = mkdtempSync(join(tmpdir(), 'data-access-link-'));
+  try {
+    const link = join(dir, 'linked-gate.mjs');
+    symlinkSync(
+      fileURLToPath(
+        new URL('./check-data-access-contract.mjs', import.meta.url)
+      ),
+      link
+    );
+    const result = spawnSync(process.execPath, [link], { encoding: 'utf8' });
+    assert.match(
+      `${result.stdout}${result.stderr}`,
+      /^OK: no hand-written Cache-Control|^RULE \d/m
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

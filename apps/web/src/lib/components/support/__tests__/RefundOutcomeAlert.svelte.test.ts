@@ -102,7 +102,11 @@ describe('the other answers', () => {
   test('changed: who refunded what meanwhile, what is left, and Reload', () => {
     const onReload = vi.fn();
     const detail = chargeDetail({
-      refundable: { maxCents: 1500, blocked: null },
+      refundable: {
+        maxCents: 1500,
+        blocked: null,
+        refundedOutsideStripeOn: null,
+      },
       refunds: [
         refundRow({
           id: 're_alex',
@@ -169,6 +173,16 @@ describe('the other answers', () => {
       m.support_outcome_chargeback_lead(),
     ],
     [{ kind: 'nothing_left' }, 'info', m.support_blocked_nothing()],
+    [
+      { kind: 'chargeback_settling' },
+      'info',
+      "This payment's chargeback was decided for us, and the creators are still being paid back. Refunds wait until that finishes. A step that fails is retried every hour, and one that keeps failing is settled by hand.",
+    ],
+    [
+      { kind: 'refunded_outside_stripe' },
+      'warning',
+      "This charge was refunded outside Stripe. Don't refund this charge here.",
+    ],
     [
       { kind: 'too_large', maxCents: 1500 },
       'warning',

@@ -179,16 +179,16 @@
       </Dialog.Footer>
     {:else}
       <!-- State 3, variant A: confirm by typing the organisation's name. -->
-      <form class="ownership-dialog__confirm" onsubmit={send} novalidate>
-        <Dialog.Header>
-          <Dialog.Title>{m.ownership_confirm_title({ name: selected.name })}</Dialog.Title>
-          <Dialog.Description>
-            {m.ownership_confirm_lede({
-              name: selected.name,
-              date: formatDate(expiresOn ?? estimatedOfferExpiry()),
-            })}
-          </Dialog.Description>
-        </Dialog.Header>
+      <Dialog.Header>
+        <Dialog.Title>{m.ownership_confirm_title({ name: selected.name })}</Dialog.Title>
+        <Dialog.Description>
+          {m.ownership_confirm_lede({
+            name: selected.name,
+            date: formatDate(expiresOn ?? estimatedOfferExpiry()),
+          })}
+        </Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Form onsubmit={send} novalidate>
         <Dialog.Body>
           <div class="ownership-dialog__stack">
             <ul class="ownership-dialog__consequences">
@@ -253,20 +253,12 @@
             {m.ownership_confirm_send()}
           </Button>
         </Dialog.Footer>
-      </form>
+      </Dialog.Form>
     {/if}
   </Dialog.Content>
 </Dialog.Root>
 
 <style>
-  /* The form exists for Enter-to-submit and submit semantics only. Without
-     `contents` it would sit between `.dialog-content`'s flex column and the
-     header / body / footer, and the body would stop being the part that
-     scrolls in a short viewport. */
-  .ownership-dialog__confirm {
-    display: contents;
-  }
-
   .ownership-dialog__recipients {
     display: flex;
     flex-direction: column;

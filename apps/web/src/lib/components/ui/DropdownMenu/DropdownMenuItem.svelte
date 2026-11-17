@@ -7,24 +7,118 @@
 		children,
 		class: className,
 		disabled = false,
+		href,
+		keepOpen = false,
 		...rest
-	}: { children?: Snippet; class?: string; disabled?: boolean } & HTMLAttributes<HTMLDivElement> = $props();
+	}: {
+		children?: Snippet;
+		class?: string;
+		disabled?: boolean;
+		/**
+		 * A link item: the item is the link, so a press or Enter follows it
+		 * and the menu closes. Never wrap an item in `<a>`: the link, not the
+		 * item, then takes the menu's first focus, and Enter on it leaves
+		 * the menu open (Codex-a6ofh.2.6).
+		 */
+		href?: string;
+		/** A press leaves the menu open, as a Try again that reloads what it shows. */
+		keepOpen?: boolean;
+	} & HTMLAttributes<HTMLDivElement> = $props();
 
 	const {
-		elements: { item }
+		elements: { item },
+		states: { open }
 	} = getCtx();
+
+	/**
+	 * The pointer's roving focus, done here and at once. Melt's own handlers
+	 * (skipped through the `m-` events Melt dispatches first) wait a
+	 * millisecond and then take tabindex 0 from whatever has focus by then.
+	 * An item that opens a dialog has handed focus to the dialog by then.
+	 * In Chromium the overlay covering the item fires a pointerleave on it,
+	 * and a pointermove from the same frame as the press is still waiting
+	 * behind the dialog's render. So the dialog's buttons lost their tab
+	 * stops one by one, and focus ended on a confirm's destructive button
+	 * (Codex-vlphc review c5, found with G5-C-L1). Here focus moves only
+	 * while the menu is open, and tabindex only between the menu's own
+	 * elements. A pressed item's leave moves nothing: it is what covered
+	 * the item that the pointer entered. A move onto the item proves
+	 * nothing covers it, and ends that: a press that left the menu open
+	 * (one reopened during its closing animation keeps its items) leaves
+	 * no item that never gives focus back to the menu.
+	 */
+	function rove(node: HTMLElement) {
+		let pressed = false;
+		const moveTo = (next: HTMLElement | null) => {
+			const menu = node.closest<HTMLElement>('[role="menu"]');
+			const active = document.activeElement;
+			if (!$open || !next || !menu || active === next) return;
+			if (active instanceof HTMLElement && menu.contains(active)) active.tabIndex = -1;
+			next.tabIndex = 0;
+			next.focus();
+		};
+		const fromMouse = (event: Event) => {
+			event.preventDefault();
+			const pointer = (event as CustomEvent<{ originalEvent: PointerEvent }>).detail?.originalEvent;
+			return pointer?.pointerType === 'mouse';
+		};
+		// Onto an item: the item. Off it: the menu, so no item stays lit.
+		const onMove = (event: Event) => {
+			if (!fromMouse(event)) return;
+			pressed = false;
+			moveTo(node);
+		};
+		const onLeave = (event: Event) => {
+			if (fromMouse(event) && !pressed) moveTo(node.closest<HTMLElement>('[role="menu"]'));
+		};
+		const onPress = () => {
+			pressed = true;
+		};
+		node.addEventListener('m-pointermove', onMove);
+		node.addEventListener('m-pointerleave', onLeave);
+		node.addEventListener('click', onPress, true);
+		return {
+			destroy() {
+				node.removeEventListener('m-pointermove', onMove);
+				node.removeEventListener('m-pointerleave', onLeave);
+				node.removeEventListener('click', onPress, true);
+			}
+		};
+	}
+
+	/**
+	 * A `keepOpen` press, by Melt's own rule: a click already prevented
+	 * moves the roving focus to the item and closes nothing, whatever
+	 * `closeOnItemClick` says. So the item keeps focus, and its `onclick`
+	 * still runs. Not for a link item: a prevented click is not followed.
+	 */
+	function holdOpen(node: HTMLElement) {
+		const onClick = (event: Event) => {
+			if (keepOpen) (event as CustomEvent<{ originalEvent: Event }>).detail?.originalEvent.preventDefault();
+		};
+		node.addEventListener('m-click', onClick);
+		return {
+			destroy() {
+				node.removeEventListener('m-click', onClick);
+			}
+		};
+	}
 </script>
 
-<div
+<svelte:element
+	this={href ? 'a' : 'div'}
+	{href}
 	{...$item}
 	use:item
+	use:rove
+	use:holdOpen
 	class="dropdown-item {className ?? ''}"
 	{...rest}
 	aria-disabled={disabled}
 	data-disabled={disabled ? '' : undefined}
 >
 	{@render children?.()}
-</div>
+</svelte:element>
 
 <style>
 	.dropdown-item {

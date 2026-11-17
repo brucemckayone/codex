@@ -4,7 +4,7 @@
   Sticky editorial command bar for the studio dashboard. Anchors the page
   with creator identity (org logo + name + eyebrow) on the left, a plain-
   English "today" narrative in the middle, and two primary actions on the
-  right. Matches the ContentFormCommandBar vocabulary (backdrop-filter,
+  right. Matches the studio command bars' vocabulary (backdrop-filter,
   breadcrumb eyebrow, ordinal meter) but adapted for the dashboard's
   "status at a glance" role.
 

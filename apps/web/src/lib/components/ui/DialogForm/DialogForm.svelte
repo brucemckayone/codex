@@ -2,7 +2,8 @@
   @component DialogForm
 
   Shared dialog + form wrapper that handles the common boilerplate:
-  Dialog.Root > Dialog.Content > Dialog.Header > form > error Alert > content slot > Dialog.Footer.
+  Dialog.Root > Dialog.Content > Dialog.Header, Dialog.Form > (Dialog.Body >
+  error Alert + content slot), Dialog.Footer.
 
   @prop {string} title - Dialog title
   @prop {string} [description] - Optional dialog description
@@ -73,14 +74,14 @@
       {/if}
     </Dialog.Header>
 
-    <form {onsubmit} class="dialog-form">
-      <div class="dialog-form-body">
+    <Dialog.Form {onsubmit}>
+      <Dialog.Body>
         {#if error}
           <Alert variant="error">{error}</Alert>
         {/if}
 
         {@render children()}
-      </div>
+      </Dialog.Body>
 
       <Dialog.Footer>
         <Button
@@ -104,24 +105,6 @@
           {/if}
         </Button>
       </Dialog.Footer>
-    </form>
+    </Dialog.Form>
   </Dialog.Content>
 </Dialog.Root>
-
-<style>
-  .dialog-form {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .dialog-form-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding: var(--space-4) var(--space-6);
-    overflow-y: auto;
-    flex: 1;
-  }
-</style>

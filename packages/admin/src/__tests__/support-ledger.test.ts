@@ -5,7 +5,7 @@
  */
 
 import type { PayoutReversal } from '@codex/database/schema';
-import { MAX_CLAWBACK_ATTEMPTS } from '@codex/payments';
+import { isSettlingWin, MAX_CLAWBACK_ATTEMPTS } from '@codex/payments';
 import { describe, expect, it } from 'vitest';
 import {
   type CreditView,
@@ -18,6 +18,7 @@ import {
   type HistoryContext,
   previewLabel,
   refundFailureLabel,
+  refundHolds,
   sliceHistory,
 } from '../services/support-ledger';
 import type { CreditAction } from '../support-types';
@@ -57,6 +58,7 @@ function context(overrides: Partial<HistoryContext> = {}): HistoryContext {
     wonDisputeIds: new Set(),
     debtResolutions: new Map(),
     disputeDates: new Map(),
+    lateWins: new Map(),
     credits: new Map(),
     ...overrides,
   };
@@ -241,6 +243,131 @@ describe('sliceHistory', () => {
     );
     expect(history).toHaveLength(1);
     expect(takenCents).toBe(0);
+  });
+});
+
+describe('a chargeback won after it was lost (Codex-2hxff.70, late-win design §6, S3)', () => {
+  const LOST_ON = '2026-11-21T10:00:00.000Z';
+
+  it("a late win's lines carry the loss date and the step's kind; another dispute's and a refund's carry neither", () => {
+    const cancelled = step({
+      causeType: 'dispute',
+      causeId: 'du_late',
+      amountCents: 1980,
+      kind: 'cancellation',
+      repaidByPayoutId: REPAY,
+    });
+    const reduced = step({
+      causeType: 'dispute',
+      causeId: 'du_late',
+      amountCents: 500,
+      kind: 'pending_reduction',
+      repaidByPayoutId: REPAY,
+    });
+    const otherDispute = step({ causeType: 'dispute', causeId: 'du_1' });
+    const refund = step({});
+    const { history, takenCents } = sliceHistory(
+      SLICE,
+      [cancelled, reduced, otherDispute, refund],
+      context({
+        wonDisputeIds: new Set(['du_late', 'du_1']),
+        lateWins: new Map([['du_late', { lostOn: LOST_ON }]]),
+      })
+    );
+
+    expect(history[0]).toMatchObject({
+      causeId: 'du_late',
+      outcome: 'paid_back',
+      lostOn: LOST_ON,
+      stepKind: 'cancellation',
+    });
+    expect(history[1]).toMatchObject({
+      lostOn: LOST_ON,
+      stepKind: 'pending_reduction',
+    });
+    for (const line of history.slice(2)) {
+      expect(line).not.toHaveProperty('lostOn');
+      expect(line).not.toHaveProperty('stepKind');
+    }
+    // Won, so its shares are paid back, not taken; the refund's was taken.
+    expect(takenCents).toBe(100);
+  });
+
+  it('a plain loss, never won, carries neither: the page reads lostOn as "being paid back"', () => {
+    const { history } = sliceHistory(
+      SLICE,
+      [
+        step({
+          causeType: 'dispute',
+          causeId: 'du_lost',
+          kind: 'cancellation',
+        }),
+        step({ causeType: 'dispute', causeId: 'du_lost' }),
+      ],
+      // Only a late win is in lateWins; this one is lost and stays lost.
+      context({ lateWins: new Map([['du_late', { lostOn: LOST_ON }]]) })
+    );
+    expect(history).toHaveLength(2);
+    for (const line of history) {
+      expect(line).not.toHaveProperty('lostOn');
+      expect(line).not.toHaveProperty('stepKind');
+    }
+  });
+
+  it('a late win whose loss never finished carries a null loss date, still with its kind', () => {
+    const { history } = sliceHistory(
+      SLICE,
+      [step({ causeType: 'dispute', causeId: 'du_late' })],
+      context({ lateWins: new Map([['du_late', { lostOn: null }]]) })
+    );
+    expect(history[0]).toMatchObject({
+      lostOn: null,
+      stepKind: 'transfer_reversal',
+    });
+  });
+});
+
+describe('refundHolds: what a charge’s disputes say about a refund now (late-win design §4.7, owner Q7)', () => {
+  const row = (
+    status: string,
+    outcomeAppliedAt: Date | null = null,
+    lateWonAt: Date | null = null
+  ) => ({ status, outcomeAppliedAt, lateWonAt });
+  const AT = new Date('2026-12-14T09:00:00Z');
+
+  it('a won chargeback not yet applied is settling; once applied it is not', () => {
+    expect(isSettlingWin(row('won'))).toBe(true);
+    expect(isSettlingWin(row('won', AT))).toBe(false);
+    for (const status of ['lost', 'needs_response', 'warning_closed']) {
+      expect(isSettlingWin(row(status))).toBe(false);
+    }
+    expect(refundHolds([row('won', AT), row('won')]).settling).toBe(true);
+    expect(refundHolds([row('won', AT)]).settling).toBe(false);
+  });
+
+  it('an open or lost chargeback blocks with its status; an inquiry or a win does not', () => {
+    expect(refundHolds([row('won', AT), row('under_review')]).blocking).toBe(
+      'under_review'
+    );
+    expect(refundHolds([row('lost', AT)]).blocking).toBe('lost');
+    expect(
+      refundHolds([row('warning_needs_response'), row('won', AT)]).blocking
+    ).toBeNull();
+  });
+
+  it('a late win lifts the window, applied or still settling; a normal win does not', () => {
+    expect(refundHolds([row('won', AT, AT)]).lateWon).toBe(true);
+    expect(refundHolds([row('won', null, AT)])).toEqual({
+      blocking: null,
+      settling: true,
+      lateWon: true,
+    });
+    expect(refundHolds([row('won', AT)]).lateWon).toBe(false);
+    expect(refundHolds([])).toEqual({
+      blocking: null,
+      settling: false,
+      lateWon: false,
+    });
   });
 });
 

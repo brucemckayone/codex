@@ -4,6 +4,8 @@ import { schema } from '../../src';
 import { MEMBERSHIPS, ORGS, SETTINGS, USERS } from './constants';
 
 const now = new Date();
+/** When the seeded owners' ownership periods start: before every seeded sale. */
+const ownedSince = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
 export async function seedOrganizations(db: typeof DbClient) {
   // Organizations
@@ -168,24 +170,27 @@ export async function seedOrganizations(db: typeof DbClient) {
 
   // Ownership periods — who is paid as each org's owner, from when
   // (Codex-2hxff.2). Production writes one with every owner membership; the
-  // seed does too, so local payouts resolve exactly as they do there.
+  // seed does too, so local payouts resolve exactly as they do there. They
+  // start 90 days back: the seeded sales are back-dated (commerce.ts, up to
+  // 80 days), and a sale before its org's first period resolves only through
+  // the payee resolver's "no owner at the sale time" warning (Codex-2hxff.46).
   await db.insert(schema.organizationOwnershipPeriods).values([
     {
       organizationId: ORGS.alpha.id,
       userId: USERS.creator.id,
-      startedAt: now,
+      startedAt: ownedSince,
       source: 'created',
     },
     {
       organizationId: ORGS.beta.id,
       userId: USERS.admin.id,
-      startedAt: now,
+      startedAt: ownedSince,
       source: 'created',
     },
     {
       organizationId: ORGS.bones.id,
       userId: USERS.luzura.id,
-      startedAt: now,
+      startedAt: ownedSince,
       source: 'created',
     },
   ]);

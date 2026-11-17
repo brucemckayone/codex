@@ -2,6 +2,7 @@
 	import { type CreateDropdownMenuProps, createDropdownMenu } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { untrack } from 'svelte';
+	import { returnsToTrigger } from './close-focus';
 	import { setCtx } from './ctx.js';
 
 	type Props = Omit<CreateDropdownMenuProps, 'open' | 'onOpenChange'> & {
@@ -11,11 +12,19 @@
 	};
 
 	let {
-		positioning,
-		arrowSize,
-		preventScroll,
-		loop,
-		closeOnItemClick,
+		// Every option the $effect below sets needs a default: one left
+		// `undefined` is `.set(undefined)` over Melt's own. These four are
+		// Melt's. Unset, `positioning` let floating-ui fall back to its own
+		// 'top', and `closeOnItemClick` let no item press close the menu, so
+		// an item that opens a dialog left the menu open under it, holding
+		// the focus the dialog gives back (Codex-vlphc review G4-M3). Nothing
+		// renders Melt's arrow yet; `arrowSize` sizes one if it ever does.
+		positioning = { placement: 'bottom' },
+		arrowSize = 8,
+		loop = false,
+		closeOnItemClick = true,
+		// A menu deliberately leaves the page free to scroll; Melt's default locks it.
+		preventScroll = false,
 		// Default to Melt's own default (true). Destructuring with no default
 		// leaves this `undefined`, and the $effect below then does
 		// `.set(undefined)` — which disables Melt's interact-outside listener
@@ -34,8 +43,17 @@
 		children
 	}: Props = $props();
 
+	/** The menu's id, once the builder has made it. */
+	let menuId: string | undefined;
+
 	const builder = createDropdownMenu({
 		defaultOpen: untrack(() => defaultOpen),
+		// The trigger takes focus back only from the menu, or from nowhere;
+		// anywhere else keeps it (see returnsToTrigger).
+		closeFocus: (trigger) => {
+			const menu = menuId ? document.getElementById(menuId) : null;
+			return returnsToTrigger(document.activeElement, menu) ? (trigger ?? null) : null;
+		},
 		onOpenChange: ({ next }) => {
 			if (open !== next) {
 				open = next;
@@ -49,6 +67,7 @@
 		options,
 		states: { open: openStore }
 	} = builder;
+	menuId = builder.ids.menu.get();
 	setCtx(builder);
 
 	$effect(() => {

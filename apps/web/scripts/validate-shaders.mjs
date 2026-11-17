@@ -33,13 +33,16 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SHADER_DIR = path.resolve(HERE, '../src/lib/components/ui/ShaderHero/shaders');
+const SHADER_DIR = path.resolve(
+  HERE,
+  '../src/lib/components/ui/ShaderHero/shaders'
+);
 
 /**
  * esbuild is not a direct dependency of `apps/web` — it arrives transitively
@@ -312,9 +315,7 @@ async function main() {
    * uploads for both passes.
    */
   const presetOf = (file) =>
-    file
-      .replace(/\.(frag|vert)\.ts$/, '')
-      .replace(/-(sim|display)$/, '');
+    file.replace(/\.(frag|vert)\.ts$/, '').replace(/-(sim|display)$/, '');
 
   try {
     for (const file of files) {

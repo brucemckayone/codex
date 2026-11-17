@@ -346,6 +346,44 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     expect(result.items[0]?.earnedCents).toBe(450);
   });
 
+  it("a failed refund settled as refunded elsewhere lowers Earned by the creator slice's share; one still open does not (owner decision 2026-11-09)", async () => {
+    const orgId = await newOrg();
+    const [settledCreator, openCreator] = await seedTestUsers(db, 2);
+    const settled = await contentSale({
+      orgId,
+      creatorId: settledCreator,
+      grossCents: 1000,
+      creatorCents: 600,
+    });
+    await fixtures.refund({
+      chargeId: settled.chargeId,
+      cents: 250,
+      status: 'failed',
+      purchaseId: settled.purchaseId,
+      resolution: 'refunded_elsewhere',
+    });
+    const open = await contentSale({
+      orgId,
+      creatorId: openCreator,
+      grossCents: 1000,
+      creatorCents: 600,
+    });
+    await fixtures.refund({
+      chargeId: open.chargeId,
+      cents: 250,
+      status: 'failed',
+      purchaseId: open.purchaseId,
+    });
+
+    const result = await service.getRevenueByCreator(orgId);
+    const earned = (creatorId: string) =>
+      result.items.find((item) => item.creatorId === creatorId)?.earnedCents;
+
+    // 600 − floor(600 × 250 / 1000) = 450, as a standing refund's.
+    expect(earned(settledCreator)).toBe(450);
+    expect(earned(openCreator)).toBe(600);
+  });
+
   it("the owner pool is the organisation's money, not anyone's Earned", async () => {
     const orgId = await newOrg();
     const subscriptionId = await fixtures.subscription(orgId, customerId);

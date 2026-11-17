@@ -1,13 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TOKEN_OVERRIDE_MAX_ENTRIES } from '@codex/validation';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  applyLayoutBrandInputs,
+  clearBrandVars,
   clearTokenOverrides,
   darkTokenOverridesToCssVars,
+  endFontPreview,
   injectBrandVars,
   previewFont,
-  revertFontPreview,
+  tokenOverrideStyle,
   tokenOverridesToCssVars,
 } from './css-injection';
 import { groundLuminance } from './ground';
@@ -202,6 +206,24 @@ describe('darkTokenOverridesToCssVars', () => {
   });
 });
 
+describe('tokenOverrideStyle', () => {
+  it('joins the light and dark mappings into one inline style', () => {
+    expect(
+      tokenOverrideStyle(
+        { 'hero-logo-scale': '2' },
+        { 'surface-secondary': '#0a0a0a' }
+      )
+    ).toBe(
+      '--brand-hero-logo-scale: 2; --color-surface-secondary-dark: #0a0a0a'
+    );
+  });
+
+  it('is undefined when neither theme emits a property', () => {
+    expect(tokenOverrideStyle(null, null)).toBeUndefined();
+    expect(tokenOverrideStyle({ 'hero-hide-title': '' }, {})).toBeUndefined();
+  });
+});
+
 /**
  * Codex-eb00a.7: the emitted --brand-font-body/-heading value must be the BARE
  * family name. org-brand.css redeclares `--font-sans` as
@@ -276,16 +298,52 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
     );
   });
 
-  it('revertFontPreview restores a bare family name', () => {
+  // Codex-q01h8: a preview puts back what it found, never the picker's value.
+  it('endFontPreview puts back the family the layout had, after several hovers', () => {
     const el = makeOrgLayout();
-    revertFontPreview('heading', 'Space Grotesk');
+    el.style.setProperty('--brand-font-heading', "'Lobster'");
+    previewFont('heading', 'Space Grotesk');
+    previewFont('heading', 'Syne');
+    endFontPreview('heading');
 
-    expect(el.style.getPropertyValue('--brand-font-heading')).toBe(
-      "'Space Grotesk', 'Space Grotesk-fallback'"
-    );
-    expect(el.style.getPropertyValue('--brand-font-heading')).not.toContain(
-      'var(--font-sans)'
-    );
+    expect(el.style.getPropertyValue('--brand-font-heading')).toBe("'Lobster'");
+  });
+
+  it('endFontPreview removes a preview the layout had no family under', () => {
+    const el = makeOrgLayout();
+    previewFont('body', 'Syne');
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe('');
+  });
+
+  it('endFontPreview with no preview leaves the layout font alone', () => {
+    const el = makeOrgLayout();
+    el.style.setProperty('--brand-font-body', "'Lobster'");
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Lobster'");
+  });
+
+  it('endFontPreview keeps a family written since the preview, e.g. the pick', () => {
+    const el = makeOrgLayout();
+    el.style.setProperty('--brand-font-body', "'Lobster'");
+    previewFont('body', 'Syne');
+    el.style.setProperty('--brand-font-body', "'Pacifico'");
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Pacifico'");
+  });
+
+  it('endFontPreview keeps a family written between two hovers', () => {
+    const el = makeOrgLayout();
+    el.style.setProperty('--brand-font-body', "'Lobster'");
+    previewFont('body', 'Syne');
+    el.style.setProperty('--brand-font-body', "'Pacifico'");
+    previewFont('body', 'Space Grotesk');
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Pacifico'");
   });
 });
 
@@ -295,7 +353,35 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
  * hydration. An input the clear removes stays gone until reload: the ground
  * numbers did, so every org page nudged against the platform's (Codex-mik4h).
  */
-describe('clearTokenOverrides keeps what the org layout binds', () => {
+describe('the token overrides and the preview keep what the org layout binds', () => {
+  const previewState: BrandEditorState = {
+    primaryColor: '#3355ff',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  function orgLayout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    el.style.setProperty('--brand-shader-logo-url', 'url(logo.svg)');
+    document.body.appendChild(el);
+    return el;
+  }
+
   const layout = readFileSync(
     join(
       dirname(fileURLToPath(import.meta.url)),
@@ -329,6 +415,126 @@ describe('clearTokenOverrides keeps what the org layout binds', () => {
     );
     expect(el.style.getPropertyValue('--color-interactive')).toBe('');
     expect(el.style.getPropertyValue('--brand-glass-tint')).toBe('');
+  });
+
+  // Codex-q01h8: the preview's sweep, and a light override, wrote them too.
+  it('injectBrandVars keeps the logo, which it never writes', () => {
+    const el = orgLayout();
+    injectBrandVars(previewState);
+
+    expect(el.style.getPropertyValue('--brand-shader-logo-url')).toBe(
+      'url(logo.svg)'
+    );
+  });
+
+  it('a light override writes no bound input, while other keys still emit', () => {
+    const overrides = Object.fromEntries(
+      bound.map((prop) => [prop.replace(/^--brand-/, ''), 'override'])
+    );
+    const emitted = tokenOverridesToCssVars({
+      ...overrides,
+      'shadow-scale': '2',
+    });
+
+    expect(bound.filter((prop) => prop in emitted)).toEqual([]);
+    expect(emitted['--brand-shadow-scale']).toBe('2');
+  });
+
+  it('nor does one in the preview: the field and the layout keep theirs', () => {
+    const el = orgLayout();
+    injectBrandVars({
+      ...previewState,
+      fontBody: 'Lobster',
+      tokenOverrides: {
+        'font-body': 'Pacifico',
+        'shader-logo-url': 'url(other.svg)',
+      },
+    });
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toContain('Lobster');
+    expect(el.style.getPropertyValue('--brand-shader-logo-url')).toBe(
+      'url(logo.svg)'
+    );
+  });
+});
+
+// Codex-q01h8: leaving the brand studio stripped the org layout's brand vars
+// until a reload. Svelte re-sets a `style:` directive only when its value
+// changes, so the layout writes its inputs back itself when the editor closes.
+describe('applyLayoutBrandInputs writes the layout back after the editor', () => {
+  const saved: BrandEditorState = {
+    primaryColor: '#2563EB',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+  // What the layout binds for an org with a background and no fine-tune
+  // overrides: the case that lost its brand.
+  const inputs = {
+    '--brand-color': '#2563EB',
+    '--brand-bg': '#F5F0E8',
+    '--brand-density': '1',
+    '--brand-radius': '0.5rem',
+    '--brand-secondary': undefined,
+  };
+  const attributes = { 'data-org-brand': true, 'data-org-bg': true };
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  function renderedLayout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    for (const [prop, value] of Object.entries(inputs)) {
+      if (value !== undefined) el.style.setProperty(prop, value);
+    }
+    el.setAttribute('data-org-brand', '');
+    el.setAttribute('data-org-bg', '');
+    document.body.appendChild(el);
+    return el;
+  }
+
+  it('restores every input and attribute the preview and the close took away', () => {
+    const el = renderedLayout();
+    // A preview with a background the nudge cannot measure drops data-org-bg.
+    injectBrandVars({
+      ...saved,
+      backgroundColor: 'rgb(30 30 46)',
+      secondaryColor: '#123456',
+    });
+    expect(el.hasAttribute('data-org-bg')).toBe(false);
+    clearBrandVars();
+    expect(el.style.getPropertyValue('--brand-color')).toBe('');
+    expect(el.style.getPropertyValue('--brand-radius')).toBe('');
+
+    applyLayoutBrandInputs(el, inputs, attributes);
+
+    expect(el.style.getPropertyValue('--brand-color')).toBe('#2563EB');
+    expect(el.style.getPropertyValue('--brand-bg')).toBe('#F5F0E8');
+    expect(el.style.getPropertyValue('--brand-density')).toBe('1');
+    expect(el.style.getPropertyValue('--brand-radius')).toBe('0.5rem');
+    expect(el.hasAttribute('data-org-brand')).toBe(true);
+    expect(el.hasAttribute('data-org-bg')).toBe(true);
+  });
+
+  it('removes an input the layout no longer binds, and an attribute it turns off', () => {
+    const el = renderedLayout();
+    el.style.setProperty('--brand-secondary', '#123456');
+
+    applyLayoutBrandInputs(el, inputs, { ...attributes, 'data-org-bg': false });
+
+    expect(el.style.getPropertyValue('--brand-secondary')).toBe('');
+    expect(el.hasAttribute('data-org-bg')).toBe(false);
   });
 });
 
@@ -438,5 +644,117 @@ describe('injectBrandVars paints the canonical hex', () => {
     expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe(
       groundLuminance('#000000', 'dark')
     );
+  });
+});
+
+describe('an override that would leave its own declaration (Codex-403d3)', () => {
+  // An org admin's saved JSON, as it might be stored before the save schema
+  // checked it: entries that would add declarations of their own, fetch an
+  // image, or swallow the entries after them, and one an editor control
+  // really writes.
+  const CRAFTED = {
+    'heading-color': 'red; position: fixed; inset: 0',
+    'x: 1; position': 'red',
+    'shadow-color': 'url(https://evil.example/x.png)',
+    surface: 'image-set("https://pub-a.r2.dev/p.png" 1x)',
+    'glass-tint': "'unclosed",
+    'shader-preset': 'haze',
+  };
+  const SAFE = { 'shader-preset': 'haze' };
+
+  it('the light mapper drops it and keeps the rest', () => {
+    expect(tokenOverridesToCssVars(CRAFTED)).toEqual(
+      tokenOverridesToCssVars(SAFE)
+    );
+    expect(Object.keys(tokenOverridesToCssVars(SAFE))).toHaveLength(1);
+  });
+
+  it('the dark mapper drops it, and the logo key ShaderHero would fetch', () => {
+    expect(
+      darkTokenOverridesToCssVars({
+        ...CRAFTED,
+        'font-body': 'Inter"; position: fixed',
+        'shader-logo-url': 'https://pub-a.r2.dev/l.svg',
+      })
+    ).toEqual(darkTokenOverridesToCssVars(SAFE));
+  });
+
+  it('keeps a dark family the save kept, though quoting takes it past 200', () => {
+    // 199 characters with a space: the save keeps it, and quoting adds two.
+    const family = `${'A'.repeat(197)} B`;
+    const emitted = Object.values(
+      darkTokenOverridesToCssVars({ 'font-body': family })
+    );
+    // quoteFamily quotes with single quotes here.
+    expect(emitted).toEqual([`'${family}'`]);
+    expect(emitted[0]?.length).toBeGreaterThan(200);
+  });
+
+  it('refuses what the save refuses: a quoted family and an over-long key', () => {
+    // Both are refused by the save's rule, so neither may render: a family
+    // with quotes would leave its quoted name open, and a key over 64
+    // characters would render here yet be dropped by the editor's load.
+    const longKey = `k-${'a'.repeat(63)}`;
+    expect(
+      darkTokenOverridesToCssVars({
+        'font-body': 'a"b\'c"d',
+        [longKey]: 'red',
+        ...SAFE,
+      })
+    ).toEqual(darkTokenOverridesToCssVars(SAFE));
+    expect(tokenOverridesToCssVars({ [longKey]: 'red', ...SAFE })).toEqual(
+      tokenOverridesToCssVars(SAFE)
+    );
+  });
+
+  it('renders a stored number in its plain form, and skips any other non-text', () => {
+    const number = tokenOverridesToCssVars({ 'text-scale': 1.2 });
+    expect(number).toEqual(tokenOverridesToCssVars({ 'text-scale': '1.2' }));
+    expect(Object.keys(number)).toHaveLength(1);
+    const odd = {
+      'font-body': true,
+      'text-scale': { nested: 1 },
+      'heading-weight': Number.NaN,
+    };
+    expect(darkTokenOverridesToCssVars(odd)).toEqual({});
+    expect(tokenOverridesToCssVars(odd)).toEqual({});
+  });
+
+  it('renders nothing from stored JSON that is not an object', () => {
+    // The layouts' parse hands on any JSON; a string or an array has keys
+    // too, which the save and the editor's load refuse.
+    for (const stored of [['red'], 'abc']) {
+      expect(tokenOverridesToCssVars(stored as never)).toEqual({});
+      expect(darkTokenOverridesToCssVars(stored as never)).toEqual({});
+    }
+  });
+
+  it('renders at most the entries the brand editor keeps on load', () => {
+    const map = Object.fromEntries(
+      Array.from({ length: TOKEN_OVERRIDE_MAX_ENTRIES + 1 }, (_, i) => [
+        `key-${i}`,
+        'red',
+      ])
+    );
+    const out = tokenOverridesToCssVars(map);
+    expect(Object.keys(out)).toHaveLength(TOKEN_OVERRIDE_MAX_ENTRIES);
+    expect(out).not.toHaveProperty(`--color-key-${TOKEN_OVERRIDE_MAX_ENTRIES}`);
+  });
+
+  it('the server-rendered style carries no declaration but its own', () => {
+    const style = tokenOverrideStyle(CRAFTED, {
+      'heading-color': 'blue; scale: 3',
+    });
+    expect(style).toBe(tokenOverrideStyle(SAFE, null));
+    expect(style?.split(';')).toHaveLength(1);
+  });
+
+  it('an unclosed quote no longer swallows the entries after it', () => {
+    expect(
+      tokenOverrideStyle(
+        { 'glass-tint': "'unclosed", 'heading-color': '#E11D48' },
+        null
+      )
+    ).toBe(tokenOverrideStyle({ 'heading-color': '#E11D48' }, null));
   });
 });

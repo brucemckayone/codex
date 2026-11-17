@@ -98,7 +98,9 @@
         ? m.support_repay_off_chargeback()
         : blockedBy === 'needs_person'
           ? m.support_repay_off_needs_person()
-          : m.support_repay_off_later_refunds()}
+          : blockedBy === 'late_win_refund'
+            ? m.support_repay_off_late_win()
+            : m.support_repay_off_later_refunds()}
     </span>
   {/if}
 {/snippet}

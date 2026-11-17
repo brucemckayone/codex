@@ -14,7 +14,7 @@
   } = getContext<ReturnType<typeof createDialog>>('DIALOG');
 </script>
 
-<p use:melt={$description} class="dialog-description {className ?? ''}" {...restProps}>
+<p use:melt={$description} class={['dialog-description', className]} {...restProps}>
   {@render children()}
 </p>
 

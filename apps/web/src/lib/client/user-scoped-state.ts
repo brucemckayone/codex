@@ -169,8 +169,9 @@ export const USER_SCOPED_SESSION_KEYS = [
   'codex:subscription-banner-dismissed',
   /**
    * `brand-editor/brand-editor-store.svelte.ts` — THIS user's UNSAVED brand
-   * draft. Restore is gated on `restored.orgId === orgId`, so the leak is
-   * narrow (two users of the same org, same tab) but it is one user's unsaved
+   * draft. Restore is gated on the org and on a fingerprint of the saved brand
+   * it was edited from (Codex-0keaj), so the leak is narrow (two users of the
+   * same org, same tab, brand unchanged since) but it is one user's unsaved
    * work shown to another.
    */
   'codex:brand-editor',

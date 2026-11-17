@@ -9,7 +9,7 @@
  * of `@codex/cache` preserves cache's "thin foundation over KV" charter; the
  * KV-only sibling `invalidateUserLibrary` stays in `@codex/cache`.
  *
- * The membership fan-out (`invalidateMemberCaches` and its two parts) lives
+ * The membership fan-out (`invalidateMemberCaches` and its parts) lives
  * here too (Codex-2hxff.44): organization-api's member and ownership routes
  * and admin-api's support owner reassign all bust the same caches, and the
  * admin copy, re-typed inline, had drifted (no org-slug bust, a silent catch).
@@ -185,27 +185,33 @@ export function dispatchOrgPublicInvalidation(
 }
 
 /**
- * Everything a role change busts for one user: the membership entry the
- * policy reads, the org's slug-keyed public caches, and the user's library
- * (management roles unlock team-only content, Codex-c01do). An ownership
- * change calls it for both the new and the previous owner. Every part logs
- * its failure, through `obs` or, when that is undefined, this module's own.
+ * Everything a role change busts: for each user, the membership entry the
+ * policy reads and their library (management roles unlock team-only
+ * content, Codex-c01do); and, once, the org's slug-keyed public caches. An
+ * ownership change passes both the new and the previous owner, so the
+ * org-slug pass, which opens a DB client, runs once and not per user
+ * (Codex-2hxff.46). A null id (an ownerless org had no previous owner) and a
+ * repeated one are skipped. Every part logs its failure, through `obs` or,
+ * when that is undefined, this module's own.
  */
 export function invalidateMemberCaches(
   ctx: MemberCacheCtx,
   orgId: string,
-  userId: string,
+  userIds: readonly (string | null)[],
   obs: ObservabilityClient | undefined
 ): void {
   const logger = orFallback(ctx, obs);
-  invalidateMembershipCache(ctx, orgId, userId, logger);
+  const users = new Set(userIds.filter((id): id is string => Boolean(id)));
+  for (const userId of users) {
+    invalidateMembershipCache(ctx, orgId, userId, logger);
+    invalidateUserLibrary({
+      kv: ctx.env.CACHE_KV,
+      waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+      userId,
+      logger,
+    });
+  }
   dispatchOrgSlugInvalidation(ctx, orgId, logger);
-  invalidateUserLibrary({
-    kv: ctx.env.CACHE_KV,
-    waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
-    userId,
-    logger,
-  });
 }
 
 /**

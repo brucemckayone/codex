@@ -700,4 +700,145 @@ describe('SubscriptionService disputes (Codex-2hxff.9)', () => {
     expect(await disputedAt(sub.id)).not.toBeNull();
     expect(stripe.subscriptions.update).not.toHaveBeenCalled();
   });
+
+  // ── a late win (Codex-2hxff.70; late-win data design §4.3, §4.8) ──────
+
+  /** A dispute lost, then won late, as `recordLateWin` leaves it. */
+  async function wonLate(input: { stripeDisputeId: string }) {
+    await db
+      .update(disputes)
+      .set({ status: 'won', lateWonAt: new Date(), outcomeAppliedAt: null })
+      .where(eq(disputes.stripeDisputeId, input.stripeDisputeId));
+  }
+
+  it('a late win on a course subscription the loss ended clears its mark and leaves the grant of the buyer’s new subscription alone (premise 15)', async () => {
+    const day = 24 * 3600 * 1000;
+    const [subscriberId] = await seedTestUsers(db, 1);
+    const userId = subscriberId ?? '';
+    const courseRow = (
+      status: string,
+      periodEnd: Date,
+      endedAt: Date | null
+    ) => ({
+      userId,
+      courseId,
+      planId,
+      organizationId: orgId,
+      stripeSubscriptionId: `sub_course_${uid()}`,
+      stripeCustomerId: `cus_course_${uid()}`,
+      status,
+      billingInterval: 'month',
+      currentPeriodStart: new Date(periodEnd.getTime() - 30 * day),
+      currentPeriodEnd: periodEnd,
+      endedAt,
+    });
+    // Ended by the loss: its period end is past, its mark still set.
+    const ended = takeFirst(
+      await db
+        .insert(courseSubscriptions)
+        .values({
+          ...courseRow(
+            'cancelled',
+            new Date(Date.now() - 10 * day),
+            new Date(Date.now() - 20 * day)
+          ),
+          disputedAt: new Date(Date.now() - 25 * day),
+        })
+        .returning()
+    );
+    await writeCourseSubscriptionEntitlement(db, {
+      userId,
+      organizationId: orgId,
+      courseId,
+      courseSubscriptionId: ended.id,
+      expiresAt: ended.currentPeriodEnd,
+    });
+    // The buyer subscribed again since; its grant runs to its own period end.
+    const renewedTo = new Date(Date.now() + 25 * day);
+    const current = takeFirst(
+      await db
+        .insert(courseSubscriptions)
+        .values(courseRow('active', renewedTo, null))
+        .returning()
+    );
+    await writeCourseSubscriptionEntitlement(db, {
+      userId,
+      organizationId: orgId,
+      courseId,
+      courseSubscriptionId: current.id,
+      expiresAt: renewedTo,
+    });
+    const input = await dispute(
+      await invoiceCharge({ courseSubscriptionId: ended.id }),
+      'lost'
+    );
+    await wonLate(input);
+    vi.mocked(stripe.subscriptions.retrieve).mockImplementation((async (
+      id: string
+    ) => ({
+      id,
+      status: id === ended.stripeSubscriptionId ? 'canceled' : 'active',
+    })) as never);
+
+    const result = await service.restoreAfterDispute(input);
+
+    expect(result).toMatchObject({
+      restored: true,
+      subscription: { id: ended.id },
+    });
+    expect(
+      takeFirst(
+        await db
+          .select({ at: courseSubscriptions.disputedAt })
+          .from(courseSubscriptions)
+          .where(eq(courseSubscriptions.id, ended.id))
+      ).at
+    ).toBeNull();
+    const grant = takeFirst(
+      await db
+        .select()
+        .from(entitlements)
+        .where(eq(entitlements.sourceRef, current.id))
+    );
+    expect(grant).toMatchObject({ expiresAt: renewedTo, revokedAt: null });
+    // An ended subscription is not billed again.
+    expect(stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  it('the loss after a late win does nothing for the subscription: no access ended, no Stripe cancel', async () => {
+    const sub = await tierSubscription();
+    const input = await dispute(
+      await invoiceCharge({ subscriptionId: sub.id }),
+      'lost'
+    );
+    await wonLate(input);
+
+    // The reconcile's stale re-run of the unfinished loss.
+    const ended = await service.cancelForLostDispute(input);
+
+    expect(ended).toBeUndefined();
+    expect(await disputedAt(sub.id)).toBeNull();
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+  });
+
+  it('a late win recorded after the loss ended access, before its Stripe cancel: the dispute is read again, and the cancel is skipped', async () => {
+    const sub = await tierSubscription();
+    const input = await dispute(
+      await invoiceCharge({ subscriptionId: sub.id }),
+      'lost'
+    );
+    // The late win lands while the loss asks Stripe whether it is live.
+    vi.mocked(stripe.subscriptions.retrieve).mockImplementation((async (
+      id: string
+    ) => {
+      await wonLate(input);
+      return { id, status: 'active' };
+    }) as never);
+
+    const ended = await service.cancelForLostDispute(input);
+
+    expect(ended).toBeUndefined();
+    expect(stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+  });
 });

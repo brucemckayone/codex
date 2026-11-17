@@ -19,6 +19,10 @@
  * stays set, then the answer lands. `deferRefresh()` makes the next refresh a
  * kit-shaped one whose promise settles only when the test lands or fails it.
  *
+ * A slot never hands the page a NEW query, and kit does on a Retry of a read
+ * that failed. So a test of the payout alert's Retry takes the Connect read
+ * as kit hands it: `kitMyConnect()` / `kitOrgPayout()` (Codex-if444).
+ *
  * A `.svelte.ts` module (runes compiled), NOT a `*.test.*` file, so it is
  * never collected as a suite.
  */
@@ -30,6 +34,7 @@ import type {
   SubscriptionStats,
   SubscriptionTier,
 } from '$lib/types';
+import { type KitQuery, kitQuery } from './kit-query.mock.svelte';
 
 export interface QuerySlot<T> {
   current: T | undefined;
@@ -150,6 +155,15 @@ export const TWO_SUBSCRIBERS: SubscriptionStats = {
 
 let myConnect = makeSlot<ConnectAccountStatusResponse>();
 let orgPayout = makeSlot<OrganizationPayoutStatusResponse>();
+/**
+ * The Connect reads as kit hands them, in place of the slots until the next
+ * `reset()` (Codex-if444). A double of kit's query
+ * (`kit-query.mock.svelte`): a Retry of a failed read hands the page a new
+ * query, still loading, as kit does. A slot never swaps, which is how both
+ * payout alerts' Retry passed its tests while judging the wrong query.
+ */
+let myConnectKit: KitQuery<ConnectAccountStatusResponse> | null = null;
+let orgPayoutKit: KitQuery<OrganizationPayoutStatusResponse> | null = null;
 let tiers = makeSlot<SubscriptionTier[]>([]);
 let stats = makeSlot<SubscriptionStats>(TWO_SUBSCRIBERS);
 /**
@@ -163,6 +177,8 @@ let deleteImpacts = new Map<string, QuerySlot<unknown>>();
 let tierItems = new Map<string, QuerySlot<unknown>>();
 /** The tiers' price changes (Codex-2hxff.86): answered, none, by default. */
 let priceChanges = makeSlot<unknown[]>([]);
+/** The price changes as kit hands them, for a Try again test (`kitPriceChanges`). */
+let priceChangesKit: KitQuery<unknown[]> | null = null;
 let subscribers = makeSlot<{
   items: unknown[];
   pagination: {
@@ -198,12 +214,15 @@ const commands = [
 export function reset() {
   myConnect = makeSlot<ConnectAccountStatusResponse>();
   orgPayout = makeSlot<OrganizationPayoutStatusResponse>();
+  myConnectKit = null;
+  orgPayoutKit = null;
   tiers = makeSlot<SubscriptionTier[]>([]);
   stats = makeSlot<SubscriptionStats>(TWO_SUBSCRIBERS);
   accessSummary = makeSlot<unknown>();
   deleteImpacts = new Map();
   tierItems = new Map();
   priceChanges = makeSlot<unknown[]>([]);
+  priceChangesKit = null;
   subscribers = makeSlot({
     items: [],
     pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
@@ -213,10 +232,35 @@ export function reset() {
 
 export const myConnectSlot = () => myConnect;
 export const orgPayoutSlot = () => orgPayout;
+
+/** `getMyConnectStatus` as kit hands it, until the next `reset()`. */
+export function kitMyConnect(): KitQuery<ConnectAccountStatusResponse> {
+  myConnectKit = kitQuery();
+  return myConnectKit;
+}
+
+/** `getOrganizationPayoutStatus` as kit hands it, until the next `reset()`. */
+export function kitOrgPayout(): KitQuery<OrganizationPayoutStatusResponse> {
+  orgPayoutKit = kitQuery();
+  return orgPayoutKit;
+}
 export const tiersSlot = () => tiers;
 export const statsSlot = () => stats;
 export const accessSummarySlot = () => accessSummary;
 export const priceChangesSlot = () => priceChanges;
+
+/**
+ * The price changes as kit hands them, until the next `reset()`: a Try again
+ * of a failed first read hands the page a NEW query (Codex-if444). Read by
+ * `getTierPriceChanges`, and by a journeys mock through `priceChangesRead`.
+ */
+export function kitPriceChanges(): KitQuery<unknown[]> {
+  priceChangesKit = kitQuery();
+  return priceChangesKit;
+}
+
+/** What a price-changes read returns now: the kit double if set, else the slot. */
+export const priceChangesRead = () => priceChangesKit?.get() ?? priceChanges;
 
 /** The delete-impact slot for one tier (made on first read, still loading). */
 export function deleteImpactSlot(tierId: string): QuerySlot<unknown> {
@@ -243,9 +287,9 @@ export function tierItemsSlot(key: string): QuerySlot<unknown> {
 }
 
 // ── query() ─────────────────────────────────────────────────────────────
-export const getMyConnectStatus = vi.fn(() => myConnect);
+export const getMyConnectStatus = vi.fn(() => myConnectKit?.get() ?? myConnect);
 export const getOrganizationPayoutStatus = vi.fn(
-  (_organizationId: string) => orgPayout
+  (_organizationId: string) => orgPayoutKit?.get() ?? orgPayout
 );
 export const listTiers = vi.fn((_orgId: string) => tiers);
 export const getSubscriptionStats = vi.fn((_orgId: string) => stats);
@@ -258,4 +302,6 @@ export const listTierItems = vi.fn(
     tierItemsSlot(tierItemsKey(args))
 );
 export const listSubscribers = vi.fn((_args: unknown) => subscribers);
-export const getTierPriceChanges = vi.fn((_orgId: string) => priceChanges);
+export const getTierPriceChanges = vi.fn((_orgId: string) =>
+  priceChangesRead()
+);

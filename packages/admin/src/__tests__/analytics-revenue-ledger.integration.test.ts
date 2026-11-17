@@ -244,6 +244,58 @@ describe('AdminAnalyticsService revenue block (payouts ledger)', () => {
     expect(stats.totalRevenueCents).toBe(600 + 1000);
   });
 
+  it('a failed refund settled as refunded elsewhere comes off as a standing one does, never past the charge; one re-paid to the creators or still open does not (owner decision 2026-11-09)', async () => {
+    const orgId = await newOrg();
+    const elsewhere = await contentSale(orgId);
+    await fixtures.refund({
+      chargeId: elsewhere.chargeId,
+      cents: 300,
+      status: 'failed',
+      purchaseId: elsewhere.purchaseId,
+      resolution: 'refunded_elsewhere',
+    });
+    const repaid = await contentSale(orgId, { customerId: secondBuyer });
+    await fixtures.refund({
+      chargeId: repaid.chargeId,
+      cents: 300,
+      status: 'failed',
+      purchaseId: repaid.purchaseId,
+      resolution: 'creators_repaid',
+    });
+    const open = await contentSale(orgId, { customerId: owner });
+    await fixtures.refund({
+      chargeId: open.chargeId,
+      cents: 300,
+      status: 'failed',
+      purchaseId: open.purchaseId,
+    });
+    // A Stripe refund and one settled elsewhere together: capped at the charge.
+    const both = await contentSale(orgId, { customerId: creatorB });
+    await fixtures.refund({
+      chargeId: both.chargeId,
+      cents: 600,
+      status: 'succeeded',
+      purchaseId: both.purchaseId,
+    });
+    await fixtures.refund({
+      chargeId: both.chargeId,
+      cents: 600,
+      status: 'failed',
+      purchaseId: both.purchaseId,
+      resolution: 'refunded_elsewhere',
+    });
+
+    const stats = await service.getRevenueStats(orgId);
+
+    expect(stats.totalRevenueCents).toBe(700 + 1000 + 1000 + 0);
+    // By the clawback's rounding: floor(slice × 300 / 1000) off each slice.
+    expect(stats.platformFeeCents).toBe(70 + 100 + 100);
+    expect(stats.creatorPayoutCents).toBe(420 + 600 + 600);
+    expect(stats.organizationFeeCents).toBe(210 + 300 + 300);
+    // Taken back in full, the last is no longer a purchase.
+    expect(stats.totalPurchases).toBe(3);
+  });
+
   it('a lost chargeback comes off; an open or won one does not', async () => {
     const orgId = await newOrg();
     const lost = await contentSale(orgId);

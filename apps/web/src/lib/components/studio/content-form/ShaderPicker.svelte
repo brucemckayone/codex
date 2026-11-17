@@ -115,7 +115,7 @@
 
   .preset-card:focus-visible {
     outline: var(--border-width-thick) var(--border-style) var(--color-primary-500);
-    outline-offset: var(--space-px);
+    outline-offset: var(--focus-offset);
   }
 
   .preset-card.selected {

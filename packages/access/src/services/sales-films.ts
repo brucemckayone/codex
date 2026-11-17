@@ -35,8 +35,12 @@
  * paid reaches both kinds of film at once.
  */
 
-import { CONTENT_STATUS, MEDIA_STATUS, MEDIA_TYPES } from '@codex/constants';
-import { CREATOR_LIST_ROLES } from '@codex/database';
+import {
+  CONTENT_STATUS,
+  MEDIA_STATUS,
+  MEDIA_TYPES,
+  ORGANIZATION_TEAM_ROLES,
+} from '@codex/constants';
 import {
   brandingSettings,
   content,
@@ -130,8 +134,8 @@ function filmReady(): SQL {
 /**
  * Rule (c)'s membership half: the outer `media_items` row's creator is an
  * ACTIVE member of the TEAM of `organizationId` (a value, or the joined
- * `courses.organization_id` column): an owner, admin or creator, the set the
- * platform lists as an org's creators (`CREATOR_LIST_ROLES`).
+ * `courses.organization_id` column): an owner, admin or creator
+ * (`ORGANIZATION_TEAM_ROLES`, the team every access gate reads).
  *
  * Narrower than `assertMediaItemsInOrg`, which admits any active role, on
  * purpose. `member` and `subscriber` are CUSTOMER rows: a paying subscriber
@@ -154,7 +158,7 @@ function creatorIsMember(
           eq(organizationMemberships.userId, mediaItems.creatorId),
           eq(organizationMemberships.organizationId, organizationId),
           eq(organizationMemberships.status, 'active'),
-          inArray(organizationMemberships.role, [...CREATOR_LIST_ROLES])
+          inArray(organizationMemberships.role, ORGANIZATION_TEAM_ROLES)
         )
       )
   );

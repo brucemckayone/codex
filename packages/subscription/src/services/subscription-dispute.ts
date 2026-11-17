@@ -8,7 +8,9 @@
  * - a win restores both, unless another chargeback on it is still open;
  * - a loss cancels it at Stripe, at once and without proration: the bank has
  *   already returned the money. `customer.subscription.deleted` then ends it
- *   here, as for any cancellation.
+ *   here, as for any cancellation;
+ * - a late win (lost, then won; Codex-2hxff.70) is restored as a win. One the
+ *   loss cancelled stays ended: only its mark is cleared (owner decision Q2).
  *
  * Tier and course subscriptions are handled alike. The money is not handled
  * here: the clawback acts on the invoice's charge. Each step is safe to run
@@ -17,7 +19,10 @@
  * has ended.
  */
 
-import { DISPUTE_CHARGEBACK_OPEN_STATUSES } from '@codex/constants';
+import {
+  DISPUTE_CHARGEBACK_OPEN_STATUSES,
+  SUBSCRIPTION_STATUS,
+} from '@codex/constants';
 import {
   courseSubscriptions,
   disputes,
@@ -211,6 +216,13 @@ export async function restoreDisputedSubscription(
  * A lost dispute: access ended now (a dispute can open already lost, never
  * paused), then the subscription cancelled at Stripe, at once and without
  * proration. Our cancellation follows from `customer.subscription.deleted`.
+ *
+ * Only while the dispute is still lost (Codex-2hxff.70; late-win data design
+ * §4.8): the hourly reconcile re-runs an unfinished loss, and a late win
+ * recorded meanwhile must not have its subscription ended. Access is ended
+ * under a share lock on the dispute (`setDisputedAt`), and the dispute is
+ * read again just before the cancel, which cannot be undone. Undefined, with
+ * nothing written or cancelled, once it is no longer lost.
  */
 export async function cancelLostDisputeSubscription(
   deps: SubscriptionDisputeDeps,
@@ -218,9 +230,28 @@ export async function cancelLostDisputeSubscription(
 ): Promise<DisputedSubscription | undefined> {
   const subscription = await resolveDisputedSubscription(deps, input);
   if (!subscription) return undefined;
-  await setDisputedAt(deps, subscription, new Date());
+  if (
+    !(await setDisputedAt(
+      deps,
+      subscription,
+      new Date(),
+      input.stripeDisputeId
+    ))
+  ) {
+    return undefined;
+  }
   const stripeId = subscription.stripeSubscriptionId;
   if (stripeId && (await isLiveAtStripe(deps, stripeId))) {
+    if (!(await isStillLost(deps, input.stripeDisputeId))) {
+      deps.obs.warn(
+        'A lost dispute is no longer lost; its subscription is not cancelled',
+        {
+          stripeDisputeId: input.stripeDisputeId,
+          subscriptionId: subscription.id,
+        }
+      );
+      return undefined;
+    }
     await deps.stripe.subscriptions.cancel(
       stripeId,
       {
@@ -287,6 +318,25 @@ const HOLDING_STATUSES: readonly string[] = [
   ...DISPUTE_CHARGEBACK_OPEN_STATUSES,
   'lost',
 ];
+
+/**
+ * Whether the dispute's row is still lost, read under a share lock: a late
+ * win being recorded is waited for, then seen.
+ */
+async function isStillLost(
+  deps: SubscriptionDisputeDeps,
+  stripeDisputeId: string
+): Promise<boolean> {
+  return deps.db.transaction(async (tx) => {
+    const [dispute] = await tx
+      .select({ status: disputes.status })
+      .from(disputes)
+      .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+      .limit(1)
+      .for('share');
+    return dispute?.status === 'lost';
+  });
+}
 
 /** Whether the dispute's row still records an open chargeback. */
 async function isOpenChargeback(
@@ -359,6 +409,12 @@ async function hasOtherHoldingChargeback(
  * to. While billing was paused, Stripe kept cycling and voided each renewal,
  * so no paid renewal moved the grant on: it moves now to the period end Stripe
  * reports (`customer.subscription.updated` keeps it), as a renewal would.
+ *
+ * Only for a live subscription (Codex-2hxff.70, plan premise 15). The refresh
+ * finds the grant by buyer and course, so for one a lost dispute ended it
+ * would move the grant of a subscription the buyer took out since to the
+ * ended one's period end, which is past: a late win would end their access.
+ * An ended subscription grants nothing, so it has no grant of its own to move.
  */
 async function refreshCourseGrant(
   deps: SubscriptionDisputeDeps,
@@ -368,11 +424,19 @@ async function refreshCourseGrant(
     .select({
       courseId: courseSubscriptions.courseId,
       currentPeriodEnd: courseSubscriptions.currentPeriodEnd,
+      status: courseSubscriptions.status,
+      endedAt: courseSubscriptions.endedAt,
     })
     .from(courseSubscriptions)
     .where(eq(courseSubscriptions.id, subscription.id))
     .limit(1);
-  if (!row) return;
+  if (
+    !row ||
+    row.endedAt !== null ||
+    row.status === SUBSCRIPTION_STATUS.CANCELLED
+  ) {
+    return;
+  }
   await refreshCourseSubscriptionEntitlementExpiry(deps.db, {
     userId: subscription.userId,
     courseId: row.courseId,

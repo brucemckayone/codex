@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { userIdSchema } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
 
 /**
@@ -51,10 +52,15 @@ export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
  * The owner offers ownership to an active admin or creator. `confirmName` is
  * the organisation's name as the owner typed it; the service compares it
  * trimmed and case-insensitively, so a stale tab cannot send an offer by
- * accident.
+ * accident. The recipient is a `users.id` (TEXT, never a uuid), held to
+ * `userIdSchema`'s length and format after the trim.
  */
 export const offerOwnershipSchema = z.object({
-  recipientUserId: z.string().trim().min(1, 'Choose who to offer ownership to'),
+  recipientUserId: z
+    .string()
+    .trim()
+    .min(1, 'Choose who to offer ownership to')
+    .pipe(userIdSchema),
   confirmName: z
     .string()
     .trim()
@@ -65,11 +71,12 @@ export const offerOwnershipSchema = z.object({
 export type OfferOwnershipInput = z.infer<typeof offerOwnershipSchema>;
 
 /**
- * Platform support assigns a new owner (admin-api). `reason` is logged as a
- * structured field for the audit trail; it must never carry PII.
+ * Platform support assigns a new owner (admin-api). `userId` is a `users.id`,
+ * as for an offer. `reason` is logged as a structured field for the audit
+ * trail; it must never carry PII.
  */
 export const reassignOwnerSchema = z.object({
-  userId: z.string().trim().min(1),
+  userId: z.string().trim().pipe(userIdSchema),
   reason: z.string().trim().min(3).max(500),
 });
 

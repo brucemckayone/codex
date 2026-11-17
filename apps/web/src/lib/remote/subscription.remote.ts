@@ -202,8 +202,9 @@ const changeTierCommandSchema = z.object({
    */
   prorationDate: z.number().int().positive().optional(),
   /**
-   * A switch into yearly billing: the preview's `quote`, passed back unchanged.
-   * The server re-checks it before the write (Codex-2hxff.96).
+   * A switch into yearly billing, or a plan change that leaves yearly billing
+   * (C(b)) and charges now: the preview's `quote`, passed back unchanged. The
+   * server re-checks it before the write (Codex-2hxff.96, .103).
    */
   quote: z.string().max(512).optional(),
   /**

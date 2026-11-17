@@ -37,6 +37,9 @@ function row(overrides: Partial<PayoutWithCreator>): PayoutWithCreator {
     subscriptionId: null,
     stripeChargeId: null,
     bankOn: null,
+    takenBack: null,
+    paidBack: null,
+    paysBack: null,
     ...overrides,
   } as PayoutWithCreator;
 }
@@ -199,5 +202,54 @@ describe('groupTransactions', () => {
 
   it('returns nothing for an empty page', () => {
     expect(groupTransactions([])).toEqual([]);
+  });
+
+  it('a won chargeback’s pay-backs stay in the sale’s group, and the sale counts once (P1)', () => {
+    // Ellen's £24.00 'Winter Light': both shares reversed on 26 Oct, paid
+    // back on 14 Dec. The pay-backs keep the sale's purchase id.
+    const PURCHASE = 'e11e0000-0000-4000-8000-000000000003';
+    const sale = {
+      purchaseId: PURCHASE,
+      createdAt: '2026-09-03T20:14:00.000Z',
+    };
+    const paysBack = {
+      causeType: 'dispute' as const,
+      title: 'Winter Light',
+      wonOn: '2026-12-14',
+    };
+    const [group] = groupTransactions([
+      row({ ...sale, payoutType: 'platform_fee', amountCents: 240 }),
+      row({
+        ...sale,
+        payoutType: 'organization_fee',
+        status: 'reversed',
+        amountCents: 720,
+        paidBack: { on: '2026-12-14' },
+      }),
+      row({
+        ...sale,
+        status: 'reversed',
+        amountCents: 1440,
+        paidBack: { on: '2026-12-14' },
+      }),
+      row({
+        purchaseId: PURCHASE,
+        payoutType: 'organization_fee',
+        amountCents: 720,
+        createdAt: '2026-12-14T16:21:00.000Z',
+        paysBack,
+      }),
+      row({
+        purchaseId: PURCHASE,
+        amountCents: 1440,
+        createdAt: '2026-12-14T16:21:00.000Z',
+        paysBack,
+      }),
+    ]);
+
+    expect(group.rows).toHaveLength(5);
+    expect(group.totalCents).toBe(2400);
+    // Ordered by its latest row, the pay-backs: the group moves to the top.
+    expect(group.latestAt).toBe('2026-12-14T16:21:00.000Z');
   });
 });

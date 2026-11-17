@@ -44,75 +44,6 @@ export class ContentNotGrantableError extends BusinessLogicError {
   }
 }
 
-/**
- * An admin publish of content that earns money (`requiresPayoutsToPublish`,
- * `@codex/constants`) whose creator can't be paid yet (422, Codex-2hxff.14).
- *
- * The twin of `@codex/content`'s `CreatorPayoutsRequiredError`, which this
- * package cannot import (admin depends on Foundation packages only). The
- * message and `code: 'CREATOR_CONNECT_REQUIRED'` are copied verbatim so the
- * Studio shows the same "set up payouts" text whichever route refused — keep
- * the two in step. Like it, the context never names the creator (it reaches
- * the client verbatim).
- */
-export class CreatorPayoutsRequiredError extends BusinessLogicError {
-  constructor(accessType: string) {
-    super(
-      'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
-      {
-        accessType,
-        code: 'CREATOR_CONNECT_REQUIRED',
-      }
-    );
-  }
-}
-
-/**
- * An admin publish of subscriber content that no tier includes (422,
- * Codex-2hxff.91, owner U2: "publishing needs at least one tier"). The twin of
- * `@codex/content`'s `TierRequiredToPublishError`; the message and
- * `code: 'TIER_REQUIRED_TO_PUBLISH'` are copied verbatim — keep them in step.
- */
-export class TierRequiredToPublishError extends BusinessLogicError {
-  constructor(contentId: string) {
-    super('Tick at least one plan before publishing subscriber content.', {
-      contentId,
-      code: 'TIER_REQUIRED_TO_PUBLISH',
-    });
-  }
-}
-
-/**
- * An admin publish of content whose media item was deleted (422,
- * Codex-6sbn1). The twin of `@codex/content`'s `MediaDeletedError`; the
- * message and `code: 'MEDIA_DELETED'` are copied verbatim — keep them in
- * step. The context carries the content id only (it is sent to the client).
- */
-export class MediaDeletedError extends BusinessLogicError {
-  constructor(contentId: string) {
-    super(
-      'Choose another media item before you publish: the last one was deleted.',
-      { contentId, code: 'MEDIA_DELETED' }
-    );
-  }
-}
-
-/**
- * An admin publish of content whose thumbnail is a frame of one of the
- * creator's deleted videos (422, Codex-tqvmx). The twin of `@codex/content`'s
- * `ThumbnailMediaDeletedError` as its publish words it; the message and
- * `code: 'THUMBNAIL_MEDIA_DELETED'` are copied verbatim — keep them in step.
- * The context carries the content id only (it is sent to the client).
- */
-export class ThumbnailMediaDeletedError extends BusinessLogicError {
-  constructor(contentId: string) {
-    super(
-      'Choose another thumbnail before you publish: it’s a frame of a deleted video.',
-      { contentId, code: 'THUMBNAIL_MEDIA_DELETED' }
-    );
-  }
-}
-
 // ============================================================================
 // Support refunds (Codex-2hxff.28; data design §1's error table)
 //
@@ -144,6 +75,45 @@ export class ChargeHasChargebackError extends BusinessLogicError {
   }
 }
 
+/**
+ * A chargeback on this charge was won and the creators' pay-back is not yet
+ * applied (Codex-2hxff.70; late-win data design §4.7, §6): a refund now
+ * would race it. The hourly reconcile applies it, and retries a step that
+ * failed every hour; one Stripe will never make is settled by hand
+ * (docs/payments/operations.md). So the message promises no time (review
+ * cycle 1, M3).
+ */
+export class ChargebackSettlingError extends BusinessLogicError {
+  constructor() {
+    super(
+      "This payment's chargeback was decided for us, and the creators are still being paid back. Refunds wait until that finishes; a step that fails is retried every hour.",
+      { code: 'CHARGEBACK_SETTLING' }
+    );
+  }
+}
+
+/**
+ * The buyer of this charge was refunded outside Stripe
+ * (`disputes.refunded_outside_stripe_at`): support settled a late-win refund
+ * Stripe won't make by hand (docs/payments/operations.md, "Settling a
+ * late-win refund Stripe won't make"), settled the late win's own failed
+ * refund as refunded elsewhere, or recorded a refund another way by hand
+ * (release-checklist.md, R19 (b)). A refund through Stripe now would pay the
+ * buyer twice, so it is refused for good (owner decision 2026-11-08, "Block
+ * it in code").
+ */
+export class RefundedOutsideStripeError extends BusinessLogicError {
+  constructor(refundedAt: Date) {
+    super(
+      "This payment was refunded outside Stripe, so it can't be refunded here.",
+      {
+        code: 'REFUNDED_OUTSIDE_STRIPE',
+        refundedOutsideStripeAt: refundedAt.toISOString(),
+      }
+    );
+  }
+}
+
 /** The charge's standing refunds already cover all of it. */
 export class NothingLeftToRefundError extends BusinessLogicError {
   constructor() {
@@ -153,7 +123,10 @@ export class NothingLeftToRefundError extends BusinessLogicError {
   }
 }
 
-/** More than the charge less its standing refunds (400). */
+/**
+ * More than the charge less its standing refunds and those settled as
+ * refunded elsewhere (400).
+ */
 export class RefundAmountTooLargeError extends ValidationError {
   constructor(maxCents: number) {
     super('The amount is more than is left to refund.', {
@@ -232,5 +205,26 @@ export class AlreadySettledError extends ConflictError {
       code: 'ALREADY_SETTLED',
       resolution,
     });
+  }
+}
+
+/**
+ * A "creators re-paid" settlement of a failed refund that a late win made
+ * (`disputes.late_win_refund_id`, or the refund's own metadata
+ * `codex_late_win_dispute` at Stripe; owner decision 6, 2026-11-08, "Block
+ * it in code"). That refund pays back a buyer who paid twice, so the buyer is
+ * still owed it, and what its clawback took from the creators stays taken:
+ * re-paying them, then refunding the buyer, would pay the same money out
+ * twice. It is refused for good. Support refunds the buyer another way, or
+ * first refunds the charge again through Stripe, then settles it as refunded
+ * elsewhere (docs/payments/purchases.md#refunds). The context is the dispute's
+ * Stripe id only.
+ */
+export class LateWinRefundNotRepayableError extends BusinessLogicError {
+  constructor(stripeDisputeId: string) {
+    super(
+      "This refund pays back a buyer who paid twice, so the creators can't be re-paid for it. Refund the buyer another way, then settle it as refunded elsewhere.",
+      { code: 'LATE_WIN_REFUND_NOT_REPAYABLE', disputeId: stripeDisputeId }
+    );
   }
 }

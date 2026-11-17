@@ -24,7 +24,12 @@
  * this service composes the shapes and does NOT re-run the entitlement decision.
  */
 
-import { CONTENT_STATUS, MEDIA_TYPES } from '@codex/constants';
+import {
+  CONTENT_STATUS,
+  MEDIA_TYPES,
+  ORGANIZATION_TEAM_ROLES,
+} from '@codex/constants';
+import { scopedNotDeleted } from '@codex/database';
 import type { CourseGuide } from '@codex/database/schema';
 import {
   content,
@@ -59,6 +64,8 @@ import type {
   BrandTokenOverrides,
   CompletionSource,
   ContentCourseLinks,
+  ContentPortalUse,
+  ContentPortalUses,
   CourseCardSummary,
   CourseDashboardData,
   CourseSellPreview,
@@ -429,6 +436,103 @@ export class CourseJourneyService extends BaseService {
       return { courses: [...byId.values()] };
     } catch (error) {
       this.handleError(error, 'getContentCourses');
+    }
+  }
+
+  /**
+   * The portals a creator's own piece is a practice in, for its editor
+   * (Codex-a6ofh.2.5, mockup W5): any status but deleted, so a draft portal
+   * counts, through stages that are not deleted, in the piece's own org (the
+   * space guard practices are added under), while the creator is on its
+   * team, active and in a team role: one who has left keeps the piece, not a
+   * view of the org's drafts, and coming back as an audience member (a
+   * subscriber, which reactivates the same row) does not bring that view
+   * back. Empty for a piece that is not the creator's, or has no org: a
+   * course always has one.
+   *
+   * A course may have more than one page (a duplicate copies its subject):
+   * it is named and linked by its published one, else its oldest, so two
+   * reads always agree.
+   */
+  async getContentPortalUses(
+    contentId: string,
+    creatorId: string
+  ): Promise<ContentPortalUses> {
+    try {
+      // The stage's place among its course's stages, from 1. The peer
+      // stages are aliased, so the outer `course_stages` is this row's.
+      const stageNumber = sql<number>`(
+        select count(*)::int from course_stages peer
+        where peer.course_id = ${courseStages.courseId}
+          and peer.deleted_at is null
+          and peer.sort_order <= ${courseStages.sortOrder}
+      )`;
+      const rows = await this.db
+        .select({
+          courseId: courses.id,
+          courseTitle: courses.title,
+          pageId: landingPages.id,
+          pageTitle: landingPages.title,
+          stageNumber,
+        })
+        .from(stagePractices)
+        .innerJoin(content, eq(content.id, stagePractices.contentId))
+        .innerJoin(
+          organizationMemberships,
+          and(
+            eq(organizationMemberships.userId, creatorId),
+            eq(organizationMemberships.organizationId, content.organizationId),
+            eq(organizationMemberships.status, 'active'),
+            inArray(organizationMemberships.role, ORGANIZATION_TEAM_ROLES)
+          )
+        )
+        .innerJoin(courseStages, eq(courseStages.id, stagePractices.stageId))
+        .innerJoin(courses, eq(courses.id, courseStages.courseId))
+        .leftJoin(
+          landingPages,
+          and(
+            eq(landingPages.subjectId, courses.id),
+            eq(landingPages.subjectType, 'course'),
+            eq(landingPages.organizationId, courses.organizationId),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .where(
+          and(
+            eq(stagePractices.contentId, contentId),
+            scopedNotDeleted(content, creatorId),
+            isNull(courseStages.deletedAt),
+            isNull(courses.deletedAt),
+            eq(courses.organizationId, content.organizationId)
+          )
+        )
+        // Each course's rows start with the page it is named by, whose first
+        // row the map below keeps.
+        .orderBy(
+          asc(courses.title),
+          asc(courses.id),
+          desc(sql`(${landingPages.status} = 'published')`),
+          asc(landingPages.createdAt),
+          asc(landingPages.id),
+          asc(courseStages.sortOrder)
+        );
+
+      const byCourse = new Map<string, ContentPortalUse>();
+      for (const row of rows) {
+        const use = byCourse.get(row.courseId) ?? {
+          courseId: row.courseId,
+          pageId: row.pageId,
+          title: row.pageTitle ?? row.courseTitle,
+          stageNumbers: [],
+        };
+        if (!use.stageNumbers.includes(row.stageNumber)) {
+          use.stageNumbers.push(row.stageNumber);
+        }
+        byCourse.set(row.courseId, use);
+      }
+      return { uses: [...byCourse.values()] };
+    } catch (error) {
+      this.handleError(error, 'getContentPortalUses');
     }
   }
 

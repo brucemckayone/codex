@@ -240,7 +240,7 @@ describe('marking someone told another way', () => {
       "Use this when you've told Jonah about the rise another way, for example on the phone. It counts as their notice from now, 4 Nov at 10:42."
     );
     expect(words.follows?.split(DATE_MARK)).toEqual([
-      'Jonah is the last person this rise is waiting for, so it will start on ',
+      'Jonah is the last person this rise is waiting for, so it will start no sooner than ',
       '.',
     ]);
     expect(words.date).toBe('5 December 2026');
@@ -250,7 +250,7 @@ describe('marking someone told another way', () => {
     );
   });
 
-  test('F4 marked, and the date is set', () => {
+  test('F4 marked on a rise that already has its date: the notice says it', () => {
     expect(
       markedNotice(feeNotice(), {
         effectiveFrom: '2026-12-05T00:00:00.000Z',
@@ -259,7 +259,17 @@ describe('marking someone told another way', () => {
     ).toEqual({
       variant: 'success',
       lead: 'Jonah Reyes is marked as told.',
-      text: 'Everyone this rise affects has now been told, so it starts on 5 December 2026.',
+      text: 'This rise already has its start date: 5 December 2026.',
+    });
+  });
+
+  test('F4 marked the last one waiting: the next 08:00 UTC run sets the date, never the mark (commerce delta4)', () => {
+    expect(
+      markedNotice(feeNotice(), { effectiveFrom: null, waitingFor: 0 })
+    ).toEqual({
+      variant: 'success',
+      lead: 'Jonah Reyes is marked as told.',
+      text: "Nobody on the list is waiting now, so the next 08:00 UTC run sets the rise's start date.",
     });
   });
 

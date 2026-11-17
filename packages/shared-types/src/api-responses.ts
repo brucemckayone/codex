@@ -199,8 +199,7 @@ export interface PublicMediaItem {
 /**
  * The org on a catalogue row (Codex-567de): what the web reads, which is a
  * link (`slug`) and the creator profile's org cards (`id`, `name`,
- * `logoUrl`). The rest of the organizations row, the payee's
- * `primaryConnectAccountUserId` among it, is not sent.
+ * `logoUrl`). The rest of the organizations row is not sent.
  */
 export interface PublicContentOrganization {
   id: string;

@@ -75,7 +75,8 @@
     heldRowsOf,
     orgCauseLine,
     ownerBalanceOf,
-    ownerBankLine,
+    ownerLines,
+    typeLabel,
   } from './payouts-view';
 
   type PayoutsPage = {
@@ -412,20 +413,6 @@
     return 'Pending';
   }
 
-  /**
-   * Human-readable label for `payouts.payoutType` enum:
-   *   - platform_fee → "Platform fee" (Codex-h69cg tri-party row)
-   *   - organization_fee → "Org fee"
-   *   - creator_payout_to_owner → "Creator pool"
-   *   - creator_payout → "Creator share"
-   */
-  function typeLabel(t: PayoutWithCreator['payoutType']): string {
-    if (t === 'platform_fee') return 'Platform fee';
-    if (t === 'organization_fee') return 'Org fee';
-    if (t === 'creator_payout_to_owner') return 'Creator pool';
-    return 'Creator share';
-  }
-
   function sourceLabel(s: PayoutWithCreator['sourceType']): string {
     return s === 'purchase' ? 'Purchase' : 'Subscription';
   }
@@ -517,7 +504,7 @@
        small outlined buttons rather than labels. Sales renders exactly one
        badge per row. -->
   <Table.Cell>
-    <span class="type-cell">{typeLabel(payout.payoutType)}</span>
+    <span class="type-cell">{typeLabel(payout)}</span>
   </Table.Cell>
 
   <Table.Cell>
@@ -556,11 +543,12 @@
   </Table.Cell>
 
   <Table.Cell>
-    {#if payout.status === 'resolved' && payout.stripeTransferId}
+    {#if (payout.status === 'resolved' || payout.status === 'reversed') && payout.stripeTransferId}
       <!-- The organisation's share reaches the owner's bank on its date
-           (Codex-2hxff.29). A creator's share is in the creator's own
-           account, whose balance the owner can't see, so it gets no date. -->
-      {@const bankLine = ownerBankLine(payout, {
+           (Codex-2hxff.29), or says when Stripe took it back (late-win P0,
+           P1). A creator's share is in the creator's own account, whose
+           balance the owner can't see, so it gets no line. -->
+      {@const lines = ownerLines(payout, {
         connectState: ownerConnectState ?? 'enabled',
         // Until the owner's status is known, no line: see `ownerBalance`.
         balance: rowBalance,
@@ -593,9 +581,9 @@
           <ExternalLinkIcon size={14} />
         </a>
       </span>
-      {#if bankLine}
-        <span class="bank-line">{bankLine}</span>
-      {/if}
+      {#each lines as line (line)}
+        <span class="bank-line">{line}</span>
+      {/each}
       </span>
     {:else if payout.payoutType === 'platform_fee'}
       <!-- Structural, not a data gap: the schema states that platform_fee rows

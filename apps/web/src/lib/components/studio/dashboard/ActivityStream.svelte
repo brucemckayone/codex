@@ -346,10 +346,10 @@
   }
 
   .event[data-tone='purchase'] .event-dot {
-    background-color: color-mix(in srgb, var(--color-success-500) 14%, var(--color-surface));
+    background-color: color-mix(in srgb, var(--color-success) 14%, var(--color-surface));
     color: var(--color-success-700);
     box-shadow: 0 0 0 var(--border-width)
-      color-mix(in srgb, var(--color-success-500) 35%, transparent);
+      color-mix(in srgb, var(--color-success) 35%, transparent);
   }
 
   .event[data-tone='publish'] .event-dot {

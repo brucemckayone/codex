@@ -16,10 +16,13 @@ export {
 export { ImageUploadError, InvalidImageError } from './errors';
 export {
   type CleanupStats,
+  claimStagedCover,
   type OrphanedFileRecord,
   OrphanedFileService,
   PAGE_IMAGE_GRACE_MS,
   type RecordOrphanInput,
+  STAGED_COVER_GRACE_MS,
+  stagedCoverRefusal,
 } from './orphaned-file-service';
 // Page-image key shape (Codex-61zsk.10): the save that nominates page images
 // for cleanup (`CourseJourneyService`) and the sweep that deletes them

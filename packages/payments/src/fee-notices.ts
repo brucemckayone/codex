@@ -7,8 +7,9 @@
  *   lists them on its first morning and adds joiners on later ones (F8).
  * - `dateRiseIfAllTold` (F4, step 4): once nobody on a rise's first list is
  *   still waiting (`due`, `failed`, `unknown`), the rise is dated the first UK
- *   midnight at least 30 days after the last of them was told. The daily run
- *   and support's "told another way" both call it, in their own transaction.
+ *   midnight at least 30 days after the last of them was told. Only the
+ *   daily run calls it, after its joiners step: support's "told another way"
+ *   never dates a rise (review final, commerce delta4).
  */
 
 import type { DatabaseClient } from '@codex/database';
@@ -322,6 +323,109 @@ export async function affectedPayees(
 /** States in which a person on the list still holds the date. */
 export const FEE_NOTICE_OPEN_STATES = ['due', 'failed', 'unknown'] as const;
 
+/**
+ * A notice tried this recently may still be held by a daily run, so the
+ * run's claim hands it to no other run (overlapping runs), and a `failed`
+ * one tried this recently may be in flight (`feeNoticeMayHaveTold`).
+ */
+export const FEE_NOTICE_RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * THE rule for a notice whose email told, or MAY have told, its person
+ * ("unconfirmed, retried, or failed mid-retry": owner, 2026-11-09). One
+ * predicate for every place that asks, so they can't drift: the first cut's
+ * smaller emails and the second cut's restarts (`queueSmallerFeeNotices`),
+ * and a void's "it's off" emails (purchase's `voidPending`). Told, or maybe:
+ *   - `sent` or `told_another_way`: told;
+ *   - `unknown`: a send with no answer, which may have gone;
+ *   - `due` after a try (attempts > 0): a run cut off after sending, or a
+ *     send in flight now (the claim adds the try before it sends);
+ *   - `failed`, tried within FEE_NOTICE_RECLAIM_AFTER_MS: the claim leaves a
+ *     retried notice `failed` (it adds the try and stamps attempted_at with
+ *     the run's clock), and one tried that recently may still be held by a
+ *     run, its retry in flight with an earlier figure, or cut off after it
+ *     went.
+ * The window trades this way: a refusal that already finished looks the same
+ * in the row, so its person may get one short email about a rise they never
+ * saw, which the owner accepted over missing a killed run's retry that went.
+ * Never tried (`due`, no attempts) is not told, nor is `not_needed`. The
+ * columns are the table's own, so it reads the row a FROM names and an
+ * ON CONFLICT DO UPDATE's existing row alike.
+ */
+export function feeNoticeMayHaveTold(now: Date): SQL {
+  const heldSince = new Date(now.getTime() - FEE_NOTICE_RECLAIM_AFTER_MS);
+  return sql`(${feeChangeNotices.state} IN ('sent', 'told_another_way', 'unknown')
+    OR (${feeChangeNotices.state} = 'due' AND ${feeChangeNotices.attempts} > 0)
+    OR (${feeChangeNotices.state} = 'failed' AND ${feeChangeNotices.attemptedAt} > ${heldSince}::timestamptz))`;
+}
+
+/**
+ * Lock a change's notices (every kind but `cancelled`), or one person's, in
+ * id order, after the change row itself. THE lock every writer that reads
+ * them to decide takes first: a cut before it queues smaller emails, a void
+ * before it queues "it's off" (purchase), and the daily step before it
+ * queues one person's smaller email (`record`'s re-tell). One order, the
+ * change row then its notices by id, means none of them holds a row another
+ * waits for (review final, commerce NIT): support's "told another way" locks
+ * the change row FOR UPDATE before its notice, and a notice insert takes the
+ * change row FOR KEY SHARE (its foreign key), so the re-tell takes that first
+ * too. KEY SHARE never waits on a cut (it holds the same) or a void (a no-key
+ * update). While a cut or a void holds the notices, the daily claim (`SKIP
+ * LOCKED`) passes them by, and a claim already committed is read as tried
+ * (`feeNoticeMayHaveTold`), so no email goes out between the read and the
+ * write, unseen by both (review final M3, silent L1).
+ */
+export async function lockFeeNotices(
+  tx: Queryable,
+  input: { changeId: string; userId?: string }
+): Promise<void> {
+  const { changeId, userId } = input;
+  await tx.execute(sql`
+    SELECT 1 FROM ${feeChanges} WHERE id = ${changeId} FOR KEY SHARE
+  `);
+  await tx.execute(sql`
+    SELECT id FROM ${feeChangeNotices}
+    WHERE change_id = ${changeId} AND kind <> 'cancelled'
+      ${userId === undefined ? sql`` : sql`AND user_id = ${userId}`}
+    ORDER BY id
+    FOR UPDATE
+  `);
+}
+
+/**
+ * Q2 (A): a waiting rise made smaller owes one short email to everyone its
+ * announcement told, or may have told (`feeNoticeMayHaveTold`): one in
+ * flight carries the earlier figure. One person's alone when `userId` is
+ * given (the daily step, for an email it sent with figures read before the
+ * cut). A smaller email told, or maybe told, starts a new round at `now`:
+ * the step's email-log check is tied to the round, so the last round's
+ * email can't count as this one's (review cycle 3, N1; Codex-2hxff.104). So
+ * does one set aside (`not_needed`), which would send nothing more. One that
+ * surely didn't go (failed and done, or never tried) keeps its round: its
+ * next send carries the new figure anyway.
+ */
+export async function queueSmallerFeeNotices(
+  db: Queryable,
+  input: { changeId: string; now: Date; userId?: string }
+): Promise<void> {
+  const { changeId, now, userId } = input;
+  await db.execute(sql`
+    INSERT INTO ${feeChangeNotices}
+      (change_id, user_id, kind, on_list, roles, before_values, after_values, state)
+    SELECT change_id, user_id, 'smaller', false, roles, '[]'::jsonb, '[]'::jsonb, 'due'
+    FROM ${feeChangeNotices}
+    WHERE change_id = ${changeId}
+      AND kind = 'announce'
+      AND ${feeNoticeMayHaveTold(now)}
+      ${userId === undefined ? sql`` : sql`AND user_id = ${userId}`}
+    ON CONFLICT (change_id, user_id, kind) DO UPDATE
+      SET state = 'due', attempts = 0, attempted_at = NULL, accepted_at = NULL,
+          last_reason = NULL, last_error = NULL, alert_error_id = NULL,
+          created_at = ${now}, updated_at = ${now}
+      WHERE ${feeNoticeMayHaveTold(now)} OR ${feeChangeNotices.state} = 'not_needed'
+  `);
+}
+
 export type DateRiseOutcome =
   | { dated: true; effectiveFrom: Date }
   | {
@@ -334,9 +438,12 @@ export type DateRiseOutcome =
     };
 
 /**
- * Step 4 of the daily run (data design §1.5), also run by support's "told
- * another way" (§1.6). Call it inside the caller's transaction: it locks the
- * change row, so the run and a mark can't both date it.
+ * Step 4 of the daily run (data design §1.5), and only there, after its
+ * joiners step: that step puts anyone set aside and affected again back on
+ * the list, and a rise dated before it ran would leave them out, told with
+ * less than 30 days (review final, commerce delta4). Support's "told another
+ * way" (§1.6) no longer calls it. Call it inside the caller's transaction:
+ * it locks the change row, so two runs can't both date it.
  *
  * When the change is a rise with its first list made, not voided and not yet
  * dated, and no `announce` notice on that list is still due, failed or

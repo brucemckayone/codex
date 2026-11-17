@@ -9,8 +9,7 @@
  *
  * Also locked here, carried over from the resolver this replaces:
  *   - a REMOVED owner (`role='owner', status='inactive'`, a normal tombstone)
- *     is never paid on the no-periods fallback;
- *   - the retired `primary_connect_account_user_id` pin no longer routes money.
+ *     is never paid on the no-periods fallback.
  *
  * Uses the Neon test DB (real schema) — the predicate under test is SQL, so a
  * mocked db would prove nothing.
@@ -32,7 +31,6 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { resolveOrganisationPayee } from '../resolve-organisation-payee';
 
@@ -182,23 +180,6 @@ describe('resolveOrganisationPayee', () => {
 
       expect(payee?.userId).toBe(later);
     });
-  });
-
-  it('ignores the retired primary-connect pin', async () => {
-    const { org, next } = await makeTransferredOrg('pin-ignored');
-    const [stranger] = await seedTestUsers(db, 1);
-    if (!stranger) throw new Error('seed failed');
-    await db
-      .insert(stripeConnectAccounts)
-      .values(createTestConnectAccountInput(null, stranger));
-    await db
-      .update(organizations)
-      .set({ primaryConnectAccountUserId: stranger })
-      .where(eq(organizations.id, org.id));
-
-    const payee = await resolveOrganisationPayee(db, org.id, AFTER_TRANSFER);
-
-    expect(payee?.userId).toBe(next);
   });
 
   describe('an org with no ownership periods (inserted outside createOrganization)', () => {

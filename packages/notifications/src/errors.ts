@@ -39,6 +39,19 @@ export class TemplateAccessDeniedError extends ForbiddenError {
   }
 }
 
+/**
+ * A test send of a creator template that names an org, to an address that
+ * is not the sender's own (owner decision 2026-11-09, Codex-tgkgb).
+ */
+export class TestSendRecipientError extends ForbiddenError {
+  constructor(templateId: string) {
+    super(
+      'Test sends of an organization-branded template go only to your own email address',
+      { templateId }
+    );
+  }
+}
+
 export class TemplateConflictError extends ConflictError {
   constructor(name: string) {
     super('Email template name already exists in scope', { name });

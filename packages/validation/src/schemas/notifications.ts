@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { mediaTypeEnum } from '../content/content-schemas';
 import {
   createSanitizedStringSchema,
   urlSchema,
@@ -125,8 +126,8 @@ export const previewTemplateSchema = z.object({
 export type PreviewTemplateInput = z.infer<typeof previewTemplateSchema>;
 
 export const testSendTemplateSchema = z.object({
-  // Email address to send test to
-  recipientEmail: z.string().email('Invalid email address'),
+  // Email address to send test to, without the spaces round a pasted one
+  recipientEmail: z.string().trim().email('Invalid email address'),
   // Optional test data (limited to 50 keys)
   data: z
     .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
@@ -259,6 +260,22 @@ export const refundProcessedDataSchema = z.object({
   accessNote: z.string().optional(),
 });
 
+/**
+ * A buyer's purchase or course is back after a chargeback lost and then won
+ * (Codex-2hxff.70, Q5). The renderer has no conditionals, so the sender
+ * composes the clause after the title and the button for an item or a course.
+ */
+export const purchaseAccessRestoredDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  /** After the title: "so it's back in your library and ready to watch." */
+  accessSentence: z.string().min(1),
+  amount: z.string(),
+  paidOn: z.string(),
+  itemUrl: z.string().url(),
+  buttonLabel: z.string().min(1),
+});
+
 // ============================================
 // Organization Templates
 // ============================================
@@ -268,7 +285,8 @@ export const refundProcessedDataSchema = z.object({
  * nothing expires (Codex-bnxhw). `orgUrl` opens the organisation: its Studio
  * for an admin or creator, its home page for a member. `roleLabel` reads
  * after "as": "an admin", "a creator", "a member". `roleName` is the plain
- * role, which the stock row production has today reads as "as a {{roleName}}".
+ * role, for a customised copy that still reads it: migration 0117 moved the
+ * stock row's "as a {{roleName}}" to "as {{roleLabel}}".
  */
 export const orgMemberInvitationDataSchema = z.object({
   inviterName: z.string(),
@@ -276,13 +294,6 @@ export const orgMemberInvitationDataSchema = z.object({
   roleName: z.string(),
   roleLabel: z.string(),
   orgUrl: z.string().url(),
-  // Transitional (Codex-2hxff.83). Until migration 0117 rewrites it, one
-  // release after this code (Codex-2hxff.84), the stock row production has
-  // links its button to `acceptUrl` and says it "expires in {{expiryDays}}
-  // days". Optional, so the sender can later stop passing them without
-  // waiting for notifications-api, which deploys after organization-api.
-  acceptUrl: z.string().url().optional(),
-  expiryDays: z.string().optional(),
 });
 
 export const memberRoleChangedDataSchema = z.object({
@@ -356,6 +367,30 @@ export const transcodingFailedDataSchema = z.object({
   contentTitle: z.string(),
   errorSummary: z.string(),
   retryUrl: z.string().url(),
+});
+
+/**
+ * Publish when ready (Codex-a6ofh.2.8), to the piece's creator: it went live
+ * when its file finished processing. `mediaKind` names the file ("video" or
+ * "audio") in the sentence.
+ */
+export const contentLiveDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  mediaKind: mediaTypeEnum,
+  contentUrl: z.string().url(),
+});
+
+/**
+ * Publish when ready, to the piece's creator: it couldn't go live, and why.
+ * `reason` is one sentence, written for the creator; `editUrl` opens its
+ * Publish step.
+ */
+export const contentNotLiveDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  reason: z.string().min(1),
+  editUrl: z.string().url(),
 });
 
 /** To the platform support mailbox (Codex-l2c48.6, .10): `details` is preformatted lines. */
@@ -560,6 +595,7 @@ export const templateDataSchemas = {
   'subscription-cancelled': subscriptionCancelledDataSchema,
   'subscription-tier-price-change': subscriptionTierPriceChangeDataSchema,
   'refund-processed': refundProcessedDataSchema,
+  'purchase-access-restored': purchaseAccessRestoredDataSchema,
   // Organization
   'org-member-invitation': orgMemberInvitationDataSchema,
   'member-role-changed': memberRoleChangedDataSchema,
@@ -571,6 +607,9 @@ export const templateDataSchemas = {
   'transcoding-complete': transcodingCompleteDataSchema,
   'transcoding-failed': transcodingFailedDataSchema,
   'transcoding-owner-alert': transcodingOwnerAlertDataSchema,
+  // Publish when ready (Codex-a6ofh.2.8)
+  'content-live': contentLiveDataSchema,
+  'content-not-live': contentNotLiveDataSchema,
   // Creator
   'new-sale': newSaleDataSchema,
   'connect-account-status': connectAccountStatusDataSchema,

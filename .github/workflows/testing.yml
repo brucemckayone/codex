@@ -196,6 +196,8 @@ jobs:
       # MUST run even when no source file changed — otherwise a workflow
       # fix is silently never exercised in CI.
       workflows: ${{ steps.filter.outputs.workflows }}
+      # The seed scripts E2E Web runs. See the filter for its scope.
+      seed: ${{ steps.filter.outputs.seed }}
       # Gates `migration-check`, the one job that still applies the
       # migrations to a copy of PRODUCTION. See the filter for its scope.
       migrations: ${{ steps.filter.outputs.migrations }}
@@ -317,6 +319,21 @@ jobs:
               - 'packages/database/scripts/migration-preflight.ts'
               - 'packages/database/package.json'
               - 'packages/constants/**'
+            # The seed, which only E2E Web runs ("Seed test database" is
+            # db:seed, seed-data.ts and its seed/ library; "Seed portal
+            # journey fixtures" is db:seed:portals, seed-portals.ts).
+            # package.json holds both scripts. Without this, a PR that changed
+            # only the seed never ran it: #712 rewrote the seed's thumbnails
+            # and its E2E Web was skipped, and the picsum outage it fixed had
+            # surfaced on the next web PR instead, #711 (Codex-89tmi).
+            # Globs, not names, so a new seed file is covered from the day
+            # it's added. The seed also imports from database/src, constants,
+            # purchase, subscription and transcoding; those packages' own
+            # suites test that code, but don't run the seed.
+            seed:
+              - 'packages/database/scripts/seed/**'
+              - 'packages/database/scripts/seed-*.ts'
+              - 'packages/database/package.json'
 
   # ============================================================================
   # MIGRATION CHECK — the committed migrations apply to a copy of PRODUCTION
@@ -984,7 +1001,6 @@ jobs:
           STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
           STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
           STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
-          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
           STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
@@ -1007,7 +1023,6 @@ jobs:
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_SUBSCRIPTION"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CONNECT"
-          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CUSTOMER"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_DISPUTE"
           echo "::add-mask::$BETTER_AUTH_SECRET"
           echo "::add-mask::$WORKER_SHARED_SECRET"
@@ -1069,15 +1084,21 @@ jobs:
     #    twin of every pull_request run still started a full E2E suite it
     #    could not finish.
     # 1. Static analysis passed (as the unit tests require)
-    # 2. AND there are web-related changes (web app, auth, or shared-types)
+    # 2. AND there are web-related changes (web app, auth, or shared-types),
+    #    a change to this workflow, or a change to the seed this job runs
+    #    (Codex-89tmi)
     if: |
       !cancelled() &&
       needs.static-analysis.result == 'success' &&
       (needs.changes.outputs.web == 'true' ||
        needs.changes.outputs.auth-worker == 'true' ||
        needs.changes.outputs.shared-types == 'true' ||
-       needs.changes.outputs.workflows == 'true')
-    runs-on: ubuntu-latest
+       needs.changes.outputs.workflows == 'true' ||
+       needs.changes.outputs.seed == 'true')
+    # ubuntu-24.04, not -latest: Playwright ^1.56 refuses ubuntu-26.04
+    # ("does not support chromium on ubuntu26.04-x64"), which -latest
+    # became after 11-12. Unpin when Playwright supports it (Codex-wxfj8).
+    runs-on: ubuntu-24.04
     # About 2x the p95 of 40 green runs (42.4 min). The default is 360,
     # so a wedged job could hold the PR for six hours (Codex-j7x4u).
     timeout-minutes: 90
@@ -1220,7 +1241,6 @@ jobs:
           STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
           STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
           STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
-          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
           STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -1246,7 +1266,6 @@ jobs:
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_SUBSCRIPTION"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CONNECT"
-          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CUSTOMER"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_DISPUTE"
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$BETTER_AUTH_SECRET"
@@ -1602,7 +1621,6 @@ jobs:
           REDACT_STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           REDACT_STRIPE_WH_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
           REDACT_STRIPE_WH_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
-          REDACT_STRIPE_WH_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
           REDACT_STRIPE_WH_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
           REDACT_STRIPE_WH_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
           REDACT_STRIPE_WH_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}

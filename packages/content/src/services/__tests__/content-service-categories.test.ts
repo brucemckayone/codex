@@ -22,6 +22,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { CacheType } from '@codex/cache';
+import { CONTENT_MAX_CATEGORIES, ERROR_CODES } from '@codex/constants';
 import {
   categories,
   content,
@@ -40,7 +42,7 @@ import {
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ValidationError } from '../../errors';
 import { CategoriesService } from '../categories-service';
 import { ContentService } from '../content-service';
@@ -266,5 +268,300 @@ describe('ContentService — category tagging (WP-5)', () => {
     await expect(createOrgAContent([doomed.id])).rejects.toBeInstanceOf(
       ValidationError
     );
+  });
+
+  // ── The studio list by category, and its rows' names (Codex-a6ofh.3.3) ──
+
+  /** One studio list page of the creator's org A content, its rows named. */
+  async function listOrgA(filters: Record<string, string> = {}) {
+    return contentService.list(
+      creatorId,
+      { organizationId: orgAId, ...filters },
+      { page: 1, limit: 100 },
+      { withCategories: true }
+    );
+  }
+
+  it('lists a piece in three categories once, and counts it once', async () => {
+    const token = uniqueToken();
+    const cats = await Promise.all(
+      ['A', 'B', 'C'].map((n) => createCategory(`${n} ${token}`, orgAId))
+    );
+    const piece = await createOrgAContent(cats.map((c) => c.id));
+
+    for (const cat of cats) {
+      const page = await listOrgA({ categoryId: cat.id });
+      expect(page.items.map((row) => row.id)).toEqual([piece.id]);
+      expect(page.pagination.total).toBe(1);
+    }
+  });
+
+  it('a category files only its own pieces', async () => {
+    const token = uniqueToken();
+    const kept = await createCategory(`Kept ${token}`, orgAId);
+    const other = await createCategory(`Other ${token}`, orgAId);
+    const inKept = await createOrgAContent([kept.id]);
+    await createOrgAContent([other.id]);
+    await createOrgAContent();
+
+    const page = await listOrgA({ categoryId: kept.id });
+    expect(page.items.map((row) => row.id)).toEqual([inKept.id]);
+  });
+
+  it('a soft-deleted category files nothing, and names no row', async () => {
+    const token = uniqueToken();
+    const doomed = await createCategory(`Doomed ${token}`, orgAId);
+    const kept = await createCategory(`Kept ${token}`, orgAId);
+    const piece = await createOrgAContent([doomed.id, kept.id]);
+    await db
+      .update(categories)
+      .set({ deletedAt: new Date() })
+      .where(eq(categories.id, doomed.id));
+
+    expect((await listOrgA({ categoryId: doomed.id })).items).toEqual([]);
+    const row = (await listOrgA()).items.find((r) => r.id === piece.id);
+    expect(row?.categories).toEqual([{ id: kept.id, name: kept.name }]);
+  });
+
+  it('each studio row names its live categories in their order, [] for none', async () => {
+    const token = uniqueToken();
+    const second = await createCategory(`Second ${token}`, orgAId);
+    const first = await createCategory(`First ${token}`, orgAId);
+    await db
+      .update(categories)
+      .set({ sortOrder: 1 })
+      .where(eq(categories.id, second.id));
+    await db
+      .update(categories)
+      .set({ sortOrder: 0 })
+      .where(eq(categories.id, first.id));
+    const filed = await createOrgAContent([second.id, first.id]);
+    const unfiled = await createOrgAContent();
+
+    const rows = (await listOrgA()).items;
+    expect(rows.find((r) => r.id === filed.id)?.categories).toEqual([
+      { id: first.id, name: first.name },
+      { id: second.id, name: second.name },
+    ]);
+    expect(rows.find((r) => r.id === unfiled.id)?.categories).toEqual([]);
+  });
+
+  // A move to another space keeps the old join rows until the set is next
+  // saved (Codex-a6ofh.3.3 review): they name nothing, and count for nothing.
+  it('a piece moved out of its org names none of that org’s categories, and is filed in none', async () => {
+    const token = uniqueToken();
+    const left = await createCategory(`Left behind ${token}`, orgAId);
+    const piece = await createOrgAContent([left.id]);
+    await db
+      .update(content)
+      .set({ organizationId: null })
+      .where(eq(content.id, piece.id));
+
+    const page = await contentService.list(
+      creatorId,
+      { organizationId: null },
+      { page: 1, limit: 100 },
+      { withCategories: true }
+    );
+    expect(page.items.find((r) => r.id === piece.id)?.categories).toEqual([]);
+    expect(
+      (await contentService.get(piece.id, creatorId))?.categoryIds
+    ).toEqual([]);
+    expect(await membershipIds(piece.id)).toEqual([left.id]);
+
+    // Nor does the filter count it, with no org to pin the category's space.
+    const filtered = await contentService.list(
+      creatorId,
+      { categoryId: left.id },
+      { page: 1, limit: 100 }
+    );
+    expect(filtered.items).toEqual([]);
+    expect(filtered.pagination.total).toBe(0);
+  });
+
+  it('a personal piece names its creator’s own personal categories', async () => {
+    const token = uniqueToken();
+    const own = await categoriesService.create(
+      { name: `Own ${token}` },
+      { creatorId }
+    );
+    const piece = await contentService.create(
+      {
+        title: `Personal ${token}`,
+        slug: createUniqueSlug('personal-content'),
+        contentType: 'written',
+        contentBody: 'This is the written content body.',
+        tags: [],
+        categoryIds: [own.id],
+      },
+      creatorId
+    );
+
+    const page = await contentService.list(
+      creatorId,
+      { organizationId: null },
+      { page: 1, limit: 100 },
+      { withCategories: true }
+    );
+    expect(page.items.find((r) => r.id === piece.id)?.categories).toEqual([
+      { id: own.id, name: own.name },
+    ]);
+    expect(
+      (await contentService.get(piece.id, creatorId))?.categoryIds
+    ).toEqual([own.id]);
+    const filtered = await contentService.list(
+      creatorId,
+      { categoryId: own.id },
+      { page: 1, limit: 100 }
+    );
+    expect(filtered.items.map((r) => r.id)).toEqual([piece.id]);
+  });
+
+  it('names no row unless asked: the badges and pickers skip the query', async () => {
+    const cat = await createCategory(`Unasked ${uniqueToken()}`, orgAId);
+    const piece = await createOrgAContent([cat.id]);
+
+    const page = await contentService.list(
+      creatorId,
+      { organizationId: orgAId },
+      { page: 1, limit: 100 }
+    );
+    const row = page.items.find((r) => r.id === piece.id);
+    expect(row).toBeDefined();
+    expect(row).not.toHaveProperty('categories');
+  });
+
+  // /explore's topic filter sends a category SLUG (Codex-a6ofh.3.3): it was
+  // matched against the legacy free-text column, which no topic slug held.
+  it('a category slug filters by the real categories, in the org given', async () => {
+    const token = uniqueToken();
+    const topic = await createCategory(`Topic ${token}`, orgAId);
+    const piece = await createOrgAContent([topic.id]);
+    await createOrgAContent();
+
+    const page = await listOrgA({ category: topic.slug });
+    expect(page.items.map((row) => row.id)).toEqual([piece.id]);
+    // Another org's list holds none of org A's pieces under that slug.
+    const elsewhere = await contentService.list(
+      creatorId,
+      { organizationId: orgBId, category: topic.slug },
+      { page: 1, limit: 100 }
+    );
+    expect(elsewhere.items).toEqual([]);
+  });
+
+  // ── Adding categories, keeping the set (Codex-a6ofh.3.3) ───────────────
+
+  it('adds to the set, keeping what the piece had', async () => {
+    const token = uniqueToken();
+    const had = await createCategory(`Had ${token}`, orgAId);
+    const added = await createCategory(`Added ${token}`, orgAId);
+    const piece = await createOrgAContent([had.id]);
+
+    const result = await contentService.addCategories(piece.id, creatorId, [
+      added.id,
+    ]);
+
+    expect([...result.categoryIds].sort()).toEqual([had.id, added.id].sort());
+    expect(result.organizationId).toBe(orgAId);
+    expect(result.hasBeenLive).toBe(false);
+    expect(await membershipIds(piece.id)).toEqual([had.id, added.id].sort());
+  });
+
+  it('bumps the org’s topic list only once the piece has been live', async () => {
+    const invalidate = vi.fn(async (_key: string) => undefined);
+    const watched = new ContentService({ db, environment: 'test' });
+    watched.setCache({ invalidate } as unknown as Parameters<
+      ContentService['setCache']
+    >[0]);
+    const token = uniqueToken();
+    const onDraft = await createCategory(`On draft ${token}`, orgAId);
+    const onLive = await createCategory(`On live ${token}`, orgAId);
+    const piece = await createOrgAContent();
+
+    // A never-live draft is on no public topic list.
+    await watched.addCategories(piece.id, creatorId, [onDraft.id]);
+    expect(invalidate).not.toHaveBeenCalled();
+
+    await watched.publish(piece.id, creatorId);
+    invalidate.mockClear();
+    const added = await watched.addCategories(piece.id, creatorId, [onLive.id]);
+    expect(added.changed).toBe(true);
+    expect(invalidate).toHaveBeenCalledWith(CacheType.CATEGORIES(orgAId));
+
+    // One it already holds files nothing new, and bumps nothing.
+    invalidate.mockClear();
+    const again = await watched.addCategories(piece.id, creatorId, [onLive.id]);
+    expect(again).toMatchObject({ changed: false, hasBeenLive: true });
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it('adding a category it has is a no-op, kept once', async () => {
+    const token = uniqueToken();
+    const cat = await createCategory(`Once ${token}`, orgAId);
+    const piece = await createOrgAContent([cat.id]);
+
+    await contentService.addCategories(piece.id, creatorId, [cat.id, cat.id]);
+
+    expect(await membershipIds(piece.id)).toEqual([cat.id]);
+  });
+
+  it('refuses another org’s category and adds nothing', async () => {
+    const token = uniqueToken();
+    const ours = await createCategory(`Ours ${token}`, orgAId);
+    const theirs = await createCategory(`Theirs ${token}`, orgBId);
+    const piece = await createOrgAContent();
+
+    await expect(
+      contentService.addCategories(piece.id, creatorId, [ours.id, theirs.id])
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      context: {
+        code: ERROR_CODES.CATEGORY_NOT_IN_SPACE,
+        invalidCategoryIds: [theirs.id],
+      },
+    });
+    expect(await membershipIds(piece.id)).toEqual([]);
+  });
+
+  it('refuses a piece that is not the caller’s, as not found', async () => {
+    const token = uniqueToken();
+    const cat = await createCategory(`Cat ${token}`, orgAId);
+    const piece = await createOrgAContent();
+    const [stranger] = await seedTestUsers(db, 1);
+
+    await expect(
+      contentService.addCategories(piece.id, stranger, [cat.id])
+    ).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+      context: { contentId: piece.id, code: 'CONTENT_NOT_FOUND' },
+    });
+    expect(await membershipIds(piece.id)).toEqual([]);
+  });
+
+  it('refuses past the limit in all, and adds none of them', async () => {
+    const max = CONTENT_MAX_CATEGORIES;
+    const token = uniqueToken();
+    const cats = await Promise.all(
+      Array.from({ length: max + 1 }, (_, i) =>
+        createCategory(`Cap ${i} ${token}`, orgAId)
+      )
+    );
+    const piece = await createOrgAContent(
+      cats.slice(0, max - 1).map((c) => c.id)
+    );
+
+    // One short of the limit, plus one: allowed.
+    await contentService.addCategories(piece.id, creatorId, [
+      cats[max - 1]!.id,
+    ]);
+    // At the limit, plus one: refused, and nothing is written.
+    await expect(
+      contentService.addCategories(piece.id, creatorId, [cats[max]!.id])
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      context: { code: ERROR_CODES.CATEGORY_LIMIT_REACHED, max },
+    });
+    expect(await membershipIds(piece.id)).toHaveLength(max);
   });
 });

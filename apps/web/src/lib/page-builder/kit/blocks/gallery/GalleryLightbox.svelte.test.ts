@@ -6,9 +6,11 @@ import {
   describe,
   expect,
   it,
+  onTestFinished,
   vi,
 } from 'vitest';
 import { logger } from '$lib/observability';
+import { lockScroll } from '$lib/utils/scroll-lock';
 import {
   flushSync,
   mount,
@@ -119,7 +121,6 @@ function popups(refused: boolean | DOMException) {
 
 const CDN = 'https://cdn.test';
 const HEADING = 'A look inside';
-const LOCK = 'data-lp-lightbox';
 
 /** Pictures 1…count, each captioned; the first records its size. */
 function pictures(count: number) {
@@ -174,7 +175,8 @@ const dialog = () => one('dialog') as HTMLDialogElement | null;
 const counter = () => one('.gallery-lightbox__count')?.textContent?.trim();
 const control = (label: string) =>
   one(`dialog button[aria-label="${label}"]`) as HTMLButtonElement;
-const locked = () => document.documentElement.hasAttribute(LOCK);
+/** The app's one counted scroll lock marks <body> while it holds. */
+const locked = () => document.body.hasAttribute('data-melt-scroll-lock');
 
 function press(element: Element) {
   (element as HTMLElement).click();
@@ -599,6 +601,21 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       expect(locked()).toBe(true);
       if (app) unmount(app);
       app = null;
+      expect(locked()).toBe(false);
+    });
+
+    it('shares the counted lock: closing never lets go of a dialog opened over it', async () => {
+      await render({ items: pictures(2) });
+      press(tiles()[0]);
+      const other = lockScroll();
+      // Let go however the test ends, or a failure leaves the page held.
+      onTestFinished(other);
+
+      press(control(GALLERY_COPY.close));
+      expect(dialog()).toBeNull();
+      expect(locked()).toBe(true);
+
+      other();
       expect(locked()).toBe(false);
     });
 

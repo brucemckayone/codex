@@ -423,14 +423,15 @@ export const deleteContent = command(z.string().uuid(), async (id) => {
   return createServerApi(platform, cookies).content.delete(id);
 });
 
-// form() — progressive enhancement (works without JS)
-export const createContentForm = form(schema, async (input) => {
+// form() — progressive enhancement (works without JS); spread onto the
+// element: <form {...createCategoryForm}> (categories.remote.ts)
+export const createCategoryForm = form(schema, async ({ organizationId, ...fields }) => {
   const { platform, cookies } = getRequestEvent();
   try {
-    const result = await createServerApi(platform, cookies).content.create(input);
-    return { success: true as const, contentId: result.id };
+    const category = await createServerApi(platform, cookies).categories.create(organizationId, fields);
+    return { success: true as const, category };
   } catch (error) {
-    return { success: false as const, error: error.message };
+    return { success: false as const, error: error instanceof Error ? error.message : 'Failed to create category' };
   }
 });
 ```

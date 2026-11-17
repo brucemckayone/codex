@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import {
   content,
   contentAccess,
+  type Dispute,
   disputes,
   organizations,
   type Payout,
@@ -310,6 +311,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       accessEnded: false,
       duplicatePayment: false,
       itemTitle: expect.any(String),
+      lateWinKeptThrough: null,
     });
     expect(stripe.refunds.list).toHaveBeenCalledWith(
       expect.objectContaining({ charge: seeded.charge.id })
@@ -439,6 +441,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       accessEnded: true,
       duplicatePayment: false,
       itemTitle: expect.any(String),
+      lateWinKeptThrough: null,
     });
   });
 
@@ -766,7 +769,10 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
     ).toBeUndefined();
   });
 
-  // ── a late win (owner decision 2026-10-25, "alert only") ──────────────
+  // ── a late win (Codex-2hxff.70; late-win data design §3.3) ────────────
+  // These replace the "alert only" tests (owner decision 2026-10-25), which
+  // were right until this bead: the record now moves to won, and the undo
+  // runs as an unapplied win (late-win.integration.test.ts).
 
   /** The service, with its error log watched. */
   function watchedService() {
@@ -776,99 +782,457 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
         .obs,
       'error'
     );
-    const lateWinAlerts = () =>
-      alert.mock.calls.filter(([message]) =>
-        String(message).startsWith('late win on a lost dispute')
-      );
-    return { service, alert, lateWinAlerts };
+    return { service, alert };
   }
 
-  it('a late win (lost → won) is only alerted, with ids only: the record stays lost and applied, nothing is re-paid and nothing restored', async () => {
+  it('a late win on an applied loss: the row becomes won, late_won_at set, the loss’s applied time kept in lost_applied_at and outcome_applied_at cleared; nothing is alerted, and a second delivery changes nothing', async () => {
     const seeded = await seedPurchase(1000);
-    const access = await grantAccess(seeded);
     const disputeId = `dp_late_${seeded.tag}`;
     createdDisputeIds.push(disputeId);
-    const { service, alert, lateWinAlerts } = watchedService();
+    const { service, alert } = watchedService();
     const record = (status: string) =>
       service.recordDispute(disputeFor(seeded, disputeId, status));
     await record('needs_response');
     await record('lost');
-    await service.processLostDispute(seeded.paymentIntentId, 1000);
-    await service.markDisputeOutcomeApplied(disputeId);
+    await service.processLostDispute(seeded.paymentIntentId, 1000, disputeId);
+    await service.markDisputeOutcomeApplied(disputeId, { status: 'lost' });
     const applied = (await record('lost'))?.outcomeAppliedAt;
     expect(applied).not.toBeNull();
-    const payoutsBefore = await db
-      .select({ id: payouts.id })
-      .from(payouts)
-      .where(eq(payouts.purchaseId, seeded.purchase.id));
 
     const after = await record('won');
 
-    expect(after?.status).toBe('lost');
-    expect(after?.outcomeAppliedAt).toEqual(applied);
-    expect(alert).toHaveBeenCalledWith(
-      'late win on a lost dispute: re-pay creators and restore the buyer by hand',
-      {
-        errorId: expect.any(String),
-        disputeId,
-        chargeId: seeded.charge.id,
-        purchaseId: seeded.purchase.id,
-        subscriptionId: null,
-        courseSubscriptionId: null,
-      }
-    );
-    expect(lateWinAlerts()).toHaveLength(1);
-    // The loss stands: still refunded, access still ended, no re-pay rows.
-    expect(
-      takeFirst(
-        await db
-          .select({ status: purchases.status })
-          .from(purchases)
-          .where(eq(purchases.id, seeded.purchase.id))
-      ).status
-    ).toBe('refunded');
-    expect((await access()).deletedAt).not.toBeNull();
-    expect(
-      await db
-        .select({ id: payouts.id })
-        .from(payouts)
-        .where(eq(payouts.purchaseId, seeded.purchase.id))
-    ).toEqual(payoutsBefore);
+    expect(after).toMatchObject({
+      status: 'won',
+      lostAppliedAt: applied,
+      outcomeAppliedAt: null,
+    });
+    expect(after?.lateWonAt).toBeInstanceOf(Date);
+    expect(after).not.toHaveProperty('refusedLost');
+    expect(alert).not.toHaveBeenCalled();
+
+    // A redelivery, or the reconcile's read of the same win.
+    const again = await record('won');
+    expect(again).toEqual(after);
   });
 
-  it('a late win on a loss whose handling never finished leaves it unapplied, for the loss to finish', async () => {
+  it('a late win on a loss whose handling never finished: won with no lost_applied_at, and unapplied, for the undo to run', async () => {
     const seeded = await seedPurchase(1000);
     const disputeId = `dp_late_unapplied_${seeded.tag}`;
     createdDisputeIds.push(disputeId);
-    const { service, lateWinAlerts } = watchedService();
+    const { service, alert } = watchedService();
     const record = (status: string) =>
       service.recordDispute(disputeFor(seeded, disputeId, status));
     await record('lost');
 
     const after = await record('won');
 
-    expect(after).toMatchObject({ status: 'lost', outcomeAppliedAt: null });
-    expect(lateWinAlerts()).toHaveLength(1);
+    expect(after).toMatchObject({
+      status: 'won',
+      lostAppliedAt: null,
+      outcomeAppliedAt: null,
+    });
+    expect(after?.lateWonAt).toBeInstanceOf(Date);
+    expect(alert).not.toHaveBeenCalled();
   });
 
-  it('every other move out of a final status is still refused, and a plain win alerts nothing', async () => {
+  it('a late win writes updated_at, so the reconcile’s grace sees it as the webhook’s, then retries it as a won, unapplied row (premise 31)', async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_late_grace_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
+    await service.markDisputeOutcomeApplied(disputeId, { status: 'lost' });
+    // The loss was applied long ago.
+    await db
+      .update(disputes)
+      .set({ updatedAt: new Date(Date.now() - 2 * 3600_000) })
+      .where(eq(disputes.stripeDisputeId, disputeId));
+    const inSource2 = async (updatedBefore: Date) =>
+      (await service.findDisputesToReconcile(10_000, updatedBefore)).some(
+        (row) => row.stripeDisputeId === disputeId
+      );
+
+    await service.recordDispute(disputeFor(seeded, disputeId, 'won'));
+
+    // Inside the 15-minute grace: still the webhook's.
+    expect(await inSource2(new Date(Date.now() - 15 * 60_000))).toBe(false);
+    // After it: won and unapplied, so the hourly source 2 retries the undo.
+    expect(await inSource2(new Date(Date.now() + 60_000))).toBe(true);
+  });
+
+  it('won → lost is refused and flagged refusedLost; every other move out of a final status is refused silently; a normal win is not a late one', async () => {
     const seeded = await seedPurchase(1000);
     const wonId = `dp_won_${seeded.tag}`;
     const closedId = `dp_closed_${seeded.tag}`;
     createdDisputeIds.push(wonId, closedId);
-    const { service, lateWinAlerts } = watchedService();
+    const { service, alert } = watchedService();
     const record = (disputeId: string, status: string) =>
       service.recordDispute(disputeFor(seeded, disputeId, status));
 
     await record(wonId, 'needs_response');
-    expect((await record(wonId, 'won'))?.status).toBe('won');
-    expect((await record(wonId, 'lost'))?.status).toBe('won');
-    expect((await record(wonId, 'prevented'))?.status).toBe('won');
+    const won = await record(wonId, 'won');
+    expect(won).toMatchObject({ status: 'won', lateWonAt: null });
+    expect(await record(wonId, 'lost')).toMatchObject({
+      status: 'won',
+      lateWonAt: null,
+      refusedLost: true,
+    });
+    const prevented = await record(wonId, 'prevented');
+    expect(prevented?.status).toBe('won');
+    expect(prevented).not.toHaveProperty('refusedLost');
     // Only `lost` may become `won`: a closed inquiry may not.
     await record(closedId, 'warning_closed');
-    expect((await record(closedId, 'won'))?.status).toBe('warning_closed');
-    expect((await record(closedId, 'lost'))?.status).toBe('warning_closed');
-    expect(lateWinAlerts()).toHaveLength(0);
+    expect(await record(closedId, 'won')).toMatchObject({
+      status: 'warning_closed',
+      lateWonAt: null,
+    });
+    const closedLost = await record(closedId, 'lost');
+    expect(closedLost?.status).toBe('warning_closed');
+    expect(closedLost).not.toHaveProperty('refusedLost');
+    expect(alert).not.toHaveBeenCalled();
+  });
+
+  // ── an appeal of a lost chargeback (Codex-wzaoh; owner D34) ───────────
+  // The webhook passes Stripe's raw status; the record reads an appeal
+  // (`appeal_*`) as lost, with the appeal marked: only a loss is appealed,
+  // and the money is lost either way.
+
+  async function readDisputeRow(disputeId: string) {
+    const [row] = await db
+      .select()
+      .from(disputes)
+      .where(eq(disputes.stripeDisputeId, disputeId));
+    return row;
+  }
+
+  /** Stripe's status, read live, as the webhook records it. */
+  function liveFor(seeded: Seeded, disputeId: string, status: string) {
+    return { ...disputeFor(seeded, disputeId, status), live: true };
+  }
+
+  /** The service's private appeal steps, for the races a test can't stage. */
+  function appealSteps(service: PurchaseService) {
+    return service as unknown as {
+      clearDisputeAppeal: (marked: Dispute) => Promise<Dispute>;
+      obs: {
+        warn: (...args: unknown[]) => void;
+        info: (...args: unknown[]) => void;
+      };
+    };
+  }
+
+  it("Stripe's raw appeal is recorded as lost and marked, and the mark follows Stripe back as well as forward; the loss stays unapplied for the caller to apply, and the same stage again writes nothing", async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_appeal_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    const appeal = (stage: 'appeal_needs_response' | 'appeal_under_review') =>
+      service.recordDispute(liveFor(seeded, disputeId, stage));
+    // Its `lost` event was missed: the appeal is how the loss arrives.
+    await service.recordDispute(disputeFor(seeded, disputeId, 'under_review'));
+
+    const needs = await appeal('appeal_needs_response');
+
+    expect(needs).toMatchObject({
+      status: 'lost',
+      appealStatus: 'appeal_needs_response',
+      outcomeAppliedAt: null,
+    });
+    expect(needs).not.toHaveProperty('appealCheck');
+    // The same stage again: nothing is written, updated_at too.
+    expect(await appeal('appeal_needs_response')).toEqual(needs);
+
+    const review = await appeal('appeal_under_review');
+    expect(review).toMatchObject({
+      status: 'lost',
+      appealStatus: 'appeal_under_review',
+    });
+    // Stripe asks for more evidence: the mark follows it back.
+    const back = await appeal('appeal_needs_response');
+    expect(back).toMatchObject({
+      status: 'lost',
+      appealStatus: 'appeal_needs_response',
+    });
+    expect(await readDisputeRow(disputeId)).toEqual(back);
+  });
+
+  it('an appeal for a dispute with no row records it lost and marked', async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_appeal_new_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+
+    const recorded = await makeService().recordDispute(
+      liveFor(seeded, disputeId, 'appeal_under_review')
+    );
+
+    expect(recorded).toMatchObject({
+      status: 'lost',
+      appealStatus: 'appeal_under_review',
+      outcomeAppliedAt: null,
+      purchaseId: seeded.purchase.id,
+    });
+  });
+
+  it('an appeal never marks a row that is not lost: a won one refuses it as lost, a closed inquiry keeps its status and it is logged', async () => {
+    const seeded = await seedPurchase(1000);
+    const wonId = `dp_appeal_won_${seeded.tag}`;
+    const closedId = `dp_appeal_closed_${seeded.tag}`;
+    createdDisputeIds.push(wonId, closedId);
+    const service = makeService();
+    const warn = vi.spyOn(appealSteps(service).obs, 'warn');
+    await service.recordDispute(disputeFor(seeded, wonId, 'won'));
+    await service.recordDispute(disputeFor(seeded, closedId, 'warning_closed'));
+
+    const won = await service.recordDispute(
+      liveFor(seeded, wonId, 'appeal_under_review')
+    );
+    const closed = await service.recordDispute(
+      liveFor(seeded, closedId, 'appeal_needs_response')
+    );
+
+    expect(won).toMatchObject({
+      status: 'won',
+      appealStatus: null,
+      refusedLost: true,
+    });
+    expect(closed).toMatchObject({
+      status: 'warning_closed',
+      appealStatus: null,
+    });
+    expect(await readDisputeRow(closedId)).toMatchObject({
+      appealStatus: null,
+    });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      'Stripe reports an appeal of a dispute recorded as neither lost nor won: not marked',
+      {
+        disputeId: closedId,
+        status: 'warning_closed',
+        appeal: 'appeal_needs_response',
+      }
+    );
+  });
+
+  it("a `lost` event for a row under appeal changes nothing and asks for Stripe's live status; the live `lost` clears the mark", async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_appeal_lost_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
+    const marked = await service.recordDispute(
+      liveFor(seeded, disputeId, 'appeal_under_review')
+    );
+
+    // From an event: it may be older than the appeal.
+    const fromEvent = await service.recordDispute(
+      disputeFor(seeded, disputeId, 'lost')
+    );
+    expect(fromEvent).toEqual({ ...marked, appealCheck: true });
+    expect(await readDisputeRow(disputeId)).toEqual(marked);
+    // Any other stale event is refused as before, and asks nothing.
+    expect(
+      await service.recordDispute(disputeFor(seeded, disputeId, 'under_review'))
+    ).toEqual(marked);
+
+    // Read live: the bank has decided.
+    const decided = await service.recordDispute(
+      liveFor(seeded, disputeId, 'lost')
+    );
+    expect(decided).toMatchObject({ status: 'lost', appealStatus: null });
+    expect(decided).not.toHaveProperty('appealCheck');
+    // A redelivered `lost` with no appeal to clear writes nothing.
+    expect(
+      await service.recordDispute(disputeFor(seeded, disputeId, 'lost'))
+    ).toEqual(decided);
+  });
+
+  it('a late win clears the mark in its own statement', async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_appeal_late_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
+    await service.recordDispute(
+      liveFor(seeded, disputeId, 'appeal_under_review')
+    );
+
+    const wonLate = await service.recordDispute(
+      disputeFor(seeded, disputeId, 'won')
+    );
+
+    expect(wonLate).toMatchObject({ status: 'won', appealStatus: null });
+    expect(wonLate?.lateWonAt).toBeInstanceOf(Date);
+  });
+
+  it("a mark left stale on a won row (an older worker's late win, after a rollback) is cleared by the next record of it", async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_appeal_stale_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
+    await service.recordDispute(
+      liveFor(seeded, disputeId, 'appeal_under_review')
+    );
+    // The older recordLateWin: lost → won, the mark left in place.
+    await db
+      .update(disputes)
+      .set({ status: 'won', lateWonAt: new Date() })
+      .where(eq(disputes.stripeDisputeId, disputeId));
+
+    const repaired = await service.recordDispute(
+      liveFor(seeded, disputeId, 'won')
+    );
+
+    expect(repaired).toMatchObject({ status: 'won', appealStatus: null });
+    expect(await readDisputeRow(disputeId)).toMatchObject({
+      status: 'won',
+      appealStatus: null,
+    });
+  });
+
+  it('a clear writes only while the row is still marked: not after a late win cleared it, nor after another clear', async () => {
+    const seeded = await seedPurchase(1000);
+    const movedId = `dp_appeal_moved_${seeded.tag}`;
+    const clearedId = `dp_appeal_cleared_${seeded.tag}`;
+    createdDisputeIds.push(movedId, clearedId);
+    const service = makeService();
+    const readAsMarked: Record<string, Dispute> = {};
+    for (const disputeId of [movedId, clearedId]) {
+      await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
+      const marked = await service.recordDispute(
+        liveFor(seeded, disputeId, 'appeal_under_review')
+      );
+      if (!marked) throw new Error('the appeal was not recorded');
+      readAsMarked[disputeId] = marked;
+    }
+    // Between the read and the clear: a late win, and another clear.
+    await service.recordDispute(disputeFor(seeded, movedId, 'won'));
+    await service.recordDispute(liveFor(seeded, clearedId, 'lost'));
+    const before = {
+      moved: await readDisputeRow(movedId),
+      cleared: await readDisputeRow(clearedId),
+    };
+
+    for (const disputeId of [movedId, clearedId]) {
+      const stale = readAsMarked[disputeId];
+      if (!stale) throw new Error('no row as read');
+      expect(await appealSteps(service).clearDisputeAppeal(stale)).toEqual(
+        stale
+      );
+    }
+
+    expect(await readDisputeRow(movedId)).toEqual(before.moved);
+    expect(await readDisputeRow(clearedId)).toEqual(before.cleared);
+  });
+
+  it("an appeal from an event, not read live, marks nothing and asks for Stripe's live status: it may be older than the bank's decision", async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_appeal_event_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    const lost = await service.recordDispute(
+      disputeFor(seeded, disputeId, 'lost')
+    );
+    if (!lost) throw new Error('the loss was not recorded');
+
+    const fromEvent = await service.recordDispute(
+      disputeFor(seeded, disputeId, 'appeal_needs_response')
+    );
+
+    expect(fromEvent).toEqual({ ...lost, appealCheck: true });
+    expect(await readDisputeRow(disputeId)).toEqual(lost);
+  });
+
+  it('a mark written or cleared is logged once at info, with ids and stages only; a write that changes nothing logs nothing', async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_appeal_logged_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    const marked = 'A lost dispute was marked with its appeal';
+    const cleared = "A dispute's appeal mark was cleared";
+    const info = vi.spyOn(appealSteps(service).obs, 'info');
+    await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
+
+    const needs = await service.recordDispute(
+      liveFor(seeded, disputeId, 'appeal_needs_response')
+    );
+    if (!needs) throw new Error('the appeal was not recorded');
+    // The same stage again, then the decision, then the decision again.
+    await service.recordDispute(
+      liveFor(seeded, disputeId, 'appeal_needs_response')
+    );
+    await service.recordDispute(liveFor(seeded, disputeId, 'lost'));
+    await service.recordDispute(liveFor(seeded, disputeId, 'lost'));
+    // A clear of a mark that is already gone.
+    await appealSteps(service).clearDisputeAppeal(needs);
+
+    expect(
+      info.mock.calls.filter(
+        ([message]) => message === marked || message === cleared
+      )
+    ).toEqual([
+      [marked, { disputeId, appeal: 'appeal_needs_response', was: null }],
+      [cleared, { disputeId, was: 'appeal_needs_response' }],
+    ]);
+  });
+
+  it('clearStaleDisputeAppealMarks clears the mark on every applied dispute that is not lost, and leaves a lost one, and a won one still being undone, marked; it logs what it cleared, and nothing when there is none', async () => {
+    const seeded = await seedPurchase(1000);
+    const wonId = `dp_stale_won_${seeded.tag}`;
+    const undoingId = `dp_stale_undoing_${seeded.tag}`;
+    const lostId = `dp_stale_lost_${seeded.tag}`;
+    createdDisputeIds.push(wonId, undoingId, lostId);
+    const service = makeService();
+    for (const disputeId of [wonId, undoingId, lostId]) {
+      await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
+      await service.recordDispute(
+        liveFor(seeded, disputeId, 'appeal_under_review')
+      );
+    }
+    // An older worker's late win: lost → won, the mark left in place. Its
+    // undo has finished on one (applied), and is still to run on the other,
+    // which the reconcile's retry of unsettled rows settles, its live record
+    // clearing the mark; this step leaves it, so that retry's grace never
+    // skips it.
+    await db
+      .update(disputes)
+      .set({
+        status: 'won',
+        lateWonAt: new Date(),
+        outcomeAppliedAt: new Date(),
+      })
+      .where(eq(disputes.stripeDisputeId, wonId));
+    await db
+      .update(disputes)
+      .set({ status: 'won', lateWonAt: new Date(), outcomeAppliedAt: null })
+      .where(eq(disputes.stripeDisputeId, undoingId));
+    const info = vi.spyOn(appealSteps(service).obs, 'info');
+
+    const clearedIds = await service.clearStaleDisputeAppealMarks();
+
+    expect(clearedIds).toContain(wonId);
+    expect(clearedIds).not.toContain(undoingId);
+    expect(clearedIds).not.toContain(lostId);
+    expect(await readDisputeRow(undoingId)).toMatchObject({
+      status: 'won',
+      appealStatus: 'appeal_under_review',
+      outcomeAppliedAt: null,
+    });
+    expect(await readDisputeRow(wonId)).toMatchObject({
+      status: 'won',
+      appealStatus: null,
+    });
+    expect(await readDisputeRow(lostId)).toMatchObject({
+      status: 'lost',
+      appealStatus: 'appeal_under_review',
+    });
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      'Stale appeal marks were cleared from disputes that are not lost',
+      { count: clearedIds.length, disputeIds: clearedIds }
+    );
+
+    // Nothing left to clear: nothing written, nothing logged.
+    expect(await service.clearStaleDisputeAppealMarks()).toEqual([]);
+    expect(info).toHaveBeenCalledOnce();
   });
 
   it('an open dispute holds a purchase row recorded before charge ids, by its purchase', async () => {
@@ -1026,8 +1390,12 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       .update(purchases)
       .set({ refundAmountCents: 300 })
       .where(eq(purchases.id, seeded.purchase.id));
+    const disputeId = `dp_lost_q3_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    await service.recordDispute(disputeFor(seeded, disputeId, 'lost'));
 
-    await makeService().processLostDispute(seeded.paymentIntentId, 1000);
+    await service.processLostDispute(seeded.paymentIntentId, 1000, disputeId);
 
     expect(await readPurchase(seeded.purchase.id)).toMatchObject({
       status: 'refunded',

@@ -4,7 +4,9 @@
   Settle a failed refund, with a confirm (Codex-2hxff.28, mockup D3):
 
   - "Refunded another way" (`refunded_elsewhere`) only records it. The
-    payees' shares stay taken back, and the buyer isn't emailed.
+    payees' shares stay taken back, and the buyer isn't emailed. On a late
+    win's own refund (`isLateWinRefund`) it also blocks every later Stripe
+    refund of the charge, so the dialog warns first (Codex-ohlcx).
   - "Re-pay payees" (`creators_repaid`, Q5) pays back what the refund took,
     as new pending payouts, and gives a failed full purchase refund's buyer
     access back. A note is required: it is a money record (Q6).
@@ -15,7 +17,10 @@
   chargeback or refund that took the payees' shares too refuses re-paying
   for good, since it would pay them twice: support settles it by hand, or as
   refunded another way. So does a clawback step only a person can read
-  (`REFUND_CLAWBACK_NEEDS_PERSON`): support settles it by hand. Whether re-paying gives the buyer access back is the
+  (`REFUND_CLAWBACK_NEEDS_PERSON`): support settles it by hand. A late win's own
+  refund of the payment (`LATE_WIN_REFUND_NOT_REPAYABLE`, owner decision 6) is
+  never re-paid: it pays back a buyer who paid twice, so support refunds the
+  buyer another way and marks it so. Whether re-paying gives the buyer access back is the
   server's prediction (`accessRestoreBlockedReason`, the restore's own rule,
   nothing locked), so the dialog says what it predicts and the confirmation
   says what happened (`accessNotRestoredReason`).
@@ -68,24 +73,26 @@
     closeFocus,
   }: Props = $props();
 
-  let note = $state('');
-  let busy = $state(false);
   /** A refusal the dialog stays open for: later, another way, or again. */
-  let problem = $state<
+  type Problem =
     | 'clawback_running'
     | 'blocked_chargeback'
     | 'blocked_later_refunds'
     | 'needs_person'
+    | 'late_win_refund'
     | 'session_ended'
-    | 'failed'
-    | null
-  >(null);
+    | 'failed';
+
+  let note = $state('');
+  let busy = $state(false);
+  let problem = $state<Problem | null>(null);
   let noteMissing = $state(false);
   /** Refused for good: Submit is off, and nothing is said of what re-paying would do. */
   const refusedForGood = $derived(
     problem === 'blocked_chargeback' ||
       problem === 'blocked_later_refunds' ||
-      problem === 'needs_person'
+      problem === 'needs_person' ||
+      problem === 'late_win_refund'
   );
 
   const noteId = $props.id();
@@ -152,6 +159,41 @@
     }
   }
 
+  /** What a refusal says: a lead in bold, when it has one, then why. */
+  function problemText(kind: Problem): { lead: string | null; body: string } {
+    switch (kind) {
+      case 'clawback_running':
+        return { lead: null, body: m.support_settle_clawback_running() };
+      case 'blocked_chargeback':
+        return {
+          lead: m.support_repay_blocked_lead(),
+          body: m.support_repay_blocked_chargeback(),
+        };
+      case 'blocked_later_refunds':
+        return {
+          lead: m.support_repay_blocked_lead(),
+          body: m.support_repay_blocked_later_refunds(),
+        };
+      case 'needs_person':
+        return {
+          lead: m.support_repay_needs_person_lead(),
+          body: m.support_repay_needs_person_body(),
+        };
+      case 'late_win_refund':
+        return {
+          lead: m.support_repay_late_win_lead(),
+          body: m.support_repay_late_win_body(),
+        };
+      case 'session_ended':
+        return {
+          lead: m.support_outcome_signed_out_lead(),
+          body: m.support_settle_session_ended(),
+        };
+      default:
+        return { lead: null, body: m.support_settle_failed() };
+    }
+  }
+
   async function handleSubmit() {
     if (busy || !item || !resolution) return;
     if (noteRequired && note.trim() === '') {
@@ -215,6 +257,10 @@
         // Retrying never helps either: Re-pay stays off for the session.
         markRepayBlocked(settling.refundId, 'needs_person');
         problem = 'needs_person';
+      } else if (answer.detailsCode === 'LATE_WIN_REFUND_NOT_REPAYABLE') {
+        // A late win's own refund: never re-paid, so Re-pay stays off too.
+        markRepayBlocked(settling.refundId, 'late_win_refund');
+        problem = 'late_win_refund';
       } else if (answer.status === 400 && noteRequired) {
         noteMissing = true;
       } else if (answer.status === 401 || answer.status === 403) {
@@ -257,6 +303,11 @@
       <Dialog.Body>
         {#if resolution === 'refunded_elsewhere'}
           <p class="text">{m.support_elsewhere_body({ buyer, amount, taken })}</p>
+          {#if item.isLateWinRefund}
+            <Alert variant="warning" data-testid="elsewhere-late-win-warning">
+              <p>{m.support_elsewhere_late_win_warning()}</p>
+            </Alert>
+          {/if}
         {:else}
           <p class="text">{m.support_repay_body({ taken })}</p>
           {#if restoresAccess}
@@ -290,6 +341,7 @@
           />
         </div>
         {#if problem}
+          {@const said = problemText(problem)}
           <Alert
             variant={problem === 'clawback_running'
               ? 'info'
@@ -301,31 +353,10 @@
             data-testid="settle-problem"
             data-problem={problem}
           >
-            {#if problem === 'clawback_running'}
-              <p>{m.support_settle_clawback_running()}</p>
-            {:else if problem === 'blocked_chargeback'}
-              <p>
-                <strong>{m.support_repay_blocked_lead()}</strong>
-                {m.support_repay_blocked_chargeback()}
-              </p>
-            {:else if problem === 'blocked_later_refunds'}
-              <p>
-                <strong>{m.support_repay_blocked_lead()}</strong>
-                {m.support_repay_blocked_later_refunds()}
-              </p>
-            {:else if problem === 'needs_person'}
-              <p>
-                <strong>{m.support_repay_needs_person_lead()}</strong>
-                {m.support_repay_needs_person_body()}
-              </p>
-            {:else if problem === 'session_ended'}
-              <p>
-                <strong>{m.support_outcome_signed_out_lead()}</strong>
-                {m.support_settle_session_ended()}
-              </p>
-            {:else}
-              <p>{m.support_settle_failed()}</p>
-            {/if}
+            <p>
+              {#if said.lead}<strong>{said.lead}</strong>{/if}
+              {said.body}
+            </p>
           </Alert>
         {/if}
       </Dialog.Body>

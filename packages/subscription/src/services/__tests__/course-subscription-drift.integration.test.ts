@@ -219,6 +219,21 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
     return row;
   }
 
+  /** A service's logger, to watch its support alerts. */
+  function errorLog(service: CourseSubscriptionService) {
+    return (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+      .obs;
+  }
+
+  /** What each "credit not given back" alert carried (Codex-2hxff.98). */
+  function notReturnedAlerts(errors: { mock: { calls: unknown[][] } }) {
+    return errors.mock.calls
+      .filter(([message]) =>
+        String(message).includes("cancelled subscription's invoice")
+      )
+      .map(([, metadata]) => metadata);
+  }
+
   /** Every course_subscription grant the subscriber holds on the course. */
   function grantsOn(cId: string) {
     return db
@@ -366,6 +381,94 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
         .where(eq(payouts.courseSubscriptionId, settled?.id ?? ''));
       expect(dupPayouts).toHaveLength(0);
       expect(await rowFor(second.id)).toEqual(settled);
+    });
+
+    it('settled with its invoice paid wholly by customer credit: nothing to refund, and one alert names the whole amount (Codex-2hxff.98)', async () => {
+      const { cId, pId, stripe, service } = await liveThenDuplicate();
+      const invoiceId = `in_${randomUUID().slice(0, 8)}`;
+      vi.mocked(stripe.invoices.list).mockResolvedValue({
+        object: 'list',
+        data: [
+          {
+            id: invoiceId,
+            amount_paid: 0,
+            starting_balance: -9000,
+            total: 5000,
+            payments: { data: [] },
+          },
+        ],
+        has_more: false,
+      } as never);
+      const errors = vi.spyOn(errorLog(service), 'error');
+      const second = courseSub(cId, pId);
+
+      await service.handleCourseSubscriptionCreated(second);
+
+      const dup = await rowFor(second.id);
+      expect(dup?.duplicateSettledAt).not.toBeNull();
+      expect(stripe.refunds.create).not.toHaveBeenCalled();
+      expect(notReturnedAlerts(errors)).toEqual([
+        {
+          errorId: expect.any(String),
+          invoiceId,
+          stripeSubscriptionId: second.id,
+          subscriptionId: dup?.id,
+          organizationId: dup?.organizationId ?? null,
+          userId: subscriberId,
+          kind: 'course',
+          cause: 'duplicate',
+          creditNotReturnedCents: 5000,
+          cardRefundedCents: 0,
+        },
+      ]);
+    });
+
+    it('paid after it was settled, partly by customer credit: the card part is refunded, and one alert names the credit not given back (Codex-2hxff.98)', async () => {
+      const { cId, pId } = await makeCourseWithPlan();
+      const { stripe, service } = serviceWith();
+      await service.handleCourseSubscriptionCreated(courseSub(cId, pId));
+      const second = courseSub(cId, pId);
+      await service.handleCourseSubscriptionCreated(second);
+      const settled = await rowFor(second.id);
+      const errors = vi.spyOn(errorLog(service), 'error');
+
+      const chargeId = `ch_${randomUUID().slice(0, 8)}`;
+      const invoice = createMockStripeInvoice({
+        amount_paid: 3000,
+        starting_balance: -2000,
+        total: 5000,
+        currency: 'gbp',
+        parent: {
+          subscription_details: {
+            subscription: second.id,
+            metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
+          },
+        },
+        payments: paidByCard(chargeId),
+      }) as unknown as Stripe.Invoice;
+      await service.handleCourseInvoicePaymentSucceeded(
+        invoice,
+        as(second, 'canceled')
+      );
+
+      expect(stripe.refunds.create).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ charge: chargeId, reason: 'duplicate' }),
+        { idempotencyKey: `refund_duplicate_${invoice.id}` }
+      );
+      expect(notReturnedAlerts(errors)).toEqual([
+        {
+          errorId: expect.any(String),
+          invoiceId: invoice.id,
+          stripeSubscriptionId: second.id,
+          subscriptionId: settled?.id,
+          organizationId: settled?.organizationId ?? null,
+          userId: subscriberId,
+          kind: 'course',
+          cause: 'duplicate',
+          creditNotReturnedCents: 2000,
+          cardRefundedCents: 3000,
+        },
+      ]);
     });
 
     it('a refused refund is retryable and leaves the duplicate owed; the retry settles it', async () => {
@@ -848,6 +951,37 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       expect(refundedAt).toBeLessThan(cancelledAt ?? 0);
       await expectNewerKeptOldEnded(ctx.cId, old, ctx.newerRow);
       expect(await payoutsFor(ctx.oldRow.id)).toHaveLength(0);
+    });
+
+    it('its paid invoice, partly paid by customer credit: the card part refunded, and support told of the credit not given back (Codex-2hxff.98)', async () => {
+      const ctx = await revivedNextToNewer();
+      const { stripe, old, invoice } = ctx;
+      // The balance paid £20 of the £70 bill; the card paid the £50.
+      Object.assign(invoice, { starting_balance: -2000, total: 7000 });
+      const errors = vi.spyOn(errorLog(ctx.service), 'error');
+
+      await ctx.service.handleCourseInvoicePaymentSucceeded(
+        invoice,
+        await ctx.atStripe()
+      );
+
+      expect(stripe.refunds.create).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ charge: ctx.chargeId }),
+        { idempotencyKey: `refund_revived_${invoice.id}` }
+      );
+      expect(notReturnedAlerts(errors)).toEqual([
+        expect.objectContaining({
+          invoiceId: invoice.id,
+          stripeSubscriptionId: old.id,
+          subscriptionId: ctx.oldRow.id,
+          userId: subscriberId,
+          kind: 'course',
+          cause: 'revived',
+          creditNotReturnedCents: 2000,
+          cardRefundedCents: 5000,
+        }),
+      ]);
+      await expectNewerKeptOldEnded(ctx.cId, old, ctx.newerRow);
     });
 
     it('an update first, then its invoice: the update refunds and cancels; the invoice changes nothing and pays no one', async () => {

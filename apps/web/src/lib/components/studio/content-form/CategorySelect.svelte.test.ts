@@ -11,7 +11,7 @@ import CategorySelect from './CategorySelect.svelte';
  *
  * CategorySelect is the presentational half of the content-form category
  * multiselect — pure props + callbacks, no remote imports — so it renders in
- * jsdom and its option rendering, toggle intents, hidden-field serialization,
+ * jsdom and its option rendering, toggle intents,
  * and create-on-the-fly affordance are falsifiable in isolation.
  */
 
@@ -43,24 +43,6 @@ describe('CategorySelect', () => {
     const text = document.body.textContent ?? '';
     expect(text).toContain('Interviews');
     expect(text).toContain('Essays');
-  });
-
-  test('serializes the selected ids into the hidden categoryIds input', () => {
-    component = mount(CategorySelect, {
-      target: document.body,
-      props: {
-        options,
-        selected: [options[0].id],
-        onToggle: noop,
-        onCreate: noop,
-      },
-    });
-
-    const hidden = document.querySelector<HTMLInputElement>(
-      'input[name="categoryIds"]'
-    );
-    expect(hidden).toBeTruthy();
-    expect(hidden?.value).toBe(JSON.stringify([options[0].id]));
   });
 
   test('marks the selected option as pressed', () => {

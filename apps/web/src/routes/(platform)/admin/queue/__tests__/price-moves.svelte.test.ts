@@ -194,6 +194,34 @@ describe('the tab', () => {
     expect(row.querySelectorAll('button')).toHaveLength(0);
   });
 
+  test('D1-a a member with an open chargeback: the queued row says it waits for it; a held one says so beside its buttons', () => {
+    mountAt('/admin/queue?tab=moves');
+    land([
+      heldMove({
+        status: 'queued',
+        action: null,
+        retry: { requestedAt: '2026-11-04T10:41:00.000Z', by: JORDAN },
+        queuedFor: '2026-11-05T11:00:00.000Z',
+        waitsForDispute: true,
+      }),
+      { ...OWEN, waitsForDispute: true },
+    ]);
+    const [queued, held] = rows();
+    const queuedText =
+      queued.querySelector('[data-testid="price-move-queued"]')?.textContent ??
+      '';
+    expect(queuedText).toContain(
+      'Waits while a chargeback is open · Jordan Reid'
+    );
+    expect(queuedText).not.toContain('Queued for');
+    expect(queued.querySelectorAll('button')).toHaveLength(0);
+    expect(
+      held.querySelector('[data-testid="price-move-waits-dispute"]')
+        ?.textContent
+    ).toContain('Waits while a chargeback is open');
+    expect(held.querySelectorAll('button').length).toBeGreaterThan(0);
+  });
+
   test('M4 refused again after a retry: Close… first, Retry the quiet one', () => {
     mountAt('/admin/queue?tab=moves');
     land([

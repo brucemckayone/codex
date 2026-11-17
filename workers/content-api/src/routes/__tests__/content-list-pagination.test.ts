@@ -21,8 +21,11 @@ import { createExecutionContext, env } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// This file's own subject. The limiter counts per subject across every file
+// in this single-worker run, so a shared id runs past the api preset's 100
+// a minute and later files read 429 (Codex-a6ofh.2).
 const USER = {
-  id: '7a1d0f2e-3b4c-4d5e-8f60-112233445566',
+  id: '7a1d0f2e-3b4c-4d5e-8f60-000000000005',
   email: 'creator@test.com',
   role: 'creator',
 };
@@ -31,6 +34,8 @@ const ORG_ID = '3c111111-1111-4111-8111-111111111999';
 
 const contentSpies = {
   list: vi.fn(),
+  whereCounts: vi.fn(),
+  attentionCounts: vi.fn(),
   // The registry calls setCache() on the constructed instance whenever CACHE_KV
   // is bound (it is, in env=test), as content-publish-invalidation.test.ts notes.
   setCache: vi.fn(),
@@ -103,12 +108,21 @@ describe('content list routes page by the requested page and limit', () => {
     const { creatorId, filters, pagination, options } = listCall();
     expect(creatorId).toBe(USER.id);
     expect(pagination).toEqual({ page: 2, limit: 5 });
-    expect(options).toEqual({ scope: 'studio' });
+    expect(options).toEqual({ scope: 'studio', withCategories: false });
     expect(filters).not.toHaveProperty('page');
     expect(filters).not.toHaveProperty('limit');
 
     const body = (await res.json()) as { pagination: { page: number } };
     expect(body.pagination.page).toBe(2);
+  });
+
+  it('GET /api/content?include=categories asks for the rows’ categories (Codex-a6ofh.3.3)', async () => {
+    const res = await get('?include=categories');
+
+    expect(res.status).toBe(200);
+    const { filters, options } = listCall();
+    expect(options).toEqual({ scope: 'studio', withCategories: true });
+    expect(filters).not.toHaveProperty('include');
   });
 
   it('GET /api/content with no paging params passes the schema defaults', async () => {
@@ -135,5 +149,197 @@ describe('content list routes page by the requested page and limit', () => {
 
     expect(res.status).toBe(200);
     expect(listCall().pagination).toEqual({ page: 1, limit: 100 });
+  });
+});
+
+/**
+ * The personal studio's "Where" (Codex-a6ofh.3.2). Its list sent no
+ * organizationId, which the service reads as every org, so org pieces showed
+ * under "personal". `scope=personal` is the service's `organizationId: null`.
+ */
+describe('GET /api/content scope (Codex-a6ofh.3.2)', () => {
+  beforeEach(() => {
+    contentSpies.list.mockReset();
+    contentSpies.list.mockResolvedValue({
+      items: [],
+      pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+    });
+  });
+
+  it('scope=personal lists the content filed under no org', async () => {
+    const res = await get('?scope=personal');
+
+    expect(res.status).toBe(200);
+    const { filters } = listCall();
+    expect(filters).toMatchObject({ organizationId: null });
+    expect(filters).not.toHaveProperty('scope');
+  });
+
+  it('no scope leaves the org open: everything', async () => {
+    const res = await get('');
+    expect(res.status).toBe(200);
+    expect(listCall().filters).not.toHaveProperty('organizationId');
+  });
+
+  it('scope=personal beside an organizationId is refused, never one winning', async () => {
+    const res = await get(`?scope=personal&organizationId=${ORG_ID}`);
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+
+  it('browse refuses a scope: it means nothing across creators', async () => {
+    const res = await get(`/browse?organizationId=${ORG_ID}&scope=personal`);
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+
+  it('needs=<kind> reaches the service: a "Needs you" chip (Codex-a6ofh.3.4)', async () => {
+    const res = await get('?needs=ready&scope=personal');
+
+    expect(res.status).toBe(200);
+    expect(listCall().filters).toMatchObject({
+      needs: 'ready',
+      organizationId: null,
+    });
+  });
+
+  it('a needs that is no kind is refused', async () => {
+    const res = await get('?needs=urgent');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+
+  it('lifecycle=off-sale reaches the service: a status tab (Codex-a6ofh.3.6)', async () => {
+    const res = await get(`?lifecycle=off-sale&organizationId=${ORG_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(listCall().filters).toMatchObject({
+      lifecycle: 'off-sale',
+      organizationId: ORG_ID,
+    });
+    expect(listCall().filters).not.toHaveProperty('status');
+  });
+
+  it('a lifecycle beside a status is refused, never one winning', async () => {
+    const res = await get('?lifecycle=draft&status=draft');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+
+  it('browse refuses a lifecycle: it lists what is on sale', async () => {
+    const res = await get(
+      `/browse?organizationId=${ORG_ID}&lifecycle=off-sale`
+    );
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.list).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/content/attention (Codex-a6ofh.3.4)', () => {
+  const counts = {
+    'live-media-gone': 1,
+    scheduled: 0,
+    'didnt-go-live': 2,
+    'media-gone': 0,
+    processing: 3,
+    ready: 4,
+  };
+
+  beforeEach(() => {
+    contentSpies.attentionCounts.mockReset();
+    contentSpies.attentionCounts.mockResolvedValue(counts);
+  });
+
+  it('counts the signed-in creator’s pieces in one org, in the data envelope', async () => {
+    const res = await get(`/attention?organizationId=${ORG_ID}`);
+
+    // Above /:id: read as an id, it would be a 400.
+    expect(res.status).toBe(200);
+    expect(contentSpies.attentionCounts).toHaveBeenCalledWith(USER.id, ORG_ID);
+    expect(await res.json()).toEqual({ data: counts });
+  });
+
+  it('scope=personal counts the pieces filed under no org; neither, everywhere', async () => {
+    expect((await get('/attention?scope=personal')).status).toBe(200);
+    expect(contentSpies.attentionCounts).toHaveBeenLastCalledWith(
+      USER.id,
+      null
+    );
+
+    expect((await get('/attention')).status).toBe(200);
+    expect(contentSpies.attentionCounts).toHaveBeenLastCalledWith(
+      USER.id,
+      undefined
+    );
+  });
+
+  it('scope=personal beside an organizationId is refused, as the list refuses it', async () => {
+    const res = await get(`/attention?scope=personal&organizationId=${ORG_ID}`);
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.attentionCounts).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/content/where-counts (Codex-a6ofh.3.2)', () => {
+  it('counts the signed-in creator’s own content, in the data envelope', async () => {
+    const counts = {
+      all: 14,
+      personal: 3,
+      orgs: [{ id: ORG_ID, name: 'Studio Alpha', count: 11 }],
+    };
+    contentSpies.whereCounts.mockReset();
+    contentSpies.whereCounts.mockResolvedValue(counts);
+
+    const res = await get('/where-counts');
+
+    // Above /:id: read as an id, it would be a 400.
+    expect(res.status).toBe(200);
+    expect(contentSpies.whereCounts).toHaveBeenCalledWith(USER.id);
+    expect(await res.json()).toEqual({ data: counts });
+  });
+});
+
+describe('GET /api/content resolves each row’s poster (Codex-a6ofh.3.1)', () => {
+  it('sends mediaItem.thumbnailUrl beside the key, from the assets base', async () => {
+    const THUMB = 'creator-1/media-thumbnails/m1/md.webp';
+    contentSpies.list.mockReset();
+    contentSpies.list.mockResolvedValue({
+      items: [
+        {
+          id: 'c1',
+          title: 'Piece',
+          mediaItem: {
+            id: 'm1',
+            status: 'ready',
+            thumbnailKey: THUMB,
+            hlsPreviewKey: null,
+          },
+        },
+      ],
+      pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+
+    const res = await buildApp().fetch(
+      new Request('http://content-api.test/api/content'),
+      { ...testEnv, R2_PUBLIC_URL_BASE: 'http://localhost:4100' } as typeof env,
+      createExecutionContext()
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: {
+        mediaItem: { thumbnailKey: string; thumbnailUrl: string | null };
+      }[];
+    };
+    expect(body.items[0]?.mediaItem).toMatchObject({
+      thumbnailKey: THUMB,
+      thumbnailUrl: `http://localhost:4100/${THUMB}`,
+    });
   });
 });

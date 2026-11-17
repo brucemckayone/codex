@@ -211,23 +211,29 @@ describe('every stored still chooses the file for its slot', () => {
  * No `sizes` value uses min(), max() or clamp(). Safari before 26.4 ignores an
  * entry that does, and calc() around one, and falls back to 100vw (WebKit bug
  * 304915): the file for the whole viewport, in every slot (Codex-kk9nv.3).
- * Outside `<style>` blocks and `style` attributes, a CSS math function with a
- * length in it is a `sizes` value in this app, so every one is a failure.
- * That includes the page builder's generators since Codex-sntzy.
+ * Outside `<style>` blocks, `style` attributes and Dialog.Content's
+ * `maxWidth`/`maxHeight`, a CSS math function with a length in it is a `sizes`
+ * value in this app, so every one is a failure. That includes the page
+ * builder's generators since Codex-sntzy.
  */
 describe('no sizes value uses a math function', () => {
   const MATH_FUNCTION = /(?<![.\w$-])(min|max|clamp)\(/g;
   /** A length in the arguments, written out or after a `${…}`, or a `${…}` itself. */
   const LENGTH = /[\d}](r?em|px|[sdl]?v[whib]|vmin|vmax|ch|ex|cq[whib]|%)|\$\{/;
 
-  /** The code a `sizes` value can be written in: no styles, no comments. */
+  /**
+   * The code a `sizes` value can be written in: no styles, no comments. Nor
+   * Dialog.Content's `maxWidth="…"` and `maxHeight="…"`: the panel writes
+   * them straight into its own `max-width`/`max-height`, so they are CSS
+   * lengths, as a `style` attribute is, and never reach an image.
+   */
   function sizesCode(source: string, isTs: boolean): string {
     if (isTs) return codeWithoutComments(source);
     return withoutComments(source)
       .replace(CODE_BLOCK, (block, open: string, tag: string) =>
         tag === 'style' ? open : block
       )
-      .replace(/\sstyle(:[\w-]+)?="[^"]*"/g, '');
+      .replace(/\s(style(:[\w-]+)?|maxWidth|maxHeight)="[^"]*"/g, '');
   }
 
   /** The `(…)` that opens at `start`, with what it holds. */
@@ -267,12 +273,15 @@ describe('no sizes value uses a math function', () => {
     const markup = [
       "<script>const s = 'clamp(16rem, 34vw, 28rem)';</script>",
       '<img sizes="min(100vw, 52rem)" alt="" />',
+      '<img sizes={`min(90vw, 40rem)`} alt="" />',
       '<div style="width: min(100%, 4rem)"></div>',
+      '<Dialog.Content maxWidth="min(35rem, 90vw)" maxHeight="min(60vh, 40rem)">',
       '<style>a { width: max(1rem, 2vw); }</style>',
     ].join('');
     expect(mathFunctions(sizesCode(markup, false))).toEqual([
       'clamp(16rem, 34vw, 28rem)',
       'min(100vw, 52rem)',
+      'min(90vw, 40rem)',
     ]);
   });
 

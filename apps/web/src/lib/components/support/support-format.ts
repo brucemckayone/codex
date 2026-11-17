@@ -15,6 +15,7 @@ import type {
   PayeeRole,
   QueueCause,
   RefundRequester,
+  RefundRow,
   Slice,
   SupportChargeKind,
   SupportPerson,
@@ -25,6 +26,7 @@ import {
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
   DISPUTE_INQUIRY_STATUSES,
+  type DisputeAppealStatus,
 } from '@codex/constants';
 import { formatShareBps } from '$lib/components/studio/ownership/ownership-view';
 import { formatPrice } from '$lib/utils/format';
@@ -100,11 +102,21 @@ export function daysLeftText(closesAt: string, now: Date = new Date()): string {
     : m.support_days_left({ count: String(days) });
 }
 
-/** The window's cell in the search results: a Badge and one line under it. */
+/**
+ * The window's cell in the search results: a Badge and one line under it. A
+ * window a late-won chargeback lifted (owner Q7) has no end, and its
+ * `closesAt` has passed, so it never shows a date or a day count.
+ */
 export function windowCell(
   window: SupportRefundWindow,
   now: Date = new Date()
 ): { badge: BadgeTreatment; detail: string } {
+  if (window.liftedByLateWin) {
+    return {
+      badge: { label: m.support_window_lifted(), variant: 'success' },
+      detail: m.support_window_lifted_why(),
+    };
+  }
   if (window.isOpen) {
     return {
       badge: { label: m.support_window_open(), variant: 'success' },
@@ -268,9 +280,21 @@ export function roleLabel(role: PayeeRole): string {
     : m.support_role_creator();
 }
 
-/** Stripe's refund status, as the refunds card shows it. */
-export function refundStatus(status: string): BadgeTreatment {
-  switch (status) {
+/**
+ * A refund's status, as the refunds card shows it: Stripe's, except a failed
+ * refund support settled as refunded elsewhere, which counts as refunded
+ * (Codex-3xnta) and so never reads "Failed".
+ */
+export function refundStatus(
+  refund: Pick<RefundRow, 'status' | 'resolution'>
+): BadgeTreatment {
+  if (
+    refund.status === 'failed' &&
+    refund.resolution === 'refunded_elsewhere'
+  ) {
+    return { label: m.support_action_elsewhere(), variant: 'neutral' };
+  }
+  switch (refund.status) {
     case 'pending':
       return { label: m.support_refund_pending(), variant: 'warning' };
     case 'requires_action':
@@ -282,7 +306,7 @@ export function refundStatus(status: string): BadgeTreatment {
     case 'canceled':
       return { label: m.support_refund_canceled(), variant: 'neutral' };
     default:
-      return { label: humanise(status), variant: 'neutral' };
+      return { label: humanise(refund.status), variant: 'neutral' };
   }
 }
 
@@ -331,6 +355,20 @@ export function disputeStatus(status: string): BadgeTreatment {
         label: m.support_dispute_other({ status: humanise(status) }),
         variant: 'neutral',
       };
+  }
+}
+
+/**
+ * A lost chargeback's appeal while it runs (owner D34), under its Lost
+ * badge: the platform answers it in Stripe, so the needs-response label
+ * says where.
+ */
+export function disputeAppeal(appeal: DisputeAppealStatus): string {
+  switch (appeal) {
+    case 'appeal_needs_response':
+      return m.support_chargeback_appeal_needs_response();
+    case 'appeal_under_review':
+      return m.support_chargeback_appeal_under_review();
   }
 }
 

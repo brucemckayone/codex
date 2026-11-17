@@ -263,11 +263,13 @@ export function ledgerFixtures(db: Database) {
     return { chargeId: id, payoutIds: ids };
   }
 
+  /** A refund; a failed one may carry how support settled it. */
   async function refund(opts: {
     chargeId: string;
     cents: number;
     status: 'pending' | 'requires_action' | 'succeeded' | 'failed' | 'canceled';
     purchaseId?: string;
+    resolution?: 'refunded_elsewhere' | 'creators_repaid';
   }): Promise<void> {
     await db.insert(refunds).values({
       stripeRefundId: `re_admrev_${token}_${randomUUID()}`,
@@ -277,6 +279,8 @@ export function ledgerFixtures(db: Database) {
       currency: 'gbp',
       status: opts.status,
       stripeCreatedAt: new Date(),
+      resolution: opts.resolution ?? null,
+      resolvedAt: opts.resolution ? new Date() : null,
     });
   }
 

@@ -1351,3 +1351,142 @@ describe('the picture (Codex-une9r)', () => {
     expect(jsonLd.thumbnailUrl).toBe(ogImage());
   });
 });
+
+describe('the studio preview of the creator’s own piece (Codex-a6ofh.2.11)', () => {
+  const HANDED_IN = 'test-preview-player';
+  const handedIn = () =>
+    createRawSnippet(() => ({
+      render: () => `<div class="${HANDED_IN}"></div>`,
+    }));
+  const BODY = `<p>${'Every word of the draft. '.repeat(120)}</p>`;
+  const article = () =>
+    makeContent({
+      contentType: 'written',
+      mediaItem: null,
+      organizationId: null,
+    });
+
+  beforeEach(async () => {
+    mockVideoPlayer.mockClear();
+    const { updateLocalProgress } = await import('$lib/collections/progress');
+    vi.mocked(updateLocalProgress).mockClear();
+  });
+
+  test('a video plays in the player handed in, and the content player never loads', async () => {
+    render({
+      content: makeContent(),
+      hasAccess: true,
+      streamingUrl: 'https://stream.test/master.m3u8',
+      preview: true,
+      player: handedIn(),
+    });
+    await vi.dynamicImportSettled();
+    flushSync();
+
+    expect(player().querySelector(`.${HANDED_IN}`)).not.toBeNull();
+    expect(mockVideoPlayer).not.toHaveBeenCalled();
+  });
+
+  test('calibration: with no player handed in, the same page plays the content player', async () => {
+    render({
+      content: makeContent(),
+      hasAccess: true,
+      streamingUrl: 'https://stream.test/master.m3u8',
+    });
+    await vi.dynamicImportSettled();
+    flushSync();
+
+    expect(mockVideoPlayer).toHaveBeenCalled();
+  });
+
+  test('an audio piece plays in it too, in the audio card’s place', () => {
+    render({
+      content: makeContent({ contentType: 'audio' }),
+      hasAccess: true,
+      preview: true,
+      player: handedIn(),
+    });
+
+    const slot = document.querySelector('.content-detail__player--audio');
+    expect(slot?.querySelector(`.${HANDED_IN}`)).not.toBeNull();
+  });
+
+  test('it gives search engines nothing: noindex, no canonical, no share tags, no structured data', () => {
+    render({
+      content: makeContent(),
+      hasAccess: true,
+      preview: true,
+      player: handedIn(),
+    });
+
+    expect(
+      document.head
+        .querySelector('meta[name="robots"]')
+        ?.getAttribute('content')
+    ).toBe('noindex');
+    expect(document.head.querySelector('link[rel="canonical"]')).toBeNull();
+    expect(document.head.querySelector('meta[property="og:title"]')).toBeNull();
+    expect(
+      document.head.querySelector('script[type="application/ld+json"]')
+    ).toBeNull();
+  });
+
+  test('calibration: the public page keeps its canonical and structured data, unmarked', () => {
+    render({ content: makeContent(), hasAccess: true });
+
+    expect(document.head.querySelector('meta[name="robots"]')).toBeNull();
+    expect(document.head.querySelector('link[rel="canonical"]')).not.toBeNull();
+    expect(
+      document.head.querySelector('script[type="application/ld+json"]')
+    ).not.toBeNull();
+  });
+
+  test('an article shows all its words and saves no reading progress', async () => {
+    const { updateLocalProgress } = await import('$lib/collections/progress');
+    render({
+      content: article(),
+      hasAccess: true,
+      contentBodyHtml: BODY,
+      preview: true,
+    });
+    window.dispatchEvent(new Event('scroll'));
+    flushSync();
+
+    expect(bodyText()).toContain('Every word of the draft.');
+    expect(updateLocalProgress).not.toHaveBeenCalled();
+  });
+
+  test('calibration: the public page saves the reader’s progress as it opens', async () => {
+    const { updateLocalProgress } = await import('$lib/collections/progress');
+    render({ content: article(), hasAccess: true, contentBodyHtml: BODY });
+
+    expect(updateLocalProgress).toHaveBeenCalled();
+  });
+
+  test('it neither announces an unlock nor says the creator bought it', () => {
+    render({
+      content: makeContent(SELLABLE),
+      hasAccess: true,
+      preview: true,
+      player: handedIn(),
+    });
+
+    expect(
+      document
+        .querySelector('.content-detail__player-status')
+        ?.textContent?.trim()
+    ).toBe('');
+    expect(bodyText()).not.toContain(m.content_price_purchased());
+  });
+
+  test('calibration: on the public page a buyer is told both', () => {
+    render({ content: makeContent(SELLABLE), hasAccess: true });
+
+    expect(
+      document
+        .querySelector('.content-detail__player-status')
+        ?.textContent?.trim()
+    ).not.toBe('');
+    expect(bodyText()).toContain(m.content_price_purchased());
+  });
+});

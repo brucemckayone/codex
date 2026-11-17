@@ -17,9 +17,9 @@ price-change email check were removed once production had applied all three
 read those sections with `git log -p -- docs/payments/release-checklist.md`.
 
 **Standing check: a release that changes the Stripe `apiVersion`.** It isn't
-removed after one release. Before merging a change to the pin in
-`packages/purchase/src/stripe-client.ts`, run the switch-credit proof in Stripe
-TEST mode:
+removed after one release. Before merging a change to the pin,
+`STRIPE_API_VERSION` in `packages/constants/src/commerce.ts`, run the
+switch-credit proof in Stripe TEST mode:
 
     pnpm exec tsx --env-file=.env.dev packages/subscription/scripts/test-clock-paid-price.ts
 
@@ -78,13 +78,29 @@ below is then the test-mode one: `sk_test_`, `rk_test_`.
   has NONE today: the deploy uploads one only from the GitHub production
   secret `ADMIN_API_STRIPE_RESTRICTED_KEY` (Codex-2hxff.92).
   - **Create it:** a restricted key in the SAME mode as `STRIPE_SECRET_KEY`
-    (`rk_test_` beside `sk_test_`), with Refunds write; Charges,
-    PaymentIntents, Invoices and Disputes read; and Balance read on connected
-    accounts. Save it as `ADMIN_API_STRIPE_RESTRICTED_KEY`; the next deploy
-    uploads it.
+    (`rk_test_` beside `sk_test_`; the upload refuses any other prefix). Set
+    these Dashboard rows, on the platform account unless noted, and leave every
+    other row at None:
+    - **Charges and Refunds: Write.** Stripe has no refunds-only permission;
+      this one row covers `refunds.create` and the charge and refund reads.
+    - **Payment Intents: Read.**
+    - **Payment Disputes: Read.**
+    - **Invoices: Read.**
+    - **Transfers: Read.** `transfers.list`, `retrieve` and `listReversals`,
+      for settling a failed refund and "Check Stripe again".
+    - **Balance: Read, on connected accounts**, for Creator debts' live
+      balance. Also on the platform account: the charge detail expands
+      `balance_transaction` for Stripe's fee, and Stripe's permission reference
+      names no row for balance transactions, so Balance is assumed to cover it.
+
+    This list is built from the Stripe calls in the header of
+    `packages/admin/src/services/support-service.ts`; the other places that
+    mention this key point here. Save it as `ADMIN_API_STRIPE_RESTRICTED_KEY`;
+    the next deploy uploads it.
   - **Without it:** support refunds fail, and Creator debts shows the 08:00
     snapshot with a warning per load.
-  - **Check it:** after the deploy, Creator debts shows a live balance.
+  - **Check it:** after the deploy, Creator debts shows a live balance, and a
+    payment's refund detail shows Stripe's fee.
 
 ### R9 — before the backfill: the Express dashboard settings (owner)
 
@@ -152,55 +168,16 @@ into the subscribers-only switch (`is_tier_gated`) plus one tick per tier
 migrations first and redeploys content-api later. In between, the OLD
 content-api still saves films, and it writes only the old column. A film saved
 as "Subscribers" in that window has the switch off and no ticks, and the new
-workers read it as **free to anyone signed in**. Production had 1 tier and 0
-gated films on 2026-10-29, so expect nothing; the check below proves it.
+workers read it as **free to anyone signed in**. The parity check for that
+window (formerly R12) ran on 2026-10-31 after the deploy: check A = 0, check
+B = 0/0, check C = 0. It is done.
 
-Both steps use one read-only script. It runs in a `READ ONLY` transaction and
-prints counts and content ids only. It loads no env file, so pass the
-production connection string in the shell (Neon console → Connection details),
-never from a file:
-
-    DB_METHOD=PRODUCTION DATABASE_URL='<production url>' pnpm --filter @codex/database audit:plan-access
-
-### R12 — after the deploy: the plan-access parity check
-
-Run it once, after the production deploy has finished and before anyone saves a
-film's access in the new Studio. Expect **check A = 0** and **check B = 0**;
-the exit code is 1 only when A is not 0.
-
-- **Check A** (legacy tier set, switch off): the window shape above. The fix is
-  `0120`'s own backfill, steps 6 then 5, each scoped to `NOT is_tier_gated` so
-  it touches only these rows. The script prints the same statements. Run them
-  in the Neon SQL Editor, in one transaction, in this order (the INSERT finds
-  its rows by the switch still being off), then run the script again:
-
-  ```sql
-  BEGIN;
-  INSERT INTO content_tier_access (content_id, tier_id, organization_id)
-  SELECT c.id, t.id, c.organization_id
-    FROM content c
-    JOIN subscription_tiers x ON x.id = c.included_in_tier_id
-    JOIN subscription_tiers t ON t.organization_id = c.organization_id
-                             AND t.deleted_at IS NULL
-                             AND t.sort_order >= x.sort_order
-   WHERE c.organization_id IS NOT NULL
-     AND NOT c.is_tier_gated
-  ON CONFLICT DO NOTHING;
-  UPDATE content SET is_tier_gated = true
-   WHERE included_in_tier_id IS NOT NULL
-     AND NOT is_tier_gated;
-  COMMIT;
-  ```
-
-  Never run `0120`'s step 6 unscoped once the new Studio is in use: it would
-  add every dearer tier to each bundle ("Basic, Premium") a creator has saved.
-  Both statements are idempotent.
-- **Check B** (ticks differ from the ladder `0120` would give): straight after
-  the deploy, a `ticked_not_ladder` row is an old-Studio edit in the window
-  that narrowed or cleared the tier. Its ticks still open the old set. Open the
-  film in the new Studio and save the tiers the creator wants. Once creators
-  use the new Studio, bundles, "keep" deletes and tier reorders make B non-zero
-  by design, so B is only meaningful on this first run.
+R13 uses a read-only script, `audit:plan-access`. It runs in a `READ ONLY`
+transaction and prints counts and content ids only. It loads no env file, so
+pass the production connection string in the shell (Neon console → Connection
+details), never from a file. Never run `0120`'s step 6 unscoped now that the
+new Studio is in use: it would add every dearer tier to each bundle ("Basic,
+Premium") a creator has saved.
 
 ### R13 — before any workers rollback
 
@@ -395,10 +372,12 @@ ROLLBACK;
 ### R17 — the first hourly price-moves run
 
 ecom-api's hourly cron runs the price-moves step, except on the 08:00 London
-run, which the bank payout has to itself. After the first run, read its `Price moves: run finished` log line:
-with no price saved since the deploy, it reads all zeros. Look for any
-`Price moves: a step of the run failed` or `payouts-sweep cron could not run
-the price moves` error.
+run, which the bank payout has to itself. A run with nothing to do logs
+nothing: `Price moves: run finished` appears only when a run claimed,
+restarted or reopened at least one move. So with no price saved since the
+deploy, expect no `Price moves` line at all (confirmed on production's 12:00Z
+run, 2026-11-06). Either way, look for any `Price moves: a step of the run
+failed` or `payouts-sweep cron could not run the price moves` error.
 
 ### Rollback
 
@@ -457,3 +436,571 @@ Runbook). So roll back only when no listed `pending_tier_from` with a
 members with the owner first. Don't change prices while
 rolled back: the old fan-out writes no price moves, so the hourly step can't
 see its subscribers after the roll forward.
+
+---
+
+## A late win undoes a lost chargeback (migrations `0126` and `0127`)
+
+`0126` adds four nullable columns and three CHECKs to `disputes`
+(`Codex-2hxff.70`; [dispute record](dispute-record.md)). It is plain
+drizzle-kit DDL. The buyer's `purchase-access-restored` email is in no
+migration: the deploy's template seed (`db:seed:templates`, which runs right
+after `db:migrate` and before any worker deploys) inserts it, as it does every
+new template, and skips one that already exists. `0127` adds one more nullable column,
+`refunded_outside_stripe_at`: a charge whose buyer support refunded outside
+Stripe, which its refund route then refuses
+([operations](operations.md#late-wins)). Both
+are additive and run before the workers deploy. The old workers never read the
+columns, and they still only alert a late win and leave its row `lost`, which
+every CHECK allows. No backfill: nothing sets the new column until support
+settles a case, by hand, by settling a late win's own failed refund as
+refunded elsewhere, or with R19's UPDATE for one refunded another way. Both stay on a rollback, but list the late wins still being
+undone first ([R19](#r19--before-any-workers-rollback-late-wins-still-being-undone)).
+The old support route doesn't read `refunded_outside_stripe_at`, so a charge
+refunded outside Stripe is refundable through Stripe again while rolled back:
+don't refund one then. R19 lists them.
+
+### R18 — lost chargebacks already settled by hand
+
+From this release the hourly reconcile undoes any lost dispute that Stripe
+now shows as won, including one alerted under the old "alert only" rule that
+a person has already put right by hand. Its first run comes within the hour
+of the deploy, and the deploy migrates and starts the new workers in one job,
+so such a row must stop being `lost` before the deploy. `0126`'s columns don't
+exist until the deploy, so R18 has two parts.
+
+**(a) Before the deploy.** List the rows the reconcile could pick up and check
+each in Stripe:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT stripe_dispute_id, stripe_charge_id, purchase_id, subscription_id,
+       course_subscription_id, amount_cents, stripe_created_at, outcome_applied_at
+  FROM disputes
+ WHERE status = 'lost'
+   AND stripe_created_at >= now() - interval '12 months'
+ ORDER BY stripe_created_at;
+ROLLBACK;
+```
+
+**Expect none:** production runs on Stripe test keys and has had no late-win
+alert.
+
+For any that Stripe shows as won and that was already put right by hand, mark
+it won and applied, so neither the old workers nor the new ones act on it
+again. This one writes: run it only with the owner's OK, with the ids from the
+list. Run it between :20 and :50 past the hour, as the operations step does:
+the old workers' hourly retry of an unfinished loss takes no lock, so a write
+while it runs could let it finish the loss on a row that is now won.
+
+```sql
+BEGIN;
+UPDATE disputes
+   SET status = 'won',
+       outcome_applied_at = COALESCE(outcome_applied_at, now() - interval '1 second'),
+       updated_at = now()
+ WHERE stripe_dispute_id IN ('du_…') AND status = 'lost'
+RETURNING stripe_dispute_id, status, outcome_applied_at;
+COMMIT;
+```
+
+Run after the `0130` deploy, the SET should also clear `appeal_status`
+(`appeal_status = NULL`). If it doesn't, nothing refuses the write. The row
+keeps a stale appeal mark, which support doesn't show on a won row, and
+which the hourly reconcile's first step clears on its next run, whatever
+the dispute's age ([the `0130` section](#the-stripe-upgrade-to-2026-10-28endive-and-dispute-appeals-migration-0130)).
+Only a mark on a lost row needs Stripe's word, and the reconcile's 4-day
+event window doesn't reach a long-settled one: the `0130` section's
+Rollback step lists those marks and clears them by hand.
+
+It returns one line per id. A missing line means the id was mistyped or is no
+longer lost: check it before going on. Each row is now an applied win:
+
+- **Every CHECK allows it, `0126`'s included.** It writes only columns that
+  exist today, and `0126`'s three CHECKs test only its new columns, which
+  arrive empty.
+- **Nothing acts on it.** The webhook stops at an applied outcome, the hourly
+  retry takes only unapplied rows, and the late-win check reads only lost ones,
+  on the old workers and the new.
+- **A row whose loss never finished** (`outcome_applied_at` empty in the list)
+  gets an applied time a second before the write. It then still reads as
+  settled by hand, not by the undo, and (b) leaves its `lost_applied_at`
+  empty, as for any loss that never finished, so support shows no made-up
+  "lost on" date. Marking it won also releases the sale's
+  unpaid payouts that its unfinished loss was holding, and the next payout run
+  pays them, as for any win. Check first that the hand settlement didn't pay
+  those creators some other way.
+
+**(b) After the deploy**, at any time, record the same rows as late wins. This
+adds support's history ("Won late") and the lifted refund limit (Q7). Nothing
+races it, because the row stays applied:
+
+```sql
+BEGIN;
+UPDATE disputes
+   SET late_won_at = now(),
+       -- In the ARRAY: each id whose outcome_applied_at was EMPTY in (a)'s
+       -- list (its loss never finished). ARRAY[]::text[] when there are none.
+       lost_applied_at = CASE
+         WHEN stripe_dispute_id = ANY (ARRAY['du_…']::text[]) THEN NULL
+         ELSE outcome_applied_at
+       END,
+       updated_at = now()
+ WHERE stripe_dispute_id IN ('du_…')
+   AND status = 'won' AND late_won_at IS NULL
+   AND outcome_applied_at IS NOT NULL
+RETURNING stripe_dispute_id, outcome_applied_at, late_won_at, lost_applied_at;
+COMMIT;
+```
+
+Then check that each is an applied late win settled by hand. Every column
+should read `t`:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT stripe_dispute_id, status,
+       outcome_applied_at < late_won_at AS applied_before_the_late_win,
+       (late_won_at IS NULL OR status = 'won') AS check_late_won_status,
+       (late_win_refund_id IS NULL OR late_won_at IS NOT NULL) AS check_late_win_refund,
+       (lost_applied_at IS NULL OR late_won_at IS NOT NULL) AS check_lost_applied
+  FROM disputes
+ WHERE stripe_dispute_id IN ('du_…');
+ROLLBACK;
+```
+
+`applied_before_the_late_win` is what keeps the buyer's "access is back" email
+from being sent for it ([dispute record](dispute-record.md#an-applied-late-win)).
+
+### R19 — before any workers rollback: late wins still being undone
+
+A late win that the new workers have already undone stays undone. A late win
+still being undone does not (won, `late_won_at` set, its outcome not yet
+applied). Within the hour, the old workers' hourly retry finishes it as a plain
+win: it re-pays the creators and marks it applied, but it leaves a refunded
+purchase refunded, and it never refunds a payment the buyer made twice. After
+the roll forward, nothing revisits it, because it is applied. So before any
+workers rollback, list them:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT d.stripe_dispute_id, d.stripe_charge_id, d.purchase_id,
+       d.subscription_id, d.course_subscription_id, d.late_won_at,
+       d.late_win_refund_id, pu.status AS purchase_status,
+       pu.duplicate_of_purchase_id,
+       EXISTS (SELECT 1 FROM purchases o
+                WHERE o.customer_id = pu.customer_id AND o.id <> pu.id
+                  AND o.status = 'completed'
+                  AND (o.content_id = pu.content_id
+                       OR o.course_id = pu.course_id)) AS bought_again
+  FROM disputes d
+  LEFT JOIN purchases pu ON pu.id = d.purchase_id
+ WHERE d.late_won_at IS NOT NULL AND d.outcome_applied_at IS NULL
+ ORDER BY d.late_won_at;
+ROLLBACK;
+```
+
+Keep this list for support too: the charges whose buyer was refunded outside
+Stripe. The old charge page doesn't block them, so while rolled back none of
+them is ever refunded through Stripe:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT stripe_dispute_id, stripe_charge_id, refunded_outside_stripe_at
+  FROM disputes
+ WHERE refunded_outside_stripe_at IS NOT NULL;
+ROLLBACK;
+```
+
+At 0 late wins still being undone, a workers rollback is exact for them.
+Otherwise, prefer a forward fix. Each listed row has a step that is retried
+every hour and alerted ([operations](operations.md#late-wins)). Fix its cause
+and let the next run finish it, or settle a refund Stripe won't make
+([operations](operations.md#settling-a-late-win-refund-stripe-wont-make)), then
+list again.
+
+**A row whose last alert is the refund not made** ("Late win: Stripe refused
+the refund of a payment the buyer made twice…" or "Late win: a payment the
+buyer made twice (bought again, or a duplicate) could not be refunded…") **MUST
+be settled with that operations step BEFORE any rollback.** It can't be
+settled after: the step's first check needs the outcome empty. And once the
+old workers mark it applied, the held re-pay is released and the next payout
+run pays the creators back the first payment, with nothing to take it back. A
+case the step stops (STOP) is the owner's to settle before the rollback; until
+then, don't roll back.
+
+**A late win's failed refund is settled with the NEW admin, or not until the
+roll forward.** The new admin's "refunded elsewhere" marks the charge refunded
+outside Stripe; the old one marks nothing, and once a refund is settled
+nothing marks it later. So before any rollback, list them:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT r.stripe_refund_id, r.stripe_charge_id, d.stripe_dispute_id,
+       COALESCE(d.late_win_refund_id = r.stripe_refund_id, false)
+         AS recorded_as_the_late_wins
+  FROM refunds r
+  JOIN disputes d ON d.stripe_charge_id = r.stripe_charge_id
+                 AND d.late_won_at IS NOT NULL
+ WHERE r.status = 'failed' AND r.resolved_at IS NULL
+ ORDER BY r.stripe_charge_id, r.stripe_refund_id;
+ROLLBACK;
+```
+
+It lists every open failed refund on a late win's charge, not only the one
+our record names: the late win's own refund may carry only Stripe's metadata
+(`codex_late_win_dispute`) when our record's write was lost. Settle each as
+the late-win alert row says ([operations](operations.md#late-wins)). One still
+open at the rollback stays open until the roll forward: refund the buyer
+another way meanwhile if need be, but don't settle it in the old admin, and
+never with "Re-pay payees". One settled while rolled back anyway is recorded
+with (b) below.
+
+If the workers must roll back anyway, **keep the list first.** Once the old
+workers mark a row applied, it looks exactly like a late win the new workers
+undid, and it can't be found again. Then wait until each row shows
+`outcome_applied_at` set, and act on it:
+
+| The row | What to do |
+|---|---|
+| A subscription or a course subscription | Nothing: the old workers settle it as the new ones would |
+| `purchase_status` is `completed` | Nothing: the buyer already has it back. They aren't sent the "access is back" email |
+| `purchase_status` is `pending` (a duplicate payment the loss never got to) | Nothing: the hourly duplicate sweep refunds it |
+| `late_win_refund_id` set | Nothing, once Stripe shows that refund succeeded: its `charge.refunded` takes it back from the creators. If a payout run paid their re-pay first, it leaves a `slice_repaid` debt for support, as any refund of a re-paid sale does. If it fails or is canceled instead, the buyer is still owed it: refund them another way. Settle a failed one in Failed refunds as refunded elsewhere, **never** "Re-pay payees": the old admin doesn't refuse it, and the old alert even suggests it. A canceled one paid nothing out and took nothing back, so there is nothing to settle. The old admin doesn't mark either charge refunded outside Stripe: record it with (b) after the roll forward, and never refund it through Stripe before then |
+| `refunded`, `late_win_refund_id` empty, and `bought_again` true or `duplicate_of_purchase_id` set | The buyer paid twice. Refund what is left of the charge: from Stripe's Dashboard while rolled back (the old charge page keeps the 14-day limit), or from the charge page once rolled forward (a late win has no limit there). Its `charge.refunded` takes it back from the creators, as in the row above |
+| `refunded`, and neither | The undo never gave the buyer the item back. Unless the charge's refunds cover what was paid (check in Stripe), give it back by hand, with the owner's OK: content with a [support grant](access.md#support-grants), and a course as the owner decides |
+
+**(b) After the roll forward**, with the owner's OK for each case, mark every
+charge whose buyer was refunded another way while rolled back: a late-win
+refund that failed or was canceled (row 4), or one the old admin settled.
+Nothing else marks it: the new admin marks only a refund it settles itself, so
+the charge page would offer a Stripe refund again, with no end date.
+
+```sql
+BEGIN;
+UPDATE disputes
+   SET refunded_outside_stripe_at = now(),
+       updated_at = now()
+ WHERE stripe_dispute_id IN ('du_…')
+   AND late_won_at IS NOT NULL
+   AND refunded_outside_stripe_at IS NULL
+RETURNING stripe_dispute_id, refunded_outside_stripe_at;
+COMMIT;
+```
+
+It returns one line per id. A missing line means the id was mistyped, isn't a
+late win, or is already marked: check it before going on.
+
+---
+
+## The email log index, a told-buyer CHECK and the payee pin's link (migration `0129`)
+
+`0129` is drizzle-kit DDL with two hand edits, one statement taken out and
+one moved. It holds:
+
+- an index on `email_audit_logs (recipient_email, template_name, created_at)`,
+  for the sweeps' "did this email go?" checks (`Codex-2hxff.102`). It is built
+  without `CONCURRENTLY`, because the runner applies each file as one
+  transaction, so inserts into the email log wait while it builds and until
+  the file commits: a moment on today's table. Disputes are locked from the
+  CHECK's scan until the commit. Organisation and user reads and writes wait
+  only for the commit, or for up to 5 s if the drop has to wait behind a long
+  transaction (then the file fails and nothing applies): the file drops the
+  pin's foreign key, which locks both tables, as its last statement (moved
+  there by hand);
+- CHECK `check_disputes_buyer_told`: a buyer told of a late win needs a late
+  win (`Codex-h301h`). Its preflight in
+  `packages/database/scripts/migration-preflight.ts` refuses the whole run,
+  applying nothing, if any row breaks it;
+- the drop of the foreign key on `organizations.primary_connect_account_user_id`,
+  the retired payee pin (`Codex-2hxff.36`). **The column itself stays this
+  release.** The workers still running while the deploy migrates list it in
+  every organisation query, so dropping it now would fail every org page until
+  they redeploy. Its generated `DROP COLUMN` was taken out of the SQL by hand
+  for that reason (owner, 2026-11-09: "Two steps"); the snapshot already
+  records it gone, so no `generate` after `0129` re-emits it. [R21](#r21--after-this-release-is-live-drop-the-payee-pin-column)
+  drops it.
+
+**Renumbering** (another session's migration of the same number landed
+first). This file was `0128` until 2026-11-10, when studio E2's
+`0128_publish_when_ready` landed first and these steps renumbered it to `0129`.
+The steps name `0128` and `0129` as they ran then; if another clash comes
+before this merges, run them again with the new numbers. A snapshot
+holds the whole schema, so renaming the file alone leaves the next `generate`
+re-emitting the other file's changes, and regenerating alone writes both hand
+edits out. Do both halves instead:
+
+1. Before bringing in the branch that holds the other `0128`, note this
+   branch's head: `PRE=$(git rev-parse HEAD)`. Steps 3 and 4 read this file
+   from `PRE`, because once the conflict below is resolved `HEAD` may no
+   longer hold it. Both branches add `meta/0128_snapshot.json` and a journal
+   entry, so the rebase or merge conflicts on `meta/0128_snapshot.json` and
+   `meta/_journal.json`: take the other branch's side of both, and delete this
+   file. Its snapshot and journal entry go with them.
+2. Run `pnpm --filter @codex/database db:gen:drizzle --name email_log_index_and_buyer_told_check`. It writes a correct snapshot on top of the other `0128`.
+3. Before overwriting, diff the regenerated `.sql` against ours: `diff <(git show "$PRE":packages/database/src/migrations/0128_email_log_index_and_buyer_told_check.sql) packages/database/src/migrations/0129_email_log_index_and_buyer_told_check.sql`. The only differences may be the two hand edits. Anything else means the two schemas overlap, so stop: delete the new `0129` `.sql` and snapshot, and restore the journal (`git checkout -- packages/database/src/migrations/meta/_journal.json`). Ours stays recoverable from `PRE`.
+4. Overwrite the new `.sql` with this file's committed text (`git show "$PRE":…0128_email_log_index_and_buyer_told_check.sql`).
+5. Run `generate` once more: it must find no schema changes. If it writes a file, delete it, restore the journal as in step 3, and stop.
+6. Carry the new name everywhere the old one is named:
+   - the `migration` of the `MIGRATION_PREFLIGHTS` entry (its "names migrations that exist" test fails until you do);
+   - the "0128" mentions in `migration-preflight.ts`, `dispute-late-win-checks.test.ts`, the guard tests' comments and this section;
+   - every local database that already applied the old name, since the runner records a file by its name and would run the renamed one again (its `CREATE INDEX` then fails, and that database's migrate is stuck): `UPDATE "__drizzle_migrations" SET hash = '0129_email_log_index_and_buyer_told_check.sql' WHERE hash = '0128_email_log_index_and_buyer_told_check.sql';`. Production and CI never ran the old name; neither did the dev Neon database, unless `seed-dev-db` (manual dispatch only) was run from this branch.
+
+Two tests in `packages/database/scripts/__tests__/migration-preflight.test.ts`
+fail until both hand edits are back: no migration drops the pin column, and
+the pin's foreign key drop is its file's last statement.
+
+From this release the migration runner bounds every file's lock wait at 5 s
+(`Codex-vliwn`), and applies each file and the row recording it in one
+transaction. If the deploy's migrate step fails with `canceling statement
+due to lock timeout`, nothing in that file was applied or recorded: find the long
+transaction holding the table in `pg_stat_activity`, let it end, and re-run
+the deploy.
+
+### R20 — before the deploy: no told buyer without a late win
+
+```sql
+SELECT count(*) FROM disputes
+ WHERE buyer_told_at IS NOT NULL AND late_won_at IS NULL;
+```
+
+It must be 0, or the preflight stops the deploy at its migrate step. Only the
+late-win email's claim writes `buyer_told_at`, and it requires a late win, so a
+row here was edited by hand: stop and ask the owner.
+
+If production's last migration is before `0126`, the columns arrive with this
+deploy, no row can break the CHECK, and the preflight skips it. Run this query
+only on a database at `0126` or later.
+
+### R21 — after this release is live: drop the payee pin column
+
+Only once this release's deploy has finished and every worker has updated, the
+follow-up release's custom migration drops the column:
+
+```sql
+ALTER TABLE "organizations" DROP COLUMN IF EXISTS "primary_connect_account_user_id";
+```
+
+Before merging it, confirm that nothing is set:
+
+```sql
+SELECT count(*) AS pinned FROM organizations
+ WHERE primary_connect_account_user_id IS NOT NULL;
+```
+
+That count was 0 of 1 org on 2026-11-09. On the same day, the audit of orgs
+whose pin differed from their active owner (whose org-share payee changed when
+payee resolution stopped reading the pin) returned no rows. Nobody's money
+moved.
+
+### Rollback
+
+All three stay on a workers rollback. The old workers never read the index
+or the CHECK, never write `buyer_told_at` without a late win, and no longer
+read or write the pin: drizzle doesn't need the foreign key. Don't run R21's
+migration while a rollback past this release is possible.
+
+---
+
+## The retired customer webhook (`Codex-2hxff.24`)
+
+This release removes ecom-api's `/webhooks/stripe/customer` route and its
+`STRIPE_WEBHOOK_SECRET_CUSTOMER` secret from the code, workflows and docs. The
+route only acknowledged events; nothing read them. Production's customer
+endpoint at Stripe is already disabled, so no delivery reaches the removed
+route. **Re-enabling that endpoint now gets 404s and Stripe's retries.**
+
+### R22 — after the deploy: delete the leftovers (owner)
+
+The deploy uploads secrets but never deletes them, so three leftovers stay
+until someone removes them:
+
+1. The worker secret, from `workers/ecom-api`:
+   `npx wrangler secret delete STRIPE_WEBHOOK_SECRET_CUSTOMER --env production`
+2. The disabled endpoint `we_1SO1fH7wyGmo4sh612lL8e29`, in the Stripe
+   Dashboard (Developers → Webhooks).
+3. The GitHub secret `STRIPE_WEBHOOK_SECRET_CUSTOMER`, in the `production`,
+   `preview` and `test` environments.
+
+Nothing reads any of them, so the order doesn't matter, and leaving them
+does no harm beyond clutter.
+
+---
+
+## The Stripe upgrade to `2026-10-28.endive`, and dispute appeals (migration `0130`)
+
+This release moves stripe-node to 23.1.0 and the pin, `STRIPE_API_VERSION`
+(`@codex/constants`), to `2026-10-28.endive` (`Codex-wzaoh`). Run the
+standing `apiVersion` check above first.
+
+`0130` is drizzle-kit DDL, unedited. It adds `disputes.appeal_status`,
+nullable with no default, and one CHECK, `check_disputes_appeal_status`
+(NULL, `appeal_needs_response` or `appeal_under_review`). Adding the column
+rewrites nothing. The CHECK scans `disputes` once under a lock: a moment on
+today's table, and every existing row is NULL, so it passes.
+
+A mark lives only on a `lost` row, and the code holds that, not the
+database. The mark is written only where the row is `lost`, and the late
+win, the one write that moves a row off `lost`, clears it in the same SET.
+There is deliberately no CHECK tying the mark to `lost`. A CHECK stays on a
+workers rollback, and the older workers' late win moves `lost` to `won`
+without knowing the column: the CHECK would refuse it, the refusal reads as
+permanent, and the late win would never be recorded. So a mark can be
+left on a won row: by R18 (a)'s hand UPDATE run after the deploy, or by a
+late win the older workers record after a rollback. It is stale but
+harmless: support shows the appeal line only under Lost. The hourly
+reconcile's first step clears every mark on an applied row that isn't lost,
+in the database with no Stripe read, whatever the dispute's age, on every
+run, the 08:00 one included. A row still being settled is left to the
+reconcile's retry of unsettled rows, whose live record clears the mark. The next record of the dispute clears it too, unless
+that record is a `lost` or an appeal, which a won row refuses
+(`refusedLost`) without looking at the mark.
+
+An appeal of a lost chargeback is recorded as `lost`, and acted on as
+`lost`, with the appeal kept in `appeal_status`, never in `status`. So the
+sale stays held, and a loss never applied is applied through the appeal. The
+mark follows Stripe's live appeal stage, forward or back, since Stripe can
+ask for more evidence. The bank's decision clears it: a late win, or a
+`lost` read live from Stripe, since a `lost` event may be older than the
+appeal. The hourly reconcile re-reads a lost dispute whose mark disagrees
+with Stripe and puts it right (owner D34; [dispute record](dispute-record.md),
+§4, "An appeal"). It compares the mark with Stripe's stored events, and an
+event keeps the rendering of the account's default API version when it was
+created, never our pin (owner D35). Below endive an appeal may read as
+`lost`: a marked row is still re-read, but an appeal on an unmarked one
+hides until an event shows it. R23's last step moves the account default to
+endive.
+
+**stripe-node 23 (census S4).** A Stripe response body that stalls or is cut
+off mid-read is now a `StripeConnectionError`. Before, it was a
+`StripeAPIError` with no `statusCode`, which the classifier's 5xx test read
+as permanent. Now it is transient: a webhook that meets one answers 5xx and
+Stripe redelivers. A body that arrives whole but isn't JSON (a proxy's HTML
+502, say) is still a `StripeAPIError` with no `statusCode`, carrying the
+parse error in `raw.exception`; the classifier now reads that one as
+transient too. Nothing to do, and nobody outside sees either.
+
+### R23 — the same release: the sandbox to endive (owner)
+
+A webhook payload renders at its endpoint's API version, not at the pin.
+And an event Stripe stores, which the hourly dispute reconcile lists, keeps
+the rendering of the account's default API version when it was created. So
+the owner moves the sandbox's 5 endpoints to `2026-10-28.endive` in this
+release, in the Stripe Dashboard (Developers → Webhooks), and then the
+account default:
+
+1. dispute (`/webhooks/stripe/dispute`)
+2. payment (`/webhooks/stripe/payment`)
+3. booking (`/webhooks/stripe/booking`)
+4. subscription (`/webhooks/stripe/subscription`)
+5. connect (`/webhooks/stripe/connect`)
+6. the account's default API version, last (owner D35): see "The account
+   default" below.
+
+**Order.** Steps 1–5 before or after the deploy are fine. Every read that
+changes shape at endive is tolerant of both versions (census A21). Step 6
+comes after the deploy and steps 1–5.
+
+**Appeals.** Appeal statuses exist only once the account has turned on
+Appeal responses, which only an eligible business can (Settings → Payments
+→ Disputes; [Stripe: dispute appeals](https://docs.stripe.com/disputes/arbitration.md)).
+Stripe doesn't document which API versions show them. With the endpoints
+and the account default on endive, the webhook and the reconcile both see
+them. Until then, an appealed lost chargeback may show as Lost, as today.
+
+**If an endpoint can only change version by being made again**, its signing
+secret changes. Put the new one in the matching worker secret
+(`STRIPE_WEBHOOK_SECRET_DISPUTE`, `_PAYMENT`, `_BOOKING`, `_SUBSCRIPTION` or
+`_CONNECT`) before you disable the old endpoint. Otherwise its deliveries
+fail the signature check.
+
+**The account default (step 6).** After the deploy and steps 1–5, in
+Workbench → Overview → API version, upgrade the account to
+`2026-10-28.endive`. Our code pins every request, so this changes only how
+Stripe renders the events it stores from then on, and anything that calls
+Stripe or receives its events without setting a version. Check Workbench's
+list of API versions in use first, and find each such caller before the
+upgrade:
+- requests at `2025-10-29.clover` are our own workers from before the
+  deploy (the old pin), not an unknown caller;
+- requests or receivers at the current default, `2025-09-30.clover`, set no
+  version: those are the callers to find. Local development's
+  `stripe listen` forwarder (`/webhooks/stripe/dev`) is one: it renders at
+  the account default unless run with `--latest`, so its payloads change
+  shape at the upgrade.
+
+Stripe allows a rollback for 72 hours after it.
+
+**Verify:**
+- the newest event created after the upgrade, of any type, renders at
+  `2026-10-28.endive`. Every stored event renders at the account default,
+  whatever its type, so this needn't wait for a dispute. Read its API version
+  on the event in the Dashboard, or read-only through the API (`events.list`
+  with `limit: 1`, its `api_version`), as the 2026-11-12 probe did when it
+  found the sandbox's 100 newest events at `2025-09-30.clover`. Check that
+  event's `created` is after the upgrade: the call returns the newest event
+  overall, so on a quiet sandbox it is an older one, which reads as a failed
+  upgrade. If it is older, wait for any event, or cause one with a harmless
+  TEST-mode update, and read again;
+- as a cross-check only, from four days after the upgrade: on a reconcile run
+  whose "dispute reconcile completed" log shows `fromEvents` of 1 or more,
+  `snapshotsBelowPin` is 0. A run with `fromEvents: 0` shows 0 whatever the
+  default, so on its own it proves nothing.
+
+### R24 — the same release: the wallets one-off Checkout shows (owner)
+
+At endive, one-off Checkout (`mode: 'payment'`) no longer sends
+`payment_method_types`. It sends `allowed_payment_method_types: ['card']`
+(owner D32), which filters what the account's default payment method
+configuration offers, as subscription checkouts already do. So which wallets
+appear now follows that configuration. Apple Pay and Google Pay are card
+wallets and pass the card filter; Link is its own method and doesn't.
+
+The sandbox's default configuration, read in TEST mode on 2026-11-12: card
+on, Apple Pay on, Google Pay unavailable and off, Link on. So one-off
+Checkout shows card and Apple Pay. Link isn't shown, and Google Pay isn't
+shown unless it is turned on.
+
+**Check** in the Stripe Dashboard (Settings → Payments → Payment methods,
+the default configuration) that card and Apple Pay are on, and turn Google
+Pay on if it should be offered. Do the same on the live account before it
+takes payments.
+
+### Rollback
+
+The column and its CHECK stay on a workers rollback. The CHECK binds
+nothing there: it tests only `appeal_status`, which the old workers never
+read or write. If the endpoints are already on endive, the old workers log
+an appeal status as one the table doesn't know and drop it. The row stays
+`lost` and the sale stays held, as before this release, but a loss never
+applied waits for the bank's decision instead of being applied through the
+appeal.
+
+If the build rolled back to has the late win (0126 or later), its late win
+still works: no CHECK ties the mark to `lost` (see above). An older build
+only alerts a late win ([R19](#r19--before-any-workers-rollback-late-wins-still-being-undone)).
+Either way, a late win or a decision the old workers record leaves a mark
+made before the rollback in place. On a won row the mark is harmless:
+support shows the appeal line only under Lost. On a lost row support would
+show a decided appeal as running.
+
+After rolling forward, the hourly reconcile repairs these. Its first step
+clears every mark on an applied row that isn't lost, whatever its age, with
+no Stripe read, on every run; a won row still being undone has its mark
+cleared by the reconcile's next retry of it, when it records the live
+status, whether or not that retry finishes the undo. A mark on a lost row needs Stripe's word: the reconcile
+re-reads each lost dispute with an event in its 4-day window whose mark
+disagrees with Stripe, and marks or clears it, and the 08:00 run leaves those
+to the next hour. A lost row's mark on a dispute with no event in that window
+waits for the dispute's next event. So, a run or two after rolling forward,
+list the marks left, each now on a lost row, and check each dispute in
+Stripe:
+
+    SELECT stripe_dispute_id, status, appeal_status, updated_at
+    FROM disputes WHERE appeal_status IS NOT NULL;
+
+A mark whose appeal Stripe has decided is cleared by hand, with the owner's
+OK:
+
+    UPDATE disputes SET appeal_status = NULL, updated_at = now()
+     WHERE stripe_dispute_id IN ('du_…') AND appeal_status IS NOT NULL
+    RETURNING stripe_dispute_id, status, appeal_status;

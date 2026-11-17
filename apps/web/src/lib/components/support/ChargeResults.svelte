@@ -144,7 +144,11 @@
       {/if}
       <div class="row-item__tags">
         {@render statusOf(item)}
-        {#if item.window.isOpen}
+        {#if item.window.liftedByLateWin}
+          <!-- Lifted by a late win (owner Q7): its date has passed, so none shows. -->
+          <Badge variant="success">{m.support_window_lifted()}</Badge>
+          <span class="cell-sub">{m.support_window_lifted_why()}</span>
+        {:else if item.window.isOpen}
           <Badge variant="success">{m.support_window_open_long()}</Badge>
           <span class="cell-sub">{daysLeftText(item.window.closesAt, now)}</span>
         {:else}

@@ -5,6 +5,7 @@
  * Extends base errors from @codex/service-errors.
  */
 
+import { ERROR_CODES } from '@codex/constants';
 import {
   BusinessLogicError,
   ConflictError,
@@ -406,7 +407,7 @@ export class CreatorConnectRequiredError extends BusinessLogicError {
   constructor() {
     super(
       'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
-      { code: 'CREATOR_CONNECT_REQUIRED' }
+      { code: ERROR_CODES.CREATOR_CONNECT_REQUIRED }
     );
   }
 }

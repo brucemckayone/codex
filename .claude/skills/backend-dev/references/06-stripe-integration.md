@@ -87,7 +87,9 @@ reconciliation months later.
 
 ### Stripe SDK version
 
-Pinned to `'2025-10-29.clover'` (Stripe Node v19.3.1). When upgrading, read the
+Pinned to `'2026-10-28.endive'` (Stripe Node v23.1.0), as `STRIPE_API_VERSION` in
+`@codex/constants` (`packages/constants/src/commerce.ts`), which
+`createStripeClient` and the test fixtures import. When upgrading, read the
 Stripe changelog and use the `stripe-best-practices` skill which includes migration
 guidance.
 
@@ -98,7 +100,7 @@ guidance.
 ```typescript
 // packages/purchase/src/stripe-client.ts
 export function createStripeClient(apiKey: string): Stripe {
-  return new Stripe(apiKey, { apiVersion: '2025-10-29.clover' });
+  return new Stripe(apiKey, { apiVersion: STRIPE_API_VERSION }); // '2026-10-28.endive'
 }
 ```
 
@@ -256,9 +258,11 @@ Codex has separate webhook endpoints per domain, each with its own secret:
 | `/webhooks/stripe/payment` | Refunds, chargebacks | `STRIPE_WEBHOOK_SECRET_PAYMENT` |
 | `/webhooks/stripe/subscription` | Subscription lifecycle | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` |
 | `/webhooks/stripe/connect` | Connect account events | `STRIPE_WEBHOOK_SECRET_CONNECT` |
-| `/webhooks/stripe/customer` | Log-only stub — to be removed (`Codex-2hxff.24`) | `STRIPE_WEBHOOK_SECRET_CUSTOMER` |
 | `/webhooks/stripe/dispute` | Disputes + early fraud warnings (`handlePaymentWebhook`) | `STRIPE_WEBHOOK_SECRET_DISPUTE` |
 | `/webhooks/stripe/dev` | Dev all-events | `STRIPE_WEBHOOK_SECRET_BOOKING` (reused in dev) |
+
+The log-only `/webhooks/stripe/customer` stub and `STRIPE_WEBHOOK_SECRET_CUSTOMER`
+were removed (`Codex-2hxff.24`); there is no customer endpoint.
 
 Separate secrets mean if one leaks, you rotate that endpoint's secret without
 disrupting the others.

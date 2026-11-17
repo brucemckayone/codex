@@ -183,42 +183,40 @@ describe('POST /invite: the invitation email (Codex-bnxhw)', () => {
     expect(invitationData()).toEqual({
       inviterName: 'Sam Owner',
       orgName: 'Invite Org',
-      // The plain role, as before: the stock row reads "as a {{roleName}}".
+      // The plain role, for a customised copy that still reads {{roleName}}.
       roleName: role,
       roleLabel,
       orgUrl,
-      // Transitional (Codex-2hxff.83): the same link under the old name.
-      acceptUrl: orgUrl,
-      expiryDays: '7',
     });
   });
 
-  it("sends exactly the template's data shape, with the old fields until 0117 has run (Codex-2hxff.83, .84)", async () => {
+  // Codex-2hxff.83: the transitional `acceptUrl`/`expiryDays` are gone. No
+  // live template uses either (production, read-only, 2026-11-09).
+  it("sends exactly the template's data shape", async () => {
     await invite('creator');
     const data = invitationData();
     expect(orgMemberInvitationDataSchema.strict().parse(data)).toEqual(data);
-    // The stock row production has links its button to `acceptUrl`, so it
-    // must be the same link.
-    expect(data.acceptUrl).toBe(data.orgUrl);
-    expect(data.expiryDays).toBe('7');
   });
 
-  it('the previous notifications-api accepts it: organization-api deploys first', async () => {
-    // That release's schema, verbatim (origin/dev 5bc603f7).
-    const previousSchema = z.object({
+  it('the notifications-api production runs accepts it: organization-api deploys first', async () => {
+    // That release's schema, verbatim (origin/main 11bf19d23): the two old
+    // fields are optional there, so their absence passes.
+    const productionSchema = z.object({
       inviterName: z.string(),
       orgName: z.string(),
       roleName: z.string(),
-      acceptUrl: z.string().url(),
-      expiryDays: z.string(),
+      roleLabel: z.string(),
+      orgUrl: z.string().url(),
+      acceptUrl: z.string().url().optional(),
+      expiryDays: z.string().optional(),
     });
     await invite('admin');
-    expect(previousSchema.parse(invitationData())).toEqual({
+    expect(productionSchema.parse(invitationData())).toEqual({
       inviterName: 'Sam Owner',
       orgName: 'Invite Org',
       roleName: 'admin',
-      acceptUrl: 'http://invite-org.lvh.me:3000/studio',
-      expiryDays: '7',
+      roleLabel: 'an admin',
+      orgUrl: 'http://invite-org.lvh.me:3000/studio',
     });
   });
 

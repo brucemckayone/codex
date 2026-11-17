@@ -181,6 +181,20 @@ describe('the theatre', () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  test('the page behind holds still while it is open, and is let go as it closes', () => {
+    // The app's one counted scroll lock marks <body> while it holds.
+    const held = () => document.body.hasAttribute('data-melt-scroll-lock');
+    openFrom();
+    expect(held()).toBe(true);
+    if (app) unmount(app);
+    app = mount(IntroVideoModal, {
+      target: document.body,
+      props: { open: false, src: SRC, onclose: vi.fn() },
+    });
+    flushSync();
+    expect(held()).toBe(false);
+  });
+
   test('Tab stays inside, from the last control to the first and back', () => {
     const { dialog } = openFrom();
     const stops = [

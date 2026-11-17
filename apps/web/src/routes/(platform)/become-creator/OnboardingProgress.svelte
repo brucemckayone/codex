@@ -106,7 +106,7 @@
   .progress__fill {
     height: 100%;
     border-radius: inherit;
-    background-color: var(--color-success-500);
+    background-color: var(--color-success);
     transition: width var(--duration-slow) var(--ease-out);
   }
 
@@ -142,8 +142,8 @@
   }
 
   .progress__step--done .progress__dot {
-    background-color: var(--color-success-500);
-    border-color: var(--color-success-500);
+    background-color: var(--color-success);
+    border-color: var(--color-success);
   }
 
   .progress__step--active .progress__dot {

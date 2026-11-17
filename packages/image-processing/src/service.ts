@@ -465,6 +465,123 @@ export class ImageProcessingService extends BaseService {
   }
 
   /**
+   * A cover readied for a piece that has been live, which keeps its changes
+   * for Update (Codex-a6ofh.2.5). The folder is made as an upload makes it,
+   * and recorded as a stage at once; the row is not touched, and the folder
+   * the row names is not deleted. Update's PATCH takes the stage
+   * (`claimStagedCover`), points the row at it and only then drops the old
+   * one. A piece holds one stage at a time: this one retires the piece's
+   * earlier stages and deletes their files. A stage never applied (Discard,
+   * a closed tab) is deleted by the sweep once {@link STAGED_COVER_GRACE_MS}
+   * has passed, which asks the row first.
+   *
+   * Without the orphan service nothing would ever reclaim it, so it is
+   * refused. A record that fails deletes the folder and rethrows; a delete
+   * that fails too is logged with its keys (`recordOrphansOrLog`), their only
+   * trace. Retiring the earlier stages is housekeeping, and the stage answers
+   * whatever happens to it ({@link retireEarlierStages}).
+   *
+   * The caller checks the piece is the creator's, as for an upload.
+   */
+  async stageContentThumbnail(
+    contentId: string,
+    creatorId: string,
+    file: File
+  ): Promise<ImageProcessingResult> {
+    const orphans = this.orphanedFileService;
+    if (!orphans) {
+      throw new InternalServiceError(
+        'A cover cannot be staged without the orphan service'
+      );
+    }
+    const still = await prepareStill(file);
+    const base = getContentThumbnailBaseKey(creatorId, contentId);
+    const target = {
+      imageType: 'content_thumbnail',
+      entityType: 'content',
+      entityId: contentId,
+    } as const;
+    const { folder, keys } = await this.putNewStill(
+      base,
+      still,
+      target,
+      'Thumbnail'
+    );
+    const staged = variantKeyList(keys);
+    const stagedAt = new Date();
+    try {
+      await orphans.recordStagedCover(contentId, staged, stagedAt);
+    } catch (error) {
+      await this.deleteStill(
+        folder,
+        target,
+        'content_thumbnail-stage-unrecorded'
+      );
+      throw error;
+    }
+    await this.retireEarlierStages(orphans, contentId, stagedAt);
+    return {
+      url: `${this.r2PublicUrlBase}/${keys.lg}`,
+      size: still.variants.lg.byteLength,
+      mimeType: 'image/webp',
+    };
+  }
+
+  /**
+   * The piece's stages from before `stagedAt` (the new one's time) handed to
+   * the sweep, then their files deleted now and their rows marked once the
+   * files are gone. Never throws, and nothing it leaves undone needs anyone:
+   * a stage a failed retire left is still a stage (taken by an Update, or
+   * the sweep's after its grace), and one it replaced, or whose files or
+   * mark failed here, is the sweep's at once (`retireStagedCovers`).
+   */
+  private async retireEarlierStages(
+    orphans: OrphanedFileService,
+    contentId: string,
+    stagedAt: Date
+  ): Promise<void> {
+    let replaced: { id: string; r2Key: string }[];
+    try {
+      replaced = await orphans.retireStagedCovers(contentId, stagedAt);
+    } catch (error) {
+      this.obs.warn('Earlier staged covers not retired; left for the sweep', {
+        resourceId: contentId,
+        error: messageForLog(error),
+      });
+      return;
+    }
+    if (replaced.length === 0) return;
+    const results = await Promise.allSettled(
+      replaced.map(({ r2Key }) => this.r2Service.delete(r2Key))
+    );
+    const gone = replaced
+      .filter((_, i) => results[i]?.status === 'fulfilled')
+      .map(({ id }) => id);
+    const failed = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    );
+    if (failed) {
+      this.obs.warn(
+        'Earlier staged covers: files not deleted; left for the sweep',
+        {
+          resourceId: contentId,
+          failed: replaced.length - gone.length,
+          error: messageForLog(failed.reason),
+        }
+      );
+    }
+    try {
+      await orphans.markReplacedStagesDeleted(contentId, gone);
+    } catch (error) {
+      // Its files are gone: the sweep's delete is a no-op, then it marks them.
+      this.obs.warn('Earlier staged covers deleted; rows left for the sweep', {
+        resourceId: contentId,
+        error: messageForLog(error),
+      });
+    }
+  }
+
+  /**
    * Run the CALLER's DB write for a still produced by `processCategoryCover` /
    * `processCourseCover` / `processCourseHero` / `processCourseSignature`, with
    * the same cleanup `processContentThumbnail` gets (Codex-29fs0).

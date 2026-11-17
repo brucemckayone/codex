@@ -17,7 +17,12 @@
     "no change coming". It isn't red: the page's own figures are fine.
 
   Read once per visit. Try again reads once more; nothing re-checks by
-  itself (the cost rule).
+  itself (the cost rule). It is judged by the shared `createLoadRetry`
+  (Codex-if444): kit drops a read that failed, so Try again hands the note a
+  NEW query, still loading. The line, and the focused Try again in it, stay
+  until that read answers; then focus goes to what the note now says: the
+  line again (it failed again: read out once more), the note, or, with
+  nothing coming, a hidden line that says so.
 
   @prop {string} [organizationId] - Billing and Payouts: the organisation
     whose owner rows to show. Earnings passes none.
@@ -28,6 +33,7 @@
   import { getUpcomingFees } from '$lib/remote/billing.remote';
   import { queryErrorMessage } from '$lib/remote/query-result';
   import * as m from '$paraglide/messages';
+  import { createLoadRetry } from './load-retry.svelte';
   import { feeNoteView, WAS_MARK } from './upcoming-fee-view';
 
   interface Props {
@@ -46,23 +52,47 @@
     feesQuery.current === undefined && queryErrorMessage(feesQuery.error) !== null
   );
 
-  let retrying = $state(false);
+  // Judged on the read the note holds, not the one Try again refreshed.
+  const feeRetry = createLoadRetry(() => feesQuery);
+  let lineNode = $state<HTMLElement | null>(null);
+  let statusNode = $state<HTMLElement | null>(null);
+  let noteNode: HTMLElement | null = null;
+  /** The last Try again loaded nothing to note (N12): said, as nothing shows. */
+  let checkedNone = $state(false);
+  /** Repeat failures read out without a focus move; keys the line's words. */
+  let repeats = $state(0);
+
+  const holdNote = (node: HTMLElement) => {
+    noteNode = node;
+    return () => {
+      if (noteNode === node) noteNode = null;
+    };
+  };
 
   async function retry() {
-    if (retrying) return;
-    retrying = true;
-    try {
-      await feesQuery.refresh();
-    } catch {
-      // The query keeps its error, so the line stays with Try again.
-    } finally {
-      retrying = false;
-    }
+    const result = await feeRetry.retry({
+      from: () => lineNode,
+      settled: () => {
+        checkedNone = !view && !failed && feesQuery.current !== undefined;
+        return () =>
+          view ? noteNode : failed ? lineNode : checkedNone ? statusNode : null;
+      },
+    });
+    // Focus moved on during it: the unchanged line is inserted again, so its
+    // `role="status"` reads it out.
+    if (result && !result.focusFree && failed) repeats += 1;
   }
 </script>
 
 {#if view}
-  <Alert variant="info" role="note" class="fee-note" data-testid="upcoming-fee-note">
+  <Alert
+    variant="info"
+    role="note"
+    class="fee-note"
+    tabindex={-1}
+    data-testid="upcoming-fee-note"
+    {@attach holdNote}
+  >
     <div class="fee-note__row">
       <CalendarIcon size={16} class="fee-note__icon" aria-hidden="true" />
       <div class="fee-note__body">
@@ -87,20 +117,35 @@
       </div>
     </div>
   </Alert>
-{:else if failed}
-  <p class="fee-check-failed" role="status" data-testid="upcoming-fee-check-failed">
+{:else if failed || feeRetry.retrying}
+  <!-- Kept while Try again runs: the note can be handed a new read that is
+       still loading, and unmounting would drop the focused button. -->
+  <p
+    bind:this={lineNode}
+    class="fee-check-failed"
+    role="status"
+    tabindex="-1"
+    data-testid="upcoming-fee-check-failed"
+  >
     <InfoIcon size={16} aria-hidden="true" />
-    {m.fee_note_check_failed()}
+    {#key repeats}{m.fee_note_check_failed()}{/key}
     <button
       type="button"
       class="fee-check-failed__retry"
-      aria-busy={retrying || undefined}
+      aria-busy={feeRetry.busy || undefined}
       onclick={retry}
     >
       {m.fee_note_try_again()}
     </button>
   </p>
 {/if}
+
+<!-- Mounted throughout, its words swapped in: a live region that appears
+     with its words already in it is often not read out. Last, so the note
+     still sits straight under the page's header. -->
+<p bind:this={statusNode} class="sr-only" role="status" tabindex="-1">
+  {checkedNone && !view && !failed ? m.fee_note_check_none() : ''}
+</p>
 
 <style>
   .fee-note__row {
@@ -181,7 +226,11 @@
     cursor: progress;
   }
 
-  .fee-check-failed__retry:focus-visible {
+  .fee-check-failed__retry:focus-visible,
+  /* The line takes focus after a Try again that failed again, the note after
+     one that found a change: shown for keyboard users. */
+  .fee-check-failed:focus-visible,
+  :global(.fee-note:focus-visible) {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);

@@ -7,7 +7,11 @@
  * under concurrency is a database question: see the DB-backed suite.
  */
 
-import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
+import {
+  MAX_TRANSCODING_ATTEMPTS,
+  TRANSCODING_ERROR_CODES,
+  TRANSCODING_ERROR_MAX_LENGTH,
+} from '@codex/constants';
 import type { MediaProgressTick, MediaStatusChange } from '@codex/validation';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
@@ -723,6 +727,54 @@ describe('publish', () => {
     expect(() =>
       publishing.publish(claimed as Parameters<typeof publishing.publish>[0])
     ).not.toThrow();
+  });
+
+  // Publish when ready (Codex-a6ofh.2.8): content-api hears of a write only
+  // when it can settle a schedule, so a retryable failure costs no call.
+  it.each([
+    ['ready', { status: 'ready' }, 1],
+    [
+      'failed by a file no attempt can cure',
+      {
+        status: 'failed',
+        transcodingErrorCode: TRANSCODING_ERROR_CODES.CORRUPT_INPUT,
+        transcodingAttempts: 1,
+      },
+      1,
+    ],
+    [
+      'failed with its attempts spent',
+      {
+        status: 'failed',
+        transcodingErrorCode: TRANSCODING_ERROR_CODES.TIMED_OUT,
+        transcodingAttempts: MAX_TRANSCODING_ATTEMPTS,
+      },
+      1,
+    ],
+    [
+      'failed, to be tried again',
+      {
+        status: 'failed',
+        transcodingErrorCode: TRANSCODING_ERROR_CODES.TIMED_OUT,
+        transcodingAttempts: 1,
+      },
+      0,
+    ],
+    ['transcoding', { status: 'transcoding' }, 0],
+  ] as const)('a write that leaves it %s tells content-api %i time(s)', (_case, row, calls) => {
+    const contentReady = { mediaChanged: vi.fn(), settle: vi.fn() };
+    const publishing = new TranscodingService({
+      ...config(fake.db),
+      contentReady,
+    });
+    const written = {
+      ...media(row as Partial<TranscodingMediaItem>),
+      updatedAt: new Date(),
+    };
+
+    publishing.publish(written as Parameters<typeof publishing.publish>[0]);
+
+    expect(contentReady.mediaChanged).toHaveBeenCalledTimes(calls);
   });
 });
 

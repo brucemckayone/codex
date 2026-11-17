@@ -28,13 +28,16 @@ vi.mock(
   '$lib/remote/admin.remote',
   () => import('./__fixtures__/admin-remote.mock.svelte')
 );
-vi.mock('$lib/remote/content.remote', () => ({
-  listContent: vi.fn(async () => ({ items: [] })),
-}));
+// The picker GrantAccessDialog holds reads it, so a grant can be made.
+vi.mock(
+  '$lib/remote/content.remote',
+  () => import('./__fixtures__/content-remote.mock.svelte')
+);
 
 import {
   getCustomerDetail,
   getCustomerGrants,
+  grantContentAccess,
   grantsPage,
   refreshGrants,
   reset,
@@ -42,6 +45,11 @@ import {
   setGrants,
   setGrantsError,
 } from './__fixtures__/admin-remote.mock.svelte';
+import {
+  contentItem,
+  reset as resetContent,
+  setContent,
+} from './__fixtures__/content-remote.mock.svelte';
 import CustomerDetailDrawer from './CustomerDetailDrawer.svelte';
 
 const ORG_ID = '00000000-0000-4000-8000-000000000001';
@@ -97,10 +105,12 @@ const MOBILITY: CustomerGrant = {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 let component: ReturnType<typeof mount> | null = null;
@@ -155,6 +165,7 @@ const clean = (el: Element | null | undefined) =>
 
 beforeEach(() => {
   reset();
+  resetContent();
   getCustomerDetail.mockResolvedValue(ELLIE);
 });
 
@@ -162,6 +173,33 @@ afterEach(() => {
   if (component) unmount(component);
   component = null;
   document.body.innerHTML = '';
+});
+
+// Melt points the panel's aria-labelledby at Dialog.Title's id: with no
+// Title, a loading or failed drawer was an unnamed dialog.
+describe('a name in every state', () => {
+  const name = () =>
+    clean(
+      document.getElementById(drawer()?.getAttribute('aria-labelledby') ?? '')
+    );
+
+  test('the drawer is named while the details load', () => {
+    getCustomerDetail.mockReturnValue(new Promise(() => {}));
+    mountDrawer();
+
+    expect(drawer()?.querySelector('.drawer-loading')).toBeTruthy();
+    expect(name()).toBe(m.studio_customers_drawer_title());
+  });
+
+  test('the drawer is named when the details failed to load', async () => {
+    getCustomerDetail.mockRejectedValue(new Error('load failed'));
+    mountDrawer();
+
+    await vi.waitFor(() =>
+      expect(drawer()?.querySelector('.drawer-error')).toBeTruthy()
+    );
+    expect(name()).toBe(m.studio_customers_drawer_title());
+  });
 });
 
 describe('loading', () => {
@@ -193,6 +231,125 @@ describe('loading', () => {
     expect(clean(grantsSection())).not.toContain(
       m.studio_customers_grants_empty()
     );
+  });
+});
+
+// Ellie's drawer opens, an Escape closes it before her details land, and
+// the page opens Tom's. Ellie's late answer wrote her into Tom's drawer,
+// ended his loading early, and pointed Grant Access at her (Codex-uhhka).
+// Both orders of the two answers.
+describe("a second customer, opened before the first one's details land", () => {
+  const TOM: CustomerDetails = {
+    ...ELLIE,
+    userId: 'tom',
+    email: 'tom.reed@example.com',
+    name: 'Tom Reed',
+  };
+  const PAID = contentItem('c-paid', 'Kettlebell Foundations', {
+    priceCents: 1500,
+  });
+  let answers: Record<string, ReturnType<typeof deferred<CustomerDetails>>>;
+
+  const profileName = () => clean(drawer()?.querySelector('.profile-name'));
+  /** The answers' continuations, and what they render. */
+  const settle = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+  };
+
+  async function openEllieThenTom() {
+    answers = { ellie: deferred(), tom: deferred() };
+    getCustomerDetail.mockImplementation(
+      ({ customerId }: { customerId: string }) => answers[customerId].promise
+    );
+    const props = $state({
+      open: true,
+      customerId: ELLIE.userId as string | null,
+      orgId: ORG_ID,
+    });
+    component = mount(CustomerDetailDrawer, { target: document.body, props });
+    flushSync();
+
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    flushSync();
+    props.open = false;
+    flushSync();
+    await vi.waitFor(() => expect(drawer()).toBeNull());
+
+    props.customerId = TOM.userId;
+    props.open = true;
+    flushSync();
+    expect(getCustomerDetail).toHaveBeenCalledTimes(2);
+    expect(drawer()?.querySelector('.drawer-loading')).toBeTruthy();
+  }
+
+  /** Grant Access grants to `who`, the customer the drawer shows. */
+  async function grantGoesTo(who: CustomerDetails) {
+    setContent([PAID]);
+    button(
+      drawer() as HTMLElement,
+      m.studio_customers_drawer_grant_access()
+    )?.click();
+    flushSync();
+    document.querySelector<HTMLButtonElement>('button.select-trigger')?.click();
+    flushSync();
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((o) => clean(o) === PAID.title)
+      ?.click();
+    flushSync();
+    [...document.querySelectorAll<HTMLButtonElement>('button[type="submit"]')]
+      .find((b) => clean(b) === m.studio_customers_grant_confirm())
+      ?.click();
+    flushSync();
+
+    await vi.waitFor(() => expect(grantContentAccess).toHaveBeenCalledTimes(1));
+    expect(grantContentAccess).toHaveBeenCalledWith({
+      customerId: who.userId,
+      contentId: PAID.id,
+      organizationId: ORG_ID,
+    });
+  }
+
+  test("the first answer, landing while the second loads, is dropped: Tom's drawer keeps loading", async () => {
+    await openEllieThenTom();
+
+    answers.ellie.resolve(ELLIE);
+    await settle();
+    expect(drawer()?.querySelector('.drawer-loading')).toBeTruthy();
+    expect(clean(drawer())).not.toContain(ELLIE.email);
+
+    answers.tom.resolve(TOM);
+    await vi.waitFor(() => expect(profileName()).toBe('Tom Reed'));
+    expect(clean(drawer())).not.toContain(ELLIE.email);
+    await grantGoesTo(TOM);
+  });
+
+  test('the first answer, landing after the second, is dropped: the drawer stays on Tom', async () => {
+    await openEllieThenTom();
+
+    answers.tom.resolve(TOM);
+    await vi.waitFor(() => expect(profileName()).toBe('Tom Reed'));
+    answers.ellie.resolve(ELLIE);
+    await settle();
+
+    expect(profileName()).toBe('Tom Reed');
+    expect(clean(drawer())).not.toContain(ELLIE.email);
+    await grantGoesTo(TOM);
+  });
+
+  test("the first load's failure, landing while the second loads, shows no error", async () => {
+    await openEllieThenTom();
+
+    answers.ellie.promise.catch(() => {});
+    answers.ellie.reject(new Error('load failed'));
+    await settle();
+    expect(drawer()?.querySelector('.drawer-error')).toBeNull();
+    expect(drawer()?.querySelector('.drawer-loading')).toBeTruthy();
+
+    answers.tom.resolve(TOM);
+    await vi.waitFor(() => expect(profileName()).toBe('Tom Reed'));
   });
 });
 
@@ -383,5 +540,166 @@ describe('revoke', () => {
     );
     expect(refreshGrants).not.toHaveBeenCalled();
     expect(drawer()).toBeTruthy();
+  });
+});
+
+// The confirmed revoke takes its grant's Revoke away, and that button opened
+// the confirm. Focus goes to the next live grant's Revoke, else the previous
+// one's, else Grant access, never back to the top of the drawer
+// (Codex-p10nx). A cancel takes nothing away, so focus goes home.
+describe('focus after a revoke', () => {
+  const revokeButton = (grant: CustomerGrant) =>
+    button(row(grant.contentTitle), m.studio_customers_grants_revoke());
+
+  async function revoke(grant: CustomerGrant, after: CustomerGrant[]) {
+    refreshGrants.mockImplementation(async () => setGrants(grantsPage(after)));
+    mountDrawer();
+    await vi.waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    revokeButton(grant)?.focus();
+    revokeButton(grant)?.click();
+    flushSync();
+    const dialog = confirmDialog();
+    if (!dialog) throw new Error('confirm did not open');
+    await focusIn(dialog);
+    button(dialog, m.studio_customers_grants_revoke_confirm())?.click();
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+  }
+  /** Focus moves into an opening dialog a moment after it opens. */
+  const focusIn = (dialog: HTMLElement) =>
+    vi.waitFor(() =>
+      expect(dialog.contains(document.activeElement)).toBe(true)
+    );
+  const gone = (grant: CustomerGrant) => ({
+    ...grant,
+    revokedAt: '2026-11-07T12:00:00.000Z',
+    revokedByName: 'Sam Owner',
+  });
+
+  test("the next live grant's Revoke", async () => {
+    setGrants(grantsPage([SLEEP, MOBILITY, CORE]));
+    await revoke(SLEEP, [MOBILITY, gone(SLEEP), CORE]);
+
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(MOBILITY))
+    );
+  });
+
+  test("the previous one's, when the last live grant went", async () => {
+    setGrants(grantsPage([SLEEP, MOBILITY, CORE]));
+    await revoke(MOBILITY, [SLEEP, gone(MOBILITY), CORE]);
+
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(SLEEP))
+    );
+  });
+
+  test('Grant access, when no live grant is left', async () => {
+    setGrants(grantsPage([SLEEP]));
+    await revoke(SLEEP, [gone(SLEEP)]);
+
+    const grantAccess = button(
+      drawer() as HTMLElement,
+      m.studio_customers_drawer_grant_access()
+    );
+    await vi.waitFor(() => expect(document.activeElement).toBe(grantAccess));
+  });
+
+  test('a cancel, even after a revoke, gives focus back to the Revoke that opened the confirm', async () => {
+    const YOGA = {
+      ...MOBILITY,
+      id: `${MOBILITY.id.slice(0, -1)}4`,
+      contentTitle: 'Yoga Basics',
+    };
+    setGrants(grantsPage([SLEEP, MOBILITY, YOGA]));
+    await revoke(SLEEP, [MOBILITY, YOGA, gone(SLEEP)]);
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(MOBILITY))
+    );
+
+    revokeButton(YOGA)?.focus();
+    revokeButton(YOGA)?.click();
+    flushSync();
+    const dialog = confirmDialog() as HTMLElement;
+    await focusIn(dialog);
+    button(dialog, m.common_cancel())?.click();
+    flushSync();
+
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(YOGA))
+    );
+  });
+
+  // The refresh after a revoke re-ran the drawer's load: its details went
+  // back to loading, at the top of its scroll, and the confirm was rebuilt
+  // while the request ran.
+  test('the refresh after a revoke loads nothing else', async () => {
+    setGrants(grantsPage([SLEEP, MOBILITY]));
+    await revoke(SLEEP, [MOBILITY, gone(SLEEP)]);
+
+    expect(refreshGrants).toHaveBeenCalledTimes(1);
+    expect(getCustomerDetail).toHaveBeenCalledTimes(1);
+    expect(getCustomerGrants).toHaveBeenCalledTimes(1);
+  });
+
+  // A busy confirm can be dismissed (ConfirmDialog's session counter). The
+  // revoke's answer marked the confirm open WHEN IT LANDED, another grant's,
+  // so that one's Cancel sent focus to the revoked grant's place, not home
+  // (review fu-focus-2).
+  test("an Escape during a revoke, then another grant's confirm: its Cancel still goes home", async () => {
+    const YOGA = {
+      ...MOBILITY,
+      id: `${MOBILITY.id.slice(0, -1)}4`,
+      contentTitle: 'Yoga Basics',
+    };
+    const PILATES = {
+      ...MOBILITY,
+      id: `${MOBILITY.id.slice(0, -1)}5`,
+      contentTitle: 'Pilates Flow',
+    };
+    setGrants(grantsPage([SLEEP, MOBILITY, YOGA, PILATES]));
+    refreshGrants.mockImplementation(async () =>
+      setGrants(grantsPage([SLEEP, MOBILITY, PILATES, gone(YOGA)]))
+    );
+    const answer = deferred<null>();
+    revokeCustomerGrant.mockReturnValue(answer.promise);
+    mountDrawer();
+    await vi.waitFor(() => expect(rows()).toHaveLength(4));
+
+    // Yoga's revoke starts, and its confirm is dismissed while it runs.
+    revokeButton(YOGA)?.focus();
+    revokeButton(YOGA)?.click();
+    flushSync();
+    const first = confirmDialog() as HTMLElement;
+    await focusIn(first);
+    button(first, m.studio_customers_grants_revoke_confirm())?.click();
+    flushSync();
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    flushSync();
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+    // Home first, as the close takes it there a moment later.
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(YOGA))
+    );
+
+    // Mobility's confirm opens, and then Yoga's revoke answers.
+    revokeButton(MOBILITY)?.focus();
+    revokeButton(MOBILITY)?.click();
+    flushSync();
+    const second = confirmDialog() as HTMLElement;
+    await focusIn(second);
+    answer.resolve(null);
+    await vi.waitFor(() =>
+      expect(row(YOGA.contentTitle).dataset.state).toBe('revoked')
+    );
+
+    button(second, m.common_cancel())?.click();
+    flushSync();
+    await vi.waitFor(() => expect(confirmDialog()).toBeNull());
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(revokeButton(MOBILITY))
+    );
   });
 });

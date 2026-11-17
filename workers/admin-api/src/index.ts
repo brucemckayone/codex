@@ -871,14 +871,16 @@ app.post(
       });
 
       // Both users' roles changed. Bust what organization-api's accept path
-      // busts for each: the membership entry the policy reads (deleted — a
-      // version bump would be dead), the org's slug-keyed public caches and
-      // the user's library. One shared helper, so the two cannot drift again
-      // (Codex-2hxff.44).
-      for (const userId of [change.ownerUserId, change.previousOwnerUserId]) {
-        if (!userId) continue;
-        invalidateMemberCaches(ctx, orgId, userId, ctx.obs);
-      }
+      // busts: each user's membership entry the policy reads (deleted — a
+      // version bump would be dead) and library, and the org's slug-keyed
+      // public caches once. One shared helper, so the two cannot drift again
+      // (Codex-2hxff.44); it skips the null previous owner of an ownerless org.
+      invalidateMemberCaches(
+        ctx,
+        orgId,
+        [change.ownerUserId, change.previousOwnerUserId],
+        ctx.obs
+      );
       return change;
     },
   })

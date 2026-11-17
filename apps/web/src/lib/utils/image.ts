@@ -78,7 +78,8 @@ export function getThumbnailUrl(baseUrl: string, size: ThumbnailSize): string {
  * getThumbnailSrcset('http://localhost:4100/abc/media-thumbnails/xyz/md.webp')
  * // => '.../sm.webp 200w, .../md.webp 400w, .../lg.webp 800w'
  */
-export function getThumbnailSrcset(baseUrl: string): string {
+export function getThumbnailSrcset(baseUrl: string | null | undefined): string {
+  if (!baseUrl) return '';
   return thumbnailCandidates(baseUrl)
     .map((candidate) => `${candidate.url} ${candidate.width}w`)
     .join(', ');

@@ -2,7 +2,7 @@
   @component StudioDashboard
 
   Editorial studio dashboard. Production-grade creator-first surface built
-  to the house style established by ContentForm (numbered ordinals,
+  to the studio's house style (numbered ordinals,
   backdrop-filter command bar, brand-tinted OKLCH accents, focus rail).
 
   Layout (from top):
@@ -50,6 +50,7 @@
     listActiveAgreements,
     listPendingProposals,
   } from '$lib/remote/agreements.remote';
+  import { DRAFTS_HREF } from '$lib/components/studio/content-list/content-status';
   import { getOrgMembers } from '$lib/remote/org.remote';
   import * as m from '$paraglide/messages';
 
@@ -204,7 +205,7 @@
         title: 'Continue a draft',
         description:
           'Pick up where you left off — finish the details, attach media, and publish.',
-        href: '/studio/content?status=draft',
+        href: DRAFTS_HREF,
         tone: 'action',
         icon: EditIcon,
       });

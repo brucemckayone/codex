@@ -8,6 +8,7 @@
 export { default as BrandStudioCanvas } from './BrandStudioCanvas.svelte';
 export { default as BrandStudioLayout } from './BrandStudioLayout.svelte';
 export { default as BrandStudioRail } from './BrandStudioRail.svelte';
+export { default as BrandStudioRailPending } from './BrandStudioRailPending.svelte';
 export { default as BrandStudioGuided } from './guided/BrandStudioGuided.svelte';
 export {
   type BrandStudioMode,

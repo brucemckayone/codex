@@ -6,28 +6,26 @@
  */
 
 import type { MediaLibrarySummary } from '@codex/shared-types';
+import { LayoutGridIcon, LayoutListIcon } from '$lib/components/ui/Icon';
 import * as m from '$paraglide/messages';
+import type { ListOption, SegmentOption } from '../list-toolbar/list-option';
 import type {
   LibrarySort,
   LibraryState,
   LibraryStatus,
   LibraryType,
   LibraryUsage,
+  LibraryView,
 } from './library-url';
 
-export interface LibraryOption<T extends string = string> {
-  value: T;
-  label: () => string;
-}
-
-export const TYPE_OPTIONS: readonly LibraryOption<LibraryType>[] = [
+export const TYPE_OPTIONS: readonly ListOption<LibraryType>[] = [
   { value: 'all', label: () => m.media_filter_all() },
   { value: 'video', label: () => m.media_type_video() },
   { value: 'audio', label: () => m.media_type_audio() },
 ];
 
 /** Mockup M1 note 3: Processing and Needs attention are groups. */
-export const STATUS_OPTIONS: readonly LibraryOption<LibraryStatus>[] = [
+export const STATUS_OPTIONS: readonly ListOption<LibraryStatus>[] = [
   { value: 'any', label: () => m.media_filter_any() },
   { value: 'ready', label: () => m.media_status_ready() },
   { value: 'processing', label: () => m.media_status_processing() },
@@ -35,18 +33,24 @@ export const STATUS_OPTIONS: readonly LibraryOption<LibraryStatus>[] = [
   { value: 'uploading', label: () => m.media_status_uploading() },
 ];
 
-export const USAGE_OPTIONS: readonly LibraryOption<LibraryUsage>[] = [
+export const USAGE_OPTIONS: readonly ListOption<LibraryUsage>[] = [
   { value: 'any', label: () => m.media_filter_any() },
   { value: 'used', label: () => m.media_filter_usage_used() },
   { value: 'unused', label: () => m.media_filter_usage_unused() },
 ];
 
-export const SORT_OPTIONS: readonly LibraryOption<LibrarySort>[] = [
+export const SORT_OPTIONS: readonly ListOption<LibrarySort>[] = [
   { value: 'newest', label: () => m.media_sort_newest() },
   { value: 'oldest', label: () => m.media_sort_oldest() },
   { value: 'title', label: () => m.media_sort_title() },
   { value: 'longest', label: () => m.media_sort_longest() },
   { value: 'largest', label: () => m.media_sort_largest() },
+];
+
+/** The tiles (M1) or the rows (M2). */
+export const VIEW_OPTIONS: readonly SegmentOption<LibraryView>[] = [
+  { value: 'grid', label: () => m.media_view_grid(), icon: LayoutGridIcon },
+  { value: 'list', label: () => m.media_view_list(), icon: LayoutListIcon },
 ];
 
 /**
@@ -55,7 +59,7 @@ export const SORT_OPTIONS: readonly LibraryOption<LibrarySort>[] = [
  * would misdescribe the view.
  */
 export function soleFacetLabel(state: LibraryState): string | null {
-  const chosen: (LibraryOption | undefined)[] = [
+  const chosen: (ListOption | undefined)[] = [
     state.mediaType === 'all'
       ? undefined
       : TYPE_OPTIONS.find((o) => o.value === state.mediaType),
@@ -67,7 +71,7 @@ export function soleFacetLabel(state: LibraryState): string | null {
       : USAGE_OPTIONS.find((o) => o.value === state.usage),
   ];
   const set = chosen.filter(
-    (option): option is LibraryOption => option !== undefined
+    (option): option is ListOption => option !== undefined
   );
   return set.length === 1 ? (set[0]?.label() ?? null) : null;
 }

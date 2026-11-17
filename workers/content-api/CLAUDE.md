@@ -13,11 +13,18 @@ Content CRUD, media lifecycle, access control, and streaming. The largest worker
 | GET | `/api/content/:id` | `auth: 'required'` | any | Get own content by ID |
 | PATCH | `/api/content/:id` | `auth: 'required'` | creator, admin | Update content |
 | GET | `/api/content` | `auth: 'required'` | any | List own content (paginated) |
-| POST | `/api/content/:id/publish` | `auth: 'required'` | creator, admin | Publish; bumps org cache |
+| POST | `/api/content/:id/publish` | `auth: 'required'` | creator, admin | Publish; bumps org cache. `?whenReady=true` (`publishContentQuerySchema`, Codex-a6ofh.2.7): media still on its way SCHEDULES it instead (returns the draft with `publishRequestedAt` set) and bumps nothing |
+| DELETE | `/api/content/:id/publish-request` | `auth: 'required'` | creator, admin | Cancel a publish-when-ready schedule; the draft stays a draft; bumps nothing. 409 `CONTENT_ALREADY_LIVE` if it went live first |
 | POST | `/api/content/:id/unpublish` | `auth: 'required'` | creator, admin | Unpublish; bumps org cache |
 | DELETE | `/api/content/:id` | `auth: 'required'` | creator, admin | Soft delete; `strict` rate limit; 204 |
 | POST | `/api/content/:id/thumbnail` | `auth: 'required'` | creator, admin | Upload thumbnail (multipart) |
 | DELETE | `/api/content/:id/thumbnail` | `auth: 'required'` | creator, admin | Remove thumbnail; 204 |
+
+### Internal (worker HMAC)
+
+| Method | Path | Policy | Description |
+|---|---|---|---|
+| POST | `/internal/content/media-ready` (`CONTENT_MEDIA_READY_ROUTE`, `@codex/worker-utils`) | `auth: 'worker'` | media-api's call when a file turned ready or failed for good, and the maintenance run's (Codex-a6ofh.2.8). Body `{ mediaItemId }` only: `settleScheduledForMedia` reads what happened. Then `fanContentInvalidation` per go-live, ONE org-content bump per org (the go-lives' and `liveOrgIds`, Codex-1szw2), and the `content-live` / `content-not-live` emails (none for `MEDIA_DELETED`), their links built from `ENVIRONMENT`'s name (`buildOrgUrlFromEnv`, staging-safe). Answers **204 at once** and settles in `ctx.background`: a caller that gave up waiting would otherwise cancel the settle part-way, drafts live and never announced. What it did is logged here (`Publish when ready: settled`, ids only); a settle that throws (only ever before its first write) is logged at error. Each draft is announced (library fan-out, its org's lists once a call, the email) as the service hands it over on commit, not after the whole settle, so a settle cut off at the 30 s limit has still told what it did. Each email is queued on its own, so one that throws costs the next nothing; one with no link to give (an environment links can't be built for, or an org piece whose slug wasn't read) is not sent and is logged with ids, never sent with a link into the personal studio. Registered by the shared constant and mounted at `/`, so the caller and the route can't drift. |
 
 ### Public Content (`/api/content/public`)
 
@@ -71,6 +78,8 @@ fetcher. All three log `r2_public_base.missing` on every request with no base
 | GET | `/api/media/:id` | `auth: 'required'` | any | Get media by ID |
 | PATCH | `/api/media/:id` | `auth: 'required'` | creator, admin | Update media |
 | GET | `/api/media` | `auth: 'required'` | any | List own media (paginated); each item carries `usage: { total, live }` (Codex-6sbn1) |
+| GET | `/api/media/summary` | `auth: 'required'` | any | The caller's whole library in four numbers (`MediaLibrarySummary`: `total`, `totalBytes`, `failed`, `stopped`) for the library header, which the paged list cannot give since its total is its filter's. Registered above `/:id` (Codex-a6ofh.1.6) |
+| GET | `/api/media/:id/preview` | `auth: 'required'`, `cache: 'fresh'` | any | The caller's OWN item signed for the studio's player (`MediaPreviewResponse`): a 15-minute preview token for the `/api/access/media/:id/hls/...` proxies, which no content or film proxy accepts. Another creator's item is the same 404 as an unknown id; 422 while not ready (Codex-a6ofh.1.5) |
 | GET | `/api/media/:id/usage` | `auth: 'required'` | any | Where the caller's item is used (`MediaUsage`): uses named only where the caller can see them, plus the delete's `fingerprint`. Never cached |
 | POST | `/api/media/:id/upload` | `auth: 'required'` | creator, admin | Binary upload fallback (local dev) |
 | POST | `/api/media/:id/upload-complete` | `auth: 'required'` | creator, admin | Mark upload done; triggers transcoding |
@@ -97,6 +106,12 @@ fetcher. All three log `r2_public_base.missing` on every request with no base
    → workerFetch (HMAC) to media-api /internal/media/:id/transcode (via waitUntil)
 4. RunPod transcodes → media-api webhook → status: ready
 5. POST /api/content/:id/publish  (requires all media ready)
+   or ?whenReady=true while it is on its way: scheduled (Codex-a6ofh.2.7);
+   the media-ready trigger publishes it later (Codex-a6ofh.2.8):
+   media-api's ready/failed write → POST /internal/content/media-ready
+   → settleScheduledForMedia → bumps + emails; the hourly maintenance step
+   makes the same call for any it missed. DELETE /api/media/:id settles in
+   ctx.background after the delete commits (no email: the creator did it).
 ```
 
 ### Streaming URL Generation
@@ -113,7 +128,9 @@ GET /api/access/content/:id/stream[?include=body]
 ```
 
 ### Cache Invalidation on Publish/Unpublish/Delete
-`bumpOrgContentVersion()` fires via `waitUntil` — invalidates:
+The helpers live in `routes/content-invalidation.ts`, shared by the creator
+routes and the media-ready route; `afterContentPublished()` is the pair a
+go-live runs. `bumpOrgContentVersion()` fires via `waitUntil` — invalidates:
 - `COLLECTION_ORG_CONTENT(organizationId)` — org content collection version
 - The org's public caches (resolves the slug from the DB, then `invalidateOrgPublicCaches`: the slug-keyed config and stats, and the creators list's own id)
 
@@ -139,10 +156,10 @@ GET /api/access/content/:id/stream[?include=body]
 | `AUTH_SESSION_KV` | Yes | Session validation |
 | `MEDIA_BUCKET` | Yes (R2 binding) | R2 namespace for health check |
 | `MEDIA_API_URL` | Yes | URL to trigger transcoding |
-| `WORKER_SHARED_SECRET` | Yes | HMAC for worker-to-worker (media-api) |
+| `WORKER_SHARED_SECRET` | Yes | HMAC for worker-to-worker: signs the media-api hop, and checks `/internal/content/media-ready` |
 | `CACHE_KV` | No | Cache invalidation |
 | `R2_PUBLIC_URL_BASE` | No | CDN base URL for resolving R2 keys to URLs |
-| `ENVIRONMENT` | No | `development` / `production` |
+| `ENVIRONMENT` | No | `development` / `production`; also names the env the publish-when-ready emails link into (not one `@codex/urls` routes → they are not sent, logged at error) |
 
 ## Strict Rules
 

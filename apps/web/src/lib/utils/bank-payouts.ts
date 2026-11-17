@@ -215,6 +215,10 @@ export interface BankLineRow {
   bankOn: string | null;
   /** A `reversed` row's take-back: when Stripe took it back, and why. */
   takenBack?: { causeType: 'refund' | 'dispute'; on: string } | null;
+  /** A share a won chargeback paid back: when its pay-back was written. */
+  paidBack?: { on: string } | null;
+  /** A share the loss of a chargeback cancelled: when (Earnings only). */
+  cancelledFor?: { causeType: 'dispute'; on: string } | null;
 }
 
 const WAITING_REASONS = new Set(['connect_not_ready', 'connect_restricted']);
@@ -223,7 +227,10 @@ const WAITING_REASONS = new Set(['connect_not_ready', 'connect_restricted']);
  * The line under a row's status badge, or null for none.
  *
  * - A pending row waiting for setup says what it waits for.
- * - A reversed row says when Stripe took its money back, and why (E5).
+ * - A reversed row says when Stripe took its money back, and why (E5), and,
+ *   when a won chargeback paid it back, when (late-win E1).
+ * - A share the loss of a chargeback cancelled says so (late-win E3), and
+ *   when it was paid back.
  * - With no balance read, a passed day is "Due to your bank", never "Sent".
  * - A paid row says when it goes, or went, to the bank, less what went
  *   towards a take-back (AMENDMENT 3: the server's `towardsCents`, the one
@@ -255,13 +262,7 @@ export function bankLineFor(
         return null;
     }
   }
-  if (row.status === 'reversed') {
-    if (!row.takenBack) return null;
-    const date = formatDay(row.takenBack.on);
-    return row.takenBack.causeType === 'dispute'
-      ? m.earnings_bank_taken_back_chargeback({ date })
-      : m.earnings_bank_taken_back_refund({ date });
-  }
+  if (row.status === 'reversed' || row.cancelledFor) return takenBackLine(row);
   if (row.status !== 'resolved' || !row.bankOn) return null;
   const bankOn = row.bankOn;
   const hasRun = bankDayHasRun(bankOn, ctx.now);
@@ -300,6 +301,44 @@ export function bankLineFor(
   return hasRun
     ? m.earnings_bank_sent_on({ date })
     : m.earnings_bank_goes_on({ date });
+}
+
+/**
+ * A share Stripe took back (reversed) or a lost chargeback cancelled: when,
+ * and why (E5, late-win E1 and E3), and, once a won chargeback paid it
+ * back, when that was. Only a chargeback is ever paid back.
+ */
+function takenBackLine(row: BankLineRow): string | null {
+  const paidBackOn = row.paidBack ? formatDay(row.paidBack.on) : null;
+  if (row.cancelledFor) {
+    const date = formatDay(row.cancelledFor.on);
+    return paidBackOn
+      ? m.earnings_bank_cancelled_for_chargeback_paid_back({ date, paidBackOn })
+      : m.earnings_bank_cancelled_for_chargeback({ date });
+  }
+  if (!row.takenBack) return null;
+  const date = formatDay(row.takenBack.on);
+  if (row.takenBack.causeType !== 'dispute') {
+    return m.earnings_bank_taken_back_refund({ date });
+  }
+  return paidBackOn
+    ? m.earnings_bank_taken_back_chargeback_paid_back({ date, paidBackOn })
+    : m.earnings_bank_taken_back_chargeback({ date });
+}
+
+/**
+ * A won chargeback's pay-back row says what it is, above its bank line
+ * (late-win Q4, mockups E1-E3 and P1). Earnings names the sale; Org Payouts
+ * doesn't, as its group is the sale.
+ */
+export function paysBackLine(
+  paysBack: { title: string | null } | null | undefined,
+  options: { named: boolean }
+): string | null {
+  if (!paysBack) return null;
+  return options.named && paysBack.title
+    ? m.earnings_bank_pays_back_titled({ title: paysBack.title })
+    : m.earnings_bank_pays_back();
 }
 
 // ── What took the balance below zero (E5, P2) ───────────────────────────────

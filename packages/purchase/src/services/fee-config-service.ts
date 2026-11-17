@@ -65,11 +65,14 @@ import {
   type FeeWriteOutcome,
   feeLevelKey,
   feeLevelWhere,
+  feeNoticeMayHaveTold,
   feeRiseStartAfter,
   layerLevelFees,
   lockFeeLevel,
+  lockFeeNotices,
   mirrorLegacyFeeRow,
   nextFeeNoticeRunAfter,
+  queueSmallerFeeNotices,
   readFeeVersions,
   resolveFeesAt,
   versionInForce,
@@ -1210,9 +1213,14 @@ async function insertVersion(
 /**
  * Void a waiting rise. Nobody still waits for it: its open notices become
  * `not_needed`. Unless a bigger rise replaces it (whose own announcement
- * says so), everyone already told about it is emailed that it's off (F2,
+ * says so), everyone it told, or may have told (payments'
+ * `feeNoticeMayHaveTold`), is emailed that it's off (F2,
  * `fee-change-cancelled`, sent by the next daily run). The cancelled notice
  * keeps what they were told (roles, values, the date named) for its email.
+ * It is queued before the open notices are closed, which would hide which
+ * ones may have gone. For someone whose email was in flight as the rise was
+ * voided, notifications-api's fee step runs this insert narrowed to them
+ * (`tellOfVoid`), with what that email told.
  */
 async function voidPending(
   tx: Tx,
@@ -1224,55 +1232,53 @@ async function voidPending(
     .update(feeChanges)
     .set({ voidedAt: now, voidReason: reason })
     .where(eq(feeChanges.id, changeId));
+  // Lock the notices before reading them (review final M3), in the one
+  // order (`lockFeeNotices`): a send's record() then waits for this void and
+  // takes its void branch (tellOfVoid), and the daily run's claim (SKIP
+  // LOCKED) passes them by, so no email is recorded between the read below
+  // and the close, unseen by both.
+  await lockFeeNotices(tx, { changeId });
+  if (reason !== 'replaced_by_bigger') {
+    await tx.execute(sql`
+      INSERT INTO ${feeChangeNotices}
+        (change_id, user_id, kind, on_list, roles, before_values, after_values, quoted_from, state)
+      SELECT change_id, user_id, 'cancelled', false, roles, before_values, after_values, quoted_from, 'due'
+      FROM ${feeChangeNotices}
+      WHERE change_id = ${changeId}
+        AND kind = 'announce'
+        AND ${feeNoticeMayHaveTold(now)}
+      ON CONFLICT (change_id, user_id, kind) DO NOTHING
+    `);
+  }
   await tx
     .update(feeChangeNotices)
     .set({ state: 'not_needed', updatedAt: now })
     .where(
       and(
         eq(feeChangeNotices.changeId, changeId),
+        ne(feeChangeNotices.kind, 'cancelled'),
         inArray(feeChangeNotices.state, ['due', 'failed', 'unknown'])
       )
     );
-  if (reason === 'replaced_by_bigger') return;
-  await tx.execute(sql`
-    INSERT INTO ${feeChangeNotices}
-      (change_id, user_id, kind, on_list, roles, before_values, after_values, quoted_from, state)
-    SELECT change_id, user_id, 'cancelled', false, roles, before_values, after_values, quoted_from, 'due'
-    FROM ${feeChangeNotices}
-    WHERE change_id = ${changeId}
-      AND kind = 'announce'
-      AND state IN ('sent', 'told_another_way')
-    ON CONFLICT (change_id, user_id, kind) DO NOTHING
-  `);
 }
 
 /**
- * Q2 (A): a waiting rise made smaller sends one short email to everyone
- * already told. Someone told about an earlier smaller figure is told again;
- * someone not told yet simply gets the announcement with the new figures.
- * A row told again starts a new round at `now`: the daily step's email-log
- * check searches from created_at, so the last round's email can't count as
- * this one's (review cycle 3, N1).
+ * Q2 (A): the smaller email for everyone the waiting rise's announcement
+ * told, or may have told, and a new round for those told before; the rule
+ * and the statement are payments' `queueSmallerFeeNotices`, which the daily
+ * step also runs for one person it emailed with figures read before a cut.
+ * The notices are locked first, as a void locks them (`lockFeeNotices`, the
+ * one order; review final silent L1): the daily claim passes them by while
+ * this cut is open, and a claim already committed is read as tried, so no
+ * announcement goes with the bigger figure unseen by this queue.
  */
 async function queueSmallerNotices(
   tx: Tx,
   changeId: string,
   now: Date
 ): Promise<void> {
-  await tx.execute(sql`
-    INSERT INTO ${feeChangeNotices}
-      (change_id, user_id, kind, on_list, roles, before_values, after_values, state)
-    SELECT change_id, user_id, 'smaller', false, roles, '[]'::jsonb, '[]'::jsonb, 'due'
-    FROM ${feeChangeNotices}
-    WHERE change_id = ${changeId}
-      AND kind = 'announce'
-      AND state IN ('sent', 'told_another_way')
-    ON CONFLICT (change_id, user_id, kind) DO UPDATE
-      SET state = 'due', attempts = 0, attempted_at = NULL, accepted_at = NULL,
-          last_reason = NULL, last_error = NULL, alert_error_id = NULL,
-          created_at = ${now}, updated_at = ${now}
-      WHERE ${feeChangeNotices}.state NOT IN ('due', 'failed', 'unknown')
-  `);
+  await lockFeeNotices(tx, { changeId });
+  await queueSmallerFeeNotices(tx, { changeId, now });
 }
 
 async function writeAudit(

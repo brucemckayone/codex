@@ -268,13 +268,13 @@ describe('TierService', () => {
       expect(pricesCalls[1]![0]).toMatchObject({ currency: 'gbp' });
     });
 
-    it('should resolve Connect via organizations.primary_connect_account_user_id (T10/X8)', async () => {
+    it("should resolve Connect via the org's payee, not another member's account (T10/X8)", async () => {
       // Two users in the same org, each with their own Connect account.
-      // The primary column pins the canonical owner so tier ops route
-      // there, not an arbitrary .limit(1) row. Exercise this by making
-      // the primary owner INACTIVE and a secondary user ACTIVE — the
-      // service should refuse (primary is not ready) rather than
-      // silently succeed against the secondary account.
+      // The org's payee (its owner, from its ownership periods) is the
+      // canonical account, so tier ops route there, not an arbitrary
+      // .limit(1) row. Exercise this by making the payee's account NOT
+      // ready and a secondary user's ready — the service should refuse
+      // rather than silently succeed against the secondary account.
       const userIds = await seedTestUsers(db, 2);
       const [primaryUser, secondaryUser] = userIds as [string, string];
 
@@ -306,7 +306,7 @@ describe('TierService', () => {
           status: 'active',
         })
       );
-      // Pin primary_connect_account_user_id to the non-ready user.
+      // Make the non-ready user the org's payee.
       await setTestOrganisationPayee(db, org.id, primaryUser);
 
       await expect(

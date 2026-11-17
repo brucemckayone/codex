@@ -31,9 +31,10 @@
 import { ObservabilityClient } from '@codex/observability';
 import { createStripeClient } from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
-import type { SubscriptionService } from '@codex/subscription';
+import { isBankPayoutRun, type SubscriptionService } from '@codex/subscription';
 import {
   createWebhookServices,
+  sendEmailToWorker,
   type WebhookServices,
 } from '@codex/worker-utils';
 import type Stripe from 'stripe';
@@ -288,14 +289,17 @@ export async function runBankPayoutsSweep(
  * Settle disputes whose webhook events were missed (Codex-2hxff.58,
  * ./dispute-reconcile.ts). Isolated like the clawback retry: its failure is
  * logged and never fails the cron, so the other sweeps still run. Access
- * effects go through the scheduled handler's own bindings and `waitUntil`.
+ * effects and the late win's email go through the scheduled handler's own
+ * bindings and `waitUntil`. The 08:00 London run looks for no late wins
+ * (Codex-2hxff.70): the bank payout needs its subrequests.
  */
 async function reconcileDisputes(
   env: Bindings,
   ctx: ExecutionContext,
   stripe: Stripe,
   services: WebhookServices['services'],
-  obs: ObservabilityClient
+  obs: ObservabilityClient,
+  scheduledTime: Date
 ): Promise<void> {
   try {
     await runDisputeReconcile({
@@ -309,6 +313,9 @@ async function reconcileDisputes(
         waitUntil: (promise) => ctx.waitUntil(promise),
         obs,
       }),
+      mail: (params) => sendEmailToWorker(env, ctx, params),
+      webAppUrl: env.WEB_APP_URL,
+      lateWins: !isBankPayoutRun(scheduledTime),
     });
   } catch (error) {
     obs.error('payouts-sweep cron could not reconcile disputes', {
@@ -373,7 +380,14 @@ export async function runScheduledPayoutsSweep(
     // First, so a dispute whose events were missed holds (or releases) its
     // sale's unpaid slices before the drain below looks at them
     // (Codex-2hxff.58). Never throws.
-    await reconcileDisputes(env, ctx, stripe, webhookServices.services, obs);
+    await reconcileDisputes(
+      env,
+      ctx,
+      stripe,
+      webhookServices.services,
+      obs,
+      scheduledTime
+    );
     await runPayoutsSweep({
       subscription: webhookServices.services.subscription,
       obs,

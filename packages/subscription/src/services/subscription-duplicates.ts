@@ -10,6 +10,9 @@
  * in full. Each refund's own `charge.refunded` sends the buyer the one email
  * ("you were already subscribed"). Cancelling comes first, so that event
  * finds the subscription already ended and cancels nothing else.
+ *
+ * A refund gives back the card charge only. What customer credit paid of an
+ * invoice is not given back, and support is told (Codex-2hxff.98).
  */
 
 import { issueRefund, resolveInvoiceCharge } from '@codex/payments';
@@ -34,12 +37,22 @@ export function isDuplicateSubscription(row: DuplicateMarked): boolean {
  * repeat: an ended subscription is not cancelled again, each refund is keyed
  * by its invoice, and a charge already refunded counts as done. Any failure
  * is thrown; the caller makes it retryable and leaves the row unsettled.
+ *
+ * Each paid invoice, once its card part is refunded, goes to
+ * `alertUnreturnedCredit`, so the caller can tell support what credit paid of
+ * it. The caller's alert is once per invoice (`alertCreditNotReturned`), so a
+ * repeat stays silent.
  */
 export async function cancelAndRefundDuplicate(
   stripe: Stripe,
-  params: { stripeSubscriptionId: string; environment: string }
+  params: {
+    stripeSubscriptionId: string;
+    environment: string;
+    /** Never throws (Codex-2hxff.98). */
+    alertUnreturnedCredit: (invoice: Stripe.Invoice) => Promise<void>;
+  }
 ): Promise<{ refundedInvoices: number }> {
-  const { stripeSubscriptionId, environment } = params;
+  const { stripeSubscriptionId, environment, alertUnreturnedCredit } = params;
   const live = await stripe.subscriptions.retrieve(stripeSubscriptionId);
   if (live.status !== 'canceled' && live.status !== 'incomplete_expired') {
     await stripe.subscriptions.cancel(
@@ -63,21 +76,24 @@ export async function cancelAndRefundDuplicate(
   });
   let refundedInvoices = 0;
   for (const invoice of paid.data) {
-    if (!invoice.id || invoice.amount_paid <= 0) continue;
-    const chargeId = await resolveInvoiceCharge(stripe, invoice);
-    if (!chargeId) {
-      throw new InternalServiceError(
-        'A paid invoice of a duplicate subscription has no charge to refund',
-        { stripeSubscriptionId, invoiceId: invoice.id }
-      );
+    if (!invoice.id) continue;
+    if (invoice.amount_paid > 0) {
+      const chargeId = await resolveInvoiceCharge(stripe, invoice);
+      if (!chargeId) {
+        throw new InternalServiceError(
+          'A paid invoice of a duplicate subscription has no charge to refund',
+          { stripeSubscriptionId, invoiceId: invoice.id }
+        );
+      }
+      await issueRefund(stripe, {
+        chargeId,
+        reason: 'duplicate',
+        idempotencyKey: `refund_duplicate_${invoice.id}`,
+        environment,
+      });
+      refundedInvoices++;
     }
-    await issueRefund(stripe, {
-      chargeId,
-      reason: 'duplicate',
-      idempotencyKey: `refund_duplicate_${invoice.id}`,
-      environment,
-    });
-    refundedInvoices++;
+    await alertUnreturnedCredit(invoice);
   }
   return { refundedInvoices };
 }

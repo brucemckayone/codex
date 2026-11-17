@@ -22,7 +22,7 @@
  */
 
 import { CacheType, VersionedCache } from '@codex/cache';
-import { AUTH_ROLES } from '@codex/constants';
+import { CATEGORY_ROUTE_ROLES } from '@codex/constants';
 import { CategoryNotFoundError } from '@codex/content';
 import {
   MAX_IMAGE_SIZE_BYTES,
@@ -62,8 +62,11 @@ const reorderCategoriesBodySchema = z.object({
   orderedIds: z.array(uuidSchema).min(1).max(200),
 });
 
-/** Platform roles allowed to reach these routes (org gate applied per-handler). */
-const CATEGORY_MANAGER_ROLES = [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN];
+/**
+ * Platform roles allowed to reach these routes (org gate applied
+ * per-handler): the shared list, which the web reads too.
+ */
+const CATEGORY_MANAGER_ROLES = [...CATEGORY_ROUTE_ROLES];
 
 /**
  * A `waitUntil` for CACHE WRITES ONLY — the shape of `ProcedureContext.cacheWrite`

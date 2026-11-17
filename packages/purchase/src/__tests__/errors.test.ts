@@ -14,12 +14,48 @@ import { describe, expect, it } from 'vitest';
 import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
+  LateWinRefundRefusedError,
   PaymentProcessingError,
   PurchaseNotFoundError,
   RevenueCalculationError,
 } from '../errors';
 
 describe('Purchase Service Errors', () => {
+  // One rule (Codex-2hxff.70): `refused`, which the error's own message and
+  // the webhook's alert both read, is true only for a Stripe refusal.
+  describe('LateWinRefundRefusedError', () => {
+    const answered = (stripeType: string | null) =>
+      new LateWinRefundRefusedError({
+        disputeId: 'dp_1',
+        purchaseId: 'purchase_1',
+        stripeCode: null,
+        stripeType,
+        stripeStatusCode: null,
+      });
+
+    it('a StripeInvalidRequestError is refused, and its message says so', () => {
+      const error = answered('StripeInvalidRequestError');
+      expect(error.refused).toBe(true);
+      expect(error.message).toBe(
+        "The late win's refund of the payment was refused; it is retried"
+      );
+    });
+
+    it.each([
+      ['StripeConnectionError'],
+      ['StripeAPIError'],
+      ['StripePermissionError'],
+      ['StripeRateLimitError'],
+      [null],
+    ])('%s is not refused: it could not be made', (stripeType) => {
+      const error = answered(stripeType);
+      expect(error.refused).toBe(false);
+      expect(error.message).toBe(
+        "The late win's refund of the payment could not be made; it is retried"
+      );
+    });
+  });
+
   describe('PurchaseNotFoundError', () => {
     it('should extend NotFoundError', () => {
       const error = new PurchaseNotFoundError('purchase-123');

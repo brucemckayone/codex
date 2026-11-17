@@ -15,6 +15,8 @@
  * users are returned with `deleted: true`, for the page to label.
  */
 
+import type { DisputeAppealStatus } from '@codex/constants';
+
 /** What was paid for: a one-off purchase, or an invoice of a subscription. */
 export type SupportChargeKind =
   | 'purchase'
@@ -31,6 +33,11 @@ export type ChargebackState = 'inquiry' | 'open' | 'won' | 'lost';
 export interface SupportRefundWindow {
   closesAt: string;
   isOpen: boolean;
+  /**
+   * A late-won chargeback lifted the window (owner Q7, Codex-2hxff.70):
+   * `isOpen` is true and `closesAt` keeps the 14-day date, which has passed.
+   */
+  liftedByLateWin: boolean;
 }
 
 /** A person named on a record: a payee, or whoever issued a refund. */
@@ -62,7 +69,10 @@ export interface ChargeSummary {
   organizationName: string | null;
   buyer: SupportBuyer;
   amountCents: number;
-  /** Refunds pending, waiting on the customer, or succeeded. */
+  /**
+   * Refunds pending, waiting on the customer, or succeeded, plus failed ones
+   * settled as refunded elsewhere (Codex-3xnta).
+   */
   refundedCents: number;
   paidAt: string;
   /** The charge's latest dispute; null for none, or an inquiry that closed. */
@@ -75,8 +85,20 @@ export interface ChargeSummary {
   window: SupportRefundWindow;
 }
 
-/** Why the form cannot refund this charge now. */
-export type RefundBlock = 'window_closed' | 'chargeback' | 'nothing_left';
+/**
+ * Why the form cannot refund this charge now. `chargeback_settling`: a
+ * chargeback on it was won and the creators' pay-back is not yet applied
+ * (Codex-2hxff.70), so a refund would race it. `refunded_outside_stripe`:
+ * support settled it by hand and refunded the buyer outside Stripe, so it is
+ * never refunded through Stripe again (owner decision 2026-11-08); it comes
+ * first, whatever the window says.
+ */
+export type RefundBlock =
+  | 'refunded_outside_stripe'
+  | 'window_closed'
+  | 'chargeback'
+  | 'chargeback_settling'
+  | 'nothing_left';
 
 /** What the charge paid for. */
 export type ChargeDetailSource =
@@ -119,7 +141,10 @@ export interface ChargeDetail {
     id: string;
     paymentIntentId: string | null;
     amountCents: number;
-    /** Refunds pending, waiting on the customer, or succeeded. */
+    /**
+     * Refunds pending, waiting on the customer, or succeeded, plus failed
+     * ones settled as refunded elsewhere (Codex-3xnta).
+     */
     refundedCents: number;
     /** Stripe's `charge.created`. */
     paidAt: string;
@@ -137,9 +162,17 @@ export interface ChargeDetail {
   } | null;
   window: SupportRefundWindow;
   refundable: {
-    /** The charge less its pending, waiting and succeeded refunds. */
+    /** The charge less its `refundedCents`, never below 0. */
     maxCents: number;
     blocked: RefundBlock | null;
+    /**
+     * When the buyer was refunded outside Stripe
+     * (`disputes.refunded_outside_stripe_at`): support settled the charge by
+     * hand, settled the late win's own failed refund as refunded elsewhere,
+     * or recorded a refund another way by hand (R19 (b)). Null otherwise. Stripe lists no standing refund for it, so
+     * `refundedCents` doesn't count it.
+     */
+    refundedOutsideStripeOn: string | null;
   };
   /**
    * How many refunds Stripe lists on the charge, in any status. The form
@@ -315,6 +348,18 @@ export interface HistoryLine {
   systemDecision: SystemDecision | null;
   /** A late take-back's credit on this step, in any state; null for none. */
   credit: HistoryCredit | null;
+  /**
+   * A late-won dispute line's loss: when it was applied (Codex-2hxff.70),
+   * for "Cancelled when the chargeback was lost, then paid back by a new
+   * payout." Absent or null otherwise.
+   */
+  lostOn?: string | null;
+  /** The step's kind, so a cancellation or a reduction is worded as one. */
+  stepKind?:
+    | 'transfer_reversal'
+    | 'pending_reduction'
+    | 'retained_fee'
+    | 'cancellation';
 }
 
 /** Whoever issued a refund: support, the Stripe Dashboard, or the platform (null). */
@@ -335,6 +380,13 @@ export interface RefundRow {
   /** When the buyer was emailed about it; null until the webhook records it. */
   notifiedAt: string | null;
   requestedBy: RefundRequester;
+  /**
+   * How support settled it in Failed refunds, from our record; null while it
+   * is open, and for a refund that didn't fail. A failed one settled
+   * `refunded_elsewhere` counts as refunded (Codex-3xnta), and the card says
+   * "Refunded another way" for it, not "Failed".
+   */
+  resolution: FailedRefundResolution | null;
 }
 
 /** One dispute of the charge, from `disputes`. */
@@ -346,8 +398,20 @@ export interface ChargebackRow {
   status: string;
   reason: string | null;
   createdAt: string;
-  /** Stripe's evidence deadline, while a response is due. */
+  /** Stripe's evidence deadline, while a response is due, an appeal's too. */
   respondBy: string | null;
+  /** A late win's loss: when it was applied (`lost_applied_at`). */
+  lostOn: string | null;
+  /** When a lost chargeback was won after all (`late_won_at`). */
+  lateWonOn: string | null;
+  /**
+   * A lost chargeback's appeal while it runs (`appeal_status`; owner D34):
+   * `status` stays `lost`. Null once the bank decides, and for any row that
+   * isn't lost, where a mark is stale.
+   */
+  appealStatus: DisputeAppealStatus | null;
+  /** Won, and the creators' pay-back not yet applied: refunds wait for it. */
+  settling: boolean;
 }
 
 /** How the preview says a line of the clawback is taken (`planClawback`). */
@@ -465,6 +529,14 @@ export interface FailedRefundItem {
    * final word.
    */
   accessRestoreBlockedReason: AccessRestorePrediction | null;
+  /**
+   * A late win's own refund of the payment, by our record
+   * (`disputes.late_win_refund_id`), whose charge isn't yet marked refunded
+   * outside Stripe: settling it refunded elsewhere marks it, and blocks every
+   * later Stripe refund of the charge (Codex-ohlcx). Our record only: one
+   * known only from Stripe's metadata reads false, and is still settled.
+   */
+  isLateWinRefund: boolean;
 }
 
 /** A payee's role on a slice, as the queue labels it. */
@@ -881,8 +953,13 @@ export interface ToldAnotherWayResult {
   };
   change: {
     changeId: string;
-    /** Set when this mark was the last one the rise waited for. */
+    /**
+     * The rise's date when it already has one. A mark never sets it: with
+     * nobody on the list left waiting (`waitingFor` 0), the next 08:00 run
+     * dates it, after its joiners step (review final, commerce delta4).
+     */
     effectiveFrom: string | null;
+    /** The people on the list the rise still waits for. */
     waitingFor: number;
   };
 }
@@ -969,6 +1046,14 @@ export interface HeldPriceMove {
   retry: { requestedAt: string; by: SupportPerson | null } | null;
   /** The run a queued row waits for; null otherwise. */
   queuedFor: string | null;
+  /**
+   * The member has an open chargeback, so the run waits for it to end
+   * (owner D1, "Wait while disputed") and moves `queuedFor` a day on each
+   * time. It mirrors the price-moves sweep, in the sweep's own order: true
+   * only for a row not closed, on a subscription that hasn't ended, whose
+   * tier or course subscription has `disputed_at` set (Codex-2hxff.70, D1-a).
+   */
+  waitsForDispute: boolean;
   /** Close's record. Null in the list. */
   resolution: {
     kind: 'moved_by_hand' | 'not_needed';

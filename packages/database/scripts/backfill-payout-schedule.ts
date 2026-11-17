@@ -56,9 +56,11 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isForeignStripeEnvironment } from '@codex/constants';
-import Stripe from 'stripe';
-
-const STRIPE_API_VERSION = '2025-10-29.clover' as const;
+import type Stripe from 'stripe';
+// The platform's Stripe client, with its pinned API version, by relative path:
+// @codex/purchase depends on @codex/database, so a package dependency would be
+// circular.
+import { createStripeClient } from '../../purchase/src/stripe-client';
 
 /** Each Stripe call gives up after 20 s; a retry replays its key. */
 const STRIPE_REQUEST = {
@@ -391,7 +393,7 @@ async function main(): Promise<void> {
   }
   const key = process.env.STRIPE_SECRET_KEY;
   assertKeyMatchesEnv(key, args);
-  const stripe = new Stripe(key as string, { apiVersion: STRIPE_API_VERSION });
+  const stripe = createStripeClient(key as string);
 
   const { dbWs, schema } = await import('../src');
   const { sql } = await import('drizzle-orm');

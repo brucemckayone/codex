@@ -9,14 +9,15 @@ DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
 
 # Stripe (use test mode keys: sk_test_...)
 STRIPE_SECRET_KEY=sk_test_YOUR_TEST_KEY_HERE
-STRIPE_WEBHOOK_SECRET_BOOKING=whsec_YOUR_BOOKING_WEBHOOK_SECRET
 # The locked Billing Portal configuration (payment methods + invoices only).
 # Without it the billing portal refuses to open (Codex-2hxff.4).
 STRIPE_PORTAL_CONFIGURATION_ID=bpc_YOUR_LOCKED_PORTAL_CONFIG
 
-# Additional Stripe webhook secrets (future phases, not required yet)
-# STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_YOUR_PAYMENT_SECRET
-# STRIPE_WEBHOOK_SECRET_SUBSCRIPTION=whsec_YOUR_SUBSCRIPTION_SECRET
-# STRIPE_WEBHOOK_SECRET_CUSTOMER=whsec_YOUR_CUSTOMER_SECRET
-# STRIPE_WEBHOOK_SECRET_CONNECT=whsec_YOUR_CONNECT_SECRET
-# STRIPE_WEBHOOK_SECRET_DISPUTE=whsec_YOUR_DISPUTE_SECRET
+# Webhook signing secrets. The worker refuses to start without the first four.
+# With `stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev`,
+# set every one to the secret the CLI prints.
+STRIPE_WEBHOOK_SECRET_BOOKING=whsec_YOUR_WEBHOOK_SECRET
+STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_YOUR_WEBHOOK_SECRET
+STRIPE_WEBHOOK_SECRET_SUBSCRIPTION=whsec_YOUR_WEBHOOK_SECRET
+STRIPE_WEBHOOK_SECRET_CONNECT=whsec_YOUR_WEBHOOK_SECRET
+STRIPE_WEBHOOK_SECRET_DISPUTE=whsec_YOUR_WEBHOOK_SECRET

@@ -13,10 +13,11 @@
  *    item 2+, the margin boxes desynced), leaving a ~4px vertical drift
  *    between items. Fix: explicit `margin: 0` on `.breadcrumb__item`.
  *
- * 2. `ContentFormCommandBar.svelte` (a.breadcrumb)
- *    Baseline alignment plus an uppercase-vs-mixed-case font-size mismatch
- *    drifted the root/separator/leaf spans by a few pixels. Fix:
- *    `align-items: center`, unified `--text-sm`, separator `line-height: 1`.
+ * 2. `ContentFormCommandBar.svelte` (a.breadcrumb) was retired with the old
+ *    content form (Codex-a6ofh.2.10), and its test with it. The studio's
+ *    other command bars (content list, media, analytics) set their uppercase
+ *    root on the leaf's baseline by design, so its centring rule never
+ *    applied to them.
  *
  * This spec inspects real computed styles and bounding rects inside the
  * browser via page.evaluate, then asserts against the returned measurements.
@@ -52,17 +53,20 @@ test.describe('Studio Breadcrumb Alignment', () => {
   test('shared Breadcrumb list items have zero margin and identical center-Y', async ({
     page,
   }) => {
+    // The edit page shows the shared breadcrumb above every state that is
+    // not the editor: loading, a failed read, and a piece that is not there,
+    // which is the one a test can hold still (an id no row has).
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
-      '/content/new'
+      '/content/00000000-0000-4000-8000-000000000000/edit'
     );
 
-    // The shared breadcrumb is rendered unconditionally at the top of the page;
-    // the ContentForm skeleton beneath it does not gate the <nav>. Still wait
-    // for it to be attached so the computed styles are valid.
     const breadcrumbList = page.locator('nav.breadcrumb .breadcrumb__list');
     await expect(breadcrumbList).toBeVisible();
+    await expect(
+      page.getByText('This piece was deleted, or isn’t yours to edit.')
+    ).toBeVisible({ timeout: 30000 });
 
     // Collect geometry + computed margins for every <li>, plus the <ol> height,
     // inside the page context so measurements come from a real layout engine.
@@ -104,7 +108,7 @@ test.describe('Studio Breadcrumb Alignment', () => {
 
     expect(
       measurements.items.length,
-      'expected two breadcrumb items: Content / New Content'
+      'expected two breadcrumb items: Content / Edit'
     ).toBeGreaterThanOrEqual(2);
 
     // 1) Every <li> must have zero margin on every side.
@@ -146,93 +150,6 @@ test.describe('Studio Breadcrumb Alignment', () => {
     expect(
       maxCenterY - minCenterY,
       `breadcrumb items center-Y spread ${maxCenterY - minCenterY}px should be ≤ 0.5px (centers: ${centerYs.map((c) => c.toFixed(2)).join(', ')})`
-    ).toBeLessThanOrEqual(0.5);
-  });
-
-  test('ContentFormCommandBar breadcrumb spans share center-Y, align-items:center, unified font-size', async ({
-    page,
-  }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/content/new'
-    );
-
-    // The command-bar breadcrumb lives inside <ContentForm>, which is gated by
-    // the mediaQuery skeleton. Wait for the anchor itself — that implies the
-    // skeleton has resolved and the form is hydrated.
-    const commandBarBreadcrumb = page.locator('.command-bar a.breadcrumb');
-    await expect(commandBarBreadcrumb).toBeVisible({ timeout: 30000 });
-
-    const measurements = await page.evaluate(() => {
-      const anchor = document.querySelector<HTMLAnchorElement>(
-        '.command-bar a.breadcrumb'
-      );
-      if (!anchor) {
-        return null;
-      }
-
-      const root = anchor.querySelector<HTMLSpanElement>('.breadcrumb-root');
-      const sep = anchor.querySelector<HTMLSpanElement>('.breadcrumb-sep');
-      const leaf = anchor.querySelector<HTMLSpanElement>('.breadcrumb-leaf');
-
-      if (!root || !sep || !leaf) {
-        return { missing: { root: !root, sep: !sep, leaf: !leaf } } as const;
-      }
-
-      const anchorStyle = window.getComputedStyle(anchor);
-      const rootStyle = window.getComputedStyle(root);
-      const leafStyle = window.getComputedStyle(leaf);
-
-      const rectCenterY = (el: HTMLElement) => {
-        const r = el.getBoundingClientRect();
-        return r.top + r.height / 2;
-      };
-
-      return {
-        alignItems: anchorStyle.alignItems,
-        rootFontSize: rootStyle.fontSize,
-        leafFontSize: leafStyle.fontSize,
-        centers: {
-          root: rectCenterY(root),
-          sep: rectCenterY(sep),
-          leaf: rectCenterY(leaf),
-        },
-      } as const;
-    });
-
-    expect(
-      measurements,
-      'command-bar breadcrumb anchor should be present'
-    ).not.toBeNull();
-    if (!measurements) return;
-    expect(
-      'missing' in measurements && measurements.missing,
-      'command-bar breadcrumb should contain root, sep, and leaf spans'
-    ).toBeFalsy();
-    if ('missing' in measurements) return;
-
-    // 1) Anchor must use align-items: center (not baseline) — this is what
-    //    reconciles the uppercase cap-height root with the mixed-case leaf.
-    expect(
-      measurements.alignItems,
-      `a.breadcrumb align-items should be 'center' (was '${measurements.alignItems}')`
-    ).toBe('center');
-
-    // 2) Root and leaf must share the same font-size so case/weight carry
-    //    hierarchy without reintroducing optical drift.
-    expect(
-      measurements.rootFontSize,
-      `.breadcrumb-root font-size (${measurements.rootFontSize}) should equal .breadcrumb-leaf font-size (${measurements.leafFontSize})`
-    ).toBe(measurements.leafFontSize);
-
-    // 3) All three inner spans must share center-Y within 0.5px.
-    const { root, sep, leaf } = measurements.centers;
-    const centers = [root, sep, leaf];
-    const spread = Math.max(...centers) - Math.min(...centers);
-    expect(
-      spread,
-      `command-bar breadcrumb span center-Y spread ${spread}px should be ≤ 0.5px (root=${root.toFixed(2)}, sep=${sep.toFixed(2)}, leaf=${leaf.toFixed(2)})`
     ).toBeLessThanOrEqual(0.5);
   });
 });

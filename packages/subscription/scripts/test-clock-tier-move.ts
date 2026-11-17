@@ -43,7 +43,8 @@
 // fallow-ignore-file unused-file
 
 import { randomUUID } from 'node:crypto';
-import Stripe from 'stripe';
+import { createStripeClient } from '@codex/purchase';
+import type Stripe from 'stripe';
 import { ensurePriceActive } from '../src/services/pending-price-change';
 import {
   flipMetadata,
@@ -52,7 +53,6 @@ import {
   readWaitingMove,
 } from '../src/services/tier-move';
 
-const STRIPE_API_VERSION = '2025-10-29.clover' as const;
 const TAG = { codex_env: 'test-clock' };
 const PREMIUM_PENCE = 2000;
 const BASIC_PENCE = 500;
@@ -419,7 +419,9 @@ async function main(): Promise<void> {
   if (!key.startsWith('sk_test_') && !key.startsWith('rk_test_')) {
     throw new Error('REFUSING: this proof runs on a Stripe TEST key only');
   }
-  const stripe = new Stripe(key, { apiVersion: STRIPE_API_VERSION });
+  // The platform's client, so it runs on the version pinned in
+  // packages/purchase/src/stripe-client.ts (as test-clock-paid-price does).
+  const stripe = createStripeClient(key);
 
   const product = await stripe.products.create({
     name: 'Codex tier move test clock',

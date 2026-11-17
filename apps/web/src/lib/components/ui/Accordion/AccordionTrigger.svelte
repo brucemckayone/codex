@@ -7,8 +7,14 @@
 	const {
 		children,
 		class: className,
+		level,
 		...rest
-	}: { children?: Snippet; class?: string } & HTMLAttributes<HTMLButtonElement> = $props();
+	}: {
+		children?: Snippet;
+		class?: string;
+		/** The heading the trigger sits in (WAI-ARIA accordion), so a fold is found by its heading; none by default. */
+		level?: 2 | 3 | 4 | 5 | 6;
+	} & HTMLAttributes<HTMLButtonElement> = $props();
 
 	const {
 		elements: { trigger },
@@ -17,7 +23,7 @@
 	const { value } = getItemCtx();
 </script>
 
-<div class="accordion-header">
+<svelte:element this={level ? `h${level}` : 'div'} class="accordion-header">
 	<button
 		{...$trigger(value)}
 		use:trigger
@@ -28,11 +34,13 @@
 		{@render children?.()}
 		<ChevronDownIcon class="accordion-chevron {$isSelected(value) ? 'rotated' : ''}" />
 	</button>
-</div>
+</svelte:element>
 
 <style>
 	.accordion-header {
 		display: flex;
+		margin: 0;
+		font: inherit;
 	}
 	.accordion-trigger {
 		display: flex;

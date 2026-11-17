@@ -1,5 +1,13 @@
+import { CONTENT_ATTENTION_KINDS, CONTENT_LIFECYCLES } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
 import {
+  addContentCategoriesSchema,
+  contentAccessGroupSchema,
+  contentAttentionQuerySchema,
+  contentBrowseQuerySchema,
+  contentBulkAccessSchema,
+  contentBulkCategoriesSchema,
+  contentBulkSchema,
   contentQuerySchema,
   contentStatusEnum,
   contentTypeEnum,
@@ -318,34 +326,17 @@ describe('Content Schemas', () => {
       expect(result.isFree).toBe(true);
     });
 
-    it('should reject video content without mediaItemId', () => {
+    // A draft needs only a title and a type (Codex-a6ofh.2.1): its media,
+    // body and price are checked when it publishes (@codex/content
+    // assertPublishable), so each type saves bare.
+    it.each([
+      'video',
+      'audio',
+      'written',
+    ] as const)('accepts a bare %s draft: a title and a type', (contentType) => {
       expect(() =>
-        createContentSchema.parse({
-          title: 'Test',
-          slug: 'test',
-          contentType: 'video',
-        })
-      ).toThrow('Media item is required for video and audio content');
-    });
-
-    it('should reject audio content without mediaItemId', () => {
-      expect(() =>
-        createContentSchema.parse({
-          title: 'Test',
-          slug: 'test',
-          contentType: 'audio',
-        })
-      ).toThrow('Media item is required for video and audio content');
-    });
-
-    it('should reject written content without contentBody', () => {
-      expect(() =>
-        createContentSchema.parse({
-          title: 'Test',
-          slug: 'test',
-          contentType: 'written',
-        })
-      ).toThrow('Content body is required for written content');
+        createContentSchema.parse({ title: 'Test', slug: 'test', contentType })
+      ).not.toThrow();
     });
 
     it('should validate written content with contentBody', () => {
@@ -362,9 +353,10 @@ describe('Content Schemas', () => {
       expect(result.contentBody).toBeDefined();
     });
 
-    it('should reject purchasable content without a price', () => {
-      // Flag model (SPEC §6.1): priceCents pairs with isPurchasable — a
-      // purchasable item MUST carry a positive price.
+    it('accepts a purchasable draft with no price yet', () => {
+      // Flag model (SPEC §6.1): priceCents pairs with isPurchasable, but a
+      // draft may set the switch before the price. Publish refuses it until
+      // the price is at least £1 (Codex-a6ofh.2.1).
       expect(() =>
         createContentSchema.parse({
           title: 'Test',
@@ -373,7 +365,7 @@ describe('Content Schemas', () => {
           mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
           isPurchasable: true,
         })
-      ).toThrow('Purchasable content requires a price of at least £1.00');
+      ).not.toThrow();
     });
 
     it('should reject price exceeding £100,000', () => {
@@ -536,23 +528,28 @@ describe('Content Schemas', () => {
       ).not.toThrow();
     });
 
-    it('rejects purchasable content without a price', () => {
+    // Publish refuses both until the price is at least £1 (Codex-a6ofh.2.1).
+    it.each([
+      ['no price', undefined],
+      ['a zero price', 0],
+    ])('accepts a purchasable draft with %s', (_case, priceCents) => {
       expect(() =>
         createContentSchema.parse({
           ...baseVideo,
           isPurchasable: true,
+          priceCents,
         })
-      ).toThrow(/price of at least £1\.00/i);
+      ).not.toThrow();
     });
 
-    it('rejects purchasable content with a zero price', () => {
+    it('still refuses a price between 1p and 99p, even on a draft', () => {
       expect(() =>
         createContentSchema.parse({
           ...baseVideo,
           isPurchasable: true,
-          priceCents: 0,
+          priceCents: 50,
         })
-      ).toThrow(/price of at least £1\.00/i);
+      ).toThrow(/£1\.00/);
     });
 
     it('rejects follower-gated content without an org', () => {
@@ -577,13 +574,16 @@ describe('Content Schemas', () => {
       expect(() => updateContentSchema.parse({ isFree: true })).not.toThrow();
     });
 
-    it('rejects a partial update marking purchasable with a zero price', () => {
+    // Codex-a6ofh.2.1: a draft may be for sale before it has a price, as on
+    // create. Publish refuses it, and so does a save of a LIVE piece
+    // (ContentService.update), with PRICE_REQUIRED.
+    it.each([
+      ['a zero price', 0],
+      ['no price', null],
+    ])('accepts a partial update marking purchasable with %s', (_label, priceCents) => {
       expect(() =>
-        updateContentSchema.parse({
-          isPurchasable: true,
-          priceCents: 0,
-        })
-      ).toThrow(/price of at least £1\.00/i);
+        updateContentSchema.parse({ isPurchasable: true, priceCents })
+      ).not.toThrow();
     });
 
     // Codex-2hxff.32: Stripe refuses card charges under £0.30, so a sub-£1
@@ -872,6 +872,113 @@ describe('Query Schemas', () => {
       ).toThrow('Invalid user ID format');
     });
 
+    // The personal studio's "Where" (Codex-a6ofh.3.2). The one scope is
+    // personal: "everywhere" is no scope, and an org is its organizationId.
+    it('takes scope=personal, and nothing else', () => {
+      expect(contentQuerySchema.parse({ scope: 'personal' }).scope).toBe(
+        'personal'
+      );
+      expect(contentQuerySchema.parse({}).scope).toBeUndefined();
+      for (const scope of ['all', 'org', '']) {
+        expect(contentQuerySchema.safeParse({ scope }).success).toBe(false);
+      }
+    });
+
+    it('refuses scope=personal beside an organizationId: two answers to where', () => {
+      const result = contentQuerySchema.safeParse({
+        scope: 'personal',
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['scope']);
+    });
+
+    // The org studio's Category facet (Codex-a6ofh.3.3).
+    it('takes one categoryId, a uuid, and refuses a slug in it', () => {
+      const id = '7c000000-0000-4000-8000-000000000001';
+      expect(contentQuerySchema.parse({ categoryId: id }).categoryId).toBe(id);
+      expect(
+        contentQuerySchema.safeParse({ categoryId: 'tutorials' }).success
+      ).toBe(false);
+    });
+
+    it('takes include=categories (the rows named) and nothing else there', () => {
+      expect(contentQuerySchema.parse({ include: 'categories' }).include).toBe(
+        'categories'
+      );
+      expect(contentQuerySchema.safeParse({ include: 'body' }).success).toBe(
+        false
+      );
+    });
+
+    it('browse refuses any scope: it means nothing across creators', () => {
+      const result = contentBrowseQuerySchema.safeParse({
+        scope: 'personal',
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['scope']);
+      // Still a browse: the org is required, the rest of the fields kept.
+      expect(
+        contentBrowseQuerySchema.safeParse({
+          organizationId: '3c111111-1111-4111-8111-111111111999',
+          sortBy: 'title',
+        }).success
+      ).toBe(true);
+      expect(contentBrowseQuerySchema.safeParse({}).success).toBe(false);
+    });
+
+    it('takes each "Needs you" kind as needs, and nothing else (Codex-a6ofh.3.4)', () => {
+      for (const kind of CONTENT_ATTENTION_KINDS) {
+        expect(contentQuerySchema.parse({ needs: kind }).needs).toBe(kind);
+      }
+      expect(contentQuerySchema.safeParse({ needs: 'urgent' }).success).toBe(
+        false
+      );
+    });
+
+    it('browse refuses needs: a creator’s own pieces mean nothing across creators', () => {
+      const result = contentBrowseQuerySchema.safeParse({
+        needs: 'ready',
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['needs']);
+    });
+
+    it('takes each lifecycle, and nothing else (Codex-a6ofh.3.6)', () => {
+      for (const lifecycle of CONTENT_LIFECYCLES) {
+        expect(contentQuerySchema.parse({ lifecycle }).lifecycle).toBe(
+          lifecycle
+        );
+      }
+      // The stored status's word is not a lifecycle.
+      expect(
+        contentQuerySchema.safeParse({ lifecycle: 'archived' }).success
+      ).toBe(false);
+    });
+
+    it('refuses a lifecycle beside a status: two answers to which', () => {
+      const result = contentQuerySchema.safeParse({
+        lifecycle: 'off-sale',
+        status: 'draft',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['lifecycle']);
+      expect(contentQuerySchema.safeParse({ status: 'draft' }).success).toBe(
+        true
+      );
+    });
+
+    it('browse refuses a lifecycle: it lists what is on sale', () => {
+      const result = contentBrowseQuerySchema.safeParse({
+        lifecycle: 'off-sale',
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['lifecycle']);
+    });
+
     it('should reject page less than 1', () => {
       expect(() => contentQuerySchema.parse({ page: 0 })).toThrow();
     });
@@ -884,6 +991,39 @@ describe('Query Schemas', () => {
       expect(() =>
         contentQuerySchema.parse({ sortBy: 'invalidField' })
       ).toThrow();
+    });
+  });
+
+  describe('contentAttentionQuerySchema (Codex-a6ofh.3.4)', () => {
+    const ORG = '3c111111-1111-4111-8111-111111111999';
+
+    it('looks where the list looks: one org, personal, or everywhere', () => {
+      expect(
+        contentAttentionQuerySchema.parse({ organizationId: ORG })
+      ).toEqual({ organizationId: ORG });
+      expect(contentAttentionQuerySchema.parse({ scope: 'personal' })).toEqual({
+        scope: 'personal',
+      });
+      expect(contentAttentionQuerySchema.parse({})).toEqual({});
+    });
+
+    it('refuses scope=personal beside an organizationId, as the list does', () => {
+      const result = contentAttentionQuerySchema.safeParse({
+        scope: 'personal',
+        organizationId: ORG,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['scope']);
+    });
+
+    it('drops the list’s other filters: the counts are a to-do, not a view', () => {
+      expect(
+        contentAttentionQuerySchema.parse({ organizationId: ORG, search: 'x' })
+      ).toEqual({ organizationId: ORG });
+      expect(
+        contentAttentionQuerySchema.safeParse({ organizationId: 'not-a-uuid' })
+          .success
+      ).toBe(false);
     });
   });
 
@@ -1461,5 +1601,115 @@ describe('Codex-osuqt: the remote query refuses what the API refuses', () => {
     expect(
       publicContentArgsSchema.parse({ orgId: orgId.toUpperCase() }).orgId
     ).toBe(orgId);
+  });
+});
+
+/** `POST /api/content/:id/categories` (Codex-a6ofh.3.3): add, never replace. */
+describe('addContentCategoriesSchema', () => {
+  const ids = (n: number) =>
+    Array.from(
+      { length: n },
+      (_, i) => `7c000000-0000-4000-8000-${String(i).padStart(12, '0')}`
+    );
+
+  it('takes one to 20 category ids', () => {
+    expect(
+      addContentCategoriesSchema.safeParse({ categoryIds: ids(1) }).success
+    ).toBe(true);
+    expect(
+      addContentCategoriesSchema.safeParse({ categoryIds: ids(20) }).success
+    ).toBe(true);
+  });
+
+  it('refuses none, more than 20, and an id that is no uuid', () => {
+    for (const categoryIds of [[], ids(21), ['tutorials']]) {
+      expect(
+        addContentCategoriesSchema.safeParse({ categoryIds }).success
+      ).toBe(false);
+    }
+    expect(addContentCategoriesSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+/** The content list's bulk actions (Codex-a6ofh.3.5, owner D-b3). */
+describe('contentBulkSchema', () => {
+  const ids = (n: number) =>
+    Array.from(
+      { length: n },
+      (_, i) => `5b000000-0000-4000-8000-${String(i).padStart(12, '0')}`
+    );
+
+  it('takes one to 15 pieces', () => {
+    expect(contentBulkSchema.safeParse({ ids: ids(1) }).success).toBe(true);
+    expect(contentBulkSchema.safeParse({ ids: ids(15) }).success).toBe(true);
+  });
+
+  it('refuses none, a sixteenth, a repeat and an id that is no uuid', () => {
+    const [first = ''] = ids(1);
+    for (const sent of [[], ids(16), [first, first], ['draft-video']]) {
+      expect(contentBulkSchema.safeParse({ ids: sent }).success).toBe(false);
+    }
+  });
+
+  it('takes 1 to 20 categories with the pieces', () => {
+    const categoryIds = ids(2);
+    expect(
+      contentBulkCategoriesSchema.safeParse({ ids: ids(3), categoryIds })
+        .success
+    ).toBe(true);
+    expect(
+      contentBulkCategoriesSchema.safeParse({ ids: ids(3), categoryIds: [] })
+        .success
+    ).toBe(false);
+  });
+});
+
+/** Who can watch, and nothing else (owner D-b2). */
+describe('contentAccessGroupSchema', () => {
+  it('takes an access kind as the editor sends it', () => {
+    expect(
+      contentAccessGroupSchema.safeParse({
+        isFree: false,
+        isPurchasable: true,
+        priceCents: 1200,
+        isFollowerGated: false,
+        isTeamOnly: false,
+      }).success
+    ).toBe(true);
+  });
+
+  it('refuses a field that is not access, so a title cannot ride along', () => {
+    expect(
+      contentAccessGroupSchema.safeParse({ isFree: true, title: 'New' }).success
+    ).toBe(false);
+  });
+
+  it('refuses nothing at all', () => {
+    expect(contentAccessGroupSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('holds every cross-field rule an update is held to', () => {
+    for (const access of [
+      // A price is a gate: a priced piece is never free.
+      { isFree: true, priceCents: 500 },
+      // Tiers beside a gate the decision applies first.
+      { isTierGated: true, isFollowerGated: true },
+      // A closed tier piece is never free.
+      { isTierGated: true, isFree: true },
+      // Non-free with no gate at all would read as public.
+      { isFree: false },
+    ]) {
+      expect(contentAccessGroupSchema.safeParse(access).success).toBe(false);
+      expect(updateContentSchema.safeParse(access).success).toBe(false);
+    }
+  });
+
+  it('goes inside the bulk body as `access`', () => {
+    expect(
+      contentBulkAccessSchema.safeParse({
+        ids: ['5b000000-0000-4000-8000-000000000001'],
+        access: { isFree: true, isPurchasable: false, priceCents: null },
+      }).success
+    ).toBe(true);
   });
 });

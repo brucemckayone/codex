@@ -37,6 +37,12 @@
 
   const amountLine = $derived.by(() => {
     const amount = formatPrice(charge.amountCents);
+    // Stripe lists no refund for a charge settled by hand (owner decision
+    // 2026-11-08), so "nothing refunded" would mislead.
+    const outsideStripe = detail.refundable.refundedOutsideStripeOn;
+    if (outsideStripe) {
+      return m.support_amount_outside_stripe({ amount, date: formatDay(outsideStripe) });
+    }
     if (charge.refundedCents <= 0) return m.support_amount_none({ amount });
     if (charge.refundedCents >= charge.amountCents) {
       return m.support_amount_full({ amount });
@@ -48,13 +54,16 @@
     });
   });
 
+  // A late win lifted the window (owner Q7): its date has passed, so none shows.
   const windowLine = $derived(
-    detail.window.isOpen
-      ? m.support_window_open_until({
-          date: formatDayTime(detail.window.closesAt),
-          left: daysLeftText(detail.window.closesAt, now),
-        })
-      : m.support_window_closed_at({ date: formatDayTime(detail.window.closesAt) })
+    detail.window.liftedByLateWin
+      ? m.support_window_lifted_long()
+      : detail.window.isOpen
+        ? m.support_window_open_until({
+            date: formatDayTime(detail.window.closesAt),
+            left: daysLeftText(detail.window.closesAt, now),
+          })
+        : m.support_window_closed_at({ date: formatDayTime(detail.window.closesAt) })
   );
 
   const orgName = $derived(detail.organization?.name ?? null);

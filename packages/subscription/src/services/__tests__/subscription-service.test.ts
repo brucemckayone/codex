@@ -2214,7 +2214,11 @@ describe('SubscriptionService', () => {
         subscription_details: Record<string, unknown>;
       };
       if (switches) {
-        expect(params.subscription_details.billing_cycle_anchor).toBe('now');
+        // API 2026-09-30.endive takes the anchor as an object; the string
+        // form is refused.
+        expect(params.subscription_details.billing_cycle_anchor).toStrictEqual({
+          type: 'now',
+        });
         expect(params.subscription_details.proration_date).toBeUndefined();
         // Every line, the amount due and the next bill's London date.
         expect(preview.quote).toMatch(
@@ -2952,7 +2956,7 @@ describe('SubscriptionService', () => {
     });
 
     // A switch into yearly billing cannot be pinned by proration_date (Stripe
-    // refuses it with billing_cycle_anchor 'now'), so the commit previews it
+    // refuses it with billing_cycle_anchor { type: 'now' }), so the commit previews it
     // again and refuses any figure the dialog did not show (Codex-2hxff.96).
     describe.each([
       { change: 'the same tier, annual (interval_switch)', target: 1 },
@@ -3062,7 +3066,8 @@ describe('SubscriptionService', () => {
         );
 
         const params = writes()[0]![1] as Record<string, unknown>;
-        expect(params.billing_cycle_anchor).toBe('now');
+        // The endive object form (API 2026-09-30.endive refuses the string).
+        expect(params.billing_cycle_anchor).toStrictEqual({ type: 'now' });
         expect(params.proration_date).toBeUndefined();
       });
 
@@ -3463,12 +3468,15 @@ describe('SubscriptionService', () => {
 
       await service.resumeSubscription(otherCreatorId, org.id);
 
-      // Stripe resume must be called with billing_cycle_anchor='unchanged'
-      // to preserve the existing cycle (avoids surprise re-billing) and
-      // with an idempotency key per packages/subscription/CLAUDE.md.
+      // Stripe resume must be called with billing_cycle_anchor
+      // { type: 'unchanged' } (the endive object form) to preserve the
+      // existing cycle (avoids surprise re-billing) and with an idempotency
+      // key per packages/subscription/CLAUDE.md.
       expect(stripe.subscriptions.resume).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ billing_cycle_anchor: 'unchanged' }),
+        expect.objectContaining({
+          billing_cycle_anchor: { type: 'unchanged' },
+        }),
         expect.objectContaining({
           idempotencyKey: expect.stringContaining('resume_'),
         })
@@ -3697,13 +3705,8 @@ describe('SubscriptionService', () => {
       expect(results.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("sends the org's four display fields, never its payee id (Codex-kk6zx)", async () => {
+    it("sends only the org's four display fields (Codex-kk6zx)", async () => {
       const { org, tier1 } = await createFullOrg('mine-org-fields');
-      const payee = takeFirst(await seedTestUsers(db, 1), 'payee id');
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: payee })
-        .where(eq(organizations.id, org.id));
       const subscriber = takeFirst(await seedTestUsers(db, 1), 'subscriber');
       await db
         .insert(subscriptions)
@@ -4457,7 +4460,9 @@ describe('SubscriptionService', () => {
       );
 
       // Real webhook shape: no `payments` field at all.
-      const realChargeId = 'ch_resolved_via_expand';
+      // Unique per run: a charge already split records nothing on a re-run
+      // against a kept database (Codex-2hxff.101).
+      const realChargeId = `ch_resolved_via_expand_${createUniqueSlug('c')}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 499,
         parent: {
@@ -4507,7 +4512,7 @@ describe('SubscriptionService', () => {
       );
 
       const piId = 'pi_with_latest_charge';
-      const chargeViaPi = 'ch_recovered_via_pi';
+      const chargeViaPi = `ch_recovered_via_pi_${createUniqueSlug('c')}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 499,
         parent: {
@@ -4563,7 +4568,7 @@ describe('SubscriptionService', () => {
       );
 
       const piId = 'pi_pending_latest_charge';
-      const chargeViaList = 'ch_recovered_via_list';
+      const chargeViaList = `ch_recovered_via_list_${createUniqueSlug('c')}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 499,
         parent: {

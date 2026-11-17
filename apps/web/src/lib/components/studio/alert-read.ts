@@ -1,0 +1,76 @@
+/**
+ * What LoadFailedAlert (and createLoadRetry) reads and retries: a remote
+ * query, or a list read from the page's LOAD. The account payment page fails
+ * in its load rather than in a remote query. Build its read in a `$derived`,
+ * so it is rebuilt whenever the page's data changes:
+ *
+ *   const purchasesRead = $derived(
+ *     loadRead({
+ *       current: data.loadFailed ? undefined : data.purchases,
+ *       error: data.loadFailed ? m.account_payments_load_failed() : undefined,
+ *       refresh: () => invalidate('account:purchases'),
+ *       key: data.purchases,
+ *     })
+ *   );
+ *
+ * The load must catch its own failure (a failed reload still lands as new
+ * `data`) and call `depends(dep)` with the dependency `refresh` invalidates
+ * (`invalidate(dep)`), or a Retry waits. `key` is an object that load
+ * returns, fresh on each run of it (its catch branch included): kit keeps it
+ * when only another load reruns.
+ *
+ * Only `loadRead` makes one, and the alert tells it from a remote query by
+ * its tag. Pass a remote query to the alert as it is: a plain object wrapping
+ * one would hide kit's query swap on Retry from the alert.
+ */
+
+import type { QueryResult } from '$lib/remote/query-result';
+
+const LOAD_READ: unique symbol = Symbol('load-read');
+
+export interface LoadRead<T> extends QueryResult<T> {
+  /** The page's `invalidate`. It must rerun the load the read is built from. */
+  refresh: () => Promise<unknown>;
+  /**
+   * An object the load returns, new on each run of it (`data.purchases`).
+   * Kit merges every load's output into `data`, so a rerun of ANOTHER load (a
+   * layout's `cache:versions` on each tab return) makes a new read with this
+   * load's output unchanged; the key tells a Retry that is not its answer.
+   * Without one, any new data is taken as the answer. An object, compared by
+   * identity: a primitive (`data.loadFailed`) would make every failed reload
+   * "the same read", so a repeat failure would never be judged; Retry would
+   * just be offered again, with no "We still couldn't…". Never `data`
+   * itself: kit merges a new one on every load's rerun, so it is no key.
+   */
+  readonly key?: object;
+  readonly [LOAD_READ]: true;
+}
+
+/** A remote query as kit hands it to the page: a promise of its read. */
+export type QueryRead = QueryResult<unknown> &
+  PromiseLike<unknown> & { refresh: () => Promise<unknown> };
+
+/** LoadFailedAlert's `query`: a remote query as it is, or a `loadRead`. */
+export type AlertRead = QueryRead | LoadRead<unknown>;
+
+/**
+ * Makes a load read. Build it from the page's `data` alone, in a `$derived`:
+ * the alert takes each new read (of a new `key`, given one) as a new answer,
+ * so never mark the reload in it. Its `refresh` must return the one
+ * `invalidate(dep)` that reruns the load it is built from (`depends(dep)`
+ * there): a second invalidate in the same tick resolves before anything
+ * reloads. If it reruns nothing, Retry is offered again while the alert goes
+ * on waiting for the load to run again.
+ */
+export function loadRead<T>(
+  // Never a remote query: one goes to the alert as it is.
+  read: Pick<LoadRead<T>, 'current' | 'error' | 'refresh' | 'key'> & {
+    then?: never;
+  }
+): LoadRead<T> {
+  return { ...read, [LOAD_READ]: true };
+}
+
+export function isLoadRead(read: object): read is LoadRead<unknown> {
+  return LOAD_READ in read;
+}

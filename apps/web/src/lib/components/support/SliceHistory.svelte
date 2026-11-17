@@ -17,6 +17,10 @@
     Re-pay (or Count against this debt) on a late take-back's line (C1).
     Without it the line has no button: the queue has its own.
 
+  A chargeback lost and then won (Codex-2hxff.70) names its loss date, says
+  "Being paid back." until its win is applied, and a cancelled or reduced
+  unpaid share it paid back says so (late-win mockups S1-S3).
+
   A line the system settled itself (Q6, Codex-2hxff.71) says what it decided,
   with a "Settled by the system" tag. When a take-back landed after the
   system decided the payee kept the transfer, its credit was reopened
@@ -52,20 +56,26 @@
 
   const titleId = $props.id();
 
+  /**
+   * A dispute dated as drawn (D2): when it opened, and when its win was
+   * applied. A chargeback lost and then won also says when it was lost
+   * (late-win S1, S2), or it would hide the weeks the shares were gone.
+   */
+  function disputeDates(line: HistoryLine, openedAt: string): string {
+    const opened = formatShortDay(openedAt);
+    const won = line.disputeWonAt ? formatShortDay(line.disputeWonAt) : null;
+    const lost = line.lostOn ? formatShortDay(line.lostOn) : null;
+    if (lost && won) return m.support_history_cause_dispute_lost_won({ opened, lost, won });
+    if (lost) return m.support_history_cause_dispute_lost({ opened, lost });
+    if (won) return m.support_history_cause_dispute_won({ opened, won });
+    return m.support_history_cause_dispute_opened({ opened });
+  }
+
   function causeText(line: HistoryLine): string {
     const amount =
       line.causeAmountCents === null ? null : formatPrice(line.causeAmountCents);
     if (line.causeType === 'dispute') {
-      // Dated as drawn (D2): when it opened, and when its win was applied.
-      if (line.disputeOpenedAt) {
-        const opened = formatShortDay(line.disputeOpenedAt);
-        return line.disputeWonAt
-          ? m.support_history_cause_dispute_won({
-              opened,
-              won: formatShortDay(line.disputeWonAt),
-            })
-          : m.support_history_cause_dispute_opened({ opened });
-      }
+      if (line.disputeOpenedAt) return disputeDates(line, line.disputeOpenedAt);
       return amount
         ? m.support_history_cause_dispute({ amount })
         : m.support_history_cause_dispute_plain();
@@ -75,24 +85,40 @@
       : m.support_history_cause_refund_plain();
   }
 
+  /** A share taken: a chargeback won after it was lost is being paid back (late-win S1). */
+  function takenText(line: HistoryLine): string {
+    if (line.causeType !== 'dispute') return m.support_history_what_taken_refund();
+    return line.lostOn && !line.disputeWonAt
+      ? m.support_history_what_taken_dispute_being_paid_back()
+      : m.support_history_what_taken_dispute();
+  }
+
+  function paidBackText(line: HistoryLine): string {
+    // Paid back by support's re-pay of a late take-back (C2).
+    if (line.credit?.state === 'repaid') {
+      return line.credit.repayPayout?.status === 'pending'
+        ? m.support_history_what_repaid_late_waiting()
+        : m.support_history_what_repaid_late();
+    }
+    // Money that never left: only a loss cancels or reduces an unpaid share,
+    // so this appears only after a late win (late-win S3).
+    const neverLeft =
+      line.stepKind === 'cancellation' || line.stepKind === 'pending_reduction';
+    return line.causeType === 'dispute' && neverLeft
+      ? m.support_history_what_cancelled_paid_back()
+      : m.support_history_what_paid_back();
+  }
+
   function whatText(line: HistoryLine): string {
     switch (line.outcome) {
       case 'taken':
-        return line.causeType === 'dispute'
-          ? m.support_history_what_taken_dispute()
-          : m.support_history_what_taken_refund();
+        return takenText(line);
       case 'taken_from_repay':
         return m.support_history_what_taken_from_repay();
       case 'owed':
         return m.support_history_what_owed();
       case 'paid_back':
-        // Paid back by support's re-pay of a late take-back (C2).
-        if (line.credit?.state === 'repaid') {
-          return line.credit.repayPayout?.status === 'pending'
-            ? m.support_history_what_repaid_late_waiting()
-            : m.support_history_what_repaid_late();
-        }
-        return m.support_history_what_paid_back();
+        return paidBackText(line);
       case 'not_taken':
         return m.support_history_what_not_taken();
       case 'in_progress':

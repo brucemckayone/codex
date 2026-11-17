@@ -20,6 +20,7 @@
 
 import {
   HEADERS,
+  isTerminalTranscodeFailure,
   MAX_TRANSCODING_ATTEMPTS,
   MEDIA_STATUS,
   MIME_TYPES,
@@ -42,17 +43,8 @@ import type {
   RunPodProgressWebhookPayload,
   RunPodWebhookPayload,
 } from '@codex/validation';
-import {
-  and,
-  eq,
-  inArray,
-  isNull,
-  lt,
-  notInArray,
-  or,
-  type SQL,
-  sql,
-} from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, type SQL, sql } from 'drizzle-orm';
+import type { ContentReadyNotifier } from '../content-ready';
 import {
   classifyRunPodAnswer,
   jobFailureFromWebhook,
@@ -77,7 +69,12 @@ import type {
   RunPodJobRequest,
   TranscodingMediaItem,
 } from '../types';
-import { failedFields, NO_PROGRESS, waitingFields } from './media-state';
+import {
+  failedFields,
+  mayRetryTranscode,
+  NO_PROGRESS,
+  waitingFields,
+} from './media-state';
 import type { TranscodingAlerts } from './transcoding-alerts';
 
 /**
@@ -138,6 +135,12 @@ export interface TranscodingServiceConfig {
    * row is published, and progress goes there only. Absent: nothing is.
    */
   mediaStatus?: MediaStatusFeed;
+  /**
+   * Publish when ready (Codex-a6ofh.2.8): told of every write that left an
+   * item ready or failed. Absent: scheduled drafts wait for the next
+   * maintenance run, which has none either, so they wait.
+   */
+  contentReady?: ContentReadyNotifier;
 }
 
 export interface TranscodingServiceFullConfig
@@ -260,6 +263,7 @@ export class TranscodingService extends BaseService {
   private readonly runpodApi: RunPodApi;
   private readonly alerts?: TranscodingAlerts;
   private readonly mediaStatus?: MediaStatusFeed;
+  private readonly contentReady?: ContentReadyNotifier;
   private readonly runpodWorkersMax: number;
   private readonly runpodApiKey: string;
   private readonly runpodApiUrl: string;
@@ -312,6 +316,7 @@ export class TranscodingService extends BaseService {
       : RUNPOD_WORKERS_MAX_DEFAULT;
     this.alerts = config.alerts;
     this.mediaStatus = config.mediaStatus;
+    this.contentReady = config.contentReady;
     this.runpodApi =
       config.runpodApi ??
       new RunPodApi({
@@ -344,9 +349,6 @@ export class TranscodingService extends BaseService {
     options: { priority?: number } = {}
   ): Promise<TranscodingMediaItem | null> {
     const inScope = claimScopeFilter(scope);
-    const nonRetryableCodes = Object.values(TRANSCODING_ERROR_CODES).filter(
-      (code) => !transcodingErrorInfo(code).retryable
-    );
     // A bound instant, not the SQL clock: the query text stays the same on
     // every request, so Hyperdrive can cache it (data-access contract rule 6).
     const now = new Date();
@@ -370,11 +372,7 @@ export class TranscodingService extends BaseService {
           eq(mediaItems.id, mediaId),
           inScope,
           inArray(mediaItems.status, [...allowedFrom]),
-          lt(mediaItems.transcodingAttempts, MAX_TRANSCODING_ATTEMPTS),
-          or(
-            isNull(mediaItems.transcodingErrorCode),
-            notInArray(mediaItems.transcodingErrorCode, nonRetryableCodes)
-          )
+          mayRetryTranscode()
         )
       )
       .returning();
@@ -384,9 +382,19 @@ export class TranscodingService extends BaseService {
     return claimed as TranscodingMediaItem;
   }
 
-  /** Tell the studio what a guarded write returned. Never throws. */
+  /**
+   * Tell the studio what a guarded write returned, and content-api when it
+   * left the item ready or failed for good, so drafts scheduled to publish
+   * when it is ready settle (Codex-a6ofh.2.8). A failure that may still be
+   * retried settles nothing there, so it isn't sent. Every writer of either
+   * state comes through here: the webhook, the maintenance run, the status
+   * object's retries. Never throws.
+   */
   publish(row: typeof mediaItems.$inferSelect): void {
     publishMediaStatus(this.mediaStatus, row, this.obs);
+    if (row.status === MEDIA_STATUS.READY || isTerminalTranscodeFailure(row)) {
+      this.contentReady?.mediaChanged(row.id);
+    }
   }
 
   /**

@@ -73,6 +73,26 @@ describe('Tooltip', () => {
     expect(content?.textContent).toContain('Tooltip label');
   });
 
+  test('Escape closes it', async () => {
+    const onOpenChange = vi.fn();
+    component = mount(TooltipHarness, {
+      target: document.body,
+      props: { open: true, onOpenChange },
+    });
+    flushSync();
+    // Melt listens for Escape a tick after the tooltip shows.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // From the trigger, where focus is when a tooltip shows on focus: Melt
+    // ignores a key whose target is not an element.
+    document
+      .querySelector('[data-testid="tooltip-trigger"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+      );
+    flushSync();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   test('fires onOpenChange when Melt-UI syncs open state externally', () => {
     const onOpenChange = vi.fn();
     component = mount(TooltipHarness, {

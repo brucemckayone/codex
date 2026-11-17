@@ -10,6 +10,7 @@
 
 import { MEDIA_LIBRARY_PAGE_SIZE } from '@codex/constants';
 import type { MediaQueryInput } from '@codex/validation';
+import { pickIdParam, pickParam } from '$lib/utils/filter-url';
 
 /** Status menu (mockup M1 note 3): `processing` and `attention` are groups. */
 export const LIBRARY_STATUSES = [
@@ -46,7 +47,7 @@ export interface LibraryState {
   view: LibraryView;
 }
 
-/** Each param's bare-URL value, for `filterHref`'s `defaults`. */
+/** Each param's bare-URL value, for `createListUrlWriter`'s `defaults`. */
 export const LIBRARY_DEFAULTS = {
   mediaType: 'all',
   status: 'any',
@@ -66,31 +67,27 @@ const SORT_ARGS: Record<
   largest: { sortBy: 'fileSizeBytes', sortOrder: 'desc' },
 };
 
-function pick<T extends string>(
-  options: readonly T[],
-  raw: string | null,
-  fallback: T
-): T {
-  return options.find((option) => option === raw) ?? fallback;
-}
-
 export function readLibraryState(url: URL): LibraryState {
   const params = url.searchParams;
   return {
     q: params.get('q') ?? '',
-    mediaType: pick(
+    mediaType: pickParam(
       LIBRARY_TYPES,
       params.get('mediaType'),
       LIBRARY_DEFAULTS.mediaType
     ),
-    status: pick(
+    status: pickParam(
       LIBRARY_STATUSES,
       params.get('status'),
       LIBRARY_DEFAULTS.status
     ),
-    usage: pick(LIBRARY_USAGES, params.get('usage'), LIBRARY_DEFAULTS.usage),
-    sort: pick(LIBRARY_SORTS, params.get('sort'), LIBRARY_DEFAULTS.sort),
-    view: pick(LIBRARY_VIEWS, params.get('view'), LIBRARY_DEFAULTS.view),
+    usage: pickParam(
+      LIBRARY_USAGES,
+      params.get('usage'),
+      LIBRARY_DEFAULTS.usage
+    ),
+    sort: pickParam(LIBRARY_SORTS, params.get('sort'), LIBRARY_DEFAULTS.sort),
+    view: pickParam(LIBRARY_VIEWS, params.get('view'), LIBRARY_DEFAULTS.view),
   };
 }
 
@@ -137,15 +134,12 @@ export function isNarrowed(
   return activeFilterCount(state) > 0 || search !== null;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * The item the drawer shows (`?item=<id>`, Codex-a6ofh.1.7), or null. Only
  * an id shape opens it: a hand-typed `?item=x` would be refused by the read.
  */
 export function readOpenItem(url: URL): string | null {
-  const id = url.searchParams.get('item');
-  return id && UUID.test(id) ? id : null;
+  return pickIdParam(url.searchParams.get('item'));
 }
 
 /** The media a new piece starts with: "Create content from this" (Codex-a6ofh.1.8). */
@@ -171,9 +165,9 @@ export function newContentHref(media: NewContentMedia): string {
  * well formed: a hand-edited link starts a blank piece, never a broken one.
  */
 export function readNewContentMedia(url: URL): NewContentMedia | null {
-  const id = url.searchParams.get('media');
+  const id = pickIdParam(url.searchParams.get('media'));
   const mediaType = url.searchParams.get('type');
-  if (!id || !UUID.test(id)) return null;
+  if (!id) return null;
   if (mediaType !== 'video' && mediaType !== 'audio') return null;
   return { id, mediaType };
 }

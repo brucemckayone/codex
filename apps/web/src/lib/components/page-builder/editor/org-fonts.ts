@@ -9,7 +9,10 @@
  * so a read while one is open would see the preview, not the organisation.
  */
 
-import { firstFamily } from '$lib/brand-editor/font-fallbacks';
+import {
+  brandFontProperty,
+  firstFamily,
+} from '$lib/brand-editor/font-fallbacks';
 
 /** What renders when the organisation has not chosen a font. */
 export const PLATFORM_FONT = 'Inter';
@@ -24,14 +27,21 @@ function familyOf(layout: HTMLElement | null, property: string): string {
   return firstFamily(layout?.style.getPropertyValue(property) ?? '');
 }
 
+function orgLayout(): HTMLElement | null {
+  return typeof document === 'undefined'
+    ? null
+    : document.querySelector<HTMLElement>('.org-layout');
+}
+
+/** One of the organisation's families, or '' when it chose none. */
+export function orgFontFamily(which: keyof FontPair): string {
+  return familyOf(orgLayout(), brandFontProperty(which));
+}
+
 /** The organisation's two families, each falling back to the platform's. */
 export function orgFonts(): FontPair {
-  const layout =
-    typeof document === 'undefined'
-      ? null
-      : document.querySelector<HTMLElement>('.org-layout');
   return {
-    heading: familyOf(layout, '--brand-font-heading') || PLATFORM_FONT,
-    body: familyOf(layout, '--brand-font-body') || PLATFORM_FONT,
+    heading: orgFontFamily('heading') || PLATFORM_FONT,
+    body: orgFontFamily('body') || PLATFORM_FONT,
   };
 }

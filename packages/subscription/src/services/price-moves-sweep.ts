@@ -41,6 +41,7 @@
  */
 
 import { BILLING_INTERVAL, SUBSCRIPTION_STATUS } from '@codex/constants';
+import { emailLogShowsSent } from '@codex/database';
 import {
   courseSubscriptionPlans,
   courseSubscriptions,
@@ -79,7 +80,9 @@ import { MOVE_TIER_ID_KEY } from './tier-move';
  * notice, the read again after it (F1), the write) × 1,125 = 4,500, and
  * the same wake's other sweeps take about 4,000 more, so 8,500: the design's
  * envelope, under the paid plan's default 10,000 per invocation (ecom-api
- * sets no `limits`).
+ * sets no `limits`). The dispute reconcile's late-win check adds ≲125 on
+ * top (3 list pages, and at most 10 undos of about 12 each; Codex-2hxff.70),
+ * about 8,625 in all. Like this sweep, it skips the 08:00 London run.
  */
 export const PRICE_MOVES_PER_RUN = 1125;
 /** People worked at once: one batch, all on one change. */
@@ -997,12 +1000,16 @@ function movingAwayAtStripe(
 
 /**
  * M1's rule for an unknown outcome: did the email go after all? A log row
- * for this row's notice, since a minute before its last try, counts as told
- * then, and nothing is sent again. notifications-api writes the log row
- * `pending` before the provider call and `success` once the provider has
- * taken the email, so a row left `pending` (the success write failed, or the
- * invocation stopped) may have been delivered, and counts too (F4). `failed`
- * (every attempt failed) and `skipped` (an opt-out, before any send) do not.
+ * for this row's notice, since a minute before its last try, that
+ * `@codex/database`'s `emailLogShowsSent` accepts at the run's clock counts
+ * as told then, and nothing is sent again. notifications-api writes the log
+ * row `pending` before the provider call and `success` once the provider has
+ * taken the email. A row left `pending` by an earlier run (the success write
+ * failed, or the invocation stopped) never got its outcome, so it does not
+ * count and the notice goes again (owner, 2026-11-09, replacing review C1's
+ * F4, "a `pending` row counts"); one still in flight, made within the last
+ * EMAIL_IN_FLIGHT_MS, does. `failed` (every attempt failed), `skipped` (an
+ * opt-out, before any send) and a test send never count.
  */
 async function foundInEmailLog(
   run: Run,
@@ -1017,7 +1024,7 @@ async function foundInEmailLog(
     SELECT "updated_at" FROM ${emailAuditLogs}
      WHERE "template_name" = ${NOTICE_TEMPLATE}
        AND "recipient_email" = ${email}
-       AND "status" IN ('success', 'pending')
+       AND ${emailLogShowsSent(run.now)}
        AND "created_at" >= ${since}::timestamptz
        AND strpos("metadata", ${`"priceMoveId":"${row.id}"`}) > 0
      ORDER BY "created_at"

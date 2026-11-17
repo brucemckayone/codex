@@ -21,6 +21,9 @@ export {
   darkTokenOverridesToCssVars,
   injectDarkTokenOverrides,
   injectTokenOverrides,
+  // Codex-403d3: what keeps an override inside its own declaration.
+  isSafeDeclaration,
+  tokenOverrideStyle,
   tokenOverridesToCssVars,
 } from './css-injection';
 // Brand Editor - Fallback defaults (used when an org has not branded)
@@ -30,6 +33,8 @@ export {
   BRAND_DEFAULT_PRIMARY,
   BRAND_DEFAULT_SECONDARY,
 } from './defaults';
+// Brand Editor - The org layout's write-back of its own inputs (Codex-q01h8)
+export { writeBackLayoutBrandInputs } from './layout-brand-inputs.svelte';
 // Brand Editor - Navigation
 export { LEVELS } from './levels';
 

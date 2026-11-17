@@ -26,6 +26,10 @@
  * reminder is covered by next month's, a lost balance email by the Studio
  * card. A kind whose template is missing (an environment whose seed has not
  * run) is skipped before anything is claimed, so it never burns a month.
+ * Each send waits SEND_TIMEOUT_MS at most (a timeout is a failed send), and
+ * no claim starts after SENDS_TIME_BUDGET_MS from the wake (Codex-2hxff.100):
+ * the fee step runs after this one, and stopping before a claim leaves
+ * nothing claimed and unsent. Whoever was not reached goes the next morning.
  *
  * Never throws: it runs inside `waitUntil` from `scheduled()`. Errors are
  * logged and counted.
@@ -77,6 +81,7 @@ import {
   waitingReminderData,
   writtenOffData,
 } from './money-notice-copy';
+import { SEND_TIMEOUT_MS, SENDS_TIME_BUDGET_MS } from './send-limits';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A person is reminded once their oldest waiting row is this old (Q5). */
@@ -137,13 +142,25 @@ export interface RunMoneyNoticesSweepDeps {
   pageSize?: number;
   /** Testing only. */
   maxPages?: number;
+  /** Real time, for the send budget (testing only). */
+  clock?: () => number;
+  /**
+   * When the 08:00 invocation started (ms since the epoch): the send budget
+   * counts from it, because the sweep before this one uses the same wall.
+   * Default: the sweep's own start.
+   */
+  wakeStartedAt?: number;
+  /** Testing only. */
+  sendTimeoutMs?: number;
 }
 
 export interface MoneyNoticesSweepResult {
   remindersSent: number;
   balanceEmailsSent: number;
-  /** Claimed, then the send failed: recorded as failed, not retried. */
+  /** Claimed, then the send failed (or timed out): recorded as failed, not retried. */
   sendsFailed: number;
+  /** The send budget ran out: nothing more was claimed, the rest go the next morning. */
+  budgetSpent: boolean;
   /** Kinds skipped because their template is missing. */
   skippedKinds: SweepKind[];
   /** Claims found lost between the claim and the send (reported, not resent). */
@@ -156,13 +173,25 @@ export interface MoneyNoticesSweepResult {
 function makeDefaultMailer(deps: {
   notificationsUrl: string;
   workerSecret: string;
+  timeoutMs: number;
 }): MoneyMailer {
   return async (params) => {
-    const res = await workerFetch(
-      `${deps.notificationsUrl}/internal/send`,
-      { method: 'POST', body: JSON.stringify(params) },
-      deps.workerSecret
-    );
+    // A timeout rejects the fetch, so the send is failed, as an error is.
+    const signal = AbortSignal.timeout(deps.timeoutMs);
+    let res: Response;
+    try {
+      res = await workerFetch(
+        `${deps.notificationsUrl}/internal/send`,
+        { method: 'POST', body: JSON.stringify(params), signal },
+        deps.workerSecret
+      );
+    } catch (error) {
+      // Cut off by our timeout: rethrow the signal's own reason, a
+      // TimeoutError, whatever the runtime's fetch rejected with (it may be
+      // a plain AbortError), so `isSendTimeout` reads it as a timeout.
+      if (signal.aborted) throw signal.reason;
+      throw error;
+    }
     if (!res.ok) {
       throw new Error(
         `notifications-api /internal/send returned ${res.status}`
@@ -176,10 +205,30 @@ interface SweepContext {
   obs: ObservabilityClient;
   mailer: MoneyMailer;
   now: Date;
+  /** Real time; no claim starts once it reaches `sendsUntil`. */
+  clock: () => number;
+  sendsUntil: number;
   dashboardUrl: string;
   pageSize: number;
   maxPages: number;
   result: MoneyNoticesSweepResult;
+}
+
+/**
+ * True once the send budget is spent. Asked before each claim, never between
+ * a claim and its send, so stopping leaves nothing claimed and unsent: the
+ * rest are claimed the next morning. Logged once.
+ */
+function outOfTime(ctx: SweepContext): boolean {
+  if (ctx.clock() < ctx.sendsUntil) return false;
+  if (!ctx.result.budgetSpent) {
+    ctx.result.budgetSpent = true;
+    ctx.obs.warn('money sweep: the send budget ran out; the rest go tomorrow', {
+      remindersSent: ctx.result.remindersSent,
+      balanceEmailsSent: ctx.result.balanceEmailsSent,
+    });
+  }
+  return true;
 }
 
 interface Recipient {
@@ -206,6 +255,19 @@ async function claim(
   return row?.id ?? null;
 }
 
+/**
+ * A send cut off by `AbortSignal.timeout`: the default mailer rethrows the
+ * signal's reason, a `TimeoutError`. Unlike a refusal, the email may still
+ * have gone.
+ */
+function isSendTimeout(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { name?: unknown }).name === 'TimeoutError'
+  );
+}
+
 /** Send a claimed notice once, and record how it went. */
 async function sendClaimed(
   ctx: SweepContext,
@@ -226,12 +288,22 @@ async function sendClaimed(
     });
   } catch (error) {
     ctx.result.sendsFailed += 1;
-    ctx.obs.error('money notice send failed; it is not retried', {
-      errorId: crypto.randomUUID(),
-      kind,
-      moneyNoticeId: noticeId,
-      error: messageForLog(error),
-    });
+    // A timeout is not a refusal: the email may have gone. Either way the
+    // claim stands and failed_at is stamped, since this sweep sends at most
+    // once; the outcome tells support which it was (Codex-2hxff.100).
+    const timedOut = isSendTimeout(error);
+    ctx.obs.error(
+      timedOut
+        ? 'money notice send timed out; it may have gone, and it is not retried'
+        : 'money notice send failed; it is not retried',
+      {
+        errorId: crypto.randomUUID(),
+        kind,
+        moneyNoticeId: noticeId,
+        outcome: timedOut ? 'timed_out_may_have_gone' : 'failed',
+        error: messageForLog(error),
+      }
+    );
     await ctx.db
       .update(moneyNotices)
       .set({ failedAt: new Date() })
@@ -304,6 +376,7 @@ async function sendWaitingReminders(ctx: SweepContext): Promise<void> {
     );
 
     for (const person of people) {
+      if (outOfTime(ctx)) return;
       try {
         const to = recipients.get(person.userId);
         if (!to) continue;
@@ -375,6 +448,7 @@ async function sendBelowZero(
   const alreadyNoticed = new Set(noticed.map((n) => n.periodKey));
 
   for (const row of open) {
+    if (outOfTime(ctx)) return;
     try {
       const since = row.negativeSince;
       const available = row.availableCents;
@@ -478,6 +552,7 @@ async function sendEpisodeEnded(
   ]);
 
   for (const row of ended) {
+    if (outOfTime(ctx)) return;
     try {
       const clearedAt = row.clearedAt;
       if (clearedAt === null) continue;
@@ -650,11 +725,14 @@ export async function runMoneyNoticesSweep(
     remindersSent: 0,
     balanceEmailsSent: 0,
     sendsFailed: 0,
+    budgetSpent: false,
     skippedKinds: [],
     orphanedClaims: 0,
     errors: 0,
   };
   const now = deps.now ?? new Date();
+  const clock = deps.clock ?? Date.now;
+  const sendsUntil = (deps.wakeStartedAt ?? clock()) + SENDS_TIME_BUDGET_MS;
   try {
     await reportOrphanedClaims(deps.db, deps.obs, now, result).catch(
       (error: unknown) => {
@@ -674,8 +752,11 @@ export async function runMoneyNoticesSweep(
         makeDefaultMailer({
           notificationsUrl: deps.notificationsUrl,
           workerSecret: deps.workerSecret,
+          timeoutMs: deps.sendTimeoutMs ?? SEND_TIMEOUT_MS,
         }),
       now,
+      clock,
+      sendsUntil,
       pageSize: deps.pageSize ?? PAGE_SIZE,
       maxPages: deps.maxPages ?? MAX_PAGES,
       dashboardUrl: buildOrgUrlFromEnv(
@@ -722,10 +803,12 @@ export async function runMoneyNoticesSweep(
 
 /**
  * Scheduled entry point: builds the clients from env, skips cleanly on
- * missing config, and runs the sweep.
+ * missing config, and runs the sweep. `wake.startedAt` is the 08:00
+ * invocation's start, which the send budget counts from.
  */
 export async function runScheduledMoneyNoticesSweep(
-  env: Bindings
+  env: Bindings,
+  wake: { startedAt?: number } = {}
 ): Promise<MoneyNoticesSweepResult | null> {
   const obs = new ObservabilityClient(
     'notifications-api',
@@ -751,5 +834,6 @@ export async function runScheduledMoneyNoticesSweep(
     environment,
     workerSecret: env.WORKER_SHARED_SECRET,
     notificationsUrl: getServiceUrl('notifications', env),
+    wakeStartedAt: wake.startedAt,
   });
 }

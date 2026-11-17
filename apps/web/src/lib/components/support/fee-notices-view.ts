@@ -537,7 +537,12 @@ export function markWords(
   };
 }
 
-/** The notice after a mark that went through (F4). */
+/**
+ * The notice after a mark that went through (F4). A mark never dates the
+ * rise: a date in the answer is one it already had, and with nobody on the
+ * list left waiting, the next 08:00 UTC run sets it (review final, commerce
+ * delta4).
+ */
 export function markedNotice(
   item: FeeNoticeItem,
   change: { effectiveFrom: string | null; waitingFor: number }
@@ -564,7 +569,7 @@ export function markedNotice(
           ? m.support_queue_fees_marked_waiting({
               count: String(change.waitingFor),
             })
-          : '',
+          : m.support_queue_fees_marked_dated_next_run(),
   };
 }
 

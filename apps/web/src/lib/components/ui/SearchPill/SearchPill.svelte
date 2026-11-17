@@ -144,11 +144,11 @@
 {/snippet}
 
 {#if onSubmit}
-  <form class="search-pill" data-testid="search-pill" onsubmit={handleSubmit}>
+  <form class="search-pill" data-testid="search-pill" data-field-box onsubmit={handleSubmit}>
     {@render body()}
   </form>
 {:else}
-  <label class="search-pill" data-testid="search-pill">
+  <label class="search-pill" data-testid="search-pill" data-field-box>
     {@render body()}
   </label>
 {/if}
@@ -173,10 +173,12 @@
       var(--transition-shadow);
   }
 
-  .search-pill:focus-within {
-    border-color: var(--color-interactive);
-    box-shadow: 0 0 0 var(--border-width-thick) var(--color-interactive-subtle);
-  }
+  /* The focus cue is base.css's `[data-field-box]` rule: the border turns
+     --color-border-focus, which an org brand holds to 3:1 against its
+     ground. The pill drew it in --color-interactive, the brand's colour as
+     picked: 1.47:1 for a pale yellow brand, 1.83:1 for a navy one on a dark
+     page. Its ring was --color-interactive-subtle, a fill token kept near
+     the page's own lightness, so 1.05:1 in every theme (Codex-zvyox). */
 
   .search-pill__icon {
     display: inline-flex;
@@ -212,7 +214,7 @@
   }
 
   /* Defeat base.css input:focus box-shadow — the pill carries the focus
-     state via .search-pill:focus-within. */
+     state on its border (data-field-box, above). */
   .search-pill__input:focus {
     outline: none;
     border: 0;

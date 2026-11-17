@@ -13,6 +13,7 @@
 
 import type { BrandingSettingsResponse } from '@codex/shared-types';
 import { HERO_LAYOUTS } from '@codex/validation';
+import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -43,7 +44,10 @@ export const getBrandingSettings = query(
     const api = createServerApi(platform, cookies);
 
     const settings = await api.org.getSettings(orgId);
-    return settings?.branding ?? null;
+    // A missing branding object is a failed read, not a brand still loading:
+    // the studio would otherwise sit on its skeletons with nothing to retry.
+    if (!settings?.branding) error(502, 'Branding settings were not returned');
+    return settings.branding;
   }
 );
 
@@ -137,20 +141,24 @@ export const updateBrandingCommand = command(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
-    const result = await api.org.updateBranding(orgId, {
-      primaryColorHex,
-      secondaryColorHex,
-      accentColorHex,
-      backgroundColorHex,
-      fontBody,
-      fontHeading,
-      radiusValue,
-      densityValue,
-      tokenOverrides,
-      darkModeOverrides,
-      darkTokenOverrides,
-      heroLayout,
-    });
+    // A refused save (a 4xx, e.g. an override the schema refuses) reaches the
+    // page with its message, not as an unexpected 500 (Codex-403d3).
+    const result = await forwardClientErrors(() =>
+      api.org.updateBranding(orgId, {
+        primaryColorHex,
+        secondaryColorHex,
+        accentColorHex,
+        backgroundColorHex,
+        fontBody,
+        fontHeading,
+        radiusValue,
+        densityValue,
+        tokenOverrides,
+        darkModeOverrides,
+        darkTokenOverrides,
+        heroLayout,
+      })
+    );
 
     await invalidateCache(platform, orgId);
 

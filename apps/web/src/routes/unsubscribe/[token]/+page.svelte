@@ -61,14 +61,14 @@
 		align-items: center;
 		justify-content: center;
 		min-height: 100vh;
-		padding: var(--spacing-lg);
+		padding: var(--space-6);
 		background: var(--color-surface);
 	}
 
 	.card {
 		max-width: 480px;
 		width: 100%;
-		padding: var(--spacing-2xl);
+		padding: var(--space-12);
 		background: var(--color-surface-elevated);
 		border-radius: var(--radius-lg);
 		border: 1px solid var(--color-border);
@@ -76,21 +76,21 @@
 	}
 
 	h1 {
-		margin: 0 0 var(--spacing-md);
-		font-size: var(--font-size-xl);
+		margin: 0 0 var(--space-4);
+		font-size: var(--text-xl);
 		color: var(--color-text-primary);
 	}
 
 	p {
-		margin: 0 0 var(--spacing-md);
+		margin: 0 0 var(--space-4);
 		color: var(--color-text-secondary);
-		font-size: var(--font-size-sm);
+		font-size: var(--text-sm);
 		line-height: 1.6;
 	}
 
 	.hint {
 		color: var(--color-text-tertiary);
-		font-size: var(--font-size-xs);
+		font-size: var(--text-xs);
 	}
 
 	.error {
@@ -99,15 +99,15 @@
 
 	button {
 		display: inline-block;
-		padding: var(--spacing-sm) var(--spacing-xl);
-		background: var(--color-primary);
-		color: var(--color-on-primary);
+		padding: var(--space-2) var(--space-8);
+		background: var(--color-interactive);
+		color: var(--color-on-interactive);
 		border: none;
 		border-radius: var(--radius-md);
-		font-size: var(--font-size-sm);
+		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		margin-top: var(--spacing-md);
+		margin-top: var(--space-4);
 	}
 
 	button:hover {

@@ -519,8 +519,12 @@ export async function schedulePriceChange(
 ): Promise<PriceChangeOutcome> {
   const read = () =>
     atStage('read', null, () =>
+      // Options go third, after the (absent) params: since stripe-node 22 an
+      // options object in the params slot is sent to Stripe as query params,
+      // and the timeout and retry limit are lost.
       stripe.subscriptions.retrieve(
         target.stripeSubscriptionId,
+        undefined,
         FAN_OUT_STRIPE_REQUEST
       )
     );

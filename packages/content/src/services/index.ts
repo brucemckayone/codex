@@ -13,12 +13,15 @@ export {
   type ContentInvalidationReason,
   DEFAULT_MAX_LIBRARY_FANOUT,
   type InvalidateContentAccessArgs,
+  type InvalidateContentAccessManyArgs,
   type InvalidateOrgMembershipArgs,
   type InvalidatePlanSubscriberLibrariesArgs,
   type InvalidationLogger,
   invalidateContentAccess,
+  invalidateContentAccessMany,
   invalidateOrgMembership,
   invalidatePlanSubscriberLibraries,
+  orgsOf,
   type WaitUntilFn,
 } from './content-invalidation';
 // Content Service
@@ -41,3 +44,5 @@ export {
 } from './content-tier-access';
 // Media Item Service
 export { MediaItemService } from './media-service';
+// Publish gate (Codex-a6ofh.2.1): shared with @codex/admin's publish
+export { assertPublishable, goLiveColumns } from './publish-gate';

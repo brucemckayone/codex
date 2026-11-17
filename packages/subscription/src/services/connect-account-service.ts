@@ -72,13 +72,16 @@ type StripeConnectAccount = typeof stripeConnectAccounts.$inferSelect;
  * Stripe Connect account requirements payload returned to the UI.
  *
  * Mirrors `Stripe.Account.Requirements` from the Stripe Node SDK
- * (verified against `stripe@19.3.1` types on 2026-05-13). Stripe returns
+ * (verified against `stripe@23.1.0` types on 2026-11-12). Stripe returns
  * `null` for unset array fields; we normalise to `[]` here so the UI can
  * iterate without null-guards. `current_deadline` and `disabled_reason`
  * remain nullable because they are semantically meaningful as "none yet"
  * / "no reason yet" states the UI distinguishes from empty arrays.
  *
- * See `node_modules/stripe/types/Accounts.d.ts:1228-1268`.
+ * `errors` holds only errors for requirements due now (owner D33): see
+ * `dueNowErrors`.
+ *
+ * See `Account.Requirements` in `stripe/esm/resources/Accounts.d.ts`.
  */
 export interface ConnectRequirements {
   currentlyDue: string[];
@@ -297,12 +300,32 @@ function normaliseRequirements(
     pendingVerification: requirements.pending_verification ?? [],
     currentDeadline: requirements.current_deadline ?? null,
     disabledReason: requirements.disabled_reason ?? null,
-    errors: (requirements.errors ?? []).map((err) => ({
+    errors: dueNowErrors(requirements),
+  };
+}
+
+/**
+ * The requirement errors for requirements due now: in `currently_due` or
+ * `past_due`. Owner D33 (Codex-wzaoh): Studio's "Stripe needs more
+ * information" list stays as it was before API 2026-09-30.endive, which also
+ * reports errors for `eventually_due` requirements
+ * (https://docs.stripe.com/changelog/endive/2026-09-30/shows-errors-for-eventually-due-requirements).
+ * Each error is kept once, in Stripe's order, however many lists hold it.
+ */
+function dueNowErrors(
+  requirements: Stripe.Account.Requirements
+): ConnectRequirements['errors'] {
+  const dueNow = new Set([
+    ...(requirements.currently_due ?? []),
+    ...(requirements.past_due ?? []),
+  ]);
+  return (requirements.errors ?? [])
+    .filter((err) => dueNow.has(err.requirement))
+    .map((err) => ({
       requirement: err.requirement,
       code: err.code,
       reason: err.reason,
-    })),
-  };
+    }));
 }
 
 export interface ConnectAccountServiceConfig extends ServiceConfig {

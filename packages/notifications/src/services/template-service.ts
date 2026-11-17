@@ -6,6 +6,7 @@
  */
 
 import {
+  ORGANIZATION_NON_SUBSCRIBER_ROLES,
   ORGANIZATION_ROLES,
   ORGANIZATION_STATUS,
   TEMPLATE_SCOPES,
@@ -24,8 +25,12 @@ import type {
   ListTemplatesQuery,
   UpdateTemplateInput,
 } from '@codex/validation';
-import { and, desc, eq, isNull } from 'drizzle-orm';
-import { TemplateAccessDeniedError, TemplateNotFoundError } from '../errors';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import {
+  TemplateAccessDeniedError,
+  TemplateNotFoundError,
+  TestSendRecipientError,
+} from '../errors';
 import type { NotificationsService } from './notifications-service';
 
 type EmailTemplate = typeof schema.emailTemplates.$inferSelect;
@@ -217,15 +222,16 @@ export class TemplateService extends BaseService {
   // ===========================================================================
 
   /**
-   * List organization templates (requires active membership)
+   * List organization templates: the org's team only. The route's
+   * `requireOrgMembership` policy admits any active membership, a paying
+   * subscriber's included; this narrows it (Codex-tgkgb).
    */
   async listOrgTemplates(
     orgId: string,
     userId: string,
     query: ListTemplatesQuery
   ): Promise<PaginatedListResponse<EmailTemplate>> {
-    // Verify membership
-    await this.requireOrgMembership(orgId, userId);
+    await this.requireTeamMembership(orgId, userId);
 
     const { page, limit, status } = query;
 
@@ -416,13 +422,19 @@ export class TemplateService extends BaseService {
   }
 
   /**
-   * Create a creator template
+   * Create a creator template. One that names an organisation needs the
+   * creator's ACTIVE TEAM role in it: test sends render in that org's brand
+   * and log under it, so naming another org, or one the creator only
+   * subscribes to, would send in its name (Codex-tgkgb).
    */
   async createCreatorTemplate(
     creatorId: string,
     input: CreateCreatorTemplateInput
   ): Promise<EmailTemplate> {
     try {
+      if (input.organizationId) {
+        await this.requireTeamMembership(input.organizationId, creatorId);
+      }
       const [template] = await this.db
         .insert(schema.emailTemplates)
         .values({
@@ -446,46 +458,75 @@ export class TemplateService extends BaseService {
 
       return template;
     } catch (error) {
-      this.obs.error('Error creating creator template', {
-        error,
-        creatorId,
-        input,
-      });
-      throw error;
+      // A refusal is the caller's typed 403, not a fault: it passes through
+      // unlogged. Anything unexpected is logged here and wrapped.
+      if (!(error instanceof TemplateAccessDeniedError)) {
+        this.obs.error('Error creating creator template', {
+          error,
+          creatorId,
+          input,
+        });
+      }
+      this.handleError(error, 'createCreatorTemplate');
     }
   }
 
   /**
-   * Update a creator template (must be owner)
+   * Update a creator template (must be owner). The update cannot move it to
+   * another org (`UpdateTemplateInput` has no `organizationId`), but one that
+   * names an org needs the creator's active team role in it still, as on
+   * create (Codex-tgkgb): a creator who left keeps no template in its name.
    */
   async updateCreatorTemplate(
     creatorId: string,
     templateId: string,
     input: UpdateTemplateInput
   ): Promise<EmailTemplate> {
-    const [updated] = await this.db
-      .update(schema.emailTemplates)
-      .set({
-        ...input,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
+    // The typed 404 and 403 pass through `handleError`; anything unexpected,
+    // a failed membership read included, is wrapped.
+    try {
+      const current = await this.db.query.emailTemplates.findFirst({
+        where: and(
           eq(schema.emailTemplates.id, templateId),
           eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
           eq(schema.emailTemplates.creatorId, creatorId),
           isNull(schema.emailTemplates.deletedAt)
+        ),
+        columns: { organizationId: true },
+      });
+      if (!current) {
+        throw new TemplateNotFoundError(templateId);
+      }
+      if (current.organizationId) {
+        await this.requireTeamMembership(current.organizationId, creatorId);
+      }
+
+      const [updated] = await this.db
+        .update(schema.emailTemplates)
+        .set({
+          ...input,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.emailTemplates.id, templateId),
+            eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
+            eq(schema.emailTemplates.creatorId, creatorId),
+            isNull(schema.emailTemplates.deletedAt)
+          )
         )
-      )
-      .returning();
+        .returning();
 
-    if (!updated) {
-      throw new TemplateNotFoundError(templateId);
+      if (!updated) {
+        throw new TemplateNotFoundError(templateId);
+      }
+
+      this.obs.info('Creator template updated', { templateId, creatorId });
+
+      return updated;
+    } catch (error) {
+      this.handleError(error, 'updateCreatorTemplate');
     }
-
-    this.obs.info('Creator template updated', { templateId, creatorId });
-
-    return updated;
   }
 
   /**
@@ -546,8 +587,8 @@ export class TemplateService extends BaseService {
       throw new TemplateNotFoundError(templateId);
     }
 
-    // Check access based on scope
-    const hasAccess = await this.checkTemplateAccess(
+    // A preview renders in the template's org brand, to the caller alone.
+    const hasAccess = await this.checkTemplatePreviewAccess(
       template,
       userId,
       userRole
@@ -567,8 +608,10 @@ export class TemplateService extends BaseService {
   }
 
   /**
-   * Check if a user has access to a template based on scope
-   * Public for use in worker routes that need access checks separate from preview
+   * Check if a user has access to a template based on scope: may they use
+   * it at all? An org's templates are its team's, never its subscribers'.
+   * Rendering one in its brand asks more: {@link checkTemplatePreviewAccess}
+   * and {@link checkTemplateSendAccess}.
    */
   async checkTemplateAccess(
     template: EmailTemplate,
@@ -583,17 +626,7 @@ export class TemplateService extends BaseService {
       template.scope === TEMPLATE_SCOPES.ORGANIZATION &&
       template.organizationId
     ) {
-      const membership = await this.db.query.organizationMemberships.findFirst({
-        where: and(
-          eq(schema.organizationMemberships.userId, userId),
-          eq(
-            schema.organizationMemberships.organizationId,
-            template.organizationId
-          ),
-          eq(schema.organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE)
-        ),
-      });
-      return !!membership;
+      return this.isActiveTeamMember(template.organizationId, userId);
     }
 
     if (template.scope === TEMPLATE_SCOPES.CREATOR) {
@@ -603,18 +636,135 @@ export class TemplateService extends BaseService {
     return false;
   }
 
+  /**
+   * May the user preview this template, rendered in its brand?
+   * `checkTemplateAccess`, and for a creator template that names an org, the
+   * creator's ACTIVE TEAM role in it still (Codex-tgkgb, owner decisions
+   * 2026-11-09). A creator who leaves the org, or only subscribes to it,
+   * cannot render in its name; listing and deleting their own template do
+   * not come through here, so those stay theirs.
+   */
+  async checkTemplatePreviewAccess(
+    template: EmailTemplate,
+    userId: string,
+    userRole: string
+  ): Promise<boolean> {
+    if (!(await this.checkTemplateAccess(template, userId, userRole))) {
+      return false;
+    }
+    if (template.scope === TEMPLATE_SCOPES.CREATOR && template.organizationId) {
+      return this.isActiveTeamMember(template.organizationId, userId);
+    }
+    return true;
+  }
+
+  /**
+   * May the user test-send this template? A preview's access, and for an
+   * org's own template, its OWNER or ADMIN (owner decision 2026-11-09): a
+   * test send emails anyone, with data the caller chooses, in the org's
+   * name. Its team may preview it; only those who may edit it may send it.
+   */
+  async checkTemplateSendAccess(
+    template: EmailTemplate,
+    userId: string,
+    userRole: string
+  ): Promise<boolean> {
+    if (!(await this.checkTemplatePreviewAccess(template, userId, userRole))) {
+      return false;
+    }
+    if (
+      template.scope === TEMPLATE_SCOPES.ORGANIZATION &&
+      template.organizationId
+    ) {
+      return this.isActiveOrgAdmin(template.organizationId, userId);
+    }
+    return true;
+  }
+
+  /**
+   * Where does a test send of this template go? A creator template that
+   * names an org renders in that org's brand, and a test send is the only
+   * way a creator template is ever sent (no internal sender passes a
+   * `creatorId`), so it goes only to the sender's own address, or it is a
+   * mailer in the org's name to anyone (owner decision 2026-11-09,
+   * Codex-tgkgb). The body's address must name it (compared trimmed and
+   * case-insensitively), and the send then goes to `callerEmail`, the
+   * signed-in user's address as stored, never the body's as typed. A creator
+   * template with no org, an org's own template and a global one go to the
+   * body's address, unchanged.
+   *
+   * @returns The address to send the test to
+   * @throws {TestSendRecipientError} (403) for any other address
+   */
+  requireTestSendRecipient(
+    template: EmailTemplate,
+    recipientEmail: string,
+    callerEmail: string
+  ): string {
+    if (
+      template.scope !== TEMPLATE_SCOPES.CREATOR ||
+      !template.organizationId
+    ) {
+      return recipientEmail;
+    }
+    const normalised = (email: string) => email.trim().toLowerCase();
+    if (normalised(recipientEmail) !== normalised(callerEmail)) {
+      throw new TestSendRecipientError(template.id);
+    }
+    return callerEmail;
+  }
+
   // ===========================================================================
   // Access Control Helpers
   // ===========================================================================
 
   /**
-   * Require active organization membership
+   * Does the user hold an ACTIVE TEAM role in the organisation (owner, admin,
+   * creator or member)? A paying subscriber's membership is active too, so
+   * the role filter is what keeps customers out (Codex-tgkgb). The one check
+   * for an org template's access and for a creator template that names an
+   * org.
    */
-  private async requireOrgMembership(
+  private async isActiveTeamMember(
+    orgId: string,
+    userId: string
+  ): Promise<boolean> {
+    const membership = await this.db.query.organizationMemberships.findFirst({
+      where: and(
+        eq(schema.organizationMemberships.userId, userId),
+        eq(schema.organizationMemberships.organizationId, orgId),
+        eq(schema.organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE),
+        inArray(schema.organizationMemberships.role, [
+          ...ORGANIZATION_NON_SUBSCRIBER_ROLES,
+        ])
+      ),
+    });
+    return !!membership;
+  }
+
+  /**
+   * Require an active team role in the organization
+   */
+  private async requireTeamMembership(
     orgId: string,
     userId: string
   ): Promise<void> {
-    const membership = await this.db.query.organizationMemberships.findFirst({
+    if (!(await this.isActiveTeamMember(orgId, userId))) {
+      throw new TemplateAccessDeniedError(orgId);
+    }
+  }
+
+  /**
+   * Does the user hold an ACTIVE owner or admin role in the organisation?
+   */
+  private async isActiveOrgAdmin(
+    orgId: string,
+    userId: string,
+    // biome-ignore lint/suspicious/noExplicitAny: Drizzle transaction type is complex to extract
+    tx?: any
+  ): Promise<boolean> {
+    const db = tx ?? this.db;
+    const membership = await db.query.organizationMemberships.findFirst({
       where: and(
         eq(schema.organizationMemberships.userId, userId),
         eq(schema.organizationMemberships.organizationId, orgId),
@@ -622,9 +772,14 @@ export class TemplateService extends BaseService {
       ),
     });
 
-    if (!membership) {
-      throw new TemplateAccessDeniedError(orgId);
-    }
+    return (
+      !!membership &&
+      [ORGANIZATION_ROLES.OWNER, ORGANIZATION_ROLES.ADMIN].includes(
+        membership.role as
+          | typeof ORGANIZATION_ROLES.OWNER
+          | typeof ORGANIZATION_ROLES.ADMIN
+      )
+    );
   }
 
   /**
@@ -636,23 +791,7 @@ export class TemplateService extends BaseService {
     // biome-ignore lint/suspicious/noExplicitAny: Drizzle transaction type is complex to extract
     tx?: any
   ): Promise<void> {
-    const db = tx ?? this.db;
-    const membership = await db.query.organizationMemberships.findFirst({
-      where: and(
-        eq(schema.organizationMemberships.userId, userId),
-        eq(schema.organizationMemberships.organizationId, orgId),
-        eq(schema.organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE)
-      ),
-    });
-
-    if (
-      !membership ||
-      ![ORGANIZATION_ROLES.OWNER, ORGANIZATION_ROLES.ADMIN].includes(
-        membership.role as
-          | typeof ORGANIZATION_ROLES.OWNER
-          | typeof ORGANIZATION_ROLES.ADMIN
-      )
-    ) {
+    if (!(await this.isActiveOrgAdmin(orgId, userId, tx))) {
       throw new TemplateAccessDeniedError(orgId);
     }
   }

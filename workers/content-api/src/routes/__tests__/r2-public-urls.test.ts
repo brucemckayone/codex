@@ -16,6 +16,7 @@ import {
   type R2PublicBases,
   toPublicItem,
   toPublicItems,
+  withPosterUrls,
 } from '../r2-public-urls';
 
 const BASE = 'https://cdn-assets.test';
@@ -116,5 +117,64 @@ describe('the documented item is the built item', () => {
     // builds, and had drifted (no categorySlugs).
     expectTypeOf<PublicItem<PublicContentRow>>().toExtend<PublicContentItem>();
     expectTypeOf<PublicContentItem>().toExtend<PublicItem<PublicContentRow>>();
+  });
+});
+
+describe('withPosterUrls — the studio list resolves its posters (Codex-a6ofh.3.1)', () => {
+  /** A studio row: the creator's own, its media item whole. */
+  function studioRow(id: string, thumbnailKey: string | null) {
+    return {
+      id,
+      title: `Piece ${id}`,
+      mediaItem: {
+        id: `media-${id}`,
+        status: 'ready',
+        thumbnailKey,
+        hlsPreviewKey: null,
+      },
+    };
+  }
+
+  it('puts the poster URL beside the key, keeping the rest of the row', () => {
+    const [item] = withPosterUrls(
+      [studioRow('a', 'creator-1/media-thumbnails/a/md.webp')],
+      BOTH_BASES,
+      { warn: vi.fn() }
+    );
+
+    expect(item).toEqual({
+      id: 'a',
+      title: 'Piece a',
+      mediaItem: {
+        id: 'media-a',
+        status: 'ready',
+        thumbnailKey: 'creator-1/media-thumbnails/a/md.webp',
+        hlsPreviewKey: null,
+        thumbnailUrl: `${BASE}/creator-1/media-thumbnails/a/md.webp`,
+      },
+    });
+  });
+
+  it('leaves a row with no media as it is, and a media item with no poster null', () => {
+    const items = withPosterUrls(
+      [{ id: 'b', title: 'Piece b', mediaItem: null }, studioRow('c', null)],
+      BOTH_BASES,
+      { warn: vi.fn() }
+    );
+
+    expect(items[0]?.mediaItem).toBeNull();
+    expect(items[1]?.mediaItem?.thumbnailUrl).toBeNull();
+  });
+
+  it('warns once for the page when no base can resolve a poster', () => {
+    const obs = { warn: vi.fn() };
+
+    withPosterUrls([studioRow('d', 'k1'), studioRow('e', 'k2')], NO_BASES, obs);
+
+    expect(obs.warn).toHaveBeenCalledTimes(1);
+    expect(obs.warn).toHaveBeenCalledWith(
+      'r2_public_base.missing',
+      expect.objectContaining({ unresolvedThumbnails: 2 })
+    );
   });
 });

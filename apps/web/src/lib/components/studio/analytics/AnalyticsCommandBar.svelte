@@ -248,8 +248,10 @@
       >
         {m.analytics_cmd_custom_range()}
       </Popover.Trigger>
-      <Popover.Content class="range-popover">
-        <h3 class="range-popover__title">{m.analytics_cmd_custom_range_heading()}</h3>
+      <Popover.Content class="range-popover" aria-labelledby="analytics-cmd-custom-heading">
+        <h3 id="analytics-cmd-custom-heading" class="range-popover__title">
+          {m.analytics_cmd_custom_range_heading()}
+        </h3>
         <div class="range-popover__field">
           <label for="analytics-cmd-start" class="range-popover__label">
             {m.analytics_cmd_start_date()}
@@ -304,8 +306,10 @@
         <Popover.Trigger class="compare-custom-link">
           {m.analytics_cmd_compare_custom_link()}
         </Popover.Trigger>
-        <Popover.Content class="range-popover">
-          <h3 class="range-popover__title">{m.analytics_cmd_compare_custom_heading()}</h3>
+        <Popover.Content class="range-popover" aria-labelledby="analytics-cmd-compare-heading">
+          <h3 id="analytics-cmd-compare-heading" class="range-popover__title">
+            {m.analytics_cmd_compare_custom_heading()}
+          </h3>
           <div class="range-popover__field">
             <label for="analytics-cmd-compare-from" class="range-popover__label">
               {m.analytics_cmd_compare_from()}

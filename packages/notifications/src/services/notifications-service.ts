@@ -1,5 +1,5 @@
 import { EMAIL_SEND_STATUS } from '@codex/constants';
-import { schema } from '@codex/database';
+import { schema, TEST_SEND_METADATA } from '@codex/database';
 import {
   BrandingSettingsService,
   ContactSettingsService,
@@ -69,6 +69,16 @@ interface SendEmailParams {
   category?: EmailCategory;
   /** User ID for preference lookup (skip check if undefined) */
   userId?: string;
+  /**
+   * A template test send: the email renders with the caller's data, but
+   * the email log records only `TEST_SEND_METADATA` (`@codex/database`,
+   * beside the readers' `notATestSend`), `{"testSend":true}`. Set by the test-send
+   * route alone, never from anything the caller sends. That data is the
+   * caller's own, and the sweeps read the log's metadata for their own
+   * bookkeeping keys (`agreementId`, `feeNoticeId`, `priceMoveId`), so a
+   * test send carrying them must never read as a real send.
+   */
+  testSend?: boolean;
 }
 
 export class NotificationsService extends BaseService {
@@ -202,6 +212,9 @@ export class NotificationsService extends BaseService {
   async sendEmail(params: SendEmailParams): Promise<SendResult> {
     const { to, toName, templateName, data, organizationId, creatorId } =
       params;
+    // What the email log keeps of the data: all of it for a real send (the
+    // sweeps find their sends by it), only the marker for a test send.
+    const loggedData = params.testSend ? TEST_SEND_METADATA : data;
 
     // Defensive email validation (API layer also validates, but services should be defensive)
     const emailSchema = z.string().email();
@@ -239,7 +252,7 @@ export class NotificationsService extends BaseService {
           creatorId: creatorId || null,
           status: EMAIL_SEND_STATUS.SKIPPED,
           metadata: JSON.stringify({
-            ...data,
+            ...loggedData,
             skipReason: 'opted_out',
             category: params.category,
           }),
@@ -319,7 +332,7 @@ export class NotificationsService extends BaseService {
         organizationId: organizationId || null,
         creatorId: creatorId || null,
         status: EMAIL_SEND_STATUS.PENDING,
-        metadata: JSON.stringify(data),
+        metadata: JSON.stringify(loggedData),
       })
       .returning();
 
@@ -550,8 +563,8 @@ export class NotificationsService extends BaseService {
 
   /**
    * A token the template allows but the data lacks renders as nothing too:
-   * a sender that stops passing `acceptUrl` while a row still links its
-   * button to it. Warned once per send, with every such token, except those
+   * a sender that stops passing a link while a row still points its button
+   * at it. Warned once per send, with every such token, except those
    * whose copy reads well without them (`getTokensThatMayRenderBlank`). Not
    * on a preview: that renders an editor's sample data, where a gap is
    * expected and shows in the preview itself.

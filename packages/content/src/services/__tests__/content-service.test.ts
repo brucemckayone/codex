@@ -19,10 +19,10 @@
  * - No cleanup needed - fresh database for this file
  */
 
+import { CacheType } from '@codex/cache';
 import {
   content,
   mediaItems,
-  organizationMemberships,
   organizations,
   stripeConnectAccounts,
   subscriptionTiers,
@@ -30,12 +30,12 @@ import {
 import {
   createTestConnectAccountInput,
   createTestMediaItemInput,
-  createTestMembershipInput,
   createTestOrganizationInput,
   createTestTierInput,
   createUniqueSlug,
   type Database,
   gateContentToTiers,
+  joinTeam,
   seedTestUsers,
   setupTestDatabase,
   takeFirst,
@@ -51,6 +51,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest';
 import {
   ContentNotFoundError,
@@ -84,20 +85,6 @@ describe('ContentService', () => {
   afterAll(async () => {
     await teardownTestDatabase();
   });
-
-  /**
-   * Put creators on an org's team: the service files content into an org only
-   * for an active owner, admin or creator of it (Codex-ocal6).
-   */
-  async function joinTeam(orgId: string, ...userIds: string[]): Promise<void> {
-    await db
-      .insert(organizationMemberships)
-      .values(
-        userIds.map((userId) =>
-          createTestMembershipInput(orgId, userId, { role: 'creator' })
-        )
-      );
-  }
 
   describe('create', () => {
     describe('valid content creation', () => {
@@ -205,7 +192,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
-        await joinTeam(org.id, creatorId);
+        await joinTeam(db, org.id, creatorId);
 
         const media = takeFirst(
           await db
@@ -309,14 +296,14 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
-        await joinTeam(org.id, creatorId);
+        await joinTeam(db, org.id, creatorId);
         const otherOrg = takeFirst(
           await db
             .insert(organizations)
             .values(createTestOrganizationInput())
             .returning()
         );
-        await joinTeam(otherOrg.id, creatorId);
+        await joinTeam(db, otherOrg.id, creatorId);
 
         const tier = takeFirst(
           await db
@@ -629,7 +616,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
-        await joinTeam(org.id, creatorId);
+        await joinTeam(db, org.id, creatorId);
 
         const media = takeFirst(
           await db
@@ -680,7 +667,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
-        await joinTeam(org1.id, creatorId);
+        await joinTeam(db, org1.id, creatorId);
 
         const org2 = takeFirst(
           await db
@@ -688,7 +675,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
-        await joinTeam(org2.id, creatorId);
+        await joinTeam(db, org2.id, creatorId);
 
         const media = takeFirst(
           await db
@@ -742,7 +729,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
-        await joinTeam(org.id, creatorId);
+        await joinTeam(db, org.id, creatorId);
 
         const media = takeFirst(
           await db
@@ -940,6 +927,70 @@ describe('ContentService', () => {
   });
 
   describe('update', () => {
+    it('refuses a slug another piece holds as a conflict, as create does', async () => {
+      const first = await service.create(
+        {
+          title: 'First draft',
+          slug: createUniqueSlug('held'),
+          contentType: 'written',
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+      const second = await service.create(
+        {
+          title: 'Second draft',
+          slug: createUniqueSlug('mover'),
+          contentType: 'written',
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+
+      await expect(
+        service.update(second.id, { slug: first.slug }, creatorId)
+      ).rejects.toThrow(SlugConflictError);
+    });
+
+    it('refuses a move into an org where its slug is taken, naming that slug', async () => {
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      await joinTeam(db, org.id, creatorId);
+      const slug = createUniqueSlug('org-held');
+      await service.create(
+        {
+          title: 'In the org',
+          slug,
+          contentType: 'written',
+          organizationId: org.id,
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+      // The same slug, personal: the personal index lets it be.
+      const personal = await service.create(
+        {
+          title: 'Personal',
+          slug,
+          contentType: 'written',
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+
+      await expect(
+        service.update(personal.id, { organizationId: org.id }, creatorId)
+      ).rejects.toMatchObject({ code: 'CONFLICT', context: { slug } });
+    });
+
     it('should update content title', async () => {
       // Arrange
       const media = takeFirst(
@@ -1361,10 +1412,95 @@ describe('ContentService', () => {
       expect(republished.offSaleAt).toBeNull();
     });
 
-    it.skip('should throw BusinessLogicError if video content has no media', async () => {
-      // This should not happen in practice (validation prevents it),
-      // but test the safeguard
-      // We'll skip this test as create() prevents this scenario
+    // A draft needs only a title and a type (Codex-a6ofh.2.1), so each rule
+    // below is reached at publish: the draft saves, its publish refuses, and
+    // the refusal names the rule for the editor's checklist.
+    it.each([
+      'video',
+      'audio',
+    ] as const)('refuses a %s draft with no media (MEDIA_REQUIRED)', async (contentType) => {
+      const draft = await service.create(
+        {
+          title: 'No media yet',
+          slug: createUniqueSlug(`no-media-${contentType}`),
+          contentType,
+          tags: [],
+        },
+        creatorId
+      );
+
+      await expect(service.publish(draft.id, creatorId)).rejects.toMatchObject({
+        statusCode: 422,
+        context: { code: 'MEDIA_REQUIRED' },
+      });
+    });
+
+    it.each([
+      ['no body', undefined],
+      [
+        'an emptied editor',
+        JSON.stringify({ type: 'doc', content: [{ type: 'paragraph' }] }),
+      ],
+    ])('refuses an article with %s (BODY_REQUIRED)', async (_case, contentBody) => {
+      const draft = await service.create(
+        {
+          title: 'Nothing written',
+          slug: createUniqueSlug('no-body'),
+          contentType: 'written',
+          contentBody,
+          tags: [],
+        },
+        creatorId
+      );
+
+      await expect(service.publish(draft.id, creatorId)).rejects.toMatchObject({
+        statusCode: 422,
+        context: { code: 'BODY_REQUIRED' },
+      });
+    });
+
+    it('publishes an article whose body is a TipTap doc with text', async () => {
+      const draft = await service.create(
+        {
+          title: 'Written in the editor',
+          slug: createUniqueSlug('doc-body'),
+          contentType: 'written',
+          contentBody: JSON.stringify({
+            type: 'doc',
+            content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Hi' }] },
+            ],
+          }),
+          tags: [],
+        },
+        creatorId
+      );
+
+      const published = await service.publish(draft.id, creatorId);
+      expect(published.status).toBe('published');
+    });
+
+    it.each([
+      ['no price', undefined],
+      ['a zero price', 0],
+    ])('refuses a piece for sale with %s (PRICE_REQUIRED)', async (_case, priceCents) => {
+      const draft = await service.create(
+        {
+          title: 'For sale, unpriced',
+          slug: createUniqueSlug('no-price'),
+          contentType: 'written',
+          contentBody: 'Body',
+          isPurchasable: true,
+          priceCents,
+          tags: [],
+        },
+        creatorId
+      );
+
+      await expect(service.publish(draft.id, creatorId)).rejects.toMatchObject({
+        statusCode: 422,
+        context: { code: 'PRICE_REQUIRED' },
+      });
     });
 
     it('should throw MediaNotReadyError if media is not ready', async () => {
@@ -1400,9 +1536,12 @@ describe('ContentService', () => {
         .where(eq(mediaItems.id, media.id));
 
       // Act & Assert
-      await expect(service.publish(created.id, creatorId)).rejects.toThrow(
-        MediaNotReadyError
-      );
+      const refusal = service.publish(created.id, creatorId);
+      await expect(refusal).rejects.toThrow(MediaNotReadyError);
+      // Still processing and failed read differently: one will finish.
+      await expect(refusal).rejects.toMatchObject({
+        context: { mediaStatus: 'transcoding', code: 'MEDIA_NOT_READY' },
+      });
     });
 
     it('should publish written content without media', async () => {
@@ -1425,6 +1564,274 @@ describe('ContentService', () => {
       // Assert
       expect(published.status).toBe('published');
       expect(published.publishedAt).not.toBeNull();
+    });
+  });
+
+  // Codex-a6ofh.2.1 (review): the media, body and price rules left the create
+  // schema for publish, so a save of a LIVE piece is where they must hold too.
+  // A draft saves without them; publish judges it.
+  describe('update of a live piece keeps it complete', () => {
+    async function liveArticle(): Promise<string> {
+      const draft = await service.create(
+        {
+          title: 'Live article',
+          slug: createUniqueSlug('live-article'),
+          contentType: 'written',
+          contentBody: 'Words',
+          tags: [],
+        },
+        creatorId
+      );
+      await service.publish(draft.id, creatorId);
+      return draft.id;
+    }
+
+    it('refuses detaching a live video from its media (MEDIA_REQUIRED), and keeps it', async () => {
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+      const draft = await service.create(
+        {
+          title: 'Live video',
+          slug: createUniqueSlug('live-video'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          tags: [],
+        },
+        creatorId
+      );
+      await service.publish(draft.id, creatorId);
+
+      await expect(
+        service.update(draft.id, { mediaItemId: null }, creatorId)
+      ).rejects.toMatchObject({
+        statusCode: 422,
+        context: { code: 'MEDIA_REQUIRED' },
+      });
+      const [row] = await db
+        .select({ mediaItemId: content.mediaItemId })
+        .from(content)
+        .where(eq(content.id, draft.id));
+      expect(row?.mediaItemId).toBe(media.id);
+    });
+
+    it.each([
+      [
+        'an emptied editor',
+        JSON.stringify({ type: 'doc', content: [{ type: 'paragraph' }] }),
+      ],
+      ['an empty string', ''],
+    ])('refuses emptying a live article to %s (BODY_REQUIRED)', async (_case, contentBody) => {
+      const id = await liveArticle();
+
+      await expect(
+        service.update(id, { contentBody }, creatorId)
+      ).rejects.toMatchObject({
+        statusCode: 422,
+        context: { code: 'BODY_REQUIRED' },
+      });
+    });
+
+    it.each([
+      ['no price', null],
+      ['a zero price', 0],
+    ])('refuses putting a live piece on sale with %s (PRICE_REQUIRED)', async (_case, priceCents) => {
+      const id = await liveArticle();
+
+      await expect(
+        service.update(id, { isPurchasable: true, priceCents }, creatorId)
+      ).rejects.toMatchObject({
+        statusCode: 422,
+        context: { code: 'PRICE_REQUIRED' },
+      });
+    });
+
+    it('saves an edit that leaves a live piece complete', async () => {
+      const id = await liveArticle();
+
+      const updated = await service.update(
+        id,
+        { title: 'Retitled' },
+        creatorId
+      );
+      expect(updated.title).toBe('Retitled');
+    });
+
+    // A piece live before these rules may already miss one (the old update
+    // rule only caught a flag and a price sent together). That gap doesn't
+    // block an unrelated edit; a NEW gap still does.
+    it('lets a live piece with an old gap take an edit, but not open another', async () => {
+      const id = await liveArticle();
+      await db
+        .update(content)
+        .set({ isPurchasable: true, priceCents: null })
+        .where(eq(content.id, id));
+
+      const retitled = await service.update(
+        id,
+        { title: 'Still unpriced' },
+        creatorId
+      );
+      expect(retitled.title).toBe('Still unpriced');
+
+      await expect(
+        service.update(id, { contentBody: '' }, creatorId)
+      ).rejects.toMatchObject({
+        statusCode: 422,
+        context: { code: 'BODY_REQUIRED' },
+      });
+    });
+
+    it("refuses moving a live video onto media that isn't ready, naming its status", async () => {
+      const [ready, transcoding] = await db
+        .insert(mediaItems)
+        .values([
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          }),
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'transcoding',
+          }),
+        ])
+        .returning();
+      if (!ready || !transcoding) throw new Error('failed to seed media');
+      const draft = await service.create(
+        {
+          title: 'Live video, new cut',
+          slug: createUniqueSlug('live-recut'),
+          contentType: 'video',
+          mediaItemId: ready.id,
+          tags: [],
+        },
+        creatorId
+      );
+      await service.publish(draft.id, creatorId);
+
+      await expect(
+        service.update(draft.id, { mediaItemId: transcoding.id }, creatorId)
+      ).rejects.toMatchObject({
+        context: { code: 'MEDIA_NOT_READY', mediaStatus: 'transcoding' },
+      });
+    });
+
+    it('saves a draft with no body and an unpriced sale', async () => {
+      const draft = await service.create(
+        {
+          title: 'Draft',
+          slug: createUniqueSlug('draft-incomplete'),
+          contentType: 'written',
+          contentBody: 'Words',
+          tags: [],
+        },
+        creatorId
+      );
+
+      const updated = await service.update(
+        draft.id,
+        { contentBody: '', isPurchasable: true, priceCents: null },
+        creatorId
+      );
+      expect(updated.status).toBe('draft');
+    });
+  });
+
+  // Drafts autosave (Codex-a6ofh.2.2), so an update to a draft that was never
+  // live must not stale catalogues it has never been in.
+  describe('update bumps the catalogue only for a piece that has been live', () => {
+    let watched: ContentService;
+    const invalidate = vi.fn(async (_key: string) => undefined);
+
+    beforeEach(() => {
+      invalidate.mockClear();
+      watched = new ContentService({ db, environment: 'test' });
+      watched.setCache({ invalidate } as unknown as Parameters<
+        ContentService['setCache']
+      >[0]);
+    });
+
+    async function orgArticle(): Promise<{ id: string; orgId: string }> {
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      await joinTeam(db, org.id, creatorId);
+      const draft = await watched.create(
+        {
+          title: 'Catalogue article',
+          slug: createUniqueSlug('catalogue-article'),
+          contentType: 'written',
+          contentBody: 'Words',
+          organizationId: org.id,
+          tags: [],
+        },
+        creatorId
+      );
+      return { id: draft.id, orgId: org.id };
+    }
+
+    it('a draft that was never live bumps nothing', async () => {
+      const { id } = await orgArticle();
+      invalidate.mockClear();
+
+      await watched.update(id, { title: 'Still a draft' }, creatorId);
+
+      expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    // Unpublishing keeps publishedAt: its buyers still have it. (A live
+    // piece takes the same branch; hasBeenLive's own test, in
+    // @codex/constants, covers the rule.)
+    it('an unpublished piece bumps the published catalogue and its org', async () => {
+      const { id, orgId } = await orgArticle();
+      await watched.publish(id, creatorId);
+      await watched.unpublish(id, creatorId);
+      invalidate.mockClear();
+
+      await watched.update(id, { title: 'Edited after going live' }, creatorId);
+
+      expect(invalidate).toHaveBeenCalledWith(
+        CacheType.COLLECTION_CONTENT_PUBLISHED
+      );
+      expect(invalidate).toHaveBeenCalledWith(
+        CacheType.COLLECTION_ORG_CONTENT(orgId)
+      );
+    });
+
+    // trigger_unpublish_on_org_delete (migration 0004) resets status and
+    // publishedAt as the row leaves its org, so the row it returns reads as
+    // a draft that was never live. Its buyers still hold it.
+    it('a live piece moved out of its org still counts as live', async () => {
+      const { id } = await orgArticle();
+      await watched.publish(id, creatorId);
+      invalidate.mockClear();
+
+      const moved = await watched.updateReportingDroppedThumbnail(
+        id,
+        { organizationId: null },
+        creatorId
+      );
+
+      expect(moved.content).toMatchObject({
+        status: 'draft',
+        publishedAt: null,
+        organizationId: null,
+      });
+      expect(moved.hasBeenLive).toBe(true);
+      expect(invalidate).toHaveBeenCalledWith(
+        CacheType.COLLECTION_CONTENT_PUBLISHED
+      );
     });
   });
 
@@ -1523,6 +1930,8 @@ describe('ContentService', () => {
           .values(createTestOrganizationInput())
           .returning()
       );
+      // Publish checks the creator is on the team (Codex-a6ofh.2.1).
+      await joinTeam(db, org.id, creatorId);
       const tier = takeFirst(
         await db
           .insert(subscriptionTiers)
@@ -1588,6 +1997,8 @@ describe('ContentService', () => {
           .values(createTestOrganizationInput())
           .returning()
       ).id;
+      // Publish checks the creator is on the team (Codex-a6ofh.2.1).
+      await joinTeam(db, orgId, creatorId);
       tierId = takeFirst(
         await db
           .insert(subscriptionTiers)
@@ -2151,6 +2562,221 @@ describe('ContentService', () => {
         expect(result.items.some((item) => item.id === contentId)).toBe(true);
       }
     });
+
+    // The studio list's sorts (Codex-a6ofh.3.1). Each test has a creator of
+    // its own, so the rows the other tests leave behind cannot reorder it.
+    describe('sort order', () => {
+      async function piecesFor(
+        owner: string,
+        count: number
+      ): Promise<string[]> {
+        const ids: string[] = [];
+        for (let i = 0; i < count; i++) {
+          const created = await service.create(
+            {
+              title: `Sorted ${i}`,
+              slug: createUniqueSlug(`sorted-${i}`),
+              contentType: 'written',
+              tags: [],
+            },
+            owner
+          );
+          ids.push(created.id);
+        }
+        return ids;
+      }
+
+      it('puts drafts never published LAST on "Recently published"', async () => {
+        const [owner] = await seedTestUsers(db, 1);
+        const [older, newer, draft] = await piecesFor(owner!, 3);
+        await db
+          .update(content)
+          .set({
+            status: 'published',
+            publishedAt: new Date('2026-01-01T00:00:00Z'),
+          })
+          .where(eq(content.id, older!));
+        await db
+          .update(content)
+          .set({
+            status: 'published',
+            publishedAt: new Date('2026-02-01T00:00:00Z'),
+          })
+          .where(eq(content.id, newer!));
+
+        const result = await service.list(owner!, {
+          sortBy: 'publishedAt',
+          sortOrder: 'desc',
+        });
+
+        // Postgres sorts NULL first descending: the draft led the list.
+        expect(result.items.map((item) => item.id)).toEqual([
+          newer,
+          older,
+          draft,
+        ]);
+      });
+
+      it('breaks a tie newest first, then by id, so pages never repeat or skip a row', async () => {
+        // Five pieces at 0 views: one tie, broken by when each was made.
+        // Two share a moment, so only the id orders them, and they sit at
+        // places 2 and 3: across the page 1/2 boundary, where a missing id
+        // key repeats one and skips the other. The pair is one written
+        // before the other whose ids sort the other way, so a tie left in
+        // write order is wrong every run, not by chance. 5 random ids lack
+        // such a pair 1 draw in 120, so that draw is made again (a fresh
+        // owner: the list is theirs alone). The other three are dated
+        // newest first in DESCENDING id order, so "newest first" is never id
+        // order: an order that drops createdAt fails every run too, where
+        // write order would pass it 5 runs in 120.
+        const draw = async () => {
+          const [owner] = await seedTestUsers(db, 1);
+          const ids = await piecesFor(owner!, 5);
+          const pair = ids.flatMap((first, i) =>
+            ids
+              .slice(i + 1)
+              .filter((later) => later < first)
+              .map((later) => [first, later] as const)
+          )[0];
+          return { owner: owner!, ids, pair };
+        };
+        let drawn = await draw();
+        for (let again = 0; !drawn.pair && again < 4; again++) {
+          drawn = await draw();
+        }
+        const { owner, ids, pair: inverted } = drawn;
+        if (!inverted) throw new Error('5 draws without an inverted pair');
+        const others = ids
+          .filter((id) => !inverted.includes(id))
+          .sort()
+          .reverse();
+        const made = new Map<string, string>([
+          [others[0]!, '2026-01-05T00:00:00Z'],
+          [inverted[0], '2026-01-04T00:00:00Z'],
+          [inverted[1], '2026-01-04T00:00:00Z'],
+          [others[1]!, '2026-01-02T00:00:00Z'],
+          [others[2]!, '2026-01-01T00:00:00Z'],
+        ]);
+        for (const [id, at] of made) {
+          await db
+            .update(content)
+            .set({ createdAt: new Date(at) })
+            .where(eq(content.id, id));
+        }
+
+        const pages = [];
+        for (const page of [1, 2, 3]) {
+          pages.push(
+            await service.list(
+              owner!,
+              { sortBy: 'viewCount', sortOrder: 'desc' },
+              { page, limit: 2 }
+            )
+          );
+        }
+        const paged = pages.flatMap((result) =>
+          result.items.map((item) => item.id)
+        );
+
+        // Newest first, the same on every page; the id orders the two made
+        // at the same moment, and each row shows exactly once (five ids, all
+        // distinct, so a repeat or a skip fails this too).
+        const sameMoment = [...inverted].sort();
+        expect(paged).toEqual([others[0], ...sameMoment, others[1], others[2]]);
+      });
+    });
+  });
+
+  /**
+   * The personal studio's "Where" (Codex-a6ofh.3.2): its list sent no org,
+   * which reads as every org, so org pieces showed as personal ones.
+   */
+  describe('where a piece is filed', () => {
+    async function orgFor(owner: string) {
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      await joinTeam(db, org.id, owner);
+      return org;
+    }
+
+    async function pieceFor(owner: string, organizationId?: string) {
+      const created = await service.create(
+        {
+          title: 'Filed piece',
+          slug: createUniqueSlug('filed'),
+          contentType: 'written',
+          tags: [],
+          ...(organizationId && { organizationId }),
+        },
+        owner
+      );
+      return created.id;
+    }
+
+    it('the personal list (organizationId null) holds no org piece', async () => {
+      const [owner] = await seedTestUsers(db, 1);
+      const org = await orgFor(owner!);
+      const personal = [await pieceFor(owner!), await pieceFor(owner!)];
+      await pieceFor(owner!, org.id);
+
+      const result = await service.list(
+        owner!,
+        { organizationId: null },
+        { page: 1, limit: 20 }
+      );
+
+      expect(result.items.map((item) => item.id).sort()).toEqual(
+        [...personal].sort()
+      );
+      expect(result.pagination.total).toBe(2);
+    });
+
+    it('counts the creator’s own live pieces by where each is filed', async () => {
+      const [owner, stranger] = await seedTestUsers(db, 2);
+      const alpha = await orgFor(owner!);
+      const beta = await orgFor(owner!);
+      await db
+        .update(organizations)
+        .set({ name: 'Alpha studio' })
+        .where(eq(organizations.id, alpha.id));
+      await db
+        .update(organizations)
+        .set({ name: 'Beta studio' })
+        .where(eq(organizations.id, beta.id));
+
+      await pieceFor(owner!);
+      const deleted = await pieceFor(owner!);
+      await service.delete(deleted, owner!);
+      await pieceFor(owner!, beta.id);
+      await pieceFor(owner!, alpha.id);
+      await pieceFor(owner!, alpha.id);
+      // Another creator's piece in the same org is never counted.
+      await joinTeam(db, alpha.id, stranger!);
+      await pieceFor(stranger!, alpha.id);
+
+      expect(await service.whereCounts(owner!)).toEqual({
+        all: 4,
+        personal: 1,
+        orgs: [
+          { id: alpha.id, name: 'Alpha studio', count: 2 },
+          { id: beta.id, name: 'Beta studio', count: 1 },
+        ],
+      });
+    });
+
+    it('a creator with nothing counts zero everywhere', async () => {
+      const [owner] = await seedTestUsers(db, 1);
+
+      expect(await service.whereCounts(owner!)).toEqual({
+        all: 0,
+        personal: 0,
+        orgs: [],
+      });
+    });
   });
 
   describe('listPublic', () => {
@@ -2169,7 +2795,7 @@ describe('ContentService', () => {
           .values(createTestOrganizationInput())
           .returning()
       );
-      await joinTeam(org.id, creatorId);
+      await joinTeam(db, org.id, creatorId);
 
       const freeArticle = await service.create(
         {

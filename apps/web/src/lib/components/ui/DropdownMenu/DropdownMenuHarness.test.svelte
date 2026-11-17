@@ -9,21 +9,31 @@
     open?: boolean;
     defaultOpen?: boolean;
     onOpenChange?: (open: boolean) => void;
+    onKeep?: () => void;
+    /** Attributes a page might pass to Content. */
+    contentAttrs?: Record<string, string>;
+    /** Attributes a page might pass to Trigger. */
+    triggerAttrs?: Record<string, string>;
   }
 
   let {
     open = $bindable(false),
     defaultOpen = false,
     onOpenChange,
+    onKeep,
+    contentAttrs = {},
+    triggerAttrs = {},
   }: Props = $props();
 </script>
 
 <DropdownMenu bind:open {defaultOpen} {onOpenChange} forceVisible={false}>
-  <DropdownMenuTrigger data-testid="dropdown-trigger">Menu</DropdownMenuTrigger>
-  <DropdownMenuContent data-testid="dropdown-content">
+  <DropdownMenuTrigger data-testid="dropdown-trigger" {...triggerAttrs}>Menu</DropdownMenuTrigger>
+  <DropdownMenuContent data-testid="dropdown-content" {...contentAttrs}>
     <DropdownMenuItem data-testid="item-1">Item One</DropdownMenuItem>
     <DropdownMenuItem data-testid="item-2">Item Two</DropdownMenuItem>
     <DropdownMenuSeparator data-testid="separator" />
     <DropdownMenuItem data-testid="item-3" disabled>Disabled Item</DropdownMenuItem>
+    <DropdownMenuItem data-testid="item-keep" keepOpen onclick={onKeep}>Try again</DropdownMenuItem>
+    <DropdownMenuItem data-testid="item-link" href="#drafts">All drafts</DropdownMenuItem>
   </DropdownMenuContent>
 </DropdownMenu>

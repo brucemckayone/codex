@@ -1,5 +1,10 @@
 import {
   CONTENT_ACCESS_TYPE,
+  CONTENT_ATTENTION_KINDS,
+  CONTENT_BULK_MAX,
+  CONTENT_LIFECYCLES,
+  CONTENT_LIST_SCOPE,
+  CONTENT_MAX_CATEGORIES,
   CONTENT_STATUS,
   CONTENT_TYPES,
   isReservedSubdomain,
@@ -8,14 +13,17 @@ import {
   MEDIA_STATUS_GROUPS,
   MEDIA_TYPES,
   type MediaStatusGroup,
+  MIME_TYPES,
   VISIBILITY,
 } from '@codex/constants';
 import { z } from 'zod';
+import { MAX_IMAGE_SIZE_BYTES } from '../image';
 import {
   createOptionalTextSchema,
   createSanitizedStringSchema,
   createSlugSchema,
   priceCentsSchema,
+  queryFlagSchema,
   urlSchema,
   userIdSchema,
   uuidSchema,
@@ -356,17 +364,47 @@ const mixesLegacyTierInput = (data: {
   data.includedInTierId !== undefined &&
   (data.isTierGated !== undefined || data.includedInTierIds !== undefined);
 
+/** A content title's limit: the editor's field stops where a save would be refused. */
+export const CONTENT_TITLE_MAX = 500;
+
+/** A content description's limit. */
+export const CONTENT_DESCRIPTION_MAX = 10_000;
+
+/**
+ * What a content thumbnail (its cover) may be: the upload's own check and
+ * every field that takes one, so a field never offers what the upload refuses.
+ */
+export const CONTENT_THUMBNAIL_MIME_TYPES = [
+  MIME_TYPES.IMAGE.PNG,
+  MIME_TYPES.IMAGE.JPEG,
+  MIME_TYPES.IMAGE.WEBP,
+] as const;
+
+/**
+ * The largest cover the upload takes: the content-api thumbnail routes' own
+ * `maxSize`, so a field never offers what the route refuses (Codex-a6ofh.2.5).
+ * It was 10 MB here against the route's 5, and a shrunk photo between the two
+ * passed every studio check only to be refused by the worker.
+ */
+export const CONTENT_THUMBNAIL_MAX_BYTES = MAX_IMAGE_SIZE_BYTES;
+
+/** The same limit in whole megabytes, for the words that state it, so they never drift from it. */
+export const CONTENT_THUMBNAIL_MAX_MB = Math.round(
+  CONTENT_THUMBNAIL_MAX_BYTES / (1024 * 1024)
+);
+
 /**
  * Base content schema (without refinements)
  * Used for both create and update schemas
  */
 const baseContentSchema = z.object({
-  title: sanitizedStringSchema(1, 500, 'Title'),
+  title: sanitizedStringSchema(1, CONTENT_TITLE_MAX, 'Title'),
   slug: slugSchema,
-  description: optionalTextSchema(10000, 'Description'),
+  description: optionalTextSchema(CONTENT_DESCRIPTION_MAX, 'Description'),
   contentType: contentTypeEnum,
 
-  // Media reference (required for video/audio, optional for written)
+  // Media reference. A video or audio draft may have none yet; it needs one
+  // to publish (Codex-a6ofh.2.1). Written content has none.
   mediaItemId: uuidSchema.optional().nullable(),
 
   // Written content body (Phase 2+) — limit raised for Tiptap JSON overhead
@@ -392,7 +430,7 @@ const baseContentSchema = z.object({
   // (including []) REPLACES the set. ContentService verifies every id lives in
   // the content's OWN space (IDOR guard). Capped so a payload can't fan out an
   // unbounded join write.
-  categoryIds: z.array(uuidSchema).max(20).optional(),
+  categoryIds: z.array(uuidSchema).max(CONTENT_MAX_CATEGORIES).optional(),
 
   // Tags (JSONB array)
   tags: tagsSchema,
@@ -467,53 +505,15 @@ const baseContentSchema = z.object({
  * - Validates mediaItemId exists and belongs to creator (service layer)
  * - Validates content type matches media type (service layer)
  * - Slug uniqueness per organization (database constraint)
+ *
+ * A draft needs only a title and a type (Codex-a6ofh.2.1, owner 4A): the
+ * studio creates the row on the first thing typed and autosaves the rest.
+ * What a piece needs to go LIVE (its media, an article's body, a price of at
+ * least £1 when it is for sale) is checked when it publishes, by
+ * `assertPublishable` in @codex/content. The rules kept here are the
+ * structural ones: a row that breaks them is wrong even as a draft.
  */
 export const createContentSchema = baseContentSchema
-  .refine(
-    (data) => {
-      // Video/audio content MUST have mediaItemId
-      if (
-        ([CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO] as string[]).includes(
-          data.contentType
-        )
-      ) {
-        return !!data.mediaItemId;
-      }
-      return true;
-    },
-    {
-      message: 'Media item is required for video and audio content',
-      path: ['mediaItemId'],
-    }
-  )
-  .refine(
-    (data) => {
-      // Written content MUST have contentBody
-      if (data.contentType === CONTENT_TYPES.WRITTEN) {
-        return !!data.contentBody && data.contentBody.length > 0;
-      }
-      return true;
-    },
-    {
-      message: 'Content body is required for written content',
-      path: ['contentBody'],
-    }
-  )
-  .refine(
-    (data) => {
-      // Purchasable content requires a price (SPEC §6.1 — priceCents pairs
-      // with isPurchasable). `priceCentsSchema` already refuses 1p–99p, so any
-      // positive price that reaches here is at least £1.00.
-      if (data.isPurchasable) {
-        return !!data.priceCents && data.priceCents > 0;
-      }
-      return true;
-    },
-    {
-      message: 'Purchasable content requires a price of at least £1.00',
-      path: ['priceCents'],
-    }
-  )
   .refine(
     (data) => {
       // Follower-gated content requires an organisation (followers are org-scoped).
@@ -720,20 +720,11 @@ export const updateContentSchema = baseContentSchema
       'Send either includedInTierId (legacy) or isTierGated / includedInTierIds, not both',
     path: ['includedInTierId'],
   })
-  .refine(
-    (data) => {
-      // If a caller marks content purchasable AND sends a price in the same
-      // payload, the price must be positive. A price-only or flag-only partial
-      // is validated defensively in ContentService.update().
-      if (!data.isPurchasable) return true;
-      if (data.priceCents === undefined) return true;
-      return !!data.priceCents && data.priceCents > 0;
-    },
-    {
-      message: 'Purchasable content requires a price of at least £1.00',
-      path: ['priceCents'],
-    }
-  )
+  // No price rule here (Codex-a6ofh.2.1): a draft may be for sale with no
+  // price yet, as create allows. A live piece's next state must still have
+  // one, and ContentService.update() refuses a save that drops it with the
+  // publish gate's PRICE_REQUIRED (assertSaveKeepsContentFilled), so every
+  // save is judged on the whole row, not on what a partial happens to send.
   .refine(
     (data) => {
       // Mirror of the create-schema invariant: an update that EXPLICITLY marks
@@ -780,6 +771,22 @@ export const updateContentSchema = baseContentSchema
 export type UpdateContentInput = z.infer<typeof updateContentSchema>;
 
 /**
+ * What the studio sends to start a draft (Codex-a6ofh.2.2): the row is made
+ * on the first thing the creator adds, from the type, the title and whatever
+ * else they have added so far. The slug is not asked for: the studio makes it
+ * from the title. `createContentSchema` still validates the whole create at
+ * the worker; this only keeps the studio's limits the same as its.
+ */
+export const contentDraftSchema = baseContentSchema.pick({
+  contentType: true,
+  organizationId: true,
+  title: true,
+  description: true,
+  contentBody: true,
+  mediaItemId: true,
+});
+
+/**
  * Publish Content Input
  * Simple schema for status change operations
  */
@@ -807,24 +814,77 @@ export const sortOrderEnum = z.enum(['asc', 'desc']);
 export const TOPIC_SLUG_MAX = 120;
 
 /**
- * Content query/filter schema
- * Used for listing and searching content
- * Extends pagination with content-specific filters and sorting
+ * POST /internal/content/media-ready (worker HMAC, Codex-a6ofh.2.8): a media
+ * item changed, so settle the drafts scheduled on it by its state now. The
+ * body names the item only: content-api reads what happened to it itself.
  */
-export const contentQuerySchema = paginationSchema.extend({
+export const mediaReadyBodySchema = z.object({ mediaItemId: uuidSchema });
+export type MediaReadyBody = z.infer<typeof mediaReadyBodySchema>;
+
+/**
+ * POST /api/content/:id/publish's query (Codex-a6ofh.2.7, Publish when
+ * ready). `whenReady=true` schedules the publish while its media is still on
+ * its way; absent or `false` publishes now.
+ */
+export const publishContentQuerySchema = z.object({
+  whenReady: queryFlagSchema.optional().transform((value) => value === true),
+});
+
+/**
+ * PATCH /api/content/:id's query (Codex-a6ofh.2, the epic review's
+ * critical). `asDraft=true` is a draft's autosave: it saves only while the
+ * piece has never been live. One that went live meanwhile (its schedule
+ * fired, an admin, another tab) is refused, so half-typed changes never
+ * reach a live piece; its changes wait for Update. Absent or `false` is an
+ * ordinary save, a live piece's Update included.
+ */
+export const updateContentQuerySchema = z.object({
+  asDraft: queryFlagSchema.optional().transform((value) => value === true),
+});
+
+/**
+ * The content list's query fields, unrefined: the studio and browse schemas
+ * below each refine or extend this, since a refined object can no longer be
+ * picked, omitted or extended over a key (zod 4).
+ */
+const contentQueryFields = paginationSchema.extend({
   // Filters
   status: contentStatusEnum.optional(),
+  // Where a piece is in its life (Codex-a6ofh.3.6, the studio list's status
+  // tabs): a draft never live, on sale, or off sale (once live and not on
+  // sale now: archived, or a draft again, its buyers keeping it). `status`
+  // is the stored column, which files an unpublished piece among the drafts;
+  // both at once is refused below. The studio list's alone: browse refuses it.
+  lifecycle: z.enum(CONTENT_LIFECYCLES).optional(),
   contentType: contentTypeEnum.optional(),
   accessType: contentAccessTypeEnum.optional(),
-  // Up to the topic slug width, so a topic the public list accepts is accepted
-  // here too (100 refused a real 101-120 character slug on /explore's
-  // signed-in sorts). A NUL is refused: Postgres refuses NUL in text.
+  // A category (topic) by its slug: the pieces filed in it, in the org when
+  // one is given (/explore's topics). It matched the legacy free-text
+  // `content.category` column until Codex-a6ofh.3.3, so /explore's signed-in
+  // sorts filtered by a slug nothing held. Up to the topic slug width, so a
+  // topic the public list accepts is accepted here too (100 refused a real
+  // 101-120 character slug). A NUL is refused: Postgres refuses NUL in text.
   category: z
     .string()
     .max(TOPIC_SLUG_MAX)
     .refine(hasNoNul, 'Category must not contain NUL')
     .optional(),
+  // One category, by id (the org studio's Category facet, Codex-a6ofh.3.3):
+  // the pieces filed in it. `category` above is the same filter by the
+  // category's slug (/explore's topics).
+  categoryId: uuidSchema.optional(),
   organizationId: uuidSchema.optional(),
+  // Where the studio list looks (Codex-a6ofh.3.2, the personal studio's
+  // "Where"): `personal` is the content filed under no org, which an
+  // optional uuid cannot say (left out, it means every org, which is how
+  // the personal list showed org pieces as its own). Leaving it out is
+  // everything; one org is `organizationId`. The studio list's alone:
+  // browse refuses it below.
+  scope: z.literal(CONTENT_LIST_SCOPE.PERSONAL).optional(),
+  // What the pieces need (Codex-a6ofh.3.4, a "Needs you" chip): one of the
+  // kinds `GET /api/content/attention` counts, matched by the same rule, so
+  // a chip lists what it counted. The studio list's alone: browse refuses it.
+  needs: z.enum(CONTENT_ATTENTION_KINDS).optional(),
   // A user id (BetterAuth text), not a uuid: uuidSchema refused every real
   // one, so /explore's creator filter 400'd (Codex-osuqt).
   creatorId: userIdSchema.optional(),
@@ -846,6 +906,43 @@ export const contentQuerySchema = paginationSchema.extend({
   sortOrder: sortOrderEnum.default('desc'),
 });
 
+/**
+ * Personal and an org at once is two answers to "where": refused, never one
+ * silently winning. In the schemas, so the web remote and the worker refuse
+ * it alike.
+ */
+function oneWhere(q: { scope?: string; organizationId?: string }): boolean {
+  return !(q.scope !== undefined && q.organizationId !== undefined);
+}
+const ONE_WHERE_REFUSAL = {
+  message: 'scope=personal reads content outside any org: drop organizationId',
+  path: ['scope'],
+};
+
+/** A stored status and a lifecycle at once would be two answers to "which": refused. */
+function oneStatus(q: { status?: string; lifecycle?: string }): boolean {
+  return !(q.status !== undefined && q.lifecycle !== undefined);
+}
+const ONE_STATUS_REFUSAL = {
+  message: 'lifecycle and status both narrow by status: send one',
+  path: ['lifecycle'],
+};
+
+/**
+ * Content query/filter schema
+ * Used for listing and searching content
+ * Extends pagination with content-specific filters and sorting
+ */
+export const contentQuerySchema = contentQueryFields
+  .extend({
+    // Each row's live categories too (Codex-a6ofh.3.3): the org studio's
+    // list names them. The badges and pickers that read this list leave it
+    // out, and skip the query. A studio read's alone: browse names none.
+    include: z.literal('categories').optional(),
+  })
+  .refine(oneWhere, ONE_WHERE_REFUSAL)
+  .refine(oneStatus, ONE_STATUS_REFUSAL);
+
 export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
 
 /**
@@ -858,17 +955,128 @@ export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
  * `contentQuerySchema` is reserved for studio-style queries where the
  * caller is browsing their OWN content (creator dashboards, drafts).
  *
- * Codex-q3zuf-style multi-tenant boundary protection.
+ * Codex-q3zuf-style multi-tenant boundary protection. The org is required by
+ * its type, so the inferred input says so too.
+ *
+ * The studio list's "Where" means nothing across creators: a `scope` is
+ * refused, so a caller never believes it narrowed a browse (Codex-a6ofh.3.2).
  */
-export const contentBrowseQuerySchema = contentQuerySchema.refine(
-  (q) => q.organizationId !== undefined,
-  {
-    message: 'organizationId is required for cross-creator browsing',
-    path: ['organizationId'],
-  }
-);
+export const contentBrowseQuerySchema = contentQueryFields.extend({
+  organizationId: uuidSchema,
+  scope: z.never().optional(),
+  // What a creator's own pieces need means nothing across creators either.
+  needs: z.never().optional(),
+  // Nor do its off-sale pieces: browse lists what is on sale.
+  lifecycle: z.never().optional(),
+});
 
 export type ContentBrowseQueryInput = z.infer<typeof contentBrowseQuerySchema>;
+
+/**
+ * `GET /api/content/attention` (Codex-a6ofh.3.4): where the "Needs you"
+ * counts look, as the studio list says it: one org (`organizationId`), the
+ * pieces under none (`scope=personal`), or, with neither, everywhere; both
+ * at once is refused (`oneWhere`). The list's other filters leave the counts
+ * alone (owner): they are a to-do, not a view.
+ */
+export const contentAttentionQuerySchema = contentQueryFields
+  .pick({ organizationId: true, scope: true })
+  .refine(oneWhere, ONE_WHERE_REFUSAL);
+
+export type ContentAttentionQueryInput = z.infer<
+  typeof contentAttentionQuerySchema
+>;
+
+/**
+ * `POST /api/content/:id/categories` (Codex-a6ofh.3.3): categories to ADD to a
+ * piece, keeping the ones it has. A `categoryIds` save replaces the whole set,
+ * so the list's bulk "Add to category" uses this instead. At least one; at
+ * most the per-piece limit, which the service also holds the piece's total to.
+ */
+export const addContentCategoriesSchema = z.object({
+  categoryIds: z.array(uuidSchema).min(1).max(CONTENT_MAX_CATEGORIES),
+});
+
+export type AddContentCategoriesInput = z.infer<
+  typeof addContentCategoriesSchema
+>;
+
+/**
+ * The pieces a bulk action takes (Codex-a6ofh.3.5): 1 to CONTENT_BULK_MAX
+ * ids, each once. A repeat is refused, never collapsed, so the answer keeps
+ * one result per id sent, in order.
+ */
+const contentBulkIdsField = z
+  .array(uuidSchema)
+  .min(1, 'Choose at least one piece')
+  .max(CONTENT_BULK_MAX, `At most ${CONTENT_BULK_MAX} pieces at a time`)
+  .refine((ids) => new Set(ids).size === ids.length, {
+    message: 'The same piece is listed twice',
+  });
+
+/** `POST /api/content/bulk/{publish,unpublish,delete}`. */
+export const contentBulkSchema = z.object({ ids: contentBulkIdsField });
+
+export type ContentBulkInput = z.infer<typeof contentBulkSchema>;
+
+/** `POST /api/content/bulk/categories`: the categories go to every piece. */
+export const contentBulkCategoriesSchema = contentBulkSchema.extend({
+  categoryIds: addContentCategoriesSchema.shape.categoryIds,
+});
+
+export type ContentBulkCategoriesInput = z.infer<
+  typeof contentBulkCategoriesSchema
+>;
+
+/**
+ * The fields of an update's access group (owner D-b2), as a `.pick` mask:
+ * the bulk access body is these and nothing else, and the service's
+ * "already reads so" check compares these.
+ */
+export const CONTENT_ACCESS_GROUP_FIELDS = {
+  isFree: true,
+  isPurchasable: true,
+  priceCents: true,
+  isTierGated: true,
+  includedInTierIds: true,
+  isFollowerGated: true,
+  isTeamOnly: true,
+} as const;
+
+/**
+ * Who can watch, and nothing else: the access group of an update (owner
+ * D-b2). Its fields are `updateContentSchema`'s own, and the whole of it is
+ * parsed by that schema too, so every cross-field rule an editor save is held
+ * to holds here, and a rule added there applies here without a copy. Strict:
+ * a title or a slug can't ride along on a bulk change.
+ */
+export const contentAccessGroupSchema = baseContentSchema
+  .pick(CONTENT_ACCESS_GROUP_FIELDS)
+  .partial()
+  .strict()
+  .refine((access) => Object.keys(access).length > 0, {
+    message: 'Say who can watch',
+  })
+  .superRefine((access, ctx) => {
+    const asUpdate = updateContentSchema.safeParse(access);
+    if (asUpdate.success) return;
+    for (const issue of asUpdate.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      });
+    }
+  });
+
+export type ContentAccessGroupInput = z.infer<typeof contentAccessGroupSchema>;
+
+/** `POST /api/content/bulk/access`: one access for every piece. */
+export const contentBulkAccessSchema = contentBulkSchema.extend({
+  access: contentAccessGroupSchema,
+});
+
+export type ContentBulkAccessInput = z.infer<typeof contentBulkAccessSchema>;
 
 /** Which items a library list keeps by what uses them (Codex-a6ofh.1.4). */
 export const MEDIA_USAGE_FILTERS = ['any', 'used', 'unused'] as const;
@@ -1009,12 +1217,7 @@ export const publicContentQuerySchema = paginationSchema
     // Creator-flagged featured filter — true returns only featured items,
     // false excludes them. Undefined (default) returns all published items.
     // Accepts boolean or stringified boolean (URL query strings).
-    featured: z
-      .union([
-        z.boolean(),
-        z.enum(['true', 'false']).transform((v) => v === 'true'),
-      ])
-      .optional(),
+    featured: z.union([z.boolean(), queryFlagSchema]).optional(),
   })
   .refine((data) => data.orgId || data.creatorId || data.slug, {
     message: 'One of orgId, creatorId or slug must be provided',

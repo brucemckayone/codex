@@ -103,6 +103,23 @@ export function remoteErrorStatus(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined;
 }
 
+/**
+ * A failure a Try again can help: no answer, a 5xx, a timeout or a rate
+ * limit; never a refusal. The studio's rule for what a page shows and for
+ * the logs of what a creator's input drives (a save, an upload), server and
+ * browser alike, so an alert on `logger.error` sees the same failures there.
+ * One exception: a signed-in list read whose args the remote already parsed
+ * logs its own server levels (`logRefusedRead`), since a 400 there can only
+ * be our drift and a 429 is anyone's to raise.
+ */
+export function isReadOutage(error: unknown): boolean {
+  const status = remoteErrorStatus(error);
+  // No status: it never reached the worker, which is an outage too.
+  return (
+    status === undefined || status >= 500 || status === 408 || status === 429
+  );
+}
+
 /** The parts of kit's `RemoteQuery` that {@link readFreshQuery} uses. */
 export interface FreshReadable<T> extends PromiseLike<unknown> {
   readonly ready: boolean;

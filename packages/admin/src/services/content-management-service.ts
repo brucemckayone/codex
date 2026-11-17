@@ -11,30 +11,19 @@
  */
 
 import { CacheType, type VersionedCache } from '@codex/cache';
+import { CONTENT_STATUS, PAGINATION } from '@codex/constants';
 import {
-  CONTENT_STATUS,
-  CONTENT_TYPES,
-  PAGINATION,
-  requiresPayoutsToPublish,
-} from '@codex/constants';
+  assertPublishable,
+  type DatabaseTransaction,
+  goLiveColumns,
+} from '@codex/content';
 import {
   MEDIA_ITEM_RESPONSE_COLUMNS,
   schema,
   withPagination,
 } from '@codex/database';
-import {
-  BaseService,
-  BusinessLogicError,
-  NotFoundError,
-} from '@codex/service-errors';
-import { playedMediaItemId, posterFramesOf } from '@codex/transcoding';
-import { and, count, desc, eq, isNull, sql } from 'drizzle-orm';
-import {
-  CreatorPayoutsRequiredError,
-  MediaDeletedError,
-  ThumbnailMediaDeletedError,
-  TierRequiredToPublishError,
-} from '../errors';
+import { BaseService, NotFoundError } from '@codex/service-errors';
+import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import type {
   AdminContentItem,
   AdminContentListOptions,
@@ -131,17 +120,15 @@ export class AdminContentManagementService extends BaseService {
   /**
    * Publish content (admin override)
    *
-   * Admin can publish any draft content in their organization.
-   * Validates media is ready for video/audio content, and that the creator
-   * can be paid when the content has a price or a tier.
+   * Admin can publish any draft content in their organization, under every
+   * rule a creator's own publish applies: `assertPublishable` (@codex/content).
    *
-   * @throws {CreatorPayoutsRequiredError} Priced or tier content whose
-   *   creator's Connect account is not charges + payouts enabled
-   * @throws {MediaDeletedError} Its media item was deleted (Codex-6sbn1)
-   * @throws {ThumbnailMediaDeletedError} Its thumbnail is a frame of one of
-   *   the creator's deleted videos (Codex-tqvmx)
-   * @throws {NotFoundError} Its media item is not the content creator's
-   *   (Codex-vmi6m)
+   * @throws {NotFoundError} No such draft in the org, or its media item is not
+   *   the content creator's (Codex-vmi6m)
+   * @throws {BusinessLogicError} (422) A publish rule refused it;
+   *   `details.code` names which (see `assertPublishable`)
+   * @throws {ForbiddenError} (403, `NOT_ON_ORG_TEAM`) Its creator is no
+   *   longer on the org's team
    */
   async publishContent(
     organizationId: string,
@@ -152,25 +139,21 @@ export class AdminContentManagementService extends BaseService {
         // The row first, locked FOR NO KEY UPDATE, then its media FOR KEY
         // SHARE below: the order ContentService.publish and update() take
         // them in (no tier lock is taken here), so a PATCH can't swap the
-        // media under this publish (Codex-6sbn1).
+        // media under this publish (Codex-6sbn1). Every read and the write
+        // below carry the same org scope.
+        const inThisOrg = and(
+          eq(schema.content.id, contentId),
+          eq(schema.content.organizationId, organizationId),
+          isNull(schema.content.deletedAt)
+        );
         await tx
           .select({ id: schema.content.id })
           .from(schema.content)
-          .where(
-            and(
-              eq(schema.content.id, contentId),
-              eq(schema.content.organizationId, organizationId),
-              isNull(schema.content.deletedAt)
-            )
-          )
+          .where(inThisOrg)
           .for('no key update');
         // Get content with media item
         const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(schema.content.id, contentId),
-            eq(schema.content.organizationId, organizationId),
-            isNull(schema.content.deletedAt)
-          ),
+          where: inThisOrg,
           with: {
             mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
             creator: {
@@ -195,125 +178,23 @@ export class AdminContentManagementService extends BaseService {
           return existing as AdminContentItem;
         }
 
-        // Validate content is ready to publish (video/audio need ready media)
-        if (
-          ([CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO] as string[]).includes(
-            existing.contentType
-          )
-        ) {
-          if (!existing.mediaItem) {
-            throw new BusinessLogicError(
-              'Cannot publish content without media',
-              {
-                contentId,
-                contentType: existing.contentType,
-              }
-            );
-          }
-          // ContentService.publish's gate (Codex-6sbn1, Codex-vmi6m): a draft
-          // keeps its link to a deleted item and must not go live on it, nor
-          // on another creator's item. A locking read, so a media delete
-          // running now is ordered against this publish.
-          const [media] = await tx
-            .select({ deletedAt: schema.mediaItems.deletedAt })
-            .from(schema.mediaItems)
-            .where(
-              and(
-                eq(schema.mediaItems.id, existing.mediaItem.id),
-                eq(schema.mediaItems.creatorId, existing.creatorId)
-              )
-            )
-            .for('key share');
-          if (!media) {
-            throw new NotFoundError('Media item not found', {
-              mediaItemId: existing.mediaItem.id,
-            });
-          }
-          if (media.deletedAt) throw new MediaDeletedError(contentId);
-          if (existing.mediaItem.status !== 'ready') {
-            throw new BusinessLogicError('Media is not ready for publishing', {
-              contentId,
-              mediaItemId: existing.mediaItem.id,
-              mediaStatus: existing.mediaItem.status,
-            });
-          }
-        }
-
-        // ContentService.publish's thumbnail gate (Codex-tqvmx): no frame of
-        // the creator's deleted videos, matched by the test the media delete
-        // guard counts uses with. A locking read after the media's, as there.
-        const frames = posterFramesOf({
-          thumbnailUrl: existing.thumbnailUrl,
-          creatorId: existing.creatorId,
-          exceptMediaItemId: playedMediaItemId(existing),
-        });
-        if (frames) {
-          const rows = await tx
-            .select({ deletedAt: schema.mediaItems.deletedAt })
-            .from(schema.mediaItems)
-            .where(frames)
-            .for('key share');
-          if (rows.some((row) => row.deletedAt !== null)) {
-            throw new ThumbnailMediaDeletedError(contentId);
-          }
-        }
-
-        // Subscriber content needs at least one tier to go live — the rule
-        // ContentService.publish applies (Codex-2hxff.91, owner U2). A paid
-        // item whose tiers are optional stays on sale, so it may publish.
-        if (existing.isTierGated && !existing.isPurchasable) {
-          const [tick] = await tx
-            .select({ one: sql<number>`1` })
-            .from(schema.contentTierAccess)
-            .innerJoin(
-              schema.subscriptionTiers,
-              eq(schema.subscriptionTiers.id, schema.contentTierAccess.tierId)
-            )
-            .where(
-              and(
-                eq(schema.contentTierAccess.contentId, contentId),
-                isNull(schema.subscriptionTiers.deletedAt)
-              )
-            )
-            .limit(1);
-          if (!tick) throw new TierRequiredToPublishError(contentId);
-        }
-
-        // Content that earns money needs a creator who can be paid — the rule
-        // ContentService.publish applies (Codex-2hxff.14), which an admin
-        // publish must not route round. The same DB-only readiness check:
-        // `stripe_connect_accounts` (one row per user) mirrors Stripe's flags.
-        if (requiresPayoutsToPublish(existing)) {
-          const [account] = await tx
-            .select({
-              chargesEnabled: schema.stripeConnectAccounts.chargesEnabled,
-              payoutsEnabled: schema.stripeConnectAccounts.payoutsEnabled,
-            })
-            .from(schema.stripeConnectAccounts)
-            .where(eq(schema.stripeConnectAccounts.userId, existing.creatorId))
-            .limit(1);
-          if (!account?.chargesEnabled || !account.payoutsEnabled) {
-            throw new CreatorPayoutsRequiredError(
-              (existing.priceCents ?? 0) > 0 ? 'paid' : 'included_in_tier'
-            );
-          }
-        }
+        // ContentService.publish's own rules, from the one definition both
+        // paths share (Codex-a6ofh.2.1): an admin publish must not route
+        // round any of them. It checks the CREATOR, as the content's owner:
+        // still on the org's team, media ready, payouts set up.
+        await assertPublishable(tx as DatabaseTransaction, existing);
 
         // Publish content
         await tx
           .update(schema.content)
-          .set({
-            status: CONTENT_STATUS.PUBLISHED,
-            publishedAt: new Date(),
-            // Back on sale: clears the departure stamp (Codex-2hxff.64).
-            offSaleAt: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.content.id, contentId));
+          // The creator's own go-live columns, from the gate's module, so
+          // the two publishes can't drift (Codex-a6ofh.2.7).
+          .set(goLiveColumns())
+          .where(inThisOrg);
 
         // Re-fetch with relations for response
         const updated = await tx.query.content.findFirst({
-          where: eq(schema.content.id, contentId),
+          where: inThisOrg,
           with: {
             creator: {
               columns: {
@@ -336,12 +217,6 @@ export class AdminContentManagementService extends BaseService {
 
       return result;
     } catch (error) {
-      if (
-        error instanceof NotFoundError ||
-        error instanceof BusinessLogicError
-      ) {
-        throw error;
-      }
       this.handleError(error, 'publishContent');
     }
   }

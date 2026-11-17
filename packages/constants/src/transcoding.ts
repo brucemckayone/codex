@@ -241,6 +241,38 @@ export function toJobErrorCode(value: unknown): TranscodingErrorCode {
 export const MAX_TRANSCODING_ATTEMPTS = 3;
 
 /**
+ * The codes no attempt can cure: the file is the problem, or there is none.
+ * `claimForDispatch` never claims a row holding one, whatever its attempts.
+ */
+export const NON_RETRYABLE_TRANSCODING_ERROR_CODES: readonly TranscodingErrorCode[] =
+  Object.values(TRANSCODING_ERROR_CODES).filter(
+    (code) => !transcodingErrorInfo(code).retryable
+  );
+
+/**
+ * A failed transcode nothing will try again: its code is one no attempt can
+ * cure, or its attempts are spent. The same rule `claimForDispatch` refuses
+ * a claim by, so a failure the creator's Retry would still dispatch is not
+ * terminal (the maintenance run claims only `uploaded` rows, never a failed
+ * one). Publish when ready clears a schedule only on these (Codex-a6ofh.2.8);
+ * any other failure may yet get there.
+ */
+export function isTerminalTranscodeFailure(media: {
+  status: string;
+  transcodingErrorCode: string | null;
+  transcodingAttempts: number;
+}): boolean {
+  return (
+    media.status === MEDIA_STATUS.FAILED &&
+    (media.transcodingAttempts >= MAX_TRANSCODING_ATTEMPTS ||
+      (media.transcodingErrorCode !== null &&
+        NON_RETRYABLE_TRANSCODING_ERROR_CODES.includes(
+          toTranscodingErrorCode(media.transcodingErrorCode)
+        )))
+  );
+}
+
+/**
  * The max workers the RunPod endpoint should have, and the most a
  * RUNPOD_WORKERS_MAX may ask for. RunPod pauses an idle endpoint by setting
  * its max workers to 0; the maintenance run raises it back to this.

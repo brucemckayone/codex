@@ -37,27 +37,41 @@ export const emailSendStatusEnum = pgEnum('email_send_status', [
  * Email audit logs table
  * Tracks all email send attempts, successes, and failures
  */
-export const emailAuditLogs = pgTable('email_audit_logs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  organizationId: uuid('organization_id').references(() => organizations.id, {
-    onDelete: 'set null',
-  }),
-  creatorId: text('creator_id').references(() => users.id, {
-    onDelete: 'set null',
-  }),
-  templateName: varchar('template_name', { length: 100 }).notNull(),
-  recipientEmail: varchar('recipient_email', { length: 255 }).notNull(),
-  status: emailSendStatusEnum('status').default('pending').notNull(),
-  error: text('error'),
-  metadata: text('metadata'), // Using text for simplicity/compatibility if jsonb missing from imports, can upgrade later
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .defaultNow()
-    .notNull()
-    .$onUpdate(() => new Date()),
-});
+export const emailAuditLogs = pgTable(
+  'email_audit_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'set null',
+    }),
+    creatorId: text('creator_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    templateName: varchar('template_name', { length: 100 }).notNull(),
+    recipientEmail: varchar('recipient_email', { length: 255 }).notNull(),
+    status: emailSendStatusEnum('status').default('pending').notNull(),
+    error: text('error'),
+    metadata: text('metadata'), // Using text for simplicity/compatibility if jsonb missing from imports, can upgrade later
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    // Every "did this email go?" check (Codex-2hxff.102): the fee step's
+    // `foundSent`, the price-move sweep's resend check and auth's
+    // `wasWelcomeEmailSent` match one recipient and template, and the first
+    // two also read `created_at` from a date.
+    index('idx_email_audit_logs_recipient_template_created').on(
+      table.recipientEmail,
+      table.templateName,
+      table.createdAt
+    ),
+  ]
+);
 
 /**
  * Email templates table

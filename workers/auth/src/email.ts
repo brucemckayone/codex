@@ -9,7 +9,7 @@
  * In production, Resend delivers real emails.
  */
 
-import { and, type Database, eq, schema } from '@codex/database';
+import { and, type Database, eq, notATestSend, schema } from '@codex/database';
 import { workerFetch } from '@codex/security';
 import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '@codex/worker-utils';
@@ -146,6 +146,12 @@ export function sendWelcomeEmail(
  * Dedupe key is `recipientEmail` because notifications-api always populates it
  * (creatorId is optional). Idempotent across afterEmailVerification re-fires
  * (BetterAuth retries, change-email-confirmation flow at line 207).
+ *
+ * Any status counts, `failed` and `pending` included: that rule is not the
+ * morning readers' (`emailLogShowsSent`), and changing it is not decided. A
+ * test send never counts (`notATestSend`): a creator may test-send their own
+ * `welcome` template to anyone's address, and it must not cost that person
+ * their real welcome email.
  */
 export async function wasWelcomeEmailSent(
   db: Database,
@@ -157,7 +163,8 @@ export async function wasWelcomeEmailSent(
     .where(
       and(
         eq(schema.emailAuditLogs.recipientEmail, email),
-        eq(schema.emailAuditLogs.templateName, 'welcome')
+        eq(schema.emailAuditLogs.templateName, 'welcome'),
+        notATestSend()
       )
     )
     .limit(1);

@@ -20,10 +20,10 @@
      `.dialog-content[data-size='sm']` — (0,3,0) once Svelte appends its scoping
      class — also beat the mobile override's `.dialog-content.creator-drawer`
      at (0,2,0), so the bottom sheet's `max-width: 100%` was dead CSS and the
-     sheet clamped to 448px on any viewport between 448px and 640px. Fixed with
-     `min-inline-size` rather than a bigger selector: min-width wins the
-     used-width constraint resolution regardless of which `max-width` cascaded,
-     so the sheet is full-bleed without a specificity arms race.
+     sheet clamped to 448px on any viewport between 448px and 640px. The
+     panel is now Dialog.Content's `variant="drawer" sheet flush`, whose sheet
+     drops the max-width below sm, so it is full-bleed with no override at all
+     (Codex-vlphc.3).
   2. **It opened scrolled 630px down.** The dialog moves initial focus to the
      first focusable descendant, which used to be a social link deep in the body,
      and the browser scrolled it into view — so you opened a person's profile and
@@ -33,7 +33,7 @@
      `.dialog-close` is `position: absolute` inside this scroll container, so at
      scrollTop 630 it measured y=-618 — off-screen, with Esc and overlay-click the
      only ways out, and no visible dismiss at all on the mobile sheet. This drawer
-     supplies its own sticky one and hides the primitive's.
+     supplies its own sticky one and turns the primitive's off.
   4. **The panel had no accessible name.** Melt's dialog builder emits
      `aria-labelledby={titleId}` on the content element unconditionally, and this
      was the only one of the app's `Dialog.Content` consumers that never rendered
@@ -129,325 +129,231 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange} {closeFocus}>
-  <Dialog.Content class="creator-drawer" size="sm">
+  <Dialog.Content
+    variant="drawer"
+    size="sm"
+    sheet
+    flush
+    closeButton={false}
+    class="creator-drawer"
+  >
     {#if creator}
-      <!--
-        First focusable element in the panel, on purpose: the dialog focuses its
-        first focusable descendant on open, so putting the dismiss control here is
-        what keeps the panel scrolled to the top. It is also sticky, so it stays
-        reachable however far the body scrolls.
-      -->
-      <div class="drawer-bar">
+      <Dialog.Body>
         <!--
-          `common_close` has now landed, so this reads from the message rather than
-          the literal it previously mirrored. `DialogContent.svelte` still hardcodes
-          its own `aria-label="Close"` — swapping a primitive with 14 consumers is
-          its own change, tracked separately, so the two agree in output today but
-          not yet in source.
+          First focusable element in the panel, on purpose: the dialog focuses its
+          first focusable descendant on open, so putting the dismiss control here is
+          what keeps the panel scrolled to the top. It is also sticky, so it stays
+          reachable however far the body scrolls.
         -->
-        <button
-          type="button"
-          class="drawer-bar__close"
-          aria-label={m.common_close()}
-          onclick={() => handleOpenChange(false)}
+        <div class="drawer-bar">
+          <!--
+            `common_close` has now landed, so this reads from the message rather than
+            the literal it previously mirrored. `DialogContent.svelte` still hardcodes
+            its own `aria-label="Close"` — swapping a primitive with 14 consumers is
+            its own change, tracked separately, so the two agree in output today but
+            not yet in source.
+          -->
+          <button
+            type="button"
+            class="drawer-bar__close"
+            aria-label={m.common_close()}
+            onclick={() => handleOpenChange(false)}
+          >
+            <XIcon size={18} />
+          </button>
+        </div>
+
+        <!-- Mobile drag handle -->
+        <div class="drawer-handle" aria-hidden="true">
+          <span class="drawer-handle__bar"></span>
+        </div>
+
+        <!-- ═══ HERO PHOTO ═══
+             Square, so the body starts above the fold. It was 3:4, which at the
+             panel's real 672px width rendered 671×895 and filled a 900px viewport
+             on its own. Below 40rem the sheet is full-bleed, as LATEST_SIZES
+             has it; from 40rem the panel is 28rem. -->
+        <CreatorPortrait
+          src={creator.avatarUrl}
+          name={displayName}
+          aspect="square"
+          size="lg"
+          sizes="(max-width: 39.9375rem) 100vw, 28rem"
+          eager
         >
-          <XIcon size={18} />
-        </button>
-      </div>
-
-      <!-- Mobile drag handle -->
-      <div class="drawer-handle" aria-hidden="true">
-        <span class="drawer-handle__bar"></span>
-      </div>
-
-      <!-- ═══ HERO PHOTO ═══
-           Square, so the body starts above the fold. It was 3:4, which at the
-           panel's real 672px width rendered 671×895 and filled a 900px viewport
-           on its own. Below 40rem the sheet is full-bleed, as LATEST_SIZES
-           has it; from 40rem the panel is 28rem. -->
-      <CreatorPortrait
-        src={creator.avatarUrl}
-        name={displayName}
-        aspect="square"
-        size="lg"
-        sizes="(max-width: 39.9375rem) 100vw, 28rem"
-        eager
-      >
-        <!-- Gradient overlay with name.
-             `Dialog.Title`, not a bare <h2>: it renders the same <h2> but wires
-             it to `use:melt={$title}`, which is the id Melt already points the
-             panel's `aria-labelledby` at. Without it that reference dangles and
-             the dialog has no accessible name at all. -->
-        <div class="drawer-hero__overlay">
-          <Dialog.Title class="drawer-hero__name">{displayName}</Dialog.Title>
-          <div class="drawer-hero__meta">
-            {#if creator.username}
-              <span class="drawer-hero__username">@{creator.username}</span>
-            {/if}
-            <Badge variant="neutral">{roleLabel}</Badge>
+          <!-- Gradient overlay with name.
+               `Dialog.Title`, not a bare <h2>: it renders the same <h2> but wires
+               it to `use:melt={$title}`, which is the id Melt already points the
+               panel's `aria-labelledby` at. Without it that reference dangles and
+               the dialog has no accessible name at all. -->
+          <div class="drawer-hero__overlay">
+            <Dialog.Title class="drawer-hero__name">{displayName}</Dialog.Title>
+            <div class="drawer-hero__meta">
+              {#if creator.username}
+                <span class="drawer-hero__username">@{creator.username}</span>
+              {/if}
+              <Badge variant="neutral">{roleLabel}</Badge>
+            </div>
           </div>
-        </div>
-      </CreatorPortrait>
+        </CreatorPortrait>
 
-      <!-- ═══ BODY ═══ -->
-      <div class="drawer-body">
-        <!-- Bio -->
-        {#if creator.bio}
-          <p class="drawer-bio">{creator.bio}</p>
-        {/if}
-
-        <!-- Stats row -->
-        <div class="drawer-stats">
-          {#if creator.contentCount > 0}
-            <span class="drawer-stats__item">
-              {creator.contentCount === 1
-                ? m.creator_drawer_content_items_one()
-                : m.creator_drawer_content_items({ count: creator.contentCount })}
-            </span>
+        <!-- ═══ BODY ═══ -->
+        <div class="drawer-body">
+          <!-- Bio -->
+          {#if creator.bio}
+            <p class="drawer-bio">{creator.bio}</p>
           {/if}
-          <span class="drawer-stats__item">
-            {m.creator_drawer_joined({ date: formatRelativeTime(creator.joinedAt) })}
-          </span>
+
+          <!-- Stats row -->
+          <div class="drawer-stats">
+            {#if creator.contentCount > 0}
+              <span class="drawer-stats__item">
+                {creator.contentCount === 1
+                  ? m.creator_drawer_content_items_one()
+                  : m.creator_drawer_content_items({ count: creator.contentCount })}
+              </span>
+            {/if}
+            <span class="drawer-stats__item">
+              {m.creator_drawer_joined({ date: formatRelativeTime(creator.joinedAt) })}
+            </span>
+          </div>
+
+          <!-- Social Links -->
+          {#if hasSocialLinks}
+            <div class="drawer-social">
+              {#if creator.socialLinks?.website}
+                <a
+                  href={creator.socialLinks.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="drawer-social__link"
+                  aria-label={m.creator_visit_website()}
+                >
+                  <GlobeIcon size={20} />
+                </a>
+              {/if}
+
+              {#if creator.socialLinks?.twitter}
+                <a
+                  href={creator.socialLinks.twitter}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="drawer-social__link"
+                  aria-label={m.creator_visit_twitter()}
+                >
+                  <TwitterIcon size={20} />
+                </a>
+              {/if}
+
+              {#if creator.socialLinks?.youtube}
+                <a
+                  href={creator.socialLinks.youtube}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="drawer-social__link"
+                  aria-label={m.creator_visit_youtube()}
+                >
+                  <YoutubeIcon size={20} />
+                </a>
+              {/if}
+
+              {#if creator.socialLinks?.instagram}
+                <a
+                  href={creator.socialLinks.instagram}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="drawer-social__link"
+                  aria-label={m.creator_visit_instagram()}
+                >
+                  <InstagramIcon size={20} />
+                </a>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- Other Organizations -->
+          {#if creator.organizations.length > 0}
+            <div class="drawer-orgs">
+              <h3 class="drawer-orgs__heading">{m.creator_drawer_also_on()}</h3>
+              <div class="drawer-orgs__row">
+                {#each creator.organizations as org (org.slug)}
+                  <!--
+                    `aria-label`, not `title`. These tiles are logo-or-initial, so
+                    name-from-content gave a logo-less org a link whose entire
+                    accessible name was one letter, and `title` is pointer-only
+                    disclosure that accname never reaches once there is content to
+                    read (WCAG 2.4.4). An explicit label outranks both, so the logo
+                    is then decorative — `alt=""` keeps it from announcing twice.
+                  -->
+                  <a
+                    href={buildOrgUrl(page.url, org.slug, '/')}
+                    class="drawer-orgs__item"
+                    aria-label={org.name}
+                    title={org.name}
+                  >
+                    {#if org.logoUrl}
+                      <img src={org.logoUrl} alt="" class="drawer-orgs__logo" />
+                    {:else}
+                      <span class="drawer-orgs__initial" aria-hidden="true">
+                        {org.name.charAt(0)}
+                      </span>
+                    {/if}
+                  </a>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          <!-- Content Gallery -->
+          {#if creator.recentContent.length > 0}
+            <div class="drawer-content">
+              <h3 class="drawer-content__heading">{m.creator_drawer_latest()}</h3>
+              <div class="drawer-content__grid">
+                {#each creator.recentContent as item (item.slug)}
+                  <a
+                    href={buildContentUrl(page.url, { slug: item.slug, id: item.slug })}
+                    class="drawer-content__item"
+                  >
+                    {#if item.thumbnailUrl}
+                      <img
+                        src={item.thumbnailUrl}
+                        srcset={getThumbnailSrcset(item.thumbnailUrl) || undefined}
+                        sizes={coverCropSizes(LATEST_SIZES, 16 / 9, item.thumbnailUrl)}
+                        alt=""
+                        class="drawer-content__thumb"
+                        loading="lazy"
+                      />
+                    {:else}
+                      <div class="drawer-content__thumb drawer-content__thumb--empty">
+                        <span class="drawer-content__thumb-type">{item.contentType}</span>
+                      </div>
+                    {/if}
+                    <span class="drawer-content__title">{item.title}</span>
+                  </a>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          <!-- View Full Profile -->
+          {#if profileUrl}
+            <a href={profileUrl} class="drawer-profile-link">
+              <span>{m.creator_drawer_view_profile()}</span>
+              <ChevronRightIcon size={16} />
+            </a>
+          {/if}
         </div>
-
-        <!-- Social Links -->
-        {#if hasSocialLinks}
-          <div class="drawer-social">
-            {#if creator.socialLinks?.website}
-              <a
-                href={creator.socialLinks.website}
-                target="_blank"
-                rel="noopener noreferrer"
-                class="drawer-social__link"
-                aria-label={m.creator_visit_website()}
-              >
-                <GlobeIcon size={20} />
-              </a>
-            {/if}
-
-            {#if creator.socialLinks?.twitter}
-              <a
-                href={creator.socialLinks.twitter}
-                target="_blank"
-                rel="noopener noreferrer"
-                class="drawer-social__link"
-                aria-label={m.creator_visit_twitter()}
-              >
-                <TwitterIcon size={20} />
-              </a>
-            {/if}
-
-            {#if creator.socialLinks?.youtube}
-              <a
-                href={creator.socialLinks.youtube}
-                target="_blank"
-                rel="noopener noreferrer"
-                class="drawer-social__link"
-                aria-label={m.creator_visit_youtube()}
-              >
-                <YoutubeIcon size={20} />
-              </a>
-            {/if}
-
-            {#if creator.socialLinks?.instagram}
-              <a
-                href={creator.socialLinks.instagram}
-                target="_blank"
-                rel="noopener noreferrer"
-                class="drawer-social__link"
-                aria-label={m.creator_visit_instagram()}
-              >
-                <InstagramIcon size={20} />
-              </a>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- Other Organizations -->
-        {#if creator.organizations.length > 0}
-          <div class="drawer-orgs">
-            <h3 class="drawer-orgs__heading">{m.creator_drawer_also_on()}</h3>
-            <div class="drawer-orgs__row">
-              {#each creator.organizations as org (org.slug)}
-                <!--
-                  `aria-label`, not `title`. These tiles are logo-or-initial, so
-                  name-from-content gave a logo-less org a link whose entire
-                  accessible name was one letter, and `title` is pointer-only
-                  disclosure that accname never reaches once there is content to
-                  read (WCAG 2.4.4). An explicit label outranks both, so the logo
-                  is then decorative — `alt=""` keeps it from announcing twice.
-                -->
-                <a
-                  href={buildOrgUrl(page.url, org.slug, '/')}
-                  class="drawer-orgs__item"
-                  aria-label={org.name}
-                  title={org.name}
-                >
-                  {#if org.logoUrl}
-                    <img src={org.logoUrl} alt="" class="drawer-orgs__logo" />
-                  {:else}
-                    <span class="drawer-orgs__initial" aria-hidden="true">
-                      {org.name.charAt(0)}
-                    </span>
-                  {/if}
-                </a>
-              {/each}
-            </div>
-          </div>
-        {/if}
-
-        <!-- Content Gallery -->
-        {#if creator.recentContent.length > 0}
-          <div class="drawer-content">
-            <h3 class="drawer-content__heading">{m.creator_drawer_latest()}</h3>
-            <div class="drawer-content__grid">
-              {#each creator.recentContent as item (item.slug)}
-                <a
-                  href={buildContentUrl(page.url, { slug: item.slug, id: item.slug })}
-                  class="drawer-content__item"
-                >
-                  {#if item.thumbnailUrl}
-                    <img
-                      src={item.thumbnailUrl}
-                      srcset={getThumbnailSrcset(item.thumbnailUrl) || undefined}
-                      sizes={coverCropSizes(LATEST_SIZES, 16 / 9, item.thumbnailUrl)}
-                      alt=""
-                      class="drawer-content__thumb"
-                      loading="lazy"
-                    />
-                  {:else}
-                    <div class="drawer-content__thumb drawer-content__thumb--empty">
-                      <span class="drawer-content__thumb-type">{item.contentType}</span>
-                    </div>
-                  {/if}
-                  <span class="drawer-content__title">{item.title}</span>
-                </a>
-              {/each}
-            </div>
-          </div>
-        {/if}
-
-        <!-- View Full Profile -->
-        {#if profileUrl}
-          <a href={profileUrl} class="drawer-profile-link">
-            <span>{m.creator_drawer_view_profile()}</span>
-            <ChevronRightIcon size={16} />
-          </a>
-        {/if}
-      </div>
+      </Dialog.Body>
     {/if}
   </Dialog.Content>
 </Dialog.Root>
 
 <style>
-  /* ═══════════════════════════════════════════════════════════
-     ANIMATIONS — Disney principles: ease-out entrance, overshoot settle
-     ═══════════════════════════════════════════════════════════ */
-
-  /* Desktop: slide in from right with deceleration */
-  @keyframes drawer-slide-in-right {
-    0% {
-      transform: translateX(100%);
-      opacity: 0;
-    }
-    60% {
-      opacity: 1;
-    }
-    100% {
-      transform: translateX(0);
-      opacity: 1;
-    }
-  }
-
-  /* Mobile: slide up from bottom with slight overshoot (follow-through) */
-  @keyframes drawer-slide-in-bottom {
-    0% {
-      transform: translateY(100%);
-      opacity: 0;
-    }
-    70% {
-      transform: translateY(-2%);
-      opacity: 1;
-    }
-    100% {
-      transform: translateY(0);
-      opacity: 1;
-    }
-  }
-
-  /* Overlay fade-in */
-  @keyframes drawer-overlay-fade {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-
-  /* Apply overlay fade to the dialog overlay when drawer is open */
-  :global(.dialog-content.creator-drawer ~ .dialog-overlay),
-  :global(.dialog-overlay:has(~ .dialog-content-wrapper .creator-drawer)) {
-    animation: drawer-overlay-fade var(--duration-slow) var(--ease-out) both;
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     DRAWER CONTAINER
-     Desktop: right-aligned panel, no padding (hero is edge-to-edge)
-     Mobile: bottom sheet
-     ═══════════════════════════════════════════════════════════ */
-  /* Width comes from `size="sm"` on Dialog.Content, not from here: a local
-     `max-width` loses to `.dialog-content[data-size]` on specificity, which is
-     why this panel silently rendered at 672px for so long. */
-  :global(.dialog-content.creator-drawer) {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: auto;
-    width: 100%;
-    height: 100%;
-    max-height: 100vh;
-    border-radius: 0;
-    border-right: none;
-    border-top: none;
-    border-bottom: none;
-    border-left: var(--border-width) var(--border-style) var(--color-border);
-    overflow-y: auto;
-    overflow-x: hidden;
-    display: flex;
-    flex-direction: column;
-    padding: 0;
-    animation: drawer-slide-in-right var(--duration-slower) var(--ease-out) both;
-  }
-
-  @media (--below-sm) {
-    :global(.dialog-content.creator-drawer) {
-      top: auto;
-      right: 0;
-      bottom: 0;
-      left: 0;
-      /* `min-inline-size`, not `max-width`. `size="sm"` puts
-         `.dialog-content[data-size='sm'] { max-width: 28rem }` on this element at
-         (0,3,0) once Svelte appends its scoping class, which outranks this
-         two-class `:global()` at (0,2,0) — media queries add no specificity — so
-         a local `max-width: 100%` here was dead CSS and the sheet clamped to
-         448px across the whole 448–640px band. min-width wins the used-width
-         constraint resolution (`max(min-width, min(max-width, width))`) whatever
-         max-width cascaded, so this is full-bleed without a specificity fight. */
-      min-inline-size: 100%;
-      width: 100%;
-      height: auto;
-      max-height: 90vh;
-      border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-      border-left: none;
-      border-top: var(--border-width) var(--border-style) var(--color-border);
-      animation-name: drawer-slide-in-bottom;
-    }
-  }
-
   /* ── Dismiss bar ──
      Sticky and zero-height so it floats the close control over the hero without
-     costing layout, and cannot scroll out of reach. The primitive's own
-     `.dialog-close` is hidden for this variant: it renders last in the DOM and is
-     absolutely positioned inside this scroll container, so it was both the wrong
-     initial focus target and off-screen once the body scrolled. */
+     costing layout, and cannot scroll out of reach. The primitive's own close
+     button is off (`closeButton={false}`): this one sits on the photograph and
+     is the panel's first focusable element, so focus lands at the top. */
   .drawer-bar {
     position: sticky;
     inset-block-start: 0;
@@ -455,10 +361,6 @@
     block-size: 0;
     display: flex;
     justify-content: flex-end;
-  }
-
-  :global(.dialog-content.creator-drawer > .dialog-close) {
-    display: none;
   }
 
   .drawer-bar__close {
@@ -555,14 +457,14 @@
     animation-delay: var(--duration-normal);
   }
 
-  /* `:global()` + three classes, both deliberate. `Dialog.Title` owns this
-     element, so Svelte does not stamp this component's scoping class onto it —
-     hence `:global()`. And DialogTitle's own `.dialog-title` rule is (0,2,0)
+  /* Reached through this component's own overlay. `Dialog.Title` owns the
+     element, so Svelte does not stamp this component's scoping class onto it
+     — hence `:global()`. DialogTitle's own `.dialog-title` rule is (0,2,0)
      with its scoping class, so a one-class `:global(.drawer-hero__name)` at
-     (0,1,0) would lose and the name would render at --text-xl in --color-text.
-     `.dialog-content.creator-drawer` is (0,3,0) and mirrors the panel selectors
-     above, so it wins without depending on stylesheet order. */
-  :global(.dialog-content.creator-drawer .drawer-hero__name) {
+     (0,1,0) would lose and the name would render at --text-xl in
+     --color-text. `.drawer-hero__overlay` carries the scoping class, so this
+     is (0,3,0) and wins without depending on stylesheet order. */
+  .drawer-hero__overlay :global(.drawer-hero__name) {
     margin: 0;
     font-family: var(--font-heading);
     font-size: var(--text-3xl);
@@ -576,7 +478,7 @@
     line-height: var(--leading-tight);
     text-shadow: 0 var(--border-width) var(--space-1) var(--color-player-overlay);
     /* `.dialog-title` reserves a gutter for the primitive's absolute close
-       button. This panel hides that button and floats its own sticky one in a
+       button. This panel turns that button off and floats its own sticky one in a
        zero-height bar, so the gutter would just shove the name off-centre. */
     padding-inline-end: 0;
   }

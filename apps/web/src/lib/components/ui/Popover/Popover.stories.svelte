@@ -20,9 +20,9 @@
       <Popover.Trigger>
         <Button variant="secondary">Open Popover</Button>
       </Popover.Trigger>
-      <Popover.Content>
+      <Popover.Content aria-labelledby="popover-story-default-title">
         <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-          <h4 style="margin: 0; color: var(--color-text);">Popover Title</h4>
+          <h4 id="popover-story-default-title" style="margin: 0; color: var(--color-text);">Popover Title</h4>
           <p style="margin: 0; font-size: 0.875rem; color: var(--color-text-secondary);">This is a popover with some content.</p>
         </div>
       </Popover.Content>
@@ -39,9 +39,9 @@
           Filter
         </Button>
       </Popover.Trigger>
-      <Popover.Content>
+      <Popover.Content aria-labelledby="popover-story-filter-title">
         <div style="display: flex; flex-direction: column; gap: 1rem; min-width: 200px;">
-          <h4 style="margin: 0; color: var(--color-text);">Filters</h4>
+          <h4 id="popover-story-filter-title" style="margin: 0; color: var(--color-text);">Filters</h4>
           <div style="display: flex; flex-direction: column; gap: 0.5rem;">
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--color-text);">
               <input type="checkbox" /> Published

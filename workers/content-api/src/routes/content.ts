@@ -10,16 +10,24 @@
  * - GET    /api/content/:id        - Get by ID
  * - PATCH  /api/content/:id        - Update content
  * - GET    /api/content            - List with filters
+ * - GET    /api/content/where-counts - Where the creator's content is filed
+ * - GET    /api/content/attention  - "Needs you" counts, by kind
  * - POST   /api/content/:id/publish   - Publish content
  * - POST   /api/content/:id/unpublish - Unpublish content
  * - DELETE /api/content/:id        - Soft delete
  * - POST   /api/content/:id/thumbnail - Upload content thumbnail
+ * - POST   /api/content/:id/categories - Add categories (keeps the set)
+ * - POST   /api/content/bulk/{publish,unpublish,delete,categories,access}
+ *          - One action on up to CONTENT_BULK_MAX pieces, a result for each
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
-import { AUTH_ROLES } from '@codex/constants';
+import {
+  AUTH_ROLES,
+  CONTENT_STATUS,
+  type ContentAttentionCounts,
+} from '@codex/constants';
 import type {
-  ContentInvalidationReason,
+  CancelPublishRequestResponse,
   ContentResponse,
   CreateContentResponse,
   DeleteContentResponse,
@@ -33,139 +41,47 @@ import {
   contentBrowseQuerySchema,
   contentQuerySchema,
   createContentSchema,
-  invalidateContentAccess,
   updateContentSchema,
 } from '@codex/content';
-import { createDbClient } from '@codex/database';
 import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
-import type { Logger, ObservabilityClient } from '@codex/observability';
-import type { CheckSlugResponse, HonoEnv } from '@codex/shared-types';
-import { createIdParamsSchema } from '@codex/validation';
+import type {
+  CheckSlugResponse,
+  ContentBulkResponse,
+  ContentPortalUses,
+  ContentWhereCounts,
+  HonoEnv,
+} from '@codex/shared-types';
 import {
-  invalidateOrgSlugCache,
+  addContentCategoriesSchema,
+  contentAttentionQuerySchema,
+  contentBulkAccessSchema,
+  contentBulkCategoriesSchema,
+  contentBulkSchema,
+  createIdParamsSchema,
+  publishContentQuerySchema,
+  updateContentQuerySchema,
+} from '@codex/validation';
+import {
   multipartProcedure,
   PaginatedResult,
   procedure,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { cleanupContentThumbnailOnDelete } from './content-cleanup';
-import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
-
-/**
- * Bump the org content version in KV after publish/unpublish/delete.
- * Also invalidates the org's public caches (info, stats, creators) since
- * content changes affect creator contentCount and org stats.
- * Fire-and-forget via waitUntil — does not block the response, and never
- * throws: the thumbnail route calls it from a `.finally()`, where a throw
- * would replace the upload's own error.
- */
-function bumpOrgContentVersion(
-  env: HonoEnv['Bindings'],
-  executionCtx: ExecutionContext,
-  organizationId: string | null | undefined,
-  obs?: ObservabilityClient
-): void {
-  if (!organizationId || !env.CACHE_KV) return;
-  // Given `obs`, because the cache swallows a failed invalidation and logs it
-  // only through its own client: the `.catch` below never sees one.
-  const cache = new VersionedCache({
-    kv: env.CACHE_KV,
-    waitUntil: (promise) => executionCtx.waitUntil(promise),
-    obs,
-  });
-  // Invalidate slug-keyed cache (stats, creators, public info) — shared
-  // helper resolves orgId → slug and swallows transient failures. Started in
-  // a promise of its own, so a client that cannot be built (missing config)
-  // lands in the `.catch` below instead of throwing to the caller, and the
-  // other bumps still run.
-  const bySlug = Promise.resolve().then(() =>
-    invalidateOrgSlugCache({
-      db: createDbClient(env),
-      cache,
-      orgId: organizationId,
-      logger: obs,
-    })
-  );
-  executionCtx.waitUntil(
-    Promise.all([
-      // Invalidate org content collection version
-      cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
-      bySlug,
-      // Invalidate the public topic list: publish/unpublish/delete changes the
-      // set of categories with ≥1 published item, so a cached "Browse by topic"
-      // list could otherwise show empty or missing topics until TTL.
-      cache.invalidate(CacheType.CATEGORIES(organizationId)),
-      // Invalidate the public portal (journey) rails for the same reason
-      // (Codex-72k55): each card's `practiceCount`/`stageCount` counts only
-      // practices whose content is PUBLISHED, so publishing or unpublishing one
-      // practice changes cards that name no content at all. Without this bump a
-      // portal advertises "8 practices" while only 7 are reachable.
-      cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
-    ]).catch((err: unknown) => {
-      obs?.warn('Cache invalidation failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    })
-  );
-}
-
-/**
- * Fan per-user library cache invalidation after a content mutation.
- *
- * Codex-c01do — content mutations (update-access-config, unpublish, delete,
- * publish) previously bumped ONLY catalogue version keys. The per-user
- * library cache (`COLLECTION_USER_LIBRARY`) was untouched, so library UI
- * showed stale accessType flags until the next visibility-change staleness
- * roundtrip. Access decisions at click time are always live (server-side)
- * — this is UX drift, not a security bug — but per feedback_dont_defer_cache_issues
- * we close the gap proactively.
- *
- * Fire-and-forget: the whole block is wrapped in `waitUntil` so the route
- * response is never blocked on KV writes.
- */
-function fanContentInvalidation(
-  env: HonoEnv['Bindings'],
-  executionCtx: ExecutionContext,
-  contentId: string,
-  organizationId: string | null | undefined,
-  reason: ContentInvalidationReason,
-  obs?: Logger,
-  options: { includeFollowers?: boolean } = {}
-): void {
-  if (!env.CACHE_KV) return;
-  const cache = new VersionedCache({
-    kv: env.CACHE_KV,
-    waitUntil: (promise) => executionCtx.waitUntil(promise),
-  });
-  const db = createDbClient(env);
-  const waitUntil = executionCtx.waitUntil.bind(executionCtx);
-
-  // Wrap the whole fanout in waitUntil so the DB `resolveAffectedUsers`
-  // query does not block the response. The helper internally hands each
-  // per-user KV bump to waitUntil as well.
-  executionCtx.waitUntil(
-    invalidateContentAccess({
-      db,
-      cache,
-      waitUntil,
-      contentId,
-      organizationId: organizationId ?? null,
-      reason,
-      logger: obs,
-      includeFollowers: options.includeFollowers ?? false,
-    }).catch((err: unknown) => {
-      obs?.warn('content-invalidation: fanout failed', {
-        contentId,
-        organizationId,
-        reason,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    })
-  );
-}
+import {
+  afterBulkChange,
+  afterContentPublished,
+  bumpOrgContentVersion,
+  fanContentInvalidation,
+} from './content-invalidation';
+import {
+  resolveR2PublicBases,
+  toPublicItems,
+  withPosterUrls,
+} from './r2-public-urls';
 
 const app = new Hono<HonoEnv>();
 
@@ -275,6 +191,242 @@ app.get(
 );
 
 /**
+ * GET /api/content/where-counts
+ * How the creator's own content is filed (Codex-a6ofh.3.2): the personal
+ * studio's "Where" menu, "Everywhere 14 · Personal 3 · Studio Alpha 9"
+ * (mockup L4b). A static child, so above `/:id`, as `/browse` is.
+ *
+ * Returns: ContentWhereCounts (200)
+ * Security: Authenticated users, own content only, API rate limit (100 req/min)
+ */
+app.get(
+  '/where-counts',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx): Promise<ContentWhereCounts> =>
+      ctx.services.content.whereCounts(ctx.user.id),
+  })
+);
+
+/**
+ * GET /api/content/attention
+ * What the creator's own pieces need, by kind (Codex-a6ofh.3.4): the content
+ * list's "Needs you" chips, counted across every page by the rule the list's
+ * `needs` filter uses. Where the list looks: `organizationId`, or
+ * `scope=personal` (the service's `organizationId: null`), or neither for
+ * everywhere. A static child, so above `/:id`.
+ *
+ * Returns: ContentAttentionCounts (200)
+ * Security: Authenticated users, own content only, API rate limit (100 req/min)
+ */
+app.get(
+  '/attention',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: contentAttentionQuerySchema },
+    handler: async (ctx): Promise<ContentAttentionCounts> => {
+      const { scope, organizationId } = ctx.input.query;
+      return ctx.services.content.attentionCounts(
+        ctx.user.id,
+        scope ? null : organizationId
+      );
+    },
+  })
+);
+
+// ============================================================================
+// Bulk actions (Codex-a6ofh.3.5, owner 2026-11-12: "Bulk endpoints, one
+// bump"): the content list's selection, at most CONTENT_BULK_MAX pieces. Each
+// piece goes through its own route's rules in its own transaction and gets a
+// result of its own; the request fails only for its body, auth or the rate
+// limit. One bulk call is one rate-limit hit. The caches are refreshed once
+// per org after the loop (`afterBulkChange`), on the per-piece routes' own
+// conditions. Static children, so above every `/:id` route: with `/:id/publish`
+// first, `/bulk/publish` was read as the piece "bulk".
+// ============================================================================
+
+/**
+ * POST /api/content/bulk/publish
+ * Publish each piece, publish when ready included (owner D-b1): one whose
+ * media is on its way is `scheduled`.
+ *
+ * Security: Creator/Admin only, own pieces (another's is not found), API
+ * rate limit (100 req/min)
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/publish',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { body: contentBulkSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.publishMany(
+        ctx.input.body.ids,
+        ctx.user.id
+      );
+      afterBulkChange(
+        ctx.env,
+        ctx.executionCtx,
+        touched,
+        'content_published',
+        ctx.obs
+      );
+      return { results };
+    },
+  })
+);
+
+/**
+ * POST /api/content/bulk/unpublish
+ * Take each piece down; a draft is `unchanged`. Buyers keep playback.
+ *
+ * Security: Creator/Admin only, own pieces, API rate limit (100 req/min)
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/unpublish',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { body: contentBulkSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.unpublishMany(
+        ctx.input.body.ids,
+        ctx.user.id
+      );
+      afterBulkChange(
+        ctx.env,
+        ctx.executionCtx,
+        touched,
+        'content_unpublished',
+        ctx.obs
+      );
+      return { results };
+    },
+  })
+);
+
+/**
+ * POST /api/content/bulk/delete
+ * Soft-delete each piece. One people bought is left alone (owner D-b4):
+ * `refused`, `CONTENT_HAS_BUYERS`. Each deleted cover's files are cleared in
+ * the background, so the answer does not wait on R2.
+ *
+ * Security: Creator/Admin only, own pieces, strict rate limit (20/min): one
+ * call deletes at most CONTENT_BULK_MAX pieces
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/delete',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+      rateLimit: 'strict',
+    },
+    input: { body: contentBulkSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.deleteMany(
+        ctx.input.body.ids,
+        ctx.user.id
+      );
+      // Codex-ko8ko, as a delete one at a time: never strand a cover's R2
+      // objects. Each cleanup is best-effort and never throws, and
+      // `background` holds the request's DB open for its orphan records.
+      ctx.background(
+        Promise.allSettled(
+          touched.map(({ id }) =>
+            cleanupContentThumbnailOnDelete(
+              ctx.services.imageProcessing,
+              id,
+              ctx.user.id,
+              ctx.obs
+            )
+          )
+        )
+      );
+      afterBulkChange(
+        ctx.env,
+        ctx.executionCtx,
+        touched,
+        'content_deleted',
+        ctx.obs
+      );
+      return { results };
+    },
+  })
+);
+
+/**
+ * POST /api/content/bulk/categories
+ * File each piece in more categories, keeping the ones it has, as
+ * `POST /:id/categories`: each one's space and 20-category limit hold.
+ *
+ * Security: Creator/Admin only, own pieces, API rate limit (100 req/min)
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/categories',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { body: contentBulkCategoriesSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.addCategoriesMany(
+        ctx.input.body.ids,
+        ctx.user.id,
+        ctx.input.body.categoryIds
+      );
+      // As the per-piece route: the org caches, no library fan-out.
+      afterBulkChange(ctx.env, ctx.executionCtx, touched, null, ctx.obs);
+      return { results };
+    },
+  })
+);
+
+/**
+ * POST /api/content/bulk/access
+ * Set who can watch each piece (owner D-b2): `PATCH /:id` with the access
+ * fields alone, under its rules. A move to Followers or Team only leaves
+ * alone a piece people bought (owner R1, `CONTENT_HAS_BUYERS`).
+ *
+ * Security: Creator/Admin only, own pieces, API rate limit (100 req/min)
+ * @returns {ContentBulkResponse}
+ */
+app.post(
+  '/bulk/access',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { body: contentBulkAccessSchema },
+    handler: async (ctx): Promise<ContentBulkResponse> => {
+      const { results, touched } = await ctx.services.content.accessMany(
+        ctx.input.body.ids,
+        ctx.user.id,
+        ctx.input.body.access
+      );
+      afterBulkChange(
+        ctx.env,
+        ctx.executionCtx,
+        touched,
+        'content_updated',
+        ctx.obs
+      );
+      return { results };
+    },
+  })
+);
+
+/**
  * GET /api/content/:id
  * Get content by ID
  *
@@ -300,6 +452,29 @@ app.get(
 );
 
 /**
+ * GET /api/content/:id/portals
+ * The portals the creator's own piece is a practice in, draft portals too,
+ * for its editor (Codex-a6ofh.2.5). A read of its own, so the piece's read
+ * stays lean and this loads only where it is shown. Empty for a piece that
+ * is not the caller's.
+ *
+ * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {ContentPortalUses}
+ */
+app.get(
+  '/:id/portals',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<ContentPortalUses> =>
+      ctx.services.courseJourney.getContentPortalUses(
+        ctx.input.params.id,
+        ctx.user.id
+      ),
+  })
+);
+
+/**
  * PATCH /api/content/:id
  * Update content
  *
@@ -316,14 +491,21 @@ app.patch(
     input: {
       params: createIdParamsSchema(),
       body: updateContentSchema,
+      // `asDraft=true`: a draft's autosave, refused (409
+      // CONTENT_ALREADY_LIVE) once the piece has been live (Codex-a6ofh.2).
+      query: updateContentQuerySchema,
     },
     handler: async (ctx): Promise<UpdateContentResponse['data']> => {
-      const { content: result, droppedThumbnailUrl } =
-        await ctx.services.content.updateReportingDroppedThumbnail(
-          ctx.input.params.id,
-          ctx.input.body,
-          ctx.user.id
-        );
+      const {
+        content: result,
+        droppedThumbnailUrl,
+        hasBeenLive,
+      } = await ctx.services.content.updateReportingDroppedThumbnail(
+        ctx.input.params.id,
+        ctx.input.body,
+        ctx.user.id,
+        { asDraft: ctx.input.query.asDraft }
+      );
       // The editor's "use media thumbnail" moves the row off an uploaded
       // thumbnail without the DELETE route; its folder goes here instead
       // (Codex-kk9nv.5). Only this content's own folder is ever deleted.
@@ -334,6 +516,10 @@ app.patch(
           droppedThumbnailUrl
         );
       }
+      // A draft that was never live is in no cache (see `hasBeenLive` in
+      // @codex/constants; the service judges it from the row before the
+      // update).
+      if (!hasBeenLive) return result;
       // Fan per-user library invalidation (Codex-c01do). Covers access-config
       // edits — the most common cause of stale accessType flags in library UI.
       fanContentInvalidation(
@@ -362,6 +548,50 @@ app.patch(
 );
 
 /**
+ * POST /api/content/:id/categories
+ * File a piece in more categories, keeping the ones it has (Codex-a6ofh.3.3):
+ * the list's bulk "Add to category". A PATCH of `categoryIds` replaces the
+ * set, so it cannot add without reading each piece first.
+ *
+ * Security: Creator/Admin only, as PATCH; API rate limit (100 req/min). Each
+ * category must be in the piece's own space, and the piece's total stays at
+ * most CONTENT_MAX_CATEGORIES (400 otherwise).
+ * @returns {{ data: { categoryIds: string[] } }} its live categories after
+ */
+app.post(
+  '/:id/categories',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: {
+      params: createIdParamsSchema(),
+      body: addContentCategoriesSchema,
+    },
+    handler: async (ctx): Promise<{ categoryIds: string[] }> => {
+      const result = await ctx.services.content.addCategories(
+        ctx.input.params.id,
+        ctx.user.id,
+        ctx.input.body.categoryIds
+      );
+      // As PATCH: a never-live draft is in no cache. A live piece's public
+      // row carries its topic slugs, and the topic list counts it. An add
+      // that filed nothing new (each one already held) changed neither.
+      if (result.hasBeenLive && result.changed) {
+        bumpOrgContentVersion(
+          ctx.env,
+          ctx.executionCtx,
+          result.organizationId,
+          ctx.obs
+        );
+      }
+      return { categoryIds: result.categoryIds };
+    },
+  })
+);
+
+/**
  * GET /api/content
  * List content with filters and pagination
  *
@@ -377,24 +607,35 @@ app.get(
       // Studio-scope: returns the signed-in creator's content across all
       // their orgs (drafts list, dashboard). organizationId is optional.
       // Paged from its own argument, as /browse is (Codex-uuj1g).
-      const { page, limit, ...filters } = ctx.input.query;
+      // `scope=personal` is the content filed under no org, the service's
+      // `organizationId: null` (Codex-a6ofh.3.2); the schema refuses it
+      // beside an organizationId. `include=categories` names each row's
+      // categories (the org studio's list, Codex-a6ofh.3.3).
+      const { page, limit, scope, include, ...filters } = ctx.input.query;
       const result = await ctx.services.content.list(
         ctx.user.id,
-        filters,
+        scope ? { ...filters, organizationId: null } : filters,
         { page, limit },
-        { scope: 'studio' }
+        { scope: 'studio', withCategories: include === 'categories' }
       );
-      return new PaginatedResult(result.items, result.pagination);
+      // The list's poster fallback (Codex-a6ofh.3.1): the row carries the
+      // poster's R2 key, which the page cannot resolve; the URL goes beside it.
+      return new PaginatedResult(
+        withPosterUrls(result.items, resolveR2PublicBases(ctx.env), ctx.obs),
+        result.pagination
+      );
     },
   })
 );
 
 /**
  * POST /api/content/:id/publish
- * Publish content
+ * Publish content, or with `?whenReady=true` (Codex-a6ofh.2.7) schedule it to go
+ * live once its media, still on its way, is ready
  *
  * Security: Creator/Admin only, API rate limit (100 req/min)
- * @returns {PublishContentResponse}
+ * @returns {PublishContentResponse} The published content, or the scheduled
+ *   draft (status `draft`, `publishRequestedAt` set)
  */
 app.post(
   '/:id/publish',
@@ -403,28 +644,17 @@ app.post(
       auth: 'required',
       roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
     },
-    input: { params: createIdParamsSchema() },
+    input: { params: createIdParamsSchema(), query: publishContentQuerySchema },
     handler: async (ctx): Promise<PublishContentResponse['data']> => {
       const result = await ctx.services.content.publish(
         ctx.input.params.id,
-        ctx.user.id
+        ctx.user.id,
+        { whenReady: ctx.input.query.whenReady }
       );
-      bumpOrgContentVersion(
-        ctx.env,
-        ctx.executionCtx,
-        result.organizationId,
-        ctx.obs
-      );
-      // Fan per-user library invalidation (Codex-c01do). A publish adds the
-      // item to subscribers'/members' libraries — they need a fresh view.
-      fanContentInvalidation(
-        ctx.env,
-        ctx.executionCtx,
-        result.id,
-        result.organizationId,
-        'content_published',
-        ctx.obs
-      );
+      // A schedule changed nothing public: no version to bump, no library
+      // to fan out to.
+      if (result.status !== CONTENT_STATUS.PUBLISHED) return result;
+      afterContentPublished(ctx.env, ctx.executionCtx, result, ctx.obs);
 
       // TODO: Send new-content-published email to subscribers
       // Requires a subscriber query (users with contentAccess in this org).
@@ -433,6 +663,32 @@ app.post(
 
       return result;
     },
+  })
+);
+
+/**
+ * DELETE /api/content/:id/publish-request
+ * Cancel a publish-when-ready schedule (Codex-a6ofh.2.7): the draft stays a
+ * draft. One with neither a schedule nor a blocked reason comes back as it
+ * is; one that went live first is a 409 (`CONTENT_ALREADY_LIVE`), never a
+ * "cancelled".
+ *
+ * Security: Creator/Admin only, API rate limit (100 req/min)
+ * @returns {CancelPublishRequestResponse}
+ */
+app.delete(
+  '/:id/publish-request',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<CancelPublishRequestResponse['data']> =>
+      ctx.services.content.cancelPublishRequest(
+        ctx.input.params.id,
+        ctx.user.id
+      ),
   })
 );
 
@@ -539,6 +795,19 @@ app.delete(
 );
 
 /**
+ * The cover file both thumbnail routes take, so an upload and a stage never
+ * refuse differently (Codex-a6ofh.2.5). The studio checks the same size
+ * before sending (`CONTENT_THUMBNAIL_MAX_BYTES`).
+ */
+const THUMBNAIL_FILES = {
+  thumbnail: {
+    required: true,
+    maxSize: MAX_IMAGE_SIZE_BYTES,
+    allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
+  },
+} as const;
+
+/**
  * POST /api/content/:id/thumbnail
  * Upload and process content thumbnail
  *
@@ -551,13 +820,7 @@ app.post(
   multipartProcedure({
     policy: { auth: 'required', roles: ['creator', 'admin'] },
     input: { params: createIdParamsSchema() },
-    files: {
-      thumbnail: {
-        required: true,
-        maxSize: MAX_IMAGE_SIZE_BYTES,
-        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
-      },
-    },
+    files: THUMBNAIL_FILES,
     handler: async (ctx) => {
       // Verify content exists and is owned by user
       const content = await ctx.services.content.get(
@@ -588,6 +851,57 @@ app.post(
             ctx.obs
           )
         );
+
+      return {
+        thumbnailUrl: result.url,
+        size: result.size,
+        mimeType: result.mimeType,
+      };
+    },
+  })
+);
+
+/**
+ * POST /api/content/:id/thumbnail/stage
+ * Ready a cover for a piece that has been live, without applying it
+ * (Codex-a6ofh.2.5): its changes wait for Update, which sends the URL this
+ * returns as `thumbnailUrl`. Nothing on the row or in public changes, so no
+ * cache version is bumped. A piece holds one stage at a time (a new one
+ * retires the last), and one never applied is reclaimed by the sweep.
+ *
+ * `rateLimit: 'strict'` (20/min), not the upload's `'api'`: every stage
+ * leaves files for the sweep, where an upload deletes the folder it replaced.
+ *
+ * Security: Creator/Admin only, must own content
+ * Content-Type: multipart/form-data
+ * Form field: thumbnail (file)
+ */
+app.post(
+  '/:id/thumbnail/stage',
+  multipartProcedure({
+    policy: {
+      auth: 'required',
+      roles: ['creator', 'admin'],
+      rateLimit: 'strict',
+    },
+    input: { params: createIdParamsSchema() },
+    files: THUMBNAIL_FILES,
+    handler: async (ctx) => {
+      const content = await ctx.services.content.get(
+        ctx.input.params.id,
+        ctx.user.id
+      );
+      if (!content) {
+        throw new ContentNotFoundError(ctx.input.params.id);
+      }
+
+      const result = await ctx.services.imageProcessing.stageContentThumbnail(
+        ctx.input.params.id,
+        ctx.user.id,
+        new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
+          type: ctx.files.thumbnail.type,
+        })
+      );
 
       return {
         thumbnailUrl: result.url,

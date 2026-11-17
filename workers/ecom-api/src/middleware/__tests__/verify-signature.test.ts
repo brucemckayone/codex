@@ -26,7 +26,11 @@ vi.mock('@codex/purchase', () => ({
   verifyWebhookSignature: vi.fn(),
 }));
 
-import { MIME_TYPES, STRIPE_EVENTS } from '@codex/constants';
+import {
+  MIME_TYPES,
+  STRIPE_API_VERSION,
+  STRIPE_EVENTS,
+} from '@codex/constants';
 import { createStripeClient, verifyWebhookSignature } from '@codex/purchase';
 import {
   _resetStripeClientCacheForTests,
@@ -75,12 +79,6 @@ function createTestApp(env: Record<string, string | undefined>) {
     return c.json({ received: true, eventType: event?.type });
   });
 
-  app.post('/webhooks/stripe/customer', (c) => {
-    // @ts-expect-error - test context type does not know about 'stripeEvent'
-    const event = c.get('stripeEvent') as Stripe.Event;
-    return c.json({ received: true, eventType: event?.type });
-  });
-
   app.post('/webhooks/stripe/connect', (c) => {
     // @ts-expect-error - test context type does not know about 'stripeEvent'
     const event = c.get('stripeEvent') as Stripe.Event;
@@ -101,7 +99,7 @@ describe('verifyStripeSignature middleware', () => {
     id: 'evt_test_123',
     object: 'event',
     type: STRIPE_EVENTS.CHECKOUT_COMPLETED,
-    api_version: '2025-10-29.clover',
+    api_version: STRIPE_API_VERSION,
     created: Date.now() / 1000,
     data: {
       object: {
@@ -118,7 +116,6 @@ describe('verifyStripeSignature middleware', () => {
     STRIPE_WEBHOOK_SECRET_BOOKING: 'whsec_booking_123',
     STRIPE_WEBHOOK_SECRET_PAYMENT: 'whsec_payment_456',
     STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: 'whsec_subscription_789',
-    STRIPE_WEBHOOK_SECRET_CUSTOMER: 'whsec_customer_abc',
     STRIPE_WEBHOOK_SECRET_CONNECT: 'whsec_connect_def',
     STRIPE_WEBHOOK_SECRET_DISPUTE: 'whsec_dispute_ghi',
     ENVIRONMENT: 'test',
@@ -345,26 +342,6 @@ describe('verifyStripeSignature middleware', () => {
       );
     });
 
-    it('should use STRIPE_WEBHOOK_SECRET_CUSTOMER for /customer path', async () => {
-      const app = createTestApp(validEnv);
-
-      await app.request('/webhooks/stripe/customer', {
-        method: 'POST',
-        body: '{}',
-        headers: {
-          'Content-Type': MIME_TYPES.APPLICATION.JSON,
-          'stripe-signature': 't=1,v1=sig',
-        },
-      });
-
-      expect(verifyWebhookSignature).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.anything(),
-        'whsec_customer_abc',
-        expect.anything()
-      );
-    });
-
     it('should use STRIPE_WEBHOOK_SECRET_CONNECT for /connect path', async () => {
       const app = createTestApp(validEnv);
 
@@ -436,7 +413,6 @@ describe('verifyStripeSignature middleware', () => {
         '/webhooks/stripe/payment',
         '/webhooks/stripe/subscription',
         '/webhooks/stripe/connect',
-        '/webhooks/stripe/customer',
         '/webhooks/stripe/booking',
         '/webhooks/stripe/dispute',
         '/webhooks/stripe/dev',

@@ -802,8 +802,15 @@ describe('schedulePriceChange', () => {
         maxNetworkRetries: 0,
       });
       expect(retrieve).toHaveBeenCalledTimes(reads);
+      // The options are the THIRD argument and the params slot is empty:
+      // since stripe-node 22 an options object passed second is sent to
+      // Stripe as query params, and the timeout and retry limit are lost.
       for (const call of retrieve.mock.calls) {
-        expect(call).toEqual(['sub_1', FAN_OUT_STRIPE_REQUEST]);
+        expect(call).toStrictEqual([
+          'sub_1',
+          undefined,
+          FAN_OUT_STRIPE_REQUEST,
+        ]);
       }
       expect(update).toHaveBeenCalledTimes(1);
       expect(update.mock.calls[0]?.[2]).toMatchObject(FAN_OUT_STRIPE_REQUEST);

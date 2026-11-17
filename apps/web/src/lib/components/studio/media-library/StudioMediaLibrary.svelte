@@ -18,15 +18,15 @@
   would make a screen reader read every tick.
 -->
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { boundSearchParam, gateSearchQuery } from '@codex/validation';
-  import { goto } from '$app/navigation';
-  import { navigating, page } from '$app/state';
+  import { boundSearchParam, gateSearchQuery, type MediaQueryInput } from '@codex/validation';
+  import { page } from '$app/state';
   import { mediaStatus } from '$lib/client/media-status.svelte';
   import { uploadQueue } from '$lib/client/upload-queue.svelte';
   import MediaUpload from '$lib/components/studio/MediaUpload.svelte';
   import { Button } from '$lib/components/ui';
+  import ListStaleNotice from '../list-toolbar/ListStaleNotice.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
   import { AlertTriangleIcon, FilmIcon, SearchXIcon, UploadIcon } from '$lib/components/ui/Icon';
@@ -35,8 +35,7 @@
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { logger } from '$lib/observability';
   import { deleteMedia, getMediaSummary, getMediaUsage, listMedia } from '$lib/remote/media.remote';
-  import { readFreshQuery, remoteErrorStatus } from '$lib/remote/query-result';
-  import { applyFilterPatch } from '$lib/utils/filter-url';
+  import { readFreshQuery } from '$lib/remote/query-result';
   import { formatFileSize } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
   import { attentionLine, soleFacetLabel } from './library-options';
@@ -53,10 +52,13 @@
   import { describeTile } from './tile-state';
   import MediaDeleteDialog from './MediaDeleteDialog.svelte';
   import { logReadFailure } from './log-read-failure';
+  import { createListSearch, createListUrlWriter } from '../list-url-writer';
+  import { PagedList } from '../paged-list.svelte';
+  import PagedListMore from '../PagedListMore.svelte';
   import { MediaDeleteFlow } from './media-delete-flow.svelte';
   import { draftsLeftToast } from './media-usage';
   import MediaLibraryCommandBar from './MediaLibraryCommandBar.svelte';
-  import MediaLibraryToolbar, { type LibraryPatch } from './MediaLibraryToolbar.svelte';
+  import MediaLibraryToolbar from './MediaLibraryToolbar.svelte';
   import MediaTable from './MediaTable.svelte';
   import MediaTileGrid, { type UploadGhost } from './MediaTileGrid.svelte';
 
@@ -82,41 +84,24 @@
   // never refused as a 400 that no Try again could fix.
   const search = $derived(gateSearchQuery(boundSearchParam(view.q)));
   const narrowed = $derived(isNarrowed(view, search));
-  /** Which list the loaded pages belong to: "Show more" appends to one only. */
-  const listKey = $derived(JSON.stringify(libraryListArgs(view, search, 1)));
 
   // Below `sm` both views are the row list (M7a), so the toggle is moot.
   const phone = new MediaQuery(MOBILE_QUERY);
   const layout = $derived(phone.current ? 'grid' : view.view);
 
   // ── Reads ─────────────────────────────────────────────────────────────
-  const firstPage = $derived(listMedia(libraryListArgs(view, search, 1)));
+  // The list a page at a time (`PagedList`, shared with the content list,
+  // Codex-a6ofh.3.1): it holds the last list while a changed filter loads (the
+  // page dims instead of flashing a skeleton), appends "Show more" only to the
+  // view it was read for, and treats a failed read as a state, never empty.
+  // Args pinned: kit types `listMedia`'s input `void | …`, so inferred args
+  // would have no `page` for the Show-more log.
+  const list = new PagedList<MediaQueryInput, MediaPage>({
+    args: (pageNumber) => libraryListArgs(view, search, pageNumber),
+    read: listMedia,
+    onMoreFailed: (error, args) => logReadFailure('studio_media.show_more_failed', error, { page: args.page }),
+  });
   const summary = getMediaSummary();
-
-  /**
-   * The last list that arrived, kept while a changed filter loads so the
-   * page dims instead of flashing a skeleton on every keystroke.
-   */
-  let held = $state.raw<MediaPage | null>(null);
-  $effect(() => {
-    const current = firstPage.current;
-    if (current) held = current;
-  });
-
-  const shownFirst = $derived(firstPage.current ?? held);
-  /**
-   * A list read failed: this view's first read, or a refetch (kit keeps
-   * `current` and sets `error` when a refresh rejects, and clears it when one
-   * lands). Either way nothing below may claim the library is empty.
-   */
-  const listFailed = $derived(firstPage.error != null);
-  const refreshing = $derived(firstPage.current === undefined && !listFailed && held !== null);
-  // A 4xx (other than a timeout or a rate limit) will refuse the same view
-  // again, so it never reads as a connection problem with a Try again.
-  const listRefused = $derived.by(() => {
-    const status = remoteErrorStatus(firstPage.error);
-    return status !== undefined && status < 500 && status !== 408 && status !== 429;
-  });
 
   // The summary decorates the header. A failed read (first or refetch) drops
   // the sums, so stale numbers never read as current, and the attention slot
@@ -135,29 +120,6 @@
     // the line stays.
     await summary.refresh().catch(() => undefined);
     summaryRetrying = false;
-  }
-
-  // ── Show more ─────────────────────────────────────────────────────────
-  let extra = $state.raw<{ key: string; pages: MediaPage[] }>({ key: '', pages: [] });
-  const extraPages = $derived(extra.key === listKey ? extra.pages : []);
-  let moreLoadingFor = $state<string | null>(null);
-  let moreFailedFor = $state<string | null>(null);
-
-  async function showMore() {
-    const key = listKey;
-    const pages = extraPages;
-    const args = libraryListArgs(view, search, pages.length + 2);
-    moreLoadingFor = key;
-    moreFailedFor = null;
-    try {
-      const next = await listMedia(args);
-      if (key === listKey) extra = { key, pages: [...pages, next] };
-    } catch (error) {
-      logReadFailure('studio_media.show_more_failed', error);
-      if (key === listKey) moreFailedFor = key;
-    } finally {
-      if (moreLoadingFor === key) moreLoadingFor = null;
-    }
   }
 
   // ── Upload surface ────────────────────────────────────────────────────
@@ -192,33 +154,16 @@
   );
 
   // ── The rows ──────────────────────────────────────────────────────────
-  /**
-   * Every loaded page in order, each item once: a page fetched after an
-   * upload starts one row later, so its first row repeats the last one before.
-   */
-  const fetched = $derived.by(() => {
-    const seen = new Set<string>();
-    const out: MediaItem[] = [];
-    for (const list of [shownFirst, ...extraPages]) {
-      for (const item of list?.items ?? []) {
-        if (seen.has(item.id)) continue;
-        seen.add(item.id);
-        out.push(item);
-      }
-    }
-    return out;
-  });
-  const items = $derived(fetched.filter((item) => !uploadingHere.has(item.id)));
-
-  const listTotal = $derived((extraPages.at(-1) ?? shownFirst)?.pagination.total ?? 0);
-  const left = $derived(Math.max(0, listTotal - fetched.length));
+  // Every loaded row once (`list.items`), less the uploads running here.
+  const items = $derived(list.items.filter((item) => !uploadingHere.has(item.id)));
 
   // ── Header ────────────────────────────────────────────────────────────
   const countText = $derived.by(() => {
     if (narrowed) {
-      if (!sums) return null;
+      // Only this view's own count: a held list's is another view's.
+      if (!sums || list.total === null) return null;
       const label = soleFacetLabel(view);
-      const shown = m.media_library_count_narrowed({ shown: listTotal, total: sums.total });
+      const shown = m.media_library_count_narrowed({ shown: list.total, total: sums.total });
       return label ? `${shown} · ${label}` : shown;
     }
     if (sums) {
@@ -226,80 +171,28 @@
       if (sums.total === 1) return m.media_library_count_one({ size });
       return size ? m.media_library_count({ count: sums.total, size }) : m.media_library_items({ count: sums.total });
     }
-    return shownFirst ? m.media_library_items({ count: listTotal }) : null;
+    return list.total === null ? null : m.media_library_items({ count: list.total });
   });
 
   const attention = $derived(attentionLine(sums, view.status));
 
   // ── Writing the view back to the URL ──────────────────────────────────
-  /**
-   * Facet changes made in one tick land in ONE navigation. The phone sheet's
-   * Apply calls its filter and sort setters back to back; built from
-   * `page.url` each, the second would undo the first (see filter-url.ts).
-   */
-  let pendingUrl: URL | null = null;
+  // One navigation per tick, built on a navigation in flight, and none for a
+  // write that changes nothing (`createListUrlWriter`, Codex-a6ofh.1.7).
+  const setParams = createListUrlWriter(LIBRARY_DEFAULTS);
 
-  /**
-   * The library URL as it is about to be: a navigation in flight to this page
-   * is newer than `page.url`, so a facet changed during it builds on it rather
-   * than dropping it. One to another page is not this library's URL. Every
-   * write goes through `setParams`, the search box's too, so all build on it.
-   */
-  function currentUrl(): URL {
-    const to = navigating?.to?.url;
-    const here = page.url;
-    return to && to.origin === here.origin && to.pathname === here.pathname ? to : here;
-  }
-
-  function setParams(patch: LibraryPatch) {
-    const clean: Record<string, string | null> = {};
-    for (const [key, value] of Object.entries(patch)) {
-      if (value !== undefined) clean[key] = value;
-    }
-    if (pendingUrl) {
-      applyFilterPatch(pendingUrl, clean, LIBRARY_DEFAULTS);
-      return;
-    }
-    const url = applyFilterPatch(new URL(currentUrl()), clean, LIBRARY_DEFAULTS);
-    pendingUrl = url;
-    queueMicrotask(() => {
-      pendingUrl = null;
-      // A write that changes nothing navigates nowhere. A navigation re-runs
-      // whatever reads `page`, so an echo that writes the same URL back
-      // (the drawer's close did) would loop without ever yielding.
-      const href = `${url.pathname}${url.search}`;
-      const shown = currentUrl();
-      if (href === `${shown.pathname}${shown.search}`) return;
-      void goto(href, { keepFocus: true, noScroll: true });
-    });
-  }
+  // The box as typed: a writable derived, so typing overrides it. It
+  // re-derives only when the URL's search text itself changes (Clear, back):
+  // `urlSearch` is a string, so another param's write while typing (a status
+  // click) leaves it, and what was typed, alone.
+  const urlSearch = $derived(view.q);
+  let searchValue = $derived(urlSearch);
+  const searchInput = createListSearch((value) => setParams({ q: value }));
+  onDestroy(searchInput.cancel);
 
   function clearFilters() {
+    searchInput.cancel();
     setParams({ q: null, mediaType: null, status: null, usage: null });
-  }
-
-  let searchValue = $state('');
-  // keep the box in sync when the URL changes from elsewhere (Clear, back)
-  $effect(() => {
-    searchValue = view.q;
-  });
-
-  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
-  function handleSearchInput(value: string) {
-    searchValue = value;
-    if (searchDebounce) clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => setParams({ q: value.trim() ? value : null }), 200);
-  }
-
-  function handleSearchClear() {
-    searchValue = '';
-    // A search still waiting out its debounce would otherwise fire after this
-    // and put the typed text back in the URL, undoing the Clear.
-    if (searchDebounce) {
-      clearTimeout(searchDebounce);
-      searchDebounce = null;
-    }
-    setParams({ q: null });
   }
 
   // ── Refetch ───────────────────────────────────────────────────────────
@@ -311,17 +204,12 @@
    * unmounting a running upload.
    */
   async function refresh(): Promise<void> {
-    const key = listKey;
-    const more = extraPages.map((_, index) => libraryListArgs(view, search, index + 2));
     await Promise.all([
-      firstPage.refresh(),
+      list.refresh(),
       // Decoration: a summary failure shows in the header and is logged by
       // the effect above. It never fails the list refetch the live channel
       // waits on to drop the states it holds.
       summary.refresh().catch(() => undefined),
-      Promise.all(more.map((args) => listMedia(args))).then((pages) => {
-        if (key === listKey && pages.length > 0) extra = { key, pages };
-      }),
     ]);
   }
 
@@ -349,7 +237,7 @@
   }
 
   // ── Live status ───────────────────────────────────────────────────────
-  const listedLifecycles = $derived(new Map(fetched.map((item) => [item.id, item.status])));
+  const listedLifecycles = $derived(new Map(list.items.map((item) => [item.id, item.status])));
 
   let announcement = $state('');
 
@@ -360,7 +248,7 @@
       listed: () => listedLifecycles,
       refresh,
       settled: (mediaId, lifecycle) => {
-        const title = fetched.find((item) => item.id === mediaId)?.title;
+        const title = list.items.find((item) => item.id === mediaId)?.title;
         if (!title) return;
         announcement =
           lifecycle === 'ready' ? m.media_announce_ready({ title }) : m.media_announce_failed({ title });
@@ -387,7 +275,7 @@
     setParams({ item: null });
   }
 
-  const openPoster = $derived(fetched.find((item) => item.id === openItem)?.thumbnailUrl ?? null);
+  const openPoster = $derived(list.items.find((item) => item.id === openItem)?.thumbnailUrl ?? null);
 
   // ── Delete (Codex-6sbn1) ──────────────────────────────────────────────
   // Never a cached read: the chip's popover may hold the same query, minutes old.
@@ -400,7 +288,7 @@
   let libraryBody: HTMLElement | null = $state(null);
 
   function handleDelete(id: string) {
-    const media = fetched.find((item) => item.id === id);
+    const media = list.items.find((item) => item.id === id);
     if (media) startDelete(media);
   }
 
@@ -426,7 +314,7 @@
   let selected = $state<Set<string>>(new Set());
   // A changed view starts a fresh selection, and its old result line goes.
   $effect(() => {
-    void listKey;
+    void list.key;
     untrack(() => {
       selected = new Set();
       bulkResult = '';
@@ -554,11 +442,11 @@
 {#snippet loadFailed()}
   <EmptyState
     title={m.media_library_error_title()}
-    description={listRefused ? m.media_library_error_refused() : m.media_library_error_body()}
+    description={list.refused ? m.media_library_error_refused() : m.media_library_error_body()}
     icon={AlertTriangleIcon}
   >
     {#snippet action()}
-      {#if listRefused && narrowed}
+      {#if list.refused && narrowed}
         <Button variant="secondary" onclick={clearFilters}>{m.media_clear_filters()}</Button>
       {:else}
         <Button loading={retrying} disabled={retrying} onclick={retryList}>{m.media_library_retry()}</Button>
@@ -617,16 +505,14 @@
 {/snippet}
 
 {#snippet rows()}
-  {#if listFailed}
+  {#if list.failed}
     <!-- A refetch failed: these rows are the last that arrived. -->
-    <div class="stale" role="alert">
-      <p class="stale-text">
-        {retryFailed ? m.media_library_retry_failed() : m.media_library_stale()}
-      </p>
-      <Button size="sm" variant="secondary" loading={retrying} disabled={retrying} onclick={retryList}>
-        {m.media_library_retry()}
-      </Button>
-    </div>
+    <ListStaleNotice
+      words={retryFailed ? m.media_library_retry_failed() : m.media_library_stale()}
+      retryLabel={m.media_library_retry()}
+      {retrying}
+      onRetry={retryList}
+    />
   {/if}
   {#if layout === 'list'}
     {#if selection.length > 0}
@@ -678,21 +564,7 @@
     />
   {/if}
 
-  {#if left > 0}
-    <div class="show-more">
-      {#if moreFailedFor === listKey}
-        <p class="show-more-failed" role="alert">{m.media_library_show_more_failed()}</p>
-      {/if}
-      <Button
-        variant="secondary"
-        loading={moreLoadingFor === listKey}
-        disabled={moreLoadingFor === listKey}
-        onclick={showMore}
-      >
-        {m.media_library_show_more({ left, total: listTotal })}
-      </Button>
-    </div>
-  {/if}
+  <PagedListMore {list} />
 {/snippet}
 
 <div class="media-library {className ?? ''}">
@@ -716,8 +588,14 @@
   <MediaLibraryToolbar
     library={view}
     {searchValue}
-    onSearchInput={handleSearchInput}
-    onSearchClear={handleSearchClear}
+    onSearchInput={(value) => {
+      searchValue = value;
+      searchInput.input(value);
+    }}
+    onSearchClear={() => {
+      searchValue = '';
+      searchInput.clear();
+    }}
     onChange={setParams}
   />
 
@@ -729,14 +607,15 @@
     class="library-body"
     role="region"
     aria-label={m.media_title()}
-    aria-busy={refreshing || undefined}
-    data-refreshing={refreshing || undefined}
+    aria-busy={list.refreshing || undefined}
+    data-refreshing={list.refreshing || undefined}
     tabindex="-1"
     bind:this={libraryBody}
   >
-    {#if listFailed && (firstPage.current === undefined || rowsEmpty)}
+    {#if list.unread || (list.failed && rowsEmpty)}
       {@render loadFailed()}
-    {:else if !shownFirst}
+    {:else if list.loading}
+      <!-- Also over an empty held list: that "none" is another view's. -->
       <div class="library-skeleton" aria-hidden="true">
         {#each Array(8) as _, index (index)}
           <div class="skeleton-tile">
@@ -845,23 +724,6 @@
     color: var(--color-text-secondary);
   }
 
-  .stale {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-status-warning-border);
-    border-radius: var(--radius-md);
-    background: var(--color-status-warning-surface);
-  }
-
-  .stale-text {
-    flex: 1;
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text);
-  }
-
   .retry-failed {
     margin: var(--space-2) 0 0;
     font-size: var(--text-sm);
@@ -935,20 +797,6 @@
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-  }
-
-  .show-more {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-2);
-    margin-top: var(--space-2);
-  }
-
-  .show-more-failed {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-status-error-text);
   }
 
   @media (--below-sm) {

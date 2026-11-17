@@ -29,9 +29,14 @@
     mediaType: 'video' | 'audio';
     title: string;
     poster?: string | null;
+    /** The poster's rendered width: the drawer's by default, the editor's column in the editor. */
+    sizes?: string;
   }
 
-  const { mediaId, mediaType, title, poster = null }: Props = $props();
+  /** The drawer is 32rem wide, or the viewport on a phone. */
+  const DRAWER_SIZES = '(max-width: 39.9375rem) 100vw, 32rem';
+
+  const { mediaId, mediaType, title, poster = null, sizes = DRAWER_SIZES }: Props = $props();
 
   type Phase =
     | { kind: 'idle' }
@@ -174,11 +179,10 @@
       onclick={play}
     >
       {#if poster && mediaType === 'video'}
-        <!-- The drawer is 32rem wide, or the viewport on a phone. -->
         <img
           src={poster}
           srcset={getThumbnailSrcset(poster) || undefined}
-          sizes="(max-width: 39.9375rem) 100vw, 32rem"
+          {sizes}
           alt=""
           class="preview-poster"
         />

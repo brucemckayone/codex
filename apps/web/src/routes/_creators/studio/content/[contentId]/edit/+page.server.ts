@@ -9,7 +9,16 @@ import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ params, platform, cookies }) => {
+export const load: PageServerLoad = async ({
+  params,
+  url,
+  platform,
+  cookies,
+}) => {
+  // Read, so SvelteKit runs this again whenever the step changes (Next, Back,
+  // Forward, a held move sent on): each step's session starts from the piece
+  // as the other step left it (Codex-a6ofh.2.3, .2.4).
+  url.searchParams.get('step');
   try {
     const api = createServerApi(platform, cookies);
     const result = await api.content.get(params.contentId);

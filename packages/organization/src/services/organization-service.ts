@@ -87,7 +87,6 @@ import type {
   Organization,
   OrganizationFilters,
   PaginationParams,
-  ReadableOrganization,
 } from '../types';
 import {
   type WithdrawnCatalogue,
@@ -112,24 +111,6 @@ import {
   withdrawOfferForIneligibleRecipient,
   withdrawOwnershipOffer,
 } from './ownership-transfer';
-
-/**
- * The columns `get`, `getBySlug` and `list` select: every one but the payee's
- * user id (Codex-kk6zx, see {@link ReadableOrganization}). A `false` entry
- * excludes that column and keeps the rest, so a column added later is read.
- *
- * Exported for every other read that loads an org for someone who does not
- * manage it (@codex/content's studio `get` and `list`), so they cannot drift
- * apart. `satisfies` ties the keys to exactly what `ReadableOrganization`
- * omits: a misspelt key would otherwise be dropped by drizzle without a word,
- * and an empty exclusion selects EVERY column.
- */
-export const READABLE_ORGANIZATION_COLUMNS = {
-  primaryConnectAccountUserId: false,
-} as const satisfies Record<
-  Exclude<keyof Organization, keyof ReadableOrganization>,
-  false
->;
 
 /**
  * Narrows an org's creators list to the members whose name or username
@@ -428,13 +409,11 @@ export class OrganizationService extends BaseService {
    * Get organization by ID
    *
    * @param id - Organization ID
-   * @returns Organization without the payee's user id, or null if not
-   *   found/deleted
+   * @returns Organization or null if not found/deleted
    */
-  async get(id: string): Promise<ReadableOrganization | null> {
+  async get(id: string): Promise<Organization | null> {
     try {
       const result = await this.db.query.organizations.findFirst({
-        columns: READABLE_ORGANIZATION_COLUMNS,
         where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
       });
 
@@ -448,13 +427,11 @@ export class OrganizationService extends BaseService {
    * Get organization by slug
    *
    * @param slug - Organization slug
-   * @returns Organization without the payee's user id, or null if not
-   *   found/deleted
+   * @returns Organization or null if not found/deleted
    */
-  async getBySlug(slug: string): Promise<ReadableOrganization | null> {
+  async getBySlug(slug: string): Promise<Organization | null> {
     try {
       const result = await this.db.query.organizations.findFirst({
-        columns: READABLE_ORGANIZATION_COLUMNS,
         where: and(
           eq(organizations.slug, slug.toLowerCase()),
           whereNotDeleted(organizations)
@@ -561,13 +538,12 @@ export class OrganizationService extends BaseService {
    *
    * @param filters - Query filters
    * @param pagination - Pagination parameters
-   * @returns Paginated organization list with metadata, each without the
-   *   payee's user id
+   * @returns Paginated organization list with metadata
    */
   async list(
     filters: OrganizationFilters = {},
     pagination: PaginationParams = { page: 1, limit: PAGINATION.DEFAULT }
-  ): Promise<PaginatedListResponse<ReadableOrganization>> {
+  ): Promise<PaginatedListResponse<Organization>> {
     try {
       const { limit, offset } = withPagination(pagination);
 
@@ -599,7 +575,6 @@ export class OrganizationService extends BaseService {
       // Run items + count queries concurrently (independent queries)
       const [items, countResult] = await Promise.all([
         this.db.query.organizations.findMany({
-          columns: READABLE_ORGANIZATION_COLUMNS,
           where: and(...whereConditions),
           limit,
           offset,

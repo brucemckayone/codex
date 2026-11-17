@@ -45,7 +45,7 @@
 import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   CONTENT_STATUS,
-  ORGANIZATION_ROLES,
+  ORGANIZATION_TEAM_ROLES,
   PURCHASE_STATUS,
 } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
@@ -96,17 +96,6 @@ export type PurchaseVerifier = Pick<PurchaseService, 'verifyPurchase'>;
  * an `as any` cast (`feedback_tx_callback_type_derivation`).
  */
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
-
-/**
- * Only owner/admin/creator roles bypass payment requirements. Regular
- * 'member' and 'subscriber' roles must purchase or subscribe to access
- * paid/subscriber content.
- */
-const MANAGEMENT_ROLES: string[] = [
-  ORGANIZATION_ROLES.OWNER,
-  ORGANIZATION_ROLES.ADMIN,
-  ORGANIZATION_ROLES.CREATOR,
-];
 
 /** The per-content access-policy flags the decision core reads (SPEC §6.1). */
 export interface ContentAccessPolicyRow {
@@ -323,7 +312,7 @@ async function decidePolicyAccess(
         eq(organizationMemberships.organizationId, orgId),
         eq(organizationMemberships.userId, userId),
         eq(organizationMemberships.status, 'active'),
-        inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+        inArray(organizationMemberships.role, ORGANIZATION_TEAM_ROLES)
       ),
       columns: { id: true },
     });
@@ -741,7 +730,7 @@ async function coursesUserManages(
         inArray(courses.id, [...courseIds]),
         eq(organizationMemberships.userId, userId),
         eq(organizationMemberships.status, 'active'),
-        inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+        inArray(organizationMemberships.role, ORGANIZATION_TEAM_ROLES)
       )
     );
   return new Set(rows.map((row) => row.courseId));

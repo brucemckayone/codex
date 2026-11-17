@@ -318,7 +318,7 @@ export async function archiveTestStripeProducts(opts: {
     // it directly — the SDK is used by service packages). Returns 0 so the
     // afterAll log shows the gap clearly. Test products in Stripe accumulate
     // until the next `pnpm db:seed` run (which only cleans `codex_seed=true`).
-    // To enable real cleanup: add `"stripe": "^19"` to apps/web/package.json
+    // To enable real cleanup: add `"stripe": "^23"` to apps/web/package.json
     // devDependencies. Filed as U-17 in iter-010-x0pa-unclears.md.
     return { archived: 0 };
   }

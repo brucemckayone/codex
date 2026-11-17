@@ -1,0 +1,201 @@
+import { isIos } from '@melt-ui/svelte/internal/helpers';
+
+/**
+ * The page's scroll lock: one for the whole app, counted.
+ *
+ * Melt's dialog took the lock itself and, under `forceVisible`, let go only
+ * when the panel left the DOM. A dialog reopened during its close animation
+ * kept its panel, and Melt's second lock, a no-op on a page already locked,
+ * replaced the only release: the page never scrolled again until a reload
+ * (Codex-vlphc review H1). Here whatever opens a modal holds the lock until
+ * it closes, animating out or not, and the page is let go when the last
+ * holder releases, so a dialog over a dialog keeps it still until both have
+ * closed.
+ *
+ * The lock holds the viewport: `overflow: hidden` on <html>. Melt's own lock
+ * set it on <body>, which reaches the viewport only while <html>'s overflow
+ * is `visible`, and base.css clips <html>'s overflow-x. So in the app the
+ * page behind every dialog still scrolled under the wheel, and Melt's
+ * scrollbar padding narrowed it by the scrollbar's width while the
+ * scrollbar stayed (Codex-vlphc review N7). A classic scrollbar's gutter is
+ * kept (`scrollbar-gutter: stable`), so nothing moves sideways: in-flow
+ * content keeps its width and a fixed bar its right edge. iOS scrolls a
+ * page that `overflow: hidden` does not hold, so there <body> is also fixed
+ * in place at its scroll position, which is restored at the release.
+ *
+ * WebKit keeps no gutter there, so the lock pads <html> instead, and the
+ * padding it adds on the right is published as `--scroll-lock-pad` on
+ * <html> (absent otherwise). A fixed element anchored to the right edge
+ * adds it to its `right`: the viewport it is placed in has widened by that
+ * much (the Toaster).
+ *
+ * Every style is put back exactly at the last release. The lock keeps
+ * Melt's `data-melt-scroll-lock` mark: a Melt builder that locks on its own
+ * (a component that builds its own Melt select with Melt's default lock)
+ * finds the page held and stacks nothing on it, and a page Melt already
+ * holds is left as it is.
+ */
+const MARK = 'data-melt-scroll-lock';
+let holders = 0;
+let release: () => void = () => {};
+
+/** Hold the page still. Call what it returns to let go; a second call does nothing. */
+export function lockScroll(): () => void {
+  holders += 1;
+  if (holders === 1) release = hold();
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    holders -= 1;
+    if (holders === 0) release();
+  };
+}
+
+function hold(): () => void {
+  const { documentElement: html, body } = document;
+  if (body.hasAttribute(MARK)) return () => {};
+  body.setAttribute(MARK, '');
+  // Read before anything changes: a classic scrollbar's width; 0 for an
+  // overlay scrollbar, or a page too short to scroll.
+  const scrollbar = window.innerWidth - html.clientWidth;
+  const before = body.getBoundingClientRect();
+  const undo = [setStyle(html, 'overflow', 'hidden')];
+  if (scrollbar > 0) {
+    undo.push(setStyle(html, 'scrollbar-gutter', 'stable'));
+    // WebKit keeps no gutter on a root that is `overflow: hidden`: the page
+    // widens by the scrollbar. Padding on that side takes it back, so
+    // in-flow content still keeps its width; a fixed element sees the wider
+    // viewport, so the right-hand padding is published for it.
+    const after = body.getBoundingClientRect();
+    const grown = after.width - before.width;
+    if (grown > 0.5) {
+      const side = after.left < before.left ? 'padding-left' : 'padding-right';
+      const padding =
+        Number.parseFloat(getComputedStyle(html).getPropertyValue(side)) || 0;
+      undo.push(setStyle(html, side, `${padding + grown}px`));
+      if (side === 'padding-right')
+        undo.push(setStyle(html, '--scroll-lock-pad', `${grown}px`));
+    }
+  }
+  if (isIos()) undo.push(fixBody(body));
+  return () => {
+    // Every restore runs, and the mark goes, whatever throws. A skipped
+    // restore leaves its style on: `overflow`, set first and so put back
+    // last, stays `hidden`, and the next hold() takes that for the page's
+    // own. A mark left behind reads as another lock's, and every hold()
+    // after it leaves the page alone. Either way the page stays locked for
+    // the rest of the session (Codex-vlphc review G5-C-L3).
+    try {
+      restoreAll(undo);
+    } finally {
+      body.removeAttribute(MARK);
+    }
+  };
+}
+
+/**
+ * iOS: <body> fixed at the page's scroll position, which is put back at the
+ * release.
+ *
+ * A fixed <body> leaves the root nothing to scroll, so `pageYOffset` reads 0
+ * while it is held. SvelteKit saves a page's place from `pageXOffset` and
+ * `pageYOffset`: on a back-swipe, before the new page tears the dialog down,
+ * and on an app switch (visibilitychange) into sessionStorage. Both saved 0,
+ * so the page came back at its top (Codex-8v12c). While it is held, those
+ * two read the place it is held at.
+ */
+function fixBody(body: HTMLElement): () => void {
+  const { scrollX, scrollY, visualViewport } = window;
+  const undo = [
+    holdOffset('pageXOffset', scrollX),
+    holdOffset('pageYOffset', scrollY),
+    setStyle(body, 'position', 'fixed'),
+    setStyle(
+      body,
+      'top',
+      `${-(scrollY - Math.floor(visualViewport?.offsetTop ?? 0))}px`
+    ),
+    setStyle(
+      body,
+      'left',
+      `${-(scrollX - Math.floor(visualViewport?.offsetLeft ?? 0))}px`
+    ),
+    setStyle(body, 'right', '0'),
+  ];
+  return () => {
+    try {
+      restoreAll(undo);
+    } finally {
+      // Instant: base.css makes <html> scroll smoothly, and the page would
+      // glide back down from the top. An engine whose ScrollBehavior has no
+      // 'instant' throws a TypeError at it; the page still goes back, gliding.
+      try {
+        window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' });
+      } catch {
+        window.scrollTo(scrollX, scrollY);
+      }
+    }
+  };
+}
+
+/**
+ * Run every restore, the last style set first. Once the rest have run, one
+ * that threw is rethrown as it was; several, together in an AggregateError,
+ * so no failure hides behind the first.
+ */
+function restoreAll(undo: (() => void)[]): void {
+  const failures: unknown[] = [];
+  for (const restore of undo.reverse()) {
+    try {
+      restore();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1)
+    throw new AggregateError(
+      failures,
+      `${failures.length} scroll-lock restores failed`
+    );
+}
+
+/**
+ * `window[name]` reads `value` until what it returns puts back exactly what
+ * was there. A window that will not take it is left as it is: the page is
+ * held all the same.
+ */
+function holdOffset(
+  name: 'pageXOffset' | 'pageYOffset',
+  value: number
+): () => void {
+  const own = Object.getOwnPropertyDescriptor(window, name);
+  try {
+    Object.defineProperty(window, name, {
+      configurable: true,
+      get: () => value,
+    });
+  } catch {
+    return () => {};
+  }
+  return () => {
+    if (own) Object.defineProperty(window, name, own);
+    else Reflect.deleteProperty(window, name);
+  };
+}
+
+/** Set one inline style; what it returns puts back exactly what was there. */
+function setStyle(
+  el: HTMLElement,
+  property: string,
+  value: string
+): () => void {
+  const previous = el.style.getPropertyValue(property);
+  const priority = el.style.getPropertyPriority(property);
+  el.style.setProperty(property, value);
+  return () => {
+    if (previous) el.style.setProperty(property, previous, priority);
+    else el.style.removeProperty(property);
+  };
+}

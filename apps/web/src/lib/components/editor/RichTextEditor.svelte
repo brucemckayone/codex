@@ -6,6 +6,9 @@
 
   @prop {string} content - JSON string (Tiptap document) or empty string
   @prop {'full' | 'minimal'} [preset='full'] - Extension set and toolbar
+  @prop {'boxed' | 'canvas'} [variant='boxed'] - `canvas`: no toolbar or box, the
+    public page's typography (`prose-content`), formatting from the selection menu
+  @prop {string} [ariaLabel] - The editor's name, when no visible label names it
   @prop {string} [placeholder] - Placeholder text for empty editor
   @prop {number} [maxLength] - Character count limit
   @prop {string} [name] - Hidden textarea name for form submission
@@ -16,6 +19,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import '$lib/styles/prose.css';
   import { Editor } from '@tiptap/core';
   import { getFullExtensions, getMinimalExtensions } from '$lib/editor/extensions.js';
   import { createSlashMenuRender } from '$lib/editor/slash-menu-render.svelte.js';
@@ -26,6 +30,14 @@
   interface Props {
     content?: string;
     preset?: EditorPreset;
+    /**
+     * `canvas` (the studio editor, Codex-a6ofh.2.3): the body as visitors
+     * read it, in the shared prose sheet, with no toolbar or box; formatting
+     * comes from the selection's bubble menu, so pair it with `full`.
+     */
+    variant?: 'boxed' | 'canvas';
+    /** Names the editor when no visible label does (the canvas has none). */
+    ariaLabel?: string;
     placeholder?: string;
     maxLength?: number;
     name?: string;
@@ -44,6 +56,8 @@
   const {
     content = '',
     preset = 'full',
+    variant = 'boxed',
+    ariaLabel,
     placeholder = '',
     maxLength,
     name,
@@ -60,8 +74,13 @@
    */
   function buildEditorAttributes(): Record<string, string> {
     const attrs: Record<string, string> = {
-      class: 'rich-text-editor__content',
+      class: variant === 'canvas' ? 'rich-text-editor__content prose-content' : 'rich-text-editor__content',
     };
+    if (ariaLabel) {
+      attrs.role = 'textbox';
+      attrs['aria-multiline'] = 'true';
+      attrs['aria-label'] = ariaLabel;
+    }
     if (ariaInvalid !== undefined) {
       attrs['aria-invalid'] = ariaInvalid ? 'true' : 'false';
     }
@@ -171,7 +190,10 @@
       if (isEmpty) {
         const parsed = parseContent(content);
         if (parsed) {
-          editorInstance.commands.setContent(parsed);
+          // Not the creator's input: TipTap 3 emits an update for a set
+          // unless told not to, and the studio canvas autosaves on one, so
+          // a piece opened would read as changed (Codex-a6ofh.2.3).
+          editorInstance.commands.setContent(parsed, { emitUpdate: false });
           didSetDeferredContent = true;
         }
       }
@@ -195,20 +217,24 @@
 </script>
 
 <div class="rich-text-editor" class:rich-text-editor--minimal={preset === 'minimal'}>
-  {#if editor}
+  {#if editor && variant === 'boxed'}
     <EditorToolbar {editor} {preset} />
   {/if}
 
+  <!-- The canvas keeps none of the boxed editor's typography: its body is
+       styled by the shared prose sheet alone. -->
   <div
     bind:this={editorElement}
-    class="rich-text-editor__wrapper"
-    class:rich-text-editor__wrapper--loading={!editor}
+    class={variant === 'canvas' ? 'rich-text-editor__canvas' : 'rich-text-editor__wrapper'}
+    class:rich-text-editor__wrapper--loading={!editor && variant === 'boxed'}
   ></div>
 
-  <!-- Bubble menu: shown on text selection (full preset only).
-       BubbleMenu extension controls visibility; we just provide the element. -->
+  <!-- Bubble menu: shown on text selection (full preset only). The
+       BubbleMenu extension shows, places and hides it, but only once a
+       selection has shown it: until then it starts hidden here, or it sits
+       under the editor in plain view. -->
   {#if preset === 'full'}
-    <div bind:this={bubbleMenuElement}>
+    <div bind:this={bubbleMenuElement} class="rich-text-editor__bubble">
       {#if editor}
         <BubbleMenuBar {editor} />
       {/if}
@@ -283,13 +309,42 @@
     min-height: 120px;
   }
 
-  /* Placeholder */
-  .rich-text-editor__wrapper :global(.rich-text-editor__content p.is-editor-empty:first-child::before) {
+  /* Placeholder, boxed or on the canvas */
+  .rich-text-editor__wrapper :global(.rich-text-editor__content p.is-editor-empty:first-child::before),
+  .rich-text-editor__canvas :global(.rich-text-editor__content p.is-editor-empty:first-child::before) {
     content: attr(data-placeholder);
     float: left;
     color: var(--color-text-muted);
     pointer-events: none;
     height: 0;
+  }
+
+  /* Out of sight until the extension first shows it: it then sets its own
+     visibility and position inline, which win over these. */
+  .rich-text-editor__bubble {
+    position: absolute;
+    visibility: hidden;
+  }
+
+  /* Canvas: the page's own type, outlined only while it is being written in */
+  .rich-text-editor__canvas {
+    border-radius: var(--radius-md);
+    outline: var(--border-width) dashed transparent;
+    outline-offset: var(--space-2);
+    transition: var(--transition-colors);
+  }
+
+  .rich-text-editor__canvas:hover {
+    outline-color: var(--color-border);
+  }
+
+  .rich-text-editor__canvas:focus-within {
+    outline: var(--border-width-thick) solid var(--color-focus);
+  }
+
+  .rich-text-editor__canvas :global(.rich-text-editor__content) {
+    min-height: var(--space-24);
+    outline: none;
   }
 
   /* Prose typography */

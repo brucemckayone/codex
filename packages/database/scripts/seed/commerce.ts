@@ -1,5 +1,12 @@
+import { FEES } from '@codex/constants';
 import { eq } from 'drizzle-orm';
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
+// The live subscription split and the Stripe client with the platform's
+// pinned API version, by relative path: @codex/database cannot depend on the
+// service packages that depend on it.
+import { applyMinPlatformFeeFloor } from '../../../purchase/src/services/revenue-calculator';
+import { createStripeClient } from '../../../purchase/src/stripe-client';
+import { calculateRevenueSplit } from '../../../subscription/src/services/revenue-split';
 import type { dbWs as DbClient } from '../../src';
 import { schema } from '../../src';
 import {
@@ -773,7 +780,7 @@ export async function seedCommerce(
     // Refuse to seed against a live Stripe account — the seed creates
     // disposable customers and subscriptions that must never touch real data.
     assertTestModeKey(stripeKey);
-    const stripe = new Stripe(stripeKey);
+    const stripe = createStripeClient(stripeKey);
     seedEnv = resolveSeedEnv();
     console.log(`  Stripe seed env: ${seedEnv}`);
 
@@ -881,8 +888,19 @@ export async function seedCommerce(
   // STRIPE_SECRET_KEY is absent) so cancel/reactivate flows operate on
   // independent Stripe objects.
   const subMonthly = TIERS.alphaStandard.priceMonthly; // £4.99
-  const subPlatformFee = Math.round(subMonthly * 0.1);
-  const subCreatorPayout = subMonthly - subPlatformFee;
+  // Split as a live invoice with no fee override splits it
+  // (SubscriptionService.computeSubscriptionSplit): 10% platform, 15% of the
+  // rest to the organisation, the platform's minimum fee floor. £4.99 is
+  // 50p / 68p / £3.81 (Codex-2hxff.24).
+  const subSplit = applyMinPlatformFeeFloor(
+    subMonthly,
+    calculateRevenueSplit(
+      subMonthly,
+      FEES.PLATFORM_PERCENT,
+      FEES.SUBSCRIPTION_ORG_PERCENT
+    ),
+    FEES.MIN_PLATFORM_FEE_CENTS
+  );
 
   type SeededSubscriber = {
     user: { id: string; email: string; name: string };
@@ -905,7 +923,7 @@ export async function seedCommerce(
     if (stripeKey && stripePriceIdsByTier && seedEnv) {
       const tierPrices = stripePriceIdsByTier.get(TIERS.alphaStandard.id);
       if (tierPrices) {
-        const stripe = new Stripe(stripeKey);
+        const stripe = createStripeClient(stripeKey);
         try {
           const result = await createOrFindStripeSubscription(stripe, {
             user,
@@ -957,9 +975,9 @@ export async function seedCommerce(
       currentPeriodStart,
       currentPeriodEnd,
       amountCents: subMonthly,
-      platformFeeCents: subPlatformFee,
-      organizationFeeCents: 0,
-      creatorPayoutCents: subCreatorPayout,
+      platformFeeCents: subSplit.platformFeeCents,
+      organizationFeeCents: subSplit.organizationFeeCents,
+      creatorPayoutCents: subSplit.creatorPayoutCents,
       createdAt: now,
       updatedAt: now,
     };
@@ -1001,6 +1019,8 @@ export async function seedCommerce(
 
   await db.insert(schema.subscriptions).values(subscriptionRows);
 
+  // No agreements: a real org has none until a proposal is accepted (Codex-2hxff.24).
+
   // ── Stripe Connect accounts for monetised seed orgs ─────────────
   // Every org with subscription tiers needs a fully-active Connect account, or
   // SubscriptionService.createCheckoutSession throws ConnectAccountNotReadyError
@@ -1009,7 +1029,7 @@ export async function seedCommerce(
   if (stripeKey) {
     // Re-assert test mode (cheap, defensive — key could have rotated mid-seed).
     assertTestModeKey(stripeKey);
-    const stripe = new Stripe(stripeKey);
+    const stripe = createStripeClient(stripeKey);
 
     // `limit: 100` (Stripe's maximum), not 20. `accounts.list` returns the
     // MOST RECENT accounts and supports no metadata filter, so the window has

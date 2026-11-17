@@ -34,6 +34,7 @@ import {
   BILLING_INTERVAL,
   CHECKOUT_SESSION_KIND,
   CURRENCY,
+  ORGANIZATION_NON_SUBSCRIBER_ROLES,
   STRIPE_ENV_METADATA_KEY,
   SUBSCRIPTION_STATUS,
   stripeEnvMetadata,
@@ -47,12 +48,17 @@ import {
 } from '@codex/database';
 import {
   connectBalances,
+  content,
+  courseSubscriptions,
+  courses,
+  disputes,
   organizationFollowers,
   organizationMemberships,
   type PayoutType,
   payoutReversals,
   payouts,
   priceChanges,
+  purchases,
   stripeConnectAccounts,
   subscriptionPriceMoves,
   subscriptions,
@@ -134,8 +140,10 @@ import {
   lt,
   ne,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
@@ -164,7 +172,10 @@ import {
   scheduleNeedsFinishing,
   type WaitingBilling,
 } from './billing-change';
-import { alertIfCreditPaid } from './credit-paid-invoice';
+import {
+  alertCreditNotReturned,
+  alertIfCreditPaid,
+} from './credit-paid-invoice';
 import {
   addMonthsClamped,
   CLEAR_PENDING_PRICE_METADATA,
@@ -308,6 +319,21 @@ function nowProration(
   return plan.newRecurringAmount > plan.sub.amountCents
     ? 'always_invoice'
     : 'create_prorations';
+}
+
+/**
+ * C(b) at a dearer plan: the one change leaving yearly billing that charges
+ * today, the part-year at the new tier's YEARLY Price (Codex-2hxff.97). Its
+ * preview and its confirm both ask this, so a `quote` is shown exactly when
+ * the confirm re-checks one (Codex-2hxff.103).
+ */
+function chargesBeforeBillingWait(
+  plan: Parameters<typeof nowProration>[0]
+): boolean {
+  return (
+    plan.kind === 'change_then_billing_wait' &&
+    nowProration(plan) === 'always_invoice'
+  );
 }
 
 /** The idempotency-key prefix of a change made now, by its proration. */
@@ -555,6 +581,27 @@ export interface PayoutWithCreator {
    * payee's account.
    */
   bankOn: string | null;
+  /**
+   * A `reversed` row's take-back: when Stripe took the money back (London
+   * `YYYY-MM-DD`) and why, from its latest step that moved money. Null
+   * otherwise. The page words it on the organisation's own shares only
+   * (owner, Codex-2hxff.70: late-win mockups P0, P1).
+   */
+  takenBack: { causeType: 'refund' | 'dispute'; on: string } | null;
+  /**
+   * A share a won chargeback paid back: when the pay-back went (London
+   * `YYYY-MM-DD`). Null otherwise (Codex-2hxff.70, late-win design §6).
+   */
+  paidBack: { on: string } | null;
+  /**
+   * On the re-pay row itself: whose chargeback it pays back, and when it was
+   * won. Null on every other row (Codex-2hxff.70).
+   */
+  paysBack: {
+    causeType: 'dispute';
+    title: string | null;
+    wonOn: string;
+  } | null;
 }
 
 /**
@@ -672,6 +719,20 @@ export interface CreatorPayoutRow {
    * otherwise.
    */
   takenBack: { causeType: 'refund' | 'dispute'; on: string } | null;
+  /** As on {@link PayoutWithCreator}: a share a won chargeback paid back. */
+  paidBack: { on: string } | null;
+  /** As on {@link PayoutWithCreator}: the re-pay row's chargeback. */
+  paysBack: {
+    causeType: 'dispute';
+    title: string | null;
+    wonOn: string;
+  } | null;
+  /**
+   * A share cancelled while held for a chargeback that was lost: "Held for
+   * a chargeback, cancelled when it was lost on …". Null otherwise
+   * (Codex-2hxff.70).
+   */
+  cancelledFor: { causeType: 'dispute'; on: string } | null;
 }
 
 /**
@@ -732,6 +793,87 @@ const CREATOR_EARNING_PAYOUT_TYPES = [
  * back to its transfer group, then to itself.
  */
 const NEEDS_ATTENTION_CHARGES = sql<number>`count(DISTINCT COALESCE(${payouts.stripeChargeId}, ${payouts.transferGroup}, ${payouts.id}::text))::int`;
+
+/**
+ * Leaves out a re-pay row a refund cancelled before it was paid (late-win
+ * design §4.5, Q4): a re-bought buyer's refund takes the won chargeback's
+ * pay-back back while it is still held, so it never moved money, and no
+ * list shows it. In SQL, so a page's rows and its `total` agree. A re-pay
+ * row is one a step's `repaid_by_payout_id` points at.
+ */
+function movedMoneyOrIsNoRepay(): SQL {
+  return sql`NOT (${payouts.status} = 'cancelled_by_refund' AND ${payouts.stripeTransferId} IS NULL AND EXISTS (SELECT 1 FROM ${payoutReversals} WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id}))`;
+}
+
+/** A page's chargeback lines, by payout id (`disputeLinesFor`). */
+interface DisputeLines {
+  paysBack: Map<string, NonNullable<CreatorPayoutRow['paysBack']>>;
+  paidBack: Map<string, NonNullable<CreatorPayoutRow['paidBack']>>;
+  cancelledFor: Map<string, NonNullable<CreatorPayoutRow['cancelledFor']>>;
+}
+
+/** Keeps a row's latest London day: two steps can both say it. */
+function laterDay<T extends { on: string }>(
+  lines: Map<string, T>,
+  payoutId: string,
+  line: T
+): void {
+  const known = lines.get(payoutId);
+  if (!known || known.on < line.on) lines.set(payoutId, line);
+}
+
+/** One chargeback step, as `disputeLinesFor` reads it. */
+interface DisputeLineStep {
+  payoutId: string;
+  repayId: string | null;
+  kind: string;
+  status: string;
+  resolvedAt: Date | null;
+  /** The step is on a listed share, under the caller's scope. */
+  onShare: boolean | null;
+  /** The step's re-pay row is listed, under the caller's scope. */
+  onRepay: boolean | null;
+  repayCreatedAt: Date | null;
+  repayMovedNothing: boolean | null;
+  wonAt: Date | string | null;
+  title: string | null;
+}
+
+/** What one chargeback step says on its re-pay row (`disputeLinesFor`). */
+function addPaysBackLine(lines: DisputeLines, step: DisputeLineStep): void {
+  // One step per re-pay row (`uq_payout_reversals_repaid_by`).
+  if (step.onRepay !== true || !step.repayId || !step.repayCreatedAt) return;
+  lines.paysBack.set(step.repayId, {
+    causeType: 'dispute',
+    title: step.title ?? null,
+    wonOn: londonDate(step.wonAt ? new Date(step.wonAt) : step.repayCreatedAt),
+  });
+}
+
+/** What one chargeback step says on its share (`disputeLinesFor`). */
+function addShareLines(
+  lines: DisputeLines,
+  step: DisputeLineStep,
+  cancelledByLoss: ReadonlySet<string>
+): void {
+  if (step.onShare !== true) return;
+  if (step.repayCreatedAt && step.repayMovedNothing !== true) {
+    laterDay(lines.paidBack, step.payoutId, {
+      on: londonDate(step.repayCreatedAt),
+    });
+  }
+  if (
+    cancelledByLoss.has(step.payoutId) &&
+    step.kind === 'cancellation' &&
+    step.status === 'done' &&
+    step.resolvedAt
+  ) {
+    laterDay(lines.cancelledFor, step.payoutId, {
+      causeType: 'dispute',
+      on: londonDate(step.resolvedAt),
+    });
+  }
+}
 
 /**
  * Map the persisted `payouts.status` column to the UI display vocabulary.
@@ -854,9 +996,10 @@ export interface TierChangePreview {
    */
   currentPeriodEnd: Date;
   /**
-   * Set for a switch into yearly billing only: what the dialog shows, which
-   * the page passes back to `changeTier()` to be re-checked before the write
-   * (`tierChangeQuote`, Codex-2hxff.96).
+   * Set for a switch into yearly billing (Codex-2hxff.96), and for C(b) when
+   * it charges now (Codex-2hxff.103): what the dialog shows, which the page
+   * passes back to `changeTier()` to be re-checked before the write
+   * (`tierChangeQuote`).
    */
   quote?: string;
   /**
@@ -1801,7 +1944,7 @@ export class SubscriptionService extends BaseService {
         ],
         set: {
           status: 'active',
-          role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${organizationMemberships.role} IN ('owner', 'admin', 'creator', 'member') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
+          role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${inArray(organizationMemberships.role, [...ORGANIZATION_NON_SUBSCRIBER_ROLES])} THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
           updatedAt: new Date(),
         },
       });
@@ -1863,12 +2006,13 @@ export class SubscriptionService extends BaseService {
    * after a good refund repeats that refund under its key. Then the row
    * becomes a tombstone. Any Stripe failure leaves the row as it was and is
    * retryable. The reviving invoice pays no one; the refund's own
-   * `charge.refunded` emails the buyer.
+   * `charge.refunded` emails the buyer. What customer credit paid of it is
+   * not given back: support is told after the Stripe steps (Codex-2hxff.98).
    */
   private async retireRevived(
     row: Subscription,
     keptSubscriptionId: string,
-    reviving?: { invoiceId: string; chargeId: string },
+    reviving?: { invoice: Stripe.Invoice; chargeId: string },
     live?: Stripe.Subscription
   ): Promise<void> {
     const context = {
@@ -1876,21 +2020,12 @@ export class SubscriptionService extends BaseService {
       stripeSubscriptionId: row.stripeSubscriptionId,
       keptSubscriptionId,
     };
-    let refunded: { invoiceId: string; chargeId: string } | undefined;
+    let revived: { paid?: Stripe.Invoice; refundedInvoiceId?: string } = {};
     try {
       const atStripe =
         live ??
         (await this.stripe.subscriptions.retrieve(row.stripeSubscriptionId));
-      // On `updated` the reviving payment is the latest invoice, if paid.
-      refunded = reviving ?? (await this.paidLatestInvoice(atStripe));
-      if (refunded) {
-        await issueRefund(this.stripe, {
-          chargeId: refunded.chargeId,
-          reason: 'requested_by_customer',
-          idempotencyKey: `refund_revived_${refunded.invoiceId}`,
-          environment: this.environment,
-        });
-      }
+      revived = await this.refundReviving(atStripe, reviving);
       if (!endedAtStripeStatus(atStripe.status)) {
         await this.stripe.subscriptions.cancel(
           row.stripeSubscriptionId,
@@ -1918,6 +2053,11 @@ export class SubscriptionService extends BaseService {
         { subscriptionId: row.id }
       );
     }
+    // What credit paid of the reviving invoice goes back to no one
+    // (Codex-2hxff.98).
+    if (revived.paid) {
+      await this.alertUnreturnedCredit(row, revived.paid, 'revived');
+    }
     // Under the lock, so an invoice event re-reading the row before paying
     // out sees it ended.
     const at = new Date();
@@ -1937,8 +2077,29 @@ export class SubscriptionService extends BaseService {
     );
     this.obs.warn(
       'Old subscription revived next to a newer one: cancelled, its reviving payment refunded',
-      { ...context, refundedInvoiceId: refunded?.invoiceId }
+      { ...context, refundedInvoiceId: revived.refundedInvoiceId }
     );
+  }
+
+  /**
+   * Refund the card part of the invoice that revived a subscription: the
+   * one the caller names, or (on `updated`) the latest invoice, if paid.
+   * Returns that paid invoice, for the credit alert (Codex-2hxff.98), and
+   * its id when a refund was made.
+   */
+  private async refundReviving(
+    atStripe: Stripe.Subscription,
+    reviving?: { invoice: Stripe.Invoice; chargeId: string }
+  ): Promise<{ paid?: Stripe.Invoice; refundedInvoiceId?: string }> {
+    const paid = reviving ?? (await this.paidLatestInvoice(atStripe));
+    if (!paid?.chargeId) return { paid: paid?.invoice };
+    await issueRefund(this.stripe, {
+      chargeId: paid.chargeId,
+      reason: 'requested_by_customer',
+      idempotencyKey: `refund_revived_${paid.invoice.id}`,
+      environment: this.environment,
+    });
+    return { paid: paid.invoice, refundedInvoiceId: paid.invoice.id };
   }
 
   /** The row as it stands now, read under the per-user, per-org lock. */
@@ -2008,18 +2169,21 @@ export class SubscriptionService extends BaseService {
     return typeof latest === 'string' ? latest : (latest?.id ?? undefined);
   }
 
-  /** The subscription's latest invoice with its charge, when it is paid. */
+  /**
+   * The subscription's latest invoice when it is paid, with its charge: null
+   * when the card paid nothing of it (customer credit paid it all,
+   * Codex-2hxff.98).
+   */
   private async paidLatestInvoice(
     stripeSub: Stripe.Subscription
-  ): Promise<{ invoiceId: string; chargeId: string } | undefined> {
+  ): Promise<{ invoice: Stripe.Invoice; chargeId: string | null } | undefined> {
     const latest = stripeSub.latest_invoice;
     const invoice =
       typeof latest === 'string'
         ? await this.stripe.invoices.retrieve(latest)
         : latest;
-    if (!invoice?.id || invoice.status !== 'paid' || invoice.amount_paid <= 0) {
-      return undefined;
-    }
+    if (!invoice?.id || invoice.status !== 'paid') return undefined;
+    if (invoice.amount_paid <= 0) return { invoice, chargeId: null };
     const chargeId = await resolveInvoiceCharge(this.stripe, invoice);
     if (!chargeId) {
       throw new InternalServiceError(
@@ -2027,7 +2191,7 @@ export class SubscriptionService extends BaseService {
         { invoiceId: invoice.id }
       );
     }
-    return { invoiceId: invoice.id, chargeId };
+    return { invoice, chargeId };
   }
 
   /** Our row for a Stripe subscription, if we hold one. */
@@ -2090,6 +2254,8 @@ export class SubscriptionService extends BaseService {
       ({ refundedInvoices } = await cancelAndRefundDuplicate(this.stripe, {
         stripeSubscriptionId: row.stripeSubscriptionId,
         environment: this.environment,
+        alertUnreturnedCredit: (invoice) =>
+          this.alertUnreturnedCredit(row, invoice, 'duplicate'),
       }));
     } catch (error) {
       this.obs.error(
@@ -2123,6 +2289,30 @@ export class SubscriptionService extends BaseService {
       stripeSubscriptionId: row.stripeSubscriptionId,
       refundedInvoices,
     });
+  }
+
+  /**
+   * A paid invoice of a subscription we cancel and refund by card: what
+   * customer credit paid of it is not given back, so support is told, once
+   * per invoice (Codex-2hxff.98). Called after the card refund. Never throws.
+   */
+  private async alertUnreturnedCredit(
+    row: Subscription,
+    invoice: Stripe.Invoice,
+    cause: 'duplicate' | 'revived'
+  ): Promise<void> {
+    await alertCreditNotReturned(
+      { stripe: this.stripe, obs: this.obs },
+      invoice,
+      {
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        subscriptionId: row.id,
+        organizationId: row.organizationId,
+        userId: row.userId,
+        kind: 'tier',
+        cause,
+      }
+    );
   }
 
   /**
@@ -2344,14 +2534,17 @@ export class SubscriptionService extends BaseService {
     if (isDuplicateSubscription(sub)) {
       // Without a charge there is nothing of this invoice's to refund, and
       // a duplicate renews nothing: left as it always was.
-      if (!sourceTransaction) return;
-      await this.settleDuplicate(sub);
-      await this.refundDuplicateInvoice(
-        sub,
-        stripeInvoice.id,
-        sourceTransaction
-      );
-      return {};
+      if (sourceTransaction) {
+        await this.settleDuplicate(sub);
+        await this.refundDuplicateInvoice(
+          sub,
+          stripeInvoice.id,
+          sourceTransaction
+        );
+      }
+      // What credit paid of it goes back to no one (Codex-2hxff.98).
+      await this.alertUnreturnedCredit(sub, stripeInvoice, 'duplicate');
+      return sourceTransaction ? {} : undefined;
     }
 
     // Fetch the Stripe subscription for period dates (v19+: on items)
@@ -2427,7 +2620,7 @@ export class SubscriptionService extends BaseService {
             sub,
             keptId,
             reviving && sourceTransaction
-              ? { invoiceId: stripeInvoice.id, chargeId: sourceTransaction }
+              ? { invoice: stripeInvoice, chargeId: sourceTransaction }
               : undefined,
             stripeSub
           );
@@ -3495,8 +3688,10 @@ export class SubscriptionService extends BaseService {
    * otherwise Stripe re-runs the calc against `Date.now()` and the user gets
    * charged a different amount than they confirmed. A switch into yearly
    * billing cannot be pinned that way (Stripe refuses `proration_date` with
-   * `billing_cycle_anchor: 'now'`), so its preview also returns a `quote` the
-   * page echoes back, and the commit re-checks it (Codex-2hxff.96).
+   * `billing_cycle_anchor: { type: 'now' }`), so its preview also returns a
+   * `quote` the page echoes back, and the commit re-checks it
+   * (Codex-2hxff.96). So does C(b) when it charges: pinned, but at a yearly
+   * Price the commit's price check never reads (Codex-2hxff.103).
    *
    * Reuses the same tier-existence + price-configured guards as `changeTier()`
    * so a preview that succeeds is a strong signal the commit will too,
@@ -3524,28 +3719,28 @@ export class SubscriptionService extends BaseService {
       // the renewal. For A and B the plan waits with it and nothing happens
       // today, so Stripe is not asked; the period end is the live one, never
       // a month from today (nothing starts today). For C(b) the plan changes
-      // now on yearly billing, previewed as any change now.
+      // now on yearly billing, previewed as any change now; when that
+      // charges, its `quote` goes back to be re-checked (Codex-2hxff.103).
       if (plan.billing) {
         const billingChange = {
           interval: BILLING_INTERVAL.MONTH,
           amountCents: plan.billing.amountCents,
           effectiveAt: periodEnd.toISOString(),
         };
-        const charges = nowProration(plan) === 'always_invoice';
-        const shown =
-          plan.kind === 'change_then_billing_wait' && charges
-            ? await this.previewNow(plan, prorationDate)
-            : {
-                amountDueCents: 0,
-                prorationLineItems: [],
-                currentPeriodEnd: periodEnd,
-              };
+        const charges = chargesBeforeBillingWait(plan);
+        const shown = charges
+          ? await this.previewNow(plan, prorationDate)
+          : {
+              amountDueCents: 0,
+              prorationLineItems: [],
+              currentPeriodEnd: periodEnd,
+            };
         return {
           ...shown,
           newRecurringAmountCents: plan.billing.amountCents,
           newRecurringInterval: BILLING_INTERVAL.MONTH,
           prorationDate,
-          isUpgrade: plan.kind === 'change_then_billing_wait' && charges,
+          isUpgrade: charges,
           takesEffect:
             plan.kind === 'change_then_billing_wait' ? 'now' : 'period_end',
           billingChange,
@@ -3593,14 +3788,20 @@ export class SubscriptionService extends BaseService {
    *
    * Most changes are pinned to `at` by `proration_date`, which the write
    * repeats. A switch into yearly billing starts a new period today: it
-   * passes `billing_cycle_anchor: 'now'` instead, because Stripe refuses
-   * `proration_date` with it, so its credit runs to the moment of the write.
-   * Its `quote` holds what the dialog showed, for the re-check
+   * passes `billing_cycle_anchor: { type: 'now' }` instead, because Stripe
+   * refuses `proration_date` with it, so its credit runs to the moment of the
+   * write. Its `quote` holds what the dialog showed, for the re-check
    * (Codex-2hxff.96). Stripe bills that new period as an ordinary line beside
    * the credit, not a proration, so it shows every line of the invoice: the
    * lines then add up to the charge, and the re-check compares them all. A
    * switch of billing period is next billed one new
    * period from `at`; an upgrade, at the old period's end.
+   *
+   * C(b) is pinned to `at` like any change now, but it bills the new tier's
+   * YEARLY Price, which the confirm's price check (the monthly bill it waits
+   * for) never reads. So it returns a `quote` too, and the confirm previews
+   * again at the same `at` and compares (Codex-2hxff.103). It is only
+   * previewed when it charges (`chargesBeforeBillingWait`).
    */
   private async previewNow(
     plan: TierChangePlan,
@@ -3618,7 +3819,7 @@ export class SubscriptionService extends BaseService {
         items: [{ id: plan.item.id, price: plan.newPriceId }],
         proration_behavior: 'always_invoice',
         ...(newPeriod
-          ? { billing_cycle_anchor: 'now' as const }
+          ? { billing_cycle_anchor: { type: 'now' } }
           : { proration_date: at }),
       },
     });
@@ -3647,7 +3848,7 @@ export class SubscriptionService extends BaseService {
       amountDueCents: preview.amount_due,
       prorationLineItems,
       currentPeriodEnd,
-      ...(newPeriod && {
+      ...((newPeriod || plan.kind === 'change_then_billing_wait') && {
         quote: tierChangeQuote({
           amountDueCents: preview.amount_due,
           lineAmountsCents: prorationLineItems.map((line) => line.amountCents),
@@ -3745,6 +3946,14 @@ export class SubscriptionService extends BaseService {
    * Stripe is written to, so the member confirms the price they will pay
    * (review C1 cycle 2, L4; cycle 3, L4-a). For C(b) it is the monthly bill
    * the change waits for.
+   *
+   * A change leaving yearly billing is also checked against the preview's
+   * `quote`: C(b) at a dearer plan charges the part-year at the new tier's
+   * yearly Price now, so it is previewed again at the pinned `prorationDate`
+   * and any difference throws `TierChangePreviewExpiredError` before Stripe
+   * is written to. A quote passed where nothing is charged now, or none
+   * where it is (a price saved since turned a cheaper pick dearer, or a
+   * dearer one cheaper), is a difference (Codex-2hxff.103).
    */
   async changeTier(
     userId: string,
@@ -3793,6 +4002,22 @@ export class SubscriptionService extends BaseService {
           prorationDate: effectiveProrationDate,
           newTierId,
         });
+      }
+
+      // Leaving yearly billing: C(b)'s part-year charge, at the new tier's
+      // yearly Price, is previewed again at the pinned date the write uses.
+      // A quote that differs, one where the dialog showed none, or none where
+      // it showed one, is refused (Codex-2hxff.103).
+      if (plan.billing) {
+        const charged = chargesBeforeBillingWait(plan)
+          ? (await this.previewNow(plan, effectiveProrationDate)).quote
+          : undefined;
+        if (charged !== quote) {
+          throw new TierChangePreviewExpiredError({
+            prorationDate: effectiveProrationDate,
+            newTierId,
+          });
+        }
       }
 
       if (plan.billing) {
@@ -4131,7 +4356,7 @@ export class SubscriptionService extends BaseService {
           // dialog said (Codex-2hxff.96). Stripe refuses proration_date with
           // this anchor, so the credit runs to this write; `changeTier`
           // re-checked the dialog's figures just before it.
-          ...(newPeriod && { billing_cycle_anchor: 'now' as const }),
+          ...(newPeriod && { billing_cycle_anchor: { type: 'now' } }),
           // A charge now must clear before the subscription changes. On 402
           // Stripe reverts the price update; we map it to
           // SubscriptionPaymentRequiredError and the row stays untouched.
@@ -4873,8 +5098,8 @@ export class SubscriptionService extends BaseService {
    *     `subscriptions.update(cancel_at_period_end: false)`.
    *
    * On success:
-   *   - Stripe call with `billing_cycle_anchor: 'unchanged'` keeps the
-   *     existing cycle so the user isn't silently re-billed.
+   *   - Stripe call with `billing_cycle_anchor: { type: 'unchanged' }` keeps
+   *     the existing cycle so the user isn't silently re-billed.
    *   - DB: `status` set to what Stripe's response reports (normally
    *     'active'), `updatedAt` bumped.
    *   - Orchestrator hook fires with reason `'subscription_resumed'` —
@@ -4935,7 +5160,7 @@ export class SubscriptionService extends BaseService {
       // first, and do nothing.
       const resumed = await this.stripe.subscriptions.resume(
         sub.stripeSubscriptionId,
-        { billing_cycle_anchor: 'unchanged' },
+        { billing_cycle_anchor: { type: 'unchanged' } },
         {
           idempotencyKey: `resume_${sub.stripeSubscriptionId}_${sub.updatedAt.getTime()}`,
         }
@@ -6377,6 +6602,7 @@ export class SubscriptionService extends BaseService {
   private buildPayoutConditions(orgId: string, options: PayoutFilterOptions) {
     return [
       eq(payouts.organizationId, orgId),
+      movedMoneyOrIsNoRepay(),
       ...this.buildPayoutFilterConditions(options),
     ];
   }
@@ -6395,6 +6621,7 @@ export class SubscriptionService extends BaseService {
     return [
       eq(payouts.userId, userId),
       inArray(payouts.payoutType, [...CREATOR_EARNING_PAYOUT_TYPES]),
+      movedMoneyOrIsNoRepay(),
       ...this.buildPayoutFilterConditions(options),
     ];
   }
@@ -6487,11 +6714,23 @@ export class SubscriptionService extends BaseService {
             // banner-first/children-after render stays predictable.
             .orderBy(desc(payouts.createdAt), payouts.payoutType, payouts.id);
 
-    const bankDates = await this.bankDatesFor(
-      items.flatMap((row) => (row.creatorId ? [row.creatorId] : []))
-    );
+    const [bankDates, takenBack, disputeLines] = await Promise.all([
+      this.bankDatesFor(
+        items.flatMap((row) => (row.creatorId ? [row.creatorId] : []))
+      ),
+      this.takenBackFor(
+        { organizationId: orgId },
+        items.filter((row) => row.status === 'reversed').map((row) => row.id)
+      ),
+      this.disputeLinesFor({ organizationId: orgId }, items),
+    ]);
     const datesOf = (creatorId: string | null) =>
       creatorId ? bankDates.get(creatorId) : undefined;
+    const linesOf = (payoutId: string) => ({
+      takenBack: takenBack.get(payoutId) ?? null,
+      paidBack: disputeLines.paidBack.get(payoutId) ?? null,
+      paysBack: disputeLines.paysBack.get(payoutId) ?? null,
+    });
 
     return {
       items: items.map((row) => ({
@@ -6520,6 +6759,7 @@ export class SubscriptionService extends BaseService {
           datesOf(row.creatorId)?.manualSince ?? null,
           datesOf(row.creatorId)?.cleared ?? null
         ),
+        ...linesOf(row.id),
       })),
       pagination: {
         page,
@@ -6702,14 +6942,15 @@ export class SubscriptionService extends BaseService {
     ]);
 
     const total = totalResult?.count ?? 0;
-    const [bankDates, takenBack] = await Promise.all([
+    const [bankDates, takenBack, disputeLines] = await Promise.all([
       rows.length === 0
         ? undefined
         : this.bankDatesFor([userId]).then((dates) => dates.get(userId)),
       this.takenBackFor(
-        userId,
+        { userId },
         rows.filter((row) => row.status === 'reversed').map((row) => row.id)
       ),
+      this.disputeLinesFor({ userId }, rows),
     ]);
 
     return {
@@ -6735,6 +6976,9 @@ export class SubscriptionService extends BaseService {
           bankDates?.cleared ?? null
         ),
         takenBack: takenBack.get(row.id) ?? null,
+        paidBack: disputeLines.paidBack.get(row.id) ?? null,
+        paysBack: disputeLines.paysBack.get(row.id) ?? null,
+        cancelledFor: disputeLines.cancelledFor.get(row.id) ?? null,
       })),
       pagination: {
         page,
@@ -6747,10 +6991,12 @@ export class SubscriptionService extends BaseService {
 
   /**
    * Each reversed row's latest take-back that moved money, in one query for
-   * the page, and only the caller's own rows (`payouts.user_id`).
+   * the page, and only the caller's own rows: the payee's (`payouts.user_id`)
+   * for Earnings, the organisation's (`payouts.organization_id`) for Org
+   * Payouts.
    */
   private async takenBackFor(
-    userId: string,
+    scope: { userId: string } | { organizationId: string },
     payoutIds: readonly string[]
   ): Promise<Map<string, NonNullable<CreatorPayoutRow['takenBack']>>> {
     const latest = new Map<
@@ -6768,7 +7014,9 @@ export class SubscriptionService extends BaseService {
       .innerJoin(payouts, eq(payouts.id, payoutReversals.payoutId))
       .where(
         and(
-          eq(payouts.userId, userId),
+          'userId' in scope
+            ? eq(payouts.userId, scope.userId)
+            : eq(payouts.organizationId, scope.organizationId),
           inArray(payoutReversals.payoutId, [...payoutIds]),
           takeBackMovedMoney(),
           isNotNull(payoutReversals.resolvedAt)
@@ -6782,6 +7030,106 @@ export class SubscriptionService extends BaseService {
       latest.set(step.payoutId, { causeType, on: londonDate(resolvedAt) });
     }
     return latest;
+  }
+
+  /**
+   * A page's chargeback lines, read from the chargebacks' steps in one query
+   * (Codex-2hxff.70; late-win design §6, mockups E1-E3 and P1):
+   *   - `paysBack` on a re-pay row: the won chargeback whose step it pays
+   *     back, the sale's title, and when it was won;
+   *   - `paidBack` on a share the chargeback took: the day its re-pay was
+   *     written, unless a refund cancelled that re-pay before it was paid (it
+   *     is never listed, so nothing was paid back);
+   *   - `cancelledFor` on a share the loss cancelled (`cancelled_by_dispute`,
+   *     which only a lost chargeback writes): the day its cancellation was
+   *     done.
+   * Each side is scoped by the row it describes, as `takenBackFor` is: the
+   * share by its own payee or organisation, the re-pay row by its own. An
+   * organisation's re-pay row also needs its share in the organisation:
+   * `paysBack`'s title is read through the share's sale. A re-pay copies its
+   * share's organisation (@codex/payments `insertRepayRow`), so this drops
+   * nothing, but it no longer rests on that alone. Not a payee's: a re-homed
+   * re-pay's payee can differ from its share's.
+   */
+  private async disputeLinesFor(
+    scope: { userId: string } | { organizationId: string },
+    rows: readonly { id: string; status: string }[]
+  ): Promise<DisputeLines> {
+    const lines: DisputeLines = {
+      paysBack: new Map(),
+      paidBack: new Map(),
+      cancelledFor: new Map(),
+    };
+    if (rows.length === 0) return lines;
+    const ids = rows.map((row) => row.id);
+    const cancelledByLoss = new Set(
+      rows
+        .filter((row) => row.status === 'cancelled_by_dispute')
+        .map((row) => row.id)
+    );
+    const repay = alias(payouts, 'repay');
+    const subscribedCourse = alias(courses, 'subscribed_course');
+    const shareScope =
+      'userId' in scope
+        ? eq(payouts.userId, scope.userId)
+        : eq(payouts.organizationId, scope.organizationId);
+    const repayScope =
+      'userId' in scope
+        ? eq(repay.userId, scope.userId)
+        : sql`(${eq(repay.organizationId, scope.organizationId)} AND ${eq(payouts.organizationId, scope.organizationId)})`;
+    const onShare = sql<boolean>`(${inArray(payoutReversals.payoutId, ids)} AND ${shareScope})`;
+    const onRepay = sql<boolean>`(${inArray(payoutReversals.repaidByPayoutId, ids)} AND ${repayScope})`;
+    const steps = await this.db
+      .select({
+        payoutId: payoutReversals.payoutId,
+        repayId: payoutReversals.repaidByPayoutId,
+        kind: payoutReversals.kind,
+        status: payoutReversals.status,
+        resolvedAt: payoutReversals.resolvedAt,
+        onShare,
+        onRepay,
+        repayCreatedAt: repay.createdAt,
+        repayMovedNothing: sql<boolean>`(${repay.status} = 'cancelled_by_refund' AND ${repay.stripeTransferId} IS NULL)`,
+        // A late win's own date, else when the win was applied; a win not
+        // yet applied falls back to its re-pay row's.
+        wonAt: sql<
+          Date | string | null
+        >`COALESCE(${disputes.lateWonAt}, ${disputes.outcomeAppliedAt})`,
+        title: sql<
+          string | null
+        >`COALESCE(${content.title}, ${courses.title}, ${subscriptionTiers.name}, ${subscribedCourse.title})`,
+      })
+      .from(payoutReversals)
+      .innerJoin(payouts, eq(payouts.id, payoutReversals.payoutId))
+      .leftJoin(repay, eq(repay.id, payoutReversals.repaidByPayoutId))
+      .leftJoin(disputes, eq(disputes.stripeDisputeId, payoutReversals.causeId))
+      .leftJoin(purchases, eq(purchases.id, payouts.purchaseId))
+      .leftJoin(content, eq(content.id, purchases.contentId))
+      .leftJoin(courses, eq(courses.id, purchases.courseId))
+      .leftJoin(subscriptions, eq(subscriptions.id, payouts.subscriptionId))
+      .leftJoin(
+        subscriptionTiers,
+        eq(subscriptionTiers.id, subscriptions.tierId)
+      )
+      .leftJoin(
+        courseSubscriptions,
+        eq(courseSubscriptions.id, payouts.courseSubscriptionId)
+      )
+      .leftJoin(
+        subscribedCourse,
+        eq(subscribedCourse.id, courseSubscriptions.courseId)
+      )
+      .where(
+        and(
+          eq(payoutReversals.causeType, 'dispute'),
+          sql`(${onShare} OR ${onRepay})`
+        )
+      );
+    for (const step of steps) {
+      addPaysBackLine(lines, step);
+      addShareLines(lines, step, cancelledByLoss);
+    }
+    return lines;
   }
 
   /**

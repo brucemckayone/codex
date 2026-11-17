@@ -5,7 +5,10 @@
  * - a later cause (`REPAY_BLOCKED_BY_LATER_CAUSE`): a later chargeback or
  *   refund took the payees' shares too, so re-paying would pay them twice;
  * - a step only a person can read (`REFUND_CLAWBACK_NEEDS_PERSON`): retrying
- *   never helps.
+ *   never helps;
+ * - a late win's own refund of the payment (`LATE_WIN_REFUND_NOT_REPAYABLE`,
+ *   owner decision 6, 2026-11-08): it pays back a buyer who paid twice, so
+ *   it is only ever settled as refunded another way.
  *
  * The server refuses either every time. Once it has said so for a row, the
  * queue disables that row's Re-pay and says why, and support settles it as
@@ -16,7 +19,11 @@
 
 import { SvelteMap } from 'svelte/reactivity';
 
-export type RepayBlockReason = 'chargeback' | 'later_refunds' | 'needs_person';
+export type RepayBlockReason =
+  | 'chargeback'
+  | 'later_refunds'
+  | 'needs_person'
+  | 'late_win_refund';
 
 const blocks = new SvelteMap<string, RepayBlockReason>();
 

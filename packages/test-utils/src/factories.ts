@@ -29,6 +29,7 @@ import {
   CONTENT_TYPES,
   MEDIA_STATUS,
   MEDIA_TYPES,
+  STRIPE_API_VERSION,
 } from '@codex/constants';
 import type {
   Content,
@@ -99,7 +100,6 @@ export function createTestOrganization(
     description: 'A test organization for automated testing',
     logoUrl: null,
     websiteUrl: null,
-    primaryConnectAccountUserId: null,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
@@ -326,6 +326,8 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     status: CONTENT_STATUS.DRAFT,
     publishedAt: null,
     offSaleAt: null,
+    publishRequestedAt: null,
+    publishBlockedReason: null,
     viewCount: 0,
     purchaseCount: 0,
     shaderPreset: null,
@@ -662,7 +664,7 @@ export function createMockStripeCheckoutEvent(
     id: eventId,
     object: 'event',
     type: 'checkout.session.completed',
-    api_version: '2025-10-29.clover',
+    api_version: STRIPE_API_VERSION,
     created: Math.floor(Date.now() / 1000),
     data: {
       object: {
@@ -743,7 +745,7 @@ export function createMockStripePaymentIntentEvent(
     id: eventId,
     object: 'event',
     type: 'payment_intent.succeeded',
-    api_version: '2025-10-29.clover',
+    api_version: STRIPE_API_VERSION,
     created: Math.floor(Date.now() / 1000),
     data: {
       object: {

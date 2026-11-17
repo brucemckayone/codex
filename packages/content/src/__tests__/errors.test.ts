@@ -137,7 +137,12 @@ describe('Content Service Errors', () => {
 
     it('should include mediaItemId in context', () => {
       const error = new MediaNotReadyError('media-123');
-      expect(error.context).toEqual({ mediaItemId: 'media-123' });
+      // The code names the rule for the editor's publish checklist
+      // (Codex-a6ofh.2.1).
+      expect(error.context).toEqual({
+        mediaItemId: 'media-123',
+        code: 'MEDIA_NOT_READY',
+      });
     });
 
     it('should be catchable as BusinessLogicError', () => {

@@ -151,7 +151,7 @@
     width: var(--space-5);
     height: var(--space-5);
     border-radius: var(--radius-full, 9999px);
-    background-color: color-mix(in srgb, var(--color-success-500) 12%, var(--color-surface));
+    background-color: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
     color: var(--color-success-700);
     font-weight: var(--font-bold);
     font-size: var(--text-xs);
@@ -178,7 +178,7 @@
     color: inherit;
     transition: background-color var(--duration-fast) var(--ease-out),
                 transform var(--duration-fast) var(--ease-out);
-    /* subtle 1px lift on hover — ContentForm ordinal rhythm */
+    /* subtle 1px lift on hover */
     border-left: var(--space-0-5) solid transparent;
   }
 
@@ -191,7 +191,7 @@
   }
 
   .rail-link[data-tone='warning']:hover {
-    border-left-color: var(--color-warning-500);
+    border-left-color: var(--color-warning);
   }
 
   .rail-link[data-tone='muted']:hover {

@@ -22,16 +22,27 @@
   import { onDestroy } from 'svelte';
   import { beforeNavigate, invalidate } from '$app/navigation';
   import { page } from '$app/state';
-  import type { HeroLayout } from '@codex/validation';
+  import {
+    type HeroLayout,
+    TOKEN_OVERRIDE_KEY,
+    TOKEN_OVERRIDE_MAX_ENTRIES,
+    tokenOverrideEntryProblem,
+    tokenOverrideText,
+  } from '@codex/validation';
   import type { BrandingSettingsResponse } from '@codex/shared-types';
   import { brandEditor, createBrandPreviewSender } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { getBrandingSettings, updateBrandingCommand } from '$lib/remote/branding.remote';
   import { getPublicContent } from '$lib/remote/content.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+  import { logger } from '$lib/observability';
+  import { queryErrorMessage, remoteErrorStatus } from '$lib/remote/query-result';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
   import {
     BrandStudioLayout,
     BrandStudioRail,
+    BrandStudioRailPending,
     BrandStudioCanvas,
     BrandStudioGuided,
     type BrandStudioMode,
@@ -52,6 +63,31 @@
   // Load current branding — the same remote query the old settings/branding
   // page used, so the save/load contract is unchanged.
   const brandingQuery = $derived(orgId ? getBrandingSettings(orgId) : null);
+
+  // The rail is live only once the editor store holds a brand (Codex-zskbp).
+  // Until `open()` runs below, `brandEditor.pending` is null and the store
+  // drops every edit, so the rail would take input that changes nothing. The
+  // gate keys on the store, not on the query: a resolved query opens the store
+  // one effect later. A failed read shows "couldn't load" with Retry instead of
+  // the editor; the canvas stays, showing the saved brand.
+  const editorOpen = $derived(brandEditor.pending !== null);
+  const brandFailed = $derived(
+    connectQueryState(brandingQuery).kind === 'failed'
+  );
+  // A Retry hands this page a new query that reads as loading until it
+  // settles (see LoadFailedAlert), so the rail keeps its failed shape until
+  // then instead of flipping to skeleton rows above the alert.
+  let brandRetrying = $state(false);
+
+  $effect(() => {
+    if (brandFailed) {
+      logger.error('studio/brand: branding failed to load', {
+        organizationId: orgId,
+        status: remoteErrorStatus(brandingQuery?.error),
+        reason: queryErrorMessage(brandingQuery?.error),
+      });
+    }
+  });
 
   // One published content slug for the canvas' Detail/Player previews. Studio
   // is ssr=false, so this reactive remote query resolves client-side. When the
@@ -130,7 +166,14 @@
     const unreadable: Record<string, string> = {};
     const initialState = toBrandEditorState(current, unreadable);
     unreadableRaw = unreadable;
-    brandEditor.open(orgId, initialState);
+    // A restored draft was edited from exactly this brand (the store checks).
+    // A discarded one was not, and one Save would have reverted a newer save.
+    const recovery = brandEditor.open(orgId, initialState);
+    if (recovery === 'restored') {
+      toast.info(m.studio_brand_recovery_restored());
+    } else if (recovery === 'discarded') {
+      toast.warning(m.studio_brand_recovery_discarded());
+    }
     // One non-blocking notice if any saved field couldn't be read — surfaced
     // BEFORE the admin can overwrite it by saving. handleSave preserves the raw
     // value, so this warns rather than signalling data loss.
@@ -240,14 +283,18 @@
           : (unreadableRaw.darkTokenOverrides ?? ''),
         heroLayout: payload.heroLayout as HeroLayout,
       });
-      brandEditor.markSaved();
+      // What it sent: an edit made while it was in flight stays unsaved.
+      brandEditor.markSaved(payload);
       await invalidate('cache:org-versions').catch(() => {
         /* non-critical — save succeeded; worst case the user reloads */
       });
       toast.success('Brand settings saved');
     } catch (err) {
+      // The command forwards a worker 4xx with its message (an HttpError is
+      // not an Error, so `err.message` never reached the toast).
       toast.error(
-        err instanceof Error ? err.message : 'Failed to save brand settings'
+        queryErrorMessage(err, 'Failed to save brand settings') ??
+          'Failed to save brand settings'
       );
     } finally {
       saving = false;
@@ -255,9 +302,21 @@
   }
 
   // Preserve the unsaved-changes guard the retired overlay used to provide.
-  beforeNavigate(({ cancel }) => {
-    if (brandEditor.isDirty) {
-      if (!confirm('You have unsaved brand changes. Discard?')) cancel();
+  // A confirmed Discard clears the tab's draft too: leaving keeps it otherwise,
+  // for the next open to offer (Codex-0keaj).
+  beforeNavigate(({ type, cancel }) => {
+    if (!brandEditor.isDirty) return;
+    // A reload, tab close or typed URL: cancelling shows the browser's own
+    // prompt, and the draft stays for the reload it exists for. confirm() is
+    // not called there (browsers block it during unload, but may not).
+    if (type === 'leave') {
+      cancel();
+      return;
+    }
+    if (confirm('You have unsaved brand changes. Discard?')) {
+      brandEditor.discard();
+    } else {
+      cancel();
     }
   });
 
@@ -276,7 +335,8 @@
       backgroundColor: b.backgroundColorHex,
       fontBody: b.fontBody,
       fontHeading: b.fontHeading,
-      radius: Number(b.radiusValue) || 0.5,
+      // 0 is a real radius ("Sharp"), so not `|| 0.5` (Codex-jxa7t).
+      radius: Number.isFinite(b.radiusValue) ? b.radiusValue : 0.5,
       density: Number(b.densityValue) || 1,
       logoUrl: b.logoUrl,
       tokenOverrides:
@@ -301,15 +361,48 @@
     unreadable: Record<string, string>
   ): Record<string, string | null> | null {
     if (!json) return null; // absent/empty — not an error
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(json) as Record<string, string | null>;
-      return parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0
-        ? parsed
-        : null;
+      parsed = JSON.parse(json);
     } catch {
       recordUnreadable(field, json, unreadable);
       return null;
     }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return keepSavable(field, parsed);
+  }
+
+  // A stored entry the save would refuse (Codex-403d3): a key that isn't
+  // lowercase kebab, a reserved key, a value that would leave its own CSS
+  // declaration or fetch, or an entry past the limit. It is dropped here, so
+  // the next Save never sends it back and the brand stays saveable (owner's
+  // pick). Nothing is lost that showed: the mappers render the same first
+  // entries and refuse the same ones. A stored number is kept as its text,
+  // as it renders. Logged with the org and the keys, never the values.
+  function keepSavable(
+    field: string,
+    stored: object
+  ): Record<string, string | null> | null {
+    const entries = Object.entries(stored);
+    const dropped = entries.slice(TOKEN_OVERRIDE_MAX_ENTRIES).map(([key]) => key);
+    const kept: Record<string, string | null> = {};
+    for (const [key, value] of entries.slice(0, TOKEN_OVERRIDE_MAX_ENTRIES)) {
+      if (tokenOverrideEntryProblem(key, value)) {
+        dropped.push(key);
+        continue;
+      }
+      kept[key] = tokenOverrideText(value);
+    }
+    if (dropped.length > 0) {
+      logger.warn('studio/brand: stored token overrides the save would refuse were dropped', {
+        organizationId: orgId,
+        field,
+        dropped: dropped.length,
+        // Only keys that are well-formed, so a crafted key is never logged.
+        keys: dropped.filter((key) => TOKEN_OVERRIDE_KEY.test(key)).slice(0, 20),
+      });
+    }
+    return Object.keys(kept).length > 0 ? kept : null;
   }
 
   function parseDarkOverrides(
@@ -349,48 +442,64 @@
 
 <BrandStudioLayout {railCollapsed} {fullscreen} onToggleRail={toggleRail}>
   {#snippet rail()}
-    <div class="brand-mode">
-      <div class="brand-mode__toggle" role="group" aria-label="Editor mode">
-        <button
-          type="button"
-          class="brand-mode__btn"
-          class:is-active={mode === 'guided'}
-          aria-pressed={mode === 'guided'}
-          onclick={() => setMode('guided')}
-        >
-          Guided
-        </button>
-        <button
-          type="button"
-          class="brand-mode__btn"
-          class:is-active={mode === 'advanced'}
-          aria-pressed={mode === 'advanced'}
-          onclick={() => setMode('advanced')}
-        >
-          Advanced
-        </button>
-      </div>
+    {#if editorOpen}
+      <div class="brand-mode">
+        <div class="brand-mode__toggle" role="group" aria-label="Editor mode">
+          <button
+            type="button"
+            class="brand-mode__btn"
+            class:is-active={mode === 'guided'}
+            aria-pressed={mode === 'guided'}
+            onclick={() => setMode('guided')}
+          >
+            Guided
+          </button>
+          <button
+            type="button"
+            class="brand-mode__btn"
+            class:is-active={mode === 'advanced'}
+            aria-pressed={mode === 'advanced'}
+            onclick={() => setMode('advanced')}
+          >
+            Advanced
+          </button>
+        </div>
 
-      <div class="brand-mode__view">
-        {#if mode === 'guided'}
-          <BrandStudioGuided
-            {saving}
-            isDirty={brandEditor.isDirty}
-            onsave={handleSave}
-            onopenfulleditor={() => setMode('advanced')}
-            orgName={data.org?.name ?? ''}
-          />
-        {:else}
-          <BrandStudioRail
-            {saving}
-            isDirty={brandEditor.isDirty}
-            onsave={handleSave}
-            orgName={data.org?.name ?? ''}
-            orgDescription={data.org?.description ?? null}
-            onpreviewreload={handleHeroPreviewReload}
-          />
-        {/if}
+        <div class="brand-mode__view">
+          {#if mode === 'guided'}
+            <BrandStudioGuided
+              {saving}
+              isDirty={brandEditor.isDirty}
+              onsave={handleSave}
+              onopenfulleditor={() => setMode('advanced')}
+              orgName={data.org?.name ?? ''}
+            />
+          {:else}
+            <BrandStudioRail
+              {saving}
+              isDirty={brandEditor.isDirty}
+              onsave={handleSave}
+              orgName={data.org?.name ?? ''}
+              orgDescription={data.org?.description ?? null}
+              onpreviewreload={handleHeroPreviewReload}
+            />
+          {/if}
+        </div>
       </div>
+    {:else}
+      <BrandStudioRailPending failed={brandFailed || brandRetrying} />
+    {/if}
+    <!-- Mounted unconditionally (see LoadFailedAlert): its status line has to
+         outlive the pending rail to announce a Retry that loads. -->
+    <div class="brand-load-failed">
+      <LoadFailedAlert
+        query={brandingQuery}
+        bind:retrying={brandRetrying}
+        message={m.branding_load_failed()}
+        againMessage={m.branding_load_failed_again()}
+        loadedMessage={m.branding_load_retry_ok()}
+        data-testid="brand-load-error"
+      />
     </div>
   {/snippet}
   {#snippet canvas()}
@@ -467,5 +576,17 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
+  }
+
+  /* The rail's gutter for the load alert. Its foot is padded only while the
+     alert shows (on a phone the rail ends just below it): once the editor
+     opens, the alert's sr-only status line is all that is left, and this
+     wrapper takes no height under the rail's footer. */
+  .brand-load-failed {
+    padding-inline: var(--space-4);
+  }
+
+  .brand-load-failed:has(:global(.load-failed)) {
+    padding-block-end: var(--space-4);
   }
 </style>

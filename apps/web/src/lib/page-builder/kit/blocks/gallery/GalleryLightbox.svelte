@@ -22,9 +22,9 @@
   it to. Escape (the dialog's
   `cancel`), the close button and a click on the dark ground round the
   picture close it. ← and → step, heard on the window while it is open, never
-  on the dialog itself (s1ebi). The page behind does not scroll: the root
-  carries `data-lp-lightbox` from opening until it unmounts. The block returns
-  focus to the tile it opened from.
+  on the dialog itself (s1ebi). The page behind does not scroll: it holds the
+  app's one counted scroll lock, as a dialog does, from opening until it
+  unmounts. The block returns focus to the tile it opened from.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
@@ -32,6 +32,7 @@
   import { describeThrown } from '$lib/client-log';
   import { ChevronLeftIcon, ChevronRightIcon, XIcon } from '$lib/components/ui/Icon';
   import { logger } from '$lib/observability';
+  import { lockScroll } from '$lib/utils/scroll-lock';
   import type { PageImageVariant } from '../../../page-images';
   import { holdsStill } from '../../motion/attributes';
   import type { Picture } from './arrange';
@@ -51,8 +52,6 @@
 
   const { pictures, start, label, onclose, onfail }: Props = $props();
 
-  /** The root attribute that holds the page still behind it. */
-  const LOCK = 'data-lp-lightbox';
   /** What a click may land on without closing: a picture, its words, a control. */
   const HELD =
     '.gallery-lightbox__picture, .gallery-lightbox__lost, .gallery-lightbox__caption, button';
@@ -189,16 +188,16 @@
       dialog = node;
       track = node.querySelector<HTMLElement>('.gallery-lightbox__track') ?? undefined;
       slides = [...node.querySelectorAll<HTMLElement>('.gallery-lightbox__slide')];
-      const root = document.documentElement;
       let settled: IntersectionObserver | undefined;
+      let unlock: (() => void) | undefined;
       const release = () => {
         settled?.disconnect();
         clearTimeout(idle);
-        root.removeAttribute(LOCK);
+        unlock?.();
       };
       try {
         node.showModal();
-        root.setAttribute(LOCK, '');
+        unlock = lockScroll();
         go(start, false);
         node.querySelector<HTMLElement>('.gallery-lightbox__close')?.focus();
         if (track && typeof IntersectionObserver !== 'undefined') {
@@ -356,13 +355,6 @@
 </dialog>
 
 <style>
-  /* The page behind holds still while it is open; the gutter keeps its
-     place, so nothing shifts as the scrollbar goes. */
-  :global(html[data-lp-lightbox]) {
-    overflow: hidden;
-    scrollbar-gutter: stable;
-  }
-
   /* The whole screen. Its ground is its own, the scrim (`--lp-bg` on media),
      not the backdrop's: a backdrop does not take the section's tokens in
      every browser. */

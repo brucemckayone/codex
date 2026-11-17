@@ -36,6 +36,7 @@ import {
 import {
   ConflictError,
   ForbiddenError,
+  InternalServiceError,
   NotFoundError,
 } from '@codex/service-errors';
 import { and, desc, eq, gt, inArray, isNull, lte, ne, sql } from 'drizzle-orm';
@@ -234,8 +235,60 @@ export async function getOwnershipView(
     );
   }
   const viewerRole = viewer.role as OwnershipViewerRole;
+  const isOwner = viewerRole === 'owner';
 
-  const [owner] = await db
+  // The reads after the viewer gate are independent, so they run together
+  // (Codex-2hxff.46); none is in a transaction. The owner-only two key on the
+  // viewer: an active owner IS the owner (`uq_org_memberships_one_active_owner`).
+  const [[owner], [period], openOffer, lastOutcome, eligibleRecipients] =
+    await Promise.all([
+      loadOwner(db, organizationId),
+      db
+        .select({ startedAt: organizationOwnershipPeriods.startedAt })
+        .from(organizationOwnershipPeriods)
+        .where(
+          and(
+            eq(organizationOwnershipPeriods.organizationId, organizationId),
+            isNull(organizationOwnershipPeriods.endedAt)
+          )
+        )
+        .limit(1),
+      loadOpenOffer(db, organizationId),
+      isOwner ? loadLastOutcome(db, organizationId, viewerId) : undefined,
+      isOwner
+        ? loadEligibleRecipients(db, organizationId, viewerId)
+        : undefined,
+    ]);
+  if (!owner) {
+    throw new NotFoundError('This organisation has no owner', {
+      organizationId,
+    });
+  }
+
+  const view: OwnershipViewCore = {
+    owner: {
+      userId: owner.userId,
+      name: owner.name,
+      avatarUrl: owner.avatarUrl ?? owner.image ?? null,
+      ownerSince: (period?.startedAt ?? owner.joinedAt).toISOString(),
+      payoutsReady: Boolean(owner.chargesEnabled && owner.payoutsEnabled),
+    },
+    viewerRole,
+    openOffer:
+      openOffer && (isOwner || openOffer.recipient.userId === viewerId)
+        ? openOffer
+        : null,
+  };
+  if (!isOwner) return view;
+
+  view.lastOutcome = lastOutcome;
+  view.eligibleRecipients = eligibleRecipients;
+  return view;
+}
+
+/** The organisation's active owner membership, with their name and Connect state. */
+function loadOwner(db: Database, organizationId: string) {
+  return db
     .select({
       userId: organizationMemberships.userId,
       joinedAt: organizationMemberships.createdAt,
@@ -259,48 +312,6 @@ export async function getOwnershipView(
       )
     )
     .limit(1);
-  if (!owner) {
-    throw new NotFoundError('This organisation has no owner', {
-      organizationId,
-    });
-  }
-
-  const [period] = await db
-    .select({ startedAt: organizationOwnershipPeriods.startedAt })
-    .from(organizationOwnershipPeriods)
-    .where(
-      and(
-        eq(organizationOwnershipPeriods.organizationId, organizationId),
-        isNull(organizationOwnershipPeriods.endedAt)
-      )
-    )
-    .limit(1);
-
-  const isOwner = viewerRole === 'owner';
-  const openOffer = await loadOpenOffer(db, organizationId);
-  const view: OwnershipViewCore = {
-    owner: {
-      userId: owner.userId,
-      name: owner.name,
-      avatarUrl: owner.avatarUrl ?? owner.image ?? null,
-      ownerSince: (period?.startedAt ?? owner.joinedAt).toISOString(),
-      payoutsReady: Boolean(owner.chargesEnabled && owner.payoutsEnabled),
-    },
-    viewerRole,
-    openOffer:
-      openOffer && (isOwner || openOffer.recipient.userId === viewerId)
-        ? openOffer
-        : null,
-  };
-  if (!isOwner) return view;
-
-  view.lastOutcome = await loadLastOutcome(db, organizationId, owner.userId);
-  view.eligibleRecipients = await loadEligibleRecipients(
-    db,
-    organizationId,
-    owner.userId
-  );
-  return view;
 }
 
 async function loadOpenOffer(
@@ -318,18 +329,17 @@ async function loadOpenOffer(
     )
     .limit(1);
   if (!offer) return null;
-  const names = await loadNames(db, [
-    offer.recipientUserId,
-    offer.offeredByUserId,
+  const [names, [connect]] = await Promise.all([
+    loadNames(db, [offer.recipientUserId, offer.offeredByUserId]),
+    db
+      .select({
+        chargesEnabled: stripeConnectAccounts.chargesEnabled,
+        payoutsEnabled: stripeConnectAccounts.payoutsEnabled,
+      })
+      .from(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.userId, offer.recipientUserId))
+      .limit(1),
   ]);
-  const [connect] = await db
-    .select({
-      chargesEnabled: stripeConnectAccounts.chargesEnabled,
-      payoutsEnabled: stripeConnectAccounts.payoutsEnabled,
-    })
-    .from(stripeConnectAccounts)
-    .where(eq(stripeConnectAccounts.userId, offer.recipientUserId))
-    .limit(1);
   return {
     id: offer.id,
     recipient: {
@@ -507,6 +517,21 @@ async function lockOffer(tx: Tx, organizationId: string, offerId: string) {
   return offer;
 }
 
+/** The organisation, unless it is missing or deleted: then a 404. */
+async function loadLiveOrganization(tx: Tx, organizationId: string) {
+  const [org] = await tx
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(
+      and(eq(organizations.id, organizationId), isNull(organizations.deletedAt))
+    )
+    .limit(1);
+  if (!org) {
+    throw new NotFoundError('Organization not found', { organizationId });
+  }
+  return org;
+}
+
 function assertOpen(offer: Offer, now: Date): void {
   if (offer.status !== 'open' || offer.expiresAt <= now) {
     throw new OwnershipOfferNotOpenError({
@@ -537,19 +562,7 @@ export async function createOwnershipOffer(
     return await db.transaction(async (tx) => {
       await lockOwnerMembership(tx, organizationId, ownerUserId);
 
-      const [org] = await tx
-        .select({ name: organizations.name })
-        .from(organizations)
-        .where(
-          and(
-            eq(organizations.id, organizationId),
-            isNull(organizations.deletedAt)
-          )
-        )
-        .limit(1);
-      if (!org) {
-        throw new NotFoundError('Organization not found', { organizationId });
-      }
+      const org = await loadLiveOrganization(tx, organizationId);
       if (
         input.confirmName.trim().toLowerCase() !== org.name.trim().toLowerCase()
       ) {
@@ -578,8 +591,11 @@ export async function createOwnershipOffer(
           expiresAt: new Date(now.getTime() + OWNERSHIP_OFFER_TTL_MS),
         })
         .returning();
+      // Not the caller's conflict: an INSERT with no ON CONFLICT returns its
+      // row or raises, and a lost race raises the unique violation caught
+      // below. An empty RETURNING is a fault on our side (Codex-2hxff.46).
       if (!offer) {
-        throw new ConflictError('Could not create the ownership offer', {
+        throw new InternalServiceError('Could not create the ownership offer', {
           organizationId,
         });
       }
@@ -738,6 +754,11 @@ export async function reassignOrganisationOwner(
   await expireStaleOwnershipOffers(db, organizationId, now);
 
   return await db.transaction(async (tx) => {
+    // As `createOwnershipOffer` checks: a deleted organisation keeps no
+    // owner to reassign, and an unknown one is a 404, not the recipient's
+    // refusal (Codex-2hxff.46). A plain read takes no lock.
+    await loadLiveOrganization(tx, organizationId);
+
     // The open offer locked before any membership: the order every path
     // takes them in, so this does not deadlock with an accept or an account
     // deletion (Codex-kk9nv.8). It is closed further down.

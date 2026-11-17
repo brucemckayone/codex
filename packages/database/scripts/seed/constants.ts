@@ -1068,9 +1068,9 @@ export const CATEGORIES = {
   },
 } as const;
 
-// ── Thumbnail Image Seeds (picsum.photos) ───────────────────
-// Each media item maps to a deterministic picsum seed string.
-// Same seed → same image on every run.
+// ── Thumbnail Image Seeds ───────────────────────────────────
+// Each media item maps to a seed string that picks its generated thumbnail
+// (placeholders.ts generateThumbnailPng). Same seed → same image every run.
 export const THUMBNAIL_SEEDS: Record<string, string> = {
   [MEDIA.introTs.id]: 'typescript-intro',
   [MEDIA.advancedSvelte.id]: 'svelte-advanced',

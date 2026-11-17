@@ -278,6 +278,76 @@ describe("the owner's bank line (r3-L1)", () => {
   });
 });
 
+describe('a sale the chargeback took back, then paid back (late-win P0, P1)', () => {
+  const reversed = (
+    id: string,
+    payoutType: string,
+    creatorName: string,
+    stripeTransferId: string
+  ) => ({
+    id,
+    creatorId: `${id}-user`,
+    creatorName,
+    creatorEmail: null,
+    creatorAvatarUrl: null,
+    amountCents: 720,
+    currency: 'gbp',
+    reason: 'transferred',
+    status: 'reversed',
+    resolvedAt: '2026-09-03T10:00:00.000Z',
+    stripeTransferId,
+    createdAt: '2026-09-03T10:00:00.000Z',
+    payoutType,
+    subscriberName: 'Ellen Marsh',
+    subscriberEmail: null,
+    sourceType: 'purchase',
+    transferGroup: 'pur_1',
+    purchaseId: 'pur_1',
+    subscriptionId: null,
+    stripeChargeId: 'ch_1',
+    bankOn: '2026-09-17',
+    takenBack: { causeType: 'dispute', on: '2026-10-26' },
+    paidBack: { on: '2026-12-14' },
+    paysBack: null,
+  });
+
+  test("the organisation's own row says when it was taken back and paid back; a creator's row has no line", () => {
+    slots.table.current = {
+      items: [
+        reversed(
+          'fee-1',
+          'organization_fee',
+          'Hannah Price',
+          'tr_3PhK2aLk2vRb27pQa1'
+        ),
+        reversed(
+          'share-1',
+          'creator_payout',
+          'Maya Okafor',
+          'tr_3PhK2bLk2vRb27pQb2'
+        ),
+      ],
+      pagination: { page: 1, limit: 20, total: 2, totalPages: 1 },
+    };
+    mountPage();
+    const rows = [
+      ...document.querySelectorAll('[data-row-kind="child"]'),
+    ] as HTMLElement[];
+    const rowOf = (name: string) =>
+      rows.find((row) => row.textContent?.includes(name));
+    const lines = (row: HTMLElement | undefined) =>
+      [...(row?.querySelectorAll('.bank-line') ?? [])].map(
+        (line) => line.textContent
+      );
+    expect(lines(rowOf('Hannah Price'))).toEqual([
+      'Taken back for a chargeback on 26 Oct, then paid back on 14 Dec',
+    ]);
+    // P0, P1: both reversed rows keep their transfer; only the owner's has a line.
+    expect(rowOf('Maya Okafor')?.querySelector('.transfer-id')).not.toBeNull();
+    expect(lines(rowOf('Maya Okafor'))).toEqual([]);
+  });
+});
+
 describe('the Held card (M2, L2, L3)', () => {
   test('while the balance loads: the card shimmers, with no figure and no next day', () => {
     slots.balance.loading = true;

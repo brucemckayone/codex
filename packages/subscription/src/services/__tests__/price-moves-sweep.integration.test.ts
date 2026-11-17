@@ -11,6 +11,7 @@
  * afterAll, children first: the new foreign keys all RESTRICT.
  */
 
+import { TEST_SEND_METADATA } from '@codex/database';
 import {
   courseSubscriptionPlans,
   courseSubscriptions,
@@ -889,23 +890,32 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
 
   // Review C1, F4: a run emailed them and stopped before recording it, so
   // the row still carries an older try's pre-notice error. Every reclaim
-  // after an earlier try checks the email log.
-  it('a run that stopped after its email, on a row with an older error: found in the log (success or pending), not emailed again', async () => {
+  // after an earlier try checks the email log. Owner, 2026-11-09 (replacing
+  // F4's "a `pending` row counts"): a `pending` row that run left never got
+  // its outcome, so they are told again; one still in flight is told.
+  it('a run that stopped after its email, on a row with an older error: found in the log if sent, or in flight; told again if left pending or only test-sent', async () => {
     const { org: o, pro } = await org('pm-reclaim');
     const fake = fakeStripe();
     const sent = await subscriber(o.id, pro);
     const pending = await subscriber(o.id, pro);
+    const inFlight = await subscriber(o.id, pro);
+    const testSent = await subscriber(o.id, pro);
     const refused = await subscriber(o.id, pro);
-    for (const sub of [sent, pending, refused]) onStripe(fake, sub, 10);
+    const all = [sent, pending, inFlight, testSent, refused];
+    for (const sub of all) onStripe(fake, sub, 10);
     const changeId = await reprice(o.id, pro);
     // Two hours ago: a run claimed them and stopped mid-batch. The row still
     // says what the try before it recorded.
     const stoppedRun = new Date(NOW - 2 * HOUR_MS);
     const loggedAt = new Date(stoppedRun.getTime() + 3000);
-    for (const [sub, status] of [
-      [sent, 'success'],
-      [pending, 'pending'],
-      [refused, 'failed'],
+    // A run beside this one, sending it now.
+    const inFlightAt = new Date(NOW - 2 * 60 * 1000);
+    for (const [sub, status, at, testSend] of [
+      [sent, 'success', loggedAt, false],
+      [pending, 'pending', loggedAt, false],
+      [inFlight, 'pending', inFlightAt, false],
+      [testSent, 'success', loggedAt, true],
+      [refused, 'failed', loggedAt, false],
     ] as const) {
       const row = await moveOf(changeId, sub);
       await db
@@ -920,28 +930,43 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
         templateName: 'subscription-tier-price-change',
         recipientEmail: await emailOf(sub),
         status,
-        metadata: JSON.stringify({ priceMoveId: row.id }),
-        createdAt: loggedAt,
-        updatedAt: loggedAt,
+        // A test send's marker, here beside the row's key, so the reader's
+        // own guard is what keeps it out.
+        metadata: JSON.stringify({
+          ...(testSend ? TEST_SEND_METADATA : {}),
+          priceMoveId: row.id,
+        }),
+        createdAt: at,
+        updatedAt: at,
       });
     }
     const send = mailer();
 
     await run([changeId], { fake, send });
 
-    // A `failed` log row: every attempt failed, so they are told now.
-    expect(send).toHaveBeenCalledOnce();
-    expect(send.mock.calls[0]?.[0].to).toBe(await emailOf(refused));
-    for (const sub of [sent, pending]) {
+    // `failed` (every attempt failed), `pending` left by the stopped run and
+    // a test send: told now.
+    const toldNow = await Promise.all(
+      [refused, pending, testSent].map(emailOf)
+    );
+    expect(send.mock.calls.map((c) => c[0].to).sort()).toEqual(
+      [...toldNow].sort()
+    );
+    for (const sub of [refused, pending, testSent]) {
       expect(await moveOf(changeId, sub)).toMatchObject({
         state: 'scheduled',
-        scheduledKind: 'pending',
-        noticeAt: loggedAt,
+        noticeAt: new Date(NOW + SENT_AFTER_MS),
       });
     }
-    expect(await moveOf(changeId, refused)).toMatchObject({
+    expect(await moveOf(changeId, sent)).toMatchObject({
       state: 'scheduled',
-      noticeAt: new Date(NOW + SENT_AFTER_MS),
+      scheduledKind: 'pending',
+      noticeAt: loggedAt,
+    });
+    expect(await moveOf(changeId, inFlight)).toMatchObject({
+      state: 'scheduled',
+      scheduledKind: 'pending',
+      noticeAt: inFlightAt,
     });
   });
 

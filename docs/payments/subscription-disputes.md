@@ -69,6 +69,16 @@ A subscription that is already cancelled when the event arrives gets no Stripe c
   - Nothing else sets it. The hourly clawback retry finishes failed steps but never marks a loss applied: finished steps cannot show the lost handling ran, because the steps a chargeback wrote when it opened finish too.
   - A lost path that failed is re-run whole by the hourly dispute reconcile (Codex-2hxff.58), which marks the outcome once it succeeds.
 
+### A late win
+
+Stripe can turn a lost dispute into a won one later (Codex-2hxff.70; [dispute-record.md](dispute-record.md) §10). The win's restore runs unchanged:
+
+- **A subscription the loss cancelled** has `disputed_at` cleared on its ended row, which grants nothing, so no access returns. It is not live at Stripe, so billing is not touched. Nothing else happens to the subscriber (owner decision Q2, 2026-10-31): the payment stands, the creators are paid back by the dispute's re-pay, the subscription stays ended, and no email is sent. Support can still refund the invoice from the charge page if the subscriber asks: a late-won payment is outside the 14-day window's refusal (owner decision Q7).
+- **A subscription the loss never got to cancel** is restored as by a normal win: access and billing back.
+- **A course subscription's grant is moved on only while the subscription is live** (not ended, not cancelled). The refresh finds the grant by buyer and course, so for one the loss ended it would move the grant of a subscription the buyer took out since back to the ended one's period end, which is past, and end their access.
+
+A loss re-run racing the late win (the hourly reconcile re-runs an unfinished loss) does nothing once the dispute is no longer lost. Access is ended only under a share lock on the dispute, so a late win landing meanwhile waits for that commit and its restore clears it. The dispute is read again just before the Stripe cancel, and once it is won the cancel is skipped.
+
 ## 6. Owner checks (no code)
 
 - **Stripe Dashboard → Billing → Subscriptions → "Manage disputed payments"** must be set to do nothing. If it cancels, a won dispute cannot be restored.

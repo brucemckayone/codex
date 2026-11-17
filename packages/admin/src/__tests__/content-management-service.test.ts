@@ -16,6 +16,10 @@
 
 import { CONTENT_STATUS, PAGINATION } from '@codex/constants';
 import {
+  CreatorPayoutsRequiredError,
+  TierRequiredToPublishError,
+} from '@codex/content';
+import {
   content as contentTable,
   mediaItems,
   organizations,
@@ -31,6 +35,7 @@ import {
   createUniqueSlug,
   type Database,
   gateContentToTiers,
+  joinTeam,
   seedTestUsers,
   setupTestDatabase,
   takeFirst,
@@ -38,10 +43,6 @@ import {
 } from '@codex/test-utils';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import {
-  CreatorPayoutsRequiredError,
-  TierRequiredToPublishError,
-} from '../errors';
 import { AdminContentManagementService } from '../services/content-management-service';
 
 describe('AdminContentManagementService', () => {
@@ -308,13 +309,23 @@ describe('AdminContentManagementService', () => {
   });
 
   describe('publishContent', () => {
-    it('should publish draft content', async () => {
-      const testOrg = takeFirst(
+    /**
+     * An org with the creator on its team: an admin publish checks the
+     * creator still is, as the creator's own publish does (Codex-a6ofh.2.1).
+     */
+    async function seedTeamOrg() {
+      const org = takeFirst(
         await db
           .insert(organizations)
           .values(createTestOrganizationInput())
           .returning()
       );
+      await joinTeam(db, org.id, creatorId);
+      return org;
+    }
+
+    it('should publish draft content', async () => {
+      const testOrg = await seedTeamOrg();
 
       const media = takeFirst(
         await db
@@ -351,12 +362,7 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should be idempotent (publishing already published content)', async () => {
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
+      const testOrg = await seedTeamOrg();
 
       const media = takeFirst(
         await db
@@ -393,12 +399,7 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should throw BusinessLogicError for video content without ready media', async () => {
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
+      const testOrg = await seedTeamOrg();
 
       const media = takeFirst(
         await db
@@ -434,12 +435,7 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should publish written content without media', async () => {
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
+      const testOrg = await seedTeamOrg();
 
       const content = takeFirst(
         await db
@@ -463,12 +459,7 @@ describe('AdminContentManagementService', () => {
     });
 
     it('republishing an item taken off sale on a departure clears the stamp (Codex-2hxff.64)', async () => {
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
+      const testOrg = await seedTeamOrg();
       // What a removal leaves (withdrawCatalogueOnDeparture).
       const content = takeFirst(
         await db
@@ -555,6 +546,7 @@ describe('AdminContentManagementService', () => {
             .values(createTestOrganizationInput())
             .returning()
         ).id;
+        await joinTeam(db, gateOrgId, creatorId);
         tierId = takeFirst(
           await db
             .insert(subscriptionTiers)
@@ -659,7 +651,7 @@ describe('AdminContentManagementService', () => {
           CreatorPayoutsRequiredError
         );
         // The Studio recognises the condition by this code, whichever route
-        // refused (the content-api twin carries the same one).
+        // refused (both run the one publish gate, Codex-a6ofh.2.1).
         await expect(refusal).rejects.toMatchObject({
           context: expect.objectContaining({
             code: 'CREATOR_CONNECT_REQUIRED',

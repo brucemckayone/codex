@@ -344,6 +344,7 @@ describe('SupportService price moves (real DB)', () => {
       subscriptionEnded: false,
       retry: null,
       queuedFor: null,
+      waitsForDispute: false,
       resolution: null,
       createdAt: SAVED.toISOString(),
     });
@@ -373,6 +374,47 @@ describe('SupportService price moves (real DB)', () => {
 
     // Leah and Owen: a queued retry is off the badge, as is a closed row.
     expect((await badge()) - before).toBe(2);
+  });
+
+  it('says a row waits for an open chargeback, as the run reads it (owner D1, Codex-2hxff.70 D1-a): queued or held on a live subscription only', async () => {
+    const plan = await proTier();
+    const c = await change(plan);
+    const [ada, bo, cy, eve] = (await Promise.all(
+      Array.from({ length: 4 }, () => subscriber(plan))
+    )) as [Subscriber, Subscriber, Subscriber, Subscriber];
+    const dee = await subscriber(plan, 'cancelled');
+    const adaMove = await move(c, ada, QUEUED());
+    const boMove = await move(c, bo, HELD_NOTICE);
+    const cyMove = await move(c, cy, QUEUED());
+    const deeMove = await move(c, dee, HELD_NOTICE);
+    const eveMove = await move(c, eve, HELD_NOTICE);
+    await db
+      .update(subscriptions)
+      .set({ disputedAt: LAST_TRY })
+      .where(
+        inArray(
+          subscriptions.id,
+          [ada, bo, dee, eve].map((who) => who.subscriptionId)
+        )
+      );
+
+    const list = await service.listHeldPriceMoves({ page: 1, limit: 50 }, NOW);
+    const waits = (id: string) =>
+      list.items.find((row) => row.moveId === id)?.waitsForDispute;
+
+    expect(waits(adaMove)).toBe(true);
+    expect(waits(boMove)).toBe(true);
+    expect(waits(cyMove)).toBe(false);
+    // Ended: the run skips it before it would wait for the dispute.
+    expect(waits(deeMove)).toBe(false);
+    // Closed: no run takes it at all.
+    const closed = await service.closePriceMove(
+      eveMove,
+      { resolution: 'not_needed', note: 'Refunded instead' },
+      supportId,
+      NOW
+    );
+    expect(closed.waitsForDispute).toBe(false);
   });
 
   it('Retry with no accepted email: back to due, three fresh tries, its reason kept, who asked; the change is the run’s to re-open; the answer names the next run', async () => {
@@ -887,7 +929,21 @@ describe('SupportService price moves (real DB)', () => {
       organization: { name: 'Northlight Collective' },
       subscriptionEnded: false,
       action: 'retry',
+      waitsForDispute: false,
     });
+
+    // A chargeback opens on the course subscription (owner D1).
+    await db
+      .update(courseSubscriptions)
+      .set({ disputedAt: NOW })
+      .where(eq(courseSubscriptions.id, courseSub.id));
+    const disputed = await service.listHeldPriceMoves(
+      { page: 1, limit: 50 },
+      NOW
+    );
+    expect(
+      disputed.items.find((row) => row.moveId === m.id)?.waitsForDispute
+    ).toBe(true);
 
     await db
       .update(courseSubscriptions)

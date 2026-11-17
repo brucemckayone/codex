@@ -199,13 +199,34 @@ function baseWhy(item: HeldPriceMove): WhyHeld {
   }
 }
 
-/** "Queued for 11:00 · Jordan Reid" (M2): the row waits for the run. */
+/**
+ * "Queued for 11:00 · Jordan Reid" (M2): the row waits for the run. While
+ * the member has an open chargeback the run defers them a day at a time
+ * (owner D1, "Wait while disputed"), so the time would keep moving: the
+ * line says why it waits instead (Codex-2hxff.70 D1-a), from the server's
+ * `waitsForDispute`, never from the status alone.
+ */
 export function queuedLine(item: HeldPriceMove): string | null {
   if (item.status !== 'queued' || !item.queuedFor) return null;
+  const name = item.retry?.by ? personName(item.retry.by) : null;
+  if (item.waitsForDispute) {
+    return name
+      ? m.support_queue_moves_waits_dispute_by({ name })
+      : m.support_queue_moves_waits_dispute();
+  }
   const time = formatTime(item.queuedFor);
-  return item.retry?.by
-    ? m.support_queue_moves_queued_by({ time, name: personName(item.retry.by) })
+  return name
+    ? m.support_queue_moves_queued_by({ time, name })
     : m.support_queue_moves_queued({ time });
+}
+
+/**
+ * A held row the run will also wait on, for its open chargeback (D1-a): the
+ * line sits beside its buttons. A queued row says it in `queuedLine`.
+ */
+export function disputeWaitLine(item: HeldPriceMove): string | null {
+  if (item.status === 'queued' || !item.waitsForDispute) return null;
+  return m.support_queue_moves_waits_dispute();
 }
 
 // ── Answers ───────────────────────────────────────────────────────────────

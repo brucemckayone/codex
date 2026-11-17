@@ -12,6 +12,7 @@
  *   - connect state derivation
  *   - status labels and the Paid chip on the API's vocabulary
  *   - each row's bank line (mock-b-studio earnings.html E1-E6)
+ *   - a won chargeback's pay-back lines (late-win earnings.html E1-E4)
  *   - the waiting banner's lines, the switch-over notice (OQ5), the Q4 rule
  *   - the server load: connect-return, fetch failures, the streamed balance
  */
@@ -26,6 +27,7 @@ import {
   formatDay,
   formatPence,
   negativeCauseLine,
+  rowLines,
   ruleLine,
   statusLabel,
   statusTone,
@@ -525,6 +527,141 @@ describe('bankLineFor', () => {
 
   it('a reversed row has no bank line', () => {
     expect(bankLineFor(paid({ status: 'reversed' }), enabled)).toBeNull();
+  });
+});
+
+describe('a won chargeback’s pay-back (late-win studio/earnings.html E1-E4)', () => {
+  // Monday 14 December 2026, 16:20 UK, a few minutes after the late win.
+  const now = new Date('2026-12-14T16:20:00Z');
+  const enabled = {
+    connectState: 'enabled' as const,
+    balance: { negative: null },
+    now,
+  };
+  const row = (
+    over: Partial<
+      BankLineRow & { paysBack: { title: string | null } | null }
+    > = {}
+  ) => ({
+    id: 'p1',
+    status: 'pending',
+    reason: null,
+    amountCents: 1440,
+    bankOn: null,
+    takenBack: null,
+    paidBack: null,
+    cancelledFor: null,
+    paysBack: null,
+    ...over,
+  });
+  const winterLight = { title: 'Winter Light' };
+
+  it('E1: the pay-back row names the chargeback, before the payout run pays it', () => {
+    expect(rowLines(row({ paysBack: winterLight }), enabled)).toEqual([
+      'Paid back: the chargeback on ‘Winter Light’ was decided for us',
+    ]);
+  });
+
+  it('E1: the share it pays back stays Reversed and says when it was paid back', () => {
+    expect(
+      rowLines(
+        row({
+          status: 'reversed',
+          takenBack: { causeType: 'dispute', on: '2026-10-26' },
+          paidBack: { on: '2026-12-14' },
+        }),
+        enabled
+      )
+    ).toEqual([
+      'Taken back for a chargeback on 26 Oct, then paid back on 14 Dec',
+    ]);
+  });
+
+  it('E2: once paid, its bank line follows', () => {
+    const tomorrow = { ...enabled, now: new Date('2026-12-15T10:00:00Z') };
+    expect(
+      rowLines(
+        row({
+          status: 'resolved',
+          bankOn: '2026-12-15',
+          paysBack: winterLight,
+        }),
+        tomorrow
+      )
+    ).toEqual([
+      'Paid back: the chargeback on ‘Winter Light’ was decided for us',
+      'Sent to your bank on 15 Dec',
+    ]);
+  });
+
+  it('E3: a pay-back waiting for setup says so under its own line', () => {
+    expect(
+      rowLines(
+        row({
+          reason: 'connect_not_ready',
+          paysBack: { title: 'Colour Grading Masterclass' },
+        }),
+        { ...enabled, connectState: 'not_started' }
+      )
+    ).toEqual([
+      'Paid back: the chargeback on ‘Colour Grading Masterclass’ was decided for us',
+      'Waiting for you to set up payouts',
+    ]);
+  });
+
+  it('E3: a share the loss cancelled says why, then when it was paid back', () => {
+    const cancelled = row({
+      status: 'cancelled_by_dispute',
+      reason: 'connect_not_ready',
+      amountCents: 1980,
+      cancelledFor: { causeType: 'dispute', on: '2026-11-21' },
+    });
+    expect(rowLines(cancelled, enabled)).toEqual([
+      'Held for a chargeback, cancelled when it was lost on 21 Nov',
+    ]);
+    expect(
+      rowLines({ ...cancelled, paidBack: { on: '2026-12-14' } }, enabled)
+    ).toEqual([
+      'Held for a chargeback, cancelled when it was lost on 21 Nov, then paid back on 14 Dec',
+    ]);
+  });
+
+  it('a share a refund cancelled has no line, as before', () => {
+    expect(rowLines(row({ status: 'cancelled_by_refund' }), enabled)).toEqual(
+      []
+    );
+  });
+
+  it('E4: a share whose pay-back a refund took back says only that it was taken', () => {
+    // The server leaves that pay-back out, and sends no `paidBack`.
+    expect(
+      rowLines(
+        row({
+          status: 'reversed',
+          takenBack: { causeType: 'dispute', on: '2026-10-19' },
+        }),
+        enabled
+      )
+    ).toEqual(['Taken back for a chargeback on 19 Oct']);
+  });
+
+  it('a pay-back whose sale has no title reads as Org Payouts words it', () => {
+    expect(rowLines(row({ paysBack: { title: null } }), enabled)).toEqual([
+      'Paid back: the chargeback was decided for us',
+    ]);
+  });
+
+  it('a refund’s take-back is never said to be paid back', () => {
+    expect(
+      rowLines(
+        row({
+          status: 'reversed',
+          takenBack: { causeType: 'refund', on: '2026-12-01' },
+          paidBack: { on: '2026-12-14' },
+        }),
+        enabled
+      )
+    ).toEqual(['Taken back for a refund on 1 Dec']);
   });
 });
 

@@ -237,7 +237,7 @@
   }
 
   .ghost-tile[data-status='error'] .ghost-progress-fill {
-    background-color: var(--color-error-500, var(--color-error));
+    background-color: var(--color-error);
   }
 
   .ghost-body {

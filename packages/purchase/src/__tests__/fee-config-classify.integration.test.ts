@@ -297,6 +297,221 @@ describe('FeeConfigService — classifying a write (real DB)', () => {
     expect(notices.find((n) => n.kind === 'smaller')?.onList).toBe(false);
   });
 
+  // ── Told, or may have been (owner, 2026-11-09) ──────────────────────────
+  // ONE rule (payments' `feeNoticeMayHaveTold`) decides whom the first cut's
+  // smaller email, the second cut's restart and a cancel's "it's off" email
+  // reach. Each case is a notice as a morning can leave it.
+  const HOUR = 60 * 60 * 1000;
+  const LEFT = [
+    {
+      left: 'sent',
+      state: 'sent',
+      attempts: 1,
+      tried: 1,
+      reason: null,
+      told: true,
+    },
+    {
+      left: 'told another way',
+      state: 'told_another_way',
+      attempts: 1,
+      tried: 1,
+      reason: 'refused',
+      told: true,
+    },
+    {
+      left: 'with no answer',
+      state: 'unknown',
+      attempts: 1,
+      tried: 1,
+      reason: 'unknown',
+      told: true,
+    },
+    {
+      left: 'due after a try (a run cut off after sending)',
+      state: 'due',
+      attempts: 1,
+      tried: 1,
+      reason: null,
+      told: true,
+    },
+    {
+      left: 'failed, retried an hour ago (it may be in flight)',
+      state: 'failed',
+      attempts: 2,
+      tried: 1,
+      reason: 'refused',
+      told: true,
+    },
+    {
+      left: 'failed, last tried 13 hours ago',
+      state: 'failed',
+      attempts: 1,
+      tried: 13,
+      reason: 'refused',
+      told: false,
+    },
+    {
+      left: 'due, never tried',
+      state: 'due',
+      attempts: 0,
+      tried: null,
+      reason: null,
+      told: false,
+    },
+  ] as const;
+  type Left = (typeof LEFT)[number];
+
+  /** A notice's columns as `left` leaves them. */
+  function leftAs(left: Left) {
+    const at = (hours: number) => new Date(Date.now() - hours * HOUR);
+    return {
+      state: left.state,
+      attempts: left.attempts,
+      attemptedAt: left.tried === null ? null : at(left.tried),
+      lastReason: left.reason,
+      acceptedAt: left.state === 'sent' ? at(1) : null,
+      ...(left.state === 'told_another_way'
+        ? { toldNote: 'by phone', toldByUserId: adminId, toldAt: at(1) }
+        : {}),
+    };
+  }
+
+  /** A waiting rise, and the untold person's announcement left as `left`. */
+  async function riseAnnounced(left: Left): Promise<string> {
+    const rise = await svc.updateOrgFees(
+      organizationId,
+      { orgFeePercent: 1500 },
+      adminId
+    );
+    const riseId = rise.change?.id as string;
+    await db.insert(feeChangeNotices).values({
+      changeId: riseId,
+      userId: untoldId,
+      kind: 'announce',
+      onList: true,
+      roles: [{ organizationId, as: 'creator' as const }],
+      beforeValues: [],
+      afterValues: [],
+      quotedFrom: '2026-12-04',
+      ...leftAs(left),
+    });
+    return riseId;
+  }
+
+  async function noticeOfKind(
+    changeId: string,
+    kind: (typeof feeChangeNotices.$inferSelect)['kind']
+  ) {
+    const [row] = await db
+      .select()
+      .from(feeChangeNotices)
+      .where(
+        and(
+          eq(feeChangeNotices.changeId, changeId),
+          eq(feeChangeNotices.userId, untoldId),
+          eq(feeChangeNotices.kind, kind)
+        )
+      );
+    return row;
+  }
+
+  it.each(
+    LEFT
+  )('the first cut queues a smaller email for an announcement left $left: $told', async (left) => {
+    const riseId = await riseAnnounced(left);
+    const smaller = await svc.updateOrgFees(
+      organizationId,
+      { orgFeePercent: 1300 },
+      adminId
+    );
+    expect(smaller.outcome).toBe('smaller');
+    const queued = await noticeOfKind(riseId, 'smaller');
+    if (left.told) {
+      expect(queued).toMatchObject({ state: 'due', attempts: 0 });
+    } else {
+      expect(queued).toBeUndefined();
+    }
+  });
+
+  it.each(
+    LEFT
+  )('the second cut starts a smaller email left $left a new round: $told', async (left) => {
+    const riseId = await riseAnnounced(LEFT[0]);
+    await svc.updateOrgFees(organizationId, { orgFeePercent: 1300 }, adminId);
+    const roundOne = new Date(Date.now() - HOUR);
+    const first = await noticeOfKind(riseId, 'smaller');
+    await db
+      .update(feeChangeNotices)
+      .set({ ...leftAs(left), createdAt: roundOne })
+      .where(eq(feeChangeNotices.id, first?.id as string));
+
+    const again = await svc.updateOrgFees(
+      organizationId,
+      { orgFeePercent: 1200 },
+      adminId
+    );
+    expect(again.outcome).toBe('smaller');
+    const roundTwo = await noticeOfKind(riseId, 'smaller');
+    if (left.told) {
+      expect(roundTwo).toMatchObject({
+        state: 'due',
+        attempts: 0,
+        attemptedAt: null,
+        lastReason: null,
+      });
+      expect(roundTwo?.createdAt.getTime()).toBeGreaterThan(roundOne.getTime());
+    } else {
+      // Its next send carries the new figure anyway.
+      expect(roundTwo).toMatchObject({
+        state: left.state,
+        attempts: left.attempts,
+        createdAt: roundOne,
+      });
+    }
+  });
+
+  it('the second cut starts a smaller email set aside a new round: it would send nothing more', async () => {
+    const riseId = await riseAnnounced(LEFT[0]);
+    await svc.updateOrgFees(organizationId, { orgFeePercent: 1300 }, adminId);
+    const first = await noticeOfKind(riseId, 'smaller');
+    await db
+      .update(feeChangeNotices)
+      .set({ state: 'not_needed', attempts: 4 })
+      .where(eq(feeChangeNotices.id, first?.id as string));
+    await svc.updateOrgFees(organizationId, { orgFeePercent: 1200 }, adminId);
+    expect(await noticeOfKind(riseId, 'smaller')).toMatchObject({
+      state: 'due',
+      attempts: 0,
+    });
+  });
+
+  it.each(
+    LEFT
+  )('a cancel emails someone whose announcement is left $left that it is off: $told', async (left) => {
+    const riseId = await riseAnnounced(left);
+    await svc.cancelChange(riseId, adminId);
+
+    const announce = await noticeOfKind(riseId, 'announce');
+    // Nobody waits for a cancelled rise; the told stay told.
+    expect(announce?.state).toBe(
+      left.state === 'sent' || left.state === 'told_another_way'
+        ? left.state
+        : 'not_needed'
+    );
+    const cancelled = await noticeOfKind(riseId, 'cancelled');
+    if (left.told) {
+      // With the date and roles that email named.
+      expect(cancelled).toMatchObject({
+        state: 'due',
+        roles: announce?.roles,
+        quotedFrom: '2026-12-04',
+      });
+    } else {
+      expect(cancelled).toBeUndefined();
+    }
+  });
+
   it('a rise restated with the same figures keeps its change and emails nobody', async () => {
     const rise = await svc.updateOrgFees(
       organizationId,

@@ -25,6 +25,11 @@ export {
   invalidateOrgSlugCache,
   type MemberCacheCtx,
 } from './cache-fanout';
+// Publish when ready (Codex-a6ofh.2.8): media-api tells content-api a file changed
+export {
+  CONTENT_MEDIA_READY_ROUTE,
+  WorkerContentReadyNotifier,
+} from './content-ready';
 // Email sending helper (worker-to-worker)
 export {
   type EmailSendResult,

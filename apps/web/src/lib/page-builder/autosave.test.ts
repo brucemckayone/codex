@@ -171,9 +171,93 @@ describe('createAutosave — error and retry', () => {
     expect(autosave.status).toBe('saved');
     expect(autosave.errorMessage).toBeUndefined();
   });
+
+  // The error stays shown while a new change waits out the debounce, so its
+  // Retry is still there to click. A content draft's first save creates the
+  // row: two chains would create it twice (Codex-a6ofh.2.2).
+  it('retry() with a change waiting out the debounce saves once, not twice', async () => {
+    const save = vi
+      .fn<() => Promise<AutosaveSaveResult>>()
+      .mockResolvedValueOnce({ ok: false, message: 'Network down' })
+      .mockResolvedValue({ ok: true });
+    const autosave = createAutosave(makeDeps({ save }));
+    autosave.notifyChange();
+    await vi.advanceTimersByTimeAsync(100);
+
+    autosave.notifyChange();
+    autosave.retry();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(save).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('createAutosave — a published page never autosaves', () => {
+  // A change made while Publish was out armed the timer before the page
+  // went live (Codex-a6ofh.2.2).
+  it('a save armed as a draft does not run once the page has gone live', async () => {
+    let published = false;
+    const deps = makeDeps({ isPublished: () => published });
+    const autosave = createAutosave(deps);
+
+    autosave.notifyChange();
+    published = true;
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(deps.save).not.toHaveBeenCalled();
+    expect(autosave.status).toBe('idle');
+  });
+
+  // Typed while Publish's own save was out: the follow-up is Publish's now.
+  it('a follow-up queued as a draft does not run once the page has gone live', async () => {
+    let published = false;
+    const first = createDeferred<AutosaveSaveResult>();
+    const save = vi
+      .fn<() => Promise<AutosaveSaveResult>>()
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValue({ ok: true });
+    const autosave = createAutosave(
+      makeDeps({ save, isPublished: () => published })
+    );
+    autosave.notifyChange();
+    await vi.advanceTimersByTimeAsync(100);
+    autosave.notifyChange();
+    published = true;
+
+    first.resolve({ ok: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  // The chain resets whatever happens, so it can never be ridden dead.
+  it('a chain that throws leaves the next flush free to save', async () => {
+    let boom = false;
+    const first = createDeferred<AutosaveSaveResult>();
+    const save = vi
+      .fn<() => Promise<AutosaveSaveResult>>()
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValue({ ok: true });
+    const autosave = createAutosave(
+      makeDeps({
+        save,
+        isPublished: () => {
+          if (boom) throw new Error('page state gone');
+          return false;
+        },
+      })
+    );
+    const chain = autosave.flush();
+    autosave.notifyChange();
+    boom = true;
+    first.resolve({ ok: true });
+    await expect(chain).rejects.toThrow('page state gone');
+
+    boom = false;
+    await expect(autosave.flush()).resolves.toEqual({ ok: true });
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
   it('notifyChange never schedules a save, however long we wait', async () => {
     const deps = makeDeps({ isPublished: () => true });
     const autosave = createAutosave(deps);

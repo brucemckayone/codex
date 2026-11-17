@@ -481,6 +481,20 @@ app.delete(
         ctx.user.id,
         ctx.input.query.usage
       );
+      // A draft scheduled to publish when this file is ready waits no more
+      // (Codex-a6ofh.2.8). Settled after the delete commits, never inside it:
+      // the delete locks media first, publish content first. No email: the
+      // creator deleted it themselves (owner, 2026-11-07).
+      ctx.background(
+        ctx.services.content
+          .settleScheduledForMedia(ctx.input.params.id)
+          .catch((error: unknown) => {
+            ctx.obs?.warn('Scheduled drafts on a deleted file not settled', {
+              mediaId: ctx.input.params.id,
+              error: messageForLog(error),
+            });
+          })
+      );
       return null;
     },
   })

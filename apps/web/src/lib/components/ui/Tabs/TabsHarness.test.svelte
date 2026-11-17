@@ -9,6 +9,7 @@
     defaultValue?: string;
     onValueChange?: (value: string | undefined) => void;
     orientation?: 'horizontal' | 'vertical';
+    listVariant?: 'underlined' | 'bare';
   }
 
   let {
@@ -16,11 +17,12 @@
     defaultValue = 'tab-1',
     onValueChange,
     orientation,
+    listVariant,
   }: Props = $props();
 </script>
 
 <Tabs bind:value {defaultValue} {onValueChange} {orientation}>
-  <TabsList>
+  <TabsList variant={listVariant}>
     <TabsTrigger value="tab-1" data-testid="trigger-1">Tab One</TabsTrigger>
     <TabsTrigger value="tab-2" data-testid="trigger-2">Tab Two</TabsTrigger>
     <TabsTrigger value="tab-3" data-testid="trigger-3" disabled>Tab Three</TabsTrigger>

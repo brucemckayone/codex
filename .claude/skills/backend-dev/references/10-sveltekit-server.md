@@ -332,21 +332,22 @@ Usage in templates:
 ### `form(schema, asyncFn)` — progressive enhancement
 
 ```typescript
-export const createContentForm = form(createContentSchema, async (input) => {
+// apps/web/src/lib/remote/categories.remote.ts
+export const createCategoryForm = form(createCategoryFormSchema, async ({ organizationId, ...fields }) => {
   const { platform, cookies } = getRequestEvent();
   try {
-    const result = await createServerApi(platform, cookies).content.create(input);
-    return { success: true as const, contentId: result.id };
-  } catch (err) {
-    return { success: false as const, error: err.message };
+    const category = await createServerApi(platform, cookies).categories.create(organizationId, fields);
+    return { success: true as const, category };
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : 'Failed to create category' };
   }
 });
 ```
 
-Usage:
+Usage (spread the form onto the element; see `studio/categories/+page.svelte`):
 ```svelte
-<form use:enhance use:applyAction method="POST" action={createContentForm}>
-  <input name="title" />
+<form {...createCategoryForm}>
+  <input name="name" />
   <button type="submit">Create</button>
 </form>
 ```

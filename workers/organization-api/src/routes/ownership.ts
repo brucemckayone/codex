@@ -155,8 +155,12 @@ app.post(
         ctx.input.params.offerId,
         ctx.user.id
       );
-      invalidateMemberCaches(ctx, orgId, change.ownerUserId, ctx.obs);
-      invalidateMemberCaches(ctx, orgId, change.previousOwnerUserId, ctx.obs);
+      invalidateMemberCaches(
+        ctx,
+        orgId,
+        [change.ownerUserId, change.previousOwnerUserId],
+        ctx.obs
+      );
       return change;
     },
   })

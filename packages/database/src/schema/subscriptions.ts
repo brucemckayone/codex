@@ -289,12 +289,11 @@ export const subscriptions = pgTable(
  *
  * A user has exactly one Connect account (`unique(userId)`) which receives
  * ALL of their earnings — from every org agreement they hold AND their own
- * direct sales (Codex-69t7c, D2). An org resolves "its" account via
- * `organizations.primaryConnectAccountUserId` → that user's single account.
+ * direct sales (Codex-69t7c, D2). An org's part of a sale goes to its owner at
+ * the time of the sale (`resolveOrganisationPayee`, @codex/payments, from
+ * `organization_ownership_periods`) → that user's single account.
  * `organizationId` below is a NULLABLE, non-identity record of the org the
- * account was first onboarded under; it is no longer used for resolution and
- * is slated for removal in WP2 once every flow routes via
- * `primaryConnectAccountUserId`.
+ * account was first onboarded under; it is not used for resolution.
  *
  * Onboarding: stripe.accounts.create() → stripe.accountLinks.create()
  * Verification: account.updated webhook updates chargesEnabled/payoutsEnabled
@@ -304,8 +303,8 @@ export const stripeConnectAccounts = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     // Nullable, non-identity (Codex-69t7c WP1): the org this account was first
-    // onboarded under. Org→account resolution lives on
-    // `organizations.primaryConnectAccountUserId`, NOT here. `set null` so
+    // onboarded under. Org→account resolution goes through the org's
+    // ownership periods, NOT here. `set null` so
     // deleting one org never destroys a user's shared single account.
     organizationId: uuid('organization_id').references(() => organizations.id, {
       onDelete: 'set null',
@@ -344,8 +343,8 @@ export const stripeConnectAccounts = pgTable(
 
     // ONE Connect account per user (Codex-69t7c WP1). Replaces the prior
     // (user_id, organization_id) composite — a user now has a single account
-    // across all orgs; the org→account link lives on
-    // organizations.primaryConnectAccountUserId.
+    // across all orgs; the org→account link is the org's owner at the time of
+    // the sale (its ownership periods).
     unique('uq_stripe_connect_user').on(table.userId),
 
     // CHECK constraint for status

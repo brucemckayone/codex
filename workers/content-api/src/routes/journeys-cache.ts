@@ -149,7 +149,7 @@ export async function getCachedPublishedCourses<T>(
 /**
  * Bump the org's portal version in KV after a write that changes a portal card.
  * Fire-and-forget via `waitUntil` — mirrors `bumpOrgContentVersion` in
- * `content.ts`, including its swallow-and-warn posture: a failed invalidation
+ * `content-invalidation.ts`, including its swallow-and-warn posture: a failed invalidation
  * costs at most `PUBLIC_JOURNEYS_CACHE_TTL` of staleness and must never fail the
  * write that already succeeded.
  *

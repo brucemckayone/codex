@@ -11,7 +11,7 @@ import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
-  ORGANIZATION_ROLES,
+  ORGANIZATION_TEAM_ROLES,
   PURCHASE_STATUS,
 } from '@codex/constants';
 import { type DatabaseClient, toIso } from '@codex/database';
@@ -217,12 +217,6 @@ export async function listUserLibrary(
     );
   }
 
-  const MANAGEMENT_ROLES: string[] = [
-    ORGANIZATION_ROLES.OWNER,
-    ORGANIZATION_ROLES.ADMIN,
-    ORGANIZATION_ROLES.CREATOR,
-  ];
-
   // Skip the membership lookup when the caller filters to a bucket that
   // doesn't need it. The membership arm needs it; engaged-free and
   // engaged-followers also reference `managementOrgIds` for cross-arm
@@ -233,7 +227,7 @@ export async function listUserLibrary(
       : await db.query.organizationMemberships.findMany({
           where: and(
             ...membershipConditions,
-            inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+            inArray(organizationMemberships.role, ORGANIZATION_TEAM_ROLES)
           ),
           columns: { organizationId: true, role: true },
         });

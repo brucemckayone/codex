@@ -78,8 +78,9 @@
   );
   const portfolioQuery = $derived(browser ? getMyAgreementPortfolio() : null);
 
-  // loading / failed / ok per read. A value survives a refresh, and a
-  // failure stays `failed` through its Retry (connectQueryState).
+  // loading / failed / ok per read. A value survives a refresh. During a
+  // Retry a failed read reads `loading`: kit hands the page a NEW query until
+  // it settles (see LoadFailedAlert's `heldRead`).
   const threadState = $derived(connectQueryState(threadQuery));
   const portfolioState = $derived(connectQueryState(portfolioQuery));
   const thread = $derived(threadState.kind === 'ok' ? threadState.status : null);

@@ -109,8 +109,10 @@ import { membershipCacheKey } from '@codex/worker-utils';
 import app from './index';
 
 const ORG_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
-const NEW_OWNER = 'user_new_owner';
-const OLD_OWNER = 'user_old_owner';
+// `users.id` values (letters and digits): the body's `userId` is held to
+// `userIdSchema` (Codex-2hxff.46).
+const NEW_OWNER = 'usernewowner01';
+const OLD_OWNER = 'useroldowner01';
 
 function makeKv() {
   const deletes: string[] = [];
@@ -181,9 +183,10 @@ describe('POST /api/admin/organizations/:orgId/owner — cache fan-out', () => {
       ].sort()
     );
     // The org-slug invalidation organization-api's accept path runs: the
-    // slug is resolved from the org id, then its keys are bumped.
-    expect(dbStub.query.organizations.findFirst).toHaveBeenCalled();
-    expect([...new Set(kvDouble.puts)].sort()).toEqual([
+    // slug is resolved from the org id, then its keys are bumped. Once for
+    // the change, not once per owner (Codex-2hxff.46).
+    expect(dbStub.query.organizations.findFirst).toHaveBeenCalledTimes(1);
+    expect([...kvDouble.puts].sort()).toEqual([
       'cache:version:acme',
       'cache:version:org:acme:creators',
       `cache:version:user:${NEW_OWNER}:library`,

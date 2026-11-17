@@ -983,7 +983,7 @@ media-controller video {
   }
 
   .video-player-controls-container {
-    transition: opacity var(--duration-instant) linear;
+    transition: opacity var(--duration-fast) linear;
     transform: none;
   }
 

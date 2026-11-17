@@ -6,6 +6,7 @@
  * - Permanent errors (return 200, acknowledged)
  */
 
+import { WinSettlingError } from '@codex/purchase';
 import {
   ConflictError,
   InternalServiceError,
@@ -14,6 +15,7 @@ import {
   ServiceUnavailableError,
   wrapError,
 } from '@codex/service-errors';
+import Stripe from 'stripe';
 import { describe, expect, it } from 'vitest';
 import { describeRootCause, isTransientError } from '../error-classification';
 
@@ -101,6 +103,32 @@ describe('isTransientError', () => {
   });
 
   // ─── Permanent errors (should return false) ─────────────────────────────────
+
+  // stripe-node's own error, as RequestSender builds it (stripe@23.1.0
+  // esm/RequestSender.js): a body that arrived whole but isn't JSON, such as
+  // a proxy's HTML 502, has no statusCode and carries the parse failure.
+  describe('Stripe API errors without a status (Codex-wzaoh)', () => {
+    type Raw = ConstructorParameters<typeof Stripe.errors.StripeAPIError>[0];
+    const apiError = (raw: Raw) => new Stripe.errors.StripeAPIError(raw);
+
+    it('a body that is not JSON is transient: Stripe redelivers', () => {
+      const notJson = {
+        message: 'Invalid JSON received from the Stripe API',
+        exception: new SyntaxError("Unexpected token '<'"),
+      };
+      expect(isTransientError(apiError(notJson))).toBe(true);
+    });
+
+    it('with no status and no parse failure, it stays permanent', () => {
+      expect(isTransientError(apiError({ message: 'Unknown' }))).toBe(false);
+    });
+
+    it('a 4xx, from the real class, stays permanent; a 5xx is transient', () => {
+      const status = (statusCode: number) => ({ message: 'x', statusCode });
+      expect(isTransientError(apiError(status(400)))).toBe(false);
+      expect(isTransientError(apiError(status(503)))).toBe(true);
+    });
+  });
 
   describe('Stripe client errors', () => {
     it('should return false for Stripe API 400 error', () => {
@@ -259,6 +287,17 @@ describe('isTransientError', () => {
         { cause: new ServiceUnavailableError('payout in flight') }
       );
       expect(isTransientError(incomplete)).toBe(true);
+    });
+
+    // Logged at warn, not alerted, but still a 500 so Stripe redelivers
+    // (Codex-2hxff.70; late-win data design §11).
+    it("a refund's clawback waiting for a won chargeback to settle is transient", () => {
+      const waiting = new WinSettlingError({
+        chargeId: 'ch_wait',
+        disputeId: 'dp_wait',
+      });
+      expect(waiting).toBeInstanceOf(ServiceUnavailableError);
+      expect(isTransientError(waiting)).toBe(true);
     });
   });
 

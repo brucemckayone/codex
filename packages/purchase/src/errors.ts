@@ -11,6 +11,7 @@ import {
   InternalServiceError,
   NotFoundError,
   ServiceError,
+  ServiceUnavailableError,
 } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
@@ -186,6 +187,55 @@ export class CheckoutNotRecordedError extends ServiceError {
       { ...options, publicContext: true }
     );
   }
+}
+
+/**
+ * Stripe did not make the late win's refund of a payment the loss refunded (a
+ * re-bought buyer's first payment, or a duplicate) (Codex-2hxff.70; late-win
+ * data design §4.5, §11): it refused it, or could not be asked (an outage, a
+ * rate limit, a key without the right). The outcome stays unapplied and the
+ * re-pay rows held, so it is retried: a 503, transient, so the webhook
+ * answers 500 and the hourly reconcile tries again (owner decision
+ * 2026-10-23, "Retry hourly, alert"). Nothing logs it here: the caller alerts
+ * each time. Its context is ids and what Stripe answered, never its message:
+ * the error's `code`, its `type` (a refusal is `StripeInvalidRequestError`)
+ * and its HTTP `statusCode`, each null when Stripe gave none. `refused` says
+ * which, by one rule its own message and the caller's alert both read:
+ * "refused" only for a refusal, "could not be made" for anything else, and
+ * never Stripe's words. The Stripe error stays on `cause`.
+ */
+export class LateWinRefundRefusedError extends ServiceUnavailableError {
+  constructor(
+    context: {
+      disputeId: string;
+      purchaseId: string;
+      stripeCode: string | null;
+      stripeType: string | null;
+      stripeStatusCode: number | null;
+    },
+    options?: ErrorOptions
+  ) {
+    super(
+      isStripeRefusal(context.stripeType)
+        ? "The late win's refund of the payment was refused; it is retried"
+        : "The late win's refund of the payment could not be made; it is retried",
+      context,
+      options
+    );
+  }
+
+  /**
+   * Stripe refused the refund (a `StripeInvalidRequestError`); otherwise it
+   * could not be asked: an outage, a rate limit, a key without the right.
+   */
+  get refused(): boolean {
+    return isStripeRefusal(this.context?.stripeType);
+  }
+}
+
+/** The one "refused" rule (`LateWinRefundRefusedError.refused`). */
+function isStripeRefusal(stripeType: unknown): boolean {
+  return stripeType === 'StripeInvalidRequestError';
 }
 
 /**

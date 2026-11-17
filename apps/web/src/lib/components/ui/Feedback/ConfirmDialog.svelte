@@ -20,10 +20,16 @@
     pass async handlers and rely on the immediate close.
   @prop {() => void | Promise<unknown>} [onConfirm]
   @prop {() => void} [onCancel]
+  @prop {FocusProp} [closeFocus] - Where focus goes at the close, over
+    Dialog.Root's default (what opened it): an element, a selector, or a
+    function returning either, as Dialog.Root takes it. For a confirm whose
+    action removes what opened it: a deleted row, a revoked invite.
+  @prop {'dialog' | 'alertdialog'} [role='dialog'] - The panel's role, as
+    Dialog.Root takes it.
   @prop {Snippet} [children] - Rendered in the dialog body.
 -->
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import type { ComponentProps, Snippet } from 'svelte';
 	import { Button } from '../Button/index';
 	import * as Dialog from '../Dialog/index';
 
@@ -38,6 +44,8 @@
 		awaitConfirm?: boolean;
 		onConfirm?: () => void | Promise<unknown>;
 		onCancel?: () => void;
+		closeFocus?: ComponentProps<typeof Dialog.Root>['closeFocus'];
+		role?: ComponentProps<typeof Dialog.Root>['role'];
 		children?: Snippet;
 	}
 
@@ -52,6 +60,8 @@
 		awaitConfirm = false,
 		onConfirm,
 		onCancel,
+		closeFocus,
+		role,
 		children
 	}: Props = $props();
 
@@ -91,7 +101,7 @@
 	}
 </script>
 
-<Dialog.Root bind:open onOpenChange={handleOpenChange}>
+<Dialog.Root bind:open onOpenChange={handleOpenChange} {closeFocus} {role}>
 	<Dialog.Content size="sm">
 		<Dialog.Header>
 			<Dialog.Title>{title}</Dialog.Title>

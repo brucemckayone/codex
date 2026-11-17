@@ -680,7 +680,7 @@
     object-position: center;
     transition:
       transform var(--duration-slower) var(--ease-smooth),
-      filter var(--duration-default) var(--ease-default);
+      filter var(--duration-normal) var(--ease-default);
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -780,7 +780,7 @@
     filter: drop-shadow(0 var(--space-1) var(--space-3) hsl(0 0% 0% / 0.35));
     transition:
       transform var(--duration-slow) var(--ease-smooth),
-      color var(--duration-default) var(--ease-default);
+      color var(--duration-normal) var(--ease-default);
   }
 
   .spotlight__card:hover .spotlight__video-icon {

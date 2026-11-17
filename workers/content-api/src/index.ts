@@ -36,6 +36,7 @@ import {
 import categoriesRoutes from './routes/categories';
 import contentRoutes from './routes/content';
 import contentAccessRoutes from './routes/content-access';
+import internalRoutes from './routes/internal';
 import journeyInsightsRoutes from './routes/journey-insights';
 import journeysRoutes from './routes/journeys';
 import mediaRoutes from './routes/media';
@@ -75,7 +76,9 @@ app.use(
       'R2_SECRET_ACCESS_KEY',
       'R2_BUCKET_MEDIA',
     ],
-    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
+    // WORKER_SHARED_SECRET signs the media-api hop and checks the internal
+    // routes (procedure() refuses a worker call without it).
+    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL', 'WORKER_SHARED_SECRET'],
   })
 );
 
@@ -103,6 +106,10 @@ app.route('/api/access', contentAccessRoutes);
 // prefix first — mirrors `/api/content/public` before `/api/content`).
 app.route('/api/journeys/insights', journeyInsightsRoutes);
 app.route('/api/journeys', journeysRoutes);
+
+// Worker-to-worker (HMAC): media-api tells content-api a file changed
+// (Codex-a6ofh.2.8).
+app.route('/', internalRoutes);
 
 // ============================================================================
 // Export

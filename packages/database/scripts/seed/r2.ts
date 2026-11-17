@@ -24,12 +24,12 @@ import {
 } from './constants';
 import {
   fetchPortraitImage,
-  fetchRealImage,
   fetchUrlImage,
   generateAudioMasterPlaylist,
   generateAvatarSvg,
   generateLogoSvg,
   generateMasterPlaylist,
+  generateThumbnailPng,
   generateVariantPlaylist,
   generateWaveformJson,
   OFFERING_IMAGE_URLS,
@@ -149,7 +149,7 @@ export async function clearR2Buckets() {
 
 /**
  * Collect all files for ready media items.
- * Fetches real photographs from picsum.photos for thumbnails (cached locally).
+ * Thumbnails are generated per seed string (generateThumbnailPng), not downloaded.
  */
 async function collectMediaFiles(): Promise<R2File[]> {
   const files: R2File[] = [];
@@ -201,8 +201,8 @@ async function collectMediaFiles(): Promise<R2File[]> {
     files.push({
       bucket: MEDIA_BUCKET_NAME,
       key: getThumbnailKey(creatorId, media.id),
-      data: await fetchRealImage(seed, 800, 450),
-      contentType: 'image/jpeg',
+      data: generateThumbnailPng(seed, 800, 450),
+      contentType: 'image/png',
     });
 
     // Responsive thumbnail variants (sm/md/lg)
@@ -211,8 +211,8 @@ async function collectMediaFiles(): Promise<R2File[]> {
       files.push({
         bucket: ASSETS_BUCKET_NAME,
         key: getMediaThumbnailKey(creatorId, media.id, size),
-        data: await fetchRealImage(seed, sizes[size][0], sizes[size][1]),
-        contentType: 'image/jpeg',
+        data: generateThumbnailPng(seed, sizes[size][0], sizes[size][1]),
+        contentType: 'image/png',
       });
     }
   }
@@ -256,16 +256,16 @@ async function collectMediaFiles(): Promise<R2File[]> {
   files.push({
     bucket: MEDIA_BUCKET_NAME,
     key: getWaveformImageKey(podcastCreatorId, podcast.id),
-    data: await fetchRealImage(podcastSeed, 800, 200),
-    contentType: 'image/jpeg',
+    data: generateThumbnailPng(podcastSeed, 800, 200),
+    contentType: 'image/png',
   });
 
   // Podcast also needs thumbnail variants so content cards can display them
   files.push({
     bucket: MEDIA_BUCKET_NAME,
     key: getThumbnailKey(podcastCreatorId, podcast.id),
-    data: await fetchRealImage(podcastSeed, 800, 450),
-    contentType: 'image/jpeg',
+    data: generateThumbnailPng(podcastSeed, 800, 450),
+    contentType: 'image/png',
   });
 
   const sizes = { sm: [320, 180], md: [640, 360], lg: [800, 450] } as const;
@@ -273,8 +273,8 @@ async function collectMediaFiles(): Promise<R2File[]> {
     files.push({
       bucket: ASSETS_BUCKET_NAME,
       key: getMediaThumbnailKey(podcastCreatorId, podcast.id, size),
-      data: await fetchRealImage(podcastSeed, sizes[size][0], sizes[size][1]),
-      contentType: 'image/jpeg',
+      data: generateThumbnailPng(podcastSeed, sizes[size][0], sizes[size][1]),
+      contentType: 'image/png',
     });
   }
 
@@ -317,28 +317,28 @@ async function collectMediaFiles(): Promise<R2File[]> {
   files.push({
     bucket: MEDIA_BUCKET_NAME,
     key: getWaveformImageKey(soundBowlsCreatorId, soundBowls.id),
-    data: await fetchRealImage(soundBowlsSeed, 800, 200),
-    contentType: 'image/jpeg',
+    data: generateThumbnailPng(soundBowlsSeed, 800, 200),
+    contentType: 'image/png',
   });
 
   // Sound bowls thumbnail variants
   files.push({
     bucket: MEDIA_BUCKET_NAME,
     key: getThumbnailKey(soundBowlsCreatorId, soundBowls.id),
-    data: await fetchRealImage(soundBowlsSeed, 800, 450),
-    contentType: 'image/jpeg',
+    data: generateThumbnailPng(soundBowlsSeed, 800, 450),
+    contentType: 'image/png',
   });
 
   for (const size of ['sm', 'md', 'lg'] as const) {
     files.push({
       bucket: ASSETS_BUCKET_NAME,
       key: getMediaThumbnailKey(soundBowlsCreatorId, soundBowls.id, size),
-      data: await fetchRealImage(
+      data: generateThumbnailPng(
         soundBowlsSeed,
         sizes[size][0],
         sizes[size][1]
       ),
-      contentType: 'image/jpeg',
+      contentType: 'image/png',
     });
   }
 

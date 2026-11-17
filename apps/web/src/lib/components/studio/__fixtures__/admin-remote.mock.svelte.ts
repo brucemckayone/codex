@@ -7,6 +7,11 @@
  * production. `error` mirrors a REJECTED kit query: `current` stays
  * undefined and the rejection sits on `error`, with `loading` false.
  *
+ * Making the grants query reads its own state, and `refresh()` writes it, as
+ * a kit query does (kit 2.55 calls `.then` on a new query, which reads its
+ * promise, and a refresh replaces that promise). So an effect that makes the
+ * query while tracking re-runs on every refresh, as it would in the app.
+ *
  * A `.svelte.ts` module (runes compiled), NOT a `*.test.*` file → never
  * collected as a suite.
  */
@@ -18,9 +23,14 @@ import type { CustomerGrant } from '$lib/types';
 
 type GrantsPage = PaginatedListResponse<CustomerGrant>;
 
-const state = $state<{ grants: GrantsPage | undefined; error: unknown }>({
+const state = $state<{
+  grants: GrantsPage | undefined;
+  error: unknown;
+  refreshes: number;
+}>({
   grants: undefined,
   error: undefined,
+  refreshes: 0,
 });
 
 export function grantsPage(items: CustomerGrant[]): GrantsPage {
@@ -42,18 +52,24 @@ export const getCustomerDetail = vi.fn(
 
 export const refreshGrants = vi.fn(async () => {});
 
-export const getCustomerGrants = vi.fn((_input: GrantsInput) => ({
-  get current() {
-    return state.grants;
-  },
-  get error() {
-    return state.error;
-  },
-  get loading() {
-    return state.grants === undefined && state.error === undefined;
-  },
-  refresh: refreshGrants,
-}));
+export const getCustomerGrants = vi.fn((_input: GrantsInput) => {
+  void state.refreshes;
+  return {
+    get current() {
+      return state.grants;
+    },
+    get error() {
+      return state.error;
+    },
+    get loading() {
+      return state.grants === undefined && state.error === undefined;
+    },
+    refresh: () => {
+      state.refreshes += 1;
+      return refreshGrants();
+    },
+  };
+});
 
 // ── command() ───────────────────────────────────────────────────────────
 export const revokeCustomerGrant = vi.fn(
@@ -86,6 +102,7 @@ export function setGrantsError(error: unknown) {
 export function reset() {
   state.grants = undefined;
   state.error = undefined;
+  state.refreshes = 0;
   getCustomerDetail.mockReset();
   getCustomerGrants.mockClear();
   refreshGrants.mockReset();

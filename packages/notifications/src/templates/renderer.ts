@@ -223,6 +223,17 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'refundDate',
     'accessNote',
   ],
+  // A chargeback lost and then won (Codex-2hxff.70): the sender composes the
+  // sentence and the button, for an item or a course.
+  'purchase-access-restored': [
+    'userName',
+    'contentTitle',
+    'accessSentence',
+    'amount',
+    'paidOn',
+    'itemUrl',
+    'buttonLabel',
+  ],
 
   // Organization
   'org-member-invitation': [
@@ -231,11 +242,6 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'roleName',
     'roleLabel',
     'orgUrl',
-    // Transitional (Codex-2hxff.83): the stock row production has uses these
-    // until migration 0117 rewrites it (Codex-2hxff.84). Drop them with the
-    // sender's copies once it has.
-    'acceptUrl',
-    'expiryDays',
   ],
   'member-role-changed': ['userName', 'orgName', 'oldRole', 'newRole'],
   'member-removed': ['userName', 'orgName'],
@@ -254,6 +260,9 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'retryUrl',
   ],
   'transcoding-owner-alert': ['headline', 'summary', 'details'],
+  // Publish when ready (Codex-a6ofh.2.8), to the piece's creator.
+  'content-live': ['userName', 'contentTitle', 'mediaKind', 'contentUrl'],
+  'content-not-live': ['userName', 'contentTitle', 'reason', 'editUrl'],
 
   // Creator
   'new-sale': [
@@ -492,6 +501,8 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'subscription-tier-price-change',
   'payment-failed',
   'refund-processed',
+  // A payment's access back after a chargeback (Codex-2hxff.70).
+  'purchase-access-restored',
   'org-member-invitation',
   'member-role-changed',
   'member-removed',
@@ -499,6 +510,9 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'transcoding-failed',
   // To the platform owner about the pipeline itself (Codex-l2c48.6).
   'transcoding-owner-alert',
+  // What became of a publish the creator asked for (Codex-a6ofh.2.8).
+  'content-live',
+  'content-not-live',
   'connect-account-status',
   // Payout notifications (WP-10 — Codex-69t7c.10): touch billing state.
   'creator-connect-needed',
@@ -545,11 +559,10 @@ export function getAllowedTokens(templateName: string): string[] {
 /**
  * Tokens whose copy reads well when the data lacks them: a proposal sent
  * with no note, a refund with no access note. Any OTHER allowed token the
- * data lacks renders blank (an empty button link, "expires in  days"), and
- * NotificationsService warns it. A field that is optional in its data schema
- * is not enough on its own: `acceptUrl` is optional only so its sender can
- * stop passing it before notifications-api deploys, and a row still using it
- * would then ship a dead button (Codex-2hxff.83).
+ * data lacks renders blank (an empty button link, a sentence with a gap),
+ * and NotificationsService warns it. A field that is optional in its data
+ * schema is not enough on its own: optional says the sender may omit it, not
+ * that a template using it still reads well without it.
  */
 const MAY_RENDER_BLANK: Record<string, readonly string[]> = {
   'refund-processed': ['accessNote'],

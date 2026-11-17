@@ -34,6 +34,18 @@ describe('Accordion', () => {
     document.body.innerHTML = '';
   });
 
+  test('a trigger sits in the heading it is given, and in no heading by default', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: { level: 2 },
+    });
+    flushSync();
+    const trigger = (id: string) =>
+      document.body.querySelector(`[data-testid="${id}"]`);
+    expect(trigger('trigger-1')?.parentElement?.tagName).toBe('H2');
+    expect(trigger('trigger-2')?.parentElement?.tagName).toBe('DIV');
+  });
+
   test('renders root as a div with children', () => {
     const children = createRawSnippet(() => ({
       render: () => '<div data-testid="child">Test content</div>',

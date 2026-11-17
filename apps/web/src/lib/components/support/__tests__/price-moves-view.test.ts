@@ -15,6 +15,7 @@ import {
   closeComesFirst,
   closedNotice,
   closeWords,
+  disputeWaitLine,
   moveAddress,
   moveAmounts,
   movePlace,
@@ -121,6 +122,37 @@ describe('a held row', () => {
     });
     expect(queuedLine(queued)).toBe('Queued for 11:00 · Jordan Reid');
     expect(queuedLine(heldMove())).toBeNull();
+  });
+
+  test('D1-a: a member with an open chargeback waits for it, so the row says why, not a time that keeps moving', () => {
+    const queued = heldMove({
+      status: 'queued',
+      action: null,
+      retry: { requestedAt: '2026-11-04T10:41:00.000Z', by: JORDAN },
+      queuedFor: '2026-11-05T11:00:00.000Z',
+    });
+    expect(queuedLine({ ...queued, waitsForDispute: true })).toBe(
+      'Waits while a chargeback is open · Jordan Reid'
+    );
+    expect(queuedLine({ ...queued, retry: null, waitsForDispute: true })).toBe(
+      'Waits while a chargeback is open'
+    );
+    // A held row keeps its buttons; the line sits beside them.
+    expect(disputeWaitLine(heldMove({ waitsForDispute: true }))).toBe(
+      'Waits while a chargeback is open'
+    );
+    expect(disputeWaitLine({ ...queued, waitsForDispute: true })).toBeNull();
+  });
+
+  test('D1-a: the line comes from waitsForDispute, never from the status alone', () => {
+    const queued = heldMove({
+      status: 'queued',
+      action: null,
+      retry: { requestedAt: '2026-11-04T10:41:00.000Z', by: JORDAN },
+      queuedFor: '2026-11-04T11:00:00.000Z',
+    });
+    expect(queuedLine(queued)).toBe('Queued for 11:00 · Jordan Reid');
+    expect(disputeWaitLine(heldMove())).toBeNull();
   });
 
   test('M4 refused again after a retry: Close… comes first', () => {

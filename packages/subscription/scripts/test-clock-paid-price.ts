@@ -10,11 +10,11 @@
  * 2. A switch INTO yearly billing starts a new period today (owner decision,
  *    Codex-2hxff.96). Our subscriptions are in Stripe's flexible billing mode,
  *    which never resets the anchor by itself, so the preview and the write
- *    pass `billing_cycle_anchor: 'now'`. Stripe refuses `proration_date` with
- *    it, so the credit runs to the write; the confirm previews again and
- *    refuses any figure the dialog did not show ("re-check at confirm"). A
- *    switch into monthly is not proved here: Codex-2hxff.97 makes it wait
- *    for the year's end.
+ *    pass `billing_cycle_anchor: { type: 'now' }`. Stripe refuses
+ *    `proration_date` with it, so the credit runs to the write; the confirm
+ *    previews again and refuses any figure the dialog did not show ("re-check
+ *    at confirm"). A switch into monthly is not proved here: Codex-2hxff.97
+ *    makes it wait for the year's end.
  * 3. The platform's own Price updates are told apart from a Dashboard edit
  *    (the false "edited in Stripe Dashboard" alert).
  *
@@ -330,8 +330,8 @@ async function switchAndCheck(kit: Kit, run: Switch): Promise<void> {
 
   // startsNewPeriod: a switch INTO yearly billing (interval_switch or
   // cross_period_change). Stripe refuses proration_date with
-  // billing_cycle_anchor 'now', so it is re-checked at the confirm. A switch
-  // into monthly is not proved here: Codex-2hxff.97 makes it wait.
+  // billing_cycle_anchor { type: 'now' }, so it is re-checked at the confirm.
+  // A switch into monthly is not proved here: Codex-2hxff.97 makes it wait.
   const newPeriod =
     run.to.interval === 'year' && run.to.interval !== run.moved.interval;
   // previewNow (subscription-service.ts).
@@ -342,7 +342,7 @@ async function switchAndCheck(kit: Kit, run: Switch): Promise<void> {
         items: [{ id: item.id, price: run.to.id }],
         proration_behavior: 'always_invoice',
         ...(newPeriod
-          ? { billing_cycle_anchor: 'now' as const }
+          ? { billing_cycle_anchor: { type: 'now' } }
           : { proration_date: at }),
       },
     });
@@ -427,7 +427,7 @@ async function switchAndCheck(kit: Kit, run: Switch): Promise<void> {
     items: [{ id: item.id, price: run.to.id }],
     proration_behavior: run.proration,
     ...(newPeriod
-      ? { billing_cycle_anchor: 'now' as const }
+      ? { billing_cycle_anchor: { type: 'now' } }
       : { proration_date: prorationDate }),
     ...(chargesNow && { payment_behavior: 'error_if_incomplete' as const }),
   });

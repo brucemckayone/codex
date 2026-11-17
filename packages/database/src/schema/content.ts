@@ -351,6 +351,18 @@ export const content = pgTable(
     // keep it until their next renewal: access while off_sale_at >= their
     // current period start. Cleared when the item is republished.
     offSaleAt: timestamp('off_sale_at', { withTimezone: true }),
+    // Publish when ready (Codex-a6ofh.2.7, data-design §3.7): when a draft
+    // was asked to go live once its media is ready. Null = not scheduled.
+    // Set only while the media is still on its way; every successful publish
+    // clears it, as does a cancel or a save that removes the media.
+    publishRequestedAt: timestamp('publish_requested_at', {
+      withTimezone: true,
+    }),
+    // Why the last scheduled attempt didn't go live: the refusal's
+    // `details.code` (an ERROR_CODES value, e.g. CREATOR_CONNECT_REQUIRED).
+    // Written by the media-ready trigger (Codex-a6ofh.2.8), which clears the
+    // schedule as it does; cleared by the next ask, a cancel or a go-live.
+    publishBlockedReason: varchar('publish_blocked_reason', { length: 50 }),
 
     // Creator-flagged feature — promotes the item to a full-width editorial
     // card on the org homepage feed. Orthogonal to status: only published
@@ -394,6 +406,16 @@ export const content = pgTable(
     index('idx_content_creator_org_published')
       .on(table.creatorId, table.organizationId, table.status)
       .where(sql`${table.deletedAt} IS NULL`),
+
+    // Every scheduled draft, for the media-ready cron safety net
+    // (Codex-a6ofh.2.7/.2.8): tiny, only rows waiting to go live. A query
+    // uses it only if it repeats both predicates; the trigger's lookup of
+    // one media's drafts is served by idx_content_media_item_id as well.
+    index('idx_content_publish_requested_media')
+      .on(table.mediaItemId)
+      .where(
+        sql`${table.publishRequestedAt} IS NOT NULL AND ${table.deletedAt} IS NULL`
+      ),
 
     // Partial index for org homepage "featured" lookup — tiny (1–3 rows/org)
     index('idx_content_org_featured')

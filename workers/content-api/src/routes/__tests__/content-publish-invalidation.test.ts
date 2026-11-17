@@ -26,6 +26,11 @@
  * (so the orgId -> slug resolve returns a known slug), and
  * `invalidateContentAccess` (the per-user library fanout is a separate concern
  * with its own tests). The assertions read the REAL keys out of KV.
+ *
+ * A SAVE (PATCH) runs the same fan-out, except for a draft that was never
+ * live (Codex-a6ofh.2.2): drafts autosave every few seconds, and such a draft
+ * is in no cache. The service decides that (`hasBeenLive`, from the row
+ * before the update; its own tests cover the rule). Its own describe below.
  */
 
 import {
@@ -33,13 +38,17 @@ import {
   env,
   waitOnExecutionContext,
 } from 'cloudflare:test';
+import { ContentAlreadyLiveError } from '@codex/content';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ─── Fixtures (valid RFC4122 v4 UUIDs so uuidSchema accepts them) ────────────
 
+// This file's own subject. The limiter counts per subject across every file
+// in this single-worker run, so a shared id runs past the api preset's 100
+// a minute and later files read 429 (Codex-a6ofh.2).
 const USER = {
-  id: '7a1d0f2e-3b4c-4d5e-8f60-112233445566',
+  id: '7a1d0f2e-3b4c-4d5e-8f60-000000000007',
   email: 'creator@test.com',
   role: 'creator',
 };
@@ -58,7 +67,9 @@ function freshIds() {
 
 const contentSpies = {
   publish: vi.fn(),
+  cancelPublishRequest: vi.fn(),
   unpublish: vi.fn(),
+  updateReportingDroppedThumbnail: vi.fn(),
   // The registry calls setCache() on the constructed instance whenever CACHE_KV
   // is bound (it is, in env=test) — service-registry.ts:431. Same reason
   // public-routes.test.ts carries it.
@@ -68,6 +79,10 @@ const contentSpies = {
 /** Resolves orgId -> slug for `invalidateOrgSlugCache`. */
 let resolvedSlug = '';
 
+const { invalidateContentAccess } = vi.hoisted(() => ({
+  invalidateContentAccess: vi.fn(async () => undefined),
+}));
+
 vi.mock('@codex/content', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/content')>();
   return {
@@ -75,7 +90,7 @@ vi.mock('@codex/content', async (importOriginal) => {
     ContentService: vi.fn(() => contentSpies),
     // The per-user library fanout is not what this file is about, and it would
     // otherwise issue real `resolveAffectedUsers` queries.
-    invalidateContentAccess: vi.fn(async () => undefined),
+    invalidateContentAccess,
   };
 });
 
@@ -114,13 +129,14 @@ function buildApp() {
   return app;
 }
 
-async function publish(contentId: string): Promise<Response> {
+async function publish(contentId: string, query = ''): Promise<Response> {
   const app = buildApp();
   const ec = createExecutionContext();
   const res = await app.fetch(
-    new Request(`http://content-api.test/api/content/${contentId}/publish`, {
-      method: 'POST',
-    }),
+    new Request(
+      `http://content-api.test/api/content/${contentId}/publish${query}`,
+      { method: 'POST' }
+    ),
     testEnv,
     ec
   );
@@ -129,7 +145,36 @@ async function publish(contentId: string): Promise<Response> {
   return res;
 }
 
+async function save(contentId: string, query = ''): Promise<Response> {
+  const ec = createExecutionContext();
+  const res = await buildApp().fetch(
+    new Request(`http://content-api.test/api/content/${contentId}${query}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'A better title' }),
+    }),
+    testEnv,
+    ec
+  );
+  await waitOnExecutionContext(ec);
+  return res;
+}
+
 const versionKey = (id: string) => `cache:version:${id}`;
+
+async function cancel(contentId: string): Promise<Response> {
+  const ec = createExecutionContext();
+  const res = await buildApp().fetch(
+    new Request(
+      `http://content-api.test/api/content/${contentId}/publish-request`,
+      { method: 'DELETE' }
+    ),
+    testEnv,
+    ec
+  );
+  await waitOnExecutionContext(ec);
+  return res;
+}
 
 /**
  * `CACHE_KV` is optional on `HonoEnv` but IS bound in `env=test`. Narrowed here
@@ -151,6 +196,19 @@ function cacheKv(): NonNullable<typeof env.CACHE_KV> {
   return kv;
 }
 
+/** Nothing was staled: none of the four keys `bumpOrgContentVersion` names, no library fan-out. */
+async function untouched(ids: { orgId: string; slug: string }) {
+  for (const key of [
+    `org:${ids.orgId}:content`,
+    ids.slug,
+    `categories:org:${ids.orgId}`,
+    `org:${ids.orgId}:journeys`,
+  ]) {
+    expect(await cacheKv().get(versionKey(key))).toBeNull();
+  }
+  expect(invalidateContentAccess).not.toHaveBeenCalled();
+}
+
 describe('POST /:id/publish fans the version bump out', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -160,6 +218,7 @@ describe('POST /:id/publish fans the version bump out', () => {
     const { contentId, orgId, slug } = freshIds();
     resolvedSlug = slug;
     contentSpies.publish.mockResolvedValue({
+      status: 'published',
       id: contentId,
       organizationId: orgId,
     });
@@ -182,6 +241,7 @@ describe('POST /:id/publish fans the version bump out', () => {
     const { contentId, orgId, slug } = freshIds();
     resolvedSlug = slug;
     contentSpies.publish.mockResolvedValue({
+      status: 'published',
       id: contentId,
       organizationId: orgId,
     });
@@ -210,6 +270,7 @@ describe('POST /:id/publish fans the version bump out', () => {
     const b = freshIds();
     resolvedSlug = a.slug;
     contentSpies.publish.mockResolvedValue({
+      status: 'published',
       id: a.contentId,
       organizationId: a.orgId,
     });
@@ -229,11 +290,175 @@ describe('POST /:id/publish fans the version bump out', () => {
     const { contentId } = freshIds();
     resolvedSlug = '';
     contentSpies.publish.mockResolvedValue({
+      status: 'published',
       id: contentId,
       organizationId: null,
     });
 
     const res = await publish(contentId);
     expect(res.status).toBe(200);
+  });
+});
+
+describe('PATCH /:id fans out only for a piece that has been live', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function saved(hasBeenLive: boolean) {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.updateReportingDroppedThumbnail.mockResolvedValue({
+      content: {
+        id: ids.contentId,
+        organizationId: ids.orgId,
+        creatorId: USER.id,
+        status: 'draft',
+        publishedAt: null,
+      },
+      droppedThumbnailUrl: null,
+      hasBeenLive,
+    });
+    return ids;
+  }
+
+  it('a draft that was never live bumps no key and fans out nothing', async () => {
+    const ids = saved(false);
+
+    expect((await save(ids.contentId)).status).toBe(200);
+
+    await untouched(ids);
+  });
+
+  // Read from the service, not the returned row: moving a piece out of its
+  // org resets the row's status and publishedAt, and its buyers still hold it.
+  it('a piece that has been live bumps its org and fans out, whatever the row now says', async () => {
+    const ids = saved(true);
+
+    expect((await save(ids.contentId)).status).toBe(200);
+
+    expect(
+      await cacheKv().get(versionKey(`org:${ids.orgId}:content`))
+    ).not.toBeNull();
+    expect(await cacheKv().get(versionKey(ids.slug))).not.toBeNull();
+    expect(invalidateContentAccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentId: ids.contentId,
+        reason: 'content_updated',
+      })
+    );
+  });
+
+  // A draft's autosave (Codex-a6ofh.2): the editor says it is one, so the
+  // service can refuse it on a piece that went live meanwhile.
+  it('a draft autosave asks with asDraft; a plain save does not', async () => {
+    const ids = saved(false);
+
+    await save(ids.contentId, '?asDraft=true');
+    await save(ids.contentId);
+
+    const calls = contentSpies.updateReportingDroppedThumbnail.mock.calls;
+    expect(calls.map((call) => call[3])).toEqual([
+      { asDraft: true },
+      { asDraft: false },
+    ]);
+  });
+
+  it('a mistyped asDraft is refused before the service is asked', async () => {
+    const { contentId } = freshIds();
+
+    expect((await save(contentId, '?asDraft=yes')).status).toBe(400);
+    expect(contentSpies.updateReportingDroppedThumbnail).not.toHaveBeenCalled();
+  });
+
+  it('a draft save refused as live is a 409 with its code, and bumps nothing', async () => {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.updateReportingDroppedThumbnail.mockRejectedValue(
+      new ContentAlreadyLiveError(ids.contentId, 'draft-save')
+    );
+
+    const res = await save(ids.contentId, '?asDraft=true');
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: { details: { code: 'CONTENT_ALREADY_LIVE' } },
+    });
+    await untouched(ids);
+  });
+});
+
+// Publish when ready (Codex-a6ofh.2.7): a schedule changes nothing public, so
+// the route must not stale a single cache or library for it.
+describe('Publish when ready on the routes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('a scheduled publish asks with whenReady, then bumps no key and fans out nothing', async () => {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.publish.mockResolvedValue({
+      id: ids.contentId,
+      organizationId: ids.orgId,
+      status: 'draft',
+      publishRequestedAt: new Date().toISOString(),
+    });
+
+    const res = await publish(ids.contentId, '?whenReady=true');
+
+    expect(res.status).toBe(200);
+    expect(contentSpies.publish).toHaveBeenCalledWith(ids.contentId, USER.id, {
+      whenReady: true,
+    });
+    await untouched(ids);
+  });
+
+  it('a plain publish asks for no schedule', async () => {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.publish.mockResolvedValue({
+      id: ids.contentId,
+      organizationId: ids.orgId,
+      status: 'published',
+    });
+
+    await publish(ids.contentId);
+
+    expect(contentSpies.publish).toHaveBeenCalledWith(ids.contentId, USER.id, {
+      whenReady: false,
+    });
+  });
+
+  it('a mistyped flag is refused before the service is asked', async () => {
+    const { contentId } = freshIds();
+
+    const res = await publish(contentId, '?whenReady=yes');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.publish).not.toHaveBeenCalled();
+  });
+
+  it('DELETE /:id/publish-request cancels it, and bumps nothing', async () => {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.cancelPublishRequest.mockResolvedValue({
+      id: ids.contentId,
+      organizationId: ids.orgId,
+      status: 'draft',
+      publishRequestedAt: null,
+    });
+
+    const res = await cancel(ids.contentId);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      data: { id: ids.contentId, publishRequestedAt: null },
+    });
+    expect(contentSpies.cancelPublishRequest).toHaveBeenCalledWith(
+      ids.contentId,
+      USER.id
+    );
+    await untouched(ids);
   });
 });
