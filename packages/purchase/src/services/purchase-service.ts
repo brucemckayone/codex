@@ -131,7 +131,6 @@ import {
   ne,
   or,
   type SQL,
-  type SQLWrapper,
   sql,
 } from 'drizzle-orm';
 import type Stripe from 'stripe';
@@ -151,6 +150,13 @@ import {
   findActiveCreatorAgreementShare,
 } from './agreement-share';
 import {
+  type BlockedPaymentKind,
+  blockedKind,
+  blockedPayment,
+  isDuplicatePayment,
+  isUnavailableBlock,
+} from './blocked-payment';
+import {
   CheckoutReservations,
   checkoutIdempotencyKey,
   stripeErrorCode,
@@ -167,6 +173,11 @@ import {
   writeCoursePurchaseEntitlement,
 } from './entitlement-writer';
 import { withStaleCustomerRecovery } from './resolve-customer';
+import {
+  findShortLosses,
+  standingRefundOf,
+  unrecoveredAfterLoss,
+} from './short-loss';
 import { verifyPurchase } from './verify-purchase';
 
 /**
@@ -606,54 +617,6 @@ const BUYER_HIDDEN_COLUMNS = {
 export type BuyerPurchase = Omit<Purchase, keyof typeof BUYER_HIDDEN_COLUMNS>;
 
 /**
- * A second payment for an item the buyer already owned (Codex-2hxff.14):
- * `pending` while its refund is owed, `refunded` once Stripe has made it.
- */
-export function isDuplicatePayment(
-  purchase: Pick<Purchase, 'duplicateOfPurchaseId'>
-): boolean {
-  return purchase.duplicateOfPurchaseId != null;
-}
-
-/**
- * A payment that landed when access would refuse its buyer the content
- * (`contentRefusesBuyers`: deleted, team-only, its organisation deleted,
- * detached and more; Codex-z1t3c, owner 2026-11-15, "block and refund", and
- * D54, "match access exactly"): a blocked sale. It
- * grants and pays nothing, and is `pending` while its refund is owed and
- * `refunded` once Stripe has made it, as a duplicate is. The marker is
- * `refund_reason` (no migration): written at insert, and kept by every later
- * writer of the refund fields (`keepUnavailableMarker`), which would
- * otherwise write Stripe's reason over it.
- */
-export function isUnavailableBlock(
-  purchase: Pick<Purchase, 'refundReason'>
-): boolean {
-  return purchase.refundReason === ITEM_UNAVAILABLE;
-}
-
-/**
- * The two kinds of payment that grant and pay nothing: a second payment for
- * an item the buyer already owns (`duplicate`; they kept the item), and a
- * blocked sale of an item no longer available (`unavailable`; they have
- * nothing).
- */
-export type BlockedPaymentKind = 'duplicate' | 'unavailable';
-
-/**
- * What kind of payment that grants and pays nothing this is, if it is one: a
- * blocked sale of an unavailable item, a duplicate, or null for a sale. A
- * row is one or the other: an unavailable item is blocked whoever owns it.
- * Support's queue reads it too (owner D55, D57).
- */
-export function blockedKind(
-  purchase: Pick<Purchase, 'duplicateOfPurchaseId' | 'refundReason'>
-): BlockedPaymentKind | null {
-  if (isUnavailableBlock(purchase)) return 'unavailable';
-  return isDuplicatePayment(purchase) ? 'duplicate' : null;
-}
-
-/**
  * A blocked payment the hourly sweep could not refund, for support to settle
  * by hand. `blocked` says which: a duplicate (the buyer kept the item) or a
  * sale of an item no longer available (the buyer has nothing).
@@ -705,60 +668,11 @@ function keepUnavailableMarker(
 }
 
 /**
- * A blocked payment (`blockedKind`): a duplicate or a blocked sale. One
- * fragment, so no part can be dropped (`and()` and `or()` drop an undefined
- * argument).
- */
-function blockedPayment(): SQL {
-  return sql`(${purchases.duplicateOfPurchaseId} IS NOT NULL OR ${purchases.refundReason} = ${ITEM_UNAVAILABLE})`;
-}
-
-/**
  * A blocked payment still owed its refund: `pending` until Stripe has
  * refunded it.
  */
 function owedBlockedRefund(): SQL {
   return sql`(${blockedPayment()} AND ${purchases.status} = ${PURCHASE_STATUS.PENDING})`;
-}
-
-/**
- * The refunds that still stand on a purchase's charge
- * (`STANDING_REFUND_STATUSES`: a failed or canceled one returned nothing):
- * the purchase's own, and one of `chargeId` still without a `purchase_id`
- * (recorded before the purchase existed, Codex-aa08z). Each is a value or
- * the outer query's column; with no `chargeId`, the purchase's own only.
- * One fragment, so no part can be dropped.
- */
-function standingRefundOf(
-  purchaseId: SQLWrapper | string,
-  chargeId: SQLWrapper | string | null
-): SQL {
-  const ofCharge =
-    chargeId === null
-      ? sql`FALSE`
-      : sql`(${refunds.purchaseId} IS NULL AND ${refunds.stripeChargeId} = ${chargeId})`;
-  return sql`((${refunds.purchaseId} = ${purchaseId} OR ${ofCharge}) AND ${inArray(refunds.status, STANDING_REFUND_STATUSES)})`;
-}
-
-/**
- * What the buyer has NOT had back of the outer query's purchase once a
- * chargeback on it is lost: what they paid, less the refunds standing on the
- * charge (`standingRefundOf`; `chargeId` is the dispute's) and the
- * chargeback's `lostCents`, never below 0. Read from the refunds, never the
- * row's `refund_amount_cents`: a pending blocked payment records no part
- * refund of its own (owner D59, review r3). The one count of it: the loss
- * writes what the buyer has back from it, and for a blocked payment what it
- * leaves is still owed, which the alert at the loss and the hourly report
- * both read (`reportBlockedPaymentsShortAfterLoss`). Any other sale lost for
- * less keeps the bank's decision.
- */
-function unrecoveredAfterLoss(
-  chargeId: SQLWrapper | string | null,
-  lostCents: SQLWrapper | number
-): SQL<number> {
-  return sql<number>`GREATEST(0, ${purchases.amountPaidCents} - COALESCE((SELECT SUM(${refunds.amountCents}) FROM ${refunds} WHERE ${standingRefundOf(purchases.id, chargeId)}), 0) - ${lostCents})::int`.mapWith(
-    Number
-  );
 }
 
 /**
@@ -1752,50 +1666,36 @@ export class PurchaseService extends BaseService {
 
   /**
    * Every blocked payment a lost chargeback refunded only in part, so still
-   * owed the rest (owner D59), at error, once per run, up to `limit`, the
-   * oldest dispute first: each with its PaymentIntent, dispute, kind, and
-   * what is owed, by the loss's own count (`unrecoveredAfterLoss`). The
-   * alert at the loss is the early signal; this one is read from the stored
-   * rows, so it repeats each run until support's refund stands on the charge,
-   * and a lost log line never loses the debt (review r3). Nothing is
-   * refunded. Never throws: it runs after the sweep's refunds and logs its
-   * own failure.
+   * owed the rest (owner D59), at error, once per run: up to `limit`, the
+   * newest dispute first, with how many there are in all (`total`), so a long
+   * tail is visible and a new one is never hidden behind old ones (review
+   * r4). Each with its PaymentIntent, dispute, kind, and what is owed, by the
+   * loss's own count (`findShortLosses`). The alert at the loss is the early
+   * signal; this one is read from the stored rows, so it repeats each run
+   * until support marks the payment paid another way on the charge page
+   * (owner D60, D61), and a lost log line never loses the debt (review r3).
+   * Nothing is refunded. Never throws: it runs after the sweep's refunds and
+   * logs its own failure.
    */
   private async reportBlockedPaymentsShortAfterLoss(
     limit: number
   ): Promise<void> {
     try {
-      const owedCents = unrecoveredAfterLoss(
-        disputes.stripeChargeId,
-        disputes.amountCents
-      );
-      const short = await this.db
-        .select({
-          purchaseId: purchases.id,
-          stripePaymentIntentId: purchases.stripePaymentIntentId,
-          duplicateOfPurchaseId: purchases.duplicateOfPurchaseId,
-          refundReason: purchases.refundReason,
-          currency: purchases.currency,
-          stripeDisputeId: disputes.stripeDisputeId,
-          owedCents,
-        })
-        .from(purchases)
-        .innerJoin(disputes, eq(disputes.purchaseId, purchases.id))
-        .where(
-          sql`(${blockedPayment()} AND ${purchases.status} = ${PURCHASE_STATUS.REFUNDED} AND ${disputes.status} = ${'lost'} AND ${owedCents} > 0)`
-        )
-        .orderBy(asc(disputes.stripeCreatedAt))
-        .limit(limit);
-      if (short.length === 0) return;
+      const { rows, total } = await findShortLosses(this.db, {
+        includePaidAnotherWay: false,
+        limit,
+      });
+      if (rows.length === 0) return;
       this.obs.error(
-        'Blocked payments a lost chargeback refunded only in part: refund the rest by hand',
+        'Blocked payments a lost chargeback refunded only in part: pay the rest another way, then mark it paid on the support charge page',
         {
           errorId: crypto.randomUUID(),
-          short: short.map((row) => ({
+          total,
+          short: rows.map((row) => ({
             purchaseId: row.purchaseId,
             stripePaymentIntentId: row.stripePaymentIntentId,
             stripeDisputeId: row.stripeDisputeId,
-            kind: blockedKind(row),
+            kind: row.kind,
             owedCents: row.owedCents,
             currency: row.currency,
           })),
@@ -4967,12 +4867,14 @@ export class PurchaseService extends BaseService {
    * A blocked payment (a duplicate, or a blocked sale) is owed back in full,
    * so a chargeback LOST for less than it leaves the rest owed, and nothing
    * refunds it: the row is `refunded` now, so no refund sweep selects it
-   * (owner D59). An error-level alert for support to refund the rest by
-   * hand, as the sweep's "refund them by hand" is, naming the payment, the
-   * dispute and the amount still owed (`unrecoveredAfterLoss`). No automatic
-   * refund. The early signal: the hourly sweep reports it again from the
-   * stored rows until it is refunded (`reportBlockedPaymentsShortAfterLoss`).
-   * Any other sale lost for less keeps the bank's decision.
+   * (owner D59). Stripe won't refund a charged-back charge, so support pays
+   * the rest another way and marks it on the charge page (owner D60, D61).
+   * An error-level alert, as the sweep's "refund them by hand" is, naming the
+   * payment, the dispute and the amount still owed (`unrecoveredAfterLoss`).
+   * No automatic refund. The early signal: the hourly sweep reports it again
+   * from the stored rows until it is marked
+   * (`reportBlockedPaymentsShortAfterLoss`). Any other sale lost for less
+   * keeps the bank's decision.
    */
   private alertBlockedPaymentShortAfterLoss(
     purchase: Purchase,
@@ -4982,7 +4884,7 @@ export class PurchaseService extends BaseService {
     const kind = blockedKind(purchase);
     if (kind === null || owedCents <= 0) return;
     this.obs.error(
-      'A lost chargeback refunded only part of a blocked payment: refund the rest by hand',
+      'A lost chargeback refunded only part of a blocked payment: pay the rest another way, then mark it paid on the support charge page',
       {
         errorId: crypto.randomUUID(),
         purchaseId: purchase.id,
@@ -5008,11 +4910,17 @@ export class PurchaseService extends BaseService {
    * is read under a share lock before the purchase is written
    * (`disputeStillLost`). Otherwise nothing is written, and `accessEnded` is
    * false, so the caller writes no streaming block.
+   *
+   * The standing refunds are those on the dispute's charge. `chargeId` is the
+   * loss's own charge (the webhook's), for a dispute with no row: without it
+   * only the purchase's linked refunds would count, and an unlinked one on
+   * the charge would be left out (review r4).
    */
   async processLostDispute(
     paymentIntentId: string,
     disputedCents: number,
-    stripeDisputeId: string
+    stripeDisputeId: string,
+    { chargeId }: { chargeId?: string } = {}
   ): Promise<
     { userId: string; orgId: string | null; accessEnded: boolean } | undefined
   > {
@@ -5046,7 +4954,7 @@ export class PurchaseService extends BaseService {
           .set({
             status: PURCHASE_STATUS.REFUNDED,
             refundedAt: now,
-            refundAmountCents: sql`${purchases.amountPaidCents} - ${unrecoveredAfterLoss(lost.stripeChargeId, disputedCents)}`,
+            refundAmountCents: sql`${purchases.amountPaidCents} - ${unrecoveredAfterLoss(lost.stripeChargeId ?? chargeId ?? null, disputedCents)}`,
             updatedAt: now,
           })
           .where(eq(purchases.id, purchase.id))
@@ -5316,10 +5224,74 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * When support marked the charge refunded outside Stripe: the earliest of
+   * its disputes' `refunded_outside_stripe_at`, or null. Support's refund
+   * form reads the same mark (`refundedOutsideStripeAt` there).
+   */
+  private async refundedOutsideStripeAt(
+    chargeId: string
+  ): Promise<Date | null> {
+    const [marked] = await this.db
+      .select({ at: disputes.refundedOutsideStripeAt })
+      .from(disputes)
+      .where(
+        and(
+          eq(disputes.stripeChargeId, chargeId),
+          isNotNull(disputes.refundedOutsideStripeAt)
+        )
+      )
+      .orderBy(asc(disputes.refundedOutsideStripeAt))
+      .limit(1);
+    return marked?.at ?? null;
+  }
+
+  /**
+   * A late win on a charge support marked paid another way (owner D62): no
+   * refund is made, and support settles the buyer by hand, at error with the
+   * charge's amount and what Stripe shows refunded on it (its standing
+   * refunds, as listed now). Once per run of the undo, which then goes on.
+   */
+  private async alertLateWinOnChargePaidAnotherWay(
+    dispute: Dispute,
+    purchase: Purchase,
+    charge: ClawbackCharge,
+    paidAnotherWayAt: Date
+  ): Promise<void> {
+    const listed = await this.recordChargeRefunds({
+      id: charge.id,
+      paymentIntentId: purchase.stripePaymentIntentId,
+    });
+    const stripeRefundedCents = listed
+      .filter((refund) =>
+        (STANDING_REFUND_STATUSES as readonly string[]).includes(
+          refund.status ?? ''
+        )
+      )
+      .reduce((sum, refund) => sum + refund.amount, 0);
+    this.obs.error(
+      'Late win on a charge marked paid another way: no refund was made, so settle the buyer by hand',
+      {
+        errorId: crypto.randomUUID(),
+        chargeId: charge.id,
+        disputeId: dispute.stripeDisputeId,
+        purchaseId: purchase.id,
+        chargeAmountCents: charge.amountCents,
+        stripeRefundedCents,
+        paidAnotherWayAt: paidAnotherWayAt.toISOString(),
+      }
+    );
+  }
+
+  /**
    * Ask Stripe for the late win's refund of the payment, and write its id
    * once (`late_win_refund_id IS NULL`). Undefined, and no refund, unless
-   * the loss refunded the payment (`refundedByTheLoss`). A refund Stripe does
-   * not make, refused or not, is a `LateWinRefundRefusedError`.
+   * the loss refunded the payment (`refundedByTheLoss`), or when support has
+   * marked the charge paid another way (`refunded_outside_stripe_at`; owner
+   * D62): the buyer was paid the rest of a short loss outside Stripe, so a
+   * refund of what is left of the charge would pay them twice. That one is
+   * alerted at error for support to settle by hand
+   * (`alertLateWinOnChargePaidAnotherWay`). A refund Stripe does not make,
+   * refused or not, is a `LateWinRefundRefusedError`.
    */
   private async issueLateWinRefund(
     dispute: Dispute,
@@ -5328,6 +5300,16 @@ export class PurchaseService extends BaseService {
     environment: string
   ): Promise<Pick<IssueRefundResult, 'refundId' | 'status'> | undefined> {
     if (!(await this.refundedByTheLoss(purchase, charge.id))) {
+      return undefined;
+    }
+    const paidAnotherWay = await this.refundedOutsideStripeAt(charge.id);
+    if (paidAnotherWay) {
+      await this.alertLateWinOnChargePaidAnotherWay(
+        dispute,
+        purchase,
+        charge,
+        paidAnotherWay
+      );
       return undefined;
     }
     const { stripeDisputeId } = dispute;

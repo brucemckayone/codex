@@ -54,6 +54,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PurchaseService } from '../services/purchase-service';
+import { findShortLosses } from '../services/short-loss';
 
 const uid = () => randomUUID().replace(/-/g, '').slice(0, 12);
 
@@ -842,10 +843,12 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
   ])('a chargeback on a blocked payment ($kind)', ({ kind, key }) => {
     const HELD_ALERT =
       'Blocked refunds still held by a chargeback after 120 days: check the dispute in Stripe, then refund them by hand';
+    // Stripe won't refund a charged-back payment, so support pays the rest
+    // another way and marks it on the charge page (owner D60, D61).
     const SHORT_ALERT =
-      'A lost chargeback refunded only part of a blocked payment: refund the rest by hand';
+      'A lost chargeback refunded only part of a blocked payment: pay the rest another way, then mark it paid on the support charge page';
     const SHORT_REPORT =
-      'Blocked payments a lost chargeback refunded only in part: refund the rest by hand';
+      'Blocked payments a lost chargeback refunded only in part: pay the rest another way, then mark it paid on the support charge page';
 
     /**
      * A blocked payment of this kind whose refund Stripe refused: owed.
@@ -1117,7 +1120,10 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         ([message]) => message === SHORT_REPORT
       );
       expect(reports).toHaveLength(2);
-      expect(reports[0]?.[1]).toMatchObject({ errorId: expect.any(String) });
+      expect(reports[0]?.[1]).toMatchObject({
+        errorId: expect.any(String),
+        total: expect.any(Number),
+      });
 
       // Support refunds the rest by hand: once it stands, nothing is owed.
       await recordPartRefund(service, pi, 1000);
@@ -1127,6 +1133,93 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         shortReported(errors).map((reported) => reported.stripePaymentIntentId)
       ).not.toContain(pi);
       expect(await rowOf(pi)).toMatchObject({ status: 'refunded' });
+    });
+
+    // Review r4 (D60): oldest first under a limit, rows support could never
+    // clear hid every NEW short loss. Newest dispute first now, and the line
+    // says how many there are in all, so a tail past the limit shows.
+    it('the report lists the newest short loss first, up to the limit, with how many there are in all', async () => {
+      const { service, stripe } = fresh();
+      const shortLoss = async (openedAt: Date) => {
+        const { pi } = await owedBlocked(service, stripe);
+        const disputeId = await openChargeback(service, pi, openedAt);
+        await recordChargeback(service, pi, disputeId, 'lost', {
+          openedAt,
+          amountCents: 500,
+        });
+        await service.processLostDispute(pi, 500, disputeId);
+        return pi;
+      };
+      const older = await shortLoss(new Date(Date.now() - 10 * 86_400_000));
+      // Ahead of any other file's loss in the shared database.
+      const newer = await shortLoss(new Date(Date.now() + 60_000));
+      const all = await findShortLosses(db, {
+        includePaidAnotherWay: false,
+        limit: 100_000,
+      });
+      expect(all.rows.map((row) => row.stripePaymentIntentId)).toEqual(
+        expect.arrayContaining([older, newer])
+      );
+      vi.mocked(stripe.refunds.create).mockRejectedValue(refusal());
+      const errors = errorsOf(service);
+
+      await service.settleOwedDuplicates({ olderThanMs: 0, limit: 1 });
+
+      const reports = errors.mock.calls.filter(
+        ([message]) => message === SHORT_REPORT
+      );
+      expect(reports).toHaveLength(1);
+      const report = reports[0]?.[1] as {
+        total: number;
+        short: Array<{ stripePaymentIntentId: string }>;
+      };
+      expect(report.short.map((entry) => entry.stripePaymentIntentId)).toEqual([
+        newer,
+      ]);
+      expect(report.total).toBe(all.total);
+      expect(report.total).toBeGreaterThanOrEqual(2);
+    });
+
+    // Review r4 (nit): with no dispute row the loss knew no charge, so an
+    // unlinked refund on it was left out of what the buyer has back. The
+    // webhook passes the loss's own charge.
+    it('a loss with no dispute row counts an unlinked refund on its own charge', async () => {
+      const { service, stripe } = fresh();
+      const chargeId = `ch_norow_${kind}_${uid()}`;
+      const { pi } = await owedBlocked(service, stripe, {
+        stripeChargeId: chargeId,
+      });
+      // Recorded before the purchase existed (Codex-aa08z): no purchase_id.
+      const unlinked = `re_unlinked_${uid()}`;
+      await db.insert(refunds).values({
+        stripeRefundId: unlinked,
+        stripeChargeId: chargeId,
+        purchaseId: null,
+        amountCents: 300,
+        currency: 'gbp',
+        status: 'succeeded',
+        stripeCreatedAt: new Date(),
+      });
+      const disputeId = `dp_norow_${kind}_${uid()}`;
+      const errors = errorsOf(service);
+      try {
+        await service.processLostDispute(pi, 1000, disputeId, { chargeId });
+
+        const row = await rowOf(pi);
+        expect(row).toMatchObject({
+          status: 'refunded',
+          refundAmountCents: 1300,
+        });
+        expect(errors).toHaveBeenCalledWith(
+          SHORT_ALERT,
+          expect.objectContaining({
+            stripeDisputeId: disputeId,
+            owedCents: 200,
+          })
+        );
+      } finally {
+        await db.delete(refunds).where(eq(refunds.stripeRefundId, unlinked));
+      }
     });
 
     it('a short loss that is then won late is not reported', async () => {

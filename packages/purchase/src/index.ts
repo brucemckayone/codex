@@ -85,6 +85,13 @@ export {
   type AgreementRevenueType,
   findActiveCreatorAgreementShare,
 } from './services/agreement-share';
+// The payments that grant and pay nothing (Codex-2hxff.14, Codex-z1t3c)
+export {
+  type BlockedPaymentKind,
+  blockedKind,
+  isDuplicatePayment,
+  isUnavailableBlock,
+} from './services/blocked-payment';
 // One open checkout per buyer and item (Codex-2hxff.14, .15)
 export {
   CheckoutReservations,
@@ -133,11 +140,7 @@ export {
 } from './services/fee-config-service';
 // Service
 export {
-  type BlockedPaymentKind,
   type BuyerPurchase,
-  blockedKind,
-  isDuplicatePayment,
-  isUnavailableBlock,
   type PurchaseMailer,
   PurchaseService,
   type RefundAccessKept,
@@ -162,6 +165,8 @@ export {
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
   type RevenueSplit,
 } from './services/revenue-calculator';
+// A lost chargeback that left a blocked payment short (owner D59, D60)
+export { findShortLosses, type ShortLoss } from './services/short-loss';
 // Customer integrity helpers (Codex-qsvxf — Q4.4 belt-and-braces)
 export {
   findStripeCustomerCollisions,

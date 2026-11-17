@@ -165,6 +165,7 @@ vi.mock('@codex/worker-utils', async (importOriginal) => {
 import app from './index';
 
 const CHARGE = 'ch_3QiC9bLk2vAbCdEf';
+const DISPUTE = 'du_3QiC9bLk2vAbCdEf';
 const REFUND_ID = '523e4567-e89b-12d3-a456-426614174004';
 const REVIEW_ID = '623e4567-e89b-12d3-a456-426614174005';
 const CREDIT_ID = '723e4567-e89b-12d3-a456-426614174006';
@@ -214,6 +215,13 @@ function supportMock() {
     checkOwedToCreator: vi.fn().mockResolvedValue({
       creditId: CREDIT_ID,
       outcome: 'still_unknown',
+    }),
+    markPaidAnotherWay: vi.fn().mockResolvedValue({
+      chargeId: CHARGE,
+      stripeDisputeId: DISPUTE,
+      owedCents: 500,
+      paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+      alreadyMarked: false,
     }),
   };
 }
@@ -298,6 +306,14 @@ const routes: Route[] = [
       expectedRefundCount: 0,
     },
     service: 'issueRefund',
+    writes: true,
+  },
+  {
+    name: 'mark paid another way',
+    method: 'POST',
+    path: `/api/admin/support/charges/${CHARGE}/paid-another-way`,
+    body: { stripeDisputeId: DISPUTE, expectedOwedCents: 500 },
+    service: 'markPaidAnotherWay',
     writes: true,
   },
   {
@@ -591,5 +607,75 @@ describe('the routes', () => {
       { amountCents: 500, reason: 'duplicate', expectedRefundCount: 0 }
     );
     expect(res.status).toBe(412);
+  });
+});
+
+// Owner D60, D61: support paid the rest of a short lost chargeback outside
+// Stripe and marks it on the charge page.
+describe('paid another way', () => {
+  const path = `/api/admin/support/charges/${CHARGE}/paid-another-way`;
+
+  it('passes the charge, the validated body and who marked it, and answers 200 with the mark', async () => {
+    const body = { stripeDisputeId: DISPUTE, expectedOwedCents: 500 };
+    const res = await call('POST', path, body);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      data: {
+        chargeId: CHARGE,
+        stripeDisputeId: DISPUTE,
+        owedCents: 500,
+        paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+        alreadyMarked: false,
+      },
+    });
+    expect(support.markPaidAnotherWay).toHaveBeenCalledWith(
+      CHARGE,
+      body,
+      PLATFORM_OWNER.id
+    );
+  });
+
+  it.each([
+    ['no dispute', { expectedOwedCents: 500 }],
+    [
+      'a charge for the dispute',
+      { stripeDisputeId: CHARGE, expectedOwedCents: 500 },
+    ],
+    ['nothing owed', { stripeDisputeId: DISPUTE, expectedOwedCents: 0 }],
+    ['part of a penny', { stripeDisputeId: DISPUTE, expectedOwedCents: 1.5 }],
+    [
+      'a note',
+      { stripeDisputeId: DISPUTE, expectedOwedCents: 500, note: 'Paid' },
+    ],
+  ])('refuses %s with 400, before the service', async (_what, body) => {
+    expect((await call('POST', path, body)).status).toBe(400);
+    expect(support.markPaidAnotherWay).not.toHaveBeenCalled();
+  });
+
+  it('refuses a charge id that is not one with 400', async () => {
+    const res = await call(
+      'POST',
+      '/api/admin/support/charges/pi_123456789/paid-another-way',
+      { stripeDisputeId: DISPUTE, expectedOwedCents: 500 }
+    );
+    expect(res.status).toBe(400);
+    expect(support.markPaidAnotherWay).not.toHaveBeenCalled();
+  });
+
+  // The classes' own envelope (details: the support code and its reason) is
+  // @codex/admin's support-errors.test.ts: this shim stands in for the mapper.
+  it.each([
+    ['NOT_OWED_AFTER_LOSS', 422, 'BUSINESS_LOGIC_ERROR'],
+    ['SHORT_LOSS_CHANGED', 412, 'PRECONDITION_FAILED'],
+  ])('answers the service’s %s refusal with %i', async (_what, statusCode, code) => {
+    support.markPaidAnotherWay.mockRejectedValueOnce(
+      Object.assign(new Error('refused'), { statusCode, code })
+    );
+    const res = await call('POST', path, {
+      stripeDisputeId: DISPUTE,
+      expectedOwedCents: 500,
+    });
+    expect(res.status).toBe(statusCode);
+    expect(await res.json()).toMatchObject({ error: { code } });
   });
 });

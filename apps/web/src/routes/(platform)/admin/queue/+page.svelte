@@ -479,7 +479,9 @@
 
 {#if notice}
   <Alert variant={notice.variant} tabindex={-1} data-settle-notice data-testid="settle-notice">
-    <p>{#if notice.lead}<strong>{notice.lead}</strong> {/if}{notice.text}</p>
+    <!-- The space sits outside the block: Svelte trims one at a block's end,
+         which ran the lead into the text. -->
+    <p>{#if notice.lead}<strong>{notice.lead}</strong>{/if} {notice.text}</p>
   </Alert>
 {/if}
 

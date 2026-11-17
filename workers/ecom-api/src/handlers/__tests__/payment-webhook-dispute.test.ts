@@ -473,7 +473,8 @@ describe('handlePaymentWebhook — disputes', () => {
     expect(purchase.processLostDispute).toHaveBeenCalledWith(
       'pi_test_dispute',
       1999,
-      'dp_test_dispute'
+      'dp_test_dispute',
+      { chargeId: 'ch_test' }
     );
     expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
     expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledWith(
@@ -1870,7 +1871,8 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(purchase.processLostDispute).toHaveBeenCalledWith(
         'pi_test_dispute',
         1999,
-        'dp_test_dispute'
+        'dp_test_dispute',
+        { chargeId: 'ch_test' }
       );
       expect(
         purchase.markDisputeOutcomeApplied
@@ -1893,7 +1895,8 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(purchase.processLostDispute).toHaveBeenCalledWith(
         'pi_test_dispute',
         1999,
-        'dp_test_dispute'
+        'dp_test_dispute',
+        { chargeId: 'ch_test' }
       );
       expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
         'dp_test_dispute',

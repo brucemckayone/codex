@@ -501,7 +501,8 @@ describe('runDisputeReconcile', () => {
     expect(purchase.processLostDispute).toHaveBeenCalledWith(
       'pi_dp_lost',
       1999,
-      'dp_lost'
+      'dp_lost',
+      { chargeId: 'ch_dp_lost' }
     );
     expect(subscription.reverseSubscriptionPayoutsForCharge).toHaveBeenCalled();
     expect(purchase.clawBackPurchaseCharge).toHaveBeenCalled();
@@ -538,7 +539,8 @@ describe('runDisputeReconcile', () => {
     expect(purchase.processLostDispute).toHaveBeenCalledWith(
       'pi_dp_appeal',
       1999,
-      'dp_appeal'
+      'dp_appeal',
+      { chargeId: 'ch_dp_appeal' }
     );
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
       'dp_appeal',
@@ -566,7 +568,8 @@ describe('runDisputeReconcile', () => {
     expect(purchase.processLostDispute).toHaveBeenCalledWith(
       'pi_dp_inq_appeal',
       1999,
-      'dp_inq_appeal'
+      'dp_inq_appeal',
+      { chargeId: 'ch_dp_inq_appeal' }
     );
     expect(rows.get('dp_inq_appeal')).toMatchObject({
       status: 'lost',

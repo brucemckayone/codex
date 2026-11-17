@@ -25,6 +25,7 @@ import {
   NOW,
   refundRow,
   SLICES,
+  shortLossDetail,
   slice,
 } from '../__fixtures__/support-fixtures';
 import ChargebacksCard from '../ChargebacksCard.svelte';
@@ -79,6 +80,27 @@ describe('The charge', () => {
     });
     expect(text()).toContain('£24.00 · refunded outside Stripe on 8 Nov 2026');
     expect(text()).not.toContain(m.support_amount_none({ amount: '£24.00' }));
+  });
+
+  // Owner D59-D61 (pause-trials/support-short-loss.html S1, S3): where the
+  // money of a short lost chargeback went, before the mark and after.
+  test('a short lost chargeback: what came back through it, and what is still owed', () => {
+    render(ChargeSummaryCard, { detail: shortLossDetail(), now: NOW });
+    expect(text()).toContain(
+      '£15.00 · £10.00 back through the lost chargeback · £5.00 still owed to the buyer'
+    );
+    expect(text()).not.toContain(m.support_amount_none({ amount: '£15.00' }));
+  });
+
+  test('once marked: the same split, the rest paid another way and when, never only "refunded outside Stripe"', () => {
+    render(ChargeSummaryCard, {
+      detail: shortLossDetail({ paidAnotherWayOn: '2026-11-17T10:00:00.000Z' }),
+      now: NOW,
+    });
+    expect(text()).toContain(
+      '£15.00 · £10.00 back through the lost chargeback · £5.00 paid another way on 17 Nov 2026'
+    );
+    expect(text()).not.toContain('£15.00 · refunded outside Stripe');
   });
 
   test('a window a late win lifted (Q7): no time limit, and never its passed date', () => {

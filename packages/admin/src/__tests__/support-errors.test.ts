@@ -12,7 +12,9 @@ import { describe, expect, it } from 'vitest';
 import {
   ChargebackSettlingError,
   LateWinRefundNotRepayableError,
+  NotOwedAfterLossError,
   RefundedOutsideStripeError,
+  ShortLossChangedError,
 } from '../errors';
 
 describe('ChargebackSettlingError', () => {
@@ -81,6 +83,43 @@ describe('LateWinRefundNotRepayableError', () => {
             code: 'LATE_WIN_REFUND_NOT_REPAYABLE',
             disputeId: 'du_123',
           },
+        },
+      },
+    });
+  });
+});
+
+// "Paid another way" on a short lost chargeback (owner D61): the page words
+// each refusal from its code and reason (en.json), never the message.
+describe('NotOwedAfterLossError', () => {
+  it.each([
+    'not_blocked',
+    'no_lost_dispute',
+    'not_short',
+  ] as const)('%s is a 422 whose details carry NOT_OWED_AFTER_LOSS and the reason', (reason) => {
+    const mapped = mapErrorToResponse(new NotOwedAfterLossError(reason), {
+      logError: false,
+    });
+    expect(mapped.statusCode).toBe(422);
+    expect(mapped.response.error).toMatchObject({
+      code: 'BUSINESS_LOGIC_ERROR',
+      details: { code: 'NOT_OWED_AFTER_LOSS', reason },
+    });
+  });
+});
+
+describe('ShortLossChangedError', () => {
+  it('is a 412 whose details carry SHORT_LOSS_CHANGED and what is owed now', () => {
+    expect(
+      mapErrorToResponse(new ShortLossChangedError(300), { logError: false })
+    ).toEqual({
+      statusCode: 412,
+      response: {
+        error: {
+          code: 'PRECONDITION_FAILED',
+          message:
+            "What's owed on this payment changed since it was loaded. Reload it and check.",
+          details: { code: 'SHORT_LOSS_CHANGED', owedCents: 300 },
         },
       },
     });

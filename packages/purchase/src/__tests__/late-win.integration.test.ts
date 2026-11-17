@@ -972,6 +972,137 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
       });
     });
 
+    // Owner D62: support may have paid the rest of a SHORT lost chargeback
+    // another way and marked the charge (`refunded_outside_stripe_at`, D61).
+    // A late win then would refund what is left of the charge on top, so it
+    // makes no refund and alerts support at error to settle it by hand. The
+    // unmarked twin is refunded as before.
+    describe.each([
+      { marked: true },
+      { marked: false },
+    ])('a late win on a blocked sale whose chargeback was lost short (marked paid another way: $marked)', ({
+      marked,
+    }) => {
+      const ALERT =
+        'Late win on a charge marked paid another way: no refund was made, so settle the buyer by hand';
+
+      async function shortLostBlockedSale() {
+        const buyerId = await newBuyer();
+        const contentId = await newContent();
+        await db
+          .update(content)
+          .set({ deletedAt: new Date() })
+          .where(eq(content.id, contentId));
+        const payment = newPayment();
+        vi.mocked(stripe.refunds.create).mockRejectedValueOnce(
+          Object.assign(new Error('The charge is disputed.'), {
+            type: 'StripeInvalidRequestError',
+            code: 'charge_disputed',
+            statusCode: 400,
+          })
+        );
+        await expect(
+          makeService().completePurchase(payment.paymentIntentId, {
+            contentId,
+            customerId: buyerId,
+            organizationId: orgId,
+            amountPaidCents: 1000,
+            currency: 'gbp',
+          })
+        ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+        const [row] = await db
+          .select({ id: purchases.id })
+          .from(purchases)
+          .where(eq(purchases.stripePaymentIntentId, payment.paymentIntentId));
+        const sale: Sale = {
+          buyerId,
+          purchaseId: row?.id ?? '',
+          ...payment,
+          contentId,
+          courseId: null,
+        };
+        // Lost for £6.00 of £10.00: £4.00 is still owed (owner D59).
+        const disputeId = await loseIt(sale, { amountCents: 600 });
+        const paidAnotherWayAt = new Date('2026-11-17T10:00:00.000Z');
+        if (marked) {
+          await db
+            .update(disputes)
+            .set({ refundedOutsideStripeAt: paidAnotherWayAt })
+            .where(eq(disputes.stripeDisputeId, disputeId));
+        }
+        await record(sale, disputeId, 'won', 600);
+        const service = makeService();
+        expect((await service.restoreAfterLateWin(disputeId))?.outcome).toBe(
+          'unavailable'
+        );
+        await service.repayWonDispute(disputeId);
+        vi.mocked(stripe.refunds.create).mockClear();
+        return { sale, disputeId, service, paidAnotherWayAt };
+      }
+
+      it(
+        marked
+          ? 'makes no refund, and alerts support at error with the charge, its amount and what Stripe shows refunded'
+          : 'refunds what is left of the charge, and alerts nothing',
+        async () => {
+          const { sale, disputeId, service, paidAnotherWayAt } =
+            await shortLostBlockedSale();
+          const refundId = `re_lw_short_${uid()}`;
+          stripeMakesRefund(refundId, 'succeeded');
+          stripeListsRefunds({
+            [sale.charge.id]: marked
+              ? []
+              : [{ id: refundId, status: 'succeeded' }],
+          });
+          const alerts = vi.spyOn(
+            (
+              service as unknown as {
+                obs: { error: (message: string, meta?: object) => void };
+              }
+            ).obs,
+            'error'
+          );
+
+          const step = await service.refundFirstPaymentAfterLateWin(
+            disputeId,
+            sale.charge,
+            'test'
+          );
+
+          const alerted = alerts.mock.calls.filter(
+            ([message]) => message === ALERT
+          );
+          if (marked) {
+            expect(step).toBe('none');
+            expect(stripe.refunds.create).not.toHaveBeenCalled();
+            expect((await readDispute(disputeId)).lateWinRefundId).toBeNull();
+            expect(alerted).toEqual([
+              [
+                ALERT,
+                {
+                  errorId: expect.any(String),
+                  chargeId: sale.charge.id,
+                  disputeId,
+                  purchaseId: sale.purchaseId,
+                  chargeAmountCents: 1000,
+                  stripeRefundedCents: 0,
+                  paidAnotherWayAt: paidAnotherWayAt.toISOString(),
+                },
+              ],
+            ]);
+          } else {
+            expect(step).toBe('done');
+            expect(stripe.refunds.create).toHaveBeenCalledOnce();
+            expect(stripe.refunds.create).toHaveBeenCalledWith(
+              expect.objectContaining({ charge: sale.charge.id }),
+              { idempotencyKey: `late_win_refund_${disputeId}` }
+            );
+            expect(alerted).toEqual([]);
+          }
+        }
+      );
+    });
+
     it('refunds what is left of the first charge under its own key, reason and metadata; writes its id; records it; restates the purchase; done', async () => {
       const { first, second, disputeId, service } = await reboughtLateWin();
       const refundId = `re_lw_first_${uid()}`;

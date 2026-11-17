@@ -258,3 +258,49 @@ export class BlockedPaymentRefundNotRepayableError extends BusinessLogicError {
     );
   }
 }
+
+/**
+ * The charge's short lost chargeback is not what the page showed (412): the
+ * dispute named is not the charge's lost one, or what is owed changed (a
+ * refund stood since, or the dispute's amount moved). Nothing is marked; the
+ * page reloads and support checks it again (owner D61). The context is what
+ * is owed now, or null when nothing is.
+ */
+export class ShortLossChangedError extends PreconditionFailedError {
+  constructor(owedCents: number | null) {
+    super(
+      "What's owed on this payment changed since it was loaded. Reload it and check.",
+      { code: 'SHORT_LOSS_CHANGED', owedCents }
+    );
+  }
+}
+
+/** Why a charge can't be marked paid another way (`NotOwedAfterLossError`). */
+export type NotOwedAfterLossReason =
+  | 'not_blocked'
+  | 'no_lost_dispute'
+  | 'not_short';
+
+/**
+ * "Paid another way" asked of a charge with nothing owed after a lost
+ * chargeback (422; owner D60, D61): its payment isn't a blocked one (a sale
+ * keeps the bank's decision), it has no lost chargeback (open, won, won late
+ * since), or the loss left nothing owed. Nothing is marked. The context's
+ * `reason` says which, for support's notice.
+ */
+export class NotOwedAfterLossError extends BusinessLogicError {
+  constructor(reason: NotOwedAfterLossReason) {
+    super(NOT_OWED_AFTER_LOSS[reason], {
+      code: 'NOT_OWED_AFTER_LOSS',
+      reason,
+    });
+  }
+}
+
+const NOT_OWED_AFTER_LOSS: Record<NotOwedAfterLossReason, string> = {
+  not_blocked:
+    'Only a blocked payment is owed the rest of a lost chargeback, so nothing was marked.',
+  no_lost_dispute:
+    'This payment has no lost chargeback, so nothing was marked.',
+  not_short: 'Nothing is owed on this payment any more, so nothing was marked.',
+};

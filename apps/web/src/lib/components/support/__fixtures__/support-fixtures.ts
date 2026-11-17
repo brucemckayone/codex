@@ -8,6 +8,7 @@
 import type {
   ChargebackRow,
   ChargeDetail,
+  ChargeShortLoss,
   ChargeSummary,
   CreatorDebtItem,
   CreatorDebtPerson,
@@ -144,6 +145,7 @@ export function chargeDetail(
     split: { takenTotalCents: 400, platformFeeShareBps: 1000 },
     refunds: [refundRow()],
     chargebacks: [],
+    shortLoss: null,
     ...overrides,
   };
 }
@@ -282,6 +284,75 @@ export const LIFTED_WINDOW = {
   isOpen: true,
   liftedByLateWin: true,
 };
+
+/** The short-loss mockup's lost dispute (pause-trials/support-short-loss.html). */
+export const SHORT_LOSS_DISPUTE_ID = 'du_1QjK7pXk9vRb88aQ';
+
+/**
+ * The short-loss mockup (owner D59-D61; pause-trials/support-short-loss.html):
+ * Ellie Marsh's £15.00 blocked sale of a deleted item, paid 1 Oct, its £10.00
+ * chargeback lost, £5.00 still owed. Before the mark the lost chargeback
+ * blocks a refund; after it (`paidAnotherWayOn`), the refunded-outside-Stripe
+ * mark does.
+ */
+export function shortLossDetail(
+  overrides: Partial<ChargeShortLoss> = {}
+): ChargeDetail {
+  const shortLoss: ChargeShortLoss = {
+    stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+    kind: 'unavailable',
+    lostCents: 1000,
+    owedCents: 500,
+    paidAnotherWayOn: null,
+    ...overrides,
+  };
+  const base = chargeDetail();
+  return chargeDetail({
+    charge: {
+      ...base.charge,
+      amountCents: 1500,
+      refundedCents: 0,
+      paidAt: '2026-10-01T13:32:00.000Z',
+    },
+    source: {
+      type: 'purchase',
+      purchaseId: 'purchase-1',
+      status: 'refunded',
+      item: {
+        kind: 'content',
+        id: 'content-1',
+        title: 'Sleep Reset Programme',
+        deleted: true,
+      },
+    },
+    window: {
+      closesAt: '2026-10-15T13:32:00.000Z',
+      isOpen: false,
+      liftedByLateWin: false,
+    },
+    refundable: {
+      maxCents: 1500,
+      blocked: shortLoss.paidAnotherWayOn
+        ? 'refunded_outside_stripe'
+        : 'chargeback',
+      refundedOutsideStripeOn: shortLoss.paidAnotherWayOn,
+    },
+    refundCount: 0,
+    refunds: [],
+    chargebacks: [
+      chargebackRow({
+        id: SHORT_LOSS_DISPUTE_ID,
+        amountCents: 1000,
+        status: 'lost',
+        reason: 'fraudulent',
+        createdAt: '2026-10-06T09:00:00.000Z',
+        respondBy: null,
+        lostOn: '2026-10-20T09:00:00.000Z',
+      }),
+    ],
+    shortLoss,
+  });
+}
 
 /** A chargeback on the charge, as `ChargebacksCard` lists it: open, by default. */
 export function chargebackRow(

@@ -37,6 +37,23 @@
 
   const amountLine = $derived.by(() => {
     const amount = formatPrice(charge.amountCents);
+    // A blocked payment a lost chargeback returned only part of (owner D59-D61):
+    // where the money went, before support marks the rest paid another way and
+    // after, when the charge is also refunded outside Stripe.
+    const shortLoss = detail.shortLoss;
+    if (shortLoss) {
+      const words = {
+        amount,
+        lost: formatPrice(shortLoss.lostCents),
+        owed: formatPrice(shortLoss.owedCents),
+      };
+      return shortLoss.paidAnotherWayOn
+        ? m.support_amount_short_loss_paid({
+            ...words,
+            date: formatDay(shortLoss.paidAnotherWayOn),
+          })
+        : m.support_amount_short_loss_owed(words);
+    }
     // Stripe lists no refund for a charge settled by hand (owner decision
     // 2026-11-08), so "nothing refunded" would mislead.
     const outsideStripe = detail.refundable.refundedOutsideStripeOn;

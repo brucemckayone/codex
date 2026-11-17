@@ -227,6 +227,35 @@ export type SupportToldAnotherWayInput = z.infer<
   typeof supportToldAnotherWaySchema
 >;
 
+// ─── A short lost chargeback, paid another way (owner D60, D61) ────────────
+
+/**
+ * A Stripe dispute (a chargeback or an inquiry): `du_…`, or `dp_…` for one
+ * Stripe opened under its older prefix, which it still answers to.
+ */
+export const stripeDisputeIdSchema = z
+  .string()
+  .regex(/^d[up]_[A-Za-z0-9]{8,64}$/, { message: 'Invalid dispute ID' });
+
+/**
+ * POST /api/admin/support/charges/:chargeId/paid-another-way. What the page
+ * showed: the lost dispute, and the amount still owed. The route refuses with
+ * SHORT_LOSS_CHANGED if either moved. Nothing else is accepted.
+ */
+export const supportPaidAnotherWaySchema = z
+  .object({
+    stripeDisputeId: stripeDisputeIdSchema,
+    expectedOwedCents: z
+      .number()
+      .int({ message: 'Must be a whole number of pence' })
+      .min(1, { message: 'Must be at least 1p' }),
+  })
+  .strict();
+
+export type SupportPaidAnotherWayInput = z.infer<
+  typeof supportPaidAnotherWaySchema
+>;
+
 // ─── Price moves (Codex-2hxff.85, .86; batch C1 Part B data design §2.5) ────
 
 /** `:moveId` on Retry and Close: a `subscription_price_moves` row. */

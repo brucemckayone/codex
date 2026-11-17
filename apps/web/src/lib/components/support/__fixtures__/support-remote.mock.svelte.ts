@@ -25,6 +25,7 @@ import type {
   FeeNoticeItem,
   HeldPriceMove,
   OwedToCreatorItem,
+  PaidAnotherWayResult,
   PriceChangeRestarted,
   PriceMoveRetried,
   RefundPreview,
@@ -193,6 +194,12 @@ export const markToldAnotherWay: Mock<
     body: { note: string };
   }) => Promise<Answer<ToldAnotherWayResult>>
 > = vi.fn();
+export const markPaidAnotherWay: Mock<
+  (input: {
+    chargeId: string;
+    body: { stripeDisputeId: string; expectedOwedCents: number };
+  }) => Promise<Answer<PaidAnotherWayResult>>
+> = vi.fn();
 export const retryPriceMove: Mock<
   (input: { moveId: string }) => Promise<Answer<PriceMoveRetried>>
 > = vi.fn();
@@ -301,6 +308,7 @@ export function reset() {
   resolveOwedToCreator.mockReset();
   checkOwedToCreator.mockReset();
   markToldAnotherWay.mockReset();
+  markPaidAnotherWay.mockReset();
   retryPriceMove.mockReset();
   closePriceMove.mockReset();
   restartPriceChange.mockReset();

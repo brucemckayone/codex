@@ -41,6 +41,8 @@ import {
   LIFTED_WINDOW,
   lateWonChargeback,
   preview,
+  SHORT_LOSS_DISPUTE_ID,
+  shortLossDetail,
 } from '../__fixtures__/support-fixtures';
 import {
   failure,
@@ -48,19 +50,23 @@ import {
   httpError,
   issueSupportRefund,
   kitPreview,
+  markPaidAnotherWay,
   previewSlot,
   reset,
 } from '../__fixtures__/support-remote.mock.svelte';
 import RefundForm from '../RefundForm.svelte';
 import type { RefundOutcome } from '../refund-outcome';
+import type { SettleNotice } from '../settle-notice';
 
 let component: ReturnType<typeof mount> | null = null;
 let outcomes: RefundOutcome[] = [];
+let settled: SettleNotice[] = [];
 const onStale = vi.fn();
 
 beforeEach(() => {
   reset();
   outcomes = [];
+  settled = [];
   onStale.mockReset();
   vi.useFakeTimers();
 });
@@ -85,6 +91,7 @@ function mountForm(
       stale: props.stale ?? false,
       onOutcome: (outcome: RefundOutcome) => outcomes.push(outcome),
       onStale,
+      onSettled: (notice: SettleNotice) => settled.push(notice),
     },
   });
   flushSync();
@@ -455,6 +462,7 @@ describe('a preview the route refuses (R2-L1)', () => {
       stale: false,
       onOutcome: (outcome: RefundOutcome) => outcomes.push(outcome),
       onStale,
+      onSettled: (notice: SettleNotice) => settled.push(notice),
     });
     component = mount(RefundForm, { target: document.body, props });
     flushSync();
@@ -537,6 +545,7 @@ describe('after the reload a refused preview asked for (R3-L3)', () => {
       stale: false,
       onOutcome: (outcome: RefundOutcome) => outcomes.push(outcome),
       onStale,
+      onSettled: (notice: SettleNotice) => settled.push(notice),
     });
     component = mount(RefundForm, { target: document.body, props });
     flushSync();
@@ -1113,5 +1122,284 @@ describe('Try again on a failed preview, as kit runs it (R2-L2)', () => {
       document.querySelector('[data-testid="session-ended"]')
     ).not.toBeNull();
     expect(document.activeElement).toBe(amountInput());
+  });
+});
+
+// A blocked payment whose chargeback was lost for less than the payment (owner
+// D59-D61; pause-trials/support-short-loss.html S1-S5): what is still owed,
+// in place of the block, and "Mark as paid another way".
+describe('a short lost chargeback', () => {
+  const text = (el: Element | null | undefined) =>
+    el?.textContent?.replace(/\s+/g, ' ').trim();
+  const markButton = () =>
+    document.querySelector<HTMLButtonElement>(
+      '[data-testid="paid-another-way"]'
+    );
+  const submit = () =>
+    document.querySelector<HTMLButtonElement>(
+      '[data-testid="paid-another-way-submit"]'
+    );
+  const MARKED = {
+    chargeId: CHARGE_ID,
+    stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+    owedCents: 500,
+    paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+    alreadyMarked: false,
+  };
+
+  async function openMark(detail = shortLossDetail()) {
+    mountForm({ detail });
+    markButton()?.click();
+    await wait(0);
+    const button = submit();
+    if (!button) throw new Error('the mark dialog did not open');
+    return button;
+  }
+
+  test('before the mark: what is still owed and why, in place of the lost chargeback’s block, and no form', () => {
+    mountForm({ detail: shortLossDetail() });
+    const alert = document.querySelector('[data-testid="short-loss"]');
+    expect(text(alert)).toBe(
+      "£5.00 is still owed to the buyer. This payment was blocked because the item was no longer available, so the buyer is owed all £15.00 back. The bank returned £10.00 through the lost chargeback, and Stripe won't refund a charged-back payment, so pay the other £5.00 another way, such as a bank transfer, then mark it here. Until it's marked, support is alerted about it every hour. Mark as paid another way"
+    );
+    expect(alert?.getAttribute('data-variant')).toBe('warning');
+    expect(document.querySelector('[data-testid="refund-blocked"]')).toBeNull();
+    expect(review()).toBeNull();
+  });
+
+  test('a duplicate says why it is owed in its own words', () => {
+    mountForm({ detail: shortLossDetail({ kind: 'duplicate' }) });
+    expect(
+      text(document.querySelector('[data-testid="short-loss"]'))
+    ).toContain(
+      "This was a second payment for an item the buyer already had, so they're owed all £15.00 back."
+    );
+  });
+
+  test('the confirm repeats the three amounts and says it must already be paid', async () => {
+    await openMark();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(text(dialog?.querySelector('h2'))).toBe(
+      'Mark £5.00 as paid to Ellie Marsh?'
+    );
+    expect(text(dialog)).toContain(
+      'Sleep Reset Programme · paid 1 Oct 2026 · chargeback lost'
+    );
+    expect(
+      [
+        ...document.querySelectorAll(
+          '[data-testid="paid-another-way-facts"] li'
+        ),
+      ].map(text)
+    ).toEqual([
+      'The buyer paid £15.00',
+      'Back through the lost chargeback £10.00',
+      'Still owed, to pay another way £5.00',
+    ]);
+    expect(text(dialog)).toContain(
+      "Only mark it once Ellie Marsh has the money. This doesn't send anything: it records that you paid the rest outside Stripe."
+    );
+    expect(text(dialog)).toContain(
+      "The hourly alert stops for this payment, and the charge can't be refunded through Stripe again. A mark can't be undone here."
+    );
+    expect(text(submit())).toBe('Mark £5.00 as paid');
+  });
+
+  test('Cancel closes it and sends nothing', async () => {
+    await openMark();
+    const cancel = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+    ].find((button) => text(button) === m.support_confirm_cancel());
+    cancel?.click();
+    await wait(0);
+    expect(submit()).toBeNull();
+    expect(markPaidAnotherWay).not.toHaveBeenCalled();
+    expect(settled).toEqual([]);
+  });
+
+  test('a double click sends one mark, of the dispute and the amount shown; the answer goes to the page and the dialog closes', async () => {
+    let answer: (value: { outcome: 'done'; result: typeof MARKED }) => void =
+      () => {};
+    markPaidAnotherWay.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        })
+    );
+    const button = await openMark();
+    button.click();
+    button.click();
+    flushSync();
+    button.click();
+    expect(markPaidAnotherWay).toHaveBeenCalledTimes(1);
+    expect(markPaidAnotherWay).toHaveBeenCalledWith({
+      chargeId: CHARGE_ID,
+      body: { stripeDisputeId: SHORT_LOSS_DISPUTE_ID, expectedOwedCents: 500 },
+    });
+    answer({ outcome: 'done', result: MARKED });
+    await wait(0);
+    expect(settled).toEqual([
+      {
+        variant: 'success',
+        lead: 'Marked as paid another way.',
+        text: '£5.00 to Ellie Marsh, on 17 Nov 2026. The hourly alert stops for this payment.',
+      },
+    ]);
+    expect(submit()).toBeNull();
+  });
+
+  test('a repeat is a success that says nothing changed', async () => {
+    markPaidAnotherWay.mockResolvedValue({
+      outcome: 'done',
+      result: { ...MARKED, alreadyMarked: true },
+    });
+    (await openMark()).click();
+    await wait(0);
+    expect(settled).toEqual([
+      {
+        variant: 'info',
+        lead: 'Already marked as paid another way',
+        text: 'on 17 Nov 2026, so nothing changed.',
+      },
+    ]);
+  });
+
+  test.each([
+    [
+      failure({
+        status: 412,
+        code: 'PRECONDITION_FAILED',
+        detailsCode: 'SHORT_LOSS_CHANGED',
+      }),
+      {
+        variant: 'warning',
+        lead: "What's owed on this payment changed since it was loaded, so nothing was marked.",
+        text: 'It has been reloaded: check it again.',
+      },
+    ],
+    [
+      failure({ detailsCode: 'NOT_OWED_AFTER_LOSS', reason: 'not_short' }),
+      {
+        variant: 'warning',
+        text: 'Nothing is owed on this payment any more, so nothing was marked: the buyer has all of it back.',
+      },
+    ],
+    [
+      failure({
+        detailsCode: 'NOT_OWED_AFTER_LOSS',
+        reason: 'no_lost_dispute',
+      }),
+      {
+        variant: 'warning',
+        text: 'This payment no longer has a lost chargeback, so nothing was marked. The bank may have decided it again: check the chargeback.',
+      },
+    ],
+    [
+      failure({ detailsCode: 'NOT_OWED_AFTER_LOSS', reason: 'not_blocked' }),
+      {
+        variant: 'warning',
+        text: 'Only a blocked payment is owed the rest of a lost chargeback, so nothing was marked.',
+      },
+    ],
+  ])('a refusal closes it with the page’s notice: %#', async (refusal, notice) => {
+    markPaidAnotherWay.mockResolvedValue(refusal);
+    (await openMark()).click();
+    await wait(0);
+    expect(settled).toEqual([notice]);
+    expect(submit()).toBeNull();
+  });
+
+  test('not saved: the dialog stays open, says nothing changed and takes focus; Try again sends the same mark', async () => {
+    markPaidAnotherWay.mockResolvedValueOnce(
+      failure({ status: 500, code: 'INTERNAL_ERROR' })
+    );
+    (await openMark()).click();
+    await wait(0);
+    const problem = document.querySelector(
+      '[data-testid="paid-another-way-problem"]'
+    );
+    expect(problem?.getAttribute('data-problem')).toBe('failed');
+    expect(text(problem)).toBe(
+      "We couldn't save that, so nothing has changed. Try again in a moment."
+    );
+    expect(document.activeElement).toBe(problem);
+    expect(settled).toEqual([]);
+    expect(text(submit())).toBe(m.support_queue_fees_try_again());
+
+    markPaidAnotherWay.mockResolvedValueOnce({
+      outcome: 'done',
+      result: MARKED,
+    });
+    submit()?.click();
+    await wait(0);
+    expect(markPaidAnotherWay).toHaveBeenCalledTimes(2);
+    expect(markPaidAnotherWay.mock.calls[1]).toEqual(
+      markPaidAnotherWay.mock.calls[0]
+    );
+    expect(settled.map((notice) => notice.variant)).toEqual(['success']);
+  });
+
+  test.each([
+    [
+      'answered 401',
+      () =>
+        markPaidAnotherWay.mockResolvedValue(
+          failure({ status: 401, code: 'UNAUTHORIZED' })
+        ),
+    ],
+    [
+      'the remote guard’s 404',
+      () =>
+        markPaidAnotherWay.mockRejectedValue({
+          status: 404,
+          body: { message: 'Not Found' },
+        }),
+    ],
+  ])('a session that ended (%s) keeps the dialog open and says so', async (_how, answer) => {
+    answer();
+    (await openMark()).click();
+    await wait(0);
+    const problem = document.querySelector(
+      '[data-testid="paid-another-way-problem"]'
+    );
+    expect(problem?.getAttribute('data-problem')).toBe('session_ended');
+    expect(text(problem)).toBe(
+      'Your session has ended. Nothing was marked. Sign in again, then reload this page.'
+    );
+    expect(settled).toEqual([]);
+  });
+
+  test('after the mark: the refunded-outside-Stripe block, with how the buyer was paid, and no action', () => {
+    mountForm({
+      detail: shortLossDetail({ paidAnotherWayOn: '2026-11-17T10:00:00.000Z' }),
+    });
+    const alert = document.querySelector('[data-testid="refund-blocked"]');
+    expect(alert?.getAttribute('data-reason')).toBe('refunded_outside_stripe');
+    expect(text(alert)).toBe(
+      "Refunded outside Stripe on 17 Nov 2026. Don't refund this charge here."
+    );
+    expect(
+      text(document.querySelector('[data-testid="short-loss-paid"]'))
+    ).toBe(
+      'The bank returned £10.00 through the lost chargeback; the other £5.00 was paid another way.'
+    );
+    expect(document.querySelector('[data-testid="short-loss"]')).toBeNull();
+    expect(markButton()).toBeNull();
+  });
+
+  test('a charge with no short loss shows neither', () => {
+    mountForm({
+      detail: chargeDetail({
+        refundable: {
+          maxCents: 2400,
+          blocked: 'refunded_outside_stripe',
+          refundedOutsideStripeOn: '2026-11-08T14:00:00.000Z',
+        },
+      }),
+    });
+    expect(document.querySelector('[data-testid="short-loss"]')).toBeNull();
+    expect(
+      document.querySelector('[data-testid="short-loss-paid"]')
+    ).toBeNull();
   });
 });

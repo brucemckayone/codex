@@ -58,6 +58,7 @@ import {
   supportCreditIdParamsSchema,
   supportFeeNoticeIdParamsSchema,
   supportIssueRefundSchema,
+  supportPaidAnotherWaySchema,
   supportPriceChangeIdParamsSchema,
   supportPriceMoveIdParamsSchema,
   supportQueueQuerySchema,
@@ -976,6 +977,32 @@ app.post(
     },
     handler: async (ctx) => {
       return await ctx.services.support.issueRefund(
+        ctx.input.params.chargeId,
+        ctx.input.body,
+        ctx.user.id
+      );
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/charges/:chargeId/paid-another-way
+ * Support paid the buyer the rest of a blocked payment's short lost
+ * chargeback outside Stripe (owner D60, D61): marks the charge refunded
+ * outside Stripe, which ends the hourly alert for it. Pays nothing. 200 on a
+ * repeat too (`alreadyMarked`); 412 SHORT_LOSS_CHANGED; 422
+ * NOT_OWED_AFTER_LOSS with its reason.
+ */
+app.post(
+  '/api/admin/support/charges/:chargeId/paid-another-way',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: {
+      params: supportChargeParamsSchema,
+      body: supportPaidAnotherWaySchema,
+    },
+    handler: async (ctx) => {
+      return await ctx.services.support.markPaidAnotherWay(
         ctx.input.params.chargeId,
         ctx.input.body,
         ctx.user.id

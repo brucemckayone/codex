@@ -627,6 +627,32 @@ describe('Owed to creators (?tab=owed)', () => {
     expect(countsSlot().refresh).not.toHaveBeenCalled();
   });
 
+  // Svelte trims a space at a block's end, so a space inside the lead's
+  // `{#if}` ran the bold lead into the text ("…answer.Try…").
+  test('a notice with a lead reads the lead, a space, then the text', async () => {
+    checkOwedToCreator.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        creditId: checkRow().creditId,
+        outcome: 'still_unknown',
+        state: 'needs_check',
+        amountCents: null,
+        stripeReversalId: null,
+        note: null,
+        checkedAt: NOW.toISOString(),
+        action: 'check',
+      },
+    });
+    mountAt('/admin/queue?tab=owed');
+    owedSlot().current = list([checkRow()]);
+    flushSync();
+    owedButton(m.support_owed_action_check())?.click();
+    await answered();
+    expect(notice()?.textContent?.trim()).toBe(
+      `${m.support_credit_check_unknown_lead()} ${m.support_credit_check_unknown_body()}`
+    );
+  });
+
   test('a check the ledger cannot attribute: the row now asks a person, so the list reloads', async () => {
     checkOwedToCreator.mockResolvedValue({
       outcome: 'done',

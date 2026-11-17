@@ -1008,7 +1008,8 @@ export async function processDispute(
       const ended = await purchase.processLostDispute(
         paymentIntentId,
         recorded.amountCents,
-        dispute.id
+        dispute.id,
+        { chargeId: charge.id }
       );
       effects.invalidateLibrary(ended?.userId);
       // Written when it opened, unless it opened already lost: again here.

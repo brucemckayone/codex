@@ -400,18 +400,32 @@ in the existing refund email, and no checkout expiry).
 - **A chargeback lost for less than the payment** (owner D59) records the
   row refunded by what the buyer has back: the refunds standing on the
   charge (a pending blocked row records no part refund of its own) and the
-  chargeback, capped at what was paid. Nothing refunds the rest: an error
-  alert names the purchase, the dispute, the kind and the amount still owed
-  in pence (`owedCents`, GBP): "A lost chargeback refunded only part of a
-  blocked payment: refund the rest by hand". Because that alert is logged
-  once, the hourly sweep also reports every such payment from the stored
-  rows, once per run, after its refunds: "Blocked payments a lost chargeback
-  refunded only in part: refund the rest by hand", each with its
-  PaymentIntent, dispute, kind, `owedCents` and currency. Both read one
-  count (`unrecoveredAfterLoss`), and the report stops once support's refund
-  stands on the charge, so it needs no mark. Support refunds the rest by
-  hand; there is no automatic refund. A loss in full, or a loss won late,
-  alerts nothing.
+  chargeback, capped at what was paid. The standing refunds are the
+  dispute's charge's, or the webhook's own charge for a dispute with no row,
+  so an unlinked refund on it still counts (review r4). Nothing refunds the
+  rest, and Stripe won't refund a charged-back payment: an error alert names
+  the purchase, the dispute, the kind and the amount still owed in pence
+  (`owedCents`, GBP): "A lost chargeback refunded only part of a blocked
+  payment: pay the rest another way, then mark it paid on the support charge
+  page". Because that alert is logged once, the hourly sweep also reports
+  every such payment not yet marked, from the stored rows, once per run,
+  after its refunds: "Blocked payments a lost chargeback refunded only in
+  part: pay the rest another way, then mark it paid on the support charge
+  page", newest dispute first, up to the sweep's limit, each with its
+  PaymentIntent, dispute, kind, `owedCents` and currency, and `total`, how
+  many there are in all. Support pays the rest outside Stripe, then presses
+  "Mark as paid another way" on the charge page, which shows what is still
+  owed in place of the refund form (owner D60, D61;
+  [operations.md](operations.md#a-blocked-payments-chargeback-lost-short-paid-another-way)).
+  The mark is the lost dispute's `refunded_outside_stripe_at`: the report
+  leaves it out from then on, and the charge is never refunded through
+  Stripe again. The alert, the report and the charge page read one query
+  (`findShortLosses`, `@codex/purchase` short-loss.ts) on one count
+  (`unrecoveredAfterLoss`); a refund that stands on the charge and makes the
+  buyer whole clears it too. There is no automatic refund. A loss in full,
+  or a loss won late, alerts nothing. A late win on a charge marked paid
+  another way refunds nothing and alerts support instead (owner D62): its
+  refund of the rest of the charge would pay the buyer twice.
   Its alert for what is still owed names both kinds, and each row says
   which it is (`blocked`: `duplicate`, the buyer kept the item, or
   `unavailable`, the buyer has nothing). Support finds the ones still owed

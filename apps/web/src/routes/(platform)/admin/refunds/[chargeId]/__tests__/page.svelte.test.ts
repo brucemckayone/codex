@@ -11,6 +11,8 @@
  * - Each answer reloads, or offers "Reload the charge", as drawn.
  * - A late take-back's Re-pay on its history line (C1) opens the queue's
  *   dialog; once done, the charge and the counts reload once (C2).
+ * - "Mark as paid another way" on a short lost chargeback (owner D61) answers
+ *   in the same notice, reloads once, and focus moves to the notice.
  *
  * Mounts the real `+page.svelte` and real components; `$app/*` and the remote
  * module are the reactive doubles.
@@ -47,6 +49,8 @@ import {
   LIFTED_WINDOW,
   NOW,
   preview,
+  SHORT_LOSS_DISPUTE_ID,
+  shortLossDetail,
   slice,
 } from '$lib/components/support/__fixtures__/support-fixtures';
 import {
@@ -56,6 +60,7 @@ import {
   getSupportCharge,
   httpError,
   issueSupportRefund,
+  markPaidAnotherWay,
   previewSlot,
   reset,
   resolveOwedToCreator,
@@ -725,5 +730,63 @@ describe('money owed back to a payee (C1, C2)', () => {
     await tick(20);
     expect(button).not.toBeNull();
     expect(document.activeElement).toBe(button);
+  });
+});
+
+describe('a short lost chargeback, paid another way (owner D61)', () => {
+  async function markIt() {
+    mountCharge();
+    chargeSlot(CHARGE_ID).current = shortLossDetail();
+    flushSync();
+    const mark = document.querySelector<HTMLButtonElement>(
+      '[data-testid="paid-another-way"]'
+    );
+    mark?.focus();
+    mark?.click();
+    await tick(0);
+    return mark;
+  }
+
+  test('the mark: the notice says what was done and takes focus; the charge and the counts reload once', async () => {
+    markPaidAnotherWay.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        chargeId: CHARGE_ID,
+        stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+        owedCents: 500,
+        paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+        alreadyMarked: false,
+      },
+    });
+    await markIt();
+    document
+      .querySelector<HTMLButtonElement>(
+        '[data-testid="paid-another-way-submit"]'
+      )
+      ?.click();
+    await tick(20);
+    const notice = document.querySelector('[data-testid="credit-notice"]');
+    expect(notice?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'Marked as paid another way. £5.00 to Ellie Marsh, on 17 Nov 2026. The hourly alert stops for this payment.'
+    );
+    expect(document.activeElement).toBe(notice);
+    expect(chargeSlot(CHARGE_ID).refresh).toHaveBeenCalledTimes(1);
+    expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
+    expect(
+      document.querySelector('[data-testid="paid-another-way-submit"]')
+    ).toBeNull();
+  });
+
+  test('Cancel puts focus back on the mark button, and nothing reloads', async () => {
+    const mark = await markIt();
+    [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+      .find((b) => b.textContent?.trim() === m.support_confirm_cancel())
+      ?.click();
+    flushSync();
+    await tick(20);
+    expect(mark).not.toBeNull();
+    expect(document.activeElement).toBe(mark);
+    expect(chargeSlot(CHARGE_ID).refresh).not.toHaveBeenCalled();
+    expect(markPaidAnotherWay).not.toHaveBeenCalled();
   });
 });

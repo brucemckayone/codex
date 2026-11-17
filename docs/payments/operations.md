@@ -375,6 +375,39 @@ bill belonged to a duplicate we cancelled, a second alert follows:
 |---|---|---|
 | Customer credit paid a cancelled subscription's invoice (a duplicate, or an old one revived beside a newer one): only the card part was refunded, and support must pay the member back outside Stripe | A duplicate subscription, or an old one revived beside a newer one (`cause`), was cancelled and its card charge refunded (`cardRefundedCents`, 0 when the credit paid it all). The `creditNotReturnedCents` of credit that paid the invoice was not given back (`Codex-2hxff.98`). It names `invoiceId`, `stripeSubscriptionId`, `subscriptionId`, `organizationId`, `userId` and `kind`, once per invoice (`codex_credit_not_returned` on the invoice) | Pay the member `creditNotReturnedCents` outside Stripe, by bank transfer for example, as for a buyer refunded another way; the platform bears it (owner decision 2026-11-09). **Never add it back as Stripe balance credit**: their one customer would spend it on their next bill in any org, and that bill's creator would be paid nothing |
 
+## A blocked payment's chargeback lost short: "Paid another way"
+
+A blocked payment (a duplicate, or a blocked sale of an item no longer
+available) is owed back in full. If its chargeback is LOST for less than the
+payment, the bank returned only part, and Stripe won't refund a charged-back
+payment, so nothing in our app can refund the rest (owner D59, D60;
+[purchases.md](purchases.md)). Support pays it another way and records it on
+the charge page (owner D61):
+
+| Alert | What it means | What to do |
+|---|---|---|
+| A lost chargeback refunded only part of a blocked payment: pay the rest another way, then mark it paid on the support charge page | Logged once, at the loss: `purchaseId`, `stripePaymentIntentId`, `stripeDisputeId`, `kind` (`duplicate` or `unavailable`), `owedCents` (what is still owed, in pence) and `currency`. Nothing was refunded | Search the PaymentIntent in Support › Refunds and open the charge: it says "£X is still owed to the buyer" in place of the refund form. Pay the buyer `owedCents` another way (a bank transfer, for example). **Only then** press "Mark as paid another way" and confirm |
+| Blocked payments a lost chargeback refunded only in part: pay the rest another way, then mark it paid on the support charge page | The hourly owed-refund sweep's report of every such payment not yet marked, newest dispute first, up to the sweep's limit, each with the ids, `kind`, `owedCents` and `currency`; `total` is how many there are in all, so a tail past the limit shows. It repeats every hour until each is marked | As above, for each one listed. A payment stops being listed once it is marked, or once a refund that stands on the charge makes the buyer whole |
+
+"Mark as paid another way" (`POST /api/admin/support/charges/:chargeId/paid-another-way`,
+platform owner only, the `strict` rate limit) sends nothing to Stripe or the
+buyer. It writes the lost dispute's `refunded_outside_stripe_at`
+([below](#late-wins)): the hourly report leaves the payment out, the charge
+can never be refunded through Stripe again, and the charge card reads "{paid}
+· {lost} back through the lost chargeback · {owed} paid another way on
+{date}". Who marked it is logged at info ("A short lost chargeback was marked
+paid another way", with `markedByUserId`); there is no note. A repeat answers
+`alreadyMarked: true` with the first date and changes nothing, so Try again
+after a lost answer is safe. It refuses with 412 `SHORT_LOSS_CHANGED` when the
+dispute or the amount is not what the page showed (the page reloads), and 422
+`NOT_OWED_AFTER_LOSS` when nothing is owed after a loss: `reason`
+`no_lost_dispute` (decided again since), `not_blocked` (a sale lost short
+keeps the bank's decision) or `not_short`. There is no undo on the screen: a
+mark made by mistake is cleared by hand, with the owner's OK, by setting the
+dispute's `refunded_outside_stripe_at` back to NULL. If the chargeback is
+later won after all, the late win refunds nothing on a marked charge
+([the alert below](#late-wins), owner D62).
+
 ## Late wins
 
 A chargeback lost and then decided for us after all (a "late win",
@@ -417,7 +450,7 @@ and `closesAt` keeps the 14-day date, which has passed. Anything that reads
 
 **Refunded outside Stripe** (owner decision 2026-11-08, "Block it in code"). A
 charge whose buyer was refunded outside Stripe has `refunded_outside_stripe_at`
-set, and is never refunded through Stripe again. Three things set it:
+set, and is never refunded through Stripe again. Four things set it:
 
 - a charge settled by hand
   ([below](#settling-a-late-win-refund-stripe-wont-make));
@@ -438,10 +471,14 @@ set, and is never refunded through Stripe again. Three things set it:
 - by hand, with the owner's OK, for a buyer refunded another way that the
   settle never saw: a canceled late-win refund (below), or one settled while
   rolled back
-  ([R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone)).
+  ([R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone));
+- support's "Mark as paid another way" on a blocked payment whose chargeback
+  was lost short
+  ([above](#a-blocked-payments-chargeback-lost-short-paid-another-way); owner
+  D61), on the lost dispute. The card's amount line then keeps the split.
 
 No date is ever overwritten. The runbook step runs only on a charge with no
-refund recorded, so it never meets a set date, and the other two guard with
+refund recorded, so it never meets a set date, and the other three guard with
 `refunded_outside_stripe_at IS NULL`. The form shows the block; the preview
 and the route refuse it with 422 `REFUNDED_OUTSIDE_STRIPE`, whatever the window
 says, and nothing lifts its window. The detail's `refundable.blocked` is
@@ -478,6 +515,7 @@ with an `errorId`, unless it says otherwise:
 | Late win: Stripe refused the refund of a payment the buyer made twice… / Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded… | The late win's refund of a first payment (a buyer who bought it again) or of a duplicate payment wasn't made. "Refused": Stripe refused the request itself (`stripeType` `StripeInvalidRequestError`). "Could not be refunded": anything else, such as an outage, a rate limit or a key without refund rights. `stripeCode`, `stripeType` and `stripeStatusCode` say which; each is empty when Stripe gave none. Nothing is marked, the creators' pay-back stays held, and it is retried: on each of Stripe's redeliveries, then every hour, one alert per try. Stripe replays an answer for 24 hours under the same idempotency key, so a cause that clears (a low balance, a fixed key) is only tried again a day after the first answer | Read the three fields. A "could not be refunded" usually clears by itself once the outage passes or the key is fixed. One Stripe will never make: settle it by hand ([below](#settling-a-late-win-refund-stripe-wont-make)). **Never refund the buyer another way first** |
 | Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds | The late win's refund was made, but Stripe reports it `failed` (`refundId`, `status`). The late win counts as settled and its outcome is marked. As with any failed refund, its clawback stands: the creators gave the first payment back off their held re-pay rows. The buyer has not been refunded | Refund the buyer another way, or first refund it again through Stripe on the charge page, then settle the refund in Failed refunds as refunded elsewhere. Settled after a refund another way, the charge is marked refunded outside Stripe and the charge page blocks any further Stripe refund: Stripe doesn't count the failed refund and the late win lifts the 14-day window, so without the mark it offered the whole amount again, for good, until the settled refund came to count as refunded ([above](#late-wins); Codex-3xnta); the mark stays (owner decision 5). So a Stripe refund comes first or not at all, and the settle dialog's "Refunded another way" says so: "Make any Stripe refund first: once this is marked, the charge can't be refunded through Stripe." (Codex-ohlcx). It knows the late win's refund by our record only (`late_win_refund_id`, on a charge not yet marked): one known only from Stripe's metadata gets no warning, and its settle still marks the charge. "Re-pay payees" (creators re-paid) is refused for it, 422 `LATE_WIN_REFUND_NOT_REPAYABLE` (owner decision 2026-11-08, "Block it in code"): the buyer is still owed this money, so its clawback stands |
 | Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand | Settled as for a failed refund, but the Failed refunds queue lists only `failed` ones, so this alert is how support finds it (owner decision 2026-11-05). It took nothing from the creators | Settle it with the owner; the buyer has not been refunded. If the owner refunds the buyer another way, record it with the UPDATE in [R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone): a canceled refund never reaches Failed refunds, so nothing else marks the charge refunded outside Stripe, and the charge page would offer a Stripe refund again for good |
+| Late win on a charge marked paid another way: no refund was made, so settle the buyer by hand | The chargeback of a blocked payment was lost short, support paid the rest another way and marked the charge, and the bank has now reversed the loss (owner D62). The late win's refund of what is left of the charge would pay the buyer twice, so none was made; the rest of the undo ran, and its outcome is marked, so this fires once. It names `chargeId`, `disputeId`, `purchaseId`, `chargeAmountCents` (the payment), `stripeRefundedCents` (what Stripe shows refunded on the charge now) and `paidAnotherWayAt` | Work out with the owner what the buyer is still owed: they paid `chargeAmountCents`, have had `stripeRefundedCents` back through Stripe and the part paid another way (the charge page's amount line), and the bank's reversal took back what the lost chargeback had returned. Pay any difference another way. The charge stays blocked from Stripe refunds |
 | A won dispute was reported lost: nothing changed, check it in Stripe | Stripe now says lost a dispute we hold as won. Nothing was changed | Check the dispute in Stripe's Dashboard |
 | The hourly late-win check read its page limit of Stripe's disputes | More than 300 disputes since our oldest lost one: the older ones weren't re-checked this run | None by itself; if it repeats, the check needs a wider limit |
 | The hourly late-win check could not read a page of Stripe's disputes / could not re-check lost disputes for a late win | A Stripe or database read failed; the next run retries | None unless it repeats |

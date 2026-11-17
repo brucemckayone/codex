@@ -170,8 +170,9 @@ export interface ChargeDetail {
      * When the buyer was refunded outside Stripe
      * (`disputes.refunded_outside_stripe_at`): support settled the charge by
      * hand, settled the late win's own failed refund as refunded elsewhere,
-     * or recorded a refund another way by hand (R19 (b)). Null otherwise. Stripe lists no standing refund for it, so
-     * `refundedCents` doesn't count it.
+     * recorded a refund another way by hand (R19 (b)), or marked a short
+     * lost chargeback paid another way (owner D61). Null otherwise. Stripe
+     * lists no standing refund for it, so `refundedCents` doesn't count it.
      */
     refundedOutsideStripeOn: string | null;
   };
@@ -197,6 +198,37 @@ export interface ChargeDetail {
   };
   refunds: RefundRow[];
   chargebacks: ChargebackRow[];
+  /**
+   * A blocked payment whose chargeback was lost for less than the payment:
+   * what the bank returned, what is still owed, and when support marked it
+   * paid another way (owner D59-D61). Null for anything else: a sale, an
+   * invoice, a loss in full.
+   */
+  shortLoss: ChargeShortLoss | null;
+}
+
+/** A charge's short lost chargeback (`findShortLosses`, `@codex/purchase`). */
+export interface ChargeShortLoss {
+  /** The lost `du_` dispute: the mark is written on it. */
+  stripeDisputeId: string;
+  kind: BlockedPaymentKind;
+  /** What the bank returned: the lost chargeback's amount. */
+  lostCents: number;
+  /** The rest, by the loss's own count; once marked, what was paid another way. */
+  owedCents: number;
+  /** `refunded_outside_stripe_at`, ISO: when support marked it paid another way. */
+  paidAnotherWayOn: string | null;
+}
+
+/** "Paid another way" (POST .../charges/:chargeId/paid-another-way; owner D61). */
+export interface PaidAnotherWayResult {
+  chargeId: string;
+  stripeDisputeId: string;
+  owedCents: number;
+  /** The mark's date, ISO: the first one, on a repeat. */
+  paidAnotherWayOn: string;
+  /** It was marked already: nothing changed. */
+  alreadyMarked: boolean;
 }
 
 /** One payee's (or the platform fee's) slice of the charge. */

@@ -29,6 +29,7 @@ const api = vi.hoisted(() => ({
   getCharge: vi.fn(),
   previewRefund: vi.fn(),
   issueRefund: vi.fn(),
+  markPaidAnotherWay: vi.fn(),
   getQueueCounts: vi.fn(),
   listFailedRefunds: vi.fn(),
   listCreatorDebts: vi.fn(),
@@ -126,6 +127,11 @@ beforeEach(() => {
 });
 
 const UUID = '11111111-1111-4111-8111-111111111111';
+const DISPUTE = 'du_3QeT8xLk2vRb09aZ';
+const PAID_ANOTHER_WAY = {
+  chargeId: CHARGE,
+  body: { stripeDisputeId: DISPUTE, expectedOwedCents: 1500 },
+};
 /** No function's schema takes a bare number. */
 const MALFORMED = 42;
 /** Each function, with an input its schema accepts. */
@@ -133,6 +139,7 @@ const CALLS: [string, unknown][] = [
   ['searchSupportCharges', { lookup: 'e@x.com', page: 1, limit: 20 }],
   ['getSupportCharge', CHARGE],
   ['getRefundPreview', { chargeId: CHARGE, amountCents: 750, refundCount: 1 }],
+  ['markPaidAnotherWay', PAID_ANOTHER_WAY],
   ['getSupportQueueCounts', undefined],
   ['listFailedRefunds', { page: 1, limit: 20 }],
   ['listCreatorDebts', { page: 1, limit: 20 }],
@@ -307,6 +314,23 @@ describe('the input schemas', () => {
     );
   });
 
+  it('paid another way needs a charge, a dispute and a whole number of pence owed, and nothing else', async () => {
+    const body = PAID_ANOTHER_WAY.body;
+    for (const input of [
+      { ...PAID_ANOTHER_WAY, chargeId: 'pi_3QeT8xLk2v' },
+      { ...PAID_ANOTHER_WAY, body: { ...body, stripeDisputeId: CHARGE } },
+      { ...PAID_ANOTHER_WAY, body: { ...body, expectedOwedCents: 0 } },
+      { ...PAID_ANOTHER_WAY, body: { ...body, expectedOwedCents: 12.5 } },
+      { ...PAID_ANOTHER_WAY, body: { ...body, note: 'Paid by transfer.' } },
+      { chargeId: CHARGE, body: { stripeDisputeId: DISPUTE } },
+    ]) {
+      expect(
+        await accepts('markPaidAnotherWay', input),
+        JSON.stringify(input)
+      ).toBe(false);
+    }
+  });
+
   it('told another way needs a note; Close needs a reason and a note', async () => {
     expect(
       await accepts('markToldAnotherWay', {
@@ -442,6 +466,12 @@ describe('a command with no answer behind it is logged', () => {
     Record<string, string>,
   ][] = [
     ['issueSupportRefund', 'issueRefund', REFUND_INPUT, { chargeId: CHARGE }],
+    [
+      'markPaidAnotherWay',
+      'markPaidAnotherWay',
+      PAID_ANOTHER_WAY,
+      { chargeId: CHARGE },
+    ],
     [
       'resolveFailedRefund',
       'resolveFailedRefund',
@@ -579,6 +609,70 @@ describe('the settle commands', () => {
       '22222222-2222-4222-8222-222222222222',
       { resolution: 'platform_absorbed', note: '' }
     );
+  });
+});
+
+describe('a short lost chargeback, paid another way (owner D61)', () => {
+  it('sends the dispute and the amount the page showed, and answers the mark', async () => {
+    api.markPaidAnotherWay.mockResolvedValue({
+      chargeId: CHARGE,
+      stripeDisputeId: DISPUTE,
+      owedCents: 1500,
+      paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+      alreadyMarked: false,
+    });
+    await expect(remote.markPaidAnotherWay(PAID_ANOTHER_WAY)).resolves.toEqual({
+      outcome: 'done',
+      result: {
+        chargeId: CHARGE,
+        stripeDisputeId: DISPUTE,
+        owedCents: 1500,
+        paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+        alreadyMarked: false,
+      },
+    });
+    expect(api.markPaidAnotherWay).toHaveBeenCalledWith(CHARGE, {
+      stripeDisputeId: DISPUTE,
+      expectedOwedCents: 1500,
+    });
+  });
+
+  it.each([
+    'not_blocked',
+    'no_lost_dispute',
+    'not_short',
+  ])('NOT_OWED_AFTER_LOSS %s reaches the page with its reason, never thrown', async (reason) => {
+    api.markPaidAnotherWay.mockRejectedValue(
+      new ApiError(422, 'Nothing was marked.', 'BUSINESS_LOGIC_ERROR', {
+        code: 'NOT_OWED_AFTER_LOSS',
+        reason,
+      })
+    );
+    await expect(
+      remote.markPaidAnotherWay(PAID_ANOTHER_WAY)
+    ).resolves.toMatchObject({
+      outcome: 'failed',
+      status: 422,
+      detailsCode: 'NOT_OWED_AFTER_LOSS',
+      reason,
+    });
+  });
+
+  it('SHORT_LOSS_CHANGED reaches the page by its code under PRECONDITION_FAILED', async () => {
+    api.markPaidAnotherWay.mockRejectedValue(
+      new ApiError(412, 'It changed.', 'PRECONDITION_FAILED', {
+        code: 'SHORT_LOSS_CHANGED',
+        owedCents: 900,
+      })
+    );
+    await expect(
+      remote.markPaidAnotherWay(PAID_ANOTHER_WAY)
+    ).resolves.toMatchObject({
+      outcome: 'failed',
+      status: 412,
+      code: 'PRECONDITION_FAILED',
+      detailsCode: 'SHORT_LOSS_CHANGED',
+    });
   });
 });
 
