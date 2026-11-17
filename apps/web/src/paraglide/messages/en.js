@@ -26723,6 +26723,22 @@ export const support_amount_short_loss_paid = (params) => `${params.amount} · $
 
 
 /**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_owed_again = (params) => `${params.amount} · ${params.paid} paid another way · chargeback won late · ${params.owed} owed to the buyer again`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, owed: NonNullable<unknown>, date2: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_paid_again = (params) => `${params.amount} · paid another way: ${params.paid} on ${params.date}, ${params.owed} on ${params.date2}`
+
+
+/**
  * @param {{ date: NonNullable<unknown>, left: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -28112,6 +28128,94 @@ export const support_short_loss_refused_no_lost_dispute = () => `This payment no
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_short_loss_refused_not_blocked = () => `Only a blocked payment is owed the rest of a lost chargeback, so nothing was marked.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_lead = (params) => `${params.owed} is owed to the buyer again.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_body_unavailable = (params) => `This payment was blocked, so the buyer is owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_body_duplicate = (params) => `This was a second payment for an item the buyer already had, so they're owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, refunded: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_refunded_unavailable = (params) => `This payment was blocked, so the buyer is owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them, and ${params.refunded} has been refunded through Stripe. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, refunded: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_refunded_duplicate = (params) => `This was a second payment for an item the buyer already had, so they're owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them, and ${params.refunded} has been refunded through Stripe. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ item: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_dialog_description = (params) => `${params.item} · paid ${params.date} · chargeback won late`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_fact_refunded = () => `Refunded through Stripe`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_fact_paid_before = (params) => `Paid another way on ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_fact_owed = () => `Owed again, to pay another way`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_dialog_follows = () => `The hourly alert stops for this payment. A mark can't be undone here.`
+
+
+/**
+ * @param {{ paid: NonNullable<unknown>, date: NonNullable<unknown>, owed: NonNullable<unknown>, date2: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_paid_note = (params) => `The chargeback was lost, then won late: ${params.paid} was paid another way on ${params.date}, and ${params.owed} on ${params.date2}.`
 
 
 /**
