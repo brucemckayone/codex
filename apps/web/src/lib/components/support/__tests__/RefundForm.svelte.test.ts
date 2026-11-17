@@ -40,6 +40,7 @@ import {
   chargeDetail,
   LIFTED_WINDOW,
   lateWonChargeback,
+  owedAgainDetail,
   preview,
   SHORT_LOSS_DISPUTE_ID,
   shortLossDetail,
@@ -1142,9 +1143,10 @@ describe('a short lost chargeback', () => {
   const MARKED = {
     chargeId: CHARGE_ID,
     stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+    stage: 'short' as const,
     owedCents: 500,
     paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
-    alreadyMarked: false,
+    alreadyMarked: false as const,
   };
 
   async function openMark(detail = shortLossDetail()) {
@@ -1234,7 +1236,11 @@ describe('a short lost chargeback', () => {
     expect(markPaidAnotherWay).toHaveBeenCalledTimes(1);
     expect(markPaidAnotherWay).toHaveBeenCalledWith({
       chargeId: CHARGE_ID,
-      body: { stripeDisputeId: SHORT_LOSS_DISPUTE_ID, expectedOwedCents: 500 },
+      body: {
+        stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+        expectedOwedCents: 500,
+        stage: 'short',
+      },
     });
     answer({ outcome: 'done', result: MARKED });
     await wait(0);
@@ -1251,7 +1257,7 @@ describe('a short lost chargeback', () => {
   test('a repeat is a success that says nothing changed', async () => {
     markPaidAnotherWay.mockResolvedValue({
       outcome: 'done',
-      result: { ...MARKED, alreadyMarked: true },
+      result: { ...MARKED, alreadyMarked: true, owedCents: null },
     });
     (await openMark()).click();
     await wait(0);
@@ -1385,6 +1391,136 @@ describe('a short lost chargeback', () => {
     );
     expect(document.querySelector('[data-testid="short-loss"]')).toBeNull();
     expect(markButton()).toBeNull();
+  });
+
+  // Owner D63, D64 (A1-A4): £5.00 was paid another way on 17 Nov, then the
+  // chargeback was won late, so the bank took the £10.00 back from the buyer:
+  // owed again, until the second mark.
+  describe('owed again after a late win', () => {
+    test('A1: what is owed again and how it adds up, in place of the refunded-outside-Stripe block', () => {
+      mountForm({ detail: owedAgainDetail() });
+      const alert = document.querySelector('[data-testid="short-loss"]');
+      expect(alert?.getAttribute('data-stage')).toBe('owed_again');
+      expect(text(alert)).toBe(
+        "£10.00 is owed to the buyer again. This payment was blocked, so the buyer is owed all £15.00 back. £5.00 was paid to them another way on 17 Nov 2026, after the chargeback was lost. The chargeback was then won late, so the bank took back the £10.00 it had returned to them. This charge can't be refunded through Stripe, so pay the other £10.00 another way, such as a bank transfer, then mark it here. Until it's marked, support is alerted about it every hour. Mark as paid another way"
+      );
+      expect(
+        document.querySelector('[data-testid="refund-blocked"]')
+      ).toBeNull();
+      expect(
+        document.querySelector('[data-testid="short-loss-paid"]')
+      ).toBeNull();
+    });
+
+    test('a duplicate says why it is owed in its own words', () => {
+      mountForm({ detail: owedAgainDetail({ kind: 'duplicate' }) });
+      expect(
+        text(document.querySelector('[data-testid="short-loss"]'))
+      ).toContain(
+        "This was a second payment for an item the buyer already had, so they're owed all £15.00 back. £5.00 was paid to them another way on 17 Nov 2026"
+      );
+    });
+
+    test('A2: the same dialog, its facts adding up to what is owed again; it sends the stage', async () => {
+      markPaidAnotherWay.mockResolvedValue({
+        outcome: 'done',
+        result: {
+          ...MARKED,
+          stage: 'owed_again',
+          owedCents: 1000,
+          paidAnotherWayOn: '2026-12-02T10:00:00.000Z',
+        },
+      });
+      const button = await openMark(owedAgainDetail());
+      const dialog = document.querySelector('[role="dialog"]');
+      expect(text(dialog?.querySelector('h2'))).toBe(
+        'Mark £10.00 as paid to Ellie Marsh?'
+      );
+      expect(text(dialog)).toContain(
+        'Sleep Reset Programme · paid 1 Oct 2026 · chargeback won late'
+      );
+      expect(
+        [
+          ...document.querySelectorAll(
+            '[data-testid="paid-another-way-facts"] li'
+          ),
+        ].map(text)
+      ).toEqual([
+        'The buyer paid £15.00',
+        'Paid another way on 17 Nov 2026 £5.00',
+        'Owed again, to pay another way £10.00',
+      ]);
+      expect(text(dialog)).toContain(
+        "The hourly alert stops for this payment. A mark can't be undone here."
+      );
+      expect(text(dialog)).not.toContain(
+        "the charge can't be refunded through Stripe again"
+      );
+      expect(text(button)).toBe('Mark £10.00 as paid');
+
+      button.click();
+      await wait(0);
+      expect(markPaidAnotherWay).toHaveBeenCalledWith({
+        chargeId: CHARGE_ID,
+        body: {
+          stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+          expectedOwedCents: 1000,
+          stage: 'owed_again',
+        },
+      });
+      expect(settled).toEqual([
+        {
+          variant: 'success',
+          lead: 'Marked as paid another way.',
+          text: '£10.00 to Ellie Marsh, on 2 Dec 2026. The hourly alert stops for this payment.',
+        },
+      ]);
+    });
+
+    test('A4: refunded through Stripe counts toward what is owed again, in the alert and the dialog', async () => {
+      const detail = owedAgainDetail({
+        refundedThroughStripeCents: 300,
+        owedCents: 700,
+      });
+      await openMark(detail);
+      expect(
+        text(document.querySelector('[data-testid="short-loss"]'))
+      ).toContain(
+        "The chargeback was then won late, so the bank took back the £10.00 it had returned to them, and £3.00 has been refunded through Stripe. This charge can't be refunded through Stripe, so pay the other £7.00 another way"
+      );
+      expect(
+        [
+          ...document.querySelectorAll(
+            '[data-testid="paid-another-way-facts"] li'
+          ),
+        ].map(text)
+      ).toEqual([
+        'The buyer paid £15.00',
+        'Refunded through Stripe £3.00',
+        'Paid another way on 17 Nov 2026 £5.00',
+        'Owed again, to pay another way £7.00',
+      ]);
+    });
+
+    test('A3: marked twice, the refunded-outside-Stripe block with both payments, and no action', () => {
+      mountForm({
+        detail: owedAgainDetail({ paidAgainOn: '2026-12-02T10:00:00.000Z' }),
+      });
+      const alert = document.querySelector('[data-testid="refund-blocked"]');
+      expect(alert?.getAttribute('data-reason')).toBe(
+        'refunded_outside_stripe'
+      );
+      expect(text(alert)).toBe(
+        "Refunded outside Stripe on 17 Nov 2026. Don't refund this charge here."
+      );
+      expect(
+        text(document.querySelector('[data-testid="short-loss-paid"]'))
+      ).toBe(
+        'The chargeback was lost, then won late: £5.00 was paid another way on 17 Nov 2026, and £10.00 on 2 Dec 2026.'
+      );
+      expect(document.querySelector('[data-testid="short-loss"]')).toBeNull();
+      expect(markButton()).toBeNull();
+    });
   });
 
   test('a charge with no short loss shows neither', () => {

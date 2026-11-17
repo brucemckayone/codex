@@ -197,7 +197,11 @@ export const markToldAnotherWay: Mock<
 export const markPaidAnotherWay: Mock<
   (input: {
     chargeId: string;
-    body: { stripeDisputeId: string; expectedOwedCents: number };
+    body: {
+      stripeDisputeId: string;
+      expectedOwedCents: number;
+      stage?: 'short' | 'owed_again';
+    };
   }) => Promise<Answer<PaidAnotherWayResult>>
 > = vi.fn();
 export const retryPriceMove: Mock<

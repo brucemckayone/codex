@@ -17,9 +17,11 @@ import type {
   FeeNoticeItem,
   HeldPriceMove,
   HistoryLine,
+  OwedAgainAfterLateWin,
   OwedToCreatorItem,
   RefundPreview,
   RefundRow,
+  ShortAfterLoss,
   Slice,
   StoppedPriceChange,
   StripeHeldTakeBack,
@@ -296,9 +298,10 @@ export const SHORT_LOSS_DISPUTE_ID = 'du_1QjK7pXk9vRb88aQ';
  * mark does.
  */
 export function shortLossDetail(
-  overrides: Partial<ChargeShortLoss> = {}
+  overrides: Partial<ShortAfterLoss> = {}
 ): ChargeDetail {
-  const shortLoss: ChargeShortLoss = {
+  const shortLoss: ShortAfterLoss = {
+    stage: 'short',
     stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
     kind: 'unavailable',
     lostCents: 1000,
@@ -306,6 +309,54 @@ export function shortLossDetail(
     paidAnotherWayOn: null,
     ...overrides,
   };
+  return shortLossCharge(shortLoss, {
+    blocked: shortLoss.paidAnotherWayOn
+      ? 'refunded_outside_stripe'
+      : 'chargeback',
+    refundedOutsideStripeOn: shortLoss.paidAnotherWayOn,
+    chargeback: { status: 'lost', lateWonOn: null },
+  });
+}
+
+/**
+ * The same sale owed again (owner D63; the mockup's A1-A4): £5.00 was paid
+ * another way on 17 Nov, then the chargeback was won late on 1 Dec, so the
+ * bank took the £10.00 back from Ellie: £10.00 is owed again. The first
+ * mark keeps the charge refunded outside Stripe; after the second mark
+ * (`paidAgainOn`), the refund card says how both payments were made.
+ */
+export function owedAgainDetail(
+  overrides: Partial<OwedAgainAfterLateWin> = {}
+): ChargeDetail {
+  const shortLoss: OwedAgainAfterLateWin = {
+    stage: 'owed_again',
+    stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+    kind: 'unavailable',
+    lostCents: 1000,
+    paidAnotherWayCents: 500,
+    paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+    lateWonOn: '2026-12-01T10:00:00.000Z',
+    refundedThroughStripeCents: 0,
+    owedCents: 1000,
+    paidAgainOn: null,
+    ...overrides,
+  };
+  return shortLossCharge(shortLoss, {
+    blocked: 'refunded_outside_stripe',
+    refundedOutsideStripeOn: shortLoss.paidAnotherWayOn,
+    chargeback: { status: 'won', lateWonOn: shortLoss.lateWonOn },
+  });
+}
+
+/** The mockup's £15.00 blocked sale, carrying `shortLoss`. */
+function shortLossCharge(
+  shortLoss: ChargeShortLoss,
+  state: {
+    blocked: ChargeDetail['refundable']['blocked'];
+    refundedOutsideStripeOn: string | null;
+    chargeback: Pick<ChargebackRow, 'status' | 'lateWonOn'>;
+  }
+): ChargeDetail {
   const base = chargeDetail();
   return chargeDetail({
     charge: {
@@ -332,10 +383,8 @@ export function shortLossDetail(
     },
     refundable: {
       maxCents: 1500,
-      blocked: shortLoss.paidAnotherWayOn
-        ? 'refunded_outside_stripe'
-        : 'chargeback',
-      refundedOutsideStripeOn: shortLoss.paidAnotherWayOn,
+      blocked: state.blocked,
+      refundedOutsideStripeOn: state.refundedOutsideStripeOn,
     },
     refundCount: 0,
     refunds: [],
@@ -343,11 +392,11 @@ export function shortLossDetail(
       chargebackRow({
         id: SHORT_LOSS_DISPUTE_ID,
         amountCents: 1000,
-        status: 'lost',
         reason: 'fraudulent',
         createdAt: '2026-10-06T09:00:00.000Z',
         respondBy: null,
         lostOn: '2026-10-20T09:00:00.000Z',
+        ...state.chargeback,
       }),
     ],
     shortLoss,

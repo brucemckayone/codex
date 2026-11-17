@@ -4,6 +4,7 @@
  * routes validate their input with these.
  */
 
+import { SHORT_LOSS_STAGES } from '@codex/constants';
 import { z } from 'zod';
 import { uuidSchema } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
@@ -239,8 +240,11 @@ export const stripeDisputeIdSchema = z
 
 /**
  * POST /api/admin/support/charges/:chargeId/paid-another-way. What the page
- * showed: the lost dispute, and the amount still owed. The route refuses with
- * SHORT_LOSS_CHANGED if either moved. Nothing else is accepted.
+ * showed: the dispute, the amount owed, and which time it is owed (`stage`,
+ * owner D63: `short` after the loss, `owed_again` after a late win; `short`
+ * when absent, as a page loaded before the second stage sends it). The route
+ * refuses with SHORT_LOSS_CHANGED if any of them moved. Nothing else is
+ * accepted.
  */
 export const supportPaidAnotherWaySchema = z
   .object({
@@ -249,6 +253,7 @@ export const supportPaidAnotherWaySchema = z
       .number()
       .int({ message: 'Must be a whole number of pence' })
       .min(1, { message: 'Must be at least 1p' }),
+    stage: z.enum(SHORT_LOSS_STAGES).default('short'),
   })
   .strict();
 

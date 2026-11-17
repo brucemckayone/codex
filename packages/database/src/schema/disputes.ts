@@ -100,7 +100,7 @@ export const disputes = pgTable(
      * When the buyer was refunded outside Stripe (owner decision 2026-11-08,
      * "Block it in code"). From then on the charge is never refunded through
      * Stripe: support's refund route refuses it (`REFUNDED_OUTSIDE_STRIPE`).
-     * Three writers:
+     * Four writers:
      * - the runbook step that settles the charge by hand
      *   (docs/payments/operations.md, "Settling a late-win refund Stripe
      *   won't make"), in the transaction that marks the outcome;
@@ -108,16 +108,40 @@ export const disputes = pgTable(
      *   elsewhere when the charge's succeeded Stripe refunds don't cover
      *   it, in the transaction that resolves it (`settleRefundedElsewhere`,
      *   @codex/admin);
+     * - support marking a blocked payment's short lost chargeback "paid
+     *   another way" (owner D61, `markPaidAnotherWay`, @codex/admin), with
+     *   `paid_another_way_cents` in the same update;
      * - a manual UPDATE, with the owner's OK, for a buyer refunded another
      *   way that the settle never saw (docs/payments/release-checklist.md,
      *   R19 (b)).
      * No date is overwritten. The runbook step runs only on a charge with no
-     * refund recorded, so it never meets a set date; the other two guard
-     * with `IS NULL`.
+     * refund recorded, so it never meets a set date; the others guard with
+     * `IS NULL`.
      */
     refundedOutsideStripeAt: timestamp('refunded_outside_stripe_at', {
       withTimezone: true,
     }),
+    /**
+     * What support paid a blocked payment's buyer another way after its
+     * chargeback was lost short, in pence (owner D61, D64): what was still
+     * owed when it was marked, written with `refunded_outside_stripe_at` by
+     * that mark and by nothing else. It is how that mark is told apart from
+     * the other writers of the date (never by comparing dates), and it is
+     * taken off what the buyer is owed (`owedAfterLoss`, @codex/purchase).
+     * Null for every other dispute.
+     */
+    paidAnotherWayCents: integer('paid_another_way_cents'),
+    /**
+     * When support paid the buyer another way a SECOND time (owner D63): a
+     * late win on a charge marked paid another way takes the chargeback
+     * back from the buyer and makes no refund (D62), so the buyer is owed
+     * again until support marks it on the charge page. Written once, guarded
+     * by `IS NULL`. Null for every other dispute.
+     */
+    lateWinRefundedOutsideStripeAt: timestamp(
+      'late_win_refunded_outside_stripe_at',
+      { withTimezone: true }
+    ),
     /**
      * The appeal of a lost chargeback, while it runs (owner D34):
      * `appeal_needs_response`, then `appeal_under_review`. Set only on a
@@ -183,6 +207,17 @@ export const disputes = pgTable(
     check(
       'check_disputes_appeal_status',
       sql`${table.appealStatus} IS NULL OR ${table.appealStatus} IN ('appeal_needs_response', 'appeal_under_review')`
+    ),
+    // Support's two "Paid another way" marks (owner D61, D63, D64). Safe for
+    // an older worker after a rollback: none writes either column, and no
+    // code clears `refunded_outside_stripe_at` or `late_won_at`.
+    check(
+      'check_disputes_paid_another_way',
+      sql`${table.paidAnotherWayCents} IS NULL OR (${table.paidAnotherWayCents} > 0 AND ${table.refundedOutsideStripeAt} IS NOT NULL)`
+    ),
+    check(
+      'check_disputes_late_win_paid_another_way',
+      sql`${table.lateWinRefundedOutsideStripeAt} IS NULL OR (${table.paidAnotherWayCents} IS NOT NULL AND ${table.lateWonAt} IS NOT NULL)`
     ),
   ]
 );

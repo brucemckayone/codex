@@ -17,6 +17,7 @@ describe('paidAnotherWayOutcome', () => {
           result: {
             chargeId: 'ch_1',
             stripeDisputeId: 'du_1',
+            stage: 'short',
             owedCents: 1250,
             paidAnotherWayOn: '2026-11-17T23:30:00.000Z',
             alreadyMarked: false,

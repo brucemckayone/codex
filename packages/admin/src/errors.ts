@@ -8,6 +8,7 @@
  * most admin operations reuse existing domain errors (NotFoundError, etc.)
  */
 
+import type { ShortLossStage } from '@codex/constants';
 import type { BlockedPaymentKind } from '@codex/purchase';
 import {
   BusinessLogicError,
@@ -260,17 +261,18 @@ export class BlockedPaymentRefundNotRepayableError extends BusinessLogicError {
 }
 
 /**
- * The charge's short lost chargeback is not what the page showed (412): the
- * dispute named is not the charge's lost one, or what is owed changed (a
- * refund stood since, or the dispute's amount moved). Nothing is marked; the
- * page reloads and support checks it again (owner D61). The context is what
- * is owed now, or null when nothing is.
+ * What the charge's blocked payment is owed is not what the page showed
+ * (412): the dispute named is not the one owed, it is owed at another stage
+ * (a late win since, owner D63), or what is owed changed (a refund stood or
+ * stopped standing since, or the dispute's amount moved). Nothing is marked;
+ * the page reloads and support checks it again (owner D61). The context is
+ * what is owed now and at which stage.
  */
 export class ShortLossChangedError extends PreconditionFailedError {
-  constructor(owedCents: number | null) {
+  constructor(now: { owedCents: number; stage: ShortLossStage }) {
     super(
       "What's owed on this payment changed since it was loaded. Reload it and check.",
-      { code: 'SHORT_LOSS_CHANGED', owedCents }
+      { code: 'SHORT_LOSS_CHANGED', owedCents: now.owedCents, stage: now.stage }
     );
   }
 }
@@ -283,10 +285,10 @@ export type NotOwedAfterLossReason =
 
 /**
  * "Paid another way" asked of a charge with nothing owed after a lost
- * chargeback (422; owner D60, D61): its payment isn't a blocked one (a sale
- * keeps the bank's decision), it has no lost chargeback (open, won, won late
- * since), or the loss left nothing owed. Nothing is marked. The context's
- * `reason` says which, for support's notice.
+ * chargeback (422; owner D60, D61, D63): its payment isn't a blocked one (a
+ * sale keeps the bank's decision), it has no lost chargeback (open, won, or
+ * won late with no first mark), or nothing is owed on it now. Nothing is
+ * marked. The context's `reason` says which, for support's notice.
  */
 export class NotOwedAfterLossError extends BusinessLogicError {
   constructor(reason: NotOwedAfterLossReason) {

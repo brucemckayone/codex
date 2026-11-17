@@ -1871,9 +1871,11 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
   // the rest. Stripe won't refund a charged-back payment, so support pays it
   // another way and marks it on the charge page, which writes the charge's
   // `refunded_outside_stripe_at`; the hourly report then leaves it out.
-  describe('a short lost chargeback, paid another way (owner D61)', () => {
-    const REPORT =
+  describe('a short lost chargeback, paid another way (owner D61, D63, D64)', () => {
+    const SHORT_REPORT =
       'Blocked payments a lost chargeback refunded only in part: pay the rest another way, then mark it paid on the support charge page';
+    const OWED_AGAIN_REPORT =
+      'Blocked payments owed again after a late win: pay it another way, then mark it paid on the support charge page';
 
     // A buyer of their own: the email search further down reads the shared
     // buyer's 50 newest charges, and these are all newer.
@@ -1889,12 +1891,22 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       );
 
     /**
-     * A blocked payment of `kind` (£10.00) whose chargeback was lost for
-     * `lostCents`, the loss applied as the webhook applies it.
+     * A blocked payment of `kind` (`paidCents`, £10.00 unless given) whose
+     * chargeback was lost for `lostCents`, the loss applied as the webhook
+     * applies it. `beforeLoss` runs once the payment is blocked.
      */
     async function shortLoss(
       kind: 'unavailable' | 'duplicate' = 'unavailable',
-      lostCents = 600
+      lostCents = 600,
+      {
+        paidCents = 1000,
+        beforeLoss,
+      }: {
+        paidCents?: number;
+        beforeLoss?: (
+          sale: Awaited<ReturnType<typeof purchaseCharge>>
+        ) => Promise<unknown>;
+      } = {}
     ) {
       const sale = await purchaseCharge(3600, lossBuyer);
       const blocked =
@@ -1906,8 +1918,17 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
             };
       await db
         .update(purchases)
-        .set({ status: PURCHASE_STATUS.PENDING, ...blocked })
+        .set({
+          status: PURCHASE_STATUS.PENDING,
+          amountPaidCents: paidCents,
+          // The split still adds up to what was paid (platform 100, org 135).
+          creatorPayoutCents: paidCents - 235,
+          ...blocked,
+        })
         .where(eq(purchases.id, sale.purchase.id));
+      const charge = fake.charges.get(sale.chargeId);
+      if (charge) charge.amount = paidCents;
+      await beforeLoss?.(sale);
       const disputeId = await dispute(sale.chargeId, 'lost', sale.purchase.id);
       await db
         .update(disputes)
@@ -1931,6 +1952,112 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       ).at;
     }
 
+    /** Both marks: the first's amount, and the second's date. */
+    async function marksOf(stripeDisputeId: string) {
+      return takeFirst(
+        await db
+          .select({
+            paidCents: disputes.paidAnotherWayCents,
+            againAt: disputes.lateWinRefundedOutsideStripeAt,
+          })
+          .from(disputes)
+          .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+      );
+    }
+
+    /** The mark's body, as the page sends it. */
+    const body = (
+      stripeDisputeId: string,
+      expectedOwedCents: number,
+      stage: 'short' | 'owed_again' = 'short'
+    ) => ({ stripeDisputeId, expectedOwedCents, stage });
+
+    /** A refund on the charge, as the refund webhook records it. */
+    async function refundOn(
+      sale: { chargeId: string; purchase: { id: string } },
+      amountCents: number,
+      status: 'succeeded' | 'pending'
+    ) {
+      const stripeRefundId = `re_sup${uid()}`;
+      created.stripeRefundIds.push(stripeRefundId);
+      await db.insert(refunds).values({
+        stripeRefundId,
+        stripeChargeId: sale.chargeId,
+        purchaseId: sale.purchase.id,
+        amountCents,
+        currency: 'gbp',
+        status,
+        stripeCreatedAt: new Date(),
+      });
+      return stripeRefundId;
+    }
+
+    /**
+     * The chargeback won late, as the webhook and the undo apply it: the
+     * row moves lost to won, the purchase is restored (a blocked payment
+     * stays refunded), and the late win's refund step runs, which makes no
+     * refund on a charge marked paid another way (owner D62).
+     */
+    async function wonLate(sale: {
+      chargeId: string;
+      paymentIntentId: string;
+      disputeId: string;
+    }) {
+      const purchase = purchaseService();
+      const lost = takeFirst(
+        await db
+          .select()
+          .from(disputes)
+          .where(eq(disputes.stripeDisputeId, sale.disputeId))
+      );
+      await purchase.recordDispute({
+        stripeDisputeId: sale.disputeId,
+        stripeChargeId: sale.chargeId,
+        paymentIntentId: sale.paymentIntentId,
+        amountCents: lost.amountCents,
+        currency: 'gbp',
+        status: 'won',
+        reason: lost.reason,
+        stripeCreatedAt: lost.stripeCreatedAt,
+      });
+      await purchase.restoreAfterLateWin(sale.disputeId);
+      const amountCents = fake.charges.get(sale.chargeId)?.amount ?? 0;
+      return purchase.refundFirstPaymentAfterLateWin(
+        sale.disputeId,
+        { id: sale.chargeId, amountCents },
+        'test'
+      );
+    }
+
+    /** What the hourly report's `line` names after one sweep. */
+    async function reportedOwed(
+      line: string
+    ): Promise<Array<{ stripePaymentIntentId: string; owedCents: number }>> {
+      const purchase = purchaseService();
+      const errors = vi.spyOn(
+        (
+          purchase as unknown as {
+            obs: { error: (message: string, meta?: object) => void };
+          }
+        ).obs,
+        'error'
+      );
+      await purchase.settleOwedDuplicates({ olderThanMs: 0, limit: 100_000 });
+      return errors.mock.calls
+        .filter(([message]) => message === line)
+        .flatMap(
+          ([, meta]) =>
+            (
+              meta as {
+                owed: Array<{
+                  stripePaymentIntentId: string;
+                  owedCents: number;
+                }>;
+              }
+            ).owed
+        );
+    }
+
     /** What the hourly report names, by PaymentIntent, after one sweep. */
     async function reported(): Promise<string[]> {
       const purchase = purchaseService();
@@ -1944,11 +2071,11 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       );
       await purchase.settleOwedDuplicates({ olderThanMs: 0, limit: 100_000 });
       return errors.mock.calls
-        .filter(([message]) => message === REPORT)
+        .filter(([message]) => message === SHORT_REPORT)
         .flatMap(([, meta]) =>
-          (
-            meta as { short: Array<{ stripePaymentIntentId: string }> }
-          ).short.map((entry) => entry.stripePaymentIntentId)
+          (meta as { owed: Array<{ stripePaymentIntentId: string }> }).owed.map(
+            (entry) => entry.stripePaymentIntentId
+          )
         );
     }
 
@@ -1961,6 +2088,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       const detail = await service.getChargeDetail(chargeId);
 
       expect(detail.shortLoss).toEqual({
+        stage: 'short',
         stripeDisputeId: disputeId,
         kind,
         lostCents: 600,
@@ -2001,7 +2129,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       ).toBeNull();
     });
 
-    it('marks it: the mark is written, the page shows it paid another way and blocked from Stripe, and who marked it is logged', async () => {
+    it('marks it: the date and what it paid are written, the page shows it paid another way and blocked from Stripe, and who marked it is logged', async () => {
       const { chargeId, disputeId, purchase } = await shortLoss();
       const info = vi.spyOn(
         (service as unknown as { obs: { info: (...a: unknown[]) => void } })
@@ -2011,21 +2139,31 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
 
       const result = await service.markPaidAnotherWay(
         chargeId,
-        { stripeDisputeId: disputeId, expectedOwedCents: 400 },
+        body(disputeId, 400),
         supportId
       );
 
       const at = await markOf(disputeId);
       expect(at).toBeInstanceOf(Date);
+      expect(await marksOf(disputeId)).toEqual({
+        paidCents: 400,
+        againAt: null,
+      });
       expect(result).toEqual({
         chargeId,
         stripeDisputeId: disputeId,
+        stage: 'short',
         owedCents: 400,
         paidAnotherWayOn: at?.toISOString(),
         alreadyMarked: false,
       });
+      // Nothing is owed now, and the page shows what was paid.
       const detail = await service.getChargeDetail(chargeId);
-      expect(detail.shortLoss).toMatchObject({
+      expect(detail.shortLoss).toEqual({
+        stage: 'short',
+        stripeDisputeId: disputeId,
+        kind: 'unavailable',
+        lostCents: 600,
         owedCents: 400,
         paidAnotherWayOn: at?.toISOString(),
       });
@@ -2039,6 +2177,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           chargeId,
           disputeId,
           purchaseId: purchase.id,
+          stage: 'short',
           owedCents: 400,
           markedByUserId: supportId,
         }
@@ -2048,7 +2187,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
 
     it('a repeat is a success that changes nothing: the first date stands', async () => {
       const { chargeId, disputeId } = await shortLoss();
-      const input = { stripeDisputeId: disputeId, expectedOwedCents: 400 };
+      const input = body(disputeId, 400);
       const first = await service.markPaidAnotherWay(
         chargeId,
         input,
@@ -2062,20 +2201,37 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         supportId
       );
 
-      expect(again).toEqual({ ...first, alreadyMarked: true });
+      expect(again).toEqual({ ...first, alreadyMarked: true, owedCents: null });
       expect(await markOf(disputeId)).toEqual(at);
+      expect((await marksOf(disputeId)).paidCents).toBe(400);
+    });
+
+    // Review r5 (nit): a repeat after a refund came to stand found nothing
+    // owed and answered 422 not_short, though it had been marked.
+    it('a repeat after a refund has since stood is still a success: the mark is read first', async () => {
+      const sale = await shortLoss();
+      const input = body(sale.disputeId, 400);
+      const first = await service.markPaidAnotherWay(
+        sale.chargeId,
+        input,
+        supportId
+      );
+      await refundOn(sale, 400, 'succeeded');
+
+      const again = await service.markPaidAnotherWay(
+        sale.chargeId,
+        input,
+        supportId
+      );
+
+      expect(again).toEqual({ ...first, alreadyMarked: true, owedCents: null });
     });
 
     it.each([
-      [
-        'what is owed moved',
-        (id: string) => ({ stripeDisputeId: id, expectedOwedCents: 500 }),
-      ],
-      [
-        'another dispute',
-        () => ({ stripeDisputeId: `du_sup${uid()}`, expectedOwedCents: 400 }),
-      ],
-    ])('not what the page showed (%s): 412 SHORT_LOSS_CHANGED with what is owed now, and nothing marked', async (_what, input) => {
+      ['what is owed moved', (id: string) => body(id, 500)],
+      ['another dispute', () => body(`du_sup${uid()}`, 400)],
+      ['the stage moved', (id: string) => body(id, 400, 'owed_again')],
+    ])('not what the page showed (%s): 412 SHORT_LOSS_CHANGED with what is owed now and its stage, and nothing marked', async (_what, input) => {
       const { chargeId, disputeId } = await shortLoss();
 
       const error = await failureOf(
@@ -2086,8 +2242,13 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(error.context).toEqual({
         code: 'SHORT_LOSS_CHANGED',
         owedCents: 400,
+        stage: 'short',
       });
       expect(await markOf(disputeId)).toBeNull();
+      expect(await marksOf(disputeId)).toEqual({
+        paidCents: null,
+        againAt: null,
+      });
     });
 
     it('nothing owed after a loss: 422 NOT_OWED_AFTER_LOSS with each reason, and nothing marked', async () => {
@@ -2124,11 +2285,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         [full.chargeId, full.disputeId, 'not_short'],
       ] as const) {
         const error = await failureOf(
-          service.markPaidAnotherWay(
-            chargeId,
-            { stripeDisputeId: disputeId, expectedOwedCents: 400 },
-            supportId
-          )
+          service.markPaidAnotherWay(chargeId, body(disputeId, 400), supportId)
         );
         expect(error.statusCode, reason).toBe(422);
         expect(error.context, reason).toEqual({
@@ -2143,7 +2300,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       const error = await failureOf(
         service.markPaidAnotherWay(
           `ch_sup${uid()}missing`,
-          { stripeDisputeId: `du_sup${uid()}`, expectedOwedCents: 400 },
+          body(`du_sup${uid()}`, 400),
           supportId
         )
       );
@@ -2157,7 +2314,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
 
       await service.markPaidAnotherWay(
         marked.chargeId,
-        { stripeDisputeId: marked.disputeId, expectedOwedCents: 400 },
+        body(marked.disputeId, 400),
         supportId
       );
 
@@ -2178,12 +2335,210 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
 
       await service.markPaidAnotherWay(
         chargeId,
-        { stripeDisputeId: disputeId, expectedOwedCents: 400 },
+        body(disputeId, 400),
         supportId
       );
 
       expect(await reported()).not.toContain(paymentIntentId);
       expect(await reported()).not.toContain(paymentIntentId);
+    });
+
+    // Owner D63, D64, END TO END: £15.00 paid, the £10.00 chargeback lost,
+    // £5.00 paid another way and marked; then the chargeback is won late, so
+    // the bank takes the £10.00 back from the buyer and no refund is made
+    // (D62). The buyer is owed £10.00 again (1500 - 0 - 500), on the hourly
+    // report and the charge page, until support marks it a second time.
+    it('owed again after a late win: reported and shown until the second mark, and never again after', async () => {
+      const sale = await shortLoss('unavailable', 1000, { paidCents: 1500 });
+      expect(
+        (await reportedOwed(SHORT_REPORT)).filter(
+          (entry) => entry.stripePaymentIntentId === sale.paymentIntentId
+        )
+      ).toEqual([expect.objectContaining({ owedCents: 500 })]);
+      const first = await service.markPaidAnotherWay(
+        sale.chargeId,
+        body(sale.disputeId, 500),
+        supportId
+      );
+
+      expect(await wonLate(sale)).toBe('none');
+      expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
+
+      const mine = async (line: string) =>
+        (await reportedOwed(line)).filter(
+          (entry) => entry.stripePaymentIntentId === sale.paymentIntentId
+        );
+      expect(await mine(SHORT_REPORT)).toEqual([]);
+      expect(await mine(OWED_AGAIN_REPORT)).toEqual([
+        expect.objectContaining({ owedCents: 1000 }),
+      ]);
+      const owedAgain = (await service.getChargeDetail(sale.chargeId))
+        .shortLoss;
+      expect(owedAgain).toEqual({
+        stage: 'owed_again',
+        stripeDisputeId: sale.disputeId,
+        kind: 'unavailable',
+        lostCents: 1000,
+        paidAnotherWayCents: 500,
+        paidAnotherWayOn: first.paidAnotherWayOn,
+        lateWonOn: expect.any(String),
+        refundedThroughStripeCents: 0,
+        owedCents: 1000,
+        paidAgainOn: null,
+      });
+
+      const second = await service.markPaidAnotherWay(
+        sale.chargeId,
+        body(sale.disputeId, 1000, 'owed_again'),
+        supportId
+      );
+
+      const { againAt } = await marksOf(sale.disputeId);
+      expect(againAt).toBeInstanceOf(Date);
+      expect(second).toEqual({
+        chargeId: sale.chargeId,
+        stripeDisputeId: sale.disputeId,
+        stage: 'owed_again',
+        owedCents: 1000,
+        paidAnotherWayOn: againAt?.toISOString(),
+        alreadyMarked: false,
+      });
+      expect(await mine(OWED_AGAIN_REPORT)).toEqual([]);
+      expect(await mine(OWED_AGAIN_REPORT)).toEqual([]);
+      expect(await mine(SHORT_REPORT)).toEqual([]);
+      expect(
+        (await service.getChargeDetail(sale.chargeId)).shortLoss
+      ).toMatchObject({
+        stage: 'owed_again',
+        paidAgainOn: againAt?.toISOString(),
+      });
+      // The first mark's date stands: the charge stays blocked from Stripe.
+      expect(await markOf(sale.disputeId)).toEqual(
+        new Date(first.paidAnotherWayOn)
+      );
+
+      // A repeat of either mark changes nothing.
+      expect(
+        await service.markPaidAnotherWay(
+          sale.chargeId,
+          body(sale.disputeId, 1000, 'owed_again'),
+          supportId
+        )
+      ).toEqual({ ...second, alreadyMarked: true, owedCents: null });
+      expect(
+        await service.markPaidAnotherWay(
+          sale.chargeId,
+          body(sale.disputeId, 500),
+          supportId
+        )
+      ).toEqual({ ...first, alreadyMarked: true, owedCents: null });
+      expect((await marksOf(sale.disputeId)).againAt).toEqual(againAt);
+    });
+
+    // Owner D64: ONE count, paid - refunded through Stripe - paid another
+    // way - the chargeback while it stands lost. A refund that stood at the
+    // first mark and then failed stops standing, so what is owed rises by it.
+    it.each([
+      {
+        what: 'a £3.00 refund through Stripe after the first mark',
+        before: null,
+        after: 'succeeded' as const,
+        paid: 500,
+        refunded: 300,
+        owed: 700,
+      },
+      {
+        what: 'a £3.00 refund before the loss',
+        before: 'succeeded' as const,
+        after: null,
+        paid: 200,
+        refunded: 300,
+        owed: 1000,
+      },
+      {
+        what: 'a £3.00 refund pending at the first mark, which then fails',
+        before: 'pending' as const,
+        after: null,
+        paid: 200,
+        refunded: 0,
+        owed: 1300,
+      },
+    ])('owed again counts every refund standing now ($what): $owed', async ({
+      before,
+      after,
+      paid,
+      refunded,
+      owed,
+    }) => {
+      let refundId: string | undefined;
+      const sale = await shortLoss('duplicate', 1000, {
+        paidCents: 1500,
+        beforeLoss: async (charge) => {
+          if (before) refundId = await refundOn(charge, 300, before);
+        },
+      });
+      const short = (await service.getChargeDetail(sale.chargeId)).shortLoss;
+      expect(short).toMatchObject({ stage: 'short', owedCents: paid });
+      await service.markPaidAnotherWay(
+        sale.chargeId,
+        body(sale.disputeId, paid),
+        supportId
+      );
+      expect((await marksOf(sale.disputeId)).paidCents).toBe(paid);
+      if (after) await refundOn(sale, 300, after);
+      if (before === 'pending' && refundId) {
+        await db
+          .update(refunds)
+          .set({ status: 'failed' })
+          .where(eq(refunds.stripeRefundId, refundId));
+      }
+
+      await wonLate(sale);
+
+      expect(
+        (await service.getChargeDetail(sale.chargeId)).shortLoss
+      ).toMatchObject({
+        stage: 'owed_again',
+        kind: 'duplicate',
+        paidAnotherWayCents: paid,
+        refundedThroughStripeCents: refunded,
+        owedCents: owed,
+        paidAgainOn: null,
+      });
+      expect(
+        (await reportedOwed(OWED_AGAIN_REPORT)).filter(
+          (entry) => entry.stripePaymentIntentId === sale.paymentIntentId
+        )
+      ).toEqual([expect.objectContaining({ owedCents: owed })]);
+    });
+
+    it('owed again, then refunded through Stripe in full: nothing is owed, 422 not_short, and nothing marked', async () => {
+      const sale = await shortLoss('unavailable', 1000, { paidCents: 1500 });
+      await service.markPaidAnotherWay(
+        sale.chargeId,
+        body(sale.disputeId, 500),
+        supportId
+      );
+      await wonLate(sale);
+      await refundOn(sale, 1000, 'succeeded');
+
+      const error = await failureOf(
+        service.markPaidAnotherWay(
+          sale.chargeId,
+          body(sale.disputeId, 1000, 'owed_again'),
+          supportId
+        )
+      );
+
+      expect(error.statusCode).toBe(422);
+      expect(error.context).toEqual({
+        code: 'NOT_OWED_AFTER_LOSS',
+        reason: 'not_short',
+      });
+      expect((await marksOf(sale.disputeId)).againAt).toBeNull();
+      expect(
+        (await service.getChargeDetail(sale.chargeId)).shortLoss
+      ).toBeNull();
     });
   });
 

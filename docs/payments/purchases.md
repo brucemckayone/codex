@@ -417,15 +417,25 @@ in the existing refund email, and no checkout expiry).
   "Mark as paid another way" on the charge page, which shows what is still
   owed in place of the refund form (owner D60, D61;
   [operations.md](operations.md#a-blocked-payments-chargeback-lost-short-paid-another-way)).
-  The mark is the lost dispute's `refunded_outside_stripe_at`: the report
-  leaves it out from then on, and the charge is never refunded through
-  Stripe again. The alert, the report and the charge page read one query
-  (`findShortLosses`, `@codex/purchase` short-loss.ts) on one count
-  (`unrecoveredAfterLoss`); a refund that stands on the charge and makes the
-  buyer whole clears it too. There is no automatic refund. A loss in full,
-  or a loss won late, alerts nothing. A late win on a charge marked paid
-  another way refunds nothing and alerts support instead (owner D62): its
-  refund of the rest of the charge would pay the buyer twice.
+  The mark is the lost dispute's `refunded_outside_stripe_at` with what it
+  paid, `paid_another_way_cents` (owner D64): the report leaves it out from
+  then on, and the charge is never refunded through Stripe again. A late
+  win on a charge marked paid another way refunds nothing and alerts
+  support instead (owner D62): its refund of the rest of the charge would
+  pay the buyer twice. The bank has then taken the chargeback back from the
+  buyer, so they are owed again (owner D63): the report's second line,
+  "Blocked payments owed again after a late win: pay it another way, then
+  mark it paid on the support charge page", and the charge page say so
+  until support marks it a second time
+  (`late_win_refunded_outside_stripe_at`). The alerts, the report and the
+  charge page read one query (`findShortLosses`, `@codex/purchase`
+  short-loss.ts) on one sum for both stages (`owedAfterLoss`; the loss's
+  `unrecoveredAfterLoss` is the same sum for a lost, unmarked dispute):
+  paid, less the refunds standing on the charge, less what was paid
+  another way, less the chargeback while it stands lost. No dates are
+  compared, and a refund that stands on the charge and makes the buyer
+  whole clears either stage. There is no automatic refund. A loss in full,
+  or a loss won late before any mark, alerts nothing.
   Its alert for what is still owed names both kinds, and each row says
   which it is (`blocked`: `duplicate`, the buyer kept the item, or
   `unavailable`, the buyer has nothing). Support finds the ones still owed

@@ -973,10 +973,11 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
     });
 
     // Owner D62: support may have paid the rest of a SHORT lost chargeback
-    // another way and marked the charge (`refunded_outside_stripe_at`, D61).
-    // A late win then would refund what is left of the charge on top, so it
-    // makes no refund and alerts support at error to settle it by hand. The
-    // unmarked twin is refunded as before.
+    // another way and marked the charge (`refunded_outside_stripe_at` and
+    // `paid_another_way_cents`, D61, D64). A late win then would refund what
+    // is left of the charge on top, so it makes no refund and alerts support
+    // at error to settle it by hand, with what was paid and what is owed
+    // again. The unmarked twin is refunded as before.
     describe.each([
       { marked: true },
       { marked: false },
@@ -1025,9 +1026,13 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
         const disputeId = await loseIt(sale, { amountCents: 600 });
         const paidAnotherWayAt = new Date('2026-11-17T10:00:00.000Z');
         if (marked) {
+          // As the first mark writes it: the date, and the £4.00 it paid.
           await db
             .update(disputes)
-            .set({ refundedOutsideStripeAt: paidAnotherWayAt })
+            .set({
+              refundedOutsideStripeAt: paidAnotherWayAt,
+              paidAnotherWayCents: 400,
+            })
             .where(eq(disputes.stripeDisputeId, disputeId));
         }
         await record(sale, disputeId, 'won', 600);
@@ -1042,7 +1047,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
 
       it(
         marked
-          ? 'makes no refund, and alerts support at error with the charge, its amount and what Stripe shows refunded'
+          ? 'makes no refund, and alerts support at error with the charge, its amount, what Stripe shows refunded, what was paid another way and what is owed again'
           : 'refunds what is left of the charge, and alerts nothing',
         async () => {
           const { sale, disputeId, service, paidAnotherWayAt } =
@@ -1087,6 +1092,10 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
                   chargeAmountCents: 1000,
                   stripeRefundedCents: 0,
                   paidAnotherWayAt: paidAnotherWayAt.toISOString(),
+                  // £10.00 paid, £4.00 paid another way, the £6.00 taken
+                  // back from the buyer: £6.00 owed again (owner D64).
+                  paidAnotherWayCents: 400,
+                  owedCents: 600,
                 },
               ],
             ]);

@@ -1,7 +1,8 @@
 /**
- * "Paid another way" (owner D60, D61): the body of
+ * "Paid another way" (owner D60, D61, D63): the body of
  * POST /api/admin/support/charges/:chargeId/paid-another-way. What the page
- * showed: the lost dispute and the whole pence still owed; nothing else.
+ * showed: the dispute, the whole pence owed and which time it is owed
+ * (`stage`, `short` when absent); nothing else.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -29,8 +30,18 @@ describe('stripeDisputeIdSchema', () => {
 });
 
 describe('supportPaidAnotherWaySchema', () => {
-  it('takes the dispute and what is owed', () => {
-    expect(supportPaidAnotherWaySchema.parse(BODY)).toEqual(BODY);
+  it('takes the dispute and what is owed, as the first time when no stage is sent', () => {
+    expect(supportPaidAnotherWaySchema.parse(BODY)).toEqual({
+      ...BODY,
+      stage: 'short',
+    });
+  });
+
+  it.each(['short', 'owed_again'] as const)('takes the stage %s', (stage) => {
+    expect(supportPaidAnotherWaySchema.parse({ ...BODY, stage })).toEqual({
+      ...BODY,
+      stage,
+    });
   });
 
   it.each([
@@ -41,6 +52,8 @@ describe('supportPaidAnotherWaySchema', () => {
     ['part of a penny', { ...BODY, expectedOwedCents: 12.5 }],
     ['an amount as text', { ...BODY, expectedOwedCents: '500' }],
     ['a note, which has no column', { ...BODY, note: 'Paid by transfer' }],
+    ['an unknown stage', { ...BODY, stage: 'third' }],
+    ['a blank stage', { ...BODY, stage: '' }],
   ])('refuses %s', (_what, body) => {
     expect(supportPaidAnotherWaySchema.safeParse(body).success).toBe(false);
   });

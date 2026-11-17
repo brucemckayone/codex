@@ -39,6 +39,7 @@ import {
   isForeignStripeEnvironment,
   PRICE_LIMITS,
   PURCHASE_STATUS,
+  type ShortLossStage,
   STRIPE_REQUESTED_BY_METADATA_KEY,
   stripeEnvMetadata,
   TEMPLATE_SCOPES,
@@ -175,6 +176,7 @@ import {
 import { withStaleCustomerRecovery } from './resolve-customer';
 import {
   findShortLosses,
+  owedOnDispute,
   standingRefundOf,
   unrecoveredAfterLoss,
 } from './short-loss';
@@ -747,6 +749,21 @@ const BLOCKED_REFUNDS = {
     refunded: 'Payment for an unavailable item refunded',
   },
 } as const;
+
+/**
+ * The hourly report's two lines, one per stage a blocked payment is owed
+ * what Stripe won't refund (owner D59, D63), each saying what support does.
+ */
+const SHORT_LOSS_REPORTS: ReadonlyArray<readonly [ShortLossStage, string]> = [
+  [
+    'short',
+    'Blocked payments a lost chargeback refunded only in part: pay the rest another way, then mark it paid on the support charge page',
+  ],
+  [
+    'owed_again',
+    'Blocked payments owed again after a late win: pay it another way, then mark it paid on the support charge page',
+  ],
+];
 
 /**
  * Where a checkout session stands (Codex-2hxff.22). Our row, once there is
@@ -1665,33 +1682,36 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Every blocked payment a lost chargeback refunded only in part, so still
-   * owed the rest (owner D59), at error, once per run: up to `limit`, the
-   * newest dispute first, with how many there are in all (`total`), so a long
-   * tail is visible and a new one is never hidden behind old ones (review
-   * r4). Each with its PaymentIntent, dispute, kind, and what is owed, by the
-   * loss's own count (`findShortLosses`). The alert at the loss is the early
-   * signal; this one is read from the stored rows, so it repeats each run
-   * until support marks the payment paid another way on the charge page
-   * (owner D60, D61), and a lost log line never loses the debt (review r3).
-   * Nothing is refunded. Never throws: it runs after the sweep's refunds and
-   * logs its own failure.
+   * Every blocked payment owed what Stripe won't refund (owner D59, D63), at
+   * error, once per run, one line per stage (`findShortLosses`): `short`, a
+   * lost chargeback refunded it only in part; `owed_again`, that chargeback
+   * was won late after support paid the rest, so the bank took it back from
+   * the buyer. Each up to `limit`, newest first by when it became owed, with
+   * how many there are in all (`total`), so a long tail is visible and a new
+   * one is never hidden behind old ones (review r4). Each with its
+   * PaymentIntent, dispute, kind, and what is owed, by the one count
+   * (`owedAfterLoss`, D64). The alerts at the loss and at the late win are
+   * the early signals; this one is read from the stored rows, so it repeats
+   * each run until support marks the payment paid another way at that stage
+   * on the charge page (D61, D63), and a lost log line never loses the debt
+   * (review r3). Nothing is refunded. Never throws: it runs after the
+   * sweep's refunds and logs its own failure.
    */
   private async reportBlockedPaymentsShortAfterLoss(
     limit: number
   ): Promise<void> {
     try {
-      const { rows, total } = await findShortLosses(this.db, {
-        includePaidAnotherWay: false,
-        limit,
-      });
-      if (rows.length === 0) return;
-      this.obs.error(
-        'Blocked payments a lost chargeback refunded only in part: pay the rest another way, then mark it paid on the support charge page',
-        {
+      for (const [stage, message] of SHORT_LOSS_REPORTS) {
+        const { rows, total } = await findShortLosses(this.db, {
+          stage,
+          includeMarked: false,
+          limit,
+        });
+        if (rows.length === 0) continue;
+        this.obs.error(message, {
           errorId: crypto.randomUUID(),
           total,
-          short: rows.map((row) => ({
+          owed: rows.map((row) => ({
             purchaseId: row.purchaseId,
             stripePaymentIntentId: row.stripePaymentIntentId,
             stripeDisputeId: row.stripeDisputeId,
@@ -1699,8 +1719,8 @@ export class PurchaseService extends BaseService {
             owedCents: row.owedCents,
             currency: row.currency,
           })),
-        }
-      );
+        });
+      }
     } catch (error) {
       this.obs.error(
         "Could not check for blocked payments a lost chargeback left short; the sweep's refunds are not affected",
@@ -5248,8 +5268,12 @@ export class PurchaseService extends BaseService {
   /**
    * A late win on a charge support marked paid another way (owner D62): no
    * refund is made, and support settles the buyer by hand, at error with the
-   * charge's amount and what Stripe shows refunded on it (its standing
-   * refunds, as listed now). Once per run of the undo, which then goes on.
+   * charge's amount, what Stripe shows refunded on it (its standing refunds,
+   * as listed now), what the first mark paid another way
+   * (`paid_another_way_cents`) and what the buyer is owed now, by the one
+   * count (`owedAfterLoss`, owner D64; null when the dispute is another
+   * writer's mark). Once per run of the undo, which then goes on; the hourly
+   * report repeats it while it is owed again (D63).
    */
   private async alertLateWinOnChargePaidAnotherWay(
     dispute: Dispute,
@@ -5268,6 +5292,12 @@ export class PurchaseService extends BaseService {
         )
       )
       .reduce((sum, refund) => sum + refund.amount, 0);
+    const owed = await owedOnDispute(this.db, {
+      purchaseId: purchase.id,
+      stripeDisputeId: dispute.stripeDisputeId,
+    });
+    // The one count means what is owed only after the first mark (D61).
+    const paidAnotherWayCents = owed?.paidAnotherWayCents ?? null;
     this.obs.error(
       'Late win on a charge marked paid another way: no refund was made, so settle the buyer by hand',
       {
@@ -5278,6 +5308,8 @@ export class PurchaseService extends BaseService {
         chargeAmountCents: charge.amountCents,
         stripeRefundedCents,
         paidAnotherWayAt: paidAnotherWayAt.toISOString(),
+        paidAnotherWayCents,
+        owedCents: paidAnotherWayCents === null ? null : owed?.owedCents,
       }
     );
   }

@@ -109,9 +109,12 @@ describe('NotOwedAfterLossError', () => {
 });
 
 describe('ShortLossChangedError', () => {
-  it('is a 412 whose details carry SHORT_LOSS_CHANGED and what is owed now', () => {
+  it('is a 412 whose details carry SHORT_LOSS_CHANGED, what is owed now and at which stage', () => {
     expect(
-      mapErrorToResponse(new ShortLossChangedError(300), { logError: false })
+      mapErrorToResponse(
+        new ShortLossChangedError({ owedCents: 300, stage: 'owed_again' }),
+        { logError: false }
+      )
     ).toEqual({
       statusCode: 412,
       response: {
@@ -119,7 +122,11 @@ describe('ShortLossChangedError', () => {
           code: 'PRECONDITION_FAILED',
           message:
             "What's owed on this payment changed since it was loaded. Reload it and check.",
-          details: { code: 'SHORT_LOSS_CHANGED', owedCents: 300 },
+          details: {
+            code: 'SHORT_LOSS_CHANGED',
+            owedCents: 300,
+            stage: 'owed_again',
+          },
         },
       },
     });

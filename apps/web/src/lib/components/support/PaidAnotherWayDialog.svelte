@@ -1,19 +1,26 @@
 <!--
   @component PaidAnotherWayDialog
 
-  "Mark as paid another way" on a blocked payment whose chargeback was lost
-  for less than the payment (owner D60, D61; mockup
-  docs/handover/phase3-sources/pause-trials/support-short-loss.html, S2-S4).
-  The bank returned part and Stripe won't refund a charged-back payment, so
-  support pays the rest outside Stripe, then records it here. It sends
-  nothing: it writes the charge's refunded-outside-Stripe mark, which ends
-  the hourly alert and blocks every Stripe refund on the charge.
+  "Mark as paid another way" on a blocked payment owed what Stripe won't
+  refund (owner D60, D61, D63; mockup
+  docs/handover/phase3-sources/pause-trials/support-short-loss.html, S2-S4,
+  A2, A4), at its stage (`detail.shortLoss.stage`):
+  - `short`: its chargeback was lost for less than the payment. The bank
+    returned part and Stripe won't refund a charged-back payment, so support
+    pays the rest outside Stripe. The mark also blocks every Stripe refund
+    on the charge.
+  - `owed_again`: support had paid the rest, then the chargeback was won
+    late, so the bank took it back from the buyer. Support pays it again,
+    and marks it a second time.
+  It sends nothing: it records the mark, which ends the hourly alert.
 
-  - The confirm repeats the three amounts and says the money must already
-    have been paid. No note: there is no column for one (Q2).
-  - It sends the dispute and the amount it showed: what's owed having moved
-    since is a 412, and a repeat is a success (`alreadyMarked`), so Try
-    again after a lost answer is safe.
+  - The confirm repeats the amounts that add up to what is owed (paid, less
+    refunded through Stripe and what was paid another way, or less what the
+    bank returned) and says the money must already have been paid. No note:
+    there is no column for one (Q2).
+  - It sends the dispute, the stage and the amount it showed: any of them
+    having moved since is a 412, and a repeat is a success
+    (`alreadyMarked`), so Try again after a lost answer is safe.
   - Not saved (a 5xx, a dropped connection) or the session ended: the dialog
     stays open and says so. Every other answer closes it with a notice for
     the page (`onFinished`), which reloads the charge and focuses it; focus
@@ -37,7 +44,11 @@
   import { markPaidAnotherWay } from '$lib/remote/support.remote';
   import { isSessionEnded } from './session';
   import type { SettleNotice } from './settle-notice';
-  import { type PaidAnotherWayProblem, paidAnotherWayOutcome } from './short-loss-view';
+  import {
+    type PaidAnotherWayProblem,
+    paidAnotherWayFacts,
+    paidAnotherWayOutcome,
+  } from './short-loss-view';
   import { formatDay } from './support-format';
 
   interface Props {
@@ -53,8 +64,12 @@
   let answered = $state(false);
 
   const shortLoss = $derived(detail.shortLoss);
-  /** The mark a problem belongs to: a different charge or dispute starts clean. */
-  const markKey = $derived(`${detail.charge.id}:${shortLoss?.stripeDisputeId ?? ''}`);
+  /** Owed again after a late win (owner D63): the second mark. */
+  const owedAgain = $derived(shortLoss?.stage === 'owed_again');
+  /** The mark a problem belongs to: a different charge, dispute or stage starts clean. */
+  const markKey = $derived(
+    `${detail.charge.id}:${shortLoss?.stripeDisputeId ?? ''}:${shortLoss?.stage ?? ''}`
+  );
   let failure = $state<{ key: string; problem: PaidAnotherWayProblem } | null>(null);
   const problem = $derived(failure?.key === markKey ? failure.problem : null);
   const buyer = $derived(detail.buyer.name);
@@ -63,6 +78,30 @@
     detail.source.type === 'purchase'
       ? (detail.source.item?.title ?? m.support_item_unknown())
       : detail.source.planName
+  );
+  const description = $derived.by(() => {
+    const words = { item: itemTitle, date: formatDay(detail.charge.paidAt) };
+    return owedAgain
+      ? m.support_owed_again_dialog_description(words)
+      : m.support_short_loss_dialog_description(words);
+  });
+  /** The amounts that add up to what is owed. */
+  const facts = $derived(
+    shortLoss ? paidAnotherWayFacts(shortLoss, detail.charge.amountCents) : []
+  );
+  /** Why it stayed open: the session ended, or it may not have saved. */
+  const problemWords = $derived(
+    problem === 'session_ended'
+      ? { lead: m.support_outcome_signed_out_lead(), text: m.support_short_loss_session_ended() }
+      : { lead: m.support_short_loss_failed_lead(), text: m.support_short_loss_failed() }
+  );
+  /** Try again once it may not have saved; else the mark, with its amount. */
+  const submitLabel = $derived(
+    problem === 'failed' ? m.support_queue_fees_try_again() : m.support_short_loss_dialog_submit({ owed })
+  );
+  /** What follows the mark: a second one says nothing of Stripe, already blocked. */
+  const follows = $derived(
+    owedAgain ? m.support_owed_again_dialog_follows() : m.support_short_loss_dialog_follows()
   );
 
   /** Read once, by the close an answer made: the next close is the default again. */
@@ -90,6 +129,7 @@
         body: {
           stripeDisputeId: marking.shortLoss.stripeDisputeId,
           expectedOwedCents: marking.shortLoss.owedCents,
+          stage: marking.shortLoss.stage,
         },
       });
       const outcome = paidAnotherWayOutcome(answer, marking.buyer);
@@ -114,12 +154,7 @@
     <Dialog.Content size="sm">
       <Dialog.Header>
         <Dialog.Title>{m.support_short_loss_dialog_title({ owed, buyer })}</Dialog.Title>
-        <Dialog.Description>
-          {m.support_short_loss_dialog_description({
-            item: itemTitle,
-            date: formatDay(detail.charge.paidAt),
-          })}
-        </Dialog.Description>
+        <Dialog.Description>{description}</Dialog.Description>
       </Dialog.Header>
       <Dialog.Body>
         {#if problem}
@@ -130,38 +165,22 @@
             data-testid="paid-another-way-problem"
             data-problem={problem}
           >
-            {#if problem === 'session_ended'}
-              <p>
-                <strong>{m.support_outcome_signed_out_lead()}</strong>
-                {m.support_short_loss_session_ended()}
-              </p>
-            {:else}
-              <p>
-                <strong>{m.support_short_loss_failed_lead()}</strong>
-                {m.support_short_loss_failed()}
-              </p>
-            {/if}
+            <p><strong>{problemWords.lead}</strong> {problemWords.text}</p>
           </Alert>
         {/if}
         <ul class="facts" data-testid="paid-another-way-facts">
-          <li>
-            <span>{m.support_short_loss_fact_paid()}</span>
-            <span class="facts__amount">{formatPrice(detail.charge.amountCents)}</span>
-          </li>
-          <li>
-            <span>{m.support_short_loss_fact_lost()}</span>
-            <span class="facts__amount">{formatPrice(shortLoss.lostCents)}</span>
-          </li>
-          <li class="facts__owed">
-            <span>{m.support_short_loss_fact_owed()}</span>
-            <span class="facts__amount">{owed}</span>
-          </li>
+          {#each facts as fact (fact.label)}
+            <li class={{ facts__owed: fact.owed }}>
+              <span>{fact.label}</span>
+              <span class="facts__amount">{formatPrice(fact.amountCents)}</span>
+            </li>
+          {/each}
         </ul>
         <p class="text">
           <strong>{m.support_short_loss_dialog_paid_first_lead({ buyer })}</strong>
           {m.support_short_loss_dialog_paid_first()}
         </p>
-        <p class="text">{m.support_short_loss_dialog_follows()}</p>
+        <p class="text">{follows}</p>
       </Dialog.Body>
       <Dialog.Footer>
         <Button variant="secondary" onclick={() => (open = false)} disabled={busy}>
@@ -173,9 +192,7 @@
           onclick={handleSubmit}
           data-testid="paid-another-way-submit"
         >
-          {problem === 'failed'
-            ? m.support_queue_fees_try_again()
-            : m.support_short_loss_dialog_submit({ owed })}
+          {submitLabel}
         </Button>
       </Dialog.Footer>
     </Dialog.Content>

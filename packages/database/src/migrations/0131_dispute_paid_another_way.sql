@@ -1,0 +1,4 @@
+ALTER TABLE "disputes" ADD COLUMN "paid_another_way_cents" integer;--> statement-breakpoint
+ALTER TABLE "disputes" ADD COLUMN "late_win_refunded_outside_stripe_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "disputes" ADD CONSTRAINT "check_disputes_paid_another_way" CHECK ("disputes"."paid_another_way_cents" IS NULL OR ("disputes"."paid_another_way_cents" > 0 AND "disputes"."refunded_outside_stripe_at" IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "disputes" ADD CONSTRAINT "check_disputes_late_win_paid_another_way" CHECK ("disputes"."late_win_refunded_outside_stripe_at" IS NULL OR ("disputes"."paid_another_way_cents" IS NOT NULL AND "disputes"."late_won_at" IS NOT NULL));

@@ -219,6 +219,7 @@ function supportMock() {
     markPaidAnotherWay: vi.fn().mockResolvedValue({
       chargeId: CHARGE,
       stripeDisputeId: DISPUTE,
+      stage: 'short',
       owedCents: 500,
       paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
       alreadyMarked: false,
@@ -616,13 +617,18 @@ describe('paid another way', () => {
   const path = `/api/admin/support/charges/${CHARGE}/paid-another-way`;
 
   it('passes the charge, the validated body and who marked it, and answers 200 with the mark', async () => {
-    const body = { stripeDisputeId: DISPUTE, expectedOwedCents: 500 };
+    const body = {
+      stripeDisputeId: DISPUTE,
+      expectedOwedCents: 500,
+      stage: 'short',
+    };
     const res = await call('POST', path, body);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       data: {
         chargeId: CHARGE,
         stripeDisputeId: DISPUTE,
+        stage: 'short',
         owedCents: 500,
         paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
         alreadyMarked: false,
@@ -631,6 +637,21 @@ describe('paid another way', () => {
     expect(support.markPaidAnotherWay).toHaveBeenCalledWith(
       CHARGE,
       body,
+      PLATFORM_OWNER.id
+    );
+  });
+
+  // The second mark names its stage (owner D63); a page loaded before the
+  // second stage sends none, which is the first mark.
+  it.each([
+    ['the second mark', { stage: 'owed_again' }, 'owed_again'],
+    ['no stage, the first mark', {}, 'short'],
+  ])('passes %s to the service', async (_what, stage, passed) => {
+    const body = { stripeDisputeId: DISPUTE, expectedOwedCents: 500 };
+    expect((await call('POST', path, { ...body, ...stage })).status).toBe(200);
+    expect(support.markPaidAnotherWay).toHaveBeenCalledWith(
+      CHARGE,
+      { ...body, stage: passed },
       PLATFORM_OWNER.id
     );
   });
@@ -646,6 +667,10 @@ describe('paid another way', () => {
     [
       'a note',
       { stripeDisputeId: DISPUTE, expectedOwedCents: 500, note: 'Paid' },
+    ],
+    [
+      'an unknown stage',
+      { stripeDisputeId: DISPUTE, expectedOwedCents: 500, stage: 'third' },
     ],
   ])('refuses %s with 400, before the service', async (_what, body) => {
     expect((await call('POST', path, body)).status).toBe(400);

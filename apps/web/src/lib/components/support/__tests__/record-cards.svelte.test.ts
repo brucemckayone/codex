@@ -23,6 +23,7 @@ import {
   lateWonChargeback,
   lateWonHistoryLine,
   NOW,
+  owedAgainDetail,
   refundRow,
   SLICES,
   shortLossDetail,
@@ -101,6 +102,25 @@ describe('The charge', () => {
       '£15.00 · £10.00 back through the lost chargeback · £5.00 paid another way on 17 Nov 2026'
     );
     expect(text()).not.toContain('£15.00 · refunded outside Stripe');
+  });
+
+  // Owner D63 (A1, A3): after a late win on a charge paid another way.
+  test('owed again: what was paid another way, the late win, and what is owed again', () => {
+    render(ChargeSummaryCard, { detail: owedAgainDetail(), now: NOW });
+    expect(text()).toContain(
+      '£15.00 · £5.00 paid another way · chargeback won late · £10.00 owed to the buyer again'
+    );
+    expect(text()).not.toContain('£15.00 · refunded outside Stripe');
+  });
+
+  test('marked twice: both payments made another way, and when', () => {
+    render(ChargeSummaryCard, {
+      detail: owedAgainDetail({ paidAgainOn: '2026-12-02T10:00:00.000Z' }),
+      now: NOW,
+    });
+    expect(text()).toContain(
+      '£15.00 · paid another way: £5.00 on 17 Nov 2026, £10.00 on 2 Dec 2026'
+    );
   });
 
   test('a window a late win lifted (Q7): no time limit, and never its passed date', () => {

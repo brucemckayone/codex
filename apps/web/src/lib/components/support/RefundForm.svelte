@@ -25,13 +25,14 @@
   won chargeback still paying the creators back, nothing left) shows the
   reason in place of the form; the server refuses all five too.
 
-  A blocked payment whose chargeback was lost for less than the payment
-  (`detail.shortLoss`, owner D59-D61) shows what is still owed instead, and
-  "Mark as paid another way" (PaidAnotherWayDialog): Stripe can't refund it,
-  so support pays the rest outside Stripe and records it. Once marked, the
-  refunded-outside-Stripe block shows, with a line saying how the buyer was
-  paid. The dialog's answer goes to the page (`onSettled`), which shows it,
-  reloads the charge and focuses the notice.
+  A blocked payment owed what Stripe won't refund (`detail.shortLoss`, owner
+  D59-D64), after its chargeback was lost for less than the payment or again
+  after support paid the rest and the chargeback was won late, shows what is
+  owed instead, and "Mark as paid another way" (PaidAnotherWayDialog):
+  support pays it outside Stripe and records it. Once marked at its stage,
+  the refunded-outside-Stripe block shows, with a line saying how the buyer
+  was paid. The dialog's answer goes to the page (`onSettled`), which shows
+  it, reloads the charge and focuses the notice.
 
   A preview the route REFUSES (a 4xx: the amount no longer fits, nothing is
   left) means the charge moved since it loaded, so trying again can never
@@ -80,6 +81,7 @@
   import { isSessionEnded } from './session';
   import SessionEndedAlert from './SessionEndedAlert.svelte';
   import type { SettleNotice } from './settle-notice';
+  import { shortLossAlert, shortLossMarkedOn, shortLossPaidNote } from './short-loss-view';
   import {
     formatDay,
     formatTime,
@@ -436,25 +438,15 @@
     }
   }
 
-  // ── A short lost chargeback: what is still owed (owner D59-D61) ─────────
+  // ── Owed what Stripe won't refund, after a loss or a late win (owner D59-D64)
   const shortLoss = $derived(detail.shortLoss);
-  /** Still owed, not yet marked paid another way: shown in place of the block. */
-  const owedAfterLoss = $derived(shortLoss && !shortLoss.paidAnotherWayOn ? shortLoss : null);
-  const shortLossText = $derived.by(() => {
-    if (!owedAfterLoss) return null;
-    const words = {
-      amount: formatPrice(detail.charge.amountCents),
-      lost: formatPrice(owedAfterLoss.lostCents),
-      owed: formatPrice(owedAfterLoss.owedCents),
-    };
-    return {
-      lead: m.support_short_loss_lead(words),
-      body:
-        owedAfterLoss.kind === 'duplicate'
-          ? m.support_short_loss_body_duplicate(words)
-          : m.support_short_loss_body_unavailable(words),
-    };
-  });
+  /** Owed, not yet marked paid another way at its stage: shown in place of the block. */
+  const owedAfterLoss = $derived(shortLoss && !shortLossMarkedOn(shortLoss) ? shortLoss : null);
+  const shortLossText = $derived(
+    owedAfterLoss ? shortLossAlert(owedAfterLoss, detail.charge.amountCents) : null
+  );
+  /** How the buyer was paid, once marked: under the refunded-outside-Stripe block. */
+  const paidNote = $derived(shortLoss ? shortLossPaidNote(shortLoss) : null);
   let paidAnotherWayOpen = $state(false);
 
   /**
@@ -607,7 +599,12 @@
   </Card.Header>
   <Card.Content>
     {#if owedAfterLoss && shortLossText}
-      <Alert variant="warning" data-testid="short-loss" data-kind={owedAfterLoss.kind}>
+      <Alert
+        variant="warning"
+        data-testid="short-loss"
+        data-kind={owedAfterLoss.kind}
+        data-stage={owedAfterLoss.stage}
+      >
         <div class="short-loss">
           <p><strong>{shortLossText.lead}</strong> {shortLossText.body}</p>
           <p class="short-loss__hint">{m.support_short_loss_hourly()}</p>
@@ -631,13 +628,8 @@
           {alert.body}
         </p>
       </Alert>
-      {#if shortLoss?.paidAnotherWayOn}
-        <p class="paid-note" data-testid="short-loss-paid">
-          {m.support_short_loss_paid_note({
-            lost: formatPrice(shortLoss.lostCents),
-            owed: formatPrice(shortLoss.owedCents),
-          })}
-        </p>
+      {#if paidNote}
+        <p class="paid-note" data-testid="short-loss-paid">{paidNote}</p>
       {/if}
     {:else}
       <div class="refund-form">

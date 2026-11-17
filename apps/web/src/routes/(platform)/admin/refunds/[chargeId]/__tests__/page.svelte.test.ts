@@ -753,6 +753,7 @@ describe('a short lost chargeback, paid another way (owner D61)', () => {
       result: {
         chargeId: CHARGE_ID,
         stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+        stage: 'short',
         owedCents: 500,
         paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
         alreadyMarked: false,

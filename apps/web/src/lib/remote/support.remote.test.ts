@@ -322,6 +322,7 @@ describe('the input schemas', () => {
       { ...PAID_ANOTHER_WAY, body: { ...body, expectedOwedCents: 0 } },
       { ...PAID_ANOTHER_WAY, body: { ...body, expectedOwedCents: 12.5 } },
       { ...PAID_ANOTHER_WAY, body: { ...body, note: 'Paid by transfer.' } },
+      { ...PAID_ANOTHER_WAY, body: { ...body, stage: 'third' } },
       { chargeId: CHARGE, body: { stripeDisputeId: DISPUTE } },
     ]) {
       expect(
@@ -612,28 +613,45 @@ describe('the settle commands', () => {
   });
 });
 
-describe('a short lost chargeback, paid another way (owner D61)', () => {
-  it('sends the dispute and the amount the page showed, and answers the mark', async () => {
-    api.markPaidAnotherWay.mockResolvedValue({
+describe('a short lost chargeback, paid another way (owner D61, D63)', () => {
+  it('sends the dispute and the amount the page showed, the first mark when no stage is given, and answers the mark', async () => {
+    const result = {
       chargeId: CHARGE,
       stripeDisputeId: DISPUTE,
+      stage: 'short' as const,
       owedCents: 1500,
       paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
-      alreadyMarked: false,
-    });
+      alreadyMarked: false as const,
+    };
+    api.markPaidAnotherWay.mockResolvedValue(result);
     await expect(remote.markPaidAnotherWay(PAID_ANOTHER_WAY)).resolves.toEqual({
       outcome: 'done',
-      result: {
-        chargeId: CHARGE,
-        stripeDisputeId: DISPUTE,
-        owedCents: 1500,
-        paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
-        alreadyMarked: false,
-      },
+      result,
     });
     expect(api.markPaidAnotherWay).toHaveBeenCalledWith(CHARGE, {
       stripeDisputeId: DISPUTE,
       expectedOwedCents: 1500,
+      stage: 'short',
+    });
+  });
+
+  it('sends the second mark with its stage', async () => {
+    api.markPaidAnotherWay.mockResolvedValue({
+      chargeId: CHARGE,
+      stripeDisputeId: DISPUTE,
+      stage: 'owed_again',
+      owedCents: 1000,
+      paidAnotherWayOn: '2026-12-02T10:00:00.000Z',
+      alreadyMarked: false,
+    });
+    await remote.markPaidAnotherWay({
+      ...PAID_ANOTHER_WAY,
+      body: { ...PAID_ANOTHER_WAY.body, stage: 'owed_again' },
+    });
+    expect(api.markPaidAnotherWay).toHaveBeenCalledWith(CHARGE, {
+      stripeDisputeId: DISPUTE,
+      expectedOwedCents: 1500,
+      stage: 'owed_again',
     });
   });
 

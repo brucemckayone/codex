@@ -849,6 +849,8 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       'A lost chargeback refunded only part of a blocked payment: pay the rest another way, then mark it paid on the support charge page';
     const SHORT_REPORT =
       'Blocked payments a lost chargeback refunded only in part: pay the rest another way, then mark it paid on the support charge page';
+    const OWED_AGAIN_REPORT =
+      'Blocked payments owed again after a late win: pay it another way, then mark it paid on the support charge page';
 
     /**
      * A blocked payment of this kind whose refund Stripe refused: owed.
@@ -952,13 +954,15 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       });
     }
 
-    /** What the sweep's short-loss report names, one entry per payment. */
-    function shortReported(errors: ReturnType<typeof errorsOf>) {
+    /** What the sweep's report line names, one entry per payment. */
+    function shortReported(
+      errors: ReturnType<typeof errorsOf>,
+      line: string = SHORT_REPORT
+    ) {
       return errors.mock.calls
-        .filter(([message]) => message === SHORT_REPORT)
+        .filter(([message]) => message === line)
         .flatMap(
-          ([, meta]) =>
-            (meta as { short: Array<Record<string, unknown>> }).short
+          ([, meta]) => (meta as { owed: Array<Record<string, unknown>> }).owed
         );
     }
 
@@ -1154,7 +1158,8 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       // Ahead of any other file's loss in the shared database.
       const newer = await shortLoss(new Date(Date.now() + 60_000));
       const all = await findShortLosses(db, {
-        includePaidAnotherWay: false,
+        stage: 'short',
+        includeMarked: false,
         limit: 100_000,
       });
       expect(all.rows.map((row) => row.stripePaymentIntentId)).toEqual(
@@ -1171,9 +1176,9 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       expect(reports).toHaveLength(1);
       const report = reports[0]?.[1] as {
         total: number;
-        short: Array<{ stripePaymentIntentId: string }>;
+        owed: Array<{ stripePaymentIntentId: string }>;
       };
-      expect(report.short.map((entry) => entry.stripePaymentIntentId)).toEqual([
+      expect(report.owed.map((entry) => entry.stripePaymentIntentId)).toEqual([
         newer,
       ]);
       expect(report.total).toBe(all.total);
@@ -1222,7 +1227,9 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       }
     });
 
-    it('a short loss that is then won late is not reported', async () => {
+    // Owed again needs support's first mark (owner D63): with none, the late
+    // win refunds the charge through Stripe, so neither line names it.
+    it('a short loss that is then won late, never marked, is not reported on either line', async () => {
       const { service, stripe } = fresh();
       const { pi } = await owedBlocked(service, stripe);
       const disputeId = await openChargeback(service, pi);
@@ -1236,9 +1243,13 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
 
       await sweep(service);
 
-      expect(
-        shortReported(errors).map((reported) => reported.stripePaymentIntentId)
-      ).not.toContain(pi);
+      for (const line of [SHORT_REPORT, OWED_AGAIN_REPORT]) {
+        expect(
+          shortReported(errors, line).map(
+            (reported) => reported.stripePaymentIntentId
+          )
+        ).not.toContain(pi);
+      }
     });
 
     // Review r3 (CRITICAL by corroboration): a pending blocked row records no

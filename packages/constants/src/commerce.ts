@@ -106,6 +106,16 @@ export function disputeAppealOf(status: string): DisputeAppealStatus | null {
 }
 
 /**
+ * The two times a blocked payment's buyer is owed money support pays another
+ * way (owner D59-D64): `short`, after its chargeback was lost for less than
+ * the payment, and `owed_again`, after support paid the rest and the
+ * chargeback was then won late, so the bank took it back from the buyer.
+ * Support marks each paid another way on the charge page.
+ */
+export const SHORT_LOSS_STAGES = ['short', 'owed_again'] as const;
+export type ShortLossStage = (typeof SHORT_LOSS_STAGES)[number];
+
+/**
  * Whether Stripe's dispute status settles as a loss (owner D34): `lost`, or
  * an appeal of it, which only a loss reaches. The platform has lost the
  * money either way, so the dispute record, the hourly reconcile and the

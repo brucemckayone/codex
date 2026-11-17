@@ -49,6 +49,7 @@
 
 import {
   appealMarkOn,
+  type ShortLossStage,
   STRIPE_ENV_METADATA_KEY,
   STRIPE_REQUESTED_BY_METADATA_KEY,
   STRIPE_SUPPORT_KEY_METADATA_KEY,
@@ -557,30 +558,71 @@ function buyerOf(row: {
   };
 }
 
-/** The charge detail's short loss (`findShortLosses`), or null. */
+/**
+ * The charge detail's blocked payment owed what Stripe won't refund
+ * (`findShortLosses`), at its stage, or null. Once the first mark is made,
+ * `short`'s amount is what it paid (`paid_another_way_cents`).
+ */
 function shortLossView(
   row: Awaited<ReturnType<typeof findShortLosses>>['rows'][number] | undefined
 ): ChargeShortLoss | null {
   if (!row) return null;
+  const { stripeDisputeId, kind, lostCents } = row;
+  if (row.stage === 'short') {
+    return {
+      stage: 'short',
+      stripeDisputeId,
+      kind,
+      lostCents,
+      owedCents: row.paidAnotherWayCents ?? row.owedCents,
+      paidAnotherWayOn: toIso(row.paidAnotherWayAt),
+    };
+  }
+  // Owed again is found only after the first mark and the late win.
+  if (
+    row.paidAnotherWayCents === null ||
+    row.paidAnotherWayAt === null ||
+    row.lateWonAt === null
+  ) {
+    throw new InternalServiceError(
+      'A payment owed again has no first mark or late win',
+      { stripeDisputeId }
+    );
+  }
   return {
-    stripeDisputeId: row.stripeDisputeId,
-    kind: row.kind,
-    lostCents: row.lostCents,
+    stage: 'owed_again',
+    stripeDisputeId,
+    kind,
+    lostCents,
+    paidAnotherWayCents: row.paidAnotherWayCents,
+    paidAnotherWayOn: row.paidAnotherWayAt.toISOString(),
+    lateWonOn: row.lateWonAt.toISOString(),
+    refundedThroughStripeCents: row.refundedThroughStripeCents,
     owedCents: row.owedCents,
-    paidAnotherWayOn: toIso(row.paidAnotherWayAt),
+    paidAgainOn: toIso(row.paidAgainAt),
   };
 }
 
 /**
- * Why a charge with no short loss can't be marked paid another way, from its
- * disputes (locked by the caller): none lost, then the lost one's payment
- * not a blocked one (or none linked), else the loss left nothing owed.
+ * Why a charge with nothing owed can't be marked paid another way, from its
+ * disputes (locked by the caller): none lost (nor won late after a first
+ * mark), then its payment not a blocked one (or none linked), else nothing
+ * is owed on it now.
  */
 async function notOwedReason(
   tx: Tx,
-  held: ReadonlyArray<{ status: string; purchaseId: string | null }>
+  held: ReadonlyArray<{
+    status: string;
+    purchaseId: string | null;
+    lateWonAt: Date | null;
+    paidAnotherWayCents: number | null;
+  }>
 ): Promise<NotOwedAfterLossReason> {
-  const lost = held.find((row) => row.status === 'lost');
+  const lost = held.find(
+    (row) =>
+      row.status === 'lost' ||
+      (row.lateWonAt !== null && row.paidAnotherWayCents !== null)
+  );
   if (!lost) return 'no_lost_dispute';
   if (!lost.purchaseId) return 'not_blocked';
   const [purchase] = await tx
@@ -594,6 +636,30 @@ async function notOwedReason(
   return purchase && blockedKind(purchase) !== null
     ? 'not_short'
     : 'not_blocked';
+}
+
+/**
+ * A mark made already at `stage` on the dispute the page named, from the
+ * locked rows (review r5): the first is known by its amount, the second by
+ * its date. Read before what is owed, so a repeat answers `alreadyMarked`
+ * even once a refund has come to stand since and nothing is owed.
+ */
+function markMadeAt(
+  held: ReadonlyArray<{
+    stripeDisputeId: string;
+    refundedOutsideStripeAt: Date | null;
+    paidAnotherWayCents: number | null;
+    lateWinRefundedOutsideStripeAt: Date | null;
+  }>,
+  stage: ShortLossStage,
+  stripeDisputeId: string
+): Date | null {
+  const named = held.find((row) => row.stripeDisputeId === stripeDisputeId);
+  if (!named) return null;
+  if (stage === 'owed_again') return named.lateWinRefundedOutsideStripeAt;
+  return named.paidAnotherWayCents === null
+    ? null
+    : named.refundedOutsideStripeAt;
 }
 
 /**
@@ -1086,11 +1152,12 @@ export class SupportService extends BaseService {
             })
             .from(refunds)
             .where(eq(refunds.stripeChargeId, chargeId)),
-          // A short lost chargeback, marked or not (owner D61): the loss's own
-          // count of what is still owed, never a second formula.
+          // A blocked payment owed what Stripe won't refund, at either stage,
+          // marked or not (owner D61, D63): the one count of what is owed,
+          // never a second formula.
           findShortLosses(this.db, {
             chargeId,
-            includePaidAnotherWay: true,
+            includeMarked: true,
             limit: 1,
           }),
         ]);
@@ -1159,22 +1226,35 @@ export class SupportService extends BaseService {
   }
 
   /**
-   * "Paid another way" (owner D60, D61): support paid the buyer the rest of a
-   * blocked payment's short lost chargeback outside Stripe, and says so. It
-   * writes the dispute's `refunded_outside_stripe_at`, the mark late wins use
-   * (`markRefundedOutsideStripe`): the charge is never refunded through
-   * Stripe again, a late win on it makes no automatic refund (owner D62), and
-   * the hourly short-loss report leaves it out. Nothing is paid here.
+   * "Paid another way" (owner D60, D61, D63): support paid a blocked
+   * payment's buyer what Stripe won't refund, outside Stripe, and says so, at
+   * the stage the page showed (`input.stage`):
+   * - `short`, after its chargeback was lost for less than the payment: it
+   *   writes the dispute's `refunded_outside_stripe_at` and what was owed,
+   *   `paid_another_way_cents` (D64). The charge is never refunded through
+   *   Stripe again, a late win on it makes no automatic refund (D62), and
+   *   the hourly report leaves it out;
+   * - `owed_again`, after that chargeback was won late, so the bank took it
+   *   back from the buyer: it writes `late_win_refunded_outside_stripe_at`,
+   *   and the hourly report leaves it out.
+   * Nothing is paid here.
    *
    * In one transaction: the charge's disputes are locked first, the late
-   * win's order (dispute, then purchase), then the short loss is read again
-   * by the loss's own count (`findShortLosses`). Answers:
-   * - marked already: the first date, `alreadyMarked`, never a refusal, so a
-   *   retry after a lost answer is safe and two people marking at once both
-   *   see the truth;
-   * - the dispute or the amount owed is not what the page showed
+   * win's order (dispute, then purchase), then what is owed is read again by
+   * the one count (`findShortLosses`). A late win records its dispute `won`
+   * under the same row lock, so it and a mark run one after the other: a
+   * first mark after it finds nothing lost (422 `no_lost_dispute`) and the
+   * late win refunds through Stripe; one before it is seen by the late win's
+   * refund step (D62), which makes none, and the payment is owed again. A
+   * second mark needs the late win committed, and the late win's later steps
+   * never write either mark. Answers:
+   * - marked already at that stage (on the locked rows, before what is
+   *   owed): the mark's date, `alreadyMarked`, never a refusal, so a retry
+   *   after a lost answer is safe and two people marking at once both see
+   *   the truth;
+   * - the dispute, the stage or the amount owed is not what the page showed
    *   (`expectedOwedCents`): `ShortLossChangedError` (412), nothing marked;
-   * - no short loss: `NotOwedAfterLossError` (422) with its reason;
+   * - nothing owed: `NotOwedAfterLossError` (422) with its reason;
    * - an unknown charge: 404, as the charge read.
    * Who marked it is logged at info; there is no column for it (owner Q2).
    */
@@ -1185,6 +1265,7 @@ export class SupportService extends BaseService {
   ): Promise<PaidAnotherWayResult> {
     try {
       await this.retrieveCharge(chargeId, false);
+      const { stage } = input;
       const outcome = await this.db.transaction(async (tx) => {
         const held = await tx
           .select()
@@ -1192,54 +1273,111 @@ export class SupportService extends BaseService {
           .where(eq(disputes.stripeChargeId, chargeId))
           .orderBy(asc(disputes.stripeCreatedAt), asc(disputes.stripeDisputeId))
           .for('update');
+        const markedOn = markMadeAt(held, stage, input.stripeDisputeId);
+        if (markedOn) return { alreadyMarked: true, on: markedOn } as const;
         const {
-          rows: [short],
+          rows: [owed],
         } = await findShortLosses(tx, {
           chargeId,
-          includePaidAnotherWay: true,
+          includeMarked: false,
           limit: 1,
         });
-        if (!short) {
+        if (!owed) {
           throw new NotOwedAfterLossError(await notOwedReason(tx, held));
         }
-        if (short.paidAnotherWayAt) {
-          return { short, on: short.paidAnotherWayAt, alreadyMarked: true };
-        }
         if (
-          short.stripeDisputeId !== input.stripeDisputeId ||
-          short.owedCents !== input.expectedOwedCents
+          owed.stage !== stage ||
+          owed.stripeDisputeId !== input.stripeDisputeId ||
+          owed.owedCents !== input.expectedOwedCents
         ) {
-          throw new ShortLossChangedError(short.owedCents);
+          throw new ShortLossChangedError(owed);
         }
-        const now = new Date();
-        await this.markRefundedOutsideStripe(
-          tx,
-          short.stripeDisputeId,
-          chargeId,
-          now
-        );
-        return { short, on: now, alreadyMarked: false };
+        const on = await this.writePaidAnotherWay(tx, owed, chargeId);
+        return { alreadyMarked: false, on, owed } as const;
       });
-      const { short, on, alreadyMarked } = outcome;
-      if (!alreadyMarked) {
-        this.obs.info('A short lost chargeback was marked paid another way', {
+      if (outcome.alreadyMarked) {
+        return {
           chargeId,
-          disputeId: short.stripeDisputeId,
-          purchaseId: short.purchaseId,
-          owedCents: short.owedCents,
-          markedByUserId: supportUserId,
-        });
+          stripeDisputeId: input.stripeDisputeId,
+          stage,
+          paidAnotherWayOn: outcome.on.toISOString(),
+          alreadyMarked: true,
+          owedCents: null,
+        };
       }
+      const { owed, on } = outcome;
+      this.obs.info(
+        stage === 'short'
+          ? 'A short lost chargeback was marked paid another way'
+          : 'A payment owed again after a late win was marked paid another way',
+        {
+          chargeId,
+          disputeId: owed.stripeDisputeId,
+          purchaseId: owed.purchaseId,
+          stage,
+          owedCents: owed.owedCents,
+          markedByUserId: supportUserId,
+        }
+      );
       return {
         chargeId,
-        stripeDisputeId: short.stripeDisputeId,
-        owedCents: short.owedCents,
+        stripeDisputeId: owed.stripeDisputeId,
+        stage,
         paidAnotherWayOn: on.toISOString(),
-        alreadyMarked,
+        alreadyMarked: false,
+        owedCents: owed.owedCents,
       };
     } catch (error) {
       this.handleError(error, 'markPaidAnotherWay');
     }
+  }
+
+  /**
+   * Write a "Paid another way" mark at `owed`'s stage on its dispute, under
+   * the caller's row lock, once (`IS NULL`): the first, with what was owed
+   * (`paid_another_way_cents`) and `refunded_outside_stripe_at` (a date set
+   * already is kept: no date is overwritten); the second,
+   * `late_win_refunded_outside_stripe_at`. Returns the mark's date.
+   */
+  private async writePaidAnotherWay(
+    tx: Tx,
+    owed: { stage: ShortLossStage; stripeDisputeId: string; owedCents: number },
+    chargeId: string
+  ): Promise<Date> {
+    const now = new Date();
+    const ofDispute = and(
+      eq(disputes.stripeDisputeId, owed.stripeDisputeId),
+      eq(disputes.stripeChargeId, chargeId)
+    );
+    const [marked] =
+      owed.stage === 'short'
+        ? await tx
+            .update(disputes)
+            .set({
+              paidAnotherWayCents: owed.owedCents,
+              refundedOutsideStripeAt: sql`COALESCE(${disputes.refundedOutsideStripeAt}, ${now.toISOString()}::timestamptz)`,
+            })
+            .where(and(ofDispute, isNull(disputes.paidAnotherWayCents)))
+            // `.returning({ … })` doesn't type-check on this client's union.
+            .returning()
+        : await tx
+            .update(disputes)
+            .set({ lateWinRefundedOutsideStripeAt: now })
+            .where(
+              and(ofDispute, isNull(disputes.lateWinRefundedOutsideStripeAt))
+            )
+            .returning();
+    const on =
+      owed.stage === 'short'
+        ? marked?.refundedOutsideStripeAt
+        : marked?.lateWinRefundedOutsideStripeAt;
+    if (!on) {
+      throw new InternalServiceError(
+        'A "Paid another way" mark found under its lock was not written',
+        { stripeDisputeId: owed.stripeDisputeId, chargeId }
+      );
+    }
+    return on;
   }
 
   private cardOf(charge: Stripe.Charge): ChargeDetail['charge']['card'] {

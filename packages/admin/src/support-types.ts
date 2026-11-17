@@ -15,7 +15,7 @@
  * users are returned with `deleted: true`, for the page to label.
  */
 
-import type { DisputeAppealStatus } from '@codex/constants';
+import type { DisputeAppealStatus, ShortLossStage } from '@codex/constants';
 import type { BlockedPaymentKind } from '@codex/purchase';
 
 /** What was paid for: a one-off purchase, or an invoice of a subscription. */
@@ -199,37 +199,78 @@ export interface ChargeDetail {
   refunds: RefundRow[];
   chargebacks: ChargebackRow[];
   /**
-   * A blocked payment whose chargeback was lost for less than the payment:
-   * what the bank returned, what is still owed, and when support marked it
-   * paid another way (owner D59-D61). Null for anything else: a sale, an
-   * invoice, a loss in full.
+   * A blocked payment owed what Stripe won't refund (owner D59-D64): after
+   * its chargeback was lost for less than the payment (`short`), or after
+   * that chargeback was won late once support had paid the rest
+   * (`owed_again`), with what is owed and support's marks. Null for anything
+   * else: a sale, an invoice, a loss in full.
    */
   shortLoss: ChargeShortLoss | null;
 }
 
-/** A charge's short lost chargeback (`findShortLosses`, `@codex/purchase`). */
-export interface ChargeShortLoss {
+/** A charge's blocked payment owed what Stripe won't refund (`findShortLosses`, `@codex/purchase`). */
+export type ChargeShortLoss = ShortAfterLoss | OwedAgainAfterLateWin;
+
+/** Its chargeback was lost for less than the payment (owner D59-D61). */
+export interface ShortAfterLoss {
+  stage: Extract<ShortLossStage, 'short'>;
   /** The lost `du_` dispute: the mark is written on it. */
   stripeDisputeId: string;
   kind: BlockedPaymentKind;
   /** What the bank returned: the lost chargeback's amount. */
   lostCents: number;
-  /** The rest, by the loss's own count; once marked, what was paid another way. */
+  /** The rest, still owed (the one count); once marked, what was paid another way. */
   owedCents: number;
   /** `refunded_outside_stripe_at`, ISO: when support marked it paid another way. */
   paidAnotherWayOn: string | null;
 }
 
-/** "Paid another way" (POST .../charges/:chargeId/paid-another-way; owner D61). */
-export interface PaidAnotherWayResult {
+/**
+ * Support paid the rest another way, then the chargeback was won late: the
+ * bank took it back from the buyer and no refund was made (owner D62, D63),
+ * so the buyer is owed again.
+ */
+export interface OwedAgainAfterLateWin {
+  stage: Extract<ShortLossStage, 'owed_again'>;
+  /** The late-won `du_` dispute: the second mark is written on it. */
+  stripeDisputeId: string;
+  kind: BlockedPaymentKind;
+  /** What the bank took back from the buyer: the chargeback's amount. */
+  lostCents: number;
+  /** The first mark: what support paid another way (`paid_another_way_cents`). */
+  paidAnotherWayCents: number;
+  /** The first mark's date, ISO. */
+  paidAnotherWayOn: string;
+  /** When the chargeback was won late, ISO. */
+  lateWonOn: string;
+  /** The refunds standing on the charge: refunded through Stripe, in all. */
+  refundedThroughStripeCents: number;
+  /** Owed again: paid, less refunded through Stripe, less the first mark (owner D64). */
+  owedCents: number;
+  /** `late_win_refunded_outside_stripe_at`, ISO: the second mark. */
+  paidAgainOn: string | null;
+}
+
+/**
+ * "Paid another way" (POST .../charges/:chargeId/paid-another-way; owner D61,
+ * D63): a mark made, or one made already (`alreadyMarked`), which marks
+ * nothing and names no amount.
+ */
+export type PaidAnotherWayResult = {
   chargeId: string;
   stripeDisputeId: string;
-  owedCents: number;
-  /** The mark's date, ISO: the first one, on a repeat. */
+  /** Which mark: the first (`short`) or the second (`owed_again`). */
+  stage: ShortLossStage;
+  /** The mark's date, ISO: on a repeat, when that mark was first made. */
   paidAnotherWayOn: string;
-  /** It was marked already: nothing changed. */
-  alreadyMarked: boolean;
-}
+} & (
+  | {
+      alreadyMarked: false;
+      /** What was marked paid another way. */
+      owedCents: number;
+    }
+  | { alreadyMarked: true; owedCents: null }
+);
 
 /** One payee's (or the platform fee's) slice of the charge. */
 export interface Slice {
