@@ -63,6 +63,12 @@ import {
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import {
+  applyIgnores,
+  IGNORE_KEYWORD,
+  ignoreProblems,
+  parseIgnores,
+} from './architecture-ignores.mjs';
 import { MATCHERS } from './architecture-matchers.mjs';
 import { RULES } from './architecture-rules.mjs';
 
@@ -278,16 +284,40 @@ export function ruleAnchor(rule) {
 /**
  * What every rule finds. Per rule: `evaluated` (the files whose counts are
  * judged this run) and `perFile` (file -> { found, hits }). A rule left out of
- * the map was not triggered (commit time only).
+ * the map was not triggered (commit time only). Hits a valid inline exception
+ * excuses are dropped here; `results.directives` keeps every exception seen,
+ * so compare() can fail the expired, unused and malformed ones.
  */
 export function collect(rules, source) {
   const results = new Map();
+  const directives = new Map();
+  // Every file a matcher reads passes through here once per read, so an
+  // exception is found wherever the rules look, and nowhere else.
+  const reading = {
+    ...source,
+    read: (file) => {
+      const text = source.read(file);
+      if (!directives.has(file) && text.includes(IGNORE_KEYWORD)) {
+        directives.set(file, parseIgnores(file, text));
+      }
+      return text;
+    },
+  };
+  const excuse = (rule, perFile) => {
+    if (MATCHERS[rule.match.kind].unit) return perFile; // measuring: no offending line
+    for (const [file, result] of perFile) {
+      if (result.hits.length === 0) continue;
+      const hits = applyIgnores(rule.id, result.hits, directives.get(file));
+      perFile.set(file, { found: hits.length, hits });
+    }
+    return perFile;
+  };
   for (const rule of rules) {
     const matcher = MATCHERS[rule.match.kind];
     const subjects = source.files.filter((f) => inScope(rule, f));
     if (matcher.whole) {
-      // A whole-repo rule (the package graph, the generated page) runs at
-      // commit time only when the commit touches something in its scope.
+      // A whole-repo rule (the package graph, a pair of lists) runs at commit
+      // time only when the commit touches something in its scope.
       if (
         source.changed &&
         !subjects.some((f) => source.changed.has(f)) &&
@@ -295,9 +325,10 @@ export function collect(rules, source) {
       ) {
         continue;
       }
-      const perFile = matcher.whole(rule, { source, subjects });
+      const perFile = matcher.whole(rule, { source: reading, subjects });
+      for (const file of perFile.keys()) reading.read(file); // note its exceptions
       results.set(rule.id, {
-        perFile,
+        perFile: excuse(rule, perFile),
         evaluated: new Set([...subjects, ...perFile.keys()]),
       });
       continue;
@@ -309,12 +340,21 @@ export function collect(rules, source) {
     for (const file of targets) {
       perFile.set(
         file,
-        matcher.file(rule, file, source.read(file), { source })
+        matcher.file(rule, file, reading.read(file), { source: reading })
       );
     }
-    results.set(rule.id, { perFile, evaluated: new Set(targets) });
+    results.set(rule.id, {
+      perFile: excuse(rule, perFile),
+      evaluated: new Set(targets),
+    });
   }
+  results.directives = directives;
   return results;
+}
+
+/** Today as YYYY-MM-DD in UTC, the format an exception's `until=` uses. */
+export function todayUtc() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function defaultAllowed(rule, file) {
@@ -328,7 +368,13 @@ function defaultAllowed(rule, file) {
  *   rule?: object, ruleId: string, file?: string, found?: number,
  *   allowed?: number, hits?: object[]}[]}
  */
-export function compare(rules, results, baseline, source) {
+export function compare(
+  rules,
+  results,
+  baseline,
+  source,
+  { today = todayUtc() } = {}
+) {
   const problems = [];
   for (const rule of rules) {
     const result = results.get(rule.id);
@@ -378,6 +424,19 @@ export function compare(rules, results, baseline, source) {
   const known = new Set(rules.map((r) => r.id));
   for (const ruleId of Object.keys(baseline)) {
     if (!known.has(ruleId)) problems.push({ type: 'unknown-rule', ruleId });
+  }
+  if (results.directives) {
+    problems.push(
+      ...ignoreProblems(results.directives, {
+        known,
+        measuring: new Set(
+          rules.filter((r) => MATCHERS[r.match.kind].unit).map((r) => r.id)
+        ),
+        ranOn: (ruleId, file) =>
+          results.get(ruleId)?.evaluated.has(file) ?? false,
+        today,
+      })
+    );
   }
   return problems;
 }
@@ -433,6 +492,47 @@ export function serializeBaseline(baseline) {
 }
 
 // ---------------------------------------------------------------------------
+// Countersigned raises
+// ---------------------------------------------------------------------------
+//
+// The ratchet has one hole: the agent that wants green can edit the baseline
+// upwards. pstack's rule for that is "Anything that loosens a gate … needs a
+// verifier's proof and then your fresh countersign, because the owner is the
+// one who wants green." So in a pull request every raised or added count must
+// be named in the PR description, with its reason, on a line of its own:
+//   G0-RAISE: <RULE> <file> — <reason>
+// --lower never needs one: lowering only tightens.
+
+/** Every (rule, file) the new baseline allows more than the old one did. */
+export function raisedEntries(before, after) {
+  const raised = [];
+  for (const [ruleId, pins] of Object.entries(after)) {
+    for (const [file, now] of Object.entries(pins)) {
+      const was = before[ruleId]?.[file];
+      if (was === undefined || now > was)
+        raised.push({ ruleId, file, was, now });
+    }
+  }
+  return raised;
+}
+
+const RAISE_LINE =
+  /^[ \t>*-]*G0-RAISE:\s*(\S+)\s+(\S+)\s+(?:—|-{1,2})\s+\S.*$/gm;
+
+/** The raises a PR description countersigns, as "RULE file" keys. */
+export function countersigned(body) {
+  return new Set([...body.matchAll(RAISE_LINE)].map((m) => `${m[1]} ${m[2]}`));
+}
+
+/** The raises a PR description doesn't countersign. */
+export function missingCountersigns(before, after, body) {
+  const signed = countersigned(body);
+  return raisedEntries(before, after).filter(
+    (r) => !signed.has(`${r.ruleId} ${r.file}`)
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
 
@@ -452,6 +552,16 @@ export function formatProblems(problems) {
   const lines = [];
   const counts = { new: 0, bank: 0, unknown: 0 };
   for (const p of problems) {
+    if (p.type === 'ignore') {
+      counts.new += 1;
+      lines.push(
+        `  [${IGNORE_KEYWORD}] ${p.file}:${p.line}`,
+        `  This exception ${p.why}.`,
+        '  Rule: docs/architecture/rules.md#exceptions',
+        ''
+      );
+      continue;
+    }
     if (p.type === 'unknown-rule') {
       counts.unknown += 1;
       lines.push(
@@ -516,7 +626,12 @@ function parseArgs(argv) {
     if (arg === '--staged') opts.staged = true;
     else if (arg === '--lower') opts.lower = true;
     else if (arg === '--init') opts.init = true;
-    else if (arg === '--root' || arg === '--rules' || arg === '--baseline') {
+    else if (
+      arg === '--root' ||
+      arg === '--rules' ||
+      arg === '--baseline' ||
+      arg === '--raises'
+    ) {
       const value = argv[i + 1];
       if (!value) throw new UsageError(`${arg} needs a value`);
       opts[arg.slice(2)] = value;
@@ -525,8 +640,12 @@ function parseArgs(argv) {
       throw new UsageError(`unknown option ${arg}`);
     }
   }
-  if ([opts.staged, opts.lower, opts.init].filter(Boolean).length > 1) {
-    throw new UsageError('--staged, --lower and --init are exclusive');
+  if (
+    [opts.staged, opts.lower, opts.init, opts.raises].filter(Boolean).length > 1
+  ) {
+    throw new UsageError(
+      '--staged, --lower, --init and --raises are exclusive'
+    );
   }
   return opts;
 }
@@ -537,6 +656,60 @@ function readBaseline(source, root, file, staged) {
   if (staged) return source.has(file) ? JSON.parse(source.read(file)) : {};
   const path = join(root, file);
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+}
+
+/**
+ * --raises <base-ref>: every count the working baseline raises or adds over
+ * the base ref's must be countersigned in the PR description, which CI passes
+ * in G0_PR_BODY. A base with no baseline means this PR writes the first one.
+ */
+function checkRaises(root, baselineFile, baseRef) {
+  const body = process.env.G0_PR_BODY;
+  if (body === undefined) {
+    console.error(
+      'check-architecture: --raises reads the PR description from G0_PR_BODY; it runs in a pull_request job.'
+    );
+    return 2;
+  }
+  const base = spawnSync('git', ['show', `${baseRef}:${baselineFile}`], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  if (base.status !== 0) {
+    if (/does not exist|exists on disk, but not in/.test(base.stderr)) {
+      console.log(
+        `OK: ${baseRef} has no ${baselineFile}, so this PR writes the first baseline; nothing to countersign.`
+      );
+      return 0;
+    }
+    console.error(
+      `check-architecture: git show ${baseRef}:${baselineFile} failed: ${base.stderr.trim()}`
+    );
+    return 2;
+  }
+  const headPath = join(root, baselineFile);
+  const head = existsSync(headPath)
+    ? JSON.parse(readFileSync(headPath, 'utf8'))
+    : {};
+  const missing = missingCountersigns(JSON.parse(base.stdout), head, body);
+  if (missing.length === 0) {
+    console.log(
+      'OK: every raised baseline count is countersigned in the PR description.'
+    );
+    return 0;
+  }
+  console.error(
+    [
+      `✗ check-architecture: ${missing.length} raised baseline count(s) are not countersigned.`,
+      '  A raise loosens a gate, so it needs its reason in the PR description. Add a line per entry:',
+      ...missing.map(
+        (r) =>
+          `  G0-RAISE: ${r.ruleId} ${r.file} — <why> (${r.was ?? 'new entry'} → ${r.now})`
+      ),
+      '  Rule: docs/architecture/rules.md#raises',
+    ].join('\n')
+  );
+  return 1;
 }
 
 /** @returns {Promise<number>} the exit code */
@@ -560,8 +733,18 @@ export async function main(argv = process.argv.slice(2)) {
     return 2;
   }
 
+  if (opts.raises) return checkRaises(root, baselineFile, opts.raises);
+
   const source = opts.staged ? stagedSource(root) : treeSource(root);
-  const results = collect(rules, source);
+  let results;
+  try {
+    results = collect(rules, source);
+  } catch (err) {
+    // A matcher that can't read what it depends on (limits.ts reshaped, a
+    // wrangler.jsonc that doesn't parse) must stop the build, not pass it.
+    console.error(`check-architecture: a rule could not run: ${err.message}`);
+    return 2;
+  }
 
   if (opts.init) {
     if (existsSync(join(root, baselineFile))) {

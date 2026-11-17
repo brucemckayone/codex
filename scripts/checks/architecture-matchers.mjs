@@ -23,7 +23,7 @@
 import { tokenize } from './check-data-access-contract.mjs';
 
 /** 1-based line of each offset, computed once per file. */
-function lineIndex(text) {
+export function lineIndex(text) {
   const starts = [0];
   for (let i = 0; i < text.length; i++) {
     if (text[i] === '\n') starts.push(i + 1);
@@ -111,7 +111,7 @@ function dirname(file) {
  * SQL example (`ON t(creator_id)`) as a dead link. Without the inline pass,
  * `row[0](x)` in a code span read as one too.
  */
-function blankCode(text) {
+export function blankCode(text) {
   const blank = (code) => code.replace(/[^\n]/g, ' ');
   const lines = text.split('\n');
   let fence = null;
@@ -455,6 +455,44 @@ export const MATCHERS = {
     file(_rule, _file, text) {
       const words = text.split(/\s+/).filter(Boolean).length;
       return { found: words, hits: [] };
+    },
+  },
+  /**
+   * Two lists that can't be derived from one another must agree: every item a
+   * rule NEEDS (with the file and line that needs it) must be in the list it
+   * HAS for the same group. "If a list can't be derived, make the build fail
+   * when the lists disagree" (pstack). The rule supplies both extractors, so a
+   * new pair of lists is a registry entry, not a new kind.
+   *
+   *   need(source, subjects) -> [{ group, item, file, line, text }]
+   *   have(source, subjects) -> Map<group, { file, items: Set<item> }>
+   */
+  'lists-agree': {
+    validate(rule) {
+      if (
+        typeof rule.match.need !== 'function' ||
+        typeof rule.match.have !== 'function'
+      ) {
+        throw new Error(
+          `rule ${rule.id}: lists-agree needs need() and have() functions`
+        );
+      }
+    },
+    whole(rule, { source, subjects }) {
+      const have = rule.match.have(source, subjects);
+      const out = new Map();
+      for (const need of rule.match.need(source, subjects)) {
+        const list = have.get(need.group);
+        if (list?.items.has(need.item)) continue;
+        const entry = out.get(need.file) ?? { found: 0, hits: [] };
+        entry.found += 1;
+        entry.hits.push({
+          line: need.line,
+          text: `${need.text}: ${need.item} is missing from ${list?.file ?? `${need.group} (no list found)`}`,
+        });
+        out.set(need.file, entry);
+      }
+      return out;
     },
   },
 };

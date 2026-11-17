@@ -36,6 +36,8 @@ import {
   inScope,
   lowerBaseline,
   memorySource,
+  missingCountersigns,
+  raisedEntries,
   serializeBaseline,
   validateRules,
 } from './check-architecture.mjs';
@@ -334,7 +336,8 @@ describe('the CLI against a real git repository', () => {
     mkdirSync(dirname(join(repo, file)), { recursive: true });
     writeFileSync(join(repo, file), text);
   };
-  const cli = (...args) =>
+  const cli = (...args) => cliWith({}, ...args);
+  const cliWith = (env, ...args) =>
     spawnSync(
       process.execPath,
       [
@@ -347,9 +350,7 @@ describe('the CLI against a real git repository', () => {
         'baseline.json',
         ...args,
       ],
-      {
-        encoding: 'utf8',
-      }
+      { encoding: 'utf8', env: { ...process.env, ...env } }
     );
 
   const setUp = () => {
@@ -439,6 +440,56 @@ describe('the CLI against a real git repository', () => {
     assert.equal(cli().status, 0);
   });
 
+  test('--raises compares with the base ref and reads the countersign from the PR body', () => {
+    setUp();
+    assert.equal(
+      cliWith({ G0_PR_BODY: '' }, '--raises', 'HEAD').status,
+      0,
+      'no baseline at the base: the first one'
+    );
+    initAndCommit();
+    writeFileSync(
+      join(repo, 'baseline.json'),
+      serializeBaseline({ T1: { 'src/pinned.ts': 2 } })
+    );
+    const unsigned = cliWith({ G0_PR_BODY: 'no lines' }, '--raises', 'HEAD');
+    assert.equal(unsigned.status, 1);
+    assert.match(
+      unsigned.stderr,
+      /G0-RAISE: T1 src\/pinned\.ts — <why> \(1 → 2\)/
+    );
+    const signed = cliWith(
+      {
+        G0_PR_BODY: 'G0-RAISE: T1 src/pinned.ts — hotfix first, extracted next',
+      },
+      '--raises',
+      'HEAD'
+    );
+    assert.equal(signed.status, 0, signed.stderr);
+    const env = { ...process.env };
+    delete env.G0_PR_BODY;
+    const noBody = spawnSync(
+      process.execPath,
+      [
+        RUNNER,
+        '--root',
+        repo,
+        '--rules',
+        join(repo, 'rules.mjs'),
+        '--baseline',
+        'baseline.json',
+        '--raises',
+        'HEAD',
+      ],
+      { encoding: 'utf8', env }
+    );
+    assert.equal(
+      noBody.status,
+      2,
+      'outside a PR job it is a usage error, not a pass'
+    );
+  });
+
   test('an unknown option is a usage error, not a pass', () => {
     setUp();
     const r = cli('--nope');
@@ -461,24 +512,91 @@ const pkg = (name, deps = {}, extra = {}) =>
 // Built from parts so this test file doesn't cite the folder itself.
 const SESSION_NOTES = 'docs/' + 'handover/';
 
+// Each fixture records the mistake it reproduces (`from`): pstack's "prove
+// each check fails on a real past mistake". A fixture invented for the test
+// proves the matcher works; one taken from history proves the rule catches the
+// thing that actually happened.
+const limitsTs = [
+  'export const RATE_LIMIT_PRESETS = {',
+  '  AUTH: {',
+  "    store: 'durable-object',",
+  '  },',
+  '  STRICT: {',
+  "    store: 'binding',",
+  "    bindingName: 'RATE_LIMIT_STRICT',",
+  '  },',
+  '  API: {',
+  "    store: 'binding',",
+  "    bindingName: 'RATE_LIMIT_API',",
+  '  },',
+  '  WEB: {',
+  "    store: 'binding',",
+  "    bindingName: 'RATE_LIMIT_WEB',",
+  '  },',
+  '} as const;',
+  '',
+].join('\n');
+
+const wrangler = (top, production = top) =>
+  JSON.stringify({
+    name: 'w',
+    ratelimits: top.map((name) => ({ name, namespace_id: '1' })),
+    env: {
+      production: {
+        ratelimits: production.map((name) => ({ name, namespace_id: '2' })),
+      },
+    },
+  });
+
 const FIRES = {
   A1: {
-    'packages/purchase/src/services/x.ts':
-      'await this.stripe.transfers.create({ amount });\n',
+    from: 'the subscription drain calls transfers.create outside the ledger (subscription-service.ts:7893, dev 3632eaa80)',
+    tree: {
+      'packages/purchase/src/services/x.ts':
+        'await this.stripe.transfers.create({ amount });\n',
+    },
   },
   LAYERS: {
-    'packages/constants/package.json': pkg('@codex/constants', {
-      '@codex/payments': 'workspace:*',
-    }),
+    from: 'packages/payments/CLAUDE.md forbids payments importing purchase or subscription; nothing checked it',
+    tree: {
+      'packages/constants/package.json': pkg('@codex/constants', {
+        '@codex/payments': 'workspace:*',
+      }),
+    },
   },
   SIZE: {
-    'packages/payments/src/new-module.ts': 'x\n'.repeat(801),
+    from: 'subscription-service.ts grew to 9,015 lines while the architecture doc said 5,097 (census 2026-11-15)',
+    tree: { 'packages/payments/src/new-module.ts': 'x\n'.repeat(801) },
   },
-  'DOC-LINK': { 'docs/a.md': '[gone](./missing.md)\n' },
-  'DOC-PATH': { 'docs/a.md': 'See packages/gone/src/x.ts for it.\n' },
-  'DOC-INDEX': { 'docs/README.md': '# Index\n', 'docs/new.md': '# New\n' },
-  'DOC-SESSION': { 'packages/a/src/x.ts': `// see ${SESSION_NOTES}x.md\n` },
-  'DOC-BUDGET': { 'packages/a/CLAUDE.md': 'word '.repeat(601) },
+  'DOC-LINK': {
+    from: '.github/README.md links ./workflows/preview-deploy.yml, which no longer exists (dev 3632eaa80)',
+    tree: { 'docs/a.md': '[gone](./missing.md)\n' },
+  },
+  'DOC-PATH': {
+    from: '352 cited repo paths in live docs did not exist (census 2026-11-15)',
+    tree: { 'docs/a.md': 'See packages/gone/src/x.ts for it.\n' },
+  },
+  'DOC-INDEX': {
+    from: '85 of 147 docs were cited nowhere in the repo (census 2026-11-15)',
+    tree: { 'docs/README.md': '# Index\n', 'docs/new.md': '# New\n' },
+  },
+  'DOC-SESSION': {
+    from: 'MediaTile.svelte cites a mockup in the gitignored session notes (dev 3632eaa80)',
+    tree: { 'packages/a/src/x.ts': `// see ${SESSION_NOTES}x.md\n` },
+  },
+  'DOC-BUDGET': {
+    from: 'the root CLAUDE.md held 3,616 words against a 1,500 budget (census 2026-11-15)',
+    tree: { 'packages/a/CLAUDE.md': 'word '.repeat(601) },
+  },
+  'RATE-LIMIT-BINDING': {
+    from: 'a preset with no binding fails open in production (root CLAUDE.md, Security; rate_limit.fail_open)',
+    tree: {
+      'packages/constants/src/limits.ts': limitsTs,
+      'workers/w/wrangler.jsonc': wrangler(['RATE_LIMIT_API']),
+      'workers/w/src/routes.ts':
+        "procedure({ policy: { auth: 'required', rateLimit: 'strict' } });\n",
+    },
+  },
 };
 
 describe('the registry rules', async () => {
@@ -491,8 +609,13 @@ describe('the registry rules', async () => {
     validateRules(RULES);
     assert.deepEqual(Object.keys(FIRES).sort(), RULES.map((r) => r.id).sort());
     for (const rule of RULES) {
+      const { from, tree } = FIRES[rule.id];
       assert.ok(
-        newProblems(rule, FIRES[rule.id]).length > 0,
+        from?.length > 20,
+        `${rule.id}'s fixture must say which past mistake it reproduces`
+      );
+      assert.ok(
+        newProblems(rule, tree).length > 0,
         `${rule.id} did not fire on its fixture`
       );
     }
@@ -737,5 +860,152 @@ describe('the registry rules', async () => {
     assert.equal(fires('CLAUDE.md', 1501), 1);
     assert.equal(fires('packages/a/CLAUDE.md', 600), 0);
     assert.equal(fires('packages/a/AGENTS.md', 601), 1);
+  });
+  test('RATE-LIMIT-BINDING: the default preset, every env, and the exempt forms', () => {
+    const rule = byId('RATE-LIMIT-BINDING');
+    const both = ['RATE_LIMIT_API', 'RATE_LIMIT_STRICT'];
+    const fires = (route, wranglerText = wrangler(both)) =>
+      newProblems(rule, {
+        'packages/constants/src/limits.ts': limitsTs,
+        'workers/w/wrangler.jsonc': wranglerText,
+        'workers/w/src/routes.ts': route,
+      }).reduce((n, p) => n + p.found, 0);
+    assert.equal(fires("procedure({ policy: { rateLimit: 'strict' } });\n"), 0);
+    assert.equal(
+      fires(
+        "procedure({ policy: { auth: 'required' } });\n",
+        wrangler(['RATE_LIMIT_STRICT'])
+      ),
+      2,
+      'no rateLimit means api, in both envs'
+    );
+    assert.equal(
+      fires(
+        "procedure({ policy: { rateLimit: 'strict' } });\n",
+        wrangler(both, ['RATE_LIMIT_API'])
+      ),
+      1,
+      'production lacks it'
+    );
+    assert.equal(
+      fires("procedure({ policy: { auth: 'worker' } });\n", wrangler([])),
+      0,
+      'worker routes are exempt'
+    );
+    assert.equal(
+      fires('procedure({ policy: { rateLimit: pick() } });\n', wrangler([])),
+      0,
+      'a non-literal is skipped, not guessed'
+    );
+    assert.equal(
+      fires("// procedure({ policy: { rateLimit: 'web' } })\n"),
+      0,
+      'a comment is not a route'
+    );
+    assert.equal(
+      fires("procedure({ policy: { rateLimit: 'nope' } });\n"),
+      2,
+      'an unknown preset fires'
+    );
+    const r = run(
+      [rule],
+      { 'workers/w/wrangler.jsonc': wrangler(both), 'workers/w/src/a.ts': 'x' },
+      {}
+    );
+    assert.equal(r.problems.length, 0, 'no routes, no needs');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inline exceptions and countersigned raises (WP-7)
+// ---------------------------------------------------------------------------
+
+// Assembled from parts, so this file is never read as a directive itself.
+const IGNORE = ['arch', 'ignore'].join('-');
+
+describe('inline exceptions expire', () => {
+  const ok = (until = '2099-01-01', rule = 'T1') =>
+    `// ${IGNORE} ${rule} until=${until} by=bruce — the drain moves in WP5\n`;
+  const today = '2026-11-17';
+  const problemsOf = (tree, rules = [CALL_RULE, SIZE_RULE]) => {
+    const source = memorySource(tree);
+    return compare(rules, collect(rules, source), {}, source, { today });
+  };
+
+  test('a valid exception on the line above excuses that hit only', () => {
+    assert.deepEqual(problemsOf({ 'src/a.ts': `${ok()}forbidden();\n` }), []);
+    assert.deepEqual(
+      types(problemsOf({ 'src/a.ts': `${ok()}forbidden();\nforbidden();\n` })),
+      ['new:T1:src/a.ts']
+    );
+  });
+
+  test('an expired, unused, malformed or unknown exception fails', () => {
+    const why = (tree) => problemsOf(tree).map((p) => p.why ?? p.type);
+    assert.match(
+      why({ 'src/a.ts': `${ok('2026-11-16')}forbidden();\n` }).join(),
+      /expired on 2026-11-16/
+    );
+    assert.match(
+      why({ 'src/a.ts': `${ok()}fine();\n` }).join(),
+      /excuses no T1 violation/
+    );
+    assert.match(
+      why({
+        'src/a.ts': `// ${IGNORE} T1 because I said so\nforbidden();\n`,
+      }).join(),
+      /malformed/
+    );
+    assert.match(
+      why({ 'src/a.ts': `${ok('2099-01-01', 'NOPE')}forbidden();\n` }).join(),
+      /doesn't define/
+    );
+    assert.match(
+      why({ 'src/a.ts': `${ok('2099-01-01', 'T-SIZE')}x\n` }).join(),
+      /measures a whole file/
+    );
+  });
+
+  test('in markdown only an HTML comment outside code is a directive', () => {
+    const rule = {
+      ...CALL_RULE,
+      id: 'T2',
+      scope: { include: ['**/*.md'] },
+      match: { kind: 'cite', text: 'BAD' },
+    };
+    const dir = `<!-- ${IGNORE} T2 until=2099-01-01 by=bruce — quoted on purpose -->`;
+    assert.deepEqual(problemsOf({ 'd.md': `${dir}\nBAD\n` }, [rule]), []);
+    const fenced = `\`\`\`\n// ${IGNORE} T2 until=2099-01-01 by=bruce — an example\n\`\`\`\nBAD\n`;
+    assert.deepEqual(types(problemsOf({ 'd.md': fenced }, [rule])), [
+      'new:T2:d.md',
+    ]);
+  });
+});
+
+describe('a raised baseline count needs a countersign', () => {
+  const before = { T1: { 'src/a.ts': 2, 'src/b.ts': 1 } };
+
+  test('raises and new entries are found; lowering is free', () => {
+    const after = { T1: { 'src/a.ts': 3, 'src/b.ts': 0, 'src/c.ts': 1 } };
+    assert.deepEqual(
+      raisedEntries(before, after).map((r) => r.file),
+      ['src/a.ts', 'src/c.ts']
+    );
+    assert.deepEqual(raisedEntries(before, { T1: { 'src/a.ts': 1 } }), []);
+  });
+
+  test('a countersign line with a reason covers its entry, and only its entry', () => {
+    const after = { T1: { 'src/a.ts': 3, 'src/c.ts': 1 } };
+    const body =
+      'Summary\n\nG0-RAISE: T1 src/a.ts — the hotfix lands first; extracted in #1234\n';
+    assert.deepEqual(
+      missingCountersigns(before, after, body).map((r) => r.file),
+      ['src/c.ts']
+    );
+    assert.equal(
+      missingCountersigns(before, after, 'G0-RAISE: T1 src/c.ts\n').length,
+      2,
+      'a line without a reason does not count'
+    );
   });
 });

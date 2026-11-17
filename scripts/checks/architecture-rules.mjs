@@ -15,6 +15,8 @@
  *   fix    The one fix an agent should apply, shown in every failure.
  */
 
+import { PRESETS_FILE, rateLimitBindings } from './architecture-lists.mjs';
+
 /** Production TypeScript: no tests, fixtures or declaration files. */
 const NOT_TESTS = [
   '**/*.test.ts',
@@ -221,5 +223,21 @@ export const RULES = [
       defaultBudget: 600,
     },
     fix: 'Move reference material into docs/ and link it; keep the CLAUDE.md to the rules an agent needs in this folder.',
+  },
+  {
+    id: 'RATE-LIMIT-BINDING',
+    title:
+      "Every rate-limit preset a worker's routes use has its binding in every environment",
+    why: 'A preset with no wrangler binding fails OPEN: every request passes and rate_limit.fail_open is logged on each one. wrangler does not inherit ratelimits or Durable Object bindings into env.* blocks, so each environment needs its own. The preset-to-binding map is read from limits.ts, not copied.',
+    scope: {
+      include: [
+        'workers/*/src/**/*.ts',
+        'workers/*/wrangler.jsonc',
+        PRESETS_FILE,
+      ],
+      exclude: NOT_TESTS,
+    },
+    match: { kind: 'lists-agree', ...rateLimitBindings },
+    fix: "Add the binding to that worker's wrangler.jsonc, in every env block, in the same change (see the namespace_id scheme in its comment).",
   },
 ];
