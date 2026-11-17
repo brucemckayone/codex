@@ -26,7 +26,7 @@ export const PRESETS_FILE = 'packages/constants/src/limits.ts';
  * limits.ts names no binding for it. This is the name the auth worker binds
  * it under (workers/auth/wrangler.jsonc).
  */
-export const DURABLE_OBJECT_BINDING = 'RATE_LIMIT_DO';
+const DURABLE_OBJECT_BINDING = 'RATE_LIMIT_DO';
 
 /** The preset `procedure()` applies when a route declares none. */
 const DEFAULT_PRESET = 'api';
@@ -36,7 +36,7 @@ const DEFAULT_PRESET = 'api';
  * the mapping is derived rather than copied. Throws when nothing parses: a
  * fail-soft empty map would pass every worker while checking nothing.
  */
-export function readPresetBindings(source) {
+function readPresetBindings(source) {
   if (!source.has(PRESETS_FILE)) throw new Error(`${PRESETS_FILE} is missing`);
   const text = source.read(PRESETS_FILE);
   const start = text.indexOf('export const RATE_LIMIT_PRESETS = {');
@@ -62,7 +62,7 @@ export function readPresetBindings(source) {
 }
 
 /** wrangler.jsonc as data: comments blanked, trailing commas dropped. */
-export function parseJsonc(text) {
+function parseJsonc(text) {
   const { code } = tokenize(text);
   return JSON.parse(code.replace(/,(\s*[}\]])/g, '$1'));
 }
@@ -83,7 +83,7 @@ function environments(config) {
  * the default when none is declared, or null when it is exempt (`auth:
  * 'worker'`) or not statically known (a function or a variable).
  */
-export function presetOf(callText) {
+function presetOf(callText) {
   if (/auth:\s*['"]worker['"]/.test(callText)) return null;
   const literal = /rateLimit:\s*['"]([a-z-]+)['"]/.exec(callText);
   if (literal) return literal[1];
@@ -92,7 +92,7 @@ export function presetOf(callText) {
 }
 
 /** Every `procedure(...)` call in comment-blanked code, with its full argument text. */
-export function procedureCalls(code) {
+function procedureCalls(code) {
   const calls = [];
   for (const m of code.matchAll(/(?<![\w.$])procedure\(/g)) {
     let depth = 0;
@@ -183,7 +183,7 @@ export const rateLimitBindings = {
 // this pair fails when either side gains a step the other lacks.
 
 /** Each `run:` step in a workflow file. A block scalar can't be matched. */
-export function workflowRuns(text) {
+function workflowRuns(text) {
   const runs = [];
   text.split('\n').forEach((line, i) => {
     const m = /^\s*(?:-\s+)?run:\s*(.*?)\s*$/.exec(line);

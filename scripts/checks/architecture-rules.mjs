@@ -37,7 +37,7 @@ const NOT_TESTS = [
  * 2026-11-17 (it has no cycles). Every `workers/*` and `apps/*` package is an
  * implicit layer above these.
  */
-export const LAYERS = [
+const LAYERS = [
   {
     name: 'Foundation',
     // Ordered: a foundation package may depend on the ones BEFORE it. This is
@@ -91,7 +91,7 @@ export const LAYERS = [
 ];
 
 /** Same-layer edges that exist on purpose. Each new one is a decision. */
-export const SAME_LAYER_EDGES = [
+const SAME_LAYER_EDGES = [
   {
     from: '@codex/image-processing',
     to: '@codex/transcoding',
@@ -119,7 +119,7 @@ export const SAME_LAYER_EDGES = [
 const SESSION_NOTES = ['docs', 'handover'].join('/');
 
 /** The static-analysis job, whose steps CI-GATES keeps equal to GATES. */
-export const CI_WORKFLOW = '.github/workflows/static_analysis.yml';
+const CI_WORKFLOW = '.github/workflows/static_analysis.yml';
 
 /** Steps of that job that prepare the run rather than gate it. */
 export const CI_SETUP_STEPS = [
