@@ -17,12 +17,17 @@
  *   owner, so nobody who owned it at the delete is missed;
  * - `reminder` rows are added by the sweep a few days before the date;
  * - `staying` rows are added when the creator keeps the piece, for the people
- *   already told;
+ *   who were, or may have been, told it was leaving;
  * - `removed` rows are added by a platform admin's immediate delete.
+ * Whoever writes or claims rows leaves out people whose account is deleted
+ * (`users.deleted_at`): erasure scrubs the address but keeps the row, so
+ * the cascade below never fires for them.
  *
  * `round` separates one notice period from the next. It copies the piece's
  * `leaves_at` (for `removed`, the time of the admin delete), so a piece kept
  * and then deleted again starts a fresh round, and each person is told again.
+ * Both are stored to the millisecond, so a value read into JS and matched
+ * back finds its rows.
  *
  * Rows are never deleted: a notice no longer needed becomes `cancelled`, and
  * one that used up its tries becomes `abandoned`. Both leave the sweep's
@@ -31,8 +36,10 @@
 
 import {
   CONTENT_LEAVING_NOTICE_KINDS,
+  CONTENT_LEAVING_NOTICE_REASONS,
   CONTENT_LEAVING_NOTICE_STATES,
   type ContentLeavingNoticeKind,
+  type ContentLeavingNoticeReason,
   type ContentLeavingNoticeState,
 } from '@codex/constants';
 import { sql } from 'drizzle-orm';
@@ -63,8 +70,29 @@ function sqlWords(words: readonly string[]) {
   return sql.raw(words.map((word) => `'${word}'`).join(', '));
 }
 
-/** The states the sweep still has to send. */
-const OPEN_STATES: readonly ContentLeavingNoticeState[] = ['due', 'failed'];
+/**
+ * The states the sweep still has to send. `unknown` is retried, as the fee
+ * notices' is: a person may get a second email over never getting one.
+ */
+const OPEN_STATES: readonly ContentLeavingNoticeState[] = [
+  'due',
+  'failed',
+  'unknown',
+];
+/** The states a try that did not send leaves, each with its reason. */
+const TRIED_STATES: readonly ContentLeavingNoticeState[] = [
+  'failed',
+  'unknown',
+  'abandoned',
+];
+const SENT: readonly ContentLeavingNoticeState[] = ['sent'];
+const CANCELLED: readonly ContentLeavingNoticeState[] = ['cancelled'];
+/** A takedown's `removed` email is its only one, so it is never cancelled. */
+const CANCELLABLE_KINDS: readonly ContentLeavingNoticeKind[] = [
+  'leaving',
+  'reminder',
+  'staying',
+];
 
 export const contentLeavingNotices = pgTable(
   'content_leaving_notices',
@@ -81,7 +109,7 @@ export const contentLeavingNotices = pgTable(
     kind: varchar('kind', { length: 20 })
       .$type<ContentLeavingNoticeKind>()
       .notNull(),
-    round: timestamp('round', { withTimezone: true }).notNull(),
+    round: timestamp('round', { withTimezone: true, precision: 3 }).notNull(),
     state: varchar('state', { length: 20 })
       .$type<ContentLeavingNoticeState>()
       .notNull()
@@ -91,8 +119,10 @@ export const contentLeavingNotices = pgTable(
     // `updated_at` can't stand in for it.
     attemptedAt: timestamp('attempted_at', { withTimezone: true }),
     sentAt: timestamp('sent_at', { withTimezone: true }),
-    // The error's code only, never an address or a message with one in it.
-    lastError: varchar('last_error', { length: 200 }),
+    // Why the last try did not send: a code, never the sender's message.
+    lastReason: varchar('last_reason', {
+      length: 20,
+    }).$type<ContentLeavingNoticeReason>(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -116,6 +146,8 @@ export const contentLeavingNotices = pgTable(
     index('idx_content_leaving_notices_open')
       .on(table.createdAt, table.id)
       .where(sql`${table.state} IN (${sqlWords(OPEN_STATES)})`),
+    // A user delete's cascade, as fee_change_notices has.
+    index('idx_content_leaving_notices_user').on(table.userId),
     check(
       'check_content_leaving_notices_kind',
       sql`${table.kind} IN (${sqlWords(CONTENT_LEAVING_NOTICE_KINDS)})`
@@ -125,13 +157,27 @@ export const contentLeavingNotices = pgTable(
       sql`${table.state} IN (${sqlWords(CONTENT_LEAVING_NOTICE_STATES)})`
     ),
     check(
+      'check_content_leaving_notices_reason',
+      sql`${table.lastReason} IS NULL OR ${table.lastReason} IN (${sqlWords(CONTENT_LEAVING_NOTICE_REASONS)})`
+    ),
+    check(
       'check_content_leaving_notices_attempts',
       sql`${table.attempts} >= 0`
     ),
     // A sent notice says when; nothing else does.
     check(
       'check_content_leaving_notices_sent',
-      sql`(${table.state} = 'sent') = (${table.sentAt} IS NOT NULL)`
+      sql`(${table.state} IN (${sqlWords(SENT)})) = (${table.sentAt} IS NOT NULL)`
+    ),
+    // A try that did not send says how many and why, so an owner who was
+    // never told can be told apart from a bug.
+    check(
+      'check_content_leaving_notices_tried',
+      sql`${table.state} NOT IN (${sqlWords(TRIED_STATES)}) OR (${table.attempts} > 0 AND ${table.lastReason} IS NOT NULL)`
+    ),
+    check(
+      'check_content_leaving_notices_cancelled',
+      sql`${table.state} NOT IN (${sqlWords(CANCELLED)}) OR ${table.kind} IN (${sqlWords(CANCELLABLE_KINDS)})`
     ),
   ]
 );

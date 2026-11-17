@@ -1,9 +1,8 @@
 /**
  * cleanupDatabase and cleanupDatabaseComplete against the RESTRICT children
  * batch C1 added (migration review M1): price changes and price moves (0124)
- * and a fee notice's marker (0123). And the leaving notice (0131,
- * Codex-a6ofh.6), which RESTRICTs its content, for those two helpers and
- * cleanupTables. A child the helpers miss makes a later suite's cleanup fail
+ * and a fee notice's marker (0123). And the leaving notice (Codex-a6ofh.6),
+ * which RESTRICTs its content, for those two helpers and cleanupTables. A child the helpers miss makes a later suite's cleanup fail
  * with 23503 on a table it never touched.
  *
  * Real database. Both helpers refuse anything but a disposable one (CI's

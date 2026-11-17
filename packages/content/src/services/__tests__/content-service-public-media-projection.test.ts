@@ -85,11 +85,14 @@ describe('ContentService.listPublic — media item projection (Codex-ve5eh)', ()
 
     await service.listPublic({ page: 1, limit: 20, sort: 'newest' });
 
-    // The sales count, and a draft's publish-when-ready state (Codex-a6ofh.2.7).
+    // The sales count, a draft's publish-when-ready state (Codex-a6ofh.2.7),
+    // and the leaving notice's date and download setting (Codex-a6ofh.6).
     expect(captured.findMany?.columns).toEqual({
       purchaseCount: false,
       publishRequestedAt: false,
       publishBlockedReason: false,
+      leavesAt: false,
+      ownersCanDownload: false,
     });
   });
 });
@@ -122,11 +125,14 @@ describe("ContentService.list({ scope: 'browse' }) — catalogue projection (Cod
       },
       creator: { columns: { id: true, name: true } },
     });
-    // The sales count, and a draft's publish-when-ready state (Codex-a6ofh.2.7).
+    // The sales count, a draft's publish-when-ready state (Codex-a6ofh.2.7),
+    // and the leaving notice's date and download setting (Codex-a6ofh.6).
     expect(captured.findMany?.columns).toEqual({
       purchaseCount: false,
       publishRequestedAt: false,
       publishBlockedReason: false,
+      leavesAt: false,
+      ownersCanDownload: false,
     });
   });
 });

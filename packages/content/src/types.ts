@@ -288,6 +288,8 @@ export type CatalogueContentRow = Omit<
   | 'purchaseCount'
   | 'publishRequestedAt'
   | 'publishBlockedReason'
+  | 'leavesAt'
+  | 'ownersCanDownload'
 > & {
   mediaItem: PublicMediaItemSource | null;
   organization: PublicContentOrganization | null;

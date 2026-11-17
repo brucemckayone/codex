@@ -368,8 +368,10 @@ export const content = pgTable(
     // off sale with this date, its owners keep it until then, and a sweep
     // sets `deleted_at` on the day. Null = not leaving. Kept after that
     // delete, so a piece that left with notice can be told from a takedown.
-    // Never set on a published piece (check_content_leaving_not_published).
-    leavesAt: timestamp('leaves_at', { withTimezone: true }),
+    // Never set on a published or scheduled piece (the two CHECKs below).
+    // To the millisecond, as `content_leaving_notices.round` copies it: a
+    // value read into JS then matches back.
+    leavesAt: timestamp('leaves_at', { withTimezone: true, precision: 3 }),
     // The creator's choice when selling (owner D8, 2026-11-17): whether the
     // people who own this piece may download it while it is leaving. On by
     // default; with it off, they can only watch it until the date.
@@ -473,6 +475,14 @@ export const content = pgTable(
     check(
       'check_content_leaving_not_published',
       sql`${table.leavesAt} IS NULL OR ${table.status} <> 'published'`
+    ),
+    // Nor scheduled to go live: the media-ready cron finds drafts by
+    // `publish_requested_at` alone, and would hand it on every tick, each
+    // go-live refused by the CHECK above. A delete that forgets to clear the
+    // schedule fails at the delete, once, instead.
+    check(
+      'check_content_leaving_not_scheduled',
+      sql`${table.leavesAt} IS NULL OR ${table.publishRequestedAt} IS NULL`
     ),
   ]
 );

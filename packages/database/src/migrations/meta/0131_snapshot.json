@@ -1,5 +1,5 @@
 {
-  "id": "d6cacb52-ce22-45d7-bbac-652329dba79b",
+  "id": "4a743282-2ccf-464f-bdc7-83f45998af6e",
   "prevId": "e9e4eb9c-bded-4b85-a8d5-bc852e1983a1",
   "version": "7",
   "dialect": "postgresql",
@@ -1104,7 +1104,7 @@
         },
         "leaves_at": {
           "name": "leaves_at",
-          "type": "timestamp with time zone",
+          "type": "timestamp (3) with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -1533,6 +1533,10 @@
         "check_content_leaving_not_published": {
           "name": "check_content_leaving_not_published",
           "value": "\"content\".\"leaves_at\" IS NULL OR \"content\".\"status\" <> 'published'"
+        },
+        "check_content_leaving_not_scheduled": {
+          "name": "check_content_leaving_not_scheduled",
+          "value": "\"content\".\"leaves_at\" IS NULL OR \"content\".\"publish_requested_at\" IS NULL"
         }
       },
       "isRLSEnabled": false
@@ -2322,7 +2326,7 @@
         },
         "round": {
           "name": "round",
-          "type": "timestamp with time zone",
+          "type": "timestamp (3) with time zone",
           "primaryKey": false,
           "notNull": true
         },
@@ -2352,9 +2356,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "last_error": {
-          "name": "last_error",
-          "type": "varchar(200)",
+        "last_reason": {
+          "name": "last_reason",
+          "type": "varchar(20)",
           "primaryKey": false,
           "notNull": false
         },
@@ -2424,7 +2428,22 @@
             }
           ],
           "isUnique": false,
-          "where": "\"content_leaving_notices\".\"state\" IN ('due', 'failed')",
+          "where": "\"content_leaving_notices\".\"state\" IN ('due', 'failed', 'unknown')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_content_leaving_notices_user": {
+          "name": "idx_content_leaving_notices_user",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2468,7 +2487,11 @@
         },
         "check_content_leaving_notices_state": {
           "name": "check_content_leaving_notices_state",
-          "value": "\"content_leaving_notices\".\"state\" IN ('due', 'sent', 'failed', 'cancelled', 'abandoned')"
+          "value": "\"content_leaving_notices\".\"state\" IN ('due', 'sent', 'failed', 'unknown', 'cancelled', 'abandoned')"
+        },
+        "check_content_leaving_notices_reason": {
+          "name": "check_content_leaving_notices_reason",
+          "value": "\"content_leaving_notices\".\"last_reason\" IS NULL OR \"content_leaving_notices\".\"last_reason\" IN ('refused', 'skipped', 'no_address', 'unknown')"
         },
         "check_content_leaving_notices_attempts": {
           "name": "check_content_leaving_notices_attempts",
@@ -2476,7 +2499,15 @@
         },
         "check_content_leaving_notices_sent": {
           "name": "check_content_leaving_notices_sent",
-          "value": "(\"content_leaving_notices\".\"state\" = 'sent') = (\"content_leaving_notices\".\"sent_at\" IS NOT NULL)"
+          "value": "(\"content_leaving_notices\".\"state\" IN ('sent')) = (\"content_leaving_notices\".\"sent_at\" IS NOT NULL)"
+        },
+        "check_content_leaving_notices_tried": {
+          "name": "check_content_leaving_notices_tried",
+          "value": "\"content_leaving_notices\".\"state\" NOT IN ('failed', 'unknown', 'abandoned') OR (\"content_leaving_notices\".\"attempts\" > 0 AND \"content_leaving_notices\".\"last_reason\" IS NOT NULL)"
+        },
+        "check_content_leaving_notices_cancelled": {
+          "name": "check_content_leaving_notices_cancelled",
+          "value": "\"content_leaving_notices\".\"state\" NOT IN ('cancelled') OR \"content_leaving_notices\".\"kind\" IN ('leaving', 'reminder', 'staying')"
         }
       },
       "isRLSEnabled": false

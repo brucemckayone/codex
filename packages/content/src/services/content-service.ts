@@ -233,6 +233,12 @@ export const CATALOGUE_CONTENT_COLUMNS = {
   // first day, so no cached public slot ever held it (no bump needed).
   publishRequestedAt: false,
   publishBlockedReason: false,
+  // The leaving notice (Codex-a6ofh.6), off the public wire from the
+  // columns' first day for the same reason. A leaving piece is never
+  // published, so its date is null on every catalogue row; whether owners
+  // may download is the creator's setting, read on the owners' own path.
+  leavesAt: false,
+  ownersCanDownload: false,
 } as const satisfies Partial<Record<keyof Content, false>>;
 
 /**
