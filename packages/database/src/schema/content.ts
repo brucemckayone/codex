@@ -363,6 +363,17 @@ export const content = pgTable(
     // Written by the media-ready trigger (Codex-a6ofh.2.8), which clears the
     // schedule as it does; cleared by the next ask, a cancel or a go-live.
     publishBlockedReason: varchar('publish_blocked_reason', { length: 50 }),
+    // The leaving notice (Codex-a6ofh.6): the day a piece its creator deleted
+    // leaves Revelations. A piece people own is not deleted at once: it goes
+    // off sale with this date, its owners keep it until then, and a sweep
+    // sets `deleted_at` on the day. Null = not leaving. Kept after that
+    // delete, so a piece that left with notice can be told from a takedown.
+    // Never set on a published piece (check_content_leaving_not_published).
+    leavesAt: timestamp('leaves_at', { withTimezone: true }),
+    // The creator's choice when selling (owner D8, 2026-11-17): whether the
+    // people who own this piece may download it while it is leaving. On by
+    // default; with it off, they can only watch it until the date.
+    ownersCanDownload: boolean('owners_can_download').notNull().default(true),
 
     // Creator-flagged feature — promotes the item to a full-width editorial
     // card on the org homepage feed. Orthogonal to status: only published
@@ -417,6 +428,11 @@ export const content = pgTable(
         sql`${table.publishRequestedAt} IS NOT NULL AND ${table.deletedAt} IS NULL`
       ),
 
+    // Every piece waiting to leave, for the leaving sweep (Codex-a6ofh.6).
+    index('idx_content_leaving')
+      .on(table.leavesAt)
+      .where(sql`${table.leavesAt} IS NOT NULL AND ${table.deletedAt} IS NULL`),
+
     // Partial index for org homepage "featured" lookup — tiny (1–3 rows/org)
     index('idx_content_org_featured')
       .on(table.organizationId, table.publishedAt)
@@ -451,6 +467,12 @@ export const content = pgTable(
     check(
       'check_price_non_negative',
       sql`${table.priceCents} IS NULL OR ${table.priceCents} >= 0`
+    ),
+    // A leaving piece is never live (Codex-a6ofh.6). To sell it again, the
+    // creator keeps it first, which clears the date, then publishes it.
+    check(
+      'check_content_leaving_not_published',
+      sql`${table.leavesAt} IS NULL OR ${table.status} <> 'published'`
     ),
   ]
 );

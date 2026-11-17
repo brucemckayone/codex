@@ -328,6 +328,8 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     offSaleAt: null,
     publishRequestedAt: null,
     publishBlockedReason: null,
+    leavesAt: null,
+    ownersCanDownload: true,
     viewCount: 0,
     purchaseCount: 0,
     shaderPreset: null,

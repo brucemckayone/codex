@@ -1,8 +1,10 @@
 /**
  * cleanupDatabase and cleanupDatabaseComplete against the RESTRICT children
  * batch C1 added (migration review M1): price changes and price moves (0124)
- * and a fee notice's marker (0123). A child the helpers miss makes a later
- * suite's cleanup fail with 23503 on a table it never touched.
+ * and a fee notice's marker (0123). And the leaving notice (0131,
+ * Codex-a6ofh.6), which RESTRICTs its content, for those two helpers and
+ * cleanupTables. A child the helpers miss makes a later suite's cleanup fail
+ * with 23503 on a table it never touched.
  *
  * Real database. Both helpers refuse anything but a disposable one (CI's
  * `neondb`, the local `main_test`), so on a throwaway `b_*` database this file
@@ -10,6 +12,8 @@
  */
 
 import {
+  content,
+  contentLeavingNotices,
   feeChangeNotices,
   feeChanges,
   organizations,
@@ -23,12 +27,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   cleanupDatabase,
   cleanupDatabaseComplete,
+  cleanupTables,
   type Database,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
 } from '../database';
-import { createTestOrganizationInput, createUniqueSlug } from '../factories';
+import {
+  createTestContentInput,
+  createTestOrganizationInput,
+  createUniqueSlug,
+} from '../factories';
 import {
   createTestSubscriptionInput,
   createTestTierInput,
@@ -177,6 +186,49 @@ describe('the cleanup helpers clear what C1 added first', () => {
         .select({ id: feeChangeNotices.id })
         .from(feeChangeNotices)
         .where(eq(feeChangeNotices.changeId, changeId))
+    ).toEqual([]);
+  });
+
+  /** A piece its creator deleted, leaving with notice, and its owner's email. */
+  async function leavingPiece(): Promise<{ contentId: string }> {
+    const [creatorId, ownerId] = (await seedTestUsers(db, 2)) as [
+      string,
+      string,
+    ];
+    const leavesAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const [piece] = await db
+      .insert(content)
+      .values(
+        createTestContentInput(creatorId, { status: 'archived', leavesAt })
+      )
+      .returning({ id: content.id });
+    const contentId = piece?.id as string;
+    await db
+      .insert(contentLeavingNotices)
+      .values({ contentId, userId: ownerId, kind: 'leaving', round: leavesAt });
+    return { contentId };
+  }
+
+  it.each([
+    ['cleanupDatabase', () => cleanupDatabase(db)],
+    ['cleanupDatabaseComplete', () => cleanupDatabaseComplete(db)],
+    ['cleanupTables', () => cleanupTables(db, ['content'])],
+  ])('%s deletes a leaving notice before the content it RESTRICTs', async (_name, clean) => {
+    const { contentId } = await leavingPiece();
+
+    await expect(clean()).resolves.toBeUndefined();
+
+    expect(
+      await db
+        .select({ id: contentLeavingNotices.id })
+        .from(contentLeavingNotices)
+        .where(eq(contentLeavingNotices.contentId, contentId))
+    ).toEqual([]);
+    expect(
+      await db
+        .select({ id: content.id })
+        .from(content)
+        .where(eq(content.id, contentId))
     ).toEqual([]);
   });
 });

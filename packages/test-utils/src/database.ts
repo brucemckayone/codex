@@ -237,6 +237,8 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   await db.delete(schema.agreementProposals);
   await db.delete(schema.creatorOrganizationAgreements);
   await db.delete(schema.organizationPlatformAgreements);
+  // Codex-a6ofh.6 (0131): a leaving notice RESTRICTs its content.
+  await db.delete(schema.contentLeavingNotices);
   await db.delete(schema.content);
   await db.delete(schema.mediaItems);
   // stripe_connect_accounts FK organizations (set null) + users (cascade);
@@ -297,6 +299,8 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   await db.delete(schema.agreementProposals);
   await db.delete(schema.creatorOrganizationAgreements);
   await db.delete(schema.organizationPlatformAgreements);
+  // Codex-a6ofh.6 (0131): a leaving notice RESTRICTs its content.
+  await db.delete(schema.contentLeavingNotices);
   await db.delete(schema.content);
   await db.delete(schema.mediaItems);
   // One Connect account per user (uq_stripe_connect_user, Codex-69t7c); clear
@@ -366,6 +370,10 @@ export async function cleanupTables(
 
   for (const tableName of orderedTables) {
     if (tables.includes(tableName)) {
+      // Codex-a6ofh.6 (0131): a leaving notice RESTRICTs its content.
+      if (tableName === 'content') {
+        await db.delete(schema.contentLeavingNotices);
+      }
       await db.delete(tableMap[tableName]);
     }
   }
