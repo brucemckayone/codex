@@ -172,3 +172,85 @@ export const rateLimitBindings = {
     return have;
   },
 };
+
+// ---------------------------------------------------------------------------
+// CI-GATES: the registry's gate index and the static-analysis job agree
+// ---------------------------------------------------------------------------
+//
+// gate.sh, the local mirror of CI, skipped five of CI's static gates, and PR
+// #705 went red in CI four minutes after passing it locally (Codex-kxdz9). So
+// the registry lists every gate the job runs, `--gates` runs them locally, and
+// this pair fails when either side gains a step the other lacks.
+
+/** Each `run:` step in a workflow file. A block scalar can't be matched. */
+export function workflowRuns(text) {
+  const runs = [];
+  text.split('\n').forEach((line, i) => {
+    const m = /^\s*(?:-\s+)?run:\s*(.*?)\s*$/.exec(line);
+    if (!m) return;
+    let command = m[1].replace(/^(['"])(.*)\1$/, '$2');
+    if (command === '|' || command === '>' || /^[|>][-+]?$/.test(command)) {
+      command = '(a multi-line run block; keep gate steps on one line)';
+    }
+    runs.push({ command, line: i + 1 });
+  });
+  return runs;
+}
+
+/** The commands a registry gate runs in CI. */
+export const gateCommands = (gate) =>
+  [gate.selfTest, gate.run, ...(gate.prOnly ?? [])].filter(Boolean);
+
+export function ciGateLists({ workflow, gates, setupSteps, registryFile }) {
+  const registryLine = (source, command) => {
+    const text = source.has(registryFile) ? source.read(registryFile) : '';
+    const at = text.indexOf(command);
+    return at === -1 ? 1 : lineIndex(text).lineOf(at);
+  };
+  const runsIn = (source) =>
+    source.has(workflow) ? workflowRuns(source.read(workflow)) : [];
+  return {
+    need(source) {
+      const needs = [];
+      for (const gate of gates) {
+        for (const command of gateCommands(gate)) {
+          needs.push({
+            group: 'workflow',
+            item: command,
+            file: registryFile,
+            line: registryLine(source, command),
+            text: `gate ${gate.id} runs this`,
+          });
+        }
+      }
+      for (const run of runsIn(source)) {
+        needs.push({
+          group: 'registry',
+          item: run.command,
+          file: workflow,
+          line: run.line,
+          text: 'this CI step',
+        });
+      }
+      return needs;
+    },
+    have(source) {
+      return new Map([
+        [
+          'workflow',
+          {
+            file: workflow,
+            items: new Set(runsIn(source).map((r) => r.command)),
+          },
+        ],
+        [
+          'registry',
+          {
+            file: `${registryFile} (GATES or CI_SETUP_STEPS)`,
+            items: new Set([...gates.flatMap(gateCommands), ...setupSteps]),
+          },
+        ],
+      ]);
+    },
+  };
+}

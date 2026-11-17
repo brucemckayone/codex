@@ -15,7 +15,12 @@
  *   fix    The one fix an agent should apply, shown in every failure.
  */
 
-import { PRESETS_FILE, rateLimitBindings } from './architecture-lists.mjs';
+import { RULES_DOC, renderRulesDoc } from './architecture-docs.mjs';
+import {
+  ciGateLists,
+  PRESETS_FILE,
+  rateLimitBindings,
+} from './architecture-lists.mjs';
 
 /** Production TypeScript: no tests, fixtures or declaration files. */
 const NOT_TESTS = [
@@ -113,6 +118,83 @@ export const SAME_LAYER_EDGES = [
  */
 const SESSION_NOTES = ['docs', 'handover'].join('/');
 
+/** The static-analysis job, whose steps CI-GATES keeps equal to GATES. */
+export const CI_WORKFLOW = '.github/workflows/static_analysis.yml';
+
+/** Steps of that job that prepare the run rather than gate it. */
+export const CI_SETUP_STEPS = [
+  'pnpm install --frozen-lockfile',
+  'pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide',
+];
+
+/**
+ * Every gate the static-analysis job runs, so `--gates` (and through it
+ * gate.sh) runs the same set locally. `localBy` marks a gate gate.sh runs
+ * itself; `before` is a setup step the gate needs; `prOnly` steps run only in
+ * a pull-request job.
+ */
+export const GATES = [
+  {
+    id: 'BIOME',
+    title: 'Biome lint and format; every diagnostic fails',
+    run: 'pnpm check:ci',
+    localBy: 'gate.sh',
+  },
+  {
+    id: 'TYPECHECK',
+    title: 'TypeScript across the monorepo',
+    run: 'pnpm typecheck',
+    localBy: 'gate.sh',
+  },
+  {
+    id: 'SETUP-ORDER',
+    title: 'Every workflow sets up pnpm before setup-node',
+    selfTest: 'node --test scripts/checks/check-workflow-setup-order.test.mjs',
+    run: 'node scripts/checks/check-workflow-setup-order.mjs',
+  },
+  {
+    id: 'BRAND-BOUNDARY',
+    title: 'The public bundle never imports the brand editor',
+    selfTest: 'pnpm --filter web run check:brand-boundary:test',
+    run: 'pnpm --filter web run check:brand-boundary',
+  },
+  {
+    id: 'DIALOG-STRUCTURE',
+    title: 'Dialogs are built from the shared Dialog parts',
+    selfTest: 'pnpm --filter web run check:dialog-structure:test',
+    run: 'pnpm --filter web run check:dialog-structure',
+  },
+  {
+    id: 'LOAD-RETRY',
+    title: 'A load failure renders the shared LoadFailedAlert with Retry',
+    selfTest: 'pnpm --filter web run check:load-retry:test',
+    run: 'pnpm --filter web run check:load-retry',
+  },
+  {
+    id: 'DATA-ACCESS',
+    title:
+      'Cache-Control from presets, no floating KV write, shared search inputs, deterministic sql time, VersionedCache gets waitUntil',
+    selfTest: 'node --test scripts/checks/check-data-access-contract.test.mjs',
+    run: 'node scripts/checks/check-data-access-contract.mjs',
+  },
+  {
+    id: 'SVELTE-BASELINE',
+    title: 'svelte-check finds no error beyond its baseline',
+    before: CI_SETUP_STEPS[1],
+    selfTest: 'pnpm --filter web run check:svelte-baseline:test',
+    run: 'pnpm --filter web run check:svelte-baseline',
+  },
+  {
+    id: 'ARCH',
+    title: 'The rules on this page, and countersigned baseline raises',
+    selfTest: 'node --test scripts/checks/check-architecture.test.mjs',
+    run: 'node scripts/checks/check-architecture.mjs',
+    prOnly: [
+      'git fetch --no-tags --depth=1 origin "$BASE_REF" && node scripts/checks/check-architecture.mjs --raises "origin/$BASE_REF"',
+    ],
+  },
+];
+
 export const RULES = [
   {
     id: 'A1',
@@ -207,7 +289,8 @@ export const RULES = [
         '**/*.{md,ts,js,mjs,cjs,json,jsonc,yml,yaml,svelte,sh,py,toml}',
       ],
       // The folder's own tracked README describes the folder.
-      exclude: ['docs/archive/**', `${SESSION_NOTES}/**`],
+      // The rules page lists this rule's own scope, which names the folder.
+      exclude: ['docs/archive/**', `${SESSION_NOTES}/**`, RULES_DOC],
     },
     match: { kind: 'cite', text: `${SESSION_NOTES}/` },
     fix: 'Move what the reference needs into a tracked doc and cite that instead.',
@@ -239,5 +322,33 @@ export const RULES = [
     },
     match: { kind: 'lists-agree', ...rateLimitBindings },
     fix: "Add the binding to that worker's wrangler.jsonc, in every env block, in the same change (see the namespace_id scheme in its comment).",
+  },
+  {
+    id: 'RULES-DOC',
+    title: 'The rules page equals the registry',
+    why: "A rules page written by hand drifts: the payments architecture doc said a money file was 5,097 lines long when it was 9,015. This page is rendered from the registry, so a rule can't exist only in prose, and the prose can't describe a rule that doesn't run.",
+    scope: { include: [RULES_DOC, 'scripts/checks/architecture-*.mjs'] },
+    match: {
+      kind: 'generated',
+      file: RULES_DOC,
+      render: () => renderRulesDoc(RULES, GATES),
+    },
+    fix: 'Run pnpm check:arch --write-rules and commit the page with the registry change.',
+  },
+  {
+    id: 'CI-GATES',
+    title: "The registry's gate list and the static-analysis job's steps agree",
+    why: "gate.sh, the local copy of CI, skipped five of CI's static gates, and PR #705 went red in CI minutes after passing it (Codex-kxdz9). With the list held here and checked both ways, a gate added to CI is run locally too, and a gate dropped from CI can't stay listed.",
+    scope: { include: [CI_WORKFLOW, 'scripts/checks/architecture-rules.mjs'] },
+    match: {
+      kind: 'lists-agree',
+      ...ciGateLists({
+        workflow: CI_WORKFLOW,
+        gates: GATES,
+        setupSteps: CI_SETUP_STEPS,
+        registryFile: 'scripts/checks/architecture-rules.mjs',
+      }),
+    },
+    fix: 'Add the step to GATES (or CI_SETUP_STEPS) in scripts/checks/architecture-rules.mjs, or add the missing step to the workflow.',
   },
 ];

@@ -495,4 +495,48 @@ export const MATCHERS = {
       return out;
     },
   },
+  /**
+   * A generated file equals what its generator renders now. The hit is the
+   * first line that differs, so the message points at the drift.
+   */
+  generated: {
+    validate(rule) {
+      const { file, render } = rule.match;
+      if (typeof file !== 'string' || typeof render !== 'function') {
+        throw new Error(
+          `rule ${rule.id}: generated needs a file and a render() function`
+        );
+      }
+    },
+    whole(rule, { source }) {
+      const { file, render } = rule.match;
+      const want = render();
+      if (!source.has(file)) {
+        return new Map([
+          [file, { found: 1, hits: [{ line: 1, text: `${file} is missing` }] }],
+        ]);
+      }
+      const have = source.read(file);
+      if (have === want) return new Map([[file, { found: 0, hits: [] }]]);
+      const a = have.split('\n');
+      const b = want.split('\n');
+      let line = 0;
+      while (line < a.length && line < b.length && a[line] === b[line])
+        line += 1;
+      return new Map([
+        [
+          file,
+          {
+            found: 1,
+            hits: [
+              {
+                line: line + 1,
+                text: `differs from the registry from here: ${JSON.stringify((a[line] ?? '').slice(0, 80))}`,
+              },
+            ],
+          },
+        ],
+      ]);
+    },
+  },
 };

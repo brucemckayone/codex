@@ -588,6 +588,19 @@ const FIRES = {
     from: 'the root CLAUDE.md held 3,616 words against a 1,500 budget (census 2026-11-15)',
     tree: { 'packages/a/CLAUDE.md': 'word '.repeat(601) },
   },
+  'RULES-DOC': {
+    from: 'docs/payments/architecture.md said a money file was 5,097 lines long when it was 9,015 (census 2026-11-15)',
+    tree: {
+      'docs/architecture/rules.md': '# Architecture rules\n\nhand-edited\n',
+    },
+  },
+  'CI-GATES': {
+    from: "Codex-kxdz9: gate.sh skipped five of CI's static gates, and PR #705 went red in CI after passing it",
+    tree: {
+      '.github/workflows/static_analysis.yml':
+        'jobs:\n  x:\n    steps:\n      - run: node scripts/checks/new-gate.mjs\n',
+    },
+  },
   'RATE-LIMIT-BINDING': {
     from: 'a preset with no binding fails open in production (root CLAUDE.md, Security; rate_limit.fail_open)',
     tree: {
@@ -861,6 +874,47 @@ describe('the registry rules', async () => {
     assert.equal(fires('packages/a/CLAUDE.md', 600), 0);
     assert.equal(fires('packages/a/AGENTS.md', 601), 1);
   });
+  test('CI-GATES fails both ways: an unlisted CI step, and a listed gate CI dropped', async () => {
+    const rule = byId('CI-GATES');
+    const { GATES, CI_SETUP_STEPS } = await import('./architecture-rules.mjs');
+    const { gateCommands } = await import('./architecture-lists.mjs');
+    const steps = [...CI_SETUP_STEPS, ...GATES.flatMap(gateCommands)];
+    const yml = (lines) =>
+      `jobs:\n  x:\n    steps:\n${lines.map((l) => `      - run: ${l}\n`).join('')}`;
+    const hits = (lines) =>
+      newProblems(rule, {
+        '.github/workflows/static_analysis.yml': yml(lines),
+      }).flatMap((p) => p.hits.map((h) => h.text));
+    assert.deepEqual(hits(steps), []);
+    assert.equal(
+      hits([...steps, 'node scripts/checks/new-gate.mjs']).length,
+      1
+    );
+    assert.match(
+      hits(steps.filter((c) => c !== 'pnpm check:ci')).join(),
+      /missing from/
+    );
+    assert.match(hits([...steps, '|']).join(), /multi-line run block/);
+  });
+
+  test('RULES-DOC: the committed page must equal the render', async () => {
+    const rule = byId('RULES-DOC');
+    const { GATES } = await import('./architecture-rules.mjs');
+    const { renderRulesDoc } = await import('./architecture-docs.mjs');
+    const page = renderRulesDoc(RULES, GATES);
+    assert.equal(
+      newProblems(rule, { 'docs/architecture/rules.md': page }).length,
+      0
+    );
+    const drift = newProblems(rule, {
+      'docs/architecture/rules.md': page.replace('### A1', '### A1x'),
+    });
+    assert.match(drift[0].hits[0].text, /differs from the registry from here/);
+    assert.equal(newProblems(rule, {}).length, 1, 'a missing page fails');
+    for (const r of RULES)
+      assert.ok(page.includes(`### ${r.id}\n`), `${r.id} has an anchor`);
+  });
+
   test('RATE-LIMIT-BINDING: the default preset, every env, and the exempt forms', () => {
     const rule = byId('RATE-LIMIT-BINDING');
     const both = ['RATE_LIMIT_API', 'RATE_LIMIT_STRICT'];

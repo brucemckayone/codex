@@ -55,14 +55,15 @@
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-
+import { RULES_DOC, renderRulesDoc } from './architecture-docs.mjs';
 import {
   applyIgnores,
   IGNORE_KEYWORD,
@@ -70,7 +71,7 @@ import {
   parseIgnores,
 } from './architecture-ignores.mjs';
 import { MATCHERS } from './architecture-matchers.mjs';
-import { RULES } from './architecture-rules.mjs';
+import { GATES, RULES } from './architecture-rules.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -326,7 +327,10 @@ export function collect(rules, source) {
         continue;
       }
       const perFile = matcher.whole(rule, { source: reading, subjects });
-      for (const file of perFile.keys()) reading.read(file); // note its exceptions
+      // note each reported file's exceptions; a hit can name a file that is missing
+      for (const file of perFile.keys()) {
+        if (source.has(file)) reading.read(file);
+      }
       results.set(rule.id, {
         perFile: excuse(rule, perFile),
         evaluated: new Set([...subjects, ...perFile.keys()]),
@@ -620,12 +624,20 @@ export function formatProblems(problems) {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const opts = { staged: false, lower: false, init: false };
+  const opts = {
+    staged: false,
+    lower: false,
+    init: false,
+    writeRules: false,
+    gates: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--staged') opts.staged = true;
     else if (arg === '--lower') opts.lower = true;
     else if (arg === '--init') opts.init = true;
+    else if (arg === '--write-rules') opts.writeRules = true;
+    else if (arg === '--gates') opts.gates = true;
     else if (
       arg === '--root' ||
       arg === '--rules' ||
@@ -640,11 +652,10 @@ function parseArgs(argv) {
       throw new UsageError(`unknown option ${arg}`);
     }
   }
-  if (
-    [opts.staged, opts.lower, opts.init, opts.raises].filter(Boolean).length > 1
-  ) {
+  const modes = ['staged', 'lower', 'init', 'raises', 'writeRules', 'gates'];
+  if (modes.filter((m) => opts[m]).length > 1) {
     throw new UsageError(
-      '--staged, --lower, --init and --raises are exclusive'
+      '--staged, --lower, --init, --raises, --write-rules and --gates are exclusive'
     );
   }
   return opts;
@@ -656,6 +667,49 @@ function readBaseline(source, root, file, staged) {
   if (staged) return source.has(file) ? JSON.parse(source.read(file)) : {};
   const path = join(root, file);
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+}
+
+/**
+ * --gates: run every CI static gate the registry lists, in order, the way the
+ * static-analysis job does. gate.sh calls this so a gate added to CI can't be
+ * skipped locally (Codex-kxdz9). A pull-request-only step is reported, not
+ * run; a gate gate.sh runs itself is skipped here.
+ */
+function runGates(root, gates) {
+  const failed = [];
+  for (const gate of gates) {
+    if (gate.localBy) {
+      console.log(`- ${gate.id}: run by ${gate.localBy}`);
+      continue;
+    }
+    for (const command of [gate.before, gate.selfTest, gate.run].filter(
+      Boolean
+    )) {
+      console.log(`- ${gate.id}: ${command}`);
+      const r = spawnSync(command, {
+        cwd: root,
+        shell: true,
+        stdio: 'inherit',
+      });
+      if (r.status !== 0) {
+        failed.push(`${gate.id} (${command})`);
+        break;
+      }
+    }
+    for (const command of gate.prOnly ?? []) {
+      console.log(`- ${gate.id}: CI pull requests only: ${command}`);
+    }
+  }
+  if (failed.length > 0) {
+    console.error(
+      `✗ check-architecture --gates: ${failed.length} gate(s) failed: ${failed.join(', ')}`
+    );
+    return 1;
+  }
+  console.log(
+    `OK: all ${gates.filter((g) => !g.localBy).length} CI static gates passed locally.`
+  );
+  return 0;
 }
 
 /**
@@ -734,6 +788,13 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (opts.raises) return checkRaises(root, baselineFile, opts.raises);
+  if (opts.writeRules) {
+    mkdirSync(dirname(join(root, RULES_DOC)), { recursive: true });
+    writeFileSync(join(root, RULES_DOC), renderRulesDoc(rules, GATES));
+    console.log(`check-architecture: wrote ${RULES_DOC}.`);
+    return 0;
+  }
+  if (opts.gates) return runGates(root, GATES);
 
   const source = opts.staged ? stagedSource(root) : treeSource(root);
   let results;
