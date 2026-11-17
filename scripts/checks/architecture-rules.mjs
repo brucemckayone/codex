@@ -181,6 +181,8 @@ export const GATES = [
     id: 'SVELTE-BASELINE',
     title: 'svelte-check finds no error beyond its baseline',
     before: CI_SETUP_STEPS[1],
+    // In CI it runs after `pnpm typecheck`, which builds every package's dist/.
+    needs: 'built packages: run `pnpm typecheck` first (gate.sh does)',
     selfTest: 'pnpm --filter web run check:svelte-baseline:test',
     run: 'pnpm --filter web run check:svelte-baseline',
   },
@@ -275,7 +277,8 @@ export const RULES = [
     why: '85 of 147 docs were cited nowhere in the repo. A doc nobody can find is never updated, and it keeps answering searches with stale content.',
     scope: {
       include: ['docs/**/*.md'],
-      exclude: ['docs/README.md', 'docs/archive/**'],
+      // The session folder's README is a Session, not a doc to index.
+      exclude: ['docs/README.md', 'docs/archive/**', `${SESSION_NOTES}/**`],
     },
     match: { kind: 'doc-index', index: 'docs/README.md' },
     fix: 'Link the doc (or its folder) from the right section of docs/README.md.',
@@ -290,7 +293,13 @@ export const RULES = [
       ],
       // The folder's own tracked README describes the folder.
       // The rules page lists this rule's own scope, which names the folder.
-      exclude: ['docs/archive/**', `${SESSION_NOTES}/**`, RULES_DOC],
+      // The baseline lists file paths; it doesn't cite them.
+      exclude: [
+        'docs/archive/**',
+        `${SESSION_NOTES}/**`,
+        RULES_DOC,
+        'scripts/checks/architecture-baseline.json',
+      ],
     },
     match: { kind: 'cite', text: `${SESSION_NOTES}/` },
     fix: 'Move what the reference needs into a tracked doc and cite that instead.',

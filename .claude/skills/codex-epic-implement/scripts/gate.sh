@@ -66,6 +66,12 @@ else run "typecheck" pnpm typecheck; fi
 
 run "biome (check:ci)" pnpm check:ci
 
+# Every OTHER gate of CI's static-analysis job, with its self-test, run from the
+# architecture registry's GATES list (Codex-kxdz9). CI-GATES keeps that list
+# equal to the workflow's steps, so a gate added to CI can't be skipped here,
+# the way the svelte-check baseline was when PR #705 went red.
+run "CI static gates (check:arch --gates)" node scripts/checks/check-architecture.mjs --gates
+
 if [[ $SKIP_TESTS -eq 0 ]]; then
   # --concurrency=1 is mandatory (shared Neon branch); the root `test` script already sets it.
   if [[ -n "$PKG" ]]; then run "test ($PKG)" pnpm turbo run test --filter="$PKG" --concurrency=1

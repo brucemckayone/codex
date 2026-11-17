@@ -693,6 +693,7 @@ function runGates(root, gates) {
       });
       if (r.status !== 0) {
         failed.push(`${gate.id} (${command})`);
+        if (gate.needs) console.error(`  ${gate.id} needs ${gate.needs}.`);
         break;
       }
     }
@@ -777,9 +778,11 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const root = opts.root ? resolve(opts.root) : REPO_ROOT;
   const baselineFile = opts.baseline ?? BASELINE_FILE;
-  const rules = opts.rules
-    ? (await import(pathToFileURL(resolve(opts.rules)).href)).RULES
-    : RULES;
+  const registry = opts.rules
+    ? await import(pathToFileURL(resolve(opts.rules)).href)
+    : { RULES, GATES };
+  const rules = registry.RULES;
+  const gates = registry.GATES ?? [];
   try {
     validateRules(rules);
   } catch (err) {
@@ -790,11 +793,11 @@ export async function main(argv = process.argv.slice(2)) {
   if (opts.raises) return checkRaises(root, baselineFile, opts.raises);
   if (opts.writeRules) {
     mkdirSync(dirname(join(root, RULES_DOC)), { recursive: true });
-    writeFileSync(join(root, RULES_DOC), renderRulesDoc(rules, GATES));
+    writeFileSync(join(root, RULES_DOC), renderRulesDoc(rules, gates));
     console.log(`check-architecture: wrote ${RULES_DOC}.`);
     return 0;
   }
-  if (opts.gates) return runGates(root, GATES);
+  if (opts.gates) return runGates(root, gates);
 
   const source = opts.staged ? stagedSource(root) : treeSource(root);
   let results;

@@ -490,6 +490,19 @@ describe('the CLI against a real git repository', () => {
     );
   });
 
+  test('--gates runs each listed gate and fails when one does', () => {
+    setUp();
+    write(
+      'rules.mjs',
+      `export const RULES = [];\nexport const GATES = [\n  { id: 'OK', title: 't', run: 'node -e "process.exit(0)"' },\n  { id: 'BAD', title: 't', selfTest: 'node -e "process.exit(3)"', run: 'node -e "process.exit(0)"', needs: 'a fixture' },\n  { id: 'LOCAL', title: 't', run: 'node -e "process.exit(9)"', localBy: 'gate.sh' },\n];\n`
+    );
+    const r = cli('--gates');
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /1 gate\(s\) failed: BAD/);
+    assert.match(r.stderr, /BAD needs a fixture/);
+    assert.match(r.stdout, /LOCAL: run by gate\.sh/);
+  });
+
   test('an unknown option is a usage error, not a pass', () => {
     setUp();
     const r = cli('--nope');

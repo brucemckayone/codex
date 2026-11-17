@@ -122,7 +122,7 @@ One cited repo path in six was dead (352 outside the archive). A doc that names 
 85 of 147 docs were cited nowhere in the repo. A doc nobody can find is never updated, and it keeps answering searches with stale content.
 
 - **Applies to:** `docs/**/*.md`
-- **Except:** `docs/README.md`, `docs/archive/**`
+- **Except:** `docs/README.md`, `docs/archive/**`, `docs/handover/**`
 - **Checked by:** `doc-index`
 - **Fix:** Link the doc (or its folder) from the right section of docs/README.md.
 
@@ -133,7 +133,7 @@ One cited repo path in six was dead (352 outside the archive). A doc that names 
 docs/handover is gitignored, so CI and every other machine see a dead reference. Durable knowledge belongs in a tracked doc.
 
 - **Applies to:** `**/*.{md,ts,js,mjs,cjs,json,jsonc,yml,yaml,svelte,sh,py,toml}`
-- **Except:** `docs/archive/**`, `docs/handover/**`, `docs/architecture/rules.md`
+- **Except:** `docs/archive/**`, `docs/handover/**`, `docs/architecture/rules.md`, `scripts/checks/architecture-baseline.json`
 - **Checked by:** `cite`
 - **Fix:** Move what the reference needs into a tracked doc and cite that instead.
 
