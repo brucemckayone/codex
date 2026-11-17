@@ -1,5 +1,5 @@
 {
-  "id": "d51025d3-e57a-4560-9fd4-8c8d33da2372",
+  "id": "d6cacb52-ce22-45d7-bbac-652329dba79b",
   "prevId": "e9e4eb9c-bded-4b85-a8d5-bc852e1983a1",
   "version": "7",
   "dialect": "postgresql",
@@ -2384,12 +2384,6 @@
               "nulls": "last"
             },
             {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
               "expression": "kind",
               "isExpression": false,
               "asc": true,
@@ -2397,6 +2391,12 @@
             },
             {
               "expression": "round",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2411,13 +2411,13 @@
           "name": "idx_content_leaving_notices_open",
           "columns": [
             {
-              "expression": "state",
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "created_at",
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2425,27 +2425,6 @@
           ],
           "isUnique": false,
           "where": "\"content_leaving_notices\".\"state\" IN ('due', 'failed')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_content_leaving_notices_content": {
-          "name": "idx_content_leaving_notices_content",
-          "columns": [
-            {
-              "expression": "content_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2489,7 +2468,7 @@
         },
         "check_content_leaving_notices_state": {
           "name": "check_content_leaving_notices_state",
-          "value": "\"content_leaving_notices\".\"state\" IN ('due', 'sent', 'failed', 'cancelled')"
+          "value": "\"content_leaving_notices\".\"state\" IN ('due', 'sent', 'failed', 'cancelled', 'abandoned')"
         },
         "check_content_leaving_notices_attempts": {
           "name": "check_content_leaving_notices_attempts",

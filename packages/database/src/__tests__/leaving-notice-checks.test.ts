@@ -23,23 +23,11 @@
 
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { getConstraintName } from '../utils/db-errors';
 
 const HAS_DB = ['LOCAL_PROXY', 'NEON_BRANCH'].includes(
   process.env.DB_METHOD || ''
 );
-
-/** The refused statement's SQLSTATE and constraint; drizzle wraps it in `cause`. */
-function refusal(error: unknown): { code?: string; constraint?: string } {
-  const e = error as {
-    code?: string;
-    constraint?: string;
-    cause?: { code?: string; constraint?: string };
-  };
-  return {
-    code: e.code ?? e.cause?.code,
-    constraint: e.constraint ?? e.cause?.constraint,
-  };
-}
 
 class Rollback extends Error {}
 
@@ -58,10 +46,8 @@ describe.skipIf(!HAS_DB)(
       const leaves = new Date(Date.UTC(2026, 11, 17, 12));
       const later = new Date(Date.UTC(2027, 0, 20, 12));
 
-      const accepted: string[] = [];
-      const refused: Record<string, { code?: string; constraint?: string }> =
-        {};
-      let defaultDownload: boolean | undefined;
+      /** Each refused statement, by name, with the constraint that refused it. */
+      const refused: Record<string, string | null> = {};
       try {
         await dbWs.transaction(async (tx) => {
           await tx.insert(users).values({
@@ -96,16 +82,15 @@ describe.skipIf(!HAS_DB)(
                 await savepoint.execute(statement);
               });
             } catch (error) {
-              refused[name] = refusal(error);
+              refused[name] = getConstraintName(error);
             }
           };
 
           // A leave date on an archived piece and on a draft (a once-live
-          // draft reads Off sale too).
+          // draft reads Off sale too), and downloads on by default.
           const archived = await piece('archived', 'archived');
           await piece('draft', 'draft');
-          accepted.push('archived leaving', 'draft leaving');
-          defaultDownload = archived.ownersCanDownload;
+          expect(archived.ownersCanDownload).toBe(true);
 
           const live = await piece('live', 'published');
           await refuse(
@@ -122,22 +107,18 @@ describe.skipIf(!HAS_DB)(
             sql`UPDATE content SET status = 'published' WHERE id = ${archived.id}`
           );
 
-          // Every kind in every state the constants name, one round each.
+          // Every kind in every state the constants name, a round per state so
+          // the unique never fires here.
           for (const kind of CONTENT_LEAVING_NOTICE_KINDS) {
-            for (const state of CONTENT_LEAVING_NOTICE_STATES) {
+            for (const [i, state] of CONTENT_LEAVING_NOTICE_STATES.entries()) {
               await tx.insert(contentLeavingNotices).values({
                 contentId: archived.id,
                 userId,
                 kind,
-                // A round per state, so the unique never fires here.
-                round: new Date(
-                  leaves.getTime() +
-                    CONTENT_LEAVING_NOTICE_STATES.indexOf(state) * 1000
-                ),
+                round: new Date(leaves.getTime() + i * 1000),
                 state,
                 sentAt: state === 'sent' ? leaves : null,
               });
-              accepted.push(`${kind}/${state}`);
             }
           }
           // Kept, then deleted again: the same person is told again.
@@ -147,32 +128,35 @@ describe.skipIf(!HAS_DB)(
             kind: 'leaving',
             round: later,
           });
-          accepted.push('a new round');
 
+          /** A notice that differs from a fresh, valid one only by `change`. */
           const notice = (
             name: string,
-            kind: string,
-            state: string,
-            sentAt: Date | null,
-            round: Date
-          ) =>
-            refuse(
+            change: Partial<{
+              kind: string;
+              state: string;
+              sentAt: Date;
+              round: Date;
+            }>
+          ) => {
+            const row = {
+              kind: 'leaving',
+              state: 'due',
+              sentAt: null,
+              round: new Date(Date.UTC(2027, 5, 1, 12)),
+              ...change,
+            };
+            return refuse(
               name,
               sql`INSERT INTO content_leaving_notices (content_id, user_id, kind, round, state, sent_at)
-                VALUES (${archived.id}, ${userId}, ${kind}, ${round}, ${state}, ${sentAt})`
+                VALUES (${archived.id}, ${userId}, ${row.kind}, ${row.round}, ${row.state}, ${row.sentAt})`
             );
-          const fresh = new Date(Date.UTC(2027, 5, 1, 12));
-          await notice('an unknown kind', 'refunded', 'due', null, fresh);
-          await notice('an unknown state', 'leaving', 'bounced', null, fresh);
-          await notice('sent with no time', 'leaving', 'sent', null, fresh);
-          await notice('a time but not sent', 'leaving', 'due', leaves, fresh);
-          await notice(
-            'the same email twice in a round',
-            'leaving',
-            'due',
-            null,
-            later
-          );
+          };
+          await notice('an unknown kind', { kind: 'refunded' });
+          await notice('an unknown state', { state: 'bounced' });
+          await notice('sent with no time', { state: 'sent' });
+          await notice('a time but not sent', { sentAt: leaves });
+          await notice('the same email twice in a round', { round: later });
           await refuse(
             'negative attempts',
             sql`UPDATE content_leaving_notices SET attempts = -1
@@ -194,50 +178,18 @@ describe.skipIf(!HAS_DB)(
         if (!(error instanceof Rollback)) throw error;
       }
 
-      expect(defaultDownload).toBe(true);
-      expect(accepted).toHaveLength(
-        2 +
-          CONTENT_LEAVING_NOTICE_KINDS.length *
-            CONTENT_LEAVING_NOTICE_STATES.length +
-          1
-      );
       expect(refused).toEqual({
-        'a published piece with a leave date': {
-          code: '23514',
-          constraint: 'check_content_leaving_not_published',
-        },
-        'a leave date set on a live piece': {
-          code: '23514',
-          constraint: 'check_content_leaving_not_published',
-        },
-        'a leaving piece published': {
-          code: '23514',
-          constraint: 'check_content_leaving_not_published',
-        },
-        'an unknown kind': {
-          code: '23514',
-          constraint: 'check_content_leaving_notices_kind',
-        },
-        'an unknown state': {
-          code: '23514',
-          constraint: 'check_content_leaving_notices_state',
-        },
-        'sent with no time': {
-          code: '23514',
-          constraint: 'check_content_leaving_notices_sent',
-        },
-        'a time but not sent': {
-          code: '23514',
-          constraint: 'check_content_leaving_notices_sent',
-        },
-        'the same email twice in a round': {
-          code: '23505',
-          constraint: 'uq_content_leaving_notices_person',
-        },
-        'negative attempts': {
-          code: '23514',
-          constraint: 'check_content_leaving_notices_attempts',
-        },
+        'a published piece with a leave date':
+          'check_content_leaving_not_published',
+        'a leave date set on a live piece':
+          'check_content_leaving_not_published',
+        'a leaving piece published': 'check_content_leaving_not_published',
+        'an unknown kind': 'check_content_leaving_notices_kind',
+        'an unknown state': 'check_content_leaving_notices_state',
+        'sent with no time': 'check_content_leaving_notices_sent',
+        'a time but not sent': 'check_content_leaving_notices_sent',
+        'the same email twice in a round': 'uq_content_leaving_notices_person',
+        'negative attempts': 'check_content_leaving_notices_attempts',
       });
     });
   }

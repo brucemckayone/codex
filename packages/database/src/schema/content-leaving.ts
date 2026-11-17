@@ -1,11 +1,18 @@
 /**
- * The leaving notice's emails (Codex-a6ofh.6; the design is
- * docs/handover/studio-content-media/leaving-notice-data-design.md §2).
+ * The leaving notice (Codex-a6ofh.6, owner 2026-11-17; the design is
+ * docs/handover/studio-content-media/leaving-notice-data-design.md).
  *
- * A creator who deletes a piece people own gives them notice: the piece goes
- * off sale, keeps playing for its owners until `content.leaves_at`, and a
- * sweep finishes the delete on that date. Each email an owner is due gets one
- * row here, so the sweep sends it, retries it and never sends it twice:
+ * A creator who deletes a piece people own gives them notice instead of
+ * ending their playback at once. The piece goes off sale with a date,
+ * `content.leaves_at`, and its owners keep it until then. They are emailed,
+ * and may download it if the creator allowed that when selling
+ * (`content.owners_can_download`). A sweep finishes the delete on the day,
+ * and the creator can keep the piece until then. The waiting state is never
+ * `deleted_at`: the access check drops a deleted row before it reads any
+ * purchase. A platform admin's delete, a takedown, stays immediate.
+ *
+ * This table holds one row per email an owner is due, so the sweep sends
+ * it, retries it and never sends it twice:
  * - `leaving` rows are written in the delete's own transaction, one per
  *   owner, so nobody who owned it at the delete is missed;
  * - `reminder` rows are added by the sweep a few days before the date;
@@ -17,7 +24,9 @@
  * `leaves_at` (for `removed`, the time of the admin delete), so a piece kept
  * and then deleted again starts a fresh round, and each person is told again.
  *
- * Rows are never deleted: a notice no longer needed becomes `cancelled`.
+ * Rows are never deleted: a notice no longer needed becomes `cancelled`, and
+ * one that used up its tries becomes `abandoned`. Both leave the sweep's
+ * claim index, so it never re-reads them.
  */
 
 import {
@@ -41,10 +50,21 @@ import {
 import { content } from './content';
 import { users } from './users';
 
-/** `'a', 'b'` for a CHECK's IN list, from a list of constant words. */
+/**
+ * `'a', 'b'` for a CHECK's or an index's IN list, from constant words. It is
+ * raw SQL, so it takes only lower-case words and underscores.
+ */
 function sqlWords(words: readonly string[]) {
+  for (const word of words) {
+    if (!/^[a-z_]+$/.test(word)) {
+      throw new Error(`Not a constant word for raw SQL: ${word}`);
+    }
+  }
   return sql.raw(words.map((word) => `'${word}'`).join(', '));
 }
+
+/** The states the sweep still has to send. */
+const OPEN_STATES: readonly ContentLeavingNoticeState[] = ['due', 'failed'];
 
 export const contentLeavingNotices = pgTable(
   'content_leaving_notices',
@@ -67,6 +87,8 @@ export const contentLeavingNotices = pgTable(
       .notNull()
       .default('due'),
     attempts: integer('attempts').notNull().default(0),
+    // The sweep's lease clock: raw-SQL updates never fire `$onUpdate`, so
+    // `updated_at` can't stand in for it.
     attemptedAt: timestamp('attempted_at', { withTimezone: true }),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     // The error's code only, never an address or a message with one in it.
@@ -80,22 +102,20 @@ export const contentLeavingNotices = pgTable(
       .$onUpdate(() => new Date()),
   },
   (table) => [
-    // One email of each kind per person per notice period.
+    // One email of each kind per person per notice period. Its order serves
+    // the reads too: Keep's and the reminder's (content_id, kind, round), and
+    // the content row's RESTRICT check (content_id).
     uniqueIndex('uq_content_leaving_notices_person').on(
       table.contentId,
-      table.userId,
       table.kind,
-      table.round
+      table.round,
+      table.userId
     ),
-    // The sweep's claim: only the rows still to send.
+    // The sweep's claim, oldest first: only the rows still to send, in the
+    // order it takes them.
     index('idx_content_leaving_notices_open')
-      .on(table.state, table.createdAt)
-      .where(sql`${table.state} IN ('due', 'failed')`),
-    // Keep and the reminder step read one piece's notices.
-    index('idx_content_leaving_notices_content').on(
-      table.contentId,
-      table.kind
-    ),
+      .on(table.createdAt, table.id)
+      .where(sql`${table.state} IN (${sqlWords(OPEN_STATES)})`),
     check(
       'check_content_leaving_notices_kind',
       sql`${table.kind} IN (${sqlWords(CONTENT_LEAVING_NOTICE_KINDS)})`

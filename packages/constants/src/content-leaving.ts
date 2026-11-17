@@ -1,19 +1,7 @@
 /**
- * The leaving notice (Codex-a6ofh.6, owner 2026-11-17). A creator who deletes
- * a piece people own gives them notice instead of ending their playback at
- * once:
- * - the piece goes off sale and out of every listing straight away;
- * - its owners keep playing it until `content.leaves_at`, the date it leaves;
- * - they are emailed, and reminded a few days before;
- * - they can download it if its creator allowed that when selling
- *   (`content.owners_can_download`);
- * - a sweep finishes the delete on that date.
- * The creator can keep the piece at any time before then.
- *
- * The waiting state is "off sale with a leave date", never `deleted_at`: the
- * access check drops a deleted row before it reads anyone's purchase, so a
- * deleted piece is gone for its owners too. A platform admin's delete, for a
- * legal or policy takedown, stays immediate.
+ * The leaving notice (Codex-a6ofh.6): what a creator's delete of a piece
+ * people own gives them instead of an end to their playback. The story is in
+ * `@codex/database`'s `schema/content-leaving.ts`.
  */
 
 /**
@@ -40,13 +28,15 @@ export type ContentLeavingNoticeKind =
  * - `sent`: the email went;
  * - `failed`: the last try failed, and the sweep tries again;
  * - `cancelled`: no longer needed, because the creator kept the piece before
- *   a `leaving` or `reminder` email went out.
+ *   a `leaving` or `reminder` email went out;
+ * - `abandoned`: it used up its tries, and the sweep stops.
  */
 export const CONTENT_LEAVING_NOTICE_STATES = [
   'due',
   'sent',
   'failed',
   'cancelled',
+  'abandoned',
 ] as const;
 
 export type ContentLeavingNoticeState =
