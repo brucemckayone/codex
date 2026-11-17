@@ -105,6 +105,12 @@ export const SAME_LAYER_EDGES = [
   },
 ];
 
+/**
+ * The gitignored session-notes folder, built from parts so this registry (and
+ * the rules page generated from it) never cites the folder itself.
+ */
+const SESSION_NOTES = ['docs', 'handover'].join('/');
+
 export const RULES = [
   {
     id: 'A1',
@@ -161,5 +167,59 @@ export const RULES = [
     },
     match: { kind: 'line-count', newFileMax: 800 },
     fix: 'Extract the change into a new domain module instead of growing this file.',
+  },
+  // ---- Docs (D0). Archived docs are frozen history, deleted in D1. ----
+  {
+    id: 'DOC-LINK',
+    title: 'Every relative markdown link resolves',
+    why: 'The 2026-11-15 docs census found 34 dead links outside the archive. A dead link sends an agent to a file that was moved, renamed or never written, and it then guesses.',
+    scope: { include: ['**/*.md'], exclude: ['docs/archive/**'] },
+    match: { kind: 'md-link' },
+    fix: 'Point the link at the file as it is now, or remove it.',
+  },
+  {
+    id: 'DOC-PATH',
+    title: 'Every repo path a doc cites exists',
+    why: 'One cited repo path in six was dead (352 outside the archive). A doc that names a file that is gone teaches an agent a codebase that no longer exists. Placeholders like [domain], <name> and globs are exempt.',
+    scope: { include: ['**/*.md'], exclude: ['docs/archive/**'] },
+    match: { kind: 'md-path' },
+    fix: 'Update the path to where the code lives now, or drop the citation.',
+  },
+  {
+    id: 'DOC-INDEX',
+    title: 'Every doc under docs/ is listed in docs/README.md',
+    why: '85 of 147 docs were cited nowhere in the repo. A doc nobody can find is never updated, and it keeps answering searches with stale content.',
+    scope: {
+      include: ['docs/**/*.md'],
+      exclude: ['docs/README.md', 'docs/archive/**'],
+    },
+    match: { kind: 'doc-index', index: 'docs/README.md' },
+    fix: 'Link the doc (or its folder) from the right section of docs/README.md.',
+  },
+  {
+    id: 'DOC-SESSION',
+    title: 'No tracked file cites the gitignored session notes',
+    why: 'docs/handover is gitignored, so CI and every other machine see a dead reference. Durable knowledge belongs in a tracked doc.',
+    scope: {
+      include: [
+        '**/*.{md,ts,js,mjs,cjs,json,jsonc,yml,yaml,svelte,sh,py,toml}',
+      ],
+      // The folder's own tracked README describes the folder.
+      exclude: ['docs/archive/**', `${SESSION_NOTES}/**`],
+    },
+    match: { kind: 'cite', text: `${SESSION_NOTES}/` },
+    fix: 'Move what the reference needs into a tracked doc and cite that instead.',
+  },
+  {
+    id: 'DOC-BUDGET',
+    title: 'A CLAUDE.md never grows past its word budget',
+    why: '36 of 38 CLAUDE.md files were over budget (the root had 3,616 words against 1,500). Every word is loaded into every agent session in that folder, so length is paid on every task.',
+    scope: { include: ['**/CLAUDE.md', '**/AGENTS.md'] },
+    match: {
+      kind: 'word-count',
+      budgets: { 'CLAUDE.md': 1500 },
+      defaultBudget: 600,
+    },
+    fix: 'Move reference material into docs/ and link it; keep the CLAUDE.md to the rules an agent needs in this folder.',
   },
 ];

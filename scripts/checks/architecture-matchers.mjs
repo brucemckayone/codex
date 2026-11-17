@@ -60,6 +60,129 @@ export function countLines(text) {
   return text.endsWith('\n') ? n : n + 1;
 }
 
+// ---------------------------------------------------------------------------
+// Docs helpers (ported from the 2026-11-15 docs census, which was calibrated:
+// after its exemptions, four of five remaining hits in a sample were real)
+// ---------------------------------------------------------------------------
+
+/** Per-source caches: the directory set and the README's listed targets. */
+const dirCache = new WeakMap();
+
+/** Every directory that holds a tracked file, so a link to a folder resolves. */
+function directoriesOf(source) {
+  let dirs = dirCache.get(source);
+  if (!dirs) {
+    dirs = new Set();
+    for (const f of source.files) {
+      let at = f.lastIndexOf('/');
+      while (at > 0) {
+        const dir = f.slice(0, at);
+        if (dirs.has(dir)) break;
+        dirs.add(dir);
+        at = dir.lastIndexOf('/');
+      }
+    }
+    dirCache.set(source, dirs);
+  }
+  return dirs;
+}
+
+/** Normalise `a/b/../c/./d` without touching the filesystem. */
+function normalise(path) {
+  const out = [];
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') out.pop();
+    else out.push(part);
+  }
+  return out.join('/');
+}
+
+function dirname(file) {
+  const at = file.lastIndexOf('/');
+  return at === -1 ? '' : file.slice(0, at);
+}
+
+/**
+ * Code blanked (offsets kept), so an example isn't judged as a link: fenced
+ * blocks, then inline spans on one line. Fences follow CommonMark: a CLOSING
+ * fence carries no info string, so "```typescript" inside a "```markdown"
+ * block doesn't close it. A naive ```…``` pairing got that wrong and judged an
+ * SQL example (`ON t(creator_id)`) as a dead link. Without the inline pass,
+ * `row[0](x)` in a code span read as one too.
+ */
+function blankCode(text) {
+  const blank = (code) => code.replace(/[^\n]/g, ' ');
+  const lines = text.split('\n');
+  let fence = null;
+  for (let k = 0; k < lines.length; k++) {
+    const line = lines[k];
+    if (fence === null) {
+      const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+      if (
+        open &&
+        !(open[1][0] === '`' && line.slice(open[0].length).includes('`'))
+      ) {
+        fence = open[1];
+        lines[k] = blank(line);
+      }
+      continue;
+    }
+    const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+    if (close && close[1][0] === fence[0] && close[1].length >= fence.length)
+      fence = null;
+    lines[k] = blank(line);
+  }
+  return lines.join('\n').replace(/`[^`\n]+`/g, blank);
+}
+
+const LINK = /\[[^\]]*\]\(([^)\s]+)[^)]*\)/g;
+
+/**
+ * The repo path a markdown link points at, or null when it isn't a repo link
+ * (a URL, a mailto:, an in-page #anchor, an autolink, a {{placeholder}}).
+ */
+function linkTarget(file, raw) {
+  const url = raw.split('#')[0];
+  // A URL, an autolink, or a template placeholder such as {{report_url}}.
+  if (!url || /^[a-z][a-z0-9+.-]*:/i.test(url) || /[<{]/.test(url)) {
+    return null;
+  }
+  let decoded = url;
+  try {
+    decoded = decodeURIComponent(url);
+  } catch {
+    // keep the raw form; a malformed escape is simply a path that won't resolve
+  }
+  return decoded.startsWith('/')
+    ? normalise(decoded)
+    : normalise(`${dirname(file)}/${decoded}`);
+}
+
+function resolves(source, target) {
+  return source.has(target) || directoriesOf(source).has(target);
+}
+
+const PATH_EXT =
+  'svelte\\.ts|svelte\\.js|test\\.ts|ts|js|mjs|cjs|svelte|md|json|jsonc|sql|yml|yaml|toml|css|html|py|sh|grit';
+
+/** A repo path written out in prose: a known top-level folder plus an extension. */
+const CITED_PATH = new RegExp(
+  `(?<![\\w/.-])((?:\\.claude|apps|packages|workers|docs|scripts|config|e2e|infrastructure|design|\\.github)/[\\w./@+\\-\\[\\]()]+?\\.(?:${PATH_EXT}))(?::\\d+(?:[-–]\\d+)?)?(?![\\w])`,
+  'g'
+);
+
+/**
+ * Placeholders and generated files the census learned to skip: `[domain]`,
+ * `<name>`, globs, `{a,b}`, "my-feature" examples, and paraglide output that
+ * exists only after a compile.
+ */
+function isPlaceholderPath(path) {
+  return (
+    /[*<{[]/.test(path) || path.includes('/my-') || path.includes('paraglide')
+  );
+}
+
 export const MATCHERS = {
   /**
    * A regex over source code with its comments blanked out. Blanking (not
@@ -210,6 +333,128 @@ export const MATCHERS = {
         out.set(file, { found: hits.length, hits });
       }
       return out;
+    },
+  },
+  /** A relative markdown link resolves to a tracked file or folder. */
+  'md-link': {
+    file(_rule, file, text, { source }) {
+      const body = blankCode(text);
+      const { lineOf } = lineIndex(text);
+      const hits = [];
+      for (const m of body.matchAll(LINK)) {
+        const target = linkTarget(file, m[1]);
+        if (target === null || resolves(source, target)) continue;
+        hits.push({
+          line: lineOf(m.index),
+          text: `(${m[1]}) does not resolve`,
+        });
+      }
+      return { found: hits.length, hits };
+    },
+  },
+
+  /**
+   * A repo path cited in prose exists. A path relative to the doc's own
+   * package (`src/x.ts` written as `packages/a/src/x.ts` from inside it) counts
+   * when it resolves against any ancestor folder of the doc.
+   */
+  'md-path': {
+    file(_rule, file, text, { source }) {
+      const { lineOf } = lineIndex(text);
+      const parts = file.split('/');
+      const bases = [];
+      for (let i = parts.length - 1; i > 0; i--)
+        bases.push(parts.slice(0, i).join('/'));
+      const hits = [];
+      for (const m of text.matchAll(CITED_PATH)) {
+        const path = m[1].replace(/\.+$/, '');
+        if (isPlaceholderPath(path)) continue;
+        if (source.has(path) || bases.some((b) => source.has(`${b}/${path}`)))
+          continue;
+        hits.push({ line: lineOf(m.index), text: `${path} does not exist` });
+      }
+      return { found: hits.length, hits };
+    },
+  },
+
+  /**
+   * A doc is listed in the index: the index links to it, or to a folder that
+   * holds it (so a section can list a whole folder).
+   */
+  'doc-index': {
+    validate(rule) {
+      if (typeof rule.match.index !== 'string') {
+        throw new Error(
+          `rule ${rule.id}: match.index must name the index file`
+        );
+      }
+    },
+    file(rule, file, _text, { source }) {
+      const { index } = rule.match;
+      if (!source.has(index)) {
+        return {
+          found: 1,
+          hits: [{ line: 1, text: `${index} does not exist` }],
+        };
+      }
+      const listed = new Set();
+      for (const m of blankCode(source.read(index)).matchAll(LINK)) {
+        const target = linkTarget(index, m[1]);
+        if (target !== null) listed.add(target);
+      }
+      let at = file;
+      while (at) {
+        if (listed.has(at)) return { found: 0, hits: [] };
+        at = dirname(at);
+      }
+      return {
+        found: 1,
+        hits: [{ line: 1, text: `not linked from ${index}` }],
+      };
+    },
+  },
+
+  /** Lines that mention a forbidden string (DOC-SESSION: a gitignored folder). */
+  cite: {
+    validate(rule) {
+      if (typeof rule.match.text !== 'string' || rule.match.text === '') {
+        throw new Error(
+          `rule ${rule.id}: match.text must be a non-empty string`
+        );
+      }
+    },
+    file(rule, _file, text) {
+      const { lineOf, textOf } = lineIndex(text);
+      const hits = [];
+      let at = text.indexOf(rule.match.text);
+      let lastLine = 0;
+      while (at !== -1) {
+        const line = lineOf(at);
+        if (line !== lastLine)
+          hits.push({ line, text: textOf(line).slice(0, 160) });
+        lastLine = line;
+        at = text.indexOf(rule.match.text, at + rule.match.text.length);
+      }
+      return { found: hits.length, hits };
+    },
+  },
+
+  /** A file's word count (whitespace-separated), against a per-file budget. */
+  'word-count': {
+    unit: 'words',
+    validate(rule) {
+      const { budgets, defaultBudget } = rule.match;
+      if (!Number.isInteger(defaultBudget) || typeof budgets !== 'object') {
+        throw new Error(
+          `rule ${rule.id}: match needs budgets and an integer defaultBudget`
+        );
+      }
+    },
+    defaultAllowed: (rule, file) =>
+      rule.match.budgets[file] ?? rule.match.defaultBudget,
+    file(_rule, _file, text) {
+      const words = text.split(/\s+/).filter(Boolean).length;
+      return { found: words, hits: [] };
     },
   },
 };

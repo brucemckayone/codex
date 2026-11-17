@@ -458,6 +458,9 @@ describe('the CLI against a real git repository', () => {
 const pkg = (name, deps = {}, extra = {}) =>
   JSON.stringify({ name, dependencies: deps, ...extra }, null, 2);
 
+// Built from parts so this test file doesn't cite the folder itself.
+const SESSION_NOTES = 'docs/' + 'handover/';
+
 const FIRES = {
   A1: {
     'packages/purchase/src/services/x.ts':
@@ -471,6 +474,11 @@ const FIRES = {
   SIZE: {
     'packages/payments/src/new-module.ts': 'x\n'.repeat(801),
   },
+  'DOC-LINK': { 'docs/a.md': '[gone](./missing.md)\n' },
+  'DOC-PATH': { 'docs/a.md': 'See packages/gone/src/x.ts for it.\n' },
+  'DOC-INDEX': { 'docs/README.md': '# Index\n', 'docs/new.md': '# New\n' },
+  'DOC-SESSION': { 'packages/a/src/x.ts': `// see ${SESSION_NOTES}x.md\n` },
+  'DOC-BUDGET': { 'packages/a/CLAUDE.md': 'word '.repeat(601) },
 };
 
 describe('the registry rules', async () => {
@@ -624,5 +632,110 @@ describe('the registry rules', async () => {
       0,
       'not a money package'
     );
+  });
+  test('DOC-LINK: resolved files and folders, URLs, anchors, code and placeholders pass', () => {
+    const rule = byId('DOC-LINK');
+    const tree = (body) => ({
+      'docs/a/x.md': body,
+      'docs/a/y.md': '',
+      'docs/b/z.md': '',
+    });
+    const fires = (body) =>
+      newProblems(rule, tree(body)).reduce((n, p) => n + p.found, 0);
+    assert.equal(
+      fires(
+        '[y](./y.md) [z](../b/z.md#part) [folder](../b/) [root](/docs/b/z.md)\n'
+      ),
+      0
+    );
+    assert.equal(
+      fires(
+        '[web](https://x.dev) [mail](mailto:a@b) [here](#top) [tpl]({{report_url}})\n'
+      ),
+      0
+    );
+    assert.equal(
+      fires('```sql\nON t(creator_id)\n```\nand `row[0](x)` inline\n'),
+      0
+    );
+    assert.equal(
+      fires('````markdown\n```typescript\n[a](inside.md)\n```\n````\n'),
+      0,
+      'a fence with an info string cannot close the block it sits in'
+    );
+    assert.equal(
+      fires('```markdown\n```typescript\n```\n[a](./gone.md)\n'),
+      1,
+      'after the real close, links count again'
+    );
+    assert.equal(fires('[a](./gone.md) [b](../b/gone.md)\n'), 2);
+  });
+
+  test('DOC-PATH: existing, package-relative and placeholder paths pass', () => {
+    const rule = byId('DOC-PATH');
+    const tree = (body) => ({
+      'packages/a/CLAUDE.md': body,
+      'packages/a/src/x.ts': '',
+      'packages/b/src/y.ts': '',
+    });
+    const fires = (body) => newProblems(rule, tree(body)).length;
+    assert.equal(
+      fires('See packages/b/src/y.ts and packages/a/src/x.ts:12.\n'),
+      0
+    );
+    assert.equal(
+      fires(
+        'Placeholders: packages/[domain]/src/x.ts, packages/<pkg>/x.ts, docs/*.md, apps/web/src/paraglide/x.js\n'
+      ),
+      0
+    );
+    assert.equal(fires('Gone: packages/a/src/gone.ts\n'), 1);
+  });
+
+  test('DOC-INDEX: a link to the doc or to its folder lists it', () => {
+    const rule = byId('DOC-INDEX');
+    const fires = (readme, file = 'docs/payments/flow.md') =>
+      newProblems(rule, { 'docs/README.md': readme, [file]: '' }).length;
+    assert.equal(fires('- [Flow](payments/flow.md)\n'), 0);
+    assert.equal(fires('- [Payments](payments/)\n'), 0);
+    assert.equal(fires('- [Other](other.md)\n'), 1);
+    assert.equal(
+      fires('', 'docs/archive/old.md'),
+      0,
+      'the archive is out of scope'
+    );
+    const missing = newProblems(rule, { 'docs/x.md': '' });
+    assert.match(missing[0].hits[0].text, /docs\/README\.md does not exist/);
+  });
+
+  test('DOC-SESSION: only a path into the folder fires, and not from inside it', () => {
+    const rule = byId('DOC-SESSION');
+    const fires = (file, body) => newProblems(rule, { [file]: body }).length;
+    assert.equal(
+      fires(
+        'packages/a/CLAUDE.md',
+        'Notes live in docs/handover, which is gitignored.\n'
+      ),
+      0
+    );
+    assert.equal(
+      fires(`${SESSION_NOTES}README.md`, `See ${SESSION_NOTES}x.md\n`),
+      0
+    );
+    assert.equal(fires('docs/archive/old.md', `See ${SESSION_NOTES}x.md\n`), 0);
+    assert.equal(
+      fires('apps/web/src/x.svelte', `<!-- ${SESSION_NOTES}y/index.html -->\n`),
+      1
+    );
+  });
+
+  test('DOC-BUDGET: the root CLAUDE.md gets 1,500 words, every other 600', () => {
+    const rule = byId('DOC-BUDGET');
+    const fires = (file, words) =>
+      newProblems(rule, { [file]: 'w '.repeat(words) }).length;
+    assert.equal(fires('CLAUDE.md', 1500), 0);
+    assert.equal(fires('CLAUDE.md', 1501), 1);
+    assert.equal(fires('packages/a/CLAUDE.md', 600), 0);
+    assert.equal(fires('packages/a/AGENTS.md', 601), 1);
   });
 });
