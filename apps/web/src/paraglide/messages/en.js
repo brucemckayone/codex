@@ -26707,6 +26707,22 @@ export const support_amount_outside_stripe = (params) => `${params.amount} · re
 
 
 /**
+ * @param {{ amount: NonNullable<unknown>, lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_short_loss_owed = (params) => `${params.amount} · ${params.lost} back through the lost chargeback · ${params.owed} still owed to the buyer`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, lost: NonNullable<unknown>, owed: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_short_loss_paid = (params) => `${params.amount} · ${params.lost} back through the lost chargeback · ${params.owed} paid another way on ${params.date}`
+
+
+/**
  * @param {{ date: NonNullable<unknown>, left: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -27880,6 +27896,222 @@ export const support_blocked_refunded_outside_stripe_lead = (params) => `Refunde
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_blocked_refunded_outside_stripe_body = () => `Don't refund this charge here.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_lead = (params) => `${params.owed} is still owed to the buyer.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_body_unavailable = (params) => `This payment was blocked because the item was no longer available, so the buyer is owed all ${params.amount} back. The bank returned ${params.lost} through the lost chargeback, and Stripe won't refund a charged-back payment, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_body_duplicate = (params) => `This was a second payment for an item the buyer already had, so they're owed all ${params.amount} back. The bank returned ${params.lost} through the lost chargeback, and Stripe won't refund a charged-back payment, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_hourly = () => `Until it's marked, support is alerted about it every hour.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_mark = () => `Mark as paid another way`
+
+
+/**
+ * @param {{ lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_paid_note = (params) => `The bank returned ${params.lost} through the lost chargeback; the other ${params.owed} was paid another way.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown>, buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_title = (params) => `Mark ${params.owed} as paid to ${params.buyer}?`
+
+
+/**
+ * @param {{ item: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_description = (params) => `${params.item} · paid ${params.date} · chargeback lost`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_fact_paid = () => `The buyer paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_fact_lost = () => `Back through the lost chargeback`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_fact_owed = () => `Still owed, to pay another way`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_paid_first_lead = (params) => `Only mark it once ${params.buyer} has the money.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_paid_first = () => `This doesn't send anything: it records that you paid the rest outside Stripe.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_follows = () => `The hourly alert stops for this payment, and the charge can't be refunded through Stripe again. A mark can't be undone here.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_submit = (params) => `Mark ${params.owed} as paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_failed_lead = () => `We couldn't save that, so nothing has changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_failed = () => `Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_session_ended = () => `Nothing was marked. Sign in again, then reload this page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_done_lead = () => `Marked as paid another way.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown>, buyer: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_done = (params) => `${params.owed} to ${params.buyer}, on ${params.date}. The hourly alert stops for this payment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_already_lead = () => `Already marked as paid another way`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_already = (params) => `on ${params.date}, so nothing changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_changed_lead = () => `What's owed on this payment changed since it was loaded, so nothing was marked.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_changed = () => `It has been reloaded: check it again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_refused_not_short = () => `Nothing is owed on this payment any more, so nothing was marked: the buyer has all of it back.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_refused_no_lost_dispute = () => `This payment no longer has a lost chargeback, so nothing was marked. The bank may have decided it again: check the chargeback.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_refused_not_blocked = () => `Only a blocked payment is owed the rest of a lost chargeback, so nothing was marked.`
 
 
 /**
