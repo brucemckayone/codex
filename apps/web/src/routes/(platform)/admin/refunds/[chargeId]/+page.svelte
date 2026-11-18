@@ -48,6 +48,7 @@
   import RefundOutcomeAlert from '$lib/components/support/RefundOutcomeAlert.svelte';
   import RefundsCard from '$lib/components/support/RefundsCard.svelte';
   import SessionEndedAlert from '$lib/components/support/SessionEndedAlert.svelte';
+  import SettleNoticeAlert from '$lib/components/support/SettleNoticeAlert.svelte';
   import SplitCard from '$lib/components/support/SplitCard.svelte';
   import ResolveCreditDialog from '$lib/components/support/ResolveCreditDialog.svelte';
   import { type CreditTarget, targetFromLine } from '$lib/components/support/owed-view';
@@ -308,16 +309,7 @@
   {/if}
 
   {#if creditNotice}
-    <Alert
-      variant={creditNotice.variant}
-      tabindex={-1}
-      data-credit-notice
-      data-testid="credit-notice"
-    >
-      <!-- The space sits outside the block: Svelte trims one at a block's end,
-           which ran the lead into the text. -->
-      <p>{#if creditNotice.lead}<strong>{creditNotice.lead}</strong>{/if} {creditNotice.text}</p>
-    </Alert>
+    <SettleNoticeAlert notice={creditNotice} data-credit-notice data-testid="credit-notice" />
   {/if}
 
   {#if outcome}

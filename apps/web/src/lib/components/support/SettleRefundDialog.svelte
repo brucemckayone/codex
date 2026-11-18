@@ -31,6 +31,12 @@
   nothing locked), so the dialog says what it predicts and the confirmation
   says what happened (`accessNotRestoredReason`).
 
+  A blocked payment's refund its chargeback decides
+  (`REFUND_DECIDED_BY_CHARGEBACK`, owner D66, D67) is never settled here:
+  the queue offers nothing while the chargeback is open, and lists nothing
+  once it is lost. A page older than that gets the refusal, and the dialog
+  closes with a notice linking to the charge (`decidedByChargebackNotice`).
+
   @prop {FailedRefundItem | null} item
   @prop {FailedRefundResolution | null} resolution
   @prop {boolean} open - Bindable.
@@ -65,7 +71,7 @@
   } from './repay-blocks.svelte';
   import { isSessionEnded } from './session';
   import { formatList, formatShortDay, systemSettledSentence } from './support-format';
-  import type { SettleNotice } from './settle-notice';
+  import { decidedByChargebackNotice, type SettleNotice } from './settle-notice';
 
   interface Props {
     item: FailedRefundItem | null;
@@ -248,7 +254,7 @@
     busy = true;
     problem = null;
     // The names the answer's text uses, as sent.
-    const settling = { refundId: item.refundId, buyer, title };
+    const settling = { refundId: item.refundId, chargeId: item.chargeId, buyer, title };
     try {
       const answer = await resolveFailedRefund({
         refundId: settling.refundId,
@@ -291,6 +297,17 @@
       } else if (answer.status === 404) {
         open = false;
         onFinished({ variant: 'info', text: m.support_settle_gone() });
+      } else if (answer.detailsCode === 'REFUND_DECIDED_BY_CHARGEBACK') {
+        // Its chargeback decides it (D66, D67), on a page older than that:
+        // nothing was settled, and the notice links to the charge. A reason
+        // this page doesn't know stays the dialog's own problem.
+        const decided = decidedByChargebackNotice(answer.reason, settling.chargeId);
+        if (decided) {
+          open = false;
+          onFinished(decided);
+        } else {
+          problem = 'failed';
+        }
       } else if (answer.detailsCode === 'REFUND_CLAWBACK_UNFINISHED') {
         problem = 'clawback_running';
       } else if (answer.detailsCode === 'REPAY_BLOCKED_BY_LATER_CAUSE') {

@@ -465,6 +465,50 @@ describe('settling', () => {
       document.querySelector('[data-testid="settle-notice"]')
     );
   });
+
+  // Owner D66 (mockup B2): a page loaded before the chargeback was lost
+  // settles nothing; the list and the counts reload (the row has gone), and
+  // the notice links to the charge page, where what is owed lives.
+  test('a refund its lost chargeback decides: nothing settled, the list reloads, and the notice links the charge', async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({
+        detailsCode: 'REFUND_DECIDED_BY_CHARGEBACK',
+        reason: 'chargeback_lost',
+      })
+    );
+    mountAt('/admin/queue');
+    failedSlot().current = list([failedRefund()]);
+    flushSync();
+
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="failed-refund-row"] button'
+      ),
+    ]
+      .find((b) => b.textContent?.includes(m.support_action_elsewhere()))
+      ?.click();
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="settle-submit"]')
+      ?.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    flushSync();
+
+    expect(failedSlot().refresh).toHaveBeenCalledTimes(1);
+    expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
+    const notice = document.querySelector('[data-testid="settle-notice"]');
+    expect(notice?.getAttribute('data-variant')).toBe('warning');
+    expect(notice?.textContent?.replace(/\s+/g, ' ').trim()).toContain(
+      `${m.support_settle_on_charge_lead()} ${m.support_settle_on_charge()}`
+    );
+    const link = notice?.querySelector<HTMLAnchorElement>(
+      '[data-testid="settle-notice-link"]'
+    );
+    expect(link?.getAttribute('href')).toBe(
+      `/admin/refunds/${failedRefund().chargeId}`
+    );
+    expect(link?.textContent?.trim()).toBe(m.support_settle_open_charge());
+  });
 });
 
 describe('Owed to creators (?tab=owed)', () => {

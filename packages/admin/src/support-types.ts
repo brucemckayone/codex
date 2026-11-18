@@ -199,11 +199,13 @@ export interface ChargeDetail {
   refunds: RefundRow[];
   chargebacks: ChargebackRow[];
   /**
-   * A blocked payment owed what Stripe won't refund (owner D59-D64): after
+   * A blocked payment owed what Stripe won't refund (owner D59-D66): after
    * its chargeback was lost for less than the payment (`short`), or after
    * that chargeback was won late once support had paid the rest
-   * (`owed_again`), with what is owed and support's marks. Null for anything
-   * else: a sale, an invoice, a loss in full.
+   * (`owed_again`), with what is owed now, how it adds up, and support's
+   * marks. Owed (`owedCents` above 0) whatever marks exist (D66), or marked
+   * at its stage with nothing owed. Null for anything else: a sale, an
+   * invoice, a loss in full.
    */
   shortLoss: ChargeShortLoss | null;
 }
@@ -211,7 +213,7 @@ export interface ChargeDetail {
 /** A charge's blocked payment owed what Stripe won't refund (`findShortLosses`, `@codex/purchase`). */
 export type ChargeShortLoss = ShortAfterLoss | OwedAgainAfterLateWin;
 
-/** Its chargeback was lost for less than the payment (owner D59-D61). */
+/** Its chargeback was lost for less than the payment (owner D59-D61, D66). */
 export interface ShortAfterLoss {
   stage: Extract<ShortLossStage, 'short'>;
   /** The lost `du_` dispute: the mark is written on it. */
@@ -219,10 +221,19 @@ export interface ShortAfterLoss {
   kind: BlockedPaymentKind;
   /** What the bank returned: the lost chargeback's amount. */
   lostCents: number;
-  /** The rest, still owed (the one count); once marked, what was paid another way. */
-  owedCents: number;
-  /** `refunded_outside_stripe_at`, ISO: when support marked it paid another way. */
+  /** The refunds standing on the charge: refunded through Stripe, in all. */
+  refundedThroughStripeCents: number;
+  /** Its failed refunds support settled refunded elsewhere, in all (owner D55, D66). */
+  refundedElsewhereCents: number;
+  /**
+   * Everything paid another way so far (`paid_another_way_cents`), each mark
+   * adding to it (owner D66), or null before the first mark.
+   */
+  paidAnotherWayCents: number | null;
+  /** `refunded_outside_stripe_at`, ISO: the first mark (a repeat keeps it, D71). */
   paidAnotherWayOn: string | null;
+  /** Still owed now, by the one count: 0 once the marks have paid it. */
+  owedCents: number;
 }
 
 /**
@@ -237,7 +248,10 @@ export interface OwedAgainAfterLateWin {
   kind: BlockedPaymentKind;
   /** What the bank took back from the buyer: the chargeback's amount. */
   lostCents: number;
-  /** The first mark: what support paid another way (`paid_another_way_cents`). */
+  /**
+   * Everything paid another way (`paid_another_way_cents`): the first
+   * stage's marks, and once marked again, this stage's too (owner D66).
+   */
   paidAnotherWayCents: number;
   /** The first mark's date, ISO. */
   paidAnotherWayOn: string;
@@ -245,28 +259,30 @@ export interface OwedAgainAfterLateWin {
   lateWonOn: string;
   /** The refunds standing on the charge: refunded through Stripe, in all. */
   refundedThroughStripeCents: number;
-  /** Owed again: paid, less refunded through Stripe, less the first mark (owner D64). */
+  /** Its failed refunds support settled refunded elsewhere, in all (owner D55, D66). */
+  refundedElsewhereCents: number;
+  /** Owed again: paid, less the refunds that count, less what was paid another way (owner D64, D66). */
   owedCents: number;
-  /** `late_win_refunded_outside_stripe_at`, ISO: the second mark. */
+  /** `late_win_refunded_outside_stripe_at`, ISO: this stage's first mark (a repeat keeps it, D71). */
   paidAgainOn: string | null;
 }
 
 /**
  * "Paid another way" (POST .../charges/:chargeId/paid-another-way; owner D61,
- * D63): a mark made, or one made already (`alreadyMarked`), which marks
- * nothing and names no amount.
+ * D63, D66): a mark made, which adds what it paid, or one made already
+ * (`alreadyMarked`), which marks nothing and names no amount.
  */
 export type PaidAnotherWayResult = {
   chargeId: string;
   stripeDisputeId: string;
   /** Which mark: the first (`short`) or the second (`owed_again`). */
   stage: ShortLossStage;
-  /** The mark's date, ISO: on a repeat, when that mark was first made. */
+  /** The stage's mark date, ISO: when it was first marked at that stage (D71). */
   paidAnotherWayOn: string;
 } & (
   | {
       alreadyMarked: false;
-      /** What was marked paid another way. */
+      /** What this mark paid another way, added to what was marked before. */
       owedCents: number;
     }
   | { alreadyMarked: true; owedCents: null }
@@ -622,6 +638,15 @@ export interface FailedRefundItem {
    * for it. The kind picks the queue's words.
    */
   blockedPayment: BlockedPaymentKind | null;
+  /**
+   * The blocked payment's chargeback, while it is open (owner D67, D72): the
+   * row is listed and counted, but nothing is settled until the bank
+   * decides (`REFUND_DECIDED_BY_CHARGEBACK`, `chargeback_open`). Won in time,
+   * this is null again and it is settled as before; lost, the row leaves the
+   * queue, and what is still owed is the charge page's (D66). Null for every
+   * other row.
+   */
+  waitingForChargeback: { stripeDisputeId: string; openedOn: string } | null;
 }
 
 /** A payee's role on a slice, as the queue labels it. */

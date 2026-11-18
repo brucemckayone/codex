@@ -1,15 +1,18 @@
 /**
  * What the charge page says about a blocked payment owed what Stripe won't
- * refund (`ChargeDetail.shortLoss`; owner D59-D64; mockup
+ * refund (`ChargeDetail.shortLoss`; owner D59-D71; mockup
  * docs/handover/phase3-sources/pause-trials/support-short-loss.html, S1-S5,
- * A1-A4), and what "Paid another way" says once it has an answer.
+ * A1-A4, B3-B5), and what "Paid another way" says once it has an answer.
  *
  * Owed after a chargeback lost for less than the payment (`short`), or again
  * after support paid the rest and the chargeback was won late
  * (`owed_again`). Support pays it outside Stripe and marks it on the charge
- * page, at its stage. Every answer but one that may not have saved, or a
- * session that ended, closes the dialog with one of these notices, and the
- * page reloads the charge.
+ * page, at its stage. Owed whatever marks exist (`owedCents` above 0): each
+ * mark adds what it paid (D66), and the parts what is owed adds up from are
+ * named, each only when there is one (B3). Marked with nothing owed, the
+ * page shows one total paid another way with its dates (D68). Every answer
+ * but one that may not have saved, or a session that ended, closes the
+ * dialog with one of these notices, and the page reloads the charge.
  */
 
 import type {
@@ -17,6 +20,7 @@ import type {
   NotOwedAfterLossReason,
   OwedAgainAfterLateWin,
   PaidAnotherWayResult,
+  ShortAfterLoss,
 } from '@codex/admin';
 import type { SupportCommandFailure } from '$lib/remote/support-failure';
 import { formatPrice } from '$lib/utils/format';
@@ -24,14 +28,30 @@ import * as m from '$paraglide/messages';
 import type { SettleNotice } from './settle-notice';
 import { formatDay } from './support-format';
 
-/** When it was marked paid another way at its stage (the second mark once owed again), or null. */
-export function shortLossMarkedOn(shortLoss: ChargeShortLoss): string | null {
-  return shortLoss.stage === 'owed_again'
-    ? shortLoss.paidAgainOn
-    : shortLoss.paidAnotherWayOn;
+/** Something is owed now, at its stage: the alert and the action show, whatever marks exist (D66). */
+export function shortLossOwes(shortLoss: ChargeShortLoss): boolean {
+  return shortLoss.owedCents > 0;
 }
 
-/** Owed again's words: what was paid, when, and what was refunded through Stripe. */
+/** Sentences, one after another. */
+function sentences(parts: ReadonlyArray<string | null>): string {
+  return parts
+    .filter((part): part is string => part !== null)
+    .reduce((first, second) => m.support_sentences_two({ first, second }));
+}
+
+/** When each stage was marked, as the brackets list them (D68): the first, then the second. */
+function markDates(...isoDates: ReadonlyArray<string | null>): string {
+  const [first, second] = isoDates
+    .filter((iso): iso is string => iso !== null)
+    .map((iso) => formatDay(iso));
+  if (first === undefined) return '';
+  return second === undefined
+    ? first
+    : m.support_paid_another_way_dates({ first, second });
+}
+
+/** Owed again's words: what was paid, when, and what came back. */
 function owedAgainWords(shortLoss: OwedAgainAfterLateWin) {
   return {
     lost: formatPrice(shortLoss.lostCents),
@@ -39,6 +59,7 @@ function owedAgainWords(shortLoss: OwedAgainAfterLateWin) {
     paid: formatPrice(shortLoss.paidAnotherWayCents),
     date: formatDay(shortLoss.paidAnotherWayOn),
     refunded: formatPrice(shortLoss.refundedThroughStripeCents),
+    elsewhere: formatPrice(shortLoss.refundedElsewhereCents),
   };
 }
 
@@ -46,25 +67,77 @@ type OwedAgainBody = (
   words: ReturnType<typeof owedAgainWords> & { amount: string }
 ) => string;
 
-/** Owed again's alert body, by kind, and with a refund through Stripe or none (A1, A4). */
+/**
+ * Owed again's alert body, by kind, and by what has come back besides: a
+ * refund through Stripe (A4), one settled refunded another way (D66), both,
+ * or neither (A1).
+ */
 const OWED_AGAIN_BODY: Record<
   ChargeShortLoss['kind'],
-  { plain: OwedAgainBody; refunded: OwedAgainBody }
+  Record<'plain' | 'refunded' | 'elsewhere' | 'both', OwedAgainBody>
 > = {
   unavailable: {
     plain: (words) => m.support_owed_again_body_unavailable(words),
     refunded: (words) => m.support_owed_again_refunded_unavailable(words),
+    elsewhere: (words) => m.support_owed_again_elsewhere_unavailable(words),
+    both: (words) => m.support_owed_again_both_unavailable(words),
   },
   duplicate: {
     plain: (words) => m.support_owed_again_body_duplicate(words),
     refunded: (words) => m.support_owed_again_refunded_duplicate(words),
+    elsewhere: (words) => m.support_owed_again_elsewhere_duplicate(words),
+    both: (words) => m.support_owed_again_both_duplicate(words),
   },
 };
 
+/** Which of owed again's bodies: by what has come back besides the first mark. */
+function owedAgainBody(shortLoss: OwedAgainAfterLateWin): OwedAgainBody {
+  const body = OWED_AGAIN_BODY[shortLoss.kind];
+  const refunded = shortLoss.refundedThroughStripeCents > 0;
+  const elsewhere = shortLoss.refundedElsewhereCents > 0;
+  if (refunded && elsewhere) return body.both;
+  if (refunded) return body.refunded;
+  return elsewhere ? body.elsewhere : body.plain;
+}
+
+/**
+ * The short loss's alert body, one sentence per part (S1, B3, B4): why the
+ * buyer is owed it all back, what has come back through Stripe, what was
+ * refunded another way, what was paid another way, each only when there is
+ * one, then the bank's sentence, which ends with what to pay.
+ */
+function shortLossBody(shortLoss: ShortAfterLoss, amount: string): string {
+  return sentences([
+    shortLoss.kind === 'duplicate'
+      ? m.support_short_loss_why_duplicate({ amount })
+      : m.support_short_loss_why_unavailable({ amount }),
+    shortLoss.refundedThroughStripeCents > 0
+      ? m.support_short_loss_refunded_stripe({
+          refunded: formatPrice(shortLoss.refundedThroughStripeCents),
+        })
+      : null,
+    shortLoss.refundedElsewhereCents > 0
+      ? m.support_short_loss_refunded_elsewhere({
+          refunded: formatPrice(shortLoss.refundedElsewhereCents),
+        })
+      : null,
+    shortLoss.paidAnotherWayCents !== null && shortLoss.paidAnotherWayOn
+      ? m.support_short_loss_paid_before({
+          paid: formatPrice(shortLoss.paidAnotherWayCents),
+          date: formatDay(shortLoss.paidAnotherWayOn),
+        })
+      : null,
+    m.support_short_loss_bank({
+      lost: formatPrice(shortLoss.lostCents),
+      owed: formatPrice(shortLoss.owedCents),
+    }),
+  ]);
+}
+
 /**
  * The refund card's alert while it is owed, in place of the block: what is
- * owed and why, and how the amounts add up (S1, A1, A4). `amountCents` is
- * what the buyer paid.
+ * owed and why, and how the amounts add up (S1, A1, A4, B3, B4).
+ * `amountCents` is what the buyer paid.
  */
 export function shortLossAlert(
   shortLoss: ChargeShortLoss,
@@ -73,70 +146,79 @@ export function shortLossAlert(
   const amount = formatPrice(amountCents);
   if (shortLoss.stage === 'owed_again') {
     const words = { ...owedAgainWords(shortLoss), amount };
-    const body = OWED_AGAIN_BODY[shortLoss.kind];
     return {
       lead: m.support_owed_again_lead(words),
-      body: (shortLoss.refundedThroughStripeCents > 0
-        ? body.refunded
-        : body.plain)(words),
+      body: owedAgainBody(shortLoss)(words),
     };
   }
-  const words = {
-    amount,
-    lost: formatPrice(shortLoss.lostCents),
-    owed: formatPrice(shortLoss.owedCents),
-  };
   return {
-    lead: m.support_short_loss_lead(words),
-    body:
-      shortLoss.kind === 'duplicate'
-        ? m.support_short_loss_body_duplicate(words)
-        : m.support_short_loss_body_unavailable(words),
+    lead: m.support_short_loss_lead({ owed: formatPrice(shortLoss.owedCents) }),
+    body: shortLossBody(shortLoss, amount),
   };
 }
 
-/** The line under the refunded-outside-Stripe block once marked at its stage (S3, A3), or null. */
+/**
+ * The line under the refunded-outside-Stripe block once marked at its stage
+ * and nothing is owed (S3, A3, B5), or null: everything paid another way, as
+ * one total (D68).
+ */
 export function shortLossPaidNote(shortLoss: ChargeShortLoss): string | null {
+  if (shortLossOwes(shortLoss)) return null;
   if (shortLoss.stage === 'owed_again') {
     if (!shortLoss.paidAgainOn) return null;
     return m.support_owed_again_paid_note({
-      ...owedAgainWords(shortLoss),
-      date2: formatDay(shortLoss.paidAgainOn),
+      paid: formatPrice(shortLoss.paidAnotherWayCents),
+      dates: markDates(shortLoss.paidAnotherWayOn, shortLoss.paidAgainOn),
     });
   }
-  if (!shortLoss.paidAnotherWayOn) return null;
+  if (shortLoss.paidAnotherWayCents === null) return null;
   return m.support_short_loss_paid_note({
     lost: formatPrice(shortLoss.lostCents),
-    owed: formatPrice(shortLoss.owedCents),
+    paid: formatPrice(shortLoss.paidAnotherWayCents),
   });
 }
 
-/** The charge card's Amount line: where the money went, and what is owed (S1, S3, A1, A3). */
+/**
+ * The charge card's Amount line: where the money went, and what is owed
+ * (S1, S3, A1, A3, B4, B5). Once marked with nothing owed, one total paid
+ * another way, with when each stage was marked (D68; a second mark at the
+ * same stage keeps its first date, D71).
+ */
 export function shortLossAmountLine(
   shortLoss: ChargeShortLoss,
   amountCents: number
 ): string {
   const amount = formatPrice(amountCents);
   if (shortLoss.stage === 'owed_again') {
-    const words = { ...owedAgainWords(shortLoss), amount };
-    return shortLoss.paidAgainOn
-      ? m.support_amount_paid_again({
-          ...words,
-          date2: formatDay(shortLoss.paidAgainOn),
-        })
-      : m.support_amount_owed_again(words);
+    if (shortLossOwes(shortLoss)) {
+      return m.support_amount_owed_again({
+        ...owedAgainWords(shortLoss),
+        amount,
+      });
+    }
+    return m.support_amount_paid_again({
+      amount,
+      paid: formatPrice(shortLoss.paidAnotherWayCents),
+      dates: markDates(shortLoss.paidAnotherWayOn, shortLoss.paidAgainOn),
+    });
   }
-  const words = {
-    amount,
-    lost: formatPrice(shortLoss.lostCents),
-    owed: formatPrice(shortLoss.owedCents),
-  };
-  return shortLoss.paidAnotherWayOn
-    ? m.support_amount_short_loss_paid({
-        ...words,
-        date: formatDay(shortLoss.paidAnotherWayOn),
-      })
-    : m.support_amount_short_loss_owed(words);
+  const lost = formatPrice(shortLoss.lostCents);
+  const owed = formatPrice(shortLoss.owedCents);
+  const paid =
+    shortLoss.paidAnotherWayCents === null
+      ? null
+      : formatPrice(shortLoss.paidAnotherWayCents);
+  if (paid === null) {
+    return m.support_amount_short_loss_owed({ amount, lost, owed });
+  }
+  return shortLossOwes(shortLoss)
+    ? m.support_amount_short_loss_owed_paid({ amount, lost, paid, owed })
+    : m.support_amount_short_loss_paid({
+        amount,
+        lost,
+        paid,
+        dates: markDates(shortLoss.paidAnotherWayOn),
+      });
 }
 
 /** One line of the confirm's facts. */
@@ -147,24 +229,50 @@ export interface PaidAnotherWayFact {
   owed: boolean;
 }
 
+/** A fact, only when there is any of it. */
+function factIf(label: string, amountCents: number): PaidAnotherWayFact[] {
+  return amountCents > 0 ? [{ label, amountCents, owed: false }] : [];
+}
+
 /**
- * The confirm's facts, which add up to what is owed (S2, A2, A4): what the
- * buyer paid (`paidCents`), then what the bank returned, or, owed again,
- * what was refunded through Stripe (only when there is any) and what the
- * first mark paid another way; last, what is owed.
+ * The confirm's facts, which add up to what is owed (S2, A2, A4, B3, B4):
+ * what the buyer paid (`paidCents`), what was refunded through Stripe and
+ * what was refunded another way (only when there is any), what was paid
+ * another way so far, what the bank returned while the chargeback stands
+ * lost; last, what is owed.
  */
 export function paidAnotherWayFacts(
   shortLoss: ChargeShortLoss,
   paidCents: number
 ): PaidAnotherWayFact[] {
-  const paid = {
-    label: m.support_short_loss_fact_paid(),
-    amountCents: paidCents,
-    owed: false,
-  };
+  const before = [
+    {
+      label: m.support_short_loss_fact_paid(),
+      amountCents: paidCents,
+      owed: false,
+    },
+    ...factIf(
+      m.support_owed_again_fact_refunded(),
+      shortLoss.refundedThroughStripeCents
+    ),
+    ...factIf(
+      m.support_fact_refunded_elsewhere(),
+      shortLoss.refundedElsewhereCents
+    ),
+  ];
   if (shortLoss.stage === 'short') {
+    const paidBefore =
+      shortLoss.paidAnotherWayCents !== null && shortLoss.paidAnotherWayOn
+        ? factIf(
+            m.support_owed_again_fact_paid_before({
+              date: formatDay(shortLoss.paidAnotherWayOn),
+            }),
+            shortLoss.paidAnotherWayCents
+          )
+        : [];
     return [
-      paid,
+      ...before,
+      ...paidBefore,
       {
         label: m.support_short_loss_fact_lost(),
         amountCents: shortLoss.lostCents,
@@ -177,19 +285,8 @@ export function paidAnotherWayFacts(
       },
     ];
   }
-  const refunded =
-    shortLoss.refundedThroughStripeCents > 0
-      ? [
-          {
-            label: m.support_owed_again_fact_refunded(),
-            amountCents: shortLoss.refundedThroughStripeCents,
-            owed: false,
-          },
-        ]
-      : [];
   return [
-    paid,
-    ...refunded,
+    ...before,
     {
       label: m.support_owed_again_fact_paid_before({
         date: formatDay(shortLoss.paidAnotherWayOn),
@@ -203,6 +300,42 @@ export function paidAnotherWayFacts(
       owed: true,
     },
   ];
+}
+
+/**
+ * What follows the mark, the confirm's last line (S2, A2, B4): the first
+ * mark also blocks every Stripe refund on the charge; once anything is
+ * marked, the charge is blocked already, and a first-stage mark says it adds
+ * to what was marked (D66).
+ */
+export function paidAnotherWayFollows(shortLoss: ChargeShortLoss): string {
+  if (shortLoss.stage === 'owed_again') {
+    return m.support_owed_again_dialog_follows();
+  }
+  if (shortLoss.paidAnotherWayCents === null) {
+    return m.support_short_loss_dialog_follows();
+  }
+  return m.support_sentences_two({
+    first: m.support_short_loss_dialog_adds({
+      owed: formatPrice(shortLoss.owedCents),
+      paid: formatPrice(shortLoss.paidAnotherWayCents),
+      total: formatPrice(shortLoss.paidAnotherWayCents + shortLoss.owedCents),
+    }),
+    second: m.support_owed_again_dialog_follows(),
+  });
+}
+
+/**
+ * The mark's body: what the page showed. What was paid another way so far
+ * is how the route knows a repeat now that each mark adds (D66).
+ */
+export function paidAnotherWayBody(shortLoss: ChargeShortLoss) {
+  return {
+    stripeDisputeId: shortLoss.stripeDisputeId,
+    expectedOwedCents: shortLoss.owedCents,
+    expectedPaidAnotherWayCents: shortLoss.paidAnotherWayCents,
+    stage: shortLoss.stage,
+  };
 }
 
 /** The mark was saved, or had been already (a repeat is a success). */

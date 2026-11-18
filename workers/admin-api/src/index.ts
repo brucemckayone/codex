@@ -988,10 +988,11 @@ app.post(
 /**
  * POST /api/admin/support/charges/:chargeId/paid-another-way
  * Support paid the buyer the rest of a blocked payment's short lost
- * chargeback outside Stripe (owner D60, D61): marks the charge refunded
- * outside Stripe, which ends the hourly alert for it. Pays nothing. 200 on a
- * repeat too (`alreadyMarked`); 412 SHORT_LOSS_CHANGED; 422
- * NOT_OWED_AFTER_LOSS with its reason.
+ * chargeback outside Stripe (owner D60, D61, D63): marks the charge refunded
+ * outside Stripe, adding what it paid to what was paid another way (D66),
+ * which ends the hourly alert for it while nothing more is owed. Pays
+ * nothing. 200 on a repeat too (`alreadyMarked`); 412 SHORT_LOSS_CHANGED;
+ * 422 NOT_OWED_AFTER_LOSS with its reason.
  */
 app.post(
   '/api/admin/support/charges/:chargeId/paid-another-way',
@@ -1238,7 +1239,9 @@ app.post(
  * POST /api/admin/support/refunds/:refundId/resolve
  * Settle a failed refund: `refunded_elsewhere`, or `creators_repaid` (with a
  * note), which pays back what its clawback took and, for a failed full
- * purchase refund, gives the buyer access back.
+ * purchase refund, gives the buyer access back. 422
+ * REFUND_DECIDED_BY_CHARGEBACK for a blocked payment's refund its chargeback
+ * decides (owner D66, D67: `chargeback_open`, `chargeback_lost`).
  */
 app.post(
   '/api/admin/support/refunds/:refundId/resolve',

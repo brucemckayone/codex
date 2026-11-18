@@ -71,6 +71,7 @@
     targetFromItem,
   } from '$lib/components/support/owed-view';
   import SettleDebtDialog from '$lib/components/support/SettleDebtDialog.svelte';
+  import SettleNoticeAlert from '$lib/components/support/SettleNoticeAlert.svelte';
   import SettleRefundDialog from '$lib/components/support/SettleRefundDialog.svelte';
   import SessionEndedAlert from '$lib/components/support/SessionEndedAlert.svelte';
   import { isSessionEnded } from '$lib/components/support/session';
@@ -478,11 +479,7 @@
 </p>
 
 {#if notice}
-  <Alert variant={notice.variant} tabindex={-1} data-settle-notice data-testid="settle-notice">
-    <!-- The space sits outside the block: Svelte trims one at a block's end,
-         which ran the lead into the text. -->
-    <p>{#if notice.lead}<strong>{notice.lead}</strong>{/if} {notice.text}</p>
-  </Alert>
+  <SettleNoticeAlert {notice} data-settle-notice data-testid="settle-notice" />
 {/if}
 
 {#if sessionEnded && !loaded}

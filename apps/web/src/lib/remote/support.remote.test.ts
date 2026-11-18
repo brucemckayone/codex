@@ -595,6 +595,31 @@ describe('the settle commands', () => {
     });
   });
 
+  // Owner D66, D67: a blocked payment's failed refund its chargeback decides.
+  it.each([
+    'chargeback_open',
+    'chargeback_lost',
+  ])('a refund its chargeback decides (%s) reaches the dialog with its reason', async (reason) => {
+    api.resolveFailedRefund.mockRejectedValue(
+      new ApiError(422, 'Nothing was settled here.', 'BUSINESS_LOGIC_ERROR', {
+        code: 'REFUND_DECIDED_BY_CHARGEBACK',
+        reason,
+        chargeId: 'ch_3QdP7aLk2vRb11aA',
+      })
+    );
+    await expect(
+      remote.resolveFailedRefund({
+        refundId: '11111111-1111-4111-8111-111111111111',
+        body: { resolution: 'refunded_elsewhere', note: '' },
+      })
+    ).resolves.toMatchObject({
+      outcome: 'failed',
+      status: 422,
+      detailsCode: 'REFUND_DECIDED_BY_CHARGEBACK',
+      reason,
+    });
+  });
+
   it('a creator debt settles through its own route', async () => {
     api.resolveCreatorDebt.mockResolvedValue({
       reviewId: 'r',
@@ -628,14 +653,16 @@ describe('a short lost chargeback, paid another way (owner D61, D63)', () => {
       outcome: 'done',
       result,
     });
+    // A page that sends no total paid another way sends none so far.
     expect(api.markPaidAnotherWay).toHaveBeenCalledWith(CHARGE, {
       stripeDisputeId: DISPUTE,
       expectedOwedCents: 1500,
+      expectedPaidAnotherWayCents: null,
       stage: 'short',
     });
   });
 
-  it('sends the second mark with its stage', async () => {
+  it('sends the second mark with its stage and what was paid another way so far (owner D66)', async () => {
     api.markPaidAnotherWay.mockResolvedValue({
       chargeId: CHARGE,
       stripeDisputeId: DISPUTE,
@@ -646,11 +673,16 @@ describe('a short lost chargeback, paid another way (owner D61, D63)', () => {
     });
     await remote.markPaidAnotherWay({
       ...PAID_ANOTHER_WAY,
-      body: { ...PAID_ANOTHER_WAY.body, stage: 'owed_again' },
+      body: {
+        ...PAID_ANOTHER_WAY.body,
+        expectedPaidAnotherWayCents: 500,
+        stage: 'owed_again',
+      },
     });
     expect(api.markPaidAnotherWay).toHaveBeenCalledWith(CHARGE, {
       stripeDisputeId: DISPUTE,
       expectedOwedCents: 1500,
+      expectedPaidAnotherWayCents: 500,
       stage: 'owed_again',
     });
   });

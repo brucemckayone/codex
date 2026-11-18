@@ -13,6 +13,7 @@ import {
   ChargebackSettlingError,
   LateWinRefundNotRepayableError,
   NotOwedAfterLossError,
+  RefundDecidedByChargebackError,
   RefundedOutsideStripeError,
   ShortLossChangedError,
 } from '../errors';
@@ -126,6 +127,40 @@ describe('ShortLossChangedError', () => {
             code: 'SHORT_LOSS_CHANGED',
             owedCents: 300,
             stage: 'owed_again',
+          },
+        },
+      },
+    });
+  });
+});
+
+// Owner D66, D67: a failed refund of a blocked payment its chargeback
+// decides is settled nowhere in the queue; the page's notice links the charge.
+describe('RefundDecidedByChargebackError', () => {
+  it.each([
+    [
+      'chargeback_open',
+      "This refund is waiting for the buyer's chargeback, so nothing was settled. If the chargeback is won, settle it then.",
+    ],
+    [
+      'chargeback_lost',
+      "The buyer's chargeback was lost, so what's still owed is settled on the charge page. Nothing was settled here.",
+    ],
+  ] as const)('%s is a 422 whose details carry REFUND_DECIDED_BY_CHARGEBACK, the reason and the charge', (reason, message) => {
+    const mapped = mapErrorToResponse(
+      new RefundDecidedByChargebackError(reason, 'ch_1QjK7pXk9vRb88aQ'),
+      { logError: false }
+    );
+    expect(mapped).toEqual({
+      statusCode: 422,
+      response: {
+        error: {
+          code: 'BUSINESS_LOGIC_ERROR',
+          message,
+          details: {
+            code: 'REFUND_DECIDED_BY_CHARGEBACK',
+            reason,
+            chargeId: 'ch_1QjK7pXk9vRb88aQ',
           },
         },
       },

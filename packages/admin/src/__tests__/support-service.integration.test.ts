@@ -1965,12 +1965,18 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       );
     }
 
-    /** The mark's body, as the page sends it. */
+    /** The mark's body, as the page sends it: what it showed owed, and paid another way so far. */
     const body = (
       stripeDisputeId: string,
       expectedOwedCents: number,
-      stage: 'short' | 'owed_again' = 'short'
-    ) => ({ stripeDisputeId, expectedOwedCents, stage });
+      stage: 'short' | 'owed_again' = 'short',
+      expectedPaidAnotherWayCents: number | null = null
+    ) => ({
+      stripeDisputeId,
+      expectedOwedCents,
+      expectedPaidAnotherWayCents,
+      stage,
+    });
 
     /** A refund on the charge, as the refund webhook records it. */
     async function refundOn(
@@ -2092,8 +2098,11 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         stripeDisputeId: disputeId,
         kind,
         lostCents: 600,
-        owedCents: 400,
+        refundedThroughStripeCents: 0,
+        refundedElsewhereCents: 0,
+        paidAnotherWayCents: null,
         paidAnotherWayOn: null,
+        owedCents: 400,
       });
       // The lost chargeback still blocks a Stripe refund until it is marked.
       expect(detail.refundable).toMatchObject({
@@ -2164,8 +2173,11 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         stripeDisputeId: disputeId,
         kind: 'unavailable',
         lostCents: 600,
-        owedCents: 400,
+        refundedThroughStripeCents: 0,
+        refundedElsewhereCents: 0,
+        paidAnotherWayCents: 400,
         paidAnotherWayOn: at?.toISOString(),
+        owedCents: 0,
       });
       expect(detail.refundable).toMatchObject({
         blocked: 'refunded_outside_stripe',
@@ -2179,6 +2191,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           purchaseId: purchase.id,
           stage: 'short',
           owedCents: 400,
+          paidBeforeCents: null,
           markedByUserId: supportId,
         }
       );
@@ -2383,18 +2396,21 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         paidAnotherWayOn: first.paidAnotherWayOn,
         lateWonOn: expect.any(String),
         refundedThroughStripeCents: 0,
+        refundedElsewhereCents: 0,
         owedCents: 1000,
         paidAgainOn: null,
       });
 
       const second = await service.markPaidAnotherWay(
         sale.chargeId,
-        body(sale.disputeId, 1000, 'owed_again'),
+        body(sale.disputeId, 1000, 'owed_again', 500),
         supportId
       );
 
-      const { againAt } = await marksOf(sale.disputeId);
+      const { againAt, paidCents } = await marksOf(sale.disputeId);
       expect(againAt).toBeInstanceOf(Date);
+      // The second mark adds what it paid (owner D66): everything paid another way.
+      expect(paidCents).toBe(1500);
       expect(second).toEqual({
         chargeId: sale.chargeId,
         stripeDisputeId: sale.disputeId,
@@ -2410,6 +2426,8 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         (await service.getChargeDetail(sale.chargeId)).shortLoss
       ).toMatchObject({
         stage: 'owed_again',
+        paidAnotherWayCents: 1500,
+        owedCents: 0,
         paidAgainOn: againAt?.toISOString(),
       });
       // The first mark's date stands: the charge stays blocked from Stripe.
@@ -2421,7 +2439,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(
         await service.markPaidAnotherWay(
           sale.chargeId,
-          body(sale.disputeId, 1000, 'owed_again'),
+          body(sale.disputeId, 1000, 'owed_again', 500),
           supportId
         )
       ).toEqual({ ...second, alreadyMarked: true, owedCents: null });
@@ -2432,7 +2450,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           supportId
         )
       ).toEqual({ ...first, alreadyMarked: true, owedCents: null });
-      expect((await marksOf(sale.disputeId)).againAt).toEqual(againAt);
+      expect(await marksOf(sale.disputeId)).toEqual({
+        paidCents: 1500,
+        againAt,
+      });
     });
 
     // Owner D64: ONE count, paid - refunded through Stripe - paid another
@@ -2525,7 +2546,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       const error = await failureOf(
         service.markPaidAnotherWay(
           sale.chargeId,
-          body(sale.disputeId, 1000, 'owed_again'),
+          body(sale.disputeId, 1000, 'owed_again', 500),
           supportId
         )
       );
@@ -2539,6 +2560,369 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(
         (await service.getChargeDetail(sale.chargeId)).shortLoss
       ).toBeNull();
+    });
+
+    // Owner D66, D67, D72, END TO END: a blocked payment's refund debt shows
+    // on ONE surface. While its chargeback is open, its failed refund waits
+    // in the queue (counted) with no settle; once the chargeback is lost it
+    // leaves the queue and both counts, and what is still owed is the charge
+    // page's alone, by the one count (standing, or failed and settled
+    // refunded elsewhere, on the charge), where each mark ADDS.
+    describe('one debt, one surface (owner D66, D67, D72)', () => {
+      /** A failed refund on the sale, as the refund webhook records it. */
+      async function failedOn(
+        sale: { chargeId: string; purchase: { id: string } },
+        amountCents: number
+      ) {
+        const stripeRefundId = `re_sup${uid()}`;
+        created.stripeRefundIds.push(stripeRefundId);
+        return takeFirst(
+          await db
+            .insert(refunds)
+            .values({
+              stripeRefundId,
+              stripeChargeId: sale.chargeId,
+              purchaseId: sale.purchase.id,
+              amountCents,
+              currency: 'gbp',
+              status: 'failed',
+              failureReason: 'charge_for_pending_refund_disputed',
+              stripeCreatedAt: new Date(),
+            })
+            .returning()
+        );
+      }
+
+      /** A refund Stripe now reports failed. */
+      async function fails(stripeRefundId: string) {
+        await db
+          .update(refunds)
+          .set({ status: 'failed', failureReason: 'expired_or_canceled_card' })
+          .where(eq(refunds.stripeRefundId, stripeRefundId));
+      }
+
+      /** The queue row of `refundId`, read page by page; undefined if it isn't listed. */
+      async function queueRowOf(refundId: string) {
+        for (let page = 1; ; page++) {
+          const list = await service.listFailedRefunds({ page, limit: 50 });
+          const found = list.items.find((item) => item.refundId === refundId);
+          if (found || page >= list.pagination.totalPages) return found;
+        }
+      }
+
+      const failedCount = async () =>
+        (await service.getQueueCounts()).failedRefunds;
+
+      const settleElsewhere = (refundId: string) =>
+        service.resolveFailedRefund(
+          refundId,
+          { resolution: 'refunded_elsewhere', note: 'Bank transfer' },
+          supportId
+        );
+
+      async function resolutionOf(refundId: string) {
+        return takeFirst(
+          await db
+            .select({ resolution: refunds.resolution })
+            .from(refunds)
+            .where(eq(refunds.id, refundId))
+        ).resolution;
+      }
+
+      const owedOn = async (paymentIntentId: string, line: string) =>
+        (await reportedOwed(line)).filter(
+          (entry) => entry.stripePaymentIntentId === paymentIntentId
+        );
+
+      /**
+       * Ordering a's start: a £15.00 blocked sale refunded in full at once
+       * (so `refunded`, as `refundBlockedPayment` leaves it), whose refund
+       * failed when the buyer opened a £10.00 chargeback while it was
+       * pending. The chargeback is open.
+       */
+      async function failedThenDisputed() {
+        const sale = await purchaseCharge(3600, lossBuyer);
+        await db
+          .update(purchases)
+          .set({
+            status: PURCHASE_STATUS.REFUNDED,
+            refundedAt: new Date(),
+            refundAmountCents: 1500,
+            amountPaidCents: 1500,
+            creatorPayoutCents: 1500 - 235,
+            refundReason: ITEM_UNAVAILABLE_REFUND_REASON,
+          })
+          .where(eq(purchases.id, sale.purchase.id));
+        const charge = fake.charges.get(sale.chargeId);
+        if (charge) charge.amount = 1500;
+        const refund = await failedOn(sale, 1500);
+        const disputeId = await dispute(
+          sale.chargeId,
+          'needs_response',
+          sale.purchase.id
+        );
+        return { ...sale, refund, disputeId };
+      }
+
+      /** The open chargeback decided `status` (`won` in time, or `lost` and applied). */
+      async function decide(
+        sale: { chargeId: string; paymentIntentId: string; disputeId: string },
+        status: 'won' | 'lost'
+      ) {
+        await db
+          .update(disputes)
+          .set({ status })
+          .where(eq(disputes.stripeDisputeId, sale.disputeId));
+        if (status === 'lost') {
+          await purchaseService().processLostDispute(
+            sale.paymentIntentId,
+            1000,
+            sale.disputeId,
+            { chargeId: sale.chargeId }
+          );
+        }
+      }
+
+      it("a: while the chargeback is open, the failed refund waits in the queue, counted, and can't be settled; once lost it leaves the queue and both counts, and the charge page alone asks for the £5.00", async () => {
+        const sale = await failedThenDisputed();
+
+        expect(
+          (await queueRowOf(sale.refund.id))?.waitingForChargeback
+        ).toEqual({
+          stripeDisputeId: sale.disputeId,
+          openedOn: expect.any(String),
+        });
+        const waitingCount = await failedCount();
+        // b, while it is open: refused, and nothing settled.
+        const open = await failureOf(settleElsewhere(sale.refund.id));
+        expect(open.statusCode).toBe(422);
+        expect(open.context).toEqual({
+          code: 'REFUND_DECIDED_BY_CHARGEBACK',
+          reason: 'chargeback_open',
+          chargeId: sale.chargeId,
+        });
+        expect(await resolutionOf(sale.refund.id)).toBeNull();
+        // The bank hasn't decided, so the charge page owes nothing yet.
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toBeNull();
+
+        await decide(sale, 'lost');
+
+        expect(await queueRowOf(sale.refund.id)).toBeUndefined();
+        expect(await failedCount()).toBe(waitingCount - 1);
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toMatchObject({
+          stage: 'short',
+          refundedThroughStripeCents: 0,
+          refundedElsewhereCents: 0,
+          paidAnotherWayCents: null,
+          owedCents: 500,
+        });
+        expect(await owedOn(sale.paymentIntentId, SHORT_REPORT)).toEqual([
+          expect.objectContaining({ owedCents: 500 }),
+        ]);
+        // b, after the loss: refused with the charge, so £15.00 is never
+        // recorded against a £5.00 debt.
+        const lost = await failureOf(settleElsewhere(sale.refund.id));
+        expect(lost.context).toEqual({
+          code: 'REFUND_DECIDED_BY_CHARGEBACK',
+          reason: 'chargeback_lost',
+          chargeId: sale.chargeId,
+        });
+        expect(await resolutionOf(sale.refund.id)).toBeNull();
+
+        // One mark clears the one debt everywhere.
+        await service.markPaidAnotherWay(
+          sale.chargeId,
+          body(sale.disputeId, 500),
+          supportId
+        );
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toMatchObject({ owedCents: 0, paidAnotherWayCents: 500 });
+        expect(await owedOn(sale.paymentIntentId, SHORT_REPORT)).toEqual([]);
+        expect(await queueRowOf(sale.refund.id)).toBeUndefined();
+      });
+
+      it('won in time: the failed refund no longer waits, and is settled as before', async () => {
+        const sale = await failedThenDisputed();
+
+        await decide(sale, 'won');
+
+        expect(
+          (await queueRowOf(sale.refund.id))?.waitingForChargeback
+        ).toBeNull();
+        const settled = await settleElsewhere(sale.refund.id);
+        expect(settled.settled.resolution).toBe('refunded_elsewhere');
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toBeNull();
+      });
+
+      it('c, d: a part refund pending at the loss fails after it, so the charge page asks for it, not the queue; marked, then won late, it is owed again and marked again, each mark adding', async () => {
+        let pending = '';
+        const sale = await shortLoss('unavailable', 1000, {
+          paidCents: 1500,
+          beforeLoss: async (charge) => {
+            pending = await refundOn(charge, 500, 'pending');
+          },
+        });
+        // The pending £5.00 counts: nothing is owed at the loss.
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toBeNull();
+
+        await fails(pending);
+
+        const failedRow = takeFirst(
+          await db
+            .select({ id: refunds.id })
+            .from(refunds)
+            .where(eq(refunds.stripeRefundId, pending))
+        );
+        expect(await queueRowOf(failedRow.id)).toBeUndefined();
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toMatchObject({ stage: 'short', owedCents: 500 });
+        expect(
+          (await failureOf(settleElsewhere(failedRow.id))).context
+        ).toMatchObject({ reason: 'chargeback_lost' });
+
+        await service.markPaidAnotherWay(
+          sale.chargeId,
+          body(sale.disputeId, 500),
+          supportId
+        );
+        expect(await wonLate(sale)).toBe('none');
+
+        // d: the bank took the £10.00 back; £15.00 - £5.00 is owed again.
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toMatchObject({
+          stage: 'owed_again',
+          paidAnotherWayCents: 500,
+          owedCents: 1000,
+        });
+        expect(await queueRowOf(failedRow.id)).toBeUndefined();
+        await service.markPaidAnotherWay(
+          sale.chargeId,
+          body(sale.disputeId, 1000, 'owed_again', 500),
+          supportId
+        );
+        expect((await marksOf(sale.disputeId)).paidCents).toBe(1500);
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toMatchObject({ stage: 'owed_again', owedCents: 0 });
+        expect(await owedOn(sale.paymentIntentId, OWED_AGAIN_REPORT)).toEqual(
+          []
+        );
+      });
+
+      // Ordering e (mockup B4): a refund that counted at the first mark
+      // fails after it. The short stage shows again, a mark at the same
+      // stage adds and keeps the first date (D71), and a retry of a mark
+      // whose total has moved never adds twice.
+      it('e: a refund that fails after the first mark is owed again at the same stage; each mark adds and keeps the first date, and a stale retry is a 412', async () => {
+        let three = '';
+        let one = '';
+        const sale = await shortLoss('unavailable', 1000, {
+          paidCents: 1500,
+          beforeLoss: async (charge) => {
+            three = await refundOn(charge, 300, 'pending');
+            one = await refundOn(charge, 100, 'pending');
+          },
+        });
+        await service.markPaidAnotherWay(
+          sale.chargeId,
+          body(sale.disputeId, 100),
+          supportId
+        );
+        const first = await markOf(sale.disputeId);
+
+        await fails(three);
+
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toMatchObject({
+          stage: 'short',
+          paidAnotherWayCents: 100,
+          paidAnotherWayOn: first?.toISOString(),
+          owedCents: 300,
+        });
+        expect(await owedOn(sale.paymentIntentId, SHORT_REPORT)).toEqual([
+          expect.objectContaining({ owedCents: 300 }),
+        ]);
+        const adding = body(sale.disputeId, 300, 'short', 100);
+        const added = await service.markPaidAnotherWay(
+          sale.chargeId,
+          adding,
+          supportId
+        );
+        expect(added).toMatchObject({
+          alreadyMarked: false,
+          owedCents: 300,
+          paidAnotherWayOn: first?.toISOString(),
+        });
+        expect((await marksOf(sale.disputeId)).paidCents).toBe(400);
+        expect(await markOf(sale.disputeId)).toEqual(first);
+        // A retry after a lost answer, nothing more owed: a repeat.
+        expect(
+          await service.markPaidAnotherWay(sale.chargeId, adding, supportId)
+        ).toMatchObject({ alreadyMarked: true, owedCents: null });
+
+        await fails(one);
+
+        // The same retry now, with £1.00 more owed: its total moved, so 412,
+        // and nothing is added.
+        const stale = await failureOf(
+          service.markPaidAnotherWay(sale.chargeId, adding, supportId)
+        );
+        expect(stale.statusCode).toBe(412);
+        expect(stale.context).toEqual({
+          code: 'SHORT_LOSS_CHANGED',
+          owedCents: 100,
+          stage: 'short',
+        });
+        expect((await marksOf(sale.disputeId)).paidCents).toBe(400);
+        await service.markPaidAnotherWay(
+          sale.chargeId,
+          body(sale.disputeId, 100, 'short', 400),
+          supportId
+        );
+        expect((await marksOf(sale.disputeId)).paidCents).toBe(500);
+        expect(await markOf(sale.disputeId)).toEqual(first);
+        expect(await owedOn(sale.paymentIntentId, SHORT_REPORT)).toEqual([]);
+      });
+
+      // Mockup B3: a failed refund support settled refunded another way
+      // before the chargeback counts, and the page names it.
+      it('a refund settled refunded elsewhere before the chargeback counts, and the page names it', async () => {
+        const sale = await shortLoss('unavailable', 1000, {
+          paidCents: 1500,
+          beforeLoss: async (charge) => {
+            const refund = await failedOn(charge, 300);
+            await db
+              .update(refunds)
+              .set({
+                resolution: 'refunded_elsewhere',
+                resolvedAt: new Date(),
+                resolvedByUserId: supportId,
+              })
+              .where(eq(refunds.id, refund.id));
+          },
+        });
+
+        expect(
+          (await service.getChargeDetail(sale.chargeId)).shortLoss
+        ).toMatchObject({
+          stage: 'short',
+          refundedThroughStripeCents: 0,
+          refundedElsewhereCents: 300,
+          owedCents: 200,
+        });
+      });
     });
   });
 

@@ -1,8 +1,9 @@
 /**
  * "Paid another way" (owner D60, D61, D63): the body of
  * POST /api/admin/support/charges/:chargeId/paid-another-way. What the page
- * showed: the dispute, the whole pence owed and which time it is owed
- * (`stage`, `short` when absent); nothing else.
+ * showed: the dispute, the whole pence owed, which time it is owed
+ * (`stage`, `short` when absent) and what was paid another way so far
+ * (`expectedPaidAnotherWayCents`, null when absent; owner D66); nothing else.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -30,9 +31,10 @@ describe('stripeDisputeIdSchema', () => {
 });
 
 describe('supportPaidAnotherWaySchema', () => {
-  it('takes the dispute and what is owed, as the first time when no stage is sent', () => {
+  it('takes the dispute and what is owed, as the first time, with nothing paid yet, when neither is sent', () => {
     expect(supportPaidAnotherWaySchema.parse(BODY)).toEqual({
       ...BODY,
+      expectedPaidAnotherWayCents: null,
       stage: 'short',
     });
   });
@@ -40,8 +42,18 @@ describe('supportPaidAnotherWaySchema', () => {
   it.each(['short', 'owed_again'] as const)('takes the stage %s', (stage) => {
     expect(supportPaidAnotherWaySchema.parse({ ...BODY, stage })).toEqual({
       ...BODY,
+      expectedPaidAnotherWayCents: null,
       stage,
     });
+  });
+
+  it.each([null, 200])('takes what was paid another way so far: %s', (paid) => {
+    expect(
+      supportPaidAnotherWaySchema.parse({
+        ...BODY,
+        expectedPaidAnotherWayCents: paid,
+      })
+    ).toEqual({ ...BODY, expectedPaidAnotherWayCents: paid, stage: 'short' });
   });
 
   it.each([
@@ -53,6 +65,9 @@ describe('supportPaidAnotherWaySchema', () => {
     ['an amount as text', { ...BODY, expectedOwedCents: '500' }],
     ['a note, which has no column', { ...BODY, note: 'Paid by transfer' }],
     ['an unknown stage', { ...BODY, stage: 'third' }],
+    ['nothing paid as 0', { ...BODY, expectedPaidAnotherWayCents: 0 }],
+    ['part of a penny paid', { ...BODY, expectedPaidAnotherWayCents: 2.5 }],
+    ['paid as text', { ...BODY, expectedPaidAnotherWayCents: '200' }],
     ['a blank stage', { ...BODY, stage: '' }],
   ])('refuses %s', (_what, body) => {
     expect(supportPaidAnotherWaySchema.safeParse(body).success).toBe(false);

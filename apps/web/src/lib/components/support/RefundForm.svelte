@@ -26,12 +26,13 @@
   reason in place of the form; the server refuses all five too.
 
   A blocked payment owed what Stripe won't refund (`detail.shortLoss`, owner
-  D59-D64), after its chargeback was lost for less than the payment or again
+  D59-D66), after its chargeback was lost for less than the payment or again
   after support paid the rest and the chargeback was won late, shows what is
   owed instead, and "Mark as paid another way" (PaidAnotherWayDialog):
-  support pays it outside Stripe and records it. Once marked at its stage,
-  the refunded-outside-Stripe block shows, with a line saying how the buyer
-  was paid. The dialog's answer goes to the page (`onSettled`), which shows
+  support pays it outside Stripe and records it. While anything is owed it
+  shows, whatever marks exist (a refund that counted at a mark can fail
+  later, D66). Once nothing is owed, the refunded-outside-Stripe block shows,
+  with a line saying how the buyer was paid. The dialog's answer goes to the page (`onSettled`), which shows
   it, reloads the charge and focuses the notice.
 
   A preview the route REFUSES (a 4xx: the amount no longer fits, nothing is
@@ -81,7 +82,7 @@
   import { isSessionEnded } from './session';
   import SessionEndedAlert from './SessionEndedAlert.svelte';
   import type { SettleNotice } from './settle-notice';
-  import { shortLossAlert, shortLossMarkedOn, shortLossPaidNote } from './short-loss-view';
+  import { shortLossAlert, shortLossOwes, shortLossPaidNote } from './short-loss-view';
   import {
     formatDay,
     formatTime,
@@ -438,10 +439,10 @@
     }
   }
 
-  // ── Owed what Stripe won't refund, after a loss or a late win (owner D59-D64)
+  // ── Owed what Stripe won't refund, after a loss or a late win (owner D59-D66)
   const shortLoss = $derived(detail.shortLoss);
-  /** Owed, not yet marked paid another way at its stage: shown in place of the block. */
-  const owedAfterLoss = $derived(shortLoss && !shortLossMarkedOn(shortLoss) ? shortLoss : null);
+  /** Owed now, whatever marks exist (D66): shown in place of the block. */
+  const owedAfterLoss = $derived(shortLoss && shortLossOwes(shortLoss) ? shortLoss : null);
   const shortLossText = $derived(
     owedAfterLoss ? shortLossAlert(owedAfterLoss, detail.charge.amountCents) : null
   );

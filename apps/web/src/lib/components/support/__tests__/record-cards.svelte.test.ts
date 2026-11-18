@@ -95,13 +95,33 @@ describe('The charge', () => {
 
   test('once marked: the same split, the rest paid another way and when, never only "refunded outside Stripe"', () => {
     render(ChargeSummaryCard, {
-      detail: shortLossDetail({ paidAnotherWayOn: '2026-11-17T10:00:00.000Z' }),
+      detail: shortLossDetail({
+        paidAnotherWayCents: 500,
+        paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+        owedCents: 0,
+      }),
       now: NOW,
     });
     expect(text()).toContain(
-      '£15.00 · £10.00 back through the lost chargeback · £5.00 paid another way on 17 Nov 2026'
+      '£15.00 · £10.00 back through the lost chargeback · £5.00 paid another way (17 Nov 2026)'
     );
     expect(text()).not.toContain('£15.00 · refunded outside Stripe');
+  });
+
+  // Owner D66 (mockup B4): marked, then a refund that counted failed, so
+  // more is owed at the same stage.
+  test('marked, then owed more: what was paid another way and what is still owed', () => {
+    render(ChargeSummaryCard, {
+      detail: shortLossDetail({
+        paidAnotherWayCents: 200,
+        paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+        owedCents: 300,
+      }),
+      now: NOW,
+    });
+    expect(text()).toContain(
+      '£15.00 · £10.00 back through the lost chargeback · £2.00 paid another way · £3.00 still owed to the buyer'
+    );
   });
 
   // Owner D63 (A1, A3): after a late win on a charge paid another way.
@@ -113,13 +133,18 @@ describe('The charge', () => {
     expect(text()).not.toContain('£15.00 · refunded outside Stripe');
   });
 
-  test('marked twice: both payments made another way, and when', () => {
+  // Owner D66, D68 (mockup A3, B5): one total, and both stages' dates.
+  test('marked twice: the total paid another way, and both dates', () => {
     render(ChargeSummaryCard, {
-      detail: owedAgainDetail({ paidAgainOn: '2026-12-02T10:00:00.000Z' }),
+      detail: owedAgainDetail({
+        paidAnotherWayCents: 1500,
+        owedCents: 0,
+        paidAgainOn: '2026-12-02T10:00:00.000Z',
+      }),
       now: NOW,
     });
     expect(text()).toContain(
-      '£15.00 · paid another way: £5.00 on 17 Nov 2026, £10.00 on 2 Dec 2026'
+      '£15.00 · £15.00 paid another way (17 Nov 2026, 2 Dec 2026)'
     );
   });
 

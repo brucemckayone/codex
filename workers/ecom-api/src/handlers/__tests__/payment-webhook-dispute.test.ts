@@ -1367,8 +1367,9 @@ describe('handlePaymentWebhook — disputes', () => {
         'refund',
         'mark',
       ]);
-      // The dispute keys the refund (late_win_refund_<dispute>), so a rerun
-      // makes no second one.
+      // The dispute and the amount key the refund
+      // (late_win_refund_<dispute>_<amount>), and its id is written once, so
+      // a rerun makes no second one (owner D69).
       expect(purchase.refundFirstPaymentAfterLateWin).toHaveBeenCalledWith(
         'dp_test_dispute',
         { id: 'ch_test', amountCents: 1999 },

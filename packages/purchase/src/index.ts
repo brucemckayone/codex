@@ -89,6 +89,7 @@ export {
 export {
   type BlockedPaymentKind,
   blockedKind,
+  blockedPayment,
   isDuplicatePayment,
   isUnavailableBlock,
 } from './services/blocked-payment';

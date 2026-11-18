@@ -551,6 +551,29 @@ describe('the routes', () => {
     expect(clearRevocation).toHaveBeenCalledWith('buyer_user', 'org-1');
   });
 
+  // Owner D66, D67: a failed refund its chargeback decides is settled
+  // nowhere here. The classes' own envelope is @codex/admin's
+  // support-errors.test.ts; this shim stands in for the mapper.
+  it('answers a refund its chargeback decides with 422, and touches no cache', async () => {
+    support.resolveFailedRefund.mockRejectedValueOnce(
+      Object.assign(new Error('decided by its chargeback'), {
+        statusCode: 422,
+        code: 'BUSINESS_LOGIC_ERROR',
+      })
+    );
+    const res = await call(
+      'POST',
+      `/api/admin/support/refunds/${REFUND_ID}/resolve`,
+      { resolution: 'refunded_elsewhere' }
+    );
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      error: { code: 'BUSINESS_LOGIC_ERROR' },
+    });
+    expect(invalidateUserLibrary).not.toHaveBeenCalled();
+    expect(clearRevocation).not.toHaveBeenCalled();
+  });
+
   it('a settlement that gave nothing back touches no cache', async () => {
     await call('POST', `/api/admin/support/refunds/${REFUND_ID}/resolve`, {
       resolution: 'refunded_elsewhere',
@@ -617,9 +640,11 @@ describe('paid another way', () => {
   const path = `/api/admin/support/charges/${CHARGE}/paid-another-way`;
 
   it('passes the charge, the validated body and who marked it, and answers 200 with the mark', async () => {
+    // A mark that adds (owner D66) names what was paid another way so far.
     const body = {
       stripeDisputeId: DISPUTE,
       expectedOwedCents: 500,
+      expectedPaidAnotherWayCents: 200,
       stage: 'short',
     };
     const res = await call('POST', path, body);
@@ -642,7 +667,8 @@ describe('paid another way', () => {
   });
 
   // The second mark names its stage (owner D63); a page loaded before the
-  // second stage sends none, which is the first mark.
+  // second stage sends none, which is the first mark. A page loaded before
+  // marks added (owner D66) sends no total paid another way: none so far.
   it.each([
     ['the second mark', { stage: 'owed_again' }, 'owed_again'],
     ['no stage, the first mark', {}, 'short'],
@@ -651,7 +677,7 @@ describe('paid another way', () => {
     expect((await call('POST', path, { ...body, ...stage })).status).toBe(200);
     expect(support.markPaidAnotherWay).toHaveBeenCalledWith(
       CHARGE,
-      { ...body, stage: passed },
+      { ...body, expectedPaidAnotherWayCents: null, stage: passed },
       PLATFORM_OWNER.id
     );
   });
@@ -671,6 +697,22 @@ describe('paid another way', () => {
     [
       'an unknown stage',
       { stripeDisputeId: DISPUTE, expectedOwedCents: 500, stage: 'third' },
+    ],
+    [
+      'nothing paid another way, as a number',
+      {
+        stripeDisputeId: DISPUTE,
+        expectedOwedCents: 500,
+        expectedPaidAnotherWayCents: 0,
+      },
+    ],
+    [
+      'part of a penny paid another way',
+      {
+        stripeDisputeId: DISPUTE,
+        expectedOwedCents: 500,
+        expectedPaidAnotherWayCents: 2.5,
+      },
     ],
   ])('refuses %s with 400, before the service', async (_what, body) => {
     expect((await call('POST', path, body)).status).toBe(400);

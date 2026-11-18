@@ -11,6 +11,12 @@
   sale) never offers Re-pay: it paid no one, and its buyer is still owed the
   refund. The note beside it says which.
 
+  A blocked payment's refund waiting for its open chargeback
+  (`waitingForChargeback`, owner D67, D72; mockup
+  docs/handover/phase3-sources/pause-trials/support-short-loss.html, B1)
+  offers no settlement at all: a badge and a line say why, and what happens
+  once the bank decides. One whose chargeback was lost is not listed (D66).
+
   @prop {FailedRefundItem[]} items
   @prop {(item, resolution) => void} onSettle
 -->
@@ -114,7 +120,13 @@
   </span>
 {/snippet}
 
-{#snippet actions(item: FailedRefundItem)}
+{#snippet waiting(openedOn: string)}
+  <span class="waiting" data-testid="waiting-for-chargeback">
+    <Badge variant="info">{m.support_queue_waiting_badge()}</Badge>
+    <span class="action-note">{m.support_queue_waiting_note({ date: formatDay(openedOn) })}</span>
+  </span>
+{/snippet}
+{#snippet settlements(item: FailedRefundItem)}
   {@const blockedBy = repayOff(item)}
   <Button variant="secondary" size="sm" onclick={() => onSettle(item, 'refunded_elsewhere')}>
     {m.support_action_elsewhere()}
@@ -130,6 +142,13 @@
   </Button>
   {#if blockedBy}
     <span class="action-note" data-testid="repay-off">{repayOffNote(blockedBy)}</span>
+  {/if}
+{/snippet}
+{#snippet actions(item: FailedRefundItem)}
+  {#if item.waitingForChargeback}
+    {@render waiting(item.waitingForChargeback.openedOn)}
+  {:else}
+    {@render settlements(item)}
   {/if}
 {/snippet}
 
@@ -274,6 +293,20 @@
   .table-actions .action-note {
     margin-left: auto;
     text-align: right;
+  }
+
+  /* In place of the settlements while the chargeback is open (D67). */
+  .waiting {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-1-5);
+    text-align: right;
+  }
+
+  .row-item__actions .waiting {
+    align-items: flex-start;
+    text-align: left;
   }
 
   .queue-table :global(.table-cell) {

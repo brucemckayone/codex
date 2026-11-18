@@ -33,12 +33,21 @@
  * And every reader ties a refund or a chargeback to its payment by one key: a
  * charge's readers by `stripe_charge_id` (`refundsOfCharge`,
  * `disputesOfCharge`), a purchase's by `refundsOfPurchase` and
- * `disputesOfPurchase`.
+ * `disputesOfPurchase`, and one payment's readers outside the ledger (what a
+ * blocked payment is owed, the restore, the late win's refund) by its charge
+ * or its own rows (`refundsOfPayment`, `countedRefundOf`).
  */
 
 import type { RefundStatus } from '@codex/database/schema';
 import { disputes, payouts, purchases, refunds } from '@codex/database/schema';
-import { type AnyColumn, eq, inArray, type SQL, sql } from 'drizzle-orm';
+import {
+  type AnyColumn,
+  eq,
+  inArray,
+  type SQL,
+  type SQLWrapper,
+  sql,
+} from 'drizzle-orm';
 
 /**
  * The refunds that count against what was paid: made and not undone. A failed
@@ -76,9 +85,10 @@ export function countsAgainstCharge(): SQL {
  * holds a PaymentIntent, so the charge is the one the purchase's ledger
  * slices name (`payouts`), the same link the support search reads its charge
  * id by. That is the charge the detail and the revenue count by
- * `stripe_charge_id`, so a purchase's row and its charge count the same rows,
- * as `standingRefundFields` does. A purchase with no slices (before the
- * ledger) matches by `purchase_id` only.
+ * `stripe_charge_id`, so a purchase's row and its charge count the same rows.
+ * A purchase with no slices (before the ledger, or a blocked payment) matches
+ * by `purchase_id` only, so a reader of one payment outside the ledger keys
+ * on its charge instead (`refundsOfPayment`).
  *
  * Its own `sql`: interpolated whole, its columns keep their table even in a
  * single-table select (drizzle writes a field's TOP-LEVEL columns bare there,
@@ -101,6 +111,40 @@ export function disputesOfPurchase(): SQL {
 /** A `refunds` row (unaliased) of the charge `chargeId` names: a column, or a CTE's. */
 export function refundsOfCharge(chargeId: AnyColumn | SQL): SQL {
   return sql`${refunds.stripeChargeId} = ${chargeId}`;
+}
+
+/**
+ * A `refunds` row (unaliased) of one payment, read outside the ledger: on
+ * its charge (`chargeId`), linked to the purchase or not (one recorded
+ * before the purchase existed has no `purchase_id`, Codex-aa08z), or the
+ * purchase's own (`purchaseId`). With no charge known, its own only. Each is
+ * a value or the outer query's column. Never through the payout slices, as
+ * `refundsOfPurchase` is: a blocked payment writes none, so its unlinked
+ * refund would drop out (review r6). One fragment, so no part can be dropped.
+ */
+export function refundsOfPayment(
+  purchaseId: SQLWrapper | string,
+  chargeId: SQLWrapper | string | null
+): SQL {
+  const ofCharge =
+    chargeId === null
+      ? sql`FALSE`
+      : sql`${refunds.stripeChargeId} = ${chargeId}`;
+  return sql`(${refunds.purchaseId} = ${purchaseId} OR ${ofCharge})`;
+}
+
+/**
+ * The refunds that count against one payment (`refundsOfPayment`,
+ * `countsAgainstCharge`): standing, or failed and settled refunded
+ * elsewhere. The one rule what a blocked payment is owed, a lost dispute's
+ * refunded amount, the failed-refund restore and the late win's refund all
+ * read (owner D66, D69), so none of them can disagree.
+ */
+export function countedRefundOf(
+  purchaseId: SQLWrapper | string,
+  chargeId: SQLWrapper | string | null
+): SQL {
+  return sql`(${refundsOfPayment(purchaseId, chargeId)} AND ${countsAgainstCharge()})`;
 }
 
 /** A `disputes` row (unaliased) of the charge `chargeId` names: a column, or a CTE's. */

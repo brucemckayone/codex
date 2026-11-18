@@ -177,6 +177,8 @@ export {
   NotOwedAfterLossError,
   type NotOwedAfterLossReason,
   RefundAmountTooLargeError,
+  RefundDecidedByChargebackError,
+  type RefundDecidedByChargebackReason,
   RefundedOutsideStripeError,
   RefundInFlightError,
   RefundKeySpentError,

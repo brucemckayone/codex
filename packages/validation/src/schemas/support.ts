@@ -240,11 +240,14 @@ export const stripeDisputeIdSchema = z
 
 /**
  * POST /api/admin/support/charges/:chargeId/paid-another-way. What the page
- * showed: the dispute, the amount owed, and which time it is owed (`stage`,
+ * showed: the dispute, the amount owed, which time it is owed (`stage`,
  * owner D63: `short` after the loss, `owed_again` after a late win; `short`
- * when absent, as a page loaded before the second stage sends it). The route
- * refuses with SHORT_LOSS_CHANGED if any of them moved. Nothing else is
- * accepted.
+ * when absent, as a page loaded before the second stage sends it), and what
+ * was paid another way so far (`expectedPaidAnotherWayCents`, null before
+ * the first mark, and when absent). A mark ADDS what it pays (owner D66), so
+ * that total is how a repeat is known: moved with nothing owed is a repeat,
+ * moved with more owed is SHORT_LOSS_CHANGED, as is any other value that
+ * moved. Nothing else is accepted.
  */
 export const supportPaidAnotherWaySchema = z
   .object({
@@ -253,6 +256,12 @@ export const supportPaidAnotherWaySchema = z
       .number()
       .int({ message: 'Must be a whole number of pence' })
       .min(1, { message: 'Must be at least 1p' }),
+    expectedPaidAnotherWayCents: z
+      .number()
+      .int({ message: 'Must be a whole number of pence' })
+      .min(1, { message: 'Must be at least 1p' })
+      .nullable()
+      .default(null),
     stage: z.enum(SHORT_LOSS_STAGES).default('short'),
   })
   .strict();

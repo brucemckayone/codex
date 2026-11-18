@@ -136,6 +136,8 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
   const buyerIds: string[] = [];
   /** Organisations a test deletes or detaches from: never the shared one. */
   const ownOrgIds: string[] = [];
+  /** Refunds recorded with no purchase, which the purchase cleanup can't find. */
+  const unlinkedRefundIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -161,6 +163,11 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       // A dispute and a refund name their purchase (ON DELETE RESTRICT).
       await db.delete(disputes).where(inArray(disputes.purchaseId, mine));
       await db.delete(refunds).where(inArray(refunds.purchaseId, mine));
+      if (unlinkedRefundIds.length > 0) {
+        await db
+          .delete(refunds)
+          .where(inArray(refunds.stripeRefundId, unlinkedRefundIds));
+      }
       await db
         .delete(courseEnrollments)
         .where(inArray(courseEnrollments.userId, buyerIds));
@@ -1318,6 +1325,80 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       ).toEqual([expect.objectContaining({ owedCents: 200 })]);
     });
 
+    // Owner D66, review r6: what a blocked payment is owed counts its refunds
+    // by ONE rule (`countedRefundOf`): on its charge or its own, standing or
+    // failed and settled refunded elsewhere. A blocked payment writes no
+    // payout slices, so a read through them (`refundsOfPurchase`) would drop
+    // a refund recorded without its purchase; and a failed refund support
+    // settled refunded elsewhere is money the buyer has back. £15.00 paid,
+    // £3.00 refunded, £10.00 lost: £2.00 owed; £5.00 when the £3.00 failed
+    // and is not settled.
+    it.each([
+      {
+        refund: 'recorded without its purchase (before it existed)',
+        owedCents: 200,
+      },
+      { refund: 'failed, and settled refunded elsewhere', owedCents: 200 },
+      { refund: 'failed, and not settled', owedCents: 500 },
+    ])('a £3.00 refund on the charge $refund, then a chargeback lost for £10.00: $owedCents pence still owed', async ({
+      refund,
+      owedCents,
+    }) => {
+      const { service, stripe } = fresh();
+      const disputeId = `dp_counted_${kind}_${uid()}`;
+      const chargeId = `ch_${disputeId}`;
+      const { pi } = await owedBlocked(service, stripe, {
+        stripeChargeId: chargeId,
+      });
+      const purchase = await rowOf(pi);
+      expect(await slicesOf(purchase.id)).toHaveLength(0);
+      const stripeRefundId = `re_counted_${uid()}`;
+      const unlinked = refund.startsWith('recorded');
+      if (unlinked) unlinkedRefundIds.push(stripeRefundId);
+      await service.recordRefund({
+        stripeRefundId,
+        stripeChargeId: chargeId,
+        paymentIntentId: unlinked ? null : pi,
+        amountCents: 300,
+        currency: 'gbp',
+        status: unlinked ? 'succeeded' : 'failed',
+        reason: null,
+        failureReason: unlinked ? null : 'expired_or_canceled_card',
+        stripeCreatedAt: new Date(),
+      });
+      if (refund.includes('settled refunded elsewhere')) {
+        await db
+          .update(refunds)
+          .set({ resolution: 'refunded_elsewhere', resolvedAt: new Date() })
+          .where(eq(refunds.stripeRefundId, stripeRefundId));
+      }
+      expect(
+        takeFirst(
+          await db
+            .select({ purchaseId: refunds.purchaseId })
+            .from(refunds)
+            .where(eq(refunds.stripeRefundId, stripeRefundId))
+        ).purchaseId
+      ).toBe(unlinked ? null : purchase.id);
+      await recordChargeback(service, pi, disputeId, 'needs_response');
+      await service.processDispute(pi, { stripeDisputeId: disputeId });
+      await recordChargeback(service, pi, disputeId, 'lost', {
+        amountCents: 1000,
+      });
+
+      await service.processLostDispute(pi, 1000, disputeId);
+
+      const {
+        rows: [owed],
+      } = await findShortLosses(db, {
+        chargeId,
+        stage: 'short',
+        includeMarked: false,
+        limit: 1,
+      });
+      expect(owed).toMatchObject({ stripeDisputeId: disputeId, owedCents });
+    });
+
     // Review r3 (nit): a report runs after the refunds and can't stop them.
     it('a failed report never stops the refunds: both run after them, and each logs its own error', async () => {
       const { service, stripe } = fresh();
@@ -1360,10 +1441,32 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
           error: 'the check failed',
         }
       );
-      expect(errors).toHaveBeenCalledWith(
-        "Could not check for blocked payments a lost chargeback left short; the sweep's refunds are not affected",
-        { errorId: expect.any(String), error: 'the check failed' }
-      );
+      // One per stage, each naming its own: one failed stage never hides
+      // the other.
+      expect(
+        errors.mock.calls.filter(
+          ([message]) =>
+            message ===
+            "Could not check for blocked payments a lost chargeback left short; the sweep's refunds are not affected"
+        )
+      ).toEqual([
+        [
+          expect.any(String),
+          {
+            errorId: expect.any(String),
+            stage: 'short',
+            error: 'the check failed',
+          },
+        ],
+        [
+          expect.any(String),
+          {
+            errorId: expect.any(String),
+            stage: 'owed_again',
+            error: 'the check failed',
+          },
+        ],
+      ]);
     });
 
     // Review r3 (nit): `recordDispute` links a purchase only if it finds one.

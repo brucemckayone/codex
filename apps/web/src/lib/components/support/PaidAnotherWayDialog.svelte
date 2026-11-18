@@ -2,9 +2,9 @@
   @component PaidAnotherWayDialog
 
   "Mark as paid another way" on a blocked payment owed what Stripe won't
-  refund (owner D60, D61, D63; mockup
+  refund (owner D60, D61, D63, D66; mockup
   docs/handover/phase3-sources/pause-trials/support-short-loss.html, S2-S4,
-  A2, A4), at its stage (`detail.shortLoss.stage`):
+  A2, A4, B3, B4), at its stage (`detail.shortLoss.stage`):
   - `short`: its chargeback was lost for less than the payment. The bank
     returned part and Stripe won't refund a charged-back payment, so support
     pays the rest outside Stripe. The mark also blocks every Stripe refund
@@ -12,15 +12,18 @@
   - `owed_again`: support had paid the rest, then the chargeback was won
     late, so the bank took it back from the buyer. Support pays it again,
     and marks it a second time.
-  It sends nothing: it records the mark, which ends the hourly alert.
+  Each mark ADDS what it pays (D66), so a stage owed more after a mark is
+  marked again, and the confirm says so. It sends nothing: it records the
+  mark, which ends the hourly alert while nothing more is owed.
 
   - The confirm repeats the amounts that add up to what is owed (paid, less
-    refunded through Stripe and what was paid another way, or less what the
-    bank returned) and says the money must already have been paid. No note:
-    there is no column for one (Q2).
-  - It sends the dispute, the stage and the amount it showed: any of them
-    having moved since is a 412, and a repeat is a success
-    (`alreadyMarked`), so Try again after a lost answer is safe.
+    what was refunded through Stripe or another way, what was paid another
+    way and what the bank returned) and says the money must already have
+    been paid. No note: there is no column for one (Q2).
+  - It sends the dispute, the stage, the amount it showed and what was paid
+    another way so far (`paidAnotherWayBody`): any of them having moved since
+    is a 412, and a repeat is a success (`alreadyMarked`), so Try again
+    after a lost answer is safe and never adds twice.
   - Not saved (a 5xx, a dropped connection) or the session ended: the dialog
     stays open and says so. Every other answer closes it with a notice for
     the page (`onFinished`), which reloads the charge and focuses it; focus
@@ -46,7 +49,9 @@
   import type { SettleNotice } from './settle-notice';
   import {
     type PaidAnotherWayProblem,
+    paidAnotherWayBody,
     paidAnotherWayFacts,
+    paidAnotherWayFollows,
     paidAnotherWayOutcome,
   } from './short-loss-view';
   import { formatDay } from './support-format';
@@ -99,10 +104,8 @@
   const submitLabel = $derived(
     problem === 'failed' ? m.support_queue_fees_try_again() : m.support_short_loss_dialog_submit({ owed })
   );
-  /** What follows the mark: a second one says nothing of Stripe, already blocked. */
-  const follows = $derived(
-    owedAgain ? m.support_owed_again_dialog_follows() : m.support_short_loss_dialog_follows()
-  );
+  /** What follows the mark: once anything is marked, Stripe is blocked already, and a mark adds. */
+  const follows = $derived(shortLoss ? paidAnotherWayFollows(shortLoss) : '');
 
   /** Read once, by the close an answer made: the next close is the default again. */
   function leaveFocus(): null {
@@ -126,11 +129,7 @@
     try {
       const answer = await markPaidAnotherWay({
         chargeId: marking.chargeId,
-        body: {
-          stripeDisputeId: marking.shortLoss.stripeDisputeId,
-          expectedOwedCents: marking.shortLoss.owedCents,
-          stage: marking.shortLoss.stage,
-        },
+        body: paidAnotherWayBody(marking.shortLoss),
       });
       const outcome = paidAnotherWayOutcome(answer, marking.buyer);
       if ('notice' in outcome) finish(outcome.notice);

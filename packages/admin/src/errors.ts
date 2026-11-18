@@ -260,13 +260,50 @@ export class BlockedPaymentRefundNotRepayableError extends BusinessLogicError {
   }
 }
 
+/** Why a failed refund is its chargeback's to decide (`RefundDecidedByChargebackError`). */
+export type RefundDecidedByChargebackReason =
+  | 'chargeback_open'
+  | 'chargeback_lost';
+
+/**
+ * A failed refund of a blocked payment that its chargeback decides (422;
+ * owner D66, D67), settled from the queue:
+ * - `chargeback_open`: the bank hasn't decided. Stripe won't refund the
+ *   charge meanwhile, and the decision changes what the buyer is owed, so
+ *   nothing is settled yet. Won in time, it is settled as before;
+ * - `chargeback_lost`: lost, or lost then won late. The bank returned some or
+ *   all of the payment, and what is still owed lives on the charge page
+ *   alone, marked there "Paid another way": settling this refund as well
+ *   would pay it twice.
+ * The queue offers neither, so a call is a stale page or a direct one.
+ * Nothing is written. The context is the reason and the charge, which the
+ * page's notice links to.
+ */
+export class RefundDecidedByChargebackError extends BusinessLogicError {
+  constructor(reason: RefundDecidedByChargebackReason, chargeId: string) {
+    super(DECIDED_BY_CHARGEBACK[reason], {
+      code: 'REFUND_DECIDED_BY_CHARGEBACK',
+      reason,
+      chargeId,
+    });
+  }
+}
+
+const DECIDED_BY_CHARGEBACK: Record<RefundDecidedByChargebackReason, string> = {
+  chargeback_open:
+    "This refund is waiting for the buyer's chargeback, so nothing was settled. If the chargeback is won, settle it then.",
+  chargeback_lost:
+    "The buyer's chargeback was lost, so what's still owed is settled on the charge page. Nothing was settled here.",
+};
+
 /**
  * What the charge's blocked payment is owed is not what the page showed
  * (412): the dispute named is not the one owed, it is owed at another stage
- * (a late win since, owner D63), or what is owed changed (a refund stood or
- * stopped standing since, or the dispute's amount moved). Nothing is marked;
- * the page reloads and support checks it again (owner D61). The context is
- * what is owed now and at which stage.
+ * (a late win since, owner D63), what is owed changed (a refund stood or
+ * stopped standing since, or the dispute's amount moved), or what was paid
+ * another way moved while more is owed (another mark since, owner D66).
+ * Nothing is marked; the page reloads and support checks it again (owner
+ * D61). The context is what is owed now and at which stage.
  */
 export class ShortLossChangedError extends PreconditionFailedError {
   constructor(now: { owedCents: number; stage: ShortLossStage }) {

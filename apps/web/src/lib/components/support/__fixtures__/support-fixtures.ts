@@ -256,6 +256,8 @@ export function failedRefund(
     isLateWinRefund: false,
     // Nor a blocked payment's (a duplicate or a blocked sale): Re-pay is on offer.
     blockedPayment: null,
+    // No open chargeback holds it (owner D67): both settlements are on offer.
+    waitingForChargeback: null,
     ...overrides,
   };
 }
@@ -295,7 +297,9 @@ export const SHORT_LOSS_DISPUTE_ID = 'du_1QjK7pXk9vRb88aQ';
  * Ellie Marsh's £15.00 blocked sale of a deleted item, paid 1 Oct, its £10.00
  * chargeback lost, £5.00 still owed. Before the mark the lost chargeback
  * blocks a refund; after it (`paidAnotherWayOn`), the refunded-outside-Stripe
- * mark does.
+ * mark does. Marked with nothing owed is `{ owedCents: 0, paidAnotherWayCents,
+ * paidAnotherWayOn }` (S3); owed more after a mark is the same with
+ * `owedCents` above 0 (owner D66, B4).
  */
 export function shortLossDetail(
   overrides: Partial<ShortAfterLoss> = {}
@@ -305,8 +309,11 @@ export function shortLossDetail(
     stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
     kind: 'unavailable',
     lostCents: 1000,
-    owedCents: 500,
+    refundedThroughStripeCents: 0,
+    refundedElsewhereCents: 0,
+    paidAnotherWayCents: null,
     paidAnotherWayOn: null,
+    owedCents: 500,
     ...overrides,
   };
   return shortLossCharge(shortLoss, {
@@ -323,7 +330,8 @@ export function shortLossDetail(
  * another way on 17 Nov, then the chargeback was won late on 1 Dec, so the
  * bank took the £10.00 back from Ellie: £10.00 is owed again. The first
  * mark keeps the charge refunded outside Stripe; after the second mark
- * (`paidAgainOn`), the refund card says how both payments were made.
+ * (`{ owedCents: 0, paidAnotherWayCents: 1500, paidAgainOn }`: each mark
+ * adds, owner D66), the refund card says how both payments were made.
  */
 export function owedAgainDetail(
   overrides: Partial<OwedAgainAfterLateWin> = {}
@@ -337,6 +345,7 @@ export function owedAgainDetail(
     paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
     lateWonOn: '2026-12-01T10:00:00.000Z',
     refundedThroughStripeCents: 0,
+    refundedElsewhereCents: 0,
     owedCents: 1000,
     paidAgainOn: null,
     ...overrides,
