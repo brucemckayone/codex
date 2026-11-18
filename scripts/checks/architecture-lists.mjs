@@ -79,32 +79,83 @@ function environments(config) {
 }
 
 /**
- * The preset a `procedure()` call's policy resolves to: an explicit string,
- * the default when none is declared, or null when it is exempt (`auth:
- * 'worker'`) or not statically known (a function or a variable).
+ * Every call that enforces a rate limit: the three route factories, which
+ * apply `policy.rateLimit` (an omitted one means `api`), and the `rateLimit()`
+ * middleware called directly with a `preset`.
  */
-function presetOf(callText) {
-  if (/auth:\s*['"]worker['"]/.test(callText)) return null;
-  const literal = /rateLimit:\s*['"]([a-z-]+)['"]/.exec(callText);
-  if (literal) return literal[1];
-  if (/rateLimit\s*:/.test(callText)) return null;
-  return DEFAULT_PRESET;
+const ROUTE_FACTORIES = [
+  'procedure',
+  'multipartProcedure',
+  'binaryUploadProcedure',
+];
+const LIMITERS = [...ROUTE_FACTORIES, 'rateLimit'];
+const CALL = new RegExp(`(?<![\\w.$])(${LIMITERS.join('|')})\\(`, 'g');
+const ALIASED = new RegExp(`\\b(?:${LIMITERS.join('|')})\\s+as\\s+\\w+`);
+
+/** The index of the bracket that closes the one at `open`. */
+function closing(code, open) {
+  const pair = { '(': ')', '{': '}' };
+  const close = pair[code[open]];
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === code[open]) depth += 1;
+    else if (code[i] === close) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return code.length - 1;
 }
 
-/** Every `procedure(...)` call in comment-blanked code, with its full argument text. */
-function procedureCalls(code) {
+/** A string literal's value, if `text` starts with one and it has no interpolation. */
+const literal = (text) =>
+  /^(['"`])([a-z-]+)\1/.exec(text.trimStart())?.[2] ?? null;
+
+/**
+ * What a call resolves to: `{ preset }`, `{ exempt: true }` (a worker-to-worker
+ * route), or `{ unknown }` with the reason it can't be read. Only the call's
+ * `policy` object is read, never its handler, so an `auth: 'worker'` inside a
+ * handler can't exempt the route. A policy or preset the code can't read
+ * statically is a violation, not a guess: an exception can cover a genuinely
+ * dynamic one.
+ */
+function resolveLimit(callee, args) {
+  if (callee === 'rateLimit') {
+    const at = /\bpreset\s*:/.exec(args);
+    if (!at) return { unknown: 'rateLimit() names no preset' };
+    const preset = literal(args.slice(at.index + at[0].length));
+    return preset
+      ? { preset }
+      : { unknown: 'rateLimit() preset is not a literal' };
+  }
+  const key = /[{,]\s*policy\s*(?=[:,}])/.exec(args);
+  if (!key) return { preset: DEFAULT_PRESET };
+  let rest = args.slice(key.index + key[0].length);
+  if (!rest.startsWith(':'))
+    return { unknown: `${callee}() policy is a shorthand variable` };
+  rest = rest.slice(1).trimStart();
+  if (!rest.startsWith('{'))
+    return { unknown: `${callee}() policy is not an object literal` };
+  const policy = rest.slice(0, closing(rest, 0) + 1);
+  if (/\bauth\s*:\s*['"`]worker['"`]/.test(policy)) return { exempt: true };
+  const limit = /\brateLimit\s*:/.exec(policy);
+  if (!limit) return { preset: DEFAULT_PRESET };
+  const preset = literal(policy.slice(limit.index + limit[0].length));
+  return preset
+    ? { preset }
+    : { unknown: `${callee}() rateLimit is not a literal` };
+}
+
+/** Every rate-limiting call in comment-blanked code, with its argument text. */
+function limiterCalls(code) {
   const calls = [];
-  for (const m of code.matchAll(/(?<![\w.$])procedure\(/g)) {
-    let depth = 0;
-    let end = m.index + m[0].length - 1;
-    for (; end < code.length; end++) {
-      if (code[end] === '(') depth += 1;
-      else if (code[end] === ')') {
-        depth -= 1;
-        if (depth === 0) break;
-      }
-    }
-    calls.push({ index: m.index, text: code.slice(m.index, end + 1) });
+  for (const m of code.matchAll(CALL)) {
+    const open = m.index + m[0].length - 1;
+    calls.push({
+      callee: m[1],
+      index: m.index,
+      args: code.slice(open, closing(code, open) + 1),
+    });
   }
   return calls;
 }
@@ -133,22 +184,43 @@ export const rateLimitBindings = {
       const { code } = tokenize(text);
       const { lineOf } = lineIndex(text);
       const worker = workerOf(file);
-      for (const call of procedureCalls(code)) {
-        const preset = presetOf(call.text);
-        if (preset === null) continue;
+      const unknown = (line, why) => {
+        needs.push({
+          group: worker,
+          item: 'a rate limit the gate can read',
+          file,
+          line,
+          text: why,
+        });
+      };
+      const alias = ALIASED.exec(code);
+      if (alias)
+        unknown(
+          lineOf(alias.index),
+          `"${alias[0]}" hides its calls from this rule`
+        );
+      for (const call of limiterCalls(code)) {
+        const limit = resolveLimit(call.callee, call.args);
+        if (limit.exempt) continue;
+        const line = lineOf(call.index);
+        if (limit.unknown) {
+          unknown(line, limit.unknown);
+          continue;
+        }
         presets ??= readPresetBindings(source);
-        const binding = presets.get(preset) ?? `an unknown preset "${preset}"`;
+        const binding =
+          presets.get(limit.preset) ?? `an unknown preset "${limit.preset}"`;
         for (const env of envsOf.get(worker) ?? ['(no wrangler.jsonc)']) {
           const item = `${binding} in ${env}`;
-          const key = `${file}\0${item}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
+          const seenKey = `${file}\0${item}`;
+          if (seen.has(seenKey)) continue;
+          seen.add(seenKey);
           needs.push({
             group: worker,
             item,
             file,
-            line: lineOf(call.index),
-            text: `procedure() uses rateLimit '${preset}'`,
+            line,
+            text: `${call.callee}() uses rateLimit '${limit.preset}'`,
           });
         }
       }
@@ -182,66 +254,223 @@ export const rateLimitBindings = {
 // the registry lists every gate the job runs, `--gates` runs them locally, and
 // this pair fails when either side gains a step the other lacks.
 
-/** Each `run:` step in a workflow file. A block scalar can't be matched. */
-function workflowRuns(text) {
-  const runs = [];
+/**
+ * Each step of each `steps:` list in a workflow file, read as block mappings:
+ * its `run:` command, and whether anything can switch it off (`if:`,
+ * `continue-on-error:`). A step written in a form this reader doesn't parse
+ * (a flow mapping, a quoted key, a block-scalar run) is reported as such, never
+ * skipped, so a gate can't hide behind YAML syntax.
+ */
+function workflowSteps(text) {
+  const steps = [];
+  let inSteps = false;
+  let itemIndent = null;
+  let current = null;
+  const finish = () => {
+    if (current) steps.push(current);
+    current = null;
+  };
   text.split('\n').forEach((line, i) => {
-    const m = /^\s*(?:-\s+)?run:\s*(.*?)\s*$/.exec(line);
-    if (!m) return;
-    let command = m[1].replace(/^(['"])(.*)\1$/, '$2');
-    if (command === '|' || command === '>' || /^[|>][-+]?$/.test(command)) {
-      command = '(a multi-line run block; keep gate steps on one line)';
+    if (/^\s*steps:\s*$/.test(line)) {
+      finish();
+      inSteps = true;
+      itemIndent = null;
+      return;
     }
-    runs.push({ command, line: i + 1 });
+    if (!inSteps || line.trim() === '' || line.trimStart().startsWith('#'))
+      return;
+    const indent = line.length - line.trimStart().length;
+    const item = /^(\s*)-\s+(.*)$/.exec(line);
+    if (item && (itemIndent === null || indent === itemIndent)) {
+      finish();
+      itemIndent = indent;
+      current = {
+        line: i + 1,
+        run: null,
+        conditional: false,
+        unreadable: null,
+      };
+      readKey(current, item[2], i + 1);
+      return;
+    }
+    if (itemIndent !== null && indent <= itemIndent) {
+      // anything at or above the item indent that isn't an item ends the list
+      finish();
+      inSteps = false;
+      return;
+    }
+    if (current && indent === itemIndent + 2)
+      readKey(current, line.trim(), i + 1);
   });
-  return runs;
+  finish();
+  return steps;
+}
+
+function readKey(step, text, line) {
+  if (text.startsWith('{')) {
+    step.unreadable = 'a flow-mapping step';
+    return;
+  }
+  if (/^["']\w[\w-]*["']\s*:/.test(text)) {
+    step.unreadable = 'a step with a quoted key';
+    return;
+  }
+  const m = /^([\w-]+):\s*(.*?)\s*$/.exec(text);
+  if (!m) return;
+  if (m[1] === 'if' || m[1] === 'continue-on-error') step.conditional = true;
+  if (m[1] === 'run') {
+    const command = m[2].replace(/^(['"])(.*)\1$/, '$2');
+    if (/^[|>][-+]?$/.test(command)) step.unreadable = 'a multi-line run block';
+    else {
+      step.run = command;
+      step.runLine = line;
+    }
+  }
 }
 
 /** The commands a registry gate runs in CI. */
-export const gateCommands = (gate) =>
-  [gate.selfTest, gate.run, ...(gate.prOnly ?? [])].filter(Boolean);
+export const gateCommands = (gate) => [gate.selfTest, gate.run].filter(Boolean);
 
-export function ciGateLists({ workflow, gates, setupSteps, registryFile }) {
+/** `pnpm [--filter <pkg>] [run] <script>`: the package and script a command needs. */
+function pnpmScript(command) {
+  const filtered = /^pnpm --filter (\S+) run (\S+)$/.exec(command);
+  if (filtered) return { pkg: filtered[1], script: filtered[2] };
+  const root = /^pnpm (?:run )?([\w:-]+)$/.exec(command);
+  if (root && !['install', 'exec', 'dlx'].includes(root[1])) {
+    return { pkg: '(root)', script: root[1] };
+  }
+  return null;
+}
+
+/** The job blocks of a workflow, by name, with their own (4-space) keys. */
+function jobs(text) {
+  const out = new Map();
+  let name = null;
+  let inJobs = false;
+  for (const line of text.split('\n')) {
+    if (/^jobs:\s*$/.test(line)) {
+      inJobs = true;
+      continue;
+    }
+    if (!inJobs) continue;
+    const job = /^ {2}([\w-]+):\s*$/.exec(line);
+    if (job) {
+      name = job[1];
+      out.set(name, []);
+    } else if (name && /^ {4}\S/.test(line)) out.get(name).push(line.trim());
+    else if (/^\S/.test(line)) inJobs = false;
+  }
+  return out;
+}
+
+export function ciGateLists({
+  workflow,
+  callers,
+  gates,
+  setupSteps,
+  registryFile,
+}) {
   const registryLine = (source, command) => {
     const text = source.has(registryFile) ? source.read(registryFile) : '';
     const at = text.indexOf(command);
     return at === -1 ? 1 : lineIndex(text).lineOf(at);
   };
-  const runsIn = (source) =>
-    source.has(workflow) ? workflowRuns(source.read(workflow)) : [];
+  const stepsIn = (source) =>
+    source.has(workflow) ? workflowSteps(source.read(workflow)) : [];
+  const callerOk = (source, caller) => {
+    if (!source.has(caller)) return false;
+    for (const keys of jobs(source.read(caller)).values()) {
+      if (
+        keys.includes(`uses: ./${workflow}`) &&
+        !keys.some((k) => /^if:/.test(k))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const scriptsOf = (source) => {
+    const scripts = new Set();
+    for (const file of source.files) {
+      if (
+        !/^(?:package\.json|(?:apps|packages|workers)\/[^/]+\/package\.json)$/.test(
+          file
+        )
+      )
+        continue;
+      try {
+        const pkg = JSON.parse(source.read(file));
+        const name = file === 'package.json' ? '(root)' : pkg.name;
+        for (const script of Object.keys(pkg.scripts ?? {}))
+          scripts.add(`${name} has script ${script}`);
+      } catch {
+        // an unparseable package.json simply provides no scripts
+      }
+    }
+    return scripts;
+  };
   return {
     need(source) {
       const needs = [];
       for (const gate of gates) {
         for (const command of gateCommands(gate)) {
+          const line = registryLine(source, command);
           needs.push({
             group: 'workflow',
             item: command,
             file: registryFile,
-            line: registryLine(source, command),
+            line,
             text: `gate ${gate.id} runs this`,
+          });
+          // `pnpm --filter x run <missing>` exits 0, so the script must exist.
+          const target = pnpmScript(command);
+          if (target) {
+            needs.push({
+              group: 'scripts',
+              item: `${target.pkg} has script ${target.script}`,
+              file: registryFile,
+              line,
+              text: `gate ${gate.id} runs a pnpm script`,
+            });
+          }
+        }
+      }
+      for (const step of stepsIn(source)) {
+        let item = null;
+        if (step.unreadable)
+          item = `(${step.unreadable}: write gate steps as block mappings with a plain run: line)`;
+        else if (step.run && step.conditional)
+          item = `${step.run} (switched off by if: or continue-on-error)`;
+        else if (step.run) item = step.run;
+        if (item) {
+          needs.push({
+            group: 'registry',
+            item,
+            file: workflow,
+            line: step.runLine ?? step.line,
+            text: 'this CI step',
           });
         }
       }
-      for (const run of runsIn(source)) {
+      for (const caller of callers) {
         needs.push({
-          group: 'registry',
-          item: run.command,
-          file: workflow,
-          line: run.line,
-          text: 'this CI step',
+          group: 'callers',
+          item: `${caller} runs ${workflow} from a job with no if:`,
+          file: caller,
+          line: 1,
+          text: 'the static-analysis job must always run',
         });
       }
       return needs;
     },
     have(source) {
+      const steps = stepsIn(source).filter(
+        (s) => s.run && !s.conditional && !s.unreadable
+      );
       return new Map([
         [
           'workflow',
-          {
-            file: workflow,
-            items: new Set(runsIn(source).map((r) => r.command)),
-          },
+          { file: workflow, items: new Set(steps.map((s) => s.run)) },
         ],
         [
           'registry',
@@ -249,6 +478,21 @@ export function ciGateLists({ workflow, gates, setupSteps, registryFile }) {
             file: `${registryFile} (GATES or CI_SETUP_STEPS)`,
             items: new Set([...gates.flatMap(gateCommands), ...setupSteps]),
           },
+        ],
+        [
+          'callers',
+          {
+            file: 'the calling workflows',
+            items: new Set(
+              callers
+                .filter((c) => callerOk(source, c))
+                .map((c) => `${c} runs ${workflow} from a job with no if:`)
+            ),
+          },
+        ],
+        [
+          'scripts',
+          { file: 'the package.json scripts', items: scriptsOf(source) },
         ],
       ]);
     },

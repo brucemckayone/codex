@@ -67,14 +67,15 @@ export function parseIgnores(file, text) {
 }
 
 /**
- * Drop the hits a valid directive on the line above excuses, marking each
- * directive that did. Returns the remaining hits.
+ * Drop the hit a valid directive on the line above excuses, marking the
+ * directive used. ONE directive excuses ONE hit: two violations on a line need
+ * two exceptions, or a fix. Returns the remaining hits.
  */
 export function applyIgnores(ruleId, hits, directives) {
   if (!directives || hits.length === 0) return hits;
   return hits.filter((hit) => {
     const excuse = directives.find(
-      (d) => d.ok && d.ruleId === ruleId && d.line === hit.line - 1
+      (d) => d.ok && !d.used && d.ruleId === ruleId && d.line === hit.line - 1
     );
     if (!excuse) return true;
     excuse.used = true;
@@ -82,15 +83,31 @@ export function applyIgnores(ruleId, hits, directives) {
   });
 }
 
+/** The longest an exception may run: it is temporary by definition. */
+export const MAX_EXCEPTION_DAYS = 90;
+
+function isRealDate(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso;
+}
+
+function addDays(iso, days) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 /**
  * The problems with the directives themselves.
  *
  * @param {Map<string, ReturnType<typeof parseIgnores>>} directivesByFile
- * @param {{ ranOn: (ruleId: string, file: string) => boolean,
- *   known: Set<string>, measuring: Set<string>, today: string }} ctx
+ * @param {{ ran: (ruleId: string) => boolean,
+ *   ranOn: (ruleId: string, file: string) => boolean, known: Set<string>,
+ *   measuring: Set<string>, noExceptions: Set<string>, today: string }} ctx
  */
 export function ignoreProblems(directivesByFile, ctx) {
   const problems = [];
+  const latest = addDays(ctx.today, MAX_EXCEPTION_DAYS);
   const push = (d, why) =>
     problems.push({
       type: 'ignore',
@@ -101,23 +118,35 @@ export function ignoreProblems(directivesByFile, ctx) {
     });
   for (const directives of directivesByFile.values()) {
     for (const d of directives) {
-      if (!d.ok) {
+      if (!d.ok || !isRealDate(d.until)) {
         push(
           d,
-          `malformed ${IGNORE_KEYWORD}: it needs a rule ID, until=YYYY-MM-DD, by=<owner> and "— <reason>"`
+          `is malformed: it needs a rule ID, a real until=YYYY-MM-DD, by=<owner> and "— <reason>"`
         );
       } else if (!ctx.known.has(d.ruleId)) {
         push(d, `names rule ${d.ruleId}, which the registry doesn't define`);
       } else if (ctx.measuring.has(d.ruleId)) {
         push(
           d,
-          `${d.ruleId} measures a whole file, so it can't be excepted inline; its baseline count is the exception`
+          `names ${d.ruleId}, which measures a whole file, so it can't be excepted inline; its baseline count is the exception`
+        );
+      } else if (ctx.noExceptions.has(d.ruleId)) {
+        push(
+          d,
+          `names ${d.ruleId}, which can't be excepted: fix the drift instead`
         );
       } else if (d.until < ctx.today) {
         push(
           d,
-          `expired on ${d.until} (granted by ${d.by}). Fix the violation, or renew the date with a fresh reason`
+          `expired on ${d.until} (granted by ${d.by}). Fix the violation, or renew the date with a fresh reason and countersign`
         );
+      } else if (d.until > latest) {
+        push(
+          d,
+          `runs to ${d.until}, more than ${MAX_EXCEPTION_DAYS} days out (the latest allowed today is ${latest})`
+        );
+      } else if (ctx.ran(d.ruleId) && !ctx.ranOn(d.ruleId, d.file)) {
+        push(d, `names ${d.ruleId}, which doesn't apply to this file`);
       } else if (!d.used && ctx.ranOn(d.ruleId, d.file)) {
         push(d, `excuses no ${d.ruleId} violation on the next line; remove it`);
       }

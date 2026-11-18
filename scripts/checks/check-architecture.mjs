@@ -14,38 +14,52 @@
  * THE RATCHET
  * ============================================================================
  *
- * Counts are keyed by (rule, file), never by line, so editing a file that
- * carries known debt doesn't churn the baseline.
+ * The baseline is keyed by (rule, file), never by line, so editing a file that
+ * carries known debt doesn't churn it. A rule that measures a file (SIZE,
+ * DOC-BUDGET) pins a number; every other rule pins the KEY of each violation
+ * it allows (the matched call, the dead link's target), so fixing one
+ * violation can't pay for a new one in the same file.
  *
- *   found > allowed        FAIL  a new violation. The message names the line,
- *                                the fix and the rule's doc anchor.
- *   found < allowed        FAIL  the fix must be banked with --lower, so the
- *                                headroom it freed can't be spent later by a
- *                                new violation.
- *   a pinned file is gone  FAIL  --lower removes the entry.
- *   equal                  pass
+ *   a key or size beyond the pin   FAIL  a new violation. The message names
+ *                                        the line, the fix and the rule's doc
+ *                                        anchor.
+ *   a pinned key gone, a size down FAIL in a commit or PR that touches the
+ *                                        file, until --lower banks the fix (so
+ *                                        the freed headroom can't be spent
+ *                                        later); a notice anywhere else
+ *   a pinned file gone             same as a fix: --lower removes the entry
+ *   equal                          pass
  *
- * A file the baseline doesn't list is allowed the rule's default: 0 for most
- * rules, the size limit for a measuring rule (SIZE, DOC-BUDGET). `--lower`
- * only ever lowers or removes. RAISING a count is a hand edit of the JSON, so
- * it shows in the PR diff where review sees it and asks for the reason.
+ * A file the baseline doesn't list is allowed nothing, or the size limit for a
+ * measuring rule. `--lower` only ever lowers or removes. Anything that LOOSENS
+ * the gate (a raised or added pin, a new or renewed exception, a change to the
+ * gate's own files) needs a countersign: a `G0-RAISE:` trailer in a commit
+ * message, checked by --ci (see architecture-raises.mjs).
  *
  * ============================================================================
  * MODES
  * ============================================================================
  *
- *   pnpm check:arch                 every TRACKED file (what CI sees; an
- *                                   untracked file is caught at commit time)
+ *   pnpm check:arch                 every TRACKED file (an untracked file is
+ *                                   caught at commit time)
  *   pnpm check:arch --staged        pre-commit: only the files staged for
  *                                   commit, read from the INDEX (`git show
  *                                   :path`), so it checks exactly what is being
  *                                   committed. Effects across the repo (a
  *                                   deleted doc breaking a link elsewhere) are
  *                                   left to the full run in CI.
- *   pnpm check:arch --lower         rewrite the baseline with lowered or
- *                                   removed counts only
+ *   pnpm check:arch --ci            the full run, plus: unbanked fixes fail in
+ *                                   the files a PR touches, and every loosening
+ *                                   since the change's base is countersigned
+ *   pnpm check:arch --raises <ref>  only the countersign check, against <ref>
+ *   pnpm check:arch --lower         bank fixes: lower or remove pins only
  *   pnpm check:arch --init          write the first baseline; refuses if one
- *                                   exists
+ *                                   exists. `--init --rule <ID>` seeds the
+ *                                   block for a rule added later
+ *   pnpm check:arch --write-rules   regenerate docs/architecture/rules.md
+ *   pnpm check:arch --gates [--skip IDS]
+ *                                   run every CI static gate the registry
+ *                                   lists, the way CI does (gate.sh)
  *
  * Test-only flags: `--root <dir>` (a fixture repo), `--rules <module>` (a
  * fixture registry), `--baseline <path>` (relative to the root).
@@ -71,6 +85,11 @@ import {
   parseIgnores,
 } from './architecture-ignores.mjs';
 import { MATCHERS } from './architecture-matchers.mjs';
+import {
+  checkLoosening,
+  ciBase,
+  touchedFiles,
+} from './architecture-raises.mjs';
 import { GATES, RULES } from './architecture-rules.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -365,44 +384,120 @@ function defaultAllowed(rule, file) {
   return MATCHERS[rule.match.kind].defaultAllowed?.(rule, file) ?? 0;
 }
 
+/** Whether a rule measures a file (SIZE, DOC-BUDGET) rather than listing violations. */
+export function isMeasuring(rule) {
+  return Boolean(MATCHERS[rule.match.kind].unit);
+}
+
+/** The items of `a` that `b` doesn't match one for one (a multiset difference). */
+export function minus(a, b) {
+  const left = [...b];
+  const out = [];
+  for (const x of a) {
+    const at = left.indexOf(x);
+    if (at === -1) out.push(x);
+    else left.splice(at, 1);
+  }
+  return out;
+}
+
+const keyOf = (hit) => hit.key ?? hit.text;
+
 /**
  * Every difference between what was found and what the baseline allows.
  *
- * @returns {{type: 'new'|'more'|'fewer'|'remove'|'stale'|'unknown-rule',
- *   rule?: object, ruleId: string, file?: string, found?: number,
- *   allowed?: number, hits?: object[]}[]}
+ * A measuring rule pins a number per file. Any other rule pins the KEY of each
+ * violation it allows (the matched call, the dead link's target), so a fixed
+ * violation can't pay for a new one in the same file: the new one's key isn't
+ * pinned, and it fails even when the count is unchanged.
+ *
+ * A fix that hasn't been banked with --lower is `blocking` only where
+ * `bankFails(file)` says so: at commit time and in a pull request, for the
+ * files that change touches. Elsewhere it is a notice. Two green PRs that bank
+ * different fixes in one file can otherwise merge cleanly into a red branch.
  */
 export function compare(
   rules,
   results,
   baseline,
   source,
-  { today = todayUtc() } = {}
+  { today = todayUtc(), bankFails = () => true } = {}
 ) {
   const problems = [];
+  const bank = (p) => problems.push({ ...p, blocking: bankFails(p.file) });
   for (const rule of rules) {
     const result = results.get(rule.id);
     if (!result) continue;
     const pins = baseline[rule.id] ?? {};
+    const measuring = isMeasuring(rule);
     for (const file of result.evaluated) {
       const { found, hits } = result.perFile.get(file) ?? {
         found: 0,
         hits: [],
       };
       const base = { rule, ruleId: rule.id, file, found, hits };
-      const fallback = defaultAllowed(rule, file);
       const pinned = pins[file];
-      if (pinned === undefined) {
-        if (found > fallback) {
-          problems.push({ ...base, type: 'new', allowed: fallback });
+      if (measuring && pinned !== undefined && !Number.isInteger(pinned)) {
+        problems.push({ ...base, type: 'format', blocking: true });
+        continue;
+      }
+      if (measuring) {
+        const fallback = defaultAllowed(rule, file);
+        if (pinned === undefined) {
+          if (found > fallback) {
+            problems.push({
+              ...base,
+              type: 'new',
+              allowed: fallback,
+              blocking: true,
+            });
+          }
+        } else if (found > pinned) {
+          problems.push({
+            ...base,
+            type: 'more',
+            allowed: pinned,
+            blocking: true,
+          });
+        } else if (found < pinned) {
+          bank({
+            ...base,
+            type: found <= fallback ? 'remove' : 'fewer',
+            allowed: pinned,
+          });
         }
-      } else if (found > pinned) {
-        problems.push({ ...base, type: 'more', allowed: pinned });
-      } else if (found < pinned) {
+        continue;
+      }
+      if (pinned !== undefined && !Array.isArray(pinned)) {
+        problems.push({ ...base, type: 'format', blocking: true });
+        continue;
+      }
+      const allowedKeys = pinned ?? [];
+      const foundKeys = hits.map(keyOf);
+      const added = minus(foundKeys, allowedKeys);
+      if (added.length > 0) {
+        const pending = [...added];
+        const newHits = hits.filter((h) => {
+          const at = pending.indexOf(keyOf(h));
+          if (at === -1) return false;
+          pending.splice(at, 1);
+          return true;
+        });
         problems.push({
           ...base,
-          type: found <= fallback ? 'remove' : 'fewer',
-          allowed: pinned,
+          type: pinned === undefined ? 'new' : 'more',
+          allowed: allowedKeys.length,
+          hits: newHits,
+          blocking: true,
+        });
+      }
+      const fixed = minus(allowedKeys, foundKeys);
+      if (fixed.length > 0) {
+        bank({
+          ...base,
+          type: fixed.length === allowedKeys.length ? 'remove' : 'fewer',
+          allowed: allowedKeys.length,
+          fixed,
         });
       }
     }
@@ -413,13 +508,13 @@ export function compare(
       // there an entry is stale only when the commit deletes its file.
       const gone = source.changed ? source.deleted.includes(file) : true;
       if (gone) {
-        problems.push({
+        bank({
           type: 'stale',
           rule,
           ruleId: rule.id,
           file,
           found: 0,
-          allowed: pinned,
+          allowed: Array.isArray(pinned) ? pinned.length : pinned,
           hits: [],
         });
       }
@@ -427,36 +522,61 @@ export function compare(
   }
   const known = new Set(rules.map((r) => r.id));
   for (const ruleId of Object.keys(baseline)) {
-    if (!known.has(ruleId)) problems.push({ type: 'unknown-rule', ruleId });
+    if (!known.has(ruleId))
+      problems.push({ type: 'unknown-rule', ruleId, blocking: true });
   }
   if (results.directives) {
-    problems.push(
-      ...ignoreProblems(results.directives, {
-        known,
-        measuring: new Set(
-          rules.filter((r) => MATCHERS[r.match.kind].unit).map((r) => r.id)
-        ),
-        ranOn: (ruleId, file) =>
-          results.get(ruleId)?.evaluated.has(file) ?? false,
-        today,
-      })
-    );
+    for (const p of ignoreProblems(results.directives, {
+      known,
+      measuring: new Set(rules.filter(isMeasuring).map((r) => r.id)),
+      noExceptions: new Set(
+        rules.filter((r) => r.exceptions === false).map((r) => r.id)
+      ),
+      ran: (ruleId) => results.has(ruleId),
+      ranOn: (ruleId, file) =>
+        results.get(ruleId)?.evaluated.has(file) ?? false,
+      today,
+    })) {
+      problems.push({ ...p, blocking: true });
+    }
   }
   return problems;
 }
 
-/** The baseline with every fixed or vanished count banked. Never raises, never adds. */
+/**
+ * The baseline with every fixed or vanished violation banked. Never raises,
+ * never adds. A block for a rule the registry doesn't define is copied through
+ * untouched: removing it is a hand edit that review sees.
+ */
 export function lowerBaseline(rules, results, baseline) {
   const next = {};
   for (const [ruleId, pins] of Object.entries(baseline)) {
     const rule = rules.find((r) => r.id === ruleId);
     const result = rule && results.get(ruleId);
-    if (!result) continue; // an unknown rule is a hand edit, not --lower's call
+    if (!result) {
+      next[ruleId] = pins;
+      continue;
+    }
     for (const [file, pinned] of Object.entries(pins)) {
       if (!result.evaluated.has(file)) continue;
-      const found = result.perFile.get(file)?.found ?? 0;
-      const kept = Math.min(found, pinned);
-      if (kept <= defaultAllowed(rule, file)) continue;
+      const entry = result.perFile.get(file) ?? { found: 0, hits: [] };
+      let kept;
+      if (isMeasuring(rule)) {
+        if (!Number.isInteger(pinned)) {
+          kept = pinned; // a format problem; --lower won't guess
+        } else {
+          kept = Math.min(entry.found, pinned);
+          if (kept <= defaultAllowed(rule, file)) continue;
+        }
+      } else {
+        const foundKeys = entry.hits.map(keyOf).sort();
+        // A count where keys belong (the old format, or a hand edit) becomes
+        // at most that many keys; any found beyond it then fail as new.
+        kept = Array.isArray(pinned)
+          ? minus(pinned, minus(pinned, foundKeys)).sort()
+          : foundKeys.slice(0, pinned);
+        if (kept.length === 0) continue;
+      }
       next[ruleId] ??= {};
       next[ruleId][file] = kept;
     }
@@ -464,16 +584,23 @@ export function lowerBaseline(rules, results, baseline) {
   return sortBaseline(next);
 }
 
-/** The first baseline: every count above its rule's default. */
+/** A baseline block per rule: every count above its default, or every violation's key. */
 export function initialBaseline(rules, results) {
   const next = {};
   for (const rule of rules) {
     const result = results.get(rule.id);
     if (!result) continue;
-    for (const [file, { found }] of result.perFile) {
-      if (found <= defaultAllowed(rule, file)) continue;
+    for (const [file, { found, hits }] of result.perFile) {
+      let entry;
+      if (isMeasuring(rule)) {
+        if (found <= defaultAllowed(rule, file)) continue;
+        entry = found;
+      } else {
+        if (hits.length === 0) continue;
+        entry = hits.map(keyOf).sort();
+      }
       next[rule.id] ??= {};
-      next[rule.id][file] = found;
+      next[rule.id][file] = entry;
     }
   }
   return sortBaseline(next);
@@ -490,50 +617,49 @@ function sortBaseline(baseline) {
   return sorted;
 }
 
-/** Biome's JSON format (2-space indent, trailing newline). */
+/** Biome's JSON line width (biome.json `formatter.lineWidth`). */
+const JSON_WIDTH = 80;
+
+/**
+ * The baseline as biome formats it, so `--lower` and the commit hook's
+ * `biome check --write` never fight over it: objects one key per line, and a
+ * key array on one line when it fits in 80 columns, else one key per line.
+ */
 export function serializeBaseline(baseline) {
-  return `${JSON.stringify(baseline, null, 2)}\n`;
-}
-
-// ---------------------------------------------------------------------------
-// Countersigned raises
-// ---------------------------------------------------------------------------
-//
-// The ratchet has one hole: the agent that wants green can edit the baseline
-// upwards. pstack's rule for that is "Anything that loosens a gate … needs a
-// verifier's proof and then your fresh countersign, because the owner is the
-// one who wants green." So in a pull request every raised or added count must
-// be named in the PR description, with its reason, on a line of its own:
-//   G0-RAISE: <RULE> <file> — <reason>
-// --lower never needs one: lowering only tightens.
-
-/** Every (rule, file) the new baseline allows more than the old one did. */
-export function raisedEntries(before, after) {
-  const raised = [];
-  for (const [ruleId, pins] of Object.entries(after)) {
-    for (const [file, now] of Object.entries(pins)) {
-      const was = before[ruleId]?.[file];
-      if (was === undefined || now > was)
-        raised.push({ ruleId, file, was, now });
+  const q = (v) => JSON.stringify(v);
+  const rules = Object.entries(baseline);
+  if (rules.length === 0) return '{}\n';
+  const out = ['{'];
+  rules.forEach(([ruleId, pins], i) => {
+    const ruleEnd = i < rules.length - 1 ? ',' : '';
+    const files = Object.entries(pins);
+    if (files.length === 0) {
+      out.push(`  ${q(ruleId)}: {}${ruleEnd}`);
+      return;
     }
-  }
-  return raised;
-}
-
-const RAISE_LINE =
-  /^[ \t>*-]*G0-RAISE:\s*(\S+)\s+(\S+)\s+(?:—|-{1,2})\s+\S.*$/gm;
-
-/** The raises a PR description countersigns, as "RULE file" keys. */
-export function countersigned(body) {
-  return new Set([...body.matchAll(RAISE_LINE)].map((m) => `${m[1]} ${m[2]}`));
-}
-
-/** The raises a PR description doesn't countersign. */
-export function missingCountersigns(before, after, body) {
-  const signed = countersigned(body);
-  return raisedEntries(before, after).filter(
-    (r) => !signed.has(`${r.ruleId} ${r.file}`)
-  );
+    out.push(`  ${q(ruleId)}: {`);
+    files.forEach(([file, pin], j) => {
+      const end = j < files.length - 1 ? ',' : '';
+      const head = `    ${q(file)}: `;
+      if (!Array.isArray(pin) || pin.length === 0) {
+        out.push(`${head}${q(pin)}${end}`);
+        return;
+      }
+      const flat = `${head}[${pin.map(q).join(', ')}]${end}`;
+      if (flat.length <= JSON_WIDTH) {
+        out.push(flat);
+        return;
+      }
+      out.push(`${head}[`);
+      pin.forEach((key, n) => {
+        out.push(`      ${q(key)}${n < pin.length - 1 ? ',' : ''}`);
+      });
+      out.push(`    ]${end}`);
+    });
+    out.push(`  }${ruleEnd}`);
+  });
+  out.push('}');
+  return `${out.join('\n')}\n`;
 }
 
 // ---------------------------------------------------------------------------
@@ -542,22 +668,21 @@ export function missingCountersigns(before, after, body) {
 
 function amount(rule, n) {
   const unit = MATCHERS[rule.match.kind].unit;
-  const text = n.toLocaleString('en-GB');
+  // Fixed digit grouping, so output never depends on the machine's locale.
+  const text = String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return unit ? `${text} ${unit}` : text;
 }
 
 /**
  * Everything an agent needs to correct itself, per problem: which rule, where,
- * the one fix, where the rule is written, and how this file's count compares
- * with the debt it was already allowed. That last line is what makes an agent
- * fix what it just introduced instead of trying to clear the whole baseline.
+ * the one fix, where the rule is written, and how this file compares with the
+ * debt it was already allowed. That last line is what makes an agent fix what
+ * it just introduced instead of trying to clear the whole baseline.
  */
 export function formatProblems(problems) {
   const lines = [];
-  const counts = { new: 0, bank: 0, unknown: 0 };
   for (const p of problems) {
     if (p.type === 'ignore') {
-      counts.new += 1;
       lines.push(
         `  [${IGNORE_KEYWORD}] ${p.file}:${p.line}`,
         `  This exception ${p.why}.`,
@@ -567,18 +692,25 @@ export function formatProblems(problems) {
       continue;
     }
     if (p.type === 'unknown-rule') {
-      counts.unknown += 1;
       lines.push(
         `  The baseline lists rule "${p.ruleId}", which the registry doesn't define.`,
-        '  Remove that block from the baseline by hand.',
+        '  Remove that block from the baseline by hand (with a countersign).',
         ''
       );
       continue;
     }
     const { rule } = p;
     lines.push(`  [${rule.id}] ${rule.title}`);
+    if (p.type === 'format') {
+      lines.push(
+        isMeasuring(rule)
+          ? `  ${p.file}: the baseline pin must be a whole number (${p.rule.match.kind} measures ${MATCHERS[rule.match.kind].unit}). Fix the JSON by hand.`
+          : `  ${p.file}: the baseline holds a count where this rule pins violation keys. Convert it: pnpm check:arch --lower`,
+        ''
+      );
+      continue;
+    }
     if (p.type === 'new' || p.type === 'more') {
-      counts.new += 1;
       const shown = p.hits.slice(0, MAX_HITS_SHOWN);
       if (shown.length === 0) lines.push(`  ${p.file}`);
       for (const hit of shown) {
@@ -588,103 +720,134 @@ export function formatProblems(problems) {
       if (p.hits.length > shown.length) {
         lines.push(`  … and ${p.hits.length - shown.length} more in this file`);
       }
+      const tally = isMeasuring(rule)
+        ? `allowed in this file: ${amount(rule, p.allowed)}, found: ${amount(rule, p.found)}`
+        : `the baseline pins ${p.allowed} in this file; ${p.hits.length} found here ${p.hits.length === 1 ? "isn't" : "aren't"} among them`;
       lines.push(
         `  Fix: ${rule.fix}`,
-        `  Rule: ${ruleAnchor(rule)}  ·  allowed in this file: ${amount(rule, p.allowed)}, found: ${amount(rule, p.found)}`,
+        `  Rule: ${ruleAnchor(rule)}  ·  ${tally}`,
         ''
       );
       continue;
     }
-    counts.bank += 1;
-    if (p.type === 'fewer') {
+    if (p.type === 'fewer' || p.type === 'remove') {
+      const what = p.fixed
+        ? `fixed ${p.fixed.map((k) => JSON.stringify(k)).join(', ')}`
+        : `allowed ${amount(rule, p.allowed)}, found ${amount(rule, p.found)}`;
       lines.push(
-        `  ${p.file}: allowed ${amount(rule, p.allowed)}, found ${amount(rule, p.found)}. Bank the fix: pnpm check:arch --lower`,
+        `  ${p.file}: ${what}. Bank the fix: pnpm check:arch --lower`,
         ''
       );
-    } else {
-      const why =
-        p.type === 'stale'
-          ? 'is gone or out of scope'
-          : 'no longer needs an entry';
-      lines.push(
-        `  ${p.file} ${why}, but the baseline still lists it (${amount(rule, p.allowed)}). Remove it: pnpm check:arch --lower`,
-        ''
-      );
+      continue;
     }
+    lines.push(
+      `  ${p.file} is gone or out of scope, but the baseline still lists it. Remove it: pnpm check:arch --lower`,
+      ''
+    );
   }
-  const head =
-    `✗ check-architecture: ${counts.new} new violation(s), ` +
-    `${counts.bank} baseline entr${counts.bank === 1 ? 'y' : 'ies'} to lower` +
-    (counts.unknown ? `, ${counts.unknown} unknown rule(s)` : '');
-  return [head, ...lines].join('\n');
+  return lines.join('\n');
+}
+
+function report(problems, okLine) {
+  const blocking = problems.filter((p) => p.blocking);
+  const notices = problems.filter((p) => !p.blocking);
+  if (notices.length > 0) {
+    console.log(
+      `note: ${notices.length} fixed violation(s) not yet banked. They block only a commit or pull request that touches the file; pnpm check:arch --lower banks them:`
+    );
+    console.log(formatProblems(notices));
+  }
+  if (blocking.length > 0) {
+    console.error(`✗ check-architecture: ${blocking.length} problem(s)`);
+    console.error(formatProblems(blocking));
+    return 1;
+  }
+  console.log(okLine);
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
+class UsageError extends Error {}
+
+const VALUE_FLAGS = [
+  '--root',
+  '--rules',
+  '--baseline',
+  '--raises',
+  '--rule',
+  '--skip',
+];
+const MODE_FLAGS = [
+  '--staged',
+  '--lower',
+  '--init',
+  '--ci',
+  '--write-rules',
+  '--gates',
+];
+
 function parseArgs(argv) {
-  const opts = {
-    staged: false,
-    lower: false,
-    init: false,
-    writeRules: false,
-    gates: false,
-  };
+  const opts = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === '--staged') opts.staged = true;
-    else if (arg === '--lower') opts.lower = true;
-    else if (arg === '--init') opts.init = true;
-    else if (arg === '--write-rules') opts.writeRules = true;
-    else if (arg === '--gates') opts.gates = true;
-    else if (
-      arg === '--root' ||
-      arg === '--rules' ||
-      arg === '--baseline' ||
-      arg === '--raises'
-    ) {
+    if (MODE_FLAGS.includes(arg)) opts[arg.slice(2)] = true;
+    else if (VALUE_FLAGS.includes(arg)) {
       const value = argv[i + 1];
-      if (!value) throw new UsageError(`${arg} needs a value`);
+      if (!value || value.startsWith('--'))
+        throw new UsageError(`${arg} needs a value`);
       opts[arg.slice(2)] = value;
       i += 1;
-    } else {
-      throw new UsageError(`unknown option ${arg}`);
-    }
+    } else throw new UsageError(`unknown option ${arg}`);
   }
-  const modes = ['staged', 'lower', 'init', 'raises', 'writeRules', 'gates'];
-  if (modes.filter((m) => opts[m]).length > 1) {
-    throw new UsageError(
-      '--staged, --lower, --init, --raises, --write-rules and --gates are exclusive'
-    );
-  }
+  const modes = [...MODE_FLAGS.map((f) => f.slice(2)), 'raises'].filter(
+    (m) => opts[m]
+  );
+  if (modes.length > 1)
+    throw new UsageError(`--${modes.join(' and --')} are exclusive`);
+  if (opts.rule && !opts.init) throw new UsageError('--rule goes with --init');
+  if (opts.skip && !opts.gates)
+    throw new UsageError('--skip goes with --gates');
   return opts;
 }
 
-class UsageError extends Error {}
-
 function readBaseline(source, root, file, staged) {
-  if (staged) return source.has(file) ? JSON.parse(source.read(file)) : {};
-  const path = join(root, file);
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+  const text = staged
+    ? source.has(file)
+      ? source.read(file)
+      : null
+    : existsSync(join(root, file))
+      ? readFileSync(join(root, file), 'utf8')
+      : null;
+  if (text === null) return {};
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error(`${file} is not valid JSON (${err.message})`);
+  }
 }
 
 /**
- * --gates: run every CI static gate the registry lists, in order, the way the
- * static-analysis job does. gate.sh calls this so a gate added to CI can't be
- * skipped locally (Codex-kxdz9). A pull-request-only step is reported, not
- * run; a gate gate.sh runs itself is skipped here.
+ * --gates [--skip IDS]: run every CI static gate the registry lists, in order,
+ * the way the static-analysis job does. gate.sh calls it with --skip for the
+ * gates it has just run itself, so a gate added to CI can't be skipped locally
+ * (Codex-kxdz9). A gate whose every command was skipped is not counted as
+ * passed.
  */
-function runGates(root, gates) {
+function runGates(root, gates, skip) {
   const failed = [];
+  let ran = 0;
   for (const gate of gates) {
-    if (gate.localBy) {
-      console.log(`- ${gate.id}: run by ${gate.localBy}`);
+    if (skip.has(gate.id)) {
+      console.log(`- ${gate.id}: skipped (--skip)`);
       continue;
     }
-    for (const command of [gate.before, gate.selfTest, gate.run].filter(
-      Boolean
-    )) {
+    const commands = [gate.before, gate.selfTest, gate.run].filter(Boolean);
+    if (commands.length === 0) continue;
+    ran += 1;
+    for (const command of commands) {
       console.log(`- ${gate.id}: ${command}`);
       const r = spawnSync(command, {
         cwd: root,
@@ -697,9 +860,6 @@ function runGates(root, gates) {
         break;
       }
     }
-    for (const command of gate.prOnly ?? []) {
-      console.log(`- ${gate.id}: CI pull requests only: ${command}`);
-    }
   }
   if (failed.length > 0) {
     console.error(
@@ -708,63 +868,48 @@ function runGates(root, gates) {
     return 1;
   }
   console.log(
-    `OK: all ${gates.filter((g) => !g.localBy).length} CI static gates passed locally.`
+    `OK: ${ran} CI static gate(s) passed locally${skip.size ? ` (${[...skip].join(', ')} skipped)` : ''}.`
   );
   return 0;
 }
 
-/**
- * --raises <base-ref>: every count the working baseline raises or adds over
- * the base ref's must be countersigned in the PR description, which CI passes
- * in G0_PR_BODY. A base with no baseline means this PR writes the first one.
- */
-function checkRaises(root, baselineFile, baseRef) {
-  const body = process.env.G0_PR_BODY;
-  if (body === undefined) {
-    console.error(
-      'check-architecture: --raises reads the PR description from G0_PR_BODY; it runs in a pull_request job.'
-    );
-    return 2;
+function loosening(root, rules, baselineFile, base) {
+  const { skipped, missing } = checkLoosening(root, rules, baselineFile, base);
+  if (skipped) {
+    console.log(`OK: ${skipped}.`);
+    return 0;
   }
-  const base = spawnSync('git', ['show', `${baseRef}:${baselineFile}`], {
-    cwd: root,
-    encoding: 'utf8',
-  });
-  if (base.status !== 0) {
-    if (/does not exist|exists on disk, but not in/.test(base.stderr)) {
-      console.log(
-        `OK: ${baseRef} has no ${baselineFile}, so this PR writes the first baseline; nothing to countersign.`
-      );
-      return 0;
-    }
-    console.error(
-      `check-architecture: git show ${baseRef}:${baselineFile} failed: ${base.stderr.trim()}`
-    );
-    return 2;
-  }
-  const headPath = join(root, baselineFile);
-  const head = existsSync(headPath)
-    ? JSON.parse(readFileSync(headPath, 'utf8'))
-    : {};
-  const missing = missingCountersigns(JSON.parse(base.stdout), head, body);
   if (missing.length === 0) {
     console.log(
-      'OK: every raised baseline count is countersigned in the PR description.'
+      `OK: everything this change loosens since ${base} is countersigned.`
     );
     return 0;
   }
   console.error(
     [
-      `✗ check-architecture: ${missing.length} raised baseline count(s) are not countersigned.`,
-      '  A raise loosens a gate, so it needs its reason in the PR description. Add a line per entry:',
-      ...missing.map(
-        (r) =>
-          `  G0-RAISE: ${r.ruleId} ${r.file} — <why> (${r.was ?? 'new entry'} → ${r.now})`
-      ),
+      `✗ check-architecture: ${missing.length} loosening(s) since ${base} are not countersigned.`,
+      '  A raised baseline entry, a new or renewed exception, or a change to the gate itself loosens it.',
+      '  Add one trailer line per item to a commit message in this change (git commit --amend, or a new commit):',
+      ...missing.map((m) => `    ${m.line}    (${m.what})`),
       '  Rule: docs/architecture/rules.md#raises',
     ].join('\n')
   );
   return 1;
+}
+
+/** Unstaged edits to the gate's own code would make --staged judge with rules the commit doesn't carry. */
+function unstagedGateEdits(root) {
+  const r = spawnSync('git', ['diff', '--name-only', '--', 'scripts/checks/'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  return r.stdout
+    .split('\n')
+    .filter((f) =>
+      /^scripts\/checks\/(?:check-architecture|architecture-[\w-]+)\.mjs$/.test(
+        f
+      )
+    );
 }
 
 /** @returns {Promise<number>} the exit code */
@@ -776,6 +921,17 @@ export async function main(argv = process.argv.slice(2)) {
     console.error(`check-architecture: ${err.message}`);
     return 2;
   }
+  try {
+    return await run(opts);
+  } catch (err) {
+    // A gate that can't run must stop the build, and say it is broken rather
+    // than reporting a violation (exit 1 means "you added one").
+    console.error(`check-architecture: could not run: ${err.message}`);
+    return 2;
+  }
+}
+
+async function run(opts) {
   const root = opts.root ? resolve(opts.root) : REPO_ROOT;
   const baselineFile = opts.baseline ?? BASELINE_FILE;
   const registry = opts.rules
@@ -790,35 +946,114 @@ export async function main(argv = process.argv.slice(2)) {
     return 2;
   }
 
-  if (opts.raises) return checkRaises(root, baselineFile, opts.raises);
-  if (opts.writeRules) {
+  if (opts.raises) return loosening(root, rules, baselineFile, opts.raises);
+  if (opts['write-rules']) {
     mkdirSync(dirname(join(root, RULES_DOC)), { recursive: true });
     writeFileSync(join(root, RULES_DOC), renderRulesDoc(rules, gates));
     console.log(`check-architecture: wrote ${RULES_DOC}.`);
     return 0;
   }
-  if (opts.gates) return runGates(root, gates);
-
-  const source = opts.staged ? stagedSource(root) : treeSource(root);
-  let results;
-  try {
-    results = collect(rules, source);
-  } catch (err) {
-    // A matcher that can't read what it depends on (limits.ts reshaped, a
-    // wrangler.jsonc that doesn't parse) must stop the build, not pass it.
-    console.error(`check-architecture: a rule could not run: ${err.message}`);
-    return 2;
+  if (opts.gates) {
+    return runGates(
+      root,
+      gates,
+      new Set((opts.skip ?? '').split(',').filter(Boolean))
+    );
   }
 
-  if (opts.init) {
-    if (existsSync(join(root, baselineFile))) {
+  if (opts.staged) {
+    const edits = unstagedGateEdits(root);
+    if (edits.length > 0) {
       console.error(
-        `check-architecture: ${baselineFile} already exists. --init writes only the FIRST baseline; use --lower to bank fixes, or edit it by hand to raise a count.`
+        `check-architecture --staged: the gate's own code has unstaged edits (${edits.join(', ')}), so this commit can't be judged by the rules it carries. Stage them or stash them first.`
+      );
+      return 2;
+    }
+  }
+
+  const source = opts.staged ? stagedSource(root) : treeSource(root);
+  const results = collect(rules, source);
+
+  // A rule whose scope matches nothing checks nothing: a typo'd glob or a
+  // moved folder would otherwise pass forever.
+  if (!source.changed) {
+    const idle = rules.filter(
+      (r) => (results.get(r.id)?.evaluated.size ?? 0) === 0
+    );
+    if (idle.length > 0) {
+      console.error(
+        `check-architecture: registry error: rule(s) ${idle.map((r) => r.id).join(', ')} match no tracked file. Fix the scope.`
+      );
+      return 2;
+    }
+  }
+
+  if (opts.init) return init(root, baselineFile, rules, results, opts.rule);
+
+  const baseline = readBaseline(
+    source,
+    root,
+    baselineFile,
+    Boolean(opts.staged)
+  );
+
+  if (opts.lower) {
+    writeFileSync(
+      join(root, baselineFile),
+      serializeBaseline(lowerBaseline(rules, results, baseline))
+    );
+    console.log(
+      `check-architecture: lowered ${baselineFile}. Re-run the check to confirm.`
+    );
+    return 0;
+  }
+
+  // Which unbanked fixes block: at commit time and in a pull request, those in
+  // files the change touches; anywhere else, none (they are notices).
+  let bankFails = () => false;
+  let ci = null;
+  if (opts.staged) {
+    bankFails = (file) =>
+      source.changed.has(file) || source.deleted.includes(file);
+  }
+  if (opts.ci) {
+    ci = ciBase(root);
+    if (ci.kind === 'pr' && ci.base) {
+      const touched = touchedFiles(root, ci.base);
+      bankFails = (file) => touched.has(file);
+    }
+  }
+
+  const problems = compare(rules, results, baseline, source, { bankFails });
+  const judged = [...results.values()].reduce(
+    (n, r) => n + r.evaluated.size,
+    0
+  );
+  let code = report(
+    problems,
+    `OK: ${results.size} of ${rules.length} rule(s) ran over ${judged} (rule, file) pair(s)${opts.staged ? ' in the staged changes' : ''}; nothing new against the baseline.`
+  );
+
+  if (ci) {
+    if (ci.base)
+      code = Math.max(code, loosening(root, rules, baselineFile, ci.base));
+    else console.log(`note: no countersign check (${ci.note}).`);
+  }
+  return code;
+}
+
+/** --init [--rule ID]: the first baseline, or the first block for a rule added later. */
+function init(root, baselineFile, rules, results, ruleId) {
+  const path = join(root, baselineFile);
+  if (!ruleId) {
+    if (existsSync(path)) {
+      console.error(
+        `check-architecture: ${baselineFile} already exists. --init writes only the FIRST baseline; --init --rule <ID> seeds a new rule's block; --lower banks fixes.`
       );
       return 2;
     }
     const baseline = initialBaseline(rules, results);
-    writeFileSync(join(root, baselineFile), serializeBaseline(baseline));
+    writeFileSync(path, serializeBaseline(baseline));
     const entries = Object.values(baseline).reduce(
       (n, pins) => n + Object.keys(pins).length,
       0
@@ -828,30 +1063,27 @@ export async function main(argv = process.argv.slice(2)) {
     );
     return 0;
   }
-
-  const baseline = readBaseline(source, root, baselineFile, opts.staged);
-
-  if (opts.lower) {
-    const lowered = lowerBaseline(rules, results, baseline);
-    writeFileSync(join(root, baselineFile), serializeBaseline(lowered));
-    console.log(
-      `check-architecture: lowered ${baselineFile}. Re-run the check to confirm.`
+  const rule = rules.find((r) => r.id === ruleId);
+  if (!rule) {
+    console.error(`check-architecture: no rule ${ruleId} in the registry.`);
+    return 2;
+  }
+  const baseline = existsSync(path)
+    ? JSON.parse(readFileSync(path, 'utf8'))
+    : {};
+  if (baseline[ruleId] !== undefined) {
+    console.error(
+      `check-architecture: ${baselineFile} already has a ${ruleId} block; use --lower to bank fixes.`
     );
-    return 0;
+    return 2;
   }
-
-  const problems = compare(rules, results, baseline, source);
-  if (problems.length > 0) {
-    console.error(formatProblems(problems));
-    return 1;
-  }
-  const judged = [...results.values()].reduce(
-    (n, r) => n + r.evaluated.size,
-    0
-  );
+  const block = initialBaseline([rule], results)[ruleId] ?? {};
+  const next = {};
+  for (const id of [...Object.keys(baseline), ruleId].sort())
+    next[id] = id === ruleId ? block : baseline[id];
+  writeFileSync(path, serializeBaseline(next));
   console.log(
-    `OK: ${results.size} of ${rules.length} rule(s) ran over ${judged} (rule, file) pair(s)` +
-      `${opts.staged ? ' in the staged changes' : ''}; every count equals the baseline.`
+    `check-architecture: seeded ${ruleId} (${Object.keys(block).length} entries). Countersign it in the commit: G0-RAISE: ${ruleId} * — <why this debt is accepted>`
   );
   return 0;
 }

@@ -87,13 +87,19 @@ function directoriesOf(source) {
   return dirs;
 }
 
-/** Normalise `a/b/../c/./d` without touching the filesystem. */
+/**
+ * Normalise `a/b/../c/./d` without touching the filesystem. A `..` that climbs
+ * above the repo root yields a path no tracked file can have, so it can't
+ * resolve by accident.
+ */
 function normalise(path) {
   const out = [];
   for (const part of path.split('/')) {
     if (part === '' || part === '.') continue;
-    if (part === '..') out.pop();
-    else out.push(part);
+    if (part === '..') {
+      if (out.length === 0) return '\0above-the-repo-root';
+      out.pop();
+    } else out.push(part);
   }
   return out.join('/');
 }
@@ -137,6 +143,31 @@ export function blankCode(text) {
 }
 
 const LINK = /\[[^\]]*\]\(([^)\s]+)[^)]*\)/g;
+const ANGLE_LINK = /\[[^\]]*\]\(<([^>\n]+)>[^)]*\)/g;
+// `[label]: target`. A label starting with ^ is a footnote (`[^1]: text`),
+// whose "target" is prose, not a link.
+const REFERENCE_DEFINITION =
+  /^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(?:<([^>\n]+)>|(\S+))/gm;
+const HREF = /\bhref="([^"\n]+)"/g;
+
+/**
+ * Every link target in (code-blanked) markdown: inline `[x](y)`, `[x](<y z>)`,
+ * a reference definition `[x]: y`, and an HTML `href="y"`.
+ */
+function linksIn(body) {
+  const links = [];
+  for (const m of body.matchAll(LINK)) {
+    if (!m[1].startsWith('<')) links.push({ raw: m[1], index: m.index });
+  }
+  for (const m of body.matchAll(ANGLE_LINK))
+    links.push({ raw: m[1], index: m.index });
+  for (const m of body.matchAll(REFERENCE_DEFINITION)) {
+    links.push({ raw: m[1] ?? m[2], index: m.index });
+  }
+  for (const m of body.matchAll(HREF))
+    links.push({ raw: m[1], index: m.index });
+  return links;
+}
 
 /**
  * The repo path a markdown link points at, or null when it isn't a repo link
@@ -177,6 +208,19 @@ const CITED_PATH = new RegExp(
  * `<name>`, globs, `{a,b}`, "my-feature" examples, and paraglide output that
  * exists only after a compile.
  */
+/**
+ * A bracketed path is a SvelteKit route (`routes/_org/[slug]/+page.svelte`),
+ * not a placeholder, when the repo tracks a folder with that bracketed name.
+ * Those are judged like any other path.
+ */
+function isRealRoutePath(source, path) {
+  if (!path.includes('[') || /[*<{]/.test(path)) return false;
+  // The bracket itself must be a tracked folder name, so `packages/[domain]/`
+  // (a placeholder) stays exempt while `routes/[slug]/` is judged.
+  const upToBracket = path.slice(0, path.indexOf('[') + 1);
+  return source.files.some((f) => f.startsWith(upToBracket));
+}
+
 function isPlaceholderPath(path) {
   return (
     /[*<{[]/.test(path) || path.includes('/my-') || path.includes('paraglide')
@@ -202,7 +246,7 @@ export const MATCHERS = {
       const hits = [];
       for (const m of code.matchAll(globalCopy(rule.match.pattern))) {
         const line = lineOf(m.index);
-        hits.push({ line, text: textOf(line) });
+        hits.push({ line, text: textOf(line), key: m[0].replace(/\s+/g, '') });
       }
       return { found: hits.length, hits };
     },
@@ -276,6 +320,18 @@ export const MATCHERS = {
         });
       });
       const appLayer = layers.length;
+      const workspace = new Set();
+      const appNames = new Set();
+      for (const file of subjects) {
+        try {
+          const { name } = JSON.parse(source.read(file));
+          if (!name) continue;
+          workspace.add(name);
+          if (/^(workers|apps)\//.test(file)) appNames.add(name);
+        } catch {
+          // reported below, as the file's own hit
+        }
+      }
       const out = new Map();
       for (const file of subjects) {
         const text = source.read(file);
@@ -302,17 +358,31 @@ export const MATCHERS = {
           hits.push({
             line: lineOfKey('name'),
             text: `${self} is not in the layer map; place it in a layer`,
+            key: 'unplaced',
           });
         } else {
-          const deps = Object.keys({
+          // Any workspace package counts, prefixed or not: eight of nine
+          // workers and apps/web are unprefixed, and depending on one is the
+          // upward edge this rule exists to stop.
+          const declared = {
             ...pkg.dependencies,
             ...pkg.peerDependencies,
-          }).filter((d) => d.startsWith('@codex/'));
+            ...pkg.optionalDependencies,
+          };
+          const deps = Object.keys(declared).filter(
+            (d) =>
+              d.startsWith('@codex/') ||
+              workspace.has(d) ||
+              String(declared[d]).startsWith('workspace:')
+          );
           for (const dep of deps) {
             const depLayer = layerOf.get(dep);
             let problem = null;
-            if (depLayer === undefined) {
-              problem = 'is not in the layer map (an app, or a new package)';
+            if (appNames.has(dep)) {
+              problem =
+                'is an app (a worker or apps/*); nothing may depend on one';
+            } else if (depLayer === undefined) {
+              problem = 'is not in the layer map (a new package)';
             } else if (depLayer > selfLayer) {
               problem = `is in layer ${depLayer}, above this package's layer ${selfLayer}`;
             } else if (depLayer === selfLayer) {
@@ -326,7 +396,11 @@ export const MATCHERS = {
               }
             }
             if (problem) {
-              hits.push({ line: lineOfKey(dep), text: `"${dep}" ${problem}` });
+              hits.push({
+                line: lineOfKey(dep),
+                text: `"${dep}" ${problem}`,
+                key: dep,
+              });
             }
           }
         }
@@ -341,12 +415,13 @@ export const MATCHERS = {
       const body = blankCode(text);
       const { lineOf } = lineIndex(text);
       const hits = [];
-      for (const m of body.matchAll(LINK)) {
-        const target = linkTarget(file, m[1]);
+      for (const { raw, index } of linksIn(body)) {
+        const target = linkTarget(file, raw);
         if (target === null || resolves(source, target)) continue;
         hits.push({
-          line: lineOf(m.index),
-          text: `(${m[1]}) does not resolve`,
+          line: lineOf(index),
+          text: `(${raw}) does not resolve`,
+          key: raw,
         });
       }
       return { found: hits.length, hits };
@@ -368,10 +443,14 @@ export const MATCHERS = {
       const hits = [];
       for (const m of text.matchAll(CITED_PATH)) {
         const path = m[1].replace(/\.+$/, '');
-        if (isPlaceholderPath(path)) continue;
         if (source.has(path) || bases.some((b) => source.has(`${b}/${path}`)))
           continue;
-        hits.push({ line: lineOf(m.index), text: `${path} does not exist` });
+        if (isPlaceholderPath(path) && !isRealRoutePath(source, path)) continue;
+        hits.push({
+          line: lineOf(m.index),
+          text: `${path} does not exist`,
+          key: path,
+        });
       }
       return { found: hits.length, hits };
     },
@@ -394,12 +473,12 @@ export const MATCHERS = {
       if (!source.has(index)) {
         return {
           found: 1,
-          hits: [{ line: 1, text: `${index} does not exist` }],
+          hits: [{ line: 1, text: `${index} does not exist`, key: 'no-index' }],
         };
       }
       const listed = new Set();
-      for (const m of blankCode(source.read(index)).matchAll(LINK)) {
-        const target = linkTarget(index, m[1]);
+      for (const { raw } of linksIn(blankCode(source.read(index)))) {
+        const target = linkTarget(index, raw);
         if (target !== null) listed.add(target);
       }
       let at = file;
@@ -409,7 +488,7 @@ export const MATCHERS = {
       }
       return {
         found: 1,
-        hits: [{ line: 1, text: `not linked from ${index}` }],
+        hits: [{ line: 1, text: `not linked from ${index}`, key: 'unlisted' }],
       };
     },
   },
@@ -430,8 +509,10 @@ export const MATCHERS = {
       let lastLine = 0;
       while (at !== -1) {
         const line = lineOf(at);
-        if (line !== lastLine)
-          hits.push({ line, text: textOf(line).slice(0, 160) });
+        if (line !== lastLine) {
+          const token = /^[^\s'"`)\]>]*/.exec(text.slice(at))[0];
+          hits.push({ line, text: textOf(line).slice(0, 160), key: token });
+        }
         lastLine = line;
         at = text.indexOf(rule.match.text, at + rule.match.text.length);
       }
@@ -489,6 +570,7 @@ export const MATCHERS = {
         entry.hits.push({
           line: need.line,
           text: `${need.text}: ${need.item} is missing from ${list?.file ?? `${need.group} (no list found)`}`,
+          key: need.item,
         });
         out.set(need.file, entry);
       }
@@ -513,7 +595,13 @@ export const MATCHERS = {
       const want = render();
       if (!source.has(file)) {
         return new Map([
-          [file, { found: 1, hits: [{ line: 1, text: `${file} is missing` }] }],
+          [
+            file,
+            {
+              found: 1,
+              hits: [{ line: 1, text: `${file} is missing`, key: 'missing' }],
+            },
+          ],
         ]);
       }
       const have = source.read(file);
@@ -532,6 +620,7 @@ export const MATCHERS = {
               {
                 line: line + 1,
                 text: `differs from the registry from here: ${JSON.stringify((a[line] ?? '').slice(0, 80))}`,
+                key: 'drift',
               },
             ],
           },

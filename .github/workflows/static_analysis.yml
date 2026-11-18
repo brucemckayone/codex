@@ -17,7 +17,11 @@ jobs:
     # job that calls a reusable workflow (`uses:`) cannot set it (Codex-j7x4u).
     timeout-minutes: 30
     steps:
+      # Full history: the architecture gate's --ci reads the change's own
+      # commits (their G0-RAISE countersigns) and diffs against its base.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v5
 
@@ -225,22 +229,15 @@ jobs:
       # Keep every gate step on one line: a multi-line run block can't be
       # matched and fails CI-GATES.
       #
-      # The third step runs on pull requests only: a raised or added baseline
-      # count loosens a gate, so it must be countersigned in the PR description
-      # (G0-RAISE: <RULE> <file> — <reason>). The body reaches the script
-      # through an env var, never interpolated into the command.
+      # --ci also fails a fix left unbanked in a file the PR touches, and any
+      # loosening (a raised baseline pin, a new exception, a change to the gate
+      # itself) that no commit in the change countersigns with a
+      # G0-RAISE: trailer. No `if:`: CI-GATES fails a conditional gate step.
       - name: Architecture gate self-test
         run: node --test scripts/checks/check-architecture.test.mjs
 
-      - name: Architecture gate (rules registry against the ratchet baseline)
-        run: node scripts/checks/check-architecture.mjs
-
-      - name: Architecture gate (raised baseline counts are countersigned)
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          G0_PR_BODY: ${{ github.event.pull_request.body }}
-        run: git fetch --no-tags --depth=1 origin "$BASE_REF" && node scripts/checks/check-architecture.mjs --raises "origin/$BASE_REF"
+      - name: Architecture gate (registry rules, ratchet baseline, countersigns)
+        run: node scripts/checks/check-architecture.mjs --ci
 
       - name: Generate Paraglide i18n files
         run: pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide

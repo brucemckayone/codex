@@ -121,6 +121,12 @@ const SESSION_NOTES = ['docs', 'handover'].join('/');
 /** The static-analysis job, whose steps CI-GATES keeps equal to GATES. */
 const CI_WORKFLOW = '.github/workflows/static_analysis.yml';
 
+/** The workflows that run the static-analysis job; each must run it unconditionally. */
+export const CI_CALLERS = [
+  '.github/workflows/testing.yml',
+  '.github/workflows/main-gate.yml',
+];
+
 /** Steps of that job that prepare the run rather than gate it. */
 export const CI_SETUP_STEPS = [
   'pnpm install --frozen-lockfile',
@@ -129,22 +135,19 @@ export const CI_SETUP_STEPS = [
 
 /**
  * Every gate the static-analysis job runs, so `--gates` (and through it
- * gate.sh) runs the same set locally. `localBy` marks a gate gate.sh runs
- * itself; `before` is a setup step the gate needs; `prOnly` steps run only in
- * a pull-request job.
+ * gate.sh) runs the same set locally. `before` is a setup step the gate needs;
+ * `needs` is a precondition named when the gate fails.
  */
 export const GATES = [
   {
     id: 'BIOME',
     title: 'Biome lint and format; every diagnostic fails',
     run: 'pnpm check:ci',
-    localBy: 'gate.sh',
   },
   {
     id: 'TYPECHECK',
     title: 'TypeScript across the monorepo',
     run: 'pnpm typecheck',
-    localBy: 'gate.sh',
   },
   {
     id: 'SETUP-ORDER',
@@ -188,12 +191,9 @@ export const GATES = [
   },
   {
     id: 'ARCH',
-    title: 'The rules on this page, and countersigned baseline raises',
+    title: 'The rules on this page, and countersigned loosening',
     selfTest: 'node --test scripts/checks/check-architecture.test.mjs',
-    run: 'node scripts/checks/check-architecture.mjs',
-    prOnly: [
-      'git fetch --no-tags --depth=1 origin "$BASE_REF" && node scripts/checks/check-architecture.mjs --raises "origin/$BASE_REF"',
-    ],
+    run: 'node scripts/checks/check-architecture.mjs --ci',
   },
 ];
 
@@ -203,7 +203,11 @@ export const RULES = [
     title: 'Money moves only through the payments ledger',
     why: 'Transfers, reversals, refunds and payouts move real money. When each module calls Stripe itself, the ledger, the clawback rules and the payout thresholds can be bypassed by whichever caller forgets them. The owners are the four @codex/payments modules that record every movement.',
     scope: {
-      include: ['packages/*/src/**/*.ts', 'workers/*/src/**/*.ts'],
+      include: [
+        'packages/*/src/**/*.{ts,js,mjs}',
+        'workers/*/src/**/*.{ts,js,mjs}',
+        'apps/*/src/**/*.{ts,js,mjs}',
+      ],
       exclude: [
         ...NOT_TESTS,
         'packages/payments/src/payout-ledger.ts',
@@ -214,8 +218,9 @@ export const RULES = [
     },
     match: {
       kind: 'call',
+      // Optional chaining and spacing included: `transfers?.create (`.
       pattern:
-        /\.(?:transfers\.(?:create|createReversal)|refunds\.create|payouts\.create)\(/,
+        /\b(?:transfers\s*\??\.\s*(?:create|createReversal)|refunds\s*\??\.\s*create|payouts\s*\??\.\s*create)\s*\(/,
     },
     fix: 'Move the money through @codex/payments (payout-ledger, clawback, refund or bank-payouts); never call these Stripe APIs directly.',
   },
@@ -337,6 +342,7 @@ export const RULES = [
     title: 'The rules page equals the registry',
     why: "A rules page written by hand drifts: the payments architecture doc said a money file was 5,097 lines long when it was 9,015. This page is rendered from the registry, so a rule can't exist only in prose, and the prose can't describe a rule that doesn't run.",
     scope: { include: [RULES_DOC, 'scripts/checks/architecture-*.mjs'] },
+    exceptions: false,
     match: {
       kind: 'generated',
       file: RULES_DOC,
@@ -347,12 +353,22 @@ export const RULES = [
   {
     id: 'CI-GATES',
     title: "The registry's gate list and the static-analysis job's steps agree",
-    why: "gate.sh, the local copy of CI, skipped five of CI's static gates, and PR #705 went red in CI minutes after passing it (Codex-kxdz9). With the list held here and checked both ways, a gate added to CI is run locally too, and a gate dropped from CI can't stay listed.",
-    scope: { include: [CI_WORKFLOW, 'scripts/checks/architecture-rules.mjs'] },
+    why: "gate.sh, the local copy of CI, skipped five of CI's static gates, and PR #705 went red in CI minutes after passing it (Codex-kxdz9). With the list held here and checked both ways, a gate added to CI is run locally too, and a gate dropped from CI can't stay listed. A step switched off by if: or continue-on-error counts as dropped, the calling workflows must run the job unconditionally, and every pnpm script a gate runs must exist, because pnpm --filter exits 0 for a missing one.",
+    scope: {
+      include: [
+        CI_WORKFLOW,
+        ...CI_CALLERS,
+        'scripts/checks/architecture-rules.mjs',
+        'package.json',
+        '{apps,packages,workers}/*/package.json',
+      ],
+    },
+    exceptions: false,
     match: {
       kind: 'lists-agree',
       ...ciGateLists({
         workflow: CI_WORKFLOW,
+        callers: CI_CALLERS,
         gates: GATES,
         setupSteps: CI_SETUP_STEPS,
         registryFile: 'scripts/checks/architecture-rules.mjs',
