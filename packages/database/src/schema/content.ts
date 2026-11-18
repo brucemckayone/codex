@@ -367,7 +367,8 @@ export const content = pgTable(
     // leaves Revelations. A piece people own is not deleted at once: it goes
     // off sale with this date, its owners keep it until then, and a sweep
     // sets `deleted_at` on the day. Null = not leaving. Kept after that
-    // delete, so a piece that left with notice can be told from a takedown.
+    // delete, and cleared by a platform admin's takedown, so a deleted piece
+    // with a date is exactly one that left with notice.
     // Never set on a published or scheduled piece (the two CHECKs below).
     // To the millisecond, as `content_leaving_notices.round` copies it: a
     // value read into JS then matches back.

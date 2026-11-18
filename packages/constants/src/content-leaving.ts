@@ -9,9 +9,9 @@
  * `content_leaving_notices` row each):
  * - `leaving`: on the delete, naming the date and, where allowed, the download;
  * - `reminder`: a few days before it leaves;
- * - `staying`: the creator kept it. Sent to everyone a `leaving` or
- *   `reminder` email of that round was tried for, since any try may have
- *   told them (see `attempts` in the schema);
+ * - `staying`: the creator kept it. Sent to everyone whose newest tried
+ *   email about the piece (`attempts > 0`, any round) is a `leaving` or
+ *   `reminder` one, since any try may have told them (see the schema);
  * - `removed`: a platform admin removed it at once (a takedown).
  */
 export const CONTENT_LEAVING_NOTICE_KINDS = [
@@ -33,11 +33,12 @@ export type ContentLeavingNoticeKind =
  * - `unknown`: the last try got no usable answer, so the email may have gone
  *   (`EmailSendResult`'s 5xx and no-answer cases). The sweep tries again;
  * - `cancelled`: no longer needed. The creator kept the piece while its
- *   `leaving` or `reminder` email was still open, tried or not, or deleted
- *   it again while its `staying` email was. Or the sweep found the email no
- *   longer true before it went (the schema lists the rule per kind), which
- *   it logs. A `removed` notice, a takedown's only email, is never
- *   cancelled;
+ *   `leaving` or `reminder` email was still open, tried or not; any delete,
+ *   the creator's or an admin's, landed while its `staying` email was open;
+ *   or a takedown landed while its `leaving` or `reminder` email was. Or the
+ *   sweep found the email no longer true before it went (the schema lists
+ *   the rule per kind), which it logs. A `removed` notice, a takedown's only
+ *   email, is never cancelled;
  * - `abandoned`: it used up its tries, or the person has no address (an
  *   erased account), and the sweep stops.
  * Whether a person may have been told is read from `attempts`, never from

@@ -17,15 +17,19 @@
  *   owner, so nobody who owned it at the delete is missed;
  * - `reminder` rows are added by the sweep a few days before the date;
  * - `staying` rows are added when the creator keeps the piece, for everyone
- *   a `leaving` or `reminder` email of the round was tried for;
+ *   whose NEWEST tried email about it (`attempts > 0`, any round) is a
+ *   `leaving` or `reminder` one: whoever may last have been told it leaves.
+ *   That reaches a person whose `staying` email a second delete cancelled
+ *   before it went, and skips one already told it stays;
  * - `removed` rows are added by a platform admin's immediate delete.
  * Every writer adds `ON CONFLICT (content_id, kind, round, user_id) DO
  * NOTHING`. A person can own a piece several ways, and can have both a tried
  * `leaving` and a tried `reminder` row. DO NOTHING skips the repeat, even
  * within one statement. Without it (or with DO UPDATE) the unique below
- * refuses the whole statement, and so the delete or Keep around it. Writers
- * also read people from the one holders set (a UNION, never UNION ALL), so
- * the rows match the holder count the creator was shown.
+ * refuses the whole statement, and so the delete or Keep around it. The
+ * `leaving` and `removed` writers read people from the one holders set (a
+ * UNION, never UNION ALL), so the rows match the holder count the creator
+ * was shown.
  *
  * Whoever writes rows leaves out people whose account is deleted
  * (`users.deleted_at`): erasure scrubs the address but keeps the row, so
@@ -46,8 +50,11 @@
  *   (`leaves_at = round`, not deleted);
  * - `staying`: while the piece is kept (`leaves_at IS NULL`, not deleted);
  * - `removed`: always.
- * Otherwise it cancels the row, with a warn log. Every delete also cancels
- * the piece's open `staying` rows in its own transaction.
+ * Otherwise it cancels the row, with a warn log: a person who may never
+ * have been told. So every delete cancels what it makes untrue in its own
+ * transaction, leaving the warn for the day-30 completion and for races:
+ * any delete cancels the piece's open `staying` rows, and a takedown also
+ * its open `leaving` and `reminder` rows (and clears `leaves_at`).
  *
  * Rows are never deleted: a notice no longer needed becomes `cancelled`, and
  * one that used up its tries becomes `abandoned`. Both leave the sweep's
@@ -156,8 +163,9 @@ export const contentLeavingNotices = pgTable(
       .$onUpdate(() => new Date()),
   },
   (table) => [
-    // One email of each kind per person per notice period, so every writer
-    // takes each person once (above). Its order serves the reads too: Keep's
+    // One email of each kind per person per notice period, so a repeat must
+    // be skipped by ON CONFLICT DO NOTHING (above). Its order serves the
+    // reads too: Keep's
     // and the reminder's (content_id, kind, round), and the content row's
     // RESTRICT check (content_id).
     uniqueIndex('uq_content_leaving_notices_person').on(
