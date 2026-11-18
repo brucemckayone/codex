@@ -19,11 +19,19 @@
  * - `staying` rows are added when the creator keeps the piece, for everyone
  *   a `leaving` or `reminder` email of the round was tried for;
  * - `removed` rows are added by a platform admin's immediate delete.
+ * Every writer takes each person ONCE (`SELECT DISTINCT`, or the holders'
+ * UNION set, never UNION ALL) and adds `ON CONFLICT DO NOTHING`. A person can
+ * own a piece several ways, and can have both a tried `leaving` and a tried
+ * `reminder` row, and a repeat would make the unique below refuse the whole
+ * statement, and so the delete or Keep around it.
+ *
  * Whoever writes rows leaves out people whose account is deleted
  * (`users.deleted_at`): erasure scrubs the address but keeps the row, so
  * the cascade below never fires for them. A person erased after their row
- * was written is still claimed, and the send finds no address, so the row
- * ends `abandoned` with `no_address` and a try, as the CHECKs ask.
+ * was written is still claimed. Erasure leaves a tombstone address, not a
+ * null one, so the send must take `users.deleted_at IS NOT NULL` as no
+ * address, as the fee sweep does; the row then ends `abandoned` with
+ * `no_address` and a try, as the CHECKs ask.
  *
  * `round` separates one notice period from the next. It copies the piece's
  * `leaves_at` (for `removed`, the time of the admin delete), so a piece kept
@@ -31,9 +39,10 @@
  * Both are stored to the millisecond, so a value read into JS and matched
  * back finds its rows.
  *
- * Rows are never deleted: a notice no longer needed becomes `cancelled`, and
- * one that used up its tries becomes `abandoned`. Both leave the sweep's
- * claim index, so it never re-reads them.
+ * Rows are never deleted: a notice no longer needed becomes `cancelled` (by
+ * Keep, by a second delete, or by the sweep finding its piece no longer
+ * leaves on that round), and one that used up its tries becomes `abandoned`.
+ * Both leave the sweep's claim index, so it never re-reads them.
  */
 
 import {
@@ -75,10 +84,18 @@ function sqlWords(words: readonly string[]) {
 }
 
 const SENT: readonly ContentLeavingNoticeState[] = ['sent'];
-/** The states whose reason says how the last try was answered. */
-const ANSWERED_OR_NOT: readonly ContentLeavingNoticeState[] = [
-  'failed',
-  'unknown',
+/** Every state a try leaves, `sent` among them: the claim counts each try. */
+const AFTER_A_TRY: readonly ContentLeavingNoticeState[] = [
+  ...SENT,
+  ...CONTENT_LEAVING_NOTICE_TRIED_STATES,
+];
+/**
+ * What a `failed` try was answered with. No address is not retried: the row
+ * is `abandoned` at once, since an erased account never gets one back.
+ */
+const FAILED_REASONS: readonly ContentLeavingNoticeReason[] = [
+  'refused',
+  'skipped',
 ];
 const CANCELLED: readonly ContentLeavingNoticeState[] = ['cancelled'];
 /** A takedown's `removed` email is its only one, so it is never cancelled. */
@@ -130,9 +147,10 @@ export const contentLeavingNotices = pgTable(
       .$onUpdate(() => new Date()),
   },
   (table) => [
-    // One email of each kind per person per notice period. Its order serves
-    // the reads too: Keep's and the reminder's (content_id, kind, round), and
-    // the content row's RESTRICT check (content_id).
+    // One email of each kind per person per notice period, so every writer
+    // takes each person once (above). Its order serves the reads too: Keep's
+    // and the reminder's (content_id, kind, round), and the content row's
+    // RESTRICT check (content_id).
     uniqueIndex('uq_content_leaving_notices_person').on(
       table.contentId,
       table.kind,
@@ -169,18 +187,25 @@ export const contentLeavingNotices = pgTable(
       'check_content_leaving_notices_sent',
       sql`(${table.state} IN (${sqlWords(SENT)})) = (${table.sentAt} IS NOT NULL)`
     ),
-    // A try that did not send says how many and why, so an owner who was
-    // never told can be told apart from a bug.
+    // Every state a try leaves has the try counted, `sent` too, since
+    // `attempts > 0` is how Keep tells who may have been told.
     check(
       'check_content_leaving_notices_tried',
-      sql`${table.state} NOT IN (${sqlWords(CONTENT_LEAVING_NOTICE_TRIED_STATES)}) OR (${table.attempts} > 0 AND ${table.lastReason} IS NOT NULL)`
+      sql`${table.state} NOT IN (${sqlWords(AFTER_A_TRY)}) OR ${table.attempts} > 0`
     ),
-    // `unknown` is exactly a try with no usable answer, so its reason says
-    // so, and a `failed` one's says what the answer was. A 5xx recorded as
-    // a refusal would hide an email that may have gone.
+    // A try that did not send says why, so an owner who was never told can
+    // be told apart from a bug.
     check(
-      'check_content_leaving_notices_unanswered',
-      sql`${table.state} NOT IN (${sqlWords(ANSWERED_OR_NOT)}) OR (${table.state} = 'unknown') = (${table.lastReason} = 'unknown')`
+      'check_content_leaving_notices_reason_given',
+      sql`${table.state} NOT IN (${sqlWords(CONTENT_LEAVING_NOTICE_TRIED_STATES)}) OR ${table.lastReason} IS NOT NULL`
+    ),
+    // The reason fits the state: `unknown` is exactly a try with no usable
+    // answer, and a `failed` one was answered (refused or skipped). A 5xx
+    // recorded as a refusal would hide an email that may have gone. A null
+    // reason passes here and is refused by `_reason_given`.
+    check(
+      'check_content_leaving_notices_reason_fits',
+      sql`(${table.state} <> 'failed' OR ${table.lastReason} IN (${sqlWords(FAILED_REASONS)})) AND (${table.state} <> 'unknown' OR ${table.lastReason} = 'unknown')`
     ),
     check(
       'check_content_leaving_notices_cancelled',

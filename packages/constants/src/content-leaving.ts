@@ -28,16 +28,18 @@ export type ContentLeavingNoticeKind =
  * Where a notice is:
  * - `due`: waiting for the sweep;
  * - `sent`: the email went;
- * - `failed`: the last try was answered without sending (a refusal, a skip,
- *   or no address), and the sweep tries again;
+ * - `failed`: the last try was answered without sending (a refusal or a
+ *   skip), and the sweep tries again;
  * - `unknown`: the last try got no usable answer, so the email may have gone
  *   (`EmailSendResult`'s 5xx and no-answer cases). The sweep tries again;
  * - `cancelled`: no longer needed. The creator kept the piece while its
  *   `leaving` or `reminder` email was still open, tried or not, or deleted
- *   it again while its `staying` email was. A `removed` notice, a takedown's
- *   only email, is never cancelled;
- * - `abandoned`: it used up its tries, or the person has no address, and the
- *   sweep stops.
+ *   it again while its `staying` email was. Or the sweep found the piece no
+ *   longer leaves on that round (kept, completed or taken down) before a
+ *   `leaving` or `reminder` email went, which it logs. A `removed` notice, a
+ *   takedown's only email, is never cancelled;
+ * - `abandoned`: it used up its tries, or the person has no address (an
+ *   erased account), and the sweep stops.
  * Whether a person may have been told is read from `attempts`, never from
  * the state: a try that ended `failed` may follow one that went.
  */
@@ -64,7 +66,7 @@ export const CONTENT_LEAVING_NOTICE_OPEN_STATES = [
   'unknown',
 ] as const satisfies readonly ContentLeavingNoticeState[];
 
-/** The states a try that did not send leaves, each with attempts and a reason. */
+/** The states a try that did not send leaves, each with a reason. */
 export const CONTENT_LEAVING_NOTICE_TRIED_STATES = [
   'failed',
   'unknown',
@@ -77,12 +79,14 @@ export const CONTENT_LEAVING_NOTICE_TRIED_STATES = [
  * can reach the table. The classes `fee_change_notices` uses:
  * - `refused`: notifications-api answered 4xx;
  * - `skipped`: it answered 2xx without sending (an opt-out, say);
- * - `no_address`: the person has no address to send to (their account was
- *   erased after the row was written);
+ * - `no_address`: the person's account was erased after the row was written.
+ *   Erasure leaves a tombstone address, not a null one, so the send reads
+ *   `users.deleted_at`, as the fee sweep does;
  * - `unknown`: a 5xx or no usable answer, so it may have gone.
- * A `failed` row carries one of the first three and an `unknown` row the
- * last (a CHECK). An `abandoned` row keeps its last try's, and one whose
- * tries were all cut off before an answer is abandoned as `unknown`.
+ * A `failed` row carries `refused` or `skipped`, and an `unknown` row
+ * `unknown` (a CHECK). `no_address` ends a row `abandoned` at once. An
+ * `abandoned` row otherwise keeps its last try's reason, and one whose tries
+ * were all cut off before an answer is abandoned as `unknown`.
  */
 export const CONTENT_LEAVING_NOTICE_REASONS = [
   'refused',

@@ -1,5 +1,5 @@
 {
-  "id": "59501dcd-aa14-4002-96ae-37f5c17646a1",
+  "id": "7d6f6ef4-5c7c-416d-b3fd-4dc8cb9a88ee",
   "prevId": "e9e4eb9c-bded-4b85-a8d5-bc852e1983a1",
   "version": "7",
   "dialect": "postgresql",
@@ -2503,11 +2503,15 @@
         },
         "check_content_leaving_notices_tried": {
           "name": "check_content_leaving_notices_tried",
-          "value": "\"content_leaving_notices\".\"state\" NOT IN ('failed', 'unknown', 'abandoned') OR (\"content_leaving_notices\".\"attempts\" > 0 AND \"content_leaving_notices\".\"last_reason\" IS NOT NULL)"
+          "value": "\"content_leaving_notices\".\"state\" NOT IN ('sent', 'failed', 'unknown', 'abandoned') OR \"content_leaving_notices\".\"attempts\" > 0"
         },
-        "check_content_leaving_notices_unanswered": {
-          "name": "check_content_leaving_notices_unanswered",
-          "value": "\"content_leaving_notices\".\"state\" NOT IN ('failed', 'unknown') OR (\"content_leaving_notices\".\"state\" = 'unknown') = (\"content_leaving_notices\".\"last_reason\" = 'unknown')"
+        "check_content_leaving_notices_reason_given": {
+          "name": "check_content_leaving_notices_reason_given",
+          "value": "\"content_leaving_notices\".\"state\" NOT IN ('failed', 'unknown', 'abandoned') OR \"content_leaving_notices\".\"last_reason\" IS NOT NULL"
+        },
+        "check_content_leaving_notices_reason_fits": {
+          "name": "check_content_leaving_notices_reason_fits",
+          "value": "(\"content_leaving_notices\".\"state\" <> 'failed' OR \"content_leaving_notices\".\"last_reason\" IN ('refused', 'skipped')) AND (\"content_leaving_notices\".\"state\" <> 'unknown' OR \"content_leaving_notices\".\"last_reason\" = 'unknown')"
         },
         "check_content_leaving_notices_cancelled": {
           "name": "check_content_leaving_notices_cancelled",

@@ -18,8 +18,9 @@
  *     the clock (millisecond precision);
  *   - notices: every kind and state the constants name is accepted, and
  *     anything else refused, a reason too; `sent` and `sent_at` come
- *     together; a try that did not send has attempts and a reason, and the
- *     reason fits the state; a `removed` notice is never cancelled; one
+ *     together; every state a try leaves has the try counted, and a try
+ *     that did not send has a reason that fits its state, null included; a
+ *     `removed` notice is never cancelled; one
  *     email of a kind per person per round, while a new round (a piece kept,
  *     then deleted again) is accepted.
  * The outcomes are checked first, after the rollback, so a constraint that
@@ -202,7 +203,7 @@ describe.skipIf(!HAS_DB)(
                 kind,
                 round: new Date(leaves.getTime() + i * 1000),
                 state,
-                attempts: reason ? 1 : 0,
+                attempts: state === 'sent' || reason ? 1 : 0,
                 lastReason: reason,
                 sentAt: state === 'sent' ? leaves : null,
               });
@@ -223,7 +224,7 @@ describe.skipIf(!HAS_DB)(
               kind: string;
               state: string;
               attempts: number;
-              lastReason: string;
+              lastReason: string | null;
               sentAt: Date;
               round: Date;
             }>
@@ -246,18 +247,29 @@ describe.skipIf(!HAS_DB)(
           outcome['an unknown kind'] = await notice({ kind: 'refunded' });
           outcome['an unknown state'] = await notice({ state: 'bounced' });
           outcome['an unknown reason'] = await notice({
-            state: 'failed',
+            // `abandoned` keeps any reason, so only the value CHECK speaks.
+            state: 'abandoned',
             attempts: 1,
             // Fits the column, so only the CHECK can refuse it.
             lastReason: 'smtp_550',
           });
-          outcome['sent with no time'] = await notice({ state: 'sent' });
+          outcome['sent with no time'] = await notice({
+            state: 'sent',
+            attempts: 1,
+          });
           outcome['a time but not sent'] = await notice({ sentAt: leaves });
+          outcome['sent with no try'] = await notice({
+            state: 'sent',
+            sentAt: leaves,
+          });
           outcome['failed with no try'] = await notice({
             state: 'failed',
             lastReason: 'refused',
           });
-          outcome['unknown with no try'] = await notice({ state: 'unknown' });
+          outcome['unknown with no try'] = await notice({
+            state: 'unknown',
+            lastReason: 'unknown',
+          });
           outcome['abandoned with no reason'] = await notice({
             state: 'abandoned',
             attempts: 5,
@@ -274,8 +286,11 @@ describe.skipIf(!HAS_DB)(
               WHERE content_id = ${archived.id} AND round = ${later}`
           );
           for (const state of CONTENT_LEAVING_NOTICE_TRIED_STATES) {
-            for (const lastReason of CONTENT_LEAVING_NOTICE_REASONS) {
-              pairs[`${state} ${lastReason}`] = await notice({
+            for (const lastReason of [
+              ...CONTENT_LEAVING_NOTICE_REASONS,
+              null,
+            ]) {
+              pairs[`${state} ${lastReason ?? 'none'}`] = await notice({
                 state,
                 attempts: 1,
                 lastReason,
@@ -308,40 +323,47 @@ describe.skipIf(!HAS_DB)(
         'an unknown reason': 'check_content_leaving_notices_reason',
         'sent with no time': 'check_content_leaving_notices_sent',
         'a time but not sent': 'check_content_leaving_notices_sent',
+        'sent with no try': 'check_content_leaving_notices_tried',
         'failed with no try': 'check_content_leaving_notices_tried',
         'unknown with no try': 'check_content_leaving_notices_tried',
-        'abandoned with no reason': 'check_content_leaving_notices_tried',
+        'abandoned with no reason':
+          'check_content_leaving_notices_reason_given',
         'a removed notice cancelled': 'check_content_leaving_notices_cancelled',
         'the same email twice in a round': 'uq_content_leaving_notices_person',
         'negative attempts': 'check_content_leaving_notices_attempts',
       });
-      // A refused, skipped or unaddressed try is `failed`; a try with no
-      // answer is `unknown`, never the other way; `abandoned` keeps any.
-      const unanswered = 'check_content_leaving_notices_unanswered';
+      // A refused or skipped try is `failed`; a try with no answer is
+      // `unknown`, never the other way; no address only ends a row
+      // `abandoned`, which keeps any reason; none of them goes without one.
+      const fits = 'check_content_leaving_notices_reason_fits';
+      const given = 'check_content_leaving_notices_reason_given';
       expect(pairs).toEqual({
         'failed refused': null,
         'failed skipped': null,
-        'failed no_address': null,
-        'failed unknown': unanswered,
-        'unknown refused': unanswered,
-        'unknown skipped': unanswered,
-        'unknown no_address': unanswered,
+        'failed no_address': fits,
+        'failed unknown': fits,
+        'failed none': given,
+        'unknown refused': fits,
+        'unknown skipped': fits,
+        'unknown no_address': fits,
         'unknown unknown': null,
+        'unknown none': given,
         'abandoned refused': null,
         'abandoned skipped': null,
         'abandoned no_address': null,
         'abandoned unknown': null,
+        'abandoned none': given,
       });
       expect(downloadDefault).toBe(true);
       expect(matchedBack).toEqual({ piece: 1, notice: 1 });
       // Every kind × state but a cancelled `removed`, the second round, and
-      // the eight accepted pairs.
+      // the seven accepted pairs.
       expect(kept).toBe(
         CONTENT_LEAVING_NOTICE_KINDS.length *
           CONTENT_LEAVING_NOTICE_STATES.length -
           1 +
           1 +
-          8
+          7
       );
     });
   }

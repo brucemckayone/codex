@@ -235,9 +235,10 @@ export const CATALOGUE_CONTENT_COLUMNS = {
   publishBlockedReason: false,
   // The leaving notice (Codex-a6ofh.6), off the public wire from the
   // columns' first day for the same reason. The public list and browse
-  // hold only live rows, so the date is null there, but the withdrawn read
-  // serves exactly the leaving pieces: when owners need their date, select
-  // it on THAT read, never by dropping it here. `ownersCanDownload` is set
+  // hold only live rows, where check_content_leaving_not_published makes the
+  // date null. The withdrawn read is the one that can serve a leaving piece
+  // (among every once-live piece a reader still holds): when owners need
+  // their date, select it on THAT read, never by dropping it here. `ownersCanDownload` is set
   // on every row and must stay off. A `true` spread into this map turns
   // drizzle's `columns` into include mode and drops every other column.
   leavesAt: false,
