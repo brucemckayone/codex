@@ -193,6 +193,36 @@ describe('a failed refund waiting for its chargeback', () => {
     ).toBeNull();
     expect(ordinary?.querySelectorAll('button')).toHaveLength(2);
   });
+
+  // Review r8: a blocked payment still owed its own refund waits for it,
+  // with no settle: that refund includes this one and covers it (D73).
+  test('one whose blocked payment is still owed its own refund: the badge and its note in place of both actions', () => {
+    const onSettle = vi.fn();
+    render(FailedRefundsTable, {
+      items: [
+        failedRefund({
+          blockedPayment: 'unavailable',
+          waitingForPaymentRefund: true,
+        }),
+        failedRefund({ refundId: 'r-2' }),
+      ],
+      onSettle,
+    });
+    const [waiting, ordinary] = [
+      ...document.querySelectorAll('table [data-testid="failed-refund-row"]'),
+    ];
+    const note = waiting?.querySelector(
+      '[data-testid="waiting-for-payment-refund"]'
+    );
+    // The owner's words (D79).
+    expect(note?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      "Waiting for the payment's refund The payment's own refund includes this. If Stripe won't make it, support is alerted to refund the payment by hand."
+    );
+    expect(waiting?.querySelectorAll('button')).toHaveLength(0);
+    expect(
+      ordinary?.querySelector('[data-testid="waiting-for-payment-refund"]')
+    ).toBeNull();
+  });
 });
 
 describe('a row whose re-pay was refused for a later cause', () => {
@@ -994,6 +1024,76 @@ describe('Settling a failed refund', () => {
       },
     ]);
     expect(submit()).toBeNull();
+  });
+
+  // Review r8: a settle that would pay back more than was paid (412), and
+  // one whose payment's own refund is still being made (422), close with a
+  // notice linking the charge; nothing was settled.
+  test('a settle that would pay back more than was paid closes with a notice naming what is left, linking the charge', async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({
+        status: 412,
+        detailsCode: 'SETTLE_EXCEEDS_PAID',
+        maxCents: 500,
+      })
+    );
+    const notices = renderDialog('refunded_elsewhere');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([
+      {
+        variant: 'warning',
+        lead: m.support_settle_exceeds_paid_lead({ amount: '£5.00' }),
+        text: m.support_settle_exceeds_paid({ amount: '£5.00' }),
+        link: {
+          href: '/admin/refunds/ch_3QdP7aLk2vRb11aA',
+          label: m.support_settle_open_charge(),
+        },
+      },
+    ]);
+    expect(submit()).toBeNull();
+  });
+
+  test.each([
+    ['late_win', m.support_settle_awaits_late_win()],
+    ['blocked_refund', m.support_settle_awaits_payment_refund()],
+  ] as const)("a refund waiting for its payment's own refund (%s) closes with a one-sentence notice linking the charge", async (reason, said) => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'REFUND_AWAITS_PAYMENT_REFUND', reason })
+    );
+    const notices = renderDialog('refunded_elsewhere');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([
+      {
+        variant: 'info',
+        text: said,
+        link: {
+          href: '/admin/refunds/ch_3QdP7aLk2vRb11aA',
+          label: m.support_settle_open_charge(),
+        },
+      },
+    ]);
+  });
+
+  test.each([
+    { detailsCode: 'SETTLE_EXCEEDS_PAID', maxCents: null, reason: null },
+    {
+      detailsCode: 'REFUND_AWAITS_PAYMENT_REFUND',
+      maxCents: null,
+      reason: 'new',
+    },
+  ])('$detailsCode without what its notice needs keeps the dialog open as a failure', async (refusal) => {
+    resolveFailedRefund.mockResolvedValue(failure(refusal));
+    const notices = renderDialog('refunded_elsewhere');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([]);
+    expect(
+      document
+        .querySelector('[data-testid="settle-problem"]')
+        ?.getAttribute('data-problem')
+    ).toBe('failed');
   });
 
   test('a reason this page does not know keeps the dialog open as a failure', async () => {

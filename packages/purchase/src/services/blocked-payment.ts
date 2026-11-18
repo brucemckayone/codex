@@ -6,9 +6,13 @@
  * support's queue.
  */
 
-import { ITEM_UNAVAILABLE_REFUND_REASON } from '@codex/constants';
+import {
+  ITEM_UNAVAILABLE_REFUND_REASON,
+  PURCHASE_STATUS,
+} from '@codex/constants';
 import type { Purchase } from '@codex/database/schema';
 import { purchases } from '@codex/database/schema';
+import { noOpenChargeback } from '@codex/payments';
 import { type SQL, sql } from 'drizzle-orm';
 
 /**
@@ -66,4 +70,28 @@ export function blockedKind(
  */
 export function blockedPayment(): SQL {
   return sql`(${purchases.duplicateOfPurchaseId} IS NOT NULL OR ${purchases.refundReason} = ${ITEM_UNAVAILABLE_REFUND_REASON})`;
+}
+
+/**
+ * A blocked payment still owed its refund: `pending` until Stripe has
+ * refunded it.
+ */
+export function owedBlockedRefund(): SQL {
+  return sql`(${blockedPayment()} AND ${purchases.status} = ${PURCHASE_STATUS.PENDING})`;
+}
+
+/**
+ * One the owed-refund sweep may ask Stripe to refund: no chargeback on it is
+ * open (owner D56, widened to duplicates by D57; `noOpenChargeback`, read
+ * from the disputes table). Stripe refuses a refund of a disputed charge, so
+ * asking would only raise "refund them by hand" every hour for weeks, and the
+ * dispute decides it: a loss records it refunded (`processLostDispute`).
+ * Any other end (a win, `prevented`, a close never recorded) leaves it owed,
+ * and once the chargeback is no longer open the next sweep refunds it. Never
+ * `disputed_at`: only a win clears that, so another end held the row forever.
+ * Support's queue reads it too: a failed refund of such a payment waits for
+ * the payment's own refund, which includes it (review r8).
+ */
+export function owedBlockedPayment(): SQL {
+  return sql`(${owedBlockedRefund()} AND ${noOpenChargeback('purchase', purchases.id)})`;
 }

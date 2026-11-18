@@ -8,7 +8,10 @@
  *   undone;
  * - a failed one support settled as refunded elsewhere: the buyer has that
  *   money back another way, so it counts as if it had succeeded. A failed one
- *   not yet settled counts nothing (Codex-2hxff.28).
+ *   not yet settled counts nothing (Codex-2hxff.28), nor does one the
+ *   platform settled `covered_by_refund` (owner D73, `covered-refunds.ts`):
+ *   the later refund of everything owed that covered it counts instead, so
+ *   counting both would count the money twice.
  *
  * What went back to a payment's buyer, the admin revenue's `taken` and the
  * studio Sales "Refunds" alike, is those refunds plus its lost chargebacks,

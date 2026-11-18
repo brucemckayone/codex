@@ -8289,6 +8289,7 @@ export class SubscriptionService extends BaseService {
       { db: this.db, obs: this.obs },
       {
         link: 'subscription',
+        check: 'duplicate_subscription_refunds_held',
         owed: this.db
           .select({ id: subscriptions.id })
           .from(subscriptions)

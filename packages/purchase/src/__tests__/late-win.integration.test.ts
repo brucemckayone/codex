@@ -2039,7 +2039,7 @@ describe('the late-win undo in @codex/purchase (Codex-2hxff.70)', () => {
       const calls = vi.mocked(stripe.refunds.create).mock
         .calls as unknown as Array<[unknown, { idempotencyKey?: string }?]>;
       expect(calls.map(([, options]) => options?.idempotencyKey)).toEqual([
-        `refund_duplicate_${duplicate.paymentIntentId}`,
+        `refund_duplicate_${duplicate.paymentIntentId}_1000`,
       ]);
       expect(
         await db

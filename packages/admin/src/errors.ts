@@ -299,6 +299,57 @@ const DECIDED_BY_CHARGEBACK: Record<RefundDecidedByChargebackReason, string> = {
     "The buyer's chargeback was lost, so what's still owed is settled on the charge page. Nothing was settled here.",
 };
 
+/** Why a failed refund waits for its payment's own refund (`RefundAwaitsPaymentRefundError`). */
+export type RefundAwaitsPaymentRefundReason = 'late_win' | 'blocked_refund';
+
+/**
+ * A settlement of a failed refund while a refund of everything its payment
+ * owes is still being made (422; review r8). That refund will include this
+ * one and cover it (owner D73), so settling it now would pay the buyer twice
+ * (or re-pay its creators for money the buyer gets back):
+ * - `late_win`: a late win on its charge is still being undone, so the late
+ *   win's refund (owner D69) is being asked for, or retried while Stripe
+ *   refuses it;
+ * - `blocked_refund`: its purchase is a blocked payment still owed its own
+ *   refund, which the checkout or the hourly sweep makes.
+ * Nothing is written. The context is the reason and the charge.
+ */
+export class RefundAwaitsPaymentRefundError extends BusinessLogicError {
+  constructor(reason: RefundAwaitsPaymentRefundReason, chargeId: string) {
+    super(AWAITS_PAYMENT_REFUND[reason], {
+      code: 'REFUND_AWAITS_PAYMENT_REFUND',
+      reason,
+      chargeId,
+    });
+  }
+}
+
+/** Client-facing: word for word the page's notices (owner D79). */
+const AWAITS_PAYMENT_REFUND: Record<RefundAwaitsPaymentRefundReason, string> = {
+  late_win:
+    "This refund is waiting for the late win's refund to finish, so nothing was settled.",
+  blocked_refund:
+    "This refund is waiting for the payment's own refund, which includes it, so nothing was settled.",
+};
+
+/**
+ * A `refunded_elsewhere` settlement that would pay the buyer back more than
+ * the payment (412; review r8): what counts against it now, this refund,
+ * what was paid another way and its chargebacks while lost add up to more
+ * than was paid. Two settles of one charge (two tabs, two people), or a
+ * refund made on the charge page since this one failed, are how. Nothing is
+ * settled. The context is the charge and what can still be paid back
+ * (`maxCents`, never below 0), which the page's notice names.
+ */
+export class SettleExceedsPaidError extends PreconditionFailedError {
+  constructor(chargeId: string, maxCents: number) {
+    super(
+      'Settling this would pay back more than was paid, so nothing was settled.',
+      { code: 'SETTLE_EXCEEDS_PAID', chargeId, maxCents }
+    );
+  }
+}
+
 /**
  * What the charge's blocked payment is owed is not what the page showed
  * (412): the dispute named is not the one owed, it is owed at another stage

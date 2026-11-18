@@ -443,6 +443,84 @@ second tab) is refused with 422 `REFUND_DECIDED_BY_CHARGEBACK`, `reason`
 Nothing is written to the refund: settled or not, a failed refund counts for
 nothing in the sum, so don't pay its amount.
 
+**A refund of everything owed covers what it included (owner D73-D75;
+review r8).** Three refunds are asked for what a payment still owes, what
+was paid less the refunds that count: the late win's (D69, made, or found at
+Stripe after an earlier run's answer was lost), its "none" (the refunds that
+count already pay it all), a blocked payment's own refund, at checkout and in
+the hourly sweep, which no longer asks for Stripe's remainder, and support's
+refund on the charge page of all that's left of a purchase's charge (a part
+refund covers nothing). A
+failed refund that counted nothing when that amount was worked out was paid
+by it. So the platform settles it `covered_by_refund`, naming that refund
+(`refunds.covered_by_refund_id`, migration `0132`; for "none", the newest
+refund that counts). It leaves Failed refunds and both counts for good. The
+charge page's Refunds card shows it as "Covered", with "Included in refund
+re_… (£X), so nothing more is owed for it." (D74). Nothing else shows it
+(D75), and a settle from a page loaded earlier gets the "already settled"
+notice. It counts for nothing, since the refund that covered it counts, and
+its clawback stands, so the creators pay once. A refund that fails AFTER
+the covering refund is owed, in the queue, at its own amount. A covering
+refund that itself fails stays in the queue at its own amount, which
+includes what it covered, and what it covered stays covered.
+
+Two refusals keep a settle from paying the buyer a second time (review r8).
+While the payment's own refund of everything owed is still being made, a
+settle of a refund on its charge is refused with 422
+`REFUND_AWAITS_PAYMENT_REFUND`: `late_win` while a late win on the charge is
+being undone, `blocked_refund` while a blocked payment is still owed its own
+refund. The queue lists the second, counted in the tab and the badge as D72's
+are, with no settle: "Waiting for the payment's refund", and "The payment's
+own refund includes this. If Stripe won't make it, support is alerted to
+refund the payment by hand." (D79). That refund includes it. A late win's
+refund in flight shows no badge, only the refusal: "This refund is waiting
+for the late win's refund to finish, so nothing was settled." (for
+`blocked_refund`, "This refund is waiting for the payment's own refund,
+which includes it, so nothing was settled."). And a
+refunded-elsewhere settle that would pay back more than was paid (the refunds
+that count, this one, what was paid another way and a lost chargeback) is
+refused with 412 `SETTLE_EXCEEDS_PAID`, naming what can still be paid back:
+"Only £X more can be paid back on this payment, so this wasn't settled.
+Refund £X on the charge page; that settles this one.", with "Open the
+charge" (D78). With nothing left (£0, as for the second of two settles at
+once), it is one sentence with the same link and no refund to make:
+"Everything paid on this payment has already been paid back, so this wasn't
+settled." (D80). Each settle locks
+every refund of its charge first, as a cover does, so two settles of one
+charge at once can't both pass. A refund of no purchase (a subscription's) is
+not checked. The alerts, each at error with an errorId and the ids:
+
+- "A refund of everything owed included failed refunds that support settled
+  before it was recorded, so the buyer was refunded twice for them, or their
+  creators re-paid: recover it by hand". The accepted residual: a failed
+  refund settled while support's refund of all that's left was at Stripe
+  (two people on one charge at once). The late win's and the blocked
+  payment's own refunds can't meet it, since a settle waits for them. The
+  covering refund (`coveringRefundId`)
+  included it, so the buyer has that money twice, or, settled "Re-pay
+  payees", its creators were re-paid for money the buyer got back. `settled`
+  names each refund, with its resolution. With the owner, recover the
+  overpayment from the buyer or account for it, per refund.
+- "Late win: its refund was made already, but a refund that counted when it
+  was asked for has failed since, so the failed refunds it included can't be
+  told: settle them by hand on the support charge page". The late win's
+  refund was found at Stripe, and a refund that counted when it was asked
+  for failed in between. Every refund in `failedRefundIds` is still listed in
+  Failed refunds, but only `owedCents` is owed. Refund the buyer that much
+  another way and settle the refund it was as refunded elsewhere; the late
+  win's refund paid the others, so don't pay them, and close them with the
+  owner.
+- "Late win: its refund and the refunds that count pay back more than the
+  payment, so the buyer was refunded twice: recover it by hand". Found when
+  that late-win refund is taken up: a settle landed in the gap.
+  `overpaidCents` is how much. Recover it with the owner, as above.
+- "A blocked payment's charge was refunded in full while its refund was asked
+  for, so its failed refunds were not covered: check them on the support
+  charge page before settling any". Stripe answered that the charge was
+  already refunded in full, by a refund made during the ask. The buyer has
+  everything back, but `failedRefundIds` stay in Failed refunds: don't pay
+  them, and close them with the owner.
+
 **Owed again (owner D63, D64).** If the chargeback is later won after all, the
 bank takes it back from the buyer, and the late win refunds nothing on a
 marked charge ([the alert below](#late-wins), D62), so the buyer is owed
@@ -571,7 +649,7 @@ with an `errorId`, unless it says otherwise:
 | Alert | What it means | What to do |
 |---|---|---|
 | Late win: Stripe refused the refund of a payment the buyer made twice… / Late win: a payment the buyer made twice (bought again, or a duplicate) could not be refunded… | The late win's refund of a first payment (a buyer who bought it again) or of a duplicate payment wasn't made. "Refused": Stripe refused the request itself (`stripeType` `StripeInvalidRequestError`). "Could not be refunded": anything else, such as an outage, a rate limit or a key without refund rights. `stripeCode`, `stripeType` and `stripeStatusCode` say which; each is empty when Stripe gave none. Nothing is marked, the creators' pay-back stays held, and it is retried: on each of Stripe's redeliveries, then every hour, one alert per try. Stripe replays an answer for 24 hours under the same idempotency key, so a cause that clears (a low balance, a fixed key) is only tried again a day after the first answer | Read the three fields. A "could not be refunded" usually clears by itself once the outage passes or the key is fixed. One Stripe will never make: settle it by hand ([below](#settling-a-late-win-refund-stripe-wont-make)). **Never refund the buyer another way first** |
-| Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds | The late win's refund was made, but Stripe reports it `failed` (`refundId`, `status`). The late win counts as settled and its outcome is marked. As with any failed refund, its clawback stands: the creators gave the first payment back off their held re-pay rows. The buyer has not been refunded | Refund the buyer another way, or first refund it again through Stripe on the charge page, then settle the refund in Failed refunds as refunded elsewhere. Settled after a refund another way, the charge is marked refunded outside Stripe and the charge page blocks any further Stripe refund: Stripe doesn't count the failed refund and the late win lifts the 14-day window, so without the mark it offered the whole amount again, for good, until the settled refund came to count as refunded ([above](#late-wins); Codex-3xnta); the mark stays (owner decision 5). So a Stripe refund comes first or not at all, and the settle dialog's "Refunded another way" says so: "Make any Stripe refund first: once this is marked, the charge can't be refunded through Stripe." (Codex-ohlcx). It knows the late win's refund by our record only (`late_win_refund_id`, on a charge not yet marked): one known only from Stripe's metadata gets no warning, and its settle still marks the charge. "Re-pay payees" (creators re-paid) is refused for it, 422 `LATE_WIN_REFUND_NOT_REPAYABLE` (owner decision 2026-11-08, "Block it in code"): the buyer is still owed this money, so its clawback stands |
+| Late win: the refund of the payment failed at Stripe, so the buyer was not refunded; it is in Failed refunds | The late win's refund was made, but Stripe reports it `failed` (`refundId`, `status`). The late win counts as settled and its outcome is marked. As with any failed refund, its clawback stands: the creators gave the first payment back off their held re-pay rows. The buyer has not been refunded | Refund it again through Stripe on the charge page, for all that's left: that refund covers it, so it leaves Failed refunds as "Covered" and there is nothing to settle (review r8). Or refund the buyer another way and settle it in Failed refunds as refunded elsewhere. Never both: a settle once a Stripe refund has paid it is refused (412 `SETTLE_EXCEEDS_PAID`, with what can still be paid back), and a part refund through Stripe covers nothing, so settle only what it leaves. Settled after a refund another way, the charge is marked refunded outside Stripe and the charge page blocks any further Stripe refund: Stripe doesn't count the failed refund and the late win lifts the 14-day window, so without the mark it offered the whole amount again, for good, until the settled refund came to count as refunded ([above](#late-wins); Codex-3xnta); the mark stays (owner decision 5). So a Stripe refund comes first or not at all, and the settle dialog's "Refunded another way" says so: "Make any Stripe refund first: once this is marked, the charge can't be refunded through Stripe." (Codex-ohlcx). It knows the late win's refund by our record only (`late_win_refund_id`, on a charge not yet marked): one known only from Stripe's metadata gets no warning, and its settle still marks the charge. "Re-pay payees" (creators re-paid) is refused for it, 422 `LATE_WIN_REFUND_NOT_REPAYABLE` (owner decision 2026-11-08, "Block it in code"): the buyer is still owed this money, so its clawback stands |
 | Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand | Settled as for a failed refund, but the Failed refunds queue lists only `failed` ones, so this alert is how support finds it (owner decision 2026-11-05). It took nothing from the creators | Settle it with the owner; the buyer has not been refunded. If the owner refunds the buyer another way, record it with the UPDATE in [R19 (b)](release-checklist.md#r19--before-any-workers-rollback-late-wins-still-being-undone): a canceled refund never reaches Failed refunds, so nothing else marks the charge refunded outside Stripe, and the charge page would offer a Stripe refund again for good |
 | Late win on a charge marked paid another way: no refund was made, so settle the buyer by hand | The chargeback of a blocked payment was lost short, support paid the rest another way and marked the charge, and the bank has now reversed the loss (owner D62). The late win's refund of what is left of the charge would pay the buyer twice, so none was made; the rest of the undo ran, and its outcome is marked, so this fires once: the early signal of "owed again" (D63), which the hourly report then repeats. It names `chargeId`, `disputeId`, `purchaseId`, `chargeAmountCents` (the payment), `stripeRefundedCents` (what Stripe shows refunded on the charge now), `paidAnotherWayAt`, `paidAnotherWayCents` (what the first mark paid) and `owedCents` (what is owed again, by the one sum above; both null when the mark is another writer's, such as a late win settled by hand) | Open the charge: it shows "£X is owed to the buyer again". Pay `owedCents` another way, then mark it paid another way a second time ([above](#a-blocked-payments-chargeback-lost-short-paid-another-way)). The charge stays blocked from Stripe refunds |
 | A won dispute was reported lost: nothing changed, check it in Stripe | Stripe now says lost a dispute we hold as won. Nothing was changed | Check the dispute in Stripe's Dashboard |
@@ -625,7 +703,9 @@ buyer is refunded another way.
 **Never refund the buyer another way while the retry is running.** If the
 cause clears, the next hourly run refunds them through Stripe as well, and they
 are paid twice. Refund another way only once step 3 below has shown the retry
-has stopped.
+has stopped. Failed refunds holds to this: while the late win is being undone,
+a settle of any refund on its charge is refused (422
+`REFUND_AWAITS_PAYMENT_REFUND`, `late_win`; review r8).
 
 Do it only with the owner's OK, for each case. Run the SQL in the Neon console's
 SQL Editor, with the dispute's id (`du_…`, from the alert) in place of `du_…`.

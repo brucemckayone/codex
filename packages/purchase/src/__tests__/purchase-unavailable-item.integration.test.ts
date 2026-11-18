@@ -15,7 +15,8 @@
  * (`contentRefusesBuyers`: deleted, team-only, its organisation deleted,
  * detached) is recorded as a
  * blocked sale (`refund_reason = 'item_unavailable'`): pending, no grant, no
- * slices, refunded in full after the commit under `refund_unavailable_${pi}`,
+ * slices, refunded in full after the commit under
+ * `refund_unavailable_${pi}_${amount}` (what is owed, owner D73),
  * retried by the hourly sweep, kept out of Sales, and never restored by
  * support. A normal sale is unchanged.
  *
@@ -125,6 +126,49 @@ function refundCall(
     Stripe.RefundCreateParams | undefined,
     Stripe.RequestOptions | undefined,
   ];
+}
+
+/**
+ * The PaymentIntent's one charge, as `latest_charge` names it, and one
+ * succeeded refund of it on Stripe's list: what a blocked refund's sync reads
+ * (`blockedRefundOwed`, owner D73).
+ */
+function chargesItsRefund(
+  stripe: Stripe,
+  paymentIntentId: string,
+  chargeId: string,
+  refundId: string,
+  amountCents: number
+) {
+  vi.mocked(stripe.paymentIntents.retrieve).mockImplementation((async (
+    id: string
+  ) => ({
+    id,
+    latest_charge: id === paymentIntentId ? chargeId : null,
+  })) as never);
+  vi.mocked(stripe.refunds.list).mockImplementation((async (params: {
+    charge?: string;
+  }) => ({
+    object: 'list',
+    data:
+      params.charge === chargeId
+        ? [
+            {
+              id: refundId,
+              object: 'refund',
+              amount: amountCents,
+              charge: chargeId,
+              currency: 'gbp',
+              status: 'succeeded',
+              reason: 'requested_by_customer',
+              failure_reason: null,
+              created: Math.floor(Date.now() / 1000),
+              metadata: {},
+            },
+          ]
+        : [],
+    has_more: false,
+  })) as never);
 }
 
 class RolledBack extends Error {}
@@ -354,10 +398,13 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       ).toBe(1500);
       expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
       const [params, options] = refundCall(stripe, 0);
-      expect(params).toMatchObject({ payment_intent: pi });
+      // What is owed, all of it: nothing was refunded yet (owner D73).
+      expect(params).toMatchObject({ payment_intent: pi, amount: 1500 });
       // None of Stripe's reasons fits, so none is sent.
       expect(params).not.toHaveProperty('reason');
-      expect(options).toEqual({ idempotencyKey: `refund_unavailable_${pi}` });
+      expect(options).toEqual({
+        idempotencyKey: `refund_unavailable_${pi}_1500`,
+      });
       expect(await slicesOf(result.id)).toHaveLength(0);
       expect(await grantsOf(customerId, item.id)).toEqual({
         entitlements: 0,
@@ -392,7 +439,7 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       });
       expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
       expect(refundCall(stripe, 0)[1]).toEqual({
-        idempotencyKey: `refund_unavailable_${pi}`,
+        idempotencyKey: `refund_unavailable_${pi}_1500`,
       });
       expect(await slicesOf(result.id)).toHaveLength(0);
       expect(await grantsOf(customerId, item.id)).toEqual({
@@ -427,7 +474,7 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       });
       expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
       expect(refundCall(stripe, 0)[1]).toEqual({
-        idempotencyKey: `refund_unavailable_${pi}`,
+        idempotencyKey: `refund_unavailable_${pi}_1500`,
       });
       expect(await slicesOf(result.id)).toHaveLength(0);
       expect(await grantsOf(customerId, item.id)).toEqual({
@@ -478,7 +525,7 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       });
       expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
       expect(refundCall(stripe, 0)[1]).toEqual({
-        idempotencyKey: `refund_unavailable_${pi}`,
+        idempotencyKey: `refund_unavailable_${pi}_1500`,
       });
       expect(await slicesOf(result.id)).toHaveLength(0);
       expect(await grantsOf(customerId, item.id)).toEqual({
@@ -1028,7 +1075,7 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
 
       const asks = asksFor();
       expect(asks).toHaveLength(2);
-      expect(asks[1]?.[1]).toEqual({ idempotencyKey: `${key}${pi}` });
+      expect(asks[1]?.[1]).toEqual({ idempotencyKey: `${key}${pi}_1500` });
       expect((await rowOf(pi)).status).toBe('refunded');
     });
 
@@ -1055,7 +1102,7 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
 
       const asks = asksFor();
       expect(asks).toHaveLength(2);
-      expect(asks[1]?.[1]).toEqual({ idempotencyKey: `${key}${pi}` });
+      expect(asks[1]?.[1]).toEqual({ idempotencyKey: `${key}${pi}_1500` });
       expect((await rowOf(pi)).status).toBe('refunded');
     });
 
@@ -1464,13 +1511,23 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
 
       expect(asksFor()).toHaveLength(2);
       expect((await rowOf(pi)).status).toBe('refunded');
-      expect(errors).toHaveBeenCalledWith(
-        "Could not check for chargebacks held past 120 days; the sweep's refunds are not affected",
-        {
-          errorId: expect.any(String),
-          link: 'purchase',
-          error: 'the check failed',
-        }
+      // Both backstops failed, each naming its check (review r8).
+      expect(
+        errors.mock.calls.filter(
+          ([message]) =>
+            message ===
+            "Could not check for chargebacks held past 120 days; the sweep's refunds are not affected"
+        )
+      ).toEqual(
+        ['blocked_refunds_held', 'failed_refunds_waiting'].map((check) => [
+          expect.any(String),
+          {
+            errorId: expect.any(String),
+            link: 'purchase',
+            check,
+            error: 'the check failed',
+          },
+        ])
       );
       // One per stage, each naming its own: one failed stage never hides
       // the other.
@@ -1763,13 +1820,14 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         .filter(([params]) => params?.payment_intent === pi)
         .map(([, options]) => options?.idempotencyKey);
       expect(keys.length).toBeGreaterThanOrEqual(3);
-      expect(new Set(keys)).toEqual(new Set([`refund_unavailable_${pi}`]));
+      expect(new Set(keys)).toEqual(new Set([`refund_unavailable_${pi}_1500`]));
     });
 
     // The refund email of a partial refund of a blocked sale says "the rest
     // will follow" (payment-webhook.ts `purchaseAccessNote`). It does: the
     // partial refund leaves the row pending, and the sweep refunds what is
-    // left, asking for no amount, under the blocked sale's own key.
+    // left: it syncs the charge's refunds, so the part counts, and asks for
+    // the rest under a key naming it (owner D73).
     it('a PARTIAL refund made elsewhere while it is owed leaves it owed: the hourly sweep refunds the rest', async () => {
       const { service, stripe } = fresh();
       vi.mocked(stripe.refunds.create).mockRejectedValueOnce(refusal());
@@ -1783,12 +1841,16 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
 
       // Support refunds £5.00 of £15.00 in the Stripe Dashboard.
+      const partId = `re_part_${uid()}`;
       const part = await service.processRefund(pi, {
         charge,
         refundAmountCents: 500,
-        stripeRefundId: `re_part_${uid()}`,
+        stripeRefundId: partId,
         refundReason: 'requested_by_customer',
       });
+      // What the sweep's sync reads: the PaymentIntent's charge, and its
+      // refunds as Stripe lists them.
+      chargesItsRefund(stripe, pi, charge.id, partId, 500);
 
       expect(part).toMatchObject({ itemUnavailable: true, accessEnded: false });
       expect(await rowOf(pi)).toMatchObject({
@@ -1811,12 +1873,12 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         .mocked(stripe.refunds.create)
         .mock.calls.map((_, index) => refundCall(stripe, index))
         .filter(([params]) => params?.payment_intent === pi);
-      // The refusal, then the sweep's: no amount, so Stripe refunds what is
-      // left of the charge (the £10.00), never the £15.00 again.
+      // The refusal, then the sweep's: the £10.00 left once the part
+      // counts, never the £15.00 again.
       expect(asks).toHaveLength(2);
-      expect(asks[1]?.[0]).not.toHaveProperty('amount');
+      expect(asks[1]?.[0]).toMatchObject({ amount: 1000 });
       expect(asks[1]?.[1]).toEqual({
-        idempotencyKey: `refund_unavailable_${pi}`,
+        idempotencyKey: `refund_unavailable_${pi}_1000`,
       });
       expect(await rowOf(pi)).toMatchObject({
         status: 'refunded',
@@ -1962,12 +2024,14 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       const item = await insertContent({ isTeamOnly: true });
       const customerId = await buyer();
       const pi = `pi_heal_part_${uid()}`;
+      const chargeId = `ch_heal_part_${uid()}`;
       sessionFor(stripe, customerId, item.id);
 
       await service.processRefund(pi, {
-        charge: { id: `ch_heal_part_${uid()}`, amountCents: 1500 },
+        charge: { id: chargeId, amountCents: 1500 },
         refundAmountCents: 500,
       });
+      chargesItsRefund(stripe, pi, chargeId, `re_heal_part_${uid()}`, 500);
 
       expect(await rowOf(pi)).toMatchObject({
         status: 'pending',
@@ -1983,9 +2047,11 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         status: 'refunded',
         refundReason: 'item_unavailable',
       });
+      // The rest: its sync counted the £5.00 part refund (owner D73).
       expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+      expect(refundCall(stripe, 0)[0]).toMatchObject({ amount: 1000 });
       expect(refundCall(stripe, 0)[1]).toEqual({
-        idempotencyKey: `refund_unavailable_${pi}`,
+        idempotencyKey: `refund_unavailable_${pi}_1000`,
       });
       expect(await grantsOf(customerId, item.id)).toEqual({
         entitlements: 0,
@@ -2174,7 +2240,9 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       const [params, options] = refundCall(stripe, 0);
       expect(params).toMatchObject({ payment_intent: pi });
       expect(params).not.toHaveProperty('reason');
-      expect(options).toEqual({ idempotencyKey: `refund_unavailable_${pi}` });
+      expect(options).toEqual({
+        idempotencyKey: `refund_unavailable_${pi}_4999`,
+      });
       expect(await slicesOf(result.id)).toHaveLength(0);
       expect(await courseGrantsOf(customerId, course.id)).toEqual({
         entitlements: 0,

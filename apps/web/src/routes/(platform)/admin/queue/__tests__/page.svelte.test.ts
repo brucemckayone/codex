@@ -509,6 +509,85 @@ describe('settling', () => {
     );
     expect(link?.textContent?.trim()).toBe(m.support_settle_open_charge());
   });
+
+  // Owner D78-D80 (review r8): the two refusals that keep a settle from
+  // paying the buyer a second time, in the owner's exact words, each linking
+  // the charge. Nothing was settled.
+  test.each([
+    {
+      name: '412 SETTLE_EXCEEDS_PAID',
+      refusal: {
+        status: 412,
+        detailsCode: 'SETTLE_EXCEEDS_PAID',
+        maxCents: 500,
+      },
+      variant: 'warning',
+      said: "Only £5.00 more can be paid back on this payment, so this wasn't settled. Refund £5.00 on the charge page; that settles this one.",
+    },
+    {
+      // Race 1's loser: the other settle paid back everything (D80).
+      name: '412 SETTLE_EXCEEDS_PAID, nothing left',
+      refusal: {
+        status: 412,
+        detailsCode: 'SETTLE_EXCEEDS_PAID',
+        maxCents: 0,
+      },
+      variant: 'warning',
+      said: "Everything paid on this payment has already been paid back, so this wasn't settled.",
+    },
+    {
+      name: '422 REFUND_AWAITS_PAYMENT_REFUND, late_win',
+      refusal: {
+        detailsCode: 'REFUND_AWAITS_PAYMENT_REFUND',
+        reason: 'late_win',
+      },
+      variant: 'info',
+      said: "This refund is waiting for the late win's refund to finish, so nothing was settled.",
+    },
+    {
+      name: '422 REFUND_AWAITS_PAYMENT_REFUND, blocked_refund',
+      refusal: {
+        detailsCode: 'REFUND_AWAITS_PAYMENT_REFUND',
+        reason: 'blocked_refund',
+      },
+      variant: 'info',
+      said: "This refund is waiting for the payment's own refund, which includes it, so nothing was settled.",
+    },
+  ])("$name: nothing settled, the notice in the owner's words, linking the charge", async ({
+    refusal,
+    variant,
+    said,
+  }) => {
+    resolveFailedRefund.mockResolvedValue(failure(refusal));
+    mountAt('/admin/queue');
+    failedSlot().current = list([failedRefund()]);
+    flushSync();
+
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="failed-refund-row"] button'
+      ),
+    ]
+      .find((b) => b.textContent?.includes(m.support_action_elsewhere()))
+      ?.click();
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="settle-submit"]')
+      ?.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    flushSync();
+
+    const notice = document.querySelector('[data-testid="settle-notice"]');
+    expect(notice?.getAttribute('data-variant')).toBe(variant);
+    expect(notice?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      `${said} Open the charge`
+    );
+    expect(
+      notice
+        ?.querySelector('[data-testid="settle-notice-link"]')
+        ?.getAttribute('href')
+    ).toBe(`/admin/refunds/${failedRefund().chargeId}`);
+  });
 });
 
 describe('Owed to creators (?tab=owed)', () => {

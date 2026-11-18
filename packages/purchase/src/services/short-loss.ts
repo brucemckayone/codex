@@ -198,6 +198,19 @@ export function chargebackCarriesRefund(
 }
 
 /**
+ * The dispute (`disputes`, unaliased) is a late win whose undo has not
+ * finished: won after a loss, its outcome not yet applied. The SQL form of
+ * `isLateWinBeingUndone` (purchase-service), which every step of the undo
+ * keys on. The outcome is applied only once the late win's refund step
+ * returns done or none, so while it holds, the late win's refund of what is
+ * owed (owner D69) is still being asked for or retried, and support's settle
+ * of a refund on its charge waits for it (review r8).
+ */
+export function lateWinBeingUndone(): SQL {
+  return sql`(${disputes.status} = ${'won'} AND ${disputes.lateWonAt} IS NOT NULL AND ${disputes.outcomeAppliedAt} IS NULL)`;
+}
+
+/**
  * The blocked payments owed what Stripe won't refund, at `stage` (both when
  * absent): newest first by when it became owed (the late win, else the
  * dispute), up to `limit`, with how many there are in all (`total`, so a

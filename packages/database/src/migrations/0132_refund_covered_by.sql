@@ -1,0 +1,4 @@
+ALTER TABLE "refunds" DROP CONSTRAINT "check_refunds_resolution";--> statement-breakpoint
+ALTER TABLE "refunds" ADD COLUMN "covered_by_refund_id" varchar(255);--> statement-breakpoint
+ALTER TABLE "refunds" ADD CONSTRAINT "check_refunds_covered_by" CHECK (("refunds"."covered_by_refund_id" IS NULL) = ("refunds"."resolution" IS DISTINCT FROM 'covered_by_refund'));--> statement-breakpoint
+ALTER TABLE "refunds" ADD CONSTRAINT "check_refunds_resolution" CHECK ("refunds"."resolution" IS NULL OR ("refunds"."status" = 'failed' AND "refunds"."resolution" IN ('refunded_elsewhere', 'creators_repaid', 'covered_by_refund')));

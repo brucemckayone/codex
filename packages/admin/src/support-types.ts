@@ -471,13 +471,28 @@ export interface RefundRow {
   notifiedAt: string | null;
   requestedBy: RefundRequester;
   /**
-   * How support settled it in Failed refunds, from our record; null while it
-   * is open, and for a refund that didn't fail. A failed one settled
-   * `refunded_elsewhere` counts as refunded (Codex-3xnta), and the card says
-   * "Refunded another way" for it, not "Failed".
+   * How it was settled, from our record; null while it is open, and for a
+   * refund that didn't fail. A failed one settled `refunded_elsewhere` counts
+   * as refunded (Codex-3xnta), and the card says "Refunded another way" for
+   * it, not "Failed". One `covered_by_refund` was paid by a later refund of
+   * everything owed (owner D73): the card says "Covered" (D74), with
+   * `coveredBy`.
    */
-  resolution: FailedRefundResolution | null;
+  resolution: RefundRowResolution | null;
+  /**
+   * The refund that covered it, with that refund's amount from Stripe's
+   * list; null unless `resolution` is `covered_by_refund`.
+   */
+  coveredBy: { refundId: string; amountCents: number } | null;
 }
+
+/**
+ * How a charge's failed refund was settled (`RefundRow.resolution`): by
+ * support (`FailedRefundResolution`), or by the platform, covered by a later
+ * refund of everything owed (owner D73). Only the platform writes
+ * `covered_by_refund`, so support's settle takes `FailedRefundResolution`.
+ */
+export type RefundRowResolution = FailedRefundResolution | 'covered_by_refund';
 
 /** One dispute of the charge, from `disputes`. */
 export interface ChargebackRow {
@@ -647,6 +662,15 @@ export interface FailedRefundItem {
    * other row.
    */
   waitingForChargeback: { stripeDisputeId: string; openedOn: string } | null;
+  /**
+   * The row's blocked payment is still owed its own refund (review r8): the
+   * checkout's, or the hourly sweep's retry, of everything owed, which will
+   * include this refund and cover it (owner D73). It is listed and counted,
+   * but nothing is settled meanwhile (`REFUND_AWAITS_PAYMENT_REFUND`,
+   * `blocked_refund`), since settling it would pay the buyer twice. False for
+   * every other row, and while its chargeback is open (`waitingForChargeback`).
+   */
+  waitingForPaymentRefund: boolean;
 }
 
 /** A payee's role on a slice, as the queue labels it. */

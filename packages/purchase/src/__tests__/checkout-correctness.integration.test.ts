@@ -684,9 +684,10 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
       expect(stripe.refunds.create).toHaveBeenCalledWith(
         expect.objectContaining({
           payment_intent: secondPi,
+          amount: 1500,
           reason: 'duplicate',
         }),
-        { idempotencyKey: `refund_duplicate_${secondPi}` }
+        { idempotencyKey: `refund_duplicate_${secondPi}_1500` }
       );
 
       // No slice for the duplicate's charge, though it carried one.

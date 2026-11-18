@@ -2170,6 +2170,7 @@ export class CourseSubscriptionService extends BaseService {
       { db: this.db, obs: this.obs },
       {
         link: 'courseSubscription',
+        check: 'duplicate_course_subscription_refunds_held',
         owed: this.db
           .select({ id: courseSubscriptions.id })
           .from(courseSubscriptions)

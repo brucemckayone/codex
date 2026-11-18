@@ -16,6 +16,11 @@
   docs/handover/phase3-sources/pause-trials/support-short-loss.html, B1)
   offers no settlement at all: a badge and a line say why, and what happens
   once the bank decides. One whose chargeback was lost is not listed (D66).
+  One whose blocked payment is still owed its own refund
+  (`waitingForPaymentRefund`, review r8; copy owner D79) offers none either:
+  that refund includes it and covers it (owner D73). Both are counted in the
+  tab and the badge (D72). A late win's refund in flight shows no badge: a
+  settle meanwhile is refused, with its notice.
 
   @prop {FailedRefundItem[]} items
   @prop {(item, resolution) => void} onSettle
@@ -126,6 +131,12 @@
     <span class="action-note">{m.support_queue_waiting_note({ date: formatDay(openedOn) })}</span>
   </span>
 {/snippet}
+{#snippet waitingRefund()}
+  <span class="waiting" data-testid="waiting-for-payment-refund">
+    <Badge variant="info">{m.support_queue_waiting_refund_badge()}</Badge>
+    <span class="action-note">{m.support_queue_waiting_refund_note()}</span>
+  </span>
+{/snippet}
 {#snippet settlements(item: FailedRefundItem)}
   {@const blockedBy = repayOff(item)}
   <Button variant="secondary" size="sm" onclick={() => onSettle(item, 'refunded_elsewhere')}>
@@ -147,6 +158,8 @@
 {#snippet actions(item: FailedRefundItem)}
   {#if item.waitingForChargeback}
     {@render waiting(item.waitingForChargeback.openedOn)}
+  {:else if item.waitingForPaymentRefund}
+    {@render waitingRefund()}
   {:else}
     {@render settlements(item)}
   {/if}
@@ -295,7 +308,8 @@
     text-align: right;
   }
 
-  /* In place of the settlements while the chargeback is open (D67). */
+  /* In place of the settlements while the chargeback is open (D67), or the
+     payment's own refund is owed (review r8). */
   .waiting {
     display: inline-flex;
     flex-direction: column;

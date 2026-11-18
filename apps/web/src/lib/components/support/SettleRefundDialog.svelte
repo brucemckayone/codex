@@ -36,6 +36,10 @@
   the queue offers nothing while the chargeback is open, and lists nothing
   once it is lost. A page older than that gets the refusal, and the dialog
   closes with a notice linking to the charge (`decidedByChargebackNotice`).
+  The same for a settle that would pay back more than was paid
+  (`SETTLE_EXCEEDS_PAID`, 412, `exceedsPaidNotice`, which names what's left)
+  and one whose payment's own refund is still being made
+  (`REFUND_AWAITS_PAYMENT_REFUND`, `awaitsPaymentRefundNotice`; review r8).
 
   @prop {FailedRefundItem | null} item
   @prop {FailedRefundResolution | null} resolution
@@ -71,7 +75,12 @@
   } from './repay-blocks.svelte';
   import { isSessionEnded } from './session';
   import { formatList, formatShortDay, systemSettledSentence } from './support-format';
-  import { decidedByChargebackNotice, type SettleNotice } from './settle-notice';
+  import {
+    awaitsPaymentRefundNotice,
+    decidedByChargebackNotice,
+    exceedsPaidNotice,
+    type SettleNotice,
+  } from './settle-notice';
 
   interface Props {
     item: FailedRefundItem | null;
@@ -305,6 +314,26 @@
         if (decided) {
           open = false;
           onFinished(decided);
+        } else {
+          problem = 'failed';
+        }
+      } else if (answer.detailsCode === 'SETTLE_EXCEEDS_PAID') {
+        // It would pay back more than was paid (review r8): nothing was
+        // settled, and the notice names what's left and links to the charge.
+        const exceeds = exceedsPaidNotice(answer.maxCents, settling.chargeId);
+        if (exceeds) {
+          open = false;
+          onFinished(exceeds);
+        } else {
+          problem = 'failed';
+        }
+      } else if (answer.detailsCode === 'REFUND_AWAITS_PAYMENT_REFUND') {
+        // The payment's own refund is still being made and includes this
+        // one (review r8): nothing was settled.
+        const awaits = awaitsPaymentRefundNotice(answer.reason, settling.chargeId);
+        if (awaits) {
+          open = false;
+          onFinished(awaits);
         } else {
           problem = 'failed';
         }

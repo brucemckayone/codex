@@ -100,13 +100,19 @@ interface HoldAlertLogger {
  * review r7). Nothing is refunded here: the row stays held while the
  * chargeback reads open, so support checks the dispute first. Up to `limit`
  * rows, the oldest first. Never throws: a failed check is logged at error on
- * its own, so the sweep that runs it (after its refunds) still returns what
- * it settled.
+ * its own, naming the `check`, so the sweep that runs it (after its refunds)
+ * still returns what it settled.
  */
 export async function alertChargebacksHeldTooLong(
   deps: { db: Pick<DatabaseClient, 'select'>; obs: HoldAlertLogger },
   params: {
     link: ChargebackLink;
+    /**
+     * Which backstop this is, named in its failure log: one link can run two
+     * (the purchase sweep's held refunds and its waiting failed refunds;
+     * review r8).
+     */
+    check: string;
     owed: SQLWrapper;
     holds?: SQL;
     asOf: Date;
@@ -145,6 +151,7 @@ export async function alertChargebacksHeldTooLong(
       {
         errorId: crypto.randomUUID(),
         link: params.link,
+        check: params.check,
         error: error instanceof Error ? error.message : String(error),
       }
     );

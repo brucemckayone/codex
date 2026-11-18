@@ -408,6 +408,43 @@ describe('Refunds on this charge', () => {
       expect(badgeOf(id)?.getAttribute('data-variant')).toBe('error');
     }
   });
+
+  test('a failed refund a later refund of everything owed covered reads a neutral "Covered", with the refund that included it and its amount (owner D74)', () => {
+    render(RefundsCard, {
+      detail: chargeDetail({
+        refunds: [
+          refundRow({
+            id: 're_covered',
+            status: 'failed',
+            failureReason: 'expired_or_canceled_card',
+            failureLabel: 'The card has expired or been cancelled',
+            resolution: 'covered_by_refund',
+            coveredBy: { refundId: 're_coverer', amountCents: 1500 },
+          }),
+          refundRow({ id: 're_coverer', amountCents: 1500 }),
+        ],
+      }),
+    });
+    const row = document.querySelector(
+      '[data-testid="refund-row"][data-refund-id="re_covered"]'
+    );
+    const badge = row?.querySelector('.badge');
+    expect(badge?.textContent?.trim()).toBe('Covered');
+    expect(badge?.getAttribute('data-variant')).toBe('neutral');
+    expect(
+      row?.querySelector('[data-testid="refund-covered"]')?.textContent?.trim()
+    ).toBe(
+      'Included in refund re_coverer (£15.00), so nothing more is owed for it.'
+    );
+    // The covering refund itself has no such line.
+    expect(
+      document
+        .querySelector(
+          '[data-testid="refund-row"][data-refund-id="re_coverer"]'
+        )
+        ?.querySelector('[data-testid="refund-covered"]')
+    ).toBeNull();
+  });
 });
 
 describe('Chargebacks', () => {

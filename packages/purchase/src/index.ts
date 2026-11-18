@@ -92,6 +92,7 @@ export {
   blockedPayment,
   isDuplicatePayment,
   isUnavailableBlock,
+  owedBlockedPayment,
 } from './services/blocked-payment';
 // One open checkout per buyer and item (Codex-2hxff.14, .15)
 export {
@@ -114,6 +115,14 @@ export {
   settledElsewhereCentsIn,
   takenBack,
 } from './services/counted-refunds';
+// A refund of everything owed covers the failed refunds it included (owner
+// D73, review r8): support's refund of all that is left covers too, and its
+// settle locks a charge's refunds as a cover does
+export {
+  coverIncludedRefunds,
+  lockRefundsOfCharge,
+  uncoveredFailedRefunds,
+} from './services/covered-refunds';
 // Entitlement + auto-enrollment write seam (Codex-2pryk WP-6)
 export {
   autoEnroll,
@@ -172,6 +181,7 @@ export {
 export {
   chargebackCarriesRefund,
   findShortLosses,
+  lateWinBeingUndone,
   type ShortLoss,
 } from './services/short-loss';
 // Customer integrity helpers (Codex-qsvxf — Q4.4 belt-and-braces)

@@ -263,10 +263,15 @@ refund").
   `pending` and becomes `refunded` only once Stripe has refunded it, so no
   reader shows money as returned that is not.
 - **After the commit**, `issueRefund` (`@codex/payments`, the platform's one
-  refund call) refunds the charge in full under
-  `refund_duplicate_<PaymentIntent>`. A redelivered event asks again under the
-  same key, unless the duplicate is already `refunded`, and
-  `charge_already_refunded` counts as done.
+  refund call) refunds what the duplicate still owes under
+  `refund_duplicate_<PaymentIntent>_<amount>` (owner D73): what was paid less
+  the refunds that count, read after the charge's refunds are synced from
+  Stripe, so a refund an earlier attempt made counts even if its answer was
+  lost. A redelivered event asks again under the same key, unless the
+  duplicate is already `refunded`, and `charge_already_refunded` counts as
+  done. The refund covers the failed refunds it included
+  ([operations](operations.md#a-blocked-payments-chargeback-lost-short-paid-another-way),
+  "A refund of everything owed covers what it included").
 - **If Stripe refuses the refund**, the row stays `pending` and the failure is
   logged ("Duplicate payment could not be refunded", with Stripe's `code`). It
   is thrown as retryable whatever the cause, so Stripe redelivers the event
@@ -375,9 +380,9 @@ in the existing refund email, and no checkout expiry).
   (no migration). None of Stripe's refund reasons is that, and every writer of
   the refund fields keeps it, so a later refund never writes Stripe's reason
   over it. It is blocked whoever owns the item: no buyer can watch it.
-- **After the commit** it is refunded in full under
-  `refund_unavailable_<PaymentIntent>`, with no refund reason (none of
-  Stripe's fits). A refusal leaves it `pending`, logged once (not also as a
+- **After the commit** it is refunded what it still owes (all of it, unless a
+  refund counts already) under `refund_unavailable_<PaymentIntent>_<amount>`,
+  as a duplicate is, with no refund reason (none of Stripe's fits). A refusal leaves it `pending`, logged once (not also as a
   purchase that failed to complete: the row committed), and thrown as
   retryable, and the hourly owed-refund sweep retries it with the duplicates,
   except while a chargeback on it is OPEN (owner D56): Stripe refuses that
@@ -461,13 +466,17 @@ in the existing refund email, and no checkout expiry).
   Its alert for what is still owed names both kinds, and each row says
   which it is (`blocked`: `duplicate`, the buyer kept the item, or
   `unavailable`, the buyer has nothing). Support finds the ones still owed
-  with `refund_reason = 'item_unavailable' AND status = 'pending'`. The key is
-  fixed per payment, as `refund_duplicate_` is, so nothing is refunded twice;
-  but Stripe keeps the first response under a key for about 24 hours, a
-  refusal included, so a retry within that day gets the same refusal back.
-  A refusal that clears sooner is refunded about a day late, never twice.
-  With no amount, the refund is of what is left of the charge, so one made
-  after a partial refund returns the rest.
+  with `refund_reason = 'item_unavailable' AND status = 'pending'`. The key
+  names the payment and the amount, as `refund_duplicate_` does, so a retry
+  of the same amount is never refunded twice; but Stripe keeps the first
+  response under a key for about 24 hours, a refusal included, so a retry
+  within that day gets the same refusal back. A refusal that clears sooner is
+  refunded about a day late, never twice. The amount is what was paid less
+  the refunds that count (owner D73), not what Stripe has left of the charge:
+  one made after a partial refund returns the rest, and one made after a
+  failed refund support settled as refunded elsewhere doesn't pay that part
+  again (Stripe's remainder knew nothing of it). An amount that moved since an
+  earlier attempt is a new key.
 - **No receipt** is sent. Its `charge.refunded` sends the usual refund email,
   worded from the refunds standing now (`processRefund`'s `refundedInFull`
   and `restOwed`), never the event's snapshot, so an event retried after the

@@ -91,6 +91,7 @@ export function refundRow(overrides: Partial<RefundRow> = {}): RefundRow {
     notifiedAt: '2026-10-20T08:13:00.000Z',
     requestedBy: { userId: 'user-jordan', name: 'Jordan Reid', deleted: false },
     resolution: null,
+    coveredBy: null,
     ...overrides,
   };
 }
@@ -258,6 +259,7 @@ export function failedRefund(
     blockedPayment: null,
     // No open chargeback holds it (owner D67): both settlements are on offer.
     waitingForChargeback: null,
+    waitingForPaymentRefund: false,
     ...overrides,
   };
 }
