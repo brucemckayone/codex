@@ -24,7 +24,11 @@
  *   which costs at worst a second email, and unsafe for the second, which
  *   costs no email at all. Newest is the latest round, and within a round a
  *   `staying` email comes after that round's others (one Keep per round),
- *   never `created_at`, which is when a transaction began. That reaches a
+ *   never `created_at`, which is when a transaction began. That holds only
+ *   while each delete's round is later than the piece's last one, so the
+ *   delete refuses a round that is not (a shorter notice length could make
+ *   it tie or go back, and a tied round makes DO NOTHING write no rows at
+ *   all). That reaches a
  *   person whose `staying` email a second delete cancelled, or a refusal
  *   kept from going, and skips one already told it stays;
  * - `removed` rows are added by a platform admin's immediate delete.
@@ -149,8 +153,9 @@ export const contentLeavingNotices = pgTable(
       .default('due'),
     // Tries started. The sweep's claim adds one BEFORE it sends, as the fee
     // notices' does, so a `due` row with a try is in flight or was cut off
-    // after sending. That makes `attempts > 0` the one test of whether a
-    // person may have been told: Keep writes a `staying` row from it.
+    // after sending. That makes `attempts > 0` the test of whether a
+    // `leaving` or `reminder` email may have told its person. A `staying`
+    // email counts as told only once `sent` (Keep's rule, in the header).
     attempts: integer('attempts').notNull().default(0),
     // The sweep's lease clock: raw-SQL updates never fire `$onUpdate`, so
     // `updated_at` can't stand in for it.
@@ -210,8 +215,9 @@ export const contentLeavingNotices = pgTable(
       'check_content_leaving_notices_sent',
       sql`(${table.state} IN (${sqlWords(SENT)})) = (${table.sentAt} IS NOT NULL)`
     ),
-    // Every state a try leaves has the try counted, `sent` too, since
-    // `attempts > 0` is how Keep tells who may have been told.
+    // Every state a try leaves has the try counted, `sent` too, since Keep
+    // reads `attempts > 0` as "may have been told" on a leaving or reminder
+    // email.
     check(
       'check_content_leaving_notices_tried',
       sql`${table.state} NOT IN (${sqlWords(AFTER_A_TRY)}) OR ${table.attempts} > 0`

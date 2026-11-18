@@ -42,8 +42,9 @@ export type ContentLeavingNoticeKind =
  *   email, is never cancelled;
  * - `abandoned`: it used up its tries, or the person has no address (an
  *   erased account), and the sweep stops.
- * Whether a person may have been told is read from `attempts`, never from
- * the state: a try that ended `failed` may follow one that went.
+ * Whether a `leaving` or `reminder` email may have told its person is read
+ * from `attempts`, never from the state: a try that ended `failed` may
+ * follow one that went. A `staying` email counts as told only once `sent`.
  */
 export const CONTENT_LEAVING_NOTICE_STATES = [
   'due',
