@@ -1,7 +1,7 @@
 {
   "A1": {
     "packages/subscription/src/services/subscription-service.ts": [
-      "transfers.create("
+      "transferPendingGroup>transfers.create("
     ]
   },
   "DOC-BUDGET": {
@@ -801,6 +801,7 @@
     ],
     ".claude/skills/pickup/SKILL.md": [
       "docs/handover/",
+      "docs/handover/INDEX.md",
       "docs/handover/README.md"
     ],
     "apps/web/e2e/page-kit/brand-fidelity.spec.ts": [

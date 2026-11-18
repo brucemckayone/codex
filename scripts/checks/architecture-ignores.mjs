@@ -41,7 +41,10 @@ const FIELDS =
  */
 export function parseIgnores(file, text) {
   const isMarkdown = file.endsWith('.md');
-  const lines = (isMarkdown ? blankCode(text) : text).split('\n');
+  // \r stripped: in a CRLF file the directive must still be seen.
+  const lines = (isMarkdown ? blankCode(text) : text)
+    .split('\n')
+    .map((l) => l.replace(/\r$/, ''));
   const found = [];
   lines.forEach((line, i) => {
     const m = DIRECTIVE.exec(line);
@@ -68,8 +71,9 @@ export function parseIgnores(file, text) {
 
 /**
  * Drop the hit a valid directive on the line above excuses, marking the
- * directive used. ONE directive excuses ONE hit: two violations on a line need
- * two exceptions, or a fix. Returns the remaining hits.
+ * directive used. ONE directive excuses ONE hit, and only one directive fits
+ * on the line above, so a second violation on the same line can't be
+ * excepted: fix it. Returns the remaining hits.
  */
 export function applyIgnores(ruleId, hits, directives) {
   if (!directives || hits.length === 0) return hits;
@@ -103,7 +107,8 @@ function addDays(iso, days) {
  * @param {Map<string, ReturnType<typeof parseIgnores>>} directivesByFile
  * @param {{ ran: (ruleId: string) => boolean,
  *   ranOn: (ruleId: string, file: string) => boolean, known: Set<string>,
- *   measuring: Set<string>, noExceptions: Set<string>, today: string }} ctx
+ *   measuring: Set<string>, noExceptions: Set<string>, today: string,
+ *   judged?: (file: string) => boolean }} ctx
  */
 export function ignoreProblems(directivesByFile, ctx) {
   const problems = [];
@@ -116,8 +121,10 @@ export function ignoreProblems(directivesByFile, ctx) {
       line: d.line,
       why,
     });
+  const judged = ctx.judged ?? (() => true);
   for (const directives of directivesByFile.values()) {
     for (const d of directives) {
+      if (!judged(d.file)) continue;
       if (!d.ok || !isRealDate(d.until)) {
         push(
           d,

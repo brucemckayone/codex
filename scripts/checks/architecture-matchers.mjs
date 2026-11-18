@@ -118,7 +118,7 @@ function dirname(file) {
  * `row[0](x)` in a code span read as one too.
  */
 export function blankCode(text) {
-  const blank = (code) => code.replace(/[^\n]/g, ' ');
+  const blank = (code) => code.replace(/[^\n\r]/g, ' ');
   const lines = text.split('\n');
   let fence = null;
   for (let k = 0; k < lines.length; k++) {
@@ -140,6 +140,95 @@ export function blankCode(text) {
     lines[k] = blank(line);
   }
   return lines.join('\n').replace(/`[^`\n]+`/g, blank);
+}
+
+/**
+ * `code` with the inside of every string and template literal replaced by x
+ * (quotes kept, length kept), so a bracket, comma or paren in a string can't
+ * change how the code around it is read. `code` is already comment-blanked.
+ */
+export function maskStrings(code) {
+  const out = code.split('');
+  for (let i = 0; i < code.length; i++) {
+    const q = code[i];
+    if (q !== "'" && q !== '"' && q !== '`') continue;
+    let j = i + 1;
+    while (j < code.length && code[j] !== q) {
+      if (code[j] === '\\') j += 1;
+      else if (q !== '`' && code[j] === '\n') break;
+      j += 1;
+    }
+    for (let k = i + 1; k < j && k < code.length; k++) {
+      if (out[k] !== '\n') out[k] = 'x';
+    }
+    i = j;
+  }
+  return out.join('');
+}
+
+const NOT_A_NAME = new Set([
+  'if',
+  'for',
+  'while',
+  'switch',
+  'catch',
+  'return',
+  'function',
+  'await',
+  'new',
+  'typeof',
+  'else',
+  'do',
+  'try',
+  'with',
+  'super',
+  'this',
+  'void',
+  'yield',
+  'throw',
+  'case',
+  'delete',
+  'in',
+  'of',
+  'instanceof',
+]);
+const DECLARATIONS = [
+  /(?:^|\s)function\s*\*?\s*([\w$]+)\s*[<(]/,
+  /^(?:export\s+)?(?:const|let|var)\s+([\w$]+)\b[^=]*=\s*(?:async\s+)?(?:function\b|\(|[\w$]+\s*=>|<)/,
+  /^([\w$]+)\s*:\s*(?:async\s+)?(?:function\b|\(|[\w$]+\s*=>)/,
+  /^(?:(?:public|private|protected|static|async|override|readonly|get|set)\s+)*\*?\s*([\w$]+)\s*(?:<[^>]*>)?\s*\(/,
+  /(?:^|\s)class\s+([\w$]+)/,
+];
+
+/**
+ * The function, method or class a line sits in, read from the code's
+ * indentation: biome formats every source file, so each less-indented line
+ * above is an ancestor. The first ancestor that declares something names it.
+ * A call's KEY carries this name, so a fix in one function can't pay for a
+ * new call in another.
+ */
+function enclosingName(maskedLines, lineNo) {
+  const indentOf = (l) => l.length - l.trimStart().length;
+  let limit = indentOf(maskedLines[lineNo - 1] ?? '');
+  // A line that starts with a closer (`}> {` ending a multi-line signature,
+  // `} catch (e) {`) belongs to a construct whose head is further up, at the
+  // same indent.
+  let headPending = false;
+  for (let i = lineNo - 2; i >= 0 && (limit > 0 || headPending); i--) {
+    const line = maskedLines[i];
+    if (line.trim() === '') continue;
+    const indent = indentOf(line);
+    if (indent > limit || (indent === limit && !headPending)) continue;
+    limit = indent;
+    const text = line.trim();
+    headPending = /^[)\]}>]/.test(text);
+    if (headPending) continue;
+    for (const pattern of DECLARATIONS) {
+      const name = pattern.exec(text)?.[1];
+      if (name && !NOT_A_NAME.has(name)) return name;
+    }
+  }
+  return '(top level)';
 }
 
 const LINK = /\[[^\]]*\]\(([^)\s]+)[^)]*\)/g;
@@ -243,10 +332,17 @@ export const MATCHERS = {
     file(rule, _path, text) {
       const { code } = tokenize(text);
       const { lineOf, textOf } = lineIndex(text);
+      let masked = null;
       const hits = [];
       for (const m of code.matchAll(globalCopy(rule.match.pattern))) {
         const line = lineOf(m.index);
-        hits.push({ line, text: textOf(line), key: m[0].replace(/\s+/g, '') });
+        masked ??= maskStrings(code).split('\n');
+        const call = m[0].replace(/\s+/g, '');
+        hits.push({
+          line,
+          text: textOf(line),
+          key: `${enclosingName(masked, line)}>${call}`,
+        });
       }
       return { found: hits.length, hits };
     },
@@ -481,8 +577,11 @@ export const MATCHERS = {
         const target = linkTarget(index, raw);
         if (target !== null) listed.add(target);
       }
+      // Walk up to, but not into, the index's own folder: a link to that
+      // folder (or above it) would list every doc and check nothing.
+      const home = dirname(index);
       let at = file;
-      while (at) {
+      while (at && at !== home && at !== '.') {
         if (listed.has(at)) return { found: 0, hits: [] };
         at = dirname(at);
       }
@@ -505,15 +604,13 @@ export const MATCHERS = {
     file(rule, _file, text) {
       const { lineOf, textOf } = lineIndex(text);
       const hits = [];
+      // One hit per citation, so a second one added to a line already pinned
+      // is seen: its token is the key.
       let at = text.indexOf(rule.match.text);
-      let lastLine = 0;
       while (at !== -1) {
         const line = lineOf(at);
-        if (line !== lastLine) {
-          const token = /^[^\s'"`)\]>]*/.exec(text.slice(at))[0];
-          hits.push({ line, text: textOf(line).slice(0, 160), key: token });
-        }
-        lastLine = line;
+        const token = /^[^\s'"`)\]>]*/.exec(text.slice(at))[0];
+        hits.push({ line, text: textOf(line).slice(0, 160), key: token });
         at = text.indexOf(rule.match.text, at + rule.match.text.length);
       }
       return { found: hits.length, hits };

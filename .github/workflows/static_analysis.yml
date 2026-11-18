@@ -30,6 +30,28 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
+      # Codex-xtcfl (G0): the architecture gate. One runner, one rule registry
+      # (scripts/checks/architecture-rules.mjs) and one ratchet baseline; the
+      # rules page docs/architecture/rules.md is generated from the registry.
+      # Its CI-GATES rule keeps the list of gates in that registry equal to the
+      # run: steps of THIS job, so a new gate step must be added there too.
+      # Keep every gate step on one line: a multi-line run block can't be
+      # matched and fails CI-GATES.
+      #
+      # --ci also fails a fix this change made but didn't bank, and any
+      # loosening (a raised baseline pin, a new exception, a change to the gate
+      # itself) the owner hasn't countersigned with a G0-RAISE: trailer. The
+      # same countersign check runs from the BASE branch's copy of the gate in
+      # g0-countersign.yml, so a PR can't exempt itself by editing this one.
+      # It runs BEFORE pnpm install: the gate needs no dependencies, and no
+      # install lifecycle script can touch it first. No `if:`: CI-GATES fails
+      # a conditional gate step.
+      - name: Architecture gate self-test
+        run: node --test scripts/checks/check-architecture.test.mjs
+
+      - name: Architecture gate (registry rules, ratchet baseline, countersigns)
+        run: node scripts/checks/check-architecture.mjs --ci
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -220,24 +242,6 @@ jobs:
 
       - name: Data-access contract gate (Cache-Control + KV writes + search inputs)
         run: node scripts/checks/check-data-access-contract.mjs
-
-      # Codex-xtcfl (G0): the architecture gate. One runner, one rule registry
-      # (scripts/checks/architecture-rules.mjs) and one ratchet baseline; the
-      # rules page docs/architecture/rules.md is generated from the registry.
-      # Its CI-GATES rule keeps the list of gates in that registry equal to the
-      # run: steps of THIS job, so a new gate step must be added there too.
-      # Keep every gate step on one line: a multi-line run block can't be
-      # matched and fails CI-GATES.
-      #
-      # --ci also fails a fix left unbanked in a file the PR touches, and any
-      # loosening (a raised baseline pin, a new exception, a change to the gate
-      # itself) that no commit in the change countersigns with a
-      # G0-RAISE: trailer. No `if:`: CI-GATES fails a conditional gate step.
-      - name: Architecture gate self-test
-        run: node --test scripts/checks/check-architecture.test.mjs
-
-      - name: Architecture gate (registry rules, ratchet baseline, countersigns)
-        run: node scripts/checks/check-architecture.mjs --ci
 
       - name: Generate Paraglide i18n files
         run: pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide

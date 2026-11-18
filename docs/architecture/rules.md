@@ -32,38 +32,42 @@ A rule here is one entry in `scripts/checks/architecture-rules.mjs`. The self-te
 
 ## The baseline
 
-A rule that measures a file (SIZE, DOC-BUDGET) pins its size. Every other rule pins the **key** of each violation it allows: the matched call, the dead link's target, the missing path. So a fix can't pay for a new violation in the same file: the new one's key isn't pinned, and it fails even when the count is unchanged.
+A rule that measures a file (SIZE, DOC-BUDGET) pins its size. Every other rule pins the **key** of each violation it allows: the call and the function it sits in (`transferPendingGroup>transfers.create(`), the dead link's target, the missing path. So a fix can't pay for a new violation in the same file: the new one's key isn't pinned, and it fails even when the count is unchanged.
 
 - A violation whose key isn't pinned, or a size above its pin, is new, and fails.
-- A fixed violation, a smaller size or a file that is gone must be **banked** with `pnpm check:arch --lower`, so the headroom it freed can't be spent later. It fails a commit or pull request that touches the file, and is a notice anywhere else, so two PRs that each bank a different fix can't merge into a red branch.
+- A fixed violation, a smaller size or a file that is gone must be **banked** with `pnpm check:arch --lower`, so the headroom it freed can't be spent later. It fails the commit that touches the file (bank it with `--lower --staged`, which banks what the index holds and stages the baseline), and the pull request that made the fix: the violation still existed at the base, in whatever file. A fix already left unbanked on `dev` is only a notice, so two PRs can't merge into a red branch.
+- A renamed file carries its pin to the new path; `--lower` moves it.
 - `--lower` only ever lowers or removes. `--init --rule <ID>` seeds the block for a rule added later.
+- RULES-DOC and CI-GATES can't be held in the baseline at all: their drift is fixed, never pinned.
 
 <a id="raises"></a>
 
 ## Loosening the gate
 
-Anything that loosens the gate needs a countersign: a trailer line in a commit message in the change. In CI, `check:arch --ci` fails a change that loosens without one. The countersign lives in the commit, not the PR description, so it travels into `dev` and `main` with the change and `git blame` keeps it next to what it explains.
+Anything that loosens the gate needs the **owner's** countersign: a trailer line in a commit message in the change. It counts only in a commit with no `Co-Authored-By: Claude` line, so the agent that loosened the gate can't sign for it; it asks the owner, and the failure prints the one-liner to run. The countersign lives in the commit, not the PR description, so it travels into `dev` and `main` with the change and `git blame` keeps it next to what it explains.
 
 | What loosens | Trailer |
 |---|---|
 | A raised or added baseline pin | `G0-RAISE: <RULE> <file> — <reason>` |
-| A whole new block, for a new rule | `G0-RAISE: <RULE> * — <reason>` |
-| A new or renewed exception (below) | `G0-RAISE: <RULE> <file> — <reason>` |
+| Every pin of a rule the base doesn't have yet | `G0-RAISE: <RULE> * — <reason>` |
+| A new, copied, moved or renewed exception (below) | `G0-RAISE: <RULE> <file> — <reason>` |
 | A change to the gate itself: its scripts, registry, CI steps, hook | `G0-RAISE: GATE <path> — <reason>` |
+| A change to a pnpm script a gate runs | `G0-RAISE: GATE package.json#scripts.<name> — <reason>` |
+| A change to the triggers, concurrency or static-analysis job of a calling workflow | `G0-RAISE: GATE <workflow> — <reason>` |
 
-A reason is at least three words. `pnpm check:arch --raises <ref>` runs the same check locally against a ref, and prints the exact lines still missing.
+A reason is at least three words, with no `<placeholder>` left in it. In a pull request the check runs twice: in the PR's own CI (`check:arch --ci`), and from the **base branch's** copy of the gate (`.github/workflows/g0-countersign.yml`), so a PR that edits the gate can't exempt itself. `pnpm check:arch --raises <ref>` runs it locally.
 
 <a id="exceptions"></a>
 
 ## Exceptions
 
-One violation of a line-level rule can be excepted by a comment on the line above it. The exception names one rule, an expiry date, the person who granted it and a reason, and it needs a countersign (above):
+One violation of a line-level rule can be excepted by a comment on the line above it. The exception names one rule, an expiry date, the person who granted it and a reason, and it needs the owner's countersign (above):
 
 ```ts
 // arch-ignore A1 until=2026-12-31 by=<owner> — <reason>
 ```
 
-In markdown, use an HTML comment. One exception excuses one violation. The date may be at most 90 days out: an exception is temporary by definition. The gate fails an exception that has expired, runs too long, excuses nothing, is malformed, names a rule that doesn't apply to the file, or names a rule that measures a whole file (SIZE, DOC-BUDGET, whose exception is its baseline pin) or can't be excepted (RULES-DOC, CI-GATES: fix the drift).
+In markdown, use an HTML comment. One exception excuses one violation, the one on the next line: the countersign covers the exception together with that line, so copying it, or moving it onto another violation, needs a new one. The date may be at most 90 days out: an exception is temporary by definition. The gate fails an exception that has expired, runs too long, excuses nothing, is malformed, names a rule that doesn't apply to the file, or names a rule that measures a whole file (SIZE, DOC-BUDGET, whose exception is its baseline pin) or can't be excepted (LAYERS, DOC-INDEX, RULES-DOC, CI-GATES).
 
 ## Rules
 
@@ -71,7 +75,7 @@ In markdown, use an HTML comment. One exception excuses one violation. The date 
 
 **Money moves only through the payments ledger.**
 
-Transfers, reversals, refunds and payouts move real money. When each module calls Stripe itself, the ledger, the clawback rules and the payout thresholds can be bypassed by whichever caller forgets them. The owners are the four @codex/payments modules that record every movement.
+Transfers, reversals, refunds and payouts move real money. When each module calls Stripe itself, the ledger, the clawback rules and the payout thresholds can be bypassed by whichever caller forgets them. The owners are the four @codex/payments modules that record every movement. Each call is pinned by the function it sits in (`transferPendingGroup>transfers.create(`), so a new call in another function fails even where an old one was fixed. Known limit: a text pattern can't follow an alias (`const t = stripe.transfers; t.create(`); the owner refactor and the types epic (Codex-omrp2) close that.
 
 - **Applies to:** `packages/*/src/**/*.{ts,js,mjs}`, `workers/*/src/**/*.{ts,js,mjs}`, `apps/*/src/**/*.{ts,js,mjs}`
 - **Except:** `**/*.test.ts`, `**/*.spec.ts`, `**/*.type-check.ts`, `**/*.d.ts`, `**/__tests__/**`, `**/__mocks__/**`, `packages/payments/src/payout-ledger.ts`, `packages/payments/src/clawback.ts`, `packages/payments/src/refund.ts`, `packages/payments/src/bank-payouts.ts`
@@ -150,6 +154,7 @@ docs/handover is gitignored, so CI and every other machine see a dead reference.
 36 of 38 CLAUDE.md files were over budget (the root had 3,616 words against 1,500). Every word is loaded into every agent session in that folder, so length is paid on every task.
 
 - **Applies to:** `**/CLAUDE.md`, `**/AGENTS.md`
+- **Not matched yet:** `**/AGENTS.md`
 - **Checked by:** `word-count`, budget `CLAUDE.md` 1,500, every other 600 words, (measures words; the baseline pins larger files at their size)
 - **Fix:** Move reference material into docs/ and link it; keep the CLAUDE.md to the rules an agent needs in this folder.
 

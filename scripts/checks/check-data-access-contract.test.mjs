@@ -456,6 +456,28 @@ test('tokenize blanks comments without shifting line numbers', () => {
   );
 });
 
+test('tokenize reads a regex literal, so /* or // inside one is not a comment', () => {
+  // review finding (G0 round 2): `/^\/*/` opened a block comment that blanked
+  // the code after it, so a money call there vanished from the A1 rule.
+  const src = [
+    "const p = path.replace(/^\\/*/, '');",
+    'await stripe.transfers.create({ amount });',
+    "const q = url.split(/\\/\\//)[1]; const r = 'kept';",
+    '/** a real comment */',
+  ].join('\n');
+  const { code, strings } = tokenize(src);
+  assert.match(code, /stripe\.transfers\.create/);
+  assert.ok(strings.some((s) => s.value === 'kept'));
+  assert.doesNotMatch(code, /a real comment/);
+  // division and markup are not regex literals
+  const division = tokenize('const half = total / 2; // note\n').code;
+  assert.doesNotMatch(division, /note/);
+  const markup = tokenize('<p>a</p> <!-- hidden -->\n', {
+    stripHtmlComments: true,
+  }).code;
+  assert.doesNotMatch(markup, /hidden/);
+});
+
 test('isCacheControlValue separates the header from its look-alikes', () => {
   assert.equal(isCacheControlValue('public, max-age=60, s-maxage=60'), true);
   assert.equal(isCacheControlValue('private, no-store'), true);

@@ -19,6 +19,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,6 +29,8 @@ import { fileURLToPath } from 'node:url';
 
 import { countLines, MATCHERS } from './architecture-matchers.mjs';
 import {
+  callerPrint,
+  ciBase,
   missingCountersigns,
   parseCountersigns,
   raisedEntries,
@@ -39,6 +42,7 @@ import {
   globToRegExp,
   initialBaseline,
   inScope,
+  judgeFixesAtBase,
   lowerBaseline,
   memorySource,
   serializeBaseline,
@@ -71,8 +75,9 @@ const SIZE_RULE = {
 // Assembled from parts, so this file is never read as a directive itself.
 const IGNORE = ['arch', 'ignore'].join('-');
 
-// The key a call rule pins: the match, whitespace removed.
-const K = 'forbidden(';
+// The key a call rule pins: the function it sits in, then the match.
+const K = '(top level)>forbidden(';
+const B = '(top level)>banned(';
 
 const SWAP_RULE = {
   ...CALL_RULE,
@@ -160,7 +165,12 @@ describe('the ratchet', () => {
       { T1: { 'src/a.ts': [K] } }
     );
     assert.deepEqual(types(problems), ['more:T1:src/a.ts']);
-    assert.equal(problems[0].hits.length, 1, 'only the unpinned one is shown');
+    assert.equal(problems[0].added, 1);
+    assert.equal(
+      problems[0].hits.length,
+      2,
+      'both hits share the key, so both are shown: only the diff knows which is new'
+    );
   });
 
   test('a fix cannot pay for a new violation in the same file', () => {
@@ -169,7 +179,7 @@ describe('the ratchet', () => {
     const { problems } = run(
       [SWAP_RULE],
       { 'src/a.ts': 'forbidden();\n' },
-      { T3: { 'src/a.ts': ['banned('] } }
+      { T3: { 'src/a.ts': [B] } }
     );
     assert.deepEqual(types(problems), [
       'more:T3:src/a.ts',
@@ -347,8 +357,11 @@ describe('--lower and --init', () => {
     const text = serializeBaseline({ T1: { 'src/a.ts': [K, K] } });
     assert.equal(
       text,
-      '{\n  "T1": {\n    "src/a.ts": ["forbidden(", "forbidden("]\n  }\n}\n'
+      `{\n  "T1": {\n    "src/a.ts": ["${K}", "${K}"]\n  }\n}\n`
     );
+    // biome counts display width: 30 wide characters are 60 columns, not 30
+    const wide = serializeBaseline({ T1: { 'a.md': ['界'.repeat(30), 'x'] } });
+    assert.equal(wide.split('\n').length, 9, 'too wide for one line');
   });
 });
 
@@ -418,7 +431,7 @@ describe('the message', () => {
     );
     assert.match(
       formatProblems(problems),
-      /src\/a\.ts: fixed "forbidden\(". Bank the fix: pnpm check:arch --lower/
+      /src\/a\.ts: fixed "\(top level\)>forbidden\(". Bank the fix: pnpm check:arch --lower/
     );
   });
 });
@@ -521,7 +534,7 @@ describe('the CLI against a real git repository', () => {
     assert.match(r.stdout, /G0-RAISE: T2 \* —/);
     assert.deepEqual(readBaseline(), {
       T1: { 'src/pinned.ts': [K] },
-      T2: { 'src/b.ts': ['banned('] },
+      T2: { 'src/b.ts': [B] },
     });
     assert.match(
       cli('--init', '--rule', 'T2').stderr,
@@ -614,7 +627,11 @@ describe('the CLI against a real git repository', () => {
     assert.equal(unsigned.status, 1);
     assert.match(
       unsigned.stderr,
-      /G0-RAISE: T1 src\/pinned\.ts — <why> {4}\(T1 src\/pinned\.ts: allows "forbidden\(" more\)/
+      /\n {4}G0-RAISE: T1 src\/pinned\.ts — <why>\n/
+    );
+    assert.match(
+      unsigned.stderr,
+      /\n {8}T1 src\/pinned\.ts: allows "\(top level\)>forbidden\(" more\n/
     );
     sh([
       'commit',
@@ -707,10 +724,16 @@ describe('the CLI against a real git repository', () => {
     commit('raise');
     const r = cliWith(prEnv(base), '--ci');
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /not countersigned/);
+    assert.match(r.stderr, /have no countersign from the owner/);
+    // review finding: a local --ci skipped the check, so gate.sh passed what
+    // CI failed. Locally it now compares with origin/dev, and says so when it
+    // can't.
     const local = cli('--ci');
-    assert.equal(local.status, 0, local.stderr);
-    assert.match(local.stdout, /no countersign check \(not in CI\)/);
+    assert.equal(local.status, 2, local.stdout);
+    assert.match(
+      local.stderr,
+      /no merge base with origin\/dev \(git fetch origin dev\)/
+    );
   });
 
   test('--gates runs each listed gate, honours --skip, and fails when one does', () => {
@@ -749,7 +772,10 @@ describe('the CLI against a real git repository', () => {
     );
     const idle = cli();
     assert.equal(idle.status, 2);
-    assert.match(idle.stderr, /T1 match no tracked file/);
+    assert.match(
+      idle.stderr,
+      /match no tracked file, so they check nothing: T1 scr\/\*\*\/\*\.ts/
+    );
 
     write('rules.mjs', rulesModule(T1));
     write('baseline.json', '{ not json');
@@ -767,7 +793,285 @@ describe('the CLI against a real git repository', () => {
     write(GATE_STAND_IN, '// edited, not staged\n');
     const r = cli('--staged');
     assert.equal(r.status, 2);
-    assert.match(r.stderr, /unstaged edits/);
+    assert.match(r.stderr, /unstaged or untracked edits/);
+  });
+
+  // ---- round 2 review fixes -------------------------------------------
+
+  test('a copied exception, or one moved onto another violation, needs a countersign', () => {
+    setUp();
+    initAndCommit();
+    const dir = `// ${IGNORE} T1 until=2026-12-01 by=bruce — the drain moves next\n`;
+    write('src/a.ts', `${dir}forbidden(one);\n`);
+    sh(['add', '.']);
+    sh([
+      'commit',
+      '-qm',
+      'one\n\nG0-RAISE: T1 src/a.ts — the drain moves next week',
+    ]);
+    const signedBase = head();
+    assert.equal(
+      cli('--raises', `${head()}~1`).status,
+      0,
+      'the first one is signed'
+    );
+    write('src/a.ts', `${dir}forbidden(one);\n${dir}forbidden(two);\n`);
+    commit('copy it');
+    const copied = cli('--raises', signedBase);
+    assert.equal(
+      copied.status,
+      1,
+      'review finding: a copy matched the original'
+    );
+    assert.match(copied.stderr, /G0-RAISE: T1 src\/a\.ts — <why>/);
+    sh(['reset', '-q', '--hard', signedBase]);
+    write('src/a.ts', `${dir}forbidden(somethingElse);\n`);
+    commit('move it');
+    assert.equal(
+      cli('--raises', signedBase).status,
+      1,
+      'moved onto a different call'
+    );
+  });
+
+  test("the gate's own pasted output, or an agent's trailer, is not a countersign", () => {
+    setUp();
+    initAndCommit();
+    const base = head();
+    write(
+      'baseline.json',
+      serializeBaseline({ T1: { 'src/pinned.ts': [K, K] } })
+    );
+    commit('raise');
+    const out = cli('--raises', base).stderr;
+    sh(['commit', '-q', '--allow-empty', '-m', 'fix ci', '-m', out]);
+    const pasted = cli('--raises', base);
+    assert.equal(
+      pasted.status,
+      1,
+      'review finding: the printed template counted as signed'
+    );
+    sh([
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'sign it\n\nG0-RAISE: T1 src/pinned.ts — hotfix first, extracted next\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>',
+    ]);
+    const agent = cli('--raises', base);
+    assert.equal(agent.status, 1, 'an agent cannot sign for itself');
+    assert.match(
+      agent.stderr,
+      /Trailers in agent commits \([0-9a-f]{9}\) were not counted/
+    );
+    assert.match(
+      agent.stderr,
+      /! git commit --allow-empty -m 'G0 countersign' -m 'G0-RAISE: T1 src\/pinned\.ts — <why>'/
+    );
+    sh([
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'owner\n\nG0-RAISE: T1 src/pinned.ts — hotfix first, extracted next',
+    ]);
+    assert.equal(cli('--raises', base).status, 0, 'the owner can');
+  });
+
+  test('a pnpm script a gate runs is part of the gate', () => {
+    setUp();
+    write(
+      'rules.mjs',
+      `${rulesModule(T1)}export const GATES = [{ id: 'G', title: 't', run: 'pnpm check:x' }];\n`
+    );
+    write(
+      'package.json',
+      JSON.stringify({
+        scripts: { 'check:x': 'biome check --error-on-warnings .', dev: 'x' },
+      })
+    );
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'gates']);
+    initAndCommit();
+    const base = head();
+    write(
+      'package.json',
+      JSON.stringify({
+        scripts: { 'check:x': 'biome check --error-on-warnings .', dev: 'y' },
+      })
+    );
+    commit('bump an unrelated script');
+    assert.equal(
+      cli('--raises', base).status,
+      0,
+      'an unrelated script is free'
+    );
+    write(
+      'package.json',
+      JSON.stringify({ scripts: { 'check:x': 'biome check .', dev: 'y' } })
+    );
+    commit('quieter biome');
+    const r = cli('--raises', base);
+    assert.equal(r.status, 1);
+    assert.match(
+      r.stderr,
+      /G0-RAISE: GATE package\.json#scripts\.check:x — <why>/
+    );
+  });
+
+  test('--lower --staged banks what the index holds, keeps the rest, and stages the baseline', () => {
+    setUp();
+    write('src/g.ts', 'forbidden();\n');
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'g']);
+    initAndCommit();
+    write('src/pinned.ts', 'ok();\n');
+    sh(['add', 'src/pinned.ts']);
+    write('src/g.ts', 'ok(); // work in progress, not staged\n');
+    const before = cli('--staged');
+    assert.equal(before.status, 1);
+    assert.match(
+      before.stderr,
+      /Bank the fix: pnpm check:arch --lower --staged/
+    );
+    const lowered = cli('--lower', '--staged');
+    assert.equal(lowered.status, 0, lowered.stderr);
+    assert.deepEqual(
+      readBaseline(),
+      { T1: { 'src/g.ts': [K] } },
+      'the unstaged fix is not banked'
+    );
+    assert.equal(cli('--staged').status, 0, 'the baseline was staged with it');
+  });
+
+  test('a rename carries its pin; --lower --staged moves it; no countersign is owed', () => {
+    setUp();
+    initAndCommit();
+    const base = head();
+    sh(['mv', 'src/pinned.ts', 'src/renamed.ts']);
+    const r = cli('--staged');
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /src\/renamed\.ts: renamed from src\/pinned\.ts/);
+    assert.doesNotMatch(
+      r.stderr,
+      /\[T1\][^\n]*\n {2}src\/renamed\.ts:1/,
+      'not reported as a new violation'
+    );
+    assert.equal(cli('--lower', '--staged').status, 0);
+    assert.deepEqual(readBaseline(), { T1: { 'src/renamed.ts': [K] } });
+    assert.equal(cli('--staged').status, 0);
+    sh(['commit', '-qm', 'rename']);
+    assert.equal(
+      cli('--raises', base).status,
+      0,
+      'moving a pin is not a raise'
+    );
+  });
+
+  test('--ci in a PR: a fix this change made blocks wherever it is; one dev left behind is a notice', () => {
+    setUp();
+    const L1 = `{ id: 'L1', title: 'Links resolve', why: 'fixture', fix: 'Fix the link.', scope: { include: ['docs/**/*.md'] }, match: { kind: 'md-link' } }`;
+    write('rules.mjs', rulesModule(T1, L1));
+    write('docs/x.md', '[guide](./guide.md)\n');
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'docs']);
+    initAndCommit();
+    const base = head();
+    write('docs/guide.md', '# Guide\n');
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'add the guide']);
+    const made = cliWith(prEnv(base), '--ci');
+    assert.equal(
+      made.status,
+      1,
+      'review finding: a fix from another file never had to be banked'
+    );
+    assert.match(made.stderr, /docs\/x\.md: fixed "\.\/guide\.md"/);
+    // The same fix, already on the base (left unbanked on dev), is someone else's.
+    const later = head();
+    write('docs/x.md', '[guide](./guide.md)\n\nMore words.\n');
+    commit('edit the doc');
+    const inherited = cliWith(prEnv(later), '--ci');
+    assert.equal(inherited.status, 0, inherited.stderr);
+    assert.match(inherited.stdout, /not yet banked/);
+  });
+
+  test('--staged refuses an untracked new gate module', () => {
+    setUp();
+    initAndCommit();
+    write('scripts/checks/architecture-new.mjs', 'export const x = 1;\n');
+    const r = cli('--staged');
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /architecture-new\.mjs/);
+  });
+
+  test('every include glob must match a file, unless the registry marks it optional', () => {
+    setUp();
+    const twoGlobs = T1.replace(
+      "['src/**/*.ts']",
+      "['src/**/*.ts', 'lib/**/*.ts']"
+    );
+    write('rules.mjs', rulesModule(twoGlobs));
+    const idle = cli();
+    assert.equal(idle.status, 2, 'review finding: one dead glob of two passed');
+    assert.match(idle.stderr, /T1 lib\/\*\*\/\*\.ts/);
+    write(
+      'rules.mjs',
+      rulesModule(
+        twoGlobs.replace('scope: {', "scope: { optional: ['lib/**/*.ts'],")
+      )
+    );
+    cli('--init');
+    assert.equal(cli().status, 0);
+  });
+
+  test('a broken gate module exits 2, not 1', () => {
+    setUp();
+    const here = dirname(RUNNER);
+    for (const f of [
+      'check-architecture.mjs',
+      'architecture-rules.mjs',
+      'architecture-matchers.mjs',
+      'architecture-lists.mjs',
+      'architecture-ignores.mjs',
+      'architecture-docs.mjs',
+      'architecture-raises.mjs',
+      'check-data-access-contract.mjs',
+    ]) {
+      write(`copy/${f}`, readFileSync(join(here, f), 'utf8'));
+    }
+    write(
+      'copy/architecture-rules.mjs',
+      `${readFileSync(join(here, 'architecture-rules.mjs'), 'utf8')}\n}\n`
+    );
+    const r = spawnSync(
+      process.execPath,
+      [join(repo, 'copy/check-architecture.mjs'), '--root', repo],
+      { encoding: 'utf8' }
+    );
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /could not load the gate's modules/);
+  });
+
+  test('a symlink reads the same at commit time and in a full run', () => {
+    setUp();
+    const SZ = `{ id: 'SZ', title: 'Small docs', why: 'fixture', fix: 'Split it.', scope: { include: ['docs/**/*.md'] }, match: { kind: 'line-count', newFileMax: 2 } }`;
+    write('rules.mjs', rulesModule(T1, SZ));
+    write('docs/big.md', 'a\nb\nc\n');
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'docs']);
+    initAndCommit();
+    symlinkSync('big.md', join(repo, 'docs/link.md'));
+    sh(['add', 'docs/link.md']);
+    const staged = cli('--staged');
+    sh(['commit', '-qm', 'link']);
+    const full = cli();
+    assert.equal(
+      staged.status,
+      full.status,
+      `${staged.stderr}\n${full.stderr}`
+    );
+    assert.equal(full.status, 0, 'a link has no text of its own');
   });
 });
 
@@ -1174,7 +1478,7 @@ describe('the registry rules', async () => {
     const step = (l) => `      - run: ${l}\n`;
     const yml = (body) => `jobs:\n  x:\n    steps:\n${body}`;
     const caller = (extra = '') =>
-      `jobs:\n  static:\n${extra}    uses: ./.github/workflows/static_analysis.yml\n`;
+      `on:\n  pull_request:\n  push:\njobs:\n  static:\n${extra}    uses: ./.github/workflows/static_analysis.yml\n`;
     const green = (over = {}) => ({
       '.github/workflows/static_analysis.yml': yml(steps.map(step).join('')),
       ...Object.fromEntries(CI_CALLERS.map((c) => [c, caller()])),
@@ -1231,7 +1535,7 @@ describe('the registry rules', async () => {
       .join('');
     assert.match(
       hits(withSteps(conditional)).join(),
-      /switched off by if:/,
+      /switched off or changed by if:/,
       'a step that runs only sometimes is not a gate'
     );
     assert.match(
@@ -1320,9 +1624,19 @@ describe('the registry rules', async () => {
       'multipart and binary uploads are routes too'
     );
     assert.equal(
-      fires("app.use(rateLimit({ preset: 'strict' }));\n", wrangler([])),
+      fires(
+        "app.use(rateLimit({ preset: 'strict', binding: c.env.RATE_LIMIT_STRICT }));\n",
+        wrangler([])
+      ),
       2,
-      'a direct rateLimit() middleware'
+      'a direct rateLimit() middleware needs the binding it passes'
+    );
+    assert.equal(
+      fires(
+        "app.use(rateLimit({ preset: 'api', binding: c.env.RATE_LIMIT_STRICT }));\n"
+      ),
+      1,
+      'review finding: a binding that differs from its preset fails, though both exist'
     );
     const durable = JSON.stringify({
       name: 'w',
@@ -1498,7 +1812,7 @@ describe('loosening needs a countersign', () => {
 
   test('swapping a pinned key for another is a raise, though the count holds', () => {
     assert.deepEqual(
-      raisedEntries(rules, before, { T1: { 'src/b.ts': ['banned('] } }).map(
+      raisedEntries(rules, before, { T1: { 'src/b.ts': [B] } }).map(
         (r) => r.file
       ),
       ['src/b.ts']
@@ -1528,7 +1842,7 @@ describe('loosening needs a countersign', () => {
 
   test('a new block for a new rule can be signed as a whole', () => {
     const raised = raisedEntries(rules, {}, { T1: { 'src/a.ts': [K] } });
-    assert.equal(raised[0].newBlock, true);
+    assert.equal(raised[0].newRule, true);
     const signed = parseCountersigns(
       'G0-RAISE: T1 * — the rule arrives with its debt\n'
     );
@@ -1572,6 +1886,517 @@ describe('loosening needs a countersign', () => {
         'G0-RAISE: T1 src/d.ts — <why>',
         'G0-RAISE: GATE scripts/checks/architecture-rules.mjs — <why>',
       ]
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 2 review fixes (G0, 2026-11-18)
+// ---------------------------------------------------------------------------
+
+describe('round 2: keys, commit time, renames and the base', () => {
+  test('a call key names its function, so a fix in one cannot pay for a call in another', () => {
+    // review finding: A1 pinned only "transfers.create(", so the pinned call
+    // could move to the ledger while a new direct one appeared elsewhere.
+    const pinned = 'payCreator>forbidden(';
+    const before = 'function payCreator() {\n  forbidden();\n}\n';
+    assert.deepEqual(
+      types(
+        run(
+          [CALL_RULE],
+          { 'src/a.ts': before },
+          { T1: { 'src/a.ts': [pinned] } }
+        ).problems
+      ),
+      []
+    );
+    const swapped =
+      'function payCreator() {\n  ledger.pay();\n}\nfunction sneaky() {\n  forbidden();\n}\n';
+    assert.deepEqual(
+      types(
+        run(
+          [CALL_RULE],
+          { 'src/a.ts': swapped },
+          { T1: { 'src/a.ts': [pinned] } }
+        ).problems
+      ),
+      ['more:T1:src/a.ts', 'remove:T1:src/a.ts']
+    );
+  });
+
+  test('the enclosing name survives a multi-line signature and destructured parameters', () => {
+    const text = [
+      'export class S {',
+      '  async drain(',
+      '    { creatorId }: Args,',
+      '    other: number',
+      '  ): Promise<{',
+      '    sent: number;',
+      '  }> {',
+      '    for (const x of xs) {',
+      '      try {',
+      '        await forbidden(x);',
+      '      } catch (e) {',
+      '        forbidden(e);',
+      '      }',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    const { hits } = MATCHERS.call.file(CALL_RULE, 'src/a.ts', text);
+    assert.deepEqual(
+      hits.map((h) => h.key),
+      ['drain>forbidden(', 'drain>forbidden(']
+    );
+  });
+
+  test('at commit time only the committed files exceptions are judged', () => {
+    // review finding: a whole-repo rule read an untouched file, whose valid
+    // exception then failed every commit as "doesn't apply to this file".
+    const reader = {
+      id: 'W1',
+      title: 'Reads every file',
+      why: 'fixture',
+      fix: 'n/a',
+      scope: { include: ['src/**/*.ts'] },
+      match: {
+        kind: 'lists-agree',
+        need: (source) => {
+          source.read('src/old.ts');
+          return [];
+        },
+        have: () => new Map(),
+      },
+    };
+    const tree = {
+      'src/a.ts': 'ok();\n',
+      'src/old.ts': `// ${IGNORE} T1 until=2026-12-01 by=bruce — the drain moves next\nforbidden();\n`,
+    };
+    const source = memorySource(tree, { changed: ['src/a.ts'] });
+    const rules = [CALL_RULE, reader];
+    const problems = compare(
+      rules,
+      collect(rules, source),
+      { T1: {} },
+      source,
+      {
+        today: '2026-11-17',
+      }
+    );
+    assert.deepEqual(problems, []);
+  });
+
+  test('a pin for a rule that allows no baseline fails, and --init never writes one', () => {
+    const strict = { ...CALL_RULE, baseline: false, exceptions: false };
+    const tree = { 'src/a.ts': 'forbidden();\n' };
+    assert.deepEqual(
+      types(run([strict], tree, { T1: { 'src/a.ts': [K] } }).problems),
+      ['unpinnable:T1:src/a.ts']
+    );
+    const { results } = run([strict], tree, {});
+    assert.deepEqual(initialBaseline([strict], results), {});
+  });
+
+  test('--lower copies a malformed pin through instead of guessing, and keeps untouched files at commit time', () => {
+    const tree = { 'src/a.ts': 'forbidden();\nforbidden();\nforbidden();\n' };
+    for (const bad of [-1, '3', null]) {
+      const baseline = { T1: { 'src/a.ts': bad } };
+      const { results } = run([CALL_RULE], tree, baseline);
+      assert.deepEqual(
+        lowerBaseline([CALL_RULE], results, baseline),
+        baseline,
+        `pin ${bad}`
+      );
+    }
+    const source = memorySource(
+      { 'src/a.ts': 'ok();\n', 'src/b.ts': 'ok();\n' },
+      { changed: ['src/a.ts'] }
+    );
+    const baseline = { T1: { 'src/a.ts': [K], 'src/b.ts': [K] } };
+    const results = collect([CALL_RULE], source);
+    assert.deepEqual(lowerBaseline([CALL_RULE], results, baseline, source), {
+      T1: { 'src/b.ts': [K] },
+    });
+  });
+
+  test('a renamed file carries its pin: one "moved" problem, no new or stale one', () => {
+    const tree = { 'src/new.ts': 'forbidden();\n' };
+    const source = memorySource(tree, {
+      changed: ['src/new.ts'],
+      deleted: ['src/old.ts'],
+      renames: { 'src/new.ts': 'src/old.ts' },
+    });
+    const baseline = { T1: { 'src/old.ts': [K] } };
+    const results = collect([CALL_RULE], source);
+    const problems = compare([CALL_RULE], results, baseline, source);
+    assert.deepEqual(types(problems), ['moved:T1:src/new.ts']);
+    assert.deepEqual(lowerBaseline([CALL_RULE], results, baseline, source), {
+      T1: { 'src/new.ts': [K] },
+    });
+  });
+
+  test('a CRLF file keeps its exceptions, and a cite hit is counted per citation', () => {
+    const crlf = `// ${IGNORE} T1 until=2026-12-01 by=bruce — the drain moves next\r\nforbidden();\r\n`;
+    const source = memorySource({ 'src/a.ts': crlf });
+    assert.deepEqual(
+      compare([CALL_RULE], collect([CALL_RULE], source), {}, source, {
+        today: '2026-11-17',
+      }),
+      []
+    );
+    const cite = {
+      ...CALL_RULE,
+      id: 'C1',
+      scope: { include: ['**/*.md'] },
+      match: { kind: 'cite', text: 'BAD/' },
+    };
+    const { hits } = MATCHERS.cite.file(
+      cite,
+      'd.md',
+      'see BAD/a.md and BAD/b.md\n'
+    );
+    assert.deepEqual(
+      hits.map((h) => h.key),
+      ['BAD/a.md', 'BAD/b.md']
+    );
+  });
+
+  test('judged at the base: only a fix this change made blocks', () => {
+    const judge = (headTree, baseTree, baseline, rules = [CALL_RULE]) => {
+      const source = memorySource(headTree);
+      const problems = compare(
+        rules,
+        collect(rules, source),
+        baseline,
+        source,
+        {
+          bankFails: () => false,
+        }
+      );
+      judgeFixesAtBase(rules, problems, {
+        baseSource: memorySource(baseTree),
+        baseBaseline: baseline,
+      });
+      return problems.map((p) => `${p.type}:${p.blocking}`);
+    };
+    const pins = { T1: { 'src/a.ts': [K] } };
+    assert.deepEqual(
+      judge({ 'src/a.ts': 'ok();\n' }, { 'src/a.ts': 'forbidden();\n' }, pins),
+      ['remove:true'],
+      'fixed by this change'
+    );
+    assert.deepEqual(
+      judge({ 'src/a.ts': 'ok();\n' }, { 'src/a.ts': 'ok();\n' }, pins),
+      ['remove:false'],
+      'already fixed, unbanked, at the base'
+    );
+    const size = { 'T-SIZE': { 'src/big.ts': 5 } };
+    assert.deepEqual(
+      judge(
+        { 'src/big.ts': 'a\nb\nc\nd\n' },
+        { 'src/big.ts': 'a\nb\nc\nd\ne\n' },
+        size,
+        [SIZE_RULE]
+      ),
+      ['fewer:true']
+    );
+    assert.deepEqual(
+      judge(
+        { 'src/big.ts': 'a\nb\nc\nd\n' },
+        { 'src/big.ts': 'a\nb\nc\nd\n' },
+        size,
+        [SIZE_RULE]
+      ),
+      ['fewer:false']
+    );
+  });
+});
+
+describe('round 2: countersigns', () => {
+  const rules = [CALL_RULE, SIZE_RULE];
+
+  test('the printed template, pasted back, is not a countersign', () => {
+    assert.equal(
+      parseCountersigns(
+        'G0-RAISE: T1 src/a.ts — <why>    (T1 src/a.ts: allows "x" more)\n'
+      ).size,
+      0
+    );
+  });
+
+  test('a renamed pin is not a raise; RULE * signs only a rule the base lacked', () => {
+    const renames = new Map([['src/new.ts', 'src/old.ts']]);
+    assert.deepEqual(
+      raisedEntries(
+        rules,
+        { T1: { 'src/old.ts': [K] } },
+        { T1: { 'src/new.ts': [K] } },
+        { renames }
+      ),
+      []
+    );
+    // T1 existed at the base with no debt: its first pin is per file.
+    const raised = raisedEntries(
+      rules,
+      {},
+      { T1: { 'src/a.ts': [K] } },
+      {
+        baseRuleIds: new Set(['T1']),
+      }
+    );
+    assert.equal(raised[0].newRule, false);
+    assert.deepEqual(
+      missingCountersigns({
+        raised,
+        exceptions: [],
+        gateChanges: [],
+        signed: parseCountersigns(
+          'G0-RAISE: T1 * — the rule arrives with its debt\n'
+        ),
+      }).map((m) => m.line),
+      ['G0-RAISE: T1 src/a.ts — <why>']
+    );
+  });
+
+  test('a calling workflow is part of the gate only where the gate depends on it', () => {
+    const wf = '.github/workflows/static_analysis.yml';
+    const caller = (e2eRunner, trigger = 'pull_request') =>
+      `name: T\non:\n  ${trigger}:\n  push:\n\njobs:\n  static-analysis:\n    uses: ./${wf}\n\n  e2e:\n    runs-on: ${e2eRunner}\n    steps:\n      - run: pnpm test\n`;
+    assert.equal(
+      callerPrint(caller('ubuntu-22.04'), wf),
+      callerPrint(caller('ubuntu-24.04'), wf)
+    );
+    assert.notEqual(
+      callerPrint(caller('ubuntu-22.04'), wf),
+      callerPrint(caller('ubuntu-22.04', 'workflow_dispatch'), wf)
+    );
+    assert.notEqual(
+      callerPrint(caller('x'), wf),
+      callerPrint(
+        caller('x').replace(`uses: ./${wf}`, `if: false\n    uses: ./${wf}`),
+        wf
+      )
+    );
+  });
+
+  test('ciBase knows its events and stops on any other', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'arch-event-'));
+    try {
+      const event = (payload) => {
+        const path = join(dir, `${Math.random()}.json`);
+        writeFileSync(path, JSON.stringify(payload));
+        return path;
+      };
+      assert.throws(
+        () =>
+          ciBase(dir, {
+            GITHUB_EVENT_NAME: 'workflow_dispatch',
+            GITHUB_EVENT_PATH: event({}),
+          }),
+        /not one the gate knows how to judge/
+      );
+      assert.deepEqual(
+        ciBase(dir, {
+          GITHUB_EVENT_NAME: 'merge_group',
+          GITHUB_EVENT_PATH: event({ merge_group: { base_sha: 'abc' } }),
+        }),
+        { kind: 'pr', base: 'abc' }
+      );
+      assert.equal(
+        ciBase(dir, {
+          GITHUB_EVENT_NAME: 'push',
+          GITHUB_REF: 'refs/heads/dev',
+          GITHUB_EVENT_PATH: event({ before: '0000000000' }),
+        }).base,
+        null
+      );
+      assert.throws(
+        () =>
+          ciBase(dir, {
+            GITHUB_EVENT_NAME: 'push',
+            GITHUB_REF: 'refs/heads/main',
+            GITHUB_EVENT_PATH: event({}),
+          }),
+        /names no "before"/
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('round 2: the registry rules', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const byId = (id) => RULES.find((r) => r.id === id);
+  const newProblems = (rule, tree) =>
+    run([rule], tree, {}).problems.filter((p) => p.type === 'new');
+
+  test('A1 sees optional chaining and a call split across lines', () => {
+    const a1 = byId('A1');
+    for (const code of [
+      'await stripe.transfers?.create({ amount });\n',
+      'await stripe\n  .transfers\n  .create({ amount });\n',
+      'await stripe.transfers.createReversal(id);\n',
+    ]) {
+      assert.equal(
+        newProblems(a1, { 'packages/purchase/src/x.ts': code }).length,
+        1,
+        code
+      );
+    }
+  });
+
+  test('DOC-INDEX: a link to the index folder itself lists nothing', () => {
+    const rule = byId('DOC-INDEX');
+    assert.equal(
+      newProblems(rule, {
+        'docs/README.md': '- [All docs](./)\n- [Up](../)\n',
+        'docs/probe/orphan.md': '',
+      }).length,
+      1
+    );
+  });
+
+  test('RATE-LIMIT-BINDING fails what it cannot read, and follows what it can', () => {
+    const rule = byId('RATE-LIMIT-BINDING');
+    const fires = (route, bindings = ['RATE_LIMIT_API']) =>
+      newProblems(rule, {
+        'packages/constants/src/limits.ts': limitsTs,
+        'workers/w/wrangler.jsonc': wrangler(bindings),
+        'workers/w/src/routes.ts': route,
+      }).reduce((n, p) => n + p.found, 0);
+    for (const [route, why] of [
+      [
+        "procedure({ policy: { auth: 'required', ...strictPolicy } });\n",
+        'a spread in the policy',
+      ],
+      ['procedure({ ...strictWrite, handler });\n', 'a spread of the options'],
+      [
+        "procedure<Body>({ policy: { rateLimit: 'strict' } });\n",
+        'type arguments',
+      ],
+      ['const route = procedure;\n', 'a stored reference'],
+    ]) {
+      assert.equal(fires(route), 1, `${why} is unreadable, so it fails`);
+    }
+    assert.equal(
+      fires(
+        "import * as wu from '@codex/worker-utils';\nwu.procedure({ policy: { rateLimit: 'streaming' } });\n"
+      ),
+      2,
+      'a call through a namespace import is read'
+    );
+    assert.equal(
+      fires('procedure({ policy: { auth: AUTH_ROLES.PLATFORM_OWNER } });\n'),
+      0,
+      'an AUTH_ROLES member is never the worker role: it needs api, which exists'
+    );
+    assert.equal(
+      fires(
+        "procedure({ handler: async () => ({ policy: { auth: 'worker' } }), policy: { rateLimit: 'strict' } });\n"
+      ),
+      2,
+      'only the top-level policy decides, never one inside the handler'
+    );
+    assert.equal(
+      fires("procedure({ policy: { rateLimit: 'api' } });\n", [
+        'RATE_LIMIT_API',
+      ]).toString(),
+      '0'
+    );
+    const routeless = newProblems(rule, {
+      'packages/constants/src/limits.ts': limitsTs,
+      'workers/w/wrangler.jsonc': wrangler(['RATE_LIMIT_API']),
+      'workers/w/lib/routes.ts':
+        "procedure({ policy: { rateLimit: 'strict' } });\n",
+    });
+    assert.match(
+      routeless.flatMap((p) => p.hits.map((h) => h.text)).join(),
+      /route files under workers\/w\/src\//,
+      'a worker whose routes left src/ checks nothing, so it fails'
+    );
+  });
+
+  test('CI-GATES: a job-level switch, a spaced key, a shell or a waiting caller turns a gate off', async () => {
+    const rule = byId('CI-GATES');
+    const { GATES, CI_SETUP_STEPS, CI_CALLERS } = await import(
+      './architecture-rules.mjs'
+    );
+    const { gateCommands } = await import('./architecture-lists.mjs');
+    const commands = GATES.flatMap(gateCommands);
+    const webScripts = commands
+      .map((c) => /^pnpm --filter web run (\S+)$/.exec(c)?.[1])
+      .filter(Boolean);
+    const steps = [...CI_SETUP_STEPS, ...commands]
+      .map((c) => `      - name: s\n        run: ${c}\n`)
+      .join('');
+    const caller = (extra = '') =>
+      `on:\n  pull_request:\njobs:\n  static:\n${extra}    uses: ./.github/workflows/static_analysis.yml\n`;
+    const tree = (workflow, callerText = caller()) => ({
+      '.github/workflows/static_analysis.yml': workflow,
+      ...Object.fromEntries(CI_CALLERS.map((c) => [c, callerText])),
+      'package.json': JSON.stringify({
+        scripts: { 'check:ci': 'x', typecheck: 'x' },
+      }),
+      'apps/web/package.json': JSON.stringify({
+        name: 'web',
+        scripts: Object.fromEntries(webScripts.map((s) => [s, 'x'])),
+      }),
+    });
+    const hits = (t) =>
+      newProblems(rule, t)
+        .flatMap((p) => p.hits.map((h) => h.text))
+        .join('\n');
+    const job = (keys) =>
+      `jobs:\n  x:\n    runs-on: ubuntu-latest\n${keys}    steps:\n${steps}`;
+    assert.equal(hits(tree(job(''))), '', 'the green tree');
+    assert.match(
+      hits(tree(job('    if: false\n'))),
+      /changed by the job's if:/
+    );
+    assert.match(
+      hits(tree(job('    continue-on-error: true\n'))),
+      /changed by the job's continue-on-error:/
+    );
+    assert.match(
+      hits(tree(`defaults:\n  run:\n    shell: true {0}\n${job('')}`)),
+      /the workflow defaults:/
+    );
+    assert.match(
+      hits(
+        tree(
+          job('').replace(
+            'run: pnpm check:ci',
+            'if : false\n        run: pnpm check:ci'
+          )
+        )
+      ),
+      /pnpm check:ci \(switched off or changed by if:\)/,
+      'review finding: "if :" with a space is still an if'
+    );
+    assert.match(
+      hits(
+        tree(
+          job('').replace(
+            'run: pnpm check:ci',
+            'shell: true {0}\n        run: pnpm check:ci'
+          )
+        )
+      ),
+      /changed by shell:/
+    );
+    assert.match(
+      hits(tree(job(''), caller('    needs: [setup]\n'))),
+      /no if: or needs:/
+    );
+    assert.match(
+      hits(
+        tree(
+          job(''),
+          'on:\n  push:\njobs:\n  static:\n    uses: ./.github/workflows/static_analysis.yml\n'
+        )
+      ),
+      /on pull_request is missing/
     );
   });
 });

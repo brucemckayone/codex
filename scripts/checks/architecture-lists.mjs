@@ -12,11 +12,13 @@
  * EVERY environment of that worker's wrangler.jsonc, because wrangler does not
  * inherit `ratelimits` or Durable Object bindings into `env.*` blocks.
  *
- * Known limit: a `rateLimit` written as a function or a variable can't be
- * resolved statically and is skipped, not guessed.
+ * What the rule can't read statically (a spread that could carry a policy, a
+ * non-literal preset, an aliased or namespaced factory it can't follow, type
+ * arguments) is a violation, never a guess. An exception can cover a
+ * genuinely dynamic one.
  */
 
-import { lineIndex } from './architecture-matchers.mjs';
+import { lineIndex, maskStrings } from './architecture-matchers.mjs';
 import { tokenize } from './check-data-access-contract.mjs';
 
 export const PRESETS_FILE = 'packages/constants/src/limits.ts';
@@ -81,7 +83,9 @@ function environments(config) {
 /**
  * Every call that enforces a rate limit: the three route factories, which
  * apply `policy.rateLimit` (an omitted one means `api`), and the `rateLimit()`
- * middleware called directly with a `preset`.
+ * middleware called directly, which enforces with the binding it is GIVEN. A
+ * call through a namespace import (`import * as wu from '@codex/worker-utils'`,
+ * then `wu.procedure(`) counts too.
  */
 const ROUTE_FACTORIES = [
   'procedure',
@@ -89,72 +93,175 @@ const ROUTE_FACTORIES = [
   'binaryUploadProcedure',
 ];
 const LIMITERS = [...ROUTE_FACTORIES, 'rateLimit'];
-const CALL = new RegExp(`(?<![\\w.$])(${LIMITERS.join('|')})\\(`, 'g');
-const ALIASED = new RegExp(`\\b(?:${LIMITERS.join('|')})\\s+as\\s+\\w+`);
+const NAMES = LIMITERS.join('|');
+const LIMITER_MODULE = /^@codex\/(?:worker-utils|security)(?:\/[\w/-]+)?$/;
 
-/** The index of the bracket that closes the one at `open`. */
-function closing(code, open) {
-  const pair = { '(': ')', '{': '}' };
-  const close = pair[code[open]];
-  let depth = 0;
-  for (let i = open; i < code.length; i++) {
-    if (code[i] === code[open]) depth += 1;
-    else if (code[i] === close) {
-      depth -= 1;
-      if (depth === 0) return i;
+/** A renamed import, or a stored reference, hides its calls from this rule. */
+const ALIASED = new RegExp(
+  `\\b(?:${NAMES})\\s+as\\s+[\\w$]+|\\b(?:const|let|var)\\s+[\\w$]+\\s*=\\s*(?:[\\w$]+\\s*\\.\\s*)?(?:${NAMES})\\b(?!\\s*[(<])`
+);
+
+/** The index of the bracket that closes the one at `open`, in masked text. */
+function closing(text, open) {
+  const pairs = { '(': ')', '{': '}', '[': ']' };
+  const stack = [];
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i];
+    if (pairs[ch]) stack.push(pairs[ch]);
+    else if (ch === stack[stack.length - 1]) {
+      stack.pop();
+      if (stack.length === 0) return i;
     }
   }
-  return code.length - 1;
+  return text.length - 1;
+}
+
+/**
+ * The top-level entries of the object literal whose `{` is at `open`: a
+ * spread, a shorthand (or method), or `key: value` with the value's span.
+ */
+function objectEntries(masked, open) {
+  const close = closing(masked, open);
+  const entries = [];
+  const push = (from, to) => {
+    const raw = masked.slice(from, to);
+    const text = raw.trim();
+    if (!text) return;
+    const at = from + raw.indexOf(text);
+    if (text.startsWith('...')) {
+      entries.push({ spread: true });
+      return;
+    }
+    const m = /^(?:([\w$]+)|(['"])([\w$-]+)\2)\s*(:)?/.exec(text);
+    if (!m) {
+      entries.push({ unreadable: true });
+      return;
+    }
+    const key = m[1] ?? m[3];
+    if (!m[4]) {
+      entries.push({ key, shorthand: true });
+      return;
+    }
+    const valueAt = at + m[0].length;
+    const lead = masked.slice(valueAt, to);
+    entries.push({
+      key,
+      start: valueAt + (lead.length - lead.trimStart().length),
+      end: to,
+    });
+  };
+  let depth = 0;
+  let from = open + 1;
+  for (let i = open + 1; i < close; i++) {
+    const ch = masked[i];
+    if (ch === '(' || ch === '{' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === '}' || ch === ']') depth -= 1;
+    else if (ch === ',' && depth === 0) {
+      push(from, i);
+      from = i + 1;
+    }
+  }
+  push(from, close);
+  return entries;
 }
 
 /** A string literal's value, if `text` starts with one and it has no interpolation. */
 const literal = (text) =>
-  /^(['"`])([a-z-]+)\1/.exec(text.trimStart())?.[2] ?? null;
+  /^(['"`])([\w-]+)\1/.exec(text.trimStart())?.[2] ?? null;
+
+/** `c.env.X`, `env.X` or a bare `X`: the binding a value names, if it names one. */
+const bindingName = (text) =>
+  /^(?:[\w$]+\s*\.\s*)*env\s*\.\s*([A-Z][A-Z0-9_]*)\s*$/.exec(text)?.[1] ??
+  /^([A-Z][A-Z0-9_]*)\s*$/.exec(text)?.[1] ??
+  null;
 
 /**
- * What a call resolves to: `{ preset }`, `{ exempt: true }` (a worker-to-worker
- * route), or `{ unknown }` with the reason it can't be read. Only the call's
- * `policy` object is read, never its handler, so an `auth: 'worker'` inside a
- * handler can't exempt the route. A policy or preset the code can't read
- * statically is a violation, not a guess: an exception can cover a genuinely
- * dynamic one.
+ * What a call resolves to: `{ preset }` (a route factory), `{ preset, binding }`
+ * (a direct `rateLimit()`), `{ exempt: true }` (a worker-to-worker route), or
+ * `{ unknown }` with the reason it can't be read. Only the options object's
+ * top level, and the `policy` object's top level, are read: a key inside the
+ * handler, or a spread that could carry a policy, never decides. What this
+ * can't read is a violation, never a guess; an exception can cover a
+ * genuinely dynamic one.
  */
-function resolveLimit(callee, args) {
-  if (callee === 'rateLimit') {
-    const at = /\bpreset\s*:/.exec(args);
-    if (!at) return { unknown: 'rateLimit() names no preset' };
-    const preset = literal(args.slice(at.index + at[0].length));
-    return preset
-      ? { preset }
-      : { unknown: 'rateLimit() preset is not a literal' };
+function resolveLimit(callee, code, masked, open) {
+  const first = masked.slice(open + 1).search(/\S/);
+  const brace = open + 1 + first;
+  if (first === -1 || masked[brace] !== '{') {
+    return { unknown: `${callee}() options are not an object literal` };
   }
-  const key = /[{,]\s*policy\s*(?=[:,}])/.exec(args);
-  if (!key) return { preset: DEFAULT_PRESET };
-  let rest = args.slice(key.index + key[0].length);
-  if (!rest.startsWith(':'))
+  const value = (entry) => code.slice(entry.start, entry.end).trim();
+  const entries = objectEntries(masked, brace);
+  if (entries.some((e) => e.spread || e.unreadable)) {
+    return {
+      unknown: `${callee}() options contain a spread or computed key, which can carry a rate limit`,
+    };
+  }
+  const get = (list, key) => list.find((e) => e.key === key);
+  if (callee === 'rateLimit') {
+    const preset = get(entries, 'preset');
+    const name = preset && !preset.shorthand ? literal(value(preset)) : null;
+    if (!name) return { unknown: 'rateLimit() preset is not a literal' };
+    const store = get(entries, 'binding') ?? get(entries, 'namespace');
+    const binding =
+      store && !store.shorthand ? bindingName(value(store)) : null;
+    if (!binding) {
+      return {
+        unknown: 'rateLimit() names no binding or namespace the gate can read',
+      };
+    }
+    return { preset: name, binding };
+  }
+  const policy = get(entries, 'policy');
+  if (!policy) return { preset: DEFAULT_PRESET };
+  if (policy.shorthand) {
     return { unknown: `${callee}() policy is a shorthand variable` };
-  rest = rest.slice(1).trimStart();
-  if (!rest.startsWith('{'))
+  }
+  if (masked[policy.start] !== '{') {
     return { unknown: `${callee}() policy is not an object literal` };
-  const policy = rest.slice(0, closing(rest, 0) + 1);
-  if (/\bauth\s*:\s*['"`]worker['"`]/.test(policy)) return { exempt: true };
-  const limit = /\brateLimit\s*:/.exec(policy);
+  }
+  const rules = objectEntries(masked, policy.start);
+  if (rules.some((e) => e.spread || e.unreadable)) {
+    return { unknown: `${callee}() policy contains a spread or computed key` };
+  }
+  const auth = get(rules, 'auth');
+  if (auth) {
+    const text = auth.shorthand ? '' : value(auth);
+    const kind = literal(text);
+    // AUTH_ROLES (@codex/constants) has no worker role, so a route that names
+    // one of its members is never the exempt worker-to-worker kind.
+    if (!kind && !/^AUTH_ROLES\s*\.\s*[A-Z_]+$/.test(text)) {
+      return { unknown: `${callee}() policy auth is not a literal` };
+    }
+    if (kind === 'worker') return { exempt: true };
+  }
+  const limit = get(rules, 'rateLimit');
   if (!limit) return { preset: DEFAULT_PRESET };
-  const preset = literal(policy.slice(limit.index + limit[0].length));
+  const preset = limit.shorthand ? null : literal(value(limit));
   return preset
     ? { preset }
     : { unknown: `${callee}() rateLimit is not a literal` };
 }
 
-/** Every rate-limiting call in comment-blanked code, with its argument text. */
-function limiterCalls(code) {
+/** Every rate-limiting call in comment-blanked code. */
+function limiterCalls(code, masked) {
+  const namespaces = [];
+  for (const m of code.matchAll(
+    /\bimport\s*\*\s*as\s+([\w$]+)\s+from\s*(['"])([^'"]+)\2/g
+  )) {
+    if (LIMITER_MODULE.test(m[3])) namespaces.push(m[1]);
+  }
+  const receiver = namespaces.length
+    ? `(?:(?:${namespaces.join('|')})\\s*\\.\\s*)?`
+    : '';
+  const call = new RegExp(`(?<![\\w$.])${receiver}(${NAMES})\\s*([(<])`, 'g');
   const calls = [];
-  for (const m of code.matchAll(CALL)) {
-    const open = m.index + m[0].length - 1;
+  for (const m of masked.matchAll(call)) {
     calls.push({
       callee: m[1],
       index: m.index,
-      args: code.slice(open, closing(code, open) + 1),
+      typeArgs: m[2] === '<',
+      open: m.index + m[0].length - 1,
     });
   }
   return calls;
@@ -165,26 +272,46 @@ const workerOf = (file) => file.split('/').slice(0, 2).join('/');
 const wranglerFiles = (subjects) =>
   subjects.filter((f) => /^workers\/[^/]+\/wrangler\.jsonc$/.test(f));
 
+const isRouteFile = (file) => /^workers\/[^/]+\/src\/.*\.ts$/.test(file);
+
 export const rateLimitBindings = {
   need(source, subjects) {
     // Read only when a route needs it, so a tree with no routes needs no limits.ts.
     let presets;
     const envsOf = new Map();
+    const needs = [];
     for (const file of wranglerFiles(subjects)) {
+      const worker = workerOf(file);
       envsOf.set(
-        workerOf(file),
+        worker,
         environments(parseJsonc(source.read(file))).map(([name]) => name)
       );
+      // A worker whose routes moved out of src/ would otherwise check nothing.
+      if (!subjects.some((f) => isRouteFile(f) && workerOf(f) === worker)) {
+        needs.push({
+          group: worker,
+          item: `route files under ${worker}/src/`,
+          file,
+          line: 1,
+          text: 'this worker has a wrangler.jsonc',
+        });
+      }
     }
-    const needs = [];
     const seen = new Set();
     for (const file of subjects) {
-      if (!/^workers\/[^/]+\/src\/.*\.ts$/.test(file)) continue;
+      if (!isRouteFile(file)) continue;
       const text = source.read(file);
       const { code } = tokenize(text);
+      const masked = maskStrings(code);
       const { lineOf } = lineIndex(text);
       const worker = workerOf(file);
-      const unknown = (line, why) => {
+      const add = (line, item, why) => {
+        const seenKey = `${file}\0${item}`;
+        if (seen.has(seenKey)) return;
+        seen.add(seenKey);
+        needs.push({ group: worker, item, file, line, text: why });
+      };
+      const unknown = (line, why) =>
         needs.push({
           group: worker,
           item: 'a rate limit the gate can read',
@@ -192,36 +319,42 @@ export const rateLimitBindings = {
           line,
           text: why,
         });
-      };
-      const alias = ALIASED.exec(code);
-      if (alias)
+      const alias = ALIASED.exec(masked);
+      if (alias) {
         unknown(
           lineOf(alias.index),
-          `"${alias[0]}" hides its calls from this rule`
+          `"${alias[0].replace(/\s+/g, ' ')}" hides its calls from this rule`
         );
-      for (const call of limiterCalls(code)) {
-        const limit = resolveLimit(call.callee, call.args);
-        if (limit.exempt) continue;
+      }
+      for (const call of limiterCalls(code, masked)) {
         const line = lineOf(call.index);
+        if (call.typeArgs) {
+          unknown(
+            line,
+            `${call.callee}<…>() type arguments hide its options from this rule`
+          );
+          continue;
+        }
+        const limit = resolveLimit(call.callee, code, masked, call.open);
+        if (limit.exempt) continue;
         if (limit.unknown) {
           unknown(line, limit.unknown);
           continue;
         }
         presets ??= readPresetBindings(source);
+        const expected = presets.get(limit.preset);
         const binding =
-          presets.get(limit.preset) ?? `an unknown preset "${limit.preset}"`;
-        for (const env of envsOf.get(worker) ?? ['(no wrangler.jsonc)']) {
-          const item = `${binding} in ${env}`;
-          const seenKey = `${file}\0${item}`;
-          if (seen.has(seenKey)) continue;
-          seen.add(seenKey);
-          needs.push({
-            group: worker,
-            item,
-            file,
+          limit.binding ?? expected ?? `an unknown preset "${limit.preset}"`;
+        const why = `${call.callee}() uses rateLimit '${limit.preset}'`;
+        if (limit.binding && limit.binding !== expected) {
+          add(
             line,
-            text: `${call.callee}() uses rateLimit '${limit.preset}'`,
-          });
+            `rateLimit() binding ${limit.binding} matching its preset '${limit.preset}' (${expected ?? 'unknown'})`,
+            why
+          );
+        }
+        for (const env of envsOf.get(worker) ?? ['(no wrangler.jsonc)']) {
+          add(line, `${binding} in ${env}`, why);
         }
       }
     }
@@ -266,12 +399,21 @@ function workflowSteps(text) {
   let inSteps = false;
   let itemIndent = null;
   let current = null;
+  let job = null;
   const finish = () => {
     if (current) steps.push(current);
     current = null;
   };
-  text.split('\n').forEach((line, i) => {
-    if (/^\s*steps:\s*$/.test(line)) {
+  text.split('\n').forEach((raw, i) => {
+    const line = raw.replace(/\r$/, '');
+    const jobHead = /^ {2}([\w-]+)\s*:\s*$/.exec(line);
+    if (jobHead) {
+      finish();
+      inSteps = false;
+      job = jobHead[1];
+      return;
+    }
+    if (/^\s*steps\s*:\s*$/.test(line)) {
       finish();
       inSteps = true;
       itemIndent = null;
@@ -286,8 +428,9 @@ function workflowSteps(text) {
       itemIndent = indent;
       current = {
         line: i + 1,
+        job,
         run: null,
-        conditional: false,
+        conditional: null,
         unreadable: null,
       };
       readKey(current, item[2], i + 1);
@@ -303,8 +446,21 @@ function workflowSteps(text) {
       readKey(current, line.trim(), i + 1);
   });
   finish();
+  // A job-level switch, or a workflow-wide `defaults:`, turns off every step.
+  const jobKeys = jobs(text);
+  const workflowDefaults = /^defaults\s*:/m.test(text);
+  for (const step of steps) {
+    const off = (jobKeys.get(step.job) ?? []).find((k) =>
+      /^(?:if|continue-on-error|defaults)\s*:/.test(k)
+    );
+    if (off) step.conditional ??= `the job's ${off.split(':')[0].trim()}:`;
+    if (workflowDefaults) step.conditional ??= 'the workflow defaults:';
+  }
   return steps;
 }
+
+/** Step keys that switch a step off, or change what its run: line does. */
+const STEP_SWITCHES = ['if', 'continue-on-error', 'shell', 'working-directory'];
 
 function readKey(step, text, line) {
   if (text.startsWith('{')) {
@@ -315,9 +471,9 @@ function readKey(step, text, line) {
     step.unreadable = 'a step with a quoted key';
     return;
   }
-  const m = /^([\w-]+):\s*(.*?)\s*$/.exec(text);
+  const m = /^([\w-]+)\s*:\s*(.*?)\s*$/.exec(text);
   if (!m) return;
-  if (m[1] === 'if' || m[1] === 'continue-on-error') step.conditional = true;
+  if (STEP_SWITCHES.includes(m[1])) step.conditional ??= `${m[1]}:`;
   if (m[1] === 'run') {
     const command = m[2].replace(/^(['"])(.*)\1$/, '$2');
     if (/^[|>][-+]?$/.test(command)) step.unreadable = 'a multi-line run block';
@@ -332,7 +488,7 @@ function readKey(step, text, line) {
 export const gateCommands = (gate) => [gate.selfTest, gate.run].filter(Boolean);
 
 /** `pnpm [--filter <pkg>] [run] <script>`: the package and script a command needs. */
-function pnpmScript(command) {
+export function pnpmScript(command) {
   const filtered = /^pnpm --filter (\S+) run (\S+)$/.exec(command);
   if (filtered) return { pkg: filtered[1], script: filtered[2] };
   const root = /^pnpm (?:run )?([\w:-]+)$/.exec(command);
@@ -347,13 +503,14 @@ function jobs(text) {
   const out = new Map();
   let name = null;
   let inJobs = false;
-  for (const line of text.split('\n')) {
-    if (/^jobs:\s*$/.test(line)) {
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (/^jobs\s*:\s*$/.test(line)) {
       inJobs = true;
       continue;
     }
     if (!inJobs) continue;
-    const job = /^ {2}([\w-]+):\s*$/.exec(line);
+    const job = /^ {2}([\w-]+)\s*:\s*$/.exec(line);
     if (job) {
       name = job[1];
       out.set(name, []);
@@ -377,18 +534,28 @@ export function ciGateLists({
   };
   const stepsIn = (source) =>
     source.has(workflow) ? workflowSteps(source.read(workflow)) : [];
+  // A caller job that is conditional, or waits on another job, can be skipped,
+  // and a skipped required job reports Success.
   const callerOk = (source, caller) => {
     if (!source.has(caller)) return false;
     for (const keys of jobs(source.read(caller)).values()) {
-      if (
-        keys.includes(`uses: ./${workflow}`) &&
-        !keys.some((k) => /^if:/.test(k))
-      ) {
-        return true;
-      }
+      const uses = keys.some((k) =>
+        new RegExp(
+          `^uses\\s*:\\s*(['"]?)\\./${workflow.replace(/[.]/g, '\\.')}\\1\\s*$`
+        ).test(k)
+      );
+      if (uses && !keys.some((k) => /^(?:if|needs)\s*:/.test(k))) return true;
     }
     return false;
   };
+  const onPullRequest = (source) =>
+    callers.some((caller) => {
+      if (!source.has(caller)) return false;
+      const on = /^on\s*:(.*)\n((?:[ \t]+.*\n|\s*\n)*)/m.exec(
+        source.read(caller).replace(/\r/g, '')
+      );
+      return Boolean(on && /\bpull_request\b(?!_)/.test(on[1] + on[2]));
+    });
   const scriptsOf = (source) => {
     const scripts = new Set();
     for (const file of source.files) {
@@ -440,7 +607,7 @@ export function ciGateLists({
         if (step.unreadable)
           item = `(${step.unreadable}: write gate steps as block mappings with a plain run: line)`;
         else if (step.run && step.conditional)
-          item = `${step.run} (switched off by if: or continue-on-error)`;
+          item = `${step.run} (switched off or changed by ${step.conditional})`;
         else if (step.run) item = step.run;
         if (item) {
           needs.push({
@@ -452,10 +619,17 @@ export function ciGateLists({
           });
         }
       }
+      needs.push({
+        group: 'callers',
+        item: `a calling workflow runs ${workflow} on pull_request`,
+        file: callers[0],
+        line: 1,
+        text: 'the static-analysis job must gate pull requests',
+      });
       for (const caller of callers) {
         needs.push({
           group: 'callers',
-          item: `${caller} runs ${workflow} from a job with no if:`,
+          item: `${caller} runs ${workflow} from a job with no if: or needs:`,
           file: caller,
           line: 1,
           text: 'the static-analysis job must always run',
@@ -483,11 +657,17 @@ export function ciGateLists({
           'callers',
           {
             file: 'the calling workflows',
-            items: new Set(
-              callers
+            items: new Set([
+              ...callers
                 .filter((c) => callerOk(source, c))
-                .map((c) => `${c} runs ${workflow} from a job with no if:`)
-            ),
+                .map(
+                  (c) =>
+                    `${c} runs ${workflow} from a job with no if: or needs:`
+                ),
+              ...(onPullRequest(source)
+                ? [`a calling workflow runs ${workflow} on pull_request`]
+                : []),
+            ]),
           },
         ],
         [

@@ -201,7 +201,7 @@ export const RULES = [
   {
     id: 'A1',
     title: 'Money moves only through the payments ledger',
-    why: 'Transfers, reversals, refunds and payouts move real money. When each module calls Stripe itself, the ledger, the clawback rules and the payout thresholds can be bypassed by whichever caller forgets them. The owners are the four @codex/payments modules that record every movement.',
+    why: "Transfers, reversals, refunds and payouts move real money. When each module calls Stripe itself, the ledger, the clawback rules and the payout thresholds can be bypassed by whichever caller forgets them. The owners are the four @codex/payments modules that record every movement. Each call is pinned by the function it sits in (`transferPendingGroup>transfers.create(`), so a new call in another function fails even where an old one was fixed. Known limit: a text pattern can't follow an alias (`const t = stripe.transfers; t.create(`); the owner refactor and the types epic (Codex-omrp2) close that.",
     scope: {
       include: [
         'packages/*/src/**/*.{ts,js,mjs}',
@@ -226,6 +226,8 @@ export const RULES = [
   },
   {
     id: 'LAYERS',
+    // A package.json can't carry a comment, so there is no line to except from.
+    exceptions: false,
     title: 'A package depends only on lower layers',
     why: "Upward and sideways dependencies are how a payments package ends up importing purchase, and how a 9,000-line service becomes impossible to split. The layer map is today's graph, so the rule starts green and any new edge is a visible decision.",
     scope: {
@@ -278,6 +280,8 @@ export const RULES = [
   },
   {
     id: 'DOC-INDEX',
+    // The hit is the whole file (line 1), with no line above to carry an exception.
+    exceptions: false,
     title: 'Every doc under docs/ is listed in docs/README.md',
     why: '85 of 147 docs were cited nowhere in the repo. A doc nobody can find is never updated, and it keeps answering searches with stale content.',
     scope: {
@@ -313,7 +317,11 @@ export const RULES = [
     id: 'DOC-BUDGET',
     title: 'A CLAUDE.md never grows past its word budget',
     why: '36 of 38 CLAUDE.md files were over budget (the root had 3,616 words against 1,500). Every word is loaded into every agent session in that folder, so length is paid on every task.',
-    scope: { include: ['**/CLAUDE.md', '**/AGENTS.md'] },
+    scope: {
+      include: ['**/CLAUDE.md', '**/AGENTS.md'],
+      // No AGENTS.md is tracked yet; the budget is there for the first one.
+      optional: ['**/AGENTS.md'],
+    },
     match: {
       kind: 'word-count',
       budgets: { 'CLAUDE.md': 1500 },
@@ -342,7 +350,9 @@ export const RULES = [
     title: 'The rules page equals the registry',
     why: "A rules page written by hand drifts: the payments architecture doc said a money file was 5,097 lines long when it was 9,015. This page is rendered from the registry, so a rule can't exist only in prose, and the prose can't describe a rule that doesn't run.",
     scope: { include: [RULES_DOC, 'scripts/checks/architecture-*.mjs'] },
+    // Drift is fixed, never held: no inline exception and no baseline pin.
     exceptions: false,
+    baseline: false,
     match: {
       kind: 'generated',
       file: RULES_DOC,
@@ -363,7 +373,9 @@ export const RULES = [
         '{apps,packages,workers}/*/package.json',
       ],
     },
+    // Drift is fixed, never held: no inline exception and no baseline pin.
     exceptions: false,
+    baseline: false,
     match: {
       kind: 'lists-agree',
       ...ciGateLists({
