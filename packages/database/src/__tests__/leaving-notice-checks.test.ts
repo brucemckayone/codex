@@ -55,7 +55,7 @@ describe.skipIf(!HAS_DB)(
         CONTENT_LEAVING_NOTICE_KINDS,
         CONTENT_LEAVING_NOTICE_REASONS,
         CONTENT_LEAVING_NOTICE_STATES,
-        CONTENT_LEAVING_NOTICE_TRIED_STATES,
+        CONTENT_LEAVING_NOTICE_UNSENT_TRY_STATES,
       } = await import('@codex/constants');
       const tag = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const userId = `ln_checks_user_${tag}`;
@@ -270,6 +270,10 @@ describe.skipIf(!HAS_DB)(
             state: 'unknown',
             lastReason: 'unknown',
           });
+          outcome['abandoned with no try'] = await notice({
+            state: 'abandoned',
+            lastReason: 'no_address',
+          });
           outcome['abandoned with no reason'] = await notice({
             state: 'abandoned',
             attempts: 5,
@@ -285,7 +289,7 @@ describe.skipIf(!HAS_DB)(
             sql`UPDATE content_leaving_notices SET attempts = -1
               WHERE content_id = ${archived.id} AND round = ${later}`
           );
-          for (const state of CONTENT_LEAVING_NOTICE_TRIED_STATES) {
+          for (const state of CONTENT_LEAVING_NOTICE_UNSENT_TRY_STATES) {
             for (const lastReason of [
               ...CONTENT_LEAVING_NOTICE_REASONS,
               null,
@@ -326,6 +330,7 @@ describe.skipIf(!HAS_DB)(
         'sent with no try': 'check_content_leaving_notices_tried',
         'failed with no try': 'check_content_leaving_notices_tried',
         'unknown with no try': 'check_content_leaving_notices_tried',
+        'abandoned with no try': 'check_content_leaving_notices_tried',
         'abandoned with no reason':
           'check_content_leaving_notices_reason_given',
         'a removed notice cancelled': 'check_content_leaving_notices_cancelled',

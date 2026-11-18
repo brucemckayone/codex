@@ -19,11 +19,13 @@
  * - `staying` rows are added when the creator keeps the piece, for everyone
  *   a `leaving` or `reminder` email of the round was tried for;
  * - `removed` rows are added by a platform admin's immediate delete.
- * Every writer takes each person ONCE (`SELECT DISTINCT`, or the holders'
- * UNION set, never UNION ALL) and adds `ON CONFLICT DO NOTHING`. A person can
- * own a piece several ways, and can have both a tried `leaving` and a tried
- * `reminder` row, and a repeat would make the unique below refuse the whole
- * statement, and so the delete or Keep around it.
+ * Every writer adds `ON CONFLICT (content_id, kind, round, user_id) DO
+ * NOTHING`. A person can own a piece several ways, and can have both a tried
+ * `leaving` and a tried `reminder` row. DO NOTHING skips the repeat, even
+ * within one statement. Without it (or with DO UPDATE) the unique below
+ * refuses the whole statement, and so the delete or Keep around it. Writers
+ * also read people from the one holders set (a UNION, never UNION ALL), so
+ * the rows match the holder count the creator was shown.
  *
  * Whoever writes rows leaves out people whose account is deleted
  * (`users.deleted_at`): erasure scrubs the address but keeps the row, so
@@ -39,10 +41,17 @@
  * Both are stored to the millisecond, so a value read into JS and matched
  * back finds its rows.
  *
- * Rows are never deleted: a notice no longer needed becomes `cancelled` (by
- * Keep, by a second delete, or by the sweep finding its piece no longer
- * leaves on that round), and one that used up its tries becomes `abandoned`.
- * Both leave the sweep's claim index, so it never re-reads them.
+ * The sweep sends a row only while its email is still true, per kind:
+ * - `leaving` and `reminder`: while the piece leaves on that round
+ *   (`leaves_at = round`, not deleted);
+ * - `staying`: while the piece is kept (`leaves_at IS NULL`, not deleted);
+ * - `removed`: always.
+ * Otherwise it cancels the row, with a warn log. Every delete also cancels
+ * the piece's open `staying` rows in its own transaction.
+ *
+ * Rows are never deleted: a notice no longer needed becomes `cancelled`, and
+ * one that used up its tries becomes `abandoned`. Both leave the sweep's
+ * claim index, so it never re-reads them.
  */
 
 import {
@@ -50,7 +59,7 @@ import {
   CONTENT_LEAVING_NOTICE_OPEN_STATES,
   CONTENT_LEAVING_NOTICE_REASONS,
   CONTENT_LEAVING_NOTICE_STATES,
-  CONTENT_LEAVING_NOTICE_TRIED_STATES,
+  CONTENT_LEAVING_NOTICE_UNSENT_TRY_STATES,
   type ContentLeavingNoticeKind,
   type ContentLeavingNoticeReason,
   type ContentLeavingNoticeState,
@@ -87,7 +96,7 @@ const SENT: readonly ContentLeavingNoticeState[] = ['sent'];
 /** Every state a try leaves, `sent` among them: the claim counts each try. */
 const AFTER_A_TRY: readonly ContentLeavingNoticeState[] = [
   ...SENT,
-  ...CONTENT_LEAVING_NOTICE_TRIED_STATES,
+  ...CONTENT_LEAVING_NOTICE_UNSENT_TRY_STATES,
 ];
 /**
  * What a `failed` try was answered with. No address is not retried: the row
@@ -197,7 +206,7 @@ export const contentLeavingNotices = pgTable(
     // be told apart from a bug.
     check(
       'check_content_leaving_notices_reason_given',
-      sql`${table.state} NOT IN (${sqlWords(CONTENT_LEAVING_NOTICE_TRIED_STATES)}) OR ${table.lastReason} IS NOT NULL`
+      sql`${table.state} NOT IN (${sqlWords(CONTENT_LEAVING_NOTICE_UNSENT_TRY_STATES)}) OR ${table.lastReason} IS NOT NULL`
     ),
     // The reason fits the state: `unknown` is exactly a try with no usable
     // answer, and a `failed` one was answered (refused or skipped). A 5xx

@@ -34,10 +34,10 @@ export type ContentLeavingNoticeKind =
  *   (`EmailSendResult`'s 5xx and no-answer cases). The sweep tries again;
  * - `cancelled`: no longer needed. The creator kept the piece while its
  *   `leaving` or `reminder` email was still open, tried or not, or deleted
- *   it again while its `staying` email was. Or the sweep found the piece no
- *   longer leaves on that round (kept, completed or taken down) before a
- *   `leaving` or `reminder` email went, which it logs. A `removed` notice, a
- *   takedown's only email, is never cancelled;
+ *   it again while its `staying` email was. Or the sweep found the email no
+ *   longer true before it went (the schema lists the rule per kind), which
+ *   it logs. A `removed` notice, a takedown's only email, is never
+ *   cancelled;
  * - `abandoned`: it used up its tries, or the person has no address (an
  *   erased account), and the sweep stops.
  * Whether a person may have been told is read from `attempts`, never from
@@ -66,8 +66,12 @@ export const CONTENT_LEAVING_NOTICE_OPEN_STATES = [
   'unknown',
 ] as const satisfies readonly ContentLeavingNoticeState[];
 
-/** The states a try that did not send leaves, each with a reason. */
-export const CONTENT_LEAVING_NOTICE_TRIED_STATES = [
+/**
+ * The states a try that did not send leaves, each with a reason. NOT the
+ * test of who may have been told: that is `attempts > 0`, which counts
+ * `sent` too.
+ */
+export const CONTENT_LEAVING_NOTICE_UNSENT_TRY_STATES = [
   'failed',
   'unknown',
   'abandoned',
@@ -84,9 +88,10 @@ export const CONTENT_LEAVING_NOTICE_TRIED_STATES = [
  *   `users.deleted_at`, as the fee sweep does;
  * - `unknown`: a 5xx or no usable answer, so it may have gone.
  * A `failed` row carries `refused` or `skipped`, and an `unknown` row
- * `unknown` (a CHECK). `no_address` ends a row `abandoned` at once. An
- * `abandoned` row otherwise keeps its last try's reason, and one whose tries
- * were all cut off before an answer is abandoned as `unknown`.
+ * `unknown` (a CHECK). `no_address` ends a row `abandoned` at once.
+ * Otherwise an `abandoned` row carries the answer of the try that ended it,
+ * or `unknown` when that try was cut off before an answer: a cut-off send
+ * may have gone, whatever an earlier try was told.
  */
 export const CONTENT_LEAVING_NOTICE_REASONS = [
   'refused',
