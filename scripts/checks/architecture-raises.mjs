@@ -1,5 +1,5 @@
 /**
- * Countersigned loosening (G0 WP-7, hardened after two reviews,
+ * Countersigned loosening (G0 WP-7, hardened over three reviews,
  * Codex-xtcfl.7).
  *
  * The ratchet only holds if nothing loosens it quietly. pstack's rule:
@@ -10,38 +10,49 @@
  *   1. raise a baseline pin, or add one        G0-RAISE: <RULE> <file> — <reason>
  *      (every pin of a rule the base lacks)    G0-RAISE: <RULE> * — <reason>
  *   2. add, copy, move or renew an exception   G0-RAISE: <RULE> <file> — <reason>
- *   3. change the gate itself: its code, its   G0-RAISE: GATE <path> — <reason>
- *      CI steps, the part of a calling
- *      workflow it relies on, or a pnpm script
- *      a gate runs                             (GATE package.json#scripts.check:ci)
+ *   3. change what a gate runs: the gate's     G0-RAISE: GATE <what> — <reason>
+ *      own code, its CI steps, a gate script
+ *      or self-test, a pnpm script or turbo
+ *      task a gate runs, a gate's config
+ *      (biome.json), or a rise in another
+ *      gate's baseline
  *
  * The countersign is a trailer line in a commit message in the range being
- * checked, and it counts only in a commit with no `Co-Authored-By: Claude`
- * line: the agent that loosened the gate can't sign for it (owner, 18 Nov). A
+ * checked. It counts only in a commit with no `Co-Authored-By: Claude` line
+ * (owner, 18 Nov), and only while what it signed is unchanged: anything that
+ * loosens the same item AFTER the signing commit needs a new countersign. A
  * commit message travels into dev and main with the change, so a release PR
  * passes without re-signing, and git blame keeps the reason next to the change.
  *
- * In a pull request this check runs twice: once in the PR's own CI, and once
- * from the BASE branch's copy of the gate (.github/workflows/g0-countersign.yml,
- * a pull_request_target job), so a PR that edits this file can't exempt itself.
+ * THREAT MODEL (owner, 18 Nov): honest agents that make eager mistakes, such
+ * as signing their own raise or breaking this check while refactoring it. When
+ * a change touches scripts/checks/, the runner also has the BASE commit's copy
+ * of the gate judge the countersigns, so a bug in the new copy can't approve
+ * itself. An agent that deliberately forges (leaves out its attribution, edits
+ * its own CI) is not stopped here; review is the backstop for that.
  *
  * Lowering never needs a countersign: it only tightens.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-
 import { IGNORE_KEYWORD, parseIgnores } from './architecture-ignores.mjs';
 import { pnpmScript } from './architecture-lists.mjs';
-import { MATCHERS } from './architecture-matchers.mjs';
+import {
+  enclosingName,
+  MATCHERS,
+  maskStringsWithLines,
+} from './architecture-matchers.mjs';
+import { tokenize } from './check-data-access-contract.mjs';
 
 /**
  * The gate's own code. Changing any of these can loosen every rule at once (a
  * matcher that stops matching, a step that stops running), so each change
  * needs a GATE countersign. The baseline has its own per-pin check (1 above)
- * and the generated rules page is held by RULES-DOC. The workflows that CALL
- * the static-analysis job are fingerprinted instead (callerPrint), because
- * most of what they hold is unrelated test jobs.
+ * and the generated rules page is held by RULES-DOC. What the OTHER gates run
+ * is derived from the registry (gateDependencies), and the calling workflows
+ * are fingerprinted (callerPrint), because most of what they hold is
+ * unrelated test jobs.
  */
 export const GATE_CODE = [
   'scripts/checks/check-architecture.mjs',
@@ -54,7 +65,6 @@ export const GATE_CODE = [
   'scripts/checks/architecture-raises.mjs',
   'scripts/checks/check-data-access-contract.mjs',
   '.github/workflows/static_analysis.yml',
-  '.github/workflows/g0-countersign.yml',
   '.husky/pre-commit',
   '.claude/skills/codex-epic-implement/scripts/gate.sh',
 ];
@@ -81,12 +91,6 @@ export function parseCountersigns(text) {
   return signed;
 }
 
-/**
- * Every (rule, file) the new baseline allows beyond the old one. A file the
- * change renamed is compared with its old path's pin. `baseRuleIds` is the
- * base registry's rule IDs: a block may be signed as a whole (`RULE *`) only
- * when the base didn't have the rule at all.
- */
 export function raisedEntries(
   rules,
   before,
@@ -122,7 +126,6 @@ export function raisedEntries(
   }
   return raised;
 }
-
 function minusKeys(a, b) {
   const left = [...b];
   return (Array.isArray(a) ? a : []).filter((x) => {
@@ -132,15 +135,38 @@ function minusKeys(a, b) {
     return false;
   });
 }
+function describeRaise(r) {
+  if (Array.isArray(r.now)) {
+    if (typeof r.was === 'number') return `${r.was} → ${r.now.length} keys`;
+    const added = minusKeys(r.now, r.was ?? []);
+    return `allows ${added.map((k) => JSON.stringify(k)).join(', ')} more`;
+  }
+  return `${r.was ?? 'unpinned'} → ${r.now}`;
+}
 
 /**
- * A file's exceptions, each with what it excuses: the directive's fields plus
- * the text of the line below it. So a copied exception, or one moved onto a
- * different violation, has no match at the base.
+ * A file's exceptions, each with what it excuses: the directive's fields, the
+ * text of the line below it, and the function that line sits in. So a copied
+ * exception, or one moved onto a different violation (or into a different
+ * function with the same text), has no match at the base.
  */
 function exceptionSignatures(file, text) {
   if (text === null) return [];
   const lines = text.split('\n');
+  let context = null;
+  const where = (line) => {
+    if (file.endsWith('.md')) return '';
+    if (!context) {
+      const { masked, startsInside } = maskStringsWithLines(
+        tokenize(text).code
+      );
+      context = { maskedLines: masked.split('\n'), startsInside };
+    }
+    return enclosingName(context.maskedLines, line, {
+      startsInside: context.startsInside,
+      lines,
+    });
+  };
   return parseIgnores(file, text)
     .filter((d) => d.ok)
     .map((d) => ({
@@ -151,6 +177,7 @@ function exceptionSignatures(file, text) {
         d.by,
         d.reason,
         (lines[d.line] ?? '').trim().replace(/\s+/g, ' '),
+        where(d.line + 1),
       ].join('|'),
     }));
 }
@@ -168,69 +195,76 @@ function newExceptions(file, beforeText, afterText) {
 }
 
 /**
- * Everything a change loosens that the owner hasn't countersigned.
- *
- * @param {{ raised: ReturnType<typeof raisedEntries>,
- *   exceptions: { file: string, ruleId: string, line: number }[],
- *   gateChanges: string[], signed: Set<string> }} input
+ * What a change loosens, as items: `key` is what a countersign names, `star`
+ * the whole-rule form that also covers it (a rule the base lacked).
  */
-export function missingCountersigns({
-  raised,
-  exceptions,
-  gateChanges,
-  signed,
-}) {
-  const missing = [];
+function looseningItems({ raised, exceptions, gateChanges }) {
+  const items = [];
   for (const r of raised) {
-    if (signed.has(`${r.ruleId} ${r.file}`)) continue;
-    if (r.newRule && signed.has(`${r.ruleId} *`)) continue;
-    missing.push({
+    items.push({
+      key: `${r.ruleId} ${r.file}`,
+      star: r.newRule ? `${r.ruleId} *` : null,
+      ruleId: r.ruleId,
       line: `G0-RAISE: ${r.ruleId} ${r.newRule ? '*' : r.file} — <why>`,
       what: `${r.ruleId} ${r.file}: ${describeRaise(r)}`,
     });
   }
   for (const d of exceptions) {
-    if (signed.has(`${d.ruleId} ${d.file}`)) continue;
-    missing.push({
+    items.push({
+      key: `${d.ruleId} ${d.file}`,
+      star: null,
+      ruleId: d.ruleId,
       line: `G0-RAISE: ${d.ruleId} ${d.file} — <why>`,
       what: `${d.file}:${d.line}: a new, copied, moved or renewed ${IGNORE_KEYWORD} for ${d.ruleId}`,
     });
   }
   for (const path of gateChanges) {
-    if (signed.has(`GATE ${path}`)) continue;
-    missing.push({
+    items.push({
+      key: `GATE ${path}`,
+      star: null,
+      ruleId: 'GATE',
       line: `G0-RAISE: GATE ${path} — <why>`,
-      what: `${path}: the gate itself changed`,
+      what: `${path}: what a gate runs changed`,
     });
   }
-  return missing;
+  return items;
 }
 
-function describeRaise(r) {
-  if (Array.isArray(r.now)) {
-    if (typeof r.was === 'number') return `${r.was} → ${r.now.length} keys`;
-    const added = minusKeys(r.now, r.was ?? []);
-    return `allows ${added.map((k) => JSON.stringify(k)).join(', ')} more`;
-  }
-  return `${r.was ?? 'unpinned'} → ${r.now}`;
+/**
+ * Everything a change loosens that no countersign names (by key alone; the
+ * runner also checks that nothing changed after the signing commit).
+ *
+ * @param {{ raised: ReturnType<typeof raisedEntries>,
+ *   exceptions: { file: string, ruleId: string, line: number }[],
+ *   gateChanges: string[], signed: Set<string> }} input
+ */
+export function missingCountersigns(input) {
+  return looseningItems(input)
+    .filter(
+      (i) => !input.signed.has(i.key) && !(i.star && input.signed.has(i.star))
+    )
+    .map(({ line, what }) => ({ line, what }));
 }
 
 // ---------------------------------------------------------------------------
-// The parts of other files the gate depends on
+// The parts of other files the gates depend on
 // ---------------------------------------------------------------------------
 
 /**
  * What a calling workflow contributes to the gate: its triggers, its
  * concurrency, and the job that runs the static-analysis workflow. Comments
- * and blank lines are left out, so only a real change counts.
+ * and blank lines are left out, and they never end a block (YAML ignores a
+ * comment's indentation), so only a real change counts.
  */
 export function callerPrint(text, workflow) {
   if (text === null) return null;
   const lines = text.replace(/\r/g, '').split('\n');
+  const isNoise = (l) => l.trim() === '' || l.trimStart().startsWith('#');
   const keep = [];
   const block = (start, isEnd) => {
     const out = [lines[start]];
-    for (let i = start + 1; i < lines.length && !isEnd(lines[i]); i++) {
+    for (let i = start + 1; i < lines.length; i++) {
+      if (!isNoise(lines[i]) && isEnd(lines[i])) break;
       out.push(lines[i]);
     }
     return out;
@@ -239,40 +273,100 @@ export function callerPrint(text, workflow) {
     if (/^(?:on|concurrency)\s*:/.test(line)) {
       keep.push(...block(i, (l) => /^\S/.test(l)));
     }
-    if (/^ {2}[\w-]+\s*:\s*$/.test(line)) {
+    if (/^ {2}[\w-]+\s*:\s*(?:#.*)?$/.test(line)) {
       const job = block(i, (l) => /^ {0,2}\S/.test(l));
       if (job.some((l) => l.includes(`./${workflow}`))) keep.push(...job);
     }
   });
   return keep
-    .filter((l) => l.trim() !== '' && !l.trimStart().startsWith('#'))
+    .filter((l) => !isNoise(l))
     .map((l) => l.trimEnd())
     .join('\n');
 }
 
-/** The package.json script a gate command runs, as { file, script }. */
-function gateScripts(gates, packageNameAt) {
-  const out = [];
-  for (const gate of gates) {
-    for (const command of [gate.before, gate.selfTest, gate.run]) {
-      const target = command && pnpmScript(command);
-      if (!target) continue;
-      const file =
-        target.pkg === '(root)' ? 'package.json' : packageNameAt(target.pkg);
-      if (file) out.push({ file, script: target.script });
-    }
-  }
-  return out;
-}
-
-const scriptValue = (text, script) => {
+const parseJson = (text) => {
   if (text === null) return null;
   try {
-    return JSON.parse(text).scripts?.[script] ?? null;
+    return JSON.parse(text);
   } catch {
-    return '(unparseable package.json)';
+    return '(unparseable)';
   }
 };
+
+/** Nested counts where every leaf is a number: true when any leaf grew. */
+function countsRose(before, after) {
+  const walk = (b, a) => {
+    if (typeof a === 'number') return a > (typeof b === 'number' ? b : 0);
+    if (a === null || typeof a !== 'object') return a !== b;
+    return Object.entries(a).some(([k, v]) => walk(b?.[k], v));
+  };
+  return walk(parseJson(before), parseJson(after));
+}
+
+/**
+ * Everything the registry's other gates run, as parts: `changed(before,
+ * after)` says whether a change to the part loosens that gate. Derived from
+ * each gate's commands (a `node [--test] <file>`, a pnpm script and every
+ * file it runs, a turbo task and every package's script for it) plus what the
+ * registry declares (`files`: configs like biome.json; `ratchets`: another
+ * gate's baseline, where only a rise counts).
+ */
+export function gateDependencies(gates, packageFiles, read) {
+  const parts = new Map();
+  const add = (label, file, changed) => {
+    if (!parts.has(label)) parts.set(label, { label, file, changed });
+  };
+  const whole = (file) => add(file, file, (a, b) => a !== b);
+  const script = (file, name) =>
+    add(`${file}#scripts.${name}`, file, (a, b) => {
+      const x = parseJson(a);
+      const y = parseJson(b);
+      return (
+        JSON.stringify(x?.scripts?.[name]) !==
+        JSON.stringify(y?.scripts?.[name])
+      );
+    });
+  const nodeFiles = (command, dir) => {
+    for (const m of command.matchAll(
+      /\bnode\s+(?:--test\s+)?([\w./-]+\.m?js)\b/g
+    )) {
+      whole(dir ? `${dir}/${m[1]}` : m[1]);
+    }
+  };
+  const packageNamed = (name) =>
+    packageFiles.find((f) => parseJson(read(f))?.name === name) ?? null;
+  for (const gate of gates) {
+    for (const command of [gate.before, gate.selfTest, gate.run].filter(
+      Boolean
+    )) {
+      nodeFiles(command, '');
+      const target = pnpmScript(command);
+      if (!target) continue;
+      const file =
+        target.pkg === '(root)' ? 'package.json' : packageNamed(target.pkg);
+      if (!file) continue;
+      script(file, target.script);
+      const value = parseJson(read(file))?.scripts?.[target.script] ?? '';
+      nodeFiles(value, file.split('/').slice(0, -1).join('/'));
+      const turbo = /^turbo run ([\w:-]+)/.exec(value);
+      if (turbo) {
+        const task = turbo[1];
+        add(`turbo.json#tasks.${task}`, 'turbo.json', (a, b) => {
+          const x = parseJson(a);
+          const y = parseJson(b);
+          return (
+            JSON.stringify(x?.tasks?.[task]) !==
+            JSON.stringify(y?.tasks?.[task])
+          );
+        });
+        for (const pkg of packageFiles) script(pkg, task);
+      }
+    }
+    for (const file of gate.files ?? []) whole(file);
+    for (const file of gate.ratchets ?? []) add(file, file, countsRose);
+  }
+  return [...parts.values()];
+}
 
 // ---------------------------------------------------------------------------
 // Reading the change from git
@@ -318,18 +412,18 @@ export function renamesSince(root, base) {
   return renames;
 }
 
-/** The rule IDs the base's generated rules page lists. */
-function ruleIdsAt(root, base) {
-  const page = showAt(root, base, 'docs/architecture/rules.md');
+/** The rule IDs the generated rules page lists at a ref. */
+function ruleIdsAt(root, ref) {
+  const page = showAt(root, ref, 'docs/architecture/rules.md');
   if (page === null) return null;
   return new Set(
     [...page.matchAll(/^### ([A-Z][A-Z0-9-]*)$/gm)].map((m) => m[1])
   );
 }
 
-/** The countersigns the owner wrote in base..HEAD, and the agent commits that tried. */
-function countersignsSince(root, base) {
-  const signed = new Set();
+/** The owner's countersigning commits in base..HEAD, newest first, and the agent commits that tried. */
+function countersignCommits(root, base) {
+  const owner = [];
   const byAgent = [];
   const log = git(root, [
     'log',
@@ -340,20 +434,85 @@ function countersignsSince(root, base) {
   for (const entry of splitZ(log)) {
     const nl = entry.indexOf('\n');
     const body = entry.slice(nl + 1);
-    const found = parseCountersigns(body);
-    if (found.size === 0) continue;
-    if (AGENT_COMMIT.test(body)) {
-      byAgent.push(entry.slice(0, 9));
-      continue;
-    }
-    for (const key of found) signed.add(key);
+    const signed = parseCountersigns(body);
+    if (signed.size === 0) continue;
+    if (AGENT_COMMIT.test(body)) byAgent.push(entry.slice(0, 9));
+    else owner.push({ sha: entry.slice(0, nl), signed });
   }
-  return { signed, byAgent };
+  return { owner, byAgent };
 }
 
 /**
- * Everything the working tree loosens relative to `base`, and what the owner
- * countersigned in base..HEAD.
+ * Everything the working tree loosens relative to `ref`, as items, whatever
+ * countersigns exist.
+ */
+function loosenedSince(root, registry, baselineFile, ref) {
+  const { rules, gates = [], callers = [] } = registry;
+  const changed = changedSince(root, ref);
+  const renames = renamesSince(root, ref);
+  const parse = (text, where) => {
+    try {
+      return JSON.parse(text ?? '{}');
+    } catch (err) {
+      throw new Error(
+        `${baselineFile} at ${where} is not valid JSON (${err.message})`
+      );
+    }
+  };
+  const readHead = (file) =>
+    existsSync(join(root, file))
+      ? readFileSync(join(root, file), 'utf8')
+      : null;
+  const beforeBaseline = parse(showAt(root, ref, baselineFile), ref);
+  const afterBaseline = parse(readHead(baselineFile), 'the working tree');
+
+  const exceptions = [];
+  for (const file of changed) {
+    const after = readHead(file);
+    if (after === null || !after.includes(IGNORE_KEYWORD)) continue;
+    const from = renames.get(file) ?? file;
+    exceptions.push(...newExceptions(file, showAt(root, ref, from), after));
+  }
+
+  const gateChanges = changed.filter((f) => GATE_CODE.includes(f));
+  const workflow = '.github/workflows/static_analysis.yml';
+  for (const caller of callers) {
+    if (!changed.includes(caller)) continue;
+    if (
+      callerPrint(showAt(root, ref, caller), workflow) !==
+      callerPrint(readHead(caller), workflow)
+    ) {
+      gateChanges.push(caller);
+    }
+  }
+  const packageFiles = splitZ(
+    git(root, ['ls-files', '-z', '--', 'package.json', '*/package.json']).stdout
+  ).filter((f) =>
+    /^(?:package\.json|(?:apps|packages|workers)\/[^/]+\/package\.json)$/.test(
+      f
+    )
+  );
+  for (const part of gateDependencies(gates, packageFiles, readHead)) {
+    if (!changed.includes(part.file)) continue;
+    if (part.changed(showAt(root, ref, part.file), readHead(part.file))) {
+      gateChanges.push(part.label);
+    }
+  }
+
+  return looseningItems({
+    raised: raisedEntries(rules, beforeBaseline, afterBaseline, {
+      renames,
+      baseRuleIds: ruleIdsAt(root, ref),
+    }),
+    exceptions,
+    gateChanges: [...new Set(gateChanges)],
+  });
+}
+
+/**
+ * Everything the working tree loosens relative to `base` that the owner
+ * hasn't countersigned. A countersign covers an item only while nothing
+ * loosened that item AFTER the signing commit: it signs what it saw.
  *
  * @param {{ rules: object[], gates?: object[], callers?: string[] }} registry
  * @returns {{ skipped?: string, missing: { line: string, what: string }[],
@@ -375,96 +534,51 @@ export function checkLoosening(root, registry, baselineFile, base) {
       byAgent: [],
     };
   }
-  const { rules, gates = [], callers = [] } = registry;
-  const changed = changedSince(root, base);
-  const renames = renamesSince(root, base);
-  const parse = (text, where) => {
-    try {
-      return JSON.parse(text ?? '{}');
-    } catch (err) {
-      throw new Error(
-        `${baselineFile} at ${where} is not valid JSON (${err.message})`
-      );
+  const items = loosenedSince(root, registry, baselineFile, base);
+  const { owner, byAgent } = countersignCommits(root, base);
+  const since = new Map();
+  const loosenedAfter = (sha) => {
+    if (!since.has(sha)) {
+      since.set(sha, loosenedSince(root, registry, baselineFile, sha));
     }
+    return since.get(sha);
   };
-  const beforeBaseline = parse(showAt(root, base, baselineFile), base);
-  const headPath = join(root, baselineFile);
-  const afterBaseline = existsSync(headPath)
-    ? parse(readFileSync(headPath, 'utf8'), 'the working tree')
-    : {};
-  const readHead = (file) =>
-    existsSync(join(root, file))
-      ? readFileSync(join(root, file), 'utf8')
-      : null;
-
-  const exceptions = [];
-  for (const file of changed) {
-    const after = readHead(file);
-    if (after === null || !after.includes(IGNORE_KEYWORD)) continue;
-    const from = renames.get(file) ?? file;
-    exceptions.push(...newExceptions(file, showAt(root, base, from), after));
-  }
-
-  const gateChanges = changed.filter((f) => GATE_CODE.includes(f));
-  for (const caller of callers) {
-    if (!changed.includes(caller)) continue;
-    const workflow = '.github/workflows/static_analysis.yml';
-    if (
-      callerPrint(showAt(root, base, caller), workflow) !==
-      callerPrint(readHead(caller), workflow)
-    ) {
-      gateChanges.push(caller);
-    }
-  }
-  const packageName = (text) => {
-    try {
-      return JSON.parse(text ?? '{}').name ?? null;
-    } catch {
-      return null;
-    }
-  };
-  // Only a CHANGED package.json can have changed a gate's script.
-  const packageNameAt = (name) =>
-    changed.find(
-      (f) =>
-        /^(?:apps|packages|workers)\/[^/]+\/package\.json$/.test(f) &&
-        packageName(readHead(f) ?? showAt(root, base, f)) === name
-    ) ?? null;
-  for (const { file, script } of gateScripts(gates, packageNameAt)) {
-    if (!changed.includes(file)) continue;
-    if (
-      scriptValue(showAt(root, base, file), script) !==
-      scriptValue(readHead(file), script)
-    ) {
-      gateChanges.push(`${file}#scripts.${script}`);
-    }
-  }
-
-  const { signed, byAgent } = countersignsSince(root, base);
+  const covered = (item) =>
+    owner.some((c) => {
+      if (c.signed.has(item.key)) {
+        return !loosenedAfter(c.sha).some((x) => x.key === item.key);
+      }
+      if (item.star && c.signed.has(item.star)) {
+        return !loosenedAfter(c.sha).some((x) => x.ruleId === item.ruleId);
+      }
+      return false;
+    });
   return {
-    missing: missingCountersigns({
-      raised: raisedEntries(rules, beforeBaseline, afterBaseline, {
-        renames,
-        baseRuleIds: ruleIdsAt(root, base),
-      }),
-      exceptions,
-      gateChanges: [...new Set(gateChanges)],
-      signed,
-    }),
+    missing: items
+      .filter((item) => !covered(item))
+      .map(({ line, what }) => ({ line, what })),
     byAgent,
   };
 }
 
+// ---------------------------------------------------------------------------
+// What CI compares with
+// ---------------------------------------------------------------------------
+
 /**
- * Where a CI run's change starts, from the GitHub event. A pull request checks
- * out a merge commit whose first parent is the base it was built on (the
- * moving tip of the base branch would blame the PR for the base's own later
- * changes). A merge-queue group names its base. A push to dev or main starts
- * where the branch was before the push; a push to any other branch, and a
- * local run, start where the branch left origin/dev. Anything else is an event
- * the gate doesn't know how to judge, and it stops the build.
+ * The commit a CI run compares with, and what kind of run it is:
  *
- * @returns {{ kind: 'pr'|'branch'|'trunk', base: string|null, note?: string }}
+ *   pr       a pull request: the base it merges into (HEAD^1 of the merge
+ *            commit GitHub checks out, so a base that moved on is seen)
+ *   release  a pull request from dev: as pr, but dev's unbanked fixes are
+ *            notices, not failures
+ *   trunk    a push to dev or main: the commit before the push; notices only
+ *   branch   a push to another branch, or a local run: its merge base with
+ *            origin/dev
+ *
+ * An event it doesn't know throws, so a new trigger can't pass by default.
+ *
+ * @returns {{ kind: 'pr'|'release'|'branch'|'trunk', base: string|null, note?: string }}
  */
 export function ciBase(root, env = process.env) {
   const event = env.GITHUB_EVENT_NAME;
@@ -494,7 +608,9 @@ export function ciBase(root, env = process.env) {
         'a pull_request run with no base: HEAD is not a merge commit and the event names no pull_request.base.sha'
       );
     }
-    return { kind: 'pr', base };
+    // A release PR (dev into main) brings every fix dev holds. Banking them
+    // is dev's job, so here they are notices, as on a push to dev.
+    return { kind: env.GITHUB_HEAD_REF === 'dev' ? 'release' : 'pr', base };
   }
   if (event === 'merge_group') {
     const base = payload.merge_group?.base_sha;

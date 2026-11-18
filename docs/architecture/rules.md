@@ -35,8 +35,9 @@ A rule here is one entry in `scripts/checks/architecture-rules.mjs`. The self-te
 A rule that measures a file (SIZE, DOC-BUDGET) pins its size. Every other rule pins the **key** of each violation it allows: the call and the function it sits in (`transferPendingGroup>transfers.create(`), the dead link's target, the missing path. So a fix can't pay for a new violation in the same file: the new one's key isn't pinned, and it fails even when the count is unchanged.
 
 - A violation whose key isn't pinned, or a size above its pin, is new, and fails.
-- A fixed violation, a smaller size or a file that is gone must be **banked** with `pnpm check:arch --lower`, so the headroom it freed can't be spent later. It fails the commit that touches the file (bank it with `--lower --staged`, which banks what the index holds and stages the baseline), and the pull request that made the fix: the violation still existed at the base, in whatever file. A fix already left unbanked on `dev` is only a notice, so two PRs can't merge into a red branch.
-- A renamed file carries its pin to the new path; `--lower` moves it.
+- A fixed violation, a smaller size or a file that is gone must be **banked** with `pnpm check:arch --lower`, so the headroom it freed can't be spent later. It fails the commit that touches the file (bank it with `--lower --staged`, which banks what the index holds and stages the baseline), and the pull request that made the fix: the violation still existed at the base, in whatever file. A fix already left unbanked on `dev` is only a notice, so two PRs can't merge into a red branch, and a release PR from `dev` isn't blocked by them.
+- In a pull request a pin allows no more than the base still had, plus any countersigned raise. So a fix left unbanked on `dev` is headroom no later change can spend: re-adding the violation fails.
+- A renamed file carries its pin to the new path; `--lower` moves it (renames are found against `origin/dev`).
 - `--lower` only ever lowers or removes. `--init --rule <ID>` seeds the block for a rule added later.
 - RULES-DOC and CI-GATES can't be held in the baseline at all: their drift is fixed, never pinned.
 
@@ -44,7 +45,7 @@ A rule that measures a file (SIZE, DOC-BUDGET) pins its size. Every other rule p
 
 ## Loosening the gate
 
-Anything that loosens the gate needs the **owner's** countersign: a trailer line in a commit message in the change. It counts only in a commit with no `Co-Authored-By: Claude` line, so the agent that loosened the gate can't sign for it; it asks the owner, and the failure prints the one-liner to run. The countersign lives in the commit, not the PR description, so it travels into `dev` and `main` with the change and `git blame` keeps it next to what it explains.
+Anything that loosens the gate needs the **owner's** countersign: a trailer line in a commit message in the change. It counts only in a commit with no `Co-Authored-By: Claude` line, so the agent that loosened the gate can't sign for it; it asks the owner, and the failure prints the one-liner to run. A countersign covers what it signed and no more: anything that loosens the same item after the signing commit needs a new one. The countersign lives in the commit, not the PR description, so it travels into `dev` and `main` with the change (`dev` takes merge commits only, so a squash can't drop it) and `git blame` keeps it next to what it explains.
 
 | What loosens | Trailer |
 |---|---|
@@ -52,10 +53,13 @@ Anything that loosens the gate needs the **owner's** countersign: a trailer line
 | Every pin of a rule the base doesn't have yet | `G0-RAISE: <RULE> * — <reason>` |
 | A new, copied, moved or renewed exception (below) | `G0-RAISE: <RULE> <file> — <reason>` |
 | A change to the gate itself: its scripts, registry, CI steps, hook | `G0-RAISE: GATE <path> — <reason>` |
-| A change to a pnpm script a gate runs | `G0-RAISE: GATE package.json#scripts.<name> — <reason>` |
+| A change to what another gate runs: a file its command names, a gate's config (`files`), a pnpm script or turbo task | `G0-RAISE: GATE <path>` or `GATE <file>#scripts.<name>` or `GATE turbo.json#tasks.<name>` |
+| A rise in another gate's own baseline (`ratchets`) | `G0-RAISE: GATE <path> — <reason>` |
 | A change to the triggers, concurrency or static-analysis job of a calling workflow | `G0-RAISE: GATE <workflow> — <reason>` |
 
-A reason is at least three words, with no `<placeholder>` left in it. In a pull request the check runs twice: in the PR's own CI (`check:arch --ci`), and from the **base branch's** copy of the gate (`.github/workflows/g0-countersign.yml`), so a PR that edits the gate can't exempt itself. `pnpm check:arch --raises <ref>` runs it locally.
+A reason is at least three words, with no `<placeholder>` left in it. `pnpm check:arch --ci` runs the check against the change's base, and `--raises <ref>` runs it alone. When the change edits `scripts/checks/`, the **base commit's** copy of the gate judges the countersigns as well, so a bug in the new copy can't approve itself.
+
+What this holds against is an honest agent's eager mistake: signing its own raise, or breaking the gate while refactoring it. An agent that sets out to forge (dropping its attribution line, rewriting the CI step that runs the gate) is not stopped by any check here; review is the backstop for that.
 
 <a id="exceptions"></a>
 
@@ -77,8 +81,8 @@ In markdown, use an HTML comment. One exception excuses one violation, the one o
 
 Transfers, reversals, refunds and payouts move real money. When each module calls Stripe itself, the ledger, the clawback rules and the payout thresholds can be bypassed by whichever caller forgets them. The owners are the four @codex/payments modules that record every movement. Each call is pinned by the function it sits in (`transferPendingGroup>transfers.create(`), so a new call in another function fails even where an old one was fixed. Known limit: a text pattern can't follow an alias (`const t = stripe.transfers; t.create(`); the owner refactor and the types epic (Codex-omrp2) close that.
 
-- **Applies to:** `packages/*/src/**/*.{ts,js,mjs}`, `workers/*/src/**/*.{ts,js,mjs}`, `apps/*/src/**/*.{ts,js,mjs}`
-- **Except:** `**/*.test.ts`, `**/*.spec.ts`, `**/*.type-check.ts`, `**/*.d.ts`, `**/__tests__/**`, `**/__mocks__/**`, `packages/payments/src/payout-ledger.ts`, `packages/payments/src/clawback.ts`, `packages/payments/src/refund.ts`, `packages/payments/src/bank-payouts.ts`
+- **Applies to:** `packages/*/src/**/*.{ts,js,mjs}`, `workers/*/src/**/*.{ts,js,mjs}`, `apps/*/src/**/*.{ts,js,mjs}`, `scripts/**/*.{ts,js,mjs}`
+- **Except:** `**/*.test.ts`, `**/*.spec.ts`, `**/*.type-check.ts`, `**/*.d.ts`, `**/__tests__/**`, `**/__mocks__/**`, `scripts/checks/**`, `packages/payments/src/payout-ledger.ts`, `packages/payments/src/clawback.ts`, `packages/payments/src/refund.ts`, `packages/payments/src/bank-payouts.ts`
 - **Checked by:** `call`, matching `\b(?:transfers\s*\??\.\s*(?:create|createReversal)|refunds\s*\??\.\s*create|payouts\s*\??\.\s*create)\s*\(`
 - **Fix:** Move the money through @codex/payments (payout-ledger, clawback, refund or bank-payouts); never call these Stripe APIs directly.
 
@@ -195,12 +199,12 @@ The static-analysis job runs these too. The CI-GATES rule keeps this list and th
 
 | Gate | Checks | Runs |
 |---|---|---|
-| BIOME | Biome lint and format; every diagnostic fails | `pnpm check:ci` |
-| TYPECHECK | TypeScript across the monorepo | `pnpm typecheck` |
+| BIOME | Biome lint and format; every diagnostic fails | `pnpm check:ci`<br>reads `biome.json` |
+| TYPECHECK | TypeScript across the monorepo | `pnpm typecheck`<br>reads `tsconfig.json`<br>reads `tsconfig.build.json`<br>reads `config/tsconfig.json`<br>reads `config/tsconfig/base.json`<br>reads `config/tsconfig/package.json`<br>reads `config/tsconfig/package-typecheck.json`<br>reads `config/tsconfig/worker.json` |
 | SETUP-ORDER | Every workflow sets up pnpm before setup-node | `node --test scripts/checks/check-workflow-setup-order.test.mjs`<br>`node scripts/checks/check-workflow-setup-order.mjs` |
 | BRAND-BOUNDARY | The public bundle never imports the brand editor | `pnpm --filter web run check:brand-boundary:test`<br>`pnpm --filter web run check:brand-boundary` |
 | DIALOG-STRUCTURE | Dialogs are built from the shared Dialog parts | `pnpm --filter web run check:dialog-structure:test`<br>`pnpm --filter web run check:dialog-structure` |
 | LOAD-RETRY | A load failure renders the shared LoadFailedAlert with Retry | `pnpm --filter web run check:load-retry:test`<br>`pnpm --filter web run check:load-retry` |
 | DATA-ACCESS | Cache-Control from presets, no floating KV write, shared search inputs, deterministic sql time, VersionedCache gets waitUntil | `node --test scripts/checks/check-data-access-contract.test.mjs`<br>`node scripts/checks/check-data-access-contract.mjs` |
-| SVELTE-BASELINE | svelte-check finds no error beyond its baseline | `pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide`<br>`pnpm --filter web run check:svelte-baseline:test`<br>`pnpm --filter web run check:svelte-baseline` |
+| SVELTE-BASELINE | svelte-check finds no error beyond its baseline | `pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide`<br>`pnpm --filter web run check:svelte-baseline:test`<br>`pnpm --filter web run check:svelte-baseline`<br>its baseline `apps/web/scripts/svelte-check-baseline.json` |
 | ARCH | The rules on this page, and countersigned loosening | `node --test scripts/checks/check-architecture.test.mjs`<br>`node scripts/checks/check-architecture.mjs --ci` |

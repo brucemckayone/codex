@@ -536,7 +536,7 @@ const REGEX_AFTER_WORD =
  * keyword such as `return`, or at the start of the file. Never after `<` or
  * `>` (markup such as `</div>`) or an identifier, number or `)` (division).
  */
-function regexCanStart(blanked, i) {
+export function regexCanStart(blanked, i) {
   let j = i - 1;
   while (j >= 0 && /\s/.test(blanked[j])) j -= 1;
   if (j < 0) return true;
@@ -549,7 +549,7 @@ function regexCanStart(blanked, i) {
 }
 
 /** The index just past the regex literal starting at `i`, or -1 if it isn't one. */
-function regexEnd(source, i) {
+export function regexEnd(source, i) {
   if (source[i + 1] === '/' || source[i + 1] === '*') return -1;
   let inClass = false;
   for (let j = i + 1; j < source.length; j++) {

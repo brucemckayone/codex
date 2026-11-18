@@ -23,18 +23,25 @@
  *   a key or size beyond the pin   FAIL  a new violation. The message names
  *                                        the line, the fix and the rule's doc
  *                                        anchor.
- *   a pinned key gone, a size down FAIL in a commit or PR that touches the
- *                                        file, until --lower banks the fix (so
- *                                        the freed headroom can't be spent
- *                                        later); a notice anywhere else
+ *   a pinned key gone, a size down FAIL in the commit or pull request that
+ *                                        made the fix, until --lower banks it
+ *                                        (so the freed headroom can't be spent
+ *                                        later); a notice anywhere else. A
+ *                                        commit made it if it stages the file;
+ *                                        a pull request, if the violation was
+ *                                        still there at its base
  *   a pinned file gone             same as a fix: --lower removes the entry
  *   equal                          pass
  *
+ * In a pull request a pin also allows no more than the base still had (plus
+ * any countersigned raise), so headroom a fix left unbanked on dev can't be
+ * spent by a later change.
+ *
  * A file the baseline doesn't list is allowed nothing, or the size limit for a
  * measuring rule. `--lower` only ever lowers or removes. Anything that LOOSENS
- * the gate (a raised or added pin, a new or renewed exception, a change to the
- * gate's own files) needs a countersign: a `G0-RAISE:` trailer in a commit
- * message, checked by --ci (see architecture-raises.mjs).
+ * the gate (a raised or added pin, a new or renewed exception, a change to
+ * what a gate runs) needs the owner's countersign: a `G0-RAISE:` trailer in a
+ * commit message, checked by --ci (see architecture-raises.mjs).
  *
  * ============================================================================
  * MODES
@@ -49,8 +56,11 @@
  *                                   deleted doc breaking a link elsewhere) are
  *                                   left to the full run in CI.
  *   pnpm check:arch --ci            the full run, plus: unbanked fixes fail in
- *                                   the files a PR touches, and every loosening
- *                                   since the change's base is countersigned
+ *                                   the pull request that made them, pins are
+ *                                   capped at the base, and every loosening
+ *                                   since the base is countersigned (judged by
+ *                                   the base's copy of the gate too, when the
+ *                                   change edits it)
  *   pnpm check:arch --raises <ref>  only the countersign check, against <ref>
  *   pnpm check:arch --lower         bank fixes: lower or remove pins only
  *   pnpm check:arch --init          write the first baseline; refuses if one
@@ -71,10 +81,13 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -491,7 +504,9 @@ export function minus(a, b) {
   return out;
 }
 
-const keyOf = (hit) => hit.key ?? hit.text;
+// NFC, as the baseline stores keys (serializeBaseline), so a decomposed
+// character in a file can't read as a new key and a fixed one at once.
+const keyOf = (hit) => (hit.key ?? hit.text).normalize('NFC');
 
 /**
  * Every difference between what was found and what the baseline allows.
@@ -767,6 +782,11 @@ export function judgeFixesAtBase(
   for (const p of notices) {
     const result = baseResults.get(p.ruleId);
     const file = atBase(p.file);
+    if (!result && p.type === 'stale' && !baseSource.has(file)) {
+      // A whole-repo rule doesn't run over a base the notices don't touch;
+      // a pin whose file was already gone at the base is dev's to bank.
+      continue;
+    }
     if (!result) {
       p.blocking = true; // couldn't measure the base: never assume the fix is old
       continue;
@@ -786,6 +806,105 @@ export function judgeFixesAtBase(
       p.blocking = minus(p.fixed, unbankedAtBase).length > 0;
     }
   }
+}
+
+/**
+ * In a pull request, a pin allows no more than the base still had, plus what
+ * this change raised it by (a raise is countersigned, in checkLoosening). A
+ * pin dev left stale (a fix nobody banked: a trunk push only notes it) is
+ * headroom nothing uses, and a later change must not spend it: re-adding a
+ * violation dev had lost would pass against the pin alone. Only a file this
+ * change reads differently can spend it, but a rule may read other files (a
+ * link's target), so every file holding pinned debt is measured at the base.
+ *
+ * @returns {object[]} a blocking 'spent' problem per (rule, file)
+ */
+export function spentAtBase(
+  rules,
+  results,
+  baseline,
+  { baseSource, baseBaseline, renames = new Map() }
+) {
+  const atBase = (file) => renames.get(file) ?? file;
+  const candidates = [];
+  for (const rule of rules) {
+    const result = results.get(rule.id);
+    const pins = baseline[rule.id];
+    if (!result || !pins || rule.baseline === false) continue;
+    for (const file of result.evaluated) {
+      const from = renames.get(file);
+      const pinned =
+        pins[file] ??
+        (from !== undefined && !result.evaluated.has(from)
+          ? pins[from]
+          : undefined);
+      if (pinned === undefined) continue;
+      const { found, hits } = result.perFile.get(file) ?? {
+        found: 0,
+        hits: [],
+      };
+      if (isMeasuring(rule)) {
+        if (!Number.isInteger(pinned)) continue; // a format problem already
+        if (found > defaultAllowed(rule, file) && found <= pinned) {
+          candidates.push({ rule, file, pinned, found, hits });
+        }
+      } else if (Array.isArray(pinned)) {
+        const foundKeys = hits.map(keyOf);
+        const within = minus(foundKeys, minus(foundKeys, pinned));
+        if (within.length > 0) {
+          candidates.push({ rule, file, pinned, found, hits, within });
+        }
+      }
+    }
+  }
+  if (candidates.length === 0) return [];
+  baseSource.changed = new Set(candidates.map((c) => atBase(c.file)));
+  const ruleSet = rules.filter((r) => candidates.some((c) => c.rule === r));
+  const baseResults = collect(ruleSet, baseSource);
+  const problems = [];
+  for (const c of candidates) {
+    const file = atBase(c.file);
+    const basePin = baseBaseline[c.rule.id]?.[file];
+    if (basePin === undefined) continue; // the whole pin is this change's raise
+    const was = baseResults.get(c.rule.id)?.perFile.get(file) ?? {
+      found: 0,
+      hits: [],
+    };
+    const base = {
+      rule: c.rule,
+      ruleId: c.rule.id,
+      file: c.file,
+      found: c.found,
+      type: 'spent',
+      blocking: true,
+      atBase: was.found,
+      pinned: c.pinned,
+    };
+    if (isMeasuring(c.rule)) {
+      if (!Number.isInteger(basePin) || c.pinned > basePin) continue; // raised
+      const allowed = Math.min(
+        c.pinned,
+        Math.max(was.found, defaultAllowed(c.rule, c.file))
+      );
+      if (c.found > allowed) problems.push({ ...base, allowed, hits: [] });
+      continue;
+    }
+    if (!Array.isArray(basePin)) continue; // a legacy count: --lower converts it
+    const raised = minus(c.pinned, basePin);
+    const room = [...was.hits.map(keyOf), ...raised];
+    const allowedKeys = minus(c.pinned, minus(c.pinned, room));
+    const spent = minus(c.within, allowedKeys);
+    if (spent.length === 0) continue;
+    const spentKeys = new Set(spent);
+    problems.push({
+      ...base,
+      allowed: allowedKeys.length,
+      added: spent.length,
+      spent,
+      hits: c.hits.filter((h) => spentKeys.has(keyOf(h))),
+    });
+  }
+  return problems;
 }
 
 function sortBaseline(baseline) {
@@ -881,6 +1000,21 @@ function amount(rule, n) {
   return unit ? `${text} ${unit}` : text;
 }
 
+/** Where a problem is: each hit's line and text, up to MAX_HITS_SHOWN, or the file alone. */
+function hitLines(p) {
+  const shown = p.hits.slice(0, MAX_HITS_SHOWN);
+  if (shown.length === 0) return [`  ${p.file}`];
+  const out = [];
+  for (const hit of shown) {
+    out.push(`  ${p.file}:${hit.line}`);
+    if (hit.text) out.push(`      ${hit.text}`);
+  }
+  if (p.hits.length > shown.length) {
+    out.push(`  … and ${p.hits.length - shown.length} more in this file`);
+  }
+  return out;
+}
+
 /**
  * Everything an agent needs to correct itself, per problem: which rule, where,
  * the one fix, where the rule is written, and how this file compares with the
@@ -930,15 +1064,7 @@ export function formatProblems(problems, { staged = false } = {}) {
       continue;
     }
     if (p.type === 'new' || p.type === 'more') {
-      const shown = p.hits.slice(0, MAX_HITS_SHOWN);
-      if (shown.length === 0) lines.push(`  ${p.file}`);
-      for (const hit of shown) {
-        lines.push(`  ${p.file}:${hit.line}`);
-        if (hit.text) lines.push(`      ${hit.text}`);
-      }
-      if (p.hits.length > shown.length) {
-        lines.push(`  … and ${p.hits.length - shown.length} more in this file`);
-      }
+      lines.push(...hitLines(p));
       let tally;
       if (isMeasuring(rule)) {
         tally = `allowed in this file: ${amount(rule, p.allowed)}, found: ${amount(rule, p.found)}`;
@@ -950,6 +1076,19 @@ export function formatProblems(problems, { staged = false } = {}) {
       lines.push(
         `  Fix: ${rule.fix}`,
         `  Rule: ${ruleAnchor(rule)}  ·  ${tally}`,
+        ''
+      );
+      continue;
+    }
+    if (p.type === 'spent') {
+      lines.push(...hitLines(p));
+      const was = isMeasuring(rule)
+        ? `the base measures ${amount(rule, p.atBase)} where the baseline pins ${amount(rule, p.pinned)}, so this change may have ${amount(rule, p.allowed)}; it has ${amount(rule, p.found)}`
+        : `the base no longer had ${p.spent.map((k) => JSON.stringify(k)).join(', ')}, though the baseline still pins ${p.spent.length === 1 ? 'it' : 'them'}`;
+      lines.push(
+        `  This fits the pin only because a fix was left unbanked before this change: ${was}.`,
+        `  Fix: ${rule.fix} (The stale pin is banked by ${lower} once the violation is gone.)`,
+        `  Rule: ${ruleAnchor(rule)}`,
         ''
       );
       continue;
@@ -1045,7 +1184,9 @@ function parseArgs(argv) {
 function parseBaseline(text, file) {
   if (text === null) return {};
   try {
-    return JSON.parse(text);
+    return JSON.parse(text, (_, v) =>
+      typeof v === 'string' ? v.normalize('NFC') : v
+    );
   } catch (err) {
     throw new Error(`${file} is not valid JSON (${err.message})`);
   }
@@ -1079,6 +1220,13 @@ function baselineAt(root, rev, file) {
  * passed.
  */
 function runGates(root, gates, skip) {
+  const unknown = [...skip].filter((id) => !gates.some((g) => g.id === id));
+  if (unknown.length > 0) {
+    console.error(
+      `check-architecture --gates: --skip names no gate: ${unknown.join(', ')}. The gates are ${gates.map((g) => g.id).join(', ')}.`
+    );
+    return 2;
+  }
   const failed = [];
   let ran = 0;
   for (const gate of gates) {
@@ -1109,6 +1257,12 @@ function runGates(root, gates, skip) {
     );
     return 1;
   }
+  if (ran === 0) {
+    console.error(
+      'check-architecture --gates: no gate ran, so nothing was checked.'
+    );
+    return 2;
+  }
   console.log(
     `OK: ${ran} CI static gate(s) passed locally${skip.size ? ` (${[...skip].join(', ')} skipped)` : ''}.`
   );
@@ -1137,10 +1291,11 @@ function loosening(root, registry, baselineFile, base) {
   }
   const lines = [
     `✗ check-architecture: ${missing.length} loosening(s) since ${base} have no countersign from the owner.`,
-    '  A raised baseline pin, a new or moved exception, or a change to the gate itself loosens it.',
+    '  A raised baseline pin, a new or moved exception, or a change to what a gate runs loosens it.',
     '  Only the OWNER can countersign: a G0-RAISE trailer counts only in a commit with no',
-    '  Co-Authored-By: Claude line. An agent must stop and ask the owner to write each reason',
-    '  and run this in the checkout (the <why> placeholders do not count):',
+    '  Co-Authored-By: Claude line, and only while what it signed is unchanged (a change that',
+    '  loosens the same item after it needs a new one). An agent must stop and ask the owner to',
+    '  write each reason and run this in the checkout (the <why> placeholders do not count):',
     `    ! git commit --allow-empty -m 'G0 countersign' ${missing.map((m) => `-m ${shellArg(m.line)}`).join(' ')}`,
     '  What each one loosens:',
   ];
@@ -1189,6 +1344,92 @@ function unstagedGateEdits(root) {
       );
     })
     .map((entry) => entry.slice(3));
+}
+
+/**
+ * When a change edits the gate's own code, the BASE commit's copy of the gate
+ * judges the countersigns too, so a bug in the new copy (a file dropped from
+ * GATE_CODE, a check that stops matching) can't approve itself (owner, 18
+ * Nov). The base's scripts/checks/ is extracted to a temporary directory and
+ * run over this checkout as data, with its own registry. It needs only node,
+ * so it runs where the static-analysis job does, before `pnpm install`.
+ */
+function baseGateJudges(root, base, baselineFile) {
+  const gitIn = (args, input) =>
+    spawnSync('git', args, {
+      cwd: root,
+      input,
+      maxBuffer: 256 * 1024 * 1024,
+    });
+  const diff = gitIn(['diff', '--quiet', base, '--', 'scripts/checks/']);
+  if (diff.status === 0) return 0; // the gate is the base's own
+  if (diff.status !== 1) {
+    throw new Error(`git diff ${base} -- scripts/checks/ failed`);
+  }
+  if (
+    gitIn(['cat-file', '-e', `${base}:scripts/checks/check-architecture.mjs`])
+      .status !== 0
+  ) {
+    console.log(
+      `note: ${base} has no architecture gate yet, so only this copy judges its countersigns.`
+    );
+    return 0;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'g0-base-gate-'));
+  try {
+    const archive = gitIn(['archive', '--format=tar', base, 'scripts/checks/']);
+    if (archive.status !== 0) throw new Error(`git archive ${base} failed`);
+    const untar = spawnSync('tar', ['-x', '-C', dir], {
+      input: archive.stdout,
+    });
+    if (untar.status !== 0)
+      throw new Error('tar could not unpack the base gate');
+    console.log(
+      `The gate's own code changed since ${base}, so its copy there judges the countersigns too:`
+    );
+    const args = [
+      join(dir, 'scripts/checks/check-architecture.mjs'),
+      '--root',
+      root,
+      '--raises',
+      base,
+    ];
+    if (baselineFile !== BASELINE_FILE) args.push('--baseline', baselineFile);
+    const r = spawnSync(process.execPath, args, {
+      cwd: root,
+      stdio: 'inherit',
+    });
+    if (r.status === 0 || r.status === 1) return r.status;
+    throw new Error(
+      `the base's copy of the gate could not run (exit ${r.status ?? r.signal})`
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The renames since the branch left origin/dev, so --lower moves a renamed
+ * file's pin instead of the gate asking for it forever.
+ */
+function branchRenames(root) {
+  try {
+    return renamesSince(root, ciBase(root, {}).base);
+  } catch (err) {
+    console.log(
+      `note: renamed files keep their pin at the old path (${err.message}).`
+    );
+    return new Map();
+  }
+}
+
+/** Whether a tracked file's working copy differs from the index. */
+function hasUnstagedEdits(root, file) {
+  const r = spawnSync('git', ['diff', '--quiet', '--', file], { cwd: root });
+  if (r.status !== 0 && r.status !== 1) {
+    throw new Error(`git diff -- ${file} failed`);
+  }
+  return r.status === 1;
 }
 
 /** @returns {Promise<number>} the exit code */
@@ -1260,7 +1501,18 @@ async function run(opts) {
     );
   }
 
+  const source = opts.staged ? stagedSource(root) : treeSource(root);
+
   if (opts.staged) {
+    // An empty commit (the owner's countersign) has nothing to judge.
+    if (
+      !opts.lower &&
+      source.changed.size === 0 &&
+      source.deleted.length === 0
+    ) {
+      console.log('OK: nothing staged for the architecture gate to judge.');
+      return 0;
+    }
     const edits = unstagedGateEdits(root);
     if (edits.length > 0) {
       console.error(
@@ -1268,9 +1520,13 @@ async function run(opts) {
       );
       return 2;
     }
+    if (opts.lower && hasUnstagedEdits(root, baselineFile)) {
+      console.error(
+        `check-architecture --lower --staged: ${baselineFile} has unstaged edits, which banking the index would overwrite. Stage them (git add) or discard them first.`
+      );
+      return 2;
+    }
   }
-
-  const source = opts.staged ? stagedSource(root) : treeSource(root);
 
   if (!opts.staged) {
     const idle = idleGlobs(rules, source.files);
@@ -1300,6 +1556,7 @@ async function run(opts) {
   );
 
   if (opts.lower) {
+    if (!opts.staged) source.renames = branchRenames(root);
     const lowered = serializeBaseline(
       lowerBaseline(rules, results, baseline, source)
     );
@@ -1322,17 +1579,20 @@ async function run(opts) {
 
   // At commit time an unbanked fix blocks in the files the commit touches. In
   // a pull request (or a local --ci) it blocks when this change made it,
-  // judged against the base. A push to dev or main only notes it.
+  // judged against the base, and a pin allows no more than the base had. A
+  // push to dev or main, or a release PR from dev, only notes a fix.
   const bankFails = opts.staged
     ? (file) => source.changed.has(file) || source.deleted.includes(file)
     : () => false;
   const problems = compare(rules, results, baseline, source, { bankFails });
-  if (ci?.base && ci.kind !== 'trunk') {
-    judgeFixesAtBase(rules, problems, {
+  if (ci?.base && (ci.kind === 'pr' || ci.kind === 'branch')) {
+    const atBase = {
       baseSource: revSource(root, ci.base, []),
       baseBaseline: baselineAt(root, ci.base, baselineFile),
       renames: source.renames,
-    });
+    };
+    judgeFixesAtBase(rules, problems, atBase);
+    problems.push(...spentAtBase(rules, results, baseline, atBase));
   }
   const judged = [...results.values()].reduce(
     (n, r) => n + r.evaluated.size,
@@ -1345,12 +1605,13 @@ async function run(opts) {
   );
 
   if (ci) {
-    if (ci.base)
+    if (ci.base) {
       code = Math.max(
         code,
-        loosening(root, forLoosening, baselineFile, ci.base)
+        loosening(root, forLoosening, baselineFile, ci.base),
+        baseGateJudges(root, ci.base, baselineFile)
       );
-    else console.log(`note: no countersign check (${ci.note}).`);
+    } else console.log(`note: no countersign check (${ci.note}).`);
   }
   return code;
 }

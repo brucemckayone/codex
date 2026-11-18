@@ -20,7 +20,11 @@
  * Matchers read only through `ctx.source`, never the filesystem, so the same
  * rule checks the working tree, the git index or a self-test fixture.
  */
-import { tokenize } from './check-data-access-contract.mjs';
+import {
+  regexCanStart,
+  regexEnd,
+  tokenize,
+} from './check-data-access-contract.mjs';
 
 /** 1-based line of each offset, computed once per file. */
 export function lineIndex(text) {
@@ -146,24 +150,50 @@ export function blankCode(text) {
  * `code` with the inside of every string and template literal replaced by x
  * (quotes kept, length kept), so a bracket, comma or paren in a string can't
  * change how the code around it is read. `code` is already comment-blanked.
+ * A regex literal is skipped whole, so a quote or backtick in one opens no
+ * string. Also returns the (1-based) lines that START inside a string: their
+ * indentation is the string's, not the code's.
  */
 export function maskStrings(code) {
+  return maskStringsWithLines(code).masked;
+}
+
+export function maskStringsWithLines(code) {
   const out = code.split('');
+  const startsInside = new Set();
+  let line = 1;
   for (let i = 0; i < code.length; i++) {
     const q = code[i];
+    if (q === '\n') {
+      line += 1;
+      continue;
+    }
+    if (q === '/' && regexCanStart(out, i)) {
+      const end = regexEnd(code, i);
+      if (end !== -1) {
+        i = end - 1;
+        continue;
+      }
+    }
     if (q !== "'" && q !== '"' && q !== '`') continue;
     let j = i + 1;
     while (j < code.length && code[j] !== q) {
       if (code[j] === '\\') j += 1;
-      else if (q !== '`' && code[j] === '\n') break;
+      else if (code[j] === '\n') {
+        if (q !== '`') break;
+        line += 1;
+        startsInside.add(line);
+      }
       j += 1;
     }
     for (let k = i + 1; k < j && k < code.length; k++) {
       if (out[k] !== '\n') out[k] = 'x';
     }
-    i = j;
+    // At the closing quote, carry on after it; at a newline that ended an
+    // unterminated string, let the loop count that newline.
+    i = code[j] === q ? j : j - 1;
   }
-  return out.join('');
+  return { masked: out.join(''), startsInside };
 }
 
 const NOT_A_NAME = new Set([
@@ -192,43 +222,80 @@ const NOT_A_NAME = new Set([
   'of',
   'instanceof',
 ]);
-const DECLARATIONS = [
+const MODIFIERS =
+  '(?:(?:public|private|protected|static|async|override|readonly|get|set)\\s+)*';
+/** A declaration that names a function: the key stops here. */
+const STRONG = [
   /(?:^|\s)function\s*\*?\s*([\w$]+)\s*[<(]/,
   /^(?:export\s+)?(?:const|let|var)\s+([\w$]+)\b[^=]*=\s*(?:async\s+)?(?:function\b|\(|[\w$]+\s*=>|<)/,
-  /^([\w$]+)\s*:\s*(?:async\s+)?(?:function\b|\(|[\w$]+\s*=>)/,
-  /^(?:(?:public|private|protected|static|async|override|readonly|get|set)\s+)*\*?\s*([\w$]+)\s*(?:<[^>]*>)?\s*\(/,
+  // a class field holding a function: `pay = async () => {`
+  new RegExp(
+    `^${MODIFIERS}([\\w$]+)\\s*(?::[^=]+)?=\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*(?::[^=]+)?=>|[\\w$]+\\s*=>)`
+  ),
+  // a method: `async name(` opening its parameters, or `name(…) {` / `name(…): T {`
+  new RegExp(
+    `^${MODIFIERS}\\*?\\s*([\\w$]+)\\s*(?:<[^>]*>)?\\s*\\((?:[^)]*$|[^)]*\\)\\s*(?::[^{]*)?\\{\\s*$)`
+  ),
   /(?:^|\s)class\s+([\w$]+)/,
 ];
+/** A name that narrows the key but isn't a declaration: keep walking past it. */
+const WEAK = [
+  // a property holding a function: `handler: async (ctx) => {`
+  /^([\w$]+)\s*:\s*(?:async\s+)?(?:function\b|\(|[\w$]+\s*=>)/,
+  // a callback passed to a call: `retry(() => {`, `await db.transaction(async (tx) => {`
+  /^(?:await\s+|return\s+)?([\w$]+(?:\.[\w$]+)*)\s*\(.*(?:=>|\bfunction\b)/,
+];
+/** A route: `app.post('/refund', …`, read from the original line. */
+const ROUTE = /\.(get|post|put|patch|delete|all)\(\s*(['"`])([^'"`]+)\2/;
 
 /**
  * The function, method or class a line sits in, read from the code's
  * indentation: biome formats every source file, so each less-indented line
- * above is an ancestor. The first ancestor that declares something names it.
- * A call's KEY carries this name, so a fix in one function can't pay for a
- * new call in another.
+ * above is an ancestor. Lines that start inside a string are skipped (their
+ * indentation is the string's). Weak names (a `handler:` property, a callback
+ * passed to a call) narrow the key and the walk goes on to the declaration or
+ * the route that names it. A call's KEY carries this name, so a fix in one
+ * function can't pay for a new call in another.
  */
-function enclosingName(maskedLines, lineNo) {
+export function enclosingName(
+  maskedLines,
+  lineNo,
+  { startsInside = new Set(), lines = maskedLines } = {}
+) {
   const indentOf = (l) => l.length - l.trimStart().length;
   let limit = indentOf(maskedLines[lineNo - 1] ?? '');
   // A line that starts with a closer (`}> {` ending a multi-line signature,
   // `} catch (e) {`) belongs to a construct whose head is further up, at the
   // same indent.
   let headPending = false;
+  let weak = null;
+  const named = (stop) => (weak ? `${stop}/${weak}` : stop);
   for (let i = lineNo - 2; i >= 0 && (limit > 0 || headPending); i--) {
     const line = maskedLines[i];
-    if (line.trim() === '') continue;
+    if (line.trim() === '' || startsInside.has(i + 1)) continue;
     const indent = indentOf(line);
     if (indent > limit || (indent === limit && !headPending)) continue;
     limit = indent;
     const text = line.trim();
     headPending = /^[)\]}>]/.test(text);
     if (headPending) continue;
-    for (const pattern of DECLARATIONS) {
+    const route = ROUTE.exec(lines[i] ?? '');
+    if (route) return named(`${route[1].toUpperCase()} ${route[3]}`);
+    for (const pattern of STRONG) {
       const name = pattern.exec(text)?.[1];
-      if (name && !NOT_A_NAME.has(name)) return name;
+      if (name && !NOT_A_NAME.has(name)) return named(name);
+    }
+    if (!weak) {
+      for (const pattern of WEAK) {
+        const name = pattern.exec(text)?.[1];
+        if (name && !NOT_A_NAME.has(name)) {
+          weak = name;
+          break;
+        }
+      }
     }
   }
-  return '(top level)';
+  return weak ?? '(top level)';
 }
 
 const LINK = /\[[^\]]*\]\(([^)\s]+)[^)]*\)/g;
@@ -332,17 +399,17 @@ export const MATCHERS = {
     file(rule, _path, text) {
       const { code } = tokenize(text);
       const { lineOf, textOf } = lineIndex(text);
-      let masked = null;
+      // Matched on string-masked code: a log line or an error message that
+      // names the API is not a call.
+      const { masked, startsInside } = maskStringsWithLines(code);
+      const maskedLines = masked.split('\n');
+      const lines = text.split('\n');
       const hits = [];
-      for (const m of code.matchAll(globalCopy(rule.match.pattern))) {
+      for (const m of masked.matchAll(globalCopy(rule.match.pattern))) {
         const line = lineOf(m.index);
-        masked ??= maskStrings(code).split('\n');
         const call = m[0].replace(/\s+/g, '');
-        hits.push({
-          line,
-          text: textOf(line),
-          key: `${enclosingName(masked, line)}>${call}`,
-        });
+        const name = enclosingName(maskedLines, line, { startsInside, lines });
+        hits.push({ line, text: textOf(line), key: `${name}>${call}` });
       }
       return { found: hits.length, hits };
     },
@@ -609,7 +676,11 @@ export const MATCHERS = {
       let at = text.indexOf(rule.match.text);
       while (at !== -1) {
         const line = lineOf(at);
-        const token = /^[^\s'"`)\]>]*/.exec(text.slice(at))[0];
+        // Sentence punctuation and markdown emphasis are not part of the path,
+        // so rewording the prose around a pinned citation keeps its key.
+        const token = /^[^\s'"`)\]>]*/
+          .exec(text.slice(at))[0]
+          .replace(/[.,;:!?*_]+$/, '');
         hits.push({ line, text: textOf(line).slice(0, 160), key: token });
         at = text.indexOf(rule.match.text, at + rule.match.text.length);
       }

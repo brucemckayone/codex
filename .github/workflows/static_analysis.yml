@@ -38,11 +38,13 @@ jobs:
       # Keep every gate step on one line: a multi-line run block can't be
       # matched and fails CI-GATES.
       #
-      # --ci also fails a fix this change made but didn't bank, and any
-      # loosening (a raised baseline pin, a new exception, a change to the gate
-      # itself) the owner hasn't countersigned with a G0-RAISE: trailer. The
-      # same countersign check runs from the BASE branch's copy of the gate in
-      # g0-countersign.yml, so a PR can't exempt itself by editing this one.
+      # --ci also fails a fix this change made but didn't bank, a pin spent
+      # beyond what the base still had, and any loosening (a raised baseline
+      # pin, a new exception, a change to what a gate runs) the owner hasn't
+      # countersigned with a G0-RAISE: trailer. When the change edits
+      # scripts/checks/, the BASE commit's copy of the gate (git archive, run
+      # from a temp dir) judges the countersigns too, so a PR can't approve
+      # its own gate edit. That needs the base's history: fetch-depth 0 above.
       # It runs BEFORE pnpm install: the gate needs no dependencies, and no
       # install lifecycle script can touch it first. No `if:`: CI-GATES fails
       # a conditional gate step.

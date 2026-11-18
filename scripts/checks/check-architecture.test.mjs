@@ -31,6 +31,7 @@ import { countLines, MATCHERS } from './architecture-matchers.mjs';
 import {
   callerPrint,
   ciBase,
+  gateDependencies,
   missingCountersigns,
   parseCountersigns,
   raisedEntries,
@@ -46,13 +47,24 @@ import {
   lowerBaseline,
   memorySource,
   serializeBaseline,
+  spentAtBase,
   validateRules,
 } from './check-architecture.mjs';
 
-const RUNNER = join(
-  dirname(fileURLToPath(import.meta.url)),
-  'check-architecture.mjs'
-);
+const HERE = dirname(fileURLToPath(import.meta.url));
+const RUNNER = join(HERE, 'check-architecture.mjs');
+
+/** The gate's own modules: what a fixture needs to run a real copy of it. */
+const GATE_MODULES = [
+  'check-architecture.mjs',
+  'architecture-rules.mjs',
+  'architecture-matchers.mjs',
+  'architecture-lists.mjs',
+  'architecture-ignores.mjs',
+  'architecture-docs.mjs',
+  'architecture-raises.mjs',
+  'check-data-access-contract.mjs',
+];
 
 const CALL_RULE = {
   id: 'T1',
@@ -461,7 +473,14 @@ describe('the CLI against a real git repository', () => {
   const readBaseline = () =>
     JSON.parse(readFileSync(join(repo, 'baseline.json'), 'utf8'));
   // Not in CI unless a test says so: the self-test itself runs in a CI job.
-  const LOCAL = { GITHUB_EVENT_NAME: '', GITHUB_EVENT_PATH: '' };
+  // GITHUB_HEAD_REF too: in a release PR's CI it is 'dev', which would turn
+  // every pull-request fixture here into a release.
+  const LOCAL = {
+    GITHUB_EVENT_NAME: '',
+    GITHUB_EVENT_PATH: '',
+    GITHUB_HEAD_REF: '',
+    GITHUB_REF: '',
+  };
   const cli = (...args) => cliWith({}, ...args);
   const cliWith = (env, ...args) =>
     spawnSync(
@@ -753,11 +772,12 @@ describe('the CLI against a real git repository', () => {
       skipped.stdout,
       /1 CI static gate\(s\) passed locally \(BAD skipped\)/
     );
-    assert.match(
-      cli('--gates', '--skip', 'OK,BAD').stdout,
-      /0 CI static gate\(s\) passed/,
-      'a skipped gate is not counted as passed'
-    );
+    const none = cli('--gates', '--skip', 'OK,BAD');
+    assert.equal(none.status, 2, 'a skipped gate is not counted as passed');
+    assert.match(none.stderr, /no gate ran/);
+    const typo = cli('--gates', '--skip', 'BIOME');
+    assert.equal(typo.status, 2, 'a typo in --skip must not skip silently');
+    assert.match(typo.stderr, /--skip names no gate: BIOME/);
     assert.equal(cli('--skip', 'OK').status, 2, '--skip goes with --gates');
   });
 
@@ -787,10 +807,15 @@ describe('the CLI against a real git repository', () => {
     );
   });
 
-  test('--staged refuses while the gate itself has unstaged edits', () => {
+  test('--staged refuses while the gate itself has unstaged edits, unless nothing is staged', () => {
     setUp();
     initAndCommit();
     write(GATE_STAND_IN, '// edited, not staged\n');
+    const empty = cli('--staged');
+    assert.equal(empty.status, 0, "the owner's empty countersign commit");
+    assert.match(empty.stdout, /nothing staged/);
+    write('src/a.ts', 'ok(); // more\n');
+    sh(['add', 'src/a.ts']);
     const r = cli('--staged');
     assert.equal(r.status, 2);
     assert.match(r.stderr, /unstaged or untracked edits/);
@@ -1000,6 +1025,8 @@ describe('the CLI against a real git repository', () => {
     setUp();
     initAndCommit();
     write('scripts/checks/architecture-new.mjs', 'export const x = 1;\n');
+    write('src/a.ts', 'ok(); // more\n');
+    sh(['add', 'src/a.ts']);
     const r = cli('--staged');
     assert.equal(r.status, 2);
     assert.match(r.stderr, /architecture-new\.mjs/);
@@ -1072,6 +1099,190 @@ describe('the CLI against a real git repository', () => {
       `${staged.stderr}\n${full.stderr}`
     );
     assert.equal(full.status, 0, 'a link has no text of its own');
+  });
+
+  // ---- round 3 review fixes -------------------------------------------
+
+  const ownerSigns = (...lines) =>
+    sh([
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      `G0 countersign\n\n${lines.join('\n')}`,
+    ]);
+
+  test('a countersign covers what it signed: loosening the same item after it needs a new one', () => {
+    setUp();
+    initAndCommit();
+    const base = head();
+    write('src/pinned.ts', 'forbidden();\nforbidden();\n');
+    write(
+      'baseline.json',
+      serializeBaseline({ T1: { 'src/pinned.ts': [K, K] } })
+    );
+    commit('raise');
+    ownerSigns('G0-RAISE: T1 src/pinned.ts — the drain moves next week');
+    assert.equal(cli('--raises', base).status, 0);
+
+    write('src/pinned.ts', 'forbidden();\nforbidden();\nforbidden();\n');
+    write(
+      'baseline.json',
+      serializeBaseline({ T1: { 'src/pinned.ts': [K, K, K] } })
+    );
+    commit('raise again');
+    const again = cli('--raises', base);
+    assert.equal(again.status, 1, 'the owner signed for two, not three');
+    assert.match(again.stderr, /G0-RAISE: T1 src\/pinned\.ts — <why>/);
+    ownerSigns('G0-RAISE: T1 src/pinned.ts — three until the drain moves');
+    assert.equal(cli('--raises', base).status, 0);
+
+    write(GATE_STAND_IN, '// loosened\n');
+    commit('gate');
+    ownerSigns(
+      'G0-RAISE: GATE scripts/checks/check-architecture.mjs — the stand-in changes shape'
+    );
+    assert.equal(cli('--raises', base).status, 0);
+    write(GATE_STAND_IN, '// loosened again\n');
+    commit('gate again');
+    assert.match(
+      cli('--raises', base).stderr,
+      /G0-RAISE: GATE scripts\/checks\/check-architecture\.mjs — <why>/
+    );
+  });
+
+  test("when a change edits the gate, the base's copy of the gate judges it too", () => {
+    setUp({ gate: false });
+    for (const file of GATE_MODULES) {
+      write(`scripts/checks/${file}`, readFileSync(join(HERE, file), 'utf8'));
+    }
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'the gate']);
+    initAndCommit();
+    const base = head();
+    // This change's copy stops listing its own module as gate code.
+    const raises = 'scripts/checks/architecture-raises.mjs';
+    const text = readFileSync(join(repo, raises), 'utf8');
+    const emptied = text.replace(
+      /export const GATE_CODE = \[[^\]]*\];/,
+      'export const GATE_CODE = [];'
+    );
+    assert.notEqual(emptied, text, 'the fixture found GATE_CODE');
+    write(raises, emptied);
+    commit('refactor the gate');
+    const own = (...args) =>
+      spawnSync(
+        process.execPath,
+        [
+          join(repo, 'scripts/checks/check-architecture.mjs'),
+          '--root',
+          repo,
+          '--rules',
+          join(repo, 'rules.mjs'),
+          '--baseline',
+          'baseline.json',
+          ...args,
+        ],
+        { encoding: 'utf8', env: { ...process.env, ...LOCAL, ...prEnv(base) } }
+      );
+    assert.equal(
+      own('--raises', base).status,
+      0,
+      'its own copy approves itself'
+    );
+    const judged = own('--ci');
+    assert.equal(judged.status, 1, judged.stdout + judged.stderr);
+    assert.match(judged.stdout, /its copy there judges the countersigns too/);
+    assert.match(
+      judged.stderr,
+      /G0-RAISE: GATE scripts\/checks\/architecture-raises\.mjs — <why>/
+    );
+    ownerSigns(
+      'G0-RAISE: GATE scripts/checks/architecture-raises.mjs — the list moves to the registry'
+    );
+    const signed = own('--ci');
+    assert.equal(signed.status, 0, signed.stdout + signed.stderr);
+  });
+
+  test('--ci in a PR: headroom a fix left unbanked on dev cannot be spent', () => {
+    setUp();
+    initAndCommit();
+    write('src/pinned.ts', 'ok();\n');
+    commit('fixed on dev, never banked');
+    const base = head();
+    const alone = cliWith(prEnv(base), '--ci');
+    assert.equal(alone.status, 0, 'the stale pin alone is a notice');
+    assert.match(alone.stdout, /not yet banked/);
+    write('src/pinned.ts', 'forbidden();\n');
+    commit('re-add it');
+    const r = cliWith(prEnv(base), '--ci');
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /fits the pin only because a fix was left unbanked/);
+    assert.equal(
+      cli().status,
+      0,
+      'a full run outside a PR has no base to cap at'
+    );
+  });
+
+  test('--ci in a release PR from dev: a fix dev made is a notice, not a failure', () => {
+    setUp();
+    initAndCommit();
+    const base = head();
+    write('src/pinned.ts', 'ok();\n');
+    commit('fixed, not banked');
+    const release = cliWith({ ...prEnv(base), GITHUB_HEAD_REF: 'dev' }, '--ci');
+    assert.equal(release.status, 0, release.stderr);
+    assert.match(release.stdout, /not yet banked/);
+    assert.equal(
+      cliWith(prEnv(base), '--ci').status,
+      1,
+      'the same fix blocks the feature PR that made it'
+    );
+  });
+
+  test('--lower --staged refuses to overwrite unstaged baseline edits', () => {
+    setUp();
+    initAndCommit();
+    write('src/pinned.ts', 'ok();\n');
+    sh(['add', 'src/pinned.ts']);
+    write('baseline.json', '{}\n');
+    const r = cli('--lower', '--staged');
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /unstaged edits/);
+    assert.equal(readFileSync(join(repo, 'baseline.json'), 'utf8'), '{}\n');
+  });
+
+  test("--lower moves a renamed file's pin, found against origin/dev", () => {
+    setUp();
+    initAndCommit();
+    sh(['update-ref', 'refs/remotes/origin/dev', 'HEAD']);
+    sh(['mv', 'src/pinned.ts', 'src/moved.ts']);
+    commit('rename');
+    const r = cli('--lower');
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(readBaseline(), { T1: { 'src/moved.ts': [K] } });
+  });
+
+  test('an exception moved into another function, onto the same text, needs a countersign', () => {
+    setUp();
+    const excepted = `  // ${IGNORE} T1 until=2026-12-01 by=bruce — the drain moves next\n  forbidden();\n`;
+    write(
+      'src/a.ts',
+      `function pay() {\n${excepted}}\nfunction refund() {\n  ok();\n}\n`
+    );
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'an excepted call']);
+    initAndCommit();
+    const base = head();
+    write(
+      'src/a.ts',
+      `function pay() {\n  ok();\n}\nfunction refund() {\n${excepted}}\n`
+    );
+    commit('move it');
+    const r = cli('--raises', base);
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /G0-RAISE: T1 src\/a\.ts — <why>/);
   });
 });
 
@@ -2397,6 +2608,409 @@ describe('round 2: the registry rules', async () => {
         )
       ),
       /on pull_request is missing/
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 3 review fixes
+// ---------------------------------------------------------------------------
+
+describe('round 3: the base, the gate and keys', () => {
+  test('a PR pin allows what the base still had, plus its own raise', () => {
+    const spent = (rules, headTree, baseTree, pins, basePins = pins) => {
+      const source = memorySource(headTree);
+      return spentAtBase(rules, collect(rules, source), pins, {
+        baseSource: memorySource(baseTree),
+        baseBaseline: basePins,
+      }).map((p) => `${p.file}:${p.allowed}:${p.found}`);
+    };
+    const pins = { T1: { 'src/a.ts': [K] } };
+    const once = { 'src/a.ts': 'forbidden();\n' };
+    const fixed = { 'src/a.ts': 'ok();\n' };
+    assert.deepEqual(
+      spent([CALL_RULE], once, fixed, pins),
+      ['src/a.ts:0:1'],
+      'the base had lost it, though the pin kept it'
+    );
+    assert.deepEqual(spent([CALL_RULE], once, once, pins), []);
+    assert.deepEqual(
+      spent(
+        [CALL_RULE],
+        { 'src/a.ts': 'forbidden();\nforbidden();\n' },
+        fixed,
+        { T1: { 'src/a.ts': [K, K] } },
+        pins
+      ),
+      ['src/a.ts:1:2'],
+      "this change's raise counts; the stale pin it sits on does not"
+    );
+    assert.deepEqual(
+      spent([CALL_RULE], once, {}, pins, {}),
+      [],
+      'a pin this change added is all raise'
+    );
+    assert.deepEqual(
+      spent([CALL_RULE], { 'src/b.ts': 'forbidden();\n' }, fixed, {
+        T1: { 'src/a.ts': [K] },
+      }),
+      [],
+      'an unpinned file is judged by compare(), not here'
+    );
+    const size = { 'T-SIZE': { 'src/big.ts': 5 } };
+    const four = { 'src/big.ts': 'a\nb\nc\nd\n' };
+    assert.deepEqual(
+      spent([SIZE_RULE], { 'src/big.ts': 'a\nb\nc\nd\ne\n' }, four, size),
+      ['src/big.ts:4:5']
+    );
+    assert.deepEqual(spent([SIZE_RULE], four, four, size), []);
+    assert.deepEqual(
+      spent(
+        [SIZE_RULE],
+        { 'src/big.ts': 'a\nb\nc\nd\ne\nf\n' },
+        four,
+        {
+          'T-SIZE': { 'src/big.ts': 6 },
+        },
+        size
+      ),
+      [],
+      'a raised size pin is the countersign check’s to judge'
+    );
+  });
+
+  test('a whole-repo rule: a pin already stale at the base is a notice', () => {
+    const WHOLE = {
+      id: 'T-W',
+      title: 'Lists agree',
+      why: 'fixture',
+      fix: 'List it.',
+      scope: { include: ['cfg/**'] },
+      match: {
+        kind: 'lists-agree',
+        need: (source, subjects) =>
+          subjects.map((f) => ({
+            group: 'g',
+            item: source.read(f).trim(),
+            file: f,
+            line: 1,
+            text: 'needs',
+          })),
+        have: () => new Map([['g', { file: 'x', items: new Set(['y']) }]]),
+      },
+    };
+    const tree = { 'cfg/b': 'y\n' };
+    const baseline = { 'T-W': { 'cfg/gone': ['x'] } };
+    const judged = (baseTree) => {
+      const source = memorySource(tree);
+      const problems = compare(
+        [WHOLE],
+        collect([WHOLE], source),
+        baseline,
+        source,
+        { bankFails: () => false }
+      );
+      judgeFixesAtBase([WHOLE], problems, {
+        baseSource: memorySource(baseTree),
+        baseBaseline: baseline,
+      });
+      return problems.map((p) => `${p.type}:${p.blocking}`);
+    };
+    assert.deepEqual(judged(tree), ['stale:false'], 'gone at the base too');
+    assert.deepEqual(
+      judged({ ...tree, 'cfg/gone': 'y\n' }),
+      ['stale:true'],
+      'this change deleted it'
+    );
+  });
+
+  test('a key with a decomposed character matches its NFC pin', () => {
+    const LINK = {
+      id: 'T-L',
+      title: 'Links resolve',
+      why: 'fixture',
+      fix: 'Fix it.',
+      scope: { include: ['docs/**/*.md'] },
+      match: { kind: 'md-link' },
+    };
+    const tree = { 'docs/a.md': '[x](./café.md)\n' };
+    const { results } = run([LINK], tree, {});
+    const key = results.get('T-L').perFile.get('docs/a.md').hits[0].key;
+    const pinned = { 'T-L': { 'docs/a.md': [key.normalize('NFC')] } };
+    assert.deepEqual(run([LINK], tree, pinned).problems, []);
+  });
+
+  test('A1 keys: a multi-line string above the call keeps its function, and a string never matches', async () => {
+    const { RULES } = await import('./architecture-rules.mjs');
+    const a1 = RULES.find((r) => r.id === 'A1');
+    const text = [
+      "app.post('/refund/handler', async (c) => {",
+      '  const note = `line one',
+      'still inside the string {',
+      '`;',
+      '  await stripe.refunds.create({});',
+      '});',
+      "app.post('/cancel/retry', async (c) => {",
+      '  await stripe.refunds.create({});',
+      '});',
+      'async function pay() {',
+      "  const s = 'transfers.create( only in a string';",
+      '  await stripe.payouts.create({});',
+      '}',
+    ].join('\n');
+    const { results } = run([a1], { 'packages/x/src/a.ts': text }, {});
+    assert.deepEqual(
+      results
+        .get('A1')
+        .perFile.get('packages/x/src/a.ts')
+        .hits.map((h) => h.key),
+      [
+        'POST /refund/handler>refunds.create(',
+        'POST /cancel/retry>refunds.create(',
+        'pay>payouts.create(',
+      ]
+    );
+  });
+
+  test('DOC-SESSION keys drop the sentence punctuation after a path', async () => {
+    const { RULES } = await import('./architecture-rules.mjs');
+    const rule = RULES.find((r) => r.id === 'DOC-SESSION');
+    const { results } = run(
+      [rule],
+      {
+        'apps/x.ts': `// see ${SESSION_NOTES}a/b.html.\n// and ${SESSION_NOTES}c.md, too\n`,
+      },
+      {}
+    );
+    assert.deepEqual(
+      results
+        .get('DOC-SESSION')
+        .perFile.get('apps/x.ts')
+        .hits.map((h) => h.key),
+      [`${SESSION_NOTES}a/b.html`, `${SESSION_NOTES}c.md`]
+    );
+  });
+});
+
+describe('round 3: what the gate is made of', () => {
+  test('a comment never ends a calling job, and changing one changes nothing', () => {
+    const wf = '.github/workflows/static_analysis.yml';
+    const caller = `on:\n  pull_request:\njobs:\n  static:\n    uses: ./${wf}\n# a note at column 0\n    with:\n      x: 1\n`;
+    assert.notEqual(
+      callerPrint(caller, wf),
+      callerPrint(
+        caller.replace('      x: 1', '      x: 1\n    if: false'),
+        wf
+      ),
+      'review finding: a column-0 comment hid the rest of the job'
+    );
+    assert.equal(
+      callerPrint(caller, wf),
+      callerPrint(caller.replace('# a note', '# another note'), wf)
+    );
+  });
+
+  test('what a gate runs is derived from its commands, plus the files and ratchets it declares', () => {
+    const gates = [
+      { id: 'A', run: 'pnpm check:ci', files: ['biome.json'] },
+      {
+        id: 'B',
+        run: 'pnpm --filter web run check:x',
+        ratchets: ['apps/web/b.json'],
+      },
+      { id: 'C', run: 'pnpm typecheck' },
+      {
+        id: 'D',
+        selfTest: 'node --test scripts/d.test.mjs',
+        run: 'node scripts/d.mjs',
+      },
+    ];
+    const web = (scripts) => JSON.stringify({ name: 'web', scripts });
+    const files = {
+      'package.json': JSON.stringify({
+        scripts: {
+          'check:ci': 'biome check .',
+          typecheck: 'turbo run typecheck',
+        },
+      }),
+      'apps/web/package.json': web({
+        'check:x': 'node scripts/x.mjs',
+        typecheck: 'tsc',
+      }),
+    };
+    const parts = gateDependencies(
+      gates,
+      Object.keys(files),
+      (f) => files[f] ?? null
+    );
+    assert.deepEqual(parts.map((p) => p.label).sort(), [
+      'apps/web/b.json',
+      'apps/web/package.json#scripts.check:x',
+      'apps/web/package.json#scripts.typecheck',
+      'apps/web/scripts/x.mjs',
+      'biome.json',
+      'package.json#scripts.check:ci',
+      'package.json#scripts.typecheck',
+      'scripts/d.mjs',
+      'scripts/d.test.mjs',
+      'turbo.json#tasks.typecheck',
+    ]);
+    const part = (label) => parts.find((p) => p.label === label);
+    const script = part('apps/web/package.json#scripts.check:x');
+    assert.ok(
+      script.changed(
+        files['apps/web/package.json'],
+        web({ 'check:x': 'true', typecheck: 'tsc' })
+      )
+    );
+    assert.ok(
+      !script.changed(
+        files['apps/web/package.json'],
+        web({ 'check:x': 'node scripts/x.mjs', typecheck: 'tsc', other: 'y' })
+      ),
+      'another script is not this gate'
+    );
+    const ratchet = part('apps/web/b.json');
+    assert.ok(ratchet.changed('{"e":{"a":{"T":1}}}', '{"e":{"a":{"T":2}}}'));
+    assert.ok(
+      ratchet.changed('{"e":{}}', '{"e":{"b":{"T":1}}}'),
+      'a file newly carrying errors'
+    );
+    assert.ok(
+      !ratchet.changed('{"e":{"a":{"T":2}}}', '{"e":{"a":{"T":1}}}'),
+      'a fall only tightens'
+    );
+    assert.ok(
+      part('turbo.json#tasks.typecheck').changed(
+        '{"tasks":{"typecheck":{}}}',
+        '{"tasks":{"typecheck":{"cache":false}},"x":1}'
+      )
+    );
+    assert.ok(
+      !part('turbo.json#tasks.typecheck').changed(
+        '{"tasks":{"typecheck":{}}}',
+        '{"tasks":{"typecheck":{}},"x":1}'
+      ),
+      'another task is not this gate'
+    );
+  });
+
+  test('ciBase: a pull request from dev is a release', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'arch-release-'));
+    try {
+      const sh = (...args) =>
+        spawnSync(
+          'git',
+          ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args],
+          { cwd: dir, encoding: 'utf8' }
+        );
+      sh('init', '-q');
+      sh('commit', '-q', '--allow-empty', '-m', 'one');
+      const path = join(dir, '.git', 'event.json');
+      writeFileSync(
+        path,
+        JSON.stringify({ pull_request: { base: { sha: 'abc' } } })
+      );
+      const env = {
+        GITHUB_EVENT_NAME: 'pull_request',
+        GITHUB_EVENT_PATH: path,
+      };
+      assert.deepEqual(ciBase(dir, { ...env, GITHUB_HEAD_REF: 'dev' }), {
+        kind: 'release',
+        base: 'abc',
+      });
+      assert.deepEqual(ciBase(dir, { ...env, GITHUB_HEAD_REF: 'feat/x' }), {
+        kind: 'pr',
+        base: 'abc',
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('round 3: the registry rules', async () => {
+  const { RULES, GATES, CI_SETUP_STEPS, CI_CALLERS } = await import(
+    './architecture-rules.mjs'
+  );
+  const { gateCommands } = await import('./architecture-lists.mjs');
+  const byId = (id) => RULES.find((r) => r.id === id);
+  const newProblems = (rule, tree) =>
+    run([rule], tree, {}).problems.filter((p) => p.type === 'new');
+
+  test('RATE-LIMIT-BINDING reads a quoted key, and a property read is not an alias', () => {
+    const rule = byId('RATE-LIMIT-BINDING');
+    const fires = (route) =>
+      newProblems(rule, {
+        'packages/constants/src/limits.ts': limitsTs,
+        'workers/w/wrangler.jsonc': wrangler(['RATE_LIMIT_API']),
+        'workers/w/src/routes.ts': route,
+      }).reduce((n, p) => n + p.found, 0);
+    assert.equal(
+      fires("procedure({ 'policy': { 'rateLimit': 'streaming' } });\n"),
+      2,
+      'review finding: a quoted key read as its masked text and passed as api'
+    );
+    for (const route of [
+      'const limit = policy.rateLimit;\n',
+      'const preset = options.rateLimit as string;\n',
+    ]) {
+      assert.equal(fires(route), 0, `${route.trim()} reads a property`);
+    }
+    for (const [route, why] of [
+      [
+        "import { procedure as p } from '@codex/worker-utils';\np({});\n",
+        'a renamed import',
+      ],
+      [
+        "import * as wu from '@codex/worker-utils';\nconst p = wu.procedure;\n",
+        'a stored namespace member',
+      ],
+      [
+        "import * as wu from '@codex/worker-utils';\nwu['procedure']({ policy: { rateLimit: 'api' } });\n",
+        'a computed namespace member',
+      ],
+    ]) {
+      assert.equal(fires(route), 1, `${why} hides its calls, so it fails`);
+    }
+  });
+
+  test('CI-GATES reads a commented or quoted job header, and a quoted job key', () => {
+    const rule = byId('CI-GATES');
+    const commands = GATES.flatMap(gateCommands);
+    const webScripts = commands
+      .map((c) => /^pnpm --filter web run (\S+)$/.exec(c)?.[1])
+      .filter(Boolean);
+    const steps = [...CI_SETUP_STEPS, ...commands]
+      .map((c) => `      - name: s\n        run: ${c}\n`)
+      .join('');
+    const caller = `on:\n  pull_request:\njobs:\n  static:\n    uses: ./.github/workflows/static_analysis.yml\n`;
+    const hits = (workflow) =>
+      newProblems(rule, {
+        '.github/workflows/static_analysis.yml': workflow,
+        ...Object.fromEntries(CI_CALLERS.map((c) => [c, caller])),
+        'package.json': JSON.stringify({
+          scripts: { 'check:ci': 'x', typecheck: 'x' },
+        }),
+        'apps/web/package.json': JSON.stringify({
+          name: 'web',
+          scripts: Object.fromEntries(webScripts.map((s) => [s, 'x'])),
+        }),
+      })
+        .flatMap((p) => p.hits.map((h) => h.text))
+        .join('\n');
+    const job = (head, keys) =>
+      `jobs:  # the jobs\n${head}\n    runs-on: ubuntu-latest\n${keys}    steps:  # every gate\n${steps}`;
+    assert.equal(hits(job('  x:  # the job', '')), '', 'the green tree');
+    assert.match(
+      hits(job('  x:  # the job', '    if: false\n')),
+      /changed by the job's if:/,
+      'review finding: a comment on the job header hid its if:'
+    );
+    assert.match(
+      hits(job('  "x":', '    "if": false\n')),
+      /changed by the job's if:/,
+      'review finding: a quoted key hid its if:'
     );
   });
 });

@@ -137,17 +137,35 @@ export const CI_SETUP_STEPS = [
  * Every gate the static-analysis job runs, so `--gates` (and through it
  * gate.sh) runs the same set locally. `before` is a setup step the gate needs;
  * `needs` is a precondition named when the gate fails.
+ *
+ * What each gate runs is also what a change must countersign to loosen it
+ * (architecture-raises.mjs, gateDependencies): the files its commands name are
+ * found from the commands, and `files` (configs it reads, such as biome.json)
+ * and `ratchets` (its own baseline, where only a rise loosens it) say the
+ * rest.
  */
 export const GATES = [
   {
     id: 'BIOME',
     title: 'Biome lint and format; every diagnostic fails',
     run: 'pnpm check:ci',
+    files: ['biome.json'],
   },
   {
     id: 'TYPECHECK',
     title: 'TypeScript across the monorepo',
     run: 'pnpm typecheck',
+    // The shared configs every package extends. A package's own tsconfig is
+    // not fingerprinted (63 files that change weekly); review is its backstop.
+    files: [
+      'tsconfig.json',
+      'tsconfig.build.json',
+      'config/tsconfig.json',
+      'config/tsconfig/base.json',
+      'config/tsconfig/package.json',
+      'config/tsconfig/package-typecheck.json',
+      'config/tsconfig/worker.json',
+    ],
   },
   {
     id: 'SETUP-ORDER',
@@ -188,6 +206,7 @@ export const GATES = [
     needs: 'built packages: run `pnpm typecheck` first (gate.sh does)',
     selfTest: 'pnpm --filter web run check:svelte-baseline:test',
     run: 'pnpm --filter web run check:svelte-baseline',
+    ratchets: ['apps/web/scripts/svelte-check-baseline.json'],
   },
   {
     id: 'ARCH',
@@ -207,9 +226,12 @@ export const RULES = [
         'packages/*/src/**/*.{ts,js,mjs}',
         'workers/*/src/**/*.{ts,js,mjs}',
         'apps/*/src/**/*.{ts,js,mjs}',
+        // An ops script moves real money as surely as a service does.
+        'scripts/**/*.{ts,js,mjs}',
       ],
       exclude: [
         ...NOT_TESTS,
+        'scripts/checks/**', // the gate itself, which names the calls it bans
         'packages/payments/src/payout-ledger.ts',
         'packages/payments/src/clawback.ts',
         'packages/payments/src/refund.ts',

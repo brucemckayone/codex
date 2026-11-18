@@ -96,10 +96,19 @@ const LIMITERS = [...ROUTE_FACTORIES, 'rateLimit'];
 const NAMES = LIMITERS.join('|');
 const LIMITER_MODULE = /^@codex\/(?:worker-utils|security)(?:\/[\w/-]+)?$/;
 
-/** A renamed import, or a stored reference, hides its calls from this rule. */
-const ALIASED = new RegExp(
-  `\\b(?:${NAMES})\\s+as\\s+[\\w$]+|\\b(?:const|let|var)\\s+[\\w$]+\\s*=\\s*(?:[\\w$]+\\s*\\.\\s*)?(?:${NAMES})\\b(?!\\s*[(<])`
-);
+/**
+ * A renamed import, or a stored reference, hides its calls from this rule. A
+ * stored reference counts only when it is the bare factory or one read off a
+ * limiter namespace: `const limit = policy.rateLimit` reads a property.
+ */
+const aliased = (namespaces) => {
+  const receiver = namespaces.length
+    ? `(?:(?:${namespaces.join('|')})\\s*\\.\\s*)?`
+    : '';
+  return new RegExp(
+    `\\bimport\\s*(?:type\\s+)?\\{[^}]*\\b(?:${NAMES})\\s+as\\s+[\\w$]+|\\b(?:const|let|var)\\s+[\\w$]+\\s*=\\s*${receiver}(?:${NAMES})\\b(?!\\s*[(<.])`
+  );
+};
 
 /** The index of the bracket that closes the one at `open`, in masked text. */
 function closing(text, open) {
@@ -118,9 +127,11 @@ function closing(text, open) {
 
 /**
  * The top-level entries of the object literal whose `{` is at `open`: a
- * spread, a shorthand (or method), or `key: value` with the value's span.
+ * spread, a shorthand (or method), or `key: value` with the value's span. The
+ * structure is read from `masked` (no string can hold a bracket or comma), a
+ * quoted key's NAME from `code`, at the same offsets.
  */
-function objectEntries(masked, open) {
+function objectEntries(code, masked, open) {
   const close = closing(masked, open);
   const entries = [];
   const push = (from, to) => {
@@ -132,7 +143,7 @@ function objectEntries(masked, open) {
       entries.push({ spread: true });
       return;
     }
-    const m = /^(?:([\w$]+)|(['"])([\w$-]+)\2)\s*(:)?/.exec(text);
+    const m = /^(?:([\w$]+)|(['"])([\w$-]+)\2)\s*(:)?/.exec(code.slice(at, to));
     if (!m) {
       entries.push({ unreadable: true });
       return;
@@ -191,7 +202,7 @@ function resolveLimit(callee, code, masked, open) {
     return { unknown: `${callee}() options are not an object literal` };
   }
   const value = (entry) => code.slice(entry.start, entry.end).trim();
-  const entries = objectEntries(masked, brace);
+  const entries = objectEntries(code, masked, brace);
   if (entries.some((e) => e.spread || e.unreadable)) {
     return {
       unknown: `${callee}() options contain a spread or computed key, which can carry a rate limit`,
@@ -220,7 +231,7 @@ function resolveLimit(callee, code, masked, open) {
   if (masked[policy.start] !== '{') {
     return { unknown: `${callee}() policy is not an object literal` };
   }
-  const rules = objectEntries(masked, policy.start);
+  const rules = objectEntries(code, masked, policy.start);
   if (rules.some((e) => e.spread || e.unreadable)) {
     return { unknown: `${callee}() policy contains a spread or computed key` };
   }
@@ -243,14 +254,19 @@ function resolveLimit(callee, code, masked, open) {
     : { unknown: `${callee}() rateLimit is not a literal` };
 }
 
-/** Every rate-limiting call in comment-blanked code. */
-function limiterCalls(code, masked) {
+/** The names a file imports a limiter module under (`import * as wu`). */
+function limiterNamespaces(code) {
   const namespaces = [];
   for (const m of code.matchAll(
     /\bimport\s*\*\s*as\s+([\w$]+)\s+from\s*(['"])([^'"]+)\2/g
   )) {
     if (LIMITER_MODULE.test(m[3])) namespaces.push(m[1]);
   }
+  return namespaces;
+}
+
+/** Every rate-limiting call in comment-blanked code. */
+function limiterCalls(masked, namespaces) {
   const receiver = namespaces.length
     ? `(?:(?:${namespaces.join('|')})\\s*\\.\\s*)?`
     : '';
@@ -319,14 +335,25 @@ export const rateLimitBindings = {
           line,
           text: why,
         });
-      const alias = ALIASED.exec(masked);
+      const namespaces = limiterNamespaces(code);
+      const alias = aliased(namespaces).exec(masked);
       if (alias) {
+        const shown = alias[0].replace(/\s+/g, ' ');
         unknown(
           lineOf(alias.index),
-          `"${alias[0].replace(/\s+/g, ' ')}" hides its calls from this rule`
+          `"${shown.length > 60 ? `…${shown.slice(-60)}` : shown}" hides its calls from this rule`
         );
       }
-      for (const call of limiterCalls(code, masked)) {
+      for (const ns of namespaces) {
+        const bracket = new RegExp(`(?<![\\w$.])${ns}\\s*\\[`).exec(masked);
+        if (bracket) {
+          unknown(
+            lineOf(bracket.index),
+            `${ns}[…] reads the limiter module by a computed name`
+          );
+        }
+      }
+      for (const call of limiterCalls(masked, namespaces)) {
         const line = lineOf(call.index);
         if (call.typeArgs) {
           unknown(
@@ -406,14 +433,14 @@ function workflowSteps(text) {
   };
   text.split('\n').forEach((raw, i) => {
     const line = raw.replace(/\r$/, '');
-    const jobHead = /^ {2}([\w-]+)\s*:\s*$/.exec(line);
+    const jobHead = JOB_HEAD.exec(line);
     if (jobHead) {
       finish();
       inSteps = false;
-      job = jobHead[1];
+      job = jobHead[2];
       return;
     }
-    if (/^\s*steps\s*:\s*$/.test(line)) {
+    if (/^\s*(['"]?)steps\1\s*:\s*(?:#.*)?$/.test(line)) {
       finish();
       inSteps = true;
       itemIndent = null;
@@ -458,6 +485,12 @@ function workflowSteps(text) {
   }
   return steps;
 }
+
+/** A job's header line, `  name:`, quoted or not, with or without a comment. */
+const JOB_HEAD = /^ {2}(['"]?)([\w-]+)\1\s*:\s*(?:#.*)?$/;
+
+/** A YAML key with its quotes dropped, so `"if": x` reads as `if: x`. */
+const unquoteKey = (text) => text.replace(/^(['"])([\w-]+)\1(\s*:)/, '$2$3');
 
 /** Step keys that switch a step off, or change what its run: line does. */
 const STEP_SWITCHES = ['if', 'continue-on-error', 'shell', 'working-directory'];
@@ -505,17 +538,18 @@ function jobs(text) {
   let inJobs = false;
   for (const raw of text.split('\n')) {
     const line = raw.replace(/\r$/, '');
-    if (/^jobs\s*:\s*$/.test(line)) {
+    if (/^(['"]?)jobs\1\s*:\s*(?:#.*)?$/.test(line)) {
       inJobs = true;
       continue;
     }
     if (!inJobs) continue;
-    const job = /^ {2}([\w-]+)\s*:\s*$/.exec(line);
+    const job = JOB_HEAD.exec(line);
     if (job) {
-      name = job[1];
+      name = job[2];
       out.set(name, []);
-    } else if (name && /^ {4}\S/.test(line)) out.get(name).push(line.trim());
-    else if (/^\S/.test(line)) inJobs = false;
+    } else if (name && /^ {4}[^\s#]/.test(line)) {
+      out.get(name).push(unquoteKey(line.trim()));
+    } else if (/^[^\s#]/.test(line)) inJobs = false;
   }
   return out;
 }

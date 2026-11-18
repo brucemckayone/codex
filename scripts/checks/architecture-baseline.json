@@ -808,7 +808,7 @@
       "docs/handover/phase3-sources/review-brands/brands.json"
     ],
     "apps/web/src/lib/components/studio/media-library/MediaTile.svelte": [
-      "docs/handover/live-media-status/index.html."
+      "docs/handover/live-media-status/index.html"
     ],
     "apps/web/src/lib/components/studio/media-library/tile-state.test.ts": [
       "docs/handover/live-media-status/"
