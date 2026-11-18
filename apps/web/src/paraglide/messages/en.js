@@ -27247,6 +27247,22 @@ export const support_refund_canceled = () => `Cancelled`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_refund_covered = () => `Covered`
+
+
+/**
+ * @param {{ refundId: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_covered_by = (params) => `Included in refund ${params.refundId} (${params.amount}), so nothing more is owed for it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_taking_back = () => `Taking back shares…`
 
 
@@ -28823,6 +28839,22 @@ export const support_queue_waiting_note = (params) => `Opened ${params.date}. No
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_queue_waiting_refund_badge = () => `Waiting for the payment's refund`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_waiting_refund_note = () => `The payment's own refund includes this. If Stripe won't make it, support is alerted to refund the payment by hand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_queue_debts_intro = () => `A refund or chargeback took more than the payee had in Stripe. One row per person, oldest debt first. Most are held by Stripe as a negative balance and come back from the payee's next earnings by themselves; a debt Stripe refused waits for you to settle it.`
 
 
@@ -29632,6 +29664,46 @@ export const support_settle_on_charge = () => `The buyer's chargeback was lost, 
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_settle_open_charge = () => `Open the charge`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_exceeds_paid_lead = (params) => `Only ${params.amount} more can be paid back on this payment, so this wasn't settled.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_exceeds_paid = (params) => `Refund ${params.amount} on the charge page; that settles this one.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_exceeds_paid_none = () => `Everything paid on this payment has already been paid back, so this wasn't settled.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_awaits_late_win = () => `This refund is waiting for the late win's refund to finish, so nothing was settled.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_awaits_payment_refund = () => `This refund is waiting for the payment's own refund, which includes it, so nothing was settled.`
 
 
 /**
