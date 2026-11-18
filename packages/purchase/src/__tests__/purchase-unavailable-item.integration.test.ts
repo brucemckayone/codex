@@ -860,15 +860,29 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       'Blocked payments owed again after a late win: pay it another way, then mark it paid on the support charge page';
 
     /**
+     * Each payment's one charge, by its PaymentIntent (review r7): the
+     * completion, its refunds and its chargeback all name it, as Stripe's
+     * events do, since a PaymentIntent has one charge.
+     */
+    const chargeOfPayment = new Map<string, string>();
+    function chargeOf(pi: string): string {
+      const chargeId = chargeOfPayment.get(pi);
+      if (!chargeId) throw new Error(`no charge for ${pi}`);
+      return chargeId;
+    }
+
+    /**
      * A blocked payment of this kind whose refund Stripe refused: owed.
      * `beforePurchase` runs once its PaymentIntent is known, before the
-     * purchase lands; `stripeChargeId` is the completion's.
+     * purchase lands; `stripeChargeId` is its one charge (`chargeOf`), its
+     * own unless given, which the completion names unless it `landsUnnamed`.
      */
     async function owedBlocked(
       service: PurchaseService,
       stripe: Stripe,
       options: {
         stripeChargeId?: string;
+        landsUnnamed?: boolean;
         beforePurchase?: (pi: string) => Promise<unknown>;
       } = {}
     ) {
@@ -880,10 +894,18 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         await complete(service, `pi_first_${uid()}`, customerId, item.id);
       }
       const pi = `pi_chargeback_${kind}_${uid()}`;
+      const chargeId = options.stripeChargeId ?? `ch_chargeback_${uid()}`;
+      chargeOfPayment.set(pi, chargeId);
       await options.beforePurchase?.(pi);
       vi.mocked(stripe.refunds.create).mockRejectedValueOnce(refusal());
       await expect(
-        complete(service, pi, customerId, item.id, options.stripeChargeId)
+        complete(
+          service,
+          pi,
+          customerId,
+          item.id,
+          options.landsUnnamed ? undefined : chargeId
+        )
       ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
       expect((await rowOf(pi)).status).toBe('pending');
       const asksFor = () =>
@@ -891,12 +913,13 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
           .mocked(stripe.refunds.create)
           .mock.calls.map((_, index) => refundCall(stripe, index))
           .filter(([params]) => params?.payment_intent === pi);
-      return { item, customerId, pi, asksFor };
+      return { item, customerId, pi, chargeId, asksFor };
     }
 
     /**
-     * The dispute's record at `status`, as the webhook writes it. The loss
-     * is then applied with the recorded amount, as the webhook passes it.
+     * The dispute's record at `status`, on the payment's charge, as the
+     * webhook writes it. The loss is then applied with the recorded amount,
+     * as the webhook passes it.
      */
     function recordChargeback(
       service: PurchaseService,
@@ -907,7 +930,7 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
     ) {
       return service.recordDispute({
         stripeDisputeId: disputeId,
-        stripeChargeId: `ch_${disputeId}`,
+        stripeChargeId: chargeOf(pi),
         paymentIntentId: pi,
         amountCents,
         currency: 'gbp',
@@ -942,7 +965,7 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       return vi.spyOn(obs, 'error');
     }
 
-    /** A refund Stripe made of the payment, as the refund webhook records it. */
+    /** A refund Stripe made of the payment, on its charge, as the refund webhook records it. */
     function recordPartRefund(
       service: PurchaseService,
       pi: string,
@@ -950,7 +973,7 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
     ) {
       return service.recordRefund({
         stripeRefundId: `re_part_${uid()}`,
-        stripeChargeId: `ch_part_${uid()}`,
+        stripeChargeId: chargeOf(pi),
         paymentIntentId: pi,
         amountCents,
         currency: 'gbp',
@@ -1325,14 +1348,16 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       ).toEqual([expect.objectContaining({ owedCents: 200 })]);
     });
 
-    // Owner D66, review r6: what a blocked payment is owed counts its refunds
-    // by ONE rule (`countedRefundOf`): on its charge or its own, standing or
+    // Owner D66, review r6/r7: what a blocked payment is owed counts its
+    // refunds by ONE rule (`countedRefundOf`): on its CHARGE, standing or
     // failed and settled refunded elsewhere. A blocked payment writes no
     // payout slices, so a read through them (`refundsOfPurchase`) would drop
-    // a refund recorded without its purchase; and a failed refund support
-    // settled refunded elsewhere is money the buyer has back. £15.00 paid,
-    // £3.00 refunded, £10.00 lost: £2.00 owed; £5.00 when the £3.00 failed
-    // and is not settled.
+    // a refund recorded without its purchase; a failed refund support settled
+    // refunded elsewhere is money the buyer has back; and a refund on another
+    // charge is not this charge's, whatever purchase it names (review r7: no
+    // writer makes one, so the rule never needs the purchase's rows). £15.00
+    // paid, £3.00 refunded, £10.00 lost: £2.00 owed; £5.00 when the £3.00
+    // failed and is not settled, or is another charge's.
     it.each([
       {
         refund: 'recorded without its purchase (before it existed)',
@@ -1340,6 +1365,10 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       },
       { refund: 'failed, and settled refunded elsewhere', owedCents: 200 },
       { refund: 'failed, and not settled', owedCents: 500 },
+      {
+        refund: 'of ANOTHER charge, under the same purchase',
+        owedCents: 500,
+      },
     ])('a £3.00 refund on the charge $refund, then a chargeback lost for £10.00: $owedCents pence still owed', async ({
       refund,
       owedCents,
@@ -1354,16 +1383,18 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       expect(await slicesOf(purchase.id)).toHaveLength(0);
       const stripeRefundId = `re_counted_${uid()}`;
       const unlinked = refund.startsWith('recorded');
+      const otherCharge = refund.includes('ANOTHER charge');
+      const standing = unlinked || otherCharge;
       if (unlinked) unlinkedRefundIds.push(stripeRefundId);
       await service.recordRefund({
         stripeRefundId,
-        stripeChargeId: chargeId,
+        stripeChargeId: otherCharge ? `ch_other_${uid()}` : chargeId,
         paymentIntentId: unlinked ? null : pi,
         amountCents: 300,
         currency: 'gbp',
-        status: unlinked ? 'succeeded' : 'failed',
+        status: standing ? 'succeeded' : 'failed',
         reason: null,
-        failureReason: unlinked ? null : 'expired_or_canceled_card',
+        failureReason: standing ? null : 'expired_or_canceled_card',
         stripeCreatedAt: new Date(),
       });
       if (refund.includes('settled refunded elsewhere')) {
@@ -1494,6 +1525,7 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       const { service, stripe } = fresh();
       const disputeId = `dp_early_nocharge_${kind}_${uid()}`;
       const { pi, asksFor } = await owedBlocked(service, stripe, {
+        landsUnnamed: true,
         beforePurchase: (early) =>
           recordChargeback(service, early, disputeId, 'needs_response'),
       });
@@ -1551,6 +1583,84 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
         old.pi
       );
       expect((await rowOf(old.pi)).status).toBe('pending');
+    });
+
+    // Review r7 (silent 3): a failed refund waiting for its open chargeback
+    // (owner D67) waits for ever if the close is never recorded. The queue
+    // shows when the chargeback opened; past the same backstop, the sweep
+    // alerts with the ids (backend only: no new queue copy).
+    it('a failed refund waiting on a chargeback opened past the backstop is alerted with its ids; a young one, or one settled, is not', async () => {
+      const { service, stripe } = fresh();
+      const WAITING_ALERT =
+        'Failed refunds of blocked payments still waiting for a chargeback after 120 days: check the dispute in Stripe; each stays waiting in Failed refunds until its close is recorded';
+      const DAY = 24 * 60 * 60 * 1000;
+      /** Refunded, then its refund failed while a chargeback opened `daysAgo`. */
+      async function waiting(daysAgo: number, { settled = false } = {}) {
+        const blocked = await owedBlocked(service, stripe);
+        vi.mocked(stripe.refunds.create).mockResolvedValueOnce({
+          id: `re_made_${uid()}`,
+        } as never);
+        await sweep(service);
+        expect((await rowOf(blocked.pi)).status).toBe('refunded');
+        const stripeRefundId = `re_waiting_${uid()}`;
+        await service.recordRefund({
+          stripeRefundId,
+          stripeChargeId: blocked.chargeId,
+          paymentIntentId: blocked.pi,
+          amountCents: 1500,
+          currency: 'gbp',
+          status: 'failed',
+          reason: null,
+          failureReason: 'charge_for_pending_refund_disputed',
+          stripeCreatedAt: new Date(),
+        });
+        if (settled) {
+          await db
+            .update(refunds)
+            .set({ resolution: 'refunded_elsewhere', resolvedAt: new Date() })
+            .where(eq(refunds.stripeRefundId, stripeRefundId));
+        }
+        const disputeId = await openChargeback(
+          service,
+          blocked.pi,
+          new Date(Date.now() - daysAgo * DAY)
+        );
+        return { purchaseId: (await rowOf(blocked.pi)).id, disputeId };
+      }
+      const old = await waiting(121);
+      const young = await waiting(30);
+      const settled = await waiting(121, { settled: true });
+      vi.mocked(stripe.refunds.create).mockRejectedValue(refusal());
+      const errors = errorsOf(service);
+
+      await sweep(service);
+
+      const lines = errors.mock.calls.filter(
+        ([message]) => message === WAITING_ALERT
+      );
+      expect(lines).toHaveLength(1);
+      const { link, held } = lines[0]?.[1] as {
+        link: string;
+        held: Array<{ id: string; stripeDisputeId: string; openedAt: string }>;
+      };
+      expect(link).toBe('purchase');
+      expect(held).toContainEqual({
+        id: old.purchaseId,
+        stripeDisputeId: old.disputeId,
+        openedAt: expect.any(String),
+      });
+      const named = held.map((row) => row.stripeDisputeId);
+      expect(named).not.toContain(young.disputeId);
+      expect(named).not.toContain(settled.disputeId);
+      // Refunded, so never the owed rows' line.
+      const heldOwed = errors.mock.calls
+        .filter(([message]) => message === HELD_ALERT)
+        .flatMap(
+          ([, meta]) =>
+            (meta as { held: Array<{ stripeDisputeId: string }> }).held
+        )
+        .map((row) => row.stripeDisputeId);
+      expect(heldOwed).not.toContain(old.disputeId);
     });
   });
 
@@ -1666,13 +1776,15 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       const item = await insertContent({ deletedAt: new Date() });
       const customerId = await buyer();
       const pi = `pi_part_owed_${uid()}`;
+      // The payment's one charge, which its refund names too (review r7).
+      const charge = { id: `ch_part_owed_${uid()}`, amountCents: 1500 };
       await expect(
-        complete(service, pi, customerId, item.id)
+        complete(service, pi, customerId, item.id, charge.id)
       ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
 
       // Support refunds £5.00 of £15.00 in the Stripe Dashboard.
       const part = await service.processRefund(pi, {
-        charge: { id: `ch_part_owed_${uid()}`, amountCents: 1500 },
+        charge,
         refundAmountCents: 500,
         stripeRefundId: `re_part_${uid()}`,
         refundReason: 'requested_by_customer',

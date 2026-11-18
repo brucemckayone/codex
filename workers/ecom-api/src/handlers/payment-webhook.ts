@@ -669,6 +669,17 @@ async function handleRefundUpdated(
     return;
   }
   const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
+  // A blocked payment's failed refund whose chargeback carries what is still
+  // owed is the support charge page's, not Failed refunds' (owner D66, review
+  // r7). Read before the record, so a failure here is redelivered and still
+  // alerts (the record's change is what alerts).
+  const carriedBy =
+    refund.status === 'failed'
+      ? await service.chargebackCarryingRefund({
+          stripeRefundId: refund.id,
+          chargeId: charge.id,
+        })
+      : null;
 
   // First, so support sees a failure while a clawback step is still retrying.
   const changed = await service.recordRefund({
@@ -700,7 +711,19 @@ async function handleRefundUpdated(
       await service.restateStandingRefunds(paymentIntentId, charge.id);
     return;
   }
-  if (refund.status === 'failed' && changed) {
+  if (refund.status === 'failed' && changed && carriedBy) {
+    obs?.error(
+      "A blocked payment's refund failed at Stripe, and its chargeback carries what is still owed: settle it on the support charge page (Paid another way), not in Failed refunds, which doesn't list it",
+      {
+        errorId: crypto.randomUUID(),
+        refundId: refund.id,
+        chargeId,
+        disputeId: carriedBy,
+        amountCents: refund.amount,
+        failureReason: refund.failure_reason ?? null,
+      }
+    );
+  } else if (refund.status === 'failed' && changed) {
     obs?.error(
       "A refund failed at Stripe: support must refund the customer another way, or re-pay the creators. A subscription whose current period's payment it refunded in full has already been cancelled",
       {

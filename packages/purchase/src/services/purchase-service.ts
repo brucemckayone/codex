@@ -166,6 +166,7 @@ import {
 import {
   countedRefundOf,
   disputesOfPurchase,
+  refundOfDispute,
   refundsOfPurchase,
   STANDING_REFUND_STATUSES,
   takenBack,
@@ -176,6 +177,7 @@ import {
 } from './entitlement-writer';
 import { withStaleCustomerRecovery } from './resolve-customer';
 import {
+  chargebackCarriesRefund,
   findShortLosses,
   owedOnDispute,
   unrecoveredAfterLoss,
@@ -1621,11 +1623,12 @@ export class PurchaseService extends BaseService {
    * stops the rest (`refundBlockedPayment` has logged it). What stays owed is
    * returned for the sweep to alert on and support to settle, each with its
    * kind: a duplicate's buyer kept the item, a blocked sale's has nothing.
-   * After the refunds, two reports at error, once per run each, neither of
-   * which can stop them: one an open chargeback has held past Stripe's
-   * dispute lifecycle (`alertChargebacksHeldTooLong`), and one a lost
-   * chargeback refunded only in part (`reportBlockedPaymentsShortAfterLoss`,
-   * owner D59).
+   * After the refunds, three reports at error, once per run each, none of
+   * which can stop them: owed rows an open chargeback has held past Stripe's
+   * dispute lifecycle (`alertChargebacksHeldTooLong`), failed refunds of
+   * blocked payments waiting that long on one (owner D67, review r7), and a
+   * lost chargeback that refunded only in part
+   * (`reportBlockedPaymentsShortAfterLoss`, owner D59).
    */
   async settleOwedDuplicates(params: {
     olderThanMs: number;
@@ -1682,6 +1685,25 @@ export class PurchaseService extends BaseService {
         asOf: new Date(),
         limit: params.limit,
         message: `Blocked refunds still held by a chargeback after ${CHARGEBACK_HOLD_ALERT_DAYS} days: check the dispute in Stripe, then refund them by hand`,
+      }
+    );
+    // A blocked payment's failed refund waiting on its open chargeback (owner
+    // D67) waits for ever if the close is never recorded; the queue shows
+    // when it opened, and this flags it past the same backstop (review r7).
+    await alertChargebacksHeldTooLong(
+      { db: this.db, obs: this.obs },
+      {
+        link: 'purchase',
+        owed: this.db
+          .select({ id: purchases.id })
+          .from(purchases)
+          .where(
+            sql`(${blockedPayment()} AND ${purchases.status} = ${PURCHASE_STATUS.REFUNDED})`
+          ),
+        holds: sql`EXISTS (SELECT 1 FROM ${refunds} WHERE ${refundOfDispute()} AND ${refunds.status} = 'failed' AND ${refunds.resolvedAt} IS NULL)`,
+        asOf: new Date(),
+        limit: params.limit,
+        message: `Failed refunds of blocked payments still waiting for a chargeback after ${CHARGEBACK_HOLD_ALERT_DAYS} days: check the dispute in Stripe; each stays waiting in Failed refunds until its close is recorded`,
       }
     );
     await this.reportBlockedPaymentsShortAfterLoss(params.limit);
@@ -4811,6 +4833,42 @@ export class PurchaseService extends BaseService {
       return { reason: 'still_refunded', counted };
     }
     return { reason: null, counted };
+  }
+
+  /**
+   * The chargeback that carries the debt of refund `stripeRefundId` on charge
+   * `chargeId`, by its dispute id, or null (owner D66, review r7): a dispute
+   * on the refund's charge (the key `refundOfDispute` joins by, here with the
+   * charge known), whose purchase is a blocked payment, at a stage that
+   * counts what it is owed (`chargebackCarriesRefund`, the rule support's
+   * queue hides it by). Such a refund's failure is settled on the support
+   * charge page, never in Failed refunds, which doesn't list it, so the
+   * refund webhook words its alert for the charge page. Read before the
+   * refund is recorded: a failure here fails the event, and its redelivery
+   * still finds the refund's change, and alerts.
+   */
+  async chargebackCarryingRefund(refund: {
+    stripeRefundId: string;
+    chargeId: string;
+  }): Promise<string | null> {
+    try {
+      const [carrier] = await this.db
+        .select({ stripeDisputeId: disputes.stripeDisputeId })
+        .from(disputes)
+        .innerJoin(purchases, eq(purchases.id, disputes.purchaseId))
+        .where(
+          and(
+            eq(disputes.stripeChargeId, refund.chargeId),
+            blockedPayment(),
+            chargebackCarriesRefund(refund.stripeRefundId)
+          )
+        )
+        .orderBy(asc(disputes.stripeCreatedAt), asc(disputes.stripeDisputeId))
+        .limit(1);
+      return carrier?.stripeDisputeId ?? null;
+    } catch (error) {
+      this.handleError(error, 'chargebackCarryingRefund');
+    }
   }
 
   /**

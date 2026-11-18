@@ -2923,6 +2923,155 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           owedCents: 200,
         });
       });
+
+      /** What the charge page shows owed, at its stage; null for none. */
+      const stageOf = async (chargeId: string) =>
+        (await service.getChargeDetail(chargeId)).shortLoss;
+
+      // Review r7: a failed refund leaves the queue ONLY where a stage
+      // carries its debt (`chargebackCarriesRefund`, the rule the stages are
+      // built from). After a late win with no mark, or one whose own refund
+      // was made, the chargeback no longer overlaps any refund, so a refund
+      // that fails after it is owed exactly its own amount, in the queue, and
+      // no stage shows: the debt is in exactly one place.
+      describe('a refund that fails after a late win (review r7)', () => {
+        it('a late win with no mark refunds nothing (the refund counted); once it fails it is back in the queue with its settle, and no stage shows', async () => {
+          let counted = '';
+          const sale = await shortLoss('unavailable', 1500, {
+            paidCents: 1500,
+            beforeLoss: async (charge) => {
+              counted = await refundOn(charge, 1500, 'pending');
+            },
+          });
+          expect(await wonLate(sale)).toBe('none');
+          const before = await failedCount();
+
+          await fails(counted);
+
+          const row = takeFirst(
+            await db
+              .select({ id: refunds.id })
+              .from(refunds)
+              .where(eq(refunds.stripeRefundId, counted))
+          );
+          expect((await queueRowOf(row.id))?.waitingForChargeback).toBeNull();
+          expect(await failedCount()).toBe(before + 1);
+          expect(await stageOf(sale.chargeId)).toBeNull();
+          expect(await owedOn(sale.paymentIntentId, SHORT_REPORT)).toEqual([]);
+          expect(await owedOn(sale.paymentIntentId, OWED_AGAIN_REPORT)).toEqual(
+            []
+          );
+          const settled = await settleElsewhere(row.id);
+          expect(settled.settled.resolution).toBe('refunded_elsewhere');
+        });
+
+        it('a late win whose own refund was made: an earlier refund that counted fails, and it is in the queue with its settle, and no stage shows', async () => {
+          let earlier = '';
+          const sale = await shortLoss('unavailable', 1000, {
+            paidCents: 1500,
+            beforeLoss: async (charge) => {
+              earlier = await refundOn(charge, 500, 'succeeded');
+            },
+          });
+          // £15.00 less the £5.00 that counted: the late win refunds £10.00.
+          expect(await wonLate(sale)).toBe('done');
+          const { lateWinRefundId } = takeFirst(
+            await db
+              .select({ lateWinRefundId: disputes.lateWinRefundId })
+              .from(disputes)
+              .where(eq(disputes.stripeDisputeId, sale.disputeId))
+          );
+          if (!lateWinRefundId) throw new Error('the late win made no refund');
+          // Recorded by the late win's sync: cleaned up with the rest.
+          created.stripeRefundIds.push(lateWinRefundId);
+          expect(
+            takeFirst(
+              await db
+                .select({ amountCents: refunds.amountCents })
+                .from(refunds)
+                .where(eq(refunds.stripeRefundId, lateWinRefundId))
+            ).amountCents
+          ).toBe(1000);
+
+          await fails(earlier);
+
+          const row = takeFirst(
+            await db
+              .select({ id: refunds.id })
+              .from(refunds)
+              .where(eq(refunds.stripeRefundId, earlier))
+          );
+          expect((await queueRowOf(row.id))?.waitingForChargeback).toBeNull();
+          expect(await stageOf(sale.chargeId)).toBeNull();
+          const settled = await settleElsewhere(row.id);
+          expect(settled.settled.resolution).toBe('refunded_elsewhere');
+        });
+
+        it('a marked late win (owed again) still carries it: hidden from the queue, refused there, and the stage shows it', async () => {
+          let pending = '';
+          const sale = await shortLoss('unavailable', 1000, {
+            paidCents: 1500,
+            beforeLoss: async (charge) => {
+              pending = await refundOn(charge, 300, 'pending');
+            },
+          });
+          await service.markPaidAnotherWay(
+            sale.chargeId,
+            body(sale.disputeId, 200),
+            supportId
+          );
+          expect(await wonLate(sale)).toBe('none');
+          expect(await stageOf(sale.chargeId)).toMatchObject({
+            stage: 'owed_again',
+            owedCents: 1000,
+          });
+
+          await fails(pending);
+
+          const row = takeFirst(
+            await db
+              .select({ id: refunds.id })
+              .from(refunds)
+              .where(eq(refunds.stripeRefundId, pending))
+          );
+          expect(await queueRowOf(row.id)).toBeUndefined();
+          expect(
+            (await failureOf(settleElsewhere(row.id))).context
+          ).toMatchObject({ reason: 'chargeback_lost' });
+          expect(await stageOf(sale.chargeId)).toMatchObject({
+            stage: 'owed_again',
+            owedCents: 1300,
+          });
+        });
+      });
+
+      // Review r7: the one rule is keyed on the CHARGE. A refund on another
+      // charge under the same purchase (no writer makes one: each links a
+      // refund by its own PaymentIntent, which has one charge) counts for
+      // nothing in this charge's debt, and its chargeback defers nothing.
+      it("a refund on another charge under the same purchase counts nowhere in this charge's debt, and is not deferred by its chargeback", async () => {
+        let failedElsewhere = '';
+        const sale = await shortLoss('unavailable', 1000, {
+          paidCents: 1500,
+          beforeLoss: async (charge) => {
+            const other = {
+              chargeId: `ch_other${uid()}`,
+              purchase: charge.purchase,
+            };
+            await refundOn(other, 300, 'succeeded');
+            failedElsewhere = (await failedOn(other, 200)).id;
+          },
+        });
+
+        expect(await stageOf(sale.chargeId)).toMatchObject({
+          stage: 'short',
+          refundedThroughStripeCents: 0,
+          owedCents: 500,
+        });
+        expect(
+          (await queueRowOf(failedElsewhere))?.waitingForChargeback
+        ).toBeNull();
+      });
     });
   });
 

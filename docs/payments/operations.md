@@ -425,11 +425,19 @@ refund and its short loss are one debt, shown in one place. While the
 payment's chargeback is open, its failed refund stays in Support › Queue ›
 Failed refunds, counted in the tab and the badge (D72), as "Waiting for the
 chargeback" with no settle: Stripe won't refund it meanwhile, and the bank's
-decision changes what is owed. Won in time, the settle comes back. Once the
-chargeback is lost (or lost and won late), the failed refund leaves the
-queue and both counts, and what is still owed is the charge page's alone,
-counted by the sum below. A late win's own failed refund is not this rule:
-it stays in the queue. A settle of one anyway (a page loaded earlier, a
+decision changes what is owed. Won in time, the settle comes back. While a
+stage carries the debt, the failed refund leaves the queue and both counts,
+and what is still owed is the charge page's alone, counted by the sum below:
+the chargeback stands lost, or it was won late after a first mark and the
+late win made no refund (`owed_again`). One rule decides both, the queue's
+hide and the charge page's stages (`chargebackCarriesRefund`, review r7), so
+the debt is always in exactly one place. A late win with no mark, or one
+whose own refund was made, carries nothing: the chargeback no longer
+overlaps any refund, so a refund that fails after it is back in the queue,
+its own amount being what is owed, and is settled there as any other. A
+late win's own failed refund is not this rule either: it stays in the
+queue. The refund is the chargeback's by its charge, the key the sum counts
+by too. A settle of one anyway (a page loaded earlier, a
 second tab) is refused with 422 `REFUND_DECIDED_BY_CHARGEBACK`, `reason`
 `chargeback_open` or `chargeback_lost`, and the notice links to the charge.
 Nothing is written to the refund: settled or not, a failed refund counts for

@@ -106,6 +106,7 @@ export {
   countsAgainstCharge,
   disputesOfCharge,
   disputesOfPurchase,
+  refundOfDispute,
   refundsOfCharge,
   refundsOfPurchase,
   STANDING_REFUND_STATUSES,
@@ -166,8 +167,13 @@ export {
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
   type RevenueSplit,
 } from './services/revenue-calculator';
-// A lost chargeback that left a blocked payment short (owner D59, D60)
-export { findShortLosses, type ShortLoss } from './services/short-loss';
+// A lost chargeback that left a blocked payment short (owner D59, D60), and
+// the one rule for where its debt is carried (review r7)
+export {
+  chargebackCarriesRefund,
+  findShortLosses,
+  type ShortLoss,
+} from './services/short-loss';
 // Customer integrity helpers (Codex-qsvxf — Q4.4 belt-and-braces)
 export {
   findStripeCustomerCollisions,

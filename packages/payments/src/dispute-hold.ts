@@ -67,6 +67,25 @@ export function noOpenChargeback(
   return sql`NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${LINK_COLUMN[link]} = ${rowId} AND ${isOpenChargeback()})`;
 }
 
+/**
+ * The disputes the hold alert names: open, opened before `openedBefore`, on
+ * an owed row (`owed`), and holding what `holds` asks for (anything, unless
+ * given). Every argument is defined, so `and()` drops none.
+ */
+function heldPastBackstop(
+  column: AnyPgColumn,
+  owed: SQLWrapper,
+  holds: SQL | undefined,
+  openedBefore: Date
+) {
+  return and(
+    isOpenChargeback(),
+    lt(disputes.stripeCreatedAt, openedBefore),
+    inArray(column, owed),
+    holds ?? sql`TRUE`
+  );
+}
+
 interface HoldAlertLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
 }
@@ -75,17 +94,21 @@ interface HoldAlertLogger {
  * Report, at error, the owed rows an open chargeback has held past
  * `CHARGEBACK_HOLD_ALERT_DAYS`: one line for the run, naming each row, its
  * dispute and when Stripe opened it. `owed` selects the ids of the sweep's
- * owed rows, held or not. Nothing is refunded here: the row stays held while
- * the chargeback reads open, so support checks the dispute first. Up to
- * `limit` rows, the oldest first. Never throws: a failed check is logged at
- * error on its own, so the sweep that runs it (after its refunds) still
- * returns what it settled.
+ * owed rows, held or not; `holds`, when given, narrows it to the disputes
+ * (the outer query's `disputes` row, unaliased) that hold something of the
+ * row's, such as a failed refund waiting on the chargeback (owner D67,
+ * review r7). Nothing is refunded here: the row stays held while the
+ * chargeback reads open, so support checks the dispute first. Up to `limit`
+ * rows, the oldest first. Never throws: a failed check is logged at error on
+ * its own, so the sweep that runs it (after its refunds) still returns what
+ * it settled.
  */
 export async function alertChargebacksHeldTooLong(
   deps: { db: Pick<DatabaseClient, 'select'>; obs: HoldAlertLogger },
   params: {
     link: ChargebackLink;
     owed: SQLWrapper;
+    holds?: SQL;
     asOf: Date;
     limit: number;
     message: string;
@@ -103,13 +126,7 @@ export async function alertChargebacksHeldTooLong(
         openedAt: disputes.stripeCreatedAt,
       })
       .from(disputes)
-      .where(
-        and(
-          isOpenChargeback(),
-          lt(disputes.stripeCreatedAt, openedBefore),
-          inArray(column, params.owed)
-        )
-      )
+      .where(heldPastBackstop(column, params.owed, params.holds, openedBefore))
       .orderBy(asc(disputes.stripeCreatedAt))
       .limit(params.limit);
     if (rows.length === 0) return;

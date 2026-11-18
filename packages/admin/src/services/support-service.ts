@@ -132,11 +132,13 @@ import {
   type BlockedPaymentKind,
   blockedKind,
   blockedPayment,
+  chargebackCarriesRefund,
   countsAgainstCharge,
   type FeeConfigService,
   findShortLosses,
   type PurchaseService,
   type RestoredRefundAccess,
+  refundOfDispute,
   refundsOfPurchase,
   STANDING_REFUND_STATUSES,
   settledElsewhere,
@@ -680,26 +682,28 @@ function markMadeAt(
 
 /**
  * A chargeback on a blocked payment of the outer query's `refunds` row
- * (unaliased), as a `disputes` row matching `which` (owner D66, D67): on the
- * refund's charge, or of its purchase, the key a blocked payment's debt is
- * counted by (`refundsOfPayment`), whose purchase (`disputes.purchase_id`, as
- * the loss links it) is a blocked one. One fragment, so no part can be
- * dropped.
+ * (unaliased), as a `disputes` row matching `which` (owner D66, D67): the
+ * refund is the dispute's by its charge (`refundOfDispute`, the key a blocked
+ * payment's debt is counted by), and the dispute's purchase
+ * (`disputes.purchase_id`, as the loss links it) is a blocked one. One
+ * fragment, so no part can be dropped.
  */
 function blockedPaymentChargebackOf(which: SQL): SQL {
-  return sql`EXISTS (SELECT 1 FROM ${disputes} INNER JOIN ${purchases} ON ${purchases.id} = ${disputes.purchaseId} WHERE (${disputes.stripeChargeId} = ${refunds.stripeChargeId} OR ${disputes.purchaseId} = ${refunds.purchaseId}) AND ${blockedPayment()} AND ${which})`;
+  return sql`EXISTS (SELECT 1 FROM ${disputes} INNER JOIN ${purchases} ON ${purchases.id} = ${disputes.purchaseId} WHERE ${refundOfDispute()} AND ${blockedPayment()} AND ${which})`;
 }
 
 /**
- * The chargeback has decided what the refund's blocked payment is still
- * owed (owner D66): lost, or lost then won late. That figure lives on the
- * charge page alone, so the failed refund is neither listed nor counted.
- * Never for the dispute's own late-win refund (`late_win_refund_id`), which
- * stays in the queue (2026-11-09 decisions); one whose id write was lost is
- * adopted by the late win's next run (owner D69).
+ * The chargeback carries what the refund's blocked payment is still owed
+ * (owner D66; `chargebackCarriesRefund`, the rule `findShortLosses`' stages
+ * are built from, review r7): lost, or won late after a first mark with no
+ * late-win refund. That figure lives on the charge page alone, so the failed
+ * refund is neither listed nor counted. A late win with no mark, or one
+ * whose own refund was made, carries nothing, so a refund that fails after
+ * it is listed and settled here, its own amount being what is owed. Never
+ * the dispute's own late-win refund, which stays in the queue.
  */
 function chargebackDecided(): SQL {
-  return sql`((${disputes.status} = 'lost' OR ${disputes.lateWonAt} IS NOT NULL) AND ${disputes.lateWinRefundId} IS DISTINCT FROM ${refunds.stripeRefundId})`;
+  return chargebackCarriesRefund(refunds.stripeRefundId);
 }
 
 /** The chargeback is open: the bank hasn't decided (owner D67). */
@@ -3427,10 +3431,7 @@ export class SupportService extends BaseService {
         openedAt: disputes.stripeCreatedAt,
       })
       .from(refunds)
-      .innerJoin(
-        disputes,
-        sql`(${disputes.stripeChargeId} = ${refunds.stripeChargeId} OR ${disputes.purchaseId} = ${refunds.purchaseId})`
-      )
+      .innerJoin(disputes, refundOfDispute())
       .innerJoin(purchases, eq(purchases.id, disputes.purchaseId))
       .where(
         and(
@@ -3457,9 +3458,9 @@ export class SupportService extends BaseService {
   /**
    * Refuse a settlement of a blocked payment's failed refund that its
    * chargeback decides (`RefundDecidedByChargebackError`, 422; owner D66,
-   * D67): `chargeback_lost` once it is lost or won late (`chargebackDecided`:
-   * what is still owed is the charge page's), else `chargeback_open` while
-   * the bank decides. Under the caller's lock on the refund, the chargebacks
+   * D67): `chargeback_lost` while a stage carries its debt
+   * (`chargebackDecided`: lost, or won late after a mark; what is still owed
+   * is the charge page's), else `chargeback_open` while the bank decides. Under the caller's lock on the refund, the chargebacks
    * are read FOR SHARE, so a decision written meanwhile either waits for this
    * settlement or is seen by it. Only rows that match are locked, and they
    * refuse, so the settle's own dispute write never meets them. Logged at
@@ -3475,10 +3476,7 @@ export class SupportService extends BaseService {
         decided: sql<boolean>`${chargebackDecided()}`,
       })
       .from(refunds)
-      .innerJoin(
-        disputes,
-        sql`(${disputes.stripeChargeId} = ${refunds.stripeChargeId} OR ${disputes.purchaseId} = ${refunds.purchaseId})`
-      )
+      .innerJoin(disputes, refundOfDispute())
       .innerJoin(purchases, eq(purchases.id, disputes.purchaseId))
       .where(
         and(

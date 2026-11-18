@@ -156,13 +156,56 @@ export interface ShortLoss {
 }
 
 /**
+ * The dispute (`disputes`, unaliased) is at `stage`, the stage that carries a
+ * blocked payment's debt while it is in it (owner D66), owed or not:
+ * - `short`: it stands lost;
+ * - `owed_again`: it was won late after a first mark, and the late win made
+ *   no refund of its own (D62 made none). A late win with no mark, or one
+ *   whose own refund was made, carries nothing: the chargeback no longer
+ *   overlaps any refund, so a refund that fails after it is owed exactly its
+ *   own amount, in support's queue (review r7).
+ */
+function stageCarriesDebt(stage: ShortLossStage): SQL {
+  return stage === 'short'
+    ? sql`(${disputes.status} = ${'lost'})`
+    : sql`(${disputes.status} = ${'won'} AND ${disputes.lateWonAt} IS NOT NULL AND ${disputes.paidAnotherWayCents} IS NOT NULL AND ${disputes.lateWinRefundId} IS NULL)`;
+}
+
+/**
+ * The dispute (`disputes`, unaliased) is at a stage that carries a blocked
+ * payment's debt (`stageCarriesDebt`, either stage). The ONE rule
+ * `findShortLosses`' stages and support's queue read (review r7): a blocked
+ * payment's failed refund leaves the queue exactly where a stage counts it,
+ * so a debt is in one place, never none.
+ */
+function chargebackCarriesDebt(): SQL {
+  return sql`(${stageCarriesDebt('short')} OR ${stageCarriesDebt('owed_again')})`;
+}
+
+/**
+ * The dispute (`disputes`, unaliased) carries the debt of refund
+ * `stripeRefundId` (a value, or the outer query's `refunds` column): at a
+ * stage that carries debt (`chargebackCarriesDebt`), and not the late win's
+ * own refund, which is support's queue's (2026-11-09 decisions; one whose id
+ * write was lost is adopted by the late win's next run, owner D69). The
+ * refund is the dispute's by its charge (`refundOfDispute`), which the caller
+ * joins.
+ */
+export function chargebackCarriesRefund(
+  stripeRefundId: SQLWrapper | string
+): SQL {
+  return sql`(${chargebackCarriesDebt()} AND ${disputes.lateWinRefundId} IS DISTINCT FROM ${stripeRefundId})`;
+}
+
+/**
  * The blocked payments owed what Stripe won't refund, at `stage` (both when
  * absent): newest first by when it became owed (the late win, else the
  * dispute), up to `limit`, with how many there are in all (`total`, so a
  * long tail beyond the limit is visible). Linked by `disputes.purchase_id`,
  * as the loss is; only a refunded blocked payment. Each while something is
  * owed, whatever marks exist (owner D66): a mark adds what it pays, so one
- * made when less was owed leaves the rest still owed.
+ * made when less was owed leaves the rest still owed. A stage is
+ * `stageCarriesDebt`'s, the rule support's queue defers by:
  * - `short`: the dispute lost;
  * - `owed_again`: the dispute won late after a first mark, no late-win
  *   refund (D62 made none).
@@ -185,8 +228,8 @@ export async function findShortLosses(
       ? sql`(${mark} IS NOT NULL OR ${owedCents} > 0)`
       : sql`(${owedCents} > 0)`;
   const stages: Record<ShortLossStage, SQL> = {
-    short: sql`(${disputes.status} = ${'lost'} AND ${owing(disputes.paidAnotherWayCents)})`,
-    owed_again: sql`(${disputes.status} = ${'won'} AND ${disputes.lateWonAt} IS NOT NULL AND ${disputes.paidAnotherWayCents} IS NOT NULL AND ${disputes.lateWinRefundId} IS NULL AND ${owing(disputes.lateWinRefundedOutsideStripeAt)})`,
+    short: sql`(${stageCarriesDebt('short')} AND ${owing(disputes.paidAnotherWayCents)})`,
+    owed_again: sql`(${stageCarriesDebt('owed_again')} AND ${owing(disputes.lateWinRefundedOutsideStripeAt)})`,
   };
   const inStage =
     params.stage === undefined

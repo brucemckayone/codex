@@ -192,6 +192,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   let mockRecordChargeRefunds: ReturnType<typeof vi.fn>;
   let mockClaimRefundEmails: ReturnType<typeof vi.fn>;
   let mockRestateStandingRefunds: ReturnType<typeof vi.fn>;
+  let mockChargebackCarryingRefund: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -225,6 +226,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
         { stripeRefundId: 're_test_refund', amountCents: 1999 },
       ]);
     mockRestateStandingRefunds = vi.fn().mockResolvedValue(undefined);
+    // No blocked payment's chargeback carries the refund's debt (review r7).
+    mockChargebackCarryingRefund = vi.fn().mockResolvedValue(null);
     mockRelease = vi.fn();
     mockStripe = {} as Stripe;
 
@@ -238,6 +241,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
           recordChargeRefunds: mockRecordChargeRefunds,
           claimRefundEmails: mockClaimRefundEmails,
           restateStandingRefunds: mockRestateStandingRefunds,
+          chargebackCarryingRefund: mockChargebackCarryingRefund,
         },
         // charge.refunded reverses subscription payouts first (Codex-13v21),
         // and last cancels on a full refund of the latest payment (P-4).
@@ -1300,6 +1304,64 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(mockProcessRefund.mock.invocationCallOrder[0]).toBeLessThan(
       mockRestateStandingRefunds.mock.invocationCallOrder[0] ?? 0
     );
+    // No chargeback carries it: the ordinary wording, never the charge page's.
+    expect(mockChargebackCarryingRefund).toHaveBeenCalledWith({
+      stripeRefundId: 're_pending_then_paid',
+      chargeId: 'ch_updated',
+    });
+    expect(bundle.mock._obs.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('support charge page'),
+      expect.anything()
+    );
+  });
+
+  // Owner D66, review r7: a blocked payment's failed refund whose chargeback
+  // carries what is still owed is hidden from Failed refunds, so its alert
+  // points at the charge page, with the charge and the dispute.
+  it('refund.updated failed on a blocked payment whose chargeback carries the debt: the alert names the charge page, the charge and the dispute, read before the record', async () => {
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+    mockChargebackCarryingRefund.mockResolvedValue('dp_carries');
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({
+        status: 'failed',
+        failure_reason: 'charge_for_pending_refund_disputed',
+      }),
+      stripe,
+      bundle.context
+    );
+
+    const failedAlerts = vi
+      .mocked(bundle.mock._obs.error)
+      .mock.calls.filter(([message]) =>
+        String(message).includes('failed at Stripe')
+      );
+    expect(failedAlerts).toEqual([
+      [
+        "A blocked payment's refund failed at Stripe, and its chargeback carries what is still owed: settle it on the support charge page (Paid another way), not in Failed refunds, which doesn't list it",
+        {
+          errorId: expect.any(String),
+          refundId: 're_pending_then_paid',
+          chargeId: 'ch_updated',
+          disputeId: 'dp_carries',
+          amountCents: 1000,
+          failureReason: 'charge_for_pending_refund_disputed',
+        },
+      ],
+    ]);
+    // Read first: a failure of the read fails the event, and its redelivery
+    // still finds the record's change, so it still alerts.
+    expect(
+      mockChargebackCarryingRefund.mock.invocationCallOrder[0]
+    ).toBeLessThan(mockRecordRefund.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it('refund.updated succeeded asks nothing about a chargeback', async () => {
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+    await handlePaymentWebhook(refundUpdatedEvent({}), stripe, bundle.context);
+    expect(mockChargebackCarryingRefund).not.toHaveBeenCalled();
   });
 
   it('refund.failed is handled the same way, and a redelivery raises no second alert', async () => {

@@ -396,7 +396,22 @@ in the existing refund email, and no checkout expiry).
   after 120 days: check the dispute in Stripe, then refund them by hand".
   It stays held while the dispute reads open. The check runs after the
   sweep's refunds (each of the three sweeps) and can't stop them: a failure
-  logs its own error.
+  logs its own error. The purchase sweep's second check (review r7) covers a
+  blocked payment already refunded whose refund then FAILED while its
+  chargeback is open, which waits in Failed refunds as "Waiting for the
+  chargeback" (owner D67): past the same 120 days it is alerted the same
+  way, with the purchase and dispute ids and when it opened: "Failed refunds
+  of blocked payments still waiting for a chargeback after 120 days: check
+  the dispute in Stripe; each stays waiting in Failed refunds until its close
+  is recorded". The refund is the dispute's by its charge.
+- **A blocked payment's refund that fails while its chargeback carries the
+  debt** (lost, or won late after a mark; review r7) is hidden from Failed
+  refunds, so the refund webhook's alert names the support charge page, the
+  charge and the dispute: "A blocked payment's refund failed at Stripe, and
+  its chargeback carries what is still owed: settle it on the support charge
+  page (Paid another way), not in Failed refunds, which doesn't list it".
+  Every other failed refund keeps the ordinary alert ("support must refund
+  the customer another way, or re-pay the creators").
 - **A chargeback lost for less than the payment** (owner D59) records the
   row refunded by what the buyer has back: the refunds standing on the
   charge (a pending blocked row records no part refund of its own) and the

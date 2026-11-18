@@ -34,8 +34,9 @@
  * charge's readers by `stripe_charge_id` (`refundsOfCharge`,
  * `disputesOfCharge`), a purchase's by `refundsOfPurchase` and
  * `disputesOfPurchase`, and one payment's readers outside the ledger (what a
- * blocked payment is owed, the restore, the late win's refund) by its charge
- * or its own rows (`refundsOfPayment`, `countedRefundOf`).
+ * blocked payment is owed, the restore, the late win's refund, and support's
+ * queue deferring a refund to its chargeback) by its charge
+ * (`refundsOfPayment`, `countedRefundOf`, `refundOfDispute`; review r7).
  */
 
 import type { RefundStatus } from '@codex/database/schema';
@@ -114,23 +115,39 @@ export function refundsOfCharge(chargeId: AnyColumn | SQL): SQL {
 }
 
 /**
- * A `refunds` row (unaliased) of one payment, read outside the ledger: on
- * its charge (`chargeId`), linked to the purchase or not (one recorded
- * before the purchase existed has no `purchase_id`, Codex-aa08z), or the
- * purchase's own (`purchaseId`). With no charge known, its own only. Each is
- * a value or the outer query's column. Never through the payout slices, as
- * `refundsOfPurchase` is: a blocked payment writes none, so its unlinked
- * refund would drop out (review r6). One fragment, so no part can be dropped.
+ * A `refunds` row (unaliased) of one payment, read outside the ledger, keyed
+ * on its CHARGE (`chargeId`, review r7): every refund of that charge, linked
+ * to the purchase or not (one recorded before the purchase existed has no
+ * `purchase_id`, Codex-aa08z). Only with no charge known, the purchase's own
+ * rows (`purchaseId`). Each is a value or the outer query's column.
+ *
+ * Never the purchase's rows as well: every writer of `refunds.purchase_id`
+ * derives it from the refund's own PaymentIntent, and a PaymentIntent has one
+ * charge, so on real data the purchase's rows are its charge's; a union would
+ * only let a wrong or missing charge id pass unseen, and widen the count the
+ * day a writer links a refund some other way. Nor `purchase_id IS NULL` on
+ * the charge's: no reader can meet another purchase's refund on a charge.
+ * Never through the payout slices, as `refundsOfPurchase` is: a blocked
+ * payment writes none (review r6).
  */
 export function refundsOfPayment(
   purchaseId: SQLWrapper | string,
   chargeId: SQLWrapper | string | null
 ): SQL {
-  const ofCharge =
-    chargeId === null
-      ? sql`FALSE`
-      : sql`${refunds.stripeChargeId} = ${chargeId}`;
-  return sql`(${refunds.purchaseId} = ${purchaseId} OR ${ofCharge})`;
+  return chargeId === null
+    ? sql`(${refunds.purchaseId} = ${purchaseId})`
+    : sql`(${refunds.stripeChargeId} = ${chargeId})`;
+}
+
+/**
+ * A `refunds` row (unaliased) of the payment the outer query's `disputes` row
+ * (unaliased) disputes: on its charge (`refundsOfPayment`). The key support's
+ * queue defers a blocked payment's failed refund to its chargeback by, the
+ * same one its debt is counted by, so the queue and the owed count can't
+ * drift (review r7).
+ */
+export function refundOfDispute(): SQL {
+  return refundsOfPayment(disputes.purchaseId, disputes.stripeChargeId);
 }
 
 /**

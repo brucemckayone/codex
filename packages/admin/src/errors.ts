@@ -271,10 +271,13 @@ export type RefundDecidedByChargebackReason =
  * - `chargeback_open`: the bank hasn't decided. Stripe won't refund the
  *   charge meanwhile, and the decision changes what the buyer is owed, so
  *   nothing is settled yet. Won in time, it is settled as before;
- * - `chargeback_lost`: lost, or lost then won late. The bank returned some or
- *   all of the payment, and what is still owed lives on the charge page
- *   alone, marked there "Paid another way": settling this refund as well
- *   would pay it twice.
+ * - `chargeback_lost`: a stage carries its debt (`chargebackCarriesRefund`):
+ *   lost, or won late after a first mark with no late-win refund. The bank
+ *   returned some or all of the payment, and what is still owed lives on the
+ *   charge page alone, marked there "Paid another way": settling this
+ *   refund as well would pay it twice. A late win with no mark, or one whose
+ *   own refund was made, carries nothing, and the refund is settled as
+ *   before (review r7).
  * The queue offers neither, so a call is a stale page or a direct one.
  * Nothing is written. The context is the reason and the charge, which the
  * page's notice links to.
