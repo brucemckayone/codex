@@ -16,11 +16,17 @@
  * - `leaving` rows are written in the delete's own transaction, one per
  *   owner, so nobody who owned it at the delete is missed;
  * - `reminder` rows are added by the sweep a few days before the date;
- * - `staying` rows are added when the creator keeps the piece, for everyone
- *   whose NEWEST tried email about it (`attempts > 0`, any round) is a
- *   `leaving` or `reminder` one: whoever may last have been told it leaves.
- *   That reaches a person whose `staying` email a second delete cancelled
- *   before it went, and skips one already told it stays;
+ * - `staying` rows (carrying the round they keep) are added when the creator
+ *   keeps the piece, for whoever may last have been told it leaves. Each
+ *   person's newest email that counts decides it. A `leaving` or `reminder`
+ *   email counts once tried (`attempts > 0`, it may have gone), and a
+ *   `staying` one only once `sent`: guessing "told" is safe for the first,
+ *   which costs at worst a second email, and unsafe for the second, which
+ *   costs no email at all. Newest is the latest round, and within a round a
+ *   `staying` email comes after that round's others (one Keep per round),
+ *   never `created_at`, which is when a transaction began. That reaches a
+ *   person whose `staying` email a second delete cancelled, or a refusal
+ *   kept from going, and skips one already told it stays;
  * - `removed` rows are added by a platform admin's immediate delete.
  * Every writer adds `ON CONFLICT (content_id, kind, round, user_id) DO
  * NOTHING`. A person can own a piece several ways, and can have both a tried

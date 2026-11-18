@@ -9,9 +9,10 @@
  * `content_leaving_notices` row each):
  * - `leaving`: on the delete, naming the date and, where allowed, the download;
  * - `reminder`: a few days before it leaves;
- * - `staying`: the creator kept it. Sent to everyone whose newest tried
- *   email about the piece (`attempts > 0`, any round) is a `leaving` or
- *   `reminder` one, since any try may have told them (see the schema);
+ * - `staying`: the creator kept it. Sent to whoever may last have been told
+ *   it leaves: everyone whose newest email that counts (a tried `leaving` or
+ *   `reminder`, or a SENT `staying`, by round) says it leaves. The schema has
+ *   the full rule;
  * - `removed`: a platform admin removed it at once (a takedown).
  */
 export const CONTENT_LEAVING_NOTICE_KINDS = [
