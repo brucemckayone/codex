@@ -10,6 +10,7 @@
  */
 import { IGNORE_KEYWORD, MAX_EXCEPTION_DAYS } from './architecture-ignores.mjs';
 import { MATCHERS } from './architecture-matchers.mjs';
+import { GUARANTEES } from './architecture-spec.mjs';
 
 export const RULES_DOC = 'docs/architecture/rules.md';
 
@@ -65,6 +66,19 @@ export function renderRulesDoc(rules, gates) {
     '|---|---|',
     ...rules.map((r) => `| [${r.id}](#${r.id.toLowerCase()}) | ${r.title} |`),
     '',
+    '<a id="guarantees"></a>',
+    '',
+    '## What the gate guarantees',
+    '',
+    "This is the spec the gate is reviewed against (`scripts/checks/architecture-spec.mjs`). A finding is a **failing test** against one of these clauses; a shape a clause puts outside is not one, and widening a clause is the owner's call. Each clause names the self-tests that prove it, and the self-test fails when one of them is missing. Under every clause the threat model is an honest agent's eager mistake: an agent that sets out to forge (dropping its attribution line, rewriting the CI step) is not stopped by any check, and review is the backstop for that.",
+    '',
+    ...GUARANTEES.flatMap((g) => [
+      `**${g.id}. ${g.title}.** ${g.holds}`,
+      '',
+      ...(g.outside.length ? [`- **Outside:** ${g.outside.join('; ')}.`] : []),
+      `- **Proved by:** ${g.tests.map((t) => `"${t}"`).join(', ')}.`,
+      '',
+    ]),
     '## Adding a rule',
     '',
     'Pick the strongest **mechanism** first, then the strongest **channel** that can run it:',
@@ -83,7 +97,7 @@ export function renderRulesDoc(rules, gates) {
     '',
     "- A violation whose key isn't pinned, or a size above its pin, is new, and fails.",
     "- A fixed violation, a smaller size or a file that is gone must be **banked** with `pnpm check:arch --lower`, so the headroom it freed can't be spent later. It fails the commit that touches the file (bank it with `--lower --staged`, which banks what the index holds and stages the baseline), and the pull request that made the fix: the violation still existed at the base, in whatever file. A fix already left unbanked on `dev` is only a notice, so two PRs can't merge into a red branch, and a release PR from `dev` isn't blocked by them.",
-    '- In a pull request a pin allows no more than the base still had, plus any countersigned raise. So a fix left unbanked on `dev` is headroom no later change can spend: re-adding the violation fails.',
+    '- In a pull request a pin allows no more than the base still had. A fix left unbanked on `dev` is headroom no later change spends quietly: growing into it fails unless the owner countersigns that pin, with the same line a raise of it takes. A release PR only notes it.',
     '- A renamed file carries its pin to the new path; `--lower` moves it (renames are found against `origin/dev`).',
     '- `--lower` only ever lowers or removes. `--init --rule <ID>` seeds the block for a rule added later.',
     "- RULES-DOC and CI-GATES can't be held in the baseline at all: their drift is fixed, never pinned.",
@@ -102,14 +116,14 @@ export function renderRulesDoc(rules, gates) {
     "| Every pin of a rule the base doesn't have yet | `G0-RAISE: <RULE> *@<hash> — <reason>` |",
     '| A new, copied, moved or renewed exception (below) | `G0-RAISE: <RULE> <file>@<hash> — <reason>` |',
     '| A change to the gate itself: any file in `scripts/checks/` but the baseline, its CI steps, the hook, gate.sh | `G0-RAISE: GATE <path>@<hash> — <reason>` |',
-    "| A change to what another gate runs: a file its command names (and what that file imports), a pnpm script, a turbo task, `pnpm-workspace.yaml`, a gate's config (`files`) | `G0-RAISE: GATE <path>@<hash>`, `GATE <file>#scripts.<name>@<hash>`, `GATE turbo.json#tasks.<name>@<hash>` |",
-    '| A config a gate finds by pattern (`filesMatching`): a nested biome config, a package turbo.json, or a new line in any `.gitignore` (Biome skips what it matches) | `G0-RAISE: GATE <path>@<hash> — <reason>` |',
+    "| A change to what another gate runs: a file its command runs (and what that file imports); a pnpm script it reaches, with its pre/post scripts; a turbo task's script in any package, added, changed or deleted; any package's install lifecycle scripts; the root `turbo.json`; a package's `turbo.json` at the tasks the gate's task depends on; `pnpm-workspace.yaml`'s `packages:`; `.npmrc`; a gate's config (`files`) | `G0-RAISE: GATE <path>@<hash>`, `GATE <file>#scripts.<name>@<hash>`, `GATE <pkg>/turbo.json#tasks.<name>@<hash>` |",
+    '| A config a gate finds by pattern (`filesMatching`): any biome config, or an ignore file (`.gitignore`, `.ignore`) that gains a plain line, loses a negation, changes order or moves (Biome skips what it matches) | `G0-RAISE: GATE <path>@<hash> — <reason>` |',
     "| A rise in another gate's own baseline (`ratchets`) | `G0-RAISE: GATE <path>@<hash> — <reason>` |",
     '| A change to the triggers, concurrency or static-analysis job of a calling workflow | `G0-RAISE: GATE <workflow>@<hash> — <reason>` |',
     '',
-    "A reason is at least three words, with no `<placeholder>` left in it. `pnpm check:arch --ci` runs the check against the change's base, and `--raises <ref>` runs it alone. When the change edits the gate's own code, the **base commit's** copy of the gate judges the countersigns as well, finding the base itself, so a bug in the new copy can't approve itself. It also runs its rules over the change and lists anything it finds, next to the GATE countersign, so the owner sees what the new gate stops catching before signing. If the base's copy can't run at all (an import or flag it can't follow), the owner can sign past it: `G0-RAISE: GATE base-judge@<base> — <reason>`.",
+    "A reason is at least three words, with no `<placeholder>` left in it. `pnpm check:arch --ci` runs the check against the change's base, and `--raises <ref>` runs it alone. When the change edits the gate's own code, the **base commit's** copy of the gate judges the countersigns as well, finding the base itself, so a bug in the new copy can't approve itself. It also runs its rules over the change and lists anything it finds, next to the GATE countersign, so the owner sees what the new gate stops catching before signing. If the base's copy can't run at all (an import or flag it can't follow), the owner can sign past it for the gate code as it stands: the gate prints `G0-RAISE: GATE base-judge@<hash> — <reason>`, and any later edit to the gate asks again.",
     '',
-    "What this holds against is an honest agent's eager mistake: signing its own raise, or breaking the gate while refactoring it. An agent that sets out to forge (dropping its attribution line, rewriting the CI step that runs the gate) is not stopped by any check here; review is the backstop for that.",
+    "That list is closed ([S6](#guarantees)): a gate command the gate can't resolve to tracked files and scripts is a registry error, never a pass. What this holds against is an honest agent's eager mistake: signing its own raise, or breaking the gate while refactoring it. An agent that sets out to forge (dropping its attribution line, rewriting the CI step that runs the gate) is not stopped by any check here; review is the backstop for that.",
     '',
     '<a id="exceptions"></a>',
     '',

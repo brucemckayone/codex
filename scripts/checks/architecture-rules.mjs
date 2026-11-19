@@ -151,10 +151,19 @@ export const GATES = [
     title: 'Biome lint and format; every diagnostic fails',
     run: 'pnpm check:ci',
     files: ['biome.json'],
-    // Biome 2 obeys a nested config (`"root": false`) and, through
-    // vcs.useIgnoreFile, every .gitignore: either can switch lint off for a
-    // folder. A .gitignore loosens only by gaining a line.
-    filesMatching: ['**/biome.json', '**/biome.jsonc', '**/.gitignore'],
+    // Biome 2 obeys a nested config (`"root": false`; from 2.4 also a hidden
+    // .biome.json), and through vcs.useIgnoreFile every .gitignore and .ignore:
+    // each can switch lint off for a folder. An ignore file loosens by a new
+    // plain line, a lost negation, a new order or a move (S6 of
+    // architecture-spec.mjs); deleting a plain line or adding a `!` doesn't.
+    filesMatching: [
+      '**/biome.json',
+      '**/biome.jsonc',
+      '**/.biome.json',
+      '**/.biome.jsonc',
+      '**/.gitignore',
+      '**/.ignore',
+    ],
   },
   {
     id: 'TYPECHECK',
@@ -173,9 +182,9 @@ export const GATES = [
       // `svelte-kit sync` writes the tsconfig tsc and svelte-check read.
       'apps/web/svelte.config.js',
     ],
-    // A package's turbo.json can narrow the task's inputs, so CI replays a
-    // cached pass.
-    filesMatching: ['*/turbo.json', '*/*/turbo.json'],
+    // The root turbo.json, and each package's turbo.json at the tasks
+    // typecheck depends on, come from the command itself (gateDependencies):
+    // either can narrow a task's inputs, so CI replays a cached pass.
   },
   {
     id: 'SETUP-ORDER',

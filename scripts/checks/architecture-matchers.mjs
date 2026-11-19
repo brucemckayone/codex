@@ -20,11 +20,7 @@
  * Matchers read only through `ctx.source`, never the filesystem, so the same
  * rule checks the working tree, the git index or a self-test fixture.
  */
-import {
-  regexCanStart,
-  regexEnd,
-  tokenize,
-} from './check-data-access-contract.mjs';
+import { regexCanStart, regexEnd } from './check-data-access-contract.mjs';
 
 /** 1-based line of each offset, computed once per file. */
 export function lineIndex(text) {
@@ -147,45 +143,79 @@ export function blankCode(text) {
 }
 
 /**
- * `code` with the inside of every string and template literal replaced by x
- * (quotes kept, length kept), so a bracket, comma or paren in a string can't
- * change how the code around it is read. `code` is already comment-blanked.
+ * One pass over JS/TS source with ONE grammar for comments, strings and
+ * templates, so they can't disagree. Two passes did: the comment blanker
+ * didn't nest templates and read the `//` of `https://` in
+ * ``${a ? `https://${h}` : ''}`` as a comment, blanking the closing backticks,
+ * and the string masker that ran after it then masked the rest of the file, so
+ * a money call below it was never seen (review round 5).
  *
- * A template's `${…}` is CODE and stays unmasked, read with the same rules
- * (so a template nested inside it is masked in turn): a money call inside an
+ *   code     comments blanked to spaces, everything else as written
+ *   masked   comments blanked, and the inside of every string and template's
+ *            text replaced by x (quotes kept), so a bracket, comma or paren in
+ *            a string can't change how the code around it is read
+ *
+ * Offsets and newlines are kept in both, so lines match the file. A
+ * template's `${…}` is CODE, read with the same rules (a template nested in it
+ * is masked in turn, and a comment in it is a comment): a money call inside an
  * interpolation is still a call. A regex literal is skipped whole, so a quote
- * in one opens no string. An unterminated ' or " is an apostrophe the scan
- * stepped into, not a string, so it masks nothing (tokenize does the same).
- * Also returns the (1-based) lines that START inside a string's text: their
- * indentation is the string's, not the code's.
+ * or backtick in one opens nothing. A `/` that starts a line is a regex or a
+ * comment, never a division: biome breaks a binary expression after its
+ * operator. An unterminated ' or " is an apostrophe the scan stepped into, not
+ * a string, so it masks nothing.
+ *
+ * Also returns the (1-based) lines that START inside a template or string:
+ * their indentation is the string's (or a dedented interpolation's), not the
+ * code's.
  */
-export function maskStrings(code) {
-  return maskStringsWithLines(code).masked;
-}
-
-export function maskStringsWithLines(code) {
-  const out = code.split('');
+export function scanSource(source) {
+  const code = source.split('');
+  const masked = source.split('');
   const startsInside = new Set();
   let line = 1;
   let i = 0;
+  const blank = (from, to) => {
+    for (let k = from; k < to; k++) {
+      if (source[k] !== '\n') {
+        code[k] = ' ';
+        masked[k] = ' ';
+      } else line += 1;
+    }
+  };
   const mask = (k) => {
-    if (out[k] !== '\n') out[k] = 'x';
+    if (k < source.length && source[k] !== '\n') masked[k] = 'x';
+  };
+  const startsLine = (at) => {
+    let k = at - 1;
+    while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) k -= 1;
+    return k < 0 || source[k] === '\n';
   };
 
   // Code, from i to the end or (in an interpolation) to the `}` closing it.
   const scanCode = (inInterpolation) => {
     let depth = 0;
-    while (i < code.length) {
-      const c = code[i];
+    while (i < source.length) {
+      const c = source[i];
       if (c === '\n') {
         line += 1;
+        if (inInterpolation) startsInside.add(line);
         i += 1;
+      } else if (c === '/' && source[i + 1] === '/') {
+        const end = source.indexOf('\n', i);
+        const stop = end === -1 ? source.length : end;
+        blank(i, stop);
+        i = stop;
+      } else if (c === '/' && source[i + 1] === '*') {
+        const end = source.indexOf('*/', i + 2);
+        const stop = end === -1 ? source.length : end + 2;
+        blank(i, stop);
+        i = stop;
       } else if (
         c === '/' &&
-        regexCanStart(out, i) &&
-        regexEnd(code, i) !== -1
+        (regexCanStart(masked, i) || startsLine(i)) &&
+        regexEnd(source, i) !== -1
       ) {
-        i = regexEnd(code, i);
+        i = regexEnd(source, i);
       } else if (c === "'" || c === '"') {
         scanQuoted(c);
       } else if (c === '`') {
@@ -202,20 +232,20 @@ export function maskStringsWithLines(code) {
   };
 
   const scanQuoted = (q) => {
-    const continued = []; // lines a backslash-newline carries the string onto
+    let continued = 0; // lines a backslash-newline carries the string onto
     let j = i + 1;
-    while (j < code.length && code[j] !== q && code[j] !== '\n') {
-      if (code[j] === '\\') {
-        if (code[j + 1] === '\n') continued.push(true);
+    while (j < source.length && source[j] !== q && source[j] !== '\n') {
+      if (source[j] === '\\') {
+        if (source[j + 1] === '\n') continued += 1;
         j += 2;
       } else j += 1;
     }
-    if (code[j] !== q) {
+    if (source[j] !== q) {
       i += 1; // unterminated: not a string
       return;
     }
     for (let k = i + 1; k < j; k++) mask(k);
-    for (const _ of continued) {
+    for (let n = 0; n < continued; n++) {
       line += 1;
       startsInside.add(line);
     }
@@ -224,20 +254,20 @@ export function maskStringsWithLines(code) {
 
   const scanTemplate = () => {
     i += 1;
-    while (i < code.length) {
-      const c = code[i];
+    while (i < source.length) {
+      const c = source[i];
       if (c === '`') {
         i += 1;
         return;
       }
       if (c === '\\') {
         mask(i);
-        if (code[i + 1] === '\n') {
+        if (source[i + 1] === '\n') {
           line += 1;
           startsInside.add(line);
         } else mask(i + 1);
         i += 2;
-      } else if (c === '$' && code[i + 1] === '{') {
+      } else if (c === '$' && source[i + 1] === '{') {
         i += 2;
         scanCode(true);
         i += 1; // the closing }
@@ -253,7 +283,7 @@ export function maskStringsWithLines(code) {
   };
 
   scanCode(false);
-  return { masked: out.join(''), startsInside };
+  return { code: code.join(''), masked: masked.join(''), startsInside };
 }
 
 const NOT_A_NAME = new Set([
@@ -322,8 +352,16 @@ const STRONG = [
 const METHOD_HEAD = new RegExp(
   `^${MODIFIERS}\\*?\\s*([\\w$]+)\\s*(?:<[^>]*>)?\\s*\\(`
 );
-/** What follows a method's parameter list: an optional return type, then its body. */
-const METHOD_BODY = /^\s*(?::(?!.*=>).*)?\{\s*$/;
+/**
+ * What follows a method's parameter list: an optional return type, then its
+ * body. The type may hold an arrow (`(): () => void {`); only an arrow right
+ * before the brace makes it an arrow function's body instead.
+ */
+const METHOD_BODY = /^\s*(?::.*)?\{\s*$/;
+const ARROW_BODY = /=>\s*\{\s*$/;
+/** A return type biome wrapped: `): Promise<` here, `> {` further down. */
+const WRAPPED_TYPE = /^\s*:.*[<([{,|&]\s*$/;
+const TYPE_CLOSE = /^\s*[>)\]}].*\{\s*$/;
 /** A name that narrows the key but isn't a declaration: keep walking past it. */
 const WEAK = [
   // a property holding a function: `handler: async (ctx) => {`
@@ -332,18 +370,20 @@ const WEAK = [
   /^(?:await\s+|return\s+)?([\w$]+(?:\.[\w$]+)*)\s*\(.*(?:=>|\bfunction\b)/,
 ];
 /**
- * A route registration at the start of its line, `app.post('/refund', …` or
- * biome's `app.post(` with the path on the next line. Only a literal path
- * (starting with /) counts, so `cache.get('payout', …)` names nothing.
+ * A route registration that starts its line: `app.post('/refund', …`, biome's
+ * `app.post(` with the path on the next line, a chained `.post('/payout', …`,
+ * or, at the top level only, an assigned `export const r = app.post(…`. The
+ * path is a literal starting with / or a CONSTANT_NAME, so `cache.get('payout',
+ * …)` names nothing.
  */
 const ROUTE_HEAD =
-  /^\s*[\w$]+(?:\.[\w$]+)*\.(get|post|put|patch|delete|all)\(\s*(?:(['"`])(\/[^'"`]*)\2)?/;
-const ROUTE_PATH = /^\s*(['"`])(\/[^'"`]*)\1/;
+  /^(\s*)((?:export\s+)?(?:const|let|var)\s+[\w$]+\s*=\s*|export\s+default\s+)?(?:[\w$]+(?:\.[\w$]+)*)?\.(get|post|put|patch|delete|all)\(\s*(?:(['"`])(\/[^'"`]*)\4|([A-Z][A-Z0-9_]*)\s*,)?/;
+const ROUTE_PATH = /^\s*(?:(['"`])(\/[^'"`]*)\1|([A-Z][A-Z0-9_]*)\s*,)/;
 
 /**
- * Where the parenthesis opened at (line, col) closes, in masked text, and
- * what follows it on that line. Masked text holds no string, so every paren
- * is code.
+ * Where the parenthesis opened at (line, col) closes, in masked text: the
+ * line it closes on and what follows it there. Masked text holds no string,
+ * so every paren is code.
  */
 function afterParens(maskedLines, line, col) {
   let depth = 0;
@@ -353,7 +393,7 @@ function afterParens(maskedLines, line, col) {
       if (text[c] === '(') depth += 1;
       else if (text[c] === ')') {
         depth -= 1;
-        if (depth === 0) return text.slice(c + 1);
+        if (depth === 0) return { line: l, rest: text.slice(c + 1) };
       }
     }
   }
@@ -365,21 +405,34 @@ function methodName(maskedLines, i) {
   const text = maskedLines[i];
   const m = METHOD_HEAD.exec(text.trimStart());
   if (!m || CONTROL.has(m[1])) return null;
-  const open = text.length - text.trimStart().length + m[0].length - 1;
-  const rest = afterParens(maskedLines, i, open);
-  return rest !== null && METHOD_BODY.test(rest) ? m[1] : null;
+  const indent = text.length - text.trimStart().length;
+  const after = afterParens(maskedLines, i, indent + m[0].length - 1);
+  if (after === null) return null;
+  const body = (rest) => METHOD_BODY.test(rest) && !ARROW_BODY.test(rest);
+  if (body(after.rest)) return m[1];
+  if (!WRAPPED_TYPE.test(after.rest)) return null;
+  // The type closes on the first later line back at the head's indent.
+  for (let l = after.line + 1; l < maskedLines.length; l++) {
+    const next = maskedLines[l];
+    if (next.trim() === '' || next.length - next.trimStart().length > indent) {
+      continue;
+    }
+    return TYPE_CLOSE.test(next) && !ARROW_BODY.test(next) ? m[1] : null;
+  }
+  return null;
 }
 
 /** The route a line registers, reading biome's next-line path too. */
 function routeName(lines, i) {
   const head = ROUTE_HEAD.exec(lines[i] ?? '');
-  if (!head) return null;
-  let path = head[3];
+  if (!head || (head[2] && head[1] !== '')) return null;
+  let path = head[5] ?? head[6];
   for (let k = i + 1; path === undefined && k < lines.length; k++) {
     if (lines[k].trim() === '') continue;
-    path = ROUTE_PATH.exec(lines[k])?.[2] ?? null;
+    const next = ROUTE_PATH.exec(lines[k]);
+    path = next?.[2] ?? next?.[3] ?? null;
   }
-  return path ? `${head[1].toUpperCase()} ${path}` : null;
+  return path ? `${head[3].toUpperCase()} ${path}` : null;
 }
 
 /**
@@ -397,14 +450,20 @@ export function enclosingName(
   { startsInside = new Set(), lines = maskedLines } = {}
 ) {
   const indentOf = (l) => l.length - l.trimStart().length;
-  let limit = indentOf(maskedLines[lineNo - 1] ?? '');
+  // A line that starts inside a template (a dedented `${…}` line) takes its
+  // place from the code line the template starts on: that line is the
+  // nearest ancestor candidate.
+  let from = lineNo;
+  while (from > 1 && startsInside.has(from)) from -= 1;
+  let limit = indentOf(maskedLines[from - 1] ?? '') + (from === lineNo ? 0 : 1);
   // A line that starts with a closer (`}> {` ending a multi-line signature,
   // `} catch (e) {`) belongs to a construct whose head is further up, at the
   // same indent.
   let headPending = false;
   let weak = null;
   const named = (stop) => (weak ? `${stop}/${weak}` : stop);
-  for (let i = lineNo - 2; i >= 0 && (limit > 0 || headPending); i--) {
+  const start = from === lineNo ? lineNo - 2 : from - 1;
+  for (let i = start; i >= 0 && (limit > 0 || headPending); i--) {
     const line = maskedLines[i];
     if (line.trim() === '' || startsInside.has(i + 1)) continue;
     const indent = indentOf(line);
@@ -519,8 +578,14 @@ function isPlaceholderPath(path) {
   );
 }
 
-/** A CLAUDE.md import, `@docs/x.md` or `@./AGENTS.md`: a path with an extension. */
-const CLAUDE_IMPORT = /(?<![\w@/.-])@((?:\.{1,2}\/)?[\w-][\w./-]*\.\w+)/g;
+/**
+ * A CLAUDE.md import as Claude Code reads one: `@docs/x.md`, `@./AGENTS.md`,
+ * `@../../docs/x.md`, `@.claude/rules.md`, `@README`. Relative to the
+ * importing file; it counts only when it names a tracked file, so a package
+ * name (`@codex/database`) imports nothing, and an address (`a@b.com`) is no
+ * import at all.
+ */
+const CLAUDE_IMPORT = /(?<![\w@/.-])@((?:\.{1,2}\/)*[\w.-][\w./-]*)/g;
 /** How deep Claude Code follows imports. */
 const MAX_IMPORT_HOPS = 5;
 
@@ -538,11 +603,10 @@ export const MATCHERS = {
       }
     },
     file(rule, _path, text) {
-      const { code } = tokenize(text);
       const { lineOf, textOf } = lineIndex(text);
       // Matched on string-masked code: a log line or an error message that
       // names the API is not a call.
-      const { masked, startsInside } = maskStringsWithLines(code);
+      const { masked, startsInside } = scanSource(text);
       const maskedLines = masked.split('\n');
       const lines = text.split('\n');
       const hits = [];
@@ -853,8 +917,11 @@ export const MATCHERS = {
         found += words(body);
         if (depth === MAX_IMPORT_HOPS) return;
         for (const m of blankCode(body).matchAll(CLAUDE_IMPORT)) {
-          const target = normalise(`${dirname(at)}/${m[1]}`);
-          if (seen.has(target) || !source?.has(target)) continue;
+          // Sentence punctuation after the path is not part of it.
+          const target = [m[1], m[1].replace(/[.,;:!?)]+$/, '')]
+            .map((p) => normalise(`${dirname(at)}/${p}`))
+            .find((p) => source?.has(p));
+          if (!target || seen.has(target)) continue;
           seen.add(target);
           count(target, source.read(target), depth + 1);
         }

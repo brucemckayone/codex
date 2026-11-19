@@ -18,6 +18,56 @@ Every rule on this page runs in CI and at commit time (`scripts/checks/check-arc
 | [RULES-DOC](#rules-doc) | The rules page equals the registry |
 | [CI-GATES](#ci-gates) | The registry's gate list and the static-analysis job's steps agree |
 
+<a id="guarantees"></a>
+
+## What the gate guarantees
+
+This is the spec the gate is reviewed against (`scripts/checks/architecture-spec.mjs`). A finding is a **failing test** against one of these clauses; a shape a clause puts outside is not one, and widening a clause is the owner's call. Each clause names the self-tests that prove it, and the self-test fails when one of them is missing. Under every clause the threat model is an honest agent's eager mistake: an agent that sets out to forge (dropping its attribution line, rewriting the CI step) is not stopped by any check, and review is the backstop for that.
+
+**S1. Money calls are found.** In A1's scope, every member call `.transfers.create(`, `.transfers.createReversal(`, `.refunds.create(` or `.payouts.create(` is found: inside a template's interpolation, in a callback, split across lines, after a nested template or a regex. Text in a comment, a string or a template's own text is never a call. Comments and strings are read by ONE scanner, so they can't disagree about where a template ends.
+
+- **Outside:** a call through a stored reference (`const t = stripe.transfers; t.create(`) or a computed member (`stripe["transfers"]`); code biome would not accept.
+- **Proved by:** "A1 ignores the owner modules, tests and comments", "A1 sees optional chaining and a call split across lines", "A1 sees a money call inside an interpolation, after a nested template, and after a regex holding a quote", "A1 keys: a multi-line string above the call keeps its function, and a string never matches", "a URL in a nested template, a comment-like template or a regex at the start of a line hides no call".
+
+**S2. A key names where its violation sits.** A line-level violation's key names the function, method, class field, route or callback it sits in, read from biome's indentation, so a fix in one named place can't pay for a new violation in another. A misread name can only merge two keys; it never hides a violation.
+
+- **Outside:** two functions with the same name in one file; code biome has not formatted.
+- **Proved by:** "a call key names its function, so a fix in one cannot pay for a call in another", "the enclosing name survives a multi-line signature and destructured parameters", "routes in the form biome writes get their own keys; a header read or a cache get names nothing", "a method head needs its body: a call or an arrow callback is no method", "a wrapped or arrow return type still names its method, and a chained, assigned or constant route names itself".
+
+**S3. Every rate limit a route uses is read.** In a worker's route files, every use of `procedure`, `multipartProcedure`, `binaryUploadProcedure` or `rateLimit` (bare, or through an `import * as` namespace of `@codex/worker-utils` or `@codex/security`) is a direct call whose options the gate reads, an object key, or an entry of an import list. Any other use, and a dynamic import of those modules, fails as unreadable. A preset with no binding in every environment of the worker's wrangler.jsonc fails.
+
+- **Outside:** a limiter reached through another module of this repo that re-exports it.
+- **Proved by:** "RATE-LIMIT-BINDING: the default preset, every env, every limiter, and what it cannot read", "RATE-LIMIT-BINDING fails what it cannot read, and follows what it can", "RATE-LIMIT-BINDING: every alias form fails; reading a property passes", "RATE-LIMIT-BINDING: any use but a call, a key or an import entry fails".
+
+**S4. A CLAUDE.md pays for what it imports.** DOC-BUDGET counts the words of every `@path` a CLAUDE.md or AGENTS.md imports that resolves to a tracked file, relative to the importing file (any number of `./` and `../`, into a dot-folder, with or without an extension), up to 5 hops, each file once.
+
+- **Outside:** at commit time, an edit to the imported file alone: CI judges the importer; an import of a file outside the repository (`@~/…`).
+- **Proved by:** "DOC-BUDGET counts the words a CLAUDE.md imports", "DOC-BUDGET follows an import up two folders, into a dot-folder or without an extension, to 5 hops".
+
+**S5. Debt only shrinks.** A violation whose key isn't pinned, or a size above its pin, fails. A fix fails the commit that touches its file until it is banked, and the pull request that made it. `--lower` only lowers or removes. In a pull request a file may grow no further than the base measured unless the owner signed its pin: growing into a pin above what the base measured needs the same countersign as raising it.
+
+- **Outside:** a release PR or a push to dev or main: there, unbanked fixes and growth into a stale pin are notices.
+- **Proved by:** "one more of a pinned key fails as more", "a fix cannot pay for a new violation in the same file", "--lower only lowers or removes; it never raises or adds", "--ci in a PR: a fix this change made blocks wherever it is; one dev left behind is a notice", "--ci in a PR: headroom a fix left unbanked on dev cannot be spent", "growing into a stale pin is signed like a raise, and a release PR only notes it".
+
+**S6. What loosens the gate is a closed list.** These, and only these, are loosening items: (1) a raised or added baseline pin, or growth into one (S5); (2) a new, copied, moved or renewed exception; (3) the gate's own code: every tracked file in `scripts/checks/` but the baseline, `.github/workflows/static_analysis.yml`, `.husky/pre-commit`, gate.sh, and a calling workflow's triggers, concurrency or static-analysis job; (4) what another gate runs: a file a gate command runs with node and what it imports, every pnpm script a gate command reaches with its `pre`/`post` scripts, a turbo task's script in every workspace package (added, changed or deleted), every workspace package's install lifecycle scripts, the root `turbo.json`, a package's `turbo.json` at the tasks the gate's task depends on, `pnpm-workspace.yaml`'s `packages:` list, `.npmrc`, `.pnpmfile.cjs`, a gate's declared `files`, and a rise in a gate's `ratchets`; (5) Biome's reach: any `biome.json`, `biome.jsonc`, `.biome.json` or `.biome.jsonc`, and any `.gitignore` or `.ignore`, at any depth, compared at its own path (a move is a new file there), unless the change only deletes plain lines or adds `!` lines. A gate command the gate can't resolve to tracked files and scripts is a registry error, never a pass.
+
+- **Outside:** tool versions: a devDependency or lockfile bump, a patch under `patches/`, another key of pnpm-workspace.yaml; a package's own tsconfig, and any other file a tool reads that this list doesn't name; the allowlists inside the other gates' own scripts: they are gate files, so every edit to one asks, a shrink included; CI environment variables and runner images.
+- **Proved by:** "a raised pin needs a G0-RAISE trailer in a commit, with a real reason", "a new exception and a change to the gate itself need one too", "a pnpm script a gate runs is part of the gate", "any file in the gate folder is gate code, and a gate part that is no file is a registry error", "what a gate runs is derived from its commands, followed as a shell would, plus what it declares", "a calling workflow is part of the gate only where the gate depends on it", "a nested biome config, a new .gitignore line or a package turbo.json is part of the gate", "an ignore file loosens by a new rule, a lost negation, a new order or a move; a .ignore and a .biome.json count", "a deleted turbo-task script, a pre/post or lifecycle script, the root turbo.json and .npmrc are gate parts", "a gate command the reader cannot resolve is a registry error; the forms it can are followed".
+
+**S7. A countersign covers exactly what the owner signed.** A `G0-RAISE: KEY@hash — reason` trailer counts only in a commit in base..HEAD with no `Co-Authored-By: Claude` line, and a reason of three words or more with no `<placeholder>`. It covers its item only at that hash. A hash is taken over a canonical form (a pin's keys sorted, JSON keys sorted), so re-sorting signs nothing away; any other change to the item, a tightening included, asks again. Every exception a hash covers is listed under it.
+
+- **Outside:** a forged trailer in a commit without its attribution line.
+- **Proved by:** "the gate's own pasted output, or an agent's trailer, is not a countersign", "a countersign covers what it signed: loosening the same item after it needs a new one", "a hash binds the countersign: an amend, or a cherry-pick onto another change, is asked again", "a countersign needs a three-word reason, and covers only its own entry", "a pin hashes in canonical order, a path with a space can be signed, and every exception a hash covers is listed".
+
+**S8. The pull request into dev judges; the base copy judges with it.** A pull request into dev fails on anything unsigned. A push to dev or main, and a release PR from this repository's dev into main, only note it. When a change edits the gate's own code (not just its baseline), the base commit's copy of the gate also judges the countersigns, finding the base itself, and lists what its own rules find. A base that holds the gate's baseline or rules page with no runner at any listed entry path fails the run (exit 2). The owner's sign past a base copy that can't run covers only the gate code it was signed for.
+
+- **Outside:** the `edited` pull_request event (a base switched after CI ran).
+- **Proved by:** "a push to dev, or a release PR, only notes an unsigned loosening", "when a change edits the gate, the base's copy of the gate judges it too", "a PR whose base is HEAD itself is an error, not a pass", "a base copy that can't run is an error the owner can sign past", "ciBase knows its events and stops on any other", "ciBase: a pull request from dev is a release", "a base that holds the gate where no entry path looks is an error; a baseline-only change runs no base copy".
+
+**S9. Exit codes.** 0: everything passed. 1: a violation, or an unsigned loosening. 2: the gate can't run: a registry error, a git error, a gate command it can't read, a base it can't find. A crash is never 0 or 1.
+
+- **Proved by:** "a gate that cannot run exits 2, never 0 or 1", "a broken gate module exits 2, not 1", "a malformed rule is an error, never a silently skipped rule".
+
 ## Adding a rule
 
 Pick the strongest **mechanism** first, then the strongest **channel** that can run it:
@@ -36,7 +86,7 @@ A rule that measures a file (SIZE, DOC-BUDGET) pins its size. Every other rule p
 
 - A violation whose key isn't pinned, or a size above its pin, is new, and fails.
 - A fixed violation, a smaller size or a file that is gone must be **banked** with `pnpm check:arch --lower`, so the headroom it freed can't be spent later. It fails the commit that touches the file (bank it with `--lower --staged`, which banks what the index holds and stages the baseline), and the pull request that made the fix: the violation still existed at the base, in whatever file. A fix already left unbanked on `dev` is only a notice, so two PRs can't merge into a red branch, and a release PR from `dev` isn't blocked by them.
-- In a pull request a pin allows no more than the base still had, plus any countersigned raise. So a fix left unbanked on `dev` is headroom no later change can spend: re-adding the violation fails.
+- In a pull request a pin allows no more than the base still had. A fix left unbanked on `dev` is headroom no later change spends quietly: growing into it fails unless the owner countersigns that pin, with the same line a raise of it takes. A release PR only notes it.
 - A renamed file carries its pin to the new path; `--lower` moves it (renames are found against `origin/dev`).
 - `--lower` only ever lowers or removes. `--init --rule <ID>` seeds the block for a rule added later.
 - RULES-DOC and CI-GATES can't be held in the baseline at all: their drift is fixed, never pinned.
@@ -55,14 +105,14 @@ A pull request into `dev` is where this is judged. A push to `dev` or `main`, an
 | Every pin of a rule the base doesn't have yet | `G0-RAISE: <RULE> *@<hash> — <reason>` |
 | A new, copied, moved or renewed exception (below) | `G0-RAISE: <RULE> <file>@<hash> — <reason>` |
 | A change to the gate itself: any file in `scripts/checks/` but the baseline, its CI steps, the hook, gate.sh | `G0-RAISE: GATE <path>@<hash> — <reason>` |
-| A change to what another gate runs: a file its command names (and what that file imports), a pnpm script, a turbo task, `pnpm-workspace.yaml`, a gate's config (`files`) | `G0-RAISE: GATE <path>@<hash>`, `GATE <file>#scripts.<name>@<hash>`, `GATE turbo.json#tasks.<name>@<hash>` |
-| A config a gate finds by pattern (`filesMatching`): a nested biome config, a package turbo.json, or a new line in any `.gitignore` (Biome skips what it matches) | `G0-RAISE: GATE <path>@<hash> — <reason>` |
+| A change to what another gate runs: a file its command runs (and what that file imports); a pnpm script it reaches, with its pre/post scripts; a turbo task's script in any package, added, changed or deleted; any package's install lifecycle scripts; the root `turbo.json`; a package's `turbo.json` at the tasks the gate's task depends on; `pnpm-workspace.yaml`'s `packages:`; `.npmrc`; a gate's config (`files`) | `G0-RAISE: GATE <path>@<hash>`, `GATE <file>#scripts.<name>@<hash>`, `GATE <pkg>/turbo.json#tasks.<name>@<hash>` |
+| A config a gate finds by pattern (`filesMatching`): any biome config, or an ignore file (`.gitignore`, `.ignore`) that gains a plain line, loses a negation, changes order or moves (Biome skips what it matches) | `G0-RAISE: GATE <path>@<hash> — <reason>` |
 | A rise in another gate's own baseline (`ratchets`) | `G0-RAISE: GATE <path>@<hash> — <reason>` |
 | A change to the triggers, concurrency or static-analysis job of a calling workflow | `G0-RAISE: GATE <workflow>@<hash> — <reason>` |
 
-A reason is at least three words, with no `<placeholder>` left in it. `pnpm check:arch --ci` runs the check against the change's base, and `--raises <ref>` runs it alone. When the change edits the gate's own code, the **base commit's** copy of the gate judges the countersigns as well, finding the base itself, so a bug in the new copy can't approve itself. It also runs its rules over the change and lists anything it finds, next to the GATE countersign, so the owner sees what the new gate stops catching before signing. If the base's copy can't run at all (an import or flag it can't follow), the owner can sign past it: `G0-RAISE: GATE base-judge@<base> — <reason>`.
+A reason is at least three words, with no `<placeholder>` left in it. `pnpm check:arch --ci` runs the check against the change's base, and `--raises <ref>` runs it alone. When the change edits the gate's own code, the **base commit's** copy of the gate judges the countersigns as well, finding the base itself, so a bug in the new copy can't approve itself. It also runs its rules over the change and lists anything it finds, next to the GATE countersign, so the owner sees what the new gate stops catching before signing. If the base's copy can't run at all (an import or flag it can't follow), the owner can sign past it for the gate code as it stands: the gate prints `G0-RAISE: GATE base-judge@<hash> — <reason>`, and any later edit to the gate asks again.
 
-What this holds against is an honest agent's eager mistake: signing its own raise, or breaking the gate while refactoring it. An agent that sets out to forge (dropping its attribution line, rewriting the CI step that runs the gate) is not stopped by any check here; review is the backstop for that.
+That list is closed ([S6](#guarantees)): a gate command the gate can't resolve to tracked files and scripts is a registry error, never a pass. What this holds against is an honest agent's eager mistake: signing its own raise, or breaking the gate while refactoring it. An agent that sets out to forge (dropping its attribution line, rewriting the CI step that runs the gate) is not stopped by any check here; review is the backstop for that.
 
 <a id="exceptions"></a>
 
@@ -202,8 +252,8 @@ The static-analysis job runs these too. The CI-GATES rule keeps this list and th
 
 | Gate | Checks | Runs |
 |---|---|---|
-| BIOME | Biome lint and format; every diagnostic fails | `pnpm check:ci`<br>reads `biome.json`<br>reads any `**/biome.json`<br>reads any `**/biome.jsonc`<br>reads any `**/.gitignore` |
-| TYPECHECK | TypeScript across the monorepo | `pnpm typecheck`<br>reads `tsconfig.json`<br>reads `tsconfig.build.json`<br>reads `config/tsconfig.json`<br>reads `config/tsconfig/base.json`<br>reads `config/tsconfig/package.json`<br>reads `config/tsconfig/package-typecheck.json`<br>reads `config/tsconfig/worker.json`<br>reads `apps/web/svelte.config.js`<br>reads any `*/turbo.json`<br>reads any `*/*/turbo.json` |
+| BIOME | Biome lint and format; every diagnostic fails | `pnpm check:ci`<br>reads `biome.json`<br>reads any `**/biome.json`<br>reads any `**/biome.jsonc`<br>reads any `**/.biome.json`<br>reads any `**/.biome.jsonc`<br>reads any `**/.gitignore`<br>reads any `**/.ignore` |
+| TYPECHECK | TypeScript across the monorepo | `pnpm typecheck`<br>reads `tsconfig.json`<br>reads `tsconfig.build.json`<br>reads `config/tsconfig.json`<br>reads `config/tsconfig/base.json`<br>reads `config/tsconfig/package.json`<br>reads `config/tsconfig/package-typecheck.json`<br>reads `config/tsconfig/worker.json`<br>reads `apps/web/svelte.config.js` |
 | SETUP-ORDER | Every workflow sets up pnpm before setup-node | `node --test scripts/checks/check-workflow-setup-order.test.mjs`<br>`node scripts/checks/check-workflow-setup-order.mjs` |
 | BRAND-BOUNDARY | The public bundle never imports the brand editor | `pnpm --filter web run check:brand-boundary:test`<br>`pnpm --filter web run check:brand-boundary` |
 | DIALOG-STRUCTURE | Dialogs are built from the shared Dialog parts | `pnpm --filter web run check:dialog-structure:test`<br>`pnpm --filter web run check:dialog-structure` |

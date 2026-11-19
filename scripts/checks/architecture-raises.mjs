@@ -14,8 +14,12 @@
  *      own code, its CI steps, a gate script,
  *      a pnpm script or turbo task a gate runs,
  *      a gate's config (biome.json, a nested
- *      biome config, a new .gitignore line), or
- *      a rise in another gate's baseline
+ *      biome config, an ignore file), or a
+ *      rise in another gate's baseline
+ *
+ * That list is CLOSED: S6 of architecture-spec.mjs says exactly what is on it
+ * and what is outside it, and a command the reader can't resolve is a
+ * registry error rather than a part that fingerprints nothing.
  *
  * The <hash> is a short hash of the item's content as the change leaves it,
  * and the gate prints it in the line to sign (owner, 19 Nov). So a countersign
@@ -45,13 +49,17 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { IGNORE_KEYWORD, parseIgnores } from './architecture-ignores.mjs';
-import { JOB_HEAD, pnpmScript } from './architecture-lists.mjs';
+import {
+  globToRegExp,
+  JOB_HEAD,
+  parseJsonc,
+  pnpmCommand,
+} from './architecture-lists.mjs';
 import {
   enclosingName,
   MATCHERS,
-  maskStringsWithLines,
+  scanSource,
 } from './architecture-matchers.mjs';
-import { tokenize } from './check-data-access-contract.mjs';
 
 /**
  * Where the gate's runner has lived, oldest first. "Does the base have a
@@ -81,15 +89,45 @@ export function isGateCode(file, baselineFile) {
   return file.startsWith(GATE_DIR) || GATE_CODE_ELSEWHERE.includes(file);
 }
 
+/** JSON with every object's keys sorted, so key order never changes a hash. */
+function canonical(value) {
+  return JSON.stringify(value ?? null, (_key, v) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, v[k]])
+        )
+      : v
+  );
+}
+
 /** The short content hash a countersign names: 8 hex digits of sha256. */
 export function hashOf(value) {
-  const text =
-    typeof value === 'string' ? value : JSON.stringify(value ?? null);
+  const text = typeof value === 'string' ? value : canonical(value);
   return createHash('sha256').update(text).digest('hex').slice(0, 8);
 }
 
+/** A pin as its countersign covers it: a key pin is a multiset, so sorted. */
+const canonicalPin = (pin) => (Array.isArray(pin) ? [...pin].sort() : pin);
+
+/** The hash a pin's countersign names (a raise, or growth into the pin). */
+export const pinState = (pin) => hashOf(canonicalPin(pin));
+
+/** The hash a `RULE *` countersign names: the rule's whole block. */
+export const blockState = (block) =>
+  hashOf(
+    Object.fromEntries(
+      Object.entries(block ?? {}).map(([file, pin]) => [
+        file,
+        canonicalPin(pin),
+      ])
+    )
+  );
+
+/** The target runs up to its `@hash`, so a path with a space can be signed. */
 const COUNTERSIGN =
-  /^[ \t]*G0-RAISE:[ \t]+(\S+)[ \t]+(\S+)[ \t]+(?:—|--?)[ \t]+(.+?)[ \t]*$/gm;
+  /^[ \t]*G0-RAISE:[ \t]+(\S+)[ \t]+(.+?@[0-9a-f]{8}|\S+)[ \t]+(?:—|--?)[ \t]+(.+?)[ \t]*$/gm;
 
 /** A commit an agent wrote: its countersigns don't count. */
 const AGENT_COMMIT =
@@ -177,9 +215,7 @@ function exceptionSignatures(file, text) {
   const where = (line) => {
     if (file.endsWith('.md')) return '';
     if (!context) {
-      const { masked, startsInside } = maskStringsWithLines(
-        tokenize(text).code
-      );
+      const { masked, startsInside } = scanSource(text);
       context = { maskedLines: masked.split('\n'), startsInside };
     }
     return enclosingName(context.maskedLines, line, {
@@ -226,11 +262,11 @@ function newExceptions(file, beforeText, afterText) {
 export function raiseItem(r, afterBaseline) {
   return {
     key: `${r.ruleId} ${r.file}`,
-    state: hashOf(r.now),
+    state: pinState(r.now),
     star: r.newRule
-      ? { key: `${r.ruleId} *`, state: hashOf(afterBaseline[r.ruleId]) }
+      ? { key: `${r.ruleId} *`, state: blockState(afterBaseline[r.ruleId]) }
       : null,
-    what: `${r.ruleId} ${r.file}: ${describeRaise(r)}`,
+    what: [`${r.ruleId} ${r.file}: ${describeRaise(r)}`],
   };
 }
 
@@ -257,7 +293,7 @@ export function uncovered(items, signed) {
     if (ok) continue;
     const line = signLine(item);
     if (!lines.has(line)) lines.set(line, []);
-    lines.get(line).push(item.what);
+    lines.get(line).push(...[item.what].flat());
   }
   return [...lines].map(([line, what]) => ({ line, what }));
 }
@@ -317,9 +353,9 @@ const workspaceGlob = (glob) =>
       .replace(/\0/g, '.*')}/package\\.json$`
   );
 
-/** The package.json files pnpm treats as the workspace: the root plus pnpm-workspace.yaml's globs. */
-function workspacePackages(files, read) {
-  const yaml = read('pnpm-workspace.yaml') ?? '';
+/** pnpm-workspace.yaml's `packages:` list: the only key of it a gate reads. */
+function workspaceList(yaml) {
+  if (yaml === null) return null;
   const globs = [];
   let inPackages = false;
   for (const line of yaml.split('\n')) {
@@ -327,9 +363,17 @@ function workspacePackages(files, read) {
     else if (/^\S/.test(line)) inPackages = false;
     else if (inPackages) {
       const m = /^\s*-\s*(['"]?)([^'"#\s]+)\1/.exec(line);
-      if (m) globs.push(workspaceGlob(m[2]));
+      if (m) globs.push(m[2]);
     }
   }
+  return globs;
+}
+
+/** The package.json files pnpm treats as the workspace: the root plus pnpm-workspace.yaml's globs. */
+function workspacePackages(files, read) {
+  const globs = (workspaceList(read('pnpm-workspace.yaml')) ?? []).map(
+    workspaceGlob
+  );
   return files.filter(
     (f) => f === 'package.json' || globs.some((re) => re.test(f))
   );
@@ -360,33 +404,102 @@ function nodeFiles(words) {
   return files;
 }
 
+/** A command segment's words, as a shell splits them: quotes dropped, a leading `VAR=value` skipped. */
+function shellWords(segment) {
+  const words = [...segment.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(
+    (m) => m[1] ?? m[2] ?? m[3]
+  );
+  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) {
+    words.shift();
+  }
+  return words;
+}
+
+/** Runners that fetch or run a package the gate can't fingerprint. */
+const OPAQUE_RUNNERS = new Set(['npx', 'npm', 'yarn', 'bun', 'bunx', 'deno']);
+const SHELLS = new Set(['bash', 'sh', 'zsh']);
+/** Scripts `pnpm install` runs in every workspace package, before every later gate. */
+const LIFECYCLE = [
+  'pnpm:devPreinstall',
+  'preinstall',
+  'install',
+  'postinstall',
+  'preprepare',
+  'prepare',
+  'postprepare',
+];
+
 const pick = (value, path) =>
   path.reduce((v, k) => (v && typeof v === 'object' ? v[k] : undefined), value);
+
+/** A JSON(C) file at a path, or the raw text when it doesn't parse, so a change to it still counts. */
+const view = (text, path) => {
+  if (text === null) return null;
+  try {
+    return pick(parseJsonc(text), path) ?? null;
+  } catch {
+    return { unparseable: text };
+  }
+};
+
+/** The tasks a turbo task runs through `dependsOn` (`^build` -> build), itself first. */
+function taskClosure(task, turbo) {
+  const tasks = view(turbo, ['tasks']) ?? {};
+  const seen = new Set();
+  const visit = (t) => {
+    if (seen.has(t)) return;
+    seen.add(t);
+    for (const [key, config] of Object.entries(tasks)) {
+      if (key !== t && !key.endsWith(`#${t}`)) continue;
+      for (const dep of config?.dependsOn ?? []) {
+        if (typeof dep === 'string')
+          visit(dep.replace(/^\^/, '').replace(/^.*#/, ''));
+      }
+    }
+  };
+  visit(task);
+  return [...seen];
+}
 
 /**
  * Everything the registry's other gates run, as parts: `changed(before,
  * after)` says whether a change to the part loosens that gate, and
  * `state(text)` is what a countersign's hash covers. Derived from each gate's
- * commands, followed as a shell would:
+ * commands, followed as a shell would (S6 of architecture-spec.mjs):
  *
  *   node [flags] <file …>    the file, and every module it imports relatively
- *   pnpm [--filter p] [run] <script>
- *                            the script's value in that package, followed in
- *                            turn, and pnpm-workspace.yaml (which --filter
- *                            resolves through)
- *   turbo [run] <task>       the task in turbo.json and in every package's
- *                            turbo.json, and every workspace package's script
- *                            for it
+ *   pnpm [-F|--filter[=]p] [run] <script> [args]
+ *                            the script's value in that package, with its
+ *                            pre/post scripts, followed in turn;
+ *                            pnpm-workspace.yaml's packages list, .npmrc and
+ *                            .pnpmfile.cjs; `pnpm exec` follows its command
+ *   turbo [run] <task …>     the root turbo.json, whole; each package's
+ *                            turbo.json at the tasks the task depends on; and
+ *                            every workspace package's script for each task
+ *   bash <file>, ./<file>    the file
  *
- * plus what the registry declares: `files` (configs like biome.json) and
- * `ratchets` (another gate's baseline, where only a rise counts). Globs a
- * gate reads by pattern (`filesMatching`) are matched against the change by
- * the caller, since a new nested config is not a tracked file yet.
+ * plus every workspace package's install lifecycle scripts, and what the
+ * registry declares: `files` (configs like biome.json) and `ratchets`
+ * (another gate's baseline, where only a rise counts). Globs a gate reads by
+ * pattern (`filesMatching`) are matched against the change by the caller,
+ * since a new nested config is not a tracked file yet.
+ *
+ * A command it can't resolve (`pnpm -r`, a filter naming no package, `node`
+ * with no file, `npx`) becomes a part no tracked file can be, so the full
+ * run's registry check names it and exits 2: never a part that fingerprints
+ * nothing. Any other first word is a binary, whose command text is what the
+ * gate reads (and that text is itself a part, in a script or the registry).
  *
  * @param {{ files: string[], read: (file: string) => string|null }} tree
  */
-export function gateDependencies(gates, { files, read }) {
+export function gateDependencies(gates, { files, read: readFile }) {
   const tracked = new Set(files);
+  // Each file is read once: over a base tree every read is a `git show`.
+  const texts = new Map();
+  const read = (file) => {
+    if (!texts.has(file)) texts.set(file, readFile(file));
+    return texts.get(file);
+  };
   const parts = new Map();
   const add = (part) => {
     if (!parts.has(part.label)) parts.set(part.label, part);
@@ -397,14 +510,20 @@ export function gateDependencies(gates, { files, read }) {
     add({
       label,
       file,
-      changed: (a, b) =>
-        JSON.stringify(pick(parseJson(a), path)) !==
-        JSON.stringify(pick(parseJson(b), path)),
-      state: (t) => pick(parseJson(t), path) ?? null,
+      changed: (a, b) => canonical(view(a, path)) !== canonical(view(b, path)),
+      state: (t) => view(t, path),
+    });
+  const unreadable = (command, why) =>
+    add({
+      label: `${command} (${why})`,
+      file: `\0${command}`,
+      changed: () => false,
+      state: () => null,
     });
   const packages = workspacePackages(files, read);
+  const scriptsOf = (file) => view(read(file), ['scripts']);
   const packageNamed = (name) =>
-    packages.find((f) => parseJson(read(f))?.name === name) ?? null;
+    packages.find((f) => view(read(f), ['name']) === name) ?? null;
   const dirOf = (file) => posix.dirname(file).replace(/^\.$/, '');
   const resolveModule = (path) =>
     [path, `${path}.mjs`, `${path}.js`, `${path}.ts`, `${path}/index.mjs`].find(
@@ -425,52 +544,106 @@ export function gateDependencies(gates, { files, read }) {
     }
   };
   const scripts = new Set();
+  // A script with its pre/post scripts; a pre/post part only where one exists.
   const script = (file, name) => {
-    const label = `${file}#scripts.${name}`;
-    json(file, ['scripts', name], label);
-    if (scripts.has(label)) return;
-    scripts.add(label);
-    const value = parseJson(read(file))?.scripts?.[name];
-    if (typeof value === 'string') runs(value, dirOf(file));
+    for (const n of [`pre${name}`, name, `post${name}`]) {
+      const value = scriptsOf(file)?.[n];
+      if (n !== name && value === undefined) continue;
+      const label = `${file}#scripts.${n}`;
+      json(file, ['scripts', n], label);
+      if (scripts.has(label)) continue;
+      scripts.add(label);
+      if (typeof value === 'string') runs(value, dirOf(file));
+    }
   };
   const turboTask = (task) => {
-    json('turbo.json', ['tasks', task], `turbo.json#tasks.${task}`);
+    whole('turbo.json');
+    const closure = taskClosure(task, read('turbo.json'));
     for (const pkg of packages) {
       const nested = `${dirOf(pkg) ? `${dirOf(pkg)}/` : ''}turbo.json`;
       if (nested !== 'turbo.json' && tracked.has(nested)) {
-        json(nested, ['tasks', task], `${nested}#tasks.${task}`);
+        for (const t of closure)
+          json(nested, ['tasks', t], `${nested}#tasks.${t}`);
       }
-      if (parseJson(read(pkg))?.scripts?.[task] !== undefined)
-        script(pkg, task);
+      if (scriptsOf(pkg)?.[task] !== undefined) script(pkg, task);
+    }
+  };
+  const pnpmSetup = () => {
+    if (tracked.has('pnpm-workspace.yaml')) {
+      add({
+        label: 'pnpm-workspace.yaml#packages',
+        file: 'pnpm-workspace.yaml',
+        changed: (a, b) =>
+          canonical(workspaceList(a)) !== canonical(workspaceList(b)),
+        state: (t) => workspaceList(t),
+      });
+    }
+    for (const file of ['.npmrc', '.pnpmfile.cjs']) {
+      if (tracked.has(file)) whole(file);
     }
   };
   const runs = (command, dir) => {
     for (const segment of command.split(/&&|\|\||;|\|/)) {
-      const words = segment.trim().split(/\s+/).filter(Boolean);
-      if (words[0] === 'node') {
-        for (const f of nodeFiles(words.slice(1))) {
-          followNode(posix.normalize(dir ? `${dir}/${f}` : f), new Set());
+      const words = shellWords(segment);
+      if (words.length === 0) continue;
+      const [first, ...rest] = words;
+      const shown = segment.trim();
+      const at = (f) => posix.normalize(dir ? `${dir}/${f}` : f);
+      if (first === 'node') {
+        if (rest.some((w) => ['-e', '--eval', '-p', '--print'].includes(w))) {
+          continue; // inline code: the command text is all it runs
         }
-      } else if (words[0] === 'turbo') {
-        const task = words[1] === 'run' ? words[2] : words[1];
-        if (task && !task.startsWith('-')) turboTask(task);
-      } else if (words[0] === 'pnpm') {
-        // --filter resolves through the workspace list; without one, pnpm
-        // runs a single project.
-        if (tracked.has('pnpm-workspace.yaml')) whole('pnpm-workspace.yaml');
-        const target = pnpmScript(words.join(' '));
-        if (!target) continue;
-        const file =
-          target.pkg === '(root)'
-            ? dir
-              ? `${dir}/package.json`
-              : 'package.json'
-            : packageNamed(target.pkg);
-        if (file) script(file, target.script);
+        const entry = nodeFiles(rest);
+        if (entry.length === 0)
+          unreadable(shown, 'a node command with no file');
+        for (const f of entry) followNode(at(f), new Set());
+      } else if (first === 'turbo') {
+        const tasks = (rest[0] === 'run' ? rest.slice(1) : rest).filter(
+          (w) => !w.startsWith('-')
+        );
+        if (tasks.length === 0)
+          unreadable(shown, 'a turbo command with no task');
+        for (const task of tasks) turboTask(task);
+      } else if (first === 'pnpm') {
+        pnpmSetup();
+        const target = pnpmCommand(rest);
+        if (!target) {
+          unreadable(shown, 'a pnpm form the gate cannot follow');
+        } else if (target.kind === 'exec' || target.kind === 'script') {
+          const file =
+            target.pkg === '(root)'
+              ? dir
+                ? `${dir}/package.json`
+                : 'package.json'
+              : packageNamed(target.pkg);
+          if (!file) {
+            unreadable(shown, `no workspace package is named ${target.pkg}`);
+          } else if (target.kind === 'exec') {
+            runs(target.command, dirOf(file));
+          } else {
+            script(file, target.script);
+          }
+        }
+      } else if (SHELLS.has(first)) {
+        const file = rest.find((w) => !w.startsWith('-'));
+        if (file) whole(at(file));
+        else unreadable(shown, `${first} with no script file`);
+      } else if (first.includes('/')) {
+        whole(at(first));
+      } else if (OPAQUE_RUNNERS.has(first)) {
+        unreadable(shown, `${first} runs a package the gate can't fingerprint`);
       }
     }
   };
 
+  for (const pkg of packages) {
+    for (const name of LIFECYCLE) {
+      const value = scriptsOf(pkg)?.[name];
+      if (value === undefined) continue;
+      json(pkg, ['scripts', name], `${pkg}#scripts.${name}`);
+      if (typeof value === 'string') runs(value, dirOf(pkg));
+    }
+  }
   for (const gate of gates) {
     for (const command of [gate.before, gate.selfTest, gate.run].filter(
       Boolean
@@ -485,42 +658,46 @@ export function gateDependencies(gates, { files, read }) {
   return [...parts.values()];
 }
 
-/** Whether a .gitignore change adds a line (a removal only un-ignores). */
-function addsIgnoreLine(before, after) {
+/** The ignore files Biome obeys through vcs.useIgnoreFile. */
+const IGNORE_FILES = new Set(['.gitignore', '.ignore']);
+
+/**
+ * Whether an ignore-file change can make Biome skip a file it checked. The
+ * last matching line wins, so only two edits are safe: deleting a plain line
+ * (what it ignored is checked again, or still ignored by an earlier line) and
+ * adding a `!` line anywhere (a negation can only un-ignore). A new plain
+ * line, a lost negation and a new order can each ignore more (review round
+ * 5). A file is compared at its own path, because its patterns are relative
+ * to its folder: a moved one is a new file there.
+ */
+function ignoreLoosens(before, after) {
   const rules = (t) =>
     (t ?? '')
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l && !l.startsWith('#'));
   const was = rules(before);
-  return rules(after).some((l) => !was.includes(l));
-}
-
-/** A repo-relative glob (`**`, `*`, `{a,b}`) as an anchored RegExp. */
-function globRe(glob) {
-  let re = '';
-  for (let k = 0; k < glob.length; k++) {
-    const c = glob[k];
-    if (c === '*' && glob[k + 1] === '*') {
-      re += glob[k + 2] === '/' ? '(?:.*/)?' : '.*';
-      k += glob[k + 2] === '/' ? 2 : 1;
-    } else if (c === '*') re += '[^/]*';
-    else if (c === '{') re += '(?:';
-    else if (c === '}') re += ')';
-    else if (c === ',') re += '|';
-    else re += c.replace(/[.+^$()|[\]\\?]/g, '\\$&');
+  const now = rules(after);
+  let i = 0;
+  let j = 0;
+  while (i < was.length || j < now.length) {
+    if (i < was.length && j < now.length && was[i] === now[j]) {
+      i += 1;
+      j += 1;
+    } else if (
+      j < now.length &&
+      now[j].startsWith('!') &&
+      !was.slice(i).includes(now[j])
+    ) {
+      j += 1; // an added negation
+    } else if (i < was.length && !was[i].startsWith('!')) {
+      i += 1; // a deleted plain line
+    } else {
+      return true;
+    }
   }
-  return new RegExp(`^${re}$`);
+  return false;
 }
-
-const parseJson = (text) => {
-  if (text === null) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return '(unparseable)';
-  }
-};
 
 /** Nested counts where every leaf is a number: true when any leaf grew. */
 function countsRose(before, after) {
@@ -529,7 +706,7 @@ function countsRose(before, after) {
     if (a === null || typeof a !== 'object') return a !== b;
     return Object.entries(a).some(([k, v]) => walk(b?.[k], v));
   };
-  return walk(parseJson(before), parseJson(after));
+  return walk(view(before, []), view(after, []));
 }
 
 // ---------------------------------------------------------------------------
@@ -585,18 +762,41 @@ function ruleIdsAt(root, ref) {
   );
 }
 
-/** Every tracked path in the checkout. */
-function trackedFiles(root) {
-  return splitZ(git(root, ['ls-files', '-z']).stdout);
+/** Every tracked path in the checkout, or in a commit. */
+function trackedFiles(root, ref = null) {
+  return splitZ(
+    ref
+      ? git(root, ['ls-tree', '-r', '-z', '--name-only', ref]).stdout
+      : git(root, ['ls-files', '-z']).stdout
+  );
 }
 
-/** Whether a commit holds the gate (at any path it has lived at). */
-export function gateAt(root, ref) {
-  return GATE_ENTRY_PATHS.find(
-    (p) =>
-      git(root, ['cat-file', '-e', `${ref}:${p}`], { allowFail: true })
-        .status === 0
+const RULES_PAGE = 'docs/architecture/rules.md';
+
+const existsAt = (root, ref, path) =>
+  git(root, ['cat-file', '-e', `${ref}:${path}`], { allowFail: true })
+    .status === 0;
+
+/**
+ * Where a commit holds the gate's runner (at any path it has lived at), or
+ * null when it has no gate yet. A commit that holds the gate's baseline or
+ * its rules page but no runner at a listed path is an error, not "no gate":
+ * a refactor that moved the runner and REPLACED its path in GATE_ENTRY_PATHS
+ * would otherwise switch off every countersign check, the base copy's too
+ * (review round 5).
+ */
+export function gateAt(root, ref, baselineAtRef = null) {
+  const entry = GATE_ENTRY_PATHS.find((p) => existsAt(root, ref, p));
+  if (entry) return entry;
+  const footprints = [RULES_PAGE, baselineAtRef].filter(
+    (p) => p && existsAt(root, ref, p)
   );
+  if (footprints.length > 0) {
+    throw new Error(
+      `${ref} holds the gate (${footprints.join(', ')}) but no runner at any of GATE_ENTRY_PATHS (${GATE_ENTRY_PATHS.join(', ')}). A move must ADD the runner's new path to that list, never replace the old one`
+    );
+  }
+  return null;
 }
 
 /**
@@ -659,10 +859,14 @@ function loosenedSince(root, registry, baselineFile, ref) {
   );
   const afterBaseline = parse(readHead(baselineFile), 'the working tree');
 
+  // Items that share a key and hash share one sign line, and every one of
+  // them is listed under it (two exceptions in a file share one hash).
   const items = new Map();
   const add = (item) => {
     const id = `${item.key}@${item.state}`;
-    if (!items.has(id)) items.set(id, item);
+    const what = [item.what].flat();
+    if (items.has(id)) items.get(id).what.push(...what);
+    else items.set(id, { ...item, what });
   };
 
   for (const r of raisedEntries(rules, beforeBaseline, afterBaseline, {
@@ -711,10 +915,26 @@ function loosenedSince(root, registry, baselineFile, ref) {
       );
     }
   }
-  for (const part of gateDependencies(gates, { files, read: readHead })) {
+  // Read over BOTH trees: a part only the base has is one the change deleted
+  // (a package's typecheck script), and that switches its gate off too.
+  const baseTexts = new Map();
+  const readBase = (file) => {
+    if (!baseTexts.has(file)) baseTexts.set(file, showAt(root, ref, file));
+    return baseTexts.get(file);
+  };
+  const parts = new Map();
+  for (const tree of [
+    { files, read: readHead },
+    { files: trackedFiles(root, ref), read: readBase },
+  ]) {
+    for (const part of gateDependencies(gates, tree)) {
+      if (!parts.has(part.label)) parts.set(part.label, part);
+    }
+  }
+  for (const part of parts.values()) {
     if (!changed.includes(part.file)) continue;
     const after = readHead(part.file);
-    if (part.changed(showAt(root, ref, part.file), after)) {
+    if (part.changed(readBase(part.file), after)) {
       gate(
         part.label,
         part.state(after),
@@ -724,20 +944,22 @@ function loosenedSince(root, registry, baselineFile, ref) {
   }
   for (const g of gates) {
     for (const glob of g.filesMatching ?? []) {
-      const re = globRe(glob);
+      const re = globToRegExp(glob);
       for (const file of changed) {
         if (!re.test(file)) continue;
-        const before = showAt(root, ref, renames.get(file) ?? file);
+        // At its own path, never through a rename: what an ignore file or a
+        // nested config does depends on the folder it sits in.
+        const before = readBase(file);
         const after = readHead(file);
-        const ignore = posix.basename(file) === '.gitignore';
-        if (ignore ? !addsIgnoreLine(before, after) : before === after) {
+        const ignore = IGNORE_FILES.has(posix.basename(file));
+        if (ignore ? !ignoreLoosens(before, after) : before === after) {
           continue;
         }
         gate(
           file,
           after,
           ignore
-            ? `${file}: a new ignore line, and ${g.id} skips what it matches`
+            ? `${file}: an ignore file can now skip more, and ${g.id} skips what it matches`
             : `${file}: a config ${g.id} reads`
         );
       }
@@ -763,7 +985,9 @@ export function checkLoosening(root, registry, baselineFile, base) {
       `base ${base} is not a commit this clone has. CI checks out with fetch-depth: 0, so it is gone from the remote (a force-push?)`
     );
   }
-  if (!gateAt(root, base)) {
+  const baselineAtBase =
+    renamesSince(root, base).get(baselineFile) ?? baselineFile;
+  if (!gateAt(root, base, baselineAtBase)) {
     return {
       skipped: `${base} has no architecture gate yet; nothing to countersign`,
       missing: [],

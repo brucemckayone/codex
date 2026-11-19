@@ -18,8 +18,7 @@
  * genuinely dynamic one.
  */
 
-import { lineIndex, maskStrings } from './architecture-matchers.mjs';
-import { tokenize } from './check-data-access-contract.mjs';
+import { lineIndex, scanSource } from './architecture-matchers.mjs';
 
 export const PRESETS_FILE = 'packages/constants/src/limits.ts';
 
@@ -45,7 +44,7 @@ function readPresetBindings(source) {
   if (start === -1) {
     throw new Error(`RATE_LIMIT_PRESETS not found in ${PRESETS_FILE}`);
   }
-  const { code } = tokenize(text.slice(start));
+  const { code } = scanSource(text.slice(start));
   const presets = new Map();
   for (const m of code.matchAll(/\n {2}([A-Z_]+): \{([\s\S]*?)\n {2}\},/g)) {
     const store = /store: '([\w-]+)'/.exec(m[2])?.[1];
@@ -63,9 +62,9 @@ function readPresetBindings(source) {
   return presets;
 }
 
-/** wrangler.jsonc as data: comments blanked, trailing commas dropped. */
-function parseJsonc(text) {
-  const { code } = tokenize(text);
+/** JSONC (wrangler.jsonc, turbo.json) as data: comments blanked, trailing commas dropped. */
+export function parseJsonc(text) {
+  const { code } = scanSource(text);
   return JSON.parse(code.replace(/,(\s*[}\]])/g, '$1'));
 }
 
@@ -106,27 +105,72 @@ const receiverOf = (namespaces) =>
     : '';
 
 /**
- * Every way a file can reach a limiter that this rule can't follow to a call:
- * a stored reference to the factory or a namespace (`const p = procedure`,
- * `const p: typeof procedure = …`, `const { procedure: p } = wu`, `const m =
- * wu`), and the factory followed by `as` (a renamed import or re-export, `{
- * procedure as route }`, or a cast), a non-null assertion or call/apply/bind. A property READ is none of these:
- * `const limit = policy.rateLimit` and `options.rateLimit as string` name a
- * value, not the factory, because only a limiter namespace may come before it.
+ * Every use of a limiter this rule can't read, as { index, text }. The check
+ * is an allow-list, not a list of hiding places (owner, 19 Nov: S3 of
+ * architecture-spec.mjs): a limiter name may appear only as
+ *
+ *   a direct call      `procedure(…)`, `wu.procedure(…)`: its options are read
+ *   an object key      `rateLimit: 'api'`, `rateLimit?: string` in a type
+ *   an import entry    `import { procedure } from …`, without `as`
+ *
+ * and a limiter namespace (`import * as wu`) only before `.name`. Anything else
+ * (`procedure?.(`, `(procedure)(`, a ternary, `.map(procedure)`, `as`, `!`,
+ * `.bind`, `typeof`, `===`, `wu[…]`, `const m = wu`) is a use whose calls the
+ * rule can't follow, and so is a dynamic import of a limiter module. Each of
+ * those failed open under the round-4 list of forms. A property READ is none
+ * of this: `policy.rateLimit` names a value, because only a limiter namespace
+ * may come before a limiter name.
  */
-const aliased = (namespaces) => {
-  const receiver = receiverOf(namespaces);
-  const forms = [
-    `\\b(?:const|let|var)\\b[^;]*?=\\s*${receiver}(?:${NAMES})\\b(?!\\s*[(<])`,
-    `(?<![\\w$.])${receiver}(?:${NAMES})\\s*(?:\\bas\\b|!(?!=)|\\.\\s*(?:call|apply|bind)\\b)`,
-  ];
-  if (namespaces.length) {
-    forms.push(
-      `\\b(?:const|let|var)\\b[^;]*?=\\s*(?:${namespaces.map(escapeName).join('|')})\\s*(?:[;,)]|$)`
-    );
+function unreadableUses(code, masked, namespaces) {
+  const uses = [];
+  const imports = [
+    ...masked.matchAll(
+      /\b(?:import|export)\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{[^}]*\}\s*from\b/g
+    ),
+  ].map((m) => [m.index, m.index + m[0].length]);
+  const inImport = (at) => imports.some(([a, b]) => at >= a && at < b);
+  const name = new RegExp(
+    `(?<![\\w$.])(?:(${namespaces.map(escapeName).join('|') || '(?!)'})\\s*\\??\\.\\s*)?(?:${NAMES})\\b`,
+    'g'
+  );
+  // A short window each side is all a decision reads.
+  const around = (m) => ({
+    before: masked.slice(Math.max(0, m.index - 80), m.index),
+    after: masked.slice(m.index + m[0].length, m.index + m[0].length + 40),
+  });
+  for (const m of masked.matchAll(name)) {
+    const { before, after } = around(m);
+    // A call (type args are read below). `wu?.procedure(` is caught as `wu?.`.
+    if (/^\s*[(<]/.test(after)) continue;
+    if (inImport(m.index) && !m[1] && !/^\s*as\b/.test(after)) continue;
+    if (
+      !m[1] &&
+      /^\s*\??\s*:(?!:)/.test(after) &&
+      /(?:^|[{,;])\s*$/.test(before)
+    ) {
+      continue; // an object key or a type member
+    }
+    uses.push({ index: m.index, text: m[0] + after.slice(0, 20) });
   }
-  return new RegExp(forms.join('|'), 'm');
-};
+  if (namespaces.length) {
+    const bare = new RegExp(
+      `(?<![\\w$.])(?:${namespaces.map(escapeName).join('|')})\\b(?!\\s*\\.\\s*[\\w$])`,
+      'g'
+    );
+    const declared = /\bimport\s*\*\s*as\s+$/;
+    for (const m of masked.matchAll(bare)) {
+      const { before, after } = around(m);
+      if (declared.test(before)) continue;
+      uses.push({ index: m.index, text: m[0] + after.slice(0, 20) });
+    }
+  }
+  for (const m of code.matchAll(
+    /\b(?:import|require)\s*\(\s*(['"])(@codex\/(?:worker-utils|security)(?:\/[\w/-]+)?)\1/g
+  )) {
+    uses.push({ index: m.index, text: m[0] });
+  }
+  return uses.sort((a, b) => a.index - b.index);
+}
 
 /** The index of the bracket that closes the one at `open`, in masked text. */
 function closing(text, open) {
@@ -338,8 +382,7 @@ export const rateLimitBindings = {
     for (const file of subjects) {
       if (!isRouteFile(file)) continue;
       const text = source.read(file);
-      const { code } = tokenize(text);
-      const masked = maskStrings(code);
+      const { code, masked } = scanSource(text);
       const { lineOf } = lineIndex(text);
       const worker = workerOf(file);
       const add = (line, item, why) => {
@@ -357,24 +400,17 @@ export const rateLimitBindings = {
           text: why,
         });
       const namespaces = limiterNamespaces(code);
-      const alias = aliased(namespaces).exec(masked);
-      if (alias) {
-        const shown = alias[0].replace(/\s+/g, ' ');
+      // One per line: `const p: typeof procedure = procedure` is one alias.
+      const unreadLines = new Set();
+      for (const use of unreadableUses(code, masked, namespaces)) {
+        const line = lineOf(use.index);
+        if (unreadLines.has(line)) continue;
+        unreadLines.add(line);
+        const shown = use.text.replace(/\s+/g, ' ').trim();
         unknown(
-          lineOf(alias.index),
-          `"${shown.length > 60 ? `…${shown.slice(-60)}` : shown}" hides its calls from this rule`
+          line,
+          `"${shown}" uses a limiter other than as a call, a key or an import, so its calls hide from this rule`
         );
-      }
-      for (const ns of namespaces) {
-        const bracket = new RegExp(
-          `(?<![\\w$.])${escapeName(ns)}\\s*(?:\\?\\.\\s*)?\\[`
-        ).exec(masked);
-        if (bracket) {
-          unknown(
-            lineOf(bracket.index),
-            `${ns}[…] reads the limiter module by a computed name`
-          );
-        }
       }
       for (const call of limiterCalls(masked, namespaces)) {
         const line = lineOf(call.index);
@@ -547,15 +583,97 @@ function readKey(step, text, line) {
 /** The commands a registry gate runs in CI. */
 export const gateCommands = (gate) => [gate.selfTest, gate.run].filter(Boolean);
 
-/** `pnpm [--filter <pkg>] [run] <script>`: the package and script a command needs. */
-export function pnpmScript(command) {
-  const filtered = /^pnpm --filter (\S+) run (\S+)$/.exec(command);
-  if (filtered) return { pkg: filtered[1], script: filtered[2] };
-  const root = /^pnpm (?:run )?([\w:-]+)$/.exec(command);
-  if (root && !['install', 'exec', 'dlx'].includes(root[1])) {
-    return { pkg: '(root)', script: root[1] };
+/**
+ * What `pnpm <words…>` runs, read the way pnpm reads it: `{ kind: 'script',
+ * pkg, script }` for `[-F p|--filter p|--filter=p] [run] <script> [args]`,
+ * `{ kind: 'exec', pkg, command }`, `{ kind: 'install' }`, or null for a form
+ * this gate doesn't follow (`-r`, `-C`, `dlx`, `add`…), which its callers
+ * treat as unreadable, never as nothing to read.
+ */
+export function pnpmCommand(words) {
+  let pkg = '(root)';
+  let k = 0;
+  while (k < words.length && words[k].startsWith('-')) {
+    const w = words[k];
+    if (w === '--filter' || w === '-F') {
+      pkg = words[k + 1];
+      k += 2;
+    } else if (w.startsWith('--filter=')) {
+      pkg = w.slice('--filter='.length);
+      k += 1;
+    } else {
+      return null;
+    }
   }
-  return null;
+  const sub = words[k];
+  if (!pkg || !sub) return null;
+  if (sub === 'install' || sub === 'i') return { kind: 'install' };
+  if (sub === 'exec') {
+    const command = words.slice(k + 1).join(' ');
+    return command ? { kind: 'exec', pkg, command } : null;
+  }
+  if (['dlx', 'add', 'remove', 'up', 'update', 'create'].includes(sub)) {
+    return null;
+  }
+  if (sub === 'run' || sub === 'run-script') {
+    const script = words[k + 1];
+    return script && !script.startsWith('-')
+      ? { kind: 'script', pkg, script }
+      : null;
+  }
+  return { kind: 'script', pkg, script: sub };
+}
+
+/** The package and script a `pnpm …` command runs, if it runs one. */
+function pnpmScript(command) {
+  const words = command.trim().split(/\s+/);
+  if (words[0] !== 'pnpm') return null;
+  const target = pnpmCommand(words.slice(1));
+  return target?.kind === 'script'
+    ? { pkg: target.pkg, script: target.script }
+    : null;
+}
+
+/**
+ * A repo-relative glob as an anchored RegExp: `**` spans directories, `*` and
+ * `?` stay inside one segment, `{a,b}` is alternation. No dependency, because
+ * this gate must run in the static-analysis job before anything is built.
+ * One implementation for scopes and for the configs a gate finds by pattern.
+ *
+ * @param {string} glob
+ */
+export function globToRegExp(glob) {
+  let re = '';
+  let depth = 0;
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        i += 1;
+        if (glob[i + 1] === '/') {
+          i += 1;
+          re += '(?:.*/)?';
+        } else {
+          re += '.*';
+        }
+      } else {
+        re += '[^/]*';
+      }
+    } else if (c === '?') {
+      re += '[^/]';
+    } else if (c === '{') {
+      depth += 1;
+      re += '(?:';
+    } else if (c === '}' && depth > 0) {
+      depth -= 1;
+      re += ')';
+    } else if (c === ',' && depth > 0) {
+      re += '|';
+    } else {
+      re += c.replace(/[.+^$()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${re}$`);
 }
 
 /** The job blocks of a workflow, by name, with their own (4-space) keys. */

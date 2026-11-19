@@ -66,6 +66,7 @@ const GATE_MODULES = [
   'architecture-ignores.mjs',
   'architecture-docs.mjs',
   'architecture-raises.mjs',
+  'architecture-spec.mjs',
   'check-data-access-contract.mjs',
 ];
 
@@ -1228,6 +1229,12 @@ describe('the CLI against a real git repository', () => {
       0,
       'a full run outside a PR has no base to cap at'
     );
+    ownerSigns(trailers(asked(r), 'dev needs the call back'));
+    assert.equal(
+      cliWith(prEnv(base), '--ci').status,
+      0,
+      'the owner can sign it, as a raise'
+    );
   });
 
   test('--ci in a release PR from dev: a fix dev made is a notice, not a failure', () => {
@@ -1408,7 +1415,7 @@ describe('the CLI against a real git repository', () => {
     );
   });
 
-  test('a release PR still cannot spend headroom main left unbanked', () => {
+  test('a release PR only notes growth into headroom main left unbanked', () => {
     setUp();
     initAndCommit();
     write('src/pinned.ts', 'ok();\n');
@@ -1420,8 +1427,12 @@ describe('the CLI against a real git repository', () => {
       { ...prEnv(base), GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'main' },
       '--ci'
     );
-    assert.equal(r.status, 1, r.stdout);
-    assert.match(r.stderr, /fits the pin only because a fix was left unbanked/);
+    assert.equal(
+      r.status,
+      0,
+      `owner, 19 Nov: the PR into dev judged it\n${r.stderr}`
+    );
+    assert.match(r.stdout, /fits the pin only because a fix was left unbanked/);
   });
 
   test('a PR whose base is HEAD itself is an error, not a pass', () => {
@@ -1444,12 +1455,21 @@ describe('the CLI against a real git repository', () => {
     ownerSigns(trailers(asked(cli('--raises', base))));
     const r = cliWith(prEnv(base), '--ci');
     assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.match(r.stderr, /G0-RAISE: GATE base-judge@[0-9a-f]{8}/);
+    const override = /G0-RAISE: (GATE base-judge@[0-9a-f]{8})/.exec(r.stderr);
+    assert.ok(override, r.stderr);
     ownerSigns(
-      `G0-RAISE: GATE base-judge@${base.slice(0, 8)} — the old gate cannot read the new flags`
+      `G0-RAISE: ${override[1]} — the old gate cannot read the new flags`
     );
     const signed = cliWith(prEnv(base), '--ci');
     assert.equal(signed.status, 0, signed.stdout + signed.stderr);
+    write(GATE_STAND_IN, '// the new gate, edited again\n');
+    commit('edit the gate after the override');
+    ownerSigns(trailers(asked(cli('--raises', base))));
+    assert.equal(
+      cliWith(prEnv(base), '--ci').status,
+      2,
+      'review finding: the override covered every later gate edit on the same base'
+    );
   });
 
   test('a nested biome config, a new .gitignore line or a package turbo.json is part of the gate', () => {
@@ -1534,6 +1554,368 @@ describe('the CLI against a real git repository', () => {
       r.status,
       0,
       `review finding: every pin read as a raise\n${r.stderr}`
+    );
+  });
+
+  // Round 5: each test below failed before its fix (owner, 19 Nov: a finding
+  // is a failing test against a clause of architecture-spec.mjs).
+
+  test('an ignore file loosens by a new rule, a lost negation, a new order or a move; a .ignore and a .biome.json count', async () => {
+    const { GATES } = await import('./architecture-rules.mjs');
+    const biome = GATES.find((g) => g.id === 'BIOME').filesMatching;
+    for (const glob of ['**/.ignore', '**/.biome.json', '**/.biome.jsonc']) {
+      assert.ok(
+        biome.includes(glob),
+        `review finding: Biome obeys ${glob} and the gate never saw it`
+      );
+    }
+    setUp();
+    write(
+      'rules.mjs',
+      `${rulesModule(T1)}export const GATES = [{ id: 'BIOME', title: 't', run: 'node -e 0', filesMatching: ${JSON.stringify(biome)} }];\n`
+    );
+    const ignore = 'node_modules\n*.gen.ts\n!keep.gen.ts\n';
+    write('.gitignore', ignore);
+    write('legacy/.gitignore', 'src/\n');
+    write('src/.ignore', 'a.ts\nb.ts\n');
+    mkdirSync(join(repo, 'src/money'), { recursive: true });
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'gates']);
+    initAndCommit();
+    const base = head();
+    const raises = () => cli('--raises', base);
+    const asks = (pattern, why) => {
+      const r = raises();
+      assert.equal(r.status, 1, `${why}\n${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, pattern, why);
+    };
+    const back = () => sh(['reset', '-q', '--hard', base]);
+
+    write('.gitignore', 'node_modules\n*.gen.ts\n');
+    commit('drop the negation');
+    asks(
+      /G0-RAISE: GATE \.gitignore@/,
+      'review finding: a lost negation re-ignores keep.gen.ts'
+    );
+    back();
+    write('.gitignore', 'node_modules\n!keep.gen.ts\n*.gen.ts\n');
+    commit('reorder');
+    asks(
+      /G0-RAISE: GATE \.gitignore@/,
+      'review finding: a negation moved first un-ignores nothing'
+    );
+    back();
+    write('.gitignore', '*.gen.ts\n!keep.gen.ts\n!other.gen.ts\n');
+    commit('a plain line out, a negation in');
+    assert.equal(
+      raises().status,
+      0,
+      'deleting a plain line or adding a negation only un-ignores'
+    );
+    back();
+    write('src/.ignore', 'a.ts\n');
+    commit('stop ignoring b.ts');
+    assert.equal(raises().status, 0, 'a .ignore follows the same rules');
+    back();
+    sh(['mv', 'legacy/.gitignore', 'src/money/.gitignore']);
+    commit('move the legacy ignore');
+    asks(
+      /G0-RAISE: GATE src\/money\/\.gitignore@/,
+      'review finding: a .gitignore moved into another folder ignores that folder'
+    );
+    back();
+    sh(['rm', '-q', '.gitignore']);
+    commit('drop the root ignore');
+    asks(
+      /G0-RAISE: GATE \.gitignore@/,
+      'deleting an ignore file that held a negation re-ignores what it kept'
+    );
+    back();
+    write('src/.ignore', 'bad.ts\n');
+    write(
+      'sub/.biome.jsonc',
+      '{ "root": false, "linter": { "enabled": false } }\n'
+    );
+    sh(['add', '.']);
+    commit('a ripgrep ignore and a hidden biome config');
+    asks(/G0-RAISE: GATE src\/\.ignore@/, 'Biome obeys a nested .ignore');
+    asks(/G0-RAISE: GATE sub\/\.biome\.jsonc@/, 'Biome 2.4 loads .biome.jsonc');
+  });
+
+  test('a deleted turbo-task script, a pre/post or lifecycle script, the root turbo.json and .npmrc are gate parts', () => {
+    setUp();
+    write(
+      'rules.mjs',
+      `${rulesModule(T1)}export const GATES = [{ id: 'TYPECHECK', title: 't', run: 'pnpm typecheck' }, { id: 'BIOME', title: 't', run: 'pnpm check:ci' }];\n`
+    );
+    const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
+    write(
+      'package.json',
+      json({
+        name: 'root',
+        scripts: { typecheck: 'turbo run typecheck', 'check:ci': 'node -e 0' },
+      })
+    );
+    write('pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
+    write(
+      'turbo.json',
+      json({ tasks: { typecheck: { dependsOn: ['^build'] }, build: {} } })
+    );
+    write(
+      'packages/p/package.json',
+      json({ name: '@x/p', scripts: { typecheck: 'tsc -p .', build: 'tsc' } })
+    );
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'a workspace']);
+    initAndCommit();
+    const base = head();
+    assert.equal(cli().status, 0, 'every part is a tracked file');
+    const edit = (file, change, message) => {
+      const value = JSON.parse(readFileSync(join(repo, file), 'utf8'));
+      change(value);
+      write(file, json(value));
+      sh(['add', file]);
+      commit(message);
+    };
+    const asks = (pattern, why) => {
+      const r = cli('--raises', base);
+      assert.equal(r.status, 1, `${why}\n${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, pattern, why);
+    };
+    const back = () => sh(['reset', '-q', '--hard', base]);
+
+    edit(
+      'packages/p/package.json',
+      (j) => {
+        delete j.scripts.typecheck;
+      },
+      'drop the typecheck script, build runs tsc'
+    );
+    asks(
+      /G0-RAISE: GATE packages\/p\/package\.json#scripts\.typecheck@/,
+      "review finding: deleting a package's typecheck script switched TYPECHECK off unsigned"
+    );
+    back();
+    edit(
+      'package.json',
+      (j) => {
+        j.scripts['precheck:ci'] = 'biome check --write .';
+      },
+      'a pre script'
+    );
+    asks(
+      /G0-RAISE: GATE package\.json#scripts\.precheck:ci@/,
+      'review finding: pnpm runs pre<name> before the gate'
+    );
+    back();
+    edit(
+      'packages/p/package.json',
+      (j) => {
+        j.scripts.prepare = 'node rewrite.mjs';
+      },
+      'a lifecycle script'
+    );
+    asks(
+      /G0-RAISE: GATE packages\/p\/package\.json#scripts\.prepare@/,
+      'review finding: pnpm install runs it before every later gate'
+    );
+    back();
+    edit(
+      'turbo.json',
+      (j) => {
+        j.tasks['@x/p#typecheck'] = { inputs: ['package.json'] };
+      },
+      'narrow one package'
+    );
+    asks(
+      /G0-RAISE: GATE turbo\.json@/,
+      'review finding: a package task in the root turbo.json replays a cached pass'
+    );
+    back();
+    write('.npmrc', 'script-shell=/usr/bin/true\n');
+    sh(['add', '.npmrc']);
+    commit('an npmrc');
+    asks(
+      /G0-RAISE: GATE \.npmrc@/,
+      'review finding: script-shell skips every script'
+    );
+    back();
+    write(
+      'packages/p/turbo.json',
+      json({ extends: ['//'], tasks: { test: { inputs: ['src/**'] } } })
+    );
+    sh(['add', '.']);
+    commit('a test-only package turbo.json');
+    assert.equal(
+      cli('--raises', base).status,
+      0,
+      'a task the gate never runs loosens nothing (#650)'
+    );
+    edit(
+      'packages/p/turbo.json',
+      (j) => {
+        j.tasks.build = { inputs: ['package.json'] };
+      },
+      'narrow the build typecheck depends on'
+    );
+    asks(
+      /G0-RAISE: GATE packages\/p\/turbo\.json#tasks\.build@/,
+      'typecheck dependsOn ^build, so a narrowed build replays stale types'
+    );
+    back();
+    write(
+      'pnpm-workspace.yaml',
+      'packages:\n  - packages/*\npatchedDependencies:\n  x: patches/x.patch\n'
+    );
+    commit('patch a dependency');
+    assert.equal(
+      cli('--raises', base).status,
+      0,
+      'another key of pnpm-workspace.yaml is outside the list (#638)'
+    );
+    write('pnpm-workspace.yaml', 'packages:\n  - apps/*\n');
+    commit('drop the packages from the workspace');
+    asks(
+      /G0-RAISE: GATE pnpm-workspace\.yaml#packages@/,
+      'the packages list decides which scripts a task runs'
+    );
+  });
+
+  test('growing into a stale pin is signed like a raise, and a release PR only notes it', () => {
+    setUp();
+    initAndCommit();
+    write('src/pinned.ts', 'ok();\n');
+    commit('fixed on dev, never banked');
+    const base = head();
+    write('src/pinned.ts', 'forbidden();\n');
+    commit('re-add it on purpose');
+    const r = cliWith(prEnv(base), '--ci');
+    assert.equal(r.status, 1, r.stdout);
+    const lines = asked(r);
+    assert.deepEqual(
+      lines.map((l) => l.split('@')[0]),
+      ['T1 src/pinned.ts'],
+      `review finding: no countersign could let it through\n${r.stderr}`
+    );
+    const unsigned = head();
+    ownerSigns(trailers(lines, 'dev needs the call back'));
+    const signed = cliWith(prEnv(base), '--ci');
+    assert.equal(signed.status, 0, signed.stdout + signed.stderr);
+    sh(['reset', '-q', '--hard', unsigned]);
+    const release = cliWith(
+      { ...prEnv(base), GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'main' },
+      '--ci'
+    );
+    assert.equal(
+      release.status,
+      0,
+      `owner, 19 Nov: the PR into dev judges; a release PR notes\n${release.stderr}`
+    );
+    assert.match(
+      release.stdout,
+      /grow into a pin above what the base measured/
+    );
+    assert.match(release.stdout, /src\/pinned\.ts/);
+
+    // A measuring rule: the base shrank the file but kept its pin, and the
+    // owner signs a raise from what the base measured.
+    rmSync(repo, { recursive: true, force: true });
+    setUp();
+    const SMALL = `{ id: 'TS', title: 'Files stay small', why: 'fixture', fix: 'Split it.', scope: { include: ['src/**/*.ts'] }, match: { kind: 'line-count', newFileMax: 3 } }`;
+    write('rules.mjs', rulesModule(T1, SMALL));
+    write('src/big.ts', 'ok();\n'.repeat(6));
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'a big file']);
+    initAndCommit();
+    write('src/big.ts', 'ok();\n'.repeat(4));
+    commit('shrunk on dev, never banked');
+    const sizeBase = head();
+    write('src/big.ts', 'ok();\n'.repeat(8));
+    const pins = readBaseline();
+    pins.TS['src/big.ts'] = 8;
+    write('baseline.json', serializeBaseline(pins));
+    commit('grow it, raising the pin');
+    ownerSigns(
+      trailers(asked(cli('--raises', sizeBase)), 'the split lands next week')
+    );
+    const grown = cliWith(prEnv(sizeBase), '--ci');
+    assert.equal(
+      grown.status,
+      0,
+      `review finding: a signed raise over a stale base pin still failed\n${grown.stderr}`
+    );
+  });
+
+  test('a base that holds the gate where no entry path looks is an error; a baseline-only change runs no base copy', () => {
+    assert.equal(
+      GATE_ENTRY_PATHS[0],
+      'scripts/checks/check-architecture.mjs',
+      'the list only grows: a move ADDS its new path'
+    );
+    setUp({ gate: false });
+    initAndCommit();
+    const base = head();
+    write('src/x.ts', 'ok();\n');
+    sh(['add', '.']);
+    commit('a change');
+    const r = cli('--raises', base);
+    assert.equal(
+      r.status,
+      2,
+      `review finding: a runner moved off every entry path made the base look gate-free\n${r.stdout}`
+    );
+    assert.match(r.stderr, /GATE_ENTRY_PATHS/);
+
+    rmSync(repo, { recursive: true, force: true });
+    setUp();
+    const inGate = 'scripts/checks/b.json';
+    const gate = (env, ...args) =>
+      spawnSync(
+        process.execPath,
+        [
+          RUNNER,
+          '--root',
+          repo,
+          '--rules',
+          join(repo, 'rules.mjs'),
+          '--baseline',
+          inGate,
+          ...args,
+        ],
+        { encoding: 'utf8', env: { ...process.env, ...LOCAL, ...env } }
+      );
+    assert.equal(gate({}, '--init').status, 0);
+    sh(['add', inGate]);
+    sh(['commit', '-qm', 'baseline']);
+    const pinBase = head();
+    write('src/pinned.ts', 'ok();\n');
+    commit('fix it');
+    assert.equal(gate({}, '--lower').status, 0);
+    commit('bank it');
+    const banked = gate(prEnv(pinBase), '--ci');
+    assert.equal(banked.status, 0, banked.stdout + banked.stderr);
+    assert.doesNotMatch(
+      banked.stdout,
+      /The gate's own code changed/,
+      'review finding: banking a fix ran the base copy and offered a GATE sign'
+    );
+  });
+
+  test('every exception a hash covers is listed under it', () => {
+    setUp();
+    initAndCommit();
+    const base = head();
+    const dir = `// ${IGNORE} T1 until=2026-12-01 by=bruce — the drain moves next\n`;
+    write('src/a.ts', `${dir}forbidden(one);\nok();\n${dir}forbidden(two);\n`);
+    sh(['add', '.']);
+    commit('two exceptions');
+    const r = cli('--raises', base);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /src\/a\.ts:1:/);
+    assert.match(
+      r.stderr,
+      /src\/a\.ts:4:/,
+      'review finding: the second exception the hash covers was never shown'
     );
   });
 });
@@ -3132,12 +3514,12 @@ describe('round 3: what the gate is made of', () => {
       'biome.json',
       'package.json#scripts.check:ci',
       'package.json#scripts.typecheck',
-      'pnpm-workspace.yaml',
+      'pnpm-workspace.yaml#packages',
       'scripts/d.mjs',
       'scripts/d.test.mjs',
       'scripts/e.test.mjs',
       'scripts/lib.mjs',
-      'turbo.json#tasks.typecheck',
+      'turbo.json',
     ]);
     const part = (label) => parts.find((p) => p.label === label);
     const script = part('apps/web/package.json#scripts.check:x');
@@ -3169,7 +3551,17 @@ describe('round 3: what the gate is made of', () => {
       !ratchet.changed('{"e":{"a":{"T":2}}}', '{"e":{"a":{"T":1}}}'),
       'a fall only tightens'
     );
-    const task = part('turbo.json#tasks.typecheck');
+    // The root turbo.json is read whole (owner, 19 Nov: a closed list): a
+    // package task, the build typecheck depends on and the global inputs all
+    // live there. A package's own turbo.json is read at the gate's tasks.
+    const root = part('turbo.json');
+    assert.ok(
+      root.changed(
+        '{"tasks":{"typecheck":{}}}',
+        '{"tasks":{"typecheck":{}},"globalDependencies":[]}'
+      )
+    );
+    const task = part('apps/web/turbo.json#tasks.typecheck');
     assert.ok(
       task.changed(
         '{"tasks":{"typecheck":{}}}',
@@ -3182,6 +3574,13 @@ describe('round 3: what the gate is made of', () => {
         '{"tasks":{"typecheck":{}},"x":1}'
       ),
       'another task is not this gate'
+    );
+    assert.ok(
+      !task.changed(
+        '{"tasks":{"typecheck":{"inputs":["a"],"cache":true}}}',
+        '{"tasks":{"typecheck":{"cache":true,"inputs":["a"]}}}'
+      ),
+      'review finding: reordering keys changed nothing yet asked again'
     );
   });
 
@@ -3615,6 +4014,421 @@ describe('round 4: masking, names, aliases and config', async () => {
       results.get('DOC-BUDGET').perFile.get('apps/x/CLAUDE.md').found,
       6 + 6,
       'review finding: moving words into an import saved nothing they cost'
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 5: the spec, and a failing test for each finding (owner, 19 Nov). A
+// test below that names a review finding failed before its fix.
+// ---------------------------------------------------------------------------
+
+describe('round 5: the spec, and a test for each finding', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const { GUARANTEES } = await import('./architecture-spec.mjs');
+  const byId = (id) => RULES.find((r) => r.id === id);
+  const keys = (text, file = 'packages/x/src/a.ts') =>
+    run([byId('A1')], { [file]: text }, {})
+      .results.get('A1')
+      .perFile.get(file)
+      .hits.map((h) => `${h.line}:${h.key}`);
+
+  test('every clause of the spec names tests that exist', () => {
+    const source = readFileSync(
+      join(HERE, 'check-architecture.test.mjs'),
+      'utf8'
+    );
+    const titles = new Set(
+      [...source.matchAll(/\btest\(\s*(['"])((?:\\.|(?!\1).)*)\1/g)].map((m) =>
+        m[2].replace(/\\(['"])/g, '$1')
+      )
+    );
+    const ids = new Set();
+    for (const clause of GUARANTEES) {
+      assert.ok(!ids.has(clause.id), `${clause.id} is listed once`);
+      ids.add(clause.id);
+      assert.ok(clause.holds.length > 0 && clause.tests.length > 0, clause.id);
+      for (const title of clause.tests) {
+        assert.ok(
+          titles.has(title),
+          `${clause.id} cites a test that doesn't exist: "${title}"`
+        );
+      }
+    }
+  });
+
+  test('a URL in a nested template, a comment-like template or a regex at the start of a line hides no call', () => {
+    assert.deepEqual(
+      keys(
+        [
+          'function pay(proto, host) {',
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source text, not a template
+          "  const url = `${proto ? `https://${host}` : ''}/v1`;",
+          '  return stripe.transfers.create(p);',
+          '}',
+        ].join('\n')
+      ),
+      ['3:pay>transfers.create('],
+      'review finding: the comment blanker read the // in the nested template as a comment'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'function pay(a) {',
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source text, not a template
+          "  const c = `${a ? `/*` : ''}`;",
+          '  return stripe.transfers.create(p);',
+          '}',
+        ].join('\n')
+      ),
+      ['3:pay>transfers.create(']
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'function f(s) {',
+          '  if (s) {}',
+          '  /`/.test(s);',
+          '  stripe.transfers.create({});',
+          '  return `a`;',
+          '}',
+        ].join('\n')
+      ),
+      ['4:f>transfers.create('],
+      'review finding: a regex after a block opened a template'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'function pay() {',
+          '  const msg = `${',
+          'await stripe.transfers.create(p)',
+          '  }`;',
+          '}',
+        ].join('\n')
+      ),
+      ['3:pay>transfers.create('],
+      'review finding: a dedented line inside an interpolation ended the walk'
+    );
+  });
+
+  test('a wrapped or arrow return type still names its method, and a chained, assigned or constant route names itself', () => {
+    assert.deepEqual(
+      keys(
+        [
+          'class PurchaseService {',
+          '  async processRefund(',
+          '    id: string',
+          '  ): Promise<',
+          '    RefundResult',
+          '  > {',
+          '    await stripe.refunds.create(p);',
+          '  }',
+          '  register(s): () => void {',
+          '    stripe.refunds.create(p);',
+          '    return () => {};',
+          '  }',
+          '}',
+        ].join('\n')
+      ),
+      ['7:processRefund>refunds.create(', '10:register>refunds.create('],
+      'review finding: 29 real methods keyed as their class'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'app',
+          "  .post('/refund', async (c) => {",
+          '    await stripe.refunds.create({});',
+          '  })',
+          "  .post('/payout', async (c) => {",
+          '    await stripe.refunds.create({});',
+          '  });',
+          "export const cancel = app.post('/cancel', async (c) => {",
+          '  await stripe.refunds.create({});',
+          '});',
+          'app.post(',
+          '  CONTENT_MEDIA_READY_ROUTE,',
+          '  procedure({',
+          '    handler: async () => {',
+          '      await stripe.refunds.create({});',
+          '    },',
+          '  })',
+          ');',
+          'function f() {',
+          "  const r = api.post('/x', d).then((res) => {",
+          '    stripe.refunds.create(p);',
+          '  });',
+          '}',
+        ].join('\n'),
+        'workers/w/src/routes/r.ts'
+      ),
+      [
+        '3:POST /refund>refunds.create(',
+        '6:POST /payout>refunds.create(',
+        '9:POST /cancel>refunds.create(',
+        '15:POST CONTENT_MEDIA_READY_ROUTE/handler>refunds.create(',
+        '21:f>refunds.create(',
+      ],
+      'review finding: chained and assigned routes keyed as (top level)'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'app.get(STATUS_ROUTE, async (c) => {',
+          '  await stripe.refunds.create({});',
+          '});',
+        ].join('\n'),
+        'workers/w/src/routes/r.ts'
+      ),
+      ['2:GET STATUS_ROUTE>refunds.create(']
+    );
+  });
+
+  test('RATE-LIMIT-BINDING: any use but a call, a key or an import entry fails', () => {
+    const rule = byId('RATE-LIMIT-BINDING');
+    const fires = (route) =>
+      run(
+        [rule],
+        {
+          'packages/constants/src/limits.ts': limitsTs,
+          'workers/w/wrangler.jsonc': wrangler(['RATE_LIMIT_API']),
+          'workers/w/src/routes.ts': route,
+        },
+        {}
+      )
+        .problems.filter((p) => p.type === 'new')
+        .reduce((n, p) => n + p.found, 0);
+    for (const [route, why] of [
+      ["procedure?.({ policy: { rateLimit: 'api' } });\n", 'an optional call'],
+      [
+        "import * as wu from '@codex/worker-utils';\nwu?.procedure({ policy: { rateLimit: 'api' } });\n",
+        'an optional member',
+      ],
+      [
+        "(procedure)({ policy: { rateLimit: 'api' } });\n",
+        'a parenthesised callee',
+      ],
+      [
+        'const route = upload ? multipartProcedure : procedure;\n',
+        'a ternary alias',
+      ],
+      ['export const routes = configs.map(procedure);\n', 'passed as a value'],
+      [
+        "const { procedure: p } = await import('@codex/worker-utils');\n",
+        'a dynamic import',
+      ],
+      ['const isProcedure = (fn) => fn === procedure;\n', 'read as a value'],
+    ]) {
+      assert.equal(fires(route), 1, `review finding: ${why} hid its calls`);
+    }
+    assert.ok(
+      fires(
+        [
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source text, not a template
+          "const base = `${proto ? `https://${host}` : ''}`;",
+          "procedure({ policy: { auth: 'required', rateLimit: 'strict' } });",
+          '',
+        ].join('\n')
+      ) > 0,
+      'review finding: a URL in a nested template masked the route below it'
+    );
+    for (const route of [
+      "import {\n  PaginatedResult,\n  procedure,\n} from '@codex/worker-utils';\nprocedure({ policy: { auth: 'required' } });\n",
+      'interface P {\n  cache?: string;\n  rateLimit?: string;\n}\n',
+      "procedure({ policy: { auth: 'required', rateLimit: 'api' } });\n",
+      'const limit = policy.rateLimit;\n',
+    ]) {
+      assert.equal(fires(route), 0, route);
+    }
+  });
+
+  test('DOC-BUDGET follows an import up two folders, into a dot-folder or without an extension, to 5 hops', () => {
+    const rule = byId('DOC-BUDGET');
+    const words = (tree, file) =>
+      run([rule], tree, {}).results.get('DOC-BUDGET').perFile.get(file).found;
+    const big = 'w '.repeat(100);
+    assert.equal(
+      words(
+        {
+          'apps/web/CLAUDE.md': 'see @../../docs/big.md\n',
+          'docs/big.md': big,
+        },
+        'apps/web/CLAUDE.md'
+      ),
+      102,
+      'review finding: an import two folders up counted 0'
+    );
+    assert.equal(
+      words(
+        { 'CLAUDE.md': 'see @.claude/rules.md\n', '.claude/rules.md': big },
+        'CLAUDE.md'
+      ),
+      102,
+      'review finding: an import into a dot-folder counted 0'
+    );
+    assert.equal(
+      words(
+        { 'CLAUDE.md': 'Read @README. It says.\n', README: big },
+        'CLAUDE.md'
+      ),
+      104,
+      'Claude Code documents an import with no extension; the full stop is prose'
+    );
+    assert.equal(
+      words(
+        { 'CLAUDE.md': 'mail bruce@hexagon.com\n', 'hexagon.com': big },
+        'CLAUDE.md'
+      ),
+      2,
+      'an address is not an import, even where a file of that name exists'
+    );
+    const chain = { 'CLAUDE.md': 'a @h1.md\n' };
+    for (let k = 1; k <= 6; k++) {
+      chain[`h${k}.md`] = k < 6 ? `x @h${k + 1}.md\n` : 'six hops away\n';
+    }
+    assert.equal(
+      words(chain, 'CLAUDE.md'),
+      2 + 5 * 2,
+      'a sixth hop is never loaded'
+    );
+  });
+
+  test('a gate command the reader cannot resolve is a registry error; the forms it can are followed', () => {
+    const tree = {
+      'package.json': JSON.stringify({
+        name: 'root',
+        scripts: { a: 'node s.mjs' },
+      }),
+      'pnpm-workspace.yaml': 'packages:\n  - apps/*\n',
+      'apps/web/package.json': JSON.stringify({
+        name: 'web',
+        scripts: {
+          'check:x': 'node scripts/x.mjs',
+          build: 'vite build',
+          typecheck: 'tsc',
+        },
+      }),
+      'apps/web/scripts/x.mjs': '',
+      's.mjs': '',
+      'scripts/run.sh': '',
+      'turbo.json': '{"tasks":{"build":{},"typecheck":{}}}',
+    };
+    const files = Object.keys(tree);
+    const parts = (command) =>
+      gateDependencies([{ id: 'G', title: 't', run: command }], {
+        files,
+        read: (f) => tree[f] ?? null,
+      });
+    const labels = (command) => parts(command).map((p) => p.label);
+    const unreadable = (command) =>
+      parts(command)
+        .filter((p) => !files.includes(p.file))
+        .map((p) => p.label);
+    for (const command of [
+      'pnpm --filter web run check:x',
+      'pnpm -F web run check:x',
+      'pnpm --filter=web run check:x',
+      'pnpm --filter web check:x',
+      'pnpm --filter web run check:x -- --ci',
+    ]) {
+      assert.ok(
+        labels(command).includes('apps/web/scripts/x.mjs'),
+        `review finding: ${command} was dropped silently`
+      );
+      assert.deepEqual(unreadable(command), [], command);
+    }
+    for (const [command, file] of [
+      ['FOO=1 node s.mjs', 's.mjs'],
+      ['node --test "s.mjs"', 's.mjs'],
+      ['bash scripts/run.sh', 'scripts/run.sh'],
+      ['./scripts/run.sh --fast', 'scripts/run.sh'],
+    ]) {
+      assert.ok(labels(command).includes(file), `${command} runs ${file}`);
+    }
+    const both = labels('turbo run build typecheck');
+    for (const task of ['build', 'typecheck']) {
+      assert.ok(
+        both.includes(`apps/web/package.json#scripts.${task}`),
+        `review finding: every turbo task after the first was dropped (${task})`
+      );
+    }
+    for (const command of [
+      'pnpm --filter nope run check:x',
+      'pnpm -r run check:x',
+      'node --test',
+      'pnpm dlx some-tool',
+      'npx some-tool',
+    ]) {
+      assert.ok(
+        unreadable(command).length > 0,
+        `review finding: ${command} fingerprinted nothing and said nothing`
+      );
+    }
+    for (const command of [
+      'node -e 0',
+      'biome check .',
+      'pnpm install --frozen-lockfile',
+      'pnpm --filter web exec paraglide-js compile --outdir ./src/x',
+    ]) {
+      assert.deepEqual(unreadable(command), [], `${command} needs no file`);
+    }
+    const script = parts('pnpm a').find(
+      (p) => p.label === 'package.json#scripts.a'
+    );
+    assert.equal(
+      script.changed('{ "scripts": {"a": "x"} ', '{ "scripts": {"a": "y"} '),
+      true,
+      'review finding: a file that does not parse read as unchanged whatever changed in it'
+    );
+  });
+
+  test('a pin hashes in canonical order, a path with a space can be signed, and every exception a hash covers is listed', () => {
+    const item = (now) =>
+      raiseItem(
+        { ruleId: 'A1', file: 'a.ts', was: [], now, newRule: false },
+        {}
+      );
+    assert.equal(
+      item(['b>x(', 'a>x(']).state,
+      item(['a>x(', 'b>x(']).state,
+      'review finding: --lower re-sorting a pin voided its countersign'
+    );
+    assert.equal(
+      hashOf({ inputs: ['a'], cache: true }),
+      hashOf({ cache: true, inputs: ['a'] }),
+      'reordering a config object signs nothing away'
+    );
+    assert.ok(
+      parseCountersigns(
+        'G0-RAISE: DOC-BUDGET docs/My Notes.md@abcd1234 — the intro grows until D12'
+      ).has('DOC-BUDGET docs/My Notes.md@abcd1234'),
+      'review finding: the gate printed a line its own parser rejects'
+    );
+    assert.deepEqual(
+      uncovered(
+        [
+          {
+            key: 'A1 a.ts',
+            state: '11111111',
+            star: null,
+            what: ['a.ts:1: one'],
+          },
+          {
+            key: 'A1 a.ts',
+            state: '11111111',
+            star: null,
+            what: ['a.ts:4: two'],
+          },
+        ],
+        new Set()
+      ),
+      [
+        {
+          line: 'G0-RAISE: A1 a.ts@11111111 — <why>',
+          what: ['a.ts:1: one', 'a.ts:4: two'],
+        },
+      ]
     );
   });
 });

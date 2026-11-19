@@ -108,8 +108,10 @@ process.on('uncaughtException', failToLoad);
 const { RULES_DOC, renderRulesDoc } = await import('./architecture-docs.mjs');
 const { applyIgnores, IGNORE_KEYWORD, ignoreProblems, parseIgnores } =
   await import('./architecture-ignores.mjs');
+const { globToRegExp } = await import('./architecture-lists.mjs');
 const { MATCHERS } = await import('./architecture-matchers.mjs');
 const {
+  blockState,
   checkLoosening,
   ciBase,
   countersignsIn,
@@ -119,6 +121,7 @@ const {
   gateDependencies,
   hashOf,
   isGateCode,
+  pinState,
   renamesSince,
 } = await import('./architecture-raises.mjs');
 const { CI_CALLERS, GATES, RULES } = await import('./architecture-rules.mjs');
@@ -135,46 +138,7 @@ const MAX_HITS_SHOWN = 5;
 // Globs
 // ---------------------------------------------------------------------------
 
-/**
- * A repo-relative glob as an anchored RegExp: `**` spans directories, `*` and
- * `?` stay inside one segment, `{a,b}` is alternation. No dependency, because
- * this gate must run in the static-analysis job before anything is built.
- *
- * @param {string} glob
- */
-export function globToRegExp(glob) {
-  let re = '';
-  let depth = 0;
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        i += 1;
-        if (glob[i + 1] === '/') {
-          i += 1;
-          re += '(?:.*/)?';
-        } else {
-          re += '.*';
-        }
-      } else {
-        re += '[^/]*';
-      }
-    } else if (c === '?') {
-      re += '[^/]';
-    } else if (c === '{') {
-      depth += 1;
-      re += '(?:';
-    } else if (c === '}' && depth > 0) {
-      depth -= 1;
-      re += ')';
-    } else if (c === ',' && depth > 0) {
-      re += '|';
-    } else {
-      re += c.replace(/[.+^$()|[\]\\]/g, '\\$&');
-    }
-  }
-  return new RegExp(`^${re}$`);
-}
+export { globToRegExp };
 
 const globCache = new Map();
 
@@ -891,6 +855,9 @@ export function spentAtBase(
       blocking: true,
       atBase: was.found,
       pinned: c.pinned,
+      // Growing into a stale pin loosens as a raise does, so the same
+      // countersign covers it: the pin's own hash (owner, 19 Nov).
+      sign: `${c.rule.id} ${c.file}@${pinState(c.pinned)}`,
     };
     if (isMeasuring(c.rule)) {
       if (!Number.isInteger(basePin)) continue; // a format problem at the base
@@ -1103,6 +1070,11 @@ export function formatProblems(problems, { staged = false } = {}) {
       lines.push(
         `  This fits the pin only because a fix was left unbanked before this change: ${was}.`,
         `  Fix: ${rule.fix} (The stale pin is banked by ${lower} once the violation is gone.)`,
+        ...(p.blocking
+          ? [
+              `  Or the owner accepts it, as a raise of that pin: G0-RAISE: ${p.sign} — <why>`,
+            ]
+          : []),
         `  Rule: ${ruleAnchor(rule)}`,
         ''
       );
@@ -1132,12 +1104,19 @@ export function formatProblems(problems, { staged = false } = {}) {
 
 function report(problems, okLine, { staged = false } = {}) {
   const blocking = problems.filter((p) => p.blocking);
-  const notices = problems.filter((p) => !p.blocking);
+  const spent = problems.filter((p) => !p.blocking && p.type === 'spent');
+  const notices = problems.filter((p) => !p.blocking && p.type !== 'spent');
   if (notices.length > 0) {
     console.log(
       `note: ${notices.length} fixed violation(s) not yet banked. They block only the commit or pull request that made the fix; pnpm check:arch --lower banks them:`
     );
     console.log(formatProblems(notices, { staged }));
+  }
+  if (spent.length > 0) {
+    console.log(
+      `note: ${spent.length} file(s) grow into a pin above what the base measured. The pull request into dev judged them:`
+    );
+    console.log(formatProblems(spent, { staged }));
   }
   if (blocking.length > 0) {
     console.error(`✗ check-architecture: ${blocking.length} problem(s)`);
@@ -1431,8 +1410,25 @@ function verifyBase(root, ci) {
   }
 }
 
-/** The sign that lets the owner merge past a base copy that cannot run. */
-const baseJudgeKey = (base) => `GATE base-judge@${base.slice(0, 8)}`;
+/**
+ * The sign that lets the owner merge past a base copy that cannot run. It
+ * covers that base and the gate code as it stands, so a further edit to the
+ * gate after the owner signed asks again (review round 5).
+ */
+function baseJudgeKey(root, base, baselineFile) {
+  const files = spawnSync('git', ['ls-files', '-z'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+    .stdout.split('\0')
+    .filter((f) => f && isGateCode(f, baselineFile))
+    .sort();
+  const code = files.map((f) => {
+    const path = join(root, f);
+    return `${f}\n${existsSync(path) ? readFileSync(path, 'utf8') : ''}`;
+  });
+  return `GATE base-judge@${hashOf([base, ...code].join('\0'))}`;
+}
 
 /**
  * When a change edits the gate's own code, the BASE commit's copy of the gate
@@ -1460,11 +1456,24 @@ function baseGateJudges(root, base, baselineFile) {
       input,
       maxBuffer: 256 * 1024 * 1024,
     });
-  const entry = gateAt(root, base);
+  const entry = gateAt(
+    root,
+    base,
+    renamesSince(root, base).get(baselineFile) ?? baselineFile
+  );
   const dirs = [
     ...new Set([GATE_DIR, ...GATE_ENTRY_PATHS.map((p) => `${dirname(p)}/`)]),
   ];
-  const diff = gitIn(['diff', '--quiet', base, '--', ...dirs]);
+  // The baseline is data the new copy judges pin by pin, not gate code: a
+  // bank or a raise alone runs no base copy.
+  const diff = gitIn([
+    'diff',
+    '--quiet',
+    base,
+    '--',
+    ...dirs,
+    `:(exclude)${baselineFile}`,
+  ]);
   if (diff.status === 0) return 0; // the gate is the base's own
   if (diff.status !== 1) {
     throw new Error(`git diff ${base} -- ${dirs.join(' ')} failed`);
@@ -1501,14 +1510,15 @@ function baseGateJudges(root, base, baselineFile) {
       { cwd: root, stdio: 'inherit' }
     );
     if (judged.status !== 0 && judged.status !== 1) {
-      if (countersignsIn(root, base).signed.has(baseJudgeKey(base))) {
+      const key = baseJudgeKey(root, base, baselineFile);
+      if (countersignsIn(root, base).signed.has(key)) {
         console.log(
-          `note: the base's copy could not run (exit ${judged.status ?? judged.signal}); the owner signed ${baseJudgeKey(base)}.`
+          `note: the base's copy could not run (exit ${judged.status ?? judged.signal}); the owner signed ${key} for this gate code.`
         );
         return 0;
       }
       throw new Error(
-        `the base's copy of the gate could not run (exit ${judged.status ?? judged.signal}). If that is the change itself (a flag or an import the base can't follow), the owner can sign past it: G0-RAISE: ${baseJudgeKey(base)} — <why>`
+        `the base's copy of the gate could not run (exit ${judged.status ?? judged.signal}). If that is the change itself (a flag or an import the base can't follow), the owner can sign past it for this gate code: G0-RAISE: ${key} — <why>`
       );
     }
     const full = spawnSync(process.execPath, [copy, ...common], {
@@ -1699,7 +1709,7 @@ async function run(opts) {
     }).filter((part) => !source.has(part.file));
     if (missing.length > 0) {
       console.error(
-        `check-architecture: registry error: these files a gate runs or reads are not tracked, so a change to them could never need a countersign: ${missing.map((p) => p.label).join('; ')}. Fix the gate's command, files or ratchets.`
+        `check-architecture: registry error: these files a gate runs or reads are not tracked, or a gate command can't be read, so a change to them could never need a countersign: ${missing.map((p) => p.label).join('; ')}. Fix the gate's command, files or ratchets.`
       );
       return 2;
     }
@@ -1767,7 +1777,15 @@ async function run(opts) {
     if (ci.kind === 'pr' || ci.kind === 'branch') {
       judgeFixesAtBase(rules, problems, atBase);
     }
-    problems.push(...spentAtBase(rules, results, baseline, atBase));
+    const spent = spentAtBase(rules, results, baseline, atBase);
+    if (spent.length > 0) {
+      const { signed } = countersignsIn(root, ci.base);
+      for (const p of spent) {
+        if (signed.has(p.sign)) continue; // the owner accepted it
+        p.blocking = ci.kind !== 'release';
+        problems.push(p);
+      }
+    }
   }
   const judged = [...results.values()].reduce(
     (n, r) => n + r.evaluated.size,
@@ -1841,7 +1859,7 @@ function init(root, baselineFile, rules, results, ruleId) {
     next[id] = id === ruleId ? block : baseline[id];
   writeFileSync(path, serializeBaseline(next));
   console.log(
-    `check-architecture: seeded ${ruleId} (${Object.keys(block).length} entries). The owner countersigns it: G0-RAISE: ${ruleId} *@${hashOf(sortBaseline({ [ruleId]: block })[ruleId])} — <why this debt is accepted>`
+    `check-architecture: seeded ${ruleId} (${Object.keys(block).length} entries). The owner countersigns it: G0-RAISE: ${ruleId} *@${blockState(block)} — <why this debt is accepted>`
   );
   return 0;
 }
