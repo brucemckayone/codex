@@ -128,6 +128,37 @@ export function isLockNotAvailable(error: unknown): boolean {
 }
 
 /**
+ * What a log line may say of a database error (review r11): the Postgres
+ * error code of it or of its cause (drizzle wraps every failed query, so the
+ * code is on the cause), whether it was a lock given up
+ * (`isLockNotAvailable`, 55P03), and its reason as `messageForLog` gives it,
+ * the driver's own words. Never the error's message: a failed query's is
+ * its SQL and params. It runs in catch blocks, so it never throws.
+ */
+export function dbErrorFacts(error: unknown): {
+  code: string | null;
+  lockTimeout: boolean;
+  reason: string;
+} {
+  try {
+    let code: string | null = null;
+    if (isPostgresError(error)) {
+      code = error.code;
+    } else if (error instanceof Error && 'cause' in error) {
+      const cause = (error as { cause: unknown }).cause;
+      if (isPostgresError(cause)) code = cause.code;
+    }
+    return {
+      code,
+      lockTimeout: isLockNotAvailable(error),
+      reason: messageForLog(error),
+    };
+  } catch {
+    return { code: null, lockTimeout: false, reason: messageForLog(error) };
+  }
+}
+
+/**
  * Check if error is a not-null violation
  * Postgres error code: 23502
  *

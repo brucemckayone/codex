@@ -46,6 +46,7 @@ import {
 } from '@codex/constants';
 import {
   type DatabaseClient,
+  dbErrorFacts,
   isLockNotAvailable,
   isUniqueViolation,
   toIso,
@@ -181,6 +182,8 @@ import {
   coverRecordedSets,
   coversMetadata,
   coverWhenNothingOwed,
+  stableErrorId,
+  uncoveredFailedRefundIdsOf,
   uncoveredFailedRefunds,
 } from './covered-refunds';
 import {
@@ -1846,30 +1849,28 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * The failed refunds a refund of everything owed includes, then what is
+   * The failed refunds a refund of everything owed includes, and what is
    * owed (the one count, `owedOnPayment`), for a refund asked for that amount
-   * (the blocked payment's own, the late win's; owner D73, review r10). The
-   * set is read FIRST: a refund that fails between the two reads is then in
-   * the amount but not the set, so it is paid and stays open, and the
-   * payment, owing nothing once the refund is made, covers it
-   * (`coverWhenNothingOwed`, alerted). Read the other way round, it would be
-   * in the set but not the amount: covered, and never paid.
+   * (the blocked payment's own, the late win's; owner D73), read in ONE
+   * statement, so both come from one snapshot (review r11): a refund failed
+   * before it is in the set and the amount, so it is paid and covered; one
+   * failing after it was standing in both, so it is neither, and is owed at
+   * its own amount in Failed refunds. No payment row is nothing owed and
+   * nothing included.
    */
   private async setThenOwed(
     purchaseId: string,
     chargeId: string | null
   ): Promise<{ uncovered: string[]; amountCents: number }> {
-    const uncovered = await uncoveredFailedRefunds(
-      this.db,
-      purchaseId,
-      chargeId
-    );
     const [row] = await this.db
-      .select({ amountCents: owedOnPayment(purchases.id, chargeId) })
+      .select({
+        amountCents: owedOnPayment(purchases.id, chargeId),
+        uncovered: uncoveredFailedRefundIdsOf(purchaseId, chargeId),
+      })
       .from(purchases)
       .where(eq(purchases.id, purchaseId))
       .limit(1);
-    return { uncovered, amountCents: row?.amountCents ?? 0 };
+    return row ?? { uncovered: [], amountCents: 0 };
   }
 
   /**
@@ -2021,7 +2022,9 @@ export class PurchaseService extends BaseService {
    * given up after 5 s (`coverWhenNothingOwed`, which reads everything again
    * under it and alerts at error). A failed refund linked to no purchase is
    * not seen. Never throws: the payments that failed are reported once per
-   * run, at error with their ids, and the rest go on.
+   * run, at error with their ids, each with its database error code, whether
+   * it was the lock given up, and the driver's reason (`dbErrorFacts`), never
+   * the failed query's text, and the rest go on.
    */
   private async coverPaymentsOwingNothing(limit: number): Promise<void> {
     const openFailed = alias(refunds, 'open_failed');
@@ -2050,11 +2053,9 @@ export class PurchaseService extends BaseService {
       );
       return;
     }
-    const failed: Array<{
-      purchaseId: string;
-      chargeId: string;
-      error: string;
-    }> = [];
+    const failed: Array<
+      { purchaseId: string; chargeId: string } & ReturnType<typeof dbErrorFacts>
+    > = [];
     for (const payment of payments) {
       try {
         await coverWhenNothingOwed(
@@ -2064,10 +2065,9 @@ export class PurchaseService extends BaseService {
           { boundedLock: true }
         );
       } catch (error) {
-        failed.push({
-          ...payment,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        // Its code and reason, never its message: a failed query's is the
+        // SQL and its params (review r11).
+        failed.push({ ...payment, ...dbErrorFacts(error) });
       }
     }
     if (failed.length > 0) {
@@ -6056,7 +6056,12 @@ export class PurchaseService extends BaseService {
    * queue. If everything the buyer has back, it included (the one count's
    * `overpaidOnPayment`: the refunds that count, what was paid another way,
    * and a chargeback while lost), is more than was paid, the buyer was
-   * refunded twice (a settle landed in the gap), which is alerted at error.
+   * refunded twice (a settle landed in the gap). One double payment is ONE
+   * incident to recover by hand (review r11): when the rows of its set the
+   * cover just reported settled refunded elsewhere (the residual) account
+   * for it, this is logged at info under the residual's errorId; otherwise
+   * it is its own, at error, under an errorId of this refund
+   * (`stableErrorId`), so a re-run joins it.
    */
   private async adoptLateWinRefund(
     stripeDisputeId: string,
@@ -6064,7 +6069,7 @@ export class PurchaseService extends BaseService {
     chargeId: string,
     own: Stripe.Refund
   ): Promise<void> {
-    await coverFromMetadata(
+    const { residual } = await coverFromMetadata(
       { db: this.db, obs: this.obs },
       { purchaseId: purchase.id, chargeId },
       own,
@@ -6076,19 +6081,38 @@ export class PurchaseService extends BaseService {
       .where(eq(purchases.id, purchase.id))
       .limit(1);
     const overpaidCents = paid?.overpaidCents ?? 0;
-    if (overpaidCents > 0) {
-      this.obs.error(
-        'Late win: its refund and the refunds that count pay back more than the payment, so the buyer was refunded twice: recover it by hand',
+    if (overpaidCents <= 0) return;
+    const facts = {
+      disputeId: stripeDisputeId,
+      purchaseId: purchase.id,
+      chargeId,
+      refundId: own.id,
+      overpaidCents,
+    };
+    // The residual's rows the buyer has twice: settled refunded elsewhere.
+    const twice = residual.filter(
+      (row) => row.resolution === 'refunded_elsewhere'
+    );
+    const twiceCents = twice.reduce((sum, row) => sum + row.amountCents, 0);
+    const [first] = twice;
+    if (first && overpaidCents <= twiceCents) {
+      this.obs.info(
+        'Late win: its refund and the refunds that count pay back more than the payment, by failed refunds its refund included that were settled refunded elsewhere: the one incident to recover is theirs',
         {
-          errorId: crypto.randomUUID(),
-          disputeId: stripeDisputeId,
-          purchaseId: purchase.id,
-          chargeId,
-          refundId: own.id,
-          overpaidCents,
+          errorId: first.errorId,
+          ...facts,
+          refundedTwiceErrorIds: twice.map((row) => row.errorId),
         }
       );
+      return;
     }
+    this.obs.error(
+      'Late win: its refund and the refunds that count pay back more than the payment, so the buyer was refunded twice: recover it by hand',
+      {
+        errorId: await stableErrorId('late_win_overpaid', [own.id]),
+        ...facts,
+      }
+    );
   }
 
   /**

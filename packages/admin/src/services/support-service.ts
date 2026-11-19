@@ -535,6 +535,22 @@ function replayOf(refund: Stripe.Refund): SupportRefundResult {
   };
 }
 
+/**
+ * A refund of all that is left of a purchase's charge pays everything owed,
+ * so it covers the failed refunds open when its amount was worked out (owner
+ * D73, review r8): `uncovered`, read before Stripe was asked, with what the
+ * amount subtracts (`recordBeforeStripe`, review r11). A part refund, or a
+ * subscription's charge, covers nothing (null).
+ */
+function coveringOf(
+  source: ChargeSource,
+  uncovered: string[],
+  allThatIsLeft: boolean
+): { purchaseId: string; failed: string[] } | null {
+  if (source.type !== 'purchase' || !allThatIsLeft) return null;
+  return { purchaseId: source.purchaseId, failed: uncovered };
+}
+
 function clawbackSourceOf(source: ChargeSource): ClawbackSource {
   return source.type === 'purchase'
     ? { sourceType: 'purchase', purchaseId: source.purchaseId }
@@ -1813,8 +1829,11 @@ export class SupportService extends BaseService {
    * preview's and the route's cap read them fresh, never from the page, and
    * count them by `settledElsewhereBeyondStripe`.
    */
-  private async settledElsewhereRows(chargeId: string) {
-    return this.db
+  private async settledElsewhereRows(
+    chargeId: string,
+    db: Tx | DatabaseClient = this.db
+  ) {
+    return db
       .select({
         stripeRefundId: refunds.stripeRefundId,
         amountCents: refunds.amountCents,
@@ -1881,6 +1900,10 @@ export class SupportService extends BaseService {
       const readCharge = this.chargeReader(chargeId, false);
       const source = await this.sourceOfCharge(chargeId, readCharge);
 
+      // Our record FIRST, in one snapshot (review r11): the set a refund of
+      // all that is left includes, and what its amount subtracts as settled
+      // elsewhere. Then Stripe's list.
+      const before = await this.recordBeforeStripe(source, chargeId);
       const listed = await listChargeRefunds(this.stripe, chargeId);
       const key = supportRefundKey(
         chargeId,
@@ -1904,11 +1927,16 @@ export class SupportService extends BaseService {
       }
 
       const charge = await readCharge();
-      const leftCents = await this.leftToRefund(chargeId, charge, listed);
-      this.assertAmountFits(input.amountCents, leftCents);
-      const covering = await this.coveringOf(
-        source,
+      const leftCents = await this.leftToRefund(
         chargeId,
+        charge,
+        listed,
+        before.settledElsewhere
+      );
+      this.assertAmountFits(input.amountCents, leftCents);
+      const covering = coveringOf(
+        source,
+        before.uncovered,
         input.amountCents === leftCents
       );
 
@@ -1965,19 +1993,19 @@ export class SupportService extends BaseService {
    * refunded through Stripe at all: a charge settled by hand and refunded
    * outside Stripe (never through Stripe, owner decision 2026-11-08,
    * whatever the window or a late win says), the window (lifted by a late
-   * win, owner Q7), an open chargeback, and a won one still settling. Read
-   * with the holds: a failed refund settled since the preview leaves the
-   * refund count as it was, so only this read sees it.
+   * win, owner Q7), an open chargeback, and a won one still settling. Less
+   * the failed refunds settled refunded elsewhere (`elsewhere`, read with the
+   * covered set before Stripe was asked, `recordBeforeStripe`): one settled
+   * since the preview leaves the refund count as it was, so only that read
+   * sees it.
    */
   private async leftToRefund(
     chargeId: string,
     charge: Stripe.Charge,
-    listed: readonly Stripe.Refund[]
+    listed: readonly Stripe.Refund[],
+    elsewhere: Awaited<ReturnType<SupportService['settledElsewhereRows']>>
   ): Promise<number> {
-    const [holds, elsewhere] = await Promise.all([
-      this.refundHoldsOf(chargeId),
-      this.settledElsewhereRows(chargeId),
-    ]);
+    const holds = await this.refundHoldsOf(chargeId);
     if (holds.refundedOutsideStripeAt) {
       throw new RefundedOutsideStripeError(holds.refundedOutsideStripeAt);
     }
@@ -1995,25 +2023,39 @@ export class SupportService extends BaseService {
   }
 
   /**
-   * A refund of all that is left of a purchase's charge pays everything
-   * owed, so it covers the failed refunds still open now (owner D73, review
-   * r8): fixed here, before Stripe is asked, as every cover's set is. A part
-   * refund, or a subscription's charge, covers nothing (null).
+   * Our record of the charge's refunds before Stripe's list is read (review
+   * r11), in ONE snapshot (a read-only repeatable-read transaction): the
+   * failed refunds still open, the set a refund of all that is left includes
+   * (`uncoveredFailedRefunds`; a purchase's only), and those settled
+   * refunded elsewhere, which its amount subtracts (`leftToRefund`). So a row
+   * of the set is in the amount, always:
+   * - a refund that fails afterwards was standing then: Stripe's list
+   *   subtracts it, or shows it failed, and either way it is not in the set,
+   *   so it is owed in Failed refunds, or paid and covered once nothing is
+   *   owed (`coverWhenNothingOwed`), never covered unpaid;
+   * - a row of the set settled refunded elsewhere afterwards is in the
+   *   amount too, so the cover alerts it at error (the residual), never a
+   *   double payment in silence.
    */
-  private async coveringOf(
+  private async recordBeforeStripe(
     source: ChargeSource,
-    chargeId: string,
-    allThatIsLeft: boolean
-  ): Promise<{ purchaseId: string; failed: string[] } | null> {
-    if (source.type !== 'purchase' || !allThatIsLeft) return null;
-    return {
-      purchaseId: source.purchaseId,
-      failed: await uncoveredFailedRefunds(
-        this.db,
-        source.purchaseId,
-        chargeId
-      ),
-    };
+    chargeId: string
+  ): Promise<{
+    uncovered: string[];
+    settledElsewhere: Awaited<
+      ReturnType<SupportService['settledElsewhereRows']>
+    >;
+  }> {
+    return this.db.transaction(
+      async (tx) => ({
+        uncovered:
+          source.type === 'purchase'
+            ? await uncoveredFailedRefunds(tx, source.purchaseId, chargeId)
+            : [],
+        settledElsewhere: await this.settledElsewhereRows(chargeId, tx),
+      }),
+      { isolationLevel: 'repeatable read', accessMode: 'read only' }
+    );
   }
 
   /**

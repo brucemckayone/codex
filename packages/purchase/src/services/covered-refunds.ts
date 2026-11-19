@@ -77,19 +77,21 @@
  * of all that is left can meet it: two people on one charge during one
  * Stripe call. `settledMeanwhile` returns each such row, and
  * `coverIncludedRefunds` logs it at error, for support to recover by hand
- * (docs/payments/operations.md), once: its errorId is made from the covering
- * refund and the row (`stableErrorId`), and a later pass that reads the set
- * back from the refund's metadata (every sync of the charge) alerts again
- * only a row settled after the covering refund's second, and not by a
- * cover. One settled within it was settled while the request that made the
- * refund was in flight, which reported it, so the later pass logs it at
- * info; were that request lost after Stripe made the refund, info is all it
- * gets. One covered by another refund is not a double payment: that
- * refund's amount was worked out with this one counted.
+ * (docs/payments/operations.md), on EVERY pass that meets it: the first, and
+ * each later one that reads the set back from the refund's metadata (every
+ * sync of the charge), whenever it was settled. A row of the set was open
+ * when the amount was worked out, by construction (each writer reads its set
+ * no later than what its amount subtracts, review r11), so a row of it since
+ * settled another way is always a double payment. Its errorId is made from
+ * the covering refund and the row (`stableErrorId`), so the repeats are one
+ * incident. Only a row covered by ANOTHER refund is logged at info: that
+ * refund's amount was worked out with this one counted, so nothing was paid
+ * twice.
  */
 
 import type { DatabaseClient } from '@codex/database';
 import { purchases, refunds } from '@codex/database/schema';
+import { InternalServiceError } from '@codex/service-errors';
 import { and, asc, desc, eq, inArray, type SQL, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
@@ -121,7 +123,7 @@ const STRIPE_METADATA_VALUE_MAX = 500;
  * into one incident instead of a new one per sync or sweep. A SHA-256 of the
  * alert's `kind` and its `parts`, shaped as a UUID.
  */
-async function stableErrorId(
+export async function stableErrorId(
   kind: string,
   parts: readonly string[]
 ): Promise<string> {
@@ -207,9 +209,23 @@ export interface CoverInput {
 /** A refund of the covered set that something else settled first. */
 interface SettledMeanwhile {
   stripeRefundId: string;
+  amountCents: number;
   resolution: string | null;
   coveredByRefundId: string | null;
-  resolvedAt: Date | null;
+}
+
+/**
+ * A row of a covering refund's set settled another way first, as
+ * `reportSettledMeanwhile` reported it: the residual's incident, which a
+ * caller adds to rather than alerting the same double payment again (the
+ * late win's overpaid check, review r11).
+ */
+interface ResidualReport {
+  refundId: string;
+  amountCents: number;
+  resolution: string | null;
+  /** One per covering refund and row (`stableErrorId`), whichever pass reported it. */
+  errorId: string;
 }
 
 /** What `coverFailedRefunds` did with each id of its set. */
@@ -278,6 +294,7 @@ async function coverFailedRefunds(
   const rows = await tx
     .select({
       stripeRefundId: refunds.stripeRefundId,
+      amountCents: refunds.amountCents,
       resolvedAt: refunds.resolvedAt,
       resolution: refunds.resolution,
       coveredByRefundId: refunds.coveredByRefundId,
@@ -305,6 +322,45 @@ async function coverFailedRefunds(
       .map((row) => row.stripeRefundId),
     unknown: missed.filter((id) => !found.has(id)),
   };
+}
+
+/**
+ * The ids of a payment's uncovered failed refunds (`uncoveredFailedRefundOf`),
+ * oldest first, as a column of the caller's own statement, so they come from
+ * the same snapshot as whatever else it reads (review r11): a refund's
+ * amount and the set it includes, read together, can't disagree. An empty
+ * array when there are none (`COALESCE`, never null). The outer query must
+ * not be on `refunds`.
+ */
+export function uncoveredFailedRefundIdsOf(
+  purchaseId: string,
+  chargeId: string | null
+): SQL<string[]> {
+  return sql<
+    string[]
+  >`COALESCE((SELECT json_agg(${refunds.stripeRefundId} ORDER BY ${refunds.stripeCreatedAt}, ${refunds.stripeRefundId}) FROM ${refunds} WHERE ${uncoveredFailedRefundOf(purchaseId, chargeId)}), '[]'::json)`.mapWith(
+    refundIdsOf
+  );
+}
+
+/**
+ * The driver's value of `uncoveredFailedRefundIdsOf`'s JSON array: parsed,
+ * or its text. Anything else is a defect, never an empty set: an empty set
+ * read wrongly would include nothing, and a refund then asked would cover
+ * nothing it paid.
+ */
+function refundIdsOf(value: unknown): string[] {
+  const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : value;
+  if (
+    Array.isArray(parsed) &&
+    parsed.every((id): id is string => typeof id === 'string')
+  ) {
+    return parsed;
+  }
+  throw new InternalServiceError(
+    "A payment's failed refunds were read as something other than a list of ids",
+    { received: typeof parsed }
+  );
 }
 
 /** One read: the uncovered failed refunds of a payment (`uncoveredFailedRefundOf`), their ids. */
@@ -417,6 +473,19 @@ export async function coverIncludedRefunds<T>(
   cover: CoverInput,
   alongside: (tx: Tx) => Promise<T>
 ): Promise<T> {
+  return (await coverAndReport(deps, cover, alongside)).result;
+}
+
+/**
+ * `coverIncludedRefunds`, also returning the residual it reported
+ * (`reportSettledMeanwhile`), for a caller that would otherwise alert the
+ * same double payment a second time.
+ */
+async function coverAndReport<T>(
+  deps: { db: DatabaseClient; obs: CoverLogger },
+  cover: CoverInput,
+  alongside: (tx: Tx) => Promise<T>
+): Promise<{ result: T; residual: ResidualReport[] }> {
   // A bound instant, not now() (data-access contract, rule 6).
   const resolvedAt = new Date();
   const { result, ...written } = await deps.db.transaction(async (tx) => {
@@ -435,8 +504,9 @@ export async function coverIncludedRefunds<T>(
       coveredRefundIds: written.covered,
     });
   }
+  const residual: ResidualReport[] = [];
   for (const row of written.settledMeanwhile) {
-    await reportSettledMeanwhile(deps.obs, cover, row);
+    residual.push(await reportSettledMeanwhile(deps.obs, cover, row));
   }
   if (written.unknown.length > 0 || written.notIncluded.length > 0) {
     deps.obs.error(
@@ -452,29 +522,28 @@ export async function coverIncludedRefunds<T>(
       }
     );
   }
-  return result;
+  return { result, residual };
 }
 
 /**
  * A row of the covered set settled another way first: the residual (see the
- * header), reported once per covering refund and row (`stableErrorId`). A
- * cover's first pass reports it at error. A pass reading the set back from
- * the refund's metadata (`includedBefore`) reports at error only a row
- * settled after the covering refund's second, and not by a cover; anything
- * else it logs at info, with the same errorId: settled within that second,
- * the request that made the refund reported it, and covered by another
- * refund, the buyer was not paid twice.
+ * header). Settled refunded elsewhere or "Re-pay payees", it is a double
+ * payment, at error on every pass that meets it, under one errorId per
+ * covering refund and row (`stableErrorId`), so the repeats are one
+ * incident. Covered by another refund, it is not, and is logged at info
+ * under the same id. Returns what it reported.
  */
 async function reportSettledMeanwhile(
   obs: CoverLogger,
   cover: CoverInput,
   row: SettledMeanwhile
-): Promise<void> {
+): Promise<ResidualReport> {
+  const errorId = await stableErrorId('refunded_twice', [
+    cover.coveringRefundId,
+    row.stripeRefundId,
+  ]);
   const facts = {
-    errorId: await stableErrorId('refunded_twice', [
-      cover.coveringRefundId,
-      row.stripeRefundId,
-    ]),
+    errorId,
     purchaseId: cover.purchaseId,
     chargeId: cover.chargeId,
     coveringRefundId: cover.coveringRefundId,
@@ -482,34 +551,23 @@ async function reportSettledMeanwhile(
     resolution: row.resolution,
     coveredByRefundId: row.coveredByRefundId,
   };
-  if (settledAfterTheCover(cover, row)) {
+  if (row.resolution === COVERED_BY_REFUND) {
+    obs.info(
+      'A refund of everything owed included a failed refund another refund covered first, so nothing was paid twice',
+      facts
+    );
+  } else {
     obs.error(
       'A refund of everything owed included a failed refund that support settled before it was recorded, so the buyer was refunded twice for it, or its creators re-paid: recover it by hand',
       facts
     );
-    return;
   }
-  obs.info(
-    'A refund of everything owed included a failed refund settled another way first, reported when that refund was made or covered by another refund, so it is not alerted again',
-    facts
-  );
-}
-
-/**
- * Whether a row of the set settled meanwhile is alerted on this pass
- * (`reportSettledMeanwhile`): always on a cover's first pass; read back from
- * metadata, only when settled after the covering refund's second
- * (Stripe's times are whole seconds) and not by a cover.
- */
-function settledAfterTheCover(
-  cover: CoverInput,
-  row: SettledMeanwhile
-): boolean {
-  if (cover.includedBefore === undefined) return true;
-  if (row.resolution === COVERED_BY_REFUND || row.resolvedAt === null) {
-    return false;
-  }
-  return row.resolvedAt.getTime() >= cover.includedBefore.getTime() + 1000;
+  return {
+    refundId: row.stripeRefundId,
+    amountCents: row.amountCents,
+    resolution: row.resolution,
+    errorId,
+  };
 }
 
 /**
@@ -517,15 +575,16 @@ function settledAfterTheCover(
  * refund, and make `alongside`'s writes, in one transaction
  * (`coverIncludedRefunds`): the one way any pass after the first covers it
  * (review r9). Rows already covered by it, or settled since, are never
- * written again, so it can run any number of times.
+ * written again, so it can run any number of times. Returns `alongside`'s
+ * result and the residual it reported (`reportSettledMeanwhile`).
  */
 export async function coverFromMetadata<T>(
   deps: { db: DatabaseClient; obs: CoverLogger },
   payment: { purchaseId: string; chargeId: string },
   refund: Pick<Stripe.Refund, 'id' | 'created' | 'metadata'>,
   alongside: (tx: Tx) => Promise<T>
-): Promise<T> {
-  return coverIncludedRefunds(
+): Promise<{ result: T; residual: ResidualReport[] }> {
+  return coverAndReport(
     deps,
     {
       purchaseId: payment.purchaseId,

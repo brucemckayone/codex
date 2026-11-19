@@ -474,7 +474,13 @@ that died after Stripe made the refund is covered even if nobody resubmits.
 The same idempotency key asked again with another set (a refund failed in
 between) is refused by Stripe, and the refund the key made answers, with its
 first set. A refund named there that was made after the covering refund is
-never covered by it.
+never covered by it. Each writer reads the set together with what its amount
+subtracts (review r11): support's refund of all that's left reads both from
+one snapshot of our record before Stripe's list, and the blocked payment's
+and the late win's in one statement. So a refund that fails afterwards is
+owed in Failed refunds, or paid and then covered once nothing is owed, never
+covered unpaid; and a refund of the set settled elsewhere afterwards is
+always the alert below.
 
 **A payment that owes nothing (owner D81, D85).** After that sync, at the
 late win's "none", at a blocked payment's own refund with nothing to ask, and
@@ -531,12 +537,13 @@ r10), so a repeat is one incident, never a new one:
   covering refund (`coveringRefundId`) included it (`refundId`, with its
   `resolution`), so the buyer has that money twice, or, settled "Re-pay
   payees", its creators were re-paid for money the buyer got back. One line
-  per refund. Said by the request that made the covering refund; each later
-  sync of the charge re-reads the refund's set and says it again only for a
-  refund settled after the covering refund's second (as when that request
-  died), logging the rest at info with the same errorId, as it does for one
-  covered by another refund (not paid twice). With the owner, recover the
-  overpayment from the buyer or account for it, per refund.
+  per refund, said at error on every pass that meets it, whenever it was
+  settled: the request that made the covering refund, and each later sync
+  of the charge, which re-reads the refund's set (review r11). All of them
+  carry one errorId per covering refund and refund: one incident. A refund
+  of the set covered by ANOTHER refund is logged at info instead ("…another
+  refund covered first, so nothing was paid twice"). With the owner, recover
+  the overpayment from the buyer or account for it, per refund.
 - "Late win: its refund and the refunds that count pay back more than the
   payment, so the buyer was refunded twice: recover it by hand". Found when
   that late-win refund is taken up: a settle landed in the gap, or the
@@ -544,6 +551,10 @@ r10), so a repeat is one incident, never a new one:
   chargeback on the charge. `overpaidCents` is how much, by the one count
   (the refunds that count, what was paid another way, and every chargeback
   while lost, beyond what was paid). Recover it with the owner, as above.
+  When refunds of its set settled refunded elsewhere account for it (the
+  alert above, already said), it is logged at info under that alert's
+  errorId instead, so one double payment is one incident to recover; its
+  own errorId is the late-win refund's, so a re-run joins it.
 - "Failed refunds were open on a payment that owes nothing, so the newest
   standing refund covered them: a cover was missed, or a refund was made
   outside our code (such as a full refund in Stripe's Dashboard)" (owner
@@ -579,7 +590,9 @@ r10), so a repeat is one incident, never a new one:
   refunds are synced again, with the same errorId.
 - "Could not cover the failed refunds of payments that owe nothing (a lock
   held elsewhere, or an error); the next sweep tries them again". Once per
-  hourly run, with `count` and each payment's ids and error. One held lock
+  hourly run, with `count` and, for each payment, its ids, the database
+  error `code`, `lockTimeout` (true for a lock given up, 55P03) and the
+  driver's `reason`, never the failed query's text. One held lock
   is given up after 5 s, and the rest of the batch goes on. Nothing to do
   unless the same payment comes back run after run: then check its charge
   for a transaction left open.
