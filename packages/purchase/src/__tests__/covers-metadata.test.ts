@@ -55,7 +55,7 @@ describe('coversMetadata', () => {
       coversMetadata(ids, obs, { purchaseId: 'p_1', chargeId: 'ch_1' })
     ).toEqual({});
     expect(obs.error).toHaveBeenCalledWith(
-      'A refund of everything owed includes more failed refunds than its Stripe metadata can name, so only this request can cover them: if it fails after Stripe makes the refund, they are covered later by the newest standing refund instead',
+      'A refund of everything owed includes more failed refunds than its Stripe metadata can name, so only this request can cover them: if it fails after Stripe makes the refund, they are covered later by the newest refund that counts instead',
       {
         errorId: expect.any(String),
         purchaseId: 'p_1',

@@ -128,6 +128,7 @@ import {
   isNull,
   lt,
   lte,
+  min,
   ne,
   or,
   type SQL,
@@ -180,7 +181,6 @@ import {
   coverRecordedSets,
   coversMetadata,
   coverWhenNothingOwed,
-  newestStandingRefund,
   uncoveredFailedRefunds,
 } from './covered-refunds';
 import {
@@ -192,6 +192,7 @@ import {
   chargebackCarriesDebtOn,
   chargebackCarriesRefund,
   findShortLosses,
+  overpaidOnPayment,
   owedOnDispute,
   owedOnPayment,
   unrecoveredAfterLoss,
@@ -770,8 +771,6 @@ interface BlockedRefundOwed {
   amountCents: number;
   /** Its failed refunds still open, uncounted, when this was read: what a refund of the amount includes. */
   uncovered: string[];
-  /** The newest standing refund: what covers `uncovered` when nothing is owed (owner D81). */
-  newestStandingRefundId: string | null;
 }
 
 /** A blocked payment's refund as asked (`askBlockedRefund`), and the set it covers now. */
@@ -1627,11 +1626,14 @@ export class PurchaseService extends BaseService {
       });
     }
     const refundId = asked?.issued.refundId ?? null;
-    const refunded = await this.markBlockedRefunded(
-      purchase,
-      owed.chargeId,
-      await this.blockedRefundCover(purchase, owed, asked)
-    );
+    const refunded =
+      asked === null
+        ? await this.markBlockedOwingNothing(purchase, owed.chargeId)
+        : await this.markBlockedRefunded(
+            purchase,
+            owed.chargeId,
+            await this.blockedRefundCover(purchase, owed, asked)
+          );
     this.obs.warn(kind.refunded, {
       purchaseId: purchase.id,
       stripePaymentIntentId: purchase.stripePaymentIntentId,
@@ -1645,23 +1647,16 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * What covers a blocked payment's failed refunds once it is refunded: the
-   * refund just asked for and the set it includes; with nothing owed, the
-   * newest standing refund (owner D81) and the set read then; refunded in
+   * What covers a blocked payment's failed refunds once its refund was
+   * asked for: the refund just made and the set it includes; refunded in
    * full meanwhile, none, once the sync has covered what it can, as for any
    * payment that owes nothing.
    */
   private async blockedRefundCover(
     purchase: Purchase,
     owed: BlockedRefundOwed,
-    asked: AskedBlockedRefund | null
+    asked: AskedBlockedRefund
   ): Promise<{ coveringRefundId: string | null; included: readonly string[] }> {
-    if (asked === null) {
-      return {
-        coveringRefundId: owed.newestStandingRefundId,
-        included: owed.uncovered,
-      };
-    }
     if (asked.issued.alreadyRefunded && owed.chargeId) {
       await this.recordChargeRefunds({
         id: owed.chargeId,
@@ -1730,36 +1725,46 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * Mark a blocked payment `refunded` when nothing was asked, because its one
+   * count was £0 (`refundBlockedPayment`): through the cover of a payment
+   * that owes nothing (`coverWhenNothingOwed`, owner D81, D85; review r10),
+   * which re-reads what is owed, the carry, the open failed refunds and the
+   * refund it names under the payment's refunds lock, covers, and alerts.
+   * The purchase is marked in that transaction, naming that refund, or none
+   * when something came to be owed before the lock (a refund that failed
+   * meanwhile, which then waits in Failed refunds at its own amount), when a
+   * stage carries its debt, or when no refund counts.
+   */
+  private async markBlockedOwingNothing(
+    purchase: Purchase,
+    chargeId: string | null
+  ): Promise<Purchase | undefined> {
+    const { result } = await coverWhenNothingOwed(
+      { db: this.db, obs: this.obs },
+      { purchaseId: purchase.id, chargeId },
+      'blocked_refund',
+      {
+        alongside: (tx, coveringRefundId) =>
+          this.writeBlockedRefunded(tx, purchase.id, coveringRefundId),
+      }
+    );
+    return result;
+  }
+
+  /**
    * Mark a blocked payment `refunded`, naming the refund that covers it (the
-   * refund made now or, with nothing owed, the newest standing refund, as
-   * D69's "none" does, owner D81), and cover the failed refunds it included
-   * in the same transaction (`coverIncluded`). With none to name (Stripe
-   * found the charge refunded in full by a refund made during the ask, and
-   * the sync since covered what it could; or no refund stands), any failed
-   * refund still open is alerted at error.
+   * refund asked for now), and cover the failed refunds it included in the
+   * same transaction (`coverIncluded`). With none to name (Stripe found the
+   * charge refunded in full by a refund made during the ask, and the sync
+   * since covered what it could), any failed refund still open is alerted
+   * at error.
    */
   private async markBlockedRefunded(
     purchase: Purchase,
     chargeId: string | null,
     cover: { coveringRefundId: string | null; included: readonly string[] }
   ): Promise<Purchase | undefined> {
-    // A bound instant, not now(): the query text stays the same on every
-    // request, so Hyperdrive can cache it (data-access contract, rule 6).
-    const refundedAt = new Date();
     const { coveringRefundId } = cover;
-    const markRefunded = async (db: Tx | DatabaseClient) => {
-      const [row] = await db
-        .update(purchases)
-        .set({
-          status: PURCHASE_STATUS.REFUNDED,
-          refundedAt: sql`COALESCE(${purchases.refundedAt}, ${refundedAt})`,
-          refundAmountCents: sql`COALESCE(${purchases.refundAmountCents}, ${purchases.amountPaidCents})`,
-          stripeRefundId: sql`COALESCE(${purchases.stripeRefundId}, ${coveringRefundId})`,
-        })
-        .where(eq(purchases.id, purchase.id))
-        .returning();
-      return row;
-    };
     if (coveringRefundId) {
       return this.coverIncluded(
         {
@@ -1768,7 +1773,7 @@ export class PurchaseService extends BaseService {
           coveredRefundIds: cover.included,
           coveringRefundId,
         },
-        markRefunded
+        (tx) => this.writeBlockedRefunded(tx, purchase.id, coveringRefundId)
       );
     }
     const open = await uncoveredFailedRefunds(this.db, purchase.id, chargeId);
@@ -1783,7 +1788,33 @@ export class PurchaseService extends BaseService {
         }
       );
     }
-    return markRefunded(this.db);
+    return this.writeBlockedRefunded(this.db, purchase.id, null);
+  }
+
+  /**
+   * Write a blocked payment `refunded`, naming `coveringRefundId` unless a
+   * refund is named already; the refunded date and amount likewise keep
+   * what is there.
+   */
+  private async writeBlockedRefunded(
+    db: Tx | DatabaseClient,
+    purchaseId: string,
+    coveringRefundId: string | null
+  ): Promise<Purchase | undefined> {
+    // A bound instant, not now(): the query text stays the same on every
+    // request, so Hyperdrive can cache it (data-access contract, rule 6).
+    const refundedAt = new Date();
+    const [row] = await db
+      .update(purchases)
+      .set({
+        status: PURCHASE_STATUS.REFUNDED,
+        refundedAt: sql`COALESCE(${purchases.refundedAt}, ${refundedAt})`,
+        refundAmountCents: sql`COALESCE(${purchases.refundAmountCents}, ${purchases.amountPaidCents})`,
+        stripeRefundId: sql`COALESCE(${purchases.stripeRefundId}, ${coveringRefundId})`,
+      })
+      .where(eq(purchases.id, purchaseId))
+      .returning();
+    return row;
   }
 
   /**
@@ -1794,8 +1825,8 @@ export class PurchaseService extends BaseService {
    * covers have run. The charge is the completion's, or the PaymentIntent's
    * `latest_charge`. Also the failed refunds still open at this moment,
    * which a refund of that amount includes and so covers (the set is fixed
-   * here, before Stripe is asked), and the newest standing refund, which
-   * covers them when nothing is owed (owner D81).
+   * here, before Stripe is asked), read BEFORE the amount
+   * (`setThenOwed`).
    */
   private async blockedRefundOwed(
     purchase: Purchase,
@@ -1811,21 +1842,34 @@ export class PurchaseService extends BaseService {
         paymentIntentId: purchase.stripePaymentIntentId,
       });
     }
+    return { chargeId, ...(await this.setThenOwed(purchase.id, chargeId)) };
+  }
+
+  /**
+   * The failed refunds a refund of everything owed includes, then what is
+   * owed (the one count, `owedOnPayment`), for a refund asked for that amount
+   * (the blocked payment's own, the late win's; owner D73, review r10). The
+   * set is read FIRST: a refund that fails between the two reads is then in
+   * the amount but not the set, so it is paid and stays open, and the
+   * payment, owing nothing once the refund is made, covers it
+   * (`coverWhenNothingOwed`, alerted). Read the other way round, it would be
+   * in the set but not the amount: covered, and never paid.
+   */
+  private async setThenOwed(
+    purchaseId: string,
+    chargeId: string | null
+  ): Promise<{ uncovered: string[]; amountCents: number }> {
+    const uncovered = await uncoveredFailedRefunds(
+      this.db,
+      purchaseId,
+      chargeId
+    );
     const [row] = await this.db
       .select({ amountCents: owedOnPayment(purchases.id, chargeId) })
       .from(purchases)
-      .where(eq(purchases.id, purchase.id))
+      .where(eq(purchases.id, purchaseId))
       .limit(1);
-    return {
-      chargeId,
-      amountCents: row?.amountCents ?? 0,
-      uncovered: await uncoveredFailedRefunds(this.db, purchase.id, chargeId),
-      newestStandingRefundId: await newestStandingRefund(
-        this.db,
-        purchase.id,
-        chargeId
-      ),
-    };
+    return { uncovered, amountCents: row?.amountCents ?? 0 };
   }
 
   /**
@@ -1964,29 +2008,37 @@ export class PurchaseService extends BaseService {
 
   /**
    * The hourly backstop of the cover of a payment that owes nothing (owner
-   * D81): the sync covers one whenever Stripe sends an event, and this finds
-   * those no event reached (a refund made outside our code whose event was
-   * lost). Up to `limit` payments with a failed refund still open whose one
-   * count is £0 and no stage carries their debt, through the partial index on
-   * open failed refunds (`idx_refunds_failed_open`), each covered under its
-   * own lock (`coverWhenNothingOwed`, which checks again under it and alerts
-   * at error). A failed refund linked to no purchase is not seen. Never
-   * throws: one payment's failure is logged and the rest go on.
+   * D81, D85). It finds failed refunds a refund event recorded without
+   * covering them: `refund.updated` records a failure and covers nothing
+   * (payment-webhook.ts), so a failure seen only that way, with the
+   * `charge.refunded` sync lost or its cover thrown, waits here. Up to
+   * `limit` payments with a failed refund still open whose one count is £0,
+   * no stage carrying their debt, and a refund that counts to name, so one
+   * it can't cover is never selected again (review r10). Oldest open failure
+   * first, through the partial index on open failed refunds
+   * (`idx_refunds_failed_open`, on `created_at`), so a payment it can't
+   * clear never crowds out the rest. Each is covered under its own lock,
+   * given up after 5 s (`coverWhenNothingOwed`, which reads everything again
+   * under it and alerts at error). A failed refund linked to no purchase is
+   * not seen. Never throws: the payments that failed are reported once per
+   * run, at error with their ids, and the rest go on.
    */
   private async coverPaymentsOwingNothing(limit: number): Promise<void> {
     const openFailed = alias(refunds, 'open_failed');
     let payments: Array<{ purchaseId: string; chargeId: string }>;
     try {
       payments = await this.db
-        .selectDistinct({
+        .select({
           purchaseId: purchases.id,
           chargeId: openFailed.stripeChargeId,
         })
         .from(openFailed)
         .innerJoin(purchases, eq(purchases.id, openFailed.purchaseId))
         .where(
-          sql`(${openFailed.status} = 'failed' AND ${openFailed.resolvedAt} IS NULL AND ${owedOnPayment(purchases.id, openFailed.stripeChargeId)} = 0 AND NOT ${chargebackCarriesDebtOn(openFailed.stripeChargeId)})`
+          sql`(${openFailed.status} = 'failed' AND ${openFailed.resolvedAt} IS NULL AND ${owedOnPayment(purchases.id, openFailed.stripeChargeId)} = 0 AND NOT ${chargebackCarriesDebtOn(openFailed.stripeChargeId)} AND EXISTS (SELECT 1 FROM ${refunds} WHERE ${countedRefundOf(purchases.id, openFailed.stripeChargeId)}))`
         )
+        .groupBy(purchases.id, openFailed.stripeChargeId)
+        .orderBy(min(openFailed.createdAt))
         .limit(limit);
     } catch (error) {
       this.obs.error(
@@ -1998,23 +2050,31 @@ export class PurchaseService extends BaseService {
       );
       return;
     }
+    const failed: Array<{
+      purchaseId: string;
+      chargeId: string;
+      error: string;
+    }> = [];
     for (const payment of payments) {
       try {
         await coverWhenNothingOwed(
           { db: this.db, obs: this.obs },
           payment,
-          'hourly_backstop'
+          'hourly_backstop',
+          { boundedLock: true }
         );
       } catch (error) {
-        this.obs.error(
-          'Could not cover the failed refunds of a payment that owes nothing; the next sweep tries again',
-          {
-            errorId: crypto.randomUUID(),
-            ...payment,
-            error: error instanceof Error ? error.message : String(error),
-          }
-        );
+        failed.push({
+          ...payment,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
+    }
+    if (failed.length > 0) {
+      this.obs.error(
+        'Could not cover the failed refunds of payments that owe nothing (a lock held elsewhere, or an error); the next sweep tries them again',
+        { errorId: crypto.randomUUID(), count: failed.length, payments: failed }
+      );
     }
   }
 
@@ -4261,8 +4321,9 @@ export class PurchaseService extends BaseService {
    * After a sync of a purchase's charge's refunds (review r9): each refund
    * carrying the set it includes covers exactly that set
    * (`coverRecordedSets`), then, with nothing owed, the failed refunds still
-   * open are covered by the newest standing refund, alerted at error
-   * (`coverWhenNothingOwed`, owner D81). The sync is every caller's: the
+   * open are covered by the newest standing refund, else the newest one
+   * settled refunded elsewhere, alerted at error once (`coverWhenNothingOwed`,
+   * owner D81, D85). The sync is every caller's: the
    * `charge.refunded` event, so a request that died after Stripe made its
    * refund is covered with nobody resubmitting; a replay of support's refund;
    * and `charge_already_refunded` on either twin. A subscription's charge
@@ -5834,28 +5895,14 @@ export class PurchaseService extends BaseService {
       });
       return { refundId: own.id, status: own.status };
     }
-    const counted = await this.countedRefunds(this.db, purchase.id, charge.id);
-    const countedCents = counted.reduce(
-      (sum, refund) => sum + refund.amountCents,
-      0
-    );
-    // What a refund of the amount below includes (owner D73): fixed now.
-    const uncovered = await uncoveredFailedRefunds(
-      this.db,
+    // What is owed by the one count (review r10), and what a refund of it
+    // includes (owner D73), the set fixed first (`setThenOwed`).
+    const { uncovered, amountCents } = await this.setThenOwed(
       purchase.id,
       charge.id
     );
-    const amountCents =
-      purchase.amountPaidCents -
-      Math.min(purchase.amountPaidCents, countedCents);
     if (amountCents <= 0) {
-      await this.coverByStandingRefund(
-        stripeDisputeId,
-        purchase.id,
-        charge.id,
-        counted.map((refund) => refund.stripeRefundId),
-        uncovered
-      );
+      await this.lateWinOwesNothing(stripeDisputeId, purchase.id, charge.id);
       return undefined;
     }
     const paidAnotherWay = await this.refundedOutsideStripeAt(charge.id);
@@ -5952,49 +5999,31 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * The late win's "none" (owner D69): the refunds that count already pay
-   * the payment, so no refund is made, and the newest STANDING refund covers
-   * the failed refunds still open (owner D73, D81: the one that took the last
-   * of the money; a counted row can be a failed refund settled elsewhere).
-   * With none standing, nothing is covered and that is alerted at error, as
-   * the cover of a payment that owes nothing does. Logged at info with the
-   * counted refunds' ids.
+   * The late win's "none" (owner D69): nothing is owed on the payment, so no
+   * refund is made, and its failed refunds still open are covered as any
+   * payment that owes nothing (`coverWhenNothingOwed`, owner D81, D85;
+   * review r10), which reads what is owed, the carry, the open failed
+   * refunds and the refund it names again under the payment's refunds lock,
+   * and alerts. Logged at info with the counted refunds' ids (D69).
    */
-  private async coverByStandingRefund(
+  private async lateWinOwesNothing(
     stripeDisputeId: string,
     purchaseId: string,
-    chargeId: string,
-    countedRefundIds: string[],
-    uncovered: string[]
+    chargeId: string
   ): Promise<void> {
-    if (uncovered.length > 0) {
-      const newest = await newestStandingRefund(this.db, purchaseId, chargeId);
-      if (newest) {
-        await this.coverIncluded(
-          {
-            purchaseId,
-            chargeId,
-            coveredRefundIds: uncovered,
-            coveringRefundId: newest,
-          },
-          async () => undefined
-        );
-      } else {
-        this.obs.error(
-          'Late win: the refunds that count pay the payment, but none stands to cover its failed refunds, so they stay in Failed refunds: check the charge on the support page',
-          {
-            errorId: crypto.randomUUID(),
-            disputeId: stripeDisputeId,
-            purchaseId,
-            chargeId,
-            failedRefundIds: uncovered,
-          }
-        );
-      }
-    }
+    await coverWhenNothingOwed(
+      { db: this.db, obs: this.obs },
+      { purchaseId, chargeId },
+      'late_win_none'
+    );
+    const counted = await this.countedRefunds(this.db, purchaseId, chargeId);
     this.obs.info(
       'Late win: the refunds that count cover the payment, so none is made',
-      { disputeId: stripeDisputeId, purchaseId, countedRefundIds }
+      {
+        disputeId: stripeDisputeId,
+        purchaseId,
+        countedRefundIds: counted.map((refund) => refund.stripeRefundId),
+      }
     );
   }
 
@@ -6024,9 +6053,10 @@ export class PurchaseService extends BaseService {
    * written, and it covers exactly the set it recorded when it was asked for
    * (`coverFromMetadata`, review r9), in one transaction: a refund that
    * counted then and has failed since was not in it, so it stays owed in the
-   * queue. If it and the other refunds that count pay back more than was
-   * paid, the buyer was refunded twice (a settle landed in the gap), which
-   * is alerted at error.
+   * queue. If everything the buyer has back, it included (the one count's
+   * `overpaidOnPayment`: the refunds that count, what was paid another way,
+   * and a chargeback while lost), is more than was paid, the buyer was
+   * refunded twice (a settle landed in the gap), which is alerted at error.
    */
   private async adoptLateWinRefund(
     stripeDisputeId: string,
@@ -6040,11 +6070,12 @@ export class PurchaseService extends BaseService {
       own,
       (tx) => this.writeLateWinRefundId(tx, stripeDisputeId, own.id)
     );
-    const counted = await this.countedRefunds(this.db, purchase.id, chargeId);
-    const othersCents = counted
-      .filter((refund) => refund.stripeRefundId !== own.id)
-      .reduce((sum, refund) => sum + refund.amountCents, 0);
-    const overpaidCents = othersCents + own.amount - purchase.amountPaidCents;
+    const [paid] = await this.db
+      .select({ overpaidCents: overpaidOnPayment(purchases.id, chargeId) })
+      .from(purchases)
+      .where(eq(purchases.id, purchase.id))
+      .limit(1);
+    const overpaidCents = paid?.overpaidCents ?? 0;
     if (overpaidCents > 0) {
       this.obs.error(
         'Late win: its refund and the refunds that count pay back more than the payment, so the buyer was refunded twice: recover it by hand',

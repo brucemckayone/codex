@@ -5,8 +5,8 @@
  * Three refunds are asked for what was paid less the refunds that count
  * (`countedRefundOf`: standing, or failed and settled refunded elsewhere):
  * - the late win's (`issueLateWinRefund`, owner D69), made or adopted;
- * - its "none" outcome, when the counted refunds already pay it all, which
- *   names the newest standing refund;
+ * - its "none" outcome, when nothing is owed, which covers as any payment
+ *   that owes nothing does (`coverWhenNothingOwed`);
  * - the blocked payment's own (`refundBlockedPayment`);
  * - support's refund on the charge page of all that is left of a purchase's
  *   charge (`SupportService.issueRefund`; a part refund covers nothing).
@@ -42,14 +42,23 @@
  * was created after the covering refund can't have been in its set, and is
  * never covered by it.
  *
- * **A payment that owes nothing** (owner D81): after every sync, and in the
- * hourly sweep, a failed refund still open on a payment whose one count is
- * £0 (`owedOnPayment`) is covered by the newest STANDING refund on the
- * charge (`coverWhenNothingOwed`), after the metadata cover, so an exact
- * attribution wins. Each one is a missed cover or a refund made outside our
- * code (a full refund in Stripe's Dashboard), so each is alerted at error. A
- * stage carrying a blocked payment's debt (`chargebackCarriesDebtOn`) is its
- * one surface (owner D66), so its failed refunds are left alone.
+ * **A payment that owes nothing** (owner D81, D85): a failed refund still
+ * open on a payment whose one count is £0 (`owedOnPayment`) is covered
+ * (`coverWhenNothingOwed`) after every sync (after the metadata cover, so an
+ * exact attribution wins), by the hourly backstop, and where the late win
+ * and the blocked payment's own refund find nothing owed. It names the
+ * newest STANDING refund on the charge, the one that took the last of the
+ * money; with none standing, the newest refund that counts, a failed refund
+ * settled refunded elsewhere, whose amount the buyer got back another way
+ * (D85). Each hit is a missed cover or a refund made outside our code (a
+ * full refund in Stripe's Dashboard), so each is alerted at error, once: a
+ * covered row is never covered again, and the alert's errorId is made from
+ * the payment, the covering refund and the ids (`stableErrorId`), so a pass
+ * that meets the same rows logs the same id. While any chargeback on the
+ * charge stands lost, or is owed again (`chargebackCarriesDebtOn`), the
+ * BANK paid the buyer what that stage carries, so no refund can honestly be
+ * named, and its failed refunds are left alone: a blocked payment's debt is
+ * that stage's (owner D66), and an ordinary sale's is Codex-1j7fs's (D77).
  *
  * **Locks.** Every cover takes the payment's refunds FOR UPDATE, in id order,
  * before any other row (`lockRefundsOfPayment`: the dispute's late-win id,
@@ -67,15 +76,27 @@
  * (`REFUND_AWAITS_PAYMENT_REFUND`, review r8), so only support's own refund
  * of all that is left can meet it: two people on one charge during one
  * Stripe call. `settledMeanwhile` returns each such row, and
- * `coverIncludedRefunds` logs it at error, with an errorId, for support to
- * recover by hand (docs/payments/operations.md).
+ * `coverIncludedRefunds` logs it at error, for support to recover by hand
+ * (docs/payments/operations.md), once: its errorId is made from the covering
+ * refund and the row (`stableErrorId`), and a later pass that reads the set
+ * back from the refund's metadata (every sync of the charge) alerts again
+ * only a row settled after the covering refund's second, and not by a
+ * cover. One settled within it was settled while the request that made the
+ * refund was in flight, which reported it, so the later pass logs it at
+ * info; were that request lost after Stripe made the refund, info is all it
+ * gets. One covered by another refund is not a double payment: that
+ * refund's amount was worked out with this one counted.
  */
 
 import type { DatabaseClient } from '@codex/database';
 import { purchases, refunds } from '@codex/database/schema';
 import { and, asc, desc, eq, inArray, type SQL, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
-import { refundsOfPayment, STANDING_REFUND_STATUSES } from './counted-refunds';
+import {
+  countedRefundOf,
+  refundsOfPayment,
+  STANDING_REFUND_STATUSES,
+} from './counted-refunds';
 import { chargebackCarriesDebtOn, owedOnPayment } from './short-loss';
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
@@ -93,6 +114,34 @@ const COVERS_METADATA_KEY = 'codex_covers';
 
 /** Stripe's limit on one metadata value. */
 const STRIPE_METADATA_VALUE_MAX = 500;
+
+/**
+ * A deterministic errorId for an alert about the same rows (review r10):
+ * every pass that meets them again logs the same id, so the alert collapses
+ * into one incident instead of a new one per sync or sweep. A SHA-256 of the
+ * alert's `kind` and its `parts`, shaped as a UUID.
+ */
+async function stableErrorId(
+  kind: string,
+  parts: readonly string[]
+): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode([kind, ...parts].join('\n'))
+    )
+  );
+  const hex = Array.from(digest, (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-');
+}
 
 /**
  * A failed refund of the payment (`refundsOfPayment`) that nothing has
@@ -160,6 +209,7 @@ interface SettledMeanwhile {
   stripeRefundId: string;
   resolution: string | null;
   coveredByRefundId: string | null;
+  resolvedAt: Date | null;
 }
 
 /** What `coverFailedRefunds` did with each id of its set. */
@@ -271,29 +321,39 @@ export async function uncoveredFailedRefunds(
   return rows.map((row) => row.stripeRefundId);
 }
 
+/** The refund a cover of a payment that owes nothing names, and whether it stands. */
+interface NothingOwedCoverer {
+  stripeRefundId: string;
+  standing: boolean;
+}
+
 /**
- * The newest refund standing on one payment's charge (pending, waiting on
- * the customer, or succeeded): the one that took the last of what was paid,
- * so what a cover names when nothing is owed (owner D81). Null when none
- * stands, as when every refund that counts was paid another way.
+ * The refund the cover of a payment that owes nothing names, among the
+ * refunds that count on one payment's charge (`countedRefundOf`), newest
+ * first by Stripe's time, then id: the newest STANDING refund (pending,
+ * waiting on the customer, or succeeded), the one that took the last of
+ * what was paid (owner D81); with none standing, the newest failed refund
+ * settled refunded elsewhere, whose amount the buyer got back another way
+ * (owner D85). Null when no refund counts: what the buyer has back is all
+ * paid another way or a chargeback's.
  */
-export async function newestStandingRefund(
+async function newestCoveringRefund(
   db: Tx | DatabaseClient,
   purchaseId: string,
   chargeId: string | null
-): Promise<string | null> {
+): Promise<NothingOwedCoverer | null> {
+  const standing = sql<boolean>`(${inArray(refunds.status, [...STANDING_REFUND_STATUSES])})`;
   const [newest] = await db
-    .select({ stripeRefundId: refunds.stripeRefundId })
+    .select({ stripeRefundId: refunds.stripeRefundId, standing })
     .from(refunds)
-    .where(
-      and(
-        refundsOfPayment(purchaseId, chargeId),
-        inArray(refunds.status, [...STANDING_REFUND_STATUSES])
-      )
+    .where(countedRefundOf(purchaseId, chargeId))
+    .orderBy(
+      desc(standing),
+      desc(refunds.stripeCreatedAt),
+      desc(refunds.stripeRefundId)
     )
-    .orderBy(desc(refunds.stripeCreatedAt), desc(refunds.stripeRefundId))
     .limit(1);
-  return newest?.stripeRefundId ?? null;
+  return newest ?? null;
 }
 
 interface CoverLogger {
@@ -307,7 +367,7 @@ interface CoverLogger {
  * an empty set. A set too long for one Stripe value is not recorded, and is
  * alerted at error with the ids: the request still covers it once Stripe
  * makes the refund, but a later pass can't (the cover of a payment that owes
- * nothing then names the newest standing refund instead).
+ * nothing then names the newest refund that counts instead).
  */
 export function coversMetadata(
   coveredRefundIds: readonly string[],
@@ -320,7 +380,7 @@ export function coversMetadata(
     return { [COVERS_METADATA_KEY]: value };
   }
   obs.error(
-    'A refund of everything owed includes more failed refunds than its Stripe metadata can name, so only this request can cover them: if it fails after Stripe makes the refund, they are covered later by the newest standing refund instead',
+    'A refund of everything owed includes more failed refunds than its Stripe metadata can name, so only this request can cover them: if it fails after Stripe makes the refund, they are covered later by the newest refund that counts instead',
     { errorId: crypto.randomUUID(), ...context, coveredRefundIds }
   );
   return {};
@@ -375,25 +435,17 @@ export async function coverIncludedRefunds<T>(
       coveredRefundIds: written.covered,
     });
   }
-  if (written.settledMeanwhile.length > 0) {
-    deps.obs.error(
-      'A refund of everything owed included failed refunds that support settled before it was recorded, so the buyer was refunded twice for them, or their creators re-paid: recover it by hand',
-      {
-        errorId: crypto.randomUUID(),
-        ...ids,
-        settled: written.settledMeanwhile.map((row) => ({
-          refundId: row.stripeRefundId,
-          resolution: row.resolution,
-          coveredByRefundId: row.coveredByRefundId,
-        })),
-      }
-    );
+  for (const row of written.settledMeanwhile) {
+    await reportSettledMeanwhile(deps.obs, cover, row);
   }
   if (written.unknown.length > 0 || written.notIncluded.length > 0) {
     deps.obs.error(
       "A refund of everything owed names failed refunds it can't have included (another payment's, or made after it), so they were not covered: check its metadata in Stripe",
       {
-        errorId: crypto.randomUUID(),
+        errorId: await stableErrorId('not_included', [
+          cover.coveringRefundId,
+          ...[...written.unknown, ...written.notIncluded].sort(),
+        ]),
         ...ids,
         unknownRefundIds: written.unknown,
         notIncludedRefundIds: written.notIncluded,
@@ -401,6 +453,63 @@ export async function coverIncludedRefunds<T>(
     );
   }
   return result;
+}
+
+/**
+ * A row of the covered set settled another way first: the residual (see the
+ * header), reported once per covering refund and row (`stableErrorId`). A
+ * cover's first pass reports it at error. A pass reading the set back from
+ * the refund's metadata (`includedBefore`) reports at error only a row
+ * settled after the covering refund's second, and not by a cover; anything
+ * else it logs at info, with the same errorId: settled within that second,
+ * the request that made the refund reported it, and covered by another
+ * refund, the buyer was not paid twice.
+ */
+async function reportSettledMeanwhile(
+  obs: CoverLogger,
+  cover: CoverInput,
+  row: SettledMeanwhile
+): Promise<void> {
+  const facts = {
+    errorId: await stableErrorId('refunded_twice', [
+      cover.coveringRefundId,
+      row.stripeRefundId,
+    ]),
+    purchaseId: cover.purchaseId,
+    chargeId: cover.chargeId,
+    coveringRefundId: cover.coveringRefundId,
+    refundId: row.stripeRefundId,
+    resolution: row.resolution,
+    coveredByRefundId: row.coveredByRefundId,
+  };
+  if (settledAfterTheCover(cover, row)) {
+    obs.error(
+      'A refund of everything owed included a failed refund that support settled before it was recorded, so the buyer was refunded twice for it, or its creators re-paid: recover it by hand',
+      facts
+    );
+    return;
+  }
+  obs.info(
+    'A refund of everything owed included a failed refund settled another way first, reported when that refund was made or covered by another refund, so it is not alerted again',
+    facts
+  );
+}
+
+/**
+ * Whether a row of the set settled meanwhile is alerted on this pass
+ * (`reportSettledMeanwhile`): always on a cover's first pass; read back from
+ * metadata, only when settled after the covering refund's second
+ * (Stripe's times are whole seconds) and not by a cover.
+ */
+function settledAfterTheCover(
+  cover: CoverInput,
+  row: SettledMeanwhile
+): boolean {
+  if (cover.includedBefore === undefined) return true;
+  if (row.resolution === COVERED_BY_REFUND || row.resolvedAt === null) {
+    return false;
+  }
+  return row.resolvedAt.getTime() >= cover.includedBefore.getTime() + 1000;
 }
 
 /**
@@ -448,83 +557,169 @@ export async function coverRecordedSets(
   }
 }
 
-/** What `coverWhenNothingOwed` found under its lock. */
-type NothingOwedCover =
-  | { open: string[]; coveringRefundId: string; covered: string[] }
-  | { open: string[]; coveringRefundId: null; covered: [] };
+/**
+ * What `coverWhenNothingOwed` found under its lock, when the payment owes
+ * nothing and no stage carries its debt: the refund it names (null when no
+ * refund counts), the failed refunds open then, and those it covered.
+ */
+interface NothingOwed {
+  coverer: NothingOwedCoverer | null;
+  open: string[];
+  covered: string[];
+}
+
+/** What `coverWhenNothingOwed` did, and its `alongside`'s result. */
+interface NothingOwedCovered<T> {
+  /** The refund named (owner D81, D85); null when something is owed, a stage carries the debt, or no refund counts. */
+  coveringRefundId: string | null;
+  covered: string[];
+  result: T | undefined;
+}
 
 /**
  * Cover every failed refund still open on a payment that owes nothing (owner
- * D81): under the payment's refunds lock, when its one count is £0
- * (`owedOnPayment`) and no stage carries its debt (`chargebackCarriesDebtOn`),
- * each is settled `covered_by_refund` by the newest standing refund
- * (`newestStandingRefund`). Each hit is alerted at error, with an errorId
- * and the ids: it is a missed cover or a refund made outside our code. With
- * no standing refund to name, nothing is covered, and that is alerted too.
- * Anything owed covers nothing. Returns what it covered; `source` names the
- * caller in the alert.
+ * D81, D85), and make `alongside`'s writes, in one transaction that locks
+ * the payment's refunds first (`lockRefundsOfPayment`). Under that lock it
+ * reads everything it acts on: the one count (`owedOnPayment`), the carry
+ * (`chargebackCarriesDebtOn`: while any chargeback on the charge stands
+ * lost or is owed again, the bank paid the buyer what that stage carries,
+ * so no refund can honestly be named), the open failed refunds, and the
+ * refund it names (`newestCoveringRefund`: the newest standing refund, else
+ * the newest one settled refunded elsewhere). So a refund that fails before
+ * the lock is never named, and anything owed covers nothing.
+ *
+ * Every "nothing owed" goes through here: the sync (after its metadata
+ * cover), the hourly backstop, the late win's "none" and the blocked
+ * payment's own refund with nothing to ask. Each hit is a missed cover or a
+ * refund made outside our code, so each is alerted at error, once
+ * (`stableErrorId`; a covered row is never covered again). With no refund
+ * that counts, nothing is covered, and that is alerted the same way.
+ * `alongside` gets the refund named, or null, and runs whatever was found.
+ * `boundedLock` gives up a lock held elsewhere after 5 s (`lock_timeout`),
+ * so one held charge never stalls a batch. `source` names the caller.
  */
-export async function coverWhenNothingOwed(
+export async function coverWhenNothingOwed<T = undefined>(
   deps: { db: DatabaseClient; obs: CoverLogger },
-  payment: { purchaseId: string; chargeId: string },
-  source: string
-): Promise<string[]> {
+  payment: { purchaseId: string; chargeId: string | null },
+  source: string,
+  options: {
+    alongside?: (tx: Tx, coveringRefundId: string | null) => Promise<T>;
+    boundedLock?: boolean;
+  } = {}
+): Promise<NothingOwedCovered<T>> {
   const resolvedAt = new Date();
-  const found = await deps.db.transaction(
-    async (tx): Promise<NothingOwedCover | null> => {
-      await lockRefundsOfPayment(tx, payment.purchaseId, payment.chargeId);
-      const [state] = await tx
-        .select({
-          owedCents: owedOnPayment(purchases.id, payment.chargeId),
-          carried: sql<boolean>`${chargebackCarriesDebtOn(payment.chargeId)}`,
-        })
-        .from(purchases)
-        .where(eq(purchases.id, payment.purchaseId))
-        .limit(1);
-      if (!state || state.owedCents > 0 || state.carried) return null;
-      const open = await uncoveredFailedRefunds(
-        tx,
-        payment.purchaseId,
-        payment.chargeId
-      );
-      if (open.length === 0) return null;
-      const coveringRefundId = await newestStandingRefund(
-        tx,
-        payment.purchaseId,
-        payment.chargeId
-      );
-      if (coveringRefundId === null) {
-        return { open, coveringRefundId: null, covered: [] };
-      }
-      const written = await coverFailedRefunds(
-        tx,
-        { ...payment, coveredRefundIds: open, coveringRefundId },
-        resolvedAt
-      );
-      return { open, coveringRefundId, covered: written.covered };
+  const { found, result } = await deps.db.transaction(async (tx) => {
+    if (options.boundedLock) {
+      await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
     }
+    await lockRefundsOfPayment(tx, payment.purchaseId, payment.chargeId);
+    const owing = await nothingOwedUnderLock(tx, payment, resolvedAt);
+    return {
+      found: owing,
+      result: await options.alongside?.(
+        tx,
+        owing?.coverer?.stripeRefundId ?? null
+      ),
+    };
+  });
+  if (found !== null) await alertNothingOwed(deps.obs, payment, source, found);
+  return {
+    coveringRefundId: found?.coverer?.stripeRefundId ?? null,
+    covered: found?.covered ?? [],
+    result,
+  };
+}
+
+/**
+ * `coverWhenNothingOwed`'s reads and cover, under its lock: null when the
+ * payment owes something or a stage carries its debt.
+ */
+async function nothingOwedUnderLock(
+  tx: Tx,
+  payment: { purchaseId: string; chargeId: string | null },
+  resolvedAt: Date
+): Promise<NothingOwed | null> {
+  const { purchaseId, chargeId } = payment;
+  const [state] = await tx
+    .select({
+      owedCents: owedOnPayment(purchases.id, chargeId),
+      // No charge, no chargeback: a dispute is always on a charge.
+      carried:
+        chargeId === null
+          ? sql<boolean>`FALSE`
+          : sql<boolean>`${chargebackCarriesDebtOn(chargeId)}`,
+    })
+    .from(purchases)
+    .where(eq(purchases.id, purchaseId))
+    .limit(1);
+  if (!state || state.owedCents > 0 || state.carried) return null;
+  const coverer = await newestCoveringRefund(tx, purchaseId, chargeId);
+  const open = await uncoveredFailedRefunds(tx, purchaseId, chargeId);
+  if (coverer === null || open.length === 0) {
+    return { coverer, open, covered: [] };
+  }
+  const written = await coverFailedRefunds(
+    tx,
+    {
+      purchaseId,
+      chargeId,
+      coveredRefundIds: open,
+      coveringRefundId: coverer.stripeRefundId,
+    },
+    resolvedAt
   );
-  if (found === null) return [];
+  return { coverer, open, covered: written.covered };
+}
+
+/**
+ * `coverWhenNothingOwed`'s alerts, at error, each with a deterministic
+ * errorId (`stableErrorId`) so a pass that meets the same rows logs the same
+ * one: what was covered and by which refund, standing or settled elsewhere
+ * (owner D85); or, with no refund that counts, what stays open.
+ */
+async function alertNothingOwed(
+  obs: CoverLogger,
+  payment: { purchaseId: string; chargeId: string | null },
+  source: string,
+  found: NothingOwed
+): Promise<void> {
+  if (found.open.length === 0) return;
   const ids = {
-    errorId: crypto.randomUUID(),
     purchaseId: payment.purchaseId,
     chargeId: payment.chargeId,
     source,
   };
-  if (found.coveringRefundId === null) {
-    deps.obs.error(
-      'Failed refunds are open on a payment that owes nothing, and no standing refund on its charge can cover them, so they stay in Failed refunds: check the charge on the support page',
-      { ...ids, failedRefundIds: found.open }
+  const { coverer } = found;
+  if (coverer === null) {
+    obs.error(
+      'Failed refunds are open on a payment that owes nothing, and no refund on its charge counts to cover them (all it has back was paid another way or by a chargeback), so they stay in Failed refunds: check the charge on the support page',
+      {
+        errorId: await stableErrorId('owes_nothing_no_coverer', [
+          payment.purchaseId,
+          payment.chargeId ?? '',
+          ...[...found.open].sort(),
+        ]),
+        ...ids,
+        failedRefundIds: found.open,
+      }
     );
-    return [];
+    return;
   }
-  deps.obs.error(
-    "Failed refunds were open on a payment that owes nothing, so the newest standing refund covered them: a cover was missed, or a refund was made outside our code (such as a full refund in Stripe's Dashboard)",
+  if (found.covered.length === 0) return;
+  obs.error(
+    coverer.standing
+      ? "Failed refunds were open on a payment that owes nothing, so the newest standing refund covered them: a cover was missed, or a refund was made outside our code (such as a full refund in Stripe's Dashboard)"
+      : 'Failed refunds were open on a payment that owes nothing and no refund stands on its charge, so the newest failed refund settled refunded elsewhere covered them: a cover was missed, or a refund was made outside our code',
     {
+      errorId: await stableErrorId('owes_nothing_covered', [
+        payment.purchaseId,
+        payment.chargeId ?? '',
+        coverer.stripeRefundId,
+        ...[...found.covered].sort(),
+      ]),
       ...ids,
-      coveringRefundId: found.coveringRefundId,
+      coveringRefundId: coverer.stripeRefundId,
       coveredRefundIds: found.covered,
     }
   );
-  return found.covered;
 }

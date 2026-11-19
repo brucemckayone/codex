@@ -147,6 +147,22 @@ export function owedOnPayment(
 }
 
 /**
+ * What the outer query's purchase's buyer has back beyond what they paid
+ * (`paidBackOnPayment` less what was paid, never below 0): a refund twice,
+ * by the same count as `owedOnPayment` (review r10), which the late win's
+ * adoption of its own refund alerts on. The outer query must not be on
+ * `refunds`.
+ */
+export function overpaidOnPayment(
+  purchaseId: SQLWrapper | string,
+  chargeId: SQLWrapper | string | null
+): SQL<number> {
+  return sql<number>`GREATEST(0, ${paidBackOnPayment(purchaseId, chargeId)} - ${purchases.amountPaidCents})::int`.mapWith(
+    Number
+  );
+}
+
+/**
  * What a chargeback lost for `lostCents` leaves the outer query's purchase
  * owed before anything is paid another way: what was paid less the refunds
  * that count and the loss being written. Not `owedOnPayment`: the loss runs
@@ -250,11 +266,19 @@ function chargebackCarriesDebt(d: StageColumns = disputes): SQL {
 }
 
 /**
- * A dispute on charge `chargeId` (a value, or the outer query's column) is
- * at a stage that carries its blocked payment's debt
- * (`chargebackCarriesDebt`): that stage is the debt's one surface (owner
- * D66), so the cover of a payment that owes nothing leaves its failed
- * refunds alone (owner D81). The outer query must not be on `disputes`.
+ * ANY dispute on charge `chargeId` (a value, or the outer query's column),
+ * of a blocked payment or an ordinary sale, stands lost or is owed again
+ * (`chargebackCarriesDebt`'s two stages). While one does, the BANK paid the
+ * buyer what that stage carries, so no refund can honestly be named as what
+ * paid the charge's failed refunds, and the cover of a payment that owes
+ * nothing leaves them alone (owner D81; the lead, review r10). A blocked
+ * payment's debt is that stage's, its one surface (owner D66). An ordinary
+ * sale's failed refund while its chargeback stands lost is Codex-1j7fs's
+ * (D77); for it only the lost arm can hold, since the owed-again arm needs
+ * `paid_another_way_cents`, which only a blocked payment's mark writes
+ * (support's `writePaidAnotherWay`, reached through `findShortLosses`, which
+ * selects `blockedPayment()` alone). The outer query must not be on
+ * `disputes`.
  */
 export function chargebackCarriesDebtOn(chargeId: SQLWrapper | string): SQL {
   return sql`EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.stripeChargeId} = ${chargeId} AND ${chargebackCarriesDebt()})`;
