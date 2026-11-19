@@ -33,7 +33,7 @@ import type {
   ContentLeavingNoticeReason,
   ContentLeavingNoticeState,
 } from '@codex/constants';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { getConstraintName } from '../utils/db-errors';
 
@@ -53,12 +53,15 @@ describe.skipIf(!HAS_DB)(
       );
       const {
         CONTENT_LEAVING_NOTICE_KINDS,
+        CONTENT_LEAVING_NOTICE_OPEN_STATES,
         CONTENT_LEAVING_NOTICE_REASONS,
         CONTENT_LEAVING_NOTICE_STATES,
         CONTENT_LEAVING_NOTICE_UNSENT_TRY_STATES,
       } = await import('@codex/constants');
       const tag = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const userId = `ln_checks_user_${tag}`;
+      // A second owner, so the unique is proved per person, not per round.
+      const otherUserId = `ln_checks_other_${tag}`;
       const leaves = new Date(Date.UTC(2026, 11, 17, 12));
       const later = new Date(Date.UTC(2027, 0, 20, 12));
       /** The reason each tried state's model row gives, as the sweep would. */
@@ -79,14 +82,23 @@ describe.skipIf(!HAS_DB)(
       const pairs: Record<string, string | null> = {};
       let downloadDefault: boolean | undefined;
       const matchedBack = { piece: -1, notice: -1 };
+      /** The claim index's states, as the migrated database holds them. */
+      let claimStates: string[] = [];
       let kept = -1;
       try {
         await dbWs.transaction(async (tx) => {
-          await tx.insert(users).values({
-            id: userId,
-            email: `ln-checks-${tag}@example.test`,
-            name: 'Leaving checks',
-          });
+          await tx.insert(users).values([
+            {
+              id: userId,
+              email: `ln-checks-${tag}@example.test`,
+              name: 'Leaving checks',
+            },
+            {
+              id: otherUserId,
+              email: `ln-checks-other-${tag}@example.test`,
+              name: 'Leaving checks, other owner',
+            },
+          ]);
           const piece = async (
             name: string,
             status: string,
@@ -289,6 +301,35 @@ describe.skipIf(!HAS_DB)(
             sql`UPDATE content_leaving_notices SET attempts = -1
               WHERE content_id = ${archived.id} AND round = ${later}`
           );
+          // The unique is per person AND per piece: a second owner of the same
+          // piece, and the same owner's second piece, in the round `later`
+          // already holds, are both accepted. A unique that lost either
+          // column would let DO NOTHING drop every owner but one.
+          const secondPiece = await piece('second', 'archived', {
+            leavesAt: later,
+          });
+          outcome['a second owner, same piece and round'] = await attempt(
+            sql`INSERT INTO content_leaving_notices (content_id, user_id, kind, round)
+              VALUES (${archived.id}, ${otherUserId}, 'leaving', ${later})`
+          );
+          outcome['a second piece, same owner and round'] = await attempt(
+            sql`INSERT INTO content_leaving_notices (content_id, user_id, kind, round)
+              VALUES (${secondPiece.id}, ${userId}, 'leaving', ${later})`
+          );
+          // Legitimate tried forms of the open and cancelled states: the claim
+          // adds the try while a row stays `due`, and Keep cancels a row
+          // tried or not, keeping its reason.
+          outcome['due with a try'] = await notice({ attempts: 1 });
+          outcome['cancelled with a try and a reason'] = await notice({
+            state: 'cancelled',
+            attempts: 2,
+            lastReason: 'refused',
+          });
+          outcome['failed with three tries'] = await notice({
+            state: 'failed',
+            attempts: 3,
+            lastReason: 'refused',
+          });
           for (const state of CONTENT_LEAVING_NOTICE_UNSENT_TRY_STATES) {
             for (const lastReason of [
               ...CONTENT_LEAVING_NOTICE_REASONS,
@@ -302,10 +343,29 @@ describe.skipIf(!HAS_DB)(
             }
           }
 
+          // The DDL is generated from @codex/constants' built dist/, so a
+          // list changed without a rebuild and regenerate leaves the index
+          // on the old one with no error. Read it back from the database.
+          const index = await tx.execute(
+            sql`SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_content_leaving_notices_open'`
+          );
+          const indexdef = index.rows[0]?.indexdef;
+          claimStates =
+            typeof indexdef === 'string'
+              ? [...indexdef.matchAll(/'([a-z_]+)'/g)]
+                  .map((match) => match[1] ?? '')
+                  .sort()
+              : [];
+
           const rows = await tx
             .select({ id: contentLeavingNotices.id })
             .from(contentLeavingNotices)
-            .where(eq(contentLeavingNotices.contentId, archived.id));
+            .where(
+              inArray(contentLeavingNotices.contentId, [
+                archived.id,
+                secondPiece.id,
+              ])
+            );
           kept = rows.length;
           throw new Rollback();
         });
@@ -336,6 +396,11 @@ describe.skipIf(!HAS_DB)(
         'a removed notice cancelled': 'check_content_leaving_notices_cancelled',
         'the same email twice in a round': 'uq_content_leaving_notices_person',
         'negative attempts': 'check_content_leaving_notices_attempts',
+        'a second owner, same piece and round': null,
+        'a second piece, same owner and round': null,
+        'due with a try': null,
+        'cancelled with a try and a reason': null,
+        'failed with three tries': null,
       });
       // A refused or skipped try is `failed`; a try with no answer is
       // `unknown`, never the other way; no address only ends a row
@@ -361,13 +426,19 @@ describe.skipIf(!HAS_DB)(
       });
       expect(downloadDefault).toBe(true);
       expect(matchedBack).toEqual({ piece: 1, notice: 1 });
-      // Every kind × state but a cancelled `removed`, the second round, and
-      // the seven accepted pairs.
+      expect(claimStates).toEqual(
+        [...CONTENT_LEAVING_NOTICE_OPEN_STATES].sort()
+      );
+      // Every kind × state but a cancelled `removed`, the second round, the
+      // second owner and the second piece, the three tried forms, and the
+      // seven accepted pairs.
       expect(kept).toBe(
         CONTENT_LEAVING_NOTICE_KINDS.length *
           CONTENT_LEAVING_NOTICE_STATES.length -
           1 +
           1 +
+          2 +
+          3 +
           7
       );
     });

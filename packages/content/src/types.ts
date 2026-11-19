@@ -21,6 +21,8 @@ import type {
   ServedMediaItem,
 } from '@codex/database/schema';
 import type { ContentBulkResult } from '@codex/shared-types';
+// Type-only, so erased at runtime: no import cycle with the service.
+import type { CATALOGUE_CONTENT_COLUMNS } from './services/content-service';
 
 /**
  * Database client type — re-exported from `@codex/database` so consumers
@@ -272,9 +274,9 @@ export type PublicMediaItemSource = Pick<
 >;
 
 /**
- * A catalogue row any viewer may read: the content row without its sales count
- * or a draft's publish-when-ready state (`CATALOGUE_CONTENT_COLUMNS`; the two
- * lists must match), its creator without an email, and the
+ * A catalogue row any viewer may read: the content row without the columns
+ * `CATALOGUE_CONTENT_COLUMNS` leaves out (its keys, read here, so the two
+ * cannot drift), its creator without an email, and the
  * projected org and media item. `list({ scope: 'browse' })` returns these
  * (Codex-1bdx0); `listPublic` adds the topic slugs. The org and creator are
  * already their wire shapes (`@codex/shared-types`); the media item still holds
@@ -285,11 +287,7 @@ export type CatalogueContentRow = Omit<
   | 'mediaItem'
   | 'organization'
   | 'creator'
-  | 'purchaseCount'
-  | 'publishRequestedAt'
-  | 'publishBlockedReason'
-  | 'leavesAt'
-  | 'ownersCanDownload'
+  | keyof typeof CATALOGUE_CONTENT_COLUMNS
 > & {
   mediaItem: PublicMediaItemSource | null;
   organization: PublicContentOrganization | null;

@@ -26,9 +26,10 @@
  *   `staying` email comes after that round's others (one Keep per round),
  *   never `created_at`, which is when a transaction began. That holds only
  *   while each delete's round is later than the piece's last one, so the
- *   delete refuses a round that is not (a shorter notice length could make
- *   it tie or go back, and a tied round makes DO NOTHING write no rows at
- *   all). That reaches a
+ *   delete refuses a round that is not. A shorter notice length could make
+ *   it tie or go back, and a tied round makes DO NOTHING skip everyone the
+ *   earlier round already wrote a row for: whoever was told it stays is
+ *   never told it leaves again. That reaches a
  *   person whose `staying` email a second delete cancelled, or a refusal
  *   kept from going, and skips one already told it stays;
  * - `removed` rows are added by a platform admin's immediate delete.
@@ -98,7 +99,10 @@ import { users } from './users';
 
 /**
  * `'a', 'b'` for a CHECK's or an index's IN list, from constant words. It is
- * raw SQL, so it takes only lower-case words and underscores.
+ * raw SQL, so it takes only lower-case words and underscores. drizzle-kit
+ * reads `@codex/constants` from its built dist/, so rebuild it before
+ * generating, or the DDL keeps the old lists with no error (the CHECK test
+ * reads the claim index back to catch that).
  */
 function sqlWords(words: readonly string[]) {
   for (const word of words) {
