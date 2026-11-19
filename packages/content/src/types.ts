@@ -418,10 +418,37 @@ export interface SettleOptions {
 export type UnpublishContentResponse = SingleItemResponse<Content>;
 
 /**
- * Response for DELETE /api/content/:id
- * Returns null (204 No Content)
+ * What a delete did (Codex-a6ofh.6): `deleted` at once, as nobody holds it,
+ * or `leaving` on `leavesAt`, its `holders` keeping it until then and each
+ * emailed. A piece already leaving answers `leaving` with its date as it was.
  */
-export type DeleteContentResponse = null;
+export type DeleteContentResult =
+  | { outcome: 'deleted'; leavesAt: null; holders: 0 }
+  | { outcome: 'leaving'; leavesAt: Date; holders: number };
+
+/** Response for DELETE /api/content/:id */
+export type DeleteContentResponse = SingleItemResponse<DeleteContentResult>;
+
+/**
+ * What Keep did (Codex-a6ofh.6): `kept` when the piece was leaving, and how
+ * many people are to be told it stays. The org it is filed in, for the
+ * route's cache refresh.
+ */
+export interface KeepContentResult {
+  kept: boolean;
+  staying: number;
+  organizationId: string | null;
+}
+
+/** Response for POST /api/content/:id/keep */
+export type KeepContentResponse = SingleItemResponse<KeepContentResult>;
+
+/** A piece the day-30 delete removed, for the sweep's cleanup (WP-4). */
+export interface CompletedLeave {
+  id: string;
+  organizationId: string | null;
+  creatorId: string;
+}
 
 /**
  * Response for GET /api/media/:id

@@ -99,7 +99,11 @@
   "vars": {
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
-    "WEB_APP_URL": "http://lvh.me:3000", "API_URL": "http://localhost:8787"
+    "WEB_APP_URL": "http://lvh.me:3000", "API_URL": "http://localhost:8787",
+    // The public R2 asset host, for the takedown's cover cleanup
+    // (Codex-a6ofh.6): image processing refuses to run without it. The same
+    // value as content-api's (workers/dev-cdn locally).
+    "R2_PUBLIC_URL_BASE": "http://localhost:4100"
   },
 
   // Environment configurations
@@ -131,7 +135,8 @@
         "ENVIRONMENT": "test",
         "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://lvh.me:3000",
-        "API_URL": "http://localhost:8787"
+        "API_URL": "http://localhost:8787",
+        "R2_PUBLIC_URL_BASE": "http://localhost:4100"
       },
       "kv_namespaces": [
         {
@@ -206,7 +211,9 @@
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://revelations.studio",
-        "AUTH_WORKER_URL": "https://auth.revelations.studio"
+        "AUTH_WORKER_URL": "https://auth.revelations.studio",
+        // As content-api's: the provisioned assets-bucket domain.
+        "R2_PUBLIC_URL_BASE": "https://cdn-assets.revelations.studio"
       },
       "kv_namespaces": [
         {

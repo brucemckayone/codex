@@ -244,21 +244,17 @@ export class ContentAlreadyLiveError extends ConflictError {
 }
 
 /**
- * 409 with `details.code: 'CONTENT_HAS_BUYERS'` (Codex-a6ofh.3.5, owner
- * D-b4): a bulk delete, or a bulk move to Followers or Team only, left this
- * piece alone because people have it, bought or given (through the piece or
- * a course that holds it, owner 2026-11-13), and either would end their
- * playback. `details.buyers` is how many people. Unpublish, Free, Buy once and Subscribers keep
- * a buyer's playback, so none of those refuses.
+ * 409 with `details.code: 'CONTENT_LEAVING'` (Codex-a6ofh.6): a publish of a
+ * piece that is leaving (`leaves_at` set). Its owners were told it goes, so
+ * the creator keeps it first (`POST /api/content/:id/keep`), which tells
+ * whoever may have heard; a publish in place would tell nobody.
  */
-export class ContentHasBuyersError extends ConflictError {
-  constructor(contentId: string, buyers: number) {
-    super(
-      buyers === 1
-        ? '1 person has it, bought or given, so it was left alone.'
-        : `${buyers} people have it, bought or given, so it was left alone.`,
-      { contentId, code: ERROR_CODES.CONTENT_HAS_BUYERS, buyers }
-    );
+export class ContentLeavingError extends ConflictError {
+  constructor(contentId: string) {
+    super('This is leaving. Keep it first, then publish it.', {
+      contentId,
+      code: ERROR_CODES.CONTENT_LEAVING,
+    });
   }
 }
 

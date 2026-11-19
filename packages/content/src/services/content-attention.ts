@@ -147,6 +147,9 @@ function mediaOnItsWay(now: Date): SQL {
 
 // ── `ready`: assertPublishable's rules, one predicate each ────────────────
 
+/** Not leaving (Codex-a6ofh.6): a leaving piece is kept before it goes live. */
+const notLeaving = sql`(${content.leavesAt} is null)`;
+
 /** `assertCanFileInOrg`: an org piece's creator is on a live org's team. */
 const onTheTeam = sql`(${content.organizationId} is null or exists (select 1 from ${organizationMemberships} inner join ${organizations} on ${organizations.id} = ${organizationMemberships.organizationId} where ${organizationMemberships.organizationId} = ${content.organizationId} and ${organizationMemberships.userId} = ${content.creatorId} and ${organizationMemberships.status} = ${ORGANIZATION_STATUS.ACTIVE} and ${inArray(organizationMemberships.role, ORGANIZATION_TEAM_ROLES)} and ${organizations.deletedAt} is null))`;
 
@@ -189,6 +192,7 @@ const coverNotFromADeletedVideo = sql`(${content.thumbnailUrl} is null or not ($
 export const readyCandidate: SQL = allOf(
   draftInHand,
   onTheTeam,
+  notLeaving,
   filledForItsType,
   pricedIfForSale,
   inATierIfGated,

@@ -442,8 +442,52 @@ app.post(
 );
 
 /**
+ * The cover's files of a piece just deleted, in the background and
+ * best-effort (Codex-ko8ko, as content-api's delete): the service records
+ * orphans for the hourly sweep on an R2 failure, and an image service that
+ * cannot be built (no public R2 host) is logged here, never a failed delete.
+ */
+function clearDeletedCover(
+  ctx: {
+    background: <T>(promise: Promise<T>) => Promise<T>;
+    services: {
+      imageProcessing: {
+        deleteContentThumbnail(
+          contentId: string,
+          creatorId: string
+        ): Promise<void>;
+      };
+    };
+    obs?: { warn(message: string, metadata?: Record<string, unknown>): void };
+  },
+  contentId: string,
+  creatorId: string
+): void {
+  void ctx.background(
+    Promise.resolve()
+      .then(() =>
+        ctx.services.imageProcessing.deleteContentThumbnail(
+          contentId,
+          creatorId
+        )
+      )
+      .catch((error: unknown) => {
+        ctx.obs?.warn('Thumbnail R2 cleanup failed on content delete', {
+          context: 'admin-content-delete-thumbnail',
+          contentId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+  );
+}
+
+/**
  * DELETE /api/admin/content/:contentId
- * Soft delete content (admin override). See publish handler for URL slot rationale.
+ * Delete content (an org owner or admin, any creator's piece in the org),
+ * as the creator's own delete (owner 2026-11-19, Codex-a6ofh.6): one nobody
+ * holds is deleted at once, one people hold leaves in 30 days, its holders
+ * emailed. Never a takedown: that is `POST .../takedown`, platform admins
+ * only. See publish handler for URL slot rationale.
  */
 app.delete(
   '/api/admin/content/:contentId',
@@ -454,13 +498,55 @@ app.delete(
       requireOrgManagement: true,
     },
     input: { params: adminContentIdParamsSchema },
-    successStatus: 204,
     handler: async (ctx) => {
-      await ctx.services.adminContent.deleteContent(
-        ctx.organizationId,
-        ctx.input.params.contentId
+      const { contentId } = ctx.input.params;
+      const { creatorId, ...result } =
+        await ctx.services.adminContent.deleteContent(
+          ctx.organizationId,
+          contentId
+        );
+      // A leaving piece keeps its cover: its owners see it until it goes.
+      if (result.outcome === 'deleted') {
+        clearDeletedCover(ctx, contentId, creatorId);
+      }
+      void ctx.background(
+        ctx.services.adminContent.refreshAfterDelete(
+          { contentId, organizationId: ctx.organizationId },
+          result.outcome === 'deleted' ? 'content_deleted' : 'content_leaving',
+          ctx.executionCtx.waitUntil.bind(ctx.executionCtx)
+        )
       );
-      return null;
+      return result;
+    },
+  })
+);
+
+/**
+ * POST /api/admin/content/:contentId/takedown
+ * A platform admin's takedown (D4, Codex-a6ofh.6): a legal or policy
+ * removal, deleted at once whoever holds it. Each holder is sent the
+ * `removed` email by the leaving sweep, and any notice in flight is
+ * cancelled. No UI calls it yet, as the fee routes.
+ *
+ * Security: platform_owner only, strict rate limit
+ */
+app.post(
+  '/api/admin/content/:contentId/takedown',
+  procedure({
+    policy: { auth: 'platform_owner', rateLimit: 'strict' },
+    input: { params: adminContentIdParamsSchema },
+    handler: async (ctx) => {
+      const { contentId } = ctx.input.params;
+      const taken = await ctx.services.adminContent.takedownContent(contentId);
+      clearDeletedCover(ctx, contentId, taken.creatorId);
+      void ctx.background(
+        ctx.services.adminContent.refreshAfterDelete(
+          { contentId, organizationId: taken.organizationId },
+          'content_deleted',
+          ctx.executionCtx.waitUntil.bind(ctx.executionCtx)
+        )
+      );
+      return { holders: taken.holders };
     },
   })
 );

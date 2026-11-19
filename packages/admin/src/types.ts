@@ -388,6 +388,17 @@ export interface AdminContentItem extends Content {
 }
 
 /**
+ * A piece a platform admin took down (Codex-a6ofh.6): how many held it (each
+ * sent the `removed` email), and where its cover and caches live.
+ */
+export interface TakenDownContent {
+  contentId: string;
+  holders: number;
+  organizationId: string | null;
+  creatorId: string;
+}
+
+/**
  * Content status for admin filtering
  */
 export type AdminContentStatus = 'draft' | 'published' | 'archived';

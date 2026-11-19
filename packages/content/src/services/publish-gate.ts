@@ -35,6 +35,7 @@ import { hasArticleBody } from '@codex/validation';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import {
   ContentBodyRequiredError,
+  ContentLeavingError,
   CreatorPayoutsRequiredError,
   MediaDeletedError,
   MediaNotFoundError,
@@ -62,6 +63,7 @@ type PublishableRow = Pick<
   | 'isPurchasable'
   | 'isTierGated'
   | 'priceCents'
+  | 'leavesAt'
 > & { mediaItem: Pick<MediaItem, 'id'> | null };
 
 /**
@@ -217,14 +219,15 @@ export function assertSaveKeepsContentFilled(
  * `MEDIA_NOT_READY`. Each refusal carries a `details.code` the editor's
  * checklist maps to a row.
  *
- * In order: the creator is on the org's team (when the row has an org), then
- * what the row holds (`assertContentFilled`: media attached, an article's
+ * In order: the creator is on the org's team (when the row has an org), the
+ * piece is not leaving (Codex-a6ofh.6), then what the row holds (`assertContentFilled`: media attached, an article's
  * body, a price of at least £1), then a video or audio piece's media is the
  * creator's own, not deleted and ready, the thumbnail isn't a frame of a
  * deleted video, subscriber content is in a tier, and content that earns
  * money has a creator who can be paid.
  *
  * @throws {NotOnOrgTeamError} The creator is no longer on the org's team
+ * @throws {ContentLeavingError} It is leaving: Keep it first
  * @throws {MediaRequiredToPublishError} Video or audio with no media
  * @throws {MediaNotFoundError} Its media item is another creator's
  *   (Codex-vmi6m)
@@ -251,6 +254,11 @@ export async function assertPublishable(
   if (row.organizationId) {
     await assertCanFileInOrg(tx, row.organizationId, row.creatorId, 'publish');
   }
+
+  // Before the media, so a publish when ready of a leaving piece is refused,
+  // never scheduled: its owners were told it goes, and Keep tells them it
+  // stays (Codex-a6ofh.6).
+  if (row.leavesAt) throw new ContentLeavingError(row.id);
 
   assertContentFilled(row);
   const readiness = await mediaReadiness(tx, row, options);

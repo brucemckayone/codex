@@ -5,6 +5,16 @@
  */
 
 /**
+ * How long owners keep a deleted piece they own (owner D1, 2026-11-17): its
+ * `leaves_at` is the delete plus this many days, and that date is the
+ * notice period's `round`. Keep's "newest email" order reads rounds as only
+ * going forward, so shortening this while a kept piece is still inside its
+ * old window can make its next delete tie or precede an earlier round. The
+ * delete refuses such a round (an error, rolled back) rather than write it.
+ */
+export const LEAVING_NOTICE_DAYS = 30;
+
+/**
  * The emails an owner can be sent about a piece (one
  * `content_leaving_notices` row each):
  * - `leaving`: on the delete, naming the date and, where allowed, the download;

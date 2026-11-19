@@ -100,6 +100,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lte,
   ne,
   notExists,
   or,
@@ -108,7 +109,6 @@ import {
 } from 'drizzle-orm';
 import {
   ContentAlreadyLiveError,
-  ContentHasBuyersError,
   ContentNotFoundError,
   ContentTypeMismatchError,
   InternalServiceError,
@@ -119,12 +119,15 @@ import {
 import type {
   BulkTouchedPiece,
   CatalogueContentRow,
+  CompletedLeave,
   Content,
   ContentBulkReport,
   ContentCategoryRef,
   ContentFilters,
   ContentWithRelations,
   DatabaseTransaction,
+  DeleteContentResult,
+  KeepContentResult,
   PaginationParams,
   PublicContentCreator,
   PublicContentOrganization,
@@ -144,12 +147,8 @@ import {
   SQL_ATTENTION_KINDS,
   type SqlAttentionKind,
 } from './content-attention';
-import {
-  buyerCountsOf,
-  byBuyers,
-  countHolders,
-  holderCountsOf,
-} from './content-buyers';
+import { buyerCountsOf, byBuyers, holderCountsOf } from './content-buyers';
+import { deleteOrLeave, keepLeaving } from './content-leaving';
 import {
   assertTiersInOrg,
   type ContentTierWire,
@@ -483,6 +482,15 @@ type StudioListOptions = { scope?: 'studio'; withCategories?: boolean };
  * stall that runs the whole request past its time.
  */
 type BulkPieceOption = { bulk?: boolean };
+
+/**
+ * What one bulk piece came to when it was neither refused nor failed (its
+ * `ContentBulkResult` but the id), and the piece the route refreshes, if any.
+ */
+type BulkPieceDone = (
+  | { outcome: 'done' | 'scheduled' | 'unchanged' }
+  | { outcome: 'leaving'; leavesAt: string; holders: number }
+) & { touched?: BulkTouchedPiece };
 
 /**
  * A bulk piece's wait on each lock it takes (a publish takes up to four: its
@@ -1152,11 +1160,9 @@ export class ContentService extends BaseService {
   /**
    * The update itself, without its tier wire. `bulk` is a piece of a bulk
    * access change (Codex-a6ofh.3.5): it writes no cache (the route does,
-   * once), waits at most a second for its row ({@link BulkPieceOption}), a
-   * piece whose access already reads as sent is left unwritten and
-   * reported `unchanged`, and with `refuseIfBought` a piece people bought is
-   * left alone (`ContentHasBuyersError`), for a move to Followers or Team
-   * only, which would end their playback (owner R1). Judged on the locked row.
+   * once), waits at most a second for its row ({@link BulkPieceOption}), and
+   * a piece whose access already reads as sent is left unwritten and
+   * reported `unchanged`. Judged on the locked row.
    */
   private async applyUpdate(
     id: string,
@@ -1164,8 +1170,8 @@ export class ContentService extends BaseService {
     creatorId: string,
     {
       asDraft = false,
-      bulk,
-    }: UpdateContentOptions & { bulk?: { refuseIfBought: boolean } } = {}
+      bulk = false,
+    }: UpdateContentOptions & BulkPieceOption = {}
   ): Promise<{
     row: Content;
     droppedThumbnailUrl: string | null;
@@ -1580,17 +1586,6 @@ export class ContentService extends BaseService {
           }
         }
 
-        // Last, before the write: a change any rule above refuses for its
-        // own reason (the org, the tier rules, an empty live piece, the
-        // payouts gate) never reads as "people have it", which, put right,
-        // would not let it through. A course-only piece is let through: the
-        // access decision answers course-only before Followers or Team only,
-        // so its course holders keep it, and nobody else had it.
-        if (bulk?.refuseIfBought && !effCourseOnly) {
-          const holders = await countHolders(tx as DatabaseTransaction, id);
-          if (holders > 0) throw new ContentHasBuyersError(id, holders);
-        }
-
         // A publish-when-ready schedule waits only on media that will get
         // there (owner, Codex-a6ofh.2.7): removing the media clears it, and so
         // does a swap onto a failed item or a stopped upload, or a change to
@@ -1762,7 +1757,7 @@ export class ContentService extends BaseService {
       if (isUniqueViolationOf(error, CONTENT_SLUG_INDEXES)) {
         throw new SlugConflictError(validated.slug ?? previousSlug ?? '');
       }
-      this.handleError(asBulkBusy(error, bulk !== undefined, id), 'update');
+      this.handleError(asBulkBusy(error, bulk, id), 'update');
     }
   }
 
@@ -2546,40 +2541,44 @@ export class ContentService extends BaseService {
   }
 
   /**
-   * Soft delete content
-   *
-   * Security:
-   * - Sets deleted_at timestamp (soft delete)
-   * - Preserves data for purchase history/analytics
-   * - Scoped to creator ownership
+   * Delete content (owner D1, Codex-a6ofh.6): a soft delete, or, for a piece
+   * people hold, the leaving notice. It goes off sale and leaves on a date
+   * {@link LEAVING_NOTICE_DAYS} days out, its holders keep it until then and
+   * each is emailed (`deleteOrLeave`). Deleting a leaving piece again changes
+   * nothing. Scoped to the creator's own pieces.
    *
    * @param id - Content ID
    * @param creatorId - Creator ID (for authorization)
    * @throws {ContentNotFoundError} If content doesn't exist
    */
-  async delete(id: string, creatorId: string): Promise<void> {
-    await this.deleteAndReport(id, creatorId);
+  async delete(id: string, creatorId: string): Promise<DeleteContentResult> {
+    return (await this.deleteAndReport(id, creatorId)).result;
   }
 
   /**
-   * `delete`, returning the org the piece was filed in. A `bulk` delete
-   * (owner D-b4) leaves alone a piece people bought
-   * (`ContentHasBuyersError`): deleting it would end their playback. Counted
+   * `delete`, with the org the piece was filed in. The holders are counted
    * here, under the row's lock, never taken from the list. A buyer still in
    * checkout is not counted: completing a purchase takes no lock this waits
-   * on, so it can land after the count (a delete one at a time never counts
-   * at all). That gap is the purchase path's to close (Codex-z1t3c).
+   * on, so it can land after the count. That gap is the purchase path's to
+   * close (Codex-z1t3c): a checkout that completes on a leaving piece is
+   * refused there.
    */
   private async deleteAndReport(
     id: string,
     creatorId: string,
     { bulk = false }: BulkPieceOption = {}
-  ): Promise<{ organizationId: string | null }> {
+  ): Promise<{ organizationId: string | null; result: DeleteContentResult }> {
     try {
       return await this.db.transaction(async (tx) => {
         if (bulk) await tx.execute(BULK_LOCK_WAIT);
         const [existing] = await tx
-          .select({ organizationId: content.organizationId })
+          .select({
+            id: content.id,
+            organizationId: content.organizationId,
+            status: content.status,
+            offSaleAt: content.offSaleAt,
+            leavesAt: content.leavesAt,
+          })
           .from(content)
           .where(and(eq(content.id, id), scopedNotDeleted(content, creatorId)))
           .for('no key update');
@@ -2587,25 +2586,105 @@ export class ContentService extends BaseService {
         if (!existing) {
           throw new ContentNotFoundError(id);
         }
-        if (bulk) {
-          const holders = await countHolders(tx as DatabaseTransaction, id);
-          if (holders > 0) throw new ContentHasBuyersError(id, holders);
-        }
-
-        await tx
-          .update(content)
-          .set({
-            deletedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(and(eq(content.id, id), withCreatorScope(content, creatorId)));
-        return existing;
+        const result = await deleteOrLeave(
+          tx as DatabaseTransaction,
+          existing,
+          this.obs
+        );
+        return { organizationId: existing.organizationId, result };
       });
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
       }
       this.handleError(asBulkBusy(error, bulk, id), 'delete');
+    }
+  }
+
+  /**
+   * Keep it (Codex-a6ofh.6, design §4): the creator cancels a leaving piece's
+   * delete. Its date is cleared and it stays off sale; whoever may last have
+   * been told it leaves is told it stays (`keepLeaving`). A piece that is
+   * not leaving comes back as it is, writing nothing (`kept: false`), as a
+   * cancel of a schedule that isn't there does. Scoped to the creator's own
+   * pieces.
+   *
+   * @throws {ContentNotFoundError} Not the creator's, or already gone
+   */
+  async keep(id: string, creatorId: string): Promise<KeepContentResult> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            organizationId: content.organizationId,
+            leavesAt: content.leavesAt,
+          })
+          .from(content)
+          .where(and(eq(content.id, id), scopedNotDeleted(content, creatorId)))
+          .for('no key update');
+        if (!existing) {
+          throw new ContentNotFoundError(id);
+        }
+        const { organizationId, leavesAt } = existing;
+        if (!leavesAt) return { kept: false, staying: 0, organizationId };
+        const staying = await keepLeaving(
+          tx as DatabaseTransaction,
+          id,
+          leavesAt
+        );
+        return { kept: true, staying, organizationId };
+      });
+    } catch (error) {
+      if (error instanceof ContentNotFoundError) {
+        throw error;
+      }
+      this.handleError(error, 'keep');
+    }
+  }
+
+  /**
+   * The day-30 delete (Codex-a6ofh.6, design §4), for the leaving sweep: up
+   * to `limit` pieces whose date has come, oldest first, are deleted. One
+   * conditional UPDATE, so a run that finds a piece another run took (SKIP
+   * LOCKED) or already deleted does nothing to it: idempotent. `leaves_at`
+   * is kept, so a deleted piece with a date is one that left with notice.
+   * The caller clears each one's cover and refreshes its people (WP-4).
+   *
+   * Not scoped to a creator: it is the sweep's, over every creator's pieces
+   * that are due, and only an `auth: 'worker'` route calls it.
+   */
+  async completeLeaving(limit = 50): Promise<CompletedLeave[]> {
+    const now = new Date();
+    const due = and(lte(content.leavesAt, now), isNull(content.deletedAt));
+    try {
+      const completed = await this.db.transaction((tx) =>
+        tx
+          .update(content)
+          .set({ deletedAt: now, updatedAt: now })
+          .where(
+            and(
+              inArray(
+                content.id,
+                tx
+                  .select({ id: content.id })
+                  .from(content)
+                  .where(due)
+                  .orderBy(asc(content.leavesAt), asc(content.id))
+                  .limit(limit)
+                  .for('update', { skipLocked: true })
+              ),
+              due
+            )
+          )
+          .returning()
+      );
+      return completed.map(({ id, organizationId, creatorId }) => ({
+        id,
+        organizationId,
+        creatorId,
+      }));
+    } catch (error) {
+      this.handleError(error, 'completeLeaving');
     }
   }
 
@@ -3155,19 +3234,30 @@ export class ContentService extends BaseService {
   }
 
   /**
-   * Soft-delete each piece, leaving alone any piece people bought (owner
-   * D-b4, `CONTENT_HAS_BUYERS`). Every deleted piece is `touched`: the route
-   * clears its cover's files and its people's libraries.
+   * Delete each piece, as `delete` does: one nobody holds is `done` (deleted
+   * at once), one people hold is `leaving`, with its date and holders
+   * (Codex-a6ofh.6). Each is `touched`, so the route refreshes its people's
+   * libraries; it clears the cover's files of the `done` ones only, since a
+   * leaving piece shows its cover until it goes.
    */
   async deleteMany(
     ids: string[],
     creatorId: string
   ): Promise<ContentBulkReport> {
     return this.eachPiece('delete', ids, async (id) => {
-      const { organizationId } = await this.deleteAndReport(id, creatorId, {
-        bulk: true,
-      });
-      return { outcome: 'done', touched: { id, organizationId } };
+      const { organizationId, result } = await this.deleteAndReport(
+        id,
+        creatorId,
+        { bulk: true }
+      );
+      const touched = { id, organizationId };
+      if (result.outcome === 'deleted') return { outcome: 'done', touched };
+      return {
+        outcome: 'leaving',
+        leavesAt: result.leavesAt.toISOString(),
+        holders: result.holders,
+        touched,
+      };
     });
   }
 
@@ -3202,25 +3292,22 @@ export class ContentService extends BaseService {
    * Set who can watch each piece (owner D-b2): an update of the access
    * fields alone, under every rule an editor save is held to (the payouts
    * gate on a live piece included). A piece that already reads so is
-   * `unchanged`. A move to Followers or Team only leaves alone any piece
-   * people bought (owner R1, `CONTENT_HAS_BUYERS`): both end their playback.
-   * Only a piece that has been live is `touched`, as `PATCH` refreshes.
+   * `unchanged`. A move to Followers or Team only no longer refuses a piece
+   * people hold (owner D2, Codex-a6ofh.6): its owners keep it whatever its
+   * access becomes. Only a piece that has been live is `touched`, as `PATCH`
+   * refreshes.
    */
   async accessMany(
     ids: string[],
     creatorId: string,
     access: ContentAccessGroupInput
   ): Promise<ContentBulkReport> {
-    const endsBuyersPlayback =
-      access.isFollowerGated === true || access.isTeamOnly === true;
     return this.eachPiece('access', ids, async (id) => {
       const {
         row,
         hasBeenLive: live,
         unchanged,
-      } = await this.applyUpdate(id, access, creatorId, {
-        bulk: { refuseIfBought: endsBuyersPlayback },
-      });
+      } = await this.applyUpdate(id, access, creatorId, { bulk: true });
       if (unchanged) return { outcome: 'unchanged' };
       return { outcome: 'done', touched: live ? row : undefined };
     });
@@ -3236,10 +3323,7 @@ export class ContentService extends BaseService {
   private async eachPiece(
     action: ContentBulkAction,
     ids: string[],
-    one: (id: string) => Promise<{
-      outcome: 'done' | 'scheduled' | 'unchanged';
-      touched?: BulkTouchedPiece;
-    }>
+    one: (id: string) => Promise<BulkPieceDone>
   ): Promise<ContentBulkReport> {
     const results: ContentBulkResult[] = [];
     const touched: BulkTouchedPiece[] = [];
@@ -3263,8 +3347,8 @@ export class ContentService extends BaseService {
         break;
       }
       try {
-        const { outcome, touched: piece } = await one(id);
-        results.push({ id, outcome });
+        const { touched: piece, ...done } = await one(id);
+        results.push({ id, ...done });
         if (piece) {
           touched.push({ id: piece.id, organizationId: piece.organizationId });
         }

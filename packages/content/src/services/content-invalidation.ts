@@ -64,18 +64,17 @@ import {
 import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   ORGANIZATION_TEAM_ROLES,
-  PURCHASE_STATUS,
 } from '@codex/constants';
-import type { Database } from '@codex/database';
+import type { DatabaseClient } from '@codex/database';
 import {
   organizationFollowers,
   organizationMemberships,
   organizations,
-  purchases,
   subscriptions,
 } from '@codex/database/schema';
 import { ValidationError } from '@codex/service-errors';
 import { and, eq, gt, inArray } from 'drizzle-orm';
+import { holdersOf } from './content-buyers';
 
 // ============================================================================
 // Types
@@ -92,6 +91,8 @@ export type ContentInvalidationReason =
   | 'content_updated'
   | 'content_unpublished'
   | 'content_deleted'
+  | 'content_leaving'
+  | 'content_kept'
   | 'content_published'
   | 'membership_role_changed'
   | 'membership_removed'
@@ -113,7 +114,7 @@ export type { InvalidationLogger, WaitUntilFn };
  * Arguments for `invalidateContentAccess` — content-scoped invalidation.
  */
 export interface InvalidateContentAccessArgs {
-  db: Database;
+  db: DatabaseClient;
   cache: VersionedCache;
   waitUntil: WaitUntilFn;
   /** Content that was mutated. Required. */
@@ -183,7 +184,8 @@ export const DEFAULT_MAX_LIBRARY_FANOUT = 500;
  * 2. If `organizationId` is present, bumps `COLLECTION_ORG_CONTENT(orgId)`
  *    (fire-and-forget).
  * 3. Resolves the set of users with library-visibility:
- *    - Purchasers of the specific content (via `purchases.status='completed'`)
+ *    - Holders of the specific content (`holdersOf`: its buyers, anyone given
+ *      it, and anyone who bought or was given a course holding it)
  *    - Subscribers to the org with access (active, cancelling, past_due —
  *      `ACCESS_GRANTING_SUBSCRIPTION_STATUSES`; subscription cache is keyed
  *      per-user, not per-content, so any subscription-gated content mutation
@@ -266,7 +268,7 @@ export interface InvalidateContentAccessManyArgs
  * Codex-a6ofh.3.5). Each catalogue key is bumped once, however many pieces
  * share it, and each user's library once, however many of the pieces they
  * hold. The users are the union of every piece's, read once per source:
- * the pieces' buyers, and their orgs' subscribers, team and (opt-in)
+ * the pieces' holders, and their orgs' subscribers, team and (opt-in)
  * followers. Above `maxFanout` users in all, the per-user bumps are skipped
  * (logged).
  */
@@ -355,7 +357,7 @@ export async function invalidateContentAccessMany(
 
 /** Arguments for {@link invalidatePlanSubscriberLibraries}. */
 export interface InvalidatePlanSubscriberLibrariesArgs {
-  db: Database;
+  db: DatabaseClient;
   cache: VersionedCache;
   waitUntil: WaitUntilFn;
   organizationId: string;
@@ -513,7 +515,7 @@ export function invalidateOrgMembership(
 // ============================================================================
 
 interface ResolveArgs {
-  db: Database;
+  db: DatabaseClient;
   /** The pieces whose buyers count: at least one. */
   contentIds: string[];
   /** The orgs whose subscribers, team and followers count; may be empty. */
@@ -523,7 +525,7 @@ interface ResolveArgs {
 
 /**
  * Union-query the set of user ids whose library currently includes (or could
- * include) these pieces: their buyers, and their orgs' people. Mirrors the decision tree in
+ * include) these pieces: their holders, and their orgs' people. Mirrors the decision tree in
  * `ContentAccessService.hasContentAccess` so the invalidation fanout is a
  * superset of users who could be holding the item.
  *
@@ -540,18 +542,13 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
   const emptyUserRows: Promise<Array<{ userId: string }>> = Promise.resolve([]);
   const hasOrg = organizationIds.length > 0;
 
-  const purchasePromise = db.query.purchases
-    .findMany({
-      where: and(
-        inArray(purchases.contentId, contentIds),
-        eq(purchases.status, PURCHASE_STATUS.COMPLETED)
-      ),
-      columns: { customerId: true },
-    })
-    .then((rows) =>
-      // Adapt `customerId` to `userId` so the merge loop is uniform.
-      rows.map((r) => ({ userId: r.customerId }))
-    );
+  // Everyone who holds a piece, bought or given, through it or a course
+  // (`holdersOf`, the leaving notice's set, Codex-a6ofh.6): a delete or a
+  // Keep changes what each of them sees.
+  const holders = holdersOf(db, contentIds);
+  const holderPromise: Promise<Array<{ userId: string }>> = db
+    .select({ userId: holders.userId })
+    .from(holders);
 
   const subscriberPromise: Promise<Array<{ userId: string }>> = hasOrg
     ? db.query.subscriptions.findMany({
@@ -585,16 +582,16 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
         })
       : emptyUserRows;
 
-  const [purchaseRows, subscriberRows, managementRows, followerRows] =
+  const [holderRows, subscriberRows, managementRows, followerRows] =
     await Promise.all([
-      purchasePromise,
+      holderPromise,
       subscriberPromise,
       managementPromise,
       followerPromise,
     ]);
 
   const ids = new Set<string>();
-  for (const r of purchaseRows) ids.add(r.userId);
+  for (const r of holderRows) ids.add(r.userId);
   for (const r of subscriberRows) ids.add(r.userId);
   for (const r of managementRows) ids.add(r.userId);
   for (const r of followerRows) ids.add(r.userId);
