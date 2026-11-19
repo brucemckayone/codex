@@ -135,11 +135,13 @@ import {
   chargebackCarriesRefund,
   countsAgainstCharge,
   coverIncludedRefunds,
+  coversMetadata,
   type FeeConfigService,
   findShortLosses,
   lateWinBeingUndone,
   lockRefundsOfCharge,
   owedBlockedPayment,
+  owedOnPayment,
   type PurchaseService,
   type RestoredRefundAccess,
   refundOfDispute,
@@ -326,7 +328,9 @@ export interface SupportServiceConfig extends ServiceConfig {
    */
   purchase: Pick<
     PurchaseService,
-    'restoreAfterFailedRefund' | 'failedRefundRestoreBlock'
+    | 'restoreAfterFailedRefund'
+    | 'failedRefundRestoreBlock'
+    | 'recordChargeRefunds'
   >;
   /** Makes a level's fee read fresh after "told another way" dates a rise. */
   feeConfig: Pick<FeeConfigService, 'invalidateLevel'>;
@@ -1849,7 +1853,9 @@ export class SupportService extends BaseService {
    * Refund the charge, in full or in part, in this order (data design §5):
    *
    * 1. list the charge's refunds;
-   * 2. one already carrying this decision's key is returned, `replayed`;
+   * 2. one already carrying this decision's key is returned, `replayed`,
+   *    once the charge's refunds are synced, which covers the set it
+   *    recorded (`replayed`, review r9);
    * 3. a count that moved since the page loaded stops it (`CHARGE_CHANGED`);
    * 4. a charge settled by hand and refunded outside Stripe (never again
    *    here, owner decision 2026-11-08), the window (server clock, Stripe's
@@ -1857,10 +1863,14 @@ export class SupportService extends BaseService {
    *    chargeback block (the dispute's CURRENT status), a won chargeback
    *    still settling, and the amount cap (Stripe's standing refunds, and
    *    the failed ones settled as refunded elsewhere, Codex-3xnta);
-   * 5. `refunds.create`, with the key and who asked; when Stripe does not
-   *    make it, `refundNotMade` says why.
+   * 5. `refunds.create`, with the key, who asked and, for a refund of all
+   *    that is left of a purchase's charge, the failed refunds it includes
+   *    (`codex_covers`, review r9); when Stripe does not make it,
+   *    `refundNotMade` says why.
    *
-   * Nothing is written here: `charge.refunded` records the refund.
+   * `charge.refunded` records the refund. Written here: only the cover of
+   * the failed refunds it includes (owner D73), and on Stripe's "already
+   * refunded" the sync's covers (owner D81).
    */
   async issueRefund(
     chargeId: string,
@@ -1880,49 +1890,27 @@ export class SupportService extends BaseService {
       const replay = listed.find(
         (refund) => refund.metadata?.[STRIPE_SUPPORT_KEY_METADATA_KEY] === key
       );
-      if (replay) return replayOf(replay);
+      if (replay) {
+        return await this.replayed(
+          {
+            id: chargeId,
+            paymentIntentId: paymentIntentIdOf(await readCharge()),
+          },
+          replay
+        );
+      }
       if (listed.length !== input.expectedRefundCount) {
         throw new ChargeChangedError(listed.length);
       }
 
       const charge = await readCharge();
-      // Read with the holds: a failed refund settled since the preview leaves
-      // the refund count as it was, so only this read sees it.
-      const [holds, elsewhere] = await Promise.all([
-        this.refundHoldsOf(chargeId),
-        this.settledElsewhereRows(chargeId),
-      ]);
-      // Settled by hand (owner decision 2026-11-08): never through Stripe,
-      // whatever the window or a late win says.
-      if (holds.refundedOutsideStripeAt) {
-        throw new RefundedOutsideStripeError(holds.refundedOutsideStripeAt);
-      }
-      const window = refundWindow(charge.created, new Date());
-      if (!window.isOpen && !holds.lateWon) {
-        throw new RefundWindowClosedError(window.closesAt);
-      }
-      if (holds.blocking) throw new ChargeHasChargebackError(holds.blocking);
-      if (holds.settling) throw new ChargebackSettlingError();
-      const leftCents =
-        charge.amount -
-        standingCents(listed) -
-        settledElsewhereBeyondStripe(listed, elsewhere);
+      const leftCents = await this.leftToRefund(chargeId, charge, listed);
       this.assertAmountFits(input.amountCents, leftCents);
-      // A refund of all that is left of a purchase's charge pays everything
-      // owed, so it covers the failed refunds still open now (owner D73,
-      // review r8): fixed here, before Stripe is asked, as every cover's set
-      // is. A part refund covers nothing.
-      const covering =
-        source.type === 'purchase' && input.amountCents === leftCents
-          ? {
-              purchaseId: source.purchaseId,
-              failed: await uncoveredFailedRefunds(
-                this.db,
-                source.purchaseId,
-                chargeId
-              ),
-            }
-          : null;
+      const covering = await this.coveringOf(
+        source,
+        chargeId,
+        input.amountCents === leftCents
+      );
 
       let made: Awaited<ReturnType<typeof issueStripeRefund>>;
       try {
@@ -1935,31 +1923,21 @@ export class SupportService extends BaseService {
           metadata: {
             [STRIPE_SUPPORT_KEY_METADATA_KEY]: key,
             [STRIPE_REQUESTED_BY_METADATA_KEY]: requestedByUserId,
+            ...this.coversMetadataOf(covering, chargeId),
           },
         });
       } catch (error) {
         return await this.refundNotMade(error, {
           chargeId,
+          paymentIntentId: paymentIntentIdOf(charge),
           key,
           requestedByUserId,
         });
       }
-      // Refunded in full meanwhile, by another tab or the Dashboard.
-      if (made.alreadyRefunded) throw new NothingLeftToRefundError();
-      if (covering && covering.failed.length > 0) {
-        // Its window is the Stripe call: a settle landing in it is detected
-        // here and alerted, not prevented (`coverIncludedRefunds`).
-        await coverIncludedRefunds(
-          { db: this.db, obs: this.obs },
-          {
-            purchaseId: covering.purchaseId,
-            chargeId,
-            coveredRefundIds: covering.failed,
-            coveringRefundId: made.refundId,
-          },
-          async () => undefined
-        );
+      if (made.alreadyRefunded) {
+        return await this.refundedMeanwhile(source, charge);
       }
+      await this.coverMade(covering, chargeId, made.refundId);
 
       this.obs.info('Support refund issued', {
         chargeId,
@@ -1983,6 +1961,166 @@ export class SupportService extends BaseService {
   }
 
   /**
+   * What is left to refund on the charge, after refusing what can't be
+   * refunded through Stripe at all: a charge settled by hand and refunded
+   * outside Stripe (never through Stripe, owner decision 2026-11-08,
+   * whatever the window or a late win says), the window (lifted by a late
+   * win, owner Q7), an open chargeback, and a won one still settling. Read
+   * with the holds: a failed refund settled since the preview leaves the
+   * refund count as it was, so only this read sees it.
+   */
+  private async leftToRefund(
+    chargeId: string,
+    charge: Stripe.Charge,
+    listed: readonly Stripe.Refund[]
+  ): Promise<number> {
+    const [holds, elsewhere] = await Promise.all([
+      this.refundHoldsOf(chargeId),
+      this.settledElsewhereRows(chargeId),
+    ]);
+    if (holds.refundedOutsideStripeAt) {
+      throw new RefundedOutsideStripeError(holds.refundedOutsideStripeAt);
+    }
+    const window = refundWindow(charge.created, new Date());
+    if (!window.isOpen && !holds.lateWon) {
+      throw new RefundWindowClosedError(window.closesAt);
+    }
+    if (holds.blocking) throw new ChargeHasChargebackError(holds.blocking);
+    if (holds.settling) throw new ChargebackSettlingError();
+    return (
+      charge.amount -
+      standingCents(listed) -
+      settledElsewhereBeyondStripe(listed, elsewhere)
+    );
+  }
+
+  /**
+   * A refund of all that is left of a purchase's charge pays everything
+   * owed, so it covers the failed refunds still open now (owner D73, review
+   * r8): fixed here, before Stripe is asked, as every cover's set is. A part
+   * refund, or a subscription's charge, covers nothing (null).
+   */
+  private async coveringOf(
+    source: ChargeSource,
+    chargeId: string,
+    allThatIsLeft: boolean
+  ): Promise<{ purchaseId: string; failed: string[] } | null> {
+    if (source.type !== 'purchase' || !allThatIsLeft) return null;
+    return {
+      purchaseId: source.purchaseId,
+      failed: await uncoveredFailedRefunds(
+        this.db,
+        source.purchaseId,
+        chargeId
+      ),
+    };
+  }
+
+  /**
+   * The covered set, for the refund's metadata (`coversMetadata`), so any
+   * later pass covers exactly it (review r9): a replay, or the sync of the
+   * charge's refunds.
+   */
+  private coversMetadataOf(
+    covering: { purchaseId: string; failed: string[] } | null,
+    chargeId: string
+  ): Record<string, string> {
+    return covering
+      ? coversMetadata(covering.failed, this.obs, {
+          purchaseId: covering.purchaseId,
+          chargeId,
+        })
+      : {};
+  }
+
+  /**
+   * Cover the set the refund just made includes (`coverIncludedRefunds`).
+   * Its window is the Stripe call: a settle landing in it is detected there
+   * and alerted, not prevented.
+   */
+  private async coverMade(
+    covering: { purchaseId: string; failed: string[] } | null,
+    chargeId: string,
+    refundId: string
+  ): Promise<void> {
+    if (!covering || covering.failed.length === 0) return;
+    await coverIncludedRefunds(
+      { db: this.db, obs: this.obs },
+      {
+        purchaseId: covering.purchaseId,
+        chargeId,
+        coveredRefundIds: covering.failed,
+        coveringRefundId: refundId,
+      },
+      async () => undefined
+    );
+  }
+
+  /**
+   * Stripe found the charge refunded in full while support's refund was
+   * asked for (another tab, or the Dashboard): the sync covers the failed
+   * refunds that refund paid (owner D81), anything still open is alerted
+   * (`alertOpenAfterFullRefund`), and nothing is left to refund.
+   */
+  private async refundedMeanwhile(
+    source: ChargeSource,
+    charge: Stripe.Charge
+  ): Promise<never> {
+    await this.purchase.recordChargeRefunds({
+      id: charge.id,
+      paymentIntentId: paymentIntentIdOf(charge),
+    });
+    await this.alertOpenAfterFullRefund(source, charge.id);
+    throw new NothingLeftToRefundError();
+  }
+
+  /**
+   * Stripe found the charge refunded in full while support's refund was
+   * asked for (another tab, or the Dashboard), and the sync since covered
+   * what it could (owner D81). A failed refund still open means something
+   * owed moved meanwhile (a refund failed between Stripe's answer and the
+   * sync), so which ones that refund paid can't be told: alerted at error,
+   * with an errorId and the ids, before anyone settles one.
+   */
+  private async alertOpenAfterFullRefund(
+    source: ChargeSource,
+    chargeId: string
+  ): Promise<void> {
+    if (source.type !== 'purchase') return;
+    const open = await uncoveredFailedRefunds(
+      this.db,
+      source.purchaseId,
+      chargeId
+    );
+    if (open.length === 0) return;
+    this.obs.error(
+      "A charge was refunded in full while support's refund was asked for, and failed refunds are still open after its refunds were synced, so which ones that refund paid can't be told: check them on the charge page before settling any",
+      {
+        errorId: crypto.randomUUID(),
+        chargeId,
+        purchaseId: source.purchaseId,
+        failedRefundIds: open,
+      }
+    );
+  }
+
+  /**
+   * A refund this decision's key already made, found again: the earlier
+   * request may have died after Stripe made it, before its cover (review
+   * r9). So the charge's refunds are synced, which covers the set the refund
+   * recorded (`codex_covers`) and, with nothing owed, any failed refund
+   * still open (`recordChargeRefunds`, owner D81), and the answer is a
+   * replay.
+   */
+  private async replayed(
+    charge: { id: string; paymentIntentId: string | null },
+    refund: Stripe.Refund
+  ): Promise<SupportRefundResult> {
+    await this.purchase.recordChargeRefunds(charge);
+    return replayOf(refund);
+  }
+
+  /**
    * Stripe did not make the refund (data design §4; silent F1, F2). Every
    * answer is logged with ids and Stripe's code and request id, never its
    * message:
@@ -2002,7 +2140,12 @@ export class SupportService extends BaseService {
    */
   private async refundNotMade(
     error: unknown,
-    attempt: { chargeId: string; key: string; requestedByUserId: string }
+    attempt: {
+      chargeId: string;
+      paymentIntentId: string | null;
+      key: string;
+      requestedByUserId: string;
+    }
   ): Promise<SupportRefundResult> {
     const e = error as StripeErrorFields | null;
     const stripeCode =
@@ -2026,7 +2169,12 @@ export class SupportService extends BaseService {
         (refund) =>
           refund.metadata?.[STRIPE_SUPPORT_KEY_METADATA_KEY] === attempt.key
       );
-      if (made) return replayOf(made);
+      if (made) {
+        return await this.replayed(
+          { id: attempt.chargeId, paymentIntentId: attempt.paymentIntentId },
+          made
+        );
+      }
       if (inFlight) {
         this.obs.warn('A support refund with this key is still running', facts);
         throw new RefundInFlightError();
@@ -3645,14 +3793,15 @@ export class SupportService extends BaseService {
 
   /**
    * Refuse a `refunded_elsewhere` settlement that would pay the buyer back
-   * more than the payment (`SettleExceedsPaidError`, 412; review r8): the
-   * refunds that count against the charge now (`countsAgainstCharge`), this
-   * refund, what was paid another way (`paid_another_way_cents`) and its
-   * chargebacks while lost, against what was paid. Under the caller's lock
-   * on the charge's refunds, so two settles of one charge can't both pass,
-   * and after the chargebacks' FOR SHARE. The context is what can still be
-   * paid back. `creators_repaid` pays the buyer nothing, so it is not
-   * checked, nor a refund of no purchase (a subscription's).
+   * more than the payment (`SettleExceedsPaidError`, 412; review r8): this
+   * refund against what can still be paid back, by THE one count
+   * (`owedOnPayment`, review r9): what was paid, less the refunds that count
+   * against the charge, what was paid another way and its chargebacks while
+   * lost, every dispute on the charge summed (owner D82). Under the caller's
+   * lock on the charge's refunds, so two settles of one charge can't both
+   * pass, and after the chargebacks' FOR SHARE. The context is what can
+   * still be paid back. `creators_repaid` pays the buyer nothing, so it is
+   * not checked, nor a refund of no purchase (a subscription's).
    */
   private async refuseIfSettleExceedsPaid(
     tx: Tx,
@@ -3661,14 +3810,14 @@ export class SupportService extends BaseService {
     const purchaseId = await this.purchaseOfRefund(tx, refund);
     if (!purchaseId) return;
     const [purchase] = await tx
-      .select({ paidCents: purchases.amountPaidCents })
+      .select({
+        paidCents: purchases.amountPaidCents,
+        owedCents: owedOnPayment(purchases.id, refund.stripeChargeId),
+      })
       .from(purchases)
       .where(eq(purchases.id, purchaseId))
       .limit(1);
-    if (!purchase) return;
-    const backCents = await this.backOnCharge(tx, refund.stripeChargeId);
-    if (backCents + refund.amountCents <= purchase.paidCents) return;
-    const maxCents = Math.max(0, purchase.paidCents - backCents);
+    if (!purchase || refund.amountCents <= purchase.owedCents) return;
     this.obs.info(
       'A failed refund settlement was refused: it would pay back more than was paid',
       {
@@ -3676,27 +3825,11 @@ export class SupportService extends BaseService {
         chargeId: refund.stripeChargeId,
         purchaseId,
         paidCents: purchase.paidCents,
-        backCents,
         amountCents: refund.amountCents,
-        maxCents,
+        maxCents: purchase.owedCents,
       }
     );
-    throw new SettleExceedsPaidError(refund.stripeChargeId, maxCents);
-  }
-
-  /**
-   * What a charge's buyer has back now, for `refuseIfSettleExceedsPaid`: the
-   * refunds that count against it (`countsAgainstCharge`), what was paid
-   * another way (`paid_another_way_cents`) and its chargebacks while lost.
-   * One statement, under the caller's locks.
-   */
-  private async backOnCharge(tx: Tx, chargeId: string): Promise<number> {
-    const [back] = await tx
-      .select({
-        cents: sql<number>`(COALESCE((SELECT SUM(${refunds.amountCents}) FROM ${refunds} WHERE ${refunds.stripeChargeId} = ${chargeId} AND ${countsAgainstCharge()}), 0) + COALESCE((SELECT SUM(COALESCE(${disputes.paidAnotherWayCents}, 0) + CASE WHEN ${disputes.status} = 'lost' THEN ${disputes.amountCents} ELSE 0 END) FROM ${disputes} WHERE ${disputes.stripeChargeId} = ${chargeId}), 0))::int`,
-      })
-      .from(sql`(SELECT 1) AS one`);
-    return back?.cents ?? 0;
+    throw new SettleExceedsPaidError(refund.stripeChargeId, purchase.owedCents);
   }
 
   /**

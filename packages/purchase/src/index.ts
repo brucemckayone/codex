@@ -116,10 +116,12 @@ export {
   takenBack,
 } from './services/counted-refunds';
 // A refund of everything owed covers the failed refunds it included (owner
-// D73, review r8): support's refund of all that is left covers too, and its
-// settle locks a charge's refunds as a cover does
+// D73, review r8): support's refund of all that is left covers too, records
+// its set in the refund's metadata (review r9), and its settle locks a
+// charge's refunds as a cover does
 export {
   coverIncludedRefunds,
+  coversMetadata,
   lockRefundsOfCharge,
   uncoveredFailedRefunds,
 } from './services/covered-refunds';
@@ -182,6 +184,7 @@ export {
   chargebackCarriesRefund,
   findShortLosses,
   lateWinBeingUndone,
+  owedOnPayment,
   type ShortLoss,
 } from './services/short-loss';
 // Customer integrity helpers (Codex-qsvxf — Q4.4 belt-and-braces)

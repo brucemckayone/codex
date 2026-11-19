@@ -454,7 +454,7 @@ refund covers nothing). A
 failed refund that counted nothing when that amount was worked out was paid
 by it. So the platform settles it `covered_by_refund`, naming that refund
 (`refunds.covered_by_refund_id`, migration `0132`; for "none", the newest
-refund that counts). It leaves Failed refunds and both counts for good. The
+standing refund, D81). It leaves Failed refunds and both counts for good. The
 charge page's Refunds card shows it as "Covered", with "Included in refund
 re_… (£X), so nothing more is owed for it." (D74). Nothing else shows it
 (D75), and a settle from a page loaded earlier gets the "already settled"
@@ -463,6 +463,27 @@ its clawback stands, so the creators pay once. A refund that fails AFTER
 the covering refund is owed, in the queue, at its own amount. A covering
 refund that itself fails stays in the queue at its own amount, which
 includes what it covered, and what it covered stays covered.
+
+**The set travels with the refund (review r9).** Each of those refunds
+records the failed refunds it includes in its Stripe metadata
+(`codex_covers`, the set fixed when its amount was worked out), so a later
+pass covers exactly that set: a resubmit of support's refund (a replay), the
+late win taking up its own refund made by an earlier run, and the sync of
+the charge's refunds that every `charge.refunded` event runs. So a request
+that died after Stripe made the refund is covered even if nobody resubmits.
+The same idempotency key asked again with another set (a refund failed in
+between) is refused by Stripe, and the refund the key made answers, with its
+first set. A refund named there that was made after the covering refund is
+never covered by it.
+
+**A payment that owes nothing (owner D81).** After that sync, and in the
+hourly sweep for a refund no event reached, a failed refund still open on a
+payment whose one count is £0 is covered by the newest STANDING refund on
+the charge (never a failed one settled elsewhere), and each one is alerted at
+error (below): it is a missed cover, or a refund made outside our code, such
+as a full refund in Stripe's Dashboard. A failed refund whose blocked
+payment's debt a stage carries is that stage's, and is left alone. The £0
+settle refusal (D80) stays for a page loaded earlier.
 
 Two refusals keep a settle from paying the buyer a second time (review r8).
 While the payment's own refund of everything owed is still being made, a
@@ -501,25 +522,49 @@ not checked. The alerts, each at error with an errorId and the ids:
   payees", its creators were re-paid for money the buyer got back. `settled`
   names each refund, with its resolution. With the owner, recover the
   overpayment from the buyer or account for it, per refund.
-- "Late win: its refund was made already, but a refund that counted when it
-  was asked for has failed since, so the failed refunds it included can't be
-  told: settle them by hand on the support charge page". The late win's
-  refund was found at Stripe, and a refund that counted when it was asked
-  for failed in between. Every refund in `failedRefundIds` is still listed in
-  Failed refunds, but only `owedCents` is owed. Refund the buyer that much
-  another way and settle the refund it was as refunded elsewhere; the late
-  win's refund paid the others, so don't pay them, and close them with the
-  owner.
 - "Late win: its refund and the refunds that count pay back more than the
   payment, so the buyer was refunded twice: recover it by hand". Found when
   that late-win refund is taken up: a settle landed in the gap.
   `overpaidCents` is how much. Recover it with the owner, as above.
-- "A blocked payment's charge was refunded in full while its refund was asked
-  for, so its failed refunds were not covered: check them on the support
-  charge page before settling any". Stripe answered that the charge was
-  already refunded in full, by a refund made during the ask. The buyer has
-  everything back, but `failedRefundIds` stay in Failed refunds: don't pay
-  them, and close them with the owner.
+- "Failed refunds were open on a payment that owes nothing, so the newest
+  standing refund covered them: a cover was missed, or a refund was made
+  outside our code (such as a full refund in Stripe's Dashboard)" (owner
+  D81). After every sync of a charge's refunds (`source: refunds_sync`: the
+  refund event, a replay of support's refund, Stripe's "already refunded"
+  answer) or in the hourly sweep (`source: hourly_backstop`), a payment whose
+  one count is £0 still had failed refunds open, so each was covered by the
+  newest standing refund (`coveringRefundId`; `coveredRefundIds`). Nothing is
+  owed and nothing needs settling. Find out why the cover was missed: a
+  refund made in the Dashboard is expected; anything else is a defect to
+  file. A stage carrying a blocked payment's debt (short, or owed again) is
+  never covered this way: it is that stage's.
+- "Failed refunds are open on a payment that owes nothing, and no standing
+  refund on its charge can cover them, so they stay in Failed refunds: check
+  the charge on the support page". As above, but every refund that counts
+  was paid another way (settled refunded elsewhere), so there is no refund
+  to name. Nothing is owed for `failedRefundIds`: a settle is refused (412,
+  nothing more can be paid back). Leave them, and tell engineering with the
+  ids; it repeats each hour until it is handled.
+- "A blocked payment was refunded with no refund of ours to name, and failed
+  refunds are still open after its charge's refunds were synced: check them
+  on the support charge page before settling any". Stripe answered that the
+  charge was already refunded in full, the sync covered what it could, and
+  something owed moved meanwhile (a refund failed between Stripe's answer and
+  the sync). Settle only what the charge page shows still owed.
+- "A charge was refunded in full while support's refund was asked for, and
+  failed refunds are still open after its refunds were synced, so which ones
+  that refund paid can't be told: check them on the charge page before
+  settling any". Support's twin of the one above.
+- "A refund of everything owed includes more failed refunds than its Stripe
+  metadata can name, so only this request can cover them: if it fails after
+  Stripe makes the refund, they are covered later by the newest standing
+  refund instead". At creation, with `coveredRefundIds`. Nothing to do unless
+  the request then fails, when the D81 alert above follows.
+- "A refund of everything owed names failed refunds it can't have included
+  (another payment's, or made after it), so they were not covered: check its
+  metadata in Stripe". Its `codex_covers` metadata was edited in the
+  Dashboard, or names another payment's refunds. Nothing was written for
+  `unknownRefundIds` or `notIncludedRefundIds`.
 
 **Owed again (owner D63, D64).** If the chargeback is later won after all, the
 bank takes it back from the buyer, and the late win refunds nothing on a
@@ -538,7 +583,13 @@ sum, read from the stored rows (no dates are compared):
 
 The refunds are the charge's, linked to the purchase or not, and the
 purchase's own; never through the payout slices, which a blocked payment
-doesn't have. So £15.00 paid, the £10.00 chargeback lost and £5.00 paid
+doesn't have. A payment can be disputed more than once (owner D82), so what
+was paid another way and the chargebacks while lost are summed over every
+dispute on the charge (`owedOnPayment`), and Short losses (the charge page
+and the hourly report) list the payment once, on its newest dispute at a
+debt stage, where a mark goes; the lost amount the page shows is every lost
+chargeback's. The same sum is what support's 412 says can still be paid
+back, and what a blocked payment's own refund asks. So £15.00 paid, the £10.00 chargeback lost and £5.00 paid
 another way is £10.00 owed again after the late win; a £3.00 refund standing
 through Stripe makes it £7.00, and so does a failed £3.00 refund support
 settled as refunded elsewhere; a refund that counted at a mark and then

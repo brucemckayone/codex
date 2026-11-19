@@ -11,7 +11,7 @@ import {
   PURCHASE_STATUS,
 } from '@codex/constants';
 import type { Purchase } from '@codex/database/schema';
-import { purchases } from '@codex/database/schema';
+import { disputes, purchases } from '@codex/database/schema';
 import { noOpenChargeback } from '@codex/payments';
 import { type SQL, sql } from 'drizzle-orm';
 
@@ -91,7 +91,19 @@ export function owedBlockedRefund(): SQL {
  * `disputed_at`: only a win clears that, so another end held the row forever.
  * Support's queue reads it too: a failed refund of such a payment waits for
  * the payment's own refund, which includes it (review r8).
+ *
+ * Nor one whose chargeback was lost (`noLostChargeback`, review r9): the
+ * loss owns it. Until the loss is applied the row is still `pending`, and
+ * the bank's return pays most or all of it, so a refund of what the one
+ * count leaves would mark it refunded first and the loss would never write
+ * what the buyer has back. Once applied it is `refunded`, and a short one is
+ * the short stage's.
  */
 export function owedBlockedPayment(): SQL {
-  return sql`(${owedBlockedRefund()} AND ${noOpenChargeback('purchase', purchases.id)})`;
+  return sql`(${owedBlockedRefund()} AND ${noOpenChargeback('purchase', purchases.id)} AND ${noLostChargeback()})`;
+}
+
+/** No chargeback of the outer query's purchase stands lost. */
+function noLostChargeback(): SQL {
+  return sql`NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.purchaseId} = ${purchases.id} AND ${disputes.status} = ${'lost'})`;
 }

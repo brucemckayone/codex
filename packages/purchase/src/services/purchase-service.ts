@@ -133,6 +133,7 @@ import {
   type SQL,
   sql,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   AlreadyPurchasedError,
@@ -174,7 +175,12 @@ import {
 } from './counted-refunds';
 import {
   type CoverInput,
+  coverFromMetadata,
   coverIncludedRefunds,
+  coverRecordedSets,
+  coversMetadata,
+  coverWhenNothingOwed,
+  newestStandingRefund,
   uncoveredFailedRefunds,
 } from './covered-refunds';
 import {
@@ -183,9 +189,11 @@ import {
 } from './entitlement-writer';
 import { withStaleCustomerRecovery } from './resolve-customer';
 import {
+  chargebackCarriesDebtOn,
   chargebackCarriesRefund,
   findShortLosses,
   owedOnDispute,
+  owedOnPayment,
   unrecoveredAfterLoss,
 } from './short-loss';
 import { verifyPurchase } from './verify-purchase';
@@ -200,6 +208,18 @@ function isStripeError(error: unknown): error is Error & { type: string } {
     'type' in error &&
     typeof error.type === 'string' &&
     error.type.startsWith('Stripe')
+  );
+}
+
+/**
+ * Stripe refused an idempotency key reused with other parameters: for a
+ * refund of everything owed, the same amount asked again with another set of
+ * failed refunds in its metadata (review r9). The refund the key made is the
+ * answer.
+ */
+function isIdempotencyRefusal(error: unknown): boolean {
+  return (
+    (error as { type?: unknown } | null)?.type === 'StripeIdempotencyError'
   );
 }
 
@@ -721,8 +741,9 @@ function notUnavailableBlock(): SQL {
  * therefore refunded a day late, never twice. The duplicate path has kept
  * this trade since Codex-2hxff.14 (docs/payments/purchases.md). An amount
  * that moved since an earlier attempt (a refund settled meanwhile) is a new
- * key, so it never meets Stripe's refusal of a key reused with other
- * parameters.
+ * key. The same amount with another set of failed refunds in its metadata
+ * (review r9) meets Stripe's refusal of a key reused with other parameters,
+ * and is answered by the refund the key made (`askBlockedRefund`).
  */
 const BLOCKED_REFUNDS = {
   duplicate: {
@@ -745,13 +766,27 @@ const BLOCKED_REFUNDS = {
 interface BlockedRefundOwed {
   /** Its charge: the completion's, or the PaymentIntent's `latest_charge`. */
   chargeId: string | null;
-  /** What was paid less the refunds that count; 0 when they pay it all. */
+  /** What it still owes by the one count (`owedOnPayment`); 0 when nothing is. */
   amountCents: number;
   /** Its failed refunds still open, uncounted, when this was read: what a refund of the amount includes. */
   uncovered: string[];
-  /** The newest refund that counts: what covers `uncovered` when nothing is owed. */
-  newestCountedRefundId: string | null;
+  /** The newest standing refund: what covers `uncovered` when nothing is owed (owner D81). */
+  newestStandingRefundId: string | null;
 }
+
+/** A blocked payment's refund as asked (`askBlockedRefund`), and the set it covers now. */
+interface AskedBlockedRefund {
+  issued: IssueRefundResult;
+  /** The failed refunds this request covers: none for a refund the key made earlier, whose sync covered its own set. */
+  included: readonly string[];
+}
+
+/**
+ * The metadata key on a blocked payment's own refund naming its idempotency
+ * key (`askBlockedRefund`), so the refund a key made is found when Stripe
+ * refuses the key with another set (review r9).
+ */
+const BLOCKED_REFUND_KEY_METADATA = 'codex_refund_key';
 
 /**
  * The metadata a late win's own refund carries at Stripe: the dispute it
@@ -1573,17 +1608,11 @@ export class PurchaseService extends BaseService {
     }
     const kind = BLOCKED_REFUNDS[blocked];
     let owed: BlockedRefundOwed;
-    let issued: IssueRefundResult | null = null;
+    let asked: AskedBlockedRefund | null = null;
     try {
       owed = await this.blockedRefundOwed(purchase, knownChargeId);
       if (owed.amountCents > 0) {
-        issued = await issueRefund(this.stripe, {
-          paymentIntentId: purchase.stripePaymentIntentId,
-          amountCents: owed.amountCents,
-          reason: kind.reason,
-          idempotencyKey: `${kind.keyPrefix}${purchase.stripePaymentIntentId}_${owed.amountCents}`,
-          environment: this.environment,
-        });
+        asked = await this.askBlockedRefund(purchase, owed, kind);
       }
     } catch (error) {
       this.obs.error(kind.refused, {
@@ -1597,11 +1626,11 @@ export class PurchaseService extends BaseService {
         purchaseId: purchase.id,
       });
     }
-    const refundId = issued?.refundId ?? null;
+    const refundId = asked?.issued.refundId ?? null;
     const refunded = await this.markBlockedRefunded(
       purchase,
-      owed,
-      issued === null ? owed.newestCountedRefundId : refundId
+      owed.chargeId,
+      await this.blockedRefundCover(purchase, owed, asked)
     );
     this.obs.warn(kind.refunded, {
       purchaseId: purchase.id,
@@ -1616,21 +1645,108 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Mark a blocked payment `refunded`, naming `coveringRefundId` (the refund
-   * made now or, with nothing owed, the newest refund that counts, as D69's
-   * "none" does), and cover the failed refunds it included in the same
-   * transaction (`coverIncluded`). With no such refund (Stripe found the
-   * charge refunded in full by a refund made during the ask), nothing is
-   * covered, and failed refunds still open are alerted at error.
+   * What covers a blocked payment's failed refunds once it is refunded: the
+   * refund just asked for and the set it includes; with nothing owed, the
+   * newest standing refund (owner D81) and the set read then; refunded in
+   * full meanwhile, none, once the sync has covered what it can, as for any
+   * payment that owes nothing.
+   */
+  private async blockedRefundCover(
+    purchase: Purchase,
+    owed: BlockedRefundOwed,
+    asked: AskedBlockedRefund | null
+  ): Promise<{ coveringRefundId: string | null; included: readonly string[] }> {
+    if (asked === null) {
+      return {
+        coveringRefundId: owed.newestStandingRefundId,
+        included: owed.uncovered,
+      };
+    }
+    if (asked.issued.alreadyRefunded && owed.chargeId) {
+      await this.recordChargeRefunds({
+        id: owed.chargeId,
+        paymentIntentId: purchase.stripePaymentIntentId,
+      });
+    }
+    return {
+      coveringRefundId: asked.issued.refundId,
+      included: asked.included,
+    };
+  }
+
+  /**
+   * Ask Stripe for a blocked payment's refund of what it still owes, keyed on
+   * the amount (`BLOCKED_REFUNDS`), with the failed refunds it includes in its
+   * metadata (`coversMetadata`, review r9) and the key itself
+   * (`BLOCKED_REFUND_KEY_METADATA`). Under the same key with another set (a
+   * refund the key made has failed, so the amount is the same and the set
+   * now names it), Stripe refuses the new parameters: the refund the key made
+   * is the answer, found by the key on the charge's synced list, and its
+   * FIRST set was covered by that sync. Any other failure is thrown.
+   */
+  private async askBlockedRefund(
+    purchase: Purchase,
+    owed: BlockedRefundOwed,
+    kind: (typeof BLOCKED_REFUNDS)[keyof typeof BLOCKED_REFUNDS]
+  ): Promise<AskedBlockedRefund> {
+    const key = `${kind.keyPrefix}${purchase.stripePaymentIntentId}_${owed.amountCents}`;
+    try {
+      const issued = await issueRefund(this.stripe, {
+        paymentIntentId: purchase.stripePaymentIntentId,
+        amountCents: owed.amountCents,
+        reason: kind.reason,
+        idempotencyKey: key,
+        environment: this.environment,
+        metadata: {
+          [BLOCKED_REFUND_KEY_METADATA]: key,
+          ...coversMetadata(owed.uncovered, this.obs, {
+            purchaseId: purchase.id,
+            chargeId: owed.chargeId,
+          }),
+        },
+      });
+      return { issued, included: owed.uncovered };
+    } catch (error) {
+      if (!isIdempotencyRefusal(error) || !owed.chargeId) throw error;
+      const listed = await this.recordChargeRefunds({
+        id: owed.chargeId,
+        paymentIntentId: purchase.stripePaymentIntentId,
+      });
+      const made = listed.find(
+        (refund) => refund.metadata?.[BLOCKED_REFUND_KEY_METADATA] === key
+      );
+      if (!made) throw error;
+      return {
+        issued: {
+          refundId: made.id,
+          alreadyRefunded: false,
+          status: made.status,
+          amountCents: made.amount,
+          createdAt: made.created,
+        },
+        included: [],
+      };
+    }
+  }
+
+  /**
+   * Mark a blocked payment `refunded`, naming the refund that covers it (the
+   * refund made now or, with nothing owed, the newest standing refund, as
+   * D69's "none" does, owner D81), and cover the failed refunds it included
+   * in the same transaction (`coverIncluded`). With none to name (Stripe
+   * found the charge refunded in full by a refund made during the ask, and
+   * the sync since covered what it could; or no refund stands), any failed
+   * refund still open is alerted at error.
    */
   private async markBlockedRefunded(
     purchase: Purchase,
-    owed: BlockedRefundOwed,
-    coveringRefundId: string | null
+    chargeId: string | null,
+    cover: { coveringRefundId: string | null; included: readonly string[] }
   ): Promise<Purchase | undefined> {
     // A bound instant, not now(): the query text stays the same on every
     // request, so Hyperdrive can cache it (data-access contract, rule 6).
     const refundedAt = new Date();
+    const { coveringRefundId } = cover;
     const markRefunded = async (db: Tx | DatabaseClient) => {
       const [row] = await db
         .update(purchases)
@@ -1648,23 +1764,22 @@ export class PurchaseService extends BaseService {
       return this.coverIncluded(
         {
           purchaseId: purchase.id,
-          chargeId: owed.chargeId,
-          coveredRefundIds: owed.uncovered,
+          chargeId,
+          coveredRefundIds: cover.included,
           coveringRefundId,
         },
         markRefunded
       );
     }
-    if (owed.uncovered.length > 0) {
-      // Stripe found the charge refunded in full by a refund made while this
-      // one was asked for, so which refund paid these can't be told.
+    const open = await uncoveredFailedRefunds(this.db, purchase.id, chargeId);
+    if (open.length > 0) {
       this.obs.error(
-        "A blocked payment's charge was refunded in full while its refund was asked for, so its failed refunds were not covered: check them on the support charge page before settling any",
+        "A blocked payment was refunded with no refund of ours to name, and failed refunds are still open after its charge's refunds were synced: check them on the support charge page before settling any",
         {
           errorId: crypto.randomUUID(),
           purchaseId: purchase.id,
-          chargeId: owed.chargeId,
-          failedRefundIds: owed.uncovered,
+          chargeId,
+          failedRefundIds: open,
         }
       );
     }
@@ -1673,14 +1788,14 @@ export class PurchaseService extends BaseService {
 
   /**
    * What a blocked payment still owes (`refundBlockedPayment`; owner D73),
-   * with D69's rule: what was paid less the refunds that count, read after
-   * the charge's refunds are synced from Stripe (`recordChargeRefunds`), so a
-   * refund an earlier attempt made counts even if its answer was lost. The
-   * charge is the completion's, or the PaymentIntent's `latest_charge`. Also
-   * the failed refunds still open at this moment, which a refund of that
-   * amount includes and so covers (the set is fixed here, before Stripe is
-   * asked), and the newest refund that counts, which covers them when
-   * nothing is owed.
+   * by the one count (`owedOnPayment`, review r9), read after the charge's
+   * refunds are synced from Stripe (`recordChargeRefunds`), so a refund an
+   * earlier attempt made counts even if its answer was lost, and the sync's
+   * covers have run. The charge is the completion's, or the PaymentIntent's
+   * `latest_charge`. Also the failed refunds still open at this moment,
+   * which a refund of that amount includes and so covers (the set is fixed
+   * here, before Stripe is asked), and the newest standing refund, which
+   * covers them when nothing is owed (owner D81).
    */
   private async blockedRefundOwed(
     purchase: Purchase,
@@ -1696,18 +1811,20 @@ export class PurchaseService extends BaseService {
         paymentIntentId: purchase.stripePaymentIntentId,
       });
     }
-    const counted = await this.countedRefunds(this.db, purchase.id, chargeId);
-    const countedCents = counted.reduce(
-      (sum, refund) => sum + refund.amountCents,
-      0
-    );
+    const [row] = await this.db
+      .select({ amountCents: owedOnPayment(purchases.id, chargeId) })
+      .from(purchases)
+      .where(eq(purchases.id, purchase.id))
+      .limit(1);
     return {
       chargeId,
-      amountCents:
-        purchase.amountPaidCents -
-        Math.min(purchase.amountPaidCents, countedCents),
+      amountCents: row?.amountCents ?? 0,
       uncovered: await uncoveredFailedRefunds(this.db, purchase.id, chargeId),
-      newestCountedRefundId: counted[0]?.stripeRefundId ?? null,
+      newestStandingRefundId: await newestStandingRefund(
+        this.db,
+        purchase.id,
+        chargeId
+      ),
     };
   }
 
@@ -1756,7 +1873,9 @@ export class PurchaseService extends BaseService {
    * dispute lifecycle (`alertChargebacksHeldTooLong`), failed refunds of
    * blocked payments waiting that long on one (owner D67, review r7), and a
    * lost chargeback that refunded only in part
-   * (`reportBlockedPaymentsShortAfterLoss`, owner D59).
+   * (`reportBlockedPaymentsShortAfterLoss`, owner D59). Before them, the
+   * backstop of the cover of a payment that owes nothing
+   * (`coverPaymentsOwingNothing`, owner D81).
    */
   async settleOwedDuplicates(params: {
     olderThanMs: number;
@@ -1801,6 +1920,9 @@ export class PurchaseService extends BaseService {
         });
       }
     }
+    // A failed refund on a payment that owes nothing, with no event seen
+    // (owner D81): covered here. Never throws.
+    await this.coverPaymentsOwingNothing(params.limit);
     // After the refunds: neither report throws (each logs its own failure).
     await alertChargebacksHeldTooLong(
       { db: this.db, obs: this.obs },
@@ -1838,6 +1960,62 @@ export class PurchaseService extends BaseService {
     );
     await this.reportBlockedPaymentsShortAfterLoss(params.limit);
     return { settled, stillOwed };
+  }
+
+  /**
+   * The hourly backstop of the cover of a payment that owes nothing (owner
+   * D81): the sync covers one whenever Stripe sends an event, and this finds
+   * those no event reached (a refund made outside our code whose event was
+   * lost). Up to `limit` payments with a failed refund still open whose one
+   * count is £0 and no stage carries their debt, through the partial index on
+   * open failed refunds (`idx_refunds_failed_open`), each covered under its
+   * own lock (`coverWhenNothingOwed`, which checks again under it and alerts
+   * at error). A failed refund linked to no purchase is not seen. Never
+   * throws: one payment's failure is logged and the rest go on.
+   */
+  private async coverPaymentsOwingNothing(limit: number): Promise<void> {
+    const openFailed = alias(refunds, 'open_failed');
+    let payments: Array<{ purchaseId: string; chargeId: string }>;
+    try {
+      payments = await this.db
+        .selectDistinct({
+          purchaseId: purchases.id,
+          chargeId: openFailed.stripeChargeId,
+        })
+        .from(openFailed)
+        .innerJoin(purchases, eq(purchases.id, openFailed.purchaseId))
+        .where(
+          sql`(${openFailed.status} = 'failed' AND ${openFailed.resolvedAt} IS NULL AND ${owedOnPayment(purchases.id, openFailed.stripeChargeId)} = 0 AND NOT ${chargebackCarriesDebtOn(openFailed.stripeChargeId)})`
+        )
+        .limit(limit);
+    } catch (error) {
+      this.obs.error(
+        "Could not look for failed refunds on payments that owe nothing; the sweep's refunds are not affected",
+        {
+          errorId: crypto.randomUUID(),
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      return;
+    }
+    for (const payment of payments) {
+      try {
+        await coverWhenNothingOwed(
+          { db: this.db, obs: this.obs },
+          payment,
+          'hourly_backstop'
+        );
+      } catch (error) {
+        this.obs.error(
+          'Could not cover the failed refunds of a payment that owes nothing; the next sweep tries again',
+          {
+            errorId: crypto.randomUUID(),
+            ...payment,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
+      }
+    }
   }
 
   /**
@@ -4045,8 +4223,10 @@ export class PurchaseService extends BaseService {
   /**
    * Record every refund of a charge, as Stripe lists them, in `refunds`
    * (`charge.refunded`; owner decision 2026-10-19, "One refunds table"). The
-   * event names no refund: `charge.refunds` is no longer sent. Returns them
-   * newest first, so the caller can name the newest on the purchase.
+   * event names no refund: `charge.refunds` is no longer sent. Then cover
+   * (`coverAfterSync`): each refund's recorded set, and a payment that owes
+   * nothing. Returns them newest first, so the caller can name the newest on
+   * the purchase.
    */
   async recordChargeRefunds(charge: {
     id: string;
@@ -4068,12 +4248,41 @@ export class PurchaseService extends BaseService {
           requestedByUserId: supportRequesterOf(refund),
         });
       }
+      await this.coverAfterSync(charge, listed);
       return [...listed].sort(
         (a, b) => b.created - a.created || b.id.localeCompare(a.id)
       );
     } catch (error) {
       this.handleError(error, 'recordChargeRefunds');
     }
+  }
+
+  /**
+   * After a sync of a purchase's charge's refunds (review r9): each refund
+   * carrying the set it includes covers exactly that set
+   * (`coverRecordedSets`), then, with nothing owed, the failed refunds still
+   * open are covered by the newest standing refund, alerted at error
+   * (`coverWhenNothingOwed`, owner D81). The sync is every caller's: the
+   * `charge.refunded` event, so a request that died after Stripe made its
+   * refund is covered with nobody resubmitting; a replay of support's refund;
+   * and `charge_already_refunded` on either twin. A subscription's charge
+   * has no purchase, so nothing (Codex-zkgbx).
+   */
+  private async coverAfterSync(
+    charge: { id: string; paymentIntentId: string | null },
+    listed: readonly Stripe.Refund[]
+  ): Promise<void> {
+    if (!charge.paymentIntentId) return;
+    const [purchase] = await this.db
+      .select({ id: purchases.id })
+      .from(purchases)
+      .where(eq(purchases.stripePaymentIntentId, charge.paymentIntentId))
+      .limit(1);
+    if (!purchase) return;
+    const deps = { db: this.db, obs: this.obs };
+    const payment = { purchaseId: purchase.id, chargeId: charge.id };
+    await coverRecordedSets(deps, payment, listed);
+    await coverWhenNothingOwed(deps, payment, 'refunds_sync');
   }
 
   /**
@@ -5640,7 +5849,7 @@ export class PurchaseService extends BaseService {
       purchase.amountPaidCents -
       Math.min(purchase.amountPaidCents, countedCents);
     if (amountCents <= 0) {
-      await this.coverByCountedRefunds(
+      await this.coverByStandingRefund(
         stripeDisputeId,
         purchase.id,
         charge.id,
@@ -5657,68 +5866,131 @@ export class PurchaseService extends BaseService {
       );
       return undefined;
     }
+    return this.askLateWinRefund(
+      { stripeDisputeId, purchase, chargeId: charge.id, environment },
+      amountCents,
+      uncovered
+    );
+  }
+
+  /**
+   * Ask Stripe for the late win's refund of `amountCents` (owner D69), with
+   * the failed refunds it includes in its metadata (`coversMetadata`, review
+   * r9), and cover them with it alongside its id write. Under its key with
+   * another set (a refund failed between runs), Stripe refuses the new
+   * parameters: the refund the key made is the late win's own, adopted with
+   * its FIRST set (`adoptLateWinRefund`). Refunded in full meanwhile, the
+   * sync covers what it can (owner D81). Any other refusal is a
+   * `LateWinRefundRefusedError`: retried, and the next run syncs again.
+   */
+  private async askLateWinRefund(
+    ask: {
+      stripeDisputeId: string;
+      purchase: Purchase;
+      chargeId: string;
+      environment: string;
+    },
+    amountCents: number,
+    uncovered: string[]
+  ): Promise<Pick<IssueRefundResult, 'refundId' | 'status'>> {
+    const { stripeDisputeId, purchase, chargeId } = ask;
     let issued: IssueRefundResult;
     try {
       issued = await issueRefund(this.stripe, {
-        chargeId: charge.id,
+        chargeId,
         amountCents,
         // A duplicate's reason, but none for a blocked sale of an item no
         // longer available: none of Stripe's fits it (Codex-z1t3c).
         reason: isUnavailableBlock(purchase) ? null : 'duplicate',
         idempotencyKey: `late_win_refund_${stripeDisputeId}_${amountCents}`,
-        environment,
-        metadata: { [LATE_WIN_REFUND_METADATA]: stripeDisputeId },
+        environment: ask.environment,
+        metadata: {
+          [LATE_WIN_REFUND_METADATA]: stripeDisputeId,
+          ...coversMetadata(uncovered, this.obs, {
+            disputeId: stripeDisputeId,
+            purchaseId: purchase.id,
+            chargeId,
+          }),
+        },
       });
     } catch (error) {
-      throw new LateWinRefundRefusedError(
-        {
-          disputeId: stripeDisputeId,
-          purchaseId: purchase.id,
-          stripeCode: stripeErrorCode(error) ?? null,
-          ...stripeErrorKind(error),
-        },
-        { cause: error }
-      );
+      const own = isIdempotencyRefusal(error)
+        ? await this.lateWinRefundOnCharge(stripeDisputeId, purchase, chargeId)
+        : undefined;
+      if (!own) {
+        throw new LateWinRefundRefusedError(
+          {
+            disputeId: stripeDisputeId,
+            purchaseId: purchase.id,
+            stripeCode: stripeErrorCode(error) ?? null,
+            ...stripeErrorKind(error),
+          },
+          { cause: error }
+        );
+      }
+      await this.adoptLateWinRefund(stripeDisputeId, purchase, chargeId, own);
+      return { refundId: own.id, status: own.status };
     }
     const madeId = issued.refundId;
-    if (madeId) {
-      await this.coverIncluded(
-        {
-          purchaseId: purchase.id,
-          chargeId: charge.id,
-          coveredRefundIds: uncovered,
-          coveringRefundId: madeId,
-        },
-        (tx) => this.writeLateWinRefundId(tx, stripeDisputeId, madeId)
-      );
+    if (madeId === null) {
+      await this.recordChargeRefunds({
+        id: chargeId,
+        paymentIntentId: purchase.stripePaymentIntentId,
+      });
+      return issued;
     }
+    await this.coverIncluded(
+      {
+        purchaseId: purchase.id,
+        chargeId,
+        coveredRefundIds: uncovered,
+        coveringRefundId: madeId,
+      },
+      (tx) => this.writeLateWinRefundId(tx, stripeDisputeId, madeId)
+    );
     return issued;
   }
 
   /**
    * The late win's "none" (owner D69): the refunds that count already pay
-   * the payment, so no refund is made, and the newest of them covers the
-   * failed refunds still open (owner D73). Logged at info with the counted
-   * refunds' ids.
+   * the payment, so no refund is made, and the newest STANDING refund covers
+   * the failed refunds still open (owner D73, D81: the one that took the last
+   * of the money; a counted row can be a failed refund settled elsewhere).
+   * With none standing, nothing is covered and that is alerted at error, as
+   * the cover of a payment that owes nothing does. Logged at info with the
+   * counted refunds' ids.
    */
-  private async coverByCountedRefunds(
+  private async coverByStandingRefund(
     stripeDisputeId: string,
     purchaseId: string,
     chargeId: string,
     countedRefundIds: string[],
     uncovered: string[]
   ): Promise<void> {
-    const [newest] = countedRefundIds;
-    if (newest && uncovered.length > 0) {
-      await this.coverIncluded(
-        {
-          purchaseId,
-          chargeId,
-          coveredRefundIds: uncovered,
-          coveringRefundId: newest,
-        },
-        async () => undefined
-      );
+    if (uncovered.length > 0) {
+      const newest = await newestStandingRefund(this.db, purchaseId, chargeId);
+      if (newest) {
+        await this.coverIncluded(
+          {
+            purchaseId,
+            chargeId,
+            coveredRefundIds: uncovered,
+            coveringRefundId: newest,
+          },
+          async () => undefined
+        );
+      } else {
+        this.obs.error(
+          'Late win: the refunds that count pay the payment, but none stands to cover its failed refunds, so they stay in Failed refunds: check the charge on the support page',
+          {
+            errorId: crypto.randomUUID(),
+            disputeId: stripeDisputeId,
+            purchaseId,
+            chargeId,
+            failedRefundIds: uncovered,
+          }
+        );
+      }
     }
     this.obs.info(
       'Late win: the refunds that count cover the payment, so none is made',
@@ -5727,19 +5999,34 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * The late win's own refund on the charge (its metadata names this
+   * dispute), from a fresh sync: what an earlier run, or the same key under
+   * another set (review r9), made.
+   */
+  private async lateWinRefundOnCharge(
+    stripeDisputeId: string,
+    purchase: Purchase,
+    chargeId: string
+  ): Promise<Stripe.Refund | undefined> {
+    const listed = await this.recordChargeRefunds({
+      id: chargeId,
+      paymentIntentId: purchase.stripePaymentIntentId,
+    });
+    return listed.find(
+      (refund) =>
+        refund.metadata?.[LATE_WIN_REFUND_METADATA] === stripeDisputeId
+    );
+  }
+
+  /**
    * The late win's own refund, found on the charge's just-synced list: an
    * earlier run made it, and its answer or id write was lost. Its id is
-   * written, and it covers what it included (owner D73), in one
-   * transaction.
-   *
-   * It was asked for everything owed then. So if it and the refunds that
-   * count now, the others, pay back exactly what was paid, every failed
-   * refund still open failed uncounted before it was asked for, and it
-   * included each. Less means a refund that counted then has failed since,
-   * in the gap: which ones it included can't be told, so none is covered
-   * and support is alerted at error with the ids. More means the buyer was
-   * refunded twice (a settle landed in the gap): the open ones are covered,
-   * since nothing more is owed, and that is alerted at error too.
+   * written, and it covers exactly the set it recorded when it was asked for
+   * (`coverFromMetadata`, review r9), in one transaction: a refund that
+   * counted then and has failed since was not in it, so it stays owed in the
+   * queue. If it and the other refunds that count pay back more than was
+   * paid, the buyer was refunded twice (a settle landed in the gap), which
+   * is alerted at error.
    */
   private async adoptLateWinRefund(
     stripeDisputeId: string,
@@ -5747,51 +6034,27 @@ export class PurchaseService extends BaseService {
     chargeId: string,
     own: Stripe.Refund
   ): Promise<void> {
+    await coverFromMetadata(
+      { db: this.db, obs: this.obs },
+      { purchaseId: purchase.id, chargeId },
+      own,
+      (tx) => this.writeLateWinRefundId(tx, stripeDisputeId, own.id)
+    );
     const counted = await this.countedRefunds(this.db, purchase.id, chargeId);
     const othersCents = counted
       .filter((refund) => refund.stripeRefundId !== own.id)
       .reduce((sum, refund) => sum + refund.amountCents, 0);
-    const uncovered = (
-      await uncoveredFailedRefunds(this.db, purchase.id, chargeId)
-    ).filter((id) => id !== own.id);
-    const restCents = purchase.amountPaidCents - othersCents - own.amount;
-    const context = {
-      disputeId: stripeDisputeId,
-      purchaseId: purchase.id,
-      chargeId,
-      refundId: own.id,
-    };
-    if (restCents > 0) {
-      await this.writeLateWinRefundId(this.db, stripeDisputeId, own.id);
-      if (uncovered.length > 0) {
-        this.obs.error(
-          "Late win: its refund was made already, but a refund that counted when it was asked for has failed since, so the failed refunds it included can't be told: settle them by hand on the support charge page",
-          {
-            errorId: crypto.randomUUID(),
-            ...context,
-            failedRefundIds: uncovered,
-            owedCents: restCents,
-          }
-        );
-      }
-      return;
-    }
-    await this.coverIncluded(
-      {
-        purchaseId: purchase.id,
-        chargeId,
-        coveredRefundIds: uncovered,
-        coveringRefundId: own.id,
-      },
-      (tx) => this.writeLateWinRefundId(tx, stripeDisputeId, own.id)
-    );
-    if (restCents < 0) {
+    const overpaidCents = othersCents + own.amount - purchase.amountPaidCents;
+    if (overpaidCents > 0) {
       this.obs.error(
         'Late win: its refund and the refunds that count pay back more than the payment, so the buyer was refunded twice: recover it by hand',
         {
           errorId: crypto.randomUUID(),
-          ...context,
-          overpaidCents: -restCents,
+          disputeId: stripeDisputeId,
+          purchaseId: purchase.id,
+          chargeId,
+          refundId: own.id,
+          overpaidCents,
         }
       );
     }

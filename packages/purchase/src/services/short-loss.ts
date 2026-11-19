@@ -10,10 +10,12 @@
  *   another way and marks it a second time (D63), which writes
  *   `late_win_refunded_outside_stripe_at`.
  *
- * One count of what is owed for both (`owedAfterLoss`, D64), read by the loss
- * that writes the refunded amount, the hourly report, the late win's alert
- * and support's charge page, so none of them can disagree (review r3, r4).
- * It counts the refunds the repo's one rule counts (`countedRefundOf`:
+ * One count of what is owed for both (`owedOnPayment`, D64), read by the
+ * hourly report, the late win's alert, support's charge page and its 412,
+ * the blocked payment's own refund and the cover of a payment that owes
+ * nothing, so none of them can disagree (review r3, r4, r9). It sums every
+ * dispute on the charge (owner D82). It counts the refunds the repo's one
+ * rule counts (`countedRefundOf`:
  * standing, or failed and settled refunded elsewhere, on the charge), so a
  * failed refund support settled is never owed here as well (owner D66,
  * review r6). A stage stands while anything is owed, whatever marks exist,
@@ -35,6 +37,7 @@ import {
   type SQLWrapper,
   sql,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import {
   type BlockedPaymentKind,
   blockedKind,
@@ -48,6 +51,12 @@ import {
 } from './counted-refunds';
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
+
+/** The columns a debt stage reads: `disputes`' own, or an alias's. */
+type StageColumns = Record<
+  'status' | 'lateWonAt' | 'paidAnotherWayCents' | 'lateWinRefundId',
+  SQLWrapper
+>;
 
 /** The total of the refunds `which` picks, a predicate on `refunds` (unaliased). */
 function refundTotal(which: SQL): SQL<number> {
@@ -68,57 +77,112 @@ function refundPart(chargeId: SQLWrapper, which: SQL): SQL<number> {
 }
 
 /**
- * The one count of what a blocked payment's buyer is owed (owner D64, D66):
- * what they paid, less the refunds that count on the charge
- * (`countedRefundOf`, the rule the late win's refund and the restore read;
- * `chargeId` is the dispute's), everything support
- * paid them another way (`paidAnotherWayCents`, null for none) and the
- * chargeback while it stands lost (`lostCents`), never below 0. Read from
- * the refunds, never the row's `refund_amount_cents`: a pending blocked
- * payment records no part refund of its own (owner D59, review r3). A refund
- * that counted at a mark and later fails stops counting, so what is owed
- * rises by it.
+ * The disputes of one payment's charge, aliased, so a subquery over them
+ * never reads the outer query's `disputes` row as its own (`chargebacksBack`
+ * is nested where the outer query joins `disputes`).
  */
-function owedCount(
-  chargeId: SQLWrapper | string | null,
-  paidAnotherWayCents: SQLWrapper | null,
-  lostCents: SQLWrapper | number
+const CHARGE_DISPUTES = 'charge_disputes';
+const chargeDisputes = alias(disputes, CHARGE_DISPUTES);
+
+/**
+ * `FROM` an aliased table, in a raw fragment: drizzle writes an alias there
+ * by its name alone, so the table is named before it.
+ */
+function fromAliased(name: string): SQL {
+  return sql`${disputes} AS ${sql.identifier(name)}`;
+}
+
+/**
+ * What one payment's chargebacks gave back (owner D82): everything support
+ * paid another way (`paid_another_way_cents`) and each chargeback while it
+ * stands lost, summed over EVERY dispute on its charge (a payment can be
+ * disputed more than once, each dispute with its own id: Stripe's "Receiving
+ * multiple disputes per payment"; `uq_disputes_stripe_dispute_id` is per
+ * dispute). With no charge known, the purchase's own disputes.
+ */
+function chargebacksBack(
+  purchaseId: SQLWrapper | string,
+  chargeId: SQLWrapper | string | null
+): SQL {
+  const ofPayment =
+    chargeId === null
+      ? sql`${chargeDisputes.purchaseId} = ${purchaseId}`
+      : sql`${chargeDisputes.stripeChargeId} = ${chargeId}`;
+  return sql`COALESCE((SELECT SUM(COALESCE(${chargeDisputes.paidAnotherWayCents}, 0) + CASE WHEN ${chargeDisputes.status} = ${'lost'} THEN ${chargeDisputes.amountCents} ELSE 0 END) FROM ${fromAliased(CHARGE_DISPUTES)} WHERE ${ofPayment}), 0)`;
+}
+
+/**
+ * Everything one payment's buyer has back (owner D64, D66, D82): the refunds
+ * that count on the charge (`countedRefundOf`: standing, or failed and
+ * settled refunded elsewhere), what was paid another way, and the
+ * chargebacks while lost (`chargebacksBack`). Read from the refunds, never
+ * the row's `refund_amount_cents`: a pending blocked payment records no part
+ * refund of its own (owner D59, review r3). A refund that counted and later
+ * fails stops counting, so what is owed rises by it.
+ */
+function paidBackOnPayment(
+  purchaseId: SQLWrapper | string,
+  chargeId: SQLWrapper | string | null
+): SQL {
+  return sql`(${refundTotal(countedRefundOf(purchaseId, chargeId))} + ${chargebacksBack(purchaseId, chargeId)})`;
+}
+
+/**
+ * THE one count of what a payment's buyer is still owed (owner D64, D66,
+ * D82): what the outer query's purchase (`purchases`, unaliased) paid, less
+ * everything they have back (`paidBackOnPayment`), never below 0. The short
+ * losses, the late win's alert, support's 412 (what can still be paid back),
+ * the blocked payment's own refund and the cover of a payment that owes
+ * nothing all read it, so none of them can disagree (review r9). The outer
+ * query must not be on `refunds`: its subquery would read that row as its
+ * own.
+ */
+export function owedOnPayment(
+  purchaseId: SQLWrapper | string,
+  chargeId: SQLWrapper | string | null
 ): SQL<number> {
-  const paidAnotherWay =
-    paidAnotherWayCents === null
-      ? sql`0`
-      : sql`COALESCE(${paidAnotherWayCents}, 0)`;
-  return sql<number>`GREATEST(0, ${purchases.amountPaidCents} - ${refundTotal(countedRefundOf(purchases.id, chargeId))} - ${paidAnotherWay} - ${lostCents})::int`.mapWith(
+  return sql<number>`GREATEST(0, ${purchases.amountPaidCents} - ${paidBackOnPayment(purchaseId, chargeId)})::int`.mapWith(
     Number
   );
 }
 
 /**
  * What a chargeback lost for `lostCents` leaves the outer query's purchase
- * owed before anything is paid another way: the one count (`owedCount`) for
- * a lost dispute with no mark. The loss writes what the buyer has back from
- * it, and for a blocked payment what it leaves is still owed, which the
- * alert at the loss reads. Any other sale lost for less keeps the bank's
- * decision.
+ * owed before anything is paid another way: what was paid less the refunds
+ * that count and the loss being written. Not `owedOnPayment`: the loss runs
+ * before its dispute row reads lost, and with no row at all (a dispute we
+ * never recorded, `disputeStillLost`), and no mark exists before a loss. The
+ * loss writes what the buyer has back from it, and for a blocked payment
+ * what it leaves is still owed, which the alert at the loss reads. Any other
+ * sale lost for less keeps the bank's decision.
  */
 export function unrecoveredAfterLoss(
   chargeId: SQLWrapper | string | null,
   lostCents: SQLWrapper | number
 ): SQL<number> {
-  return owedCount(chargeId, null, lostCents);
+  return sql<number>`GREATEST(0, ${purchases.amountPaidCents} - ${refundTotal(countedRefundOf(purchases.id, chargeId))} - ${lostCents})::int`.mapWith(
+    Number
+  );
 }
 
 /**
- * What the outer query's purchase is owed on its dispute row (joined as
- * `disputes`): the one count (`owedCount`), less everything paid another
- * way, and less the chargeback only while it stands lost. Once it is won,
- * the bank has taken it back from the buyer.
+ * What the outer query's purchase is owed, on its dispute row (joined as
+ * `disputes`): the one count (`owedOnPayment`) on that dispute's charge,
+ * every dispute of the charge summed (owner D82).
  */
 function owedAfterLoss(): SQL<number> {
-  return owedCount(
-    disputes.stripeChargeId,
-    disputes.paidAnotherWayCents,
-    sql`(CASE WHEN ${disputes.status} = ${'lost'} THEN ${disputes.amountCents} ELSE 0 END)`
+  return owedOnPayment(purchases.id, disputes.stripeChargeId);
+}
+
+/**
+ * What the chargebacks of the outer query's dispute row's charge gave back
+ * while lost (`chargebacksBack` without what was paid another way): the
+ * "lost" part support's charge page names, so the parts add up to what is
+ * owed with any number of disputes (owner D82).
+ */
+function lostOnCharge(): SQL<number> {
+  return sql<number>`COALESCE((SELECT SUM(${chargeDisputes.amountCents}) FROM ${fromAliased(CHARGE_DISPUTES)} WHERE ${chargeDisputes.stripeChargeId} = ${disputes.stripeChargeId} AND ${chargeDisputes.status} = ${'lost'}), 0)::int`.mapWith(
+    Number
   );
 }
 
@@ -165,10 +229,13 @@ export interface ShortLoss {
  *   overlaps any refund, so a refund that fails after it is owed exactly its
  *   own amount, in support's queue (review r7).
  */
-function stageCarriesDebt(stage: ShortLossStage): SQL {
+function stageCarriesDebt(
+  stage: ShortLossStage,
+  d: StageColumns = disputes
+): SQL {
   return stage === 'short'
-    ? sql`(${disputes.status} = ${'lost'})`
-    : sql`(${disputes.status} = ${'won'} AND ${disputes.lateWonAt} IS NOT NULL AND ${disputes.paidAnotherWayCents} IS NOT NULL AND ${disputes.lateWinRefundId} IS NULL)`;
+    ? sql`(${d.status} = ${'lost'})`
+    : sql`(${d.status} = ${'won'} AND ${d.lateWonAt} IS NOT NULL AND ${d.paidAnotherWayCents} IS NOT NULL AND ${d.lateWinRefundId} IS NULL)`;
 }
 
 /**
@@ -178,8 +245,31 @@ function stageCarriesDebt(stage: ShortLossStage): SQL {
  * payment's failed refund leaves the queue exactly where a stage counts it,
  * so a debt is in one place, never none.
  */
-function chargebackCarriesDebt(): SQL {
-  return sql`(${stageCarriesDebt('short')} OR ${stageCarriesDebt('owed_again')})`;
+function chargebackCarriesDebt(d: StageColumns = disputes): SQL {
+  return sql`(${stageCarriesDebt('short', d)} OR ${stageCarriesDebt('owed_again', d)})`;
+}
+
+/**
+ * A dispute on charge `chargeId` (a value, or the outer query's column) is
+ * at a stage that carries its blocked payment's debt
+ * (`chargebackCarriesDebt`): that stage is the debt's one surface (owner
+ * D66), so the cover of a payment that owes nothing leaves its failed
+ * refunds alone (owner D81). The outer query must not be on `disputes`.
+ */
+export function chargebackCarriesDebtOn(chargeId: SQLWrapper | string): SQL {
+  return sql`EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.stripeChargeId} = ${chargeId} AND ${chargebackCarriesDebt()})`;
+}
+
+/**
+ * Another dispute of the outer query's purchase, aliased, newer than its
+ * joined `disputes` row and also at a debt stage: `findShortLosses` lists a
+ * payment once, on its newest such dispute (owner D82).
+ */
+const NEWER_DISPUTES = 'newer_disputes';
+const newerDisputes = alias(disputes, NEWER_DISPUTES);
+
+function newestDebtDispute(): SQL {
+  return sql`NOT EXISTS (SELECT 1 FROM ${fromAliased(NEWER_DISPUTES)} WHERE ${newerDisputes.purchaseId} = ${purchases.id} AND ${chargebackCarriesDebt(newerDisputes)} AND (${newerDisputes.stripeCreatedAt}, ${newerDisputes.stripeDisputeId}) > (${disputes.stripeCreatedAt}, ${disputes.stripeDisputeId}))`;
 }
 
 /**
@@ -225,6 +315,11 @@ export function lateWinBeingUndone(): SQL {
  * `includeMarked` adds the ones marked at their stage with nothing owed
  * (support's charge page shows the after-state); `chargeId` narrows it to
  * one charge.
+ *
+ * ONE row per payment (owner D82), on its newest dispute at a debt stage
+ * (`newestDebtDispute`), so `total` counts payments: what is owed sums every
+ * dispute on the charge (`owedOnPayment`), and so does the lost part a short
+ * one names. A mark goes on that row's dispute, as it always has.
  */
 export async function findShortLosses(
   db: DatabaseClient | Tx,
@@ -263,7 +358,12 @@ export async function findShortLosses(
       disputeStatus: disputes.status,
       stripeChargeId: disputes.stripeChargeId,
       stripeDisputeId: disputes.stripeDisputeId,
-      lostCents: disputes.amountCents,
+      // Lost: what every chargeback on the charge returned (the parts add
+      // up to what is owed, owner D82). Won late: what this one took back.
+      lostCents:
+        sql<number>`(CASE WHEN ${disputes.status} = ${'lost'} THEN ${lostOnCharge()} ELSE ${disputes.amountCents} END)::int`.mapWith(
+          Number
+        ),
       openedAt: disputes.stripeCreatedAt,
       refundedOutsideStripeAt: disputes.refundedOutsideStripeAt,
       paidAnotherWayCents: disputes.paidAnotherWayCents,
@@ -283,7 +383,7 @@ export async function findShortLosses(
     .from(purchases)
     .innerJoin(disputes, eq(disputes.purchaseId, purchases.id))
     .where(
-      sql`(${blockedPayment()} AND ${purchases.status} = ${PURCHASE_STATUS.REFUNDED} AND ${inStage} AND ${ofCharge})`
+      sql`(${blockedPayment()} AND ${purchases.status} = ${PURCHASE_STATUS.REFUNDED} AND ${inStage} AND ${ofCharge} AND ${newestDebtDispute()})`
     )
     .orderBy(
       desc(sql`COALESCE(${disputes.lateWonAt}, ${disputes.stripeCreatedAt})`),
