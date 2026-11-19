@@ -96,18 +96,36 @@ const LIMITERS = [...ROUTE_FACTORIES, 'rateLimit'];
 const NAMES = LIMITERS.join('|');
 const LIMITER_MODULE = /^@codex\/(?:worker-utils|security)(?:\/[\w/-]+)?$/;
 
+/** A name as a RegExp source: a namespace may hold `$`. */
+const escapeName = (name) => name.replace(/\$/g, '\\$');
+
+/** `(?:wu\s*\.\s*)?` for the file's limiter namespaces, or '' when it has none. */
+const receiverOf = (namespaces) =>
+  namespaces.length
+    ? `(?:(?:${namespaces.map(escapeName).join('|')})\\s*\\.\\s*)?`
+    : '';
+
 /**
- * A renamed import, or a stored reference, hides its calls from this rule. A
- * stored reference counts only when it is the bare factory or one read off a
- * limiter namespace: `const limit = policy.rateLimit` reads a property.
+ * Every way a file can reach a limiter that this rule can't follow to a call:
+ * a stored reference to the factory or a namespace (`const p = procedure`,
+ * `const p: typeof procedure = …`, `const { procedure: p } = wu`, `const m =
+ * wu`), and the factory followed by `as` (a renamed import or re-export, `{
+ * procedure as route }`, or a cast), a non-null assertion or call/apply/bind. A property READ is none of these:
+ * `const limit = policy.rateLimit` and `options.rateLimit as string` name a
+ * value, not the factory, because only a limiter namespace may come before it.
  */
 const aliased = (namespaces) => {
-  const receiver = namespaces.length
-    ? `(?:(?:${namespaces.join('|')})\\s*\\.\\s*)?`
-    : '';
-  return new RegExp(
-    `\\bimport\\s*(?:type\\s+)?\\{[^}]*\\b(?:${NAMES})\\s+as\\s+[\\w$]+|\\b(?:const|let|var)\\s+[\\w$]+\\s*=\\s*${receiver}(?:${NAMES})\\b(?!\\s*[(<.])`
-  );
+  const receiver = receiverOf(namespaces);
+  const forms = [
+    `\\b(?:const|let|var)\\b[^;]*?=\\s*${receiver}(?:${NAMES})\\b(?!\\s*[(<])`,
+    `(?<![\\w$.])${receiver}(?:${NAMES})\\s*(?:\\bas\\b|!(?!=)|\\.\\s*(?:call|apply|bind)\\b)`,
+  ];
+  if (namespaces.length) {
+    forms.push(
+      `\\b(?:const|let|var)\\b[^;]*?=\\s*(?:${namespaces.map(escapeName).join('|')})\\s*(?:[;,)]|$)`
+    );
+  }
+  return new RegExp(forms.join('|'), 'm');
 };
 
 /** The index of the bracket that closes the one at `open`, in masked text. */
@@ -143,7 +161,12 @@ function objectEntries(code, masked, open) {
       entries.push({ spread: true });
       return;
     }
-    const m = /^(?:([\w$]+)|(['"])([\w$-]+)\2)\s*(:)?/.exec(code.slice(at, to));
+    const source = code.slice(at, to);
+    // A getter, setter, async or generator method computes its value: `get
+    // policy() { return … }` must not read as a shorthand named `get`.
+    const m = /^(?:get|set|async|static)\s+[\w$'"[]|^\*/.test(source)
+      ? null
+      : /^(?:([\w$]+)|(['"])([\w$-]+)\2)\s*(:)?/.exec(source);
     if (!m) {
       entries.push({ unreadable: true });
       return;
@@ -267,9 +290,7 @@ function limiterNamespaces(code) {
 
 /** Every rate-limiting call in comment-blanked code. */
 function limiterCalls(masked, namespaces) {
-  const receiver = namespaces.length
-    ? `(?:(?:${namespaces.join('|')})\\s*\\.\\s*)?`
-    : '';
+  const receiver = receiverOf(namespaces);
   const call = new RegExp(`(?<![\\w$.])${receiver}(${NAMES})\\s*([(<])`, 'g');
   const calls = [];
   for (const m of masked.matchAll(call)) {
@@ -345,7 +366,9 @@ export const rateLimitBindings = {
         );
       }
       for (const ns of namespaces) {
-        const bracket = new RegExp(`(?<![\\w$.])${ns}\\s*\\[`).exec(masked);
+        const bracket = new RegExp(
+          `(?<![\\w$.])${escapeName(ns)}\\s*(?:\\?\\.\\s*)?\\[`
+        ).exec(masked);
         if (bracket) {
           unknown(
             lineOf(bracket.index),
@@ -486,8 +509,12 @@ function workflowSteps(text) {
   return steps;
 }
 
-/** A job's header line, `  name:`, quoted or not, with or without a comment. */
-const JOB_HEAD = /^ {2}(['"]?)([\w-]+)\1\s*:\s*(?:#.*)?$/;
+/**
+ * A job's header line, `  name:`, quoted or not, with or without an anchor,
+ * a tag or a comment (`  static: &base  # the gate`).
+ */
+export const JOB_HEAD =
+  /^ {2}(['"]?)([\w-]+)\1\s*:\s*(?:[&!][^\s#]+\s*)*(?:#.*)?$/;
 
 /** A YAML key with its quotes dropped, so `"if": x` reads as `if: x`. */
 const unquoteKey = (text) => text.replace(/^(['"])([\w-]+)\1(\s*:)/, '$2$3');

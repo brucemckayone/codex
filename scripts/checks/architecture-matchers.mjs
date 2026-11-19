@@ -150,8 +150,13 @@ export function blankCode(text) {
  * `code` with the inside of every string and template literal replaced by x
  * (quotes kept, length kept), so a bracket, comma or paren in a string can't
  * change how the code around it is read. `code` is already comment-blanked.
- * A regex literal is skipped whole, so a quote or backtick in one opens no
- * string. Also returns the (1-based) lines that START inside a string: their
+ *
+ * A template's `${…}` is CODE and stays unmasked, read with the same rules
+ * (so a template nested inside it is masked in turn): a money call inside an
+ * interpolation is still a call. A regex literal is skipped whole, so a quote
+ * in one opens no string. An unterminated ' or " is an apostrophe the scan
+ * stepped into, not a string, so it masks nothing (tokenize does the same).
+ * Also returns the (1-based) lines that START inside a string's text: their
  * indentation is the string's, not the code's.
  */
 export function maskStrings(code) {
@@ -162,37 +167,92 @@ export function maskStringsWithLines(code) {
   const out = code.split('');
   const startsInside = new Set();
   let line = 1;
-  for (let i = 0; i < code.length; i++) {
-    const q = code[i];
-    if (q === '\n') {
-      line += 1;
-      continue;
-    }
-    if (q === '/' && regexCanStart(out, i)) {
-      const end = regexEnd(code, i);
-      if (end !== -1) {
-        i = end - 1;
-        continue;
+  let i = 0;
+  const mask = (k) => {
+    if (out[k] !== '\n') out[k] = 'x';
+  };
+
+  // Code, from i to the end or (in an interpolation) to the `}` closing it.
+  const scanCode = (inInterpolation) => {
+    let depth = 0;
+    while (i < code.length) {
+      const c = code[i];
+      if (c === '\n') {
+        line += 1;
+        i += 1;
+      } else if (
+        c === '/' &&
+        regexCanStart(out, i) &&
+        regexEnd(code, i) !== -1
+      ) {
+        i = regexEnd(code, i);
+      } else if (c === "'" || c === '"') {
+        scanQuoted(c);
+      } else if (c === '`') {
+        scanTemplate();
+      } else {
+        if (c === '{') depth += 1;
+        else if (c === '}') {
+          if (inInterpolation && depth === 0) return;
+          depth -= 1;
+        }
+        i += 1;
       }
     }
-    if (q !== "'" && q !== '"' && q !== '`') continue;
+  };
+
+  const scanQuoted = (q) => {
+    const continued = []; // lines a backslash-newline carries the string onto
     let j = i + 1;
-    while (j < code.length && code[j] !== q) {
-      if (code[j] === '\\') j += 1;
-      else if (code[j] === '\n') {
-        if (q !== '`') break;
+    while (j < code.length && code[j] !== q && code[j] !== '\n') {
+      if (code[j] === '\\') {
+        if (code[j + 1] === '\n') continued.push(true);
+        j += 2;
+      } else j += 1;
+    }
+    if (code[j] !== q) {
+      i += 1; // unterminated: not a string
+      return;
+    }
+    for (let k = i + 1; k < j; k++) mask(k);
+    for (const _ of continued) {
+      line += 1;
+      startsInside.add(line);
+    }
+    i = j + 1;
+  };
+
+  const scanTemplate = () => {
+    i += 1;
+    while (i < code.length) {
+      const c = code[i];
+      if (c === '`') {
+        i += 1;
+        return;
+      }
+      if (c === '\\') {
+        mask(i);
+        if (code[i + 1] === '\n') {
+          line += 1;
+          startsInside.add(line);
+        } else mask(i + 1);
+        i += 2;
+      } else if (c === '$' && code[i + 1] === '{') {
+        i += 2;
+        scanCode(true);
+        i += 1; // the closing }
+      } else if (c === '\n') {
         line += 1;
         startsInside.add(line);
+        i += 1;
+      } else {
+        mask(i);
+        i += 1;
       }
-      j += 1;
     }
-    for (let k = i + 1; k < j && k < code.length; k++) {
-      if (out[k] !== '\n') out[k] = 'x';
-    }
-    // At the closing quote, carry on after it; at a newline that ended an
-    // unterminated string, let the loop count that newline.
-    i = code[j] === q ? j : j - 1;
-  }
+  };
+
+  scanCode(false);
   return { masked: out.join(''), startsInside };
 }
 
@@ -205,6 +265,7 @@ const NOT_A_NAME = new Set([
   'return',
   'function',
   'await',
+  'async',
   'new',
   'typeof',
   'else',
@@ -222,6 +283,29 @@ const NOT_A_NAME = new Set([
   'of',
   'instanceof',
 ]);
+/** Words that can't name a method even in method position: `if (x) {`. */
+const CONTROL = new Set([
+  'if',
+  'for',
+  'while',
+  'switch',
+  'catch',
+  'with',
+  'function',
+  'return',
+  'do',
+  'else',
+  'try',
+  'await',
+  'typeof',
+  'void',
+  'yield',
+  'throw',
+  'case',
+  'in',
+  'of',
+  'instanceof',
+]);
 const MODIFIERS =
   '(?:(?:public|private|protected|static|async|override|readonly|get|set)\\s+)*';
 /** A declaration that names a function: the key stops here. */
@@ -232,12 +316,14 @@ const STRONG = [
   new RegExp(
     `^${MODIFIERS}([\\w$]+)\\s*(?::[^=]+)?=\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*(?::[^=]+)?=>|[\\w$]+\\s*=>)`
   ),
-  // a method: `async name(` opening its parameters, or `name(…) {` / `name(…): T {`
-  new RegExp(
-    `^${MODIFIERS}\\*?\\s*([\\w$]+)\\s*(?:<[^>]*>)?\\s*\\((?:[^)]*$|[^)]*\\)\\s*(?::[^{]*)?\\{\\s*$)`
-  ),
   /(?:^|\s)class\s+([\w$]+)/,
 ];
+/** A method's head up to its `(`: `async payOut(`, `get counts(`, `*items(`. */
+const METHOD_HEAD = new RegExp(
+  `^${MODIFIERS}\\*?\\s*([\\w$]+)\\s*(?:<[^>]*>)?\\s*\\(`
+);
+/** What follows a method's parameter list: an optional return type, then its body. */
+const METHOD_BODY = /^\s*(?::(?!.*=>).*)?\{\s*$/;
 /** A name that narrows the key but isn't a declaration: keep walking past it. */
 const WEAK = [
   // a property holding a function: `handler: async (ctx) => {`
@@ -245,8 +331,56 @@ const WEAK = [
   // a callback passed to a call: `retry(() => {`, `await db.transaction(async (tx) => {`
   /^(?:await\s+|return\s+)?([\w$]+(?:\.[\w$]+)*)\s*\(.*(?:=>|\bfunction\b)/,
 ];
-/** A route: `app.post('/refund', …`, read from the original line. */
-const ROUTE = /\.(get|post|put|patch|delete|all)\(\s*(['"`])([^'"`]+)\2/;
+/**
+ * A route registration at the start of its line, `app.post('/refund', …` or
+ * biome's `app.post(` with the path on the next line. Only a literal path
+ * (starting with /) counts, so `cache.get('payout', …)` names nothing.
+ */
+const ROUTE_HEAD =
+  /^\s*[\w$]+(?:\.[\w$]+)*\.(get|post|put|patch|delete|all)\(\s*(?:(['"`])(\/[^'"`]*)\2)?/;
+const ROUTE_PATH = /^\s*(['"`])(\/[^'"`]*)\1/;
+
+/**
+ * Where the parenthesis opened at (line, col) closes, in masked text, and
+ * what follows it on that line. Masked text holds no string, so every paren
+ * is code.
+ */
+function afterParens(maskedLines, line, col) {
+  let depth = 0;
+  for (let l = line; l < maskedLines.length; l++) {
+    const text = maskedLines[l];
+    for (let c = l === line ? col : 0; c < text.length; c++) {
+      if (text[c] === '(') depth += 1;
+      else if (text[c] === ')') {
+        depth -= 1;
+        if (depth === 0) return text.slice(c + 1);
+      }
+    }
+  }
+  return null;
+}
+
+/** The method a line declares, if it is a method head: its body follows the parameters. */
+function methodName(maskedLines, i) {
+  const text = maskedLines[i];
+  const m = METHOD_HEAD.exec(text.trimStart());
+  if (!m || CONTROL.has(m[1])) return null;
+  const open = text.length - text.trimStart().length + m[0].length - 1;
+  const rest = afterParens(maskedLines, i, open);
+  return rest !== null && METHOD_BODY.test(rest) ? m[1] : null;
+}
+
+/** The route a line registers, reading biome's next-line path too. */
+function routeName(lines, i) {
+  const head = ROUTE_HEAD.exec(lines[i] ?? '');
+  if (!head) return null;
+  let path = head[3];
+  for (let k = i + 1; path === undefined && k < lines.length; k++) {
+    if (lines[k].trim() === '') continue;
+    path = ROUTE_PATH.exec(lines[k])?.[2] ?? null;
+  }
+  return path ? `${head[1].toUpperCase()} ${path}` : null;
+}
 
 /**
  * The function, method or class a line sits in, read from the code's
@@ -279,12 +413,14 @@ export function enclosingName(
     const text = line.trim();
     headPending = /^[)\]}>]/.test(text);
     if (headPending) continue;
-    const route = ROUTE.exec(lines[i] ?? '');
-    if (route) return named(`${route[1].toUpperCase()} ${route[3]}`);
+    const route = routeName(lines, i);
+    if (route) return named(route);
     for (const pattern of STRONG) {
       const name = pattern.exec(text)?.[1];
       if (name && !NOT_A_NAME.has(name)) return named(name);
     }
+    const method = methodName(maskedLines, i);
+    if (method) return named(method);
     if (!weak) {
       for (const pattern of WEAK) {
         const name = pattern.exec(text)?.[1];
@@ -382,6 +518,11 @@ function isPlaceholderPath(path) {
     /[*<{[]/.test(path) || path.includes('/my-') || path.includes('paraglide')
   );
 }
+
+/** A CLAUDE.md import, `@docs/x.md` or `@./AGENTS.md`: a path with an extension. */
+const CLAUDE_IMPORT = /(?<![\w@/.-])@((?:\.{1,2}\/)?[\w-][\w./-]*\.\w+)/g;
+/** How deep Claude Code follows imports. */
+const MAX_IMPORT_HOPS = 5;
 
 export const MATCHERS = {
   /**
@@ -701,9 +842,25 @@ export const MATCHERS = {
     },
     defaultAllowed: (rule, file) =>
       rule.match.budgets[file] ?? rule.match.defaultBudget,
-    file(_rule, _file, text) {
-      const words = text.split(/\s+/).filter(Boolean).length;
-      return { found: words, hits: [] };
+    // Claude Code loads a CLAUDE.md's `@path` imports into the same session
+    // (relative to the importing file, up to 5 hops), so their words count
+    // against the importer's budget: moving text into an import saves nothing.
+    file(_rule, file, text, { source }) {
+      const words = (t) => t.split(/\s+/).filter(Boolean).length;
+      const seen = new Set([file]);
+      let found = 0;
+      const count = (at, body, depth) => {
+        found += words(body);
+        if (depth === MAX_IMPORT_HOPS) return;
+        for (const m of blankCode(body).matchAll(CLAUDE_IMPORT)) {
+          const target = normalise(`${dirname(at)}/${m[1]}`);
+          if (seen.has(target) || !source?.has(target)) continue;
+          seen.add(target);
+          count(target, source.read(target), depth + 1);
+        }
+      };
+      count(file, text, 0);
+      return { found, hits: [] };
     },
   },
   /**

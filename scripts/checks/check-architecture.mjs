@@ -62,6 +62,9 @@
  *                                   the base's copy of the gate too, when the
  *                                   change edits it)
  *   pnpm check:arch --raises <ref>  only the countersign check, against <ref>
+ *   … --raises-ci                   the countersign check against the base
+ *                                   this copy's own ciBase finds: how a newer
+ *                                   copy calls the base's copy as its judge
  *   pnpm check:arch --lower         bank fixes: lower or remove pins only
  *   pnpm check:arch --init          write the first baseline; refuses if one
  *                                   exists. `--init --rule <ID>` seeds the
@@ -106,9 +109,18 @@ const { RULES_DOC, renderRulesDoc } = await import('./architecture-docs.mjs');
 const { applyIgnores, IGNORE_KEYWORD, ignoreProblems, parseIgnores } =
   await import('./architecture-ignores.mjs');
 const { MATCHERS } = await import('./architecture-matchers.mjs');
-const { checkLoosening, ciBase, GATE_CODE, renamesSince } = await import(
-  './architecture-raises.mjs'
-);
+const {
+  checkLoosening,
+  ciBase,
+  countersignsIn,
+  GATE_DIR,
+  GATE_ENTRY_PATHS,
+  gateAt,
+  gateDependencies,
+  hashOf,
+  isGateCode,
+  renamesSince,
+} = await import('./architecture-raises.mjs');
 const { CI_CALLERS, GATES, RULES } = await import('./architecture-rules.mjs');
 process.off('uncaughtException', failToLoad);
 
@@ -881,10 +893,13 @@ export function spentAtBase(
       pinned: c.pinned,
     };
     if (isMeasuring(c.rule)) {
-      if (!Number.isInteger(basePin) || c.pinned > basePin) continue; // raised
+      if (!Number.isInteger(basePin)) continue; // a format problem at the base
+      // A countersigned raise adds to what the base still had, never to the
+      // stale headroom above it, as a key rule's raise does.
       const allowed = Math.min(
         c.pinned,
-        Math.max(was.found, defaultAllowed(c.rule, c.file))
+        Math.max(was.found, defaultAllowed(c.rule, c.file)) +
+          Math.max(0, c.pinned - basePin)
       );
       if (c.found > allowed) problems.push({ ...base, allowed, hits: [] });
       continue;
@@ -1152,6 +1167,7 @@ const MODE_FLAGS = [
   '--lower',
   '--init',
   '--ci',
+  '--raises-ci',
   '--write-rules',
   '--gates',
 ];
@@ -1202,14 +1218,32 @@ function readBaseline(source, root, file, staged) {
   );
 }
 
-/** The baseline at a commit, or {} where it doesn't exist yet. */
+/**
+ * The baseline at a commit, or {} where the commit has none. Any other git
+ * failure throws (exit 2): an unreadable base must not read as "no pins".
+ */
 function baselineAt(root, rev, file) {
+  const has = spawnSync('git', ['cat-file', '-e', `${rev}:${file}`], {
+    cwd: root,
+  });
+  if (has.status !== 0) {
+    const commit = spawnSync('git', ['cat-file', '-e', `${rev}^{commit}`], {
+      cwd: root,
+    });
+    if (commit.status !== 0) throw new Error(`${rev} is not a commit`);
+    return {};
+  }
   const r = spawnSync('git', ['show', `${rev}:${file}`], {
     cwd: root,
     encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
+    maxBuffer: 512 * 1024 * 1024,
   });
-  return parseBaseline(r.status === 0 ? r.stdout : null, `${file} at ${rev}`);
+  if (r.status !== 0) {
+    throw new Error(
+      `git show ${rev}:${file} failed: ${(r.stderr ?? r.error?.message ?? '').trim()}`
+    );
+  }
+  return parseBaseline(r.stdout, `${file} at ${rev}`);
 }
 
 /**
@@ -1272,8 +1306,20 @@ function runGates(root, gates, skip) {
 /** Shell-quote one argument for the one-liner the owner pastes. */
 const shellArg = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
 
-function loosening(root, registry, baselineFile, base) {
-  const { skipped, missing, byAgent } = checkLoosening(
+/**
+ * The countersign check against `base`. In a pull request into dev it fails
+ * on anything unsigned; on a push to dev or main, or a release PR, it only
+ * notes it (`notice`), because two PRs that each signed the same file make a
+ * merged state neither signed (owner, 19 Nov).
+ */
+function loosening(
+  root,
+  registry,
+  baselineFile,
+  base,
+  { notice = false } = {}
+) {
+  const { skipped, missing, byAgent, unbound } = checkLoosening(
     root,
     registry,
     baselineFile,
@@ -1290,41 +1336,50 @@ function loosening(root, registry, baselineFile, base) {
     return 0;
   }
   const lines = [
-    `✗ check-architecture: ${missing.length} loosening(s) since ${base} have no countersign from the owner.`,
-    '  A raised baseline pin, a new or moved exception, or a change to what a gate runs loosens it.',
-    '  Only the OWNER can countersign: a G0-RAISE trailer counts only in a commit with no',
-    '  Co-Authored-By: Claude line, and only while what it signed is unchanged (a change that',
-    '  loosens the same item after it needs a new one). An agent must stop and ask the owner to',
-    '  write each reason and run this in the checkout (the <why> placeholders do not count):',
-    `    ! git commit --allow-empty -m 'G0 countersign' ${missing.map((m) => `-m ${shellArg(m.line)}`).join(' ')}`,
-    '  What each one loosens:',
+    `${notice ? 'note' : '✗ check-architecture'}: ${missing.length} loosening(s) since ${base} have no countersign from the owner at their current content.`,
   ];
-  for (const m of missing) lines.push(`    ${m.line}`, `        ${m.what}`);
+  if (notice) {
+    lines.push(
+      '  Each pull request into dev was where these were judged; here they are only noted.'
+    );
+  } else {
+    lines.push(
+      '  A raised baseline pin, a new or moved exception, or a change to what a gate runs loosens it.',
+      '  Only the OWNER can countersign: a G0-RAISE trailer counts only in a commit with no',
+      '  Co-Authored-By: Claude line, and it covers the item only at the @hash it names, so any',
+      '  later change to that item (an amend, a merge from the base) needs a new one. An agent',
+      '  must stop and ask the owner to write each reason and run this in the checkout (the',
+      '  <why> placeholders do not count):',
+      `    ! git commit --allow-empty -m 'G0 countersign' ${missing.map((m) => `-m ${shellArg(m.line)}`).join(' ')}`
+    );
+  }
+  lines.push('  What each one loosens:');
+  for (const m of missing) {
+    lines.push(`    ${m.line}`, ...m.what.map((w) => `        ${w}`));
+  }
   if (byAgent.length > 0) {
     lines.push(
       `  Trailers in agent commits (${byAgent.join(', ')}) were not counted.`
     );
   }
+  if (unbound.length > 0) {
+    lines.push(
+      `  These owner trailers name no @hash, so they cover nothing: ${unbound.join('; ')}.`
+    );
+  }
   lines.push('  Rule: docs/architecture/rules.md#raises');
-  console.error(lines.join('\n'));
-  return 1;
+  (notice ? console.log : console.error)(lines.join('\n'));
+  return notice ? 0 : 1;
 }
 
 /**
  * Unstaged or untracked edits to the gate's own code would make --staged
  * judge with rules the commit doesn't carry.
  */
-function unstagedGateEdits(root) {
+function unstagedGateEdits(root, baselineFile) {
   const r = spawnSync(
     'git',
-    [
-      'status',
-      '--porcelain',
-      '-z',
-      '--untracked-files=all',
-      '--',
-      'scripts/checks/',
-    ],
+    ['status', '--porcelain', '-z', '--untracked-files=all'],
     { cwd: root, encoding: 'utf8' }
   );
   if (r.status !== 0) {
@@ -1340,19 +1395,63 @@ function unstagedGateEdits(root) {
       const unstaged = xy[1] !== ' ';
       return (
         (untracked || unstaged) &&
-        (GATE_CODE.includes(path) || (untracked && path.endsWith('.mjs')))
+        (isGateCode(path, baselineFile) ||
+          (untracked && path.startsWith(GATE_DIR)))
       );
     })
     .map((entry) => entry.slice(3));
 }
 
 /**
+ * A pull request's base must be a real ancestor of what CI checked out, and
+ * not that commit itself: a ciBase bug that compared HEAD with HEAD would
+ * otherwise pass every check while judging nothing.
+ */
+function verifyBase(root, ci) {
+  if (!ci.base || (ci.kind !== 'pr' && ci.kind !== 'release')) return;
+  const sha = (ref) =>
+    spawnSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
+      cwd: root,
+      encoding: 'utf8',
+    }).stdout.trim();
+  if (sha(ci.base) === sha('HEAD')) {
+    throw new Error(
+      `the pull request's base ${ci.base} is HEAD itself, so nothing would be judged`
+    );
+  }
+  const ancestor = spawnSync(
+    'git',
+    ['merge-base', '--is-ancestor', ci.base, 'HEAD'],
+    { cwd: root }
+  );
+  if (ancestor.status !== 0) {
+    throw new Error(
+      `the pull request's base ${ci.base} is not an ancestor of HEAD`
+    );
+  }
+}
+
+/** The sign that lets the owner merge past a base copy that cannot run. */
+const baseJudgeKey = (base) => `GATE base-judge@${base.slice(0, 8)}`;
+
+/**
  * When a change edits the gate's own code, the BASE commit's copy of the gate
- * judges the countersigns too, so a bug in the new copy (a file dropped from
- * GATE_CODE, a check that stops matching) can't approve itself (owner, 18
- * Nov). The base's scripts/checks/ is extracted to a temporary directory and
- * run over this checkout as data, with its own registry. It needs only node,
- * so it runs where the static-analysis job does, before `pnpm install`.
+ * judges it too, so a bug in the new copy (a file it stops treating as gate
+ * code, a check that stops matching) can't approve itself (owner, 18 Nov).
+ * The base's gate folder is extracted to a temporary directory and run over
+ * this checkout as data, with its own registry, in two passes:
+ *
+ *   --raises-ci   the countersigns, against the base the BASE copy finds
+ *                 itself, so one bug in this copy's ciBase can't switch off
+ *                 both judges
+ *   (full run)    the base's rules over this tree: anything it finds is
+ *                 listed for the GATE countersign (owner, 19 Nov), so the
+ *                 owner sees what the new gate stops catching. Not blocking.
+ *
+ * Its argv (--root, --raises-ci, --baseline) is a contract with every older
+ * copy: never rename those flags. When the base copy can't run at all, the
+ * owner can sign `G0-RAISE: GATE base-judge@<base> — <why>` to merge past it.
+ * It needs only node, so it runs before `pnpm install`.
  */
 function baseGateJudges(root, base, baselineFile) {
   const gitIn = (args, input) =>
@@ -1361,15 +1460,16 @@ function baseGateJudges(root, base, baselineFile) {
       input,
       maxBuffer: 256 * 1024 * 1024,
     });
-  const diff = gitIn(['diff', '--quiet', base, '--', 'scripts/checks/']);
+  const entry = gateAt(root, base);
+  const dirs = [
+    ...new Set([GATE_DIR, ...GATE_ENTRY_PATHS.map((p) => `${dirname(p)}/`)]),
+  ];
+  const diff = gitIn(['diff', '--quiet', base, '--', ...dirs]);
   if (diff.status === 0) return 0; // the gate is the base's own
   if (diff.status !== 1) {
-    throw new Error(`git diff ${base} -- scripts/checks/ failed`);
+    throw new Error(`git diff ${base} -- ${dirs.join(' ')} failed`);
   }
-  if (
-    gitIn(['cat-file', '-e', `${base}:scripts/checks/check-architecture.mjs`])
-      .status !== 0
-  ) {
+  if (!entry) {
     console.log(
       `note: ${base} has no architecture gate yet, so only this copy judges its countersigns.`
     );
@@ -1377,50 +1477,78 @@ function baseGateJudges(root, base, baselineFile) {
   }
   const dir = mkdtempSync(join(tmpdir(), 'g0-base-gate-'));
   try {
-    const archive = gitIn(['archive', '--format=tar', base, 'scripts/checks/']);
+    const archive = gitIn([
+      'archive',
+      '--format=tar',
+      base,
+      `${dirname(entry)}/`,
+    ]);
     if (archive.status !== 0) throw new Error(`git archive ${base} failed`);
     const untar = spawnSync('tar', ['-x', '-C', dir], {
       input: archive.stdout,
     });
-    if (untar.status !== 0)
+    if (untar.status !== 0) {
       throw new Error('tar could not unpack the base gate');
+    }
+    const copy = join(dir, entry);
+    const common = ['--root', root, '--baseline', baselineFile];
     console.log(
-      `The gate's own code changed since ${base}, so its copy there judges the countersigns too:`
+      `The gate's own code changed since ${base}, so its copy there (${entry}) judges the countersigns too:`
     );
-    const args = [
-      join(dir, 'scripts/checks/check-architecture.mjs'),
-      '--root',
-      root,
-      '--raises',
-      base,
-    ];
-    if (baselineFile !== BASELINE_FILE) args.push('--baseline', baselineFile);
-    const r = spawnSync(process.execPath, args, {
+    const judged = spawnSync(
+      process.execPath,
+      [copy, '--raises-ci', ...common],
+      { cwd: root, stdio: 'inherit' }
+    );
+    if (judged.status !== 0 && judged.status !== 1) {
+      if (countersignsIn(root, base).signed.has(baseJudgeKey(base))) {
+        console.log(
+          `note: the base's copy could not run (exit ${judged.status ?? judged.signal}); the owner signed ${baseJudgeKey(base)}.`
+        );
+        return 0;
+      }
+      throw new Error(
+        `the base's copy of the gate could not run (exit ${judged.status ?? judged.signal}). If that is the change itself (a flag or an import the base can't follow), the owner can sign past it: G0-RAISE: ${baseJudgeKey(base)} — <why>`
+      );
+    }
+    const full = spawnSync(process.execPath, [copy, ...common], {
       cwd: root,
-      stdio: 'inherit',
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
     });
-    if (r.status === 0 || r.status === 1) return r.status;
-    throw new Error(
-      `the base's copy of the gate could not run (exit ${r.status ?? r.signal})`
-    );
+    if (full.status !== 0) {
+      const shown = `${full.stdout}${full.stderr}`.trimEnd().split('\n');
+      console.log(
+        [
+          `note: the base's copy of the gate, run over this change, finds what is listed below (exit ${full.status}). The GATE countersign covers it: read it before signing.`,
+          ...shown.slice(0, 60).map((l) => `  | ${l}`),
+          ...(shown.length > 60
+            ? [`  | … and ${shown.length - 60} more lines`]
+            : []),
+        ].join('\n')
+      );
+    }
+    return judged.status;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 /**
- * The renames since the branch left origin/dev, so --lower moves a renamed
- * file's pin instead of the gate asking for it forever.
+ * The renames since the baseline last changed, so --lower moves a renamed
+ * file's pin. Any rename since then can only have left a pin at its old path.
  */
-function branchRenames(root) {
-  try {
-    return renamesSince(root, ciBase(root, {}).base);
-  } catch (err) {
-    console.log(
-      `note: renamed files keep their pin at the old path (${err.message}).`
-    );
-    return new Map();
+function baselineRenames(root, baselineFile) {
+  const last = spawnSync(
+    'git',
+    ['log', '-1', '--format=%H', '--', baselineFile],
+    { cwd: root, encoding: 'utf8' }
+  );
+  if (last.status !== 0) {
+    throw new Error(`git log -- ${baselineFile} failed: ${last.stderr.trim()}`);
   }
+  const since = last.stdout.trim();
+  return since ? renamesSince(root, since) : new Map();
 }
 
 /** Whether a tracked file's working copy differs from the index. */
@@ -1430,6 +1558,16 @@ function hasUnstagedEdits(root, file) {
     throw new Error(`git diff -- ${file} failed`);
   }
   return r.status === 1;
+}
+
+/** Whether a file exists in the working tree but is not in the index. */
+function untrackedHere(root, file) {
+  if (!existsSync(join(root, file))) return false;
+  return (
+    spawnSync('git', ['ls-files', '--error-unmatch', '--', file], {
+      cwd: root,
+    }).status !== 0
+  );
 }
 
 /** @returns {Promise<number>} the exit code */
@@ -1500,6 +1638,19 @@ async function run(opts) {
       new Set((opts.skip ?? '').split(',').filter(Boolean))
     );
   }
+  // How a newer copy of the gate calls this one, as the base's judge: the
+  // base is found HERE, by this copy's own ciBase.
+  if (opts['raises-ci']) {
+    const ci = ciBase(root);
+    if (!ci.base) {
+      console.log(`note: no countersign check (${ci.note}).`);
+      return 0;
+    }
+    verifyBase(root, ci);
+    return loosening(root, forLoosening, baselineFile, ci.base, {
+      notice: ci.kind === 'trunk' || ci.kind === 'release',
+    });
+  }
 
   const source = opts.staged ? stagedSource(root) : treeSource(root);
 
@@ -1513,16 +1664,20 @@ async function run(opts) {
       console.log('OK: nothing staged for the architecture gate to judge.');
       return 0;
     }
-    const edits = unstagedGateEdits(root);
+    const edits = unstagedGateEdits(root, baselineFile);
     if (edits.length > 0) {
       console.error(
         `check-architecture --staged: the gate's own code has unstaged or untracked edits (${edits.join(', ')}), so this commit can't be judged by the rules it carries. Stage them or stash them first.`
       );
       return 2;
     }
-    if (opts.lower && hasUnstagedEdits(root, baselineFile)) {
+    if (
+      opts.lower &&
+      (hasUnstagedEdits(root, baselineFile) ||
+        untrackedHere(root, baselineFile))
+    ) {
       console.error(
-        `check-architecture --lower --staged: ${baselineFile} has unstaged edits, which banking the index would overwrite. Stage them (git add) or discard them first.`
+        `check-architecture --lower --staged: ${baselineFile} has edits the index doesn't hold (or isn't staged at all), which banking the index would overwrite. Stage it (git add) or discard the edits first.`
       );
       return 2;
     }
@@ -1536,12 +1691,25 @@ async function run(opts) {
       );
       return 2;
     }
+    // A gate part that is no tracked file is fingerprinted as nothing: a
+    // typo'd `files` entry, or a command form the reader got wrong.
+    const missing = gateDependencies(gates, {
+      files: source.files,
+      read: (f) => (source.has(f) ? source.read(f) : null),
+    }).filter((part) => !source.has(part.file));
+    if (missing.length > 0) {
+      console.error(
+        `check-architecture: registry error: these files a gate runs or reads are not tracked, so a change to them could never need a countersign: ${missing.map((p) => p.label).join('; ')}. Fix the gate's command, files or ratchets.`
+      );
+      return 2;
+    }
   }
 
   // --ci: where the change starts, and the renames since then.
   let ci = null;
   if (opts.ci) {
     ci = ciBase(root);
+    verifyBase(root, ci);
     if (ci.base) source.renames = renamesSince(root, ci.base);
   }
 
@@ -1556,7 +1724,7 @@ async function run(opts) {
   );
 
   if (opts.lower) {
-    if (!opts.staged) source.renames = branchRenames(root);
+    if (!opts.staged) source.renames = baselineRenames(root, baselineFile);
     const lowered = serializeBaseline(
       lowerBaseline(rules, results, baseline, source)
     );
@@ -1579,19 +1747,26 @@ async function run(opts) {
 
   // At commit time an unbanked fix blocks in the files the commit touches. In
   // a pull request (or a local --ci) it blocks when this change made it,
-  // judged against the base, and a pin allows no more than the base had. A
-  // push to dev or main, or a release PR from dev, only notes a fix.
+  // judged against the base. A push to dev or main, or a release PR, only
+  // notes a fix. Wherever there is a base but trunk, a pin allows no more
+  // than the base still had.
   const bankFails = opts.staged
     ? (file) => source.changed.has(file) || source.deleted.includes(file)
     : () => false;
   const problems = compare(rules, results, baseline, source, { bankFails });
-  if (ci?.base && (ci.kind === 'pr' || ci.kind === 'branch')) {
+  if (ci?.base && ci.kind !== 'trunk') {
     const atBase = {
       baseSource: revSource(root, ci.base, []),
-      baseBaseline: baselineAt(root, ci.base, baselineFile),
+      baseBaseline: baselineAt(
+        root,
+        ci.base,
+        source.renames.get(baselineFile) ?? baselineFile
+      ),
       renames: source.renames,
     };
-    judgeFixesAtBase(rules, problems, atBase);
+    if (ci.kind === 'pr' || ci.kind === 'branch') {
+      judgeFixesAtBase(rules, problems, atBase);
+    }
     problems.push(...spentAtBase(rules, results, baseline, atBase));
   }
   const judged = [...results.values()].reduce(
@@ -1608,7 +1783,9 @@ async function run(opts) {
     if (ci.base) {
       code = Math.max(
         code,
-        loosening(root, forLoosening, baselineFile, ci.base),
+        loosening(root, forLoosening, baselineFile, ci.base, {
+          notice: ci.kind === 'trunk' || ci.kind === 'release',
+        }),
         baseGateJudges(root, ci.base, baselineFile)
       );
     } else console.log(`note: no countersign check (${ci.note}).`);
@@ -1664,7 +1841,7 @@ function init(root, baselineFile, rules, results, ruleId) {
     next[id] = id === ruleId ? block : baseline[id];
   writeFileSync(path, serializeBaseline(next));
   console.log(
-    `check-architecture: seeded ${ruleId} (${Object.keys(block).length} entries). The owner countersigns it: G0-RAISE: ${ruleId} * — <why this debt is accepted>`
+    `check-architecture: seeded ${ruleId} (${Object.keys(block).length} entries). The owner countersigns it: G0-RAISE: ${ruleId} *@${hashOf(sortBaseline({ [ruleId]: block })[ruleId])} — <why this debt is accepted>`
   );
   return 0;
 }

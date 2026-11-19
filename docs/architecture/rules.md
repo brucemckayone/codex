@@ -45,19 +45,22 @@ A rule that measures a file (SIZE, DOC-BUDGET) pins its size. Every other rule p
 
 ## Loosening the gate
 
-Anything that loosens the gate needs the **owner's** countersign: a trailer line in a commit message in the change. It counts only in a commit with no `Co-Authored-By: Claude` line, so the agent that loosened the gate can't sign for it; it asks the owner, and the failure prints the one-liner to run. A countersign covers what it signed and no more: anything that loosens the same item after the signing commit needs a new one. The countersign lives in the commit, not the PR description, so it travels into `dev` and `main` with the change (`dev` takes merge commits only, so a squash can't drop it) and `git blame` keeps it next to what it explains.
+Anything that loosens the gate needs the **owner's** countersign: a trailer line in a commit message in the change. It counts only in a commit with no `Co-Authored-By: Claude` line, so the agent that loosened the gate can't sign for it; it asks the owner, and the failure prints the one-liner to run. Each line names the item with `@` and a short hash of its content as the change leaves it, so a countersign covers exactly what the owner saw: an amend, a cherry-pick, or a change to the same item merged in from the base changes the hash, and the gate asks again with the new one. The countersign lives in the commit, not the PR description, so `git blame` keeps it next to what it explains.
+
+A pull request into `dev` is where this is judged. A push to `dev` or `main`, and a release PR from `dev`, only note anything unsigned: two PRs that each signed the same file produce a merged state neither signed.
 
 | What loosens | Trailer |
 |---|---|
-| A raised or added baseline pin | `G0-RAISE: <RULE> <file> — <reason>` |
-| Every pin of a rule the base doesn't have yet | `G0-RAISE: <RULE> * — <reason>` |
-| A new, copied, moved or renewed exception (below) | `G0-RAISE: <RULE> <file> — <reason>` |
-| A change to the gate itself: its scripts, registry, CI steps, hook | `G0-RAISE: GATE <path> — <reason>` |
-| A change to what another gate runs: a file its command names, a gate's config (`files`), a pnpm script or turbo task | `G0-RAISE: GATE <path>` or `GATE <file>#scripts.<name>` or `GATE turbo.json#tasks.<name>` |
-| A rise in another gate's own baseline (`ratchets`) | `G0-RAISE: GATE <path> — <reason>` |
-| A change to the triggers, concurrency or static-analysis job of a calling workflow | `G0-RAISE: GATE <workflow> — <reason>` |
+| A raised or added baseline pin | `G0-RAISE: <RULE> <file>@<hash> — <reason>` |
+| Every pin of a rule the base doesn't have yet | `G0-RAISE: <RULE> *@<hash> — <reason>` |
+| A new, copied, moved or renewed exception (below) | `G0-RAISE: <RULE> <file>@<hash> — <reason>` |
+| A change to the gate itself: any file in `scripts/checks/` but the baseline, its CI steps, the hook, gate.sh | `G0-RAISE: GATE <path>@<hash> — <reason>` |
+| A change to what another gate runs: a file its command names (and what that file imports), a pnpm script, a turbo task, `pnpm-workspace.yaml`, a gate's config (`files`) | `G0-RAISE: GATE <path>@<hash>`, `GATE <file>#scripts.<name>@<hash>`, `GATE turbo.json#tasks.<name>@<hash>` |
+| A config a gate finds by pattern (`filesMatching`): a nested biome config, a package turbo.json, or a new line in any `.gitignore` (Biome skips what it matches) | `G0-RAISE: GATE <path>@<hash> — <reason>` |
+| A rise in another gate's own baseline (`ratchets`) | `G0-RAISE: GATE <path>@<hash> — <reason>` |
+| A change to the triggers, concurrency or static-analysis job of a calling workflow | `G0-RAISE: GATE <workflow>@<hash> — <reason>` |
 
-A reason is at least three words, with no `<placeholder>` left in it. `pnpm check:arch --ci` runs the check against the change's base, and `--raises <ref>` runs it alone. When the change edits `scripts/checks/`, the **base commit's** copy of the gate judges the countersigns as well, so a bug in the new copy can't approve itself.
+A reason is at least three words, with no `<placeholder>` left in it. `pnpm check:arch --ci` runs the check against the change's base, and `--raises <ref>` runs it alone. When the change edits the gate's own code, the **base commit's** copy of the gate judges the countersigns as well, finding the base itself, so a bug in the new copy can't approve itself. It also runs its rules over the change and lists anything it finds, next to the GATE countersign, so the owner sees what the new gate stops catching before signing. If the base's copy can't run at all (an import or flag it can't follow), the owner can sign past it: `G0-RAISE: GATE base-judge@<base> — <reason>`.
 
 What this holds against is an honest agent's eager mistake: signing its own raise, or breaking the gate while refactoring it. An agent that sets out to forge (dropping its attribution line, rewriting the CI step that runs the gate) is not stopped by any check here; review is the backstop for that.
 
@@ -81,7 +84,7 @@ In markdown, use an HTML comment. One exception excuses one violation, the one o
 
 Transfers, reversals, refunds and payouts move real money. When each module calls Stripe itself, the ledger, the clawback rules and the payout thresholds can be bypassed by whichever caller forgets them. The owners are the four @codex/payments modules that record every movement. Each call is pinned by the function it sits in (`transferPendingGroup>transfers.create(`), so a new call in another function fails even where an old one was fixed. Known limit: a text pattern can't follow an alias (`const t = stripe.transfers; t.create(`); the owner refactor and the types epic (Codex-omrp2) close that.
 
-- **Applies to:** `packages/*/src/**/*.{ts,js,mjs}`, `workers/*/src/**/*.{ts,js,mjs}`, `apps/*/src/**/*.{ts,js,mjs}`, `scripts/**/*.{ts,js,mjs}`
+- **Applies to:** `packages/*/src/**/*.{ts,mts,cts,js,mjs,cjs}`, `workers/*/src/**/*.{ts,mts,cts,js,mjs,cjs}`, `apps/*/src/**/*.{ts,mts,cts,js,mjs,cjs}`, `scripts/**/*.{ts,mts,cts,js,mjs,cjs}`, `{packages,workers,apps}/*/scripts/**/*.{ts,mts,cts,js,mjs,cjs}`
 - **Except:** `**/*.test.ts`, `**/*.spec.ts`, `**/*.type-check.ts`, `**/*.d.ts`, `**/__tests__/**`, `**/__mocks__/**`, `scripts/checks/**`, `packages/payments/src/payout-ledger.ts`, `packages/payments/src/clawback.ts`, `packages/payments/src/refund.ts`, `packages/payments/src/bank-payouts.ts`
 - **Checked by:** `call`, matching `\b(?:transfers\s*\??\.\s*(?:create|createReversal)|refunds\s*\??\.\s*create|payouts\s*\??\.\s*create)\s*\(`
 - **Fix:** Move the money through @codex/payments (payout-ledger, clawback, refund or bank-payouts); never call these Stripe APIs directly.
@@ -199,12 +202,12 @@ The static-analysis job runs these too. The CI-GATES rule keeps this list and th
 
 | Gate | Checks | Runs |
 |---|---|---|
-| BIOME | Biome lint and format; every diagnostic fails | `pnpm check:ci`<br>reads `biome.json` |
-| TYPECHECK | TypeScript across the monorepo | `pnpm typecheck`<br>reads `tsconfig.json`<br>reads `tsconfig.build.json`<br>reads `config/tsconfig.json`<br>reads `config/tsconfig/base.json`<br>reads `config/tsconfig/package.json`<br>reads `config/tsconfig/package-typecheck.json`<br>reads `config/tsconfig/worker.json` |
+| BIOME | Biome lint and format; every diagnostic fails | `pnpm check:ci`<br>reads `biome.json`<br>reads any `**/biome.json`<br>reads any `**/biome.jsonc`<br>reads any `**/.gitignore` |
+| TYPECHECK | TypeScript across the monorepo | `pnpm typecheck`<br>reads `tsconfig.json`<br>reads `tsconfig.build.json`<br>reads `config/tsconfig.json`<br>reads `config/tsconfig/base.json`<br>reads `config/tsconfig/package.json`<br>reads `config/tsconfig/package-typecheck.json`<br>reads `config/tsconfig/worker.json`<br>reads `apps/web/svelte.config.js`<br>reads any `*/turbo.json`<br>reads any `*/*/turbo.json` |
 | SETUP-ORDER | Every workflow sets up pnpm before setup-node | `node --test scripts/checks/check-workflow-setup-order.test.mjs`<br>`node scripts/checks/check-workflow-setup-order.mjs` |
 | BRAND-BOUNDARY | The public bundle never imports the brand editor | `pnpm --filter web run check:brand-boundary:test`<br>`pnpm --filter web run check:brand-boundary` |
 | DIALOG-STRUCTURE | Dialogs are built from the shared Dialog parts | `pnpm --filter web run check:dialog-structure:test`<br>`pnpm --filter web run check:dialog-structure` |
 | LOAD-RETRY | A load failure renders the shared LoadFailedAlert with Retry | `pnpm --filter web run check:load-retry:test`<br>`pnpm --filter web run check:load-retry` |
 | DATA-ACCESS | Cache-Control from presets, no floating KV write, shared search inputs, deterministic sql time, VersionedCache gets waitUntil | `node --test scripts/checks/check-data-access-contract.test.mjs`<br>`node scripts/checks/check-data-access-contract.mjs` |
-| SVELTE-BASELINE | svelte-check finds no error beyond its baseline | `pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide`<br>`pnpm --filter web run check:svelte-baseline:test`<br>`pnpm --filter web run check:svelte-baseline`<br>its baseline `apps/web/scripts/svelte-check-baseline.json` |
+| SVELTE-BASELINE | svelte-check finds no error beyond its baseline | `pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide`<br>`pnpm --filter web run check:svelte-baseline:test`<br>`pnpm --filter web run check:svelte-baseline`<br>reads `apps/web/svelte.config.js`<br>its baseline `apps/web/scripts/svelte-check-baseline.json` |
 | ARCH | The rules on this page, and countersigned loosening | `node --test scripts/checks/check-architecture.test.mjs`<br>`node scripts/checks/check-architecture.mjs --ci` |

@@ -31,10 +31,13 @@ import { countLines, MATCHERS } from './architecture-matchers.mjs';
 import {
   callerPrint,
   ciBase,
+  GATE_ENTRY_PATHS,
   gateDependencies,
-  missingCountersigns,
+  hashOf,
   parseCountersigns,
   raisedEntries,
+  raiseItem,
+  uncovered,
 } from './architecture-raises.mjs';
 import {
   collect,
@@ -479,6 +482,7 @@ describe('the CLI against a real git repository', () => {
     GITHUB_EVENT_NAME: '',
     GITHUB_EVENT_PATH: '',
     GITHUB_HEAD_REF: '',
+    GITHUB_BASE_REF: '',
     GITHUB_REF: '',
   };
   const cli = (...args) => cliWith({}, ...args);
@@ -531,6 +535,24 @@ describe('the CLI against a real git repository', () => {
     );
     return { GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: path };
   };
+  // What the gate asks the owner to sign, `KEY@hash`, read from its output.
+  const asked = (r) =>
+    [
+      ...`${r.stdout}${r.stderr}`.matchAll(
+        /G0-RAISE: (\S+ \S+@[0-9a-f]{8}) — <why>/g
+      ),
+    ].map((m) => m[1]);
+  const trailers = (keys, reason = 'the fixture accepts it') =>
+    keys.map((k) => `G0-RAISE: ${k} — ${reason}`).join('\n');
+  // The owner's countersign commit: no Co-Authored-By line.
+  const ownerSigns = (...lines) =>
+    sh([
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      `G0 countersign\n\n${lines.join('\n')}`,
+    ]);
 
   test('--init writes the first baseline as keys, then refuses to overwrite it', () => {
     setUp();
@@ -550,7 +572,7 @@ describe('the CLI against a real git repository', () => {
     sh(['add', '.']);
     const r = cli('--init', '--rule', 'T2');
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /G0-RAISE: T2 \* —/);
+    assert.match(r.stdout, /G0-RAISE: T2 \*@[0-9a-f]{8} —/);
     assert.deepEqual(readBaseline(), {
       T1: { 'src/pinned.ts': [K] },
       T2: { 'src/b.ts': [B] },
@@ -646,19 +668,14 @@ describe('the CLI against a real git repository', () => {
     assert.equal(unsigned.status, 1);
     assert.match(
       unsigned.stderr,
-      /\n {4}G0-RAISE: T1 src\/pinned\.ts — <why>\n/
+      /\n {4}G0-RAISE: T1 src\/pinned\.ts@[0-9a-f]{8} — <why>\n/
     );
+    const [key] = asked(unsigned);
     assert.match(
       unsigned.stderr,
       /\n {8}T1 src\/pinned\.ts: allows "\(top level\)>forbidden\(" more\n/
     );
-    sh([
-      'commit',
-      '-q',
-      '--amend',
-      '-m',
-      'raise\n\nG0-RAISE: T1 src/pinned.ts — ok',
-    ]);
+    sh(['commit', '-q', '--amend', '-m', `raise\n\nG0-RAISE: ${key} — ok`]);
     assert.equal(
       cli('--raises', base).status,
       1,
@@ -670,6 +687,16 @@ describe('the CLI against a real git repository', () => {
       '--amend',
       '-m',
       'raise\n\nG0-RAISE: T1 src/pinned.ts — hotfix first, extracted next',
+    ]);
+    const hashless = cli('--raises', base);
+    assert.equal(hashless.status, 1, 'a trailer with no @hash covers nothing');
+    assert.match(hashless.stderr, /name no @hash, so they cover nothing/);
+    sh([
+      'commit',
+      '-q',
+      '--amend',
+      '-m',
+      `raise\n\nG0-RAISE: ${key} — hotfix first, extracted next`,
     ]);
     const signed = cli('--raises', base);
     assert.equal(signed.status, 0, signed.stderr);
@@ -687,18 +714,12 @@ describe('the CLI against a real git repository', () => {
     commit('loosen');
     const r = cli('--raises', base);
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /G0-RAISE: T1 src\/a\.ts — <why>/);
+    assert.match(r.stderr, /G0-RAISE: T1 src\/a\.ts@[0-9a-f]{8} — <why>/);
     assert.match(
       r.stderr,
-      /G0-RAISE: GATE scripts\/checks\/check-architecture\.mjs — <why>/
+      /G0-RAISE: GATE scripts\/checks\/check-architecture\.mjs@[0-9a-f]{8} — <why>/
     );
-    sh([
-      'commit',
-      '-q',
-      '--amend',
-      '-m',
-      'loosen\n\nG0-RAISE: T1 src/a.ts — the drain moves next week\nG0-RAISE: GATE scripts/checks/check-architecture.mjs — the stand-in changes shape',
-    ]);
+    sh(['commit', '-q', '--amend', '-m', `loosen\n\n${trailers(asked(r))}`]);
     const signed = cli('--raises', base);
     assert.equal(signed.status, 0, signed.stderr);
   });
@@ -827,19 +848,13 @@ describe('the CLI against a real git repository', () => {
     setUp();
     initAndCommit();
     const dir = `// ${IGNORE} T1 until=2026-12-01 by=bruce — the drain moves next\n`;
+    const start = head();
     write('src/a.ts', `${dir}forbidden(one);\n`);
     sh(['add', '.']);
-    sh([
-      'commit',
-      '-qm',
-      'one\n\nG0-RAISE: T1 src/a.ts — the drain moves next week',
-    ]);
+    sh(['commit', '-qm', 'one']);
+    ownerSigns(trailers(asked(cli('--raises', start))));
     const signedBase = head();
-    assert.equal(
-      cli('--raises', `${head()}~1`).status,
-      0,
-      'the first one is signed'
-    );
+    assert.equal(cli('--raises', start).status, 0, 'the first one is signed');
     write('src/a.ts', `${dir}forbidden(one);\n${dir}forbidden(two);\n`);
     commit('copy it');
     const copied = cli('--raises', signedBase);
@@ -848,7 +863,7 @@ describe('the CLI against a real git repository', () => {
       1,
       'review finding: a copy matched the original'
     );
-    assert.match(copied.stderr, /G0-RAISE: T1 src\/a\.ts — <why>/);
+    assert.match(copied.stderr, /G0-RAISE: T1 src\/a\.ts@[0-9a-f]{8} — <why>/);
     sh(['reset', '-q', '--hard', signedBase]);
     write('src/a.ts', `${dir}forbidden(somethingElse);\n`);
     commit('move it');
@@ -891,15 +906,9 @@ describe('the CLI against a real git repository', () => {
     );
     assert.match(
       agent.stderr,
-      /! git commit --allow-empty -m 'G0 countersign' -m 'G0-RAISE: T1 src\/pinned\.ts — <why>'/
+      /! git commit --allow-empty -m 'G0 countersign' -m 'G0-RAISE: T1 src\/pinned\.ts@[0-9a-f]{8} — <why>'/
     );
-    sh([
-      'commit',
-      '-q',
-      '--allow-empty',
-      '-m',
-      'owner\n\nG0-RAISE: T1 src/pinned.ts — hotfix first, extracted next',
-    ]);
+    ownerSigns(trailers(asked(agent), 'hotfix first, extracted next'));
     assert.equal(cli('--raises', base).status, 0, 'the owner can');
   });
 
@@ -940,7 +949,7 @@ describe('the CLI against a real git repository', () => {
     assert.equal(r.status, 1);
     assert.match(
       r.stderr,
-      /G0-RAISE: GATE package\.json#scripts\.check:x — <why>/
+      /G0-RAISE: GATE package\.json#scripts\.check:x@[0-9a-f]{8} — <why>/
     );
   });
 
@@ -1103,15 +1112,6 @@ describe('the CLI against a real git repository', () => {
 
   // ---- round 3 review fixes -------------------------------------------
 
-  const ownerSigns = (...lines) =>
-    sh([
-      'commit',
-      '-q',
-      '--allow-empty',
-      '-m',
-      `G0 countersign\n\n${lines.join('\n')}`,
-    ]);
-
   test('a countersign covers what it signed: loosening the same item after it needs a new one', () => {
     setUp();
     initAndCommit();
@@ -1122,7 +1122,7 @@ describe('the CLI against a real git repository', () => {
       serializeBaseline({ T1: { 'src/pinned.ts': [K, K] } })
     );
     commit('raise');
-    ownerSigns('G0-RAISE: T1 src/pinned.ts — the drain moves next week');
+    ownerSigns(trailers(asked(cli('--raises', base))));
     assert.equal(cli('--raises', base).status, 0);
 
     write('src/pinned.ts', 'forbidden();\nforbidden();\nforbidden();\n');
@@ -1133,21 +1133,22 @@ describe('the CLI against a real git repository', () => {
     commit('raise again');
     const again = cli('--raises', base);
     assert.equal(again.status, 1, 'the owner signed for two, not three');
-    assert.match(again.stderr, /G0-RAISE: T1 src\/pinned\.ts — <why>/);
-    ownerSigns('G0-RAISE: T1 src/pinned.ts — three until the drain moves');
+    assert.match(
+      again.stderr,
+      /G0-RAISE: T1 src\/pinned\.ts@[0-9a-f]{8} — <why>/
+    );
+    ownerSigns(trailers(asked(again), 'three until the drain moves'));
     assert.equal(cli('--raises', base).status, 0);
 
     write(GATE_STAND_IN, '// loosened\n');
     commit('gate');
-    ownerSigns(
-      'G0-RAISE: GATE scripts/checks/check-architecture.mjs — the stand-in changes shape'
-    );
+    ownerSigns(trailers(asked(cli('--raises', base))));
     assert.equal(cli('--raises', base).status, 0);
     write(GATE_STAND_IN, '// loosened again\n');
     commit('gate again');
     assert.match(
       cli('--raises', base).stderr,
-      /G0-RAISE: GATE scripts\/checks\/check-architecture\.mjs — <why>/
+      /G0-RAISE: GATE scripts\/checks\/check-architecture\.mjs@[0-9a-f]{8} — <why>/
     );
   });
 
@@ -1160,14 +1161,14 @@ describe('the CLI against a real git repository', () => {
     sh(['commit', '-qm', 'the gate']);
     initAndCommit();
     const base = head();
-    // This change's copy stops listing its own module as gate code.
+    // This change's copy stops treating its own code as gate code.
     const raises = 'scripts/checks/architecture-raises.mjs';
     const text = readFileSync(join(repo, raises), 'utf8');
     const emptied = text.replace(
-      /export const GATE_CODE = \[[^\]]*\];/,
-      'export const GATE_CODE = [];'
+      'return file.startsWith(GATE_DIR) || GATE_CODE_ELSEWHERE.includes(file);',
+      'return false;'
     );
-    assert.notEqual(emptied, text, 'the fixture found GATE_CODE');
+    assert.notEqual(emptied, text, 'the fixture found isGateCode');
     write(raises, emptied);
     commit('refactor the gate');
     const own = (...args) =>
@@ -1192,14 +1193,15 @@ describe('the CLI against a real git repository', () => {
     );
     const judged = own('--ci');
     assert.equal(judged.status, 1, judged.stdout + judged.stderr);
-    assert.match(judged.stdout, /its copy there judges the countersigns too/);
+    assert.match(
+      judged.stdout,
+      /its copy there \(scripts\/checks\/check-architecture\.mjs\) judges the countersigns too/
+    );
     assert.match(
       judged.stderr,
-      /G0-RAISE: GATE scripts\/checks\/architecture-raises\.mjs — <why>/
+      /G0-RAISE: GATE scripts\/checks\/architecture-raises\.mjs@[0-9a-f]{8} — <why>/
     );
-    ownerSigns(
-      'G0-RAISE: GATE scripts/checks/architecture-raises.mjs — the list moves to the registry'
-    );
+    ownerSigns(trailers(asked(judged), 'the list moves to the registry'));
     const signed = own('--ci');
     assert.equal(signed.status, 0, signed.stdout + signed.stderr);
   });
@@ -1210,6 +1212,9 @@ describe('the CLI against a real git repository', () => {
     write('src/pinned.ts', 'ok();\n');
     commit('fixed on dev, never banked');
     const base = head();
+    write('src/other.ts', 'ok();\n');
+    sh(['add', 'src/other.ts']);
+    commit('an unrelated change');
     const alone = cliWith(prEnv(base), '--ci');
     assert.equal(alone.status, 0, 'the stale pin alone is a notice');
     assert.match(alone.stdout, /not yet banked/);
@@ -1231,7 +1236,10 @@ describe('the CLI against a real git repository', () => {
     const base = head();
     write('src/pinned.ts', 'ok();\n');
     commit('fixed, not banked');
-    const release = cliWith({ ...prEnv(base), GITHUB_HEAD_REF: 'dev' }, '--ci');
+    const release = cliWith(
+      { ...prEnv(base), GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'main' },
+      '--ci'
+    );
     assert.equal(release.status, 0, release.stderr);
     assert.match(release.stdout, /not yet banked/);
     assert.equal(
@@ -1249,14 +1257,28 @@ describe('the CLI against a real git repository', () => {
     write('baseline.json', '{}\n');
     const r = cli('--lower', '--staged');
     assert.equal(r.status, 2);
-    assert.match(r.stderr, /unstaged edits/);
+    assert.match(r.stderr, /edits the index doesn't hold/);
     assert.equal(readFileSync(join(repo, 'baseline.json'), 'utf8'), '{}\n');
   });
 
-  test("--lower moves a renamed file's pin, found against origin/dev", () => {
+  test('--lower --staged refuses a baseline that was never staged', () => {
+    setUp();
+    assert.equal(cli('--init').status, 0);
+    const written = readFileSync(join(repo, 'baseline.json'), 'utf8');
+    write('src/pinned.ts', 'ok();\n');
+    sh(['add', 'src/pinned.ts']);
+    const r = cli('--lower', '--staged');
+    assert.equal(
+      r.status,
+      2,
+      'review finding: it banked {} over the fresh baseline'
+    );
+    assert.equal(readFileSync(join(repo, 'baseline.json'), 'utf8'), written);
+  });
+
+  test("--lower moves a renamed file's pin, found since the baseline last changed", () => {
     setUp();
     initAndCommit();
-    sh(['update-ref', 'refs/remotes/origin/dev', 'HEAD']);
     sh(['mv', 'src/pinned.ts', 'src/moved.ts']);
     commit('rename');
     const r = cli('--lower');
@@ -1282,7 +1304,237 @@ describe('the CLI against a real git repository', () => {
     commit('move it');
     const r = cli('--raises', base);
     assert.equal(r.status, 1, r.stdout);
-    assert.match(r.stderr, /G0-RAISE: T1 src\/a\.ts — <why>/);
+    assert.match(r.stderr, /G0-RAISE: T1 src\/a\.ts@[0-9a-f]{8} — <why>/);
+  });
+
+  // ---- round 4 review fixes -------------------------------------------
+
+  test('a hash binds the countersign: an amend, or a cherry-pick onto another change, is asked again', () => {
+    setUp();
+    initAndCommit();
+    const base = head();
+    write(
+      'baseline.json',
+      serializeBaseline({ T1: { 'src/pinned.ts': [K, K] } })
+    );
+    commit('raise');
+    ownerSigns(trailers(asked(cli('--raises', base))));
+    const signing = head();
+    assert.equal(cli('--raises', base).status, 0);
+    // An agent folds one more raise into the owner's commit, message unchanged.
+    write(
+      'baseline.json',
+      serializeBaseline({ T1: { 'src/pinned.ts': [K, K, K] } })
+    );
+    sh(['commit', '-q', '-a', '--amend', '--no-edit']);
+    assert.equal(
+      cli('--raises', base).status,
+      1,
+      'review finding: an amend kept the signature'
+    );
+    // The signing commit, cherry-picked onto a different raise of the same pin.
+    sh(['reset', '-q', '--hard', base]);
+    write(
+      'baseline.json',
+      serializeBaseline({ T1: { 'src/pinned.ts': [K, B] } })
+    );
+    commit('another raise');
+    sh(['cherry-pick', '--allow-empty', signing]);
+    assert.equal(
+      cli('--raises', base).status,
+      1,
+      'review finding: a cherry-picked countersign covered a different raise'
+    );
+  });
+
+  test('a change merged in from the base asks again, and the hash it prints covers it', () => {
+    setUp();
+    write(GATE_STAND_IN, 'a\nb\nc\nd\ne\n');
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'a five-line gate']);
+    initAndCommit();
+    const base = head();
+    sh(['checkout', '-q', '-b', 'pr']);
+    write(GATE_STAND_IN, 'A\nb\nc\nd\ne\n');
+    commit('the PR loosens line 1');
+    ownerSigns(trailers(asked(cli('--raises', base))));
+    sh(['checkout', '-q', '-b', 'devline', base]);
+    write(GATE_STAND_IN, 'a\nb\nc\nd\nE\n');
+    commit('dev changes line 5');
+    const devTip = head();
+    sh(['checkout', '-q', 'pr']);
+    sh(['merge', '-q', '--no-edit', 'devline']); // GitHub's merge ref
+    const merged = cli('--raises', devTip);
+    assert.equal(merged.status, 1, 'the owner never saw the merged file');
+    ownerSigns(trailers(asked(merged)));
+    const signed = cli('--raises', devTip);
+    assert.equal(
+      signed.status,
+      0,
+      `review finding: re-signing could never cover it\n${signed.stderr}`
+    );
+  });
+
+  test('a push to dev, or a release PR, only notes an unsigned loosening', () => {
+    setUp();
+    initAndCommit();
+    const base = head();
+    write(
+      'baseline.json',
+      serializeBaseline({ T1: { 'src/pinned.ts': [K, K] } })
+    );
+    commit('unsigned raise');
+    const event = join(repo, '.git', 'push.json');
+    writeFileSync(event, JSON.stringify({ before: base }));
+    const push = cliWith(
+      {
+        GITHUB_EVENT_NAME: 'push',
+        GITHUB_REF: 'refs/heads/dev',
+        GITHUB_EVENT_PATH: event,
+      },
+      '--ci'
+    );
+    assert.equal(push.status, 0, push.stderr);
+    assert.match(push.stdout, /note: 1 loosening\(s\)/);
+    const release = cliWith(
+      { ...prEnv(base), GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'main' },
+      '--ci'
+    );
+    assert.equal(release.status, 0, release.stderr);
+    assert.equal(
+      cliWith(prEnv(base), '--ci').status,
+      1,
+      'a PR into dev is where it is judged'
+    );
+  });
+
+  test('a release PR still cannot spend headroom main left unbanked', () => {
+    setUp();
+    initAndCommit();
+    write('src/pinned.ts', 'ok();\n');
+    commit('fixed, never banked');
+    const base = head();
+    write('src/pinned.ts', 'forbidden();\n');
+    commit('re-added on dev');
+    const r = cliWith(
+      { ...prEnv(base), GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'main' },
+      '--ci'
+    );
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /fits the pin only because a fix was left unbanked/);
+  });
+
+  test('a PR whose base is HEAD itself is an error, not a pass', () => {
+    setUp();
+    initAndCommit();
+    const r = cliWith(prEnv(head()), '--ci');
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /is HEAD itself/);
+  });
+
+  test("a base copy that can't run is an error the owner can sign past", () => {
+    setUp();
+    write(GATE_STAND_IN, 'process.exit(2);\n');
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'a base gate that cannot run']);
+    initAndCommit();
+    const base = head();
+    write(GATE_STAND_IN, '// the new gate\n');
+    commit('replace the gate');
+    ownerSigns(trailers(asked(cli('--raises', base))));
+    const r = cliWith(prEnv(base), '--ci');
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /G0-RAISE: GATE base-judge@[0-9a-f]{8}/);
+    ownerSigns(
+      `G0-RAISE: GATE base-judge@${base.slice(0, 8)} — the old gate cannot read the new flags`
+    );
+    const signed = cliWith(prEnv(base), '--ci');
+    assert.equal(signed.status, 0, signed.stdout + signed.stderr);
+  });
+
+  test('a nested biome config, a new .gitignore line or a package turbo.json is part of the gate', () => {
+    setUp();
+    write(
+      'rules.mjs',
+      `${rulesModule(T1)}export const GATES = [{ id: 'BIOME', title: 't', run: 'node -e 0', filesMatching: ['**/biome.json', '**/.gitignore', '*/turbo.json'] }];\n`
+    );
+    write('.gitignore', 'node_modules\n');
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'gates']);
+    initAndCommit();
+    const base = head();
+    write('.gitignore', 'node_modules\n# a note\n');
+    commit('a comment');
+    assert.equal(cli('--raises', base).status, 0, 'a comment ignores nothing');
+    write('.gitignore', '');
+    commit('un-ignore');
+    assert.equal(cli('--raises', base).status, 0, 'a removal only tightens');
+    write('.gitignore', 'node_modules\nsrc/legacy/\n');
+    write(
+      'src/quiet/biome.json',
+      '{ "root": false, "linter": { "enabled": false } }\n'
+    );
+    write('pkg/turbo.json', '{}\n');
+    sh(['add', '.']);
+    commit('quiet a folder');
+    const r = cli('--raises', base);
+    assert.equal(r.status, 1);
+    for (const file of [
+      '\\.gitignore',
+      'src\\/quiet\\/biome\\.json',
+      'pkg\\/turbo\\.json',
+    ]) {
+      assert.match(r.stderr, new RegExp(`G0-RAISE: GATE ${file}@[0-9a-f]{8}`));
+    }
+  });
+
+  test('any file in the gate folder is gate code, and a gate part that is no file is a registry error', () => {
+    setUp();
+    initAndCommit();
+    const base = head();
+    write('scripts/checks/helper.mjs', 'export const h = 1;\n');
+    sh(['add', '.']);
+    commit('a helper split out of the gate');
+    assert.match(
+      cli('--raises', base).stderr,
+      /G0-RAISE: GATE scripts\/checks\/helper\.mjs@[0-9a-f]{8}/,
+      'review finding: a module missing from a hand-kept list was unsigned'
+    );
+    write(
+      'rules.mjs',
+      `${rulesModule(T1)}export const GATES = [{ id: 'G', title: 't', run: 'node ./scripts/gone.mjs', files: ['biom.json'] }];\n`
+    );
+    const r = cli();
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /not tracked[^\n]*scripts\/gone\.mjs; biom\.json/);
+  });
+
+  test('a moved baseline is read at its old path at the base', () => {
+    setUp();
+    initAndCommit();
+    const base = head();
+    sh(['mv', 'baseline.json', 'moved.json']);
+    commit('move the baseline');
+    const r = spawnSync(
+      process.execPath,
+      [
+        RUNNER,
+        '--root',
+        repo,
+        '--rules',
+        join(repo, 'rules.mjs'),
+        '--baseline',
+        'moved.json',
+        '--raises',
+        base,
+      ],
+      { encoding: 'utf8', env: { ...process.env, ...LOCAL } }
+    );
+    assert.equal(
+      r.status,
+      0,
+      `review finding: every pin read as a raise\n${r.stderr}`
+    );
   });
 });
 
@@ -2051,15 +2303,20 @@ describe('loosening needs a countersign', () => {
     );
   });
 
-  test('a new block for a new rule can be signed as a whole', () => {
-    const raised = raisedEntries(rules, {}, { T1: { 'src/a.ts': [K] } });
+  test('a new block for a new rule can be signed as a whole, at its hash', () => {
+    const after = { T1: { 'src/a.ts': [K] } };
+    const raised = raisedEntries(rules, {}, after);
     assert.equal(raised[0].newRule, true);
-    const signed = parseCountersigns(
-      'G0-RAISE: T1 * — the rule arrives with its debt\n'
-    );
-    assert.deepEqual(
-      missingCountersigns({ raised, exceptions: [], gateChanges: [], signed }),
-      []
+    const items = raised.map((r) => raiseItem(r, after));
+    const sign = (hash) =>
+      parseCountersigns(
+        `G0-RAISE: T1 *@${hash} — the rule arrives with its debt\n`
+      );
+    assert.deepEqual(uncovered(items, sign(hashOf(after.T1))), []);
+    assert.equal(
+      uncovered(items, sign('00000000')).length,
+      1,
+      'a block the owner never saw'
     );
   });
 
@@ -2079,24 +2336,33 @@ describe('loosening needs a countersign', () => {
       ],
       ['T1 src/a.ts', 'GATE scripts/x.mjs']
     );
-    const raised = raisedEntries(rules, before, {
-      T1: { 'src/a.ts': [K, K, K], 'src/c.ts': [K] },
-    });
-    const missing = missingCountersigns({
-      raised,
-      exceptions: [{ file: 'src/d.ts', ruleId: 'T1', line: 4 }],
-      gateChanges: ['scripts/checks/architecture-rules.mjs'],
-      signed: parseCountersigns(
-        'G0-RAISE: T1 src/a.ts — the hotfix lands first\n'
-      ),
-    });
+    const after = { T1: { 'src/a.ts': [K, K, K], 'src/c.ts': [K] } };
+    const items = [
+      ...raisedEntries(rules, before, after).map((r) => raiseItem(r, after)),
+      { key: 'T1 src/d.ts', state: 'aaaaaaaa', star: null, what: 'x' },
+      {
+        key: 'GATE scripts/checks/architecture-rules.mjs',
+        state: 'bbbbbbbb',
+        star: null,
+        what: 'y',
+      },
+    ];
+    const signedAt = (hash) =>
+      parseCountersigns(
+        `G0-RAISE: T1 src/a.ts@${hash} — the hotfix lands first\n`
+      );
     assert.deepEqual(
-      missing.map((m) => m.line),
+      uncovered(items, signedAt(hashOf([K, K, K]))).map((m) => m.line),
       [
-        'G0-RAISE: T1 src/c.ts — <why>',
-        'G0-RAISE: T1 src/d.ts — <why>',
-        'G0-RAISE: GATE scripts/checks/architecture-rules.mjs — <why>',
+        `G0-RAISE: T1 src/c.ts@${hashOf([K])} — <why>`,
+        'G0-RAISE: T1 src/d.ts@aaaaaaaa — <why>',
+        'G0-RAISE: GATE scripts/checks/architecture-rules.mjs@bbbbbbbb — <why>',
       ]
+    );
+    assert.equal(
+      uncovered(items, signedAt(hashOf([K, K]))).length,
+      4,
+      'a countersign for an earlier state of the pin covers nothing'
     );
   });
 });
@@ -2356,16 +2622,15 @@ describe('round 2: countersigns', () => {
       }
     );
     assert.equal(raised[0].newRule, false);
+    const after = { T1: { 'src/a.ts': [K] } };
     assert.deepEqual(
-      missingCountersigns({
-        raised,
-        exceptions: [],
-        gateChanges: [],
-        signed: parseCountersigns(
-          'G0-RAISE: T1 * — the rule arrives with its debt\n'
-        ),
-      }).map((m) => m.line),
-      ['G0-RAISE: T1 src/a.ts — <why>']
+      uncovered(
+        raised.map((r) => raiseItem(r, after)),
+        parseCountersigns(
+          `G0-RAISE: T1 *@${hashOf(after.T1)} — the rule arrives with its debt\n`
+        )
+      ).map((m) => m.line),
+      [`G0-RAISE: T1 src/a.ts@${hashOf([K])} — <why>`]
     );
   });
 
@@ -2664,18 +2929,28 @@ describe('round 3: the base, the gate and keys', () => {
       ['src/big.ts:4:5']
     );
     assert.deepEqual(spent([SIZE_RULE], four, four, size), []);
+    const raisedTo6 = { 'T-SIZE': { 'src/big.ts': 6 } };
     assert.deepEqual(
       spent(
         [SIZE_RULE],
         { 'src/big.ts': 'a\nb\nc\nd\ne\nf\n' },
         four,
-        {
-          'T-SIZE': { 'src/big.ts': 6 },
-        },
+        raisedTo6,
+        size
+      ),
+      ['src/big.ts:5:6'],
+      'review finding: a raise of one released all the stale headroom too'
+    );
+    assert.deepEqual(
+      spent(
+        [SIZE_RULE],
+        { 'src/big.ts': 'a\nb\nc\nd\ne\n' },
+        four,
+        raisedTo6,
         size
       ),
       [],
-      'a raised size pin is the countersign check’s to judge'
+      'the base had 4, the raise adds 1'
     );
   });
 
@@ -2810,7 +3085,7 @@ describe('round 3: what the gate is made of', () => {
     );
   });
 
-  test('what a gate runs is derived from its commands, plus the files and ratchets it declares', () => {
+  test('what a gate runs is derived from its commands, followed as a shell would, plus what it declares', () => {
     const gates = [
       { id: 'A', run: 'pnpm check:ci', files: ['biome.json'] },
       {
@@ -2821,52 +3096,66 @@ describe('round 3: what the gate is made of', () => {
       { id: 'C', run: 'pnpm typecheck' },
       {
         id: 'D',
-        selfTest: 'node --test scripts/d.test.mjs',
-        run: 'node scripts/d.mjs',
+        selfTest: 'node --test scripts/d.test.mjs scripts/e.test.mjs',
+        run: 'node --experimental-strip-types ./scripts/d.mjs --verbose',
       },
     ];
     const web = (scripts) => JSON.stringify({ name: 'web', scripts });
     const files = {
+      'pnpm-workspace.yaml': "packages:\n  - 'apps/*'\n",
       'package.json': JSON.stringify({
         scripts: {
           'check:ci': 'biome check .',
-          typecheck: 'turbo run typecheck',
+          typecheck: 'turbo typecheck',
         },
       }),
       'apps/web/package.json': web({
-        'check:x': 'node scripts/x.mjs',
+        'check:x': 'svelte-kit sync && pnpm run check:x:inner',
+        'check:x:inner': 'node ./scripts/x.mjs',
         typecheck: 'tsc',
       }),
+      'apps/web/turbo.json': '{"tasks":{"typecheck":{}}}',
+      'scripts/d.mjs': "import { x } from './lib.mjs';\n",
+      'scripts/lib.mjs': 'export const x = 1;\n',
     };
-    const parts = gateDependencies(
-      gates,
-      Object.keys(files),
-      (f) => files[f] ?? null
-    );
+    const parts = gateDependencies(gates, {
+      files: Object.keys(files),
+      read: (f) => files[f] ?? null,
+    });
     assert.deepEqual(parts.map((p) => p.label).sort(), [
       'apps/web/b.json',
       'apps/web/package.json#scripts.check:x',
+      'apps/web/package.json#scripts.check:x:inner',
       'apps/web/package.json#scripts.typecheck',
       'apps/web/scripts/x.mjs',
+      'apps/web/turbo.json#tasks.typecheck',
       'biome.json',
       'package.json#scripts.check:ci',
       'package.json#scripts.typecheck',
+      'pnpm-workspace.yaml',
       'scripts/d.mjs',
       'scripts/d.test.mjs',
+      'scripts/e.test.mjs',
+      'scripts/lib.mjs',
       'turbo.json#tasks.typecheck',
     ]);
     const part = (label) => parts.find((p) => p.label === label);
     const script = part('apps/web/package.json#scripts.check:x');
+    const withScripts = (scripts) =>
+      web({
+        ...JSON.parse(files['apps/web/package.json']).scripts,
+        ...scripts,
+      });
     assert.ok(
       script.changed(
         files['apps/web/package.json'],
-        web({ 'check:x': 'true', typecheck: 'tsc' })
+        withScripts({ 'check:x': 'true' })
       )
     );
     assert.ok(
       !script.changed(
         files['apps/web/package.json'],
-        web({ 'check:x': 'node scripts/x.mjs', typecheck: 'tsc', other: 'y' })
+        withScripts({ other: 'y' })
       ),
       'another script is not this gate'
     );
@@ -2880,19 +3169,42 @@ describe('round 3: what the gate is made of', () => {
       !ratchet.changed('{"e":{"a":{"T":2}}}', '{"e":{"a":{"T":1}}}'),
       'a fall only tightens'
     );
+    const task = part('turbo.json#tasks.typecheck');
     assert.ok(
-      part('turbo.json#tasks.typecheck').changed(
+      task.changed(
         '{"tasks":{"typecheck":{}}}',
         '{"tasks":{"typecheck":{"cache":false}},"x":1}'
       )
     );
     assert.ok(
-      !part('turbo.json#tasks.typecheck').changed(
+      !task.changed(
         '{"tasks":{"typecheck":{}}}',
         '{"tasks":{"typecheck":{}},"x":1}'
       ),
       'another task is not this gate'
     );
+  });
+
+  test('the runner lives where the base lookup looks, and imports nothing outside its folder', async () => {
+    const { readdirSync } = await import('node:fs');
+    const root = join(HERE, '../..');
+    const runner = RUNNER.slice(root.length + 1).replaceAll('\\', '/');
+    assert.ok(
+      GATE_ENTRY_PATHS.includes(runner),
+      `${runner} must be in GATE_ENTRY_PATHS, or a base would look gate-free`
+    );
+    // The base's judge runs from an extracted copy of this folder alone.
+    for (const file of readdirSync(HERE).filter((f) => f.endsWith('.mjs'))) {
+      const text = readFileSync(join(HERE, file), 'utf8');
+      for (const m of text.matchAll(
+        /(?:\bfrom\s*|\bimport\s*\(\s*)(['"])(\.{1,2}\/[^'"]+)\1/g
+      )) {
+        assert.ok(
+          !m[2].startsWith('../'),
+          `${file} imports ${m[2]}, outside the folder the base's judge extracts`
+        );
+      }
+    }
   });
 
   test('ciBase: a pull request from dev is a release', () => {
@@ -2914,11 +3226,33 @@ describe('round 3: what the gate is made of', () => {
       const env = {
         GITHUB_EVENT_NAME: 'pull_request',
         GITHUB_EVENT_PATH: path,
+        GITHUB_BASE_REF: 'main',
       };
       assert.deepEqual(ciBase(dir, { ...env, GITHUB_HEAD_REF: 'dev' }), {
         kind: 'release',
         base: 'abc',
       });
+      assert.equal(
+        ciBase(dir, { ...env, GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'x' })
+          .kind,
+        'pr',
+        'dev into another branch is no release'
+      );
+      writeFileSync(
+        path,
+        JSON.stringify({
+          pull_request: {
+            base: { sha: 'abc' },
+            head: { repo: { full_name: 'fork/codex' } },
+          },
+          repository: { full_name: 'brucemckayone/codex' },
+        })
+      );
+      assert.equal(
+        ciBase(dir, { ...env, GITHUB_HEAD_REF: 'dev' }).kind,
+        'pr',
+        "a fork's dev is no release"
+      );
       assert.deepEqual(ciBase(dir, { ...env, GITHUB_HEAD_REF: 'feat/x' }), {
         kind: 'pr',
         base: 'abc',
@@ -3011,6 +3345,276 @@ describe('round 3: the registry rules', async () => {
       hits(job('  "x":', '    "if": false\n')),
       /changed by the job's if:/,
       'review finding: a quoted key hid its if:'
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 4 review fixes (G0, 2026-11-19)
+// ---------------------------------------------------------------------------
+
+describe('round 4: masking, names, aliases and config', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const { JOB_HEAD } = await import('./architecture-lists.mjs');
+  const byId = (id) => RULES.find((r) => r.id === id);
+  const keys = (text, file = 'packages/x/src/a.ts') =>
+    run([byId('A1')], { [file]: text }, {})
+      .results.get('A1')
+      .perFile.get(file)
+      .hits.map((h) => `${h.line}:${h.key}`);
+
+  test('A1 sees a money call inside an interpolation, after a nested template, and after a regex holding a quote', () => {
+    assert.deepEqual(
+      keys(
+        [
+          'function pay() {',
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source text, not a template
+          '  log(`sent ${(await stripe.transfers.create(p)).id}`);',
+          '}',
+        ].join('\n')
+      ),
+      ['2:pay>transfers.create('],
+      'review finding: an interpolation was masked as string'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'function balanceNote(payeeName) {',
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source text, not a template
+          '  return `${payeeName ? `${payeeName}\'s` : "the payee\'s"} balance',
+          '  was too low`;',
+          '}',
+          'function refundNow(charge) {',
+          '  return stripe.refunds.create({ charge });',
+          '}',
+        ].join('\n')
+      ),
+      ['6:refundNow>refunds.create('],
+      'review finding: the apostrophe flipped template parity and masked the call'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'function pay(s) {',
+          "  if (s) /'/.test(s) && (await stripe.refunds.create(p));",
+          '}',
+        ].join('\n')
+      ),
+      ['2:pay>refunds.create(']
+    );
+  });
+
+  test('a line continuation in a string keeps the lines below it in place', () => {
+    assert.deepEqual(
+      keys(
+        [
+          'function pay() {',
+          "  const s = 'one \\",
+          "two';",
+          '  if (x) {',
+          '    const t = `a',
+          'b`;',
+          '    stripe.transfers.create(p);',
+          '  }',
+          '}',
+        ].join('\n')
+      ),
+      ['7:pay>transfers.create(']
+    );
+  });
+
+  test('routes in the form biome writes get their own keys; a header read or a cache get names nothing', () => {
+    const route = (path) => [
+      'app.post(',
+      `  '${path}',`,
+      '  procedure({',
+      "    policy: { auth: 'required' },",
+      '    handler: async (ctx) => {',
+      '      await stripe.refunds.create({});',
+      '    },',
+      '  })',
+      ');',
+    ];
+    assert.deepEqual(
+      keys(
+        [...route('/refund'), ...route('/cancel')].join('\n'),
+        'workers/w/src/routes/r.ts'
+      ),
+      [
+        '6:POST /refund/handler>refunds.create(',
+        '15:POST /cancel/handler>refunds.create(',
+      ],
+      'review finding: every route keyed as procedure/handler'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'function connect(request) {',
+          "  if (request.headers.get('Upgrade') !== 'websocket') {",
+          '    stripe.transfers.create(p);',
+          '  }',
+          '}',
+        ].join('\n')
+      ),
+      ['3:connect>transfers.create(']
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'function settle() {',
+          "  return cache.get('payout', async () => {",
+          '    return stripe.transfers.create(p);',
+          '  });',
+          '}',
+        ].join('\n')
+      ),
+      ['3:settle/cache.get>transfers.create(']
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'function settle() {',
+          "  cache.get('payout', async () => {",
+          '    stripe.transfers.create(p);',
+          '  });',
+          '}',
+        ].join('\n')
+      ),
+      ['3:settle/cache.get>transfers.create('],
+      'review finding: a non-path literal named a route'
+    );
+  });
+
+  test('a method head needs its body: a call or an arrow callback is no method', () => {
+    const text = [
+      'class PayoutService {',
+      '  async payOut(id: string): Promise<{ transferId: string }> {',
+      '    return this.db.transaction(',
+      '      async (tx): Promise<void> => {',
+      '        await stripe.transfers.create(p);',
+      '      }',
+      '    );',
+      '  }',
+      '  async refund(id: string, onDone: () => void): Promise<void> {',
+      '    await stripe.refunds.create(p);',
+      '  }',
+      '  async delete(id: string) {',
+      '    await stripe.refunds.create(p);',
+      '  }',
+      '}',
+    ].join('\n');
+    assert.deepEqual(keys(text), [
+      '5:payOut>transfers.create(',
+      '10:refund>refunds.create(',
+      '13:delete>refunds.create(',
+    ]);
+  });
+
+  test('RATE-LIMIT-BINDING: every alias form fails; reading a property passes', () => {
+    const rule = byId('RATE-LIMIT-BINDING');
+    const fires = (route) =>
+      run(
+        [rule],
+        {
+          'packages/constants/src/limits.ts': limitsTs,
+          'workers/w/wrangler.jsonc': wrangler(['RATE_LIMIT_API']),
+          'workers/w/src/routes.ts': route,
+        },
+        {}
+      )
+        .problems.filter((p) => p.type === 'new')
+        .reduce((n, p) => n + p.found, 0);
+    for (const [route, why] of [
+      ["(procedure as any)({ policy: { rateLimit: 'api' } });\n", 'a cast'],
+      ['const route = procedure.bind(null);\n', 'a stored bind'],
+      ["procedure.call(null, { policy: { rateLimit: 'api' } });\n", 'call'],
+      [
+        "export { procedure as route } from '@codex/worker-utils';\n",
+        'a re-export',
+      ],
+      [
+        "import wu, { procedure as p } from '@codex/worker-utils';\n",
+        'a default plus a renamed import',
+      ],
+      [
+        "import * as wu from '@codex/worker-utils';\nconst { procedure: p } = wu;\n",
+        'destructured off a namespace',
+      ],
+      [
+        "import * as wu from '@codex/worker-utils';\nconst m = wu;\n",
+        'a stored namespace',
+      ],
+      ['const p: typeof procedure = procedure;\n', 'a typed alias'],
+      [
+        "import * as $wu from '@codex/worker-utils';\n$wu['procedure']({});\n",
+        'a computed member of a $ namespace',
+      ],
+      [
+        "import * as wu from '@codex/worker-utils';\nwu?.['procedure']({});\n",
+        'an optional computed member',
+      ],
+      [
+        "procedure({ get policy() { return { rateLimit: 'streaming' }; } });\n",
+        'a getter policy',
+      ],
+    ]) {
+      assert.equal(fires(route), 1, `${why} hides its calls, so it fails`);
+    }
+    for (const route of [
+      'const limit = policy.rateLimit;\n',
+      'const preset = options.rateLimit as string;\n',
+    ]) {
+      assert.equal(fires(route), 0, `${route.trim()} reads a property`);
+    }
+  });
+
+  test('a job header with an anchor, a tag, quotes or a comment is still a job header', () => {
+    for (const head of [
+      '  x: &static',
+      '  x: !!map',
+      '  "x":  # the gate',
+      "  'x':",
+    ]) {
+      assert.ok(JOB_HEAD.test(head), head);
+    }
+    assert.ok(!JOB_HEAD.test('  x: value'), 'a scalar is no job');
+  });
+
+  test('callerPrint ignores trailing comments and a comment naming the workflow, and reads a quoted job', () => {
+    const wf = '.github/workflows/static_analysis.yml';
+    const caller = `on:\n  pull_request: # PRs\njobs:\n  static:\n    uses: ./${wf} # the gate\n  e2e:\n    # needs ./${wf} to pass first\n    runs-on: a\n`;
+    assert.equal(
+      callerPrint(caller, wf),
+      callerPrint(
+        caller
+          .replace('# PRs', '# every PR')
+          .replace('# the gate', '# the static gate'),
+        wf
+      )
+    );
+    assert.equal(
+      callerPrint(caller, wf),
+      callerPrint(caller.replace('runs-on: a', 'runs-on: b'), wf),
+      'a comment naming the workflow pulls in no job'
+    );
+    const quoted = `on:\n  pull_request:\njobs:\n  "static-analysis":\n    uses: ./${wf}\n`;
+    assert.notEqual(
+      callerPrint(quoted, wf),
+      callerPrint(`${quoted}    with:\n      skip: true\n`, wf)
+    );
+  });
+
+  test('DOC-BUDGET counts the words a CLAUDE.md imports', () => {
+    const rule = byId('DOC-BUDGET');
+    const tree = {
+      'apps/x/CLAUDE.md': 'one two @./MORE.md three, not @codex/database\n',
+      'apps/x/MORE.md': 'a b c d e @./CLAUDE.md\n',
+    };
+    const { results } = run([rule], tree, {});
+    assert.equal(
+      results.get('DOC-BUDGET').perFile.get('apps/x/CLAUDE.md').found,
+      6 + 6,
+      'review finding: moving words into an import saved nothing they cost'
     );
   });
 });

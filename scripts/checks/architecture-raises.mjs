@@ -1,5 +1,5 @@
 /**
- * Countersigned loosening (G0 WP-7, hardened over three reviews,
+ * Countersigned loosening (G0 WP-7, hardened over four reviews,
  * Codex-xtcfl.7).
  *
  * The ratchet only holds if nothing loosens it quietly. pstack's rule:
@@ -7,37 +7,45 @@
  * countersign, because the owner is the one who wants green." There are three
  * ways to loosen this gate, and each needs the OWNER's countersign:
  *
- *   1. raise a baseline pin, or add one        G0-RAISE: <RULE> <file> — <reason>
- *      (every pin of a rule the base lacks)    G0-RAISE: <RULE> * — <reason>
- *   2. add, copy, move or renew an exception   G0-RAISE: <RULE> <file> — <reason>
- *   3. change what a gate runs: the gate's     G0-RAISE: GATE <what> — <reason>
- *      own code, its CI steps, a gate script
- *      or self-test, a pnpm script or turbo
- *      task a gate runs, a gate's config
- *      (biome.json), or a rise in another
- *      gate's baseline
+ *   1. raise a baseline pin, or add one        G0-RAISE: <RULE> <file>@<hash> — <reason>
+ *      (every pin of a rule the base lacks)    G0-RAISE: <RULE> *@<hash> — <reason>
+ *   2. add, copy, move or renew an exception   G0-RAISE: <RULE> <file>@<hash> — <reason>
+ *   3. change what a gate runs: the gate's     G0-RAISE: GATE <what>@<hash> — <reason>
+ *      own code, its CI steps, a gate script,
+ *      a pnpm script or turbo task a gate runs,
+ *      a gate's config (biome.json, a nested
+ *      biome config, a new .gitignore line), or
+ *      a rise in another gate's baseline
+ *
+ * The <hash> is a short hash of the item's content as the change leaves it,
+ * and the gate prints it in the line to sign (owner, 19 Nov). So a countersign
+ * covers exactly what the owner saw: an amend that folds a further change into
+ * the signing commit, a countersign cherry-picked onto another change, or a
+ * change to the same item merged in from the base all change the hash, and
+ * the gate asks again, printing the new one.
  *
  * The countersign is a trailer line in a commit message in the range being
  * checked. It counts only in a commit with no `Co-Authored-By: Claude` line
- * (owner, 18 Nov), and only while what it signed is unchanged: anything that
- * loosens the same item AFTER the signing commit needs a new countersign. A
- * commit message travels into dev and main with the change, so a release PR
- * passes without re-signing, and git blame keeps the reason next to the change.
+ * (owner, 18 Nov). A pull request into dev is where it is judged; a push to
+ * dev or main, and a release PR from dev, only note what is unsigned (owner,
+ * 19 Nov), because two PRs that each signed the same file produce a merged
+ * state neither signed.
  *
  * THREAT MODEL (owner, 18 Nov): honest agents that make eager mistakes, such
  * as signing their own raise or breaking this check while refactoring it. When
- * a change touches scripts/checks/, the runner also has the BASE commit's copy
- * of the gate judge the countersigns, so a bug in the new copy can't approve
- * itself. An agent that deliberately forges (leaves out its attribution, edits
- * its own CI) is not stopped here; review is the backstop for that.
+ * a change touches the gate's own code, the runner also has the BASE commit's
+ * copy of the gate judge the countersigns, so a bug in the new copy can't
+ * approve itself. An agent that deliberately forges (leaves out its
+ * attribution, edits its own CI) is not stopped here; review is the backstop.
  *
  * Lowering never needs a countersign: it only tightens.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { IGNORE_KEYWORD, parseIgnores } from './architecture-ignores.mjs';
-import { pnpmScript } from './architecture-lists.mjs';
+import { JOB_HEAD, pnpmScript } from './architecture-lists.mjs';
 import {
   enclosingName,
   MATCHERS,
@@ -46,28 +54,39 @@ import {
 import { tokenize } from './check-data-access-contract.mjs';
 
 /**
- * The gate's own code. Changing any of these can loosen every rule at once (a
- * matcher that stops matching, a step that stops running), so each change
- * needs a GATE countersign. The baseline has its own per-pin check (1 above)
- * and the generated rules page is held by RULES-DOC. What the OTHER gates run
- * is derived from the registry (gateDependencies), and the calling workflows
- * are fingerprinted (callerPrint), because most of what they hold is
- * unrelated test jobs.
+ * Where the gate's runner has lived, oldest first. "Does the base have a
+ * gate?" is asked of every path here, so moving the runner can't make a base
+ * look gate-free. A move ADDS its new path; the self-test fails when the
+ * runner isn't at one of these.
  */
-export const GATE_CODE = [
-  'scripts/checks/check-architecture.mjs',
-  'scripts/checks/check-architecture.test.mjs',
-  'scripts/checks/architecture-rules.mjs',
-  'scripts/checks/architecture-matchers.mjs',
-  'scripts/checks/architecture-lists.mjs',
-  'scripts/checks/architecture-ignores.mjs',
-  'scripts/checks/architecture-docs.mjs',
-  'scripts/checks/architecture-raises.mjs',
-  'scripts/checks/check-data-access-contract.mjs',
+export const GATE_ENTRY_PATHS = ['scripts/checks/check-architecture.mjs'];
+
+/** The gate's own folder: every tracked file in it is gate code, except the baseline. */
+export const GATE_DIR = 'scripts/checks/';
+
+/**
+ * Gate code outside GATE_DIR: the workflow that runs it, the hook and the
+ * local mirror of CI. The calling workflows are fingerprinted by callerPrint,
+ * because most of what they hold is unrelated test jobs.
+ */
+const GATE_CODE_ELSEWHERE = [
   '.github/workflows/static_analysis.yml',
   '.husky/pre-commit',
   '.claude/skills/codex-epic-implement/scripts/gate.sh',
 ];
+
+/** Whether a path is the gate's own code. The baseline has its own per-pin check. */
+export function isGateCode(file, baselineFile) {
+  if (file === baselineFile) return false;
+  return file.startsWith(GATE_DIR) || GATE_CODE_ELSEWHERE.includes(file);
+}
+
+/** The short content hash a countersign names: 8 hex digits of sha256. */
+export function hashOf(value) {
+  const text =
+    typeof value === 'string' ? value : JSON.stringify(value ?? null);
+  return createHash('sha256').update(text).digest('hex').slice(0, 8);
+}
 
 const COUNTERSIGN =
   /^[ \t]*G0-RAISE:[ \t]+(\S+)[ \t]+(\S+)[ \t]+(?:—|--?)[ \t]+(.+?)[ \t]*$/gm;
@@ -77,9 +96,10 @@ const AGENT_COMMIT =
   /^Co-Authored-By:.*(?:\bClaude\b|noreply@anthropic\.com)/im;
 
 /**
- * The countersigns in some commit messages, as "RULE target" keys. A reason
- * must be at least three words and hold no `<placeholder>`, so a line that
- * says nothing, or the gate's own template pasted back, doesn't count.
+ * The countersigns in some commit messages, as "RULE target" strings, the
+ * target carrying its `@hash`. A reason must be at least three words and hold
+ * no `<placeholder>`, so a line that says nothing, or the gate's own template
+ * pasted back, doesn't count.
  */
 export function parseCountersigns(text) {
   const signed = new Set();
@@ -194,56 +214,52 @@ function newExceptions(file, beforeText, afterText) {
   return added;
 }
 
-/**
- * What a change loosens, as items: `key` is what a countersign names, `star`
- * the whole-rule form that also covers it (a rule the base lacked).
- */
-function looseningItems({ raised, exceptions, gateChanges }) {
-  const items = [];
-  for (const r of raised) {
-    items.push({
-      key: `${r.ruleId} ${r.file}`,
-      star: r.newRule ? `${r.ruleId} *` : null,
-      ruleId: r.ruleId,
-      line: `G0-RAISE: ${r.ruleId} ${r.newRule ? '*' : r.file} — <why>`,
-      what: `${r.ruleId} ${r.file}: ${describeRaise(r)}`,
-    });
-  }
-  for (const d of exceptions) {
-    items.push({
-      key: `${d.ruleId} ${d.file}`,
-      star: null,
-      ruleId: d.ruleId,
-      line: `G0-RAISE: ${d.ruleId} ${d.file} — <why>`,
-      what: `${d.file}:${d.line}: a new, copied, moved or renewed ${IGNORE_KEYWORD} for ${d.ruleId}`,
-    });
-  }
-  for (const path of gateChanges) {
-    items.push({
-      key: `GATE ${path}`,
-      star: null,
-      ruleId: 'GATE',
-      line: `G0-RAISE: GATE ${path} — <why>`,
-      what: `${path}: what a gate runs changed`,
-    });
-  }
-  return items;
-}
+// ---------------------------------------------------------------------------
+// What a change loosens, each with the hash a countersign must name
+// ---------------------------------------------------------------------------
 
 /**
- * Everything a change loosens that no countersign names (by key alone; the
- * runner also checks that nothing changed after the signing commit).
- *
- * @param {{ raised: ReturnType<typeof raisedEntries>,
- *   exceptions: { file: string, ruleId: string, line: number }[],
- *   gateChanges: string[], signed: Set<string> }} input
+ * A raised pin as the item to sign: its key, the hash of the pin as the
+ * change leaves it, and, for a rule the base lacked, the whole-rule form
+ * (`RULE *`) with the hash of the rule's whole block.
  */
-export function missingCountersigns(input) {
-  return looseningItems(input)
-    .filter(
-      (i) => !input.signed.has(i.key) && !(i.star && input.signed.has(i.star))
-    )
-    .map(({ line, what }) => ({ line, what }));
+export function raiseItem(r, afterBaseline) {
+  return {
+    key: `${r.ruleId} ${r.file}`,
+    state: hashOf(r.now),
+    star: r.newRule
+      ? { key: `${r.ruleId} *`, state: hashOf(afterBaseline[r.ruleId]) }
+      : null,
+    what: `${r.ruleId} ${r.file}: ${describeRaise(r)}`,
+  };
+}
+
+/** The line to sign for an item: its whole-rule form when it has one. */
+const signLine = (item) => {
+  const { key, state } = item.star ?? item;
+  return `G0-RAISE: ${key}@${state} — <why>`;
+};
+
+/**
+ * The items no countersign covers, grouped by the line to sign (every pin of
+ * a new rule shares one `RULE *` line).
+ *
+ * @param {{ key: string, state: string, star: object|null, what: string }[]} items
+ * @param {Set<string>} signed  "KEY@hash" strings from owner commits
+ * @returns {{ line: string, what: string[] }[]}
+ */
+export function uncovered(items, signed) {
+  const lines = new Map();
+  for (const item of items) {
+    const ok =
+      signed.has(`${item.key}@${item.state}`) ||
+      (item.star && signed.has(`${item.star.key}@${item.star.state}`));
+    if (ok) continue;
+    const line = signLine(item);
+    if (!lines.has(line)) lines.set(line, []);
+    lines.get(line).push(item.what);
+  }
+  return [...lines].map(([line, what]) => ({ line, what }));
 }
 
 // ---------------------------------------------------------------------------
@@ -253,12 +269,15 @@ export function missingCountersigns(input) {
 /**
  * What a calling workflow contributes to the gate: its triggers, its
  * concurrency, and the job that runs the static-analysis workflow. Comments
- * and blank lines are left out, and they never end a block (YAML ignores a
- * comment's indentation), so only a real change counts.
+ * (whole-line or trailing) and blank lines are left out and never end a block
+ * (YAML ignores a comment's indentation), so only a real change counts.
  */
 export function callerPrint(text, workflow) {
   if (text === null) return null;
-  const lines = text.replace(/\r/g, '').split('\n');
+  const lines = text
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((l) => l.replace(/\s+#(?=[^'"]*$).*$/, ''));
   const isNoise = (l) => l.trim() === '' || l.trimStart().startsWith('#');
   const keep = [];
   const block = (start, isEnd) => {
@@ -270,18 +289,228 @@ export function callerPrint(text, workflow) {
     return out;
   };
   lines.forEach((line, i) => {
-    if (/^(?:on|concurrency)\s*:/.test(line)) {
+    if (/^(['"]?)(?:on|concurrency)\1\s*:/.test(line)) {
       keep.push(...block(i, (l) => /^\S/.test(l)));
     }
-    if (/^ {2}[\w-]+\s*:\s*(?:#.*)?$/.test(line)) {
+    if (JOB_HEAD.test(line)) {
       const job = block(i, (l) => /^ {0,2}\S/.test(l));
-      if (job.some((l) => l.includes(`./${workflow}`))) keep.push(...job);
+      const uses = job.some(
+        // a comment line never starts with `uses:`, so it can't pull a job in
+        (l) => /^\s*(['"]?)uses\1\s*:/.test(l) && l.includes(`./${workflow}`)
+      );
+      if (uses) keep.push(...job);
     }
   });
   return keep
     .filter((l) => !isNoise(l))
     .map((l) => l.trimEnd())
     .join('\n');
+}
+
+/** `apps/*` and the like (pnpm-workspace.yaml globs) as an anchored RegExp. */
+const workspaceGlob = (glob) =>
+  new RegExp(
+    `^${glob
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*\*/g, '\0')
+      .replace(/\*/g, '[^/]+')
+      .replace(/\0/g, '.*')}/package\\.json$`
+  );
+
+/** The package.json files pnpm treats as the workspace: the root plus pnpm-workspace.yaml's globs. */
+function workspacePackages(files, read) {
+  const yaml = read('pnpm-workspace.yaml') ?? '';
+  const globs = [];
+  let inPackages = false;
+  for (const line of yaml.split('\n')) {
+    if (/^packages\s*:/.test(line)) inPackages = true;
+    else if (/^\S/.test(line)) inPackages = false;
+    else if (inPackages) {
+      const m = /^\s*-\s*(['"]?)([^'"#\s]+)\1/.exec(line);
+      if (m) globs.push(workspaceGlob(m[2]));
+    }
+  }
+  return files.filter(
+    (f) => f === 'package.json' || globs.some((re) => re.test(f))
+  );
+}
+
+/** The files a `node …` command runs: every file argument with --test, else the entry. */
+function nodeFiles(words) {
+  const files = [];
+  const test = words.includes('--test');
+  const takesValue = new Set([
+    '--import',
+    '--require',
+    '-r',
+    '--loader',
+    '--experimental-loader',
+    '--env-file',
+  ]);
+  for (let k = 0; k < words.length; k++) {
+    const w = words[k];
+    if (takesValue.has(w)) {
+      k += 1;
+      continue;
+    }
+    if (w.startsWith('-')) continue;
+    if (/\.[mc]?[jt]s$/.test(w)) files.push(w);
+    if (!test) break; // the rest are the script's own arguments
+  }
+  return files;
+}
+
+const pick = (value, path) =>
+  path.reduce((v, k) => (v && typeof v === 'object' ? v[k] : undefined), value);
+
+/**
+ * Everything the registry's other gates run, as parts: `changed(before,
+ * after)` says whether a change to the part loosens that gate, and
+ * `state(text)` is what a countersign's hash covers. Derived from each gate's
+ * commands, followed as a shell would:
+ *
+ *   node [flags] <file …>    the file, and every module it imports relatively
+ *   pnpm [--filter p] [run] <script>
+ *                            the script's value in that package, followed in
+ *                            turn, and pnpm-workspace.yaml (which --filter
+ *                            resolves through)
+ *   turbo [run] <task>       the task in turbo.json and in every package's
+ *                            turbo.json, and every workspace package's script
+ *                            for it
+ *
+ * plus what the registry declares: `files` (configs like biome.json) and
+ * `ratchets` (another gate's baseline, where only a rise counts). Globs a
+ * gate reads by pattern (`filesMatching`) are matched against the change by
+ * the caller, since a new nested config is not a tracked file yet.
+ *
+ * @param {{ files: string[], read: (file: string) => string|null }} tree
+ */
+export function gateDependencies(gates, { files, read }) {
+  const tracked = new Set(files);
+  const parts = new Map();
+  const add = (part) => {
+    if (!parts.has(part.label)) parts.set(part.label, part);
+  };
+  const whole = (file) =>
+    add({ label: file, file, changed: (a, b) => a !== b, state: (t) => t });
+  const json = (file, path, label) =>
+    add({
+      label,
+      file,
+      changed: (a, b) =>
+        JSON.stringify(pick(parseJson(a), path)) !==
+        JSON.stringify(pick(parseJson(b), path)),
+      state: (t) => pick(parseJson(t), path) ?? null,
+    });
+  const packages = workspacePackages(files, read);
+  const packageNamed = (name) =>
+    packages.find((f) => parseJson(read(f))?.name === name) ?? null;
+  const dirOf = (file) => posix.dirname(file).replace(/^\.$/, '');
+  const resolveModule = (path) =>
+    [path, `${path}.mjs`, `${path}.js`, `${path}.ts`, `${path}/index.mjs`].find(
+      (p) => tracked.has(p)
+    ) ?? null;
+
+  const followNode = (file, seen) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    whole(file);
+    const text = read(file);
+    if (text === null || /\.json$/.test(file)) return;
+    for (const m of text.matchAll(
+      /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)(['"])(\.{1,2}\/[^'"]+)\1/gm
+    )) {
+      const target = resolveModule(posix.join(posix.dirname(file), m[2]));
+      if (target) followNode(target, seen);
+    }
+  };
+  const scripts = new Set();
+  const script = (file, name) => {
+    const label = `${file}#scripts.${name}`;
+    json(file, ['scripts', name], label);
+    if (scripts.has(label)) return;
+    scripts.add(label);
+    const value = parseJson(read(file))?.scripts?.[name];
+    if (typeof value === 'string') runs(value, dirOf(file));
+  };
+  const turboTask = (task) => {
+    json('turbo.json', ['tasks', task], `turbo.json#tasks.${task}`);
+    for (const pkg of packages) {
+      const nested = `${dirOf(pkg) ? `${dirOf(pkg)}/` : ''}turbo.json`;
+      if (nested !== 'turbo.json' && tracked.has(nested)) {
+        json(nested, ['tasks', task], `${nested}#tasks.${task}`);
+      }
+      if (parseJson(read(pkg))?.scripts?.[task] !== undefined)
+        script(pkg, task);
+    }
+  };
+  const runs = (command, dir) => {
+    for (const segment of command.split(/&&|\|\||;|\|/)) {
+      const words = segment.trim().split(/\s+/).filter(Boolean);
+      if (words[0] === 'node') {
+        for (const f of nodeFiles(words.slice(1))) {
+          followNode(posix.normalize(dir ? `${dir}/${f}` : f), new Set());
+        }
+      } else if (words[0] === 'turbo') {
+        const task = words[1] === 'run' ? words[2] : words[1];
+        if (task && !task.startsWith('-')) turboTask(task);
+      } else if (words[0] === 'pnpm') {
+        // --filter resolves through the workspace list; without one, pnpm
+        // runs a single project.
+        if (tracked.has('pnpm-workspace.yaml')) whole('pnpm-workspace.yaml');
+        const target = pnpmScript(words.join(' '));
+        if (!target) continue;
+        const file =
+          target.pkg === '(root)'
+            ? dir
+              ? `${dir}/package.json`
+              : 'package.json'
+            : packageNamed(target.pkg);
+        if (file) script(file, target.script);
+      }
+    }
+  };
+
+  for (const gate of gates) {
+    for (const command of [gate.before, gate.selfTest, gate.run].filter(
+      Boolean
+    )) {
+      runs(command, '');
+    }
+    for (const file of gate.files ?? []) whole(file);
+    for (const file of gate.ratchets ?? []) {
+      add({ label: file, file, changed: countsRose, state: (t) => t });
+    }
+  }
+  return [...parts.values()];
+}
+
+/** Whether a .gitignore change adds a line (a removal only un-ignores). */
+function addsIgnoreLine(before, after) {
+  const rules = (t) =>
+    (t ?? '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
+  const was = rules(before);
+  return rules(after).some((l) => !was.includes(l));
+}
+
+/** A repo-relative glob (`**`, `*`, `{a,b}`) as an anchored RegExp. */
+function globRe(glob) {
+  let re = '';
+  for (let k = 0; k < glob.length; k++) {
+    const c = glob[k];
+    if (c === '*' && glob[k + 1] === '*') {
+      re += glob[k + 2] === '/' ? '(?:.*/)?' : '.*';
+      k += glob[k + 2] === '/' ? 2 : 1;
+    } else if (c === '*') re += '[^/]*';
+    else if (c === '{') re += '(?:';
+    else if (c === '}') re += ')';
+    else if (c === ',') re += '|';
+    else re += c.replace(/[.+^$()|[\]\\?]/g, '\\$&');
+  }
+  return new RegExp(`^${re}$`);
 }
 
 const parseJson = (text) => {
@@ -301,71 +530,6 @@ function countsRose(before, after) {
     return Object.entries(a).some(([k, v]) => walk(b?.[k], v));
   };
   return walk(parseJson(before), parseJson(after));
-}
-
-/**
- * Everything the registry's other gates run, as parts: `changed(before,
- * after)` says whether a change to the part loosens that gate. Derived from
- * each gate's commands (a `node [--test] <file>`, a pnpm script and every
- * file it runs, a turbo task and every package's script for it) plus what the
- * registry declares (`files`: configs like biome.json; `ratchets`: another
- * gate's baseline, where only a rise counts).
- */
-export function gateDependencies(gates, packageFiles, read) {
-  const parts = new Map();
-  const add = (label, file, changed) => {
-    if (!parts.has(label)) parts.set(label, { label, file, changed });
-  };
-  const whole = (file) => add(file, file, (a, b) => a !== b);
-  const script = (file, name) =>
-    add(`${file}#scripts.${name}`, file, (a, b) => {
-      const x = parseJson(a);
-      const y = parseJson(b);
-      return (
-        JSON.stringify(x?.scripts?.[name]) !==
-        JSON.stringify(y?.scripts?.[name])
-      );
-    });
-  const nodeFiles = (command, dir) => {
-    for (const m of command.matchAll(
-      /\bnode\s+(?:--test\s+)?([\w./-]+\.m?js)\b/g
-    )) {
-      whole(dir ? `${dir}/${m[1]}` : m[1]);
-    }
-  };
-  const packageNamed = (name) =>
-    packageFiles.find((f) => parseJson(read(f))?.name === name) ?? null;
-  for (const gate of gates) {
-    for (const command of [gate.before, gate.selfTest, gate.run].filter(
-      Boolean
-    )) {
-      nodeFiles(command, '');
-      const target = pnpmScript(command);
-      if (!target) continue;
-      const file =
-        target.pkg === '(root)' ? 'package.json' : packageNamed(target.pkg);
-      if (!file) continue;
-      script(file, target.script);
-      const value = parseJson(read(file))?.scripts?.[target.script] ?? '';
-      nodeFiles(value, file.split('/').slice(0, -1).join('/'));
-      const turbo = /^turbo run ([\w:-]+)/.exec(value);
-      if (turbo) {
-        const task = turbo[1];
-        add(`turbo.json#tasks.${task}`, 'turbo.json', (a, b) => {
-          const x = parseJson(a);
-          const y = parseJson(b);
-          return (
-            JSON.stringify(x?.tasks?.[task]) !==
-            JSON.stringify(y?.tasks?.[task])
-          );
-        });
-        for (const pkg of packageFiles) script(pkg, task);
-      }
-    }
-    for (const file of gate.files ?? []) whole(file);
-    for (const file of gate.ratchets ?? []) add(file, file, countsRose);
-  }
-  return [...parts.values()];
 }
 
 // ---------------------------------------------------------------------------
@@ -421,10 +585,29 @@ function ruleIdsAt(root, ref) {
   );
 }
 
-/** The owner's countersigning commits in base..HEAD, newest first, and the agent commits that tried. */
-function countersignCommits(root, base) {
-  const owner = [];
+/** Every tracked path in the checkout. */
+function trackedFiles(root) {
+  return splitZ(git(root, ['ls-files', '-z']).stdout);
+}
+
+/** Whether a commit holds the gate (at any path it has lived at). */
+export function gateAt(root, ref) {
+  return GATE_ENTRY_PATHS.find(
+    (p) =>
+      git(root, ['cat-file', '-e', `${ref}:${p}`], { allowFail: true })
+        .status === 0
+  );
+}
+
+/**
+ * The owner's countersigns in base..HEAD ("KEY@hash"), the agent commits whose
+ * trailers were not counted, and the owner trailers that name no hash (the
+ * old form, which covers nothing).
+ */
+export function countersignsIn(root, base) {
+  const signed = new Set();
   const byAgent = [];
+  const unbound = [];
   const log = git(root, [
     'log',
     '-z',
@@ -432,24 +615,34 @@ function countersignCommits(root, base) {
     `${base}..HEAD`,
   ]).stdout;
   for (const entry of splitZ(log)) {
-    const nl = entry.indexOf('\n');
-    const body = entry.slice(nl + 1);
-    const signed = parseCountersigns(body);
-    if (signed.size === 0) continue;
-    if (AGENT_COMMIT.test(body)) byAgent.push(entry.slice(0, 9));
-    else owner.push({ sha: entry.slice(0, nl), signed });
+    const body = entry.slice(entry.indexOf('\n') + 1);
+    const found = parseCountersigns(body);
+    if (found.size === 0) continue;
+    if (AGENT_COMMIT.test(body)) {
+      byAgent.push(entry.slice(0, 9));
+      continue;
+    }
+    for (const s of found) {
+      if (/@[0-9a-f]{8}$/.test(s)) signed.add(s);
+      else unbound.push(s);
+    }
   }
-  return { owner, byAgent };
+  return { signed, byAgent, unbound };
 }
 
 /**
- * Everything the working tree loosens relative to `ref`, as items, whatever
- * countersigns exist.
+ * Everything the working tree loosens relative to `ref`, as items to sign,
+ * whatever countersigns exist.
  */
 function loosenedSince(root, registry, baselineFile, ref) {
   const { rules, gates = [], callers = [] } = registry;
   const changed = changedSince(root, ref);
   const renames = renamesSince(root, ref);
+  const files = trackedFiles(root);
+  const readHead = (file) =>
+    existsSync(join(root, file))
+      ? readFileSync(join(root, file), 'utf8')
+      : null;
   const parse = (text, where) => {
     try {
       return JSON.parse(text ?? '{}');
@@ -459,64 +652,107 @@ function loosenedSince(root, registry, baselineFile, ref) {
       );
     }
   };
-  const readHead = (file) =>
-    existsSync(join(root, file))
-      ? readFileSync(join(root, file), 'utf8')
-      : null;
-  const beforeBaseline = parse(showAt(root, ref, baselineFile), ref);
+  // A moved baseline is read at its old path at the base.
+  const beforeBaseline = parse(
+    showAt(root, ref, renames.get(baselineFile) ?? baselineFile),
+    ref
+  );
   const afterBaseline = parse(readHead(baselineFile), 'the working tree');
 
-  const exceptions = [];
+  const items = new Map();
+  const add = (item) => {
+    const id = `${item.key}@${item.state}`;
+    if (!items.has(id)) items.set(id, item);
+  };
+
+  for (const r of raisedEntries(rules, beforeBaseline, afterBaseline, {
+    renames,
+    baseRuleIds: ruleIdsAt(root, ref),
+  })) {
+    add(raiseItem(r, afterBaseline));
+  }
+
   for (const file of changed) {
     const after = readHead(file);
     if (after === null || !after.includes(IGNORE_KEYWORD)) continue;
     const from = renames.get(file) ?? file;
-    exceptions.push(...newExceptions(file, showAt(root, ref, from), after));
+    const sigs = exceptionSignatures(file, after);
+    for (const d of newExceptions(file, showAt(root, ref, from), after)) {
+      add({
+        key: `${d.ruleId} ${file}`,
+        state: hashOf(
+          sigs
+            .filter((x) => x.d.ruleId === d.ruleId)
+            .map((x) => x.sig)
+            .sort()
+        ),
+        star: null,
+        what: `${file}:${d.line}: a new, copied, moved or renewed ${IGNORE_KEYWORD} for ${d.ruleId}`,
+      });
+    }
   }
 
-  const gateChanges = changed.filter((f) => GATE_CODE.includes(f));
+  const gate = (label, content, what) =>
+    add({ key: `GATE ${label}`, state: hashOf(content), star: null, what });
+  for (const file of changed) {
+    if (isGateCode(file, baselineFile)) {
+      gate(file, readHead(file), `${file}: the gate's own code changed`);
+    }
+  }
   const workflow = '.github/workflows/static_analysis.yml';
   for (const caller of callers) {
     if (!changed.includes(caller)) continue;
-    if (
-      callerPrint(showAt(root, ref, caller), workflow) !==
-      callerPrint(readHead(caller), workflow)
-    ) {
-      gateChanges.push(caller);
+    const after = callerPrint(readHead(caller), workflow);
+    if (callerPrint(showAt(root, ref, caller), workflow) !== after) {
+      gate(
+        caller,
+        after,
+        `${caller}: its triggers, concurrency or static-analysis job changed`
+      );
     }
   }
-  const packageFiles = splitZ(
-    git(root, ['ls-files', '-z', '--', 'package.json', '*/package.json']).stdout
-  ).filter((f) =>
-    /^(?:package\.json|(?:apps|packages|workers)\/[^/]+\/package\.json)$/.test(
-      f
-    )
-  );
-  for (const part of gateDependencies(gates, packageFiles, readHead)) {
+  for (const part of gateDependencies(gates, { files, read: readHead })) {
     if (!changed.includes(part.file)) continue;
-    if (part.changed(showAt(root, ref, part.file), readHead(part.file))) {
-      gateChanges.push(part.label);
+    const after = readHead(part.file);
+    if (part.changed(showAt(root, ref, part.file), after)) {
+      gate(
+        part.label,
+        part.state(after),
+        `${part.label}: what a gate runs changed`
+      );
     }
   }
-
-  return looseningItems({
-    raised: raisedEntries(rules, beforeBaseline, afterBaseline, {
-      renames,
-      baseRuleIds: ruleIdsAt(root, ref),
-    }),
-    exceptions,
-    gateChanges: [...new Set(gateChanges)],
-  });
+  for (const g of gates) {
+    for (const glob of g.filesMatching ?? []) {
+      const re = globRe(glob);
+      for (const file of changed) {
+        if (!re.test(file)) continue;
+        const before = showAt(root, ref, renames.get(file) ?? file);
+        const after = readHead(file);
+        const ignore = posix.basename(file) === '.gitignore';
+        if (ignore ? !addsIgnoreLine(before, after) : before === after) {
+          continue;
+        }
+        gate(
+          file,
+          after,
+          ignore
+            ? `${file}: a new ignore line, and ${g.id} skips what it matches`
+            : `${file}: a config ${g.id} reads`
+        );
+      }
+    }
+  }
+  return [...items.values()];
 }
 
 /**
  * Everything the working tree loosens relative to `base` that the owner
- * hasn't countersigned. A countersign covers an item only while nothing
- * loosened that item AFTER the signing commit: it signs what it saw.
+ * hasn't countersigned at its current hash.
  *
  * @param {{ rules: object[], gates?: object[], callers?: string[] }} registry
- * @returns {{ skipped?: string, missing: { line: string, what: string }[],
- *   byAgent: string[] }}
+ * @returns {{ skipped?: string, missing: { line: string, what: string[] }[],
+ *   byAgent: string[], unbound: string[] }}
  */
 export function checkLoosening(root, registry, baselineFile, base) {
   const ok = git(root, ['cat-file', '-e', `${base}^{commit}`], {
@@ -527,38 +763,17 @@ export function checkLoosening(root, registry, baselineFile, base) {
       `base ${base} is not a commit this clone has. CI checks out with fetch-depth: 0, so it is gone from the remote (a force-push?)`
     );
   }
-  if (showAt(root, base, 'scripts/checks/check-architecture.mjs') === null) {
+  if (!gateAt(root, base)) {
     return {
       skipped: `${base} has no architecture gate yet; nothing to countersign`,
       missing: [],
       byAgent: [],
+      unbound: [],
     };
   }
   const items = loosenedSince(root, registry, baselineFile, base);
-  const { owner, byAgent } = countersignCommits(root, base);
-  const since = new Map();
-  const loosenedAfter = (sha) => {
-    if (!since.has(sha)) {
-      since.set(sha, loosenedSince(root, registry, baselineFile, sha));
-    }
-    return since.get(sha);
-  };
-  const covered = (item) =>
-    owner.some((c) => {
-      if (c.signed.has(item.key)) {
-        return !loosenedAfter(c.sha).some((x) => x.key === item.key);
-      }
-      if (item.star && c.signed.has(item.star)) {
-        return !loosenedAfter(c.sha).some((x) => x.ruleId === item.ruleId);
-      }
-      return false;
-    });
-  return {
-    missing: items
-      .filter((item) => !covered(item))
-      .map(({ line, what }) => ({ line, what })),
-    byAgent,
-  };
+  const { signed, byAgent, unbound } = countersignsIn(root, base);
+  return { missing: uncovered(items, signed), byAgent, unbound };
 }
 
 // ---------------------------------------------------------------------------
@@ -570,8 +785,8 @@ export function checkLoosening(root, registry, baselineFile, base) {
  *
  *   pr       a pull request: the base it merges into (HEAD^1 of the merge
  *            commit GitHub checks out, so a base that moved on is seen)
- *   release  a pull request from dev: as pr, but dev's unbanked fixes are
- *            notices, not failures
+ *   release  a pull request from this repo's dev into main: as pr, but
+ *            unbanked fixes and unsigned loosening are notices
  *   trunk    a push to dev or main: the commit before the push; notices only
  *   branch   a push to another branch, or a local run: its merge base with
  *            origin/dev
@@ -608,9 +823,16 @@ export function ciBase(root, env = process.env) {
         'a pull_request run with no base: HEAD is not a merge commit and the event names no pull_request.base.sha'
       );
     }
-    // A release PR (dev into main) brings every fix dev holds. Banking them
-    // is dev's job, so here they are notices, as on a push to dev.
-    return { kind: env.GITHUB_HEAD_REF === 'dev' ? 'release' : 'pr', base };
+    // A release PR (this repo's dev into main) brings every fix and every
+    // signed loosening dev holds; judging them is dev's PRs' job, so here they
+    // are notices, as on a push to dev. A fork's branch named dev is no release.
+    const headRepo = payload.pull_request?.head?.repo?.full_name;
+    const sameRepo = !headRepo || headRepo === payload.repository?.full_name;
+    const release =
+      env.GITHUB_HEAD_REF === 'dev' &&
+      env.GITHUB_BASE_REF === 'main' &&
+      sameRepo;
+    return { kind: release ? 'release' : 'pr', base };
   }
   if (event === 'merge_group') {
     const base = payload.merge_group?.base_sha;

@@ -140,9 +140,10 @@ export const CI_SETUP_STEPS = [
  *
  * What each gate runs is also what a change must countersign to loosen it
  * (architecture-raises.mjs, gateDependencies): the files its commands name are
- * found from the commands, and `files` (configs it reads, such as biome.json)
- * and `ratchets` (its own baseline, where only a rise loosens it) say the
- * rest.
+ * found from the commands, and `files` (configs it reads, such as biome.json),
+ * `filesMatching` (configs found by pattern, such as a nested biome.json, so a
+ * new one counts) and `ratchets` (its own baseline, where only a rise loosens
+ * it) say the rest.
  */
 export const GATES = [
   {
@@ -150,6 +151,10 @@ export const GATES = [
     title: 'Biome lint and format; every diagnostic fails',
     run: 'pnpm check:ci',
     files: ['biome.json'],
+    // Biome 2 obeys a nested config (`"root": false`) and, through
+    // vcs.useIgnoreFile, every .gitignore: either can switch lint off for a
+    // folder. A .gitignore loosens only by gaining a line.
+    filesMatching: ['**/biome.json', '**/biome.jsonc', '**/.gitignore'],
   },
   {
     id: 'TYPECHECK',
@@ -165,7 +170,12 @@ export const GATES = [
       'config/tsconfig/package.json',
       'config/tsconfig/package-typecheck.json',
       'config/tsconfig/worker.json',
+      // `svelte-kit sync` writes the tsconfig tsc and svelte-check read.
+      'apps/web/svelte.config.js',
     ],
+    // A package's turbo.json can narrow the task's inputs, so CI replays a
+    // cached pass.
+    filesMatching: ['*/turbo.json', '*/*/turbo.json'],
   },
   {
     id: 'SETUP-ORDER',
@@ -206,6 +216,7 @@ export const GATES = [
     needs: 'built packages: run `pnpm typecheck` first (gate.sh does)',
     selfTest: 'pnpm --filter web run check:svelte-baseline:test',
     run: 'pnpm --filter web run check:svelte-baseline',
+    files: ['apps/web/svelte.config.js'],
     ratchets: ['apps/web/scripts/svelte-check-baseline.json'],
   },
   {
@@ -223,11 +234,13 @@ export const RULES = [
     why: "Transfers, reversals, refunds and payouts move real money. When each module calls Stripe itself, the ledger, the clawback rules and the payout thresholds can be bypassed by whichever caller forgets them. The owners are the four @codex/payments modules that record every movement. Each call is pinned by the function it sits in (`transferPendingGroup>transfers.create(`), so a new call in another function fails even where an old one was fixed. Known limit: a text pattern can't follow an alias (`const t = stripe.transfers; t.create(`); the owner refactor and the types epic (Codex-omrp2) close that.",
     scope: {
       include: [
-        'packages/*/src/**/*.{ts,js,mjs}',
-        'workers/*/src/**/*.{ts,js,mjs}',
-        'apps/*/src/**/*.{ts,js,mjs}',
-        // An ops script moves real money as surely as a service does.
-        'scripts/**/*.{ts,js,mjs}',
+        'packages/*/src/**/*.{ts,mts,cts,js,mjs,cjs}',
+        'workers/*/src/**/*.{ts,mts,cts,js,mjs,cjs}',
+        'apps/*/src/**/*.{ts,mts,cts,js,mjs,cjs}',
+        // An ops script moves real money as surely as a service does, and
+        // the Stripe ones live beside their package (packages/database/scripts).
+        'scripts/**/*.{ts,mts,cts,js,mjs,cjs}',
+        '{packages,workers,apps}/*/scripts/**/*.{ts,mts,cts,js,mjs,cjs}',
       ],
       exclude: [
         ...NOT_TESTS,
