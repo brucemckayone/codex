@@ -7,7 +7,7 @@ describe('orgShader — the org has a moving background (03 X50)', () => {
   });
 
   it('reads the saved preset, as the org layout does', () => {
-    expect(orgShader(saved('{"shader-preset":"glow"}'), null)).toBe(true);
+    expect(orgShader(saved('{"shader-preset":"ether"}'), null)).toBe(true);
     expect(orgShader(saved('{"shader-preset":"none"}'), null)).toBe(false);
     expect(orgShader(saved('{"shader-preset":""}'), null)).toBe(false);
     expect(orgShader(saved('{"heading-weight":"400"}'), null)).toBe(false);
@@ -17,14 +17,30 @@ describe('orgShader — the org has a moving background (03 X50)', () => {
   });
 
   it('takes the brand editor’s pending preset while it is open', () => {
-    const org = saved('{"shader-preset":"glow"}');
+    const org = saved('{"shader-preset":"ether"}');
     expect(
       orgShader(org, { tokenOverrides: { 'shader-preset': 'none' } })
     ).toBe(false);
     expect(
-      orgShader(saved(null), { tokenOverrides: { 'shader-preset': 'nebula' } })
+      orgShader(saved(null), { tokenOverrides: { 'shader-preset': 'aurora' } })
     ).toBe(true);
     expect(orgShader(org, { tokenOverrides: {} })).toBe(false);
+  });
+
+  // Codex-1yd58 WP-1c: the id is read as ShaderHero reads it
+  // (`resolvePresetId`), so the hero defaults to the moving background exactly
+  // where one paints.
+  it('counts a cut preset, which paints its survivor, as a shader', () => {
+    expect(orgShader(saved('{"shader-preset":"glow"}'), null)).toBe(true);
+    expect(
+      orgShader(saved(null), { tokenOverrides: { 'shader-preset': 'nebula' } })
+    ).toBe(true);
+  });
+
+  it('counts an id naming no preset, which paints nothing, as no shader', () => {
+    expect(orgShader(saved('{"shader-preset":"bogus"}'), null)).toBe(false);
+    expect(orgShader(saved('{"shader-preset":"toString"}'), null)).toBe(false);
+    expect(orgShader(saved('{"shader-preset":7}'), null)).toBe(false);
   });
 });
 

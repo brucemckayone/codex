@@ -66,7 +66,7 @@ describe('shader palette resolution', () => {
       '--brand-bg': '#ffffff',
     });
 
-    const cfg = getShaderConfig(el, 'waves');
+    const cfg = getShaderConfig(el, 'ripple');
 
     expectRgb(cfg.colors.primary, [1, 0, 0]);
     expectRgb(cfg.colors.secondary, [0, 1, 0]);
@@ -79,7 +79,7 @@ describe('shader palette resolution', () => {
     // passed while the real page (which emits `--brand-bg`) got the navy default.
     const cfg = getShaderConfig(
       mountLayout({ '--color-brand-bg': '#ffffff' }),
-      'waves'
+      'ripple'
     );
     expectRgb(cfg.colors.bg, PLATFORM_DEFAULT_BG);
   });
@@ -90,18 +90,18 @@ describe('shader palette resolution', () => {
       '--brand-bg': '#ffffff',
       '--brand-bg-dark': '#000000',
     });
-    expectRgb(getShaderConfig(el, 'waves').colors.bg, [0, 0, 0]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.bg, [0, 0, 0]);
   });
 
   it('keeps the platform background when the org set none', () => {
     expectRgb(
-      getShaderConfig(mountLayout({}), 'waves').colors.bg,
+      getShaderConfig(mountLayout({}), 'ripple').colors.bg,
       PLATFORM_DEFAULT_BG
     );
   });
 
   it('falls back to platform defaults with no brand palette at all', () => {
-    const cfg = getShaderConfig(mountLayout({}), 'waves');
+    const cfg = getShaderConfig(mountLayout({}), 'ripple');
     expectRgb(cfg.colors.primary, PLATFORM_DEFAULT_PRIMARY);
   });
 
@@ -113,7 +113,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-secondary': '#123456',
     });
 
-    const cfg = getShaderConfig(el, 'waves');
+    const cfg = getShaderConfig(el, 'ripple');
 
     expectRgb(cfg.colors.primary, [0, 128 / 255, 128 / 255]);
     expectRgb(cfg.colors.secondary, [0x12 / 255, 0x34 / 255, 0x56 / 255]);
@@ -129,7 +129,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': '#008080',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [1, 0, 0]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [1, 0, 0]);
   });
 
   it('ignores custom colours when the flag is any value other than "1"', () => {
@@ -139,7 +139,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': '#008080',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [1, 0, 0]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [1, 0, 0]);
   });
 
   it('falls back to the brand colour on a malformed custom colour', () => {
@@ -152,7 +152,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': '#nothex',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [1, 0, 0]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [1, 0, 0]);
   });
 
   it('falls back per-slot, so one bad colour does not discard the others', () => {
@@ -163,7 +163,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-accent': '#008080',
     });
 
-    const cfg = getShaderConfig(el, 'waves');
+    const cfg = getShaderConfig(el, 'ripple');
 
     expectRgb(cfg.colors.primary, [1, 0, 0]);
     expectRgb(cfg.colors.accent, [0, 128 / 255, 128 / 255]);
@@ -177,7 +177,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary-dark': '#0000ff',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [0, 0, 1]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [0, 0, 1]);
   });
 
   it('uses the light shader colour when no -dark variant exists', () => {
@@ -187,7 +187,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': '#ff0000',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [1, 0, 0]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [1, 0, 0]);
   });
 
   it('accepts rgb() as well as hex, since computed styles may serialise either', () => {
@@ -196,7 +196,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': 'rgb(0, 128, 255)',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [0, 128 / 255, 1]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [0, 128 / 255, 1]);
   });
 });
 

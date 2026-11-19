@@ -17,7 +17,7 @@
  * ## Usage
  *
  *   node apps/web/scripts/validate-shaders.mjs            # all shaders
- *   node apps/web/scripts/validate-shaders.mjs vapor ink  # only these
+ *   node apps/web/scripts/validate-shaders.mjs flow ink  # only these
  *
  * Exit code 0 means every shader compiled. Non-zero prints the offending
  * shader, the glslang diagnostic, and the source line it points at.
@@ -211,8 +211,9 @@ function stripComments(source) {
  * — while the feature does nothing at all.
  *
  * This is not hypothetical. A subagent was killed mid-task by a spend limit
- * after rewriting `life-sim.frag.ts` and `life-display.frag.ts` to consume the
- * shared audio block, but before wiring `life-renderer.ts` to upload it. Every
+ * after rewriting the `-sim` and `-display` shaders of a two-pass preset
+ * (since cut) to consume the shared audio block, but before wiring its
+ * renderer to upload it. Every
  * gate in the repo was green and the preset's entire audio response was dead.
  * A cap kill leaves files that compile but are semantically incomplete, which
  * is exactly the case a type system cannot see.
@@ -310,12 +311,12 @@ async function main() {
   const sourcesByPreset = new Map();
 
   /**
-   * Map a shader filename to its preset. `life-sim.frag.ts` and
-   * `life-display.frag.ts` both belong to `life`, whose single renderer
-   * uploads for both passes.
+   * Map a shader filename to its preset. `lenia-sim.frag.ts` and
+   * `lenia-display.frag.ts` both belong to `lenia`, whose single renderer
+   * uploads for both passes; `flow-init.frag.ts` (flow's seed) belongs to flow.
    */
   const presetOf = (file) =>
-    file.replace(/\.(frag|vert)\.ts$/, '').replace(/-(sim|display)$/, '');
+    file.replace(/\.(frag|vert)\.ts$/, '').replace(/-(sim|display|init)$/, '');
 
   try {
     for (const file of files) {

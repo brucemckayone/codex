@@ -317,7 +317,7 @@ void main() {
   // palette is; at lightSky = 0 the multiplier is exactly 1.0 and the night
   // look is bit-identical.
   //
-  // The white point here is 1.0, unlike clouds.frag.ts which uses 1.6, and the
+  // The white point here is 1.0, unlike the 1.6 flux.frag.ts uses, and the
   // difference is deliberate. A full gain leaves tonemap headroom only up to
   // an input of about 1.13, so it CLIPS an additive composite over a light
   // ground — measured on aurora, additive plus this gain collapses curtain

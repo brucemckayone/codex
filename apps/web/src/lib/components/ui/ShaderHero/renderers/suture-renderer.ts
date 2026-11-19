@@ -34,15 +34,27 @@
  * (treble), saturation pump (amplitude) and ACES tone mapping. See
  * `suture-display.frag.ts` for the exact mappings.
  *
- * Simulation is run at 512x512 in a ping-pong double FBO.
+ * Simulation runs in a ping-pong double FBO shaped like the canvas (~512²
+ * texels, `sim-grid.ts`), so the marbling is not stretched on wide heroes.
  * Display pass renders to the full canvas viewport.
  */
 
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
-import type { ShaderConfig, SutureConfig } from '../shader-config';
+import {
+  DEFAULTS,
+  type ShaderConfig,
+  type SutureConfig,
+} from '../shader-config';
 import { SUTURE_DISPLAY_FRAG } from '../shaders/suture-display.frag';
 import { SUTURE_SIM_FRAG } from '../shaders/suture-sim.frag';
+import {
+  createStepClock,
+  inputStride,
+  resizeSim,
+  type SimGrid,
+  simGridFor,
+} from '../sim-grid';
 import {
   createDoubleFBO,
   createProgram,
@@ -54,10 +66,9 @@ import {
   VERTEX_SHADER,
 } from '../webgl-utils';
 
-const SIM_RES = 512;
-
-/** Number of init frames to seed the noise field (matches original). */
-const INIT_FRAMES = 10;
+/** Simulation steps a second: 1 a frame at 60 Hz, as suture always ran. */
+const STEPS_PER_SECOND = 60;
+const INPUT_STRIDE = inputStride(STEPS_PER_SECOND);
 
 // Frame-rate-independent click-burst lifespan (docs/04-motion.md §4).
 // Old per-frame counter (`b.frame++` with `b.frame < 8`) swept the radial
@@ -313,8 +324,8 @@ export function createSutureRenderer(): ShaderRenderer {
   let quad: ReturnType<typeof createQuad> | null = null;
   let simBuf: DoubleFBO | null = null;
 
-  /** Frame counter for the init seeding phase. */
-  let frameNum = 0;
+  let grid: SimGrid = simGridFor(0, 0);
+  const clock = createStepClock(STEPS_PER_SECOND);
 
   /** Timestamp (seconds) of last ambient force injection. */
   let lastAmbientTime = 0;
@@ -326,7 +337,6 @@ export function createSutureRenderer(): ShaderRenderer {
   let clickBursts: Array<{ x: number; y: number; age: number }> = [];
 
   /** Last render time — used for frame-rate-independent fades and phase accumulation. */
-  let lastRenderTime = 0;
 
   /**
    * Wanderer fade intensity (0..1). Eases in on audio start, out on pause.
@@ -372,7 +382,7 @@ export function createSutureRenderer(): ShaderRenderer {
   // ── Sim step helper ────────────────────────────────────────
   /**
    * Step the fluid simulation once. Mouse coords are in sim-pixel space
-   * (0..SIM_RES) — NOT normalised UV. `uForce` controls BOTH the Gaussian
+   * (0..grid.w, 0..grid.h) — NOT normalised UV. `uForce` controls BOTH the Gaussian
    * radius AND the peak strength (via `exp(-length/(10·force))` additive
    * to velocity).
    */
@@ -385,7 +395,7 @@ export function createSutureRenderer(): ShaderRenderer {
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
 
-    gl.viewport(0, 0, SIM_RES, SIM_RES);
+    gl.viewport(0, 0, grid.w, grid.h);
     gl.useProgram(simProg);
     quad.bind(simProg);
 
@@ -393,8 +403,7 @@ export function createSutureRenderer(): ShaderRenderer {
     gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
     gl.uniform1i(simU.uState, 0);
 
-    const tx = 1.0 / SIM_RES;
-    gl.uniform2f(simU.uTexel, tx, tx);
+    gl.uniform2f(simU.uTexel, 1.0 / grid.w, 1.0 / grid.h);
     gl.uniform1f(simU.uCurlScale, _curlScale);
     gl.uniform1f(simU.uAdvDist, _advDist);
     gl.uniform2f(simU.uMouse, mouseX, mouseY);
@@ -492,7 +501,7 @@ export function createSutureRenderer(): ShaderRenderer {
   }
 
   return {
-    init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
+    init(gl: WebGL2RenderingContext, width: number, height: number): boolean {
       // Check required extensions
       if (!gl.getExtension('EXT_color_buffer_float')) return false;
       gl.getExtension('OES_texture_float_linear');
@@ -511,7 +520,8 @@ export function createSutureRenderer(): ShaderRenderer {
 
       // Create geometry and FBOs
       quad = createQuad(gl);
-      simBuf = createDoubleFBO(gl, SIM_RES, SIM_RES);
+      grid = simGridFor(width, height);
+      simBuf = createDoubleFBO(gl, grid.w, grid.h);
 
       // Seed initial state
       this.reset(gl);
@@ -552,31 +562,18 @@ export function createSutureRenderer(): ShaderRenderer {
         (bassSmoothEarly * CURL_BASS_GAIN +
           amplitudeSmoothEarly * CURL_AMP_GAIN) *
         wandererFade;
-      const audioCurl = cfg.curl + cfg.curl * curlBoost;
+      // Fallbacks: a caller can hand a fresh renderer another preset's config
+      // for a frame, and a NaN here poisons the field for good.
+      const curl = cfg.curl ?? DEFAULTS.curl;
+      const dissipation = cfg.dissipation ?? DEFAULTS.dissipation;
+      const audioCurl = curl + curl * curlBoost;
       _curlScale = -audioCurl / 50.0;
-      const advBase = cfg.advection ?? 6.0;
-      _advDist =
-        cfg.dissipation > 0.98 ? advBase : advBase * (cfg.dissipation / 0.985);
+      const advBase = cfg.advection ?? DEFAULTS.advection;
+      _advDist = dissipation > 0.98 ? advBase : advBase * (dissipation / 0.985);
 
-      frameNum++;
-
-      // ── Init seeding phase (first 10 frames) ───────────────
-      if (frameNum <= INIT_FRAMES) {
-        gl.viewport(0, 0, SIM_RES, SIM_RES);
-        gl.useProgram(initProg);
-        quad.bind(initProg);
-        gl.uniform1f(initU.uSeed, Math.random() * 100.0 + frameNum);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
-        drawQuad(gl);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        simBuf.swap();
-
-        // Display even during init
-        _audio = audio;
-        _amp = audio?.amplitudeSmooth ?? 0;
-        displayPass(gl, time, cfg, width, height);
-        return;
-      }
+      // The field is seeded ONCE, in reset(). It used to re-seed with a new
+      // random seed on each of the first 10 frames and draw each one, so the
+      // hero strobed through 10 unrelated images in its first ~166 ms.
 
       // Cache audio state for display pass and colour cycling.
       const bassSmooth = audio?.bassSmooth ?? 0;
@@ -587,9 +584,8 @@ export function createSutureRenderer(): ShaderRenderer {
       _amp = amplitudeSmooth;
 
       // Frame-rate-independent dt — drives fade + phase accumulators.
-      const dt =
-        lastRenderTime === 0 ? 1 / 60 : Math.min(0.1, time - lastRenderTime);
-      lastRenderTime = time;
+      // One clock for the frame: dt and this frame's simulation steps.
+      const { steps, first, dt } = clock.tick(time);
 
       // Ease wanderer fade toward 1 (audio playing) or 0 (paused).
       const fadeTarget = audioActive ? 1 : 0;
@@ -627,7 +623,7 @@ export function createSutureRenderer(): ShaderRenderer {
           const tapForce =
             (WANDERER_TAP_BASE + WANDERER_TAP_GAIN * amplitudeSmooth) *
             wandererFade;
-          stepSim(gl, pos.x * SIM_RES, pos.y * SIM_RES, true, tapForce);
+          stepSim(gl, pos.x * grid.w, pos.y * grid.h, true, tapForce);
         }
 
         // Beat-synced splash: larger discrete impulse at the wanderer's
@@ -637,7 +633,7 @@ export function createSutureRenderer(): ShaderRenderer {
           const splashForce =
             (WANDERER_SPLASH_BASE + WANDERER_SPLASH_GAIN * beatPulse) *
             wandererFade;
-          stepSim(gl, pos.x * SIM_RES, pos.y * SIM_RES, true, splashForce);
+          stepSim(gl, pos.x * grid.w, pos.y * grid.h, true, splashForce);
         }
       }
 
@@ -697,7 +693,7 @@ export function createSutureRenderer(): ShaderRenderer {
             BASS_EMITTER_MOD_AMP *
               (0.5 +
                 0.5 * Math.sin(orbitPhase * BASS_EMITTER_MOD_RATE + i * 1.9));
-          stepSim(gl, bx * SIM_RES, by * SIM_RES, true, rumbleForce * forceMod);
+          stepSim(gl, bx * grid.w, by * grid.h, true, rumbleForce * forceMod);
         }
       }
 
@@ -713,9 +709,9 @@ export function createSutureRenderer(): ShaderRenderer {
             (AMBIENT_INTERVAL_IDLE_MAX - AMBIENT_INTERVAL_IDLE_MIN);
       if (time - lastAmbientTime > ambientInterval) {
         lastAmbientTime = time;
-        const ax = (0.15 + Math.random() * 0.7) * SIM_RES;
-        const ay = (0.15 + Math.random() * 0.7) * SIM_RES;
-        const force = cfg.dissipation > 0.98 ? 1.0 : cfg.dissipation;
+        const ax = (0.15 + Math.random() * 0.7) * grid.w;
+        const ay = (0.15 + Math.random() * 0.7) * grid.h;
+        const force = dissipation > 0.98 ? 1.0 : dissipation;
         stepSim(gl, ax, ay, true, force);
       }
 
@@ -730,8 +726,8 @@ export function createSutureRenderer(): ShaderRenderer {
       // `if (audio.active && bass > 0.5)` random impulse path is intentionally
       // gone — it would double-inject on top of the wanderer's beat splashes.
       if (mouse.burstStrength > 0) {
-        const mx = mouse.x * SIM_RES;
-        const my = mouse.y * SIM_RES;
+        const mx = mouse.x * grid.w;
+        const my = mouse.y * grid.h;
         clickBursts.push({ x: mx, y: my, age: 0 });
       }
 
@@ -755,31 +751,41 @@ export function createSutureRenderer(): ShaderRenderer {
       const mouseAttenuation = audioActive
         ? Math.max(0.45, 1.0 - 0.55 * amplitudeSmooth)
         : 1.0;
-      const mouseX = mouse.active ? mouse.x * SIM_RES : -1000;
-      const mouseY = mouse.active ? mouse.y * SIM_RES : -1000;
-      stepSim(
-        gl,
-        mouseX,
-        mouseY,
-        mouse.active,
-        (cfg.force ?? 1.0) * mouseAttenuation
-      );
+      const mouseX = mouse.active ? mouse.x * grid.w : -1000;
+      const mouseY = mouse.active ? mouse.y * grid.h : -1000;
+      // Steps follow elapsed time, so 120 Hz runs suture at 60 Hz speed.
+      // Input lands on a fixed stride of steps (INPUT_STRIDE): 60 pushes a
+      // second at any frame rate, as flow and ripple do.
+      for (let i = 0; i < steps; i++) {
+        const input = (first + i) % INPUT_STRIDE === 0 && mouse.active;
+        stepSim(
+          gl,
+          input ? mouseX : -1000,
+          input ? mouseY : -1000,
+          input,
+          (cfg.force ?? DEFAULTS.force) * mouseAttenuation
+        );
+      }
 
       // ── Display pass ───────────────────────────────────────
       displayPass(gl, time, cfg, width, height);
     },
 
-    resize(_gl: WebGL2RenderingContext, _width: number, _height: number): void {
-      // FBO sim resolution is fixed at 512x512.
-      // Display pass viewport is set each frame in render().
+    resize(gl: WebGL2RenderingContext, width: number, height: number): void {
+      // Shared rule (sim-grid `resizeSim`): rebuild only on a real change of
+      // shape, never on a lost context, allocating before destroying; the new grid is reseeded. Display viewport is set each frame in render().
+      const resized = resizeSim(gl, grid, simBuf, width, height);
+      if (!resized) return;
+      grid = resized.grid;
+      simBuf = resized.buf;
+      this.reset(gl);
     },
 
     reset(gl: WebGL2RenderingContext): void {
       if (!initProg || !initU || !simBuf || !quad) return;
 
-      frameNum = 0;
+      clock.reset();
       lastAmbientTime = 0;
-      lastRenderTime = 0;
       wandererFade = 0;
       wandererPhase = 0;
       lastTapX = -10;
@@ -788,7 +794,7 @@ export function createSutureRenderer(): ShaderRenderer {
       orbitPhase = 0;
       clickBursts = [];
 
-      gl.viewport(0, 0, SIM_RES, SIM_RES);
+      gl.viewport(0, 0, grid.w, grid.h);
       gl.useProgram(initProg);
       quad.bind(initProg);
       gl.uniform1f(initU.uSeed, Math.random() * 100.0);

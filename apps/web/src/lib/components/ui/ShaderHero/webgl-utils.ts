@@ -6,6 +6,40 @@
  * All presets use WebGL2 (GLSL ES 3.0).
  */
 
+import { logger } from '$lib/observability';
+
+/** How much of a driver's info log a record keeps. */
+const INFO_LOG_MAX = 2000;
+
+/**
+ * Who is building programs right now (`surface:preset`), for the compile and
+ * link events. The renderers call `createProgram` themselves, inside their
+ * `init()`, so a caller that starts one labels the whole init with
+ * `withProgramLabel` instead of threading a label through every renderer.
+ * An explicit `label` passed to `createProgram` wins.
+ */
+let programLabel: string | undefined;
+
+/** Run `build` (a renderer's `init()`) with its programs labelled `label`. */
+export function withProgramLabel<T>(label: string, build: () => T): T {
+  const outer = programLabel;
+  programLabel = label;
+  try {
+    return build();
+  } finally {
+    programLabel = outer;
+  }
+}
+
+/** What every compile/link event carries besides the driver's log. */
+function programContext(gl: WebGL2RenderingContext, label: string | undefined) {
+  return {
+    ...(label === undefined ? {} : { label }),
+    // A lost context fails every compile; that is a different story.
+    contextLost: gl.isContextLost(),
+  };
+}
+
 /** A single framebuffer object with its backing texture. */
 export interface FBO {
   fbo: WebGLFramebuffer;
@@ -39,39 +73,66 @@ function mustAllocate<T>(value: T | null, what: string): T {
 function compileShader(
   gl: WebGL2RenderingContext,
   type: number,
-  src: string
+  src: string,
+  label: string | undefined
 ): WebGLShader | null {
   const s = gl.createShader(type);
   if (!s) return null;
   gl.shaderSource(s, src);
   gl.compileShader(s);
   if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-    console.error('Shader compile error:', gl.getShaderInfoLog(s));
+    // Through the app logger, so a compile failure on a visitor's GPU reaches
+    // the server logs rather than only their devtools.
+    logger.error('shader_hero.shader_compile_failed', {
+      ...programContext(gl, label),
+      stage: type === gl.VERTEX_SHADER ? 'vertex' : 'fragment',
+      info: (gl.getShaderInfoLog(s) ?? '').slice(0, INFO_LOG_MAX),
+    });
     gl.deleteShader(s);
     return null;
   }
   return s;
 }
 
-/** Create and link a WebGL program from vertex + fragment source. */
+/**
+ * Create and link a WebGL program from vertex + fragment source. `label`
+ * names it in a compile or link failure; unset, the label of the init it runs
+ * in (`withProgramLabel`) is used, if any.
+ */
 export function createProgram(
   gl: WebGL2RenderingContext,
   vSrc: string,
-  fSrc: string
+  fSrc: string,
+  label: string | undefined = programLabel
 ): WebGLProgram | null {
-  const vs = compileShader(gl, gl.VERTEX_SHADER, vSrc);
-  const fs = compileShader(gl, gl.FRAGMENT_SHADER, fSrc);
-  if (!vs || !fs) return null;
+  const vs = compileShader(gl, gl.VERTEX_SHADER, vSrc, label);
+  const fs = compileShader(gl, gl.FRAGMENT_SHADER, fSrc, label);
+  // Whichever stage did compile is freed with the failure, not leaked.
+  const dropShaders = () => {
+    if (vs) gl.deleteShader(vs);
+    if (fs) gl.deleteShader(fs);
+  };
+  if (!vs || !fs) {
+    dropShaders();
+    return null;
+  }
 
   const p = gl.createProgram();
-  if (!p) return null;
+  if (!p) {
+    dropShaders();
+    return null;
+  }
   gl.attachShader(p, vs);
   gl.attachShader(p, fs);
   gl.linkProgram(p);
 
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-    console.error('Program link error:', gl.getProgramInfoLog(p));
+    logger.error('shader_hero.program_link_failed', {
+      ...programContext(gl, label),
+      info: (gl.getProgramInfoLog(p) ?? '').slice(0, INFO_LOG_MAX),
+    });
     gl.deleteProgram(p);
+    dropShaders();
     return null;
   }
 

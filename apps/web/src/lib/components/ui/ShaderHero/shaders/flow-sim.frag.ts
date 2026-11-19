@@ -1,7 +1,8 @@
 /**
  * Flow simulation fragment shader (GLSL ES 3.0).
  *
- * Ping-pong at 512x512.
+ * Ping-pong on a grid shaped like the canvas (`sim-grid.ts`); every spatial
+ * term is per-texel, so a texel is square on screen at any shape.
  * Buffer format: RG = vector field, B = divergence, A = trail accumulator.
  *
  * Self-organising curl-noise dynamical system:
@@ -39,6 +40,7 @@ const float _G1 = 0.125;  // edges
 const float _G2 = 0.0625; // corners
 
 const float SQ2 = 0.6;    // diagonal weight for curl/div
+const float MAX_ROTATION = 0.15; // radians per step (see the curl rotation)
 
 vec2 normz(vec2 x) {
   return length(x) < 0.0001 ? vec2(0.0) : normalize(x);
@@ -106,8 +108,14 @@ void main() {
     + SQ2 * (cNW.x + cNW.y + cNE.x - cNE.y
            + cSW.y - cSW.x - cSE.y - cSE.x);
 
-  // Rotation angle from curl
-  float sc = -uCurl * sign(curl) * pow(abs(curl), 1.0);
+  // Rotation angle from curl, capped per step. Uncapped, curl above ~0.6
+  // turned the field fine-grained and turbulent within ~2 s; the display's
+  // 16-sample line integral then averaged every direction into one muddy
+  // mid colour, and its contrast curve crushed that to black (Codex-c48om:
+  // OBB's dark mode, the 'Stream' look). The cap keeps the field coherent at
+  // the scale the display reads, so high curl draws finer, livelier
+  // streaks instead of nothing; low curl rarely reaches it and is unchanged.
+  float sc = clamp(-uCurl * curl, -MAX_ROTATION, MAX_ROTATION);
 
   // ── Divergence ────────────────────────────────────────────
   float div = cS.y - cN.y - cE.x + cW.x
@@ -131,20 +139,20 @@ void main() {
   // ── Smooth update ─────────────────────────────────────────
   vec3 result = uSmoothing * c + (1.0 - uSmoothing) * vec3(a, b, sd);
 
-  // ── Mouse interaction ─────────────────────────────────────
+  // ── Mouse interaction (distances in texels, so round on screen) ──
   if (uMouseActive > 0.5) {
-    vec2 d = v_uv - uMouse;
-    float m = exp(-length(d) / (20.0 * tx.x));
+    vec2 d = (v_uv - uMouse) / tx;
+    float m = exp(-length(d) / 20.0);
     result.xy += m * normz(d) * 0.5;
   }
 
   // ── Click burst: strong radial push + curl injection ──────
   if (uBurst > 0.01) {
-    vec2 d = v_uv - uMouse;
-    float m = exp(-length(d) / (15.0 * tx.x));
+    vec2 d = (v_uv - uMouse) / tx;
+    float m = exp(-length(d) / 15.0);
     result.xy += uBurst * m * normz(d);
     // Inject some curl at burst point
-    result.xy += uBurst * 0.3 * m * vec2(-d.y, d.x) / max(length(d), 0.001);
+    result.xy += uBurst * 0.3 * m * vec2(-d.y, d.x) / max(length(d), 0.5);
   }
 
   // ── Clamp and normalize ───────────────────────────────────

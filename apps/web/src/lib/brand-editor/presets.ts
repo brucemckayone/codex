@@ -163,7 +163,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'executive',
     name: 'Executive',
     category: 'Professional',
-    description: 'Refined and authoritative — slate, gold, folded silk',
+    description: 'Refined and authoritative — slate, gold, a slow sheen',
     palette: {
       primary: '#1E293B',
       secondary: '#64748B',
@@ -223,7 +223,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'vibrant',
     name: 'Vibrant',
     category: 'Creative',
-    description: 'Bold and energetic — drifting orbs, rounded geometry',
+    description: 'Bold and energetic — soft glowing forms, rounded geometry',
     palette: {
       primary: '#7C3AED',
       secondary: '#EC4899',
@@ -243,7 +243,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Electric',
-        note: 'Crackling plasma behind the hero — maximum voltage',
+        note: 'Hard, fast paint streams behind the hero — maximum voltage',
         atmosphere: 'charge',
       },
     ],
@@ -252,7 +252,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'sunset',
     name: 'Sunset',
     category: 'Creative',
-    description: 'Warm gradient heat — deep field dust and star depth',
+    description: 'Warm gradient heat — deep, wide curtains of light',
     palette: {
       primary: '#E11D48',
       secondary: '#F97316',
@@ -296,7 +296,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     alternates: [
       {
         label: 'Swell',
-        note: 'Long rolling waves and roomier spacing — open water',
+        note: 'Long, slow swells and roomier spacing — open water',
         atmosphere: 'dunes',
         form: 'plush',
       },
@@ -357,7 +357,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     alternates: [
       {
         label: 'Arcade',
-        note: 'Plasma and a poster headline — coin-op energy',
+        note: 'Hard paint streams and a poster headline — coin-op energy',
         type: 'poster',
         atmosphere: 'charge',
       },
@@ -423,7 +423,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Haze',
-        note: 'One pale cloud drift — motion without noise',
+        note: 'One pale paint drift — motion without noise',
         atmosphere: 'haze',
       },
     ],
@@ -480,7 +480,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Lattice',
-        note: 'A rotating gyroid mesh — structure, still no colour',
+        note: 'A rotating aetheric fold — structure, still no colour',
         atmosphere: 'lattice',
       },
     ],
@@ -491,7 +491,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'forest',
     name: 'Forest',
     category: 'Organic',
-    description: 'Deep green on pale sage — branching growth, slab type',
+    description: 'Deep green on pale sage — soft lifeforms, slab type',
     palette: {
       primary: '#14532D',
       secondary: '#854D0E',
@@ -510,7 +510,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Rain',
-        note: 'Rain on glass instead of growth — quieter, wetter',
+        note: 'Small ripples instead of lifeforms — quieter, wetter',
         atmosphere: 'drizzle',
         form: 'plush',
       },
@@ -549,7 +549,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'bloom',
     name: 'Bloom',
     category: 'Organic',
-    description: 'Rose on blush — pollen adrift, centred hero',
+    description: 'Rose on blush — a soft glow adrift, centred hero',
     palette: {
       primary: '#BE185D',
       secondary: '#DB2777',
@@ -569,7 +569,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Bloom',
-        note: 'Drifting orbs instead of pollen — warmer light',
+        note: 'Brighter glowing forms — warmer light',
         atmosphere: 'bloomlight',
       },
     ],
@@ -594,7 +594,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     alternates: [
       {
         label: 'Lattice',
-        note: 'A gyroid mesh instead of agent trails — colder geometry',
+        note: 'Aetheric folds instead of agent trails — colder geometry',
         atmosphere: 'lattice',
       },
       {
@@ -609,7 +609,8 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'blueprint',
     name: 'Blueprint',
     category: 'Tech',
-    description: 'Draughtsman blue on pale — gyroid lattice, zero radius',
+    description:
+      'Draughtsman blue on pale — a precise rotating fold, zero radius',
     palette: {
       primary: '#1E3A8A',
       secondary: '#3B82F6',
@@ -652,7 +653,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     alternates: [
       {
         label: 'Bloom',
-        note: 'Soft orbs and generous radius — friendlier SaaS',
+        note: 'Soft glowing forms and generous radius — friendlier SaaS',
         atmosphere: 'bloomlight',
         form: 'soft',
       },
@@ -669,7 +670,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'onyx',
     name: 'Onyx',
     category: 'Luxury',
-    description: 'Antique gold on true black — bismuth facets, garamond',
+    description: 'Antique gold on true black — hard iridescent bands, garamond',
     palette: {
       primary: '#B8860B',
       secondary: '#D4A843',
@@ -689,7 +690,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Drape',
-        note: 'Folded silk instead of mineral facets — softer luxury',
+        note: 'A slow sheen instead of hard bands — softer luxury',
         atmosphere: 'drape',
       },
     ],
@@ -712,7 +713,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     alternates: [
       {
         label: 'Facet',
-        note: 'Iridescent bismuth terraces — mineral rather than milky',
+        note: 'Hard iridescent bands — mineral rather than milky',
         atmosphere: 'facet',
       },
       {
@@ -727,7 +728,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'velvet',
     name: 'Velvet',
     category: 'Luxury',
-    description: 'Lilac on deep indigo — folded silk, centred hero',
+    description: 'Lilac on deep indigo — a slow sheen, centred hero',
     palette: {
       primary: '#A78BFA',
       secondary: '#8B5CF6',
@@ -746,7 +747,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Borealis',
-        note: 'Curtains of light instead of silk — colder, wider',
+        note: 'Curtains of light instead of a sheen — colder, wider',
         atmosphere: 'borealis',
       },
     ],
@@ -777,7 +778,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Charge',
-        note: 'Plasma behind the hero — sugar rush',
+        note: 'Fast paint streams behind the hero — sugar rush',
         atmosphere: 'charge',
       },
     ],
@@ -806,7 +807,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Sunset',
-        note: 'Deep-field dust — drive-in rather than darkroom',
+        note: 'Deep curtains of light — drive-in rather than darkroom',
         atmosphere: 'deepfield',
       },
     ],
@@ -815,7 +816,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'arcade',
     name: 'Arcade',
     category: 'Playful',
-    description: 'Electric blue and lime — crackling plasma, poster type',
+    description: 'Electric blue and lime — hard paint streams, poster type',
     palette: {
       primary: '#3B82F6',
       secondary: '#A3E635',
@@ -835,7 +836,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Flux',
-        note: 'Banded flux instead of plasma — smoother, faster',
+        note: 'Banded flux instead of paint streams — smoother, faster',
         atmosphere: 'current',
       },
     ],
@@ -860,7 +861,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     alternates: [
       {
         label: 'Deep field',
-        note: 'Dust and stars instead of curtains — vaster',
+        note: 'Deeper, wider curtains — vaster',
         atmosphere: 'deepfield',
       },
       {
@@ -875,7 +876,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'storm',
     name: 'Storm',
     category: 'Atmospheric',
-    description: 'Cobalt on gunmetal — a tightening vortex, crisp form',
+    description: 'Cobalt on gunmetal — fast, dense folds, crisp form',
     palette: {
       primary: '#2563EB',
       secondary: '#1D4ED8',
@@ -889,7 +890,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     alternates: [
       {
         label: 'Rain',
-        note: 'Rain on glass — the aftermath rather than the front',
+        note: 'Small ripples — the aftermath rather than the front',
         atmosphere: 'drizzle',
         form: 'soft',
       },
@@ -905,7 +906,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
     id: 'zen',
     name: 'Zen',
     category: 'Atmospheric',
-    description: 'Sage and brass on parchment — rain on glass, serif type',
+    description: 'Sage and brass on parchment — small ripples, serif type',
     palette: {
       primary: '#6B8F71',
       secondary: '#8FAE92',
@@ -925,7 +926,7 @@ const DEFINITIONS: readonly PresetDefinition[] = [
       },
       {
         label: 'Canopy',
-        note: 'Slow branching growth — the garden rather than the rain',
+        note: 'Soft lifeforms — the garden rather than the pond',
         atmosphere: 'canopy',
       },
     ],

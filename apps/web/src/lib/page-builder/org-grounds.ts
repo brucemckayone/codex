@@ -11,6 +11,7 @@
 import type { BrandEditorState } from '$lib/brand-editor';
 import { parseDarkColorOverrides } from '$lib/brand-editor';
 import { paintableColour } from '$lib/brand-editor/ground';
+import { resolvePresetId } from '$lib/components/ui/ShaderHero/shader-config';
 import type { OrganizationData } from '$lib/types';
 import type { ThemeGrounds } from './kit/model/resolve';
 
@@ -43,6 +44,18 @@ export function orgGrounds(
  * (`data-hero-shader-active`), so the page kit defaults its hero to
  * `atmosphere` exactly where a shader runs behind it (03 X51). PURE, as
  * `orgGrounds` above.
+ *
+ * The id goes through `resolvePresetId`, as `ShaderHero` reads it: a cut
+ * preset paints its survivor (a shader), and an id naming no preset paints
+ * nothing (no shader). Only the LIGHT `shader-preset` is read: a preset set
+ * for the dark theme alone does not count. And it is a claim about the
+ * tokens, not the canvas: a renderer that fails to start still counts here.
+ * In WP-2 (Codex-hdzjw) the gate becomes the running renderer's live state
+ * (`data-live`).
+ *
+ * The editor open with nothing pending reads the SAVED tokens: `open()` sets
+ * `pending` as it opens the panel, so open-with-null is only a transient,
+ * and then nothing pending means the saved brand.
  */
 export function orgShader(
   org: Pick<OrganizationData, 'brandFineTune'> | null | undefined,
@@ -62,5 +75,6 @@ export function orgShader(
     }
   }
   const preset = overrides['shader-preset'];
-  return typeof preset === 'string' && preset.length > 0 && preset !== 'none';
+  const id = typeof preset === 'string' ? resolvePresetId(preset) : null;
+  return id !== null && id !== 'none';
 }

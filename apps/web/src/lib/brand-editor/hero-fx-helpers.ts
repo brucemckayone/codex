@@ -13,9 +13,10 @@
  * responsible for providing a writer that routes to the active editing theme
  * (light vs dark) — these helpers do not look at editingTheme.
  *
- * GOTCHA #1 (selectPreset 'none'): MUST iterate ALL_HERO_FX_SHADER_KEYS — the
- * union of every shader-* key across every preset plus 'shader-preset' — so
- * no stale overrides linger after the user picks "None".
+ * GOTCHA #1 (selectPreset 'none'): MUST clear ALL_HERO_FX_SHADER_KEYS — the
+ * union of every shader-* key across every preset plus 'shader-preset' — AND
+ * every other `shader-*` key the overrides hold (a cut preset's params, saved
+ * before the cut), so no stale overrides linger after the user picks "None".
  *
  * GOTCHA #2 (updateOverride remove-on-default): MUST remove the override
  * entry (write null) when the value equals HERO_FX_DEFAULTS[key] or is empty,
@@ -32,12 +33,23 @@ export type SetOverride = (key: string, value: string | null) => void;
  *
  * `presetId === 'none'` clears EVERY shader-* key (including 'shader-preset')
  * on the active theme so no stale config from a previously-selected preset
- * lingers. Any other id writes only the 'shader-preset' key, preserving any
- * existing slider values the user has tweaked under shared controls.
+ * lingers: every key a live preset writes, plus every `shader-*` key in
+ * `current` (the overrides as the editor shows them). The second set is what
+ * reaches a cut preset's params — `shader-nebula-depth` and the like, saved
+ * before the cut, which no live preset names and so no list of live keys can.
+ * Any other id writes only the 'shader-preset' key, preserving any existing
+ * slider values the user has tweaked under shared controls.
  */
-export function selectPreset(presetId: string, setOverride: SetOverride): void {
+export function selectPreset(
+  presetId: string,
+  setOverride: SetOverride,
+  current: Readonly<Record<string, unknown>>
+): void {
   if (presetId === 'none') {
-    for (const key of ALL_HERO_FX_SHADER_KEYS) {
+    const stale = Object.keys(current).filter((key) =>
+      key.startsWith('shader-')
+    );
+    for (const key of new Set([...ALL_HERO_FX_SHADER_KEYS, ...stale])) {
       setOverride(key, null);
     }
   } else {

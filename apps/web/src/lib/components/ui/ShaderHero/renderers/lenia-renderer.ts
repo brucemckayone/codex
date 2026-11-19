@@ -54,7 +54,7 @@ import {
   VERTEX_SHADER,
 } from '../webgl-utils';
 
-const SIM_RES = 256; // Lower res than ink/turing due to the expensive kernel
+const SIM_RES = 256; // Lower res than ink due to the expensive kernel
 
 // Frame-rate-independent click-burst lifespan (docs/04-motion.md §4).
 // Old per-frame counter (`b.frame++` with `b.frame < 5`) made clicks visibly

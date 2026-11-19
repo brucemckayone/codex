@@ -10,12 +10,24 @@
   Respects prefers-reduced-motion (renders one static frame then stops).
   Pauses when scrolled off-screen via IntersectionObserver.
 
-  @prop {string | null} preset - Selected preset ID. `null` hides the preview.
+  @prop {string | null} preset - The piece's saved preset ID. It previews what
+    immersive mode will actually play (`immersivePreset`): the piece's own
+    shader, else the org's brand shader, else flow. A saved ID that names no
+    preset says so in words above that preview.
 -->
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { loadRenderer } from '$lib/components/ui/ShaderHero/load-renderer';
-  import { getShaderConfig, type ShaderPresetId } from '$lib/components/ui/ShaderHero/shader-config';
+  import { presetLabel } from '$lib/brand-editor/hero-fx-presets';
+  import { immersivePreset, noShaderPlays } from '$lib/components/AudioPlayer/immersive-preset';
+  import {
+    getBrandPresetId,
+    getShaderConfig,
+    type LivePresetId,
+    presetIsUnknown,
+    type ShaderConfig,
+    warnUnknownPreset,
+  } from '$lib/components/ui/ShaderHero/shader-config';
+  import { destroyRenderer, startRenderer } from '$lib/components/ui/ShaderHero/start-renderer';
   import { createPollConfig } from '$lib/components/ui/ShaderHero/use-poll-config';
   import type { ShaderRenderer, MouseState } from '$lib/components/ui/ShaderHero/renderer-types';
 
@@ -32,13 +44,17 @@
 
   let gl: WebGL2RenderingContext | null = null;
   let renderer: ShaderRenderer | null = null;
-  let currentPreset: ShaderPresetId | null = null;
-  // Closure reads `currentPreset` lexically — switchPreset() updates the
-  // variable, the next 30-frame tick picks it up. Amortises getShaderConfig
-  // (forced style recalc) per ShaderHero.svelte:135-146.
-  const pollConfig = createPollConfig(() =>
-    getShaderConfig(null, currentPreset as ShaderPresetId)
-  );
+  let currentPreset: LivePresetId | null = null;
+  // Built per renderer, for the preset that started, so its first frame
+  // reads its own config. One poller built at init for `currentPreset` handed
+  // a new renderer the PREVIOUS preset's config for up to 29 frames, which
+  // ripple and suture turn into NaN: a preview black for good. Amortises
+  // getShaderConfig (forced style recalc) per ShaderHero.svelte.
+  let pollConfig: (() => ShaderConfig) | null = null;
+  /** The shader would not load or start, even on the fallback. */
+  let startFailed = $state(false);
+  /** The chosen shader would not start here, so the fallback plays instead. */
+  let fellBack = $state<{ from: LivePresetId; to: LivePresetId } | null>(null);
   let animFrameId = 0;
   let startTime = 0;
   let isReducedMotion = false;
@@ -65,7 +81,7 @@
   }
 
   function renderFrame() {
-    if (!gl || !renderer || !canvasEl) {
+    if (!gl || !renderer || !canvasEl || !pollConfig) {
       animFrameId = 0;
       return;
     }
@@ -90,11 +106,11 @@
     animFrameId = requestAnimationFrame(renderFrame);
   }
 
-  async function switchPreset(target: ShaderPresetId | null) {
+  async function switchPreset(target: LivePresetId | null) {
     if (!gl || !canvasEl) return;
 
     // Token guard — if switchPreset is called again while the previous
-    // loadRenderer() is still in-flight, the newer call wins.
+    // load is still in flight, the newer call wins.
     const token = ++loadToken;
 
     cancelAnimationFrame(animFrameId);
@@ -104,23 +120,41 @@
       renderer.destroy(gl);
       renderer = null;
     }
+    pollConfig = null;
 
     currentPreset = target;
     hasRenderedStaticFrame = false;
+    startFailed = false;
+    fellBack = null;
 
-    if (target === null || target === 'none') return;
+    if (target === null) return;
 
-    const next = await loadRenderer(target);
-    if (token !== loadToken || !next || !gl || !canvasEl) return;
-
-    renderer = next;
-    resize();
-    const ok = renderer.init(gl, canvasEl.width, canvasEl.height);
-    if (!ok) {
-      renderer = null;
+    // Logs a failure, destroys a half-built renderer, and retries an init
+    // failure once on single-pass `film` (`start-renderer.ts`).
+    const context = gl;
+    const started = await startRenderer(target, {
+      gl: context,
+      surface: 'shader_preview',
+      size: () => {
+        resize();
+        return canvasEl ? { width: canvasEl.width, height: canvasEl.height } : null;
+      },
+      isCurrent: () => token === loadToken && gl === context,
+    });
+    if (token !== loadToken || gl !== context) {
+      if (started.ok === true) destroyRenderer(started.renderer, context, 'shader_preview');
+      return;
+    }
+    if (started.ok === false) {
+      startFailed = true;
       return;
     }
 
+    renderer = started.renderer;
+    const shown = started.preset;
+    // The film retry ran: say what plays, as immersive mode will play it.
+    if (shown !== target) fellBack = { from: target, to: shown };
+    pollConfig = createPollConfig(() => getShaderConfig(null, shown));
     startTime = performance.now();
     animFrameId = requestAnimationFrame(renderFrame);
   }
@@ -146,8 +180,8 @@
     }
   }
 
-  // Lazy WebGL init. The canvas is conditionally rendered (only when a
-  // preset is selected), so its `bind:this` resolves AFTER mount — meaning
+  // Lazy WebGL init. The canvas is conditionally rendered (only in the
+  // browser, once `playing` is known), so its `bind:this` resolves AFTER mount — meaning
   // the old `onMount(() => if (!canvasEl) return)` bailed on first paint
   // and never ran again once the canvas appeared. We now initialise in an
   // $effect that re-runs whenever `canvasEl` changes from undefined to a
@@ -204,18 +238,39 @@
     };
   });
 
+  /** The saved id names no preset, live or cut (an unset one is not unknown). */
+  const unknown = $derived(presetIsUnknown(preset));
+
+  /**
+   * What immersive mode will actually play for this piece, so the preview
+   * never shows a shader it will not get: its own (a cut one as its
+   * survivor), else the org's brand shader — what the None card promises —
+   * else flow. The brand's is read off the org layout, so in the browser only.
+   */
+  const brandPreset = $derived(browser ? getBrandPresetId() : null);
+  const playing = $derived<LivePresetId | null>(
+    browser ? immersivePreset(preset, brandPreset) : null
+  );
+  /** "your brand's shader", or Flow where the brand has none. */
+  const fallbackPlays = $derived(noShaderPlays(brandPreset));
+
+  // A saved id naming no preset plays the brand's shader; say so in the logs.
+  $effect(() => {
+    if (preset && unknown) warnUnknownPreset(preset, 'studio');
+  });
+
   // React to preset changes — covers both the initial load (after ready flips)
   // and subsequent selections from the grid.
   $effect(() => {
     if (!ready) return;
-    const target = preset as ShaderPresetId | null;
+    const target = playing;
     if (target === currentPreset) return;
     void switchPreset(target);
   });
 </script>
 
 <div class="shader-preview" bind:this={containerEl}>
-  {#if preset && preset !== 'none'}
+  {#if playing}
     {#if hasWebGL}
       <canvas
         bind:this={canvasEl}
@@ -226,17 +281,32 @@
         aria-hidden="true"
       ></canvas>
       <span class="preview-label">Preview</span>
+      <!-- Over the canvas, never instead of it: the canvas (and its
+           context) must stay for the next shader picked to start on. -->
+      {#if startFailed}
+        <p class="preview-fallback preview-fallback--over">
+          Preview unavailable — this shader could not start in this browser
+        </p>
+      {/if}
     {:else}
       <div class="preview-fallback">
         <span>Preview unavailable — WebGL not supported in this browser</span>
       </div>
     {/if}
-  {:else}
-    <div class="preview-empty">
-      <span>Select a shader preset below to see a live preview</span>
-    </div>
+  {/if}
+  {#if unknown}
+    <p class="preview-note">
+      This piece's saved shader is no longer available, so it plays
+      {fallbackPlays}.
+    </p>
   {/if}
 </div>
+{#if fellBack}
+  <p class="preview-fell-back">
+    {presetLabel(fellBack.from)} can't run in this browser, so it plays
+    {presetLabel(fellBack.to)} here.
+  </p>
+{/if}
 
 <style>
   .shader-preview {
@@ -272,7 +342,33 @@
     pointer-events: none;
   }
 
-  .preview-empty,
+  /* Words over the preview, on the label's fixed dark scrim. */
+  .preview-note {
+    position: absolute;
+    right: var(--space-2);
+    bottom: var(--space-2);
+    left: var(--space-2);
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--media-glyph);
+    background: color-mix(in srgb, black 60%, transparent);
+    border-radius: var(--radius-sm);
+  }
+
+  .preview-fell-back {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .preview-fallback--over {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    background: var(--color-surface-secondary);
+  }
+
   .preview-fallback {
     display: flex;
     align-items: center;

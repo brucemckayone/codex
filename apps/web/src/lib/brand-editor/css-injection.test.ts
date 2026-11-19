@@ -5,6 +5,7 @@ import { TOKEN_OVERRIDE_MAX_ENTRIES } from '@codex/validation';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyLayoutBrandInputs,
+  BRAND_PREFIX_KEYS,
   clearBrandVars,
   clearTokenOverrides,
   darkTokenOverridesToCssVars,
@@ -59,6 +60,57 @@ describe('tokenOverridesToCssVars', () => {
     expect(darkTokenOverridesToCssVars({ 'text-on-brand': '#ffd700' })).toEqual(
       {}
     );
+  });
+
+  // Codex-1yd58: a cut preset's params, saved before the cut, name no key a
+  // live preset reads. Painted, each would be a stray `--color-shader-*`.
+  it('paints no shader-* key outside BRAND_PREFIX_KEYS, light or dark', () => {
+    const stored = {
+      'shader-nebula-depth': '9',
+      'shader-warp-strength': '1.5',
+      'shader-flow-curl': '0.8',
+      'text-secondary': '#555555',
+    };
+    expect(tokenOverridesToCssVars(stored)).toEqual({
+      '--brand-shader-flow-curl': '0.8',
+      '--color-text-secondary': '#555555',
+    });
+    expect(darkTokenOverridesToCssVars(stored)).toEqual({
+      '--brand-shader-flow-curl-dark': '0.8',
+      '--color-text-secondary-dark': '#555555',
+    });
+  });
+
+  // What makes that skip safe: every shader key the config reads is in the
+  // set. Derived from shader-config.ts, so a new param that is read but not
+  // listed fails here instead of silently never painting.
+  it('lists in BRAND_PREFIX_KEYS every shader key shader-config reads', () => {
+    const configSrc = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../components/ui/ShaderHero/shader-config.ts'
+      ),
+      'utf8'
+    );
+    const read = new Set([
+      ...[...configSrc.matchAll(/rv\(\s*'(shader-[\w-]+)'/g)].map((m) => m[1]),
+      ...[
+        ...configSrc.matchAll(/readBrandVar\(\s*style,\s*'(shader-[\w-]+)'/g),
+      ].map((m) => m[1]),
+    ]);
+    // The palette slots are read through one template literal, so its four
+    // keys are added by name below.
+    expect(configSrc).toMatch(/`shader-color-\$\{slot\}`/);
+    for (const slot of ['primary', 'secondary', 'accent', 'bg']) {
+      read.add(`shader-color-${slot}`);
+    }
+    // The walk reached the builders: preset, palette flag, and survivors' params.
+    expect(read).toContain('shader-preset');
+    expect(read).toContain('shader-use-custom-colors');
+    expect(read).toContain('shader-flow-curl');
+    expect(read.size).toBeGreaterThan(80);
+    const missing = [...read].filter((key) => !BRAND_PREFIX_KEYS.has(key));
+    expect(missing).toEqual([]);
   });
 
   it('skips hero-hide-* keys (attribute-only, no CSS consumer)', () => {

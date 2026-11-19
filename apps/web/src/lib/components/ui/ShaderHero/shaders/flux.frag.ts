@@ -232,8 +232,8 @@ void main() {
   // White point 1.6, matching the line emission scale above, rather than 1.0.
   // A full gain leaves headroom only to an input of about 1.13, and a line on
   // a light palette reaches 1.57 — so lines and fill would both clip to white
-  // and the field would read as blank. This is the same failure measured on
-  // clouds, where the full-gain form cut within-cloud contrast by 47%.
+  // and the field would read as blank. The same failure was measured on a
+  // cloud field, where the full-gain form cut within-cloud contrast by 47%.
   const float ACES_WHITE = 0.8862;   // aces(1.6)
   color = clamp(aces(color) * mix(1.0, 1.0 / ACES_WHITE, lightBg), 0.0, 1.0);
 

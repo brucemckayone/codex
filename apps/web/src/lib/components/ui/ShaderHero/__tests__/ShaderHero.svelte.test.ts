@@ -35,10 +35,14 @@ vi.mock('../load-renderer', () => ({
   loadRenderer: vi.fn(async () => renderer),
 }));
 vi.mock('../jfa-sdf', () => ({ destroyJFACache: vi.fn() }));
+const { logger } = vi.hoisted(() => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock('$lib/observability', () => ({ logger }));
 // What the brand's tokens say the shader draws; a test edits it as the brand
 // editor would.
 const brand = vi.hoisted(() => ({
-  config: { preset: 'glow' } as Record<string, unknown>,
+  config: { preset: 'ether' } as Record<string, unknown>,
   /** How many times the shader has read them. */
   reads: 0,
 }));
@@ -50,7 +54,10 @@ vi.mock('../shader-config', async (importOriginal) => ({
   },
 }));
 
+import { loadRenderer } from '../load-renderer';
+import type { ShaderRenderer } from '../renderer-types';
 import ShaderHero from '../ShaderHero.svelte';
+import type { ShaderPresetId } from '../shader-config';
 import { shaderStill } from '../shader-still.svelte';
 import { shaderTone } from '../shader-tone';
 
@@ -65,7 +72,11 @@ const toneDraws = vi.fn();
 let encoded = 0;
 let contextLost = false;
 /** The WebGL context's stand-in. */
-const webgl = { isContextLost: () => contextLost };
+const webgl = {
+  isContextLost: () => contextLost,
+  // No float render targets: what a failure report records.
+  getExtension: () => null,
+};
 
 /** Run the frames queued so far (those they queue run on the next step). */
 function step(count = 1) {
@@ -78,7 +89,7 @@ function step(count = 1) {
 
 /** Mount, then let the async renderer load and its first frame queue. */
 async function start(
-  props: { still?: boolean; tone?: boolean },
+  props: { still?: boolean; tone?: boolean; preset?: ShaderPresetId },
   target: HTMLElement = document.body
 ) {
   app = mount(ShaderHero, { target, props });
@@ -112,7 +123,7 @@ beforeEach(() => {
   // The WebGL context is a stand-in; the 2D one the samples are drawn on
   // counts its draws and reads back a mid grey.
   toneDraws.mockClear();
-  brand.config = { preset: 'glow' };
+  brand.config = { preset: 'ether' };
   contextLost = false;
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(((
     kind: string
@@ -466,7 +477,7 @@ describe('ShaderHero still copy', () => {
     expect(shaderStill.current?.theme).toBe('light');
 
     // The brand changes, then a resize redraws the frame.
-    brand.config = { preset: 'glow', intensity: 0.4 };
+    brand.config = { preset: 'ether', intensity: 0.4 };
     (document.querySelector('.shader-hero') as HTMLElement).style.setProperty(
       '--brand-shader-is-dark',
       '1'
@@ -475,7 +486,7 @@ describe('ShaderHero still copy', () => {
     for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
     step(1);
     expect(renderer.render.mock.calls[1]?.[3]).toEqual({
-      preset: 'glow',
+      preset: 'ether',
       intensity: 0.4,
     });
     expect(shaderStill.current?.theme).toBe('dark');
@@ -525,7 +536,7 @@ describe('ShaderHero still copy', () => {
     expect(encoded).toBe(1);
 
     // A new shader setting, as the brand editor writes it.
-    brand.config = { preset: 'glow', intensity: 0.4 };
+    brand.config = { preset: 'ether', intensity: 0.4 };
     layout.style.setProperty('--brand-shader-intensity', '0.4');
     await settle();
     expect(renderer.render).toHaveBeenCalledTimes(2);
@@ -546,7 +557,7 @@ describe('ShaderHero still copy', () => {
     const { layout, settle } = await inStudio();
 
     // The brand editor, which paints no copy.
-    brand.config = { preset: 'glow', intensity: 0.4 };
+    brand.config = { preset: 'ether', intensity: 0.4 };
     layout.style.setProperty('--brand-shader-intensity', '0.4');
     await settle();
     // The old brand's copy gives way to the glow; no full-viewport draw.
@@ -623,5 +634,192 @@ describe('ShaderHero still copy', () => {
     step(3);
     expect(encoded).toBe(1);
     expect(shaderStill.current).toBeNull();
+  });
+});
+
+// Codex-1yd58.14: a renderer that will not load or start leaves the CSS
+// fallback showing, says so once, and stops the loop until the preset changes.
+describe('ShaderHero renderer failure', () => {
+  /** A renderer whose `init()` refuses, as a two-pass preset does with no
+   *  float render targets. */
+  const refusing = () =>
+    ({
+      init: vi.fn(() => false),
+      render: vi.fn(),
+      resize: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn(),
+    }) satisfies ShaderRenderer;
+
+  const failures = () =>
+    logger.warn.mock.calls.filter(
+      ([event]) => event === 'shader_hero.renderer_failed'
+    );
+
+  beforeEach(() => {
+    vi.mocked(loadRenderer).mockClear();
+  });
+
+  afterEach(() => {
+    logger.warn.mockClear();
+  });
+
+  it('logs a renderer that will not load, and asks for no more frames', async () => {
+    vi.mocked(loadRenderer).mockRejectedValueOnce(new Error('chunk gone'));
+    brand.config = { preset: 'lava' };
+    await start({ still: false });
+    step(5);
+    expect(frames).toHaveLength(0);
+    expect(renderer.render).not.toHaveBeenCalled();
+    expect(failures()).toEqual([
+      [
+        'shader_hero.renderer_failed',
+        expect.objectContaining({ preset: 'lava', reason: 'load' }),
+      ],
+    ]);
+  });
+
+  it('stays stopped through a wake that leaves the preset, and loads the next one', async () => {
+    const layout = document.createElement('div');
+    layout.className = 'org-layout';
+    document.body.appendChild(layout);
+    vi.mocked(loadRenderer).mockResolvedValueOnce(refusing());
+    brand.config = { preset: 'flux' };
+    const props = $state({ still: false });
+    await start(props, layout);
+    step(3);
+    expect(loadRenderer).toHaveBeenCalledTimes(1);
+    expect(frames).toHaveLength(0);
+    expect(failures()).toEqual([
+      [
+        'shader_hero.renderer_failed',
+        { preset: 'flux', reason: 'init', hasFloat: false, contextLost: false },
+      ],
+    ]);
+
+    // Woken by something else (freezing draws a frame): still the same
+    // preset, so no second try and no loop.
+    props.still = true;
+    flushSync();
+    step(3);
+    // A brand token that is not the preset: the same.
+    layout.style.setProperty('--brand-radius', '4px');
+    await Promise.resolve();
+    step(3);
+    expect(loadRenderer).toHaveBeenCalledTimes(1);
+    expect(frames).toHaveLength(0);
+
+    // The preset changes, as the brand editor writes it: it loads and draws.
+    props.still = false;
+    flushSync();
+    brand.config = { preset: 'ether' };
+    layout.style.setProperty('--brand-shader-preset', 'ether');
+    await Promise.resolve();
+    step(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    step(2);
+    expect(loadRenderer).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(loadRenderer).mock.calls[1]?.[0]).toBe('ether');
+    expect(renderer.render).toHaveBeenCalled();
+    // The failure was said once, not once per wake.
+    expect(failures()).toHaveLength(1);
+  });
+
+  it('counts an init that throws as an init failure, and frees what it built', async () => {
+    const throwing = {
+      ...refusing(),
+      init: vi.fn((): boolean => {
+        throw new Error('bad framebuffer');
+      }),
+    } satisfies ShaderRenderer;
+    vi.mocked(loadRenderer).mockResolvedValueOnce(throwing);
+    brand.config = { preset: 'glass' };
+    await start({ still: false });
+    step(3);
+    expect(throwing.destroy).toHaveBeenCalledTimes(1);
+    expect(frames).toHaveLength(0);
+    expect(failures()).toEqual([
+      [
+        'shader_hero.renderer_failed',
+        expect.objectContaining({
+          preset: 'glass',
+          reason: 'init',
+          hasFloat: false,
+          error: 'bad framebuffer',
+        }),
+      ],
+    ]);
+  });
+
+  it('retries a load failure once when the browser is back online, then gives up', async () => {
+    // The calibration: the retry fires only while the tab is shown.
+    expect(document.visibilityState).toBe('visible');
+    vi.mocked(loadRenderer)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('still offline'));
+    brand.config = { preset: 'topo' };
+    await start({ still: false });
+    expect(loadRenderer).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(new Event('online'));
+    step(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(loadRenderer).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(loadRenderer).mock.calls[1]?.[0]).toBe('topo');
+
+    // Failed again: no third try, whatever comes back.
+    window.dispatchEvent(new Event('online'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    step(3);
+    await Promise.resolve();
+    expect(loadRenderer).toHaveBeenCalledTimes(2);
+    expect(frames).toHaveLength(0);
+    // Said once for the preset and reason, and the retry's outcome once.
+    expect(failures()).toHaveLength(1);
+    expect(
+      logger.warn.mock.calls.filter(
+        ([event]) => event === 'shader_hero.renderer_retry_failed'
+      )
+    ).toEqual([['shader_hero.renderer_retry_failed', { preset: 'topo' }]]);
+  });
+
+  it('reads no config for a brand change that leaves the preset tokens alone', async () => {
+    const layout = document.createElement('div');
+    layout.className = 'org-layout';
+    document.body.appendChild(layout);
+    vi.mocked(loadRenderer).mockResolvedValueOnce(refusing());
+    brand.config = { preset: 'fracture' };
+    await start({ still: false }, layout);
+    step(2);
+    const before = brand.reads;
+
+    layout.style.setProperty('--brand-radius', '4px');
+    await Promise.resolve();
+    expect(brand.reads).toBe(before);
+
+    // The preset token itself: read, and (another preset) loaded.
+    brand.config = { preset: 'ink' };
+    layout.style.setProperty('--brand-shader-preset', 'ink');
+    await Promise.resolve();
+    expect(brand.reads).toBe(before + 1);
+  });
+
+  it('watches nothing for a preset fixed by its prop, which cannot change', async () => {
+    const layout = document.createElement('div');
+    layout.className = 'org-layout';
+    document.body.appendChild(layout);
+    vi.mocked(loadRenderer).mockResolvedValueOnce(refusing());
+    brand.config = { preset: 'caustic' };
+    await start({ still: false, preset: 'caustic' }, layout);
+    step(2);
+    const before = brand.reads;
+
+    layout.style.setProperty('--brand-shader-preset', 'ink');
+    await Promise.resolve();
+    step(2);
+    expect(brand.reads).toBe(before);
+    expect(loadRenderer).toHaveBeenCalledTimes(1);
   });
 });

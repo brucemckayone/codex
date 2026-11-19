@@ -6,7 +6,7 @@
   Progressive enhancement: CSS gradient fallback when WebGL unavailable.
 
   Features:
-  - 4 presets: suture (RDA), ether (raymarch), warp (FBM), ripple (wave eq)
+  - every `ShaderPresetId`, each its own lazily loaded renderer
   - Brand-colored — reads org palette from CSS vars
   - IntersectionObserver pauses when off-screen
   - prefers-reduced-motion, `still`, or a page holding it (`tone`): render one
@@ -20,6 +20,9 @@
   import { destroyJFACache } from './jfa-sdf';
   import { getShaderConfig, type ShaderPresetId, shaderIsDark } from './shader-config';
   import { loadRenderer } from './load-renderer';
+  import { reportRendererFailure, reportRetryFailure } from './renderer-failure';
+  import { destroyRenderer } from './start-renderer';
+  import { withProgramLabel } from './webgl-utils';
   import type { ShaderRenderer, MouseState } from './renderer-types';
   import { captureStill, shaderStill } from './shader-still.svelte';
   import { shaderTone, toneViewport } from './shader-tone';
@@ -376,17 +379,128 @@
         redrawFrozen();
       });
 
+    // ── Renderer failure ───────────────────────────────────────
+    // A preset whose renderer will not load or start STOPS the loop (retried
+    // every frame it would only fail again) and hides the canvas. The CSS
+    // fallback shows in its place only once the layout's shader gate keys on
+    // this live state, so not until WP-2 (Codex-hdzjw): until then the gate
+    // still claims a shader. The loop wakes when the brand's preset tokens or the theme
+    // change, and goes on once the preset it reads is another one, which then
+    // loads. A LOAD failure (offline, a replaced chunk) is also retried ONCE,
+    // when the browser comes back online or the tab is shown again: the org
+    // layout's hero is mounted once per SPA session, so nothing else would.
+    const glContext: WebGL2RenderingContext = gl;
+    let failedPreset: ShaderPresetId | null = null;
+    // Bumped per load, so a load overtaken by a newer preset is discarded.
+    let loadToken = 0;
+
+    /** The raw preset tokens, and which theme's applies, as the config reads them. */
+    function presetTokens(): string {
+      const layout = document.querySelector('.org-layout');
+      if (!layout) return '';
+      const style = getComputedStyle(layout);
+      return ['--brand-shader-preset', '--brand-shader-preset-dark', '--brand-shader-is-dark']
+        .map((prop) => style.getPropertyValue(prop).trim())
+        .join('|');
+    }
+    let failedTokens = '';
+
+    function wake() {
+      failedPreset = null;
+      retryObserver?.disconnect();
+      // The poll's cached read still names the failed preset: read afresh.
+      configPollCounter = 30;
+      scheduleFrame();
+    }
+
+    // Only where the brand can change the preset: an override never changes.
+    const retryObserver =
+      presetOverride === undefined
+        ? new MutationObserver(() => {
+            if (failedPreset === null) return;
+            // Most mutations are other tokens; the full read is the costly one.
+            const tokens = presetTokens();
+            if (tokens === failedTokens) return;
+            failedTokens = tokens;
+            if (getShaderConfig(undefined, presetOverride).preset === failedPreset) return;
+            wake();
+          })
+        : null;
+
+    // One retry per preset after a load failure, then it gives up. Plain
+    // bookkeeping inside onMount: nothing renders from it.
+    const loadRetried: ShaderPresetId[] = [];
+    let disarmLoadRetry: (() => void) | null = null;
+    /** The preset whose one retry is loading now, so its failure is told apart. */
+    let retrying: ShaderPresetId | null = null;
+    function armLoadRetry(preset: ShaderPresetId) {
+      if (loadRetried.includes(preset)) return;
+      loadRetried.push(preset);
+      // Some engines cache a failed module fetch, so this may fail the same
+      // way; it is one cheap, safe attempt, and its outcome is logged.
+      const retry = () => {
+        if (document.visibilityState !== 'visible') return;
+        disarm();
+        if (failedPreset !== preset) return;
+        retrying = preset;
+        wake();
+      };
+      const disarm = () => {
+        window.removeEventListener('online', retry);
+        document.removeEventListener('visibilitychange', retry);
+        disarmLoadRetry = null;
+      };
+      window.addEventListener('online', retry);
+      document.addEventListener('visibilitychange', retry);
+      disarmLoadRetry = disarm;
+    }
+
+    function rendererFailed(preset: ShaderPresetId, reason: 'load' | 'init', thrown?: unknown) {
+      reportRendererFailure(preset, reason, glContext, thrown);
+      // Nothing runs, so the state says nothing does: a later change of
+      // preset, even back to this one after another, loads afresh.
+      currentPreset = 'none';
+      failedPreset = preset;
+      failedTokens = presetTokens();
+      if (canvasEl) canvasEl.style.opacity = '0';
+      if (retrying === preset) {
+        // The one retry failed too: said once, and not tried again.
+        retrying = null;
+        reportRetryFailure(preset);
+      } else if (reason === 'load') {
+        armLoadRetry(preset);
+      }
+      if (!retryObserver) return;
+      const layout = document.querySelector('.org-layout');
+      if (layout) {
+        retryObserver.observe(layout, {
+          attributes: true,
+          attributeFilter: ['style', 'data-editing-theme', 'data-org-brand'],
+        });
+      }
+      retryObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme'],
+      });
+    }
+
     // ── Preset switching ───────────────────────────────────────
     async function ensureRenderer(preset: ShaderPresetId): Promise<boolean> {
       if (preset === currentPreset && renderer) return true;
 
       // Clean up old renderer
       if (renderer) {
-        renderer.destroy(gl!);
+        renderer.destroy(glContext);
         renderer = null;
       }
 
+      const token = ++loadToken;
+      // Another preset: whatever was retrying is no longer what loads.
+      if (retrying !== preset) retrying = null;
       currentPreset = preset;
+      failedPreset = null;
+      retryObserver?.disconnect();
+      disarmLoadRetry?.();
       clearTone();
       // Another shader, or none: the copy is of one that is gone.
       clearStill();
@@ -402,27 +516,47 @@
         return false;
       }
 
-      const newRenderer = await loadRenderer(preset);
-      if (!newRenderer) {
-        // Loader failed — keep polling so the user (or editor) can switch to
-        // a working preset without a full remount.
-        scheduleFrame();
+      let newRenderer: ShaderRenderer | null;
+      try {
+        newRenderer = await loadRenderer(preset);
+      } catch (thrown) {
+        // A chunk that will not load (offline, a deploy replaced it).
+        if (token === loadToken) rendererFailed(preset, 'load', thrown);
+        return false;
+      }
+      // Overtaken by a newer preset while it loaded: that load owns the canvas.
+      if (token !== loadToken) return false;
+      if (!newRenderer || !canvasEl) {
+        rendererFailed(preset, 'load');
         return false;
       }
 
       resize(); // Ensure canvas is sized before init
-      const ok = newRenderer.init(gl!, canvasEl!.width, canvasEl!.height);
+      // A throw from init() is an init failure too, not an escape from here.
+      let ok = false;
+      let initThrown: unknown;
+      const building = newRenderer;
+      const box = { width: canvasEl.width, height: canvasEl.height };
+      try {
+        // Its programs' compile/link events name who built them.
+        ok = withProgramLabel(`shader_hero:${preset}`, () =>
+          building.init(glContext, box.width, box.height)
+        );
+      } catch (thrown) {
+        initThrown = thrown;
+      }
       if (!ok) {
-        newRenderer.destroy(gl!);
-        // init() failure (e.g. missing EXT_color_buffer_float) — keep polling
-        // so switching to a less-demanding preset still works.
-        scheduleFrame();
+        // A half-built renderer frees what it did build.
+        destroyRenderer(newRenderer, glContext, 'shader_hero');
+        // e.g. no EXT_color_buffer_float for a two-pass preset.
+        rendererFailed(preset, 'init', initThrown);
         return false;
       }
 
       renderer = newRenderer;
+      retrying = null;
       hasRenderedStaticFrame = false;
-      canvasEl!.style.opacity = '1';
+      canvasEl.style.opacity = '1';
       // Re-prime the loop: frame() returns early on preset mismatch without
       // re-scheduling, so after an async preset switch the loop is released.
       scheduleFrame();
@@ -443,10 +577,15 @@
       // nothing, and its loop keeps to the poll that spots a new preset.
       const config = pollConfig(isFrozen && !hasRenderedStaticFrame && renderer !== null);
 
+      // A preset that failed stays stopped until it changes (`retryObserver`):
+      // whatever woke this frame (a resize, the tab coming back) is no reason
+      // to fail it again.
+      if (config.preset === failedPreset) return;
+
       // Switch preset if needed (async — may take a frame).
-      // ensureRenderer calls scheduleFrame() on all branches (success AND
-      // every failure mode, including 'none') so the poll loop keeps running
-      // and later brand-editor activations are detected.
+      // ensureRenderer calls scheduleFrame() on success and on 'none', so the
+      // poll loop keeps running and later brand-editor activations are
+      // detected; a failure stops the loop instead (`rendererFailed`).
       if (config.preset !== currentPreset) {
         ensureRenderer(config.preset);
         return;
@@ -599,6 +738,10 @@
       document.removeEventListener('visibilitychange', onVisibilityChange);
       motionQuery.removeEventListener('change', onMotionChange);
       resizeObserver.disconnect();
+      retryObserver?.disconnect();
+      disarmLoadRetry?.();
+      // A load still in flight finds itself overtaken and installs nothing.
+      loadToken++;
       watchBrand(false);
       canvasEl?.removeEventListener('webglcontextlost', clearStill);
       detachPointerListeners();

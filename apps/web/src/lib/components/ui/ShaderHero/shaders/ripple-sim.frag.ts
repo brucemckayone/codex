@@ -1,3 +1,5 @@
+import { SIM_BASE } from '../sim-grid';
+
 /**
  * Water Ripple simulation fragment shader (GLSL ES 3.0).
  *
@@ -52,7 +54,9 @@ void main() {
 
   // Mouse impulse: Gaussian deposit
   if (uMouseActive > 0.5) {
-    vec2 d = v_uv - uMouse;
+    // Distance in texels / SIM_BASE: round on screen at any grid shape, and on a
+    // square 512 grid exactly the uv distance it always was.
+    vec2 d = (v_uv - uMouse) / (uTexel * ${SIM_BASE.toFixed(1)});
     float r = uRippleSize;
     float impulse = uMouseStrength * 0.015 * exp(-dot(d, d) / (r * r));
     next += impulse;

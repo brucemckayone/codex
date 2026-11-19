@@ -8,9 +8,11 @@
  * held to its floor over the pixels under it (a filled button, a ghost
  * button's line and a mark over a ring round them), at the 0.1 percentile.
  *
- * The page is studio-alpha's Tending the Grief, in Quiet, over its 'glow'
- * shader (near-black in the light theme, which a fixed 1.6 left at 3.4:1 for
- * 4.5:1 text). Since 03 X59 every Style but Poster's and Cinematic's takes
+ * The page is studio-alpha's Tending the Grief, in Quiet, over its seeded
+ * 'glow' shader — cut since, so it paints as its survivor 'ether'
+ * (`CUT_PRESET_ALIASES`). 'glow' was near-black in the light theme, which a
+ * fixed 1.6 left at 3.4:1 for 4.5:1 text; the proof measures whatever is
+ * drawn, so it holds the veil over 'ether' the same way. Since 03 X59 every Style but Poster's and Cinematic's takes
  * the hazy look, the multiple included, and each Style's own inks are what is
  * drawn on the veil, so the page is held to it in each of them: its root
  * switched to the Style, which is how a Style restyles a page (its layouts
@@ -311,7 +313,7 @@ test('the page is drawn in a Style that asks for the hazy look', () => {
 
 for (const style of HAZY)
   for (const theme of ['light', 'dark'] as const) {
-    test(`studio-alpha ('glow') as ${style}, ${theme}: a veil thinner than the proven one holds every ink on it over the shader drawn`, async ({
+    test(`studio-alpha ('glow', painted as 'ether') as ${style}, ${theme}: a veil thinner than the proven one holds every ink on it over the shader drawn`, async ({
       browser,
       baseURL,
     }) => {
@@ -373,7 +375,7 @@ test.describe('a framed hero picture on the shader', () => {
   );
 
   for (const theme of ['light', 'dark'] as const)
-    test(`studio-alpha ('glow'), Studio's split hero with a picture, ${theme}: every ink beside the frame holds over the shader drawn`, async ({
+    test(`studio-alpha ('glow', painted as 'ether'), Studio's split hero with a picture, ${theme}: every ink beside the frame holds over the shader drawn`, async ({
       browser,
       baseURL,
     }) => {

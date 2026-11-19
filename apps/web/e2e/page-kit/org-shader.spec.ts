@@ -8,7 +8,8 @@
  * org's colour (Recommended)").
  *
  * Measured on the org's own path (no carrier, no DB write): studio-alpha
- * carries the seeded 'glow' preset, of-blood-and-bones none. The words are
+ * carries the seeded 'glow' preset — cut since, so it paints as its survivor
+ * 'ether' (`CUT_PRESET_ALIASES`) — of-blood-and-bones none. The words are
  * held to their floors on the proven veil (`--_atmos-floor`) over the two
  * worst backdrops (pure black and pure white bound every shader frame, 03
  * §5.1), from the section's live tokens: its ground, the veil's strength and
@@ -174,7 +175,7 @@ const over = (ground: string, s: number, backdrop: 0 | 255) =>
     .join('')}`;
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`studio-alpha (a 'glow' shader) ${theme}: the hero is its moving background, the closing ask keeps its Style's band, and every word holds on the veil in the org's heading colour`, async ({
+  test(`studio-alpha (its seeded 'glow', painted as 'ether') ${theme}: the hero is its moving background, the closing ask keeps its Style's band, and every word holds on the veil in the org's heading colour`, async ({
     browser,
     baseURL,
   }) => {

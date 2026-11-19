@@ -16,7 +16,11 @@ Use this skill when implementing new shader presets for the ShaderHero system in
 
 The ShaderHero system renders animated WebGL2 shader backgrounds for organization hero sections. Each org can select a shader preset and configure it via the brand editor. The system reads configuration from CSS custom properties (`--brand-shader-*`) injected by the brand editor, and passes them as uniforms to GLSL ES 3.0 fragment shaders.
 
-**Current presets (36 + none):** suture, ether, warp, ripple, pulse, ink, topo, nebula, turing, silk, glass, film, flux, lava, caustic, physarum, rain, frost, glow, life, mycelium, aurora, tendrils, pollen, growth, geode, lenia, ocean, bismuth, pearl, vortex, gyroid, waves, clouds, fracture, julia, vapor, tunnel.
+**Current presets (16 + none), after the WP-1b shader lab cull (Codex-1yd58, 2026-11-19):** flow, suture, ripple, film, caustic (owner: keep), and ether, pulse, ink, topo, glass, flux, lava, physarum, aurora, lenia, fracture (owner: rework, Codex-1yd58.15).
+
+**25 presets were cut.** Their ids still exist in stored data (branding `shader-preset`, content `shader_preset`), so every id goes through `resolvePresetId()` in `shader-config.ts`, which maps a cut id to its survivor via `CUT_PRESET_ALIASES`. Never turn a stored id into a renderer without it: an unknown id used to fall through to `'none'` and blank the org silently. A new preset is a survivor; a removed one is an alias entry, never a deletion alone.
+
+**FBO presets size their simulation with `sim-grid.ts`:** `simGridFor(width, height)` shapes the grid like the canvas (≈512² texels, sides multiples of 64), `simGridChanged` gates rebuilds on resize, and `createStepClock(stepsPerSecond)` turns elapsed time into steps so 120 Hz screens do not run twice as fast. Measure brush and drop distances in texels (`(v_uv - uMouse) / uTexel`), never in uv, or they draw as ellipses on wide heroes. Seed with something smooth (`PERIODIC_NOISE_GLSL` tiles over the wrapped grid) and warm up on the first render, so a reduced-motion visitor's single frame is not raw noise.
 
 **Two types of presets:**
 
@@ -303,7 +307,7 @@ export function create{Name}Renderer(): ShaderRenderer { ... }
 FBO-based renderers MUST:
 - Check `gl.getExtension('EXT_color_buffer_float')` in `init()` and return false if missing
 - Also get `gl.getExtension('OES_texture_float_linear')` for linear filtering
-- Use `createDoubleFBO(gl, SIM_RES, SIM_RES)` where `SIM_RES = 512`
+- Use `createDoubleFBO(gl, grid.w, grid.h)` with `grid = simGridFor(width, height)` from `sim-grid.ts` (the template below still shows the old square `SIM_RES`; follow flow/suture/ripple instead)
 - Run two substeps per frame (one with input, one coasting)
 - Seed initial state in `reset()` by rendering the init shader into both FBO sides
 - Have a separate init program (simple clear shader)

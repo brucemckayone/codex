@@ -109,13 +109,6 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-glow',
   'shader-scale',
   'shader-aberration',
-  // Warp
-  'shader-warp-strength',
-  'shader-light-angle',
-  'shader-speed',
-  'shader-detail',
-  'shader-contrast',
-  'shader-invert',
   // Ripple
   'shader-wave-speed',
   'shader-damping',
@@ -142,26 +135,6 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-topo-scale',
   'shader-topo-elevation',
   'shader-topo-octaves',
-  // Nebula
-  'shader-nebula-density',
-  'shader-nebula-speed',
-  'shader-nebula-scale',
-  'shader-nebula-depth',
-  'shader-nebula-wind',
-  'shader-nebula-stars',
-  // Turing
-  'shader-turing-feed',
-  'shader-turing-kill',
-  'shader-turing-da',
-  'shader-turing-db',
-  'shader-turing-speed',
-  // Silk
-  'shader-silk-fold-scale',
-  'shader-silk-fold-depth',
-  'shader-silk-speed',
-  'shader-silk-softness',
-  'shader-silk-sheen',
-  'shader-silk-lining',
   // Glass
   'shader-glass-cell-size',
   'shader-glass-border',
@@ -199,157 +172,30 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-physarum-deposit',
   'shader-physarum-sensor',
   'shader-physarum-turn',
-  // Rain
-  'shader-rain-density',
-  'shader-rain-speed',
-  'shader-rain-size',
-  'shader-rain-refraction',
-  'shader-rain-blur',
-  // Frost
-  'shader-frost-growth',
-  'shader-frost-branch',
-  'shader-frost-symmetry',
-  'shader-frost-melt',
-  'shader-frost-glow',
-  // Glow
-  'shader-glow-count',
-  'shader-glow-pulse',
-  'shader-glow-size',
-  'shader-glow-drift',
-  'shader-glow-trail',
-  'shader-glow-depth',
-  // Life
-  'shader-life-inner',
-  'shader-life-outer',
-  'shader-life-birth',
-  'shader-life-death',
-  'shader-life-speed',
-  // Mycelium
-  'shader-mycelium-growth',
-  'shader-mycelium-branch',
-  'shader-mycelium-spread',
-  'shader-mycelium-pulse',
-  'shader-mycelium-thickness',
   // Aurora
   'shader-aurora-layers',
   'shader-aurora-speed',
   'shader-aurora-height',
   'shader-aurora-spread',
   'shader-aurora-shimmer',
-  // Tendrils
-  'shader-tendrils-scale',
-  'shader-tendrils-speed',
-  'shader-tendrils-steps',
-  'shader-tendrils-curl',
-  'shader-tendrils-fade',
-  // Pollen
-  'shader-pollen-density',
-  'shader-pollen-size',
-  'shader-pollen-fibres',
-  'shader-pollen-drift',
-  'shader-pollen-depth',
-  'shader-pollen-bokeh',
-  // Growth
-  'shader-growth-speed',
-  'shader-growth-noise',
-  'shader-growth-scale',
-  'shader-growth-width',
-  'shader-growth-glow',
-  // Geode
-  'shader-geode-bands',
-  'shader-geode-warp',
-  'shader-geode-cavity',
-  'shader-geode-speed',
-  'shader-geode-sparkle',
   // Lenia
   'shader-lenia-radius',
   'shader-lenia-growth',
   'shader-lenia-width',
   'shader-lenia-speed',
   'shader-lenia-dt',
-  // Ocean
-  'shader-ocean-caustic-scale',
-  'shader-ocean-sand-scale',
-  'shader-ocean-speed',
-  'shader-ocean-shadow',
-  'shader-ocean-ripple',
-  // Bismuth
-  'shader-bismuth-terraces',
-  'shader-bismuth-warp',
-  'shader-bismuth-iridescence',
-  'shader-bismuth-speed',
-  'shader-bismuth-edge',
-  // Pearl
-  'shader-pearl-displacement',
-  'shader-pearl-speed',
-  'shader-pearl-fresnel',
-  'shader-pearl-specular',
-  // Vortex
-  'shader-vortex-speed',
-  'shader-vortex-density',
-  'shader-vortex-twist',
-  'shader-vortex-rings',
-  'shader-vortex-spiral',
-  // Gyroid
-  'shader-gyroid-scale1',
-  'shader-gyroid-scale2',
-  'shader-gyroid-speed',
-  'shader-gyroid-density',
-  'shader-gyroid-thickness',
-  // Waves
-  'shader-waves-height',
-  'shader-waves-speed',
-  'shader-waves-chop',
-  'shader-waves-foam',
-  'shader-waves-depth',
-  // Clouds
-  'shader-clouds-cover',
-  'shader-clouds-speed',
-  'shader-clouds-scale',
-  'shader-clouds-dark',
-  'shader-clouds-light',
   // Fracture
   'shader-fracture-cuts',
   'shader-fracture-speed',
   'shader-fracture-border',
   'shader-fracture-shadow',
   'shader-fracture-fill',
-  // Julia
-  'shader-julia-zoom',
-  'shader-julia-speed',
-  'shader-julia-iterations',
-  'shader-julia-radius',
-  'shader-julia-saturation',
-  // Vapor
-  'shader-vapor-density',
-  'shader-vapor-speed',
-  'shader-vapor-scale',
-  'shader-vapor-warmth',
-  'shader-vapor-glow',
-  // Tunnel
-  'shader-tunnel-speed',
-  'shader-tunnel-fractal',
-  'shader-tunnel-radius',
-  'shader-tunnel-brightness',
-  'shader-tunnel-twist',
-  // Plasma
-  'shader-plasma-speed',
-  'shader-plasma-bands',
-  'shader-plasma-pressure',
-  'shader-plasma-turn',
-  'shader-plasma-diffusion',
   // Flow
   'shader-flow-curl',
   'shader-flow-advection',
   'shader-flow-smoothing',
   'shader-flow-contrast',
   'shader-flow-field-speed',
-  // Spore
-  'shader-spore-sensor-angle',
-  'shader-spore-sensor-offset',
-  'shader-spore-step-size',
-  'shader-spore-rotation',
-  'shader-spore-decay',
   // Logo SDF
   'shader-logo-url',
 ]);
@@ -429,7 +275,12 @@ const RETIRED_OVERRIDE_KEYS = new Set(['text-on-brand']);
  * Whether an override key becomes a CSS custom property: not an
  * attribute-only key (`hero-hide-*` drive data-* attributes, set by the org
  * layout), not a hero setting (`hero-opt-*`, read by the landing page's hero,
- * see `$lib/org-hero/hero-config.ts`) and not a retired one. A reserved key
+ * see `$lib/org-hero/hero-config.ts`), not a retired one, and not a `shader-*`
+ * key outside BRAND_PREFIX_KEYS. Every shader key a live preset or the shader
+ * palette reads is in that set (`css-injection.test.ts` derives the reads from
+ * `shader-config.ts`), so one outside it is a cut preset's param saved before
+ * the cut (Codex-1yd58): nothing reads it, and painted it would only be a
+ * stray `--color-shader-*` on the org layout. A reserved key
  * (`shader-logo-url`) never gets this far: the mappers refuse it with the
  * save's own rule.
  */
@@ -437,7 +288,8 @@ function emitsCssVar(key: string): boolean {
   return (
     !key.startsWith('hero-hide-') &&
     !key.startsWith(HERO_OPT_PREFIX) &&
-    !RETIRED_OVERRIDE_KEYS.has(key)
+    !RETIRED_OVERRIDE_KEYS.has(key) &&
+    (!key.startsWith('shader-') || BRAND_PREFIX_KEYS.has(key))
   );
 }
 

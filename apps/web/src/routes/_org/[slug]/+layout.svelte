@@ -22,6 +22,7 @@
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
+  import { orgShader } from '$lib/page-builder/org-grounds';
   import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
   // Every brand face's own fallback, so a face on its way draws on its lines (Codex-61zsk.61).
@@ -175,22 +176,18 @@
     };
   });
 
-  // Shader-active flag — true iff the org has a non-empty, non-'none' shader preset.
-  // Reads from brand editor when open, server tokenOverrides otherwise. Drives
-  // the `data-hero-shader-active` attribute that gates the shader-less fallback
+  // Shader-active flag: the page kit's own rule (`orgShader`), so the hero's
+  // fallback backdrop and every page-kit surface agree on whether a shader
+  // runs. It reads the brand editor's pending tokens while it is open, else
+  // the saved ones, and the LIGHT `shader-preset` only — a dark-only preset
+  // does not light it. A claim, not the truth: in WP-2 (Codex-hdzjw) the gate
+  // becomes the running renderer's live state (`data-live`). Drives the
+  // `data-hero-shader-active` attribute that gates the shader-less fallback
   // backdrop on .hero (so orgs without a shader get a legible dark gradient for
   // the difference-blended title, Codex-tl2ts).
-  const hasShaderPreset = $derived.by(() => {
-    const overrides = brandEditor.isOpen
-      ? (brandEditor.pending?.tokenOverrides ?? {})
-      : (() => {
-          const raw = data.org?.brandFineTune?.tokenOverrides;
-          if (!raw) return {};
-          try { return JSON.parse(raw) as Record<string, string | null>; } catch { return {}; }
-        })();
-    const preset = overrides['shader-preset'];
-    return typeof preset === 'string' && preset.length > 0 && preset !== 'none';
-  });
+  const hasShaderPreset = $derived(
+    orgShader(data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
 
   // Fine-tune branding fields — text/heading/body weight, shadow scale/color,
   // heading colour, etc. are now read exclusively from the tokenOverrides JSON

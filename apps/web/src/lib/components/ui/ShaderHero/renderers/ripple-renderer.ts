@@ -16,15 +16,27 @@
  * treble; saturation lifts during playback so meditation content reads as
  * vibrant rather than washed out.
  *
- * Simulation runs at 512x512 in a ping-pong double FBO.
+ * Simulation runs in a ping-pong double FBO shaped like the canvas (~512²
+ * texels, `sim-grid.ts`), so ripples are round on wide heroes and phones.
  * Display pass renders to the full canvas viewport.
  */
 
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
-import type { RippleConfig, ShaderConfig } from '../shader-config';
+import {
+  DEFAULTS,
+  type RippleConfig,
+  type ShaderConfig,
+} from '../shader-config';
 import { RIPPLE_DISPLAY_FRAG } from '../shaders/ripple-display.frag';
 import { RIPPLE_SIM_FRAG } from '../shaders/ripple-sim.frag';
+import {
+  createStepClock,
+  inputStride,
+  resizeSim,
+  type SimGrid,
+  simGridFor,
+} from '../sim-grid';
 import {
   createDoubleFBO,
   createProgram,
@@ -36,7 +48,18 @@ import {
   VERTEX_SHADER,
 } from '../webgl-utils';
 
-const SIM_RES = 512;
+/** Simulation steps a second: 2 a frame at 60 Hz, as ripple always ran. */
+const STEPS_PER_SECOND = 120;
+const INPUT_STRIDE = inputStride(STEPS_PER_SECOND);
+
+/**
+ * Drops seeded with a fresh surface, and steps run so they have spread.
+ * Ripple used to start as flat water and wait 2.5-4 s for its first idle
+ * drop, so a visitor who never touched it saw a plain gradient, and a
+ * reduced-motion visitor's single frame never showed water at all.
+ */
+const SEED_DROPS = 3;
+const SEED_STEPS = 40;
 
 /** Ripple init fragment shader — flat water (all zeros). */
 const RIPPLE_INIT_FRAG = `#version 300 es
@@ -160,8 +183,8 @@ const BASS_RUMBLE_TAP_DISTANCE = 0.06;
 const AMBIENT_INTERVAL_PLAYING_MIN = 3.5;
 const AMBIENT_INTERVAL_PLAYING_MAX = 5.5;
 /** Ambient drip interval when idle (audio paused / hero mode). */
-const AMBIENT_INTERVAL_IDLE_MIN = 2.5;
-const AMBIENT_INTERVAL_IDLE_MAX = 4.0;
+const AMBIENT_INTERVAL_IDLE_MIN = 1.2;
+const AMBIENT_INTERVAL_IDLE_MAX = 2.4;
 
 /** Uniform name lists for type-safe location lookup. */
 const SIM_UNIFORM_NAMES = [
@@ -212,12 +235,15 @@ export function createRippleRenderer(): ShaderRenderer {
 
   /** Timestamp (seconds) of last ambient drip. */
   let lastAmbientTime = 0;
+  let grid: SimGrid = simGridFor(0, 0);
+  const clock = createStepClock(STEPS_PER_SECOND);
+  /** Set by reset(): the next render seeds drops (it has the config). */
+  let seedPending = false;
 
   /** Active click splash animations. */
   let clickSplashes: Array<{ x: number; y: number; frames: number }> = [];
 
   /** Last render time — used for frame-rate-independent fades. */
-  let lastRenderTime = 0;
 
   /**
    * Wanderer fade intensity (0..1). Eases in on audio start, out on pause.
@@ -271,7 +297,7 @@ export function createRippleRenderer(): ShaderRenderer {
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
 
-    gl.viewport(0, 0, SIM_RES, SIM_RES);
+    gl.viewport(0, 0, grid.w, grid.h);
     gl.useProgram(simProg);
     quad.bind(simProg);
 
@@ -279,10 +305,11 @@ export function createRippleRenderer(): ShaderRenderer {
     gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
     gl.uniform1i(simU.uState, 0);
 
-    const tx = 1.0 / SIM_RES;
-    gl.uniform2f(simU.uTexel, tx, tx);
-    gl.uniform1f(simU.uWaveSpeed, cfg.waveSpeed);
-    gl.uniform1f(simU.uDamping, cfg.damping);
+    gl.uniform2f(simU.uTexel, 1.0 / grid.w, 1.0 / grid.h);
+    // Fallbacks: a caller can hand a fresh renderer another preset's config
+    // for a frame, and a NaN here poisons the wave field for good.
+    gl.uniform1f(simU.uWaveSpeed, cfg.waveSpeed ?? DEFAULTS.waveSpeed);
+    gl.uniform1f(simU.uDamping, cfg.damping ?? DEFAULTS.damping);
     gl.uniform1f(
       simU.uRippleSize,
       rippleSizeOverride ?? cfg.rippleSize ?? DEFAULT_RIPPLE_SIZE
@@ -335,7 +362,7 @@ export function createRippleRenderer(): ShaderRenderer {
   }
 
   return {
-    init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
+    init(gl: WebGL2RenderingContext, width: number, height: number): boolean {
       // Check required extensions
       if (!gl.getExtension('EXT_color_buffer_float')) return false;
       gl.getExtension('OES_texture_float_linear');
@@ -353,7 +380,8 @@ export function createRippleRenderer(): ShaderRenderer {
 
       // Create geometry and FBOs
       quad = createQuad(gl);
-      simBuf = createDoubleFBO(gl, SIM_RES, SIM_RES);
+      grid = simGridFor(width, height);
+      simBuf = createDoubleFBO(gl, grid.w, grid.h);
 
       // Initialize to flat water
       this.reset(gl);
@@ -382,9 +410,8 @@ export function createRippleRenderer(): ShaderRenderer {
       const audioActive = audio?.active ?? false;
 
       // Frame-rate-independent dt — used for the wanderer fade only.
-      const dt =
-        lastRenderTime === 0 ? 1 / 60 : Math.min(0.1, time - lastRenderTime);
-      lastRenderTime = time;
+      // One clock for the frame: dt and this frame's simulation steps.
+      const { steps, first, dt } = clock.tick(time);
 
       // Ease wanderer fade toward 1 (audio playing) or 0 (paused).
       const fadeTarget = audioActive ? 1 : 0;
@@ -529,17 +556,39 @@ export function createRippleRenderer(): ShaderRenderer {
       const mouseAttenuation = audioActive
         ? Math.max(0.45, 1.0 - 0.55 * amplitudeSmooth)
         : 1.0;
-      stepSim(
-        gl,
-        mouse.active ? mouse.x : -10.0,
-        mouse.active ? mouse.y : -10.0,
-        mouse.active,
-        mouseAttenuation,
-        cfg
-      );
+      // ── A fresh surface starts with drops already spreading ───
+      if (seedPending) {
+        seedPending = false;
+        for (let i = 0; i < SEED_DROPS; i++) {
+          stepSim(
+            gl,
+            0.2 + Math.random() * 0.6,
+            0.2 + Math.random() * 0.6,
+            true,
+            0.5,
+            cfg
+          );
+        }
+        for (let i = 0; i < SEED_STEPS; i++) {
+          stepSim(gl, -10.0, -10.0, false, 0.0, cfg);
+        }
+        lastAmbientTime = time;
+      }
 
-      // Extra substep for smoother wave propagation (matches prototype)
-      stepSim(gl, -10.0, -10.0, false, 0.0, cfg);
+      // Steps follow elapsed time, so 120 Hz runs ripple at 60 Hz speed.
+      // Input lands on a fixed stride of steps (60 pushes a second at any
+      // frame rate); the rest propagate the waves.
+      for (let i = 0; i < steps; i++) {
+        const input = (first + i) % INPUT_STRIDE === 0 && mouse.active;
+        stepSim(
+          gl,
+          input ? mouse.x : -10.0,
+          input ? mouse.y : -10.0,
+          input,
+          input ? mouseAttenuation : 0.0,
+          cfg
+        );
+      }
 
       // ── Display pass ───────────────────────────────────────
       gl.viewport(0, 0, width, height);
@@ -550,8 +599,7 @@ export function createRippleRenderer(): ShaderRenderer {
       gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
       gl.uniform1i(displayU.uState, 0);
 
-      const tx = 1.0 / SIM_RES;
-      gl.uniform2f(displayU.uTexel, tx, tx);
+      gl.uniform2f(displayU.uTexel, 1.0 / grid.w, 1.0 / grid.h);
 
       // ── Immersive colour cycling (shared utility) ──────────
       // Uses smoothed amplitude so phase nudge doesn't jitter.
@@ -571,7 +619,9 @@ export function createRippleRenderer(): ShaderRenderer {
         (cfg.refraction ?? DEFAULT_REFRACTION) * (1.0 + bassSmooth * 0.8)
       );
       gl.uniform1f(displayU.uGrain, cfg.grain);
-      gl.uniform1f(displayU.uVignette, 0.0);
+      // The Vignette slider, which used to be ignored (hard-coded 0). Off in
+      // fullscreen immersive mode, as flow does.
+      gl.uniform1f(displayU.uVignette, audioActive ? 0.0 : cfg.vignette);
       gl.uniform1f(displayU.uTime, time);
 
       // Full-spectrum modulation — see display shader for exact mappings.
@@ -585,16 +635,20 @@ export function createRippleRenderer(): ShaderRenderer {
       drawQuad(gl);
     },
 
-    resize(_gl: WebGL2RenderingContext, _width: number, _height: number): void {
-      // FBO sim resolution is fixed at 512x512.
-      // Display pass viewport is set each frame in render().
+    resize(gl: WebGL2RenderingContext, width: number, height: number): void {
+      // Shared rule (sim-grid `resizeSim`): rebuild only on a real change of
+      // shape, never on a lost context, allocating before destroying; the new surface is reseeded. Display viewport is set each frame in render().
+      const resized = resizeSim(gl, grid, simBuf, width, height);
+      if (!resized) return;
+      grid = resized.grid;
+      simBuf = resized.buf;
+      this.reset(gl);
     },
 
     reset(gl: WebGL2RenderingContext): void {
       if (!initProg || !simBuf || !quad) return;
 
       lastAmbientTime = 0;
-      lastRenderTime = 0;
       wandererFade = 0;
       wandererPhase = 0;
       lastTapX = -10;
@@ -604,8 +658,10 @@ export function createRippleRenderer(): ShaderRenderer {
       lastRumbleTapX.fill(-10);
       lastRumbleTapY.fill(-10);
       clickSplashes = [];
+      clock.reset();
+      seedPending = true;
 
-      gl.viewport(0, 0, SIM_RES, SIM_RES);
+      gl.viewport(0, 0, grid.w, grid.h);
       gl.useProgram(initProg);
       quad.bind(initProg);
 

@@ -8,7 +8,15 @@
   @prop {(preset: string | null) => void} onchange - Callback when selection changes
 -->
 <script lang="ts">
+  import { browser } from '$app/environment';
   import { HERO_FX_PRESETS } from '$lib/brand-editor/hero-fx-presets';
+  import { noShaderPlays } from '$lib/components/AudioPlayer/immersive-preset';
+  import {
+    getBrandPresetId,
+    presetIsUnknown,
+    resolvePresetId,
+    warnUnknownPreset,
+  } from '$lib/components/ui/ShaderHero/shader-config';
   import ShaderPreview from './ShaderPreview.svelte';
 
   interface Props {
@@ -22,9 +30,8 @@
    * Every shader preset, derived from the single source of truth.
    *
    * This list used to be hardcoded here, and it had drifted: it named 26 of
-   * the 41 presets, so `topo`, `turing`, `glass`, `film`, `physarum`,
-   * `mycelium`, `pollen`, `growth`, `geode`, `lenia`, `bismuth`, `pearl`,
-   * `vortex`, `gyroid`, `fracture` and `vapor` could not be chosen for
+   * the then 41 presets, so sixteen of them (`topo`, `glass`, `film`,
+   * `physarum`, `lenia` and `fracture` among them) could not be chosen for
    * immersive audio playback at all — no matter how audio-reactive they were.
    *
    * Two lists that must agree, with nothing forcing them to, always diverge:
@@ -33,18 +40,37 @@
    * documenting it — a new preset now appears here automatically.
    *
    * `none` is re-described. In the brand editor it means "fall back to the
-   * default gradient hero"; here it means "play audio with no visualiser at
-   * all", since the immersive player is a fullscreen overlay with no gradient
-   * behind it. Same id, different consequence — so the label is overridden
-   * rather than inherited.
+   * default gradient hero"; here it means "no shader of the piece's own", and
+   * immersive mode then paints the org's brand shader, else flow
+   * (`AudioPlayer/immersive-preset.ts`, owner 2026-11-19). Same id, different
+   * consequence — so the description is overridden rather than inherited,
+   * and worded from what actually plays: "Plays your brand's shader", or
+   * "Plays Flow" where the brand has none (`noShaderPlays`). The brand's
+   * preset is read off the org layout, so in the browser (the studio is
+   * client-rendered).
    */
+  const nonePlays = noShaderPlays(browser ? getBrandPresetId() : null);
   const PRESETS = HERO_FX_PRESETS.map((p) =>
-    p.id === 'none' ? { ...p, description: 'No shader effect' } : p
+    p.id === 'none' ? { ...p, description: `Plays ${nonePlays}` } : p
   );
 
+  /**
+   * The card the stored value paints. A content row may hold a cut preset
+   * (`content.shader_preset` is free text), which plays as its survivor, so
+   * the survivor's card is the one marked selected.
+   */
+  const selectedId = $derived(resolvePresetId(value));
+
+  // A saved id naming no preset marks no card and plays the brand's shader
+  // (ShaderPreview says so); say so in the logs too.
+  $effect(() => {
+    if (value && presetIsUnknown(value)) warnUnknownPreset(value, 'studio');
+  });
+
   function isSelected(presetId: string): boolean {
-    if (presetId === 'none') return value === null;
-    return value === presetId;
+    // A blank value is no shader, as null is.
+    if (presetId === 'none') return !value?.trim() || selectedId === 'none';
+    return selectedId === presetId;
   }
 
   function handleSelect(presetId: string) {
