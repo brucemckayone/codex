@@ -1,12 +1,10 @@
 /**
  * The one door from a renderer to "the screen" (Codex-1yd58 WP-2).
  *
- * Every preset ends its frame by drawing into whatever output is bound. Today
- * that is always the canvas (the default framebuffer). The Showreel
- * compositor (WP-3, Codex-1yd58.4, not built yet) will render a preset into
- * its own scene framebuffer, then composite it with the playing footage: it
- * will attach that framebuffer here, and every renderer, unchanged, will draw
- * into it.
+ * Every preset ends its frame by drawing into whatever output is bound: the
+ * canvas (the default framebuffer), or, while the brand shader stack's
+ * compositor (`compositor/compositor.ts`, Codex-1yd58.4) renders a preset, its
+ * scene framebuffer, attached here. Every renderer, unchanged, draws into it.
  *
  * THE RULE: nothing under `ShaderHero/` calls
  * `gl.bindFramebuffer(gl.FRAMEBUFFER, null)` except this file (the
@@ -31,8 +29,10 @@ export function bindOutput(gl: WebGL2RenderingContext): void {
  * canvas again. The caller owns the framebuffer and its size; renderers keep
  * drawing at the width and height `render()` is given.
  *
- * No caller until WP-3's compositor (Codex-1yd58.4): this is the seam it will
- * attach to, pinned by `__tests__/output-target.test.ts`.
+ * The compositor attaches its scene targets here around each preset's
+ * render and detaches them before its own frame pass, which reaches the
+ * canvas through `bindOutput` like any renderer. Pinned by
+ * `__tests__/output-target.test.ts`.
  */
 export function setOutputTarget(
   gl: WebGL2RenderingContext,

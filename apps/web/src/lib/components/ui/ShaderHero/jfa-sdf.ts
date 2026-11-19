@@ -126,7 +126,16 @@ export function destroyJFACache(gl: WebGL2RenderingContext): void {
   if (seedProg && gl.isProgram(seedProg)) gl.deleteProgram(seedProg);
   if (stepProg && gl.isProgram(stepProg)) gl.deleteProgram(stepProg);
   if (distProg && gl.isProgram(distProg)) gl.deleteProgram(distProg);
+  resetJFACache();
+}
 
+/**
+ * Forget the cached JFA programs WITHOUT deleting them: their context was
+ * lost, so every handle is dead, and the next `generateSDF` compiles afresh
+ * on the restored one (Codex-1yd58.4). `destroyJFACache` is for a live
+ * context.
+ */
+export function resetJFACache(): void {
   seedProg = null;
   stepProg = null;
   distProg = null;

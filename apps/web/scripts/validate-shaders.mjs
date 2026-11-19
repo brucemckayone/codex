@@ -18,6 +18,8 @@
  *
  *   node apps/web/scripts/validate-shaders.mjs            # all shaders
  *   node apps/web/scripts/validate-shaders.mjs flow ink  # only these
+ *   node apps/web/scripts/validate-shaders.mjs compositor # only the
+ *                                     # compositor's passes (Codex-1yd58.4)
  *
  * Exit code 0 means every shader compiled. Non-zero prints the offending
  * shader, the glslang diagnostic, and the source line it points at.
@@ -292,6 +294,12 @@ async function main() {
   const filter = process.argv.slice(2);
   const esbuild = await loadEsbuild();
 
+  // `compositor` alone checks only the compositor's passes.
+  if (filter.length > 0 && filter.every((f) => f === 'compositor')) {
+    await checkCompositor(esbuild);
+    return;
+  }
+
   let files = readdirSync(SHADER_DIR)
     .filter((f) => f.endsWith('.frag.ts') || f.endsWith('.vert.ts'))
     .sort();
@@ -439,6 +447,124 @@ async function main() {
     console.log(
       `✓ ${covered} presets have every declared uniform wired${note}`
     );
+  }
+
+  if (filter.length === 0 || filter.includes('compositor')) {
+    await checkCompositor(esbuild);
+  }
+}
+
+const REGISTRY = path.resolve(
+  HERE,
+  '../src/lib/components/ui/ShaderHero/compositor/effects/registry.ts'
+);
+/** WP-3 ships 9 effects; fewer means the registry moved or emptied. */
+const MIN_EFFECTS = 9;
+
+/** Every uniform a GLSL source declares (comments stripped first). */
+function declaredUniforms(source) {
+  return [
+    ...stripComments(source).matchAll(
+      /^\s*uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?\w+\s+(\w+)/gm
+    ),
+  ].map((m) => m[1]);
+}
+
+/**
+ * The compositor's passes (Codex-1yd58.4): each effect in the registry,
+ * assembled exactly as the compositor assembles it at runtime
+ * (`assembleEffect`), must compile, and must declare only uniforms the
+ * compositor sets.
+ *
+ * The compositor sets every name in `UNIFORMS` (TypeScript makes its value
+ * record complete, and each sampler has a fixed unit), and a pass's
+ * declarations are generated from its effect's `uniforms` list. So the two
+ * ways a pass could read a uniform nobody sets, and get a silent zero, are:
+ * its body declares one itself, or its list names one outside the table
+ * (past the type check, through a cast). Both fail here.
+ */
+async function checkCompositor(esbuild) {
+  const work = mkdtempSync(path.join(tmpdir(), 'glsl-compositor-'));
+  try {
+    const bundled = path.join(work, 'registry.mjs');
+    let mod;
+    try {
+      await esbuild.build({
+        entryPoints: [REGISTRY],
+        outfile: bundled,
+        bundle: true,
+        format: 'esm',
+        platform: 'neutral',
+        logLevel: 'silent',
+      });
+      mod = await import(`file://${bundled}`);
+    } catch (err) {
+      fail(
+        `\n✖ compositor registry\n  could not bundle/import: ${err.message}`
+      );
+      return;
+    }
+    const { EFFECTS, assembleEffect, SETTABLE_UNIFORMS } = mod;
+    if (
+      !Array.isArray(EFFECTS) ||
+      typeof assembleEffect !== 'function' ||
+      !Array.isArray(SETTABLE_UNIFORMS)
+    ) {
+      fail(
+        '\n✖ compositor registry\n  exports no EFFECTS / assembleEffect / SETTABLE_UNIFORMS'
+      );
+      return;
+    }
+    if (EFFECTS.length < MIN_EFFECTS) {
+      fail(
+        `\n✖ compositor registry\n  only ${EFFECTS.length} effect(s), expected at least ${MIN_EFFECTS}: it moved or emptied`
+      );
+      return;
+    }
+    const settable = new Set(SETTABLE_UNIFORMS);
+    const failures = [];
+    for (const effect of EFFECTS) {
+      const name = `compositor:${effect.axis}:${effect.id}`;
+      const source = assembleEffect(effect);
+      const scratch = path.join(work, `${effect.id}.frag`);
+      writeFileSync(scratch, source, 'utf8');
+      try {
+        execFileSync('glslangValidator', ['-S', 'frag', scratch], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (err) {
+        const diagnostic = `${err.stdout ?? ''}${err.stderr ?? ''}`.trim();
+        failures.push(name);
+        fail(`\n✖ ${name}\n${diagnostic}`);
+        const line = firstErrorLine(diagnostic);
+        if (line) fail(context(source, line));
+      }
+      const own = declaredUniforms(effect.glsl);
+      if (own.length > 0) {
+        failures.push(name);
+        fail(
+          `\n✖ ${name}: its glsl declares uniform(s) of its own: ${own.join(', ')}` +
+            "\n  List them in the effect's `uniforms`; the declarations are generated from it."
+        );
+      }
+      const unset = [
+        ...new Set([...declaredUniforms(source), ...effect.uniforms]),
+      ].filter((u) => !settable.has(u));
+      if (unset.length > 0) {
+        failures.push(name);
+        fail(
+          `\n✖ ${name}: reads uniform(s) the compositor never sets: ${unset.join(', ')}` +
+            '\n  Add them to UNIFORMS (compositor/effects/uniforms.ts) and set them in the compositor.'
+        );
+      }
+    }
+    if (failures.length === 0) {
+      console.log(
+        `✓ ${EFFECTS.length} compositor passes compiled, every uniform set`
+      );
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
 }
 

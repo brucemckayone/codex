@@ -198,6 +198,14 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-flow-field-speed',
   // Logo SDF
   'shader-logo-url',
+  // The brand shader STACK (Codex-1yd58.4): a second preset, how it blends,
+  // the layers over it and the frame it is seen through. Read by
+  // ShaderHero/compositor/stack-config.ts, not shader-config.ts.
+  'shader-second',
+  'shader-blend',
+  'shader-blend-amount',
+  'shader-layers',
+  'shader-frame',
 ]);
 
 /**

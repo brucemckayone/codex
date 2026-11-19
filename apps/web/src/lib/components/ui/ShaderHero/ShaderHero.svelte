@@ -15,14 +15,52 @@
   - Live-preview: brand editor changes take effect immediately
   - `data-live` on its root once a renderer has drawn a frame the canvas shows
     (moving or still); the org layout's `tone` one also reports to `shaderLive`
+  - `data-drawn` once the canvas shows any frame: a shader's, or the
+    Showreel's plain ground, which is drawn but not live (no brand shader
+    paints under the words)
+  - the brand shader STACK (Codex-1yd58.4): a second preset, a blend, layers
+    and a frame, drawn through the compositor (`compositor/`). A bare stack,
+    the base alone, takes today's path: no compositor, no framebuffer, the
+    canvas at today's size.
+  - the Showreel's film (`showreelFeed`, the org layout's hero only), drawn
+    through the compositor too, on a plain ground of the brand's background
+    when the brand has no shader
+  - a lost WebGL context is restored: everything is rebuilt and it goes live
+    again once it draws
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
-  import { destroyJFACache } from './jfa-sdf';
-  import { getShaderConfig, type ShaderPresetId, shaderIsDark } from './shader-config';
+  import { createFrameBudget, PHONE_MAX_WIDTH } from './compositor/budget';
+  import type { Compositor } from './compositor/compositor';
+  import { showreelFeed } from './compositor/showreel-feed';
+  import {
+    BARE_STACK,
+    getStackConfig,
+    needsCompositor,
+    type StackConfig,
+    stackKey,
+  } from './compositor/stack-config';
+  import { destroyJFACache, resetJFACache } from './jfa-sdf';
+  import {
+    getShaderConfig,
+    type LivePresetId,
+    type ShaderConfig,
+    type ShaderPresetId,
+    shaderIsDark,
+  } from './shader-config';
   import { loadRenderer } from './load-renderer';
-  import { reportContextLost, reportRendererFailure, reportRetryFailure } from './renderer-failure';
+  import { setOutputTarget } from './output-target';
+  import {
+    type RendererFailure,
+    reportCompositorFailure,
+    reportContextLost,
+    reportContextRestored,
+    reportRendererFailure,
+    reportRetryFailure,
+    reportSecondFailure,
+    reportStackBudget,
+  } from './renderer-failure';
   import { destroyRenderer } from './start-renderer';
   import { withProgramLabel } from './webgl-utils';
   import type { ShaderRenderer, MouseState } from './renderer-types';
@@ -93,6 +131,12 @@
   // preset switch, because the old frame stays on screen until the new
   // renderer draws, and it is cleared when nothing would show.
   let live = $state(false);
+  // `data-drawn` (Codex-1yd58.4): the canvas shows a frame, a shader's or the
+  // Showreel's plain ground (its film with no brand shader under it). The
+  // Showreel keys on this one. A plain ground is drawn but NOT live: no
+  // brand shader paints under the words, so their ink stays the page's
+  // (white shader ink on a light brand would vanish).
+  let drawn = $state(false);
 
   onMount(() => {
     if (!canvasEl || !browser) return;
@@ -118,6 +162,7 @@
       );
       return () => liveWriter?.release();
     }
+    const glContext: WebGL2RenderingContext = gl;
 
     // ── State ──────────────────────────────────────────────────
     let renderer: ShaderRenderer | null = null;
@@ -137,6 +182,24 @@
     let pointerListenersAttached = false;
 
     const mouse: MouseState = { x: 0.5, y: 0.5, active: false, burstStrength: 0 };
+
+    // The stack (Codex-1yd58.4): see "Stack" below.
+    let compositor: Compositor | null = null;
+    /** Bumped per compositor load and detach: a load overtaken is discarded. */
+    let compositorToken = 0;
+    let compositorLoading = false;
+    /** It would not load or draw: the base alone, for the session. */
+    let compositorBroken = false;
+    let secondRenderer: ShaderRenderer | null = null;
+    /** The second preset loaded or loading, else null. */
+    let secondPreset: LivePresetId | null = null;
+    let secondConfig: ShaderConfig | null = null;
+    /** Bumped per second-preset load: a load overtaken is discarded. */
+    let secondToken = 0;
+    const secondsFailed = new Set<LivePresetId>();
+    /** The phone budget dropped the second preset, for the session. */
+    let secondDropped = false;
+    const budget = createFrameBudget();
 
     // ── RAF scheduling ─────────────────────────────────────────
     // Guarded re-prime: the loop re-schedules itself only from the render
@@ -203,23 +266,46 @@
     // requires touching load-renderer.ts.
 
     // ── Canvas sizing ──────────────────────────────────────────
+    // Two sizes (plan §5.2). The SCENE is what the presets render at:
+    // today's canvas size, DPR 1 on a phone. The canvas itself is the scene,
+    // except while a compositor is attached: then its frame pass draws at the
+    // display DPR (<= 2) and only that pass pays for it.
+    let sceneW = 0;
+    let sceneH = 0;
+    let cssWidth = 0;
+    /** The canvas's client rect at the last resize (the compositor's stage). */
+    let canvasBox = { left: 0, bottom: 0, width: 0, height: 0 };
+
     function resize(force = false) {
       if (!canvasEl || !containerEl) return;
       // Mid-switch (no renderer yet, the last preset's frame still live), a
       // size change would clear the canvas to black with nothing to redraw
       // it. It keeps its size until the new renderer applies it before init
       // (`resize(true)` in ensureRenderer).
-      if (!force && !renderer && live) return;
+      // (With no preset at all, a live canvas is the Showreel's plain ground,
+      // which resizes like any frame.)
+      if (!force && !renderer && currentPreset !== 'none' && drawn) return;
       const rect = containerEl.getBoundingClientRect();
+      cssWidth = rect.width;
+      canvasBox = { left: rect.left, bottom: rect.bottom, width: rect.width, height: rect.height };
       // Cap DPR at 1 on mobile for performance (9x fewer fragments vs DPR 3)
-      const isMobile = rect.width < 768;
-      const dpr = isMobile ? 1 : Math.min(window.devicePixelRatio, 2);
+      const isMobile = rect.width < PHONE_MAX_WIDTH;
+      const sceneDpr = isMobile ? 1 : Math.min(window.devicePixelRatio, 2);
+      const dpr = compositor ? Math.min(window.devicePixelRatio, 2) : sceneDpr;
+      const nextSceneW = Math.round(rect.width * sceneDpr);
+      const nextSceneH = Math.round(rect.height * sceneDpr);
+      if (nextSceneW !== sceneW || nextSceneH !== sceneH) {
+        sceneW = nextSceneW;
+        sceneH = nextSceneH;
+        renderer?.resize(glContext, sceneW, sceneH);
+        const [secondW, secondH] = secondSize();
+        secondRenderer?.resize(glContext, secondW, secondH);
+      }
       const w = Math.round(rect.width * dpr);
       const h = Math.round(rect.height * dpr);
       if (canvasEl.width !== w || canvasEl.height !== h) {
         canvasEl.width = w;
         canvasEl.height = h;
-        renderer?.resize(gl!, w, h);
         clearTone();
         // Resizing clears the canvas.
         redrawFrozen();
@@ -235,6 +321,16 @@
     let cachedConfig = getShaderConfig(undefined, presetOverride);
     let cachedConfigKey = JSON.stringify(cachedConfig);
 
+    /** The brand's stack over `base`. An override names the whole picture
+     *  (the platform's own shader on the auth pane): no stack. */
+    function readStack(base: ShaderPresetId, el?: Element | null): StackConfig {
+      return presetOverride === undefined ? getStackConfig(el, base) : BARE_STACK;
+    }
+    // Read with the config, so a stack draws from the first frame. Kept by
+    // identity while its key holds: the compositor plans once per stack.
+    let cachedStack = readStack(cachedConfig.preset);
+    let cachedStackKey = stackKey(cachedStack);
+
     function pollConfig(fresh: boolean) {
       // Poll every 30 frames (~0.5s at 60fps) to avoid getComputedStyle overhead
       configPollCounter++;
@@ -242,9 +338,16 @@
         configPollCounter = 0;
         cachedConfig = getShaderConfig(undefined, presetOverride);
         const key = JSON.stringify(cachedConfig);
-        // New colours or settings draw a different picture under each cell.
-        if (key !== cachedConfigKey) clearTone();
+        const stack = readStack(cachedConfig.preset);
+        const nextStackKey = stackKey(stack);
+        // New colours, settings or stack draw a different picture under each cell.
+        if (key !== cachedConfigKey || nextStackKey !== cachedStackKey) clearTone();
         cachedConfigKey = key;
+        if (nextStackKey !== cachedStackKey) {
+          cachedStack = stack;
+          cachedStackKey = nextStackKey;
+        }
+        if (secondPreset) secondConfig = getShaderConfig(undefined, secondPreset);
       }
       return cachedConfig;
     }
@@ -324,7 +427,7 @@
       if (gl?.isContextLost()) return;
       const width = containerEl.getBoundingClientRect().width;
       const dark = drawsDark();
-      stillDrawnKey = `${cachedConfigKey}|${dark}`;
+      stillDrawnKey = `${cachedConfigKey}|${cachedStackKey}|${dark}`;
       captureStill(canvasEl, {
         theme: dark ? 'dark' : 'light',
         blur: width > 0 ? blurRadius() / width : 0,
@@ -351,8 +454,10 @@
       ? new MutationObserver(() => {
           clearTimeout(stillSettle);
           stillSettle = window.setTimeout(() => {
-            const key = JSON.stringify(getShaderConfig(orgLayoutEl, presetOverride));
-            if (`${key}|${drawsDark()}` === stillDrawnKey) return;
+            const config = getShaderConfig(orgLayoutEl, presetOverride);
+            // The stack too: a stack-only edit draws another picture.
+            const stack = stackKey(readStack(config.preset, orgLayoutEl));
+            if (`${JSON.stringify(config)}|${stack}|${drawsDark()}` === stillDrawnKey) return;
             clearStill();
             if (shaderStill.wanted) redrawFrozen();
           }, STILL_SETTLE_MS);
@@ -402,26 +507,52 @@
         redrawFrozen();
       });
 
+    // The Showreel's film, its frame and the org's name (WP-5) reach the
+    // window's shader through `showreelFeed`. A film attaches a compositor
+    // (`syncStack`), even with no preset; a frozen hero draws again to show
+    // what changed.
+    if (tone)
+      showreelFeed.onChange((changed) => {
+        if (compositor) {
+          if (changed === 'media') compositor.setMedia(showreelFeed.media);
+          else if (changed === 'stage') compositor.setStage(showreelFeed.stage);
+          else compositor.setNameMask(showreelFeed.mask);
+        }
+        if (changed === 'media') scheduleFrame();
+        redrawFrozen();
+      });
+
     // ── Live (Codex-1yd58.3) ───────────────────────────────────
     // The canvas is shown only once a renderer has drawn into it, so the fade
     // in starts from a real frame, and `data-live`, which the hero's ink keys
     // on, flips in the same task as the fade it is timed to. (The canvas used
     // to be shown at init, one frame before anything was drawn, and stayed
     // shown with nothing on it while a hidden tab drew no frames.)
-    /** A renderer has drawn the frame the canvas now shows. Every frame calls
-     *  this, so it returns early once live. (No frame renders on a lost
-     *  context: `frame()` stops first.) */
-    function shown() {
-      if (live) return;
-      live = true;
+    /** What the layout's gate was last told (`shaderLive`). */
+    let reported: 'live' | 'none' | 'failed' | null = null;
+    function report(state: 'live' | 'none' | 'failed') {
+      if (state === reported) return;
+      reported = state;
+      liveWriter?.report(state);
+    }
+    /** A frame is drawn and the canvas shows it: a brand shader's ('live'),
+     *  or the Showreel's plain ground, under no shader ('none') or one that
+     *  would not start ('failed'). Every frame calls this, so it returns
+     *  early once settled. (No frame renders on a lost context: `frame()`
+     *  stops first.) */
+    function shown(state: 'live' | 'none' | 'failed') {
+      if (drawn && reported === state) return;
+      drawn = true;
+      live = state === 'live';
       if (canvasEl) canvasEl.style.opacity = '1';
-      liveWriter?.report('live');
+      report(state);
     }
     /** Nothing is drawn: no preset, or a shader that cannot draw. */
     function hidden(state: 'none' | 'failed') {
+      drawn = false;
       live = false;
       if (canvasEl) canvasEl.style.opacity = '0';
-      liveWriter?.report(state);
+      report(state);
     }
 
     // ── Renderer failure ───────────────────────────────────────
@@ -433,7 +564,6 @@
     // the preset it reads is another one, which then loads. A LOAD failure (offline, a replaced chunk) is also retried ONCE,
     // when the browser comes back online or the tab is shown again: the org
     // layout's hero is mounted once per SPA session, so nothing else would.
-    const glContext: WebGL2RenderingContext = gl;
     let failedPreset: ShaderPresetId | null = null;
     // Bumped per load, so a load overtaken by a newer preset is discarded.
     let loadToken = 0;
@@ -506,7 +636,11 @@
       currentPreset = 'none';
       failedPreset = preset;
       failedTokens = presetTokens();
-      hidden('failed');
+      // With a film to play, the plain ground takes over (`frame()`), and
+      // says 'failed' as it draws; its loop goes on.
+      if (hasMedia()) scheduleFrame();
+      else hidden('failed');
+      dropStack();
       if (retrying === preset) {
         // The one retry failed too: said once, and not tried again.
         retrying = null;
@@ -550,8 +684,10 @@
       clearStill();
 
       if (preset === 'none') {
-        // Hide canvas so CSS gradient fallback shows through.
-        hidden('none');
+        // Hide canvas so CSS gradient fallback shows through, unless the
+        // Showreel's film plays on a plain ground (`frame()`).
+        if (secondPreset || secondRenderer) void setSecond(null);
+        if (!hasMedia()) hidden('none');
         // Keep the poll loop alive so a brand-editor activation (user sets a
         // shader preset via CSS var) is detected — frame() polls every ~30
         // frames and calls ensureRenderer on preset mismatch. Without this,
@@ -580,7 +716,8 @@
       let ok = false;
       let initThrown: unknown;
       const building = newRenderer;
-      const box = { width: canvasEl.width, height: canvasEl.height };
+      // The scene's size: the canvas's own unless a compositor is attached.
+      const box = { width: sceneW, height: sceneH };
       try {
         // Its programs' compile/link events name who built them.
         ok = withProgramLabel(`shader_hero:${preset}`, () =>
@@ -609,60 +746,329 @@
       return true;
     }
 
+    // ── Stack (Codex-1yd58.4, plan §5.8) ───────────────────────
+    // A stack that is more than the base, or a Showreel film (with or
+    // without a base: `needsCompositor`), attaches a compositor (its own
+    // chunk, loaded on first use) and the canvas rises to the display DPR;
+    // without either it detaches, and the hero draws exactly as it always has.
+    // The second preset is a slot of its own beside the base: a failure, or
+    // the phone budget, drops it for the session and the base keeps drawing.
+
+    /** The second preset's size: half the scene's on a phone. */
+    function secondSize(): [number, number] {
+      if (cssWidth >= PHONE_MAX_WIDTH) return [sceneW, sceneH];
+      return [Math.max(1, Math.round(sceneW / 2)), Math.max(1, Math.round(sceneH / 2))];
+    }
+
+    /** The Showreel has handed this hero a film (only the window's, `tone`). */
+    function hasMedia(): boolean {
+      return tone && showreelFeed.media !== null;
+    }
+
+    /**
+     * The stack this frame draws. With no base drawing (no preset, or one that
+     * failed, which `cachedStack` was parsed against), the Showreel's plain
+     * ground carries no second and no layers: a brand shader blended into it
+     * would paint under the words with the hero saying none paints. Cached by
+     * identity: the compositor plans once per stack.
+     */
+    let groundStack: StackConfig = BARE_STACK;
+    let groundFrom: StackConfig | null = null;
+    function stackNow(): StackConfig {
+      if (renderer || currentPreset !== 'none') return cachedStack;
+      if (groundFrom !== cachedStack) {
+        groundFrom = cachedStack;
+        groundStack = { ...cachedStack, second: null, layers: [] };
+      }
+      return groundStack;
+    }
+
+    /** Bring the second slot and the compositor in line with the stack. */
+    function syncStack() {
+      const base = stackNow();
+      const want = base.second;
+      // With no compositor to blend it (broken for the session), a second
+      // would load and never draw.
+      const second =
+        want !== null && !compositorBroken && !secondDropped && !secondsFailed.has(want)
+          ? want
+          : null;
+      if (second !== secondPreset) void setSecond(second);
+      const stack = second === want ? base : { ...base, second };
+      if (!needsCompositor(stack, currentPreset, hasMedia())) {
+        if (compositor || compositorLoading) detachCompositor();
+      } else if (!compositor && !compositorLoading && !compositorBroken) {
+        void attachCompositor();
+      }
+    }
+
+    /** The base failed: nothing to stack on. Its loop stops, unless a film
+     *  plays on a plain ground, which keeps the compositor. */
+    function dropStack() {
+      if (secondPreset || secondRenderer) void setSecond(null);
+      if (!hasMedia()) detachCompositor();
+    }
+
+    async function attachCompositor() {
+      const token = ++compositorToken;
+      compositorLoading = true;
+      let made: Compositor | null = null;
+      try {
+        const { createCompositor } = await import('./compositor/compositor');
+        if (token === compositorToken) made = createCompositor(glContext);
+      } catch (thrown) {
+        // Its chunk would not load (offline, a replaced deploy).
+        if (token === compositorToken) {
+          compositorBroken = true;
+          reportCompositorFailure('load', thrown);
+        }
+      }
+      // Detached, or torn down, while it loaded: the later call owns it.
+      if (token !== compositorToken) return;
+      compositorLoading = false;
+      if (!made) return;
+      compositor = made;
+      if (tone) {
+        made.setMedia(showreelFeed.media);
+        made.setStage(showreelFeed.stage);
+        made.setNameMask(showreelFeed.mask);
+      }
+      // The canvas rises to the display DPR; the presets keep the scene's.
+      resize(true);
+      // A frozen hero drew its frame bare: it draws it again, stacked.
+      redrawFrozen();
+    }
+
+    function detachCompositor() {
+      compositorToken++;
+      compositorLoading = false;
+      if (!compositor) return;
+      compositor.destroy();
+      compositor = null;
+      // Back to today's canvas, the scene's own size.
+      resize(true);
+      redrawFrozen();
+    }
+
+    async function setSecond(preset: LivePresetId | null) {
+      const token = ++secondToken;
+      if (secondRenderer) destroyRenderer(secondRenderer, glContext, 'shader_hero');
+      secondRenderer = null;
+      secondPreset = preset;
+      secondConfig = null;
+      if (!preset) return;
+      let loaded: ShaderRenderer | null = null;
+      let thrown: unknown;
+      try {
+        loaded = await loadRenderer(preset);
+      } catch (error) {
+        thrown = error;
+      }
+      // Overtaken by another second, or none, while it loaded.
+      if (token !== secondToken) return;
+      if (!loaded) {
+        secondFailed(preset, 'load', thrown);
+        return;
+      }
+      const building = loaded;
+      const [w, h] = secondSize();
+      let ok = false;
+      try {
+        ok = withProgramLabel(`shader_hero:second:${preset}`, () =>
+          building.init(glContext, w, h)
+        );
+      } catch (error) {
+        thrown = error;
+      }
+      if (!ok) {
+        destroyRenderer(building, glContext, 'shader_hero');
+        secondFailed(preset, 'init', thrown);
+        return;
+      }
+      secondRenderer = building;
+      secondConfig = getShaderConfig(undefined, preset);
+      // Judge the budget on frames that draw both presets.
+      budget.reset();
+      redrawFrozen();
+    }
+
+    /** The base never stopped: the next frame's `syncStack` goes on without it. */
+    function secondFailed(preset: LivePresetId, reason: RendererFailure, thrown: unknown) {
+      secondPreset = null;
+      // A lost context fails every init: the restore loads it again.
+      if (glContext.isContextLost()) return;
+      secondsFailed.add(preset);
+      reportSecondFailure(preset, reason, glContext, thrown);
+    }
+
+    /** The second preset threw in its render: dropped, and logged. */
+    function secondThrew(thrown: unknown) {
+      const preset = secondPreset;
+      if (!secondRenderer || !preset) return;
+      destroyRenderer(secondRenderer, glContext, 'shader_hero');
+      secondRenderer = null;
+      secondFailed(preset, 'render', thrown);
+    }
+
+    /** What a drawn frame tells the layout: a brand shader, or a plain ground
+     *  under none (or under one that would not start). */
+    function paints(): 'live' | 'none' | 'failed' {
+      if (renderer) return 'live';
+      return failedPreset ? 'failed' : 'none';
+    }
+
+    /** Draw the frame: through the compositor when one is attached (with no
+     *  base preset, the film on a plain ground). False: nothing was drawn. */
+    function draw(time: number, config: ShaderConfig): boolean {
+      if (!canvasEl) return false;
+      if (compositor) {
+        let composited = false;
+        let thrown: unknown;
+        try {
+          composited = compositor.render({
+            base: renderer,
+            baseConfig: config,
+            second: secondRenderer,
+            secondConfig,
+            stack: stackNow(),
+            time,
+            mouse,
+            scene: [sceneW, sceneH],
+            secondSize: secondSize(),
+            output: [canvasEl.width, canvasEl.height],
+            phone: cssWidth < PHONE_MAX_WIDTH,
+            reducedMotion: isReducedMotion,
+            canvasBox,
+            scrollY: window.scrollY,
+            onSecondFailed: secondThrew,
+          });
+        } catch (error) {
+          // A preset threw inside it: the loop must not die with it.
+          thrown = error;
+        }
+        if (composited) return true;
+        // Lost mid-frame: the loss handler's, and the restore rebuilds it.
+        if (glContext.isContextLost()) return false;
+        if (thrown !== undefined) reportCompositorFailure('render', thrown);
+        // It could not draw (logged): the base alone from now on.
+        compositorBroken = true;
+        detachCompositor();
+      }
+      if (!renderer) return false;
+      renderer.render(glContext, time, mouse, config, canvasEl.width, canvasEl.height);
+      return true;
+    }
+
     // ── Render loop ────────────────────────────────────────────
     // RAF hygiene (docs/04-motion.md §6): the loop re-primes ONLY at the end
     // of the render branch. Short-circuit returns (no renderer, hidden tab,
     // reduced-motion after static frame) release the loop; `scheduleFrame()`
     // resumes it from state-change handlers (visibility/motion/ensureRenderer).
+
+    /**
+     * A frozen shader draws seldom (a resize, a sample, the studio), so the
+     * frame it is about to draw reads the brand afresh: the poll's last read
+     * may be minutes and a brand edit old. With nothing to draw with it draws
+     * nothing, and its loop keeps to the poll that spots a new preset.
+     */
+    function aboutToDrawFrozen(): boolean {
+      return isFrozen && !hasRenderedStaticFrame && (renderer !== null || compositor !== null);
+    }
+
+    /**
+     * Whether the brand's preset is the one to draw on. False: the loop stops
+     * this frame.
+     *
+     * A preset that failed stays stopped until it changes (`retryObserver`):
+     * whatever woke this frame (a resize, the tab coming back) is no reason to
+     * fail it again. With a film, it draws the plain ground instead (owner,
+     * 2026-11-19); without one, a plain ground it drew (for a film since
+     * ended) goes too.
+     *
+     * Otherwise a new preset is switched to (async — may take a frame).
+     * ensureRenderer calls scheduleFrame() on success and on 'none', so the
+     * poll loop keeps running and later brand-editor activations are
+     * detected; a failure stops the loop instead (`rendererFailed`).
+     */
+    function onBrandPreset(config: ShaderConfig): boolean {
+      if (config.preset === failedPreset) {
+        if (hasMedia()) return true;
+        if (compositor || compositorLoading) detachCompositor();
+        if (drawn) hidden('failed');
+        return false;
+      }
+      if (config.preset === currentPreset) return true;
+      ensureRenderer(config.preset);
+      return false;
+    }
+
+    /**
+     * Bring the stack in line, and say whether there is anything to draw: a
+     * base preset, or, with no preset at all, the Showreel's film on a plain
+     * ground of the brand's background, through a compositor (owner,
+     * 2026-11-19). A renderer still loading is not a plain ground: its old
+     * frame stays up. A plain ground that can no longer draw (its film ended,
+     * or the compositor broke) hides, as no preset does.
+     */
+    function readyToDraw(): boolean {
+      if (renderer) {
+        syncStack();
+        return true;
+      }
+      if (currentPreset !== 'none') return false;
+      syncStack();
+      if (compositor) return true;
+      if (drawn && !compositorLoading) hidden(failedPreset ? 'failed' : 'none');
+      return false;
+    }
+
+    /** Reduced motion or `still`: one static frame, then the loop is
+     *  released (setFrozen re-primes when both are off again). */
+    function drawFrozen(config: ShaderConfig) {
+      if (hasRenderedStaticFrame) return;
+      hasRenderedStaticFrame = true;
+      frozenElapsed ??= (performance.now() - startTime) / 1000;
+      if (!draw(frozenElapsed, config)) return;
+      shown(paints());
+      sampleTone();
+      copyStill();
+    }
+
+    /** The phone budget: two presets that cannot hold the frame rate lose
+     *  the second (the next frame's `syncStack` drops it). */
+    function judgeBudget(intervalMs: number) {
+      if (!secondPreset || !secondRenderer || !compositor) return;
+      if (cssWidth >= PHONE_MAX_WIDTH) return;
+      const breach = budget.push(intervalMs);
+      if (!breach) return;
+      secondDropped = true;
+      reportStackBudget(secondPreset, breach);
+    }
+
     function frame() {
       animFrameId = 0; // this callback has fired — clear handle before deciding to re-prime
 
       // A lost context draws nothing, so the loop stops here: every wake (a
-      // resize, the tab coming back, a frozen redraw) returns at once.
-      // Restoring the context and its loop is WP-3's (Codex-1yd58.4).
-      if (gl?.isContextLost()) return;
+      // resize, the tab coming back, a frozen redraw) returns at once, until
+      // `onContextRestored` starts it again.
+      if (glContext.isContextLost()) return;
 
-      // A frozen shader draws seldom (a resize, a sample, the studio), so the
-      // frame it is about to draw reads the brand afresh: the poll's last
-      // read may be minutes and a brand edit old. With no renderer it draws
-      // nothing, and its loop keeps to the poll that spots a new preset.
-      const config = pollConfig(isFrozen && !hasRenderedStaticFrame && renderer !== null);
-
-      // A preset that failed stays stopped until it changes (`retryObserver`):
-      // whatever woke this frame (a resize, the tab coming back) is no reason
-      // to fail it again.
-      if (config.preset === failedPreset) return;
-
-      // Switch preset if needed (async — may take a frame).
-      // ensureRenderer calls scheduleFrame() on success and on 'none', so the
-      // poll loop keeps running and later brand-editor activations are
-      // detected; a failure stops the loop instead (`rendererFailed`).
-      if (config.preset !== currentPreset) {
-        ensureRenderer(config.preset);
-        return;
-      }
+      const config = pollConfig(aboutToDrawFrozen());
+      if (!onBrandPreset(config)) return;
 
       // Tab hidden — release loop; onVisibilityChange re-primes on return.
       if (!isVisible) return;
 
-      // No renderer but preset matches (i.e. currentPreset === 'none'): keep
-      // polling so a future brand-editor preset change is detected. Hidden
-      // tab early-return above still cuts this path on inactive tabs.
-      if (!renderer) {
+      // Nothing to draw (no preset, or one still loading): keep polling so a
+      // future brand-editor preset change is detected. Hidden tab
+      // early-return above still cuts this path on inactive tabs.
+      if (!readyToDraw()) {
         animFrameId = requestAnimationFrame(frame);
         return;
       }
 
-      // Reduced motion or `still`: render one static frame, then release the
-      // loop. setFrozen re-primes when both are off again.
       if (isFrozen) {
-        if (hasRenderedStaticFrame) return;
-        hasRenderedStaticFrame = true;
-        frozenElapsed ??= (performance.now() - startTime) / 1000;
-        renderer.render(gl!, frozenElapsed, mouse, config, canvasEl!.width, canvasEl!.height);
-        shown();
-        sampleTone();
-        copyStill();
+        drawFrozen(config);
         return; // no re-prime — static frame is final
       }
 
@@ -670,7 +1076,8 @@
       // dt is clamped to 0.1s to avoid a tiny residual cliff if the RAF
       // loop happens to fire before `scheduleFrame` resets lastFrameTime.
       const now = performance.now();
-      const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+      const intervalMs = now - lastFrameTime;
+      const dt = Math.min(intervalMs / 1000, 0.1);
       lastFrameTime = now;
 
       if (mouse.burstStrength > 0) {
@@ -679,9 +1086,12 @@
       }
 
       const elapsed = (now - startTime) / 1000;
-      renderer.render(gl!, elapsed, mouse, config, canvasEl!.width, canvasEl!.height);
-      shown();
-      sampleTone();
+      if (draw(elapsed, config)) {
+        shown(paints());
+        sampleTone();
+      }
+
+      judgeBudget(intervalMs);
 
       // Re-prime ONLY from the render branch — hidden tabs and reduced-motion
       // users no longer pay for 1Hz / 60Hz wake-ups that render nothing.
@@ -762,17 +1172,50 @@
     const resizeObserver = new ResizeObserver(() => resize());
     if (containerEl) resizeObserver.observe(containerEl);
 
+    // ── Context loss and restore (Codex-1yd58.4) ────────────────
     // A lost context (a GPU reset, or the browser reclaiming its oldest)
     // shows nothing, so the page editor's bands go back to the glow and the
-    // shader is no longer live. Nothing restores the context yet (WP-3,
-    // Codex-1yd58.4): the loop stops at the top of `frame()`, and the loss is
-    // logged, the only record of why the hero fell back.
-    function onContextLost() {
+    // shader is no longer live. The loss is logged, and its default is
+    // prevented: without that the browser never restores the context.
+    function onContextLost(event: Event) {
+      event.preventDefault();
+      cancelAnimationFrame(animFrameId);
+      animFrameId = 0;
+      // A load in flight would start on a dead context: the restore starts
+      // afresh instead.
+      loadToken++;
+      secondToken++;
       clearStill();
       hidden('failed');
       reportContextLost(currentPreset);
     }
+    // Restored, the context is new and empty: every object made on the lost
+    // one is dead. They are forgotten, never deleted (a dead handle is not
+    // the new context's to delete): the renderers, the compositor's targets
+    // and passes, the output target, the JFA program cache. Then it starts
+    // the brand's preset as on mount, and goes live once it draws.
+    function onContextRestored() {
+      renderer = null;
+      currentPreset = 'none';
+      secondRenderer = null;
+      secondPreset = null;
+      secondConfig = null;
+      compositor?.forget();
+      setOutputTarget(glContext, null);
+      resetJFACache();
+      // Whatever failed on the lost context may work on the new one.
+      compositorBroken = false;
+      secondsFailed.clear();
+      failedPreset = null;
+      retryObserver?.disconnect();
+      hasRenderedStaticFrame = false;
+      const { preset } = pollConfig(true);
+      reportContextRestored(preset);
+      // Re-primes the loop once it is built (`scheduleFrame`).
+      void ensureRenderer(preset);
+    }
     canvasEl?.addEventListener('webglcontextlost', onContextLost);
+    canvasEl?.addEventListener('webglcontextrestored', onContextRestored);
 
     // ── Start ──────────────────────────────────────────────────
     // ensureRenderer() calls scheduleFrame() on success — no need to re-prime here.
@@ -786,16 +1229,22 @@
         shaderTone.onHold(null);
         shaderTone.onDemand(null);
         shaderTone.clear();
+        showreelFeed.onChange(null);
         shaderStill.onDemand(null);
         shaderStill.clear();
       }
       cancelAnimationFrame(animFrameId);
-      if (renderer) renderer.destroy(gl!);
+      if (renderer) renderer.destroy(glContext);
+      // A load still in flight finds itself overtaken and installs nothing.
+      secondToken++;
+      compositorToken++;
+      if (secondRenderer) destroyRenderer(secondRenderer, glContext, 'shader_hero');
+      compositor?.destroy();
       // JFA program cache is module-scoped and stays warm across preset
       // switches (pulse recompilation would otherwise cost ~3ms per activation).
       // On actual subsystem unmount it would orphan without this — the GL
       // context lives on the canvas element, module lives across SPA nav.
-      if (gl) destroyJFACache(gl);
+      destroyJFACache(glContext);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       motionQuery.removeEventListener('change', onMotionChange);
       resizeObserver.disconnect();
@@ -805,6 +1254,7 @@
       loadToken++;
       watchBrand(false);
       canvasEl?.removeEventListener('webglcontextlost', onContextLost);
+      canvasEl?.removeEventListener('webglcontextrestored', onContextRestored);
       detachPointerListeners();
       liveWriter?.release();
     };
@@ -816,6 +1266,7 @@
   class="shader-hero {className ?? ''}"
   aria-hidden="true"
   data-live={live ? '' : undefined}
+  data-drawn={drawn ? '' : undefined}
 >
   {#if browser && hasWebGL}
     <canvas
