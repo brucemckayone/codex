@@ -31,6 +31,8 @@
   @prop {string | null} [poster] - Shown until the first frame, and again at the end
   @prop {Array<{src, srclang, label, default?}>} [captions] - Optional caption
     tracks (ref 05 §"Media elements" §2); the CC button appears only with some
+  @prop {number} [aspect] - The film's width / height (default 16 / 9), so a
+    phone-shot 9:16 film fills the theatre instead of playing between bars
   @prop {() => void} onclose - Called when the modal is dismissed
 -->
 <script lang="ts">
@@ -64,10 +66,12 @@
      * pipeline makes none yet (Codex-jw0pn).
      */
     captions?: CaptionTrack[];
+    /** The film's width / height. Unset, the CSS keeps 16:9. */
+    aspect?: number;
     onclose: () => void;
   }
 
-  const { open, src, renew, title, poster = null, captions, onclose }: Props =
+  const { open, src, renew, title, poster = null, captions, aspect, onclose }: Props =
     $props();
 
   const name = $derived(title || m.player_intro_video());
@@ -235,7 +239,9 @@
     use:portal
     onclick={handleOverlayClick}
   >
-    <div class="intro-modal__inner">
+    <!-- the shape on the inner, not the dialog: the dialog's style carries only
+         the page's brand, re-stated for a modal portalled out of the page -->
+    <div class="intro-modal__inner" style:--film-aspect={aspect}>
       <div class="intro-modal__top">
         {#if title}<p class="intro-modal__name">{title}</p>{/if}
         <button
@@ -289,18 +295,19 @@
     to { opacity: 1; }
   }
 
-  /* As large as the window allows at 16:9, leaving room for the top row. */
+  /* As large as the window allows in the film's shape, leaving room for the
+     top row. */
   .intro-modal__inner {
     display: grid;
     gap: var(--space-3);
-    inline-size: min(100%, var(--container-xl), (100vh - var(--space-32)) * 16 / 9);
+    inline-size: min(100%, var(--container-xl), (100vh - var(--space-32)) * var(--film-aspect, 16 / 9));
     animation: modal-scale-in var(--duration-slow) var(--ease-out) both;
     animation-delay: calc(var(--duration-fast) * 0.5);
   }
 
   @supports (height: 100dvh) {
     .intro-modal__inner {
-      inline-size: min(100%, var(--container-xl), (100dvh - var(--space-32)) * 16 / 9);
+      inline-size: min(100%, var(--container-xl), (100dvh - var(--space-32)) * var(--film-aspect, 16 / 9));
     }
   }
 
@@ -354,7 +361,7 @@
   /* No mask on the frame: a feathered edge would fade the controls away. */
   .intro-modal__player {
     position: relative;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: var(--film-aspect, 16 / 9);
     overflow: hidden;
     border-radius: var(--radius-lg);
     background: var(--color-neutral-900);

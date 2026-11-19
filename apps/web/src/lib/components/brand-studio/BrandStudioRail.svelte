@@ -44,6 +44,7 @@
   import BrandEditorHeaderLayout from '$lib/components/brand-editor/levels/BrandEditorHeaderLayout.svelte';
   import BrandEditorHeroEffects from '$lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte';
   import BrandEditorHeroFilm from '$lib/components/brand-editor/levels/BrandEditorHeroFilm.svelte';
+  import BrandEditorHeroDesigner from '$lib/components/brand-editor/levels/BrandEditorHeroDesigner.svelte';
   import BrandEditorHeroText from '$lib/components/brand-editor/levels/BrandEditorHeroText.svelte';
   import BrandEditorLogo from '$lib/components/brand-editor/levels/BrandEditorLogo.svelte';
   import BrandEditorShape from '$lib/components/brand-editor/levels/BrandEditorShape.svelte';
@@ -322,6 +323,8 @@
     <BrandEditorHeroEffects />
   {:else if id === 'hero-film'}
     <BrandEditorHeroFilm onsaved={onpreviewreload} />
+  {:else if id === 'hero-designer'}
+    <BrandEditorHeroDesigner />
   {/if}
 {/snippet}
 

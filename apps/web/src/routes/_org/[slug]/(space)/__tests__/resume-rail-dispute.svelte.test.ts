@@ -23,7 +23,9 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 
-vi.mock('$app/environment', () => ({ browser: true }));
+// `dev` too: the page's hero imports the loop player, whose HLS wrapper
+// logs through $lib/observability, which reads it at module load.
+vi.mock('$app/environment', () => ({ browser: true, dev: true }));
 vi.mock('$app/navigation', () => ({ replaceState: vi.fn() }));
 vi.mock('$app/state', () => ({
   page: {

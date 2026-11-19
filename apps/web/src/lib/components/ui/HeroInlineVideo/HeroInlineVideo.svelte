@@ -32,6 +32,7 @@
   @prop poster - Shown until the first frame
   @prop originX - Where the chip is, as % of the hero's width
   @prop originY - Where the chip is, as % of the hero's height
+  @prop aspect - The film's width / height (default 16 / 9)
   @prop onclose - Called when the film is dismissed or ends
 -->
 <script lang="ts">
@@ -52,6 +53,9 @@
     poster?: string | null;
     originX?: number;
     originY?: number;
+    /** The film's own width / height. A phone-shot film is 9:16: drawn in a
+     *  16:9 box it plays between two black bars. Unset, the CSS keeps 16:9. */
+    aspect?: number;
     onclose: () => void;
   }
 
@@ -62,6 +66,7 @@
     poster = null,
     originX = 50,
     originY = 50,
+    aspect,
     onclose,
   }: Props = $props();
 
@@ -124,6 +129,7 @@
   class="hero-film"
   style:--film-x="{originX}%"
   style:--film-y="{originY}%"
+  style:--film-aspect={aspect}
 >
   <div class="hero-film__frame" role="region" aria-label={title}>
     {#if Player}
@@ -179,11 +185,12 @@
     }
   }
 
-  /* 16:9, as large as the hero allows, in a halo that melts into it. */
+  /* The film's own shape (16:9 unless told), as large as the hero allows, in a
+     halo that melts into it. */
   .hero-film__frame {
     position: relative;
-    inline-size: min(100cqw, var(--container-xl), 100cqh * 16 / 9);
-    aspect-ratio: 16 / 9;
+    inline-size: min(100cqw, var(--container-xl), 100cqh * var(--film-aspect, 16 / 9));
+    aspect-ratio: var(--film-aspect, 16 / 9);
     overflow: hidden;
     border-radius: var(--radius-lg);
     background: var(--color-neutral-900);

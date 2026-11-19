@@ -159,7 +159,7 @@ describe('BrandStudioRail', () => {
     expect(labels.some((l) => l.includes('Hero'))).toBe(true);
   });
 
-  test('browse lists all eight control rows in order', () => {
+  test('browse lists all nine control rows in order', () => {
     component = mountRail();
     expect(visibleRowLabels()).toEqual([
       'Colours',
@@ -171,6 +171,8 @@ describe('BrandStudioRail', () => {
       'Effects',
       // The intro film (Codex-376dl).
       'Film',
+      // The purpose-first hero and its compositions (Codex-1yd58).
+      'Composition',
     ]);
   });
 

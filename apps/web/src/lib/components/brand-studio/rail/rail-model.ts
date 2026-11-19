@@ -27,7 +27,8 @@ export type RailControlId =
   | 'hero-text'
   | 'hero-layout'
   | 'hero-effects'
-  | 'hero-film';
+  | 'hero-film'
+  | 'hero-designer';
 
 export interface RailControlMeta {
   readonly id: RailControlId;
@@ -185,6 +186,23 @@ export const RAIL_GROUPS: readonly RailGroupMeta[] = [
         label: 'Film',
         icon: '▶',
         keywords: ['film', 'intro', 'video', 'trailer'],
+        affects: ['Hero section'],
+      },
+      {
+        // The purpose-first hero ($lib/org-hero/hero-config.ts): what the
+        // hero is for, and the composition that serves it. Last in the group,
+        // with words no other control uses, so it never takes a search match
+        // from Layout, Effects or Film.
+        id: 'hero-designer',
+        label: 'Composition',
+        icon: '✦',
+        keywords: [
+          'purpose',
+          'composition',
+          'spotlight',
+          'showcase',
+          'showreel',
+        ],
         affects: ['Hero section'],
       },
     ],

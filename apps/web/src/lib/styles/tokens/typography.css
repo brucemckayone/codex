@@ -40,6 +40,9 @@
 
   /* Line Heights */
   --leading-none: 1;
+  /* a display headline set over two lines: room for the ascenders and
+     descenders of a book serif, without the gap of --leading-tight */
+  --leading-display: 1.08;
   --leading-snug: 1.3;
   --leading-tight: 1.25;
   --leading-normal: 1.5;

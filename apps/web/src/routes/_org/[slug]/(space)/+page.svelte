@@ -8,7 +8,10 @@
 <script lang="ts">
   import { subscriptionStatusGrantsAccess } from '@codex/constants';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
-  import { cappedSizes, getThumbnailUrl } from '$lib/utils/image';
+  import { cappedSizes, getThumbnailDimensions, getThumbnailUrl } from '$lib/utils/image';
+  import { logger } from '$lib/observability';
+  import { queryErrorMessage } from '$lib/remote/query-result';
+  import { toast } from '$lib/components/ui/Toast';
   import { formatDuration } from '$lib/utils/format';
   import { flushSync, onMount, tick } from 'svelte';
   import { browser } from '$app/environment';
@@ -64,6 +67,22 @@
   import { inAPlanOnSale } from '$lib/utils/plan-label';
   import { shouldShowSubscribeCta } from '$lib/utils/subscribe-cta';
   import { StructuredData } from '$lib/components/seo';
+  import OrgHero from '$lib/components/org-hero/OrgHero.svelte';
+  import { orgShader } from '$lib/page-builder/org-grounds';
+  import { brandEditor } from '$lib/brand-editor';
+  import {
+    contentKindForHero,
+    heroContentType,
+    heroFacts,
+    heroFreeNote,
+    parseHeroOverrides,
+    pieceMeta,
+    portalMeta,
+    readHeroSettings,
+    resolveHero,
+    type HeroFacts,
+    type OrgHeroPiece,
+  } from '$lib/org-hero/hero-config';
   import type { ContentItem } from './feed-types';
   import type { PageData } from './$types';
 
@@ -148,6 +167,36 @@
     Boolean(introFilm && (introFilm.previewUrl || introFilm.fullFilm))
   );
   const filmDuration = $derived(formatDuration(introFilm?.durationSeconds));
+  // The film's own shape, from its poster (cut from the film's first frame, at
+  // the film's size). A poster address that records its size gives it at once,
+  // in the server HTML too; an older one is read once it loads, keyed to that
+  // poster so a replaced film never keeps the old shape. Unknown (no poster,
+  // or one that never loads), the player's CSS keeps 16:9. A phone-shot film
+  // is 9:16.
+  const posterSize = $derived(getThumbnailDimensions(introFilm?.posterUrl));
+  let probed = $state.raw<{ poster: string; aspect: number } | null>(null);
+  const filmAspect = $derived(
+    posterSize
+      ? posterSize.width / posterSize.height
+      : probed && probed.poster === introFilm?.posterUrl
+        ? probed.aspect
+        : undefined
+  );
+  $effect(() => {
+    const poster = introFilm?.posterUrl;
+    if (!poster || getThumbnailDimensions(poster)) return;
+    let gone = false;
+    const probe = new Image();
+    probe.onload = () => {
+      if (!gone && probe.naturalWidth > 0 && probe.naturalHeight > 0) {
+        probed = { poster, aspect: probe.naturalWidth / probe.naturalHeight };
+      }
+    };
+    probe.src = getThumbnailUrl(poster, 'sm');
+    return () => {
+      gone = true;
+    };
+  });
   /** What the open film plays; `null` while it is closed. */
   let filmSrc = $state.raw<PressSource | null>(null);
   let filmRenew = $state.raw<AskForFull | undefined>(undefined);
@@ -417,9 +466,13 @@
   const isFollowing = $derived(followingStore.get(data.org.id));
   let followLoading = $state(false);
 
+  function signInToFollow() {
+    window.location.href = `/login?redirect=${encodeURIComponent(page.url.pathname)}`;
+  }
+
   async function handleFollowToggle() {
     if (!user) {
-      window.location.href = `/login?redirect=${encodeURIComponent(page.url.pathname)}`;
+      signInToFollow();
       return;
     }
     followLoading = true;
@@ -431,8 +484,29 @@
         await followOrganization(data.org.id);
         followingStore.set(data.org.id, true);
       }
-    } catch {
-      // Silently fail — store retains previous state
+    } catch (error) {
+      // The store keeps the previous state, so the button already says the
+      // truth. Every refusal is counted with its status, so the causes stay
+      // apart; a session that ran out then signs in again, and anything else
+      // is told it didn't take.
+      const status =
+        typeof error === 'object' &&
+        error !== null &&
+        'status' in error &&
+        typeof error.status === 'number'
+          ? error.status
+          : undefined;
+      logger.warn('org_landing.follow_toggle_failed', {
+        organizationId: data.org.id,
+        action: isFollowing ? 'unfollow' : 'follow',
+        status,
+        error: queryErrorMessage(error)?.slice(0, 200),
+      });
+      if (status === 401) {
+        signInToFollow();
+        return;
+      }
+      toast.error(m.org_follow_failed());
     } finally {
       followLoading = false;
     }
@@ -442,7 +516,7 @@
 
   /** Where the chip is in the hero, so the film grows out of it. */
   function setFilmOrigin(chip: HTMLElement) {
-    const hero = chip.closest('.hero');
+    const hero = chip.closest('[data-hero-root]');
     if (!hero) return;
     const heroRect = hero.getBoundingClientRect();
     const chipRect = chip.getBoundingClientRect();
@@ -476,6 +550,139 @@
     if (hours < 1) return `${Math.round(totalSeconds / 60)}m`;
     return hours % 1 === 0 ? `${Math.round(hours)}` : `${hours.toFixed(1)}`;
   }
+
+  // ── The purpose-first hero (see $lib/org-hero/hero-config.ts) ──
+  // On exactly when the org has a `hero-opt-purpose`; otherwise the classic
+  // hero renders unchanged. In the brand editor's preview frame the editor's
+  // pending overrides drive it live, the same way they drive the hide flags in
+  // the org layout. Everything below reads data this page already loads.
+  const heroOverrides = $derived(
+    brandEditor.isOpen
+      ? (brandEditor.pending?.tokenOverrides ?? {})
+      : parseHeroOverrides(data.org?.brandFineTune?.tokenOverrides)
+  );
+  const heroSettings = $derived(readHeroSettings(heroOverrides));
+
+  const HERO_PIECE_WORDS = {
+    article: { featured: m.org_hero_kicker_featured_essay, latest: m.org_hero_kicker_new_essay, cta: m.org_hero_cta_read },
+    audio: { featured: m.org_hero_kicker_featured_recording, latest: m.org_hero_kicker_new_recording, cta: m.org_hero_cta_listen },
+    video: { featured: m.org_hero_kicker_featured_film, latest: m.org_hero_kicker_new_film, cta: m.org_hero_cta_watch },
+  } as const;
+
+  function heroContentPiece(c: ContentItem, mode: 'featured' | 'latest'): OrgHeroPiece {
+    const kind = c.contentType === 'written' ? 'article' : c.contentType === 'audio' ? 'audio' : 'video';
+    const words = HERO_PIECE_WORDS[kind];
+    const seconds = c.mediaItem?.durationSeconds ?? 0;
+    const minutes = seconds > 0 ? Math.max(1, Math.round(seconds / 60)) : null;
+    return {
+      kind,
+      kicker: words[mode](),
+      title: c.title,
+      meta: pieceMeta(kind, minutes),
+      // a description can be stored rich text: the hero shows its words only
+      line: c.description ? extractPlainText(c.description) || null : null,
+      href: buildContentUrl(page.url, c),
+      imageUrl: getDisplayThumbnail(c) ?? null,
+      cta: words.cta(),
+    };
+  }
+
+  // A featured portal leads (the larger commitment), then featured content.
+  const heroFeatured = $derived.by((): OrgHeroPiece | null => {
+    const j = data.featuredJourneys?.[0];
+    if (j) {
+      return {
+        kind: 'portal',
+        kicker: m.org_hero_kicker_featured_portal(),
+        title: j.title,
+        meta: portalMeta(j.stageCount, j.practiceCount),
+        line: j.tagline,
+        href: buildJourneyUrl(page.url, { slug: j.slug, id: j.pageId }, { surface: 'sales' }),
+        imageUrl: j.coverImageUrl,
+        cta: m.org_hero_cta_portal(),
+      };
+    }
+    const c = data.allContent.find((item) => item.featured);
+    return c ? heroContentPiece(c, 'featured') : null;
+  });
+  const heroLatest = $derived(data.allContent[0] ? heroContentPiece(data.allContent[0], 'latest') : null);
+  const heroShelf = $derived.by((): OrgHeroPiece[] => {
+    const seen = new Set<string>();
+    const out: OrgHeroPiece[] = [];
+    const add = (piece: OrgHeroPiece | null) => {
+      if (!piece || seen.has(piece.href) || out.length >= 3) return;
+      seen.add(piece.href);
+      out.push(piece);
+    };
+    add(heroFeatured);
+    for (const c of data.allContent) {
+      if (out.length >= 3) break;
+      add(heroContentPiece(c, c.featured ? 'featured' : 'latest'));
+    }
+    return out;
+  });
+  const heroFactsList = $derived(
+    heroFacts({
+      // the rail's read stops at its cap, so a full list is not a count
+      portals: data.journeysAtCap ? 0 : data.journeys.length,
+      videos: stats?.content?.video ?? 0,
+      audio: stats?.content?.audio ?? 0,
+      written: stats?.content?.written ?? 0,
+      totalSeconds: stats?.totalDurationSeconds ?? 0,
+    })
+  );
+  // The org layout's own rule for whether a shader runs behind the page.
+  const heroHasShader = $derived(orgShader(data.org, brandEditor.isOpen ? brandEditor.pending : null));
+  // The classic hero's Layout switches (hero-hide-*) hold for this hero too: a
+  // hidden logo, line or stats line is one the org doesn't show.
+  const heroHides = (part: string) => heroOverrides[`hero-hide-${part}`] === '1';
+  const heroFactFlags = $derived<HeroFacts>({
+    hasLogo: !!logoUrl && !heroHides('logo'),
+    hasShader: heroHasShader,
+    hasFilm: filmPlayable,
+    hasFilmLoop: filmPlayable && !!introFilm?.previewUrl,
+    hasFeatured: !!heroFeatured,
+    hasLatest: !!heroLatest,
+    hasFeaturedImage: !!heroFeatured?.imageUrl,
+    hasLatestImage: !!heroLatest?.imageUrl,
+    hasFacts: heroFactsList.length > 0 && !heroHides('stats'),
+    hasDescription: !!orgDescription && !heroHides('description'),
+    // Join needs a plan on sale: known in the server HTML for an org whose
+    // hero can offer it, else (the editor's live preview) from the tiers read
+    canJoin: subscriptionsEnabled && (data.heroHasPlans ?? hasActiveTiers),
+    hideTitle: heroHides('title'),
+  });
+  const heroOptions = $derived(
+    heroSettings.purpose ? resolveHero(heroSettings.purpose, heroSettings.options, heroFactFlags) : null
+  );
+  const heroSpot = $derived(
+    heroOptions?.spot === 'featured' ? heroFeatured : heroOptions?.spot === 'latest' ? heroLatest : null
+  );
+  // The button's words follow the spotlighted piece, so the hero tells one story.
+  const heroContentKind = $derived(
+    contentKindForHero(heroOptions?.spot === 'film' ? { kind: 'video' } : heroSpot, stats?.content)
+  );
+  const heroConsumeNote = $derived(
+    data.allContent.some((c) => deriveContentAccessKind(c) === 'free')
+      ? heroFreeNote(heroContentKind)
+      : null
+  );
+  const heroFilm = $derived(
+    introFilm && filmPlayable
+      ? {
+          duration: filmDuration || null,
+          posterUrl: introFilm.posterUrl ? getThumbnailUrl(introFilm.posterUrl, 'sm') : null,
+          stillUrl: introFilm.posterUrl ? getThumbnailUrl(introFilm.posterUrl, 'lg') : null,
+          previewUrl: introFilm.previewUrl ?? null,
+        }
+      : null
+  );
+  // The consume button opens the explore page on the kind it names when the
+  // org has some of it; with no counts, or none of that kind, on everything.
+  const heroConsumeHref = $derived.by(() => {
+    const type = heroContentType(heroContentKind);
+    return (stats?.content?.[type] ?? 0) > 0 ? `/explore?type=${type}` : '/explore';
+  });
 </script>
 
 <svelte:head>
@@ -504,25 +711,54 @@
 
 <StructuredData data={orgSchema} />
 
+<!-- Desktop: the intro film, grown out of its chip, in whichever hero shows -->
+{#snippet inlineFilm()}
+  {#if introFilm && filmSrc !== null && isDesktop}
+    <HeroInlineVideo
+      src={filmSrc}
+      renew={filmRenew}
+      title={introFilm.title}
+      poster={introFilm.posterUrl}
+      originX={videoOriginX}
+      originY={videoOriginY}
+      aspect={filmAspect}
+      onclose={closeFilm}
+    />
+  {/if}
+{/snippet}
+
 <div class="org-landing">
+  {#if heroOptions}
+    <!-- The purpose-first hero: only for an org with a hero purpose. -->
+    <OrgHero
+      options={heroOptions}
+      name={orgName}
+      description={orgDescription}
+      logoUrl={heroFactFlags.hasLogo ? logoUrl : ''}
+      contentKind={heroContentKind}
+      spot={heroSpot}
+      shelf={heroShelf}
+      facts={heroFactsList}
+      hrefs={{ explore: '/explore', consume: heroConsumeHref, join: '/pricing', search: '/explore' }}
+      consumeNote={heroConsumeNote}
+      film={heroFilm}
+      filmOpen={filmInHero}
+      following={isFollowing}
+      followBusy={followLoading}
+      onfilm={pressFilm}
+      onfollow={handleFollowToggle}
+      filmLayer={inlineFilm}
+      bind:filmChip
+    />
+  {:else}
   <!-- Hero: full viewport, content anchored bottom-left, editorial -->
-  <section class="hero" class:hero--video-playing={filmInHero}>
+  <section class="hero" class:hero--video-playing={filmInHero} data-hero-root>
     <!-- Title lives OUTSIDE hero__content so it has no z-index isolation
          and mix-blend-mode: difference can reach the shader canvas -->
     <h1 class="hero__title">{orgName}</h1>
 
     <!-- Desktop: the intro film, grown out of its chip -->
-    {#if introFilm && filmSrc !== null && isDesktop}
-      <HeroInlineVideo
-        src={filmSrc}
-        renew={filmRenew}
-        title={introFilm.title}
-        poster={introFilm.posterUrl}
-        originX={videoOriginX}
-        originY={videoOriginY}
-        onclose={closeFilm}
-      />
-    {/if}
+    {@render inlineFilm()}
 
     <div class="hero__content" inert={filmInHero}>
       <!-- Logo badge -->
@@ -641,6 +877,7 @@
       {/if}
     </div>
   </section>
+  {/if}
 
   <div class="content-area">
   <!-- Editor's picks — contained multi-feature carousel over the creator's
@@ -989,6 +1226,7 @@
     renew={filmRenew}
     title={introFilm.title}
     poster={introFilm.posterUrl}
+    aspect={filmAspect}
     onclose={closeFilm}
   />
 {/if}
@@ -1006,6 +1244,9 @@
 
 <style>
   .org-landing {
+    /* the band where the feed rises over the hero's foot; the hero's veil fades
+       out across the same band, so the two meet without an edge */
+    --landing-overlap: 250px;
     display: flex;
     flex-direction: column;
     min-height: 100%;
@@ -1387,8 +1628,8 @@
     position: relative;
     z-index: 1;
     /* Pull up into hero for seamless overlap */
-    margin-top: -250px;
-    padding-top: 250px;
+    margin-top: calc(var(--landing-overlap) * -1);
+    padding-top: var(--landing-overlap);
     /* Blur the fixed shader behind for frosted-glass effect */
     backdrop-filter: blur(var(--blur-2xl));
     -webkit-backdrop-filter: blur(var(--blur-2xl));
@@ -1403,8 +1644,8 @@
       color-mix(in srgb, var(--color-background) 88%, transparent) 1200px
     );
     /* Mask fades entire element in over the overlap zone */
-    mask-image: linear-gradient(to bottom, transparent 0%, black 250px);
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 250px);
+    mask-image: linear-gradient(to bottom, transparent 0%, black var(--landing-overlap));
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black var(--landing-overlap));
   }
 
   /*

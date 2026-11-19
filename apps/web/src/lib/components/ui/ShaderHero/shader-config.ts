@@ -903,7 +903,18 @@ export function getShaderConfig(
       const parsed = raw ? parseCssColor(raw) : null;
       if (parsed) return parsed;
     }
-    return (style ? readColorVar(style, `brand-${slot}`) : null) ?? fallback;
+    if (!style) return fallback;
+    if (slot === 'bg') {
+      // The org's background is injected as `--brand-bg` (+ `--brand-bg-dark`),
+      // NOT `--color-brand-bg`, which no stylesheet defines. Reading that name
+      // sent every org's shader to the navy platform default whatever its own
+      // background was. `readBrandVar` applies the page's own rule (the -dark
+      // value in dark mode, else the light one), so the shader's ground is the
+      // ground the page paints around it. No background set: the default, as before.
+      const raw = readBrandVar(style, 'bg', isDark);
+      return (raw ? parseCssColor(raw) : null) ?? fallback;
+    }
+    return readColorVar(style, `brand-${slot}`) ?? fallback;
   };
 
   const primary = paletteSlot('primary', [0.486, 0.227, 0.929]);

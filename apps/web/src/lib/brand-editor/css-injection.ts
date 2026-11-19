@@ -6,6 +6,7 @@ import {
   tokenOverrideText,
 } from '@codex/validation';
 import { browser } from '$app/environment';
+import { HERO_OPT_PREFIX } from '$lib/org-hero/hero-config';
 import { brandFontProperty, withFallback } from './font-fallbacks';
 import {
   GROUND_VAR_PROPS,
@@ -427,11 +428,17 @@ const RETIRED_OVERRIDE_KEYS = new Set(['text-on-brand']);
 /**
  * Whether an override key becomes a CSS custom property: not an
  * attribute-only key (`hero-hide-*` drive data-* attributes, set by the org
- * layout) and not a retired one. A reserved key (`shader-logo-url`) never
- * gets this far: the mappers refuse it with the save's own rule.
+ * layout), not a hero setting (`hero-opt-*`, read by the landing page's hero,
+ * see `$lib/org-hero/hero-config.ts`) and not a retired one. A reserved key
+ * (`shader-logo-url`) never gets this far: the mappers refuse it with the
+ * save's own rule.
  */
 function emitsCssVar(key: string): boolean {
-  return !key.startsWith('hero-hide-') && !RETIRED_OVERRIDE_KEYS.has(key);
+  return (
+    !key.startsWith('hero-hide-') &&
+    !key.startsWith(HERO_OPT_PREFIX) &&
+    !RETIRED_OVERRIDE_KEYS.has(key)
+  );
 }
 
 /**

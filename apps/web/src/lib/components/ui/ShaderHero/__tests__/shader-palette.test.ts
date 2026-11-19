@@ -11,7 +11,8 @@ import { getShaderConfig } from '../shader-config';
  *
  *   1. `--brand-shader-color-{slot}` — only when `--brand-shader-use-custom-colors`
  *      is exactly `'1'`, and only when the value parses
- *   2. `--color-brand-{slot}` — the org's brand palette
+ *   2. `--color-brand-{slot}` — the org's brand palette (the background slot
+ *      reads `--brand-bg` / `--brand-bg-dark`, the names the page emits)
  *   3. a compiled-in platform default
  *
  * The tests below pin each rung, because the interesting failures are all
@@ -24,6 +25,7 @@ import { getShaderConfig } from '../shader-config';
 
 /** Platform defaults, mirrored from getShaderConfig's compiled-in fallbacks. */
 const PLATFORM_DEFAULT_PRIMARY = [0.486, 0.227, 0.929];
+const PLATFORM_DEFAULT_BG = [0.059, 0.09, 0.165];
 
 /** Assert an RGB triple matches expected channel values within 1/255. */
 function expectRgb(actual: number[], expected: number[]) {
@@ -60,7 +62,8 @@ describe('shader palette resolution', () => {
       '--color-brand-primary': '#ff0000',
       '--color-brand-secondary': '#00ff00',
       '--color-brand-accent': '#0000ff',
-      '--color-brand-bg': '#ffffff',
+      // the name css-injection really emits for the org background
+      '--brand-bg': '#ffffff',
     });
 
     const cfg = getShaderConfig(el, 'waves');
@@ -69,6 +72,32 @@ describe('shader palette resolution', () => {
     expectRgb(cfg.colors.secondary, [0, 1, 0]);
     expectRgb(cfg.colors.accent, [0, 0, 1]);
     expectRgb(cfg.colors.bg, [1, 1, 1]);
+  });
+
+  it('ignores --color-brand-bg, which no stylesheet defines', () => {
+    // REGRESSION GUARD. This fixture used to set `--color-brand-bg`, so the test
+    // passed while the real page (which emits `--brand-bg`) got the navy default.
+    const cfg = getShaderConfig(
+      mountLayout({ '--color-brand-bg': '#ffffff' }),
+      'waves'
+    );
+    expectRgb(cfg.colors.bg, PLATFORM_DEFAULT_BG);
+  });
+
+  it('paints the dark background in dark mode, as the page does', () => {
+    const el = mountLayout({
+      '--brand-shader-is-dark': '1',
+      '--brand-bg': '#ffffff',
+      '--brand-bg-dark': '#000000',
+    });
+    expectRgb(getShaderConfig(el, 'waves').colors.bg, [0, 0, 0]);
+  });
+
+  it('keeps the platform background when the org set none', () => {
+    expectRgb(
+      getShaderConfig(mountLayout({}), 'waves').colors.bg,
+      PLATFORM_DEFAULT_BG
+    );
   });
 
   it('falls back to platform defaults with no brand palette at all', () => {
