@@ -392,7 +392,6 @@ export interface AdminContentItem extends Content {
  * sent the `removed` email), and where its cover and caches live.
  */
 export interface TakenDownContent {
-  contentId: string;
   holders: number;
   organizationId: string | null;
   creatorId: string;

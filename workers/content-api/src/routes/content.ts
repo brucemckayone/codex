@@ -347,7 +347,7 @@ app.post(
             outcome === 'done'
               ? [
                   cleanupContentThumbnailOnDelete(
-                    ctx.services.imageProcessing,
+                    () => ctx.services.imageProcessing,
                     id,
                     ctx.user.id,
                     ctx.obs
@@ -759,23 +759,14 @@ app.delete(
     },
     input: { params: createIdParamsSchema() },
     handler: async (ctx): Promise<DeleteContentResponse['data']> => {
-      // Read org BEFORE delete so we can (a) bump its version and (b) fan
-      // per-user library invalidation while the row is still readable.
-      // Note: the per-user fanout query in `invalidateContentAccess` runs
-      // against the content-id — we want to resolve affected users using the
-      // pre-delete state (purchases, subscribers, members) which survives
-      // the soft-delete unchanged. It's safe to call after delete because
-      // we key by contentId and purchases/subscriptions/memberships don't
-      // soft-delete alongside content.
-      let organizationId: string | undefined;
+      // The org comes from the delete's own read, under the row's lock. The
+      // per-user fan-out keys by the content id, and the people it finds
+      // (holders, subscribers, team) survive the soft-delete unchanged.
       const contentId = ctx.input.params.id;
-      try {
-        const content = await ctx.services.content.get(contentId, ctx.user.id);
-        organizationId = content?.organizationId ?? undefined;
-      } catch {
-        // Pre-fetch for cache invalidation is non-critical
-      }
-      const result = await ctx.services.content.delete(contentId, ctx.user.id);
+      const { organizationId, result } = await ctx.services.content.delete(
+        contentId,
+        ctx.user.id
+      );
       // Codex-ko8ko: content soft-delete must not strand the thumbnail's R2
       // objects. Best-effort — records orphans for the hourly sweep on R2
       // failure and never throws; awaited so the request-scoped DB stays open
@@ -783,7 +774,7 @@ app.delete(
       // keeps its cover: its owners see it until it goes.
       if (result.outcome === 'deleted') {
         await cleanupContentThumbnailOnDelete(
-          ctx.services.imageProcessing,
+          () => ctx.services.imageProcessing,
           contentId,
           ctx.user.id,
           ctx.obs
@@ -796,7 +787,7 @@ app.delete(
         ctx.env,
         ctx.executionCtx,
         contentId,
-        organizationId ?? null,
+        organizationId,
         result.outcome === 'deleted' ? 'content_deleted' : 'content_leaving',
         ctx.obs
       );
@@ -824,19 +815,22 @@ app.post(
     input: { params: createIdParamsSchema() },
     handler: async (ctx): Promise<KeepContentResponse['data']> => {
       const contentId = ctx.input.params.id;
-      const result = await ctx.services.content.keep(contentId, ctx.user.id);
+      const { organizationId, result } = await ctx.services.content.keep(
+        contentId,
+        ctx.user.id
+      );
       if (result.kept) {
         bumpOrgContentVersion(
           ctx.env,
           ctx.executionCtx,
-          result.organizationId,
+          organizationId,
           ctx.obs
         );
         fanContentInvalidation(
           ctx.env,
           ctx.executionCtx,
           contentId,
-          result.organizationId,
+          organizationId,
           'content_kept',
           ctx.obs
         );

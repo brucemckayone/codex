@@ -38,6 +38,7 @@ export type {
 // The studio list's bulk actions, one result per piece (Codex-a6ofh.3.5)
 export type {
   ContentBulkAction,
+  ContentBulkDone,
   ContentBulkOutcome,
   ContentBulkResponse,
   ContentBulkResult,

@@ -7,9 +7,8 @@
  *  - a cleanup failure is swallowed + logged, NEVER propagated — the content
  *    soft-delete is the primary op and must not 500 because R2 hiccuped.
  *
- * These assert the extracted helper directly (mirrors public-cache.test.ts),
- * trusting the one-line route wiring in content.ts — the same approach the
- * existing cache-invalidation calls in that delete handler take.
+ * These assert the helper directly, trusting the one-line route wiring in
+ * content-api's and admin-api's delete handlers.
  */
 
 import type { Logger } from '@codex/observability';
@@ -18,6 +17,9 @@ import {
   cleanupContentThumbnailOnDelete,
   type ThumbnailCleaner,
 } from '../content-cleanup';
+
+/** The service getter a route passes (`() => ctx.services.imageProcessing`). */
+const serve = (cleaner: ThumbnailCleaner) => () => cleaner;
 
 function createObs(): Logger {
   return {
@@ -34,7 +36,7 @@ describe('cleanupContentThumbnailOnDelete', () => {
     const imageProcessing: ThumbnailCleaner = { deleteContentThumbnail };
 
     await cleanupContentThumbnailOnDelete(
-      imageProcessing,
+      serve(imageProcessing),
       'content-1',
       'user-1',
       createObs()
@@ -55,7 +57,7 @@ describe('cleanupContentThumbnailOnDelete', () => {
     // would surface a 500 on an otherwise-successful soft-delete.
     await expect(
       cleanupContentThumbnailOnDelete(
-        imageProcessing,
+        serve(imageProcessing),
         'content-1',
         'user-1',
         obs
@@ -77,7 +79,27 @@ describe('cleanupContentThumbnailOnDelete', () => {
     const imageProcessing: ThumbnailCleaner = { deleteContentThumbnail };
 
     await expect(
-      cleanupContentThumbnailOnDelete(imageProcessing, 'content-1', 'user-1')
+      cleanupContentThumbnailOnDelete(
+        serve(imageProcessing),
+        'content-1',
+        'user-1'
+      )
     ).resolves.toBeUndefined();
+  });
+
+  it('logs an image service that cannot be built, never throwing it (Codex-a6ofh.6)', async () => {
+    const obs = createObs();
+    const unbuildable = () => {
+      throw new Error('R2_PUBLIC_URL_BASE not configured');
+    };
+
+    await expect(
+      cleanupContentThumbnailOnDelete(unbuildable, 'content-1', 'user-1', obs)
+    ).resolves.toBeUndefined();
+
+    expect(obs.warn).toHaveBeenCalledWith(
+      'Thumbnail R2 cleanup failed on content delete',
+      expect.objectContaining({ error: 'R2_PUBLIC_URL_BASE not configured' })
+    );
   });
 });

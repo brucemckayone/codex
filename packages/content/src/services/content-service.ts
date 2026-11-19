@@ -68,6 +68,7 @@ import {
 } from '@codex/service-errors';
 import type {
   ContentBulkAction,
+  ContentBulkDone,
   ContentBulkResult,
   ContentWhereCounts,
   ContentWhereOrg,
@@ -123,6 +124,7 @@ import type {
   Content,
   ContentBulkReport,
   ContentCategoryRef,
+  ContentChange,
   ContentFilters,
   ContentWithRelations,
   DatabaseTransaction,
@@ -484,13 +486,10 @@ type StudioListOptions = { scope?: 'studio'; withCategories?: boolean };
 type BulkPieceOption = { bulk?: boolean };
 
 /**
- * What one bulk piece came to when it was neither refused nor failed (its
- * `ContentBulkResult` but the id), and the piece the route refreshes, if any.
+ * What one bulk piece came to when it was neither refused nor failed, and
+ * the piece the route refreshes, if any.
  */
-type BulkPieceDone = (
-  | { outcome: 'done' | 'scheduled' | 'unchanged' }
-  | { outcome: 'leaving'; leavesAt: string; holders: number }
-) & { touched?: BulkTouchedPiece };
+type BulkPieceDone = ContentBulkDone & { touched?: BulkTouchedPiece };
 
 /**
  * A bulk piece's wait on each lock it takes (a publish takes up to four: its
@@ -2549,14 +2548,19 @@ export class ContentService extends BaseService {
    *
    * @param id - Content ID
    * @param creatorId - Creator ID (for authorization)
+   * @returns what the delete did, and the org the piece is filed in (for the
+   *   route's cache refresh, read under the row's lock)
    * @throws {ContentNotFoundError} If content doesn't exist
    */
-  async delete(id: string, creatorId: string): Promise<DeleteContentResult> {
-    return (await this.deleteAndReport(id, creatorId)).result;
+  async delete(
+    id: string,
+    creatorId: string
+  ): Promise<ContentChange<DeleteContentResult>> {
+    return this.deleteAndReport(id, creatorId);
   }
 
   /**
-   * `delete`, with the org the piece was filed in. The holders are counted
+   * `delete`, and a bulk piece's lock wait. The holders are counted
    * here, under the row's lock, never taken from the list. A buyer still in
    * checkout is not counted: completing a purchase takes no lock this waits
    * on, so it can land after the count. That gap is the purchase path's to
@@ -2567,7 +2571,7 @@ export class ContentService extends BaseService {
     id: string,
     creatorId: string,
     { bulk = false }: BulkPieceOption = {}
-  ): Promise<{ organizationId: string | null; result: DeleteContentResult }> {
+  ): Promise<ContentChange<DeleteContentResult>> {
     try {
       return await this.db.transaction(async (tx) => {
         if (bulk) await tx.execute(BULK_LOCK_WAIT);
@@ -2609,9 +2613,13 @@ export class ContentService extends BaseService {
    * cancel of a schedule that isn't there does. Scoped to the creator's own
    * pieces.
    *
+   * @returns what Keep did, and the org the piece is filed in
    * @throws {ContentNotFoundError} Not the creator's, or already gone
    */
-  async keep(id: string, creatorId: string): Promise<KeepContentResult> {
+  async keep(
+    id: string,
+    creatorId: string
+  ): Promise<ContentChange<KeepContentResult>> {
     try {
       return await this.db.transaction(async (tx) => {
         const [existing] = await tx
@@ -2626,13 +2634,15 @@ export class ContentService extends BaseService {
           throw new ContentNotFoundError(id);
         }
         const { organizationId, leavesAt } = existing;
-        if (!leavesAt) return { kept: false, staying: 0, organizationId };
+        if (!leavesAt) {
+          return { organizationId, result: { kept: false, staying: 0 } };
+        }
         const staying = await keepLeaving(
           tx as DatabaseTransaction,
           id,
           leavesAt
         );
-        return { kept: true, staying, organizationId };
+        return { organizationId, result: { kept: true, staying } };
       });
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
@@ -2657,8 +2667,9 @@ export class ContentService extends BaseService {
     const now = new Date();
     const due = and(lte(content.leavesAt, now), isNull(content.deletedAt));
     try {
-      const completed = await this.db.transaction((tx) =>
-        tx
+      return await this.db.transaction((transaction) => {
+        const tx = transaction as DatabaseTransaction;
+        return tx
           .update(content)
           .set({ deletedAt: now, updatedAt: now })
           .where(
@@ -2676,13 +2687,12 @@ export class ContentService extends BaseService {
               due
             )
           )
-          .returning()
-      );
-      return completed.map(({ id, organizationId, creatorId }) => ({
-        id,
-        organizationId,
-        creatorId,
-      }));
+          .returning({
+            id: content.id,
+            organizationId: content.organizationId,
+            creatorId: content.creatorId,
+          });
+      });
     } catch (error) {
       this.handleError(error, 'completeLeaving');
     }

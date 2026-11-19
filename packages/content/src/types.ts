@@ -431,13 +431,20 @@ export type DeleteContentResponse = SingleItemResponse<DeleteContentResult>;
 
 /**
  * What Keep did (Codex-a6ofh.6): `kept` when the piece was leaving, and how
- * many people are to be told it stays. The org it is filed in, for the
- * route's cache refresh.
+ * many people are to be told it stays.
  */
 export interface KeepContentResult {
   kept: boolean;
   staying: number;
+}
+
+/**
+ * A change to one piece, and the org it is filed in, read under the row's
+ * lock: the route refreshes that org's caches and answers with `result`.
+ */
+export interface ContentChange<T> {
   organizationId: string | null;
+  result: T;
 }
 
 /** Response for POST /api/content/:id/keep */

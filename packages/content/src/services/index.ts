@@ -20,16 +20,14 @@ export {
   invalidateContentAccess,
   invalidateContentAccessMany,
   invalidateOrgMembership,
+  invalidateOrgPublicCounts,
   invalidatePlanSubscriberLibraries,
   orgsOf,
   type WaitUntilFn,
 } from './content-invalidation';
-// Publish gate (Codex-a6ofh.2.1): shared with @codex/admin's publish
-export {
-  deleteOrLeave,
-  type LeavingLog,
-  takedownPiece,
-} from './content-leaving';
+// The leaving notice's writes (Codex-a6ofh.6): shared with @codex/admin's
+// delete and takedown
+export { deleteOrLeave, takedownPiece } from './content-leaving';
 // Content Service
 export {
   CATALOGUE_CONTENT_COLUMNS,
@@ -50,4 +48,5 @@ export {
 } from './content-tier-access';
 // Media Item Service
 export { MediaItemService } from './media-service';
+// Publish gate (Codex-a6ofh.2.1): shared with @codex/admin's publish
 export { assertPublishable, goLiveColumns } from './publish-gate';

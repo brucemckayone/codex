@@ -33,9 +33,13 @@ export type ContentBulkOutcome =
   | 'refused'
   | 'failed';
 
+/** A piece's result when it was neither refused nor failed, but its id. */
+export type ContentBulkDone =
+  | { outcome: 'done' | 'scheduled' | 'unchanged' }
+  | { outcome: 'leaving'; leavesAt: string; holders: number };
+
 export type ContentBulkResult =
-  | { id: string; outcome: 'done' | 'scheduled' | 'unchanged' }
-  | { id: string; outcome: 'leaving'; leavesAt: string; holders: number }
+  | (ContentBulkDone & { id: string })
   | {
       id: string;
       outcome: 'refused' | 'failed';

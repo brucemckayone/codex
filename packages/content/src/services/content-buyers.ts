@@ -158,18 +158,6 @@ export async function holderCountsOf(
 }
 
 /**
- * One piece's holders ({@link holderCountsOf}), read inside the caller's
- * transaction, after its lock on the piece, so a delete is judged on the
- * server, never on a number the list showed.
- */
-export async function countHolders(
-  db: Database | DatabaseTransaction,
-  contentId: string
-): Promise<number> {
-  return (await holderCountsOf(db, [contentId])).get(contentId) ?? 0;
-}
-
-/**
  * Each piece's buyers, by id, in one grouped read over the page's ids (the
  * studio list's Sales column). A piece nobody bought has no key.
  */

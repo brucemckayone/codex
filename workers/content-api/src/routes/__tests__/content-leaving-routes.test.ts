@@ -26,7 +26,6 @@ const ORG_ID = '3c222222-2222-4222-8222-222222222999';
 const LEAVES_AT = new Date('2031-03-31T12:00:00.000Z');
 
 const contentSpies = {
-  get: vi.fn(),
   delete: vi.fn(),
   keep: vi.fn(),
   setCache: vi.fn(),
@@ -106,7 +105,6 @@ const coversCleared = () =>
 describe('the leaving notice routes', () => {
   beforeEach(() => {
     for (const spy of Object.values(contentSpies)) spy.mockReset();
-    contentSpies.get.mockResolvedValue({ id: PIECE, organizationId: ORG_ID });
     bumpOrgContentVersion.mockReset();
     fanContentInvalidation.mockReset();
     cleanupContentThumbnailOnDelete.mockClear();
@@ -115,9 +113,8 @@ describe('the leaving notice routes', () => {
   describe('DELETE /api/content/:id', () => {
     it('answers a held piece with its date and holders, and keeps its cover', async () => {
       contentSpies.delete.mockResolvedValue({
-        outcome: 'leaving',
-        leavesAt: LEAVES_AT,
-        holders: 2,
+        organizationId: ORG_ID,
+        result: { outcome: 'leaving', leavesAt: LEAVES_AT, holders: 2 },
       });
 
       const res = await call('DELETE', `/${PIECE}`);
@@ -138,9 +135,8 @@ describe('the leaving notice routes', () => {
 
     it('clears the cover of a piece deleted at once', async () => {
       contentSpies.delete.mockResolvedValue({
-        outcome: 'deleted',
-        leavesAt: null,
-        holders: 0,
+        organizationId: ORG_ID,
+        result: { outcome: 'deleted', leavesAt: null, holders: 0 },
       });
 
       const res = await call('DELETE', `/${PIECE}`);
@@ -156,8 +152,11 @@ describe('the leaving notice routes', () => {
 
   describe('POST /api/content/:id/keep', () => {
     it('keeps the creator’s piece and refreshes its org and its people', async () => {
-      const kept = { kept: true, staying: 3, organizationId: ORG_ID };
-      contentSpies.keep.mockResolvedValue(kept);
+      const kept = { kept: true, staying: 3 };
+      contentSpies.keep.mockResolvedValue({
+        organizationId: ORG_ID,
+        result: kept,
+      });
 
       const res = await call('POST', `/${PIECE}/keep`);
 
@@ -170,9 +169,8 @@ describe('the leaving notice routes', () => {
 
     it('refreshes nothing for a piece that was not leaving', async () => {
       contentSpies.keep.mockResolvedValue({
-        kept: false,
-        staying: 0,
         organizationId: ORG_ID,
+        result: { kept: false, staying: 0 },
       });
 
       const res = await call('POST', `/${PIECE}/keep`);

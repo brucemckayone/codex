@@ -25,6 +25,9 @@ export {
   invalidateOrgSlugCache,
   type MemberCacheCtx,
 } from './cache-fanout';
+// The cover cleanup a delete runs (Codex-ko8ko), shared by content-api and
+// admin-api (Codex-a6ofh.6)
+export { cleanupContentThumbnailOnDelete } from './content-cleanup';
 // Publish when ready (Codex-a6ofh.2.8): media-api tells content-api a file changed
 export {
   CONTENT_MEDIA_READY_ROUTE,

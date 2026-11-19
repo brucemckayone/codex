@@ -355,6 +355,63 @@ export async function invalidateContentAccessMany(
 // Per-tier invalidation (plan access, Codex-2hxff.91)
 // ============================================================================
 
+/** Arguments for {@link invalidateOrgPublicCounts}. */
+export interface InvalidateOrgPublicCountsArgs {
+  db: DatabaseClient;
+  cache: VersionedCache;
+  waitUntil: WaitUntilFn;
+  organizationId: string;
+  reason: ContentInvalidationReason;
+  logger?: InvalidationLogger;
+}
+
+/**
+ * The org's public counts, which a piece coming or going changes: its active
+ * topics (`CATEGORIES`) and the slug-keyed stats and creators list. Shared by
+ * a tier's change and an admin's delete or takedown (Codex-a6ofh.6), so the
+ * two refresh one set.
+ *
+ * The slug-keyed bumps need the slug: one primary-key read, AWAITED so it
+ * runs inside the request (review round 2). Handed to a plain `waitUntil`,
+ * it raced the request's DB cleanup (`pool.end()`), and a lost race left the
+ * stats and creators stale until their TTL. Only the KV bumps are fire and
+ * forget. A failed read is logged and never fails the write.
+ */
+export async function invalidateOrgPublicCounts(
+  args: InvalidateOrgPublicCountsArgs
+): Promise<void> {
+  const { db, cache, waitUntil, organizationId, reason, logger } = args;
+  bumpWithLogger(
+    cache,
+    waitUntil,
+    CacheType.CATEGORIES(organizationId),
+    { reason, organizationId, key: 'org:categories' },
+    logger
+  );
+  const logPublicBumpFailure = (error: unknown) => {
+    logger?.warn('content-invalidation: bump failed', {
+      reason,
+      organizationId,
+      key: 'org:public',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  };
+  const org = await db.query.organizations
+    .findFirst({
+      where: eq(organizations.id, organizationId),
+      columns: { slug: true },
+    })
+    .catch((error: unknown) => {
+      logPublicBumpFailure(error);
+      return undefined;
+    });
+  if (org?.slug) {
+    waitUntil(
+      invalidateOrgPublicCaches(cache, org.slug).catch(logPublicBumpFailure)
+    );
+  }
+}
+
 /** Arguments for {@link invalidatePlanSubscriberLibraries}. */
 export interface InvalidatePlanSubscriberLibrariesArgs {
   db: DatabaseClient;
@@ -400,44 +457,17 @@ export async function invalidatePlanSubscriberLibraries(
     logger
   );
   // Ticks decide which items are CLOSED, and the public counts leave closed
-  // items out (review L7): the active topics, and the slug-keyed stats and
-  // creators list. The editor's saves bump these already
+  // items out (review L7). The editor's saves bump these already
   // (`bumpOrgContentVersion`); a tick write elsewhere must too, or a topic
   // whose only film just closed keeps its chip until the TTL.
-  bumpWithLogger(
+  await invalidateOrgPublicCounts({
+    db,
     cache,
     waitUntil,
-    CacheType.CATEGORIES(organizationId),
-    { reason, organizationId, key: 'org:categories' },
-    logger
-  );
-  // The slug-keyed bumps need the slug: one primary-key read, AWAITED so it
-  // runs inside the request (review round 2). Handed to a plain `waitUntil`,
-  // it raced the request's DB cleanup (`pool.end()`), and a lost race left
-  // the stats and creators stale until their TTL. Only the KV bumps are fire
-  // and forget. A failed read is logged and never fails the write.
-  const logPublicBumpFailure = (error: unknown) => {
-    logger?.warn('content-invalidation: bump failed', {
-      reason,
-      organizationId,
-      key: 'org:public',
-      error: error instanceof Error ? error.message : String(error),
-    });
-  };
-  const org = await db.query.organizations
-    .findFirst({
-      where: eq(organizations.id, organizationId),
-      columns: { slug: true },
-    })
-    .catch((error: unknown) => {
-      logPublicBumpFailure(error);
-      return undefined;
-    });
-  if (org?.slug) {
-    waitUntil(
-      invalidateOrgPublicCaches(cache, org.slug).catch(logPublicBumpFailure)
-    );
-  }
+    organizationId,
+    reason,
+    logger,
+  });
 
   const ids = [...new Set(tierIds)];
   if (ids.length === 0) return;

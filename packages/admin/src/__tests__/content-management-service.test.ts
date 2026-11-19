@@ -1063,7 +1063,6 @@ describe('AdminContentManagementService', () => {
       const taken = await service.takedownContent(piece.id);
 
       expect(taken).toEqual({
-        contentId: piece.id,
         holders: 1,
         organizationId: orgId,
         creatorId,

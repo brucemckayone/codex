@@ -515,7 +515,7 @@ describe('ContentService: bulk actions', () => {
       const sold = await live();
       await bought(sold.id);
 
-      const result = await service.delete(sold.id, creatorId);
+      const { result } = await service.delete(sold.id, creatorId);
 
       expect(result.outcome).toBe('leaving');
       expect(result.holders).toBe(1);

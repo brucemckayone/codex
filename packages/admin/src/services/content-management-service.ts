@@ -20,6 +20,7 @@ import {
   deleteOrLeave,
   goLiveColumns,
   invalidateContentAccess,
+  invalidateOrgPublicCounts,
   takedownPiece,
 } from '@codex/content';
 import {
@@ -397,12 +398,12 @@ export class AdminContentManagementService extends BaseService {
         if (!existing) {
           throw new NotFoundError('Content not found', { contentId });
         }
-        const { holders } = await takedownPiece(
+        const holders = await takedownPiece(
           tx as DatabaseTransaction,
           contentId,
           this.obs
         );
-        return { contentId, holders, ...existing };
+        return { holders, ...existing };
       });
     } catch (error) {
       if (error instanceof NotFoundError) {
@@ -414,10 +415,10 @@ export class AdminContentManagementService extends BaseService {
 
   /**
    * What a delete or a takedown refreshes, run by the route in the
-   * background: the platform's and the org's lists, its topics and portal
-   * rails, and the library of everyone the piece reached (holders,
-   * subscribers, team; `invalidateContentAccess`). The org's slug-keyed
-   * stats wait for their TTL, as after an admin publish.
+   * background: the platform's and the org's lists and portal rails, its
+   * public counts (`invalidateOrgPublicCounts`: topics, stats, creators),
+   * and the library of everyone the piece reached (holders, subscribers,
+   * team; `invalidateContentAccess`).
    */
   async refreshAfterDelete(
     piece: { contentId: string; organizationId: string | null },
@@ -427,14 +428,21 @@ export class AdminContentManagementService extends BaseService {
     const { cache } = this;
     if (!cache) return;
     const { contentId, organizationId } = piece;
-    const orgKeys = organizationId
+    const org = organizationId
       ? [
-          CacheType.CATEGORIES(organizationId),
-          CacheType.COLLECTION_ORG_JOURNEYS(organizationId),
+          cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
+          invalidateOrgPublicCounts({
+            db: this.db,
+            cache,
+            waitUntil,
+            organizationId,
+            reason,
+            logger: this.obs,
+          }),
         ]
       : [];
     await Promise.all([
-      ...orgKeys.map((key) => cache.invalidate(key)),
+      ...org,
       invalidateContentAccess({
         db: this.db,
         cache,

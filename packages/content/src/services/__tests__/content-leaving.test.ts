@@ -223,21 +223,7 @@ describe('ContentService: the leaving notice', () => {
     kind: ContentLeavingNoticeKind,
     answer: 'sent' | 'refused' | 'in-flight' = 'sent'
   ) {
-    const [open] = await db
-      .select()
-      .from(contentLeavingNotices)
-      .where(
-        and(
-          eq(contentLeavingNotices.contentId, contentId),
-          eq(contentLeavingNotices.userId, userId),
-          eq(contentLeavingNotices.kind, kind),
-          inArray(contentLeavingNotices.state, [
-            ...CONTENT_LEAVING_NOTICE_OPEN_STATES,
-          ])
-        )
-      )
-      .orderBy(desc(contentLeavingNotices.round))
-      .limit(1);
+    const open = (await rowsOf(contentId, userId, kind)).find(isOpen);
     expect(open, `an open ${kind} row to send`).toBeDefined();
     if (!open) return;
     const now = new Date();
@@ -254,17 +240,19 @@ describe('ContentService: the leaving notice', () => {
       .where(eq(contentLeavingNotices.id, open.id));
   }
 
+  /** A row the sweep would still claim. */
+  const isOpen = (row: { state: string }) =>
+    (CONTENT_LEAVING_NOTICE_OPEN_STATES as readonly string[]).includes(
+      row.state
+    );
+
   /** How many staying rows the piece has, and how many of them were sent. */
   async function stayingOf(contentId: string, userId: string) {
     const rows = await rowsOf(contentId, userId, 'staying');
     return {
       all: rows.length,
       sent: rows.filter((row) => row.state === 'sent').length,
-      open: rows.filter((row) =>
-        (CONTENT_LEAVING_NOTICE_OPEN_STATES as readonly string[]).includes(
-          row.state
-        )
-      ).length,
+      open: rows.filter(isOpen).length,
     };
   }
 
@@ -274,7 +262,7 @@ describe('ContentService: the leaving notice', () => {
     it('deletes a piece nobody holds at once, writing no notice', async () => {
       const row = await piece();
 
-      const result = await service.delete(row.id, creatorId);
+      const { result } = await service.delete(row.id, creatorId);
 
       expect(result).toEqual({
         outcome: 'deleted',
@@ -294,7 +282,7 @@ describe('ContentService: the leaving notice', () => {
       await bought(row.id, b);
       const before = Date.now();
 
-      const result = await service.delete(row.id, creatorId);
+      const { result } = await service.delete(row.id, creatorId);
 
       expect(result.outcome).toBe('leaving');
       expect(result.holders).toBe(2);
@@ -351,7 +339,7 @@ describe('ContentService: the leaving notice', () => {
         source: 'grant',
       });
 
-      const result = await service.delete(row.id, creatorId);
+      const { result } = await service.delete(row.id, creatorId);
 
       expect(result.outcome).toBe('leaving');
       expect((await stored(row.id)).publishRequestedAt).toBeNull();
@@ -390,7 +378,7 @@ describe('ContentService: the leaving notice', () => {
         sourceRef: coursePurchase.id,
       });
 
-      const result = await service.delete(row.id, creatorId);
+      const { result } = await service.delete(row.id, creatorId);
 
       expect(result.holders).toBe(1);
       expect((await noticesOf(row.id)).map((n) => n.userId)).toEqual([holder]);
@@ -402,7 +390,7 @@ describe('ContentService: the leaving notice', () => {
       await bought(row.id, holder);
       await erase(holder);
 
-      const result = await service.delete(row.id, creatorId);
+      const { result } = await service.delete(row.id, creatorId);
 
       expect(result.outcome).toBe('deleted');
       expect(await noticesOf(row.id)).toEqual([]);
@@ -415,7 +403,7 @@ describe('ContentService: the leaving notice', () => {
       await bought(row.id, erased);
       await erase(erased);
 
-      const result = await service.delete(row.id, creatorId);
+      const { result } = await service.delete(row.id, creatorId);
 
       expect(result.holders).toBe(1);
       expect((await noticesOf(row.id)).map((n) => n.userId)).toEqual([kept]);
@@ -425,9 +413,9 @@ describe('ContentService: the leaving notice', () => {
       const [holder] = await people(1);
       const row = await piece();
       await bought(row.id, holder);
-      const first = await service.delete(row.id, creatorId);
+      const { result: first } = await service.delete(row.id, creatorId);
 
-      const again = await service.delete(row.id, creatorId);
+      const { result: again } = await service.delete(row.id, creatorId);
 
       expect(again).toEqual(first);
       expect(await noticesOf(row.id)).toHaveLength(1);
@@ -478,9 +466,11 @@ describe('ContentService: the leaving notice', () => {
       vi.useFakeTimers({ toFake: ['Date'] });
       vi.setSystemTime(now);
 
-      await expect(service.delete(row.id, creatorId)).rejects.toMatchObject(
-        INTERNAL
-      );
+      // Guard (a) by name: guard (b) would refuse it too, as a skipped holder.
+      await expect(service.delete(row.id, creatorId)).rejects.toMatchObject({
+        ...INTERNAL,
+        context: { lastRound: expect.any(String) },
+      });
 
       vi.useRealTimers();
       const stays = await stored(row.id);
@@ -531,9 +521,9 @@ describe('ContentService: the leaving notice', () => {
       const { row, holder } = await heldBy();
       await service.delete(row.id, creatorId);
 
-      const result = await service.keep(row.id, creatorId);
+      const { result } = await service.keep(row.id, creatorId);
 
-      expect(result).toEqual({ kept: true, staying: 0, organizationId: null });
+      expect(result).toEqual({ kept: true, staying: 0 });
       const after = await stored(row.id);
       expect(after.leavesAt).toBeNull();
       expect(after.status).toBe('archived');
@@ -556,7 +546,7 @@ describe('ContentService: the leaving notice', () => {
       await service.delete(row.id, creatorId);
       await tick(row.id, holder, 'leaving', 'in-flight');
 
-      const result = await service.keep(row.id, creatorId);
+      const { result } = await service.keep(row.id, creatorId);
 
       expect(result.staying).toBe(1);
       const [leaving] = await rowsOf(row.id, holder, 'leaving');
@@ -566,7 +556,9 @@ describe('ContentService: the leaving notice', () => {
 
     it('writes ONE staying row for a tried leaving AND a tried reminder', async () => {
       const { row, holder } = await heldBy();
-      const { leavesAt } = await service.delete(row.id, creatorId);
+      const {
+        result: { leavesAt },
+      } = await service.delete(row.id, creatorId);
       if (!leavesAt) throw new Error('expected a leave date');
       await db.insert(contentLeavingNotices).values({
         contentId: row.id,
@@ -577,7 +569,7 @@ describe('ContentService: the leaving notice', () => {
       await tick(row.id, holder, 'leaving');
       await tick(row.id, holder, 'reminder', 'in-flight');
 
-      const result = await service.keep(row.id, creatorId);
+      const { result } = await service.keep(row.id, creatorId);
 
       expect(result.staying).toBe(1);
       expect((await stayingOf(row.id, holder)).all).toBe(1);
@@ -589,7 +581,7 @@ describe('ContentService: the leaving notice', () => {
       await tick(row.id, holder, 'leaving');
       await erase(holder);
 
-      const result = await service.keep(row.id, creatorId);
+      const { result } = await service.keep(row.id, creatorId);
 
       expect(result.staying).toBe(0);
     });
@@ -603,7 +595,7 @@ describe('ContentService: the leaving notice', () => {
       await tick(row.id, holder, 'staying', 'refused');
       await service.delete(row.id, creatorId);
 
-      const result = await service.keep(row.id, creatorId);
+      const { result } = await service.keep(row.id, creatorId);
 
       expect(result.staying).toBe(1);
       const staying = await rowsOf(row.id, holder, 'staying');
@@ -633,7 +625,7 @@ describe('ContentService: the leaving notice', () => {
       await tick(row.id, holder, 'staying');
       await service.delete(row.id, creatorId);
 
-      const result = await service.keep(row.id, creatorId);
+      const { result } = await service.keep(row.id, creatorId);
 
       expect(result.staying).toBe(0);
     });
@@ -649,7 +641,7 @@ describe('ContentService: the leaving notice', () => {
       await service.delete(row.id, creatorId);
       await tick(row.id, holder, 'leaving');
 
-      const result = await service.keep(row.id, creatorId);
+      const { result } = await service.keep(row.id, creatorId);
 
       expect(result.staying).toBe(1);
       expect(await stayingOf(row.id, holder)).toEqual({
@@ -662,9 +654,9 @@ describe('ContentService: the leaving notice', () => {
     it('comes back unchanged for a piece that is not leaving', async () => {
       const row = await piece();
 
-      const result = await service.keep(row.id, creatorId);
+      const { result } = await service.keep(row.id, creatorId);
 
-      expect(result).toEqual({ kept: false, staying: 0, organizationId: null });
+      expect(result).toEqual({ kept: false, staying: 0 });
       expect((await stored(row.id)).status).toBe('published');
     });
 
