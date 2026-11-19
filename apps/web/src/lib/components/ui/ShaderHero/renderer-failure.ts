@@ -55,3 +55,14 @@ export function reportRetryFailure(preset: ShaderPresetId): void {
   retriesReported.add(preset);
   logger.warn('shader_hero.renderer_retry_failed', { preset });
 }
+
+/**
+ * Log a lost WebGL context (`shader_hero.context_lost`): a GPU reset, or the
+ * browser reclaiming the context. Nothing restores it yet (WP-3,
+ * Codex-1yd58.4), so the hero shows its CSS fallback until the page reloads,
+ * and this is the only record of why. Every loss is logged: a loss is an
+ * event, not a retry in a loop.
+ */
+export function reportContextLost(preset: ShaderPresetId): void {
+  logger.warn('shader_hero.context_lost', { preset });
+}

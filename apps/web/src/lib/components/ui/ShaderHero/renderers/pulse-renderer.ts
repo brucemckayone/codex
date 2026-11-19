@@ -20,6 +20,7 @@ import {
 } from '../audio-uniforms';
 import type { SDFResult } from '../jfa-sdf';
 import { destroyLogoTexture, loadLogoTexture } from '../logo-texture';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { PulseConfig, ShaderConfig } from '../shader-config';
 import { PULSE_DISPLAY_FRAG } from '../shaders/pulse-display.frag';
@@ -250,7 +251,7 @@ export function createPulseRenderer(): ShaderRenderer {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    bindOutput(gl);
     simBuf.swap();
   }
 
@@ -417,7 +418,7 @@ export function createPulseRenderer(): ShaderRenderer {
 
       // Audio uniforms for display
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 
@@ -438,7 +439,7 @@ export function createPulseRenderer(): ShaderRenderer {
       drawQuad(gl);
       gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
       drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
     },
 
     destroy(gl: WebGL2RenderingContext): void {

@@ -18,6 +18,7 @@ import {
   createDeltaClock,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { AuroraConfig, ShaderConfig } from '../shader-config';
 import { AURORA_FRAG } from '../shaders/aurora.frag';
@@ -218,7 +219,7 @@ export function createAuroraRenderer(): ShaderRenderer {
 
       uploadAudioUniforms(gl, uniforms, a);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 

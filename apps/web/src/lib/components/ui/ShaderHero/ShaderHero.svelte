@@ -13,6 +13,8 @@
     static frame, then stop
   - Mobile DPR capped at 1 for performance
   - Live-preview: brand editor changes take effect immediately
+  - `data-live` on its root once a renderer has drawn a frame the canvas shows
+    (moving or still); the org layout's `tone` one also reports to `shaderLive`
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -20,10 +22,11 @@
   import { destroyJFACache } from './jfa-sdf';
   import { getShaderConfig, type ShaderPresetId, shaderIsDark } from './shader-config';
   import { loadRenderer } from './load-renderer';
-  import { reportRendererFailure, reportRetryFailure } from './renderer-failure';
+  import { reportContextLost, reportRendererFailure, reportRetryFailure } from './renderer-failure';
   import { destroyRenderer } from './start-renderer';
   import { withProgramLabel } from './webgl-utils';
   import type { ShaderRenderer, MouseState } from './renderer-types';
+  import { shaderLive } from './shader-live.svelte';
   import { captureStill, shaderStill } from './shader-still.svelte';
   import { shaderTone, toneViewport } from './shader-tone';
   import { averageCells, visibleBufferRegion } from './tone-grid';
@@ -83,9 +86,20 @@
   let canvasEl: HTMLCanvasElement | undefined = $state();
   let containerEl: HTMLDivElement | undefined = $state();
   let hasWebGL = $state(true);
+  // `data-live` (Codex-1yd58.3): the canvas shows a frame that a renderer drew.
+  // What reads "a shader is painting" keys on this attribute, never on the
+  // canvas's inline style: the home hero's ink, OrgHero's shader ink, and
+  // (through `shaderLive`) the org layout's gate. It stays set through a
+  // preset switch, because the old frame stays on screen until the new
+  // renderer draws, and it is cleared when nothing would show.
+  let live = $state(false);
 
   onMount(() => {
     if (!canvasEl || !browser) return;
+
+    // The org layout's shader is the one whose state the layout's gate
+    // reads (`shader-live.svelte.ts` explains why there is a single writer).
+    const liveWriter = tone ? shaderLive.claim() : null;
 
     // ── WebGL context ──────────────────────────────────────────
     const gl = canvasEl.getContext('webgl2', {
@@ -98,7 +112,11 @@
 
     if (!gl) {
       hasWebGL = false;
-      return;
+      // Nothing can draw, whatever the brand asks for.
+      liveWriter?.report(
+        getShaderConfig(undefined, presetOverride).preset === 'none' ? 'none' : 'failed'
+      );
+      return () => liveWriter?.release();
     }
 
     // ── State ──────────────────────────────────────────────────
@@ -185,8 +203,13 @@
     // requires touching load-renderer.ts.
 
     // ── Canvas sizing ──────────────────────────────────────────
-    function resize() {
+    function resize(force = false) {
       if (!canvasEl || !containerEl) return;
+      // Mid-switch (no renderer yet, the last preset's frame still live), a
+      // size change would clear the canvas to black with nothing to redraw
+      // it. It keeps its size until the new renderer applies it before init
+      // (`resize(true)` in ensureRenderer).
+      if (!force && !renderer && live) return;
       const rect = containerEl.getBoundingClientRect();
       // Cap DPR at 1 on mobile for performance (9x fewer fragments vs DPR 3)
       const isMobile = rect.width < 768;
@@ -379,14 +402,35 @@
         redrawFrozen();
       });
 
+    // ── Live (Codex-1yd58.3) ───────────────────────────────────
+    // The canvas is shown only once a renderer has drawn into it, so the fade
+    // in starts from a real frame, and `data-live`, which the hero's ink keys
+    // on, flips in the same task as the fade it is timed to. (The canvas used
+    // to be shown at init, one frame before anything was drawn, and stayed
+    // shown with nothing on it while a hidden tab drew no frames.)
+    /** A renderer has drawn the frame the canvas now shows. Every frame calls
+     *  this, so it returns early once live. (No frame renders on a lost
+     *  context: `frame()` stops first.) */
+    function shown() {
+      if (live) return;
+      live = true;
+      if (canvasEl) canvasEl.style.opacity = '1';
+      liveWriter?.report('live');
+    }
+    /** Nothing is drawn: no preset, or a shader that cannot draw. */
+    function hidden(state: 'none' | 'failed') {
+      live = false;
+      if (canvasEl) canvasEl.style.opacity = '0';
+      liveWriter?.report(state);
+    }
+
     // ── Renderer failure ───────────────────────────────────────
     // A preset whose renderer will not load or start STOPS the loop (retried
-    // every frame it would only fail again) and hides the canvas. The CSS
-    // fallback shows in its place only once the layout's shader gate keys on
-    // this live state, so not until WP-2 (Codex-hdzjw): until then the gate
-    // still claims a shader. The loop wakes when the brand's preset tokens or the theme
-    // change, and goes on once the preset it reads is another one, which then
-    // loads. A LOAD failure (offline, a replaced chunk) is also retried ONCE,
+    // every frame it would only fail again) and hides the canvas
+    // (`hidden('failed')`). Then `data-live` is cleared, and the layout's gate
+    // clears too, so the page's surfaces go back to opaque. The loop wakes
+    // when the brand's preset tokens or the theme change, and goes on once
+    // the preset it reads is another one, which then loads. A LOAD failure (offline, a replaced chunk) is also retried ONCE,
     // when the browser comes back online or the tab is shown again: the org
     // layout's hero is mounted once per SPA session, so nothing else would.
     const glContext: WebGL2RenderingContext = gl;
@@ -462,7 +506,7 @@
       currentPreset = 'none';
       failedPreset = preset;
       failedTokens = presetTokens();
-      if (canvasEl) canvasEl.style.opacity = '0';
+      hidden('failed');
       if (retrying === preset) {
         // The one retry failed too: said once, and not tried again.
         retrying = null;
@@ -507,7 +551,7 @@
 
       if (preset === 'none') {
         // Hide canvas so CSS gradient fallback shows through.
-        canvasEl!.style.opacity = '0';
+        hidden('none');
         // Keep the poll loop alive so a brand-editor activation (user sets a
         // shader preset via CSS var) is detected — frame() polls every ~30
         // frames and calls ensureRenderer on preset mismatch. Without this,
@@ -531,7 +575,7 @@
         return false;
       }
 
-      resize(); // Ensure canvas is sized before init
+      resize(true); // Ensure canvas is sized before init (a mid-switch resize waited for this)
       // A throw from init() is an init failure too, not an escape from here.
       let ok = false;
       let initThrown: unknown;
@@ -556,7 +600,9 @@
       renderer = newRenderer;
       retrying = null;
       hasRenderedStaticFrame = false;
-      canvasEl.style.opacity = '1';
+      // Shown once it draws (`shown()`), not now. In a switch the canvas
+      // still holds the last preset's frame (`resize()` keeps its size while
+      // the new preset loads), so it stays shown and live.
       // Re-prime the loop: frame() returns early on preset mismatch without
       // re-scheduling, so after an async preset switch the loop is released.
       scheduleFrame();
@@ -570,6 +616,11 @@
     // resumes it from state-change handlers (visibility/motion/ensureRenderer).
     function frame() {
       animFrameId = 0; // this callback has fired — clear handle before deciding to re-prime
+
+      // A lost context draws nothing, so the loop stops here: every wake (a
+      // resize, the tab coming back, a frozen redraw) returns at once.
+      // Restoring the context and its loop is WP-3's (Codex-1yd58.4).
+      if (gl?.isContextLost()) return;
 
       // A frozen shader draws seldom (a resize, a sample, the studio), so the
       // frame it is about to draw reads the brand afresh: the poll's last
@@ -609,6 +660,7 @@
         hasRenderedStaticFrame = true;
         frozenElapsed ??= (performance.now() - startTime) / 1000;
         renderer.render(gl!, frozenElapsed, mouse, config, canvasEl!.width, canvasEl!.height);
+        shown();
         sampleTone();
         copyStill();
         return; // no re-prime — static frame is final
@@ -628,6 +680,7 @@
 
       const elapsed = (now - startTime) / 1000;
       renderer.render(gl!, elapsed, mouse, config, canvasEl!.width, canvasEl!.height);
+      shown();
       sampleTone();
 
       // Re-prime ONLY from the render branch — hidden tabs and reduced-motion
@@ -710,8 +763,16 @@
     if (containerEl) resizeObserver.observe(containerEl);
 
     // A lost context (a GPU reset, or the browser reclaiming its oldest)
-    // shows nothing, so the page editor's bands go back to the glow.
-    canvasEl?.addEventListener('webglcontextlost', clearStill);
+    // shows nothing, so the page editor's bands go back to the glow and the
+    // shader is no longer live. Nothing restores the context yet (WP-3,
+    // Codex-1yd58.4): the loop stops at the top of `frame()`, and the loss is
+    // logged, the only record of why the hero fell back.
+    function onContextLost() {
+      clearStill();
+      hidden('failed');
+      reportContextLost(currentPreset);
+    }
+    canvasEl?.addEventListener('webglcontextlost', onContextLost);
 
     // ── Start ──────────────────────────────────────────────────
     // ensureRenderer() calls scheduleFrame() on success — no need to re-prime here.
@@ -743,8 +804,9 @@
       // A load still in flight finds itself overtaken and installs nothing.
       loadToken++;
       watchBrand(false);
-      canvasEl?.removeEventListener('webglcontextlost', clearStill);
+      canvasEl?.removeEventListener('webglcontextlost', onContextLost);
       detachPointerListeners();
+      liveWriter?.release();
     };
   });
 </script>
@@ -753,6 +815,7 @@
   bind:this={containerEl}
   class="shader-hero {className ?? ''}"
   aria-hidden="true"
+  data-live={live ? '' : undefined}
 >
   {#if browser && hasWebGL}
     <canvas

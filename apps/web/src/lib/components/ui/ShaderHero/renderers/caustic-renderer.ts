@@ -16,6 +16,7 @@ import {
   uploadAudioUniforms,
 } from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig } from '../shader-config';
 import { CAUSTIC_FRAG } from '../shaders/caustic.frag';
@@ -218,7 +219,7 @@ export function createCausticRenderer(): ShaderRenderer {
       uploadAudioUniforms(gl, uniforms, a);
 
       // Draw to screen (no FBO)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 

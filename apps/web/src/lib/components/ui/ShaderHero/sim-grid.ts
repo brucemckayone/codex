@@ -13,17 +13,15 @@
  *    display ran it twice as fast as a 60 Hz one and a 30 fps phone at half
  *    speed. `createStepClock` turns elapsed time into a step count.
  *
+ * DEPENDENCY-FREE on purpose: shader modules import `SIM_BASE`, `SIM_CELL` and
+ * `PERIODIC_NOISE_GLSL` from here, and `shaders:check` bundles them alone, so
+ * GL runtime helpers (which reach the app logger) live in `sim-resize.ts`.
+ *
  * Shaders measure distance in texels (`(v_uv - p) / uTexel`), so a brush or
  * drop is round on screen at any shape. A size that was tuned in uv on the
  * old square grid divides by `SIM_BASE` texels instead (ripple's drop), so it
  * keeps exactly the size it always had on a square canvas.
  */
-
-import {
-  createDoubleFBO,
-  type DoubleFBO,
-  destroyDoubleFBO,
-} from './webgl-utils';
 
 /** The texel budget: a square grid of this side, which every shape matches. */
 export const SIM_BASE = 512;
@@ -83,35 +81,6 @@ export function simGridChanged(
   if (!(width > 0) || !(height > 0)) return false;
   const ratio = canvasAspect(width, height) / current.aspect;
   return Math.abs(Math.log(ratio)) > Math.log(1.15);
-}
-
-export interface ResizedSim {
-  readonly grid: SimGrid;
-  readonly buf: DoubleFBO;
-}
-
-/**
- * The simulated presets' resize, in one place so the three cannot drift.
- * Returns the grid and buffer for the caller to adopt and then reseed, or
- * null to keep what it has: no real change of shape (`simGridChanged`), no
- * buffer yet, or a lost context, which cannot allocate (restoring it is
- * WP-3, Codex-1yd58.4; until then the old grid is kept). It allocates BEFORE
- * destroying, so an allocation that throws leaves the old buffer intact.
- */
-export function resizeSim(
-  gl: WebGL2RenderingContext,
-  grid: SimGrid,
-  buf: DoubleFBO | null,
-  width: number,
-  height: number
-): ResizedSim | null {
-  if (!buf || gl.isContextLost() || !simGridChanged(grid, width, height)) {
-    return null;
-  }
-  const next = simGridFor(width, height);
-  const nextBuf = createDoubleFBO(gl, next.w, next.h);
-  destroyDoubleFBO(gl, buf);
-  return { grid: next, buf: nextBuf };
 }
 
 /** Longest frame the clock will catch up on (a tab returning from the background). */

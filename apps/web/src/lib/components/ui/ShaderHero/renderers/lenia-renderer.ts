@@ -39,6 +39,7 @@ import {
   SILENT_AUDIO,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { LeniaConfig, ShaderConfig } from '../shader-config';
 import { LENIA_DISPLAY_FRAG } from '../shaders/lenia-display.frag';
@@ -255,7 +256,7 @@ export function createLeniaRenderer(): ShaderRenderer {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    bindOutput(gl);
     simBuf.swap();
   }
 
@@ -435,7 +436,7 @@ export function createLeniaRenderer(): ShaderRenderer {
 
       uploadAudioUniforms(gl, displayU, a);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 
@@ -463,7 +464,7 @@ export function createLeniaRenderer(): ShaderRenderer {
       drawQuad(gl);
       gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
       drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
 
       // Warm-up: 50 coast steps to let creatures form. Runs silent — this is
       // bootstrapping the field, not playback, so reacting to whatever was

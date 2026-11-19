@@ -30,6 +30,7 @@ import {
   uploadAudioUniforms,
 } from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { EtherConfig, ShaderConfig } from '../shader-config';
 import { ETHER_FRAG } from '../shaders/ether.frag';
@@ -246,7 +247,7 @@ export function createEtherRenderer(): ShaderRenderer {
       gl.uniform2f(uniforms.u_wanderer, wanderer.x, wanderer.y);
 
       // Draw to screen (no FBO)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 

@@ -33,6 +33,7 @@ import {
   uploadAudioUniforms,
 } from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { InkConfig, ShaderConfig } from '../shader-config';
 import { INK_DISPLAY_FRAG } from '../shaders/ink-display.frag';
@@ -276,7 +277,7 @@ export function createInkRenderer(): ShaderRenderer {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    bindOutput(gl);
     simBuf.swap();
   }
 
@@ -616,7 +617,7 @@ export function createInkRenderer(): ShaderRenderer {
 
       // Full-spectrum modulation — see display shader for exact mappings.
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 
@@ -648,7 +649,7 @@ export function createInkRenderer(): ShaderRenderer {
       drawQuad(gl);
       gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
       drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
     },
 
     destroy(gl: WebGL2RenderingContext): void {

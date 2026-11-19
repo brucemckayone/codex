@@ -58,6 +58,7 @@ import { loadRenderer } from '../load-renderer';
 import type { ShaderRenderer } from '../renderer-types';
 import ShaderHero from '../ShaderHero.svelte';
 import type { ShaderPresetId } from '../shader-config';
+import { shaderLive } from '../shader-live.svelte';
 import { shaderStill } from '../shader-still.svelte';
 import { shaderTone } from '../shader-tone';
 
@@ -821,5 +822,196 @@ describe('ShaderHero renderer failure', () => {
     step(2);
     expect(brand.reads).toBe(before);
     expect(loadRenderer).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Codex-1yd58.3: `data-live` on the root is what "a shader is painting" reads
+// (the home hero's ink, OrgHero's), and the `tone` instance reports the same
+// state to `shaderLive` for the org layout's gate.
+describe('ShaderHero live', () => {
+  const root = () => document.querySelector('.shader-hero') as HTMLElement;
+  const canvas = () => document.querySelector('canvas') as HTMLCanvasElement;
+  const isLive = () => {
+    flushSync();
+    return root().hasAttribute('data-live');
+  };
+  const stub = (init: () => boolean = () => true) =>
+    ({
+      init: vi.fn(init),
+      render: vi.fn(),
+      resize: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn(),
+    }) satisfies ShaderRenderer;
+
+  beforeEach(() => {
+    vi.mocked(loadRenderer).mockClear();
+  });
+
+  it('goes live only once a renderer has drawn a frame, and shows the canvas then', async () => {
+    await start({ tone: true });
+    // Loaded and started, but nothing drawn: not shown, not live.
+    expect(vi.mocked(loadRenderer)).toHaveBeenCalledTimes(1);
+    expect(renderer.render).not.toHaveBeenCalled();
+    expect(isLive()).toBe(false);
+    expect(canvas().style.opacity).toBe('');
+    expect(shaderLive.state).toBe('pending');
+
+    step(1);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(isLive()).toBe(true);
+    expect(canvas().style.opacity).toBe('1');
+    expect(shaderLive.state).toBe('live');
+  });
+
+  it('goes live from the one frame a still shader draws', async () => {
+    await start({ still: true, tone: true });
+    expect(isLive()).toBe(false);
+    step(1);
+    expect(isLive()).toBe(true);
+    expect(shaderLive.state).toBe('live');
+  });
+
+  it('is never live with no preset, and reports none', async () => {
+    brand.config = { preset: 'none' };
+    await start({ tone: true });
+    step(3);
+    expect(isLive()).toBe(false);
+    expect(canvas().style.opacity).toBe('0');
+    expect(shaderLive.state).toBe('none');
+  });
+
+  it('is never live when its renderer will not load, and reports failed', async () => {
+    vi.mocked(loadRenderer).mockRejectedValueOnce(new Error('chunk gone'));
+    await start({ tone: true });
+    step(3);
+    expect(isLive()).toBe(false);
+    expect(shaderLive.state).toBe('failed');
+  });
+
+  it('reports failed with no WebGL, and none when there was nothing to draw', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    await start({ tone: true });
+    flushSync();
+    expect(document.querySelector('canvas')).toBeNull();
+    expect(root().hasAttribute('data-live')).toBe(false);
+    expect(shaderLive.state).toBe('failed');
+    if (app) unmount(app);
+    app = null;
+    expect(shaderLive.state).toBe('pending');
+
+    brand.config = { preset: 'none' };
+    await start({ tone: true });
+    expect(shaderLive.state).toBe('none');
+  });
+
+  it('stays live through a switch while the new renderer loads, as the old frame stays shown', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ tone: true });
+    step(1);
+    expect(isLive()).toBe(true);
+
+    let finishLoad: (r: ShaderRenderer) => void = () => {};
+    vi.mocked(loadRenderer).mockImplementationOnce(
+      () =>
+        new Promise<ShaderRenderer | null>((resolve) => {
+          finishLoad = resolve;
+        })
+    );
+    brand.config = { preset: 'lava' };
+    step(30); // the poll spots the new preset and starts loading it
+    expect(vi.mocked(loadRenderer).mock.calls.at(-1)?.[0]).toBe('lava');
+    expect(isLive()).toBe(true);
+    expect(canvas().style.opacity).toBe('1');
+
+    // A resize mid-load keeps the old frame: resizing the canvas would clear
+    // it to black, with no renderer to redraw it, so it keeps its size.
+    const before = { width: canvas().width, height: canvas().height };
+    expect(before).toEqual({ width: 1200, height: 800 });
+    box = { width: 900, height: 700 };
+    for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+    expect({ width: canvas().width, height: canvas().height }).toEqual(before);
+
+    const next = stub();
+    finishLoad(next);
+    await Promise.resolve();
+    await Promise.resolve();
+    // Installed and not yet drawn: still live (the old frame is on screen),
+    // and the size the resize asked for is applied before init.
+    expect(isLive()).toBe(true);
+    expect({ width: canvas().width, height: canvas().height }).toEqual({
+      width: 900,
+      height: 700,
+    });
+    expect(next.init).toHaveBeenCalledWith(expect.anything(), 900, 700);
+    step(1);
+    expect(next.render).toHaveBeenCalledTimes(1);
+    expect(isLive()).toBe(true);
+    expect(shaderLive.state).toBe('live');
+  });
+
+  it('stops being live when the brand switches the shader off, or the new one fails', async () => {
+    await start({ tone: true });
+    step(1);
+    brand.config = { preset: 'none' };
+    step(30);
+    expect(isLive()).toBe(false);
+    expect(canvas().style.opacity).toBe('0');
+    expect(shaderLive.state).toBe('none');
+
+    vi.mocked(loadRenderer).mockResolvedValueOnce(stub(() => false));
+    brand.config = { preset: 'flux' };
+    step(30);
+    await Promise.resolve();
+    await Promise.resolve();
+    step(1);
+    expect(isLive()).toBe(false);
+    expect(shaderLive.state).toBe('failed');
+  });
+
+  it('stops being live when its context is lost, logs it, and stops its loop', async () => {
+    // An earlier test's loss may have logged: count only this one's.
+    logger.warn.mockClear();
+    await start({ tone: true });
+    step(1);
+    expect(isLive()).toBe(true);
+
+    contextLost = true;
+    canvas().dispatchEvent(new Event('webglcontextlost'));
+    expect(isLive()).toBe(false);
+    expect(canvas().style.opacity).toBe('0');
+    expect(shaderLive.state).toBe('failed');
+    expect(
+      logger.warn.mock.calls.filter(
+        ([event]) => event === 'shader_hero.context_lost'
+      )
+    ).toEqual([['shader_hero.context_lost', { preset: 'ether' }]]);
+
+    // Nothing more is drawn on a context that cannot show it, and the loop
+    // asks for no frame (it used to spin at full rate on the dead context).
+    const drawn = renderer.render.mock.calls.length;
+    step(3);
+    expect(renderer.render.mock.calls.length).toBe(drawn);
+    expect(frames).toHaveLength(0);
+    expect(isLive()).toBe(false);
+    expect(shaderLive.state).toBe('failed');
+  });
+
+  it('reports only from the `tone` instance, and goes back to pending on unmount', async () => {
+    await start({ tone: false });
+    step(1);
+    expect(isLive()).toBe(true);
+    expect(shaderLive.state).toBe('pending');
+    if (app) unmount(app);
+    app = null;
+    // The stand-in cancelAnimationFrame cancels nothing: drop the old frame.
+    frames = [];
+
+    await start({ tone: true });
+    step(1);
+    expect(shaderLive.state).toBe('live');
+    if (app) unmount(app);
+    app = null;
+    expect(shaderLive.state).toBe('pending');
   });
 });

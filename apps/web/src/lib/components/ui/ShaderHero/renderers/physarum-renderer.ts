@@ -51,6 +51,7 @@ import {
   type ResolvedAudio,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig } from '../shader-config';
 import { PHYSARUM_DISPLAY_FRAG } from '../shaders/physarum-display.frag';
@@ -275,7 +276,7 @@ export function createPhysarumRenderer(): ShaderRenderer {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    bindOutput(gl);
     simBuf.swap();
   }
 
@@ -462,7 +463,7 @@ export function createPhysarumRenderer(): ShaderRenderer {
 
       uploadAudioUniforms(gl, displayU, a);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 
@@ -490,7 +491,7 @@ export function createPhysarumRenderer(): ShaderRenderer {
       drawQuad(gl);
       gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
       drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
     },
 
     destroy(gl: WebGL2RenderingContext): void {

@@ -125,6 +125,18 @@ jobs:
       - name: Load-failure Retry gate (shared LoadFailedAlert only)
         run: pnpm --filter web run check:load-retry
 
+      # Codex-1yd58 WP-2: the output door. A ShaderHero renderer reaches the
+      # screen only through bindOutput(gl) (ShaderHero/output-target.ts), the
+      # seam the Showreel compositor (WP-3, not built yet) will redirect to its
+      # scene framebuffer. A raw bindFramebuffer(FRAMEBUFFER, null) still draws
+      # today, and would then draw behind the compositor's back. Text-only (no glslang), so it runs here;
+      # see apps/web/scripts/check-output-door.mjs. Self-test first.
+      - name: Output-door gate self-test
+        run: pnpm --filter web run check:output-door:test
+
+      - name: Output-door gate (ShaderHero draws through bindOutput)
+        run: pnpm --filter web run check:output-door
+
       # Codex-ea1hd WP9: the data-access contract drift gate.
       #
       # Two grep-based rules over packages/*/src, workers/*/src and apps/*/src:

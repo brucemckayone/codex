@@ -16,6 +16,7 @@ import {
   uploadAudioUniforms,
 } from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { LavaConfig, ShaderConfig } from '../shader-config';
 import { LAVA_FRAG } from '../shaders/lava.frag';
@@ -192,7 +193,7 @@ export function createLavaRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_clock, clock);
       uploadAudioUniforms(gl, uniforms, a);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 

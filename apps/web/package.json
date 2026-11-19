@@ -25,6 +25,8 @@
     "check:dialog-structure:test": "node --test scripts/check-dialog-structure.test.mjs",
     "check:load-retry": "node scripts/check-load-retry.mjs",
     "check:load-retry:test": "node --test scripts/check-load-retry.test.mjs",
+    "check:output-door": "node scripts/check-output-door.mjs",
+    "check:output-door:test": "node --test scripts/check-output-door.test.mjs",
     "check:svelte-baseline": "svelte-kit sync && node scripts/check-svelte-baseline.mjs",
     "check:svelte-baseline:test": "node --test scripts/check-svelte-baseline.test.mjs",
     "lint": "biome lint --write .",

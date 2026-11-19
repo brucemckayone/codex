@@ -31,6 +31,7 @@ import {
   createDeltaClock,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { FractureConfig, ShaderConfig } from '../shader-config';
 import { FRACTURE_FRAG } from '../shaders/fracture.frag';
@@ -240,7 +241,7 @@ export function createFractureRenderer(): ShaderRenderer {
       uploadAudioUniforms(gl, uniforms, a);
 
       // Draw to screen (no FBO)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 

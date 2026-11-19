@@ -516,11 +516,12 @@
     color: var(--_ink);
   }
 
-  /* A shader is painting behind the hero: the org's hero ink, on a dark scrim.
+  /* A shader is painting behind the hero (ShaderHero's `data-live`: a renderer
+     has drawn the frame its canvas shows): the org's hero ink, on a dark scrim.
      The full hero colour is for the title (and the button). Body copy is a TINT
      of it into the player's near-white, so a red ink reads as a warm pale line
      instead of red paragraphs, and a white ink (the default) stays white. */
-  :global(.org-layout:has(> .shader-hero--fullpage > canvas[style*='opacity: 1'])) .org-hero[data-bg='shader'] {
+  :global(.org-layout:has(> .shader-hero--fullpage[data-live])) .org-hero[data-bg='shader'] {
     --_ink: color-mix(in oklab, var(--brand-hero-text, var(--color-player-text)) 22%, var(--color-player-text));
     --_ink-strong: var(--brand-hero-title-color, var(--color-player-text));
     --_ink-soft: color-mix(in oklab, var(--brand-hero-text-muted, var(--color-player-text-secondary)) 30%, var(--color-player-text-secondary));

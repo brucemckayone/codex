@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { orgGrounds, orgShader } from './org-grounds';
+import { heroShaderActive, orgGrounds, orgShader } from './org-grounds';
+
+// Codex-1yd58.3: the org layout's `data-hero-shader-active`.
+describe('heroShaderActive — the tokens’ claim, corrected by the shader', () => {
+  it('renders the claim until the shader settles, as the server does', () => {
+    expect(heroShaderActive(true, 'pending')).toBe(true);
+    expect(heroShaderActive(false, 'pending')).toBe(false);
+  });
+
+  it('is set by a drawn frame, even where the tokens claimed none (a dark-only preset)', () => {
+    expect(heroShaderActive(true, 'live')).toBe(true);
+    expect(heroShaderActive(false, 'live')).toBe(true);
+  });
+
+  it('is cleared by no preset or a shader that cannot draw, whatever the tokens claim', () => {
+    for (const expected of [true, false]) {
+      expect(heroShaderActive(expected, 'none')).toBe(false);
+      expect(heroShaderActive(expected, 'failed')).toBe(false);
+    }
+  });
+});
 
 describe('orgShader — the org has a moving background (03 X50)', () => {
   const saved = (tokenOverrides: string | null) => ({

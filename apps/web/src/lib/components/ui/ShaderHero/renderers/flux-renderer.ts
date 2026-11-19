@@ -19,6 +19,7 @@ import {
   createDeltaClock,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { FluxConfig, ShaderConfig } from '../shader-config';
 import { FLUX_FRAG } from '../shaders/flux.frag';
@@ -216,7 +217,7 @@ export function createFluxRenderer(): ShaderRenderer {
       uploadAudioUniforms(gl, uniforms, a);
 
       // Draw to screen (no FBO)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 

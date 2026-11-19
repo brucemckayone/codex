@@ -14,8 +14,9 @@ import { describe, expect, test } from 'vitest';
  * showed the same white on the light page from first paint until its
  * renderer loaded, and for good if WebGL was unavailable.
  *
- * So the ink is a function of ONE state — is ShaderHero's canvas visible? —
- * and this file pins both halves of that:
+ * So the ink is a function of ONE state: has the fullpage ShaderHero drawn
+ * the frame its canvas shows (its root's `data-live`, Codex-1yd58.3)? This
+ * file pins both halves of that:
  *   - page state: every hero text colour resolves to the org's page tokens,
  *     never white and never a `--brand-hero-*` input;
  *   - painting state: every hero text colour resolves to EXACTLY the
@@ -48,6 +49,13 @@ const SHADER_HERO = join(
   'ui',
   'ShaderHero',
   'ShaderHero.svelte'
+);
+const ORG_HERO = join(
+  WEB_SRC,
+  'lib',
+  'components',
+  'org-hero',
+  'OrgHero.svelte'
 );
 
 const pageSource = readFileSync(PAGE, 'utf8');
@@ -107,9 +115,9 @@ const registered = new Map(
     .map((n) => [n.prelude.trim(), declsOf(n.block?.children ?? [])] as const)
 );
 
-/** The painting-shader state: the rule(s) keyed on the canvas being visible. */
+/** The painting-shader state: the rule(s) keyed on ShaderHero's `data-live`. */
 const isLive = (r: CssRule) =>
-  r.selector.includes(':has(') && r.selector.includes('canvas[style');
+  r.selector.includes(':has(') && r.selector.includes('[data-live]');
 const declaresInk = (r: CssRule) =>
   [...r.decls.keys()].some((p) => p.startsWith('--_hero-'));
 const liveHero = rules.filter(
@@ -327,48 +335,85 @@ describe('the painting-shader selector reads what ShaderHero writes', () => {
     '$1 .hero'
   );
 
-  test('it matches the hero only while the fullpage canvas is at opacity 1', () => {
-    expect(liveSelector).toMatch(
-      /:has\(.*canvas\[style\*='opacity: 1'\]\) \.hero$/
+  test("it matches the hero only while the fullpage shader's root is `data-live`", () => {
+    expect(liveSelector).toBe(
+      '.org-layout:has(> .shader-hero--fullpage[data-live]) .hero'
     );
     // The layout's structure: ShaderHero's root is a direct child of
-    // .org-layout and the canvas is a direct child of that root.
+    // .org-layout.
     document.body.innerHTML = `
       <div class="org-layout">
         <div class="shader-hero shader-hero--fullpage"><canvas class="shader-hero__canvas"></canvas></div>
         <main><section class="hero"></section></main>
       </div>`;
-    const canvas = document.querySelector('canvas') as HTMLCanvasElement;
+    const root = document.querySelector('.shader-hero') as HTMLElement;
     const hero = document.querySelector('.hero');
 
-    expect(document.querySelector(liveSelector)).toBeNull(); // SSR / before mount: no inline opacity
-    canvas.style.opacity = '0'; // preset 'none', or a renderer that failed
+    // SSR, before mount, loading, preset 'none', a renderer that failed.
     expect(document.querySelector(liveSelector)).toBeNull();
-    canvas.style.opacity = '1'; // a renderer initialised
+    // An inline opacity is not the signal any more.
+    (root.firstElementChild as HTMLElement).style.opacity = '1';
+    expect(document.querySelector(liveSelector)).toBeNull();
+    root.toggleAttribute('data-live', true); // a renderer drew a frame
     expect(document.querySelector(liveSelector)).toBe(hero);
-    canvas.style.opacity = '0'; // the editor switched the shader off again
+    root.toggleAttribute('data-live', false); // switched off, failed, or lost
     expect(document.querySelector(liveSelector)).toBeNull();
-    canvas.remove(); // `hasWebGL = false` drops the canvas entirely
+    // Only the fullpage one: another live ShaderHero on the page is not it.
+    const other = document.createElement('div');
+    other.className = 'shader-hero';
+    other.toggleAttribute('data-live', true);
+    document.querySelector('main')?.appendChild(other);
     expect(document.querySelector(liveSelector)).toBeNull();
   });
 
-  test('ShaderHero shows its canvas only by setting opacity 1, and the layout mounts it as the fullpage shader', () => {
+  test('OrgHero keys its shader ink on the same state, and nothing reads the canvas style', () => {
+    const orgHero = readFileSync(ORG_HERO, 'utf8');
+    const prefix = (liveHero[0]?.selector ?? '').replace(/ \.hero$/, '');
+    const shaderInk = readRules(orgHero).filter(
+      (r) => isLive(r) && r.selector.endsWith(".org-hero[data-bg='shader']")
+    );
+    expect(shaderInk.map((r) => r.selector)).toEqual([
+      `${prefix} .org-hero[data-bg='shader']`,
+    ]);
+    for (const [file, source] of [
+      ['page', pageSource],
+      ['OrgHero', orgHero],
+    ])
+      expect(
+        readRules(source).filter((r) => r.selector.includes('canvas[style')),
+        file
+      ).toEqual([]);
+  });
+
+  test('ShaderHero publishes `data-live` on its root, and the layout mounts it as the fullpage shader', () => {
+    // WHEN it is set (after a drawn frame, never at init) and cleared ('none',
+    // a failure, a lost context) is pinned by ShaderHero.svelte.test.ts's
+    // "ShaderHero live" block, which drives the real component.
+    const source = readFileSync(SHADER_HERO, 'utf8');
+    const root = parse(source, { modern: true }).fragment.nodes.find(
+      (n): n is AST.RegularElement => n.type === 'RegularElement'
+    );
+    const attribute = (name: string) =>
+      root?.attributes.find(
+        (a): a is AST.Attribute => a.type === 'Attribute' && a.name === name
+      );
+    expect(
+      source.slice(attribute('class')?.start, attribute('class')?.end)
+    ).toContain('shader-hero');
+    expect(attribute('data-live')).toBeDefined();
+    // Hidden until it is live, so the fade the ink is timed to exists.
+    expect(
+      readRules(source)
+        .find((r) => r.selector === '.shader-hero__canvas')
+        ?.decls.get('opacity')
+    ).toBe('0');
+    // One mount, as the fullpage shader. Its other props (`still`, held in
+    // the studio) do not change where the canvas sits, so they are not pinned.
     const stripComments = (s: string) =>
       s
         .replace(/<!--[\s\S]*?-->/g, '')
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/(^|[^:])\/\/.*$/gm, '$1');
-    const shader = stripComments(readFileSync(SHADER_HERO, 'utf8'));
-    // Hidden by default, shown by the inline `opacity: 1` the selector matches.
-    expect(
-      readRules(readFileSync(SHADER_HERO, 'utf8'))
-        .find((r) => r.selector === '.shader-hero__canvas')
-        ?.decls.get('opacity')
-    ).toBe('0');
-    expect(shader.match(/\.style\.opacity = '1'/g)).toHaveLength(1);
-    expect(shader).toMatch(/\.style\.opacity = '0'/);
-    // One mount, as the fullpage shader. Its other props (`still`, held in
-    // the studio) do not change where the canvas sits, so they are not pinned.
     const mounts =
       stripComments(readFileSync(LAYOUT, 'utf8')).match(
         /<ShaderHero\b[^>]*\/>/g

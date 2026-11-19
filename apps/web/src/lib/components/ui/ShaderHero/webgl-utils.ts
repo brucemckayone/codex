@@ -7,6 +7,7 @@
  */
 
 import { logger } from '$lib/observability';
+import { bindOutput } from './output-target';
 
 /** How much of a driver's info log a record keeps. */
 const INFO_LOG_MAX = 2000;
@@ -217,7 +218,7 @@ export function createFBOWithFormat(
     tex,
     0
   );
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  bindOutput(gl);
 
   return { fbo, tex, w, h };
 }

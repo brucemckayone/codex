@@ -13,6 +13,7 @@ import {
   createDeltaClock,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig, TopoConfig } from '../shader-config';
 import { TOPO_FRAG } from '../shaders/topo.frag';
@@ -171,7 +172,7 @@ export function createTopoRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_clock, clock);
       uploadAudioUniforms(gl, uniforms, a);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 

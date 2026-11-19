@@ -20,7 +20,8 @@ vi.mock('../webgl-utils', () => ({
   },
 }));
 
-const { resizeSim, simGridFor } = await import('../sim-grid');
+const { resizeSim } = await import('../sim-resize');
+const { simGridFor } = await import('../sim-grid');
 
 const glWith = (lost: boolean) =>
   ({ isContextLost: () => lost }) as unknown as WebGL2RenderingContext;

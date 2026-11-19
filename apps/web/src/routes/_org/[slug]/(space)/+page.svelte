@@ -753,8 +753,12 @@
   {:else}
   <!-- Hero: full viewport, content anchored bottom-left, editorial -->
   <section class="hero" class:hero--video-playing={filmInHero} data-hero-root>
-    <!-- Title lives OUTSIDE hero__content so it has no z-index isolation
-         and mix-blend-mode: difference can reach the shader canvas -->
+    <!-- Title lives OUTSIDE hero__content, out of that z-index. Its
+         mix-blend-mode still cannot reach the shader canvas: the org
+         layout's .org-main is a stacking context (position: relative;
+         z-index: 1) and the canvas sits outside it, so the blend stays
+         inside .org-main. Over a shader the title measured as its plain
+         ink (Codex-hdzjw). -->
     <h1 class="hero__title">{orgName}</h1>
 
     <!-- Desktop: the intro film, grown out of its chip -->
@@ -1284,20 +1288,21 @@
     color: var(--_hero-ink);
   }
 
-  /* A shader is painting behind the hero. ShaderHero sets its canvas to
-     `opacity: 1` only once a renderer has initialised, and back to 0 for
-     preset 'none' or a failed renderer, so this matches exactly the frames
-     that have the dark ground. The org's explicit hero ink wins here, with
-     the white it was designed around as the fallback — unchanged for orgs
-     with a shader. `hero-ink.test.ts` pins both sides of this contract.
+  /* A shader is painting behind the hero. ShaderHero publishes `data-live`
+     on its root once a renderer has drawn a frame the canvas shows, and
+     clears it for preset 'none', a renderer that failed, or a lost context.
+     So this rule matches exactly the frames that have the dark ground. The
+     org's explicit hero ink wins here, with the white it was designed around
+     as the fallback, unchanged for orgs with a shader. `hero-ink.test.ts`
+     pins both sides of this contract.
 
-     The canvas FADES in (ShaderHero's --transition-opacity), so an instant
-     swap put white on a still-unpainted page for the first half of the
-     fade. Transitioning the ink discretely with the fade's own duration
-     and easing flips it when the canvas crosses half opacity instead. It
-     lives on this rule only, so a theme switch without a shader stays
-     instant. */
-  :global(.org-layout:has(> .shader-hero--fullpage > canvas[style*='opacity: 1'])) .hero {
+     The canvas FADES in (ShaderHero's --transition-opacity), starting in the
+     task that sets `data-live`. An instant swap would put white on a page
+     that is still unpainted for the first half of the fade. Transitioning
+     the ink discretely, with the fade's own duration and easing, flips it
+     when the canvas crosses half opacity instead. It lives on this rule
+     only, so a theme switch without a shader stays instant. */
+  :global(.org-layout:has(> .shader-hero--fullpage[data-live])) .hero {
     --_hero-ink: var(--brand-hero-text, white);
     --_hero-ink-heading: var(--brand-hero-title-color, white);
     --_hero-ink-muted: var(--brand-hero-text-muted, white);
@@ -1333,7 +1338,7 @@
      Uses `hsl(0 0% 0% / α)` direct (same pattern as player.css) — semantic
      surface tokens flip to light in dark-theme orgs, which would invert
      the intended darkening effect. */
-  :global(.org-layout:has(> .shader-hero--fullpage > canvas[style*='opacity: 1'])) .hero::after {
+  :global(.org-layout:has(> .shader-hero--fullpage[data-live])) .hero::after {
     content: '';
     position: absolute;
     inset: 0;
@@ -1377,8 +1382,9 @@
   }
 
   .hero__title {
-    /* No z-index — lives outside hero__content so mix-blend-mode
-       can composite directly against the shader canvas */
+    /* No z-index, and outside hero__content. The blend below still stays
+       inside .org-main's stacking context and never reaches the shader
+       canvas (see the markup comment; Codex-hdzjw). */
     position: relative;
     margin: 0;
     width: 100%;
@@ -2113,9 +2119,9 @@
      HERO ENTRANCE ANIMATIONS
      Staggered choreography on initial mount.
 
-     Title uses `clip-path` (not opacity/transform) so it never creates
-     a stacking context — preserving `mix-blend-mode: difference`
-     against the shader canvas throughout the reveal.
+     Title uses `clip-path` (not opacity/transform). Its blend never
+     reaches the shader canvas during the reveal or after it:
+     .org-main's stacking context confines it (Codex-hdzjw).
 
      Content children use opacity + translateY (they have no blend-mode
      dependency). Reduced-motion is handled globally by motion.css — it

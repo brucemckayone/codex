@@ -26,6 +26,7 @@
  */
 
 import { computeImmersiveColours } from '../immersive-colours';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { FlowConfig, ShaderConfig } from '../shader-config';
 import { FLOW_DISPLAY_FRAG } from '../shaders/flow-display.frag';
@@ -34,10 +35,10 @@ import { FLOW_SIM_FRAG } from '../shaders/flow-sim.frag';
 import {
   createStepClock,
   inputStride,
-  resizeSim,
   type SimGrid,
   simGridFor,
 } from '../sim-grid';
+import { resizeSim } from '../sim-resize';
 import {
   createDoubleFBO,
   createProgram,
@@ -213,7 +214,7 @@ export function createFlowRenderer(): ShaderRenderer {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    bindOutput(gl);
     simBuf.swap();
   }
 
@@ -413,13 +414,15 @@ export function createFlowRenderer(): ShaderRenderer {
       gl.uniform1f(displayU.uAmplitudeSmooth, amplitudeSmooth);
       gl.uniform1f(displayU.uAudioActive, wandererFade);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 
     resize(gl: WebGL2RenderingContext, width: number, height: number): void {
-      // Shared rule (sim-grid `resizeSim`): rebuild only on a real change of
-      // shape, never on a lost context, allocating before destroying; the new grid is reseeded (the seed and warm-up make that seamless).
+      // Shared rule (`resizeSim` in sim-resize.ts): rebuild only on a real
+      // change of shape, never on a lost context, allocating before
+      // destroying. The new grid is reseeded (the seed and warm-up make that
+      // seamless).
       const resized = resizeSim(gl, grid, simBuf, width, height);
       if (!resized) return;
       grid = resized.grid;
@@ -445,7 +448,7 @@ export function createFlowRenderer(): ShaderRenderer {
       drawQuad(gl);
       gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
       drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
     },
 
     destroy(gl: WebGL2RenderingContext): void {

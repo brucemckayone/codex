@@ -15,6 +15,7 @@ import {
   createDeltaClock,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig } from '../shader-config';
 import { FILM_FRAG } from '../shaders/film.frag';
@@ -184,7 +185,7 @@ export function createFilmRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_clock, clock);
       uploadAudioUniforms(gl, uniforms, a);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 
