@@ -14,15 +14,29 @@
 import { CacheType } from '@codex/cache';
 import { describe, expect, it, vi } from 'vitest';
 
-const fakeDb = vi.hoisted(() => ({
-  query: {
-    organizations: { findFirst: async () => ({ slug: 'studio-alpha' }) },
-    purchases: { findMany: async () => [{ customerId: 'u-buyer' }] },
-    subscriptions: { findMany: async () => [] },
-    organizationMemberships: { findMany: async () => [{ userId: 'u-team' }] },
-    organizationFollowers: { findMany: async () => [] },
-  },
-}));
+const fakeDb = vi.hoisted(() => {
+  // The holders read (`holdersOf`, Codex-a6ofh.6) is one `db.select()` chain
+  // of nested subqueries: any builder call returns the chain, and awaiting
+  // it gives the one holder.
+  const holders: object = new Proxy(() => {}, {
+    get: (_target, prop) =>
+      prop === 'then'
+        ? (resolve: (rows: unknown) => void) => resolve([{ userId: 'u-buyer' }])
+        : () => holders,
+    apply: () => holders,
+  });
+  return {
+    select: () => holders,
+    query: {
+      organizations: { findFirst: async () => ({ slug: 'studio-alpha' }) },
+      subscriptions: { findMany: async () => [] },
+      organizationMemberships: {
+        findMany: async () => [{ userId: 'u-team' }],
+      },
+      organizationFollowers: { findMany: async () => [] },
+    },
+  };
+});
 vi.mock('@codex/database', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/database')>();
   return { ...actual, createDbClient: () => fakeDb };

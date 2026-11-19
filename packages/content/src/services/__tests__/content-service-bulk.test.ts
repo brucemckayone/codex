@@ -1,11 +1,12 @@
 /**
  * ContentService bulk actions (Codex-a6ofh.3.5, data-design §4.2): each piece
  * goes through its own method in its own transaction and gets a result of its
- * own, in the order sent. A refused piece never undoes the others; a piece
- * people bought is left alone by a delete, and by a move to Followers or Team
- * only (owner D-b4, R1); another creator's piece is refused as not found and
- * never touched. And the studio list's rows carry their buyers (owner R2),
- * which its "sales" sort orders by.
+ * own, in the order sent. A refused piece never undoes the others; a delete
+ * of a piece people hold leaves it on a date instead (Codex-a6ofh.6), and a
+ * move to Followers or Team only changes it, its owners keeping it (D2);
+ * another creator's piece is refused as not found and never touched. And
+ * the studio list's rows carry their buyers (owner R2), which its "sales"
+ * sort orders by.
  *
  * Database: a real Postgres (the throwaway e3_scratch locally, the CI branch
  * in CI). Every row it makes is its own, and deleted in afterAll.
@@ -17,6 +18,7 @@ import {
   categories,
   content,
   contentCategories,
+  contentLeavingNotices,
   courseStages,
   courses,
   entitlements,
@@ -93,6 +95,11 @@ describe('ContentService: bulk actions', () => {
         .where(inArray(entitlements.contentId, contentIds));
     }
     if (contentIds.length > 0) {
+      // A held piece's delete writes its notices (Codex-a6ofh.6), which hold
+      // the content row (restrict).
+      await db
+        .delete(contentLeavingNotices)
+        .where(inArray(contentLeavingNotices.contentId, contentIds));
       await db
         .delete(contentCategories)
         .where(inArray(contentCategories.contentId, contentIds));
@@ -199,6 +206,10 @@ describe('ContentService: bulk actions', () => {
 
   const outcomes = (results: ContentBulkResult[]) =>
     results.map((result) => result.outcome);
+
+  /** A `leaving` result's holders, or null for any other outcome. */
+  const holdersOf = (result: ContentBulkResult | undefined) =>
+    result?.outcome === 'leaving' ? result.holders : null;
 
   const refusalCode = (result: ContentBulkResult | undefined) => {
     if (!result || !('error' in result)) return undefined;
@@ -361,7 +372,7 @@ describe('ContentService: bulk actions', () => {
   });
 
   describe('deleteMany', () => {
-    it('leaves a piece people bought alone, and deletes the rest', async () => {
+    it('a piece people bought leaves on a date; one nobody holds is deleted', async () => {
       const sold = await live();
       await bought(sold.id);
       await bought(sold.id, secondBuyerId);
@@ -369,17 +380,18 @@ describe('ContentService: bulk actions', () => {
 
       const report = await service.deleteMany([sold.id, unsold.id], creatorId);
 
-      expect(outcomes(report.results)).toEqual(['refused', 'done']);
-      const [refused] = report.results;
-      expect(refusalCode(refused)).toBe(ERROR_CODES.CONTENT_HAS_BUYERS);
-      expect(
-        refused && 'error' in refused
-          ? (refused.error.details as { buyers?: number }).buyers
-          : null
-      ).toBe(2);
-      expect((await stored(sold.id)).deletedAt).toBeNull();
+      expect(outcomes(report.results)).toEqual(['leaving', 'done']);
+      const [leaving] = report.results;
+      expect(holdersOf(leaving)).toBe(2);
+      const after = await stored(sold.id);
+      expect(after.deletedAt).toBeNull();
+      expect(leaving?.outcome === 'leaving' ? leaving.leavesAt : null).toBe(
+        after.leavesAt?.toISOString()
+      );
       expect((await stored(unsold.id)).deletedAt).not.toBeNull();
-      expect(report.touched.map((t) => t.id)).toEqual([unsold.id]);
+      // Both refresh their people's libraries; the route clears only the
+      // deleted one's cover.
+      expect(report.touched.map((t) => t.id)).toEqual([sold.id, unsold.id]);
     });
 
     it('counts course buyers and grants as buyers; a course subscriber or a revoked grant is not one', async () => {
@@ -419,14 +431,11 @@ describe('ContentService: bulk actions', () => {
       );
 
       expect(outcomes(report.results)).toEqual([
-        'refused',
-        'refused',
+        'leaving',
+        'leaving',
         'done',
         'done',
       ]);
-      expect(refusalCode(report.results[0])).toBe(
-        ERROR_CODES.CONTENT_HAS_BUYERS
-      );
     });
 
     it('counts a course buyer whose purchase is under dispute: a win gives the course back', async () => {
@@ -463,7 +472,7 @@ describe('ContentService: bulk actions', () => {
 
       const report = await service.deleteMany([lesson.id], creatorId);
 
-      expect(outcomes(report.results)).toEqual(['refused']);
+      expect(outcomes(report.results)).toEqual(['leaving']);
       expect((await stored(lesson.id)).deletedAt).toBeNull();
     });
 
@@ -479,12 +488,14 @@ describe('ContentService: bulk actions', () => {
 
       const report = await service.deleteMany([sold.id], creatorId);
 
-      const [refused] = report.results;
-      expect(
-        refused && 'error' in refused
-          ? (refused.error.details as { buyers?: number }).buyers
-          : null
-      ).toBe(1);
+      expect(holdersOf(report.results[0])).toBe(1);
+      const notices = await db
+        .select()
+        .from(contentLeavingNotices)
+        .where(eq(contentLeavingNotices.contentId, sold.id));
+      expect(notices.map((n) => [n.userId, n.kind])).toEqual([
+        [buyerId, 'leaving'],
+      ]);
     });
 
     it('counts only completed purchases, a refunded one is no buyer', async () => {
@@ -500,13 +511,17 @@ describe('ContentService: bulk actions', () => {
       expect(outcomes(report.results)).toEqual(['done']);
     });
 
-    it('a delete one at a time still deletes a bought piece', async () => {
+    it('a delete one at a time leaves a bought piece on the same terms', async () => {
       const sold = await live();
       await bought(sold.id);
 
-      await service.delete(sold.id, creatorId);
+      const result = await service.delete(sold.id, creatorId);
 
-      expect((await stored(sold.id)).deletedAt).not.toBeNull();
+      expect(result.outcome).toBe('leaving');
+      expect(result.holders).toBe(1);
+      const after = await stored(sold.id);
+      expect(after.deletedAt).toBeNull();
+      expect(after.leavesAt?.getTime()).toBe(result.leavesAt?.getTime());
     });
   });
 
@@ -571,7 +586,7 @@ describe('ContentService: bulk actions', () => {
       expect(outcomes(again.results)).toEqual(['unchanged', 'unchanged']);
     });
 
-    it('a move to Followers leaves a bought piece alone (R1)', async () => {
+    it('a move to Followers changes a bought piece too: its owners keep it (D2)', async () => {
       const sold = await live({ organizationId: orgId });
       await bought(sold.id);
       const unsold = await live({ organizationId: orgId });
@@ -582,37 +597,16 @@ describe('ContentService: bulk actions', () => {
         followers
       );
 
-      expect(outcomes(report.results)).toEqual(['refused', 'done']);
-      expect(refusalCode(report.results[0])).toBe(
-        ERROR_CODES.CONTENT_HAS_BUYERS
-      );
-      expect((await stored(sold.id)).isFollowerGated).toBe(false);
+      expect(outcomes(report.results)).toEqual(['done', 'done']);
+      expect((await stored(sold.id)).isFollowerGated).toBe(true);
       expect((await stored(unsold.id)).isFollowerGated).toBe(true);
       expect(report.touched).toEqual([
+        { id: sold.id, organizationId: orgId },
         { id: unsold.id, organizationId: orgId },
       ]);
     });
 
-    it('lets a course-only piece move to Followers: its course holders keep it', async () => {
-      const lesson = await live({ organizationId: orgId, courseOnly: true });
-      await db.insert(entitlements).values({
-        userId: buyerId,
-        organizationId: orgId,
-        courseId: await inCourse(lesson.id),
-        source: 'course_purchase',
-      });
-
-      const report = await service.accessMany(
-        [lesson.id],
-        creatorId,
-        followers
-      );
-
-      expect(outcomes(report.results)).toEqual(['done']);
-      expect((await stored(lesson.id)).isFollowerGated).toBe(true);
-    });
-
-    it('a change its own rule refuses is never refused as "people have it"', async () => {
+    it('a change its own rule refuses says that rule, whoever holds the piece', async () => {
       // A partial group: the Subscribers switch stays on, so the move to
       // Followers breaks the tier rule, whoever has the piece.
       const gated = await piece({
@@ -633,7 +627,7 @@ describe('ContentService: bulk actions', () => {
       );
     });
 
-    it('a held piece the payouts gate refuses says the gate, never "people have it"', async () => {
+    it('a held piece the payouts gate refuses says the gate', async () => {
       // Followers with a price: the creator has no payout account, so the
       // gate refuses it, whoever has the piece.
       const shown = await live({ organizationId: orgId });

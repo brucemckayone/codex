@@ -25,14 +25,6 @@ import { NO_PUBLISH_REQUEST } from './publish-gate';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** The notice table's unique: one email of each kind per person per round. */
-const NOTICE_PERSON = [
-  contentLeavingNotices.contentId,
-  contentLeavingNotices.kind,
-  contentLeavingNotices.round,
-  contentLeavingNotices.userId,
-];
-
 /** What the leaving writes log through (an `ObservabilityClient`). */
 export interface LeavingLog {
   error(message: string, metadata?: Record<string, unknown>): void;
@@ -104,7 +96,8 @@ async function cancelOpen(
 /**
  * One `kind` row per holder of the piece, for `round`, from the one holders
  * set, each person once (ON CONFLICT DO NOTHING skips a repeat). Returns how
- * many it wrote.
+ * many it wrote. The INSERT is SQL around the holders' SELECT: drizzle's
+ * insert-select takes only a select of every column, in table order.
  */
 async function writeHolderNotices(
   tx: DatabaseTransaction,
@@ -113,21 +106,20 @@ async function writeHolderNotices(
   round: Date
 ): Promise<number> {
   const holders = holdersOf(tx, [contentId]);
-  const written = await tx
-    .insert(contentLeavingNotices)
-    .select(
-      tx
-        .select({
-          contentId: sql<string>`${holders.contentId}`.as('content_id'),
-          userId: holders.userId,
-          kind: sql<ContentLeavingNoticeKind>`${kind}::varchar`.as('kind'),
-          round: sql<Date>`${round.toISOString()}::timestamptz`.as('round'),
-        })
-        .from(holders)
-    )
-    .onConflictDoNothing({ target: NOTICE_PERSON })
-    .returning({ id: contentLeavingNotices.id });
-  return written.length;
+  const people = tx
+    .select({
+      contentId: sql`${holders.contentId}`.as('content_id'),
+      userId: sql`${holders.userId}`.as('user_id'),
+    })
+    .from(holders);
+  const written = await tx.execute(sql`
+    INSERT INTO content_leaving_notices (content_id, user_id, kind, round)
+    SELECT people.content_id, people.user_id, ${kind}, ${round.toISOString()}::timestamptz
+    FROM (${people}) people
+    ON CONFLICT (content_id, kind, round, user_id) DO NOTHING
+    RETURNING id
+  `);
+  return written.rows.length;
 }
 
 /**

@@ -9,7 +9,7 @@
  *
  * Coverage mirrors the subscription-invalidation test matrix:
  *   - Catalogue bumps fire unconditionally
- *   - Per-user fanout query union of purchases + subscribers + management
+ *   - Per-user fanout query union of holders + subscribers + management
  *   - `includeFollowers` opt-in adds followers to the fanout
  *   - Deduplication across sources (a user who is both purchaser + subscriber
  *     is bumped once)
@@ -23,7 +23,7 @@
 import { CacheType, type VersionedCache } from '@codex/cache';
 import type { Database } from '@codex/database';
 import { ValidationError } from '@codex/service-errors';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_MAX_LIBRARY_FANOUT,
   type InvalidationLogger,
@@ -39,7 +39,8 @@ import {
 // ============================================================================
 
 interface QueryFixture {
-  purchases: Array<{ customerId: string }>;
+  /** What the holders read (`holdersOf`) returns. */
+  holders: Array<{ userId: string }>;
   subscriptions: Array<{ userId: string }>;
   organizationMemberships: Array<{ userId: string }>;
   organizationFollowers: Array<{ userId: string }>;
@@ -47,19 +48,18 @@ interface QueryFixture {
 
 function makeDb(fixture: Partial<QueryFixture> = {}): Database {
   const defaults: QueryFixture = {
-    purchases: [],
+    holders: [],
     subscriptions: [],
     organizationMemberships: [],
     organizationFollowers: [],
   };
   const rows = { ...defaults, ...fixture };
 
-  // Only .findMany is exercised by the helper.
+  // The holders are one `db.select()` chain (`holdersOf`); the org's people
+  // are `.findMany` reads.
   const mock = {
+    select: vi.fn(() => selectChain(rows.holders)),
     query: {
-      purchases: {
-        findMany: vi.fn().mockResolvedValue(rows.purchases),
-      },
       subscriptions: {
         findMany: vi.fn().mockResolvedValue(rows.subscriptions),
       },
@@ -72,9 +72,36 @@ function makeDb(fixture: Partial<QueryFixture> = {}): Database {
     },
   };
   // Drizzle has a much larger surface; we narrow it here because the helper
-  // only uses `db.query.*.findMany`. Casting via unknown is the standard
-  // pattern (see subscription-invalidation.test.ts) — not `as any`.
+  // only uses `db.select()` and `db.query.*.findMany`. Casting via unknown is
+  // the standard pattern (see subscription-invalidation.test.ts) — not `as any`.
   return mock as unknown as Database;
+}
+
+/** How many holders reads ran since the last test began: one per await. */
+let holderReads = 0;
+beforeEach(() => {
+  holderReads = 0;
+});
+
+/**
+ * A `db.select()` builder for the holders read: any chain of builder calls
+ * (the subqueries `holdersOf` nests), resolving to `rows` when awaited.
+ */
+function selectChain(rows: Array<{ userId: string }>): unknown {
+  const chain: object = new Proxy(() => {}, {
+    get(_target, prop) {
+      if (prop === 'then') {
+        holderReads += 1;
+        return (
+          resolve: (value: unknown) => void,
+          reject: (error: unknown) => void
+        ) => Promise.resolve(rows).then(resolve, reject);
+      }
+      return () => chain;
+    },
+    apply: () => chain,
+  });
+  return chain;
 }
 
 function makeCache(
@@ -161,7 +188,7 @@ describe('invalidateContentAccess', () => {
 
   it('unions purchasers, subscribers, and management members and fans per-user bumps', async () => {
     const db = makeDb({
-      purchases: [{ customerId: 'u-purchase' }],
+      holders: [{ userId: 'u-purchase' }],
       subscriptions: [{ userId: 'u-subscriber' }],
       organizationMemberships: [{ userId: 'u-management' }],
     });
@@ -192,7 +219,7 @@ describe('invalidateContentAccess', () => {
 
   it('deduplicates when a user appears in multiple sources', async () => {
     const db = makeDb({
-      purchases: [{ customerId: 'u-overlap' }],
+      holders: [{ userId: 'u-overlap' }],
       subscriptions: [{ userId: 'u-overlap' }],
       organizationMemberships: [{ userId: 'u-overlap' }],
     });
@@ -321,7 +348,7 @@ describe('invalidateContentAccess', () => {
 
   it('swallows cache.invalidate rejections and routes them through the logger', async () => {
     const boom = new Error('KV unavailable');
-    const db = makeDb({ purchases: [{ customerId: 'u-1' }] });
+    const db = makeDb({ holders: [{ userId: 'u-1' }] });
     const { cache } = makeCache(() => Promise.reject(boom));
     const { waitUntil, promises } = makeWaitUntil();
     const warn = vi.fn();
@@ -364,7 +391,7 @@ describe('invalidateContentAccess', () => {
           resolvers.push(resolve);
         })
     );
-    const db = makeDb({ purchases: [{ customerId: 'u-1' }] });
+    const db = makeDb({ holders: [{ userId: 'u-1' }] });
     const { waitUntil, promises, spy } = makeWaitUntil();
 
     await invalidateContentAccess({
@@ -657,7 +684,7 @@ describe('invalidateContentAccessMany', () => {
 
   it("bumps each user's library once, a buyer of two pieces and a member alike", async () => {
     const db = makeDb({
-      purchases: [{ customerId: 'u-buyer' }, { customerId: 'u-buyer' }],
+      holders: [{ userId: 'u-buyer' }, { userId: 'u-buyer' }],
       organizationMemberships: [{ userId: 'u-buyer' }, { userId: 'u-team' }],
     });
     const { cache, invalidate } = makeCache();
@@ -682,7 +709,7 @@ describe('invalidateContentAccessMany', () => {
       callsTo(invalidate, CacheType.COLLECTION_USER_LIBRARY('u-team'))
     ).toBe(1);
     // One read per source, never one per piece.
-    expect(db.query.purchases.findMany).toHaveBeenCalledTimes(1);
+    expect(holderReads).toBe(1);
     expect(db.query.organizationMemberships.findMany).toHaveBeenCalledTimes(1);
   });
 
@@ -706,11 +733,7 @@ describe('invalidateContentAccessMany', () => {
 
   it('skips the per-user bumps above the cap, and says so', async () => {
     const db = makeDb({
-      purchases: [
-        { customerId: 'a' },
-        { customerId: 'b' },
-        { customerId: 'c' },
-      ],
+      holders: [{ userId: 'a' }, { userId: 'b' }, { userId: 'c' }],
     });
     const { cache, invalidate } = makeCache();
     const { waitUntil, promises } = makeWaitUntil();
@@ -741,7 +764,7 @@ describe('invalidateContentAccessMany', () => {
   });
 
   it('leaves the catalogue keys to its caller with catalogue: false', async () => {
-    const db = makeDb({ purchases: [{ customerId: 'u-buyer' }] });
+    const db = makeDb({ holders: [{ userId: 'u-buyer' }] });
     const { cache, invalidate } = makeCache();
     const { waitUntil, promises } = makeWaitUntil();
 
@@ -780,6 +803,6 @@ describe('invalidateContentAccessMany', () => {
     });
 
     expect(invalidate).not.toHaveBeenCalled();
-    expect(db.query.purchases.findMany).not.toHaveBeenCalled();
+    expect(db.select).not.toHaveBeenCalled();
   });
 });

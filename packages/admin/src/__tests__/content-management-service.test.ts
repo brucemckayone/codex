@@ -5,7 +5,8 @@
  * - List all content with pagination and filtering
  * - Publish content (admin override)
  * - Unpublish content (admin override)
- * - Delete content (soft delete)
+ * - Delete content (the creator's path: a held piece leaves with notice)
+ * - Takedown (a platform admin's immediate delete)
  * - Organization scoping enforcement
  * - Error handling
  *
@@ -14,15 +15,18 @@
  * - Each test creates its own data (idempotent tests)
  */
 
+import { randomUUID } from 'node:crypto';
 import { CONTENT_STATUS, PAGINATION } from '@codex/constants';
 import {
   CreatorPayoutsRequiredError,
   TierRequiredToPublishError,
 } from '@codex/content';
 import {
+  contentLeavingNotices,
   content as contentTable,
   mediaItems,
   organizations,
+  purchases,
   stripeConnectAccounts,
   subscriptionTiers,
 } from '@codex/database/schema';
@@ -847,7 +851,12 @@ describe('AdminContentManagementService', () => {
 
       const result = await service.deleteContent(testOrg.id, content.id);
 
-      expect(result).toBe(true);
+      expect(result).toEqual({
+        outcome: 'deleted',
+        leavesAt: null,
+        holders: 0,
+        creatorId,
+      });
 
       // Verify content is no longer returned in list
       const list = await service.listAllContent(testOrg.id);
@@ -942,6 +951,179 @@ describe('AdminContentManagementService', () => {
       await expect(
         service.deleteContent(testOrg.id, content.id)
       ).rejects.toThrow(NotFoundError);
+    });
+
+    it('gives a held piece notice, as the creator’s delete does', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece();
+      await bought(piece.id, buyer);
+
+      const result = await service.deleteContent(orgId, piece.id);
+
+      expect(result).toMatchObject({
+        outcome: 'leaving',
+        holders: 1,
+        creatorId,
+      });
+      const after = await stored(piece.id);
+      expect(after.deletedAt).toBeNull();
+      expect(after.leavesAt?.getTime()).toBe(result.leavesAt?.getTime());
+      expect(
+        (await noticesOf(piece.id)).map((n) => [n.userId, n.kind])
+      ).toEqual([[buyer, 'leaving']]);
+    });
+  });
+
+  // ── the leaving notice (Codex-a6ofh.6) ────────────────────────────────────
+
+  /** A live free article in the org (the suite's unless told). */
+  async function livePiece(organizationId = orgId) {
+    return takeFirst(
+      await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId,
+          title: 'Leaving notice',
+          slug: createUniqueSlug('leaving'),
+          contentType: 'written',
+          contentBody: 'Something to read',
+          status: CONTENT_STATUS.PUBLISHED,
+          publishedAt: new Date(),
+          priceCents: 0,
+        })
+        .returning()
+    );
+  }
+
+  async function bought(contentId: string, customerId: string) {
+    await db.insert(purchases).values({
+      customerId,
+      contentId,
+      amountPaidCents: 900,
+      currency: 'gbp',
+      platformFeeCents: 0,
+      organizationFeeCents: 0,
+      creatorPayoutCents: 900,
+      stripePaymentIntentId: `pi_${randomUUID()}`,
+      status: 'completed',
+      purchasedAt: new Date(),
+    });
+  }
+
+  const stored = async (id: string) =>
+    takeFirst(
+      await db.select().from(contentTable).where(eq(contentTable.id, id))
+    );
+
+  const noticesOf = (contentId: string) =>
+    db
+      .select()
+      .from(contentLeavingNotices)
+      .where(eq(contentLeavingNotices.contentId, contentId));
+
+  describe('publishContent of a leaving piece', () => {
+    it('refuses it: Keep it first', async () => {
+      // Its creator on the team, so the leave is what refuses it.
+      const teamOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      await joinTeam(db, teamOrg.id, creatorId);
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece(teamOrg.id);
+      await bought(piece.id, buyer);
+      await service.deleteContent(teamOrg.id, piece.id);
+
+      await expect(
+        service.publishContent(teamOrg.id, piece.id)
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        context: { code: 'CONTENT_LEAVING' },
+      });
+    });
+  });
+
+  describe('takedownContent', () => {
+    it('deletes a leaving piece at once: its notices cancelled, a removed row each, its date cleared', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece();
+      await bought(piece.id, buyer);
+      const { leavesAt } = await service.deleteContent(orgId, piece.id);
+      if (!leavesAt) throw new Error('expected a leave date');
+      await db.insert(contentLeavingNotices).values({
+        contentId: piece.id,
+        userId: buyer,
+        kind: 'reminder',
+        round: leavesAt,
+      });
+
+      const taken = await service.takedownContent(piece.id);
+
+      expect(taken).toEqual({
+        contentId: piece.id,
+        holders: 1,
+        organizationId: orgId,
+        creatorId,
+      });
+      const after = await stored(piece.id);
+      expect(after.deletedAt).not.toBeNull();
+      // A deleted piece with a date is one that left with notice.
+      expect(after.leavesAt).toBeNull();
+      const byKind = Object.fromEntries(
+        (await noticesOf(piece.id)).map((n) => [n.kind, n.state])
+      );
+      expect(byKind).toEqual({
+        leaving: 'cancelled',
+        reminder: 'cancelled',
+        removed: 'due',
+      });
+    });
+
+    it('cancels a kept piece’s open staying email', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece();
+      await bought(piece.id, buyer);
+      const { leavesAt } = await service.deleteContent(orgId, piece.id);
+      if (!leavesAt) throw new Error('expected a leave date');
+      await db.insert(contentLeavingNotices).values({
+        contentId: piece.id,
+        userId: buyer,
+        kind: 'staying',
+        round: leavesAt,
+      });
+      await db
+        .update(contentTable)
+        .set({ leavesAt: null })
+        .where(eq(contentTable.id, piece.id));
+
+      await service.takedownContent(piece.id);
+
+      const staying = (await noticesOf(piece.id)).find(
+        (n) => n.kind === 'staying'
+      );
+      expect(staying?.state).toBe('cancelled');
+    });
+
+    it('takes down a piece nobody holds, writing no notice', async () => {
+      const piece = await livePiece();
+
+      const taken = await service.takedownContent(piece.id);
+
+      expect(taken.holders).toBe(0);
+      expect((await stored(piece.id)).deletedAt).not.toBeNull();
+      expect(await noticesOf(piece.id)).toEqual([]);
+    });
+
+    it('refuses a piece already gone', async () => {
+      const piece = await livePiece();
+      await service.takedownContent(piece.id);
+
+      await expect(service.takedownContent(piece.id)).rejects.toThrow(
+        NotFoundError
+      );
     });
   });
 });
