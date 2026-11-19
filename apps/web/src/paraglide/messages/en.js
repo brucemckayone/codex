@@ -9055,6 +9055,14 @@ export const branding_hero_comp_billboard = () => `Billboard`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_showreel = () => `Showreel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_field_align = () => `Alignment`
 
 
