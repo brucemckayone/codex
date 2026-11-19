@@ -37,7 +37,11 @@ const FULL: HeroFacts = {
   hasDescription: true,
   canJoin: true,
   hideTitle: false,
+  hasReel: true,
 };
+
+/** An org with everything but a reel worth playing: today's frames. */
+const NO_REEL: HeroFacts = { ...FULL, hasReel: false };
 
 /** A brand-new org: one or two pieces, nothing set. */
 const BARE: HeroFacts = {
@@ -53,6 +57,7 @@ const BARE: HeroFacts = {
   hasDescription: false,
   canJoin: false,
   hideTitle: false,
+  hasReel: false,
 };
 
 describe('readHeroSettings', () => {
@@ -128,8 +133,8 @@ describe('resolveHero', () => {
     expect(c.lead).toBe('name'); // no logo
   });
 
-  it('leads with the intro film when it can loop, and never draws a film it lacks', () => {
-    const withFilm = defaultOptions('consume', FULL);
+  it('with no reel, leads with the intro film when it can loop, and never draws a film it lacks', () => {
+    const withFilm = defaultOptions('consume', NO_REEL);
     expect(withFilm).toMatchObject({
       comp: 'showcase',
       spot: 'film',
@@ -137,7 +142,10 @@ describe('resolveHero', () => {
       micro: 'off',
     });
     // no loopable film: the latest piece fills the frame instead
-    const noLoop = defaultOptions('consume', { ...FULL, hasFilmLoop: false });
+    const noLoop = defaultOptions('consume', {
+      ...NO_REEL,
+      hasFilmLoop: false,
+    });
     expect(noLoop).toMatchObject({ comp: 'showcase', spot: 'latest' });
     // a film but no pieces: the film alone still makes a Showcase
     const filmOnly = defaultOptions('consume', {
@@ -234,7 +242,7 @@ describe('fallbacks decide on the piece the spot lands on', () => {
   });
 
   it('never loops the film behind the words while it fills the frame', () => {
-    const o = resolveHero('consume', { bg: 'film' }, FULL);
+    const o = resolveHero('consume', { bg: 'film' }, NO_REEL);
     expect(o.spot).toBe('film');
     expect(o.bg).toBe('shader');
     expect(
@@ -249,6 +257,208 @@ describe('fallbacks decide on the piece the spot lands on', () => {
     expect(resolveHero('grow', {}, { ...BARE, hideTitle: true }).lead).toBe(
       'name'
     );
+  });
+});
+
+describe('the Showreel', () => {
+  const REEL_AXES = HERO_OPTION_KEYS.filter((key) => key.startsWith('reel-'));
+
+  it('is the default for a consume org with a reel, every reel option at its first value', () => {
+    expect(REEL_AXES).toHaveLength(9);
+    const o = defaultOptions('consume', FULL);
+    expect(o).toMatchObject({
+      comp: 'showreel',
+      bg: 'shader',
+      spot: 'none',
+      align: 'start',
+      micro: 'off',
+    });
+    for (const axis of REEL_AXES) {
+      expect(o[axis]).toBe(HERO_OPTION_VALUES[axis][0]);
+    }
+  });
+
+  it('is never the default for an org without a reel, shader or not: that org keeps today’s hero', () => {
+    expect(defaultOptions('consume', NO_REEL)).toMatchObject({
+      comp: 'showcase',
+      spot: 'film',
+      bg: 'shader',
+    });
+    expect(defaultOptions('consume', BARE).comp).toBe('statement');
+  });
+
+  it('plays on a plain ground for an org with a reel but no shader, without the shader’s surface or band', () => {
+    const noShader = { ...FULL, hasShader: false };
+    expect(defaultOptions('consume', noShader)).toMatchObject({
+      comp: 'showreel',
+      bg: 'plain',
+      spot: 'none',
+    });
+    expect(
+      resolveHero(
+        'consume',
+        { 'reel-surface': 'shader', 'reel-band': 'under' },
+        noShader
+      )
+    ).toMatchObject({ 'reel-surface': 'none', 'reel-band': 'none' });
+    expect(
+      resolveHero('consume', { 'reel-band': 'fade' }, noShader)['reel-band']
+    ).toBe('none');
+    // a surface that is not the shader's stays
+    expect(
+      resolveHero('consume', { 'reel-surface': 'grain' }, noShader)[
+        'reel-surface'
+      ]
+    ).toBe('grain');
+    // with a shader, both stay
+    expect(
+      resolveHero(
+        'consume',
+        { 'reel-surface': 'shader', 'reel-band': 'under' },
+        FULL
+      )
+    ).toMatchObject({ 'reel-surface': 'shader', 'reel-band': 'under' });
+  });
+
+  it('is never the default for any other purpose', () => {
+    for (const purpose of HERO_PURPOSES) {
+      if (purpose === 'consume') continue;
+      expect(defaultOptions(purpose, FULL).comp).not.toBe('showreel');
+    }
+  });
+
+  it('can be chosen under any purpose, and keeps the org’s own reel options', () => {
+    const chosen = {
+      comp: 'showreel',
+      'reel-layout': 'wide',
+      'reel-peek': 'on',
+      'reel-pointer': 'glitch',
+      'reel-trans': 'liquid',
+      'reel-surface': 'halftone',
+      'reel-band': 'fade',
+      'reel-opening': 'none',
+      'reel-film': 'liquid',
+      'reel-loop': 'off',
+    } as const;
+    const o = resolveHero('grow', chosen, FULL);
+    expect(o).toMatchObject(chosen);
+    // the reel's layout places the words
+    expect(o.align).toBe('start');
+  });
+
+  it('chosen with no reel to play, gives way to the purpose’s own hero', () => {
+    // exactly the hero the org would have with no choice made, for every purpose
+    for (const facts of [NO_REEL, BARE]) {
+      for (const purpose of HERO_PURPOSES) {
+        expect(resolveHero(purpose, { comp: 'showreel' }, facts)).toEqual(
+          defaultOptions(purpose, facts)
+        );
+      }
+    }
+    expect(resolveHero('grow', { comp: 'showreel' }, NO_REEL)).toMatchObject({
+      comp: 'centre',
+      align: 'center',
+    });
+    expect(resolveHero('intro', { comp: 'showreel' }, NO_REEL).comp).toBe(
+      'split'
+    );
+    expect(resolveHero('library', { comp: 'showreel' }, NO_REEL).comp).toBe(
+      'statement'
+    );
+    expect(resolveHero('follow', { comp: 'showreel' }, NO_REEL).comp).toBe(
+      'statement'
+    );
+    // a consume org whose only piece is a featured portal
+    const onlyPortal = { ...BARE, hasFeatured: true, hasFeaturedImage: true };
+    expect(resolveHero('consume', { comp: 'showreel' }, onlyPortal).comp).toBe(
+      'statement'
+    );
+    // the org's other choices still hold
+    expect(
+      resolveHero('grow', { comp: 'showreel', height: 'compact' }, NO_REEL)
+        .height
+    ).toBe('compact');
+    // no shader is no reason to give way
+    expect(
+      resolveHero('grow', { comp: 'showreel' }, { ...FULL, hasShader: false })
+        .comp
+    ).toBe('showreel');
+  });
+
+  it('draws no ground of its own, no spotlight, and no shelf beside its index', () => {
+    const o = resolveHero(
+      'consume',
+      { bg: 'film', spot: 'featured', proof: 'shelf' },
+      FULL
+    );
+    expect(o).toMatchObject({
+      comp: 'showreel',
+      bg: 'shader',
+      spot: 'none',
+      proof: 'facts',
+    });
+    expect(
+      resolveHero('consume', { proof: 'shelf' }, { ...FULL, hasFacts: false })
+        .proof
+    ).toBe('none');
+    // the shelf is the Statement's, and stays there
+    expect(
+      resolveHero('consume', { comp: 'statement', proof: 'shelf' }, FULL).proof
+    ).toBe('shelf');
+  });
+
+  it('never plays through a name that is out of sight', () => {
+    const byName = {
+      'reel-layout': 'name',
+      'reel-opening': 'name',
+      'reel-film': 'name',
+    } as const;
+    const hidden = {
+      'reel-layout': 'corner',
+      'reel-opening': 'none',
+      'reel-film': 'smoke',
+    };
+    // the classic hide-the-name switch, and a logo the org lets lead alone
+    expect(
+      resolveHero('consume', byName, { ...FULL, hideTitle: true })
+    ).toMatchObject(hidden);
+    expect(
+      resolveHero('consume', { ...byName, lead: 'logo' }, FULL)
+    ).toMatchObject(hidden);
+    // with no logo the name comes back, and so does the window
+    expect(
+      resolveHero('consume', byName, {
+        ...FULL,
+        hideTitle: true,
+        hasLogo: false,
+      })
+    ).toMatchObject(byName);
+  });
+
+  it('peeks at the featured row only when there is one', () => {
+    expect(
+      resolveHero('consume', { 'reel-peek': 'on' }, FULL)['reel-peek']
+    ).toBe('on');
+    expect(
+      resolveHero(
+        'consume',
+        { 'reel-peek': 'on' },
+        { ...FULL, hasFeatured: false }
+      )['reel-peek']
+    ).toBe('off');
+  });
+
+  it('reads the reel options from storage, and ignores a value it does not know', () => {
+    const s = readHeroSettings({
+      'hero-opt-purpose': 'consume',
+      'hero-opt-comp': 'showreel',
+      'hero-opt-reel-layout': 'diagonal',
+      'hero-opt-reel-loop': 'off',
+    });
+    expect(s.options).toEqual({ comp: 'showreel', 'reel-loop': 'off' });
+    expect(writeHeroSetting({}, 'reel-surface', 'grain')).toEqual({
+      'hero-opt-reel-surface': 'grain',
+    });
   });
 });
 
@@ -295,7 +505,14 @@ describe('stored values are a contract', () => {
       'spotlight',
     ]);
     expect(HERO_OPTION_VALUES).toEqual({
-      comp: ['statement', 'centre', 'showcase', 'split', 'billboard'],
+      comp: [
+        'statement',
+        'centre',
+        'showcase',
+        'split',
+        'billboard',
+        'showreel',
+      ],
       align: ['start', 'center', 'end'],
       height: ['full', 'tall', 'compact'],
       bg: ['shader', 'film', 'gradient', 'pattern', 'plain'],
@@ -315,6 +532,15 @@ describe('stored values are a contract', () => {
       accent: ['none', 'underline', 'highlight'],
       entrance: ['rise', 'reveal', 'fade', 'none'],
       logo: ['s', 'm', 'l'],
+      'reel-layout': ['corner', 'wide', 'name'],
+      'reel-peek': ['off', 'on'],
+      'reel-pointer': ['liquid', 'smoke', 'glitch', 'none'],
+      'reel-trans': ['burn', 'liquid', 'glitch'],
+      'reel-surface': ['none', 'grain', 'halftone', 'reeded', 'red', 'shader'],
+      'reel-band': ['none', 'under', 'fade'],
+      'reel-opening': ['name', 'none'],
+      'reel-film': ['name', 'smoke', 'liquid'],
+      'reel-loop': ['on', 'off'],
     });
   });
 });

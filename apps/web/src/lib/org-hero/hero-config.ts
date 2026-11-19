@@ -36,7 +36,9 @@ export type HeroPurpose = (typeof HERO_PURPOSES)[number];
 
 /** Every option and the values it can take. The first value is never implied. */
 export const HERO_OPTION_VALUES = {
-  comp: ['statement', 'centre', 'showcase', 'split', 'billboard'],
+  // 'showreel': the intro film, then the featured pieces, played one at a time
+  // through the brand shader (Codex-1yd58); its own options are the reel-* keys
+  comp: ['statement', 'centre', 'showcase', 'split', 'billboard', 'showreel'],
   align: ['start', 'center', 'end'],
   height: ['full', 'tall', 'compact'],
   bg: ['shader', 'film', 'gradient', 'pattern', 'plain'],
@@ -57,6 +59,20 @@ export const HERO_OPTION_VALUES = {
   accent: ['none', 'underline', 'highlight'],
   entrance: ['rise', 'reveal', 'fade', 'none'],
   logo: ['s', 'm', 'l'],
+  // The Showreel's own options. Every other composition leaves them unread.
+  'reel-layout': ['corner', 'wide', 'name'],
+  // the first featured pieces rise just above the fold
+  'reel-peek': ['off', 'on'],
+  'reel-pointer': ['liquid', 'smoke', 'glitch', 'none'],
+  // between pieces
+  'reel-trans': ['burn', 'liquid', 'glitch'],
+  // a treatment over every picture and film
+  'reel-surface': ['none', 'grain', 'halftone', 'reeded', 'red', 'shader'],
+  'reel-band': ['none', 'under', 'fade'],
+  'reel-opening': ['name', 'none'],
+  // how "Watch our film" opens into the full frame
+  'reel-film': ['name', 'smoke', 'liquid'],
+  'reel-loop': ['on', 'off'],
 } as const;
 
 export type HeroOptionKey = keyof typeof HERO_OPTION_VALUES;
@@ -77,6 +93,8 @@ export const HERO_ALIGN_ALLOWED: Record<
   showcase: ['start', 'end'],
   split: ['start', 'end'],
   billboard: ['start', 'center'],
+  // the reel's layout places the words
+  showreel: ['start'],
 };
 
 /** What the org actually has: the inputs every fallback is decided from. */
@@ -103,6 +121,11 @@ export interface HeroFacts {
   canJoin: boolean;
   /** The org hid its name in the hero's Layout control (`hero-hide-title`). */
   hideTitle: boolean;
+  /**
+   * The Showreel has something to play: the intro film, or at least two
+   * pieces it can show (`reelQualifies` in reel.ts).
+   */
+  hasReel: boolean;
 }
 
 export interface HeroSettings {
@@ -189,36 +212,46 @@ function baseOptions(facts: HeroFacts): HeroOptions {
     accent: 'none',
     entrance: 'rise',
     logo: 'm',
+    'reel-layout': 'corner',
+    'reel-peek': 'off',
+    'reel-pointer': 'liquid',
+    'reel-trans': 'burn',
+    'reel-surface': 'none',
+    'reel-band': 'none',
+    'reel-opening': 'name',
+    'reel-film': 'name',
+    'reel-loop': 'on',
   };
 }
 
-/** What each purpose changes from the base, given what the org has. */
+/**
+ * What each purpose changes from the base, given what the org has. Only the
+ * changes: a value the base already sets is not repeated here.
+ */
 function purposeDefaults(
   purpose: HeroPurpose,
   facts: HeroFacts
 ): Partial<HeroOptions> {
   switch (purpose) {
-    case 'consume':
-      // Media first: the org's own film fills the frame when it can loop, else
-      // the latest piece. The film sits in the FRAME, not behind the words, so
-      // the ground stays the shader. One quiet line of proof, no small print.
+    case 'consume': {
+      // Media first: the Showreel plays the org's film and pieces when it has
+      // a reel, shader or not. Else the film fills the Showcase frame when it
+      // can loop, else the latest piece does: in the FRAME, never behind the
+      // words. No small print.
+      const frame =
+        facts.hasFilmLoop || facts.hasLatest ? 'showcase' : 'statement';
       return {
-        comp: facts.hasFilmLoop || facts.hasLatest ? 'showcase' : 'statement',
+        comp: facts.hasReel ? 'showreel' : frame,
         spot: facts.hasFilmLoop ? 'film' : 'latest',
-        main: 'consume',
         micro: 'off',
-        proof: facts.hasFacts ? 'facts' : 'none',
-        bg: facts.hasShader ? 'shader' : 'gradient',
       };
+    }
     case 'grow':
       return {
         comp: 'centre',
         align: 'center',
         height: 'full',
         main: 'join',
-        micro: 'on',
-        spot: 'none',
-        proof: facts.hasFacts ? 'facts' : 'none',
       };
     case 'intro': {
       const picture = pictureFor(spotPiece('featured', facts), facts);
@@ -233,20 +266,15 @@ function purposeDefaults(
     }
     case 'library':
       return {
-        comp: 'statement',
         height: 'compact',
         search: 'on',
         main: 'explore',
         line: 'none',
-        spot: 'none',
         proof: 'none',
       };
     case 'follow':
       return {
-        comp: 'statement',
         main: 'follow',
-        micro: 'on',
-        spot: 'none',
         proof: facts.hasLatest ? 'shelf' : 'none',
       };
     case 'spotlight':
@@ -255,7 +283,6 @@ function purposeDefaults(
         height: 'full',
         spot: facts.hasFeatured ? 'featured' : 'latest',
         main: 'explore',
-        proof: facts.hasFacts ? 'facts' : 'none',
       };
   }
 }
@@ -277,8 +304,13 @@ export function resolveHero(
   options: Partial<HeroOptions>,
   facts: HeroFacts
 ): HeroOptions {
+  // A chosen Showreel with nothing to play is set aside, so the purpose's own
+  // hero draws: what an org saw before the Showreel existed. This is the
+  // Showreel's only fallback; applyFallbacks has none.
+  const { comp, ...rest } = options;
+  const chosen = comp === 'showreel' && !facts.hasReel ? rest : options;
   return applyFallbacks(
-    { ...baseOptions(facts), ...purposeDefaults(purpose, facts), ...options },
+    { ...baseOptions(facts), ...purposeDefaults(purpose, facts), ...chosen },
     facts
   );
 }
@@ -315,6 +347,22 @@ function pictureFor(
  */
 function applyFallbacks(input: HeroOptions, facts: HeroFacts): HeroOptions {
   const c = { ...input };
+  // A Showreel reaching here has a reel: the consume default asks for one,
+  // and resolveHero sets aside a chosen Showreel without one, so the
+  // purpose's own hero draws instead.
+  if (c.comp === 'showreel') {
+    // The reel plays in the brand shader's ground, or on a plain one when the
+    // org has no shader (owner, 2026-11-19). It takes the spotlight's place:
+    // no spotlight, and no shelf repeating the pieces its index lists.
+    c.bg = facts.hasShader ? 'shader' : 'plain';
+    c.spot = 'none';
+    if (c.proof === 'shelf') c.proof = 'facts';
+  }
+  // the shader surface and the shader band are drawn by the shader
+  if (!facts.hasShader) {
+    if (c['reel-surface'] === 'shader') c['reel-surface'] = 'none';
+    c['reel-band'] = 'none';
+  }
   if (c.bg === 'shader' && !facts.hasShader) c.bg = 'gradient';
   if (c.bg === 'film' && !facts.hasFilmLoop)
     c.bg = facts.hasShader ? 'shader' : 'gradient';
@@ -342,7 +390,10 @@ function applyFallbacks(input: HeroOptions, facts: HeroFacts): HeroOptions {
   if (c.spot === 'latest' && !facts.hasLatest)
     c.spot = facts.hasFeatured ? 'featured' : 'none';
   // showcase, split and billboard are drawn around a piece; one exists by now
-  if (c.comp !== 'statement' && c.comp !== 'centre' && c.spot === 'none') {
+  if (
+    (c.comp === 'showcase' || c.comp === 'split' || c.comp === 'billboard') &&
+    c.spot === 'none'
+  ) {
     c.spot = facts.hasFeatured ? 'featured' : 'latest';
   }
   if (c.main === 'film' && !facts.hasFilm) c.main = 'explore';
@@ -354,6 +405,15 @@ function applyFallbacks(input: HeroOptions, facts: HeroFacts): HeroOptions {
   // name stays in the page for screen readers
   if (facts.hideTitle) c.lead = 'logo';
   if (c.lead !== 'name' && !facts.hasLogo) c.lead = 'name';
+  // With the logo leading alone the name is out of sight, so the reel never
+  // plays through it: no name window, no opening or way into the film by it.
+  if (c.lead === 'logo') {
+    if (c['reel-layout'] === 'name') c['reel-layout'] = 'corner';
+    if (c['reel-opening'] === 'name') c['reel-opening'] = 'none';
+    if (c['reel-film'] === 'name') c['reel-film'] = 'smoke';
+  }
+  // the peek lifts the featured row, so it needs one
+  if (c['reel-peek'] === 'on' && !facts.hasFeatured) c['reel-peek'] = 'off';
   if (!HERO_ALIGN_ALLOWED[c.comp].includes(c.align))
     c.align = HERO_ALIGN_ALLOWED[c.comp][0];
   return c;
@@ -424,6 +484,13 @@ export interface OrgHeroPiece {
   line?: string | null;
   href: string;
   imageUrl: string | null;
+  /**
+   * Its public 30-second preview (HLS): silent in the Showreel, with sound in
+   * its theatre. Null for an essay or a portal, or a piece without one.
+   */
+  previewUrl: string | null;
+  /** The whole piece's length; null when unknown or it has none. */
+  durationSeconds: number | null;
   /** What following the link does: "Enter the portal", "Watch the film" … */
   cta: string;
 }

@@ -18,7 +18,10 @@ vi.mock('$lib/observability', () => ({
 }));
 const { logger } = await import('$lib/observability');
 
-/** An org with everything but a film, so no player mounts. */
+/**
+ * An org with everything but a film, so no player mounts, and no reel, so
+ * these frames stay the ones they test.
+ */
 const FACTS: HeroFacts = {
   hasLogo: true,
   hasShader: true,
@@ -32,6 +35,7 @@ const FACTS: HeroFacts = {
   hasDescription: true,
   canJoin: true,
   hideTitle: false,
+  hasReel: false,
 };
 
 /** Each test names its own files: a file's failure is logged once per tab. */
@@ -43,6 +47,8 @@ const piece = (file: string): OrgHeroPiece => ({
   line: null,
   href: '/content/bone-deep',
   imageUrl: `http://localhost:4100/org/media-thumbnails/${file}/lg.webp`,
+  previewUrl: null,
+  durationSeconds: 720,
   cta: 'Watch the film',
 });
 

@@ -49,7 +49,7 @@
       id: 'arrangement',
       title: m.branding_hero_group_arrangement,
       fields: [
-        { key: 'comp', label: m.branding_hero_field_comp, values: { statement: m.branding_hero_comp_statement, centre: m.branding_hero_comp_centre, showcase: m.branding_hero_comp_showcase, split: m.branding_hero_comp_split, billboard: m.branding_hero_comp_billboard } },
+        { key: 'comp', label: m.branding_hero_field_comp, values: { statement: m.branding_hero_comp_statement, centre: m.branding_hero_comp_centre, showcase: m.branding_hero_comp_showcase, split: m.branding_hero_comp_split, billboard: m.branding_hero_comp_billboard, showreel: m.branding_hero_comp_showreel } },
         { key: 'align', label: m.branding_hero_field_align, values: { start: m.branding_hero_align_start, center: m.branding_hero_align_center, end: m.branding_hero_align_end } },
         { key: 'height', label: m.branding_hero_field_height, values: { full: m.branding_hero_height_full, tall: m.branding_hero_height_tall, compact: m.branding_hero_height_compact } },
       ],

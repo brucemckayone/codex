@@ -83,6 +83,7 @@
     type HeroFacts,
     type OrgHeroPiece,
   } from '$lib/org-hero/hero-config';
+  import { buildReel, reelQualifies } from '$lib/org-hero/reel';
   import type { ContentItem } from './feed-types';
   import type { PageData } from './$types';
 
@@ -568,12 +569,15 @@
     audio: { featured: m.org_hero_kicker_featured_recording, latest: m.org_hero_kicker_new_recording, cta: m.org_hero_cta_listen },
     video: { featured: m.org_hero_kicker_featured_film, latest: m.org_hero_kicker_new_film, cta: m.org_hero_cta_watch },
   } as const;
+  /** An essay's row has no media item: no preview, no length. */
+  const NO_MEDIA: NonNullable<ContentItem['mediaItem']> = { durationSeconds: null, thumbnailUrl: null, hlsPreviewUrl: null };
 
   function heroContentPiece(c: ContentItem, mode: 'featured' | 'latest'): OrgHeroPiece {
     const kind = c.contentType === 'written' ? 'article' : c.contentType === 'audio' ? 'audio' : 'video';
     const words = HERO_PIECE_WORDS[kind];
-    const seconds = c.mediaItem?.durationSeconds ?? 0;
-    const minutes = seconds > 0 ? Math.max(1, Math.round(seconds / 60)) : null;
+    const media = c.mediaItem ?? NO_MEDIA;
+    const seconds = media.durationSeconds;
+    const minutes = seconds && seconds > 0 ? Math.max(1, Math.round(seconds / 60)) : null;
     return {
       kind,
       kicker: words[mode](),
@@ -583,29 +587,44 @@
       line: c.description ? extractPlainText(c.description) || null : null,
       href: buildContentUrl(page.url, c),
       imageUrl: getDisplayThumbnail(c) ?? null,
+      previewUrl: media.hlsPreviewUrl,
+      durationSeconds: seconds,
       cta: words.cta(),
     };
   }
 
-  // A featured portal leads (the larger commitment), then featured content.
+  function heroPortalPiece(j: NonNullable<PageData['featuredJourneys']>[number]): OrgHeroPiece {
+    return {
+      kind: 'portal',
+      kicker: m.org_hero_kicker_featured_portal(),
+      title: j.title,
+      meta: portalMeta(j.stageCount, j.practiceCount),
+      line: j.tagline,
+      href: buildJourneyUrl(page.url, { slug: j.slug, id: j.pageId }, { surface: 'sales' }),
+      imageUrl: j.coverImageUrl,
+      previewUrl: null,
+      durationSeconds: null,
+      cta: m.org_hero_cta_portal(),
+    };
+  }
+
+  const heroFeaturedPortals = $derived((data.featuredJourneys ?? []).map(heroPortalPiece));
+  // The spotlight: a featured portal leads (the larger commitment), then featured content.
   const heroFeatured = $derived.by((): OrgHeroPiece | null => {
-    const j = data.featuredJourneys?.[0];
-    if (j) {
-      return {
-        kind: 'portal',
-        kicker: m.org_hero_kicker_featured_portal(),
-        title: j.title,
-        meta: portalMeta(j.stageCount, j.practiceCount),
-        line: j.tagline,
-        href: buildJourneyUrl(page.url, { slug: j.slug, id: j.pageId }, { surface: 'sales' }),
-        imageUrl: j.coverImageUrl,
-        cta: m.org_hero_cta_portal(),
-      };
-    }
     const c = data.allContent.find((item) => item.featured);
-    return c ? heroContentPiece(c, 'featured') : null;
+    return heroFeaturedPortals[0] ?? (c ? heroContentPiece(c, 'featured') : null);
   });
   const heroLatest = $derived(data.allContent[0] ? heroContentPiece(data.allContent[0], 'latest') : null);
+  // The Showreel's reel: its order, sources and the film's own row are
+  // decided in $lib/org-hero/reel.ts.
+  const heroReel = $derived(
+    buildReel({
+      film: filmPlayable ? introFilm : null,
+      rows: data.allContent,
+      portals: heroFeaturedPortals,
+      toPiece: heroContentPiece,
+    })
+  );
   const heroShelf = $derived.by((): OrgHeroPiece[] => {
     const seen = new Set<string>();
     const out: OrgHeroPiece[] = [];
@@ -651,6 +670,7 @@
     // hero can offer it, else (the editor's live preview) from the tiers read
     canJoin: subscriptionsEnabled && (data.heroHasPlans ?? hasActiveTiers),
     hideTitle: heroHides('title'),
+    hasReel: reelQualifies(heroReel),
   });
   const heroOptions = $derived(
     heroSettings.purpose ? resolveHero(heroSettings.purpose, heroSettings.options, heroFactFlags) : null
