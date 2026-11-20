@@ -49,7 +49,11 @@
  * not control. An org can still override them by hand in fine-tune; a preset
  * asserting a value would be a guess dressed as a design.
  */
-import { DEFAULTS } from '$lib/components/ui/ShaderHero/shader-config';
+import { presetFxKey } from '$lib/components/ui/ShaderHero/preset-fx-defaults';
+import {
+  DEFAULTS,
+  resolvePresetId,
+} from '$lib/components/ui/ShaderHero/shader-config';
 import { contrastRatio as contrast } from './ink';
 import { hexToOklch, oklchToHex } from './oklch-math';
 import type { BrandPreset } from './types';
@@ -481,11 +485,11 @@ export interface AtmosphereAxis {
    * which must declare 1.
    */
   readonly tempo: number;
-  /** `--brand-shader-intensity`, 0..1. A generic post-process, safe absolute. */
+  /** The shader's own intensity (`shader-<id>-intensity`). A safe absolute. */
   readonly intensity: number;
-  /** `--brand-shader-vignette`, 0..1. */
+  /** The shader's own vignette (`shader-<id>-vignette`), 0..1. */
   readonly vignette: number;
-  /** `--brand-shader-grain`, 0..1. Omitted = leave the shader's default. */
+  /** The shader's own grain (`shader-<id>-grain`). Omitted = its default. */
   readonly grain?: number;
   /** Deliberate non-speed deviations, keyed WITHOUT the `shader-` prefix. */
   readonly params?: Readonly<Record<string, string>>;
@@ -903,10 +907,19 @@ export function atmosphereShaderTokens(
 ): Record<string, string> {
   const tokens: Record<string, string> = {
     'shader-preset': atmos.shader,
-    'shader-intensity': String(atmos.intensity),
-    'shader-vignette': String(atmos.vignette),
   };
-  if (atmos.grain !== undefined) tokens['shader-grain'] = String(atmos.grain);
+  // The post-process is the shader's OWN (`shader-<id>-intensity` etc.,
+  // preset-fx-defaults.ts): a preset applies by merging over the brand, so
+  // the shared key would lose to a value the creator tuned on this shader
+  // before. A still hero ('none') has none to set.
+  const live = resolvePresetId(atmos.shader);
+  if (live && live !== 'none') {
+    tokens[presetFxKey(live, 'intensity')] = String(atmos.intensity);
+    tokens[presetFxKey(live, 'vignette')] = String(atmos.vignette);
+    if (atmos.grain !== undefined) {
+      tokens[presetFxKey(live, 'grain')] = String(atmos.grain);
+    }
+  }
 
   const tempo = SHADER_TEMPO[atmos.shader];
   if (tempo) {

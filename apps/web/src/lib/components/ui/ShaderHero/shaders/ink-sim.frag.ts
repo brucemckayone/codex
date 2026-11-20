@@ -1,7 +1,13 @@
 /**
  * Ink Dispersion simulation fragment shader (GLSL ES 3.0).
  *
- * 3-channel advection-diffusion on a 512x512 ping-pong FBO.
+ * 3-channel advection-diffusion on a ping-pong FBO shaped like the canvas
+ * (sim-grid.ts, about 512² texels).
+ *
+ * WP-1d (Codex-1yd58): every distance is in texels / SIM_BASE (the deposit
+ * radius, the curl field, the advection), so a drop is round and the flow
+ * has the same grain on any canvas shape. On a square canvas each is the
+ * size it always was in uv.
  * RGB = concentrations of primary / secondary / accent brand-colored ink
  * spreading through liquid via Laplacian diffusion + curl noise advection.
  *
@@ -22,6 +28,10 @@
  *   uDropChannel   — channel for ambient drop
  */
 import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+import { SIM_BASE } from '../sim-grid';
+
+/** One SIM_BASE-th of the grid's texels: a square-grid uv unit, on any shape. */
+const BASE = SIM_BASE.toFixed(1);
 
 export const INK_SIM_FRAG = `#version 300 es
 precision highp float;
@@ -67,19 +77,30 @@ float valueNoise(vec2 p) {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+// The flow's potential: two value-noise lattices at different angles and
+// scales. One axis-aligned lattice left its grid in the ink: dye sheared
+// into straight horizontal and vertical fronts along the cell edges, which a
+// light ground shows plainly (WP-1d). Scaled so the flow keeps its speed.
+const mat2 FLOW_ROT_A = mat2(0.8, 0.6, -0.6, 0.8);
+const mat2 FLOW_ROT_B = mat2(0.28, -0.96, 0.96, 0.28);
+float flowNoise(vec2 p) {
+  return (valueNoise(FLOW_ROT_A * p)
+        + 0.5 * valueNoise(FLOW_ROT_B * p * 1.9 + 7.3)) / 1.5;
+}
+
 // ── Curl noise: velocity = (dN/dy, -dN/dx) via finite differences ───
 vec2 curlNoise(vec2 p) {
   float eps = 0.5;
-  float n0 = valueNoise(p + vec2(0.0, eps));
-  float n1 = valueNoise(p - vec2(0.0, eps));
-  float n2 = valueNoise(p + vec2(eps, 0.0));
-  float n3 = valueNoise(p - vec2(eps, 0.0));
+  float n0 = flowNoise(p + vec2(0.0, eps));
+  float n1 = flowNoise(p - vec2(0.0, eps));
+  float n2 = flowNoise(p + vec2(eps, 0.0));
+  float n3 = flowNoise(p - vec2(eps, 0.0));
   return vec2((n0 - n1), -(n2 - n3)) / (2.0 * eps);
 }
 
 // ── Gaussian deposit helper ─────────────────────────────────────────
 vec3 deposit(vec2 pos, float channel, float strength) {
-  vec2 d = v_uv - pos;
+  vec2 d = (v_uv - pos) / (uTexel * ${BASE});
   float r = uDropSize;
   float g = strength * exp(-dot(d, d) / (r * r));
   vec3 ink = vec3(0.0);
@@ -103,8 +124,8 @@ void main() {
 
   // ── 3. Curl noise advection ───────────────────────────────────────
   // Animate noise domain slowly so the flow field evolves
-  vec2 noiseCoord = v_uv * uCurl + uTime * 0.15;
-  vec2 vel = curlNoise(noiseCoord) * uAdvection * 0.004;
+  vec2 noiseCoord = v_uv / (uTexel * ${BASE}) * uCurl + uTime * 0.15;
+  vec2 vel = curlNoise(noiseCoord) * uAdvection * 0.004 * uTexel * ${BASE};
 
   // Sample state at reverse-advected position
   vec2 advectedUV = clamp(v_uv - vel, vec2(0.0), vec2(1.0));

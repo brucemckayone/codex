@@ -14,6 +14,13 @@
  *    a flat heightColor * 0.15
  *  - Bloom halo on brightest contour lines (elevation-tinted)
  *  - Luminance-aware filmic grain
+ *
+ * WP-1d (Codex-1yd58): the terrain evolves IN PLACE. A bounded, slowly
+ * moving domain warp reshapes the landforms around fixed homes, and each
+ * finer octave circles its own small orbit, so the map breathes instead of
+ * sliding: the old p += (0.3t, 0.2t) carried everything off to one side
+ * forever. Every fifth contour is an index line (wider, brighter), and the
+ * ground between lines carries a soft hillshade in the brand stops.
  */
 import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
 
@@ -73,18 +80,41 @@ float valueNoise(vec2 p) {
 
 const mat2 octaveRot = mat2(0.8, 0.6, -0.6, 0.8);
 
-float fbm(vec2 p) {
+// Each octave above the first circles a small orbit of its own: detail
+// churns in place, and nothing travels (an orbit is bounded).
+float fbm(vec2 p, float t) {
   float f = 0.0;
   float amp = 0.5;
   float totalAmp = 0.0;
   for (int i = 0; i < 5; i++) {
     if (i >= u_octaves) break;
-    f += amp * valueNoise(p);
+    float fi = float(i);
+    vec2 orbit = fi * 0.35 * vec2(cos(t * (0.21 + 0.07 * fi) + fi), sin(t * (0.17 + 0.05 * fi) + 2.0 * fi));
+    f += amp * valueNoise(p + orbit);
     totalAmp += amp;
     p = octaveRot * p * 2.02;
     amp *= 0.5;
   }
   return totalAmp > 0.0 ? f / totalAmp : 0.0;
+}
+
+// A bounded warp (each component is noise in [-1, 1]) whose field drifts
+// slowly through itself: the landforms it bends stay where they are.
+vec2 terrainWarp(vec2 p, float t) {
+  vec2 q = p * 0.45;
+  return vec2(
+    valueNoise(q + vec2(t * 0.23, 1.7)),
+    valueNoise(q + vec2(4.1, -t * 0.19))
+  );
+}
+
+/** Contour + index-line coverage for one height, AA'd by its own fwidth. */
+float contourMask(float scaledHeight, float width) {
+  float fw = fwidth(scaledHeight);
+  float frac = fract(scaledHeight);
+  float d = min(frac, 1.0 - frac);
+  float halfWidth = width * 0.5;
+  return 1.0 - smoothstep(fw * halfWidth, fw * (halfWidth + 1.0), d);
 }
 
 // -- Smooth 4-stop palette (bg → primary → secondary → accent) --
@@ -117,13 +147,15 @@ void main() {
 
   float aspect = u_resolution.x / u_resolution.y;
   vec2 p = vec2(uv.x * aspect, uv.y) * u_scale;
-  p += vec2(t * 0.3, t * 0.2);
+  p += terrainWarp(p, t) * 0.55;
 
   // Elevation scales the height field about its midpoint, so the contour
   // spacing changes rather than the whole map brightening. Audio reaches the
   // map through elevation (see above), computed from the slow envelope.
-  float height = fbm(p);
-  height = clamp((height * 0.5 + 0.5 - 0.5) * elevation + 0.5, 0.0, 1.0);
+  // A SOFT ceiling (tanh), not a clamp: a hard clamp flattened every summit
+  // into a blank plateau at high elevation, where a map keeps its rings.
+  float height = fbm(p, t);
+  height = 0.5 + 0.5 * tanh(height * elevation);
 
   // Mouse hill + burst
   vec2 mouseUV = vec2(u_mouse.x * aspect, u_mouse.y);
@@ -133,21 +165,29 @@ void main() {
   float burstHill = u_burst * u_elevation * 0.3 * exp(-mouseDist * mouseDist * 8.0);
   height = clamp(height + hoverHill + burstHill, 0.0, 1.0);
 
-  // ── Contour lines via fract + fwidth ──
+  // ── Contour lines via fract + fwidth; every 5th is an index line ──
   float lineCountF = float(u_lineCount);
   float scaledHeight = height * lineCountF;
-  float contourFrac = fract(scaledHeight);
-  float fw = fwidth(scaledHeight);
-  float halfWidth = u_lineWidth * 0.5;
-  float d1 = abs(contourFrac);
-  float d2 = abs(contourFrac - 1.0);
-  float d = min(d1, d2);
-  float lineMask = 1.0 - smoothstep(fw * halfWidth, fw * (halfWidth + 1.0), d);
+  float minorMask = contourMask(scaledHeight, u_lineWidth);
+  // Every 5th contour. contourMask's width is in pixels at any scale.
+  float indexMask = contourMask(scaledHeight / 5.0, u_lineWidth * 1.9);
+  float lineMask = max(minorMask * 0.9, indexMask);
+
+  // ── Soft hillshade: the height's screen-space slope, lit from the upper
+  // left. Read off the derivatives the contour AA already needs.
+  vec2 slope = vec2(dFdx(height), dFdy(height)) * u_resolution.y / u_scale;
+  vec3 normal = normalize(vec3(-slope * 0.9, 1.0));
+  float shade = dot(normal, normalize(vec3(-0.55, 0.6, 0.6)));
 
   // ── Colour by height (smooth palette) — HDR line emission ──
-  vec3 lineColor = heightColor(height) * 1.8 * lineGain;  // > 1 for ACES rolloff
-  // Subtle height-tinted fill between lines (was flat * 0.15)
-  vec3 fillColor = mix(u_bgColor * 0.6, heightColor(height) * 0.25, height);
+  vec3 base = heightColor(height);
+  vec3 lineColor = base * mix(1.8, 2.6, indexMask) * lineGain;  // > 1 for ACES
+  // The ground between lines (as before: bg low, the height's stop high),
+  // now lit by the hill: shadowed slopes sink, lit ones lift.
+  vec3 fillColor = mix(u_bgColor * 0.6, base * 0.3, height);
+  // A gentle range: a deep shadow sank a light ground's darkest 5% and
+  // took dark text with it (the contrast check, WP-1d).
+  fillColor *= mix(0.85, 1.3, clamp(shade, 0.0, 1.0));
 
   vec3 color = mix(fillColor, lineColor, lineMask);
 

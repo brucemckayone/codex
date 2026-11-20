@@ -69,6 +69,8 @@ describe('tokenOverridesToCssVars', () => {
       'shader-nebula-depth': '9',
       'shader-warp-strength': '1.5',
       'shader-flow-curl': '0.8',
+      // Liquid Logo's own colour, dropped in WP-1d: it paints the palette.
+      'shader-pulse-color': '#d10000',
       'text-secondary': '#555555',
     };
     expect(tokenOverridesToCssVars(stored)).toEqual({

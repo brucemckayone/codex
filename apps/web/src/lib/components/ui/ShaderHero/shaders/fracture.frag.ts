@@ -1,6 +1,16 @@
 /**
  * Fracture fragment shader — Space subdivided by animated half-plane cuts.
  *
+ * ## WP-1d R4b (Codex-1yd58): the hard lines are the motif
+ *
+ * - Fewer, larger shards: 5 cuts by default (8), and the cuts sway a
+ *   quarter as far (CUT_SWAY), so the pattern breathes, not swings.
+ * - The lines, by default, are the old ones: bold, hard, near-black, with
+ *   the hard offset shadow. R4 softened and tinted them and the owner lost
+ *   the post-modern look, so those are settings: u_border (line weight),
+ *   u_lineSoftness (hard to soft, which also fades the shadow), u_lineTint
+ *   (dark to a tint of the ground).
+ *
  * ## What changed and why
  *
  * **Motion.** Each cut's angle was `baseAngle + t * rate`, with `rate` a
@@ -53,6 +63,8 @@ uniform int u_cuts;
 uniform float u_border;
 uniform float u_shadow;
 uniform float u_fill;
+uniform float u_lineSoftness;
+uniform float u_lineTint;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
@@ -82,7 +94,7 @@ ${MOTION_HELPERS}
  * idle rate, 0.062 rad/s. Well inside the drift band, and applied to an
  * outline rather than to a camera.
  */
-const float CUT_SWAY = 1.25;
+const float CUT_SWAY = 0.32;
 
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -168,14 +180,16 @@ void main() {
   // busy passage reads as a brighter pane rather than as flicker.
   cellColor = tinted * 1.25 * audioLift(u_energy, 0.16);
 
-  // ── Border (anti-aliased) ──────────────────────────────────────────
+  // ── Border: hard by default (1 px of anti-alias) ───────────────────
+  // Softness blurs it either side of the same weight (R4's soft line).
   float fw = fwidth(minEdge);
-  float borderMask = 1.0 - smoothstep(u_border - fw, u_border + fw, minEdge);
+  float ramp = max(fw, u_lineSoftness * u_border * 0.65);
+  float borderMask = 1.0 - smoothstep(u_border - ramp, u_border + ramp, minEdge);
 
   // ── Shadow ─────────────────────────────────────────────────────────
   float shadowMask = (sCellId != cellId) ? 1.0 : 0.0;
   shadowMask *= smoothstep(0.0, u_shadow * 2.0, u_shadow * 2.0 - sEdge);
-  shadowMask = clamp(shadowMask, 0.0, 0.5);
+  shadowMask = clamp(shadowMask, 0.0, mix(0.5, 0.25, u_lineSoftness));
 
   // Interior gradient — brighter farther from an edge, which fakes polygon
   // depth without shading.
@@ -188,8 +202,19 @@ void main() {
   // that keeping some colour in it looks better than crushing it to black.
   float bgLum = dot(u_bgColor, vec3(0.299, 0.587, 0.114));
   float onLight = smootherstep(0.25, 0.8, bgLum);
-  vec3 leadColor = u_bgColor * mix(0.40, 0.14, onLight);
-  vec3 shadowColor = u_bgColor * mix(0.30, 0.55, onLight);
+  // Dark by default (the old lines); the tint takes them to R4's tint of
+  // the ground, lighter on a dark ground and darker on a light one.
+  vec3 tintLead = mix(
+    mix(u_bgColor, u_brandPrimary, 0.35) * 1.4 + 0.04,
+    mix(u_bgColor, u_brandPrimary, 0.4) * 0.7,
+    onLight
+  );
+  vec3 leadColor = mix(u_bgColor * mix(0.40, 0.14, onLight), tintLead, u_lineTint);
+  vec3 shadowColor = mix(
+    u_bgColor * mix(0.30, 0.55, onLight),
+    u_bgColor * mix(0.55, 0.8, onLight),
+    u_lineTint
+  );
 
   // ── Composite ──────────────────────────────────────────────────────
   vec3 color = mix(u_bgColor, interiorTint, u_fill);

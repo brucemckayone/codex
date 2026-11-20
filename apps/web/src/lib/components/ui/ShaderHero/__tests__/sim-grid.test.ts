@@ -47,6 +47,49 @@ describe('simGridFor', () => {
   it('clamps shapes past 4:1 instead of building a sliver grid', () => {
     expect(simGridFor(10_000, 100)).toEqual(simGridFor(4000, 1000));
   });
+
+  // WP-1d R3: lenia's 48-tap kernel runs at a 256² budget. Every caller that
+  // passes no base keeps SIM_BASE, so the grids above are unchanged.
+  it('takes a smaller texel budget when given one, in the same shape', () => {
+    expect(simGridFor(1440, 810, SIM_BASE)).toEqual(simGridFor(1440, 810));
+    expect(simGridFor(800, 800, 256)).toEqual({ w: 256, h: 256, aspect: 1 });
+    for (const [w, h] of [
+      [1440, 810],
+      [390, 844],
+    ]) {
+      const grid = simGridFor(w, h, 256);
+      expect(grid.w % SIM_CELL).toBe(0);
+      expect(grid.h % SIM_CELL).toBe(0);
+      expect(Math.abs(grid.w / grid.h - w / h)).toBeLessThan(0.45);
+      expect(grid.w * grid.h).toBeGreaterThan(256 * 256 * 0.8);
+      expect(grid.w * grid.h).toBeLessThan(256 * 256 * 1.25);
+    }
+  });
+
+  // Review round 1, LOW 1: at a 256² budget, 64-texel sides made ovals on
+  // tablets and desktops (768x1024 0.80, 1024x768 1.25, 1280x1024 0.80).
+  // Lenia's seed is Gaussian blobs, not a periodic noise, so it rounds its
+  // sides to 16 texels; every other caller keeps SIM_CELL.
+  it.each([
+    [768, 1024],
+    [1024, 768],
+    [1280, 1024],
+    [390, 844],
+  ])('stays round at 256² with 16-texel sides: %ix%i', (w, h) => {
+    const grid = simGridFor(w, h, 256, 16);
+    expect(grid.w % 16).toBe(0);
+    expect(grid.h % 16).toBe(0);
+    expect(Math.abs(grid.w / grid.h / (w / h) - 1)).toBeLessThan(0.15);
+  });
+
+  it('keeps 64-texel sides when no cell is given', () => {
+    expect(simGridFor(1280, 1024, 256)).toEqual(
+      simGridFor(1280, 1024, 256, SIM_CELL)
+    );
+    expect(simGridFor(1440, 810)).toEqual(
+      simGridFor(1440, 810, SIM_BASE, SIM_CELL)
+    );
+  });
 });
 
 describe('simGridChanged', () => {

@@ -1,23 +1,30 @@
 /**
- * Pulse renderer — implements ShaderRenderer.
+ * Liquid Logo renderer (preset id 'pulse') — implements ShaderRenderer.
  *
  * 3D perspective raymarched wave surface based on tomkh's wave equation.
  * Sim runs at 512x512 in a ping-pong double FBO (identical physics to ripple).
+ * The grid stays SQUARE: it is the plane in world space (90 x 90 units), seen
+ * in perspective, not the canvas, so a canvas-shaped grid would stretch it.
+ * It runs on the step clock (Codex-1yd58 WP-1d): 120 steps a second at any
+ * frame rate, input on every second step. It ran a fixed number of steps
+ * per frame (twice as fast at 120 Hz) and queued a click splash on every
+ * frame of the click's decay. R2b: it starts still, and only the pointer
+ * and the sound move it (no idle drops, no seed, no logo attractor).
  * Display pass raymarches the heightfield from a configurable camera angle.
  *
  * Optional logo SDF integration: when an org logo URL is present in the
  * shader config, the logo is converted to a signed distance field (SDF)
- * which drives an attractor force in the wave equation. Waves naturally
- * accumulate along the logo boundary, making the logo emerge from the fluid.
+ * which the display pass raises into a still liquid relief (LOGO_HEIGHT)
+ * the waves ride over. The sim never reads it.
  */
 
 import {
   AUDIO_UNIFORM_NAMES,
   createAudioFade,
-  createDeltaClock,
   SILENT_AUDIO,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { createClickEdge } from '../click-edge';
 import type { SDFResult } from '../jfa-sdf';
 import { destroyLogoTexture, loadLogoTexture } from '../logo-texture';
 import { bindOutput } from '../output-target';
@@ -25,6 +32,7 @@ import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { PulseConfig, ShaderConfig } from '../shader-config';
 import { PULSE_DISPLAY_FRAG } from '../shaders/pulse-display.frag';
 import { PULSE_SIM_FRAG } from '../shaders/pulse-sim.frag';
+import { createStepClock, inputStride, SIM_BASE } from '../sim-grid';
 import {
   createDoubleFBO,
   createProgram,
@@ -36,7 +44,18 @@ import {
   VERTEX_SHADER,
 } from '../webgl-utils';
 
-const SIM_RES = 512;
+/** The plane's grid: square, see above. */
+const SIM_RES = SIM_BASE;
+/** Steps a second: what pulse ran at 60 Hz (an input step and a coast step). */
+const STEPS_PER_SECOND = 120;
+const INPUT_STRIDE = inputStride(STEPS_PER_SECOND);
+/** Input steps one click splash lasts, and its first push. */
+const CLICK_SPLASH_STEPS = 6;
+const CLICK_SPLASH_STRENGTH = 3.0;
+/** The hover push on each input step. */
+const HOVER_STRENGTH = 1.0;
+/** The logo ridge's height in world units (waves are ~±2 at wave scale 4). */
+const LOGO_HEIGHT = 1.4;
 const HEIGHTMAPSCALE = 90;
 const CAM_RADIUS = 50;
 
@@ -55,9 +74,6 @@ const SIM_UNIFORM_NAMES = [
   'uMouse',
   'uMouseActive',
   'uMouseStrength',
-  'uSdf',
-  'uHasLogo',
-  'uTime',
   ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
@@ -67,7 +83,7 @@ const DISPLAY_UNIFORM_NAMES = [
   'uColorSecondary',
   'uColorAccent',
   'uBgColor',
-  'uPulseColor',
+  'uLogoHeight',
   'uIntensity',
   'uGrain',
   'uVignette',
@@ -87,7 +103,8 @@ function screenToHeightmapUV(
   my: number,
   camHeight: number,
   camTarget: number,
-  aspect: number
+  width: number,
+  height: number
 ): [number, number] | null {
   const cy = camHeight;
   const cz = -CAM_RADIUS;
@@ -99,8 +116,10 @@ function screenToHeightmapUV(
   const rx = fz > 0 ? 1 : -1;
   const uy = fz;
   const uz = -fy;
-  const px = (mx * 2 - 1) * aspect;
-  const py = my * 2 - 1;
+  // The display's framing: fitted to the canvas's short side.
+  const short = Math.min(width, height) || 1;
+  const px = ((mx * 2 - 1) * width) / short;
+  const py = ((my * 2 - 1) * height) / short;
   const fov = 0.5;
   const dx = fov * px * rx;
   const dy = fy + fov * py * uy;
@@ -134,10 +153,14 @@ export function createPulseRenderer(): ShaderRenderer {
   let quad: ReturnType<typeof createQuad> | null = null;
 
   const audioFade = createAudioFade();
-  const deltaClock = createDeltaClock();
+  const clock = createStepClock(STEPS_PER_SECOND);
+  const clickEdge = createClickEdge();
+  /** An ambient drop due, held until an input step lays it. */
+  let pendingAmbient: { u: number; v: number; strength: number } | null = null;
   let simBuf: DoubleFBO | null = null;
   let lastAmbientTime = 0;
-  let clickSplashes: Array<{ u: number; v: number; frames: number }> = [];
+  /** One per click, over CLICK_SPLASH_STEPS input steps. */
+  let clickSplashes: Array<{ u: number; v: number; applied: number }> = [];
 
   // ── Logo SDF state ──────────────────────────────────────────────
   let sdfResult: SDFResult | null = null;
@@ -199,15 +222,12 @@ export function createPulseRenderer(): ShaderRenderer {
     }
   }
 
-  // Audio values set by render() before calling stepSim
   /**
    * This frame's resolved audio, shared with the sim pass — which runs from a
    * helper outside the render scope, and needs its own upload because uniforms
    * are per-program state.
    */
   let resolvedAudio = SILENT_AUDIO;
-  let _currentAudioBass = 0;
-  let _currentAudioAmplitude = 0;
 
   function stepSim(
     gl: WebGL2RenderingContext,
@@ -215,8 +235,7 @@ export function createPulseRenderer(): ShaderRenderer {
     mouseV: number,
     mouseOn: boolean,
     mouseStr: number,
-    cfg: PulseConfig,
-    time: number
+    cfg: PulseConfig
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
     gl.viewport(0, 0, SIM_RES, SIM_RES);
@@ -228,16 +247,6 @@ export function createPulseRenderer(): ShaderRenderer {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
     gl.uniform1i(simU.uState, 0);
-
-    // TEXTURE1: SDF (if available)
-    const sdf = sdfResult;
-    if (sdf) {
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, sdf.sdfTexture);
-      gl.uniform1i(simU.uSdf, 1);
-    }
-    gl.uniform1f(simU.uHasLogo, sdf ? 1.0 : 0.0);
-    gl.uniform1f(simU.uTime, time);
 
     const tx = 1.0 / SIM_RES;
     gl.uniform2f(simU.uTexel, tx, tx);
@@ -284,102 +293,112 @@ export function createPulseRenderer(): ShaderRenderer {
         return;
       const cfg = config as PulseConfig;
 
-      // Audio values (0 when no audio) — shared with stepSim via closure
-      // These were the RAW bands, which is the one thing the brief forbids on
-      // a simulation: at frame rate they read as jitter, and this preset feeds
-      // them into a fluid solve where the noise compounds across steps. Now
-      // the smoothed envelopes, resolved through the shared fade.
-      const dt = deltaClock(time);
+      // One clock for the frame: dt and this frame's simulation steps.
+      const { steps, first, dt } = clock.tick(time);
+      // Resolve through the shared fade: the sim shader reads the same block
+      // (u_bass, u_level) the display one does.
       const a = audioFade.update(audio, dt);
       resolvedAudio = a;
       const bass = a.bass;
-      const _mids = a.mids;
-      const _treble = a.treble;
-      const amplitude = a.level;
-      _currentAudioBass = bass;
-      _currentAudioAmplitude = amplitude;
 
-      // ── Logo SDF change detection ───────────────────────────────
+      // ── Logo SDF: (re)generate when the logo URL changes ─────
       const logoUrl = cfg.logoUrl ?? null;
       if (logoUrl !== currentLogoUrl && !logoLoading) {
         void loadAndGenerateSDF(gl, logoUrl ?? undefined);
       }
 
-      const aspect = width / height;
+      // ── Mouse → heightmap UV (camera ray onto the plane) ─────
       const mapped = mouse.active
         ? screenToHeightmapUV(
             mouse.x,
             mouse.y,
             cfg.camHeight,
             cfg.camTarget,
-            aspect
+            width,
+            height
           )
         : null;
 
-      // Ambient splashes — more frequent and stronger when audio is active
-      const ambientInterval = audio?.active
-        ? Math.max(0.3, 1.5 - bass * 1.2)
-        : 2.5 + Math.random() * 1.5;
-      if (time - lastAmbientTime > ambientInterval) {
+      // ── Per-frame state ────────────────────────────────────
+      // Timers and the click edge follow time and are caught on the frame
+      // they land; the input steps below lay them.
+      // Drops come only with sound (R2b). With none, nothing moves the
+      // water but the pointer: idle drops every few seconds read as the
+      // surface pulsing by itself.
+      if (audio?.active) {
+        if (time - lastAmbientTime > Math.max(0.3, 1.5 - bass * 1.2)) {
+          lastAmbientTime = time;
+          pendingAmbient = {
+            u: 0.15 + Math.random() * 0.7,
+            v: 0.15 + Math.random() * 0.7,
+            strength: 0.6 + bass * 2.0,
+          };
+        }
+      } else {
         lastAmbientTime = time;
-        const ambientStrength = audio?.active ? 0.6 + bass * 2.0 : 0.6;
-        stepSim(
-          gl,
-          0.15 + Math.random() * 0.7,
-          0.15 + Math.random() * 0.7,
-          true,
-          ambientStrength,
-          cfg,
-          time
-        );
+      }
+      // One splash per click (click-edge.ts). A splash used to be queued on
+      // every frame burstStrength was above zero: ~28 per click at 60 Hz,
+      // each running 6 extra steps: the "overwhelming" touch.
+      if (clickEdge.clicked(mouse.burstStrength) && mapped) {
+        clickSplashes.push({ u: mapped[0], v: mapped[1], applied: 0 });
       }
 
-      // Bass-driven impulses — fire additional splashes on strong bass hits
-      if (audio?.active && bass > 0.4) {
-        const impulseStrength = bass * 3.5;
-        stepSim(
-          gl,
-          0.2 + Math.random() * 0.6,
-          0.2 + Math.random() * 0.6,
-          true,
-          impulseStrength,
-          cfg,
-          time
-        );
-      }
+      /**
+       * The input step's impulses, in the order they ran per frame: the
+       * ambient drop, the bass impulse, click splashes, then the hover step.
+       * Each is a sim step of its own, so they run on the clock's input
+       * steps (60 a second at any frame rate). They ran once a FRAME, so at
+       * 120 Hz the waves ran twice as fast. At 60 Hz the count and order
+       * are what they were.
+       */
+      const inputStep = (): void => {
+        const amb = pendingAmbient;
+        pendingAmbient = null;
+        if (amb) stepSim(gl, amb.u, amb.v, true, amb.strength, cfg);
 
-      if (mouse.burstStrength > 0 && mapped) {
-        clickSplashes.push({ u: mapped[0], v: mapped[1], frames: 0 });
-      }
+        // Bass impulse at a random point, during playback.
+        if (audio?.active && bass > 0.4) {
+          stepSim(
+            gl,
+            0.2 + Math.random() * 0.6,
+            0.2 + Math.random() * 0.6,
+            true,
+            bass * 3.5,
+            cfg
+          );
+        }
 
-      for (let i = clickSplashes.length - 1; i >= 0; i--) {
-        const sp = clickSplashes[i];
-        if (sp.frames < 6) {
+        for (let i = clickSplashes.length - 1; i >= 0; i--) {
+          const sp = clickSplashes[i];
           stepSim(
             gl,
             sp.u,
             sp.v,
             true,
-            3.0 * (1.0 - sp.frames / 6.0),
-            cfg,
-            time
+            CLICK_SPLASH_STRENGTH * (1.0 - sp.applied / CLICK_SPLASH_STEPS),
+            cfg
           );
-          sp.frames++;
-        } else {
-          clickSplashes.splice(i, 1);
+          sp.applied++;
+          if (sp.applied >= CLICK_SPLASH_STEPS) clickSplashes.splice(i, 1);
         }
-      }
 
-      stepSim(
-        gl,
-        mapped ? mapped[0] : -10.0,
-        mapped ? mapped[1] : -10.0,
-        mapped != null,
-        1.0,
-        cfg,
-        time
-      );
-      stepSim(gl, -10.0, -10.0, false, 0.0, cfg, time);
+        stepSim(
+          gl,
+          mapped ? mapped[0] : -10.0,
+          mapped ? mapped[1] : -10.0,
+          mapped != null,
+          HOVER_STRENGTH,
+          cfg
+        );
+      };
+
+      // Steps follow elapsed time, so 120 Hz runs the waves at 60 Hz speed.
+      // Input lands on a fixed stride of steps; the rest propagate.
+      for (let i = 0; i < steps; i++) {
+        if ((first + i) % INPUT_STRIDE === 0) inputStep();
+        else stepSim(gl, -10.0, -10.0, false, 0.0, cfg);
+      }
 
       // ── Display pass ────────────────────────────────────────────
       gl.viewport(0, 0, width, height);
@@ -405,7 +424,7 @@ export function createPulseRenderer(): ShaderRenderer {
       gl.uniform3fv(displayU.uColorSecondary, cfg.colors.secondary);
       gl.uniform3fv(displayU.uColorAccent, cfg.colors.accent);
       gl.uniform3fv(displayU.uBgColor, cfg.colors.bg);
-      gl.uniform3fv(displayU.uPulseColor, cfg.pulseColor);
+      gl.uniform1f(displayU.uLogoHeight, LOGO_HEIGHT);
       gl.uniform1f(displayU.uIntensity, cfg.intensity);
       gl.uniform1f(displayU.uGrain, cfg.grain);
       gl.uniform1f(displayU.uVignette, cfg.vignette);
@@ -432,6 +451,8 @@ export function createPulseRenderer(): ShaderRenderer {
       if (!initProg || !simBuf || !quad) return;
       lastAmbientTime = 0;
       clickSplashes = [];
+      pendingAmbient = null;
+      clock.reset();
       gl.viewport(0, 0, SIM_RES, SIM_RES);
       gl.useProgram(initProg);
       quad.bind(initProg);

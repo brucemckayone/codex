@@ -57,6 +57,8 @@ const UNIFORM_NAMES = [
   'u_border',
   'u_shadow',
   'u_fill',
+  'u_lineSoftness',
+  'u_lineTint',
   'u_intensity',
   'u_grain',
   'u_vignette',
@@ -67,13 +69,15 @@ const UNIFORM_NAMES = [
 
 type FractureUniform = (typeof UNIFORM_NAMES)[number];
 
-/** Default values matching the plan spec. */
+/** Fallbacks, matching shader-config's DEFAULTS (WP-1d R4b). */
 const DEFAULTS = {
-  cuts: 8,
-  speed: 0.17,
+  cuts: 5,
+  speed: 0.12,
   border: 0.01,
   shadow: 0.05,
   fill: 0.85,
+  lineSoftness: 0,
+  lineTint: 0,
   intensity: 0.65,
   grain: 0.025,
   vignette: 0.2,
@@ -232,6 +236,11 @@ export function createFractureRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_border, cfg.border ?? DEFAULTS.border);
       gl.uniform1f(uniforms.u_shadow, cfg.shadow ?? DEFAULTS.shadow);
       gl.uniform1f(uniforms.u_fill, cfg.fill ?? DEFAULTS.fill);
+      gl.uniform1f(
+        uniforms.u_lineSoftness,
+        cfg.lineSoftness ?? DEFAULTS.lineSoftness
+      );
+      gl.uniform1f(uniforms.u_lineTint, cfg.lineTint ?? DEFAULTS.lineTint);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
       gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);

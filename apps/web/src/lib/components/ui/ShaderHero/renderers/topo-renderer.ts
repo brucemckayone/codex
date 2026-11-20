@@ -51,12 +51,12 @@ type TopoUniform = (typeof UNIFORM_NAMES)[number];
 
 /** Default values matching the plan spec. */
 const DEFAULTS = {
-  lineCount: 12,
-  lineWidth: 1.2,
-  speed: 0.15,
+  lineCount: 27,
+  lineWidth: 1.0,
+  speed: 0.4,
   scale: 2.5,
-  elevation: 1.0,
-  octaves: 3,
+  elevation: 2.8,
+  octaves: 5,
   intensity: 0.65,
   grain: 0.025,
   vignette: 0.2,

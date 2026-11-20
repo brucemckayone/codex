@@ -1,7 +1,12 @@
+import { SHADER_DEFAULT_PALETTE } from '$lib/brand-editor/defaults';
 import {
-  SHADER_DEFAULT_PALETTE,
-  SHADER_DEFAULT_PULSE_COLOR,
-} from '$lib/brand-editor/defaults';
+  FX_SETTINGS,
+  type FxSetting,
+  fxDefaultsFor,
+  LIVE_PRESET_IDS,
+  presetFxKey,
+} from '$lib/components/ui/ShaderHero/preset-fx-defaults';
+import type { LivePresetId } from '$lib/components/ui/ShaderHero/shader-config';
 
 // ── Preset definitions ─────────────────────────────────────────────────
 export interface PresetOption {
@@ -19,7 +24,13 @@ export const HERO_FX_PRESETS: PresetOption[] = [
     label: 'Water Ripple',
     description: 'Rippling water surface',
   },
-  { id: 'pulse', label: 'Pulse', description: '3D liquid wave surface' },
+  // Shown as "Liquid Logo" since WP-1d; the stored id stays 'pulse', so no
+  // saved brand migrates.
+  {
+    id: 'pulse',
+    label: 'Liquid Logo',
+    description: 'Your logo raised in still liquid',
+  },
   { id: 'ink', label: 'Ink Dispersion', description: 'Colored ink in liquid' },
   { id: 'topo', label: 'Topo', description: 'Topographic contour lines' },
   {
@@ -56,10 +67,28 @@ export function presetLabel(id: string): string {
 }
 
 // ── Default values ─────────────────────────────────────────────────────
+/**
+ * Each preset's own intensity/grain/vignette default (preset-fx-defaults.ts),
+ * written as a range input reports a value (String(0.2) is '0.2'), so
+ * updateOverride's remove-on-default matches a slider set back to it.
+ */
+const PRESET_FX_DEFAULT_VALUES: Record<string, string> = Object.fromEntries(
+  LIVE_PRESET_IDS.flatMap((id) =>
+    FX_SETTINGS.map((setting) => [
+      presetFxKey(id, setting),
+      String(fxDefaultsFor(id)[setting]),
+    ])
+  )
+);
+
 export const HERO_FX_DEFAULTS: Record<string, string> = {
+  // The legacy shared keys: no control writes them any more (each preset
+  // has its own, below), but a brand saved before WP-1d may hold them, and
+  // picking "None" must still clear them.
   'shader-intensity': '0.65',
   'shader-grain': '0.025',
   'shader-vignette': '0.20',
+  ...PRESET_FX_DEFAULT_VALUES,
   // Shader palette. The default is '0' — match the brand palette — so an org
   // that never opens this section renders exactly as it did before the keys
   // existed. The four colours below are only the pickers' opening state.
@@ -71,102 +100,112 @@ export const HERO_FX_DEFAULTS: Record<string, string> = {
   // Suture
   'shader-curl': '30',
   'shader-dissipation': '0.903',
-  'shader-advection': '8.0',
-  'shader-force': '2.70',
-  // Ether
-  'shader-rotation-speed': '0.40',
-  'shader-complexity': '6',
-  'shader-zoom': '5.0',
-  'shader-glow': '0.50',
-  'shader-scale': '2.00',
-  'shader-aberration': '0.003',
+  'shader-advection': '8',
+  'shader-force': '2.7',
+  // Ether: the owner's tuning (WP-1d), written as a range input reports it,
+  // so a slider set back to it drops the override (updateOverride).
+  'shader-rotation-speed': '0.9',
+  'shader-complexity': '8',
+  'shader-zoom': '5.5',
+  'shader-glow': '1.5',
+  'shader-scale': '4',
+  'shader-aberration': '0.02',
   // Ripple
-  'shader-wave-speed': '0.80',
+  'shader-wave-speed': '0.8',
   'shader-damping': '0.995',
-  'shader-ripple-size': '0.030',
-  'shader-refraction': '0.50',
-  // Pulse
-  'shader-pulse-damping': '0.97',
-  'shader-wave-scale': '4.0',
-  'shader-cam-height': '30',
-  'shader-cam-target': '-30',
-  'shader-specular': '0.60',
-  'shader-impulse-size': '0.040',
-  'shader-pulse-color': SHADER_DEFAULT_PULSE_COLOR,
+  'shader-ripple-size': '0.03',
+  'shader-refraction': '0.5',
+  // Liquid Logo (id 'pulse')
+  'shader-pulse-damping': '0.98',
+  'shader-wave-scale': '4',
+  'shader-cam-height': '27',
+  'shader-cam-target': '-5',
+  'shader-specular': '1',
+  'shader-impulse-size': '0.04',
   // Ink
-  'shader-ink-diffusion': '1.50',
-  'shader-ink-advection': '0.80',
-  'shader-ink-drop-size': '0.050',
+  'shader-ink-diffusion': '1.5',
+  'shader-ink-advection': '0.8',
+  'shader-ink-drop-size': '0.05',
   'shader-ink-evaporation': '0.997',
   'shader-ink-curl': '15',
-  // Topo
-  'shader-topo-line-count': '12',
-  'shader-topo-line-width': '1.2',
-  'shader-topo-speed': '0.15',
+  // Topo: the owner's tuning (WP-1d), as a range input reports it.
+  'shader-topo-line-count': '27',
+  'shader-topo-line-width': '1',
+  'shader-topo-speed': '0.4',
   'shader-topo-scale': '2.5',
-  'shader-topo-elevation': '1.0',
-  'shader-topo-octaves': '3',
+  'shader-topo-elevation': '2.8',
+  'shader-topo-octaves': '5',
   // Glass
-  'shader-glass-cell-size': '5.0',
+  // Glass: as a range input reports it. R4b's line settings start at the old
+  // hard, dark came (WP-1d).
+  'shader-glass-cell-size': '5',
   'shader-glass-border': '0.04',
-  'shader-glass-drift': '0.10',
-  'shader-glass-glow': '0.20',
+  'shader-glass-line-softness': '0',
+  'shader-glass-line-colour': '0',
+  'shader-glass-piece-edges': '0',
+  'shader-glass-drift': '0.1',
+  'shader-glass-glow': '0.2',
   'shader-glass-light': '0.15',
   // Film
   'shader-film-scale': '2.5',
   'shader-film-speed': '0.16',
-  'shader-film-bands': '6.0',
-  'shader-film-shift': '0.30',
-  'shader-film-ripple': '1.50',
+  'shader-film-bands': '6',
+  'shader-film-shift': '0.3',
+  'shader-film-ripple': '1.5',
   // Flux
   'shader-flux-poles': '3',
-  'shader-flux-line-density': '10.0',
-  'shader-flux-line-width': '1.00',
-  'shader-flux-strength': '1.50',
-  'shader-flux-speed': '0.10',
+  'shader-flux-line-density': '10',
+  'shader-flux-line-width': '1',
+  'shader-flux-strength': '1.5',
+  'shader-flux-speed': '0.1',
   // Lava
-  'shader-lava-crack-scale': '4.0',
+  'shader-lava-crack-scale': '4',
   'shader-lava-crack-width': '0.04',
-  'shader-lava-glow': '1.50',
+  'shader-lava-glow': '1.5',
   'shader-lava-speed': '0.08',
-  'shader-lava-crust': '0.60',
-  'shader-lava-heat': '1.00',
+  'shader-lava-crust': '0.6',
+  'shader-lava-heat': '1',
   // Caustic
-  'shader-caustic-scale': '5.0',
-  'shader-caustic-speed': '0.30',
+  'shader-caustic-scale': '5',
+  'shader-caustic-speed': '0.3',
   'shader-caustic-iterations': '5',
-  'shader-caustic-brightness': '1.70',
-  'shader-caustic-ripple': '3.00',
+  'shader-caustic-brightness': '1.7',
+  'shader-caustic-ripple': '3',
   // Physarum
-  'shader-physarum-diffusion': '1.00',
-  'shader-physarum-decay': '0.980',
-  'shader-physarum-deposit': '1.00',
-  'shader-physarum-sensor': '0.030',
+  'shader-physarum-diffusion': '1',
+  'shader-physarum-decay': '0.98',
+  'shader-physarum-deposit': '1',
+  'shader-physarum-sensor': '0.03',
   'shader-physarum-turn': '0.25',
   // Aurora
   'shader-aurora-layers': '5',
-  'shader-aurora-speed': '0.10',
-  'shader-aurora-height': '0.40',
+  'shader-aurora-speed': '0.1',
+  'shader-aurora-height': '0.4',
   'shader-aurora-spread': '0.25',
-  'shader-aurora-shimmer': '0.80',
-  // Lenia
-  'shader-lenia-radius': '13.0',
-  'shader-lenia-growth': '0.14',
-  'shader-lenia-width': '0.015',
-  'shader-lenia-speed': '2',
-  'shader-lenia-dt': '0.2',
+  'shader-aurora-shimmer': '0.8',
+  // Lenia: the owner's tuning (WP-1d R3). Width was '0.015' while the hero
+  // painted 0.04, so the slider showed one value and the page another.
+  'shader-lenia-radius': '15',
+  'shader-lenia-growth': '0.2',
+  'shader-lenia-width': '0.05',
+  'shader-lenia-speed': '4',
+  'shader-lenia-dt': '0.5',
   // Fracture
-  'shader-fracture-cuts': '8',
-  'shader-fracture-speed': '0.17',
-  'shader-fracture-border': '0.010',
+  // Fracture (WP-1d R4b): fewer, larger shards, a calmer sway, the old hard
+  // dark line; as a range input reports it.
+  'shader-fracture-cuts': '5',
+  'shader-fracture-speed': '0.12',
+  'shader-fracture-border': '0.01',
+  'shader-fracture-line-softness': '0',
+  'shader-fracture-line-colour': '0',
   'shader-fracture-shadow': '0.05',
   'shader-fracture-fill': '0.85',
   // Flow
-  'shader-flow-curl': '0.60',
-  'shader-flow-advection': '6.0',
-  'shader-flow-smoothing': '0.80',
-  'shader-flow-contrast': '12.0',
-  'shader-flow-field-speed': '1.00',
+  'shader-flow-curl': '0.6',
+  'shader-flow-advection': '6',
+  'shader-flow-smoothing': '0.8',
+  'shader-flow-contrast': '12',
+  'shader-flow-field-speed': '1',
 };
 
 /** All shader-* token override keys. */
@@ -220,11 +259,10 @@ export type ControlConfig =
   | ColorControlConfig
   | ToggleControlConfig;
 
-/** Sliders shown for every active preset (above the per-preset section). */
-export const HERO_FX_SHARED_CONTROLS: SliderControlConfig[] = [
-  {
+/** The intensity/grain/vignette sliders, before a preset gives them a key. */
+const FX_SLIDERS: Record<FxSetting, Omit<SliderControlConfig, 'key'>> = {
+  intensity: {
     kind: 'slider',
-    key: 'shader-intensity',
     label: 'Intensity',
     min: 0.1,
     max: 6.0,
@@ -233,9 +271,8 @@ export const HERO_FX_SHARED_CONTROLS: SliderControlConfig[] = [
     minLabel: 'Subtle',
     maxLabel: 'Blazing',
   },
-  {
+  grain: {
     kind: 'slider',
-    key: 'shader-grain',
     label: 'Grain',
     min: 0.0,
     max: 0.08,
@@ -244,9 +281,8 @@ export const HERO_FX_SHARED_CONTROLS: SliderControlConfig[] = [
     minLabel: 'Clean',
     maxLabel: 'Gritty',
   },
-  {
+  vignette: {
     kind: 'slider',
-    key: 'shader-vignette',
     label: 'Vignette',
     min: 0.0,
     max: 0.5,
@@ -255,7 +291,20 @@ export const HERO_FX_SHARED_CONTROLS: SliderControlConfig[] = [
     minLabel: 'None',
     maxLabel: 'Heavy',
   },
-];
+};
+
+/**
+ * The intensity, grain and vignette sliders for `preset`, shown above its own
+ * section. Each writes the preset's OWN key (`shader-<id>-intensity` etc.), so
+ * switching presets never carries one's tuning to another, and switching back
+ * finds it where it was left.
+ */
+export function presetFxControls(preset: LivePresetId): SliderControlConfig[] {
+  return FX_SETTINGS.map((setting) => ({
+    ...FX_SLIDERS[setting],
+    key: presetFxKey(preset, setting),
+  }));
+}
 
 /**
  * Shader palette controls, shown for every active preset.
@@ -462,10 +511,9 @@ export const HERO_FX_PRESET_CONTROLS: Record<
     ],
   },
   pulse: {
-    sectionLabel: 'Pulse',
+    sectionLabel: 'Liquid Logo',
+    // No colour picker: the surface paints the brand palette (WP-1d).
     controls: [
-      // Color picker first to mirror the historical layout.
-      { kind: 'color', key: 'shader-pulse-color', label: 'Surface Color' },
       {
         kind: 'slider',
         key: 'shader-pulse-damping',
@@ -676,19 +724,53 @@ export const HERO_FX_PRESET_CONTROLS: Record<
         max: 10.0,
         step: 0.5,
         format: 'fixed1',
-        minLabel: 'Small',
-        maxLabel: 'Large',
+        // More cells across at the top end: smaller pieces.
+        minLabel: 'Large',
+        maxLabel: 'Small',
       },
       {
         kind: 'slider',
         key: 'shader-glass-border',
-        label: 'Border Width',
+        label: 'Line Weight',
         min: 0.02,
         max: 0.1,
         step: 0.01,
         format: 'fixed2',
         minLabel: 'Thin',
         maxLabel: 'Thick',
+      },
+      {
+        kind: 'slider',
+        key: 'shader-glass-line-softness',
+        label: 'Line Softness',
+        min: 0,
+        max: 1,
+        step: 0.05,
+        format: 'fixed2',
+        minLabel: 'Hard',
+        maxLabel: 'Soft',
+      },
+      {
+        kind: 'slider',
+        key: 'shader-glass-line-colour',
+        label: 'Line Colour',
+        min: 0,
+        max: 1,
+        step: 0.05,
+        format: 'fixed2',
+        minLabel: 'Dark',
+        maxLabel: 'Tinted',
+      },
+      {
+        kind: 'slider',
+        key: 'shader-glass-piece-edges',
+        label: 'Piece Edges',
+        min: 0,
+        max: 1,
+        step: 0.05,
+        format: 'fixed2',
+        minLabel: 'Sharp',
+        maxLabel: 'Bevelled',
       },
       {
         kind: 'slider',
@@ -1184,13 +1266,35 @@ export const HERO_FX_PRESET_CONTROLS: Record<
       {
         kind: 'slider',
         key: 'shader-fracture-border',
-        label: 'Edge Width',
+        label: 'Line Weight',
         min: 0.005,
         max: 0.02,
         step: 0.001,
         format: 'fixed3',
         minLabel: 'Thin',
         maxLabel: 'Thick',
+      },
+      {
+        kind: 'slider',
+        key: 'shader-fracture-line-softness',
+        label: 'Line Softness',
+        min: 0,
+        max: 1,
+        step: 0.05,
+        format: 'fixed2',
+        minLabel: 'Hard',
+        maxLabel: 'Soft',
+      },
+      {
+        kind: 'slider',
+        key: 'shader-fracture-line-colour',
+        label: 'Line Colour',
+        min: 0,
+        max: 1,
+        step: 0.05,
+        format: 'fixed2',
+        minLabel: 'Dark',
+        maxLabel: 'Tinted',
       },
       {
         kind: 'slider',

@@ -4,8 +4,8 @@
     HERO_FX_COLOR_CONTROLS,
     HERO_FX_DEFAULTS,
     HERO_FX_PRESETS,
-    HERO_FX_SHARED_CONTROLS,
     HERO_FX_PRESET_CONTROLS,
+    presetFxControls,
     type ControlConfig,
   } from '$lib/brand-editor/hero-fx-presets';
   import {
@@ -31,6 +31,11 @@
   // so that survivor's card is the one marked active and its controls show.
   const activePreset = $derived(
     resolvePresetId(overrides['shader-preset']) ?? 'none'
+  );
+  // Intensity, grain and vignette write the ACTIVE preset's own keys, so a
+  // switch never carries one preset's tuning to the next (WP-1d).
+  const fxControls = $derived(
+    activePreset === 'none' ? [] : presetFxControls(activePreset)
   );
 
   // Which palette controls to show. The four colour pickers are pointless
@@ -121,11 +126,12 @@
     </div>
   </section>
 
-  <!-- Shared sliders + per-preset controls (only when a preset is active) -->
+  <!-- This preset's intensity/grain/vignette + its own controls (only when a
+       preset is active). Not "Global": each preset keeps its own (WP-1d). -->
   {#if activePreset !== 'none'}
     <section class="hero-fx__section">
-      <span class="hero-fx__section-label">Global</span>
-      {#each HERO_FX_SHARED_CONTROLS as control (control.key)}
+      <span class="hero-fx__section-label">This effect</span>
+      {#each fxControls as control (control.key)}
         <ControlField
           {control}
           currentValue={readControlValue(control)}

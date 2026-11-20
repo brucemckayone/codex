@@ -6,6 +6,7 @@ import {
   tokenOverrideText,
 } from '@codex/validation';
 import { browser } from '$app/environment';
+import { PRESET_FX_KEYS } from '$lib/components/ui/ShaderHero/preset-fx-defaults';
 import { HERO_OPT_PREFIX } from '$lib/org-hero/hero-config';
 import { brandFontProperty, withFallback } from './font-fallbacks';
 import {
@@ -85,6 +86,10 @@ export const BRAND_PREFIX_KEYS = new Set([
   'font-heading',
   // Shader hero configuration — consumed by ShaderHero component via getComputedStyle
   'shader-preset',
+  // Intensity, grain and vignette are each preset's own
+  // (`shader-<id>-intensity` etc., preset-fx-defaults.ts). The shared three
+  // stay so a brand saved before WP-1d still reads them as the fallback.
+  ...PRESET_FX_KEYS,
   'shader-intensity',
   'shader-grain',
   'shader-vignette',
@@ -114,14 +119,13 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-damping',
   'shader-ripple-size',
   'shader-refraction',
-  // Pulse
+  // Liquid Logo (id 'pulse')
   'shader-pulse-damping',
   'shader-wave-scale',
   'shader-cam-height',
   'shader-cam-target',
   'shader-specular',
   'shader-impulse-size',
-  'shader-pulse-color',
   // Ink
   'shader-ink-diffusion',
   'shader-ink-advection',
@@ -141,6 +145,10 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-glass-drift',
   'shader-glass-glow',
   'shader-glass-light',
+  // WP-1d R4b: R4's softer came, as settings (0 is the old hard, dark one).
+  'shader-glass-line-softness',
+  'shader-glass-line-colour',
+  'shader-glass-piece-edges',
   // Film
   'shader-film-scale',
   'shader-film-speed',
@@ -190,6 +198,9 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-fracture-border',
   'shader-fracture-shadow',
   'shader-fracture-fill',
+  // WP-1d R4b: R4's softer line, as settings (0 is the old hard, dark one).
+  'shader-fracture-line-softness',
+  'shader-fracture-line-colour',
   // Flow
   'shader-flow-curl',
   'shader-flow-advection',

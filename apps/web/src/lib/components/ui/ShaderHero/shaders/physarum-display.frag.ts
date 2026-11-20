@@ -2,16 +2,14 @@
  * Physarum display fragment shader (GLSL ES 3.0).
  *
  * Renders the pheromone field as a glowing transport network: a four-stop brand
- * ramp on trail density, edge definition from screen-space derivatives, a
- * travelling pulse on dense junctions, and accent-bright agent fronts.
+ * ramp on trail density, edge definition from screen-space derivatives and a
+ * travelling pulse on dense junctions.
  *
  * ## What changed and why
  *
- * **Agent fronts are now visible.** The pass read only the trail channel, so
- * the moving agents — the thing that makes this a transport network rather than
- * a smear — were invisible; you saw only what they had left behind. The 3x3
- * read now takes the whole `vec4` (the same fetch, no extra cost) and the agent
- * channel drives a bright accent front, so the network reads as being drawn.
+ * **No agent fronts (WP-1d R3).** The agents are particles now
+ * (physarum-sim.frag.ts), each one texel; a front lit where they stand would
+ * be 65,536 bright dots. The veins they draw are the picture.
  *
  * **The node pulse.** It was `sin(uTime * 2.0 + trail * 10.0)`: 2 rad/s off the
  * wall clock, fast enough to read as a strobe over dense regions. It now runs
@@ -75,25 +73,20 @@ vec3 toneOverBg(vec3 c, vec3 bg) {
 }
 
 void main() {
-  // ---- 1. 3x3 tent-weighted read of trail and agent presence ----
-  // The simulation runs at a fixed 512x512 while the canvas may be larger, so a
-  // point sample shows texel stair-steps on every vein. One vec4 fetch per tap
-  // gives the agent channel for free.
+  // ---- 1. 3x3 tent-weighted read of the trail ----
+  // The simulation grid is coarser than the canvas, so a point sample shows
+  // texel stair-steps on every vein.
   vec2 tx = vec2(1.0) / vec2(textureSize(uState, 0));
   float trail = 0.0;
-  float agent = 0.0;
   float w = 0.0;
   for (int dy = -1; dy <= 1; dy++) {
     for (int dx = -1; dx <= 1; dx++) {
       float k = (dx == 0 && dy == 0) ? 4.0 : (abs(dx) + abs(dy) == 1 ? 2.0 : 1.0);
-      vec4 s = texture(uState, v_uv + vec2(float(dx), float(dy)) * tx);
-      trail += s.r * k;
-      agent += s.b * k;
+      trail += texture(uState, v_uv + vec2(float(dx), float(dy)) * tx).r * k;
       w += k;
     }
   }
   trail /= w;
-  agent /= w;
 
   float bgLum = dot(uBgColor, vec3(0.299, 0.587, 0.114));
   float darkBg = 1.0 - smootherstep(0.35, 0.62, bgLum);
@@ -119,12 +112,6 @@ void main() {
   float pulse = 0.5 + 0.5 * sin(uClock + trail * 10.0);
   float nodeGlow = smoothstep(0.5, 1.0, trail) * pulse * (0.07 + beatHit(1.9) * 0.08);
   color = highlight(color, accent, nodeGlow, darkBg);
-
-  // ---- 5. Agent fronts — where the network is being drawn right now ----
-  float front = smootherstep(0.2, 0.7, agent);
-  color = highlight(
-    color, accent, front * (0.18 + beatHit(1.6) * 0.18) * uIntensity, darkBg
-  );
 
   // ---- 6. Treble sparkle, on dense trail only ----
   // Confined to strong veins so the empty field never twinkles: a background

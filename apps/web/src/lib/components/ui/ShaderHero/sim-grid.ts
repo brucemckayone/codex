@@ -46,21 +46,30 @@ function canvasAspect(width: number, height: number): number {
   return Math.min(Math.max(width / height, MIN_ASPECT), MAX_ASPECT);
 }
 
-function roundToCell(n: number): number {
-  return Math.max(SIM_CELL, Math.round(n / SIM_CELL) * SIM_CELL);
+function roundToCell(n: number, cell: number): number {
+  return Math.max(cell, Math.round(n / cell) * cell);
 }
 
 /**
  * The simulation grid for a canvas of this size: the canvas's shape, with
- * about `SIM_BASE`² texels, each side a multiple of `SIM_CELL`. A zero or
- * missing size (a canvas not laid out yet) gives the square grid.
+ * about `base`² texels (`SIM_BASE`² unless a preset's pass is too costly for
+ * it: lenia's 48-tap kernel runs at 256²), each side a multiple of `cell`.
+ * `SIM_CELL` (64) lets a periodic seed tile; a preset with no periodic seed
+ * can round finer, and a small grid must (lenia, 16: at 256² a 64-texel side
+ * is a quarter of the grid, which made ovals of 0.80 to 1.25 on tablets). A
+ * zero or missing size (a canvas not laid out yet) gives the square grid.
  */
-export function simGridFor(width: number, height: number): SimGrid {
+export function simGridFor(
+  width: number,
+  height: number,
+  base: number = SIM_BASE,
+  cell: number = SIM_CELL
+): SimGrid {
   const aspect = canvasAspect(width, height);
   const root = Math.sqrt(aspect);
   return {
-    w: roundToCell(SIM_BASE * root),
-    h: roundToCell(SIM_BASE / root),
+    w: roundToCell(base * root, cell),
+    h: roundToCell(base / root, cell),
     aspect,
   };
 }

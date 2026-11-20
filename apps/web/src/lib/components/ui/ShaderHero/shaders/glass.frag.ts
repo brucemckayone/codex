@@ -1,7 +1,23 @@
 /**
  * Glass fragment shader — Voronoi stained glass with a thin-film lead fringe.
  *
- * ## What changed and why
+ * ## WP-1d R4b (Codex-1yd58): the came is the motif
+ *
+ * - **Irregular cells.** Seeds sat at their grid cell's centre plus a small
+ *   orbit, so the pane read as a wobbly square grid. Each seed now sits off
+ *   centre by a fixed hash, and about a third of the grid cells hold two
+ *   seeds, so pieces vary about 2:1 in size.
+ * - **The leading, by default, is the old came:** bold, hard (1 px of
+ *   anti-alias), near-black. R4 made it thin, soft and tinted and the owner
+ *   lost the stained glass, so each of those is now a setting:
+ *   u_border (line weight), u_lineSoftness (hard to soft), u_lineTint (dark
+ *   to the R4 ground tint).
+ * - **Light.** Each piece is lit from one side by a slow light sweep, and its
+ *   brightness is fixed (pieces no longer pulse one by one). u_pieceEdges
+ *   bevels the pieces toward their lead (R4's roundness); 0, the default, is
+ *   the old flat piece.
+ *
+ * ## Earlier
  *
  * **Cost.** The Voronoi searched a 5x5 = 25 cell neighbourhood. A seed that
  * stays inside its own cell can only ever be beaten by a seed in the
@@ -57,6 +73,9 @@ uniform float u_border;
 uniform float u_drift;
 uniform float u_glow;
 uniform float u_light;
+uniform float u_lineSoftness;
+uniform float u_lineTint;
+uniform float u_pieceEdges;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
@@ -91,6 +110,18 @@ ${MOTION_HELPERS}
  * default is 0.10, where the clamp does nothing at all.
  */
 const float MAX_SEED_DRIFT = 0.27;
+
+/**
+ * WP-1d R4 seed layout, inside the same 3x3 bound (offset magnitude under
+ * 0.396 from the cell centre): a lone seed is jittered up to SEED_JITTER per
+ * axis (0.25 magnitude); a split cell's two seeds sit SPLIT_OFFSET either
+ * side of it (0.2 + 0.06 jitter). The orbit is scaled by DRIFT_SCALE, so the
+ * slider's top (0.27, 0.38 magnitude) adds at most 0.11: 0.36 in all.
+ */
+const float SEED_JITTER = 0.18;
+const float SPLIT_CHANCE = 0.35;
+const float SPLIT_OFFSET = 0.2;
+const float DRIFT_SCALE = 0.3;
 
 float hash21(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -135,6 +166,24 @@ vec3 filmTint(float order) {
   return mix(a, b, w);
 }
 
+/**
+ * Keep the nearest and second-nearest seed. A piece is named by its grid
+ * cell, offset by half a cell for a split cell's second seed.
+ */
+void consider(vec2 uv, vec2 seed, vec2 cell, inout float minDist,
+              inout float secondMinDist, inout vec2 nearestCell,
+              inout vec2 nearestSeed) {
+  float d = distance(uv, seed);
+  if (d < minDist) {
+    secondMinDist = minDist;
+    minDist = d;
+    nearestCell = cell;
+    nearestSeed = seed;
+  } else if (d < secondMinDist) {
+    secondMinDist = d;
+  }
+}
+
 void main() {
   float clock = u_clock;
   vec2 aspect = vec2(u_resolution.x / u_resolution.y, 1.0);
@@ -156,22 +205,29 @@ void main() {
       vec2 cellHash = hash22(cellBase);
       // Hashed rate as well as hashed phase — see the file header.
       vec2 rate = 0.20 + cellHash * 0.28;
-      vec2 seed = cellBase + 0.5 + drift * vec2(
+      vec2 orbit = drift * DRIFT_SCALE * vec2(
         sin(clock * rate.x + cellHash.x * 6.2831),
         cos(clock * rate.y + cellHash.y * 6.2831)
       );
-      float d = distance(uv, seed);
-      if (d < minDist) {
-        secondMinDist = minDist;
-        minDist = d;
-        nearestCell = cellBase;
-        nearestSeed = seed;
-        nearestId = hash21(cellBase);
-      } else if (d < secondMinDist) {
-        secondMinDist = d;
+      vec2 place = hash22(cellBase + 7.7) - 0.5;
+      vec2 centre = cellBase + 0.5 + orbit;
+      // About a third of the cells hold two seeds, either side of the centre
+      // along the hashed direction; the rest one seed, jittered off centre.
+      if (fract((cellHash.x + cellHash.y) * 13.7) < SPLIT_CHANCE) {
+        vec2 across = normalize(place + 1e-3) * SPLIT_OFFSET;
+        vec2 jitter = place.yx * 0.12;
+        consider(uv, centre + across + jitter, cellBase,
+          minDist, secondMinDist, nearestCell, nearestSeed);
+        consider(uv, centre - across + jitter, cellBase + 0.5,
+          minDist, secondMinDist, nearestCell, nearestSeed);
+      } else {
+        consider(uv, centre + place * (SEED_JITTER * 2.0), cellBase,
+          minDist, secondMinDist, nearestCell, nearestSeed);
       }
     }
   }
+
+  nearestId = hash21(nearestCell);
 
   // Mouse seed — a temporary fracture that follows the pointer. Kept: it is
   // the one motion the viewer causes directly and it reshapes cell outlines.
@@ -215,29 +271,53 @@ void main() {
   int colorIdx = clamp(int(floor(nearestId * 3.0)), 0, 2);
   vec3 cellColor = palette[colorIdx];
 
-  // Per-cell luminance variation with a hashed rate, plus a subtle warm/cool
-  // shift, so the pane reads as real stained glass rather than three flat
-  // swatches. The slow envelope widens the variation; nothing per-note does.
-  float lightAmp = u_light * 0.35 * audioLift(u_energy, 0.2);
-  float cellLight = 0.7
-    + lightAmp * sin(clock * (0.55 + nearestId * 0.5) + nearestId * 6.2831);
+  // Each piece its own fixed brightness and a subtle warm/cool shift, so the
+  // pane reads as real stained glass rather than three flat swatches. (Each
+  // piece pulsed on its own clock before R4.)
+  float cellLight = 0.74 + 0.22 * hash21(nearestCell + vec2(41.7));
   float tintHash = hash21(nearestCell + vec2(17.3));
   vec3 tintedColor = mix(cellColor, mix(cellColor, u_brandAccent, 0.5), tintHash * 0.25);
   cellColor = tintedColor * cellLight;
+
+  // Light through the pane from one side, sweeping slowly: each piece is
+  // brighter on its lit side, and its edges bevel toward the lead. u_light
+  // sets how strongly; the slow envelope lifts it a little.
+  float lightAngle = 2.2 + 0.35 * sin(clock * 0.05);
+  vec2 lightDir = vec2(cos(lightAngle), sin(lightAngle));
+  vec2 fromSeed = uv - nearestSeed;
+  float lightAmt = (0.35 + u_light * 1.5) * audioLift(u_energy, 0.2);
+  float sheen = clamp(dot(fromSeed, lightDir), -0.6, 0.6);
+  float bevelBand = 1.0 - smoothstep(0.0, u_border * 3.0, edge);
+  float bevel = bevelBand * dot(normalize(fromSeed + vec2(1e-4)), lightDir);
+  cellColor *= 1.0 + lightAmt * (0.35 * sheen + 0.45 * bevel * u_pieceEdges);
 
   // Centre-fade translucency. Bass adds body — a magnitude, not a position.
   float centerFade = smoothstep(0.0, 0.5, minDist);
   cellColor *= (0.85 + 0.15 * centerFade) * audioLift(u_bass, 0.12);
 
-  // ── Leading (dark border) ──────────────────────────────────────────
-  float borderMask = smoothstep(u_border * 0.5, u_border, edge);
-  vec3 leadColor = u_bgColor * 0.18;
+  // ── Leading ────────────────────────────────────────────────────────
+  // The came: as wide as the old one (its ramp's centre, 0.75 of u_border),
+  // hard-edged (1 px of anti-alias) and near-black (the ground at 18%).
+  // Softness widens the edge to R4's soft ramp at the same weight; the tint
+  // moves the colour to R4's: a dark came on a dark ground, a brand-tinted
+  // line on a light one.
+  float aa = fwidth(edge);
+  float leadEdge = u_border * 0.75;
+  float leadRamp = max(aa, u_lineSoftness * u_border * 0.4);
+  float borderMask = smoothstep(leadEdge - leadRamp, leadEdge + leadRamp, edge);
+  float bgLum = dot(u_bgColor, vec3(0.299, 0.587, 0.114));
+  float onLight = smootherstep(0.3, 0.75, bgLum);
+  vec3 tintLead = mix(u_bgColor * 0.35, mix(u_bgColor, u_brandPrimary, 0.55) * 0.75, onLight);
+  vec3 leadColor = mix(u_bgColor * 0.18, tintLead, u_lineTint);
 
   // ── Edge glow with a thin-film fringe ──────────────────────────────
   // A beat widens and brightens the glow. Edges are exactly where a transient
   // belongs on this preset: the outline lights up, the tessellation does not
   // move.
-  float glowGain = u_glow * (1.0 + beatHit(1.4) * 0.5);
+  // On a light ground the glow would light the came itself and grey it out,
+  // so with dark lines (u_lineTint 0) it is held back there (WP-1d R4b).
+  float glowGain = u_glow * (1.0 + beatHit(1.4) * 0.5)
+                 * mix(1.0, u_lineTint, onLight);
   float glowSpan = u_border * (0.5 + beatHit(1.8) * 0.4);
   float edgeGlow = (1.0 - borderMask) * glowGain * smoothstep(0.0, glowSpan, edge);
 
