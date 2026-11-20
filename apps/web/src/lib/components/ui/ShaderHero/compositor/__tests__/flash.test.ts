@@ -4,6 +4,7 @@
  * picture's brightness more often than that, whatever its GLSL does.
  */
 import { describe, expect, it } from 'vitest';
+import { EFFECTS } from '../effects/registry';
 import { effectTime, FLASH_MAX_PER_SECOND, governFlash } from '../flash';
 
 /** The most distinct clock values in any one-second window, sampled at 240 Hz. */
@@ -67,5 +68,15 @@ describe('effectTime', () => {
     expect(effectTime({ flashes: true }, 2.9)).toBe(governFlash(2.9));
     expect(effectTime({ flashes: false }, 2.9)).toBe(2.9);
     expect(effectTime({}, 2.9)).toBe(2.9);
+  });
+
+  // Each registered effect that flashes (WP-8: glitch, leak), on the clock
+  // the compositor hands it, over ten seconds.
+  it.each(
+    EFFECTS.filter((e) => e.flashes).map((e) => [e.id, e] as const)
+  )('gives %s a clock that changes at most 3 times in any second', (_id, effect) => {
+    expect(
+      changesPerSecond((t) => effectTime(effect, t), 10)
+    ).toBeLessThanOrEqual(FLASH_MAX_PER_SECOND);
   });
 });

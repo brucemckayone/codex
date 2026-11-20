@@ -6,14 +6,18 @@
  *   --brand-shader-blend         how it meets the base: mix | screen |
  *                                multiply | difference | smoke-key
  *   --brand-shader-blend-amount  0-1
- *   --brand-shader-layers        passes in order, `id [amount]`, comma
- *                                separated: `grain 0.4, halftone`
+ *   --brand-shader-layers        passes in order, `id:amount` (plan §3; the
+ *                                amount optional, and `id amount` read
+ *                                too), comma separated: `grain:0.4, halftone`
  *   --brand-shader-frame         shader-only | through-name | name-glows
  *
  * each with a `-dark` twin the dark theme prefers, as every shader key has.
  *
  * Anything it cannot use is dropped, never an error: an unknown or repeated
- * second (the base itself) means no second, an unknown layer is skipped, an
+ * second (the base itself) means no second, an unknown layer is skipped (and
+ * logged once, so a typo or a cut layer never draws the bare base unseen), a
+ * repeated layer keeps its first place and amount (also logged once: each
+ * layer is a full pass, so a stack is at most six DISTINCT ones), an
  * unknown blend or frame is the default, amounts are clamped to 0-1. A stack
  * that comes out as the base alone is BARE (`isBareStack`), and a bare stack
  * takes today's path: no compositor, no framebuffer, the canvas at today's
@@ -22,6 +26,7 @@
  * Its own file, not `shader-config.ts`, and it reads ids only (`effects/ids`),
  * so a bare stack's hero loads none of the compositor or its GLSL.
  */
+import { logger } from '$lib/observability';
 import {
   type LivePresetId,
   presetIsUnknown,
@@ -38,6 +43,7 @@ import {
   isLayerId,
   type LayerId,
   PASSTHROUGH_FRAME,
+  SURFACE_ONLY_LAYER_IDS,
 } from './effects/ids';
 
 /** The five brand keys a stack is read from (each also `-dark`). */
@@ -110,21 +116,77 @@ function amountOf(text: string | undefined | null): number | null {
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : null;
 }
 
+/** Why a layer item was skipped, as `shader.unknown_layer` reports it. */
+type SkippedLayerReason = 'unknown' | 'surface-only' | 'repeat' | 'over-cap';
+
+/**
+ * The most skip lines a session logs: a token of junk would otherwise log one
+ * per distinct item for every visitor (a 199-character one, 70). The first
+ * few say the token is wrong; the rest say nothing new.
+ */
+const MAX_SKIP_WARNINGS = MAX_LAYERS;
+
+/** `${reason}:${id}` pairs logged this session: the poll reads ~2x a second. */
+const warnedLayers = new Set<string>();
+
+/**
+ * Log, once per id and reason per session and at most `MAX_SKIP_WARNINGS`
+ * times, a layer item the stack skips (`shader.unknown_layer`), as
+ * `warnUnknownPreset` logs a preset's, in production too. The reason tells a
+ * stale, cut or mistyped id (`unknown`) from a layer only the Showreel's
+ * surface runs (`surface-only`), one already in the stack (`repeat`) and one
+ * past the cap (`over-cap`). Without the line the hero draws something the
+ * token did not say and nobody learns why. The parse runs on the config
+ * poll, never in the render loop.
+ */
+function warnSkippedLayer(id: string, reason: SkippedLayerReason): void {
+  const key = `${reason}:${id}`;
+  if (warnedLayers.has(key) || warnedLayers.size >= MAX_SKIP_WARNINGS) return;
+  warnedLayers.add(key);
+  logger.warn('shader.unknown_layer', { id, where: 'brand', reason });
+}
+
+/**
+ * `id:amount` or `id amount`, comma separated; the amount may be left off. A
+ * repeated id is dropped before it takes a place, so the cap counts distinct
+ * layers: `glow, glow, ink` is two passes, not three. A layer that would run
+ * past the cap is dropped and logged (`over-cap`), never cut off unseen.
+ */
 function parseLayers(text: string | null): StackLayer[] {
   const layers: StackLayer[] = [];
-  for (const item of (text ?? '').split(',')) {
-    const [id, amount] = item.trim().toLowerCase().split(/\s+/);
-    if (!id || !isLayerId(id)) continue;
+  for (const raw of (text ?? '').split(',')) {
+    const item = raw.trim().toLowerCase();
+    if (!item) continue;
+    const [id, amount] = item.split(/[\s:]+/);
+    // An item with no id is unset, not unknown: nothing to log.
+    if (!id) continue;
+    if (!isLayerId(id)) {
+      warnSkippedLayer(id, 'unknown');
+      continue;
+    }
+    if (SURFACE_ONLY_LAYER_IDS.includes(id)) {
+      warnSkippedLayer(id, 'surface-only');
+      continue;
+    }
+    if (layers.some((layer) => layer.id === id)) {
+      warnSkippedLayer(id, 'repeat');
+      continue;
+    }
+    if (layers.length === MAX_LAYERS) {
+      warnSkippedLayer(id, 'over-cap');
+      continue;
+    }
     layers.push({ id, amount: amountOf(amount) });
-    if (layers.length === MAX_LAYERS) break;
   }
   return layers;
 }
 
 /**
  * The stack the tokens describe over `base`. `read` returns a key's raw
- * value, or null when unset. PURE but for one log line: a second id that
- * names no preset is logged once (`shader.unknown_preset`), as the base's is.
+ * value, or null when unset. PURE but for two log lines, each once per id
+ * per session: a second id that names no preset (`shader.unknown_preset`, as
+ * the base's is) and a layer item the stack skips (`shader.unknown_layer`,
+ * with its reason: unknown, surface-only, a repeat or over the cap).
  */
 export function parseStack(
   read: (key: StackTokenKey) => string | null,

@@ -129,13 +129,31 @@ jobs:
       # screen only through bindOutput(gl) (ShaderHero/output-target.ts), the
       # seam the Showreel compositor (WP-3, not built yet) will redirect to its
       # scene framebuffer. A raw bindFramebuffer(FRAMEBUFFER, null) still draws
-      # today, and would then draw behind the compositor's back. Text-only (no glslang), so it runs here;
+      # today, and would then draw behind the compositor's back. Text-only (no glslang);
       # see apps/web/scripts/check-output-door.mjs. Self-test first.
       - name: Output-door gate self-test
         run: pnpm --filter web run check:output-door:test
 
       - name: Output-door gate (ShaderHero draws through bindOutput)
         run: pnpm --filter web run check:output-door
+
+      # Codex-1yd58 WP-8: the shader gate. A GLSL error is invisible to tsc,
+      # biome and the unit tests (a shader is a string until a browser
+      # compiles it, and fails as a black canvas), so every ShaderHero preset
+      # and compositor pass is compiled with glslang, and each compositor
+      # layer is RUN in headless Chrome on SwiftShader and must draw its input
+      # unchanged at amount 0. glslang is not on the runner, so apt installs
+      # it (glslang-tools, 15.1 on 24.04, compiles all 52 sources). The
+      # runner's own Chrome runs the layers: no Playwright browser download.
+      # CI=true (set by Actions) makes a missing browser or WebGL2 a FAILURE,
+      # never a skip. See apps/web/scripts/validate-shaders.mjs.
+      - name: Install glslang (GLSL compiler for the shader gate)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glslang-tools
+
+      - name: Shader gate (GLSL compiles; each layer draws its input at amount 0)
+        env:
+          SHADERS_CHROME: /usr/bin/google-chrome
+        run: pnpm --filter web run shaders:check
 
       # Codex-ea1hd WP9: the data-access contract drift gate.
       #
