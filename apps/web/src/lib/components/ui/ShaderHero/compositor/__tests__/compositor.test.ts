@@ -1,0 +1,874 @@
+/**
+ * The compositor (Codex-1yd58.4) on a recording stand-in for WebGL2: what it
+ * draws into what, in what order, at what size, and what its three WP-5
+ * seams (`setMedia`, `setStage`, `setNameMask`) do before anything calls
+ * them. The stand-in tracks the bound framebuffer, the texture on each unit
+ * and the viewport, and records each draw with them.
+ */
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const { logger } = vi.hoisted(() => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock('$lib/observability', () => ({ logger }));
+
+// A frame or layers in place of the plan's, for the passes WP-3 does not
+// ship (a film frame, a flashing layer). Unset, the real plan runs.
+const override = vi.hoisted(() => ({
+  frame: null as unknown,
+  layers: null as unknown,
+}));
+vi.mock('../plan', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../plan')>();
+  return {
+    ...actual,
+    planStack: (...args: Parameters<typeof actual.planStack>) => {
+      const plan = actual.planStack(...args);
+      return {
+        ...plan,
+        ...(override.frame ? { frame: override.frame } : {}),
+        ...(override.layers ? { layers: override.layers } : {}),
+      };
+    },
+  };
+});
+
+import { bindOutput } from '../../output-target';
+import type { ShaderRenderer } from '../../renderer-types';
+import type { ShaderConfig } from '../../shader-config';
+import { type CompositeFrame, createCompositor } from '../compositor';
+import type { LayerEffect } from '../effects/effect';
+import { FRAMES, LAYERS } from '../effects/registry';
+import { governFlash } from '../flash';
+import { BARE_STACK, type StackConfig } from '../stack-config';
+import { stageBoxFrom } from '../stage';
+
+interface Handle {
+  kind: string;
+  id: number;
+  source?: string;
+  sources?: string[];
+  tex?: Handle;
+}
+
+interface Draw {
+  framebuffer: Handle | null;
+  units: Record<number, Handle | null>;
+  viewport: number[];
+  /** The fragment source of the program drawn with. */
+  fragment: string;
+}
+
+const TEXTURE0 = 0x84c0;
+
+/** The stateless WebGL calls the compositor and its helpers make. */
+const GL_METHODS = new Set([
+  'bindBuffer',
+  'bufferData',
+  'compileShader',
+  'deleteBuffer',
+  'deleteFramebuffer',
+  'deleteProgram',
+  'deleteShader',
+  'deleteTexture',
+  'detachShader',
+  'enableVertexAttribArray',
+  'getExtension',
+  'getProgramInfoLog',
+  'linkProgram',
+  'pixelStorei',
+  'texParameteri',
+  'uniform1f',
+  'uniform1i',
+  'uniform2f',
+  'uniform3f',
+  'uniform4f',
+  'vertexAttribPointer',
+]);
+
+/** A WebGL2 stand-in: every call is logged; the stateful ones are tracked. */
+function fakeGl({
+  failCompile = () => false,
+  incomplete = false,
+  tainted = null as unknown,
+  loseAt = null as string | null,
+}: {
+  failCompile?: (source: string) => boolean;
+  /** Every framebuffer reports incomplete, as one whose storage the driver
+   *  could not give (out of memory) does. */
+  incomplete?: boolean;
+  /** A source whose upload throws, as a cross-origin one without CORS does. */
+  tainted?: unknown;
+  /** The context is lost at this call (mid-frame, after the top check). */
+  loseAt?: string | null;
+} = {}) {
+  const calls: [string, unknown[]][] = [];
+  const draws: Draw[] = [];
+  /** Each clear: where it landed, at what size, in what colour. */
+  const clears: {
+    framebuffer: Handle | null;
+    viewport: number[];
+    color: number[];
+  }[] = [];
+  let clearColor = [0, 0, 0, 0];
+  let lost = false;
+  let id = 0;
+  let framebuffer: Handle | null = null;
+  let unit = 0;
+  const units: Record<number, Handle | null> = {};
+  let viewport = [0, 0, 0, 0];
+  let program: Handle | null = null;
+  const make = (kind: string): Handle => ({ kind, id: ++id });
+
+  const impl: Record<string, (...args: never[]) => unknown> = {
+    // A lost context allocates nothing.
+    createTexture: () => {
+      if (loseAt === 'createTexture') lost = true;
+      return lost ? null : make('texture');
+    },
+    createFramebuffer: () => (lost ? null : make('framebuffer')),
+    checkFramebufferStatus: () =>
+      incomplete ? 'FRAMEBUFFER_INCOMPLETE_ATTACHMENT' : 'FRAMEBUFFER_COMPLETE',
+    texImage2D: (...args: unknown[]) => {
+      if (tainted !== null && args.at(-1) === tainted) {
+        throw new DOMException('The image is tainted', 'SecurityError');
+      }
+    },
+    createBuffer: () => make('buffer'),
+    createShader: () => make('shader'),
+    createProgram: () => ({ ...make('program'), sources: [] }),
+    shaderSource: (shader: Handle, source: string) => {
+      shader.source = source;
+    },
+    getShaderParameter: (shader: Handle) => !failCompile(shader.source ?? ''),
+    getProgramParameter: () => true,
+    attachShader: (prog: Handle, shader: Handle) => {
+      prog.sources?.push(shader.source ?? '');
+    },
+    getUniformLocation: (_prog: Handle, name: string) => ({ uniform: name }),
+    getAttribLocation: () => 0,
+    getShaderInfoLog: () => 'stand-in compile failure',
+    isContextLost: () => lost,
+    bindFramebuffer: (_target: string, fb: Handle | null) => {
+      framebuffer = fb;
+    },
+    framebufferTexture2D: (
+      _t: string,
+      _a: string,
+      _tt: string,
+      tex: Handle
+    ) => {
+      if (framebuffer) framebuffer.tex = tex;
+    },
+    activeTexture: (which: number) => {
+      unit = which - TEXTURE0;
+    },
+    bindTexture: (_target: string, tex: Handle | null) => {
+      units[unit] = tex;
+    },
+    viewport: (...box: number[]) => {
+      viewport = box;
+    },
+    useProgram: (prog: Handle) => {
+      program = prog;
+    },
+    clearColor: (...rgba: number[]) => {
+      clearColor = rgba;
+    },
+    clear: () => {
+      clears.push({ framebuffer, viewport, color: clearColor });
+    },
+    drawArrays: () => {
+      draws.push({
+        framebuffer,
+        units: { ...units },
+        viewport,
+        fragment: program?.sources?.find((s) => s.includes('fragColor')) ?? '',
+      });
+    },
+  };
+
+  // Only WebGL's own names answer: a matcher probing it (`asymmetricMatch`,
+  // `then`, a symbol) must find nothing there.
+  const gl = new Proxy(
+    {},
+    {
+      get(_target, key) {
+        if (typeof key !== 'string') return undefined;
+        if (key === 'TEXTURE0') return TEXTURE0;
+        if (/^[A-Z][A-Z0-9_]*$/.test(key)) return key;
+        if (!(key in impl) && !GL_METHODS.has(key)) return undefined;
+        return (...args: never[]) => {
+          calls.push([key, args]);
+          return impl[key]?.(...args);
+        };
+      },
+    }
+  ) as unknown as WebGL2RenderingContext;
+
+  return {
+    gl,
+    calls,
+    draws,
+    clears,
+    clearColor: () => clearColor,
+    named: (name: string) =>
+      calls.filter(([k]) => k === name).map(([, a]) => a),
+    lose: () => {
+      lost = true;
+    },
+    /** The browser restores it: a new, empty context on the same object. */
+    restore: () => {
+      lost = false;
+    },
+    reset: () => {
+      calls.length = 0;
+      draws.length = 0;
+      clears.length = 0;
+    },
+  };
+}
+
+/** A renderer stand-in that draws into whatever output is bound, as every preset does. */
+function stubRenderer() {
+  const binds: unknown[] = [];
+  const renderer = {
+    init: vi.fn(() => true),
+    resize: vi.fn(),
+    reset: vi.fn(),
+    destroy: vi.fn(),
+    render: vi.fn((gl: WebGL2RenderingContext) => {
+      bindOutput(gl);
+      binds.push('rendered');
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }),
+  } satisfies ShaderRenderer;
+  return renderer;
+}
+
+const config = {
+  preset: 'flow',
+  colors: {
+    primary: [0.1, 0.2, 0.3],
+    secondary: [0.4, 0.5, 0.6],
+    accent: [0.7, 0.8, 0.9],
+    bg: [0.05, 0.05, 0.05],
+  },
+} as unknown as ShaderConfig;
+
+function frame(over: Partial<CompositeFrame> = {}): CompositeFrame {
+  return {
+    base: stubRenderer(),
+    baseConfig: config,
+    second: null,
+    secondConfig: null,
+    stack: { ...BARE_STACK, layers: [{ id: 'grain', amount: null }] },
+    time: 2.9,
+    mouse: { x: 0.25, y: 0.75, active: false, burstStrength: 0 },
+    scene: [390, 844],
+    secondSize: [195, 422],
+    output: [780, 1688],
+    phone: true,
+    reducedMotion: false,
+    canvasBox: { left: 0, bottom: 844, width: 390, height: 844 },
+    scrollY: 0,
+    ...over,
+  };
+}
+
+/** The effect a draw was made with, by its body. */
+const drewWith = (draw: Draw, effect: { glsl: string }) =>
+  draw.fragment.includes(effect.glsl);
+
+afterEach(() => {
+  override.frame = null;
+  override.layers = null;
+  logger.warn.mockClear();
+});
+
+describe('compositor render', () => {
+  it('draws the base into the scene target at the scene size, then the frame to the canvas at the output size', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const f = frame({
+      stack: { ...BARE_STACK, frame: 'shader-only', layers: [] },
+    });
+    expect(compositor.render(f)).toBe(true);
+
+    expect(f.base.render).toHaveBeenCalledWith(
+      fake.gl,
+      2.9,
+      f.mouse,
+      config,
+      390,
+      844
+    );
+    const [base, out] = fake.draws;
+    // The base's own `bindOutput` landed on the scene target.
+    expect(base.framebuffer?.kind).toBe('framebuffer');
+    // The frame reached the canvas, through the door, and reads the scene.
+    expect(out.framebuffer).toBeNull();
+    expect(out.viewport).toEqual([0, 0, 780, 1688]);
+    expect(out.units[0]).toBe(base.framebuffer?.tex);
+    expect(drewWith(out, FRAMES['shader-only'])).toBe(true);
+    expect(fake.draws).toHaveLength(2);
+    // After it, the output is the canvas again, as after any renderer.
+    fake.reset();
+    bindOutput(fake.gl);
+    expect(fake.named('bindFramebuffer').at(-1)?.[1]).toBeNull();
+  });
+
+  it('with no base preset, draws a plain ground of the brand background into the scene', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const f = frame({
+      base: null,
+      stack: { ...BARE_STACK, frame: 'shader-only', layers: [] },
+    });
+    expect(compositor.render(f)).toBe(true);
+    // One clear, into the scene target at the scene size, in the bg colour.
+    expect(fake.clears).toHaveLength(1);
+    const [ground] = fake.clears;
+    expect(ground.framebuffer?.kind).toBe('framebuffer');
+    expect(ground.viewport).toEqual([0, 0, 390, 844]);
+    expect(ground.color).toEqual([0.05, 0.05, 0.05, 1]);
+    // GL's default clear colour back for the presets that follow.
+    expect(fake.clearColor()).toEqual([0, 0, 0, 0]);
+    // The frame reads that ground and draws it to the canvas.
+    const out = fake.draws.at(-1) as Draw;
+    expect(out.framebuffer).toBeNull();
+    expect(out.units[0]).toBe(ground.framebuffer?.tex);
+    expect(fake.draws).toHaveLength(1);
+  });
+
+  it('clears nothing when a base preset draws the scene', () => {
+    const fake = fakeGl();
+    createCompositor(fake.gl).render(frame());
+    expect(fake.clears).toEqual([]);
+  });
+
+  it('renders the second preset into its own target at its own size, and blends the two', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const second = stubRenderer();
+    const secondConfig = {
+      ...config,
+      preset: 'ripple',
+    } as unknown as ShaderConfig;
+    const stack: StackConfig = {
+      ...BARE_STACK,
+      second: 'ripple',
+      blend: 'mix',
+    };
+    compositor.render(frame({ second, secondConfig, stack }));
+
+    expect(second.render).toHaveBeenCalledWith(
+      fake.gl,
+      2.9,
+      expect.anything(),
+      secondConfig,
+      195,
+      422
+    );
+    const [base, secondDraw, blend, out] = fake.draws;
+    expect(secondDraw.framebuffer).not.toBe(base.framebuffer);
+    expect(secondDraw.framebuffer?.kind).toBe('framebuffer');
+    // The blend reads the base on unit 0 and the second on unit 1, into a third target.
+    expect(drewWith(blend, { glsl: 'mix(a, b, u_amount)' })).toBe(true);
+    expect(blend.units[0]).toBe(base.framebuffer?.tex);
+    expect(blend.units[1]).toBe(secondDraw.framebuffer?.tex);
+    expect(blend.viewport).toEqual([0, 0, 390, 844]);
+    expect([base.framebuffer, secondDraw.framebuffer]).not.toContain(
+      blend.framebuffer
+    );
+    expect(out.framebuffer).toBeNull();
+    expect(out.units[0]).toBe(blend.framebuffer?.tex);
+  });
+
+  it('runs no blend while the second preset is not drawing', () => {
+    const fake = fakeGl();
+    const stack: StackConfig = { ...BARE_STACK, second: 'ripple' };
+    createCompositor(fake.gl).render(frame({ stack }));
+    expect(fake.draws.some((d) => d.fragment.includes('u_second'))).toBe(false);
+  });
+
+  it('runs layers in order at the scene size, ping-ponging: never into the target it reads', () => {
+    const fake = fakeGl();
+    const stack: StackConfig = {
+      ...BARE_STACK,
+      layers: [
+        { id: 'grain', amount: 0.2 },
+        { id: 'grain', amount: 0.4 },
+        { id: 'grain', amount: 0.6 },
+      ],
+    };
+    createCompositor(fake.gl).render(frame({ stack }));
+    const layers = fake.draws.slice(1, 4);
+    expect(layers.every((d) => drewWith(d, LAYERS.grain))).toBe(true);
+    for (const draw of layers) {
+      expect(draw.viewport).toEqual([0, 0, 390, 844]);
+      expect(draw.units[0]).not.toBe(draw.framebuffer?.tex);
+    }
+    // Each reads what the one before it wrote; two targets between them.
+    expect(layers[1].units[0]).toBe(layers[0].framebuffer?.tex);
+    expect(layers[2].units[0]).toBe(layers[1].framebuffer?.tex);
+    expect(layers[2].framebuffer).toBe(layers[0].framebuffer);
+    expect(fake.draws[4].units[0]).toBe(layers[2].framebuffer?.tex);
+    // Each with its own amount.
+    const amounts = fake
+      .named('uniform1f')
+      .filter(([loc]) => (loc as { uniform: string }).uniform === 'u_amount')
+      .map(([, v]) => v);
+    expect(amounts).toEqual([0.2, 0.4, 0.6]);
+  });
+
+  /** Draws into a target whose own texture sits on a unit: a feedback loop. */
+  const feedbackShaped = (draws: Draw[]) =>
+    draws.filter(
+      (d) =>
+        d.framebuffer &&
+        Object.values(d.units).some(
+          (t) => t !== null && t === d.framebuffer?.tex
+        )
+    );
+
+  it('never draws into a target whose texture sits on a unit, film frame and all', () => {
+    // A new target is bound where it is made: made after the film's unit was
+    // bound, it sat on that unit while a layer drew into it (review C2).
+    override.frame = filmFrame;
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setMedia(fakeVideo().el);
+    compositor.setStage(
+      stageBoxFrom({ left: 20, top: 100, width: 350, height: 600 }, 0, 600)
+    );
+    const second = stubRenderer();
+    const stack: StackConfig = {
+      ...BARE_STACK,
+      second: 'ripple',
+      blend: 'screen',
+      layers: [
+        { id: 'grain', amount: null },
+        { id: 'grain', amount: null },
+      ],
+    };
+    compositor.render(frame({ second, secondConfig: config, stack }));
+    expect(fake.draws.length).toBeGreaterThanOrEqual(5);
+    expect(feedbackShaped(fake.draws)).toEqual([]);
+  });
+
+  it('drops a second preset that throws, tells the hero, and draws the base on', () => {
+    const fake = fakeGl();
+    const second = stubRenderer();
+    const boom = new Error('second.render threw');
+    second.render.mockImplementation(() => {
+      throw boom;
+    });
+    const onSecondFailed = vi.fn();
+    const f = frame({
+      second,
+      secondConfig: config,
+      stack: { ...BARE_STACK, second: 'ripple', blend: 'mix' },
+      onSecondFailed,
+    });
+    expect(createCompositor(fake.gl).render(f)).toBe(true);
+    expect(onSecondFailed).toHaveBeenCalledWith(boom);
+    expect(f.base.render).toHaveBeenCalledTimes(1);
+    // No blend without it, and the frame still reached the canvas.
+    expect(fake.draws.some((d) => d.fragment.includes('u_second'))).toBe(false);
+    expect(fake.draws.at(-1)?.framebuffer).toBeNull();
+    fake.reset();
+    bindOutput(fake.gl);
+    expect(fake.named('bindFramebuffer').at(-1)?.[1]).toBeNull();
+  });
+
+  it('fails on a target the driver could not back, logs it, and frees it', () => {
+    const fake = fakeGl({ incomplete: true });
+    expect(createCompositor(fake.gl).render(frame())).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'shader_hero.compositor_failed',
+      expect.objectContaining({
+        what: 'targets',
+        name: 'TargetIncompleteError',
+      })
+    );
+    // Deleted, and nothing drawn into it, the base included.
+    expect(fake.named('deleteFramebuffer')).toHaveLength(1);
+    expect(fake.draws).toEqual([]);
+  });
+
+  it('reports nothing for a context lost before or during a frame: the loss is the hero’s', () => {
+    const before = fakeGl();
+    const compositor = createCompositor(before.gl);
+    compositor.render(frame());
+    before.lose();
+    expect(compositor.render(frame({ scene: [400, 900] }))).toBe(false);
+
+    const during = fakeGl({ loseAt: 'createTexture' });
+    expect(createCompositor(during.gl).render(frame())).toBe(false);
+    expect(
+      logger.warn.mock.calls.filter(
+        ([event]) => event === 'shader_hero.compositor_failed'
+      )
+    ).toEqual([]);
+  });
+
+  it('draws nothing at 0x0 (a box not laid out yet) and calls it no failure, then composites', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const empty = frame({ scene: [0, 0], secondSize: [0, 0], output: [0, 0] });
+    expect(compositor.render(empty)).toBe(true);
+    expect(fake.named('createFramebuffer')).toEqual([]);
+    expect(empty.base?.render).not.toHaveBeenCalled();
+    expect(compositor.render(frame())).toBe(true);
+    expect(fake.draws.length).toBeGreaterThan(0);
+    expect(
+      logger.warn.mock.calls.filter(
+        ([event]) => event === 'shader_hero.compositor_failed'
+      )
+    ).toEqual([]);
+  });
+
+  it('leaves no target on a texture unit after a frame (no feedback loop next frame)', () => {
+    const fake = fakeGl();
+    createCompositor(fake.gl).render(frame());
+    fake.reset();
+    // The next frame's base draws with whatever was left bound.
+    stubRenderer().render(fake.gl);
+    expect(Object.values(fake.draws[0].units).every((t) => t === null)).toBe(
+      true
+    );
+  });
+
+  it('gives a flashing effect the governed clock, and the rest the real one', () => {
+    const fake = fakeGl();
+    const flashing: LayerEffect = { ...LAYERS.grain, flashes: true };
+    override.layers = [
+      { effect: flashing, amount: 1 },
+      { effect: LAYERS.grain, amount: 1 },
+    ];
+    createCompositor(fake.gl).render(frame({ time: 2.9 }));
+    const times = fake
+      .named('uniform1f')
+      .filter(([loc]) => (loc as { uniform: string }).uniform === 'u_time')
+      .map(([, v]) => v);
+    expect(times).toEqual([governFlash(2.9), 2.9]);
+    expect(governFlash(2.9)).not.toBe(2.9);
+  });
+
+  it('falls back to shader only for a frame that will not compile, and fails only when nothing will', () => {
+    const fake = fakeGl({
+      failCompile: (src) => src.includes(FRAMES['name-glows'].glsl),
+    });
+    const compositor = createCompositor(fake.gl);
+    compositor.setNameMask({} as TexImageSource);
+    const stack: StackConfig = { ...BARE_STACK, frame: 'name-glows' };
+    expect(compositor.render(frame({ stack }))).toBe(true);
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['shader-only'])).toBe(
+      true
+    );
+
+    const broken = fakeGl({ failCompile: (src) => src.includes('fragColor') });
+    expect(createCompositor(broken.gl).render(frame({ stack }))).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith('shader_hero.compositor_failed', {
+      what: 'program',
+    });
+  });
+});
+
+describe('setNameMask (WP-5 seam)', () => {
+  it('draws a name frame as shader only until a mask is set, then through it', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const stack: StackConfig = { ...BARE_STACK, frame: 'through-name' };
+    compositor.render(frame({ stack }));
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['shader-only'])).toBe(
+      true
+    );
+
+    const mask = { kind: 'mask-canvas' } as unknown as TexImageSource;
+    compositor.setNameMask(mask);
+    fake.reset();
+    compositor.render(frame({ stack }));
+    // Uploaded on the next render, the right way up, and read on unit 2.
+    const uploads = fake.named('texImage2D').filter((a) => a.at(-1) === mask);
+    expect(uploads).toHaveLength(1);
+    const out = fake.draws.at(-1) as Draw;
+    expect(drewWith(out, FRAMES['through-name'])).toBe(true);
+    expect(out.units[2]?.kind).toBe('texture');
+
+    // Not uploaded again until it is set again (a resize, a font load).
+    fake.reset();
+    compositor.render(frame({ stack }));
+    expect(
+      fake.named('texImage2D').filter((a) => a.at(-1) === mask)
+    ).toHaveLength(0);
+
+    compositor.setNameMask(null);
+    fake.reset();
+    compositor.render(frame({ stack }));
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['shader-only'])).toBe(
+      true
+    );
+  });
+});
+
+/** WP-5's kind of frame: it samples the film inside the stage. Its own id,
+ *  so its pass is cached apart from the real frames'. */
+const filmFrame = {
+  ...FRAMES['shader-only'],
+  id: 'test-film',
+  uniforms: [
+    'u_scene',
+    'u_media',
+    'u_rect',
+    'u_fade',
+    'u_mediaSize',
+    'u_hasMedia',
+  ],
+  glsl: `void main() { fragColor = vec4(texture(u_media, v_uv).rgb * u_fade + u_rect.x * 0.0, u_hasMedia); }`,
+};
+
+function fakeVideo({ rvfc = true } = {}) {
+  let pending: (() => void) | null = null;
+  let handle = 0;
+  const video = {
+    videoWidth: 720,
+    videoHeight: 1280,
+    readyState: 4,
+    currentTime: 0,
+    cancelVideoFrameCallback: vi.fn(),
+    ...(rvfc
+      ? {
+          requestVideoFrameCallback: vi.fn((cb: () => void) => {
+            pending = cb;
+            return ++handle;
+          }),
+        }
+      : {}),
+  };
+  return {
+    video,
+    el: video as unknown as HTMLVideoElement,
+    nextFrame: () => pending?.(),
+  };
+}
+
+const uploadsOf = (fake: ReturnType<typeof fakeGl>, source: unknown) =>
+  fake.named('texImage2D').filter((a) => a.at(-1) === source).length;
+
+describe('setMedia and setStage (WP-5 seams)', () => {
+  // The frame 100px down a 390x844 window, page at the top; fades over 600px.
+  const visible = stageBoxFrom(
+    { left: 20, top: 100, width: 350, height: 600 },
+    0,
+    600
+  );
+
+  it('uploads a video frame once per new frame, through requestVideoFrameCallback', () => {
+    override.frame = filmFrame;
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const { video, el, nextFrame } = fakeVideo();
+    compositor.setMedia(el);
+    compositor.setStage(visible);
+    expect(video.requestVideoFrameCallback).toHaveBeenCalledTimes(1);
+
+    compositor.render(frame());
+    expect(uploadsOf(fake, el)).toBe(1);
+    compositor.render(frame());
+    expect(uploadsOf(fake, el)).toBe(1);
+    nextFrame();
+    compositor.render(frame());
+    expect(uploadsOf(fake, el)).toBe(2);
+    // The callback keeps itself subscribed.
+    expect(video.requestVideoFrameCallback).toHaveBeenCalledTimes(2);
+
+    // The stage reaches the pass: its rect in output pixels, its fade, the film's size.
+    const set = (name: string) =>
+      fake.calls
+        .filter(
+          ([k, a]) =>
+            k.startsWith('uniform') &&
+            (a[0] as { uniform: string })?.uniform === name
+        )
+        .at(-1)?.[1]
+        .slice(1);
+    expect(set('u_rect')).toEqual([40, 288, 700, 1200]);
+    expect(set('u_fade')).toEqual([1]);
+    expect(set('u_mediaSize')).toEqual([720, 1280]);
+    expect(set('u_hasMedia')).toEqual([1]);
+
+    compositor.setMedia(null);
+    expect(video.cancelVideoFrameCallback).toHaveBeenCalledWith(2);
+  });
+
+  it('culls: no upload once the film has faded out or sits off the canvas', () => {
+    override.frame = filmFrame;
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const { el, nextFrame } = fakeVideo();
+    compositor.setMedia(el);
+    compositor.setStage(visible);
+    compositor.render(frame({ scrollY: 600 }));
+    expect(uploadsOf(fake, el)).toBe(0);
+
+    compositor.setStage(
+      stageBoxFrom({ left: 20, top: 2000, width: 350, height: 600 }, 0, 600)
+    );
+    nextFrame();
+    compositor.render(frame());
+    expect(uploadsOf(fake, el)).toBe(0);
+
+    compositor.setStage(visible);
+    compositor.render(frame());
+    expect(uploadsOf(fake, el)).toBe(1);
+  });
+
+  it('uploads nothing, however fresh, for a frame that never samples the film (all of WP-3’s)', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const { el } = fakeVideo();
+    compositor.setMedia(el);
+    compositor.setStage(visible);
+    for (const id of ['shader-only', 'through-name', 'name-glows'] as const) {
+      compositor.render(frame({ stack: { ...BARE_STACK, frame: id } }));
+    }
+    expect(uploadsOf(fake, el)).toBe(0);
+  });
+
+  it('without requestVideoFrameCallback, uploads when the video’s clock has moved', () => {
+    override.frame = filmFrame;
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const { video, el } = fakeVideo({ rvfc: false });
+    compositor.setMedia(el);
+    compositor.setStage(visible);
+    compositor.render(frame());
+    compositor.render(frame());
+    expect(uploadsOf(fake, el)).toBe(1);
+    video.currentTime = 0.04;
+    compositor.render(frame());
+    expect(uploadsOf(fake, el)).toBe(2);
+  });
+
+  it('logs a broken image once, keeps it in case it loads, and uploads nothing till then', () => {
+    override.frame = filmFrame;
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const image = { complete: true, naturalWidth: 0, naturalHeight: 0 };
+    const img = image as unknown as HTMLImageElement;
+    compositor.setMedia(img);
+    compositor.setStage(visible);
+    compositor.render(frame());
+    compositor.render(frame());
+    expect(uploadsOf(fake, img)).toBe(0);
+    expect(
+      logger.warn.mock.calls.filter(
+        ([event]) => event === 'shader_hero.compositor_failed'
+      )
+    ).toEqual([['shader_hero.compositor_failed', { what: 'media' }]]);
+    Object.assign(image, { naturalWidth: 1600, naturalHeight: 900 });
+    compositor.render(frame());
+    expect(uploadsOf(fake, img)).toBe(1);
+  });
+
+  it('drops a source that will not upload, and stops watching its frames', () => {
+    // (Logged as 'media', once a session: the broken image above said it.)
+    override.frame = filmFrame;
+    const { video, el, nextFrame } = fakeVideo();
+    const fake = fakeGl({ tainted: el });
+    const compositor = createCompositor(fake.gl);
+    compositor.setMedia(el);
+    compositor.setStage(visible);
+    compositor.render(frame());
+    expect(video.cancelVideoFrameCallback).toHaveBeenCalledWith(1);
+    nextFrame();
+    compositor.render(frame());
+    // The one attempt that threw, and none after it.
+    expect(uploadsOf(fake, el)).toBe(1);
+  });
+
+  it('uploads nothing before the video has a frame, and an image once it has loaded', () => {
+    override.frame = filmFrame;
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const { video, el } = fakeVideo();
+    video.readyState = 1;
+    compositor.setMedia(el);
+    compositor.setStage(visible);
+    compositor.render(frame());
+    expect(uploadsOf(fake, el)).toBe(0);
+
+    const image = { complete: false, naturalWidth: 0, naturalHeight: 0 };
+    const img = image as unknown as HTMLImageElement;
+    compositor.setMedia(img);
+    compositor.render(frame());
+    expect(uploadsOf(fake, img)).toBe(0);
+    Object.assign(image, {
+      complete: true,
+      naturalWidth: 1600,
+      naturalHeight: 900,
+    });
+    compositor.render(frame());
+    compositor.render(frame());
+    expect(uploadsOf(fake, img)).toBe(1);
+  });
+});
+
+describe('forget and destroy', () => {
+  it('forgets every GL object without deleting one, then rebuilds them all, mask included', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const mask = { kind: 'mask' } as unknown as TexImageSource;
+    compositor.setNameMask(mask);
+    const stack: StackConfig = {
+      ...BARE_STACK,
+      frame: 'through-name',
+      layers: [{ id: 'grain', amount: null }],
+    };
+    compositor.render(frame({ stack }));
+
+    fake.lose();
+    compositor.forget();
+    fake.restore();
+    fake.reset();
+    compositor.render(frame({ stack }));
+    for (const call of [
+      'deleteProgram',
+      'deleteFramebuffer',
+      'deleteTexture',
+      'deleteBuffer',
+    ]) {
+      expect(fake.named(call)).toEqual([]);
+    }
+    // Rebuilt: its passes, its targets and the mask, from the source it held.
+    expect(fake.named('createProgram').length).toBeGreaterThanOrEqual(2);
+    expect(fake.named('createFramebuffer').length).toBeGreaterThanOrEqual(2);
+    expect(uploadsOf(fake, mask)).toBe(1);
+  });
+
+  it('deletes what it made on destroy, and leaves the canvas as the output', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.render(frame());
+    fake.reset();
+    compositor.destroy();
+    expect(fake.named('deleteProgram').length).toBeGreaterThanOrEqual(2);
+    expect(fake.named('deleteFramebuffer').length).toBeGreaterThanOrEqual(2);
+    expect(fake.named('deleteBuffer')).toHaveLength(1);
+    bindOutput(fake.gl);
+    expect(fake.named('bindFramebuffer').at(-1)?.[1]).toBeNull();
+  });
+
+  it('deletes nothing on destroy once the context is lost', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.render(frame());
+    fake.lose();
+    fake.reset();
+    compositor.destroy();
+    expect(fake.named('deleteProgram')).toEqual([]);
+    expect(fake.named('deleteFramebuffer')).toEqual([]);
+  });
+});

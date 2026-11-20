@@ -22,6 +22,7 @@ const renderer = vi.hoisted(() => ({
   init: vi.fn(() => true),
   render: vi.fn(),
   resize: vi.fn(),
+  reset: vi.fn(),
   destroy: vi.fn(),
 }));
 
@@ -34,7 +35,37 @@ vi.mock('$app/environment', () => ({
 vi.mock('../load-renderer', () => ({
   loadRenderer: vi.fn(async () => renderer),
 }));
-vi.mock('../jfa-sdf', () => ({ destroyJFACache: vi.fn() }));
+vi.mock('../jfa-sdf', () => ({
+  destroyJFACache: vi.fn(),
+  resetJFACache: vi.fn(),
+}));
+// The stack's compositor: a stand-in that says it drew (Codex-1yd58.4).
+const compositor = vi.hoisted(() => ({
+  // It reads the frame's `onSecondFailed`, as the real one does.
+  render: vi.fn(
+    (_frame: { onSecondFailed?: (thrown: unknown) => void }) => true
+  ),
+  setMedia: vi.fn(),
+  setStage: vi.fn(),
+  setNameMask: vi.fn(),
+  destroy: vi.fn(),
+  forget: vi.fn(),
+}));
+vi.mock('../compositor/compositor', () => ({
+  createCompositor: vi.fn(() => compositor),
+}));
+// The brand's stack; null reads the real (bare, with no tokens) one.
+const brandStack = vi.hoisted(() => ({ value: null as unknown }));
+vi.mock('../compositor/stack-config', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../compositor/stack-config')>();
+  return {
+    ...actual,
+    getStackConfig: (...args: Parameters<typeof actual.getStackConfig>) =>
+      (brandStack.value as ReturnType<typeof actual.getStackConfig> | null) ??
+      actual.getStackConfig(...args),
+  };
+});
 const { logger } = vi.hoisted(() => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -54,8 +85,12 @@ vi.mock('../shader-config', async (importOriginal) => ({
   },
 }));
 
+import { createCompositor } from '../compositor/compositor';
+import { showreelFeed } from '../compositor/showreel-feed';
+import { BARE_STACK, type StackConfig } from '../compositor/stack-config';
+import { resetJFACache } from '../jfa-sdf';
 import { loadRenderer } from '../load-renderer';
-import type { ShaderRenderer } from '../renderer-types';
+import type { MouseState, ShaderRenderer } from '../renderer-types';
 import ShaderHero from '../ShaderHero.svelte';
 import type { ShaderPresetId } from '../shader-config';
 import { shaderLive } from '../shader-live.svelte';
@@ -1013,5 +1048,923 @@ describe('ShaderHero live', () => {
     if (app) unmount(app);
     app = null;
     expect(shaderLive.state).toBe('pending');
+  });
+});
+
+// ── The brand shader stack and context restore (Codex-1yd58.4) ─────────
+describe('ShaderHero stack', () => {
+  const root = () => document.querySelector('.shader-hero') as HTMLElement;
+  const canvas = () => document.querySelector('canvas') as HTMLCanvasElement;
+  const isLive = () => {
+    flushSync();
+    return root().hasAttribute('data-live');
+  };
+  /** The canvas shows a frame: a shader's, or the Showreel's plain ground. */
+  const isDrawn = () => {
+    flushSync();
+    return root().hasAttribute('data-drawn');
+  };
+  const size = () => [canvas().width, canvas().height];
+  const withLayers: StackConfig = {
+    ...BARE_STACK,
+    layers: [{ id: 'grain', amount: null }],
+  };
+  /** Let a dynamic import (the compositor's chunk) and its follow-up settle. */
+  async function settle() {
+    await vi.dynamicImportSettled();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+  const events = (level: 'warn' | 'info', name: string) =>
+    logger[level].mock.calls.filter(([event]) => event === name);
+
+  beforeEach(() => {
+    // A cancelAnimationFrame that cancels, as a browser's does: a lost
+    // context's handler cancels the frame already queued.
+    let rafId = 0;
+    const queued = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      const id = ++rafId;
+      const run: FrameRequestCallback = (now) => {
+        queued.delete(id);
+        callback(now);
+      };
+      queued.set(id, run);
+      frames.push(run);
+      return id;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      const run = queued.get(id);
+      queued.delete(id);
+      frames = frames.filter((queuedRun) => queuedRun !== run);
+    });
+    brandStack.value = null;
+    showreelFeed.setMedia(null);
+    showreelFeed.setStage(null);
+    showreelFeed.setNameMask(null);
+    // A phone at DPR 3: the scene renders at DPR 1, the output at 2.
+    vi.stubGlobal('devicePixelRatio', 3);
+    box = { width: 390, height: 844 };
+    vi.mocked(loadRenderer).mockReset();
+    vi.mocked(loadRenderer).mockImplementation(async () => renderer);
+    vi.mocked(createCompositor).mockClear();
+    vi.mocked(resetJFACache).mockClear();
+    for (const fn of Object.values(compositor)) fn.mockClear();
+    compositor.render.mockImplementation(() => true);
+    renderer.init.mockClear();
+    renderer.resize.mockClear();
+    renderer.destroy.mockClear();
+    logger.warn.mockClear();
+    logger.info.mockClear();
+  });
+
+  it('takes today’s path for a bare stack: no compositor, the canvas at the scene’s DPR', async () => {
+    await start({ tone: true });
+    step(3);
+    await settle();
+    step(1);
+    expect(createCompositor).not.toHaveBeenCalled();
+    expect(size()).toEqual([390, 844]);
+    expect(renderer.init).toHaveBeenCalledWith(expect.anything(), 390, 844);
+    expect(renderer.render).toHaveBeenCalledTimes(4);
+    expect(renderer.render).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.any(Number),
+      expect.anything(),
+      brand.config,
+      390,
+      844
+    );
+    expect(compositor.render).not.toHaveBeenCalled();
+  });
+
+  it('attaches the compositor for a stack: the canvas rises to the output DPR, the presets keep the scene’s', async () => {
+    brandStack.value = withLayers;
+    await start({ tone: true });
+    step(1);
+    await settle();
+    expect(createCompositor).toHaveBeenCalledTimes(1);
+    expect(size()).toEqual([780, 1688]);
+    // The preset was built at the scene's size and is never resized for it.
+    expect(renderer.init).toHaveBeenCalledWith(expect.anything(), 390, 844);
+    expect(renderer.resize).not.toHaveBeenCalled();
+
+    renderer.render.mockClear();
+    step(1);
+    expect(renderer.render).not.toHaveBeenCalled();
+    expect(compositor.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        base: renderer,
+        stack: withLayers,
+        scene: [390, 844],
+        output: [780, 1688],
+        second: null,
+        phone: true,
+      })
+    );
+    expect(isLive()).toBe(true);
+
+    // The brand takes its layers away: bare again, today's canvas.
+    brandStack.value = BARE_STACK;
+    step(30);
+    expect(compositor.destroy).toHaveBeenCalledTimes(1);
+    expect(size()).toEqual([390, 844]);
+    renderer.render.mockClear();
+    step(1);
+    expect(renderer.render).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.any(Number),
+      expect.anything(),
+      brand.config,
+      390,
+      844
+    );
+  });
+
+  it('stacks nothing on a surface whose preset is fixed by its prop', async () => {
+    brandStack.value = withLayers;
+    await start({ preset: 'flow' });
+    step(3);
+    await settle();
+    expect(createCompositor).not.toHaveBeenCalled();
+  });
+
+  it('draws the base alone, from then on, when the compositor cannot draw', async () => {
+    brandStack.value = withLayers;
+    compositor.render.mockImplementation(() => false);
+    await start({ tone: true });
+    step(1);
+    await settle();
+    renderer.render.mockClear();
+    step(1);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(compositor.destroy).toHaveBeenCalledTimes(1);
+    expect(size()).toEqual([390, 844]);
+    step(30);
+    await settle();
+    expect(createCompositor).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads a second preset beside the base, at half the scene’s size on a phone', async () => {
+    const second = {
+      init: vi.fn(() => true),
+      render: vi.fn(),
+      resize: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn(),
+    } satisfies ShaderRenderer;
+    vi.mocked(loadRenderer).mockImplementation(async (id) =>
+      id === 'flow' ? second : renderer
+    );
+    brandStack.value = { ...BARE_STACK, second: 'flow' };
+    await start({ tone: true });
+    step(1);
+    await settle();
+    expect(second.init).toHaveBeenCalledWith(expect.anything(), 195, 422);
+    step(1);
+    expect(compositor.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        base: renderer,
+        second,
+        secondSize: [195, 422],
+      })
+    );
+  });
+
+  it('keeps the base live when the second preset fails, and logs the failure', async () => {
+    vi.mocked(loadRenderer).mockImplementation(async (id) => {
+      if (id === 'flow') throw new Error('chunk gone');
+      return renderer;
+    });
+    brandStack.value = { ...BARE_STACK, second: 'flow' };
+    await start({ tone: true });
+    step(1);
+    await settle();
+    expect(events('warn', 'shader_hero.second_failed')).toEqual([
+      [
+        'shader_hero.second_failed',
+        expect.objectContaining({
+          preset: 'flow',
+          reason: 'load',
+          error: 'chunk gone',
+        }),
+      ],
+    ]);
+    // Live through the failure itself, not only once a later frame draws.
+    expect(isLive()).toBe(true);
+    expect(shaderLive.state).toBe('live');
+    // The stack without its second is bare: today's path, still drawing.
+    renderer.render.mockClear();
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(3);
+    expect(size()).toEqual([390, 844]);
+    expect(isLive()).toBe(true);
+    expect(shaderLive.state).toBe('live');
+    expect(frames).toHaveLength(1);
+    // Not tried again on every poll.
+    step(60);
+    await settle();
+    expect(
+      vi.mocked(loadRenderer).mock.calls.filter(([id]) => id === 'flow')
+    ).toHaveLength(1);
+  });
+
+  it('drops the second preset on a phone that cannot hold the frame rate, and logs it', async () => {
+    const second = {
+      init: vi.fn(() => true),
+      render: vi.fn(),
+      resize: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn(),
+    } satisfies ShaderRenderer;
+    vi.mocked(loadRenderer).mockImplementation(async (id) =>
+      id === 'flow' ? second : renderer
+    );
+    brandStack.value = { ...BARE_STACK, second: 'flow' };
+    await start({ tone: true });
+    step(1);
+    await settle();
+    // 120 frames 40 ms apart: a 95th percentile far over 25 ms.
+    for (let i = 0; i < 121; i++) {
+      clock += 40;
+      step(1);
+    }
+    expect(events('warn', 'shader_hero.stack_budget_dropped')).toEqual([
+      [
+        'shader_hero.stack_budget_dropped',
+        { preset: 'flow', p95Ms: 40, frames: 120 },
+      ],
+    ]);
+    step(1);
+    expect(second.destroy).toHaveBeenCalledTimes(1);
+    expect(compositor.destroy).toHaveBeenCalledTimes(1);
+    expect(isLive()).toBe(true);
+  });
+
+  it('prevents a lost context’s default (or it is never restored), and stops its loop', async () => {
+    await start({ tone: true });
+    step(1);
+    contextLost = true;
+    const lost = new Event('webglcontextlost', { cancelable: true });
+    canvas().dispatchEvent(lost);
+    expect(lost.defaultPrevented).toBe(true);
+    step(3);
+    expect(frames).toHaveLength(0);
+  });
+
+  it('rebuilds on a restored context, deleting nothing dead, and goes live once it draws', async () => {
+    await start({ tone: true });
+    step(1);
+    expect(isLive()).toBe(true);
+    contextLost = true;
+    canvas().dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    expect(isLive()).toBe(false);
+    expect(shaderLive.state).toBe('failed');
+
+    renderer.init.mockClear();
+    renderer.render.mockClear();
+    contextLost = false;
+    canvas().dispatchEvent(new Event('webglcontextrestored'));
+    await settle();
+    // Its objects died with the old context: forgotten, never deleted.
+    expect(renderer.destroy).not.toHaveBeenCalled();
+    expect(resetJFACache).toHaveBeenCalledTimes(1);
+    expect(renderer.init).toHaveBeenCalledWith(expect.anything(), 390, 844);
+    expect(events('info', 'shader_hero.context_restored')).toEqual([
+      ['shader_hero.context_restored', { preset: 'ether' }],
+    ]);
+    // Live again from the first frame it draws, and moving.
+    expect(isLive()).toBe(false);
+    step(1);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(isLive()).toBe(true);
+    expect(shaderLive.state).toBe('live');
+    expect(frames).toHaveLength(1);
+  });
+
+  it('forgets the compositor’s objects on a restored context, and composites again', async () => {
+    brandStack.value = withLayers;
+    await start({ tone: true });
+    step(1);
+    await settle();
+    step(1);
+    contextLost = true;
+    canvas().dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    contextLost = false;
+    compositor.render.mockClear();
+    canvas().dispatchEvent(new Event('webglcontextrestored'));
+    await settle();
+    expect(compositor.forget).toHaveBeenCalledTimes(1);
+    expect(compositor.destroy).not.toHaveBeenCalled();
+    step(1);
+    expect(compositor.render).toHaveBeenCalledTimes(1);
+    expect(isLive()).toBe(true);
+  });
+
+  // Owner, 2026-11-19: an org with no brand shader still gets the Showreel,
+  // its film on a plain ground; with no film it draws nothing, as today.
+  const film = () =>
+    ({ videoWidth: 720, videoHeight: 1280 }) as unknown as HTMLVideoElement;
+
+  it('plays a film with no brand shader on a plain ground: drawn, but no shader under the words', async () => {
+    brand.config = { preset: 'none' };
+    const video = film();
+    showreelFeed.setMedia(video);
+    await start({ tone: true });
+    step(1);
+    await settle();
+    expect(loadRenderer).not.toHaveBeenCalled();
+    expect(createCompositor).toHaveBeenCalledTimes(1);
+    expect(compositor.setMedia).toHaveBeenCalledWith(video);
+    expect(size()).toEqual([780, 1688]);
+    step(1);
+    expect(compositor.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        base: null,
+        baseConfig: brand.config,
+        output: [780, 1688],
+      })
+    );
+    // Drawn (the Showreel keys on that), but not live: the words keep the
+    // page's ink, and the layout's gate hears 'none' (owner's call A).
+    expect(isDrawn()).toBe(true);
+    expect(canvas().style.opacity).toBe('1');
+    expect(isLive()).toBe(false);
+    expect(shaderLive.state).toBe('none');
+    // A drawn plain ground resizes like any frame (no preset is loading).
+    box = { width: 400, height: 800 };
+    for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+    expect(size()).toEqual([800, 1600]);
+    box = { width: 390, height: 844 };
+    for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+
+    // The film ends: nothing left to draw, so it hides, as no preset does,
+    // and keeps polling for a preset the brand may set.
+    showreelFeed.setMedia(null);
+    expect(compositor.setMedia).toHaveBeenLastCalledWith(null);
+    step(1);
+    expect(compositor.destroy).toHaveBeenCalledTimes(1);
+    expect(isDrawn()).toBe(false);
+    expect(isLive()).toBe(false);
+    expect(shaderLive.state).toBe('none');
+    expect(size()).toEqual([390, 844]);
+    expect(frames).toHaveLength(1);
+  });
+
+  it('says which it draws as the brand moves from a plain ground to a shader and back', async () => {
+    brand.config = { preset: 'none' };
+    showreelFeed.setMedia(film());
+    await start({ tone: true });
+    step(1);
+    await settle();
+    step(1);
+    expect([isDrawn(), isLive(), shaderLive.state]).toEqual([
+      true,
+      false,
+      'none',
+    ]);
+
+    brand.config = { preset: 'ether' };
+    step(30);
+    await settle();
+    step(1);
+    expect(compositor.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({ base: renderer })
+    );
+    expect([isDrawn(), isLive(), shaderLive.state]).toEqual([
+      true,
+      true,
+      'live',
+    ]);
+
+    brand.config = { preset: 'none' };
+    step(30);
+    step(1);
+    expect(renderer.destroy).toHaveBeenCalled();
+    expect(compositor.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({ base: null })
+    );
+    expect([isDrawn(), isLive(), shaderLive.state]).toEqual([
+      true,
+      false,
+      'none',
+    ]);
+    // Through it all the canvas never hid.
+    expect(canvas().style.opacity).toBe('1');
+  });
+
+  // Owner's call B: a brand shader that will not start (an FBO preset on a
+  // phone without float targets) still lets the film play.
+  it('plays the film on a plain ground when the brand’s shader will not start, and says failed', async () => {
+    brand.config = { preset: 'fracture' };
+    vi.mocked(loadRenderer).mockImplementation(async (id) => {
+      if (id === 'fracture') throw new Error('chunk gone');
+      return renderer;
+    });
+    showreelFeed.setMedia(film());
+    await start({ tone: true });
+    step(1);
+    await settle();
+    step(5);
+    expect(
+      logger.warn.mock.calls.filter(
+        ([event]) => event === 'shader_hero.renderer_failed'
+      )
+    ).toEqual([
+      [
+        'shader_hero.renderer_failed',
+        expect.objectContaining({ preset: 'fracture', reason: 'load' }),
+      ],
+    ]);
+    // Tried once, not every frame it draws the ground.
+    expect(loadRenderer).toHaveBeenCalledTimes(1);
+    expect(compositor.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({ base: null })
+    );
+    expect([isDrawn(), isLive(), shaderLive.state]).toEqual([
+      true,
+      false,
+      'failed',
+    ]);
+
+    // The film ends: today's stop-and-hide.
+    showreelFeed.setMedia(null);
+    step(1);
+    expect(compositor.destroy).toHaveBeenCalledTimes(1);
+    expect([isDrawn(), isLive(), shaderLive.state]).toEqual([
+      false,
+      false,
+      'failed',
+    ]);
+    expect(frames).toHaveLength(0);
+  });
+
+  it('draws a failed base’s film on a PLAIN ground: none of its stack, and the stack back once a base draws', async () => {
+    const second = {
+      init: vi.fn(() => true),
+      render: vi.fn(),
+      resize: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn(),
+    } satisfies ShaderRenderer;
+    const stack: StackConfig = {
+      ...BARE_STACK,
+      second: 'aurora',
+      layers: [{ id: 'grain', amount: null }],
+    };
+    brandStack.value = stack;
+    brand.config = { preset: 'fracture' };
+    vi.mocked(loadRenderer).mockImplementation(async (id) => {
+      if (id === 'fracture') throw new Error('chunk gone');
+      return id === 'aurora' ? second : renderer;
+    });
+    showreelFeed.setMedia(film());
+    await start({ tone: true });
+    for (let i = 0; i < 4; i++) {
+      step(1);
+      await settle();
+    }
+    // The stack was parsed against the failed base: its second never loads,
+    // and the ground goes without the layers too.
+    expect(vi.mocked(loadRenderer).mock.calls.map(([id]) => id)).toEqual([
+      'fracture',
+    ]);
+    const plain = compositor.render.mock.calls.at(-1)?.[0] as unknown as {
+      base: unknown;
+      second: unknown;
+      stack: StackConfig;
+    };
+    expect(plain.base).toBeNull();
+    expect(plain.second).toBeNull();
+    expect(plain.stack).toEqual({ ...stack, second: null, layers: [] });
+    expect([isDrawn(), isLive(), shaderLive.state]).toEqual([
+      true,
+      false,
+      'failed',
+    ]);
+
+    // The brand moves to a preset that starts: its stack comes back.
+    brand.config = { preset: 'ripple' };
+    step(30);
+    await settle();
+    step(1);
+    await settle();
+    step(1);
+    expect(vi.mocked(loadRenderer).mock.calls.map(([id]) => id)).toEqual([
+      'fracture',
+      'ripple',
+      'aurora',
+    ]);
+    expect(compositor.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({ base: renderer, second, stack })
+    );
+    expect([isDrawn(), isLive(), shaderLive.state]).toEqual([
+      true,
+      true,
+      'live',
+    ]);
+  });
+
+  it('stops and hides a brand shader that will not start when there is no film, as today', async () => {
+    brand.config = { preset: 'fracture' };
+    vi.mocked(loadRenderer).mockRejectedValue(new Error('chunk gone'));
+    await start({ tone: true });
+    step(3);
+    await settle();
+    expect(createCompositor).not.toHaveBeenCalled();
+    expect(compositor.render).not.toHaveBeenCalled();
+    expect([isDrawn(), isLive(), shaderLive.state]).toEqual([
+      false,
+      false,
+      'failed',
+    ]);
+    expect(frames).toHaveLength(0);
+  });
+
+  // Review round 1 (silent-failure-hunter), folded from its probes.
+  it('drops the studio’s still copy on a stack-only edit, as on any brand edit (P1)', async () => {
+    box = { width: 1200, height: 800 };
+    const layout = document.createElement('div');
+    layout.className = 'org-layout';
+    document.body.appendChild(layout);
+    await start({ still: true, tone: true }, layout);
+    step(1);
+    await settle();
+    step(1);
+    const before = shaderStill.current;
+    expect(before).not.toBeNull();
+    // An edit that changes neither the config nor the stack keeps the copy.
+    layout.setAttribute('style', '--brand-unrelated: 1');
+    await new Promise((settled) => setTimeout(settled, 320));
+    expect(shaderStill.current).toEqual(before);
+    // A stack-only edit draws another picture: the copy goes.
+    brandStack.value = withLayers;
+    layout.setAttribute('style', '--brand-shader-layers: grain');
+    await new Promise((settled) => setTimeout(settled, 320));
+    expect(shaderStill.current).not.toEqual(before);
+  });
+
+  it('latches nothing for a compositor that failed because the context was lost, and composites after the restore (P2)', async () => {
+    brandStack.value = withLayers;
+    await start({ tone: true });
+    step(1);
+    await settle();
+    step(1);
+    compositor.render.mockImplementationOnce(() => {
+      contextLost = true;
+      return false;
+    });
+    step(1);
+    expect(compositor.destroy).not.toHaveBeenCalled();
+    canvas().dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    contextLost = false;
+    canvas().dispatchEvent(new Event('webglcontextrestored'));
+    await settle();
+    compositor.render.mockClear();
+    step(2);
+    expect(compositor.render).toHaveBeenCalledTimes(2);
+    expect(
+      logger.warn.mock.calls.filter(
+        ([event]) => event === 'shader_hero.compositor_failed'
+      )
+    ).toEqual([]);
+  });
+
+  it('gives a compositor that failed for real another go after a restore', async () => {
+    brandStack.value = withLayers;
+    compositor.render.mockImplementationOnce(() => false);
+    await start({ tone: true });
+    step(1);
+    await settle();
+    step(1);
+    expect(compositor.destroy).toHaveBeenCalledTimes(1);
+    step(30);
+    await settle();
+    expect(createCompositor).toHaveBeenCalledTimes(1);
+
+    contextLost = true;
+    canvas().dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    contextLost = false;
+    canvas().dispatchEvent(new Event('webglcontextrestored'));
+    await settle();
+    step(1);
+    await settle();
+    expect(createCompositor).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps its loop through a throw out of the compositor, logs it, and draws the base alone (P3)', async () => {
+    brandStack.value = withLayers;
+    await start({ tone: true });
+    step(1);
+    await settle();
+    step(1);
+    const boom = new Error('a preset threw');
+    compositor.render.mockImplementationOnce(() => {
+      throw boom;
+    });
+    renderer.render.mockClear();
+    expect(() => step(1)).not.toThrow();
+    expect(frames).toHaveLength(1);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(compositor.destroy).toHaveBeenCalledTimes(1);
+    expect(
+      logger.warn.mock.calls.filter(
+        ([event]) => event === 'shader_hero.compositor_failed'
+      )
+    ).toEqual([
+      [
+        'shader_hero.compositor_failed',
+        expect.objectContaining({ what: 'render', error: 'a preset threw' }),
+      ],
+    ]);
+    expect(isLive()).toBe(true);
+  });
+
+  it('drops a second preset that throws in its render, logs it, and never loads it again', async () => {
+    const second = {
+      init: vi.fn(() => true),
+      render: vi.fn(),
+      resize: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn(),
+    } satisfies ShaderRenderer;
+    vi.mocked(loadRenderer).mockImplementation(async (id) =>
+      id === 'flow' ? second : renderer
+    );
+    brandStack.value = { ...BARE_STACK, second: 'flow' };
+    await start({ tone: true });
+    step(1);
+    await settle();
+    const boom = new Error('second.render threw');
+    compositor.render.mockImplementationOnce(
+      (f: { onSecondFailed?: (e: unknown) => void }) => {
+        f.onSecondFailed?.(boom);
+        return true;
+      }
+    );
+    step(1);
+    expect(second.destroy).toHaveBeenCalledTimes(1);
+    expect(events('warn', 'shader_hero.second_failed')).toEqual([
+      [
+        'shader_hero.second_failed',
+        expect.objectContaining({
+          preset: 'flow',
+          reason: 'render',
+          error: 'second.render threw',
+        }),
+      ],
+    ]);
+    step(60);
+    await settle();
+    expect(
+      vi.mocked(loadRenderer).mock.calls.filter(([id]) => id === 'flow')
+    ).toHaveLength(1);
+    expect(isLive()).toBe(true);
+  });
+
+  it('latches nothing for a second preset whose init failed on a lost context, and loads it after the restore', async () => {
+    let finish: (r: ShaderRenderer) => void = () => {};
+    const second = {
+      init: vi.fn(() => !contextLost),
+      render: vi.fn(),
+      resize: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn(),
+    } satisfies ShaderRenderer;
+    vi.mocked(loadRenderer).mockImplementation((id) =>
+      id === 'flow'
+        ? new Promise<ShaderRenderer | null>((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve(renderer)
+    );
+    brandStack.value = { ...BARE_STACK, second: 'flow' };
+    await start({ tone: true });
+    step(1);
+    // Lost while the second loads: its init fails.
+    contextLost = true;
+    finish(second);
+    await settle();
+    expect(events('warn', 'shader_hero.second_failed')).toEqual([]);
+    canvas().dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    contextLost = false;
+    canvas().dispatchEvent(new Event('webglcontextrestored'));
+    await settle();
+    step(1);
+    await settle();
+    expect(
+      vi.mocked(loadRenderer).mock.calls.filter(([id]) => id === 'flow')
+    ).toHaveLength(2);
+  });
+
+  it('draws nothing with no brand shader and no film, exactly as today, even over a stack', async () => {
+    brand.config = { preset: 'none' };
+    brandStack.value = withLayers;
+    await start({ tone: true });
+    step(3);
+    await settle();
+    step(1);
+    expect(createCompositor).not.toHaveBeenCalled();
+    expect(loadRenderer).not.toHaveBeenCalled();
+    expect(compositor.render).not.toHaveBeenCalled();
+    expect(isLive()).toBe(false);
+    expect(canvas().style.opacity).toBe('0');
+    expect(shaderLive.state).toBe('none');
+    expect(frames).toHaveLength(1);
+  });
+
+  it('attaches for a film over a brand shader whose stack is bare', async () => {
+    showreelFeed.setMedia(film());
+    await start({ tone: true });
+    step(1);
+    await settle();
+    step(1);
+    expect(compositor.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({ base: renderer, stack: BARE_STACK })
+    );
+  });
+
+  it('leaves the film to the window’s shader: a hero without `tone` ignores it', async () => {
+    showreelFeed.setMedia(film());
+    await start({});
+    step(2);
+    await settle();
+    step(1);
+    expect(createCompositor).not.toHaveBeenCalled();
+  });
+
+  it('hands the compositor the film’s frame and the name mask as they change', async () => {
+    showreelFeed.setMedia(film());
+    await start({ tone: true });
+    step(1);
+    await settle();
+    const box = {
+      left: 0,
+      top: 120,
+      width: 300,
+      height: 500,
+      fadeDistance: 600,
+    };
+    const mask = {} as TexImageSource;
+    showreelFeed.setStage(box);
+    showreelFeed.setNameMask(mask);
+    expect(compositor.setStage).toHaveBeenLastCalledWith(box);
+    expect(compositor.setNameMask).toHaveBeenLastCalledWith(mask);
+  });
+});
+
+// A press is the burst's rise from one frame to the next: a renderer splashes
+// on each one (ripple's click edge, lane C's R1). One gesture, one rise.
+describe('ShaderHero press', () => {
+  /** A renderer that keeps the burst each frame drew with. */
+  function counting() {
+    const bursts: number[] = [];
+    const r = {
+      init: vi.fn(() => true),
+      render: vi.fn((...args: Parameters<ShaderRenderer['render']>) => {
+        const mouse: MouseState = args[2];
+        bursts.push(mouse.burstStrength);
+      }),
+      resize: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn(),
+    } satisfies ShaderRenderer;
+    const rises = () =>
+      bursts.filter((burst, i) => burst > (bursts[i - 1] ?? 0)).length;
+    return { r, bursts, rises };
+  }
+  /** Frames for `ms`, 16 ms apart. */
+  function play(ms: number) {
+    for (let t = 0; t < ms; t += 16) {
+      clock += 16;
+      step(1);
+    }
+  }
+  const at = { clientX: 40, clientY: 30 };
+  const pointerDown = (pointerType: string, isPrimary = true, button = 0) =>
+    window.dispatchEvent(
+      new PointerEvent('pointerdown', { ...at, pointerType, isPrimary, button })
+    );
+  const touch = (type: 'touchstart' | 'touchend') => {
+    const event = new Event(type);
+    Object.defineProperty(event, 'touches', {
+      value: type === 'touchstart' ? [at] : [],
+    });
+    window.dispatchEvent(event);
+  };
+  const click = () => window.dispatchEvent(new MouseEvent('click', at));
+  /** What a finger's tap sends: the press, then ~100 ms on, the
+   *  browser's compatibility click. */
+  function tap() {
+    pointerDown('touch');
+    touch('touchstart');
+    play(100);
+    touch('touchend');
+    click();
+  }
+
+  beforeEach(() => {
+    vi.mocked(loadRenderer).mockClear();
+  });
+
+  it('counts a tap once, though the browser also sends it a click', async () => {
+    const { r, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({});
+    play(100);
+    tap();
+    play(600);
+    expect(rises()).toBe(1);
+  });
+
+  it('counts a mouse click once, and a keyboard’s click (no press) not at all', async () => {
+    const { r, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({});
+    play(100);
+    click();
+    play(600);
+    expect(rises()).toBe(0);
+
+    pointerDown('mouse');
+    play(50);
+    click();
+    play(600);
+    expect(rises()).toBe(1);
+  });
+
+  it('counts a left-button press, never a right or middle one', async () => {
+    const { r, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({});
+    play(100);
+    pointerDown('mouse', true, 2);
+    play(600);
+    pointerDown('mouse', true, 1);
+    play(600);
+    expect(rises()).toBe(0);
+
+    pointerDown('mouse', true, 0);
+    play(600);
+    expect(rises()).toBe(1);
+  });
+
+  it('counts two taps a second apart twice, and a second finger not at all', async () => {
+    const { r, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({});
+    play(100);
+    tap();
+    play(1000);
+    tap();
+    // A second finger lands: its own pointerdown, and a touchstart.
+    pointerDown('touch', false);
+    touch('touchstart');
+    play(600);
+    expect(rises()).toBe(2);
+  });
+
+  it('leaves no splash for the still frame or the thaw of a press that froze it', async () => {
+    const { r, bursts, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({ tone: true });
+    play(100);
+    pointerDown('mouse');
+    // The press holds the page (its motion dial) before the next frame.
+    const release = shaderTone.hold();
+    releases.push(release);
+    play(100);
+    expect(r.render).toHaveBeenCalled();
+    const frozenFrom = bursts.length - 1;
+    release();
+    play(600);
+    expect(bursts.slice(frozenFrom).every((burst) => burst === 0)).toBe(true);
+    expect(rises()).toBe(0);
+  });
+
+  it('carries no press into the preset it switches to', async () => {
+    const before = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(before.r);
+    await start({});
+    play(100);
+
+    let finishLoad: (r: ShaderRenderer) => void = () => {};
+    vi.mocked(loadRenderer).mockImplementationOnce(
+      () =>
+        new Promise<ShaderRenderer | null>((resolve) => {
+          finishLoad = resolve;
+        })
+    );
+    brand.config = { preset: 'lava' };
+    step(30); // the poll spots the new preset and starts loading it
+    expect(vi.mocked(loadRenderer).mock.calls.at(-1)?.[0]).toBe('lava');
+    pointerDown('mouse');
+    const after = counting();
+    finishLoad(after.r);
+    await Promise.resolve();
+    await Promise.resolve();
+    play(300);
+    expect(after.r.render).toHaveBeenCalled();
+    expect(after.rises()).toBe(0);
   });
 });
