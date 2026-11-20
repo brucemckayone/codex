@@ -200,13 +200,18 @@ describe('shader palette resolution', () => {
   });
 });
 
-describe('pulse surface colour', () => {
-  it('falls back to the designed default on a malformed hex', () => {
-    const el = mountLayout({ '--brand-shader-pulse-color': '#zzz' });
-    const cfg = getShaderConfig(el, 'pulse');
+describe('Liquid Logo (pulse) surface colour', () => {
+  // WP-1d: the surface paints the brand palette like every other preset. Its
+  // own picker (red by default, for every org) is gone, and a colour a brand
+  // stored before that is ignored rather than painted.
+  it('paints the brand palette, whatever pulse colour a brand stored', () => {
+    const stored = getShaderConfig(
+      mountLayout({ '--brand-shader-pulse-color': '#00ff00' }),
+      'pulse'
+    );
+    const plain = getShaderConfig(mountLayout({}), 'pulse');
 
-    // #d10000 — the compiled-in default, not mid-grey.
-    if (cfg.preset !== 'pulse') throw new Error('expected the pulse preset');
-    expectRgb(cfg.pulseColor, [0xd1 / 255, 0, 0]);
+    expect(stored).not.toHaveProperty('pulseColor');
+    expect(stored.colors).toEqual(plain.colors);
   });
 });

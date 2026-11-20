@@ -118,6 +118,38 @@ vec3 fluxPalette(float t) {
   return mix(c, u_brandAccent, smootherstep(0.64, 1.0, t));
 }
 
+/** Two lines per period of the phase (at 0 and 0.5), w wide in phase units. */
+float lineShape(float phase, float w) {
+  w = max(w, 1.0e-4);
+  float p = fract(phase);
+  float m = smoothstep(0.5 - w, 0.5, p) - smoothstep(0.5, 0.5 + w, p);
+  m += (1.0 - smoothstep(0.0, w, p)) + smoothstep(1.0 - w, 1.0, p);
+  return clamp(m, 0.0, 1.0);
+}
+
+/**
+ * Field lines with no seams. Each pole's atan jumps by 2pi across a ray from
+ * the pole, so the phase jumps by the line count there. A whole-number count
+ * keeps fract() continuous across the ray; a fractional one broke the lines
+ * along it. And fwidth() spiked on the jump even when it was whole, which
+ * drew a bright hairline from every pole: the AA width now comes from the
+ * analytic gradient instead, which has no jump.
+ *
+ * kLo and kLo + 1 lines are drawn and crossfaded by kMix.
+ */
+float fluxLines(float angleSum, vec2 grad, float kLo, float kMix, float lineWidth, float px) {
+  float base = angleSum / TWO_PI;
+  // The phase's change across one pixel, per line, as fwidth() would measure it.
+  float rate = (abs(grad.x) + abs(grad.y)) * px / TWO_PI * lineWidth;
+  // kMix comes from uniforms only, so these branches are uniform, and most
+  // settings (the defaults among them) draw one pattern, not two.
+  if (kMix <= 0.0) return lineShape(base * kLo, rate * kLo);
+  if (kMix >= 1.0) return lineShape(base * (kLo + 1.0), rate * (kLo + 1.0));
+  float lo = lineShape(base * kLo, rate * kLo);
+  float hi = lineShape(base * (kLo + 1.0), rate * (kLo + 1.0));
+  return mix(lo, hi, kMix);
+}
+
 void main() {
   // Integrated by the renderer, never derived here. Deriving it as
   // mix(u_time * k, u_beatPhase, u_audioActive) would sweep it BACKWARDS as
@@ -144,7 +176,12 @@ void main() {
   float lineWidth = u_lineWidth * audioLift(u_bass, 0.35);
   float lineDensity = u_lineDensity * audioLift(u_energy, 0.15);
 
-  float potential = 0.0;
+  // The angle part of the potential, per unit charge (sum of sign * atan),
+  // and its gradient. The line phase used to be charge * atan * density / 2pi
+  // summed over the poles, which jumps by strength * density across each
+  // pole's branch cut (a ray from the pole). See fluxLines() for the fix.
+  float angleSum = 0.0;
+  vec2 angleGrad = vec2(0.0);
   float fieldMag = 0.0;
 
   for (int i = 0; i < MAX_POLES; i++) {
@@ -162,38 +199,63 @@ void main() {
     vec2 polePos = anchor + wander + kick;
 
     // Alternating polarity, branch-free: mod(fi, 2) is 0 or 1, so this is
-    // +strength then -strength. Was a ternary.
-    float charge = u_strength * (1.0 - 2.0 * mod(fi, 2.0));
+    // +1 then -1. Was a ternary.
+    float sgn = 1.0 - 2.0 * mod(fi, 2.0);
 
     vec2 d = uv - polePos;
     // Only the SQUARE of the distance is ever used, so the old length() call
-    // was a sqrt whose result was immediately squared again.
-    float d2 = max(dot(d, d), 4.0e-4);
-    potential += charge * atan(d.y, d.x);
-    fieldMag += abs(charge) / d2;
+    // was a sqrt whose result was immediately squared again. One reciprocal
+    // serves both terms below.
+    float invD2 = 1.0 / max(dot(d, d), 1.0e-10);
+    angleSum += sgn * atan(d.y, d.x);
+    // The gradient of atan(d.y, d.x) is (-d.y, d.x) / |d|^2, with no cut.
+    // Not through the field's 4e-4 floor: that flattened it to zero at the
+    // pole, the AA width with it, and the converging lines aliased into
+    // speckle there. The true 1/|d| saturates the core to a solid glow, as
+    // fwidth() did.
+    angleGrad += sgn * vec2(-d.y, d.x) * invD2;
+    // The field magnitude keeps its floor: 1 / max(|d|^2, 4e-4).
+    fieldMag += abs(u_strength) * min(invD2, 2500.0);
   }
 
   // Pointer pole, outside the loop. It used to be the loop's final iteration
   // behind an if/else, so all the real poles carried a branch none of them
   // needed. u_mouseActive is a damped 0..1 in the renderer, so the field eases
   // back when the pointer leaves instead of reconfiguring in one frame.
+  // Its weight and the click's polarity flip used to scale its CHARGE, which
+  // made its cut jump by a fraction; they now crossfade whole patterns.
+  float pointerAngle = 0.0;
+  vec2 pointerGrad = vec2(0.0);
+  float pointerFlip = smoothstep(0.0, 0.5, u_burst);
   if (u_mouseActive > 0.002) {
     vec2 polePos = (u_mouse * 2.0 - 1.0) * vec2(u_resolution.x / u_resolution.y, 1.0);
-    // Click flips the pointer pole's polarity — smoothly, via the burst ramp.
-    float charge = u_strength * mix(1.0, -1.0, smoothstep(0.0, 0.5, u_burst)) * u_mouseActive;
     vec2 d = uv - polePos;
-    float d2 = max(dot(d, d), 4.0e-4);
-    potential += charge * atan(d.y, d.x);
-    fieldMag += abs(charge) / d2;
+    float invD2 = 1.0 / max(dot(d, d), 1.0e-10);
+    pointerAngle = atan(d.y, d.x);
+    pointerGrad = vec2(-d.y, d.x) * invD2;
+    fieldMag += abs(u_strength * mix(1.0, -1.0, pointerFlip) * u_mouseActive) * min(invD2, 2500.0);
   }
 
-  // Field lines via fract + fwidth anti-aliasing.
-  float phaseArg = potential * lineDensity / TWO_PI;
-  float linePhase = fract(phaseArg);
-  float fw = fwidth(phaseArg) * lineWidth;
-  float lineMask = smoothstep(0.5 - fw, 0.5, linePhase) - smoothstep(0.5, 0.5 + fw, linePhase);
-  lineMask += smoothstep(fw, 0.0, linePhase) + smoothstep(1.0 - fw, 1.0, linePhase);
-  lineMask = clamp(lineMask, 0.0, 1.0);
+  // Lines per pole: whole numbers either side of strength * density (15 at
+  // the defaults, so the default pattern is exactly the old one, minus the
+  // seams), crossfaded so a slider or the audio lift still moves smoothly.
+  // Only across the middle of each step: a half-and-half blend shows both
+  // patterns as faint ghost lines, so most values draw one crisp pattern.
+  float perPole = abs(u_strength) * lineDensity;
+  float kLo = max(floor(perPole), 1.0);
+  float kMix = smoothstep(0.3, 0.7, clamp(perPole - kLo, 0.0, 1.0));
+  // One pixel in uv units: uv spans 2 over the height.
+  float px = 2.0 / u_resolution.y;
+
+  float lineMask = fluxLines(angleSum, angleGrad, kLo, kMix, lineWidth, px);
+  if (u_mouseActive > 0.002) {
+    float withPointer = mix(
+      fluxLines(angleSum + pointerAngle, angleGrad + pointerGrad, kLo, kMix, lineWidth, px),
+      fluxLines(angleSum - pointerAngle, angleGrad - pointerGrad, kLo, kMix, lineWidth, px),
+      pointerFlip
+    );
+    lineMask = mix(lineMask, withPointer, u_mouseActive);
+  }
 
   float logField = clamp(log(1.0 + fieldMag) / 3.0, 0.0, 1.0);
 

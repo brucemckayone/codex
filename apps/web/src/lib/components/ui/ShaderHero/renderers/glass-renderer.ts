@@ -60,6 +60,9 @@ const UNIFORM_NAMES = [
   'u_drift',
   'u_glow',
   'u_light',
+  'u_lineSoftness',
+  'u_lineTint',
+  'u_pieceEdges',
   'u_intensity',
   'u_grain',
   'u_vignette',
@@ -69,13 +72,17 @@ const UNIFORM_NAMES = [
 
 type GlassUniform = (typeof UNIFORM_NAMES)[number];
 
-/** Default values for glass preset. */
+/** Fallbacks, matching shader-config's DEFAULTS (WP-1d R4b). */
 const DEFAULTS = {
-  cellSize: 8.0,
-  border: 0.08,
-  drift: 0.3,
-  glow: 0.4,
-  light: 0.5,
+  cellSize: 5.0,
+  border: 0.04,
+  drift: 0.1,
+  glow: 0.2,
+  light: 0.15,
+  // The old came: hard, dark, flat pieces.
+  lineSoftness: 0,
+  lineTint: 0,
+  pieceEdges: 0,
   intensity: 0.65,
   grain: 0.025,
   vignette: 0.2,
@@ -193,12 +200,24 @@ export function createGlassRenderer(): ShaderRenderer {
         drift?: number;
         glow?: number;
         light?: number;
+        lineSoftness?: number;
+        lineTint?: number;
+        pieceEdges?: number;
       };
       gl.uniform1f(uniforms.u_cellSize, cfg.cellSize ?? DEFAULTS.cellSize);
       gl.uniform1f(uniforms.u_border, cfg.border ?? DEFAULTS.border);
       gl.uniform1f(uniforms.u_drift, cfg.drift ?? DEFAULTS.drift);
       gl.uniform1f(uniforms.u_glow, cfg.glow ?? DEFAULTS.glow);
       gl.uniform1f(uniforms.u_light, cfg.light ?? DEFAULTS.light);
+      gl.uniform1f(
+        uniforms.u_lineSoftness,
+        cfg.lineSoftness ?? DEFAULTS.lineSoftness
+      );
+      gl.uniform1f(uniforms.u_lineTint, cfg.lineTint ?? DEFAULTS.lineTint);
+      gl.uniform1f(
+        uniforms.u_pieceEdges,
+        cfg.pieceEdges ?? DEFAULTS.pieceEdges
+      );
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
       gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);

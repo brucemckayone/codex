@@ -95,11 +95,19 @@ vec3 aces(vec3 x) {
 
 void main() {
   float t = u_clock;  // integrated musical clock, monotone by construction
-  vec2 uv = gl_FragCoord.xy / u_resolution;
+  // Measured in units of the canvas's SHORT side, so a cell is round on
+  // every shape. It was gl_FragCoord / u_resolution, a fraction of the width
+  // AND of the height, so the cells stretched 1.8x sideways on a desktop
+  // hero and 2x upright on a phone. The short side keeps today's cell size
+  // where the hero is short (desktop height), and gives a phone the same
+  // count across its width.
+  float shortSide = min(u_resolution.x, u_resolution.y);
+  vec2 uv = gl_FragCoord.xy / shortSide;
   vec2 st = uv * u_crackScale;
 
-  // Mouse influence on cracks
-  float mouseDist = distance(uv, u_mouse);
+  // Mouse influence on cracks: the pointer in the same units, so the halo
+  // is a circle too.
+  float mouseDist = distance(uv, u_mouse * u_resolution / shortSide);
   float mouseInfluence = u_mouseActive * smoothstep(0.4, 0.0, mouseDist);
   float burstInfluence = u_burst;
   float effectiveCrackWidth = u_crackWidth * (1.0 + mouseInfluence * 2.0 + burstInfluence * 4.0);

@@ -1,4 +1,10 @@
-import { type SimGrid, simGridChanged, simGridFor } from './sim-grid';
+import {
+  SIM_BASE,
+  SIM_CELL,
+  type SimGrid,
+  simGridChanged,
+  simGridFor,
+} from './sim-grid';
 import {
   createDoubleFBO,
   type DoubleFBO,
@@ -26,12 +32,14 @@ export function resizeSim(
   grid: SimGrid,
   buf: DoubleFBO | null,
   width: number,
-  height: number
+  height: number,
+  base: number = SIM_BASE,
+  cell: number = SIM_CELL
 ): ResizedSim | null {
   if (!buf || gl.isContextLost() || !simGridChanged(grid, width, height)) {
     return null;
   }
-  const next = simGridFor(width, height);
+  const next = simGridFor(width, height, base, cell);
   const nextBuf = createDoubleFBO(gl, next.w, next.h);
   destroyDoubleFBO(gl, buf);
   return { grid: next, buf: nextBuf };

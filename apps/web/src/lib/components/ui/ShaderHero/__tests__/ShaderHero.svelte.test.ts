@@ -90,7 +90,7 @@ import { showreelFeed } from '../compositor/showreel-feed';
 import { BARE_STACK, type StackConfig } from '../compositor/stack-config';
 import { resetJFACache } from '../jfa-sdf';
 import { loadRenderer } from '../load-renderer';
-import type { ShaderRenderer } from '../renderer-types';
+import type { MouseState, ShaderRenderer } from '../renderer-types';
 import ShaderHero from '../ShaderHero.svelte';
 import type { ShaderPresetId } from '../shader-config';
 import { shaderLive } from '../shader-live.svelte';
@@ -1810,5 +1810,161 @@ describe('ShaderHero stack', () => {
     showreelFeed.setNameMask(mask);
     expect(compositor.setStage).toHaveBeenLastCalledWith(box);
     expect(compositor.setNameMask).toHaveBeenLastCalledWith(mask);
+  });
+});
+
+// A press is the burst's rise from one frame to the next: a renderer splashes
+// on each one (ripple's click edge, lane C's R1). One gesture, one rise.
+describe('ShaderHero press', () => {
+  /** A renderer that keeps the burst each frame drew with. */
+  function counting() {
+    const bursts: number[] = [];
+    const r = {
+      init: vi.fn(() => true),
+      render: vi.fn((...args: Parameters<ShaderRenderer['render']>) => {
+        const mouse: MouseState = args[2];
+        bursts.push(mouse.burstStrength);
+      }),
+      resize: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn(),
+    } satisfies ShaderRenderer;
+    const rises = () =>
+      bursts.filter((burst, i) => burst > (bursts[i - 1] ?? 0)).length;
+    return { r, bursts, rises };
+  }
+  /** Frames for `ms`, 16 ms apart. */
+  function play(ms: number) {
+    for (let t = 0; t < ms; t += 16) {
+      clock += 16;
+      step(1);
+    }
+  }
+  const at = { clientX: 40, clientY: 30 };
+  const pointerDown = (pointerType: string, isPrimary = true, button = 0) =>
+    window.dispatchEvent(
+      new PointerEvent('pointerdown', { ...at, pointerType, isPrimary, button })
+    );
+  const touch = (type: 'touchstart' | 'touchend') => {
+    const event = new Event(type);
+    Object.defineProperty(event, 'touches', {
+      value: type === 'touchstart' ? [at] : [],
+    });
+    window.dispatchEvent(event);
+  };
+  const click = () => window.dispatchEvent(new MouseEvent('click', at));
+  /** What a finger's tap sends: the press, then ~100 ms on, the
+   *  browser's compatibility click. */
+  function tap() {
+    pointerDown('touch');
+    touch('touchstart');
+    play(100);
+    touch('touchend');
+    click();
+  }
+
+  beforeEach(() => {
+    vi.mocked(loadRenderer).mockClear();
+  });
+
+  it('counts a tap once, though the browser also sends it a click', async () => {
+    const { r, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({});
+    play(100);
+    tap();
+    play(600);
+    expect(rises()).toBe(1);
+  });
+
+  it('counts a mouse click once, and a keyboard’s click (no press) not at all', async () => {
+    const { r, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({});
+    play(100);
+    click();
+    play(600);
+    expect(rises()).toBe(0);
+
+    pointerDown('mouse');
+    play(50);
+    click();
+    play(600);
+    expect(rises()).toBe(1);
+  });
+
+  it('counts a left-button press, never a right or middle one', async () => {
+    const { r, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({});
+    play(100);
+    pointerDown('mouse', true, 2);
+    play(600);
+    pointerDown('mouse', true, 1);
+    play(600);
+    expect(rises()).toBe(0);
+
+    pointerDown('mouse', true, 0);
+    play(600);
+    expect(rises()).toBe(1);
+  });
+
+  it('counts two taps a second apart twice, and a second finger not at all', async () => {
+    const { r, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({});
+    play(100);
+    tap();
+    play(1000);
+    tap();
+    // A second finger lands: its own pointerdown, and a touchstart.
+    pointerDown('touch', false);
+    touch('touchstart');
+    play(600);
+    expect(rises()).toBe(2);
+  });
+
+  it('leaves no splash for the still frame or the thaw of a press that froze it', async () => {
+    const { r, bursts, rises } = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(r);
+    await start({ tone: true });
+    play(100);
+    pointerDown('mouse');
+    // The press holds the page (its motion dial) before the next frame.
+    const release = shaderTone.hold();
+    releases.push(release);
+    play(100);
+    expect(r.render).toHaveBeenCalled();
+    const frozenFrom = bursts.length - 1;
+    release();
+    play(600);
+    expect(bursts.slice(frozenFrom).every((burst) => burst === 0)).toBe(true);
+    expect(rises()).toBe(0);
+  });
+
+  it('carries no press into the preset it switches to', async () => {
+    const before = counting();
+    vi.mocked(loadRenderer).mockResolvedValueOnce(before.r);
+    await start({});
+    play(100);
+
+    let finishLoad: (r: ShaderRenderer) => void = () => {};
+    vi.mocked(loadRenderer).mockImplementationOnce(
+      () =>
+        new Promise<ShaderRenderer | null>((resolve) => {
+          finishLoad = resolve;
+        })
+    );
+    brand.config = { preset: 'lava' };
+    step(30); // the poll spots the new preset and starts loading it
+    expect(vi.mocked(loadRenderer).mock.calls.at(-1)?.[0]).toBe('lava');
+    pointerDown('mouse');
+    const after = counting();
+    finishLoad(after.r);
+    await Promise.resolve();
+    await Promise.resolve();
+    play(300);
+    expect(after.r.render).toHaveBeenCalled();
+    expect(after.rises()).toBe(0);
   });
 });

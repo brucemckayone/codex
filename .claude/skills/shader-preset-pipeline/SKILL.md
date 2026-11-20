@@ -20,7 +20,11 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
 
 **25 presets were cut.** Their ids still exist in stored data (branding `shader-preset`, content `shader_preset`), so every id goes through `resolvePresetId()` in `shader-config.ts`, which maps a cut id to its survivor via `CUT_PRESET_ALIASES`. Never turn a stored id into a renderer without it: an unknown id used to fall through to `'none'` and blank the org silently. A new preset is a survivor; a removed one is an alias entry, never a deletion alone.
 
-**FBO presets size their simulation with `sim-grid.ts`:** `simGridFor(width, height)` shapes the grid like the canvas (≈512² texels, sides multiples of 64), `simGridChanged` gates rebuilds on resize, and `createStepClock(stepsPerSecond)` turns elapsed time into steps so 120 Hz screens do not run twice as fast. Measure brush and drop distances in texels (`(v_uv - uMouse) / uTexel`), never in uv, or they draw as ellipses on wide heroes. Seed with something smooth (`PERIODIC_NOISE_GLSL` tiles over the wrapped grid) and warm up on the first render, so a reduced-motion visitor's single frame is not raw noise.
+**FBO presets size their simulation with `sim-grid.ts`:** `simGridFor(width, height)` shapes the grid like the canvas (≈512² texels, sides multiples of 64), `simGridChanged` gates rebuilds on resize, and `createStepClock(stepsPerSecond)` turns elapsed time into steps so 120 Hz screens do not run twice as fast. Measure brush and drop distances in texels (`(v_uv - uMouse) / uTexel`), never in uv, or they draw as ellipses on wide heroes. Seed with something smooth (`PERIODIC_NOISE_GLSL` tiles over the wrapped grid) and warm up on the first render, so a reduced-motion visitor's single frame is not raw noise. Both `simGridFor(width, height, base, cell)` and `resizeSim(gl, grid, buf, width, height, base, cell)` take an optional `base` (texels across, default `SIM_BASE`) and `cell` (the side multiple, default 64); a small grid passes both, as lenia does (`LENIA_GRID_BASE` 256, cell 16), or a 64 multiple distorts it. `createStepClock(stepsPerSecond, maxPerFrame = 4)` caps the steps one slow frame may catch up: size it so the slowest frame rate you support still gets every step it owes (lenia: `Math.max(4, 2 * perFrame)`, so 30 and 20 fps keep full speed), and guard `tick()`'s `dt`, which can be 0 (`if (!(dt > 0)) return`).
+
+**Each preset owns its intensity, grain and vignette (Codex-1yd58 WP-1d):** the keys are `shader-<id>-intensity` / `-grain` / `-vignette`, listed in `PRESET_FX_KEYS` (spread into `BRAND_PREFIX_KEYS` and the editor's `HERO_FX_DEFAULTS`); the defaults are one row of `PRESET_FX_DEFAULTS` in `preset-fx-defaults.ts` (`FX_BASE` until tuned; `fxDefaultsFor(id)` reads it), and the editor's sliders come from `presetFxControls(id)`. The shared `shader-intensity` keys are only a legacy fallback, read when a brand saved before WP-1d holds them. A renderer's own `DEFAULTS` for the three are a fallback for a partial config, never where a preset is tuned.
+
+**One splash per press:** queue a click splash on the burst's RISING edge, `createClickEdge().clicked(mouse.burstStrength)` from `click-edge.ts`, and play it out over a few input steps. Never splash on `burstStrength > 0`: it holds on every frame of its decay, about 28 splashes a click at 60 Hz and 56 at 120 Hz. Don't clear the edge in `reset()`: a reseed mid-decay would read the falling value as a new press.
 
 **Two types of presets:**
 
@@ -302,7 +306,8 @@ FBO-based renderers MUST:
 - Check `gl.getExtension('EXT_color_buffer_float')` in `init()` and return false if missing
 - Also get `gl.getExtension('OES_texture_float_linear')` for linear filtering
 - Use `createDoubleFBO(gl, grid.w, grid.h)` with `grid = simGridFor(width, height)` from `sim-grid.ts`, and rebuild it in `resize()` with `resizeSim` from `sim-resize.ts` (the template below does both)
-- Step with `createStepClock(stepsPerSecond)`, not a fixed count per frame, and apply pointer input on every `inputStride(stepsPerSecond)`-th step (60 pushes a second at any frame rate)
+- Step with `createStepClock(stepsPerSecond, maxPerFrame)`, not a fixed count per frame, and apply pointer input on every `inputStride(stepsPerSecond)`-th step (60 pushes a second at any frame rate)
+- Splash once per press, on `click-edge.ts`'s rising edge (the template below does)
 - Seed initial state in `reset()` by rendering the init shader into both FBO sides
 - Have a separate init program (simple clear shader)
 
@@ -332,7 +337,7 @@ interface MouseState {
 }
 ```
 
-ShaderHero passes the raw pointer position: mouse x/y are updated on `mousemove` and `touchmove` events, unsmoothed. A renderer that wants smooth motion lerps its own copy (see `lerpedMouse` in `ether-renderer.ts`). `burstStrength` is set to 1.0 on click/touchstart and decays by elapsed time, not per frame.
+ShaderHero passes the raw pointer position: mouse x/y are updated on `mousemove` and `touchmove` events, unsmoothed. A renderer that wants smooth motion lerps its own copy (see `lerpedMouse` in `ether-renderer.ts`). `burstStrength` is set to 1.0 once per press (one primary-button `pointerdown`: a tap is not counted twice) and decays by elapsed time, not per frame.
 
 ### 11. Design tokens in brand editor
 
@@ -401,6 +406,7 @@ A renderer reaches "the screen" ONLY through `bindOutput(gl)` from `output-targe
  */
 
 import { bindOutput } from '../output-target';
+import { FX_BASE } from '../preset-fx-defaults';
 import type { MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig, {Name}Config } from '../shader-config';
 import { {NAME}_FRAG } from '../shaders/{name}.frag';
@@ -436,9 +442,9 @@ type {Name}Uniform = (typeof UNIFORM_NAMES)[number];
 const DEFAULTS = {
   paramA: 1.0,
   paramB: 0.5,
-  intensity: 0.65,
-  grain: 0.025,
-  vignette: 0.2,
+  // A fallback for a partial config only: tune the preset's intensity,
+  // grain and vignette in `preset-fx-defaults.ts`.
+  ...FX_BASE,
 } as const;
 
 export function create{Name}Renderer(): ShaderRenderer {
@@ -622,6 +628,7 @@ void main() {
  * Buffer format: {describe what RGBA channels store}.
  */
 
+import { createClickEdge } from '../click-edge';
 import { bindOutput } from '../output-target';
 import type { MouseState, ShaderRenderer } from '../renderer-types';
 import type { {Name}Config, ShaderConfig } from '../shader-config';
@@ -649,6 +656,8 @@ import {
 const STEPS_PER_SECOND = 120;
 /** Pointer input on every n-th step: 60 pushes a second at any frame rate. */
 const INPUT_STRIDE = inputStride(STEPS_PER_SECOND);
+/** Input steps one press's splash plays over. */
+const CLICK_BURST_STEPS = 5;
 
 /** Init fragment shader -- seeds the initial state. */
 const {NAME}_INIT_FRAG = `#version 300 es
@@ -697,6 +706,9 @@ export function create{Name}Renderer(): ShaderRenderer {
   let simBuf: DoubleFBO | null = null;
   let grid: SimGrid = simGridFor(0, 0);
   const clock = createStepClock(STEPS_PER_SECOND);
+  // One splash per press, queued on the burst's rising edge.
+  const clickEdge = createClickEdge();
+  let splashSteps = 0;
 
   // ── Sim step helper ────────────────────────────────
   function stepSim(
@@ -778,15 +790,21 @@ export function create{Name}Renderer(): ShaderRenderer {
       // ── Simulation steps: by elapsed time, not per frame ──
       // A frozen (reduced-motion) redraw ticks 0 steps; the first tick
       // after a reset runs at least one. Input lands on a fixed stride.
+      if (clickEdge.clicked(mouse.burstStrength ?? 0)) {
+        splashSteps = CLICK_BURST_STEPS;
+      }
       const { steps, first } = clock.tick(time);
       for (let i = 0; i < steps; i++) {
-        const input = (first + i) % INPUT_STRIDE === 0 && mouse.active;
+        const onStride = (first + i) % INPUT_STRIDE === 0;
+        const splash = onStride && splashSteps > 0;
+        if (splash) splashSteps--;
+        const input = onStride && (mouse.active || splash);
         stepSim(
           gl, time,
           input ? mouse.x : -10.0,
           input ? mouse.y : -10.0,
           input,
-          input ? (mouse.burstStrength ?? 0.0) : 0.0,
+          splash ? 1.0 : 0.0,
           cfg
         );
       }

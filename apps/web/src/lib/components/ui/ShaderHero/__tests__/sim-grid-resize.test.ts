@@ -55,6 +55,22 @@ describe('resizeSim', () => {
     expect(state.calls).toEqual([`create ${next.w}x${next.h}`, 'destroy old']);
   });
 
+  it('rebuilds at the texel budget it is given (lenia: 256²)', () => {
+    const small = simGridFor(390, 844, 256);
+    const next = simGridFor(844, 390, 256);
+    const resized = resizeSim(glWith(false), small, oldBuf, 844, 390, 256);
+    expect(resized?.grid).toEqual(next);
+    expect(state.calls).toEqual([`create ${next.w}x${next.h}`, 'destroy old']);
+  });
+
+  it('rebuilds with the cell size it is given (lenia: 16)', () => {
+    const small = simGridFor(390, 844, 256, 16);
+    const resized = resizeSim(glWith(false), small, oldBuf, 1024, 768, 256, 16);
+    // 288x224 in 16-texel sides; 64-texel sides give 320x192 (an oval).
+    expect(resized?.grid).toMatchObject({ w: 288, h: 224 });
+    expect(state.calls).toEqual(['create 288x224', 'destroy old']);
+  });
+
   it('leaves the old buffer intact when the allocation throws', () => {
     state.createThrows = true;
     expect(() => resizeSim(glWith(false), phone, oldBuf, 844, 390)).toThrow(

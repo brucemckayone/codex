@@ -6,6 +6,13 @@
  */
 
 import { logger } from '$lib/observability';
+import {
+  FX_BASE,
+  type FxSetting,
+  fxDefaultsFor,
+  presetFxKey,
+  sharedFxKey,
+} from './preset-fx-defaults';
 
 export type ShaderPresetId =
   | 'suture'
@@ -212,8 +219,6 @@ export interface PulseConfig extends ShaderConfigBase {
   camTarget: number;
   specular: number;
   impulseSize: number;
-  /** Surface override color — defaults to blood red (#d10000). */
-  pulseColor: [number, number, number];
 }
 
 export interface InkConfig extends ShaderConfigBase {
@@ -242,6 +247,12 @@ interface GlassConfig extends ShaderConfigBase {
   drift: number;
   glow: number;
   light: number;
+  /** 0 hard to 1 soft (R4's); the default is the hard came. */
+  lineSoftness: number;
+  /** 0 near-black to 1 a tint of the ground (R4's). */
+  lineTint: number;
+  /** 0 flat pieces to 1 bevelled toward the lead (R4's). */
+  pieceEdges: number;
 }
 
 interface FilmConfig extends ShaderConfigBase {
@@ -315,6 +326,10 @@ export interface FractureConfig extends ShaderConfigBase {
   border: number;
   shadow: number;
   fill: number;
+  /** 0 hard to 1 soft (R4's); the default is the hard line. */
+  lineSoftness: number;
+  /** 0 near-black to 1 a tint of the ground (R4's). */
+  lineTint: number;
 }
 
 export interface FlowConfig extends ShaderConfigBase {
@@ -361,9 +376,11 @@ export type ShaderConfig =
  */
 export const DEFAULTS = {
   preset: 'none' as ShaderPresetId,
-  intensity: 0.65,
-  grain: 0.025,
-  vignette: 0.2,
+  // The renderers' last-resort fallbacks. A brand gets its preset's own
+  // values (preset-fx-defaults.ts; the read order is in getShaderConfig).
+  intensity: FX_BASE.intensity,
+  grain: FX_BASE.grain,
+  vignette: FX_BASE.vignette,
   // Suture
   curl: 30,
   // Owner's lab tunings (WP-1b, 2026-11-19), contrast-checked on three
@@ -373,45 +390,48 @@ export const DEFAULTS = {
   dissipation: 0.903,
   advection: 8.0,
   force: 2.7,
-  // Ether
-  rotationSpeed: 0.4,
-  complexity: 6,
-  zoom: 5.0,
-  glow: 0.5,
-  scale: 2.0,
-  aberration: 0.003,
+  // Ether (the owner's tuning, WP-1d)
+  rotationSpeed: 0.9,
+  complexity: 8,
+  zoom: 5.5,
+  glow: 1.5,
+  scale: 4.0,
+  aberration: 0.02,
   // Ripple
   waveSpeed: 0.8,
   damping: 0.995,
   rippleSize: 0.03,
   refraction: 0.5,
-  // Pulse
-  pulseDamping: 0.97,
+  // Pulse (the owner's view, shine and persistence, WP-1d)
+  pulseDamping: 0.98,
   waveScale: 4.0,
-  camHeight: 30,
-  camTarget: -30,
-  specular: 0.6,
+  camHeight: 27,
+  camTarget: -5,
+  specular: 1.0,
   impulseSize: 0.04,
-  pulseColor: [0.82, 0.0, 0.0] as [number, number, number], // blood red (#d10000)
   // Ink
   inkDiffusion: 1.5,
   inkAdvection: 0.8,
   inkDropSize: 0.05,
   inkEvaporation: 0.997,
   inkCurl: 15,
-  // Topo
-  topoLineCount: 12,
-  topoLineWidth: 1.2,
-  topoSpeed: 0.15,
+  // Topo (the owner's tuning, WP-1d)
+  topoLineCount: 27,
+  topoLineWidth: 1.0,
+  topoSpeed: 0.4,
   topoScale: 2.5,
-  topoElevation: 1.0,
-  topoOctaves: 3,
+  topoElevation: 2.8,
+  topoOctaves: 5,
   // Glass
   glassCellSize: 5.0,
   glassBorder: 0.04,
   glassDrift: 0.1,
   glassGlow: 0.2,
   glassLight: 0.15,
+  // The old came, by default (WP-1d R4b); 1 on each is R4's look.
+  glassLineSoftness: 0,
+  glassLineTint: 0,
+  glassPieceEdges: 0,
   // Film
   filmScale: 2.5,
   filmSpeed: 0.16,
@@ -450,17 +470,22 @@ export const DEFAULTS = {
   auroraSpread: 0.25,
   auroraShimmer: 0.8,
   // Lenia
-  leniaRadius: 13.0,
-  leniaGrowth: 0.14,
-  leniaWidth: 0.04,
-  leniaSpeed: 2,
-  leniaDt: 0.2,
+  // The owner's tuning (WP-1d R3).
+  leniaRadius: 15,
+  leniaGrowth: 0.2,
+  leniaWidth: 0.05,
+  leniaSpeed: 4,
+  leniaDt: 0.5,
   // Fracture
-  fractureCuts: 8,
-  fractureSpeed: 0.17,
+  // WP-1d R4b: fewer, larger shards and a calmer sway; the old bold, hard,
+  // dark lines, shadow and fill. Softness and tint 1 are R4's soft look.
+  fractureCuts: 5,
+  fractureSpeed: 0.12,
   fractureBorder: 0.01,
   fractureShadow: 0.05,
   fractureFill: 0.85,
+  fractureLineSoftness: 0,
+  fractureLineTint: 0,
   // Flow
   flowCurl: 0.6,
   flowAdvection: 6.0,
@@ -662,20 +687,26 @@ export function getShaderConfig(
   // Read logo URL for SDF-based shader integration
   const logoUrl = style ? readBrandVar(style, 'shader-logo-url', isDark) : null;
 
+  // Intensity, grain and vignette belong to each preset (preset-fx-defaults
+  // .ts): its own key, then the legacy shared key a brand saved before
+  // WP-1d may hold, then the preset's tuned default. `none` has no keys.
+  const fx = fxDefaultsFor(resolvedPreset);
+  const fxValue = (setting: FxSetting): number => {
+    if (!style) return fx[setting];
+    const own =
+      resolvedPreset === 'none'
+        ? null
+        : readBrandVar(style, presetFxKey(resolvedPreset, setting), isDark);
+    return num(
+      own ?? readBrandVar(style, sharedFxKey(setting), isDark),
+      fx[setting]
+    );
+  };
   const base: ShaderConfigBase = {
     preset: resolvedPreset,
-    intensity: num(
-      style ? readBrandVar(style, 'shader-intensity', isDark) : null,
-      DEFAULTS.intensity
-    ),
-    grain: num(
-      style ? readBrandVar(style, 'shader-grain', isDark) : null,
-      DEFAULTS.grain
-    ),
-    vignette: num(
-      style ? readBrandVar(style, 'shader-vignette', isDark) : null,
-      DEFAULTS.vignette
-    ),
+    intensity: fxValue('intensity'),
+    grain: fxValue('grain'),
+    vignette: fxValue('vignette'),
     logoUrl: logoUrl ?? undefined,
     colors: {
       primary: primary as [number, number, number],
@@ -733,25 +764,18 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     rippleSize: rv('shader-ripple-size', DEFAULTS.rippleSize),
     refraction: rv('shader-refraction', DEFAULTS.refraction),
   }),
-  pulse: (base, rv, style, isDark) => {
-    const pulseColorRaw = style
-      ? readBrandVar(style, 'shader-pulse-color', isDark)
-      : null;
-    return {
-      ...base,
-      preset: 'pulse',
-      damping: rv('shader-pulse-damping', DEFAULTS.pulseDamping),
-      waveScale: rv('shader-wave-scale', DEFAULTS.waveScale),
-      camHeight: rv('shader-cam-height', DEFAULTS.camHeight),
-      camTarget: rv('shader-cam-target', DEFAULTS.camTarget),
-      specular: rv('shader-specular', DEFAULTS.specular),
-      impulseSize: rv('shader-impulse-size', DEFAULTS.impulseSize),
-      // `?? DEFAULTS` covers a malformed token, not just a missing one — a
-      // typo'd hex now falls back to the designed red instead of painting grey.
-      pulseColor:
-        (pulseColorRaw ? hexToRgb(pulseColorRaw) : null) ?? DEFAULTS.pulseColor,
-    };
-  },
+  // Pulse paints the shared palette (WP-1d): its own colour picker, red for
+  // every org, is gone, and a stored `shader-pulse-color` is ignored.
+  pulse: (base, rv) => ({
+    ...base,
+    preset: 'pulse',
+    damping: rv('shader-pulse-damping', DEFAULTS.pulseDamping),
+    waveScale: rv('shader-wave-scale', DEFAULTS.waveScale),
+    camHeight: rv('shader-cam-height', DEFAULTS.camHeight),
+    camTarget: rv('shader-cam-target', DEFAULTS.camTarget),
+    specular: rv('shader-specular', DEFAULTS.specular),
+    impulseSize: rv('shader-impulse-size', DEFAULTS.impulseSize),
+  }),
   ink: (base, rv) => ({
     ...base,
     preset: 'ink',
@@ -779,6 +803,9 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     drift: rv('shader-glass-drift', DEFAULTS.glassDrift),
     glow: rv('shader-glass-glow', DEFAULTS.glassGlow),
     light: rv('shader-glass-light', DEFAULTS.glassLight),
+    lineSoftness: rv('shader-glass-line-softness', DEFAULTS.glassLineSoftness),
+    lineTint: rv('shader-glass-line-colour', DEFAULTS.glassLineTint),
+    pieceEdges: rv('shader-glass-piece-edges', DEFAULTS.glassPieceEdges),
   }),
   film: (base, rv) => ({
     ...base,
@@ -854,6 +881,11 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     border: rv('shader-fracture-border', DEFAULTS.fractureBorder),
     shadow: rv('shader-fracture-shadow', DEFAULTS.fractureShadow),
     fill: rv('shader-fracture-fill', DEFAULTS.fractureFill),
+    lineSoftness: rv(
+      'shader-fracture-line-softness',
+      DEFAULTS.fractureLineSoftness
+    ),
+    lineTint: rv('shader-fracture-line-colour', DEFAULTS.fractureLineTint),
   }),
   flow: (base, rv) => ({
     ...base,

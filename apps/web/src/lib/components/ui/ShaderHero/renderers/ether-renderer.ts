@@ -63,7 +63,7 @@ const UNIFORM_NAMES = [
   'u_brandSecondary',
   'u_brandAccent',
   'u_bgColor',
-  'u_rotSpeed',
+  'u_phase',
   'u_complexity',
   'u_glow',
   'u_scale',
@@ -80,16 +80,17 @@ const UNIFORM_NAMES = [
 type EtherUniform = (typeof UNIFORM_NAMES)[number];
 
 /** Default values matching the prototype. */
+// The owner's tuning (WP-1d), which shader-config's DEFAULTS also carry.
 const DEFAULTS = {
-  rotSpeed: 0.4,
-  complexity: 6,
-  glow: 0.5,
-  scale: 2.0,
-  zoom: 5.0,
-  intensity: 0.4,
-  grain: 0.02,
-  vignette: 0.2,
-  aberration: 0.003,
+  rotSpeed: 0.9,
+  complexity: 8,
+  glow: 1.5,
+  scale: 4.0,
+  zoom: 5.5,
+  intensity: 0.65,
+  grain: 0.07,
+  vignette: 0.3,
+  aberration: 0.02,
 } as const;
 
 export function createEtherRenderer(): ShaderRenderer {
@@ -112,6 +113,9 @@ export function createEtherRenderer(): ShaderRenderer {
    * Gates all audio-reactive visual boosts so the shader doesn't pop.
    */
   let wandererFade = 0;
+
+  /** Rotation angle: the integral of the rotation speed, see u_phase. */
+  let phase = 0;
 
   /**
    * Wanderer position — noise-perturbed Lissajous. Smooth everywhere, never
@@ -143,6 +147,7 @@ export function createEtherRenderer(): ShaderRenderer {
       lerpedMouse = { x: 0.5, y: 0.5 };
       lastRenderTime = 0;
       wandererFade = 0;
+      phase = 0;
 
       return true;
     },
@@ -211,11 +216,13 @@ export function createEtherRenderer(): ShaderRenderer {
 
       // Preset-specific config. Rotation speed drifts very gently with
       // smoothed amplitude (not raw) so loud passages feel more alive without
-      // jitter on transients.
-      gl.uniform1f(
-        uniforms.u_rotSpeed,
-        (cfg.rotationSpeed ?? DEFAULTS.rotSpeed) + amplitudeSmooth * 0.12
-      );
+      // jitter on transients. It is integrated here: the shader used
+      // time * speed, so any change of speed jumped the angle by time * the
+      // change (after a minute, a slider nudge spun the form).
+      phase +=
+        dt *
+        ((cfg.rotationSpeed ?? DEFAULTS.rotSpeed) + amplitudeSmooth * 0.12);
+      gl.uniform1f(uniforms.u_phase, phase);
       gl.uniform1i(
         uniforms.u_complexity,
         cfg.complexity ?? DEFAULTS.complexity

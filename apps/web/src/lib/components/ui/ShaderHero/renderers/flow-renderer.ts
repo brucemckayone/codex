@@ -299,57 +299,68 @@ export function createFlowRenderer(): ShaderRenderer {
           }
         : cfg;
 
-      // ── Wanderer: continuous trail + beat-synced splash ──────
-      if (wandererFade > 0.01) {
-        const pos = wandererPosition(time, amplitudeSmooth);
+      /**
+       * The audio impulses: the wanderer's trail and beat splash, and the
+       * bass rumble. Each one is a simulation step of its own, so they run
+       * on the clock's input steps (60 a second at any frame rate). They ran
+       * once a FRAME, so at 120 Hz they landed twice as often (the field
+       * raced while audio played), and they still stepped the field on a
+       * still frame that takes no steps. At 60 Hz the count and order are
+       * what they were.
+       */
+      const applyAudioImpulses = (): void => {
+        // ── Wanderer: continuous trail + beat-synced splash ────
+        if (wandererFade > 0.01) {
+          const pos = wandererPosition(time, amplitudeSmooth);
 
-        // Continuous trail: a single gentle curl-burst at the wanderer's
-        // position every frame. Strength scales with smoothed amplitude so
-        // loud passages feel more present without jittering.
-        const trailStrength =
-          (WANDERER_TRAIL_BASE + WANDERER_TRAIL_GAIN * amplitudeSmooth) *
-          wandererFade;
-        stepSim(gl, time, pos.x, pos.y, false, trailStrength, audioCfg);
-
-        // Beat-synced splash: bigger burst at the wanderer's current
-        // position when the onset detector fires. Gated on audible pulse so
-        // it doesn't ring during fade-in.
-        if (beatPulse > 0.2 && audioActive) {
-          const splashStrength =
-            (WANDERER_SPLASH_BASE + WANDERER_SPLASH_GAIN * beatPulse) *
+          // Continuous trail: a single gentle curl-burst at the wanderer's
+          // position on every input step. Strength scales with smoothed
+          // amplitude so loud passages feel more present without jittering.
+          const trailStrength =
+            (WANDERER_TRAIL_BASE + WANDERER_TRAIL_GAIN * amplitudeSmooth) *
             wandererFade;
-          stepSim(gl, time, pos.x, pos.y, false, splashStrength, audioCfg);
-        }
-      }
+          stepSim(gl, time, pos.x, pos.y, false, trailStrength, audioCfg);
 
-      // ── Bass rumble emitter ──────────────────────────────────
-      // Parallel to the beat-onset path. Sustained low-end (meditation
-      // drones, pads, rumble) produces no transients for the onset detector
-      // to fire on, but there IS continuous bass energy the viewer should
-      // feel. We emit 1-4 wide curl bursts at orbiting positions — the
-      // dynamical system blends these into large-scale "atmospheric swirl."
-      // Quadratic bass scaling so soft bass is subtle, loud bass is
-      // dramatic.
-      if (
-        audioActive &&
-        bassSmooth > BASS_RUMBLE_FLOOR &&
-        wandererFade > 0.01
-      ) {
-        const emitterCount = Math.min(4, 1 + Math.floor(bassSmooth * 6));
-        const orbitT = time * BASS_ORBIT_RATE;
-        const rumbleStrength =
-          bassSmooth * bassSmooth * BASS_RUMBLE_STRENGTH * wandererFade;
-        for (let i = 0; i < emitterCount; i++) {
-          const angle = orbitT + (i * (Math.PI * 2)) / emitterCount;
-          // Orbit radius breathes slowly so positions don't feel static.
-          const r =
-            BASS_ORBIT_R_BASE +
-            BASS_ORBIT_R_BREATH * Math.sin(time * 0.11 + i * 1.7);
-          const bx = 0.5 + r * Math.cos(angle);
-          const by = 0.5 + r * Math.sin(angle);
-          stepSim(gl, time, bx, by, false, rumbleStrength, audioCfg);
+          // Beat-synced splash: bigger burst at the wanderer's current
+          // position when the onset detector fires. Gated on audible pulse
+          // so it doesn't ring during fade-in.
+          if (beatPulse > 0.2 && audioActive) {
+            const splashStrength =
+              (WANDERER_SPLASH_BASE + WANDERER_SPLASH_GAIN * beatPulse) *
+              wandererFade;
+            stepSim(gl, time, pos.x, pos.y, false, splashStrength, audioCfg);
+          }
         }
-      }
+
+        // ── Bass rumble emitter ────────────────────────────────
+        // Parallel to the beat-onset path. Sustained low-end (meditation
+        // drones, pads, rumble) produces no transients for the onset
+        // detector to fire on, but there IS continuous bass energy the
+        // viewer should feel. We emit 1-4 wide curl bursts at orbiting
+        // positions — the dynamical system blends these into large-scale
+        // "atmospheric swirl." Quadratic bass scaling so soft bass is
+        // subtle, loud bass is dramatic.
+        if (
+          audioActive &&
+          bassSmooth > BASS_RUMBLE_FLOOR &&
+          wandererFade > 0.01
+        ) {
+          const emitterCount = Math.min(4, 1 + Math.floor(bassSmooth * 6));
+          const orbitT = time * BASS_ORBIT_RATE;
+          const rumbleStrength =
+            bassSmooth * bassSmooth * BASS_RUMBLE_STRENGTH * wandererFade;
+          for (let i = 0; i < emitterCount; i++) {
+            const angle = orbitT + (i * (Math.PI * 2)) / emitterCount;
+            // Orbit radius breathes slowly so positions don't feel static.
+            const r =
+              BASS_ORBIT_R_BASE +
+              BASS_ORBIT_R_BREATH * Math.sin(time * 0.11 + i * 1.7);
+            const bx = 0.5 + r * Math.cos(angle);
+            const by = 0.5 + r * Math.sin(angle);
+            stepSim(gl, time, bx, by, false, rumbleStrength, audioCfg);
+          }
+        }
+      };
 
       // ── Warm-up after a seed (see WARMUP_STEPS) ─────────────
       for (; pendingWarmup > 0; pendingWarmup--) {
@@ -359,7 +370,10 @@ export function createFlowRenderer(): ShaderRenderer {
       // ── Mouse hover + click burst, then coast ────────────────
       // The step count follows elapsed time, not frames, so a 120 Hz screen
       // runs flow at the speed a 60 Hz one does. Input lands on a fixed
-      // stride of steps (INPUT_STRIDE): 60 pushes a second at any frame rate.
+      // stride of steps (INPUT_STRIDE): 60 pushes a second at any frame rate,
+      // and the audio impulses with it. The click needs no edge here: it
+      // rides the input steps as burstStrength decays, by time, so it is
+      // the same at any frame rate.
       // Mouse hover attenuates during loud passages so the music leads —
       // ducks up to ~45% as smoothed amplitude rises.
       const mouseAttenuation = audioActive
@@ -367,6 +381,7 @@ export function createFlowRenderer(): ShaderRenderer {
         : 1.0;
       for (let i = 0; i < steps; i++) {
         const inputStep = (first + i) % INPUT_STRIDE === 0;
+        if (inputStep) applyAudioImpulses();
         const input = inputStep && mouse.active;
         stepSim(
           gl,
