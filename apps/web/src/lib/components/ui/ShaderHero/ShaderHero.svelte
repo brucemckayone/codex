@@ -227,6 +227,9 @@
       frozenElapsed = null;
       if (isFrozen) {
         hasRenderedStaticFrame = false;
+        // The burst decays only while it moves: a press that froze it (one
+        // that holds the page) would splash its still frame, or the thaw.
+        mouse.burstStrength = 0;
         detachPointerListeners();
         // Schedule one frame to render the static snapshot, then loop self-exits.
         scheduleFrame();
@@ -737,6 +740,9 @@
       renderer = newRenderer;
       retrying = null;
       hasRenderedStaticFrame = false;
+      // A new renderer's press edge starts at 0, and the burst does not decay
+      // while it loads: a press just before the switch would splash it.
+      mouse.burstStrength = 0;
       // Shown once it draws (`shown()`), not now. In a switch the canvas
       // still holds the last preset's frame (`resize()` keeps its size while
       // the new preset loads), so it stays shown and live.
@@ -1111,7 +1117,15 @@
       mapMouse(e.clientX, e.clientY);
       mouse.active = true;
     }
-    function onClick(e: MouseEvent) {
+    // One press per gesture. A tap is a touchstart AND, ~100 ms later, the
+    // browser's compatibility click, so pressing on both counted every tap
+    // twice: two splashes per tap on a phone. A pointerdown fires once for a
+    // mouse, a pen and each finger alike; only the first finger presses. A
+    // keyboard's click (at 0, 0) no longer splashes the canvas's corner.
+    function onPointerDown(e: PointerEvent) {
+      // The main button only: a right or middle press never splashed (no
+      // click fired for them). A finger and a pen report button 0 too.
+      if (!e.isPrimary || e.button !== 0) return;
       mapMouse(e.clientX, e.clientY);
       mouse.burstStrength = 1.0;
     }
@@ -1119,7 +1133,6 @@
       const t = e.touches[0];
       mapMouse(t.clientX, t.clientY);
       mouse.active = true;
-      mouse.burstStrength = 1.0;
     }
     function onTouchMove(e: TouchEvent) {
       const t = e.touches[0];
@@ -1134,7 +1147,7 @@
       if (pointerListenersAttached) return;
       pointerListenersAttached = true;
       window.addEventListener('mousemove', onMouseMove);
-      window.addEventListener('click', onClick);
+      window.addEventListener('pointerdown', onPointerDown, { passive: true });
       window.addEventListener('touchstart', onTouchStart, { passive: true });
       window.addEventListener('touchmove', onTouchMove, { passive: true });
       window.addEventListener('touchend', onTouchEnd);
@@ -1144,7 +1157,7 @@
       if (!pointerListenersAttached) return;
       pointerListenersAttached = false;
       window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('click', onClick);
+      window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', onTouchEnd);
