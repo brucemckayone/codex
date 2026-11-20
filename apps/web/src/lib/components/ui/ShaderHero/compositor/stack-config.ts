@@ -35,6 +35,7 @@ import {
   shaderIsDark,
   warnUnknownPreset,
 } from '../shader-config';
+import { LAYER_AMOUNTS } from './effects/amounts';
 import {
   type BlendId,
   type FrameId,
@@ -117,7 +118,11 @@ function amountOf(text: string | undefined | null): number | null {
 }
 
 /** Why a layer item was skipped, as `shader.unknown_layer` reports it. */
-type SkippedLayerReason = 'unknown' | 'surface-only' | 'repeat' | 'over-cap';
+export type SkippedLayerReason =
+  | 'unknown'
+  | 'surface-only'
+  | 'repeat'
+  | 'over-cap';
 
 /**
  * The most skip lines a session logs: a token of junk would otherwise log one
@@ -147,56 +152,111 @@ function warnSkippedLayer(id: string, reason: SkippedLayerReason): void {
 }
 
 /**
- * `id:amount` or `id amount`, comma separated; the amount may be left off. A
- * repeated id is dropped before it takes a place, so the cap counts distinct
- * layers: `glow, glow, ink` is two passes, not three. A layer that would run
- * past the cap is dropped and logged (`over-cap`), never cut off unseen.
+ * A layers token of `none` is an explicit empty list: the dark theme's way to
+ * say "no layers" over a light theme that has some (an absent dark key falls
+ * back to the light one).
  */
-function parseLayers(text: string | null): StackLayer[] {
-  const layers: StackLayer[] = [];
+export const NO_LAYERS = 'none';
+
+/**
+ * A layer as the editor writes it back: `text` is the item as the token held
+ * it, kept while the layer is untouched, so an edit of one layer never
+ * rewrites another (`grain:0.125` stays, never `grain:0.13`).
+ */
+export interface EditedLayer extends StackLayer {
+  readonly text?: string;
+}
+
+/** One item of a layers token, as the stack judges it. */
+export type LayerItem =
+  | {
+      readonly kind: 'layer';
+      readonly id: LayerId;
+      /** 0-1, or null for the layer's own default. */
+      readonly amount: number | null;
+      /** The item as the token holds it (trimmed, lower case). */
+      readonly text: string;
+    }
+  | {
+      readonly kind: 'skipped';
+      readonly id: string;
+      readonly reason: SkippedLayerReason;
+      /** The item as the token holds it (trimmed, lower case). */
+      readonly text: string;
+    };
+
+/**
+ * Every item of a layers token in order, judged as the stack reads it:
+ * `id:amount` or `id amount`, comma separated, the amount optional. A
+ * repeated id is skipped before it takes a place, so the cap counts distinct
+ * layers (`glow, glow, ink` is two passes, not three), and a layer that would
+ * run past the cap is skipped too, never cut off unseen. PURE: the brand
+ * editor reads a token with it (a retired layer shows as a row) without the
+ * log lines `parseStack` writes.
+ */
+export function readLayerItems(text: string | null): LayerItem[] {
+  const items: LayerItem[] = [];
+  const taken = new Set<string>();
   for (const raw of (text ?? '').split(',')) {
     const item = raw.trim().toLowerCase();
     if (!item) continue;
     const [id, amount] = item.split(/[\s:]+/);
-    // An item with no id is unset, not unknown: nothing to log.
-    if (!id) continue;
-    if (!isLayerId(id)) {
-      warnSkippedLayer(id, 'unknown');
-      continue;
+    // An item with no id is unset, not unknown, and `none` says so outright.
+    if (!id || id === NO_LAYERS) continue;
+    const skip = (reason: SkippedLayerReason) =>
+      items.push({ kind: 'skipped', id, reason, text: item });
+    if (!isLayerId(id)) skip('unknown');
+    else if (SURFACE_ONLY_LAYER_IDS.includes(id)) skip('surface-only');
+    else if (taken.has(id)) skip('repeat');
+    else if (taken.size === MAX_LAYERS) skip('over-cap');
+    else {
+      taken.add(id);
+      items.push({ kind: 'layer', id, amount: amountOf(amount), text: item });
     }
-    if (SURFACE_ONLY_LAYER_IDS.includes(id)) {
-      warnSkippedLayer(id, 'surface-only');
-      continue;
-    }
-    if (layers.some((layer) => layer.id === id)) {
-      warnSkippedLayer(id, 'repeat');
-      continue;
-    }
-    if (layers.length === MAX_LAYERS) {
-      warnSkippedLayer(id, 'over-cap');
-      continue;
-    }
-    layers.push({ id, amount: amountOf(amount) });
   }
-  return layers;
+  return items;
+}
+
+/** An amount as a token writes it: clamped to 0-1, at most two decimals. */
+export function formatAmount(amount: number): string {
+  return String(Math.round(Math.min(1, Math.max(0, amount)) * 100) / 100);
 }
 
 /**
- * The stack the tokens describe over `base`. `read` returns a key's raw
- * value, or null when unset. PURE but for two log lines, each once per id
- * per session: a second id that names no preset (`shader.unknown_preset`, as
- * the base's is) and a layer item the stack skips (`shader.unknown_layer`,
- * with its reason: unknown, surface-only, a repeat or over the cap).
+ * The layers token for `layers`, in order: a layer's stored `text` while it
+ * is untouched, else `id` at the layer's own strength (null, or equal to
+ * `LAYER_AMOUNTS`), else `id:amount`. Null for no layers, so the key is
+ * removed. `readLayerItems` reads it back to the same layers.
  */
-export function parseStack(
+export function serialiseLayers(layers: readonly EditedLayer[]): string | null {
+  if (layers.length === 0) return null;
+  return layers
+    .map(
+      ({ id, amount, text }) =>
+        text ??
+        (amount === null || amount === LAYER_AMOUNTS[id]
+          ? id
+          : `${id}:${formatAmount(amount)}`)
+    )
+    .join(',');
+}
+
+/** The stack and every layer item, as `readStack` reads them. */
+export interface StackReading {
+  readonly stack: StackConfig;
+  readonly items: readonly LayerItem[];
+}
+
+/**
+ * The stack the tokens describe over `base`, and every layer item as it was
+ * judged. `read` returns a key's raw value, or null when unset. PURE: the
+ * brand editor reads with this; the hero reads with `parseStack`, which logs.
+ */
+export function readStack(
   read: (key: StackTokenKey) => string | null,
   base: ShaderPresetId
-): StackConfig {
-  const secondRaw = read('shader-second');
-  if (secondRaw && presetIsUnknown(secondRaw)) {
-    warnUnknownPreset(secondRaw, 'brand');
-  }
-  const resolved = resolvePresetId(secondRaw);
+): StackReading {
+  const resolved = resolvePresetId(read('shader-second'));
   const second =
     base !== 'none' &&
     resolved !== null &&
@@ -206,13 +266,44 @@ export function parseStack(
       : null;
   const blend = read('shader-blend')?.toLowerCase() ?? '';
   const frame = read('shader-frame')?.toLowerCase() ?? '';
+  const items = readLayerItems(read('shader-layers'));
+  const layers: StackLayer[] = [];
+  for (const item of items) {
+    if (item.kind === 'layer')
+      layers.push({ id: item.id, amount: item.amount });
+  }
   return {
-    second,
-    blend: isBlendId(blend) ? blend : BARE_STACK.blend,
-    blendAmount: amountOf(read('shader-blend-amount')),
-    layers: parseLayers(read('shader-layers')),
-    frame: isFrameId(frame) ? frame : BARE_STACK.frame,
+    stack: {
+      second,
+      blend: isBlendId(blend) ? blend : BARE_STACK.blend,
+      blendAmount: amountOf(read('shader-blend-amount')),
+      layers,
+      frame: isFrameId(frame) ? frame : BARE_STACK.frame,
+    },
+    items,
   };
+}
+
+/**
+ * The stack the tokens describe over `base`, as `readStack` reads it, but for
+ * two log lines, each once per id per session: a second id that names no
+ * preset (`shader.unknown_preset`, as the base's is) and a layer item the
+ * stack skips (`shader.unknown_layer`, with its reason: unknown,
+ * surface-only, a repeat or over the cap).
+ */
+export function parseStack(
+  read: (key: StackTokenKey) => string | null,
+  base: ShaderPresetId
+): StackConfig {
+  const secondRaw = read('shader-second');
+  if (secondRaw && presetIsUnknown(secondRaw)) {
+    warnUnknownPreset(secondRaw, 'brand');
+  }
+  const { stack, items } = readStack(read, base);
+  for (const item of items) {
+    if (item.kind === 'skipped') warnSkippedLayer(item.id, item.reason);
+  }
+  return stack;
 }
 
 /** `readBrandVar` (shader-config.ts): the `-dark` value first when dark. */

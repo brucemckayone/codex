@@ -11,12 +11,16 @@
  *     message and asserts nothing applied — the tests can fail).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { defaultOptions } from '$lib/org-hero/hero-config';
 import { brandEditor } from './brand-editor-store.svelte';
 import {
   BRAND_PREVIEW_MESSAGE_TYPE,
+  BRAND_PREVIEW_RESOLVED_TYPE,
   type BrandPreviewMessage,
+  type BrandPreviewResolved,
   createBrandPreviewSender,
   initBrandPreviewBridge,
+  reportPreviewResolved,
 } from './brand-preview-bridge';
 import type { BrandEditorState } from './types';
 
@@ -338,5 +342,208 @@ describe('initBrandPreviewBridge (iframe applier)', () => {
       },
     });
     expect(brandEditor.pending).toBeNull();
+  });
+});
+
+// ── WP-9: the frame's report of what its hero resolved to ────────────────────
+
+const RESOLVED: BrandPreviewResolved = {
+  options: defaultOptions('consume', {
+    hasShader: true,
+    hasLogo: true,
+    hasFilm: false,
+    hasFilmLoop: false,
+    hasFeatured: false,
+    hasLatest: true,
+    hasFeaturedImage: false,
+    hasLatestImage: true,
+    hasFacts: true,
+    hasDescription: true,
+    canJoin: false,
+    hideTitle: false,
+    hasReel: true,
+  }),
+  kind: 'listen',
+  chosen: { purpose: 'consume', options: { lead: 'name' } },
+};
+
+/** A studio window: records its message listeners so a test can deliver. */
+function makeStudio() {
+  const listeners = new Set<(event: MessageEvent) => void>();
+  return {
+    target: {
+      addEventListener: (type: string, cb: (event: MessageEvent) => void) => {
+        if (type === 'message') listeners.add(cb);
+      },
+      removeEventListener: (
+        type: string,
+        cb: (event: MessageEvent) => void
+      ) => {
+        if (type === 'message') listeners.delete(cb);
+      },
+    } as Pick<Window, 'addEventListener' | 'removeEventListener'>,
+    deliver(event: Partial<MessageEvent>) {
+      for (const cb of listeners) cb(event as MessageEvent);
+    },
+    count: () => listeners.size,
+  };
+}
+
+describe('the resolved report (iframe → studio)', () => {
+  const report = { type: BRAND_PREVIEW_RESOLVED_TYPE, resolved: RESOLVED };
+
+  it('hears a report from a tracked frame, at its origin', () => {
+    const studio = makeStudio();
+    const sender = createBrandPreviewSender({ target: studio.target });
+    const frame = makeFrame();
+    sender.register(frame.element, ORIGIN);
+    const heard: Array<BrandPreviewResolved | null> = [];
+    sender.onResolved((r) => heard.push(r));
+    studio.deliver({
+      source: frame.element.contentWindow,
+      origin: ORIGIN,
+      data: report,
+    });
+    expect(heard).toEqual([RESOLVED]);
+    sender.destroy();
+  });
+
+  it('hears a withdrawal (null) from a tracked frame, as the landing leaves', () => {
+    const studio = makeStudio();
+    const sender = createBrandPreviewSender({ target: studio.target });
+    const frame = makeFrame();
+    sender.register(frame.element, ORIGIN);
+    const heard: Array<BrandPreviewResolved | null> = [];
+    sender.onResolved((r) => heard.push(r));
+    const gone = { type: BRAND_PREVIEW_RESOLVED_TYPE, resolved: null };
+    studio.deliver({
+      source: frame.element.contentWindow,
+      origin: ORIGIN,
+      data: report,
+    });
+    studio.deliver({
+      source: frame.element.contentWindow,
+      origin: ORIGIN,
+      data: gone,
+    });
+    // From anyone else it is ignored, like any report.
+    studio.deliver({ source: {} as Window, origin: ORIGIN, data: gone });
+    expect(heard).toEqual([RESOLVED, null]);
+    sender.destroy();
+  });
+
+  it('ignores a report from another window, another origin, or of the wrong shape', () => {
+    const studio = makeStudio();
+    const sender = createBrandPreviewSender({ target: studio.target });
+    const frame = makeFrame();
+    sender.register(frame.element, ORIGIN);
+    const heard: unknown[] = [];
+    sender.onResolved((r) => heard.push(r));
+    const own = frame.element.contentWindow;
+    studio.deliver({ source: {} as Window, origin: ORIGIN, data: report });
+    studio.deliver({
+      source: own,
+      origin: 'https://evil.example',
+      data: report,
+    });
+    studio.deliver({
+      source: own,
+      origin: ORIGIN,
+      data: { ...report, type: BRAND_PREVIEW_MESSAGE_TYPE },
+    });
+    studio.deliver({
+      source: own,
+      origin: ORIGIN,
+      data: {
+        type: BRAND_PREVIEW_RESOLVED_TYPE,
+        resolved: { options: RESOLVED.options, kind: 'dance' },
+      },
+    });
+    // No `chosen`: not a report the editor can judge as current.
+    studio.deliver({
+      source: own,
+      origin: ORIGIN,
+      data: {
+        type: BRAND_PREVIEW_RESOLVED_TYPE,
+        resolved: { options: RESOLVED.options, kind: 'listen' },
+      },
+    });
+    studio.deliver({
+      source: own,
+      origin: ORIGIN,
+      data: {
+        type: BRAND_PREVIEW_RESOLVED_TYPE,
+        resolved: { ...RESOLVED, chosen: { purpose: 7, options: {} } },
+      },
+    });
+    expect(heard).toEqual([]);
+    sender.destroy();
+  });
+
+  it('stops listening on teardown and on destroy', () => {
+    const studio = makeStudio();
+    const sender = createBrandPreviewSender({ target: studio.target });
+    const teardown = sender.onResolved(() => {});
+    sender.onResolved(() => {});
+    expect(studio.count()).toBe(2);
+    teardown();
+    expect(studio.count()).toBe(1);
+    sender.destroy();
+    expect(studio.count()).toBe(0);
+  });
+
+  describe('reportPreviewResolved (the framed landing)', () => {
+    beforeEach(() => brandEditor.close());
+    afterEach(() => brandEditor.close());
+
+    /** A framed page whose parent records what it is sent. */
+    function framed() {
+      const posts: Array<{ message: unknown; targetOrigin: string }> = [];
+      const parent = {
+        postMessage: (message: unknown, targetOrigin: string) =>
+          posts.push({ message, targetOrigin }),
+      } as unknown as Window;
+      const target = {
+        location: { origin: ORIGIN },
+        parent,
+      } as unknown as Window;
+      return { target, posts };
+    }
+
+    it('posts the report to its parent at its own origin, once per change', () => {
+      const page = framed();
+      brandEditor.applyPreviewVars(makeState());
+      reportPreviewResolved(RESOLVED, page.target);
+      reportPreviewResolved(RESOLVED, page.target);
+      expect(page.posts).toEqual([{ message: report, targetOrigin: ORIGIN }]);
+      reportPreviewResolved({ ...RESOLVED, kind: 'read' }, page.target);
+      expect(page.posts).toHaveLength(2);
+    });
+
+    it('withdraws its report with null, once, and reports afresh after', () => {
+      const page = framed();
+      brandEditor.applyPreviewVars(makeState());
+      reportPreviewResolved(RESOLVED, page.target);
+      reportPreviewResolved(null, page.target);
+      reportPreviewResolved(null, page.target);
+      reportPreviewResolved(RESOLVED, page.target);
+      expect(page.posts.map((post) => post.message)).toEqual([
+        report,
+        { type: BRAND_PREVIEW_RESOLVED_TYPE, resolved: null },
+        report,
+      ]);
+    });
+
+    it('stays silent standalone, and in a frame that is not showing edits', () => {
+      const page = framed();
+      reportPreviewResolved(RESOLVED, page.target); // store closed: not a preview
+      const standalone = {
+        location: { origin: ORIGIN },
+      } as unknown as Window & { parent: Window };
+      standalone.parent = standalone;
+      brandEditor.applyPreviewVars(makeState());
+      reportPreviewResolved(RESOLVED, standalone);
+      expect(page.posts).toEqual([]);
+    });
   });
 });

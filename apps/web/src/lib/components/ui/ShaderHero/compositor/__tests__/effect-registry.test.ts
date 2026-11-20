@@ -6,6 +6,11 @@
  * effect of its own axis.
  */
 import { describe, expect, it } from 'vitest';
+import {
+  BLEND_AMOUNTS,
+  LAYER_AMOUNTS,
+  MOVING_LAYER_IDS,
+} from '../effects/amounts';
 import type { Effect } from '../effects/effect';
 import { HEADER } from '../effects/header';
 import {
@@ -117,6 +122,20 @@ describe('effect registry', () => {
       for (const name of effect.uniforms)
         expect(SETTABLE_UNIFORMS).toContain(name);
     }
+  });
+
+  it("mirrors each layer's and blend's own amount for the parse and the editor", () => {
+    for (const id of LAYER_IDS)
+      expect(LAYER_AMOUNTS[id], id).toBe(LAYERS[id].amount);
+    for (const id of BLEND_IDS)
+      expect(BLEND_AMOUNTS[id], id).toBe(BLENDS[id].amount);
+  });
+
+  it('mirrors the layers reduced motion drops, for the editor to say so', () => {
+    const dropped = LAYER_IDS.filter(
+      (id) => LAYERS[id].reducedMotionFallback === null
+    );
+    expect([...MOVING_LAYER_IDS].sort()).toEqual([...dropped].sort());
   });
 
   it('classifies every effect that reads the clock, and marks only those that flash', () => {

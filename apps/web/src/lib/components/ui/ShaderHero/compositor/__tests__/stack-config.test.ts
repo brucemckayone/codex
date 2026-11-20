@@ -17,16 +17,23 @@ import {
   darkTokenOverridesToCssVars,
   tokenOverridesToCssVars,
 } from '$lib/brand-editor/css-injection';
+import { LAYER_AMOUNTS } from '../effects/amounts';
 import { LAYER_IDS, SURFACE_ONLY_LAYER_IDS } from '../effects/ids';
 import {
   BARE_STACK,
+  formatAmount,
   getStackConfig,
   isBareStack,
   MAX_LAYERS,
+  NO_LAYERS,
   needsCompositor,
   parseStack,
+  readLayerItems,
+  readStack,
   STACK_TOKEN_KEYS,
+  type StackLayer,
   type StackTokenKey,
+  serialiseLayers,
 } from '../stack-config';
 
 /** Every layer a brand's stack may name, each once. */
@@ -434,5 +441,150 @@ describe('the layers token', () => {
         { id: 'shader-light', where: 'brand', reason: 'surface-only' },
       ],
     ]);
+  });
+});
+
+// The brand editor (WP-9) reads a token with readLayerItems / readStack and
+// writes one with serialiseLayers: one module owns the format both ways.
+describe("the editor's reading and writing", () => {
+  const layersOf = (value: string) =>
+    parseStack(tokens({ 'shader-layers': value }), 'flow').layers;
+  const unknownLayerWarnings = () =>
+    logger.warn.mock.calls.filter(
+      ([event]) => event === 'shader.unknown_layer'
+    );
+
+  /** A layer list as it reads back: a default amount is no amount. */
+  const normalised = (layers: readonly StackLayer[]) =>
+    layers.map(({ id, amount }) => ({
+      id,
+      amount:
+        amount === null || amount === LAYER_AMOUNTS[id]
+          ? null
+          : Number(formatAmount(amount)),
+    }));
+
+  it('writes a layer at its own strength as its id alone, and the rest as id:amount', () => {
+    expect(
+      serialiseLayers([
+        { id: 'grain', amount: 0.4 },
+        { id: 'halftone', amount: null },
+        { id: 'glow', amount: LAYER_AMOUNTS.glow },
+        { id: 'mosaic', amount: 0.333 },
+      ])
+    ).toBe('grain:0.4,halftone,glow,mosaic:0.33');
+    expect(serialiseLayers([])).toBeNull();
+  });
+
+  it("keeps an untouched layer's stored text, so an edit of one never rewrites another", () => {
+    // Review W2: `grain:0.125` was rewritten as `grain:0.13` when only
+    // halftone changed. A layer item carries its text; a strength set by
+    // hand drops it, and is written afresh.
+    const items = readLayerItems('grain:0.125, HALFTONE');
+    const layers = items.flatMap((item) =>
+      item.kind === 'layer' ? [item] : []
+    );
+    expect(layers.map((layer) => layer.text)).toEqual([
+      'grain:0.125',
+      'halftone',
+    ]);
+    expect(
+      serialiseLayers(
+        layers.map((layer) =>
+          layer.id === 'halftone' ? { id: layer.id, amount: 0.5 } : layer
+        )
+      )
+    ).toBe('grain:0.125,halftone:0.5');
+  });
+
+  it('reads back every stackable layer at every 5% step', () => {
+    // Review W1: six layers at once, each amount from 0 to 1.
+    const six = STACK_LAYER_IDS.slice(0, MAX_LAYERS);
+    for (let step = 0; step <= 20; step++) {
+      const amount = Math.round(step * 5) / 100;
+      const layers = six.map((id) => ({ id, amount }));
+      expect(layersOf(serialiseLayers(layers) ?? ''), String(amount)).toEqual(
+        normalised(layers)
+      );
+    }
+  });
+
+  it('reads back what it writes, for every order and amount', () => {
+    // A fixed walk over the stack's layers, lengths 1 to 6, amounts at 5%
+    // steps and the default, so every layer and both forms are covered.
+    let seed = 7;
+    const next = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    for (let run = 0; run < 200; run++) {
+      const pool = [...STACK_LAYER_IDS];
+      const length = 1 + Math.floor(next() * MAX_LAYERS);
+      const layers: StackLayer[] = [];
+      for (let i = 0; i < length; i++) {
+        const [id] = pool.splice(Math.floor(next() * pool.length), 1);
+        const roll = next();
+        layers.push({
+          id,
+          amount: roll < 0.25 ? null : Math.round(roll * 20) / 20,
+        });
+      }
+      const token = serialiseLayers(layers);
+      expect(token, JSON.stringify(layers)).not.toBeNull();
+      expect(token?.length ?? 0).toBeLessThanOrEqual(200);
+      expect(layersOf(token ?? '')).toEqual(normalised(layers));
+    }
+  });
+
+  it('judges every item without logging, keeping a skipped one as the token holds it', () => {
+    expect(
+      readLayerItems('grain:0.4, sparkle:0.4, SHADER-LIGHT, grain:0.9')
+    ).toEqual([
+      { kind: 'layer', id: 'grain', amount: 0.4, text: 'grain:0.4' },
+      {
+        kind: 'skipped',
+        id: 'sparkle',
+        reason: 'unknown',
+        text: 'sparkle:0.4',
+      },
+      {
+        kind: 'skipped',
+        id: 'shader-light',
+        reason: 'surface-only',
+        text: 'shader-light',
+      },
+      { kind: 'skipped', id: 'grain', reason: 'repeat', text: 'grain:0.9' },
+    ]);
+    const seven = STACK_LAYER_IDS.slice(0, MAX_LAYERS + 1);
+    expect(readLayerItems(seven.join(',')).at(-1)).toEqual({
+      kind: 'skipped',
+      id: seven[MAX_LAYERS],
+      reason: 'over-cap',
+      text: seven[MAX_LAYERS],
+    });
+    expect(unknownLayerWarnings()).toEqual([]);
+  });
+
+  it(`reads ${NO_LAYERS} as an explicit empty list, and logs nothing for it`, () => {
+    expect(layersOf(NO_LAYERS)).toEqual([]);
+    expect(readLayerItems(NO_LAYERS)).toEqual([]);
+    expect(unknownLayerWarnings()).toEqual([]);
+  });
+
+  it('reads the stack as parseStack does, without its log lines', () => {
+    const read = tokens({
+      'shader-second': 'suture',
+      'shader-blend': 'mix',
+      'shader-blend-amount': '0.3',
+      'shader-layers': 'grain:0.4, wobble',
+      'shader-frame': 'name-glows',
+    });
+    const { stack, items } = readStack(read, 'flow');
+    expect(stack).toEqual(parseStack(read, 'flow'));
+    expect(items.map((i) => i.kind)).toEqual(['layer', 'skipped']);
+    logger.warn.mockClear();
+    readStack(read, 'flow');
+    readStack(tokens({ 'shader-second': 'kaleidoscope-read-test' }), 'flow');
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });

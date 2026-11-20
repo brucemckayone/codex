@@ -10,3 +10,14 @@ export const setCtx = (builder: ReturnType<typeof createDropdownMenu>) => {
 export const getCtx = () => {
   return getContext<ReturnType<typeof createDropdownMenu>>(NAME);
 };
+
+const DISABLED = 'dropdown-menu-disabled';
+
+/** The Root's `disabled`, read by its Trigger. */
+export const setDisabledCtx = (disabled: () => boolean) => {
+  setContext(DISABLED, disabled);
+};
+
+export const getDisabledCtx = (): (() => boolean) => {
+  return getContext<(() => boolean) | undefined>(DISABLED) ?? (() => false);
+};

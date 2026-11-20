@@ -11,14 +11,24 @@
   page's fallbacks decide what this org can actually show). Only the options
   the org changes are stored, so improving a purpose's defaults later reaches
   every org that never touched them.
+
+  The preview reports what the hero resolved to (WP-9, the preview bridge's
+  resolved report): a field whose choice the page cannot show says what it
+  shows instead, the purposes are named in the org's own kind ("Get people
+  listening"), and the Showreel group shows whenever the hero is a Showreel,
+  chosen outright or by its purpose on Auto. A hint rests only on a report
+  resolved from the choices as they now stand (`answers`), never on one
+  still on its way back after an edit, nor on a landing the preview has left.
 -->
 <script lang="ts">
-  import { brandEditor } from '$lib/brand-editor';
+  import { answers, brandEditor, previewResolved } from '$lib/brand-editor';
+  import ListSegment from '$lib/components/studio/list-toolbar/ListSegment.svelte';
   import * as m from '$paraglide/messages';
   import {
     clearHeroSettings,
     HERO_PURPOSE_COPY,
     HERO_PURPOSES,
+    heroConsumeLabel,
     type HeroOptionKey,
     type HeroOptions,
     type HeroPurpose,
@@ -43,8 +53,18 @@
   }[HeroOptionKey];
 
   const onOff = { on: m.branding_hero_on, off: m.branding_hero_off };
+  /** The kind of content the preview's hero names, else watching. */
+  const kind = () => previewResolved.current?.kind ?? 'watch';
 
-  const GROUPS: ReadonlyArray<{ id: string; title: Words; fields: readonly Field[] }> = [
+  type Group = {
+    id: string;
+    title: Words;
+    fields: readonly Field[];
+    /** Only while the hero is a Showreel (its own options). */
+    showreel?: true;
+  };
+
+  const GROUPS: readonly Group[] = [
     {
       id: 'arrangement',
       title: m.branding_hero_group_arrangement,
@@ -78,7 +98,7 @@
       id: 'buttons',
       title: m.branding_hero_group_buttons,
       fields: [
-        { key: 'main', label: m.branding_hero_field_main, values: { consume: m.branding_hero_main_consume, explore: m.branding_hero_main_explore, join: m.branding_hero_main_join, film: m.branding_hero_main_film, follow: m.branding_hero_main_follow } },
+        { key: 'main', label: m.branding_hero_field_main, values: { consume: () => heroConsumeLabel(kind()), explore: m.branding_hero_main_explore, join: m.branding_hero_main_join, film: m.branding_hero_main_film, follow: m.branding_hero_main_follow } },
         { key: 'second', label: m.branding_hero_field_second, values: { auto: m.branding_hero_second_auto, none: m.branding_hero_none } },
         { key: 'micro', label: m.branding_hero_field_micro, values: onOff },
         { key: 'bstyle', label: m.branding_hero_field_bstyle, values: { solid: m.branding_hero_bstyle_solid, outline: m.branding_hero_bstyle_outline, pill: m.branding_hero_bstyle_pill, link: m.branding_hero_bstyle_link } },
@@ -101,6 +121,22 @@
         { key: 'entrance', label: m.branding_hero_field_entrance, values: { rise: m.branding_hero_entrance_rise, reveal: m.branding_hero_entrance_reveal, fade: m.branding_hero_entrance_fade, none: m.branding_hero_none } },
       ],
     },
+    {
+      id: 'showreel',
+      title: m.branding_hero_group_showreel,
+      showreel: true,
+      fields: [
+        { key: 'reel-layout', label: m.branding_hero_field_reel_layout, values: { corner: m.branding_hero_reel_layout_corner, wide: m.branding_hero_reel_layout_wide, name: m.branding_hero_reel_layout_name } },
+        { key: 'reel-peek', label: m.branding_hero_field_reel_peek, values: { off: m.branding_hero_reel_peek_off, on: m.branding_hero_reel_peek_on } },
+        { key: 'reel-pointer', label: m.branding_hero_field_reel_pointer, values: { liquid: m.branding_hero_reel_pointer_liquid, smoke: m.branding_hero_reel_pointer_smoke, glitch: m.branding_hero_reel_pointer_glitch, none: m.branding_hero_none } },
+        { key: 'reel-trans', label: m.branding_hero_field_reel_trans, values: { burn: m.branding_hero_reel_trans_burn, liquid: m.branding_hero_reel_trans_liquid, glitch: m.branding_hero_reel_trans_glitch } },
+        { key: 'reel-surface', label: m.branding_hero_field_reel_surface, values: { none: m.branding_hero_none, grain: m.branding_hero_reel_surface_grain, halftone: m.branding_hero_reel_surface_halftone, reeded: m.branding_hero_reel_surface_reeded, red: m.branding_hero_reel_surface_red, shader: m.branding_hero_reel_surface_shader } },
+        { key: 'reel-band', label: m.branding_hero_field_reel_band, values: { none: m.branding_hero_none, under: m.branding_hero_reel_band_under, fade: m.branding_hero_reel_band_fade } },
+        { key: 'reel-opening', label: m.branding_hero_field_reel_opening, values: { name: m.branding_hero_reel_opening_name, none: m.branding_hero_none } },
+        { key: 'reel-film', label: m.branding_hero_field_reel_film, values: { name: m.branding_hero_reel_film_name, smoke: m.branding_hero_reel_film_smoke, liquid: m.branding_hero_reel_film_liquid } },
+        { key: 'reel-loop', label: m.branding_hero_field_reel_loop, values: { on: m.branding_hero_reel_loop_on, off: m.branding_hero_reel_loop_off } },
+      ],
+    },
   ];
 
   const overrides = $derived(brandEditor.pending?.tokenOverrides ?? {});
@@ -109,6 +145,40 @@
   // change and Reset clears it.
   const changed = $derived(storedHeroChanges(overrides));
   const purposeLabelId = $props.id();
+  const report = $derived(previewResolved.current);
+  // What the page drew from THESE choices: the last report is from before an
+  // edit until the preview answers it, so no hint rests on a stale one.
+  const resolved = $derived(report && answers(report, settings) ? report.options : null);
+
+  // The hero is a Showreel when chosen outright, or on Auto when its purpose
+  // picks one: the preview says which, and before its first report the
+  // purpose that does (Get people watching, for an org with a reel). Only the
+  // purpose and the composition decide it, so a report on those two still
+  // holds while an edit of anything else is on its way.
+  const storedComp = $derived(settings.options.comp ?? null);
+  const reelReport = $derived(report && answers(report, settings, ['comp']) ? report : null);
+  const showreelOnAuto = $derived(
+    storedComp === null &&
+      (reelReport ? reelReport.options.comp === 'showreel' : settings.purpose === 'consume')
+  );
+  const isShowreel = $derived(storedComp === 'showreel' || showreelOnAuto);
+  const groups = $derived(GROUPS.filter((group) => !group.showreel || isShowreel));
+
+  /** The segment's options: Auto (no stored value, '') and every value. */
+  function optionsOf(field: Field) {
+    return [
+      { value: '', label: m.branding_hero_auto },
+      ...Object.entries<Words>(field.values).map(([value, label]) => ({ value, label })),
+    ];
+  }
+
+  /** What the page shows in place of a choice it cannot, or null. */
+  function shownInstead(field: Field, choice: string | null): string | null {
+    const shown = resolved?.[field.key];
+    if (choice === null || shown === undefined || shown === choice) return null;
+    const label = Object.entries<Words>(field.values).find(([value]) => value === shown)?.[1];
+    return label ? label() : null;
+  }
 
   function write(next: Record<string, string | null>) {
     brandEditor.updateField('tokenOverrides', next);
@@ -143,7 +213,7 @@
             aria-pressed={settings.purpose === purpose}
             onclick={() => setPurpose(purpose)}
           >
-            <b>{HERO_PURPOSE_COPY[purpose].label('watch')}</b>
+            <b>{HERO_PURPOSE_COPY[purpose].label(kind())}</b>
             <small>{HERO_PURPOSE_COPY[purpose].hint()}</small>
           </button>
         {/each}
@@ -162,21 +232,32 @@
       </button>
     </div>
 
-    {#each GROUPS as group (group.id)}
-      <section class="hero-designer__section">
+    {#each groups as group (group.id)}
+      <section class="hero-designer__section" data-group={group.id}>
         <span class="hero-designer__label">{group.title()}</span>
+        {#if group.showreel}
+          <p class="hero-designer__lede">{m.branding_hero_showreel_lede()}</p>
+          {#if showreelOnAuto && settings.purpose}
+            <p class="hero-designer__lede">
+              {m.branding_hero_showreel_auto_note({ purpose: HERO_PURPOSE_COPY[settings.purpose].label(kind()) })}
+            </p>
+          {/if}
+        {/if}
         {#each group.fields as field (field.key)}
           {@const current = settings.options[field.key] ?? null}
-          <div class="hero-designer__field" data-changed={current !== null ? '' : undefined}>
+          {@const instead = shownInstead(field, current)}
+          <div class="hero-designer__field" data-key={field.key} data-changed={current !== null ? '' : undefined}>
             <span class="hero-designer__field-label">{field.label()}</span>
-            <div class="hero-designer__seg" role="group" aria-label={field.label()}>
-              <button type="button" aria-pressed={current === null} onclick={() => setOption(field.key, null)}>{m.branding_hero_auto()}</button>
-              {#each Object.entries(field.values) as [value, label] (value)}
-                <button type="button" aria-pressed={current === value} onclick={() => setOption(field.key, value)}>
-                  {label()}
-                </button>
-              {/each}
-            </div>
+            <ListSegment
+              label={field.label()}
+              value={current ?? ''}
+              options={optionsOf(field)}
+              wrap
+              onSelect={(value) => setOption(field.key, value === '' ? null : value)}
+            />
+            {#if instead}
+              <p class="hero-designer__instead">{m.branding_hero_resolved_hint({ value: instead })}</p>
+            {/if}
           </div>
         {/each}
       </section>
@@ -287,13 +368,12 @@
     background: var(--color-status-warning-text);
   }
 
-  .hero-designer__seg {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1);
+  .hero-designer__instead {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-status-warning-text);
   }
 
-  .hero-designer__seg button,
   .hero-designer__quiet {
     padding: var(--space-1) var(--space-2);
     font: inherit;
@@ -303,12 +383,6 @@
     background: var(--color-surface);
     color: var(--color-text);
     cursor: pointer;
-  }
-
-  .hero-designer__seg button[aria-pressed='true'] {
-    background: var(--color-interactive);
-    border-color: var(--color-interactive);
-    color: var(--color-on-interactive);
   }
 
   .hero-designer__primary {
@@ -330,7 +404,6 @@
   .hero-designer__back { align-self: flex-start; }
 
   .hero-designer__purpose:focus-visible,
-  .hero-designer__seg button:focus-visible,
   .hero-designer__primary:focus-visible,
   .hero-designer__quiet:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
