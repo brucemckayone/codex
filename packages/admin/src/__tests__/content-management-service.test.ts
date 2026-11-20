@@ -1023,6 +1023,7 @@ describe('AdminContentManagementService', () => {
       const { result: mine } = await creatorSide.keep(piece.id, creatorId);
       expect(mine).toEqual({ kept: false, staying: 0, stillLeavingBy: 'org' });
       expect((await stored(piece.id)).leavesAt).not.toBeNull();
+      expect((await noticesOf(piece.id)).map((n) => n.state)).toEqual(['due']);
       expect(await service.keepContent(orgId, piece.id)).toMatchObject({
         kept: true,
       });
@@ -1242,6 +1243,29 @@ describe('AdminContentManagementService', () => {
         reminder: 'cancelled',
         removed: 'due',
       });
+    });
+
+    // Review round 4: a takedown clears both sides with the date, whichever
+    // side started the leave, or the sides CHECK refuses it.
+    it.each([
+      ['only its creator', false],
+      ['both sides', true],
+    ] as const)('takes down a leave held by %s, clearing every side', async (_held, orgToo) => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece();
+      await bought(piece.id, buyer);
+      await creatorSide.delete(piece.id, creatorId);
+      if (orgToo) await service.deleteContent(orgId, piece.id);
+
+      await service.takedownContent(piece.id);
+
+      const after = await stored(piece.id);
+      expect(after.deletedAt).not.toBeNull();
+      expect(after.leavesAt).toBeNull();
+      expect([after.leavingByCreator, after.leavingByOrg]).toEqual([
+        false,
+        false,
+      ]);
     });
 
     it('cancels a kept piece’s open staying email', async () => {

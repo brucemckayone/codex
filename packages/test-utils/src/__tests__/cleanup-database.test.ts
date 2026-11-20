@@ -198,7 +198,11 @@ describe('the cleanup helpers clear what C1 added first', () => {
     const [piece] = await db
       .insert(content)
       .values(
-        createTestContentInput(creatorId, { status: 'archived', leavesAt })
+        createTestContentInput(creatorId, {
+          status: 'archived',
+          leavesAt,
+          leavingByCreator: true,
+        })
       )
       .returning({ id: content.id });
     const contentId = piece?.id as string;

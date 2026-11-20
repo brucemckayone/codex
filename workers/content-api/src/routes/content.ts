@@ -798,9 +798,14 @@ app.delete(
 
 /**
  * POST /api/content/:id/keep
- * Keep a leaving piece (Codex-a6ofh.6): its date is cleared and it stays off
- * sale, and whoever may have been told it leaves is told it stays. A piece
- * that is not leaving comes back as it is (`kept: false`).
+ * Keep a leaving piece (Codex-a6ofh.6): the creator withdraws their own
+ * delete (owners 2026-11-19 and -20). When an org admin deleted it too, it
+ * still leaves on its date (`kept: false`, `stillLeavingBy: 'org'`), and
+ * nothing is refreshed. A leave holding only an org admin's delete is
+ * theirs to keep (403 CONTENT_LEAVE_NOT_YOURS). Otherwise its date is
+ * cleared, it stays off sale, and whoever may have been told it leaves is
+ * told it stays. A piece that is not leaving comes back as it is
+ * (`kept: false`, `stillLeavingBy: null`).
  *
  * Security: Creator/Admin only, own pieces, API rate limit (100 req/min)
  * @returns {KeepContentResponse}

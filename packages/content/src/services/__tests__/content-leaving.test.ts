@@ -820,6 +820,8 @@ describe('ContentService: the leaving notice', () => {
     // the creator's to undo. @codex/admin's tests make one through its delete.
     it('refuses to keep a leave holding only an org admin’s delete, writing nothing', async () => {
       const { row, holder } = await heldBy();
+      const [unsent] = await seedTestUsers(db, 1);
+      await bought(row.id, unsent);
       await service.delete(row.id, creatorId);
       await tick(row.id, holder, 'leaving');
       await orgOnly(row.id);
@@ -833,11 +835,16 @@ describe('ContentService: the leaving notice', () => {
       expect(after.leavingByOrg).toBe(true);
       const [leaving] = await rowsOf(row.id, holder, 'leaving');
       expect(leaving?.state).toBe('sent');
+      // An email not yet sent stays open: a refusal cancels nothing.
+      const [pending] = await rowsOf(row.id, unsent, 'leaving');
+      expect(pending?.state).toBe('due');
       expect((await stayingOf(row.id, holder)).all).toBe(0);
     });
 
     it('withdraws only the creator’s delete when an org admin deleted it too: it still leaves', async () => {
       const { row, holder } = await heldBy();
+      const [unsent] = await seedTestUsers(db, 1);
+      await bought(row.id, unsent);
       await service.delete(row.id, creatorId);
       await tick(row.id, holder, 'leaving');
       // Both sides, as an org admin's delete of it while leaving leaves it.
@@ -859,9 +866,12 @@ describe('ContentService: the leaving notice', () => {
         false,
         true,
       ]);
-      // Its owners were told it leaves, and it does: nothing is cancelled.
+      // Its owners were told it leaves, and it does: nothing is cancelled,
+      // an email not yet sent included, and nobody is told it stays.
       const [leaving] = await rowsOf(row.id, holder, 'leaving');
       expect(leaving?.state).toBe('sent');
+      const [pending] = await rowsOf(row.id, unsent, 'leaving');
+      expect(pending?.state).toBe('due');
       expect((await stayingOf(row.id, holder)).all).toBe(0);
     });
 

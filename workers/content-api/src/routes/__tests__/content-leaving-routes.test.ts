@@ -176,7 +176,7 @@ describe('the leaving notice routes', () => {
 
   describe('POST /api/content/:id/keep', () => {
     it('keeps the creator’s piece and refreshes its org and its people', async () => {
-      const kept = { kept: true, staying: 3 };
+      const kept = { kept: true, staying: 3, stillLeavingBy: null };
       contentSpies.keep.mockResolvedValue({
         organizationId: ORG_ID,
         result: kept,
@@ -194,12 +194,27 @@ describe('the leaving notice routes', () => {
     it('refreshes nothing for a piece that was not leaving', async () => {
       contentSpies.keep.mockResolvedValue({
         organizationId: ORG_ID,
-        result: { kept: false, staying: 0 },
+        result: { kept: false, staying: 0, stillLeavingBy: null },
       });
 
       const res = await call('POST', `/${PIECE}/keep`);
 
       expect(res.status).toBe(200);
+      expect(orgsBumped()).toEqual([]);
+      expect(reasons()).toEqual([]);
+    });
+
+    it('answers a withdrawal as it is and refreshes nothing: it still leaves', async () => {
+      const withdrawn = { kept: false, staying: 0, stillLeavingBy: 'org' };
+      contentSpies.keep.mockResolvedValue({
+        organizationId: ORG_ID,
+        result: withdrawn,
+      });
+
+      const res = await call('POST', `/${PIECE}/keep`);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ data: withdrawn });
       expect(orgsBumped()).toEqual([]);
       expect(reasons()).toEqual([]);
     });
