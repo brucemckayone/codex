@@ -48,7 +48,8 @@ export const ERROR_CODES = {
   // org admin's delete is kept by an org admin, the creator's by the creator.
   CONTENT_LEAVE_NOT_YOURS: 'CONTENT_LEAVE_NOT_YOURS',
   // A delete less than LEAVING_ROUND_GAP_HOURS after the piece's last notice
-  // period started (owner 2026-11-19): `retryAt` says when it may.
+  // period that emailed anyone started (owner 2026-11-19): `retryAt` says
+  // when it may.
   CONTENT_LEAVING_TOO_SOON: 'CONTENT_LEAVING_TOO_SOON',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',

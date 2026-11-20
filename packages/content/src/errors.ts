@@ -244,14 +244,17 @@ export class ContentAlreadyLiveError extends ConflictError {
 }
 
 /**
- * 409 with `details.code: 'CONTENT_LEAVING'` (Codex-a6ofh.6): a publish of a
- * piece that is leaving (`leaves_at` set). Its owners were told it goes, so
- * the creator keeps it first (`POST /api/content/:id/keep`), which tells
- * whoever may have heard; a publish in place would tell nobody.
+ * 409 with `details.code: 'CONTENT_LEAVING'` (Codex-a6ofh.6): a publish, or
+ * a move to another org or to personal, of a piece that is leaving
+ * (`leaves_at` set). Its owners were told it goes, so it is kept first
+ * (`POST /api/content/:id/keep`), which tells whoever may have heard; a
+ * publish in place would tell nobody. And a leave belongs to its org: moved,
+ * an org admin's leave could be kept by another org's admins (owner
+ * 2026-11-19), and one moved to personal by nobody.
  */
 export class ContentLeavingError extends ConflictError {
-  constructor(contentId: string) {
-    super('This is leaving. Keep it first, then publish it.', {
+  constructor(contentId: string, action: 'publish' | 'move' = 'publish') {
+    super(`This is leaving. Keep it first, then ${action} it.`, {
       contentId,
       code: ERROR_CODES.CONTENT_LEAVING,
     });
@@ -280,9 +283,9 @@ export class LeaveNotYoursError extends ForbiddenError {
 /**
  * 409 with `details.code: 'CONTENT_LEAVING_TOO_SOON'` (owner 2026-11-19): a
  * delete of a held piece less than `LEAVING_ROUND_GAP_HOURS` after its last
- * notice period started, so its owners are not emailed on every delete and
- * Keep. Nothing was written; `retryAt` (ISO) is when a delete may start the
- * next one.
+ * notice period that emailed anyone started, so its owners are not emailed
+ * on every delete and Keep. Nothing was written; `retryAt` (ISO) is when a
+ * delete may start the next one.
  */
 export class ContentLeavingTooSoonError extends ConflictError {
   constructor(contentId: string, retryAt: Date) {

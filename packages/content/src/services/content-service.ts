@@ -110,6 +110,7 @@ import {
 } from 'drizzle-orm';
 import {
   ContentAlreadyLiveError,
+  ContentLeavingError,
   ContentNotFoundError,
   ContentTypeMismatchError,
   InternalServiceError,
@@ -1247,6 +1248,19 @@ export class ContentService extends BaseService {
         // never a half-typed change on the live piece (Codex-a6ofh.2).
         if (asDraft && hasBeenLive(existing)) {
           throw new ContentAlreadyLiveError(id, 'draft-save');
+        }
+
+        // A leaving piece stays where its leave was started (owner
+        // 2026-11-19): moved to another org, an org admin's leave could be
+        // kept by that org's admins and the piece put back on sale; moved to
+        // personal, by nobody. Any change of org, null included, waits for
+        // a Keep. An unchanged org is no move (the form sends it every save).
+        if (
+          existing.leavesAt &&
+          'organizationId' in validated &&
+          (validated.organizationId ?? null) !== existing.organizationId
+        ) {
+          throw new ContentLeavingError(id, 'move');
         }
 
         // Moving the row into a different org needs the same team membership
@@ -2555,7 +2569,8 @@ export class ContentService extends BaseService {
    *   route's cache refresh, read under the row's lock)
    * @throws {ContentNotFoundError} If content doesn't exist
    * @throws {ContentLeavingTooSoonError} A held piece whose last notice
-   *   period started under `LEAVING_ROUND_GAP_HOURS` ago (it was kept since)
+   *   period that emailed anyone started under `LEAVING_ROUND_GAP_HOURS` ago
+   *   (it was kept since)
    */
   async delete(
     id: string,

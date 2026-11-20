@@ -519,6 +519,23 @@ describe('ContentService: the leaving notice', () => {
       expect(await rowsOf(row.id, holder, 'leaving')).toHaveLength(2);
     });
 
+    // A period kept before any email was tried emailed nobody (owner,
+    // review round 2): it starts no gap, so a silent delete and Keep cannot
+    // hold off the next delete, the other side's included.
+    it('starts no gap from a period that emailed nobody', async () => {
+      const [holder] = await seedTestUsers(db, 1);
+      const row = await piece();
+      await bought(row.id, holder);
+      await service.delete(row.id, creatorId);
+      await service.keep(row.id, creatorId);
+
+      const { result } = await service.delete(row.id, creatorId);
+
+      expect(result.outcome).toBe('leaving');
+      const rounds = await rowsOf(row.id, holder, 'leaving');
+      expect(rounds.map((r) => r.state)).toEqual(['due', 'cancelled']);
+    });
+
     it('deletes at once inside the gap when nobody holds it any more: no email to space out', async () => {
       const [holder] = await seedTestUsers(db, 1);
       const row = await piece();
@@ -785,6 +802,51 @@ describe('ContentService: the leaving notice', () => {
         statusCode: 404,
       });
       expect((await stored(row.id)).leavesAt).not.toBeNull();
+    });
+  });
+
+  // ── moving a leaving piece ──────────────────────────────────────────────
+
+  // A leave belongs to its org (owner, review round 2): moved to another
+  // org, an org admin's leave could be kept by that org's admins and the
+  // piece put back on sale; moved to personal, by nobody.
+  describe('moving a leaving piece', () => {
+    it('refuses a move to another org, or to personal, until it is kept', async () => {
+      const otherOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      ).id;
+      // On both teams, so only the leave can refuse the move.
+      await joinTeam(db, otherOrg, creatorId);
+      const [holder] = await seedTestUsers(db, 1);
+      const row = await piece({ organizationId: orgId });
+      await bought(row.id, holder);
+      await service.delete(row.id, creatorId);
+
+      for (const organizationId of [otherOrg, null]) {
+        await expect(
+          service.update(row.id, { organizationId }, creatorId)
+        ).rejects.toMatchObject(LEAVING_REFUSED);
+      }
+      expect((await stored(row.id)).organizationId).toBe(orgId);
+
+      // A save naming its own org is no move.
+      const saved = await service.update(
+        row.id,
+        { organizationId: orgId, title: 'Still leaving' },
+        creatorId
+      );
+      expect(saved.title).toBe('Still leaving');
+
+      await service.keep(row.id, creatorId);
+      const moved = await service.update(
+        row.id,
+        { organizationId: otherOrg },
+        creatorId
+      );
+      expect(moved.organizationId).toBe(otherOrg);
     });
   });
 

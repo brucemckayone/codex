@@ -327,8 +327,9 @@ export async function invalidateContentAccessMany(
   }
 
   // Over the cap, the holders still come first: the change is to what they
-  // own, and the leaving notice's design (§8) bumps up to the cap of them
-  // inline at a delete and a Keep, the sweep the rest.
+  // own. The leaving notice's design (§8): up to the cap of them inline; at
+  // a delete the sweep bumps the rest, while at a Keep (no sweep reaches a
+  // kept piece) they wait for their next focus, as everyone else here does.
   let bumped = [...everyone];
   if (everyone.size > maxFanout) {
     bumped = [...holders].slice(0, maxFanout);

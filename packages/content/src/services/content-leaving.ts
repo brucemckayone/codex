@@ -124,6 +124,12 @@ interface HolderNotices {
   inserted: number;
   /** The piece's latest round BEFORE this write, if it had one. */
   lastRound: Date | null;
+  /**
+   * The latest round BEFORE this write in which an email was tried (a row
+   * with `attempts > 0`): the last notice period that may have emailed
+   * anyone. A period cancelled before any try emailed nobody.
+   */
+  lastEmailedRound: Date | null;
 }
 
 /**
@@ -151,7 +157,9 @@ async function writeHolderNotices(
   const { rows } = await tx.execute(sql`
     WITH people AS (${people}),
     last AS (
-      SELECT max(round) AS round FROM content_leaving_notices
+      SELECT max(round) AS round,
+        max(round) FILTER (WHERE attempts > 0) AS emailed
+      FROM content_leaving_notices
       WHERE content_id = ${contentId}::uuid
     ),
     written AS (
@@ -163,34 +171,42 @@ async function writeHolderNotices(
     )
     SELECT (SELECT count(*) FROM people)::int AS holders,
       (SELECT count(*) FROM written)::int AS inserted,
-      (SELECT round FROM last) AS last_round
+      (SELECT round FROM last) AS last_round,
+      (SELECT emailed FROM last) AS last_emailed_round
   `);
   const [counted] = rows as Array<{
     holders: number;
     inserted: number;
     last_round: Date | string | null;
+    last_emailed_round: Date | string | null;
   }>;
   // The SELECT of scalars always answers one row. Without it, a count read
   // as 0 would take the delete down its no-holders branch: deleted at once,
   // every owner's playback ended with no notice. So a missing row, or a date
-  // that does not parse (which would let guard (a) pass), is an error.
+  // that does not parse (which would let guard (a) or the gap pass), is an
+  // error.
   if (!counted) {
     throw new InternalServiceError('The leaving notice wrote no count row', {
       contentId,
       kind,
     });
   }
-  const lastRound = counted.last_round ? new Date(counted.last_round) : null;
-  if (lastRound && Number.isNaN(lastRound.getTime())) {
-    throw new InternalServiceError('The last notice round did not parse', {
-      contentId,
-      kind,
-    });
-  }
+  const asRound = (value: Date | string | null) => {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new InternalServiceError('The last notice round did not parse', {
+        contentId,
+        kind,
+      });
+    }
+    return date;
+  };
   return {
     holders: counted.holders,
     inserted: counted.inserted,
-    lastRound,
+    lastRound: asRound(counted.last_round),
+    lastEmailedRound: asRound(counted.last_emailed_round),
   };
 }
 
@@ -232,9 +248,12 @@ function leavingRowsOf(
  * `by` says whose delete it is (owner 2026-11-19), so only that side can
  * Keep it: an org admin's delete of a piece already leaving by its
  * creator's makes it the org's, with no new round and no email. And a new
- * round must start {@link LEAVING_ROUND_GAP_HOURS} after the last one did,
- * or the delete is refused (409, rolled back), so a delete and a Keep,
- * repeated, cannot email the owners every hour.
+ * round must start {@link LEAVING_ROUND_GAP_HOURS} after the last one that
+ * emailed anyone did, or the delete is refused (409, rolled back), so a
+ * delete and a Keep, repeated, cannot email the owners every hour. A period
+ * kept before any email was tried emailed nobody and starts no gap, so a
+ * silent delete and Keep cannot hold off the other side's delete (owner
+ * 2026-11-19, review round 2).
  */
 export async function deleteOrLeave(
   tx: DatabaseTransaction,
@@ -278,13 +297,13 @@ export async function deleteOrLeave(
   }
   // Rounds are their period's end, each period the same length, so the
   // gap between two rounds is the gap between the deletes that started them.
+  // Measured from the last period that emailed anyone, never the last one.
   const gapMs = LEAVING_ROUND_GAP_HOURS * HOUR_MS;
-  if (lastRound && leavesAt.getTime() - lastRound.getTime() < gapMs) {
+  const { lastEmailedRound: emailed } = written;
+  if (emailed && leavesAt.getTime() - emailed.getTime() < gapMs) {
     throw new ContentLeavingTooSoonError(
       piece.id,
-      new Date(
-        now.getTime() + gapMs - (leavesAt.getTime() - lastRound.getTime())
-      )
+      new Date(now.getTime() + gapMs - (leavesAt.getTime() - emailed.getTime()))
     );
   }
   assertWroteEveryHolder(

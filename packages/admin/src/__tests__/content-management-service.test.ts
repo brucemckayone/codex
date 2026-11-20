@@ -979,6 +979,21 @@ describe('AdminContentManagementService', () => {
       ).toEqual([[buyer, 'leaving']]);
     });
 
+    // Owner, review round 2: the gap runs from a period that emailed
+    // someone, so the creator's silent delete and Keep cannot hold this off.
+    it('is not held off by the creator’s delete and Keep that emailed nobody', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece();
+      await bought(piece.id, buyer);
+      await creatorSide.delete(piece.id, creatorId);
+      await creatorSide.keep(piece.id, creatorId);
+
+      const result = await service.deleteContent(orgId, piece.id);
+
+      expect(result.outcome).toBe('leaving');
+      expect((await stored(piece.id)).leavingByOrg).toBe(true);
+    });
+
     it('makes a leave its creator started the org’s, with no new round or email', async () => {
       const [buyer] = await seedTestUsers(db, 1);
       const piece = await livePiece();

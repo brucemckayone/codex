@@ -15,11 +15,13 @@
 export const LEAVING_NOTICE_DAYS = 30;
 
 /**
- * How long a piece waits after its last notice period started before a
- * delete may start another (owner 2026-11-19). Each delete emails every
- * owner and each Keep emails who may have heard, so without a gap a delete
- * and a Keep, repeated, would email them every hour. A delete inside it is
- * refused (409 `CONTENT_LEAVING_TOO_SOON`), and nothing is written.
+ * How long a piece waits after its last notice period that emailed anyone
+ * started before a delete may start another (owner 2026-11-19). Each delete
+ * emails every owner and each Keep emails who may have heard, so without a
+ * gap a delete and a Keep, repeated, would email them every hour. A delete
+ * inside it is refused (409 `CONTENT_LEAVING_TOO_SOON`), and nothing is
+ * written. A period kept before any email was tried starts no gap, so a
+ * silent delete and Keep cannot hold off the other side's delete.
  */
 export const LEAVING_ROUND_GAP_HOURS = 24;
 

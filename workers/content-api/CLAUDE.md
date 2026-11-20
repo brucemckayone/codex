@@ -11,12 +11,12 @@ Content CRUD, media lifecycle, access control, and streaming. The largest worker
 | POST | `/api/content` | `auth: 'required'` | creator, admin | Create draft content; 201 |
 | GET | `/api/content/check-slug/:slug` | `auth: 'required'` | any | `{ available: bool }` |
 | GET | `/api/content/:id` | `auth: 'required'` | any | Get own content by ID |
-| PATCH | `/api/content/:id` | `auth: 'required'` | creator, admin | Update content |
+| PATCH | `/api/content/:id` | `auth: 'required'` | creator, admin | Update content. A leaving piece cannot change org, personal included (409 `CONTENT_LEAVING`, "Keep it first", Codex-a6ofh.6) |
 | GET | `/api/content` | `auth: 'required'` | any | List own content (paginated) |
 | POST | `/api/content/:id/publish` | `auth: 'required'` | creator, admin | Publish; bumps org cache. `?whenReady=true` (`publishContentQuerySchema`, Codex-a6ofh.2.7): media still on its way SCHEDULES it instead (returns the draft with `publishRequestedAt` set) and bumps nothing |
 | DELETE | `/api/content/:id/publish-request` | `auth: 'required'` | creator, admin | Cancel a publish-when-ready schedule; the draft stays a draft; bumps nothing. 409 `CONTENT_ALREADY_LIVE` if it went live first |
 | POST | `/api/content/:id/unpublish` | `auth: 'required'` | creator, admin | Unpublish; bumps org cache |
-| DELETE | `/api/content/:id` | `auth: 'required'` | creator, admin | `strict` rate limit. 200 `{ data: { outcome, leavesAt, holders } }` (Codex-a6ofh.6): `deleted` (nobody holds it: soft-deleted at once, its cover cleared) or `leaving` (off sale, its owners keep it until `leavesAt`, each emailed; the cover kept). 409 `CONTENT_LEAVING_TOO_SOON` (`retryAt`) for a new notice period under `LEAVING_ROUND_GAP_HOURS` after the last |
+| DELETE | `/api/content/:id` | `auth: 'required'` | creator, admin | `strict` rate limit. 200 `{ data: { outcome, leavesAt, holders } }` (Codex-a6ofh.6): `deleted` (nobody holds it: soft-deleted at once, its cover cleared) or `leaving` (off sale, its owners keep it until `leavesAt`, each emailed; the cover kept). 409 `CONTENT_LEAVING_TOO_SOON` (`retryAt`) for a new notice period under `LEAVING_ROUND_GAP_HOURS` after the last one that emailed anyone |
 | POST | `/api/content/:id/keep` | `auth: 'required'` | creator, admin | Keep a leaving piece (Codex-a6ofh.6): clears its date, it stays off sale, whoever may have heard is told it stays. 200 `{ data: { kept, staying } }`; `kept: false` (nothing written) if it was not leaving. 403 `CONTENT_LEAVE_NOT_YOURS` for a leave an org admin's delete started (`POST /api/admin/content/:contentId/keep` keeps those) |
 | POST | `/api/content/:id/thumbnail` | `auth: 'required'` | creator, admin | Upload thumbnail (multipart) |
 | DELETE | `/api/content/:id/thumbnail` | `auth: 'required'` | creator, admin | Remove thumbnail; 204 |
