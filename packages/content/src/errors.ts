@@ -258,6 +258,45 @@ export class ContentLeavingError extends ConflictError {
   }
 }
 
+/**
+ * 403 with `details.code: 'CONTENT_LEAVE_NOT_YOURS'` (owner 2026-11-19): a
+ * Keep by the side that did not start the leave. An org owner or admin's
+ * delete is kept only by an org owner or admin (`POST
+ * /api/admin/content/:contentId/keep`), the creator's only by the creator
+ * (`POST /api/content/:id/keep`), so neither can undo the other's delete and
+ * put the piece back on sale. `startedBy` says whose delete it was.
+ */
+export class LeaveNotYoursError extends ForbiddenError {
+  constructor(contentId: string, startedBy: 'org' | 'creator') {
+    super(
+      startedBy === 'org'
+        ? 'An org admin deleted this, so only an org admin can keep it.'
+        : 'Its creator deleted this, so only they can keep it.',
+      { contentId, startedBy, code: ERROR_CODES.CONTENT_LEAVE_NOT_YOURS }
+    );
+  }
+}
+
+/**
+ * 409 with `details.code: 'CONTENT_LEAVING_TOO_SOON'` (owner 2026-11-19): a
+ * delete of a held piece less than `LEAVING_ROUND_GAP_HOURS` after its last
+ * notice period started, so its owners are not emailed on every delete and
+ * Keep. Nothing was written; `retryAt` (ISO) is when a delete may start the
+ * next one.
+ */
+export class ContentLeavingTooSoonError extends ConflictError {
+  constructor(contentId: string, retryAt: Date) {
+    super(
+      'This started leaving less than a day ago. It can be deleted again later.',
+      {
+        contentId,
+        retryAt: retryAt.toISOString(),
+        code: ERROR_CODES.CONTENT_LEAVING_TOO_SOON,
+      }
+    );
+  }
+}
+
 export class SlugConflictError extends ConflictError {
   constructor(slug: string) {
     super('Content with this slug already exists', { slug });

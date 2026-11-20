@@ -21,6 +21,8 @@ import {
   goLiveColumns,
   invalidateContentAccess,
   invalidateOrgPublicCounts,
+  type KeepContentResult,
+  keepLeaving,
   takedownPiece,
 } from '@codex/content';
 import {
@@ -337,15 +339,10 @@ export class AdminContentManagementService extends BaseService {
             status: schema.content.status,
             offSaleAt: schema.content.offSaleAt,
             leavesAt: schema.content.leavesAt,
+            leavingByOrg: schema.content.leavingByOrg,
           })
           .from(schema.content)
-          .where(
-            and(
-              eq(schema.content.id, contentId),
-              eq(schema.content.organizationId, organizationId),
-              isNull(schema.content.deletedAt)
-            )
-          )
+          .where(this.inOrg(organizationId, contentId))
           .for('no key update');
 
         if (!existing) {
@@ -357,6 +354,7 @@ export class AdminContentManagementService extends BaseService {
         const result = await deleteOrLeave(
           tx as DatabaseTransaction,
           existing,
+          'org',
           this.obs
         );
         return { ...result, creatorId: existing.creatorId };
@@ -367,6 +365,52 @@ export class AdminContentManagementService extends BaseService {
       }
       this.handleError(error, 'deleteContent');
     }
+  }
+
+  /**
+   * Keep it (owner 2026-11-19): an org owner or admin cancels the leave an
+   * org admin's delete started (`keepLeaving`, @codex/content), so the
+   * creator alone cannot undo it. A leave the creator's own delete started
+   * is theirs to keep (403, `LeaveNotYoursError`). A piece that is not
+   * leaving comes back `kept: false`, writing nothing. Scoped to the
+   * organization.
+   */
+  async keepContent(
+    organizationId: string,
+    contentId: string
+  ): Promise<KeepContentResult> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            id: schema.content.id,
+            leavesAt: schema.content.leavesAt,
+            leavingByOrg: schema.content.leavingByOrg,
+          })
+          .from(schema.content)
+          .where(this.inOrg(organizationId, contentId))
+          .for('no key update');
+
+        if (!existing) {
+          throw new NotFoundError('Content not found', {
+            contentId,
+            organizationId,
+          });
+        }
+        return await keepLeaving(tx as DatabaseTransaction, existing, 'org');
+      });
+    } catch (error) {
+      this.handleError(error, 'keepContent');
+    }
+  }
+
+  /** The org's live (not deleted) piece `contentId`: the delete and Keep scope. */
+  private inOrg(organizationId: string, contentId: string) {
+    return and(
+      eq(schema.content.id, contentId),
+      eq(schema.content.organizationId, organizationId),
+      isNull(schema.content.deletedAt)
+    );
   }
 
   /**
@@ -414,23 +458,44 @@ export class AdminContentManagementService extends BaseService {
   }
 
   /**
-   * What a delete or a takedown refreshes, run by the route in the
+   * What a delete, a Keep or a takedown refreshes, run by the route in the
    * background: the platform's and the org's lists and portal rails, its
    * public counts (`invalidateOrgPublicCounts`: topics, stats, creators),
    * and the library of everyone the piece reached (holders, subscribers,
-   * team; `invalidateContentAccess`).
+   * team; `invalidateContentAccess`). It settles only once every refresh
+   * has, so the request's DB cleanup never runs under one still reading;
+   * each failure is logged with the refresh it was.
    */
-  async refreshAfterDelete(
+  async refreshAfterChange(
     piece: { contentId: string; organizationId: string | null },
-    reason: 'content_deleted' | 'content_leaving',
+    reason: 'content_deleted' | 'content_leaving' | 'content_kept',
     waitUntil: (promise: Promise<unknown>) => void
   ): Promise<void> {
     const { cache } = this;
     if (!cache) return;
     const { contentId, organizationId } = piece;
-    const org = organizationId
-      ? [
+    const refreshes: Array<[string, Promise<unknown>]> = [
+      [
+        'library',
+        invalidateContentAccess({
+          db: this.db,
+          cache,
+          waitUntil,
+          contentId,
+          organizationId,
+          reason,
+          logger: this.obs,
+        }),
+      ],
+    ];
+    if (organizationId) {
+      refreshes.push(
+        [
+          'org:journeys',
           cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
+        ],
+        [
+          'org:public',
           invalidateOrgPublicCounts({
             db: this.db,
             cache,
@@ -440,23 +505,18 @@ export class AdminContentManagementService extends BaseService {
             logger: this.obs,
           }),
         ]
-      : [];
-    await Promise.all([
-      ...org,
-      invalidateContentAccess({
-        db: this.db,
-        cache,
-        waitUntil,
+      );
+    }
+    const settled = await Promise.allSettled(refreshes.map(([, run]) => run));
+    for (const [index, outcome] of settled.entries()) {
+      if (outcome.status === 'fulfilled') continue;
+      const error: unknown = outcome.reason;
+      this.obs.warn('admin content change: cache refresh failed', {
         contentId,
-        organizationId,
         reason,
-        logger: this.obs,
-      }),
-    ]).catch((error: unknown) => {
-      this.obs.warn('admin content delete: cache refresh failed', {
-        contentId,
+        refresh: refreshes[index]?.[0],
         error: error instanceof Error ? error.message : String(error),
       });
-    });
+    }
   }
 }

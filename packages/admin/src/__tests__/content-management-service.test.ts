@@ -18,6 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import { CONTENT_STATUS, PAGINATION } from '@codex/constants';
 import {
+  ContentService,
   CreatorPayoutsRequiredError,
   TierRequiredToPublishError,
 } from '@codex/content';
@@ -52,12 +53,15 @@ import { AdminContentManagementService } from '../services/content-management-se
 describe('AdminContentManagementService', () => {
   let db: Database;
   let service: AdminContentManagementService;
+  /** The creator's own delete and Keep, the side the org's are not. */
+  let creatorSide: ContentService;
   let creatorId: string;
   let orgId: string;
 
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new AdminContentManagementService({ db, environment: 'test' });
+    creatorSide = new ContentService({ db, environment: 'test' });
 
     // Create test user
     const userIds = await seedTestUsers(db, 1);
@@ -968,13 +972,42 @@ describe('AdminContentManagementService', () => {
       const after = await stored(piece.id);
       expect(after.deletedAt).toBeNull();
       expect(after.leavesAt?.getTime()).toBe(result.leavesAt?.getTime());
+      // The org's leave (owner 2026-11-19): only an org admin can Keep it.
+      expect(after.leavingByOrg).toBe(true);
       expect(
         (await noticesOf(piece.id)).map((n) => [n.userId, n.kind])
       ).toEqual([[buyer, 'leaving']]);
     });
+
+    it('makes a leave its creator started the org’s, with no new round or email', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece();
+      await bought(piece.id, buyer);
+      const { result: first } = await creatorSide.delete(piece.id, creatorId);
+
+      const again = await service.deleteContent(orgId, piece.id);
+
+      expect(again).toMatchObject({
+        outcome: 'leaving',
+        leavesAt: first.leavesAt,
+        holders: 1,
+      });
+      expect((await stored(piece.id)).leavingByOrg).toBe(true);
+      expect(await noticesOf(piece.id)).toHaveLength(1);
+      // So the creator can no longer undo it.
+      await expect(creatorSide.keep(piece.id, creatorId)).rejects.toMatchObject(
+        notYours('org')
+      );
+    });
   });
 
   // ── the leaving notice (Codex-a6ofh.6) ────────────────────────────────────
+
+  /** The 403 a Keep by the side that did not start the leave answers. */
+  const notYours = (startedBy: 'org' | 'creator') => ({
+    statusCode: 403,
+    context: { code: 'CONTENT_LEAVE_NOT_YOURS', startedBy },
+  });
 
   /** A live free article in the org (the suite's unless told). */
   async function livePiece(organizationId = orgId) {
@@ -1021,6 +1054,67 @@ describe('AdminContentManagementService', () => {
       .select()
       .from(contentLeavingNotices)
       .where(eq(contentLeavingNotices.contentId, contentId));
+
+  describe('keepContent', () => {
+    it('keeps a leave an org admin’s delete started', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece();
+      await bought(piece.id, buyer);
+      await service.deleteContent(orgId, piece.id);
+
+      const result = await service.keepContent(orgId, piece.id);
+
+      expect(result).toEqual({ kept: true, staying: 0 });
+      const after = await stored(piece.id);
+      expect(after.leavesAt).toBeNull();
+      expect(after.leavingByOrg).toBe(false);
+      expect(after.status).toBe(CONTENT_STATUS.ARCHIVED);
+      expect((await noticesOf(piece.id)).map((n) => n.state)).toEqual([
+        'cancelled',
+      ]);
+    });
+
+    it('refuses a leave the creator’s own delete started, writing nothing', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece();
+      await bought(piece.id, buyer);
+      await creatorSide.delete(piece.id, creatorId);
+
+      await expect(service.keepContent(orgId, piece.id)).rejects.toMatchObject(
+        notYours('creator')
+      );
+      const after = await stored(piece.id);
+      expect(after.leavesAt).not.toBeNull();
+      expect((await noticesOf(piece.id)).map((n) => n.state)).toEqual(['due']);
+    });
+
+    it('comes back unchanged for a piece that is not leaving', async () => {
+      const piece = await livePiece();
+
+      const result = await service.keepContent(orgId, piece.id);
+
+      expect(result).toEqual({ kept: false, staying: 0 });
+      expect((await stored(piece.id)).status).toBe(CONTENT_STATUS.PUBLISHED);
+    });
+
+    it('refuses another org’s piece as not found', async () => {
+      const otherOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece(otherOrg.id);
+      await bought(piece.id, buyer);
+      await service.deleteContent(otherOrg.id, piece.id);
+
+      await expect(service.keepContent(orgId, piece.id)).rejects.toThrow(
+        NotFoundError
+      );
+      expect((await stored(piece.id)).leavesAt).not.toBeNull();
+    });
+  });
 
   describe('publishContent of a leaving piece', () => {
     it('refuses it: Keep it first', async () => {
@@ -1069,8 +1163,10 @@ describe('AdminContentManagementService', () => {
       });
       const after = await stored(piece.id);
       expect(after.deletedAt).not.toBeNull();
-      // A deleted piece with a date is one that left with notice.
+      // A deleted piece with a date is one that left with notice. Nor is
+      // the leave anyone's any more (the org's, as an org admin deleted it).
       expect(after.leavesAt).toBeNull();
+      expect(after.leavingByOrg).toBe(false);
       const byKind = Object.fromEntries(
         (await noticesOf(piece.id)).map((n) => [n.kind, n.state])
       );
@@ -1093,9 +1189,10 @@ describe('AdminContentManagementService', () => {
         kind: 'staying',
         round: leavesAt,
       });
+      // As Keep leaves it: no date, and so no side that started one.
       await db
         .update(contentTable)
-        .set({ leavesAt: null })
+        .set({ leavesAt: null, leavingByOrg: false })
         .where(eq(contentTable.id, piece.id));
 
       await service.takedownContent(piece.id);

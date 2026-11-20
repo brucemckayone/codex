@@ -240,9 +240,12 @@ export const CATALOGUE_CONTENT_COLUMNS = {
   // date null. The withdrawn read is the one that can serve a leaving piece
   // (among every once-live piece a reader still holds): when owners need
   // their date, select it on THAT read, never by dropping it here. `ownersCanDownload` is set
-  // on every row and must stay off. A `true` spread into this map turns
-  // drizzle's `columns` into include mode and drops every other column.
+  // on every row and must stay off, as must `leavingByOrg`, whose delete
+  // started a leave (the studio's, owner 2026-11-19). A `true` spread into
+  // this map turns drizzle's `columns` into include mode and drops every
+  // other column.
   leavesAt: false,
+  leavingByOrg: false,
   ownersCanDownload: false,
 } as const satisfies Partial<Record<keyof Content, false>>;
 
@@ -2551,6 +2554,8 @@ export class ContentService extends BaseService {
    * @returns what the delete did, and the org the piece is filed in (for the
    *   route's cache refresh, read under the row's lock)
    * @throws {ContentNotFoundError} If content doesn't exist
+   * @throws {ContentLeavingTooSoonError} A held piece whose last notice
+   *   period started under `LEAVING_ROUND_GAP_HOURS` ago (it was kept since)
    */
   async delete(
     id: string,
@@ -2582,6 +2587,7 @@ export class ContentService extends BaseService {
             status: content.status,
             offSaleAt: content.offSaleAt,
             leavesAt: content.leavesAt,
+            leavingByOrg: content.leavingByOrg,
           })
           .from(content)
           .where(and(eq(content.id, id), scopedNotDeleted(content, creatorId)))
@@ -2593,6 +2599,7 @@ export class ContentService extends BaseService {
         const result = await deleteOrLeave(
           tx as DatabaseTransaction,
           existing,
+          'creator',
           this.obs
         );
         return { organizationId: existing.organizationId, result };
@@ -2611,10 +2618,12 @@ export class ContentService extends BaseService {
    * been told it leaves is told it stays (`keepLeaving`). A piece that is
    * not leaving comes back as it is, writing nothing (`kept: false`), as a
    * cancel of a schedule that isn't there does. Scoped to the creator's own
-   * pieces.
+   * pieces, and only to a leave their own delete started: an org admin's is
+   * kept by an org admin (owner 2026-11-19).
    *
    * @returns what Keep did, and the org the piece is filed in
    * @throws {ContentNotFoundError} Not the creator's, or already gone
+   * @throws {LeaveNotYoursError} An org admin's delete started the leave
    */
   async keep(
     id: string,
@@ -2624,8 +2633,10 @@ export class ContentService extends BaseService {
       return await this.db.transaction(async (tx) => {
         const [existing] = await tx
           .select({
+            id: content.id,
             organizationId: content.organizationId,
             leavesAt: content.leavesAt,
+            leavingByOrg: content.leavingByOrg,
           })
           .from(content)
           .where(and(eq(content.id, id), scopedNotDeleted(content, creatorId)))
@@ -2633,16 +2644,12 @@ export class ContentService extends BaseService {
         if (!existing) {
           throw new ContentNotFoundError(id);
         }
-        const { organizationId, leavesAt } = existing;
-        if (!leavesAt) {
-          return { organizationId, result: { kept: false, staying: 0 } };
-        }
-        const staying = await keepLeaving(
+        const result = await keepLeaving(
           tx as DatabaseTransaction,
-          id,
-          leavesAt
+          existing,
+          'creator'
         );
-        return { organizationId, result: { kept: true, staying } };
+        return { organizationId: existing.organizationId, result };
       });
     } catch (error) {
       if (error instanceof ContentNotFoundError) {

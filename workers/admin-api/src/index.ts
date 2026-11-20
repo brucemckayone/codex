@@ -447,8 +447,10 @@ app.post(
  * Delete content (an org owner or admin, any creator's piece in the org),
  * as the creator's own delete (owner 2026-11-19, Codex-a6ofh.6): one nobody
  * holds is deleted at once, one people hold leaves in 30 days, its holders
- * emailed. Never a takedown: that is `POST .../takedown`, platform admins
- * only. See publish handler for URL slot rationale.
+ * emailed. The leave is the org's: only an org admin can Keep it (`POST
+ * .../keep`), never the creator. Never a takedown: that is `POST
+ * .../takedown`, platform admins only. See publish handler for URL slot
+ * rationale.
  */
 app.delete(
   '/api/admin/content/:contentId',
@@ -478,12 +480,50 @@ app.delete(
         );
       }
       void ctx.background(
-        ctx.services.adminContent.refreshAfterDelete(
+        ctx.services.adminContent.refreshAfterChange(
           { contentId, organizationId: ctx.organizationId },
           result.outcome === 'deleted' ? 'content_deleted' : 'content_leaving',
           ctx.executionCtx.waitUntil.bind(ctx.executionCtx)
         )
       );
+      return result;
+    },
+  })
+);
+
+/**
+ * POST /api/admin/content/:contentId/keep
+ * Keep it (owner 2026-11-19, Codex-a6ofh.6): an org owner or admin cancels
+ * the leave an org admin's delete started, so the creator alone cannot undo
+ * it. A leave the creator's own delete started is theirs to keep (403
+ * CONTENT_LEAVE_NOT_YOURS); a piece not leaving answers `kept: false`.
+ * Answers `{ data: { kept, staying } }`. See publish handler for URL slot
+ * rationale.
+ */
+app.post(
+  '/api/admin/content/:contentId/keep',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: { params: adminContentIdParamsSchema },
+    handler: async (ctx) => {
+      const { contentId } = ctx.input.params;
+      const result = await ctx.services.adminContent.keepContent(
+        ctx.organizationId,
+        contentId
+      );
+      if (result.kept) {
+        void ctx.background(
+          ctx.services.adminContent.refreshAfterChange(
+            { contentId, organizationId: ctx.organizationId },
+            'content_kept',
+            ctx.executionCtx.waitUntil.bind(ctx.executionCtx)
+          )
+        );
+      }
       return result;
     },
   })
@@ -515,7 +555,7 @@ app.post(
         )
       );
       void ctx.background(
-        ctx.services.adminContent.refreshAfterDelete(
+        ctx.services.adminContent.refreshAfterChange(
           { contentId, organizationId: taken.organizationId },
           'content_deleted',
           ctx.executionCtx.waitUntil.bind(ctx.executionCtx)

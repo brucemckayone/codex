@@ -57,7 +57,11 @@ vi.mock('../content-cleanup', () => ({ cleanupContentThumbnailOnDelete }));
 
 // Below the mocks on purpose: biome's organizeImports never moves an import
 // across a statement, so the real routes resolve the mocked modules.
-import { ContentNotFoundError } from '@codex/content';
+import {
+  ContentLeavingTooSoonError,
+  ContentNotFoundError,
+  LeaveNotYoursError,
+} from '@codex/content';
 import content from '../content';
 
 const testEnv = {
@@ -148,6 +152,26 @@ describe('the leaving notice routes', () => {
       expect(coversCleared()).toEqual([PIECE]);
       expect(reasons()).toEqual(['content_deleted']);
     });
+
+    it('answers a delete inside the gap 409, saying when it may, and refreshes nothing', async () => {
+      const retryAt = new Date('2031-03-02T12:00:00.000Z');
+      contentSpies.delete.mockRejectedValue(
+        new ContentLeavingTooSoonError(PIECE, retryAt)
+      );
+
+      const res = await call('DELETE', `/${PIECE}`);
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as {
+        error: { details?: Record<string, unknown> };
+      };
+      expect(body.error.details).toMatchObject({
+        code: 'CONTENT_LEAVING_TOO_SOON',
+        retryAt: retryAt.toISOString(),
+      });
+      expect(reasons()).toEqual([]);
+      expect(coversCleared()).toEqual([]);
+    });
   });
 
   describe('POST /api/content/:id/keep', () => {
@@ -186,6 +210,22 @@ describe('the leaving notice routes', () => {
       const res = await call('POST', `/${PIECE}/keep`);
 
       expect(res.status).toBe(404);
+      expect(reasons()).toEqual([]);
+    });
+
+    it('answers 403 for a leave an org admin’s delete started', async () => {
+      contentSpies.keep.mockRejectedValue(new LeaveNotYoursError(PIECE, 'org'));
+
+      const res = await call('POST', `/${PIECE}/keep`);
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as {
+        error: { details?: Record<string, unknown> };
+      };
+      expect(body.error.details).toMatchObject({
+        code: 'CONTENT_LEAVE_NOT_YOURS',
+        startedBy: 'org',
+      });
       expect(reasons()).toEqual([]);
     });
 

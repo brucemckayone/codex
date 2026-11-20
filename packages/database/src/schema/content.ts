@@ -373,6 +373,12 @@ export const content = pgTable(
     // To the millisecond, as `content_leaving_notices.round` copies it: a
     // value read into JS then matches back.
     leavesAt: timestamp('leaves_at', { withTimezone: true, precision: 3 }),
+    // Whose delete started the leave (owner 2026-11-19): true when an org
+    // owner or admin's did. Only the side that started a leave can Keep it,
+    // so a creator cannot undo an org admin's delete and put the piece back
+    // on sale, nor an org admin the creator's. True only while `leaves_at`
+    // is set (the CHECK below); Keep and a takedown clear both.
+    leavingByOrg: boolean('leaving_by_org').notNull().default(false),
     // The creator's choice when selling (owner D8, 2026-11-17): whether the
     // people who own this piece may download it while it is leaving. On by
     // default; with it off, they can only watch it until the date.
@@ -484,6 +490,12 @@ export const content = pgTable(
     check(
       'check_content_leaving_not_scheduled',
       sql`${table.leavesAt} IS NULL OR ${table.publishRequestedAt} IS NULL`
+    ),
+    // Only a leaving piece has a side that started its leave: a write that
+    // clears the date without the flag (a takedown, a Keep) fails here.
+    check(
+      'check_content_leaving_by_org',
+      sql`NOT ${table.leavingByOrg} OR ${table.leavesAt} IS NOT NULL`
     ),
   ]
 );

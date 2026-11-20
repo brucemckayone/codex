@@ -99,8 +99,8 @@ export interface ContentWithRelations
 /**
  * The content columns the public catalogue never sends: the sales count
  * (owner, 2026-10-26), the publish-when-ready schedule (Codex-a6ofh.2.7) and
- * the leaving notice's date and download setting (Codex-a6ofh.6).
- * content-api leaves them out with `CATALOGUE_CONTENT_COLUMNS`
+ * the leaving notice's date, its starter and download setting
+ * (Codex-a6ofh.6). content-api leaves them out with `CATALOGUE_CONTENT_COLUMNS`
  * (@codex/content). Every type for a public or browse row omits this set, so
  * a newly hidden column is one edit here.
  */
@@ -109,6 +109,7 @@ export type CatalogueHiddenField =
   | 'publishRequestedAt'
   | 'publishBlockedReason'
   | 'leavesAt'
+  | 'leavingByOrg'
   | 'ownersCanDownload';
 
 /** As content-api serves it: never the transcoder's raw detail. */

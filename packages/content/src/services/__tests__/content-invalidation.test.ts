@@ -292,8 +292,8 @@ describe('invalidateContentAccess', () => {
     );
   });
 
-  it('skips per-user fanout and logs a warning when the cap is exceeded', async () => {
-    // 3 users, cap=2 → skip fanout
+  it('bumps no one but holders, and logs a warning, when the cap is exceeded', async () => {
+    // 3 team members and no holders, cap=2: nobody is bumped
     const db = makeDb({
       organizationMemberships: [
         { userId: 'u1' },
@@ -335,14 +335,53 @@ describe('invalidateContentAccess', () => {
     );
     // And the cap warning fires
     expect(warn).toHaveBeenCalledWith(
-      'content-invalidation: fanout skipped (cap exceeded)',
+      'content-invalidation: fanout capped to holders',
       expect.objectContaining({
         contentId: CONTENT_ID,
         organizationId: ORG_ID,
         reason: 'content_updated',
         userCount: 3,
+        holderCount: 0,
+        bumped: 0,
         maxFanout: 2,
       })
+    );
+  });
+
+  it('still bumps the holders when the org’s people pass the cap (design §8)', async () => {
+    // 1 holder and 3 team members, cap=2: the holder's library still
+    // refreshes at the delete; the team waits for their next focus.
+    const db = makeDb({
+      holders: [{ userId: 'u-holder' }],
+      organizationMemberships: [
+        { userId: 'u1' },
+        { userId: 'u2' },
+        { userId: 'u3' },
+      ],
+    });
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+    const warn = vi.fn();
+
+    await invalidateContentAccess({
+      db,
+      cache,
+      waitUntil,
+      contentId: CONTENT_ID,
+      organizationId: ORG_ID,
+      reason: 'content_leaving',
+      logger: { warn },
+      maxFanout: 2,
+    });
+    await Promise.all(promises);
+
+    const userBumps = invalidate.mock.calls
+      .map((args) => args[0])
+      .filter((key) => typeof key === 'string' && key.startsWith('user:'));
+    expect(userBumps).toEqual([CacheType.COLLECTION_USER_LIBRARY('u-holder')]);
+    expect(warn).toHaveBeenCalledWith(
+      'content-invalidation: fanout capped to holders',
+      expect.objectContaining({ userCount: 4, holderCount: 1, bumped: 1 })
     );
   });
 
@@ -731,7 +770,7 @@ describe('invalidateContentAccessMany', () => {
     expect(db.query.organizationMemberships.findMany).not.toHaveBeenCalled();
   });
 
-  it('skips the per-user bumps above the cap, and says so', async () => {
+  it('bumps holders only up to the cap, and says so', async () => {
     const db = makeDb({
       holders: [{ userId: 'a' }, { userId: 'b' }, { userId: 'c' }],
     });
@@ -756,10 +795,10 @@ describe('invalidateContentAccessMany', () => {
     const userBumps = invalidate.mock.calls.filter(
       (args) => typeof args[0] === 'string' && args[0].startsWith('user:')
     );
-    expect(userBumps).toHaveLength(0);
+    expect(userBumps).toHaveLength(2);
     expect(logger.warn).toHaveBeenCalledWith(
-      'content-invalidation: fanout skipped (cap exceeded)',
-      expect.objectContaining({ userCount: 3, maxFanout: 2 })
+      'content-invalidation: fanout capped to holders',
+      expect.objectContaining({ userCount: 3, bumped: 2, maxFanout: 2 })
     );
   });
 

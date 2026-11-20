@@ -44,6 +44,12 @@ export const ERROR_CODES = {
   // A publish of a piece that is leaving (Codex-a6ofh.6): its owners were
   // told it goes, so it is kept first, never put back on sale in place.
   CONTENT_LEAVING: 'CONTENT_LEAVING',
+  // A Keep by the side that did not start the leave (owner 2026-11-19): an
+  // org admin's delete is kept by an org admin, the creator's by the creator.
+  CONTENT_LEAVE_NOT_YOURS: 'CONTENT_LEAVE_NOT_YOURS',
+  // A delete less than LEAVING_ROUND_GAP_HOURS after the piece's last notice
+  // period started (owner 2026-11-19): `retryAt` says when it may.
+  CONTENT_LEAVING_TOO_SOON: 'CONTENT_LEAVING_TOO_SOON',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   NOT_FOUND: 'NOT_FOUND',

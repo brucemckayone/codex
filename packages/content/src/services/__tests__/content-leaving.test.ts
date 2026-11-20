@@ -15,6 +15,7 @@ import {
   CONTENT_LEAVING_NOTICE_OPEN_STATES,
   type ContentLeavingNoticeKind,
   LEAVING_NOTICE_DAYS,
+  LEAVING_ROUND_GAP_HOURS,
 } from '@codex/constants';
 import {
   content,
@@ -51,13 +52,37 @@ import type { NewContent } from '../../types';
 import { assertWroteEveryHolder, leaveDateFrom } from '../content-leaving';
 import { ContentService } from '../content-service';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const GAP_MS = LEAVING_ROUND_GAP_HOURS * HOUR_MS;
 /** A ServiceError by its code, never `instanceof` (two module copies). */
 const INTERNAL = { statusCode: 500, code: 'INTERNAL_ERROR' };
 const LEAVING_REFUSED = {
   statusCode: 409,
   context: { code: 'CONTENT_LEAVING' },
 };
+const TOO_SOON = {
+  statusCode: 409,
+  context: { code: 'CONTENT_LEAVING_TOO_SOON' },
+};
+const NOT_YOURS = {
+  statusCode: 403,
+  context: { code: 'CONTENT_LEAVE_NOT_YOURS' },
+};
+
+/** The service's clock to `at` (JS `Date` only; Postgres keeps its own). */
+function clockAt(at: number) {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(at);
+}
+
+/**
+ * The service's clock past the gap a new notice period waits for
+ * (`LEAVING_ROUND_GAP_HOURS`), so a delete after a Keep starts one.
+ */
+function nextDay() {
+  clockAt(Date.now() + GAP_MS + HOUR_MS);
+}
 
 describe('ContentService: the leaving notice', () => {
   let db: Database;
@@ -128,9 +153,6 @@ describe('ContentService: the leaving notice', () => {
     contentIds.push(row.id);
     return row;
   }
-
-  /** People of their own, so erasing one never reaches another test. */
-  const people = (n: number) => seedTestUsers(db, n);
 
   /** A completed purchase of the piece. */
   async function bought(contentId: string, customerId: string) {
@@ -276,7 +298,7 @@ describe('ContentService: the leaving notice', () => {
     });
 
     it('takes a held piece off sale with a date, and writes each holder a leaving row', async () => {
-      const [a, b] = await people(2);
+      const [a, b] = await seedTestUsers(db, 2);
       const row = await piece();
       await bought(row.id, a);
       await bought(row.id, b);
@@ -291,6 +313,8 @@ describe('ContentService: the leaving notice', () => {
       expect(after.status).toBe('archived');
       expect(after.offSaleAt).not.toBeNull();
       expect(after.publishRequestedAt).toBeNull();
+      // The creator's own delete: the creator's to Keep.
+      expect(after.leavingByOrg).toBe(false);
       const leavesAt = after.leavesAt?.getTime() ?? 0;
       expect(leavesAt).toBe(result.leavesAt?.getTime());
       expect(leavesAt - before).toBeGreaterThanOrEqual(
@@ -314,7 +338,7 @@ describe('ContentService: the leaving notice', () => {
     });
 
     it('keeps a once-live draft a draft, and an earlier off-sale date', async () => {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const offSaleAt = new Date(Date.now() - DAY_MS);
       const row = await piece({ status: 'draft', offSaleAt });
       await bought(row.id, holder);
@@ -327,7 +351,7 @@ describe('ContentService: the leaving notice', () => {
     });
 
     it('clears a publish-when-ready schedule, which the leaving CHECK refuses', async () => {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const row = await piece({
         status: 'draft',
         publishedAt: null,
@@ -346,7 +370,7 @@ describe('ContentService: the leaving notice', () => {
     });
 
     it('writes ONE row for a buyer who also bought a course holding the piece', async () => {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const row = await piece({ organizationId: orgId });
       await bought(row.id, holder);
       // A course purchase is a purchases row and the course's grant: each is
@@ -385,7 +409,7 @@ describe('ContentService: the leaving notice', () => {
     });
 
     it('deletes at once a piece whose only holder is an erased account', async () => {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const row = await piece();
       await bought(row.id, holder);
       await erase(holder);
@@ -397,7 +421,7 @@ describe('ContentService: the leaving notice', () => {
     });
 
     it('writes no row for an erased holder among live ones', async () => {
-      const [kept, erased] = await people(2);
+      const [kept, erased] = await seedTestUsers(db, 2);
       const row = await piece();
       await bought(row.id, kept);
       await bought(row.id, erased);
@@ -410,7 +434,7 @@ describe('ContentService: the leaving notice', () => {
     });
 
     it('a second delete of a leaving piece changes nothing', async () => {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const row = await piece();
       await bought(row.id, holder);
       const { result: first } = await service.delete(row.id, creatorId);
@@ -419,6 +443,21 @@ describe('ContentService: the leaving notice', () => {
 
       expect(again).toEqual(first);
       expect(await noticesOf(row.id)).toHaveLength(1);
+    });
+
+    it('a creator’s delete of a leave an org admin started leaves it the org’s', async () => {
+      const [holder] = await seedTestUsers(db, 1);
+      const row = await piece();
+      await bought(row.id, holder);
+      await service.delete(row.id, creatorId);
+      await db
+        .update(content)
+        .set({ leavingByOrg: true })
+        .where(eq(content.id, row.id));
+
+      await service.delete(row.id, creatorId);
+
+      expect((await stored(row.id)).leavingByOrg).toBe(true);
     });
 
     it("refuses another creator's piece as not found", async () => {
@@ -431,18 +470,67 @@ describe('ContentService: the leaving notice', () => {
     });
 
     it('cancels a kept piece’s open staying rows', async () => {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const row = await piece();
       await bought(row.id, holder);
       await service.delete(row.id, creatorId);
       await tick(row.id, holder, 'leaving');
       await service.keep(row.id, creatorId);
       expect((await stayingOf(row.id, holder)).open).toBe(1);
+      nextDay();
 
       await service.delete(row.id, creatorId);
 
       const [staying] = await rowsOf(row.id, holder, 'staying');
       expect(staying?.state).toBe('cancelled');
+    });
+
+    // The gap between notice periods (owner 2026-11-19): a delete, a Keep
+    // and a delete again inside it would email every owner twice in an hour.
+    it('refuses a new notice period inside the gap, writing nothing, and starts it at the gap', async () => {
+      const [holder] = await seedTestUsers(db, 1);
+      const row = await piece();
+      await bought(row.id, holder);
+      const start = Date.UTC(2031, 2, 1, 12);
+      clockAt(start);
+      await service.delete(row.id, creatorId);
+      await tick(row.id, holder, 'leaving');
+      clockAt(start + HOUR_MS);
+      await service.keep(row.id, creatorId);
+      clockAt(start + 2 * HOUR_MS);
+
+      await expect(service.delete(row.id, creatorId)).rejects.toMatchObject({
+        ...TOO_SOON,
+        context: {
+          ...TOO_SOON.context,
+          retryAt: new Date(start + GAP_MS).toISOString(),
+        },
+      });
+      // Rolled back whole: still kept, its staying email still open (every
+      // delete cancels those), and no second round.
+      expect((await stored(row.id)).leavesAt).toBeNull();
+      expect((await stayingOf(row.id, holder)).open).toBe(1);
+      expect(await rowsOf(row.id, holder, 'leaving')).toHaveLength(1);
+
+      clockAt(start + GAP_MS);
+      const { result } = await service.delete(row.id, creatorId);
+
+      expect(result.outcome).toBe('leaving');
+      expect(await rowsOf(row.id, holder, 'leaving')).toHaveLength(2);
+    });
+
+    it('deletes at once inside the gap when nobody holds it any more: no email to space out', async () => {
+      const [holder] = await seedTestUsers(db, 1);
+      const row = await piece();
+      await bought(row.id, holder);
+      await service.delete(row.id, creatorId);
+      await service.keep(row.id, creatorId);
+      await erase(holder);
+
+      const { result } = await service.delete(row.id, creatorId);
+
+      expect(result.outcome).toBe('deleted');
+      expect((await stored(row.id)).deletedAt).not.toBeNull();
     });
 
     // Guard (a): a round that ties an earlier one would make DO NOTHING skip
@@ -452,7 +540,7 @@ describe('ContentService: the leaving notice', () => {
       ['equal to', 0],
       ['later than', 1],
     ])('refuses a leave date %s an earlier round, writing nothing', async (_, after) => {
-      const [holder, earlier] = await people(2);
+      const [holder, earlier] = await seedTestUsers(db, 2);
       const row = await piece();
       await bought(row.id, holder);
       const now = new Date('2031-03-01T12:00:00.000Z');
@@ -511,7 +599,7 @@ describe('ContentService: the leaving notice', () => {
   describe('keep', () => {
     /** A live piece one fresh person bought. */
     async function heldBy() {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const row = await piece();
       await bought(row.id, holder);
       return { row, holder };
@@ -593,6 +681,7 @@ describe('ContentService: the leaving notice', () => {
       await tick(row.id, holder, 'leaving');
       await service.keep(row.id, creatorId);
       await tick(row.id, holder, 'staying', 'refused');
+      nextDay();
       await service.delete(row.id, creatorId);
 
       const { result } = await service.keep(row.id, creatorId);
@@ -608,6 +697,7 @@ describe('ContentService: the leaving notice', () => {
       await service.delete(row.id, creatorId);
       await tick(row.id, holder, 'leaving');
       await service.keep(row.id, creatorId);
+      nextDay();
       await service.delete(row.id, creatorId);
       await service.keep(row.id, creatorId);
       await tick(row.id, holder, 'staying');
@@ -623,6 +713,7 @@ describe('ContentService: the leaving notice', () => {
       await tick(row.id, holder, 'leaving');
       await service.keep(row.id, creatorId);
       await tick(row.id, holder, 'staying');
+      nextDay();
       await service.delete(row.id, creatorId);
 
       const { result } = await service.keep(row.id, creatorId);
@@ -638,6 +729,7 @@ describe('ContentService: the leaving notice', () => {
       await tick(row.id, holder, 'leaving');
       await service.keep(row.id, creatorId);
       await tick(row.id, holder, 'staying');
+      nextDay();
       await service.delete(row.id, creatorId);
       await tick(row.id, holder, 'leaving');
 
@@ -651,6 +743,29 @@ describe('ContentService: the leaving notice', () => {
       });
     });
 
+    // Whose delete started it (owner 2026-11-19): an org admin's is not the
+    // creator's to undo. @codex/admin's tests start one through its delete.
+    it('refuses to keep a leave an org admin’s delete started, writing nothing', async () => {
+      const { row, holder } = await heldBy();
+      await service.delete(row.id, creatorId);
+      await tick(row.id, holder, 'leaving');
+      await db
+        .update(content)
+        .set({ leavingByOrg: true })
+        .where(eq(content.id, row.id));
+
+      await expect(service.keep(row.id, creatorId)).rejects.toMatchObject({
+        ...NOT_YOURS,
+        context: { ...NOT_YOURS.context, startedBy: 'org' },
+      });
+      const after = await stored(row.id);
+      expect(after.leavesAt).not.toBeNull();
+      expect(after.leavingByOrg).toBe(true);
+      const [leaving] = await rowsOf(row.id, holder, 'leaving');
+      expect(leaving?.state).toBe('sent');
+      expect((await stayingOf(row.id, holder)).all).toBe(0);
+    });
+
     it('comes back unchanged for a piece that is not leaving', async () => {
       const row = await piece();
 
@@ -661,7 +776,7 @@ describe('ContentService: the leaving notice', () => {
     });
 
     it("refuses another creator's piece as not found", async () => {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const row = await piece({}, otherCreatorId);
       await bought(row.id, holder);
       await service.delete(row.id, otherCreatorId);
@@ -678,7 +793,7 @@ describe('ContentService: the leaving notice', () => {
   describe('completeLeaving', () => {
     /** A held piece deleted, its date moved to `daysFromNow`. */
     async function leavingIn(daysFromNow: number) {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const row = await piece();
       await bought(row.id, holder);
       await service.delete(row.id, creatorId);
@@ -713,7 +828,7 @@ describe('ContentService: the leaving notice', () => {
 
   describe('publish', () => {
     async function leaving() {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const row = await piece();
       await bought(row.id, holder);
       await service.delete(row.id, creatorId);
@@ -750,7 +865,7 @@ describe('ContentService: the leaving notice', () => {
 
   describe('"Needs you"', () => {
     it('never lists a leaving draft as ready to publish', async () => {
-      const [holder] = await people(1);
+      const [holder] = await seedTestUsers(db, 1);
       const tag = `ready-${randomUUID().slice(0, 8)}`;
       const row = await piece({
         title: `${tag} draft`,

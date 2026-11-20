@@ -329,6 +329,7 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     publishRequestedAt: null,
     publishBlockedReason: null,
     leavesAt: null,
+    leavingByOrg: false,
     ownersCanDownload: true,
     viewCount: 0,
     purchaseCount: 0,

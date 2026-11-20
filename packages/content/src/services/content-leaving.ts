@@ -15,20 +15,34 @@ import {
   CONTENT_STATUS,
   type ContentLeavingNoticeKind,
   LEAVING_NOTICE_DAYS,
+  LEAVING_ROUND_GAP_HOURS,
 } from '@codex/constants';
 import { content, contentLeavingNotices } from '@codex/database/schema';
 import { InternalServiceError } from '@codex/service-errors';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import type { DatabaseTransaction, DeleteContentResult } from '../types';
+import { ContentLeavingTooSoonError, LeaveNotYoursError } from '../errors';
+import type {
+  DatabaseTransaction,
+  DeleteContentResult,
+  KeepContentResult,
+} from '../types';
 import { holdersOf } from './content-buyers';
 import { NO_PUBLISH_REQUEST } from './publish-gate';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 /** What the leaving writes log through (an `ObservabilityClient`). */
 interface LeavingLog {
   error(message: string, metadata?: Record<string, unknown>): void;
 }
+
+/**
+ * Whose delete or Keep it is (owner 2026-11-19): the creator's own
+ * (`ContentService`), or an org owner or admin's (`@codex/admin`). Only the
+ * side that started a leave can Keep it.
+ */
+type LeaveSide = 'creator' | 'org';
 
 /** The locked row a delete reads. */
 interface DeletingPiece {
@@ -36,6 +50,14 @@ interface DeletingPiece {
   status: string;
   offSaleAt: Date | null;
   leavesAt: Date | null;
+  leavingByOrg: boolean;
+}
+
+/** The locked row Keep reads. */
+interface KeepingPiece {
+  id: string;
+  leavesAt: Date | null;
+  leavingByOrg: boolean;
 }
 
 /** The day a piece deleted at `now` leaves ({@link LEAVING_NOTICE_DAYS}). */
@@ -148,10 +170,27 @@ async function writeHolderNotices(
     inserted: number;
     last_round: Date | string | null;
   }>;
+  // The SELECT of scalars always answers one row. Without it, a count read
+  // as 0 would take the delete down its no-holders branch: deleted at once,
+  // every owner's playback ended with no notice. So a missing row, or a date
+  // that does not parse (which would let guard (a) pass), is an error.
+  if (!counted) {
+    throw new InternalServiceError('The leaving notice wrote no count row', {
+      contentId,
+      kind,
+    });
+  }
+  const lastRound = counted.last_round ? new Date(counted.last_round) : null;
+  if (lastRound && Number.isNaN(lastRound.getTime())) {
+    throw new InternalServiceError('The last notice round did not parse', {
+      contentId,
+      kind,
+    });
+  }
   return {
-    holders: counted?.holders ?? 0,
-    inserted: counted?.inserted ?? 0,
-    lastRound: counted?.last_round ? new Date(counted.last_round) : null,
+    holders: counted.holders,
+    inserted: counted.inserted,
+    lastRound,
   };
 }
 
@@ -189,14 +228,28 @@ function leavingRowsOf(
  * skip everyone the earlier round wrote a row for): the new round must be
  * later than every round the piece had, and the rows written must match the
  * holders. Either throws, which rolls the whole delete back, rows included.
+ *
+ * `by` says whose delete it is (owner 2026-11-19), so only that side can
+ * Keep it: an org admin's delete of a piece already leaving by its
+ * creator's makes it the org's, with no new round and no email. And a new
+ * round must start {@link LEAVING_ROUND_GAP_HOURS} after the last one did,
+ * or the delete is refused (409, rolled back), so a delete and a Keep,
+ * repeated, cannot email the owners every hour.
  */
 export async function deleteOrLeave(
   tx: DatabaseTransaction,
   piece: DeletingPiece,
+  by: LeaveSide,
   log: LeavingLog,
   now: Date = new Date()
 ): Promise<DeleteContentResult> {
   if (piece.leavesAt) {
+    if (by === 'org' && !piece.leavingByOrg) {
+      await tx
+        .update(content)
+        .set({ leavingByOrg: true, updatedAt: now })
+        .where(eq(content.id, piece.id));
+    }
     const holders = await leavingRowsOf(tx, piece.id, piece.leavesAt);
     return { outcome: 'leaving', leavesAt: piece.leavesAt, holders };
   }
@@ -212,14 +265,26 @@ export async function deleteOrLeave(
       .where(eq(content.id, piece.id));
     return { outcome: 'deleted', leavesAt: null, holders: 0 };
   }
-  if (written.lastRound && written.lastRound.getTime() >= leavesAt.getTime()) {
+  const { lastRound } = written;
+  if (lastRound && lastRound.getTime() >= leavesAt.getTime()) {
     throw new InternalServiceError(
       'The leave date is not later than an earlier notice period',
       {
         contentId: piece.id,
         leavesAt: leavesAt.toISOString(),
-        lastRound: written.lastRound.toISOString(),
+        lastRound: lastRound.toISOString(),
       }
+    );
+  }
+  // Rounds are their period's end, each period the same length, so the
+  // gap between two rounds is the gap between the deletes that started them.
+  const gapMs = LEAVING_ROUND_GAP_HOURS * HOUR_MS;
+  if (lastRound && leavesAt.getTime() - lastRound.getTime() < gapMs) {
+    throw new ContentLeavingTooSoonError(
+      piece.id,
+      new Date(
+        now.getTime() + gapMs - (leavesAt.getTime() - lastRound.getTime())
+      )
     );
   }
   assertWroteEveryHolder(
@@ -238,6 +303,7 @@ export async function deleteOrLeave(
           : piece.status,
       offSaleAt: piece.offSaleAt ?? now,
       leavesAt,
+      leavingByOrg: by === 'org',
       ...NO_PUBLISH_REQUEST,
       updatedAt: now,
     })
@@ -258,14 +324,24 @@ export async function deleteOrLeave(
  *    `created_at`, the time a transaction began. Reading this before step 1
  *    would miss a send that started in between;
  * 3. the date is cleared, and the piece stays off sale.
- * Erased accounts get no row. Returns how many `staying` rows it wrote.
+ * Erased accounts get no row.
+ *
+ * Only the side whose delete started the leave can Keep it (`by`, owner
+ * 2026-11-19); the other is refused (403) before anything is written. A
+ * piece that is not leaving comes back as it is, writing nothing (`kept:
+ * false`), as a cancel of a schedule that isn't there does.
  */
 export async function keepLeaving(
   tx: DatabaseTransaction,
-  contentId: string,
-  round: Date,
+  piece: KeepingPiece,
+  by: LeaveSide,
   now: Date = new Date()
-): Promise<number> {
+): Promise<KeepContentResult> {
+  const { id: contentId, leavesAt: round } = piece;
+  if (!round) return { kept: false, staying: 0 };
+  const startedBy: LeaveSide = piece.leavingByOrg ? 'org' : 'creator';
+  if (startedBy !== by) throw new LeaveNotYoursError(contentId, startedBy);
+
   await cancelOpen(tx, contentId, ['leaving', 'reminder'], now, round);
 
   const staying = await tx.execute(sql`
@@ -287,9 +363,9 @@ export async function keepLeaving(
 
   await tx
     .update(content)
-    .set({ leavesAt: null, updatedAt: now })
+    .set({ leavesAt: null, leavingByOrg: false, updatedAt: now })
     .where(eq(content.id, contentId));
-  return staying.rows.length;
+  return { kept: true, staying: staying.rows.length };
 }
 
 /**
@@ -311,6 +387,7 @@ export async function takedownPiece(
     .set({
       deletedAt: now,
       leavesAt: null,
+      leavingByOrg: false,
       ...NO_PUBLISH_REQUEST,
       updatedAt: now,
     })

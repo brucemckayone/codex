@@ -78,9 +78,12 @@ service.setCache(cache); // Optional: inject VersionedCache for invalidation
 | Method | Signature | Notes |
 |---|---|---|
 | `listAllContent` | `(organizationId: string, options?)` | Paginated. Optional `status` filter. Returns `AdminContentItem` with creator info. |
-| `publishContent` | `(contentId: string, organizationId: string)` | Transaction. Video and audio need ready media, as for a creator's publish. Content that earns money (`requiresPayoutsToPublish`) still needs its creator payout-ready — else this package's `CreatorPayoutsRequiredError`, a twin of `@codex/content`'s with the same message and code. |
-| `unpublishContent` | `(contentId: string, organizationId: string)` | Transaction. Returns to draft. |
-| `deleteContent` | `(contentId: string, organizationId: string)` | Transaction. Soft delete. |
+| `publishContent` | `(organizationId: string, contentId: string)` | Transaction. Video and audio need ready media, as for a creator's publish. Content that earns money (`requiresPayoutsToPublish`) still needs its creator payout-ready — else this package's `CreatorPayoutsRequiredError`, a twin of `@codex/content`'s with the same message and code. |
+| `unpublishContent` | `(organizationId: string, contentId: string)` | Transaction. Returns to draft. |
+| `deleteContent` | `(organizationId: string, contentId: string)` | Transaction. The creator's delete (owner 2026-11-19, Codex-a6ofh.6, `deleteOrLeave`): a piece nobody holds is soft-deleted at once; one people hold leaves in 30 days, each holder emailed, and the leave is the org's (only `keepContent` cancels it). Returns `DeleteContentResult & { creatorId }`. |
+| `keepContent` | `(organizationId: string, contentId: string)` | Transaction. Cancels a leave an org admin's delete started (`keepLeaving`); 403 `LeaveNotYoursError` for one the creator's own delete started. Returns `{ kept, staying }`. |
+| `takedownContent` | `(contentId: string)` | Transaction. A platform admin's takedown (D4, `takedownPiece`): deleted at once, notices in flight cancelled, a `removed` row per holder. NOT scoped: the `platform_owner` route's alone. Returns `{ holders, organizationId, creatorId }`. |
+| `refreshAfterChange` | `(piece, reason, waitUntil)` | The caches a delete, Keep or takedown changes, for the route's `ctx.background`. Settles only once every refresh has (`Promise.allSettled`), each failure logged. |
 
 ## `AdminCustomerManagementService`
 

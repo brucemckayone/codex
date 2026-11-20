@@ -21,13 +21,9 @@ import {
 /** The service getter a route passes (`() => ctx.services.imageProcessing`). */
 const serve = (cleaner: ThumbnailCleaner) => () => cleaner;
 
-function createObs(): Logger {
-  return {
-    warn: vi.fn(),
-    info: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  } as unknown as Logger;
+/** The logger the helper takes: a warn, and an error it must be able to reach. */
+function createObs(): Pick<Logger, 'warn'> & Required<Pick<Logger, 'error'>> {
+  return { warn: vi.fn(), error: vi.fn() };
 }
 
 describe('cleanupContentThumbnailOnDelete', () => {
@@ -87,7 +83,7 @@ describe('cleanupContentThumbnailOnDelete', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('logs an image service that cannot be built, never throwing it (Codex-a6ofh.6)', async () => {
+  it('logs an image service that cannot be built as an error, never throwing it (Codex-a6ofh.6)', async () => {
     const obs = createObs();
     const unbuildable = () => {
       throw new Error('R2_PUBLIC_URL_BASE not configured');
@@ -97,9 +93,15 @@ describe('cleanupContentThumbnailOnDelete', () => {
       cleanupContentThumbnailOnDelete(unbuildable, 'content-1', 'user-1', obs)
     ).resolves.toBeUndefined();
 
-    expect(obs.warn).toHaveBeenCalledWith(
-      'Thumbnail R2 cleanup failed on content delete',
-      expect.objectContaining({ error: 'R2_PUBLIC_URL_BASE not configured' })
+    // No orphan is recorded for the sweep, so the files leak: an error, not
+    // the warn of an R2 failure the sweep will retry.
+    expect(obs.error).toHaveBeenCalledWith(
+      'Thumbnail cleanup could not start; its files are left in R2',
+      expect.objectContaining({
+        contentId: 'content-1',
+        error: 'R2_PUBLIC_URL_BASE not configured',
+      })
     );
+    expect(obs.warn).not.toHaveBeenCalled();
   });
 });

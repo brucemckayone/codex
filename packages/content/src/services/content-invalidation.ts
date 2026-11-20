@@ -31,9 +31,11 @@
  *   memberships + (optionally) followers.
  * - A `MAX_LIBRARY_FANOUT` hard cap guards against runaway writes for
  *   unboundedly popular content (e.g. follower-gated posts on a large org).
- *   When the cap is exceeded, we log a warning and skip per-user fanout —
- *   the platform-layout `visibilitychange → invalidate('cache:versions')`
- *   loop will pick up changes on the user's next focus event.
+ *   When the cap is exceeded, only the pieces' holders are bumped, up to the
+ *   cap (a delete or a Keep is theirs: leaving-notice design §8), and we log
+ *   a warning; everyone else waits for the platform-layout
+ *   `visibilitychange → invalidate('cache:versions')` loop on their next
+ *   focus event.
  *
  * Usage:
  *
@@ -134,8 +136,8 @@ export interface InvalidateContentAccessArgs {
   includeFollowers?: boolean;
   /**
    * Override the fanout cap. Defaults to `DEFAULT_MAX_LIBRARY_FANOUT` (500).
-   * Above this, per-user fanout is skipped (warning logged) and we rely on
-   * the client-side visibility staleness check.
+   * Above this, only the holders are bumped, up to the cap (warning logged),
+   * and the rest rely on the client-side visibility staleness check.
    */
   maxFanout?: number;
 }
@@ -192,9 +194,10 @@ export const DEFAULT_MAX_LIBRARY_FANOUT = 500;
  *      stales the whole library entry)
  *    - Management members (owner/admin/creator) of the org
  *    - Optional: followers of the org (gated by `includeFollowers`)
- * 4. If the set exceeds `maxFanout`, logs a warning and skips step 5 — the
- *    visibility-change staleness check will resolve drift on next focus.
- * 5. For each user, fire-and-forget bumps
+ * 4. If the set exceeds `maxFanout`, logs a warning and keeps only the
+ *    holders, up to `maxFanout`: the visibility-change staleness check
+ *    resolves everyone else's drift on next focus.
+ * 5. For each user kept, fire-and-forget bumps
  *    `COLLECTION_USER_LIBRARY(userId)` via `cache.invalidate`.
  *
  * Returns once the user set is resolved and every bump is handed to
@@ -269,8 +272,8 @@ export interface InvalidateContentAccessManyArgs
  * share it, and each user's library once, however many of the pieces they
  * hold. The users are the union of every piece's, read once per source:
  * the pieces' holders, and their orgs' subscribers, team and (opt-in)
- * followers. Above `maxFanout` users in all, the per-user bumps are skipped
- * (logged).
+ * followers. Above `maxFanout` users in all, only the holders are bumped,
+ * up to `maxFanout` (logged).
  */
 export async function invalidateContentAccessMany(
   args: InvalidateContentAccessManyArgs
@@ -312,29 +315,35 @@ export async function invalidateContentAccessMany(
   }
 
   // --- Resolve affected user set ------------------------------------------
-  const affectedUserIds = await resolveAffectedUsers({
+  const { holders, everyone } = await resolveAffectedUsers({
     db,
     contentIds,
     organizationIds,
     includeFollowers,
   });
 
-  if (affectedUserIds.size === 0) {
+  if (everyone.size === 0) {
     return;
   }
 
-  if (affectedUserIds.size > maxFanout) {
-    logger?.warn('content-invalidation: fanout skipped (cap exceeded)', {
+  // Over the cap, the holders still come first: the change is to what they
+  // own, and the leaving notice's design (§8) bumps up to the cap of them
+  // inline at a delete and a Keep, the sweep the rest.
+  let bumped = [...everyone];
+  if (everyone.size > maxFanout) {
+    bumped = [...holders].slice(0, maxFanout);
+    logger?.warn('content-invalidation: fanout capped to holders', {
       ...logContext,
       reason,
-      userCount: affectedUserIds.size,
+      userCount: everyone.size,
+      holderCount: holders.size,
+      bumped: bumped.length,
       maxFanout,
     });
-    return;
   }
 
   // --- Per-user library bumps (fire-and-forget) ---------------------------
-  for (const userId of affectedUserIds) {
+  for (const userId of bumped) {
     bumpWithLogger(
       cache,
       waitUntil,
@@ -347,7 +356,7 @@ export async function invalidateContentAccessMany(
   logger?.info?.('content-invalidation: fanout complete', {
     ...logContext,
     reason,
-    userCount: affectedUserIds.size,
+    userCount: bumped.length,
   });
 }
 
@@ -564,9 +573,13 @@ interface ResolveArgs {
  * anyway (the cache is only a UI-flash optimisation), so the cost of a
  * superfluous bump is one extra `GET /api/library` on next focus.
  *
- * The per-source queries run in parallel for minimum latency.
+ * The per-source queries run in parallel for minimum latency. `holders` is
+ * the pieces' own, kept apart so a capped fan-out can still reach them;
+ * `everyone` is every source together, holders included.
  */
-async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
+async function resolveAffectedUsers(
+  args: ResolveArgs
+): Promise<{ holders: Set<string>; everyone: Set<string> }> {
   const { db, contentIds, organizationIds, includeFollowers } = args;
 
   const emptyUserRows: Promise<Array<{ userId: string }>> = Promise.resolve([]);
@@ -575,10 +588,10 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
   // Everyone who holds a piece, bought or given, through it or a course
   // (`holdersOf`, the leaving notice's set, Codex-a6ofh.6): a delete or a
   // Keep changes what each of them sees.
-  const holders = holdersOf(db, contentIds);
+  const held = holdersOf(db, contentIds);
   const holderPromise: Promise<Array<{ userId: string }>> = db
-    .select({ userId: holders.userId })
-    .from(holders);
+    .select({ userId: held.userId })
+    .from(held);
 
   const subscriberPromise: Promise<Array<{ userId: string }>> = hasOrg
     ? db.query.subscriptions.findMany({
@@ -620,12 +633,12 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
       followerPromise,
     ]);
 
-  const ids = new Set<string>();
-  for (const r of holderRows) ids.add(r.userId);
-  for (const r of subscriberRows) ids.add(r.userId);
-  for (const r of managementRows) ids.add(r.userId);
-  for (const r of followerRows) ids.add(r.userId);
-  return ids;
+  const holders = new Set(holderRows.map((r) => r.userId));
+  const everyone = new Set(holders);
+  for (const r of subscriberRows) everyone.add(r.userId);
+  for (const r of managementRows) everyone.add(r.userId);
+  for (const r of followerRows) everyone.add(r.userId);
+  return { holders, everyone };
 }
 
 /**

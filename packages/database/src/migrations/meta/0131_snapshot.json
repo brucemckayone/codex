@@ -1,5 +1,5 @@
 {
-  "id": "7d6f6ef4-5c7c-416d-b3fd-4dc8cb9a88ee",
+  "id": "605837b5-5a84-490d-91df-67bfda99167a",
   "prevId": "e9e4eb9c-bded-4b85-a8d5-bc852e1983a1",
   "version": "7",
   "dialect": "postgresql",
@@ -1108,6 +1108,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "leaving_by_org": {
+          "name": "leaving_by_org",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "owners_can_download": {
           "name": "owners_can_download",
           "type": "boolean",
@@ -1537,6 +1544,10 @@
         "check_content_leaving_not_scheduled": {
           "name": "check_content_leaving_not_scheduled",
           "value": "\"content\".\"leaves_at\" IS NULL OR \"content\".\"publish_requested_at\" IS NULL"
+        },
+        "check_content_leaving_by_org": {
+          "name": "check_content_leaving_by_org",
+          "value": "NOT \"content\".\"leaving_by_org\" OR \"content\".\"leaves_at\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false

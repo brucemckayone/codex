@@ -22,20 +22,33 @@ export interface ThumbnailCleaner {
  * row is deleted (never while it is leaving: its owners still see the cover).
  *
  * ALWAYS resolves: any error is swallowed and logged, so the soft-delete (the
- * primary operation, already committed) never answers 500 for it. The
- * service comes as a getter (`() => ctx.services.imageProcessing`) so one
- * that cannot be built, a worker missing its R2 config, is logged here too
- * rather than thrown at the caller. On an R2 failure `deleteContentThumbnail`
- * itself records orphans for the deferred sweep, so nothing leaks for good.
+ * primary operation, already committed) never answers 500 for it. On an R2
+ * failure `deleteContentThumbnail` itself records orphans for the deferred
+ * sweep, so those files do not leak for good: a warn. The service comes as
+ * a getter (`() => ctx.services.imageProcessing`) so one that cannot be
+ * built, a worker missing its R2 config, is caught here rather than thrown
+ * at the caller. Then nothing records the files, so they do leak, and every
+ * delete on that worker would leak the same way: an error.
  */
 export async function cleanupContentThumbnailOnDelete(
   imageProcessing: () => ThumbnailCleaner,
   contentId: string,
   creatorId: string,
-  obs?: Pick<Logger, 'warn'>
+  obs?: Pick<Logger, 'warn'> & Required<Pick<Logger, 'error'>>
 ): Promise<void> {
+  let cleaner: ThumbnailCleaner;
   try {
-    await imageProcessing().deleteContentThumbnail(contentId, creatorId);
+    cleaner = imageProcessing();
+  } catch (error) {
+    obs?.error('Thumbnail cleanup could not start; its files are left in R2', {
+      context: 'content-delete-thumbnail',
+      contentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+  try {
+    await cleaner.deleteContentThumbnail(contentId, creatorId);
   } catch (error) {
     obs?.warn('Thumbnail R2 cleanup failed on content delete', {
       context: 'content-delete-thumbnail',

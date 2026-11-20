@@ -26,8 +26,8 @@ export {
   type WaitUntilFn,
 } from './content-invalidation';
 // The leaving notice's writes (Codex-a6ofh.6): shared with @codex/admin's
-// delete and takedown
-export { deleteOrLeave, takedownPiece } from './content-leaving';
+// delete, Keep and takedown
+export { deleteOrLeave, keepLeaving, takedownPiece } from './content-leaving';
 // Content Service
 export {
   CATALOGUE_CONTENT_COLUMNS,

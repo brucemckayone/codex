@@ -80,15 +80,31 @@ import {
  *   })
  * );
  *
- * // Delete with 204 No Content
- * app.delete('/api/content/:id',
+ * // Delete with 204 No Content: the handler has nothing to report
+ * app.delete('/api/user/avatar',
  *   procedure({
  *     policy: { auth: 'required' },
- *     input: { params: z.object({ id: z.string().uuid() }) },
  *     successStatus: 204,
  *     handler: async (ctx) => {
- *       await ctx.services.content.delete(ctx.input.params.id, ctx.user.id);
+ *       await ctx.services.identity.deleteAvatar(ctx.user.id);
  *       return null;
+ *     },
+ *   })
+ * );
+ *
+ * // Delete that reports what it did: 200 { data }, no successStatus. The
+ * // content delete answers { outcome, leavesAt, holders } (Codex-a6ofh.6);
+ * // a 204 would hand the client null.
+ * app.delete('/api/content/:id',
+ *   procedure({
+ *     policy: { auth: 'required', rateLimit: 'strict' },
+ *     input: { params: z.object({ id: z.string().uuid() }) },
+ *     handler: async (ctx) => {
+ *       const { result } = await ctx.services.content.delete(
+ *         ctx.input.params.id,
+ *         ctx.user.id
+ *       );
+ *       return result;
  *     },
  *   })
  * );

@@ -16,7 +16,8 @@ Content CRUD, media lifecycle, access control, and streaming. The largest worker
 | POST | `/api/content/:id/publish` | `auth: 'required'` | creator, admin | Publish; bumps org cache. `?whenReady=true` (`publishContentQuerySchema`, Codex-a6ofh.2.7): media still on its way SCHEDULES it instead (returns the draft with `publishRequestedAt` set) and bumps nothing |
 | DELETE | `/api/content/:id/publish-request` | `auth: 'required'` | creator, admin | Cancel a publish-when-ready schedule; the draft stays a draft; bumps nothing. 409 `CONTENT_ALREADY_LIVE` if it went live first |
 | POST | `/api/content/:id/unpublish` | `auth: 'required'` | creator, admin | Unpublish; bumps org cache |
-| DELETE | `/api/content/:id` | `auth: 'required'` | creator, admin | Soft delete; `strict` rate limit; 204 |
+| DELETE | `/api/content/:id` | `auth: 'required'` | creator, admin | `strict` rate limit. 200 `{ data: { outcome, leavesAt, holders } }` (Codex-a6ofh.6): `deleted` (nobody holds it: soft-deleted at once, its cover cleared) or `leaving` (off sale, its owners keep it until `leavesAt`, each emailed; the cover kept). 409 `CONTENT_LEAVING_TOO_SOON` (`retryAt`) for a new notice period under `LEAVING_ROUND_GAP_HOURS` after the last |
+| POST | `/api/content/:id/keep` | `auth: 'required'` | creator, admin | Keep a leaving piece (Codex-a6ofh.6): clears its date, it stays off sale, whoever may have heard is told it stays. 200 `{ data: { kept, staying } }`; `kept: false` (nothing written) if it was not leaving. 403 `CONTENT_LEAVE_NOT_YOURS` for a leave an org admin's delete started (`POST /api/admin/content/:contentId/keep` keeps those) |
 | POST | `/api/content/:id/thumbnail` | `auth: 'required'` | creator, admin | Upload thumbnail (multipart) |
 | DELETE | `/api/content/:id/thumbnail` | `auth: 'required'` | creator, admin | Remove thumbnail; 204 |
 
@@ -166,7 +167,7 @@ go-live runs. `bumpOrgContentVersion()` fires via `waitUntil` — invalidates:
 - **MUST** scope all content/media queries by `creatorId` — NEVER return other creators' content
 - **MUST** check media ready status before allowing publish (enforced in `ContentService`)
 - **MUST** verify access before generating streaming URLs (enforced in `ContentAccessService`)
-- **MUST** use `successStatus: 201` for POST creates, `204` for deletes
+- **MUST** use `successStatus: 201` for POST creates, `204` for a delete whose handler returns `null`. `DELETE /api/content/:id` answers 200 with its outcome (Codex-a6ofh.6)
 - **NEVER** return raw R2 keys — always resolve to signed/CDN URLs
 - **NEVER** put business logic in route handlers — delegate to service methods
 

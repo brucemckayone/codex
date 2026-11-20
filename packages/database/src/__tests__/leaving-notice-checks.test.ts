@@ -138,7 +138,7 @@ describe.skipIf(!HAS_DB)(
           const archived = await piece('archived', 'archived', {
             leavesAt: leaves,
           });
-          await piece('draft', 'draft', { leavesAt: leaves });
+          const draft = await piece('draft', 'draft', { leavesAt: leaves });
           downloadDefault = archived.ownersCanDownload;
 
           const live = await piece('live', 'published');
@@ -160,6 +160,21 @@ describe.skipIf(!HAS_DB)(
           );
           outcome['a leaving piece scheduled'] = await attempt(
             sql`UPDATE content SET publish_requested_at = ${leaves} WHERE id = ${archived.id}`
+          );
+          // Whose delete started a leave is only ever said of a leaving
+          // piece: a takedown or a Keep that cleared the date but left the
+          // flag would keep the creator from ever keeping the piece again.
+          outcome['an org-started flag, no leave date'] = await attempt(
+            sql`UPDATE content SET leaving_by_org = true WHERE id = ${live.id}`
+          );
+          outcome['an org-started leave'] = await attempt(
+            sql`UPDATE content SET leaving_by_org = true WHERE id = ${draft.id}`
+          );
+          outcome['a leave date cleared, its flag left'] = await attempt(
+            sql`UPDATE content SET leaves_at = NULL WHERE id = ${draft.id}`
+          );
+          outcome['a leave cleared with its flag'] = await attempt(
+            sql`UPDATE content SET leaves_at = NULL, leaving_by_org = false WHERE id = ${draft.id}`
           );
 
           // Dates set from the clock in SQL, which keeps microseconds, read
@@ -382,6 +397,10 @@ describe.skipIf(!HAS_DB)(
         'a leave date set on a scheduled piece':
           'check_content_leaving_not_scheduled',
         'a leaving piece scheduled': 'check_content_leaving_not_scheduled',
+        'an org-started flag, no leave date': 'check_content_leaving_by_org',
+        'an org-started leave': null,
+        'a leave date cleared, its flag left': 'check_content_leaving_by_org',
+        'a leave cleared with its flag': null,
         'an unknown kind': 'check_content_leaving_notices_kind',
         'an unknown state': 'check_content_leaving_notices_state',
         'an unknown reason': 'check_content_leaving_notices_reason',

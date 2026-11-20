@@ -32,7 +32,7 @@ app.post('/path',
       query: z.object({ page: z.number() }),
       body: createContentSchema,
     },
-    successStatus: 200 | 201 | 204,         // default 200; use 201 for POST create, 204 for DELETE
+    successStatus: 200 | 201 | 204,         // default 200; 201 for POST create; 204 when the handler returns null
     handler: async (ctx) => { ... },
   })
 );
@@ -151,12 +151,27 @@ procedure({
   handler: async (ctx) => ctx.services.content.create(ctx.input.body, ctx.user.id),
 })
 
-// DELETE (204)
+// DELETE with nothing to report (204): the handler returns null
+// (identity-api's DELETE /api/user/avatar)
 procedure({
   policy: { auth: 'required' },
-  input: { params: z.object({ id: uuidSchema }) },
   successStatus: 204,
-  handler: async (ctx) => { await ctx.services.content.delete(ctx.input.params.id, ctx.user.id); return null; },
+  handler: async (ctx) => {
+    await ctx.services.identity.deleteAvatar(ctx.user.id);
+    return null;
+  },
+})
+
+// DELETE that reports what it did (200 { data }): no successStatus. A
+// content delete answers { outcome, leavesAt, holders }, the leaving notice
+// (Codex-a6ofh.6); a 204 there would hand the client null.
+procedure({
+  policy: { auth: 'required', rateLimit: 'strict' },
+  input: { params: z.object({ id: uuidSchema }) },
+  handler: async (ctx) => {
+    const { result } = await ctx.services.content.delete(ctx.input.params.id, ctx.user.id);
+    return result;
+  },
 })
 
 // Paginated list
@@ -176,7 +191,7 @@ procedure({ policy: { auth: 'worker' }, ... })
 ## Strict Rules
 
 - **MUST** use `procedure()` for ALL endpoints — exceptions: BetterAuth (`/api/auth/*`), Stripe webhooks, RunPod webhooks, dev-cdn
-- **MUST** set `successStatus: 201` for POST create, `successStatus: 204` for DELETE
+- **MUST** set `successStatus: 201` for POST create, and `successStatus: 204` for a DELETE whose handler returns `null`. A DELETE that reports what it did (the content delete's `{ outcome, leavesAt, holders }`, Codex-a6ofh.6) answers 200 `{ data }`: forcing a 204 onto it makes the web's `request()` read `null`, so the outcome is lost with no error
 - **MUST** return `new PaginatedResult(items, pagination)` from list handlers
 - **MUST** pass `ctx.user.id` to service methods — procedure does NOT scope DB queries automatically
 - **NEVER** catch errors in handlers — let them propagate to `mapErrorToResponse()`
