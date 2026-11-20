@@ -241,11 +241,13 @@ export const CATALOGUE_CONTENT_COLUMNS = {
   // date null. The withdrawn read is the one that can serve a leaving piece
   // (among every once-live piece a reader still holds): when owners need
   // their date, select it on THAT read, never by dropping it here. `ownersCanDownload` is set
-  // on every row and must stay off, as must `leavingByOrg`, whose delete
-  // started a leave (the studio's, owner 2026-11-19). A `true` spread into
+  // on every row and must stay off, as must `leavingByCreator` and
+  // `leavingByOrg`, whose delete a leave holds (the studio's, owners
+  // 2026-11-19 and -20). A `true` spread into
   // this map turns drizzle's `columns` into include mode and drops every
   // other column.
   leavesAt: false,
+  leavingByCreator: false,
   leavingByOrg: false,
   ownersCanDownload: false,
 } as const satisfies Partial<Record<keyof Content, false>>;
@@ -2602,6 +2604,7 @@ export class ContentService extends BaseService {
             status: content.status,
             offSaleAt: content.offSaleAt,
             leavesAt: content.leavesAt,
+            leavingByCreator: content.leavingByCreator,
             leavingByOrg: content.leavingByOrg,
           })
           .from(content)
@@ -2633,12 +2636,13 @@ export class ContentService extends BaseService {
    * been told it leaves is told it stays (`keepLeaving`). A piece that is
    * not leaving comes back as it is, writing nothing (`kept: false`), as a
    * cancel of a schedule that isn't there does. Scoped to the creator's own
-   * pieces, and only to a leave their own delete started: an org admin's is
-   * kept by an org admin (owner 2026-11-19).
+   * pieces, and it withdraws only the creator's own delete (owners
+   * 2026-11-19 and -20): when an org admin deleted it too, the piece still
+   * leaves (`kept: false`, `stillLeavingBy: 'org'`).
    *
    * @returns what Keep did, and the org the piece is filed in
    * @throws {ContentNotFoundError} Not the creator's, or already gone
-   * @throws {LeaveNotYoursError} An org admin's delete started the leave
+   * @throws {LeaveNotYoursError} The leave holds only an org admin's delete
    */
   async keep(
     id: string,
@@ -2651,6 +2655,7 @@ export class ContentService extends BaseService {
             id: content.id,
             organizationId: content.organizationId,
             leavesAt: content.leavesAt,
+            leavingByCreator: content.leavingByCreator,
             leavingByOrg: content.leavingByOrg,
           })
           .from(content)

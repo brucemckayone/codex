@@ -38,27 +38,43 @@ interface LeavingLog {
 }
 
 /**
- * Whose delete or Keep it is (owner 2026-11-19): the creator's own
- * (`ContentService`), or an org owner or admin's (`@codex/admin`). Only the
- * side that started a leave can Keep it.
+ * Whose delete or Keep it is (owners 2026-11-19 and -20): the creator's own
+ * (`ContentService`), or an org owner or admin's (`@codex/admin`). A leave
+ * is each side's whose delete it holds, and a Keep withdraws only its own.
  */
 type LeaveSide = 'creator' | 'org';
 
+/** The sides whose delete a leave holds, as the locked row reads them. */
+interface LeaveSides {
+  leavingByCreator: boolean;
+  leavingByOrg: boolean;
+}
+
 /** The locked row a delete reads. */
-interface DeletingPiece {
+interface DeletingPiece extends LeaveSides {
   id: string;
   status: string;
   offSaleAt: Date | null;
   leavesAt: Date | null;
-  leavingByOrg: boolean;
 }
 
 /** The locked row Keep reads. */
-interface KeepingPiece {
+interface KeepingPiece extends LeaveSides {
   id: string;
   leavesAt: Date | null;
-  leavingByOrg: boolean;
 }
+
+/** Whether the leave holds `side`'s delete. */
+function wants(piece: LeaveSides, side: LeaveSide): boolean {
+  return side === 'org' ? piece.leavingByOrg : piece.leavingByCreator;
+}
+
+/** `side`'s column, set to `value`, for an update. */
+function sideColumn(side: LeaveSide, value: boolean) {
+  return side === 'org' ? { leavingByOrg: value } : { leavingByCreator: value };
+}
+
+const NO_SIDES = { leavingByCreator: false, leavingByOrg: false } as const;
 
 /** The day a piece deleted at `now` leaves ({@link LEAVING_NOTICE_DAYS}). */
 export function leaveDateFrom(now: Date): Date {
@@ -245,9 +261,10 @@ function leavingRowsOf(
  * later than every round the piece had, and the rows written must match the
  * holders. Either throws, which rolls the whole delete back, rows included.
  *
- * `by` says whose delete it is (owner 2026-11-19), so only that side can
- * Keep it: an org admin's delete of a piece already leaving by its
- * creator's makes it the org's, with no new round and no email. And a new
+ * `by` says whose delete it is (owners 2026-11-19 and -20). A delete of a
+ * piece already leaving adds its side to the leave, with no new round and
+ * no email: the creator's to an org admin's, or the org's to the
+ * creator's. The piece then leaves unless both withdraw. And a new
  * round must start {@link LEAVING_ROUND_GAP_HOURS} after the last one that
  * emailed anyone did, or the delete is refused (409, rolled back), so a
  * delete and a Keep, repeated, cannot email the owners every hour. A period
@@ -263,10 +280,10 @@ export async function deleteOrLeave(
   now: Date = new Date()
 ): Promise<DeleteContentResult> {
   if (piece.leavesAt) {
-    if (by === 'org' && !piece.leavingByOrg) {
+    if (!wants(piece, by)) {
       await tx
         .update(content)
-        .set({ leavingByOrg: true, updatedAt: now })
+        .set({ ...sideColumn(by, true), updatedAt: now })
         .where(eq(content.id, piece.id));
     }
     const holders = await leavingRowsOf(tx, piece.id, piece.leavesAt);
@@ -322,7 +339,8 @@ export async function deleteOrLeave(
           : piece.status,
       offSaleAt: piece.offSaleAt ?? now,
       leavesAt,
-      leavingByOrg: by === 'org',
+      // Both sides are clear here: a piece with no date holds none (CHECK).
+      ...sideColumn(by, true),
       ...NO_PUBLISH_REQUEST,
       updatedAt: now,
     })
@@ -345,10 +363,13 @@ export async function deleteOrLeave(
  * 3. the date is cleared, and the piece stays off sale.
  * Erased accounts get no row.
  *
- * Only the side whose delete started the leave can Keep it (`by`, owner
- * 2026-11-19); the other is refused (403) before anything is written. A
- * piece that is not leaving comes back as it is, writing nothing (`kept:
- * false`), as a cancel of a schedule that isn't there does.
+ * A Keep withdraws only its own side's delete (`by`, owners 2026-11-19
+ * and -20). A side whose delete the leave does not hold is refused (403)
+ * before anything is written. When the other side's delete stands too,
+ * only this side's is withdrawn: the piece still leaves on its date, its
+ * emails untouched (`kept: false`, `stillLeavingBy`). A piece that is not
+ * leaving comes back as it is, writing nothing (`kept: false`), as a cancel
+ * of a schedule that isn't there does.
  */
 export async function keepLeaving(
   tx: DatabaseTransaction,
@@ -357,9 +378,16 @@ export async function keepLeaving(
   now: Date = new Date()
 ): Promise<KeepContentResult> {
   const { id: contentId, leavesAt: round } = piece;
-  if (!round) return { kept: false, staying: 0 };
-  const startedBy: LeaveSide = piece.leavingByOrg ? 'org' : 'creator';
-  if (startedBy !== by) throw new LeaveNotYoursError(contentId, startedBy);
+  if (!round) return { kept: false, staying: 0, stillLeavingBy: null };
+  const other: LeaveSide = by === 'org' ? 'creator' : 'org';
+  if (!wants(piece, by)) throw new LeaveNotYoursError(contentId, other);
+  if (wants(piece, other)) {
+    await tx
+      .update(content)
+      .set({ ...sideColumn(by, false), updatedAt: now })
+      .where(eq(content.id, contentId));
+    return { kept: false, staying: 0, stillLeavingBy: other };
+  }
 
   await cancelOpen(tx, contentId, ['leaving', 'reminder'], now, round);
 
@@ -382,9 +410,9 @@ export async function keepLeaving(
 
   await tx
     .update(content)
-    .set({ leavesAt: null, leavingByOrg: false, updatedAt: now })
+    .set({ leavesAt: null, ...NO_SIDES, updatedAt: now })
     .where(eq(content.id, contentId));
-  return { kept: true, staying: staying.rows.length };
+  return { kept: true, staying: staying.rows.length, stillLeavingBy: null };
 }
 
 /**
@@ -406,7 +434,7 @@ export async function takedownPiece(
     .set({
       deletedAt: now,
       leavesAt: null,
-      leavingByOrg: false,
+      ...NO_SIDES,
       ...NO_PUBLISH_REQUEST,
       updatedAt: now,
     })

@@ -112,6 +112,8 @@ describe.skipIf(!HAS_DB)(
                 slug: `ln-checks-${name}-${tag}`,
                 contentType: 'video',
                 status,
+                // A leave date holds a side (check_content_leaving_sides).
+                ...(change.leavesAt ? { leavingByCreator: true } : {}),
                 ...change,
               })
               .returning({
@@ -146,35 +148,38 @@ describe.skipIf(!HAS_DB)(
             publishRequestedAt: leaves,
           });
           outcome['a published piece with a leave date'] = await attempt(
-            sql`INSERT INTO content (creator_id, title, slug, content_type, status, leaves_at)
-              VALUES (${userId}, 'x', ${`ln-checks-x-${tag}`}, 'video', 'published', ${leaves})`
+            sql`INSERT INTO content (creator_id, title, slug, content_type, status, leaves_at, leaving_by_creator)
+              VALUES (${userId}, 'x', ${`ln-checks-x-${tag}`}, 'video', 'published', ${leaves}, true)`
           );
           outcome['a leave date set on a live piece'] = await attempt(
-            sql`UPDATE content SET leaves_at = ${leaves} WHERE id = ${live.id}`
+            sql`UPDATE content SET leaves_at = ${leaves}, leaving_by_creator = true WHERE id = ${live.id}`
           );
           outcome['a leaving piece published'] = await attempt(
             sql`UPDATE content SET status = 'published' WHERE id = ${archived.id}`
           );
           outcome['a leave date set on a scheduled piece'] = await attempt(
-            sql`UPDATE content SET leaves_at = ${leaves} WHERE id = ${scheduled.id}`
+            sql`UPDATE content SET leaves_at = ${leaves}, leaving_by_creator = true WHERE id = ${scheduled.id}`
           );
           outcome['a leaving piece scheduled'] = await attempt(
             sql`UPDATE content SET publish_requested_at = ${leaves} WHERE id = ${archived.id}`
           );
-          // Whose delete started a leave is only ever said of a leaving
-          // piece: a takedown or a Keep that cleared the date but left the
-          // flag would keep the creator from ever keeping the piece again.
-          outcome['an org-started flag, no leave date'] = await attempt(
+          // A piece has a leave date exactly when a side's delete is held:
+          // a leave with no side could be kept by nobody, and a side left
+          // behind by a takedown or a Keep would outlive its leave.
+          outcome['a leave with no side'] = await attempt(
+            sql`UPDATE content SET leaving_by_creator = false WHERE id = ${draft.id}`
+          );
+          outcome['a side with no leave'] = await attempt(
             sql`UPDATE content SET leaving_by_org = true WHERE id = ${live.id}`
           );
-          outcome['an org-started leave'] = await attempt(
+          outcome['both sides'] = await attempt(
             sql`UPDATE content SET leaving_by_org = true WHERE id = ${draft.id}`
           );
-          outcome['a leave date cleared, its flag left'] = await attempt(
+          outcome['a leave date cleared, its sides left'] = await attempt(
             sql`UPDATE content SET leaves_at = NULL WHERE id = ${draft.id}`
           );
-          outcome['a leave cleared with its flag'] = await attempt(
-            sql`UPDATE content SET leaves_at = NULL, leaving_by_org = false WHERE id = ${draft.id}`
+          outcome['a leave cleared with its sides'] = await attempt(
+            sql`UPDATE content SET leaves_at = NULL, leaving_by_creator = false, leaving_by_org = false WHERE id = ${draft.id}`
           );
 
           // Dates set from the clock in SQL, which keeps microseconds, read
@@ -183,7 +188,7 @@ describe.skipIf(!HAS_DB)(
           // round as the admin delete sets it.
           const timed = await piece('timed', 'archived');
           await tx.execute(
-            sql`UPDATE content SET leaves_at = now() + interval '30 days' WHERE id = ${timed.id}`
+            sql`UPDATE content SET leaves_at = now() + interval '30 days', leaving_by_creator = true WHERE id = ${timed.id}`
           );
           await tx.execute(
             sql`INSERT INTO content_leaving_notices (content_id, user_id, kind, round)
@@ -397,10 +402,11 @@ describe.skipIf(!HAS_DB)(
         'a leave date set on a scheduled piece':
           'check_content_leaving_not_scheduled',
         'a leaving piece scheduled': 'check_content_leaving_not_scheduled',
-        'an org-started flag, no leave date': 'check_content_leaving_by_org',
-        'an org-started leave': null,
-        'a leave date cleared, its flag left': 'check_content_leaving_by_org',
-        'a leave cleared with its flag': null,
+        'a leave with no side': 'check_content_leaving_sides',
+        'a side with no leave': 'check_content_leaving_sides',
+        'both sides': null,
+        'a leave date cleared, its sides left': 'check_content_leaving_sides',
+        'a leave cleared with its sides': null,
         'an unknown kind': 'check_content_leaving_notices_kind',
         'an unknown state': 'check_content_leaving_notices_state',
         'an unknown reason': 'check_content_leaving_notices_reason',

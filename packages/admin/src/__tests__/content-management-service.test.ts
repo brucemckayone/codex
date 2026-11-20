@@ -972,8 +972,11 @@ describe('AdminContentManagementService', () => {
       const after = await stored(piece.id);
       expect(after.deletedAt).toBeNull();
       expect(after.leavesAt?.getTime()).toBe(result.leavesAt?.getTime());
-      // The org's leave (owner 2026-11-19): only an org admin can Keep it.
-      expect(after.leavingByOrg).toBe(true);
+      // The org's delete (owner 2026-11-19): only an org admin withdraws it.
+      expect([after.leavingByCreator, after.leavingByOrg]).toEqual([
+        false,
+        true,
+      ]);
       expect(
         (await noticesOf(piece.id)).map((n) => [n.userId, n.kind])
       ).toEqual([[buyer, 'leaving']]);
@@ -994,7 +997,9 @@ describe('AdminContentManagementService', () => {
       expect((await stored(piece.id)).leavingByOrg).toBe(true);
     });
 
-    it('makes a leave its creator started the org’s, with no new round or email', async () => {
+    // Owner, review round 3: a delete of a piece already leaving adds its
+    // side to the leave, never takes the leave over.
+    it('adds the org’s side to a leave its creator started, with no new round or email', async () => {
       const [buyer] = await seedTestUsers(db, 1);
       const piece = await livePiece();
       await bought(piece.id, buyer);
@@ -1007,12 +1012,53 @@ describe('AdminContentManagementService', () => {
         leavesAt: first.leavesAt,
         holders: 1,
       });
-      expect((await stored(piece.id)).leavingByOrg).toBe(true);
+      const after = await stored(piece.id);
+      expect([after.leavingByCreator, after.leavingByOrg]).toEqual([
+        true,
+        true,
+      ]);
       expect(await noticesOf(piece.id)).toHaveLength(1);
-      // So the creator can no longer undo it.
-      await expect(creatorSide.keep(piece.id, creatorId)).rejects.toMatchObject(
-        notYours('org')
+      // The creator's Keep withdraws only the creator's delete: it still
+      // leaves, and only the org's Keep then keeps it.
+      const { result: mine } = await creatorSide.keep(piece.id, creatorId);
+      expect(mine).toEqual({ kept: false, staying: 0, stillLeavingBy: 'org' });
+      expect((await stored(piece.id)).leavesAt).not.toBeNull();
+      expect(await service.keepContent(orgId, piece.id)).toMatchObject({
+        kept: true,
+      });
+    });
+
+    // Review round 3's attack: the org takes over the creator's leave, keeps
+    // it and publishes it, undoing the creator's delete in three calls.
+    it('cannot undo the creator’s delete: delete, keep, publish leaves it leaving', async () => {
+      const teamOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
       );
+      // Its creator on the team, so the leave is what refuses the publish.
+      await joinTeam(db, teamOrg.id, creatorId);
+      const [buyer] = await seedTestUsers(db, 1);
+      const piece = await livePiece(teamOrg.id);
+      await bought(piece.id, buyer);
+      await creatorSide.delete(piece.id, creatorId);
+      await service.deleteContent(teamOrg.id, piece.id);
+
+      const kept = await service.keepContent(teamOrg.id, piece.id);
+
+      expect(kept).toEqual({
+        kept: false,
+        staying: 0,
+        stillLeavingBy: 'creator',
+      });
+      expect((await stored(piece.id)).leavesAt).not.toBeNull();
+      await expect(
+        service.publishContent(teamOrg.id, piece.id)
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        context: { code: 'CONTENT_LEAVING' },
+      });
     });
   });
 
@@ -1079,10 +1125,13 @@ describe('AdminContentManagementService', () => {
 
       const result = await service.keepContent(orgId, piece.id);
 
-      expect(result).toEqual({ kept: true, staying: 0 });
+      expect(result).toEqual({ kept: true, staying: 0, stillLeavingBy: null });
       const after = await stored(piece.id);
       expect(after.leavesAt).toBeNull();
-      expect(after.leavingByOrg).toBe(false);
+      expect([after.leavingByCreator, after.leavingByOrg]).toEqual([
+        false,
+        false,
+      ]);
       expect(after.status).toBe(CONTENT_STATUS.ARCHIVED);
       expect((await noticesOf(piece.id)).map((n) => n.state)).toEqual([
         'cancelled',
@@ -1108,7 +1157,7 @@ describe('AdminContentManagementService', () => {
 
       const result = await service.keepContent(orgId, piece.id);
 
-      expect(result).toEqual({ kept: false, staying: 0 });
+      expect(result).toEqual({ kept: false, staying: 0, stillLeavingBy: null });
       expect((await stored(piece.id)).status).toBe(CONTENT_STATUS.PUBLISHED);
     });
 
@@ -1181,7 +1230,10 @@ describe('AdminContentManagementService', () => {
       // A deleted piece with a date is one that left with notice. Nor is
       // the leave anyone's any more (the org's, as an org admin deleted it).
       expect(after.leavesAt).toBeNull();
-      expect(after.leavingByOrg).toBe(false);
+      expect([after.leavingByCreator, after.leavingByOrg]).toEqual([
+        false,
+        false,
+      ]);
       const byKind = Object.fromEntries(
         (await noticesOf(piece.id)).map((n) => [n.kind, n.state])
       );
@@ -1207,7 +1259,7 @@ describe('AdminContentManagementService', () => {
       // As Keep leaves it: no date, and so no side that started one.
       await db
         .update(contentTable)
-        .set({ leavesAt: null, leavingByOrg: false })
+        .set({ leavesAt: null, leavingByCreator: false, leavingByOrg: false })
         .where(eq(contentTable.id, piece.id));
 
       await service.takedownContent(piece.id);

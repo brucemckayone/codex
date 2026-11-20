@@ -278,6 +278,13 @@ describe('ContentService: the leaving notice', () => {
     };
   }
 
+  /** The leave as an org admin's delete alone would leave it. */
+  const orgOnly = (contentId: string) =>
+    db
+      .update(content)
+      .set({ leavingByCreator: false, leavingByOrg: true })
+      .where(eq(content.id, contentId));
+
   // ── delete ──────────────────────────────────────────────────────────────
 
   describe('delete', () => {
@@ -313,7 +320,8 @@ describe('ContentService: the leaving notice', () => {
       expect(after.status).toBe('archived');
       expect(after.offSaleAt).not.toBeNull();
       expect(after.publishRequestedAt).toBeNull();
-      // The creator's own delete: the creator's to Keep.
+      // The creator's own delete: the leave holds the creator's side only.
+      expect(after.leavingByCreator).toBe(true);
       expect(after.leavingByOrg).toBe(false);
       const leavesAt = after.leavesAt?.getTime() ?? 0;
       expect(leavesAt).toBe(result.leavesAt?.getTime());
@@ -445,19 +453,23 @@ describe('ContentService: the leaving notice', () => {
       expect(await noticesOf(row.id)).toHaveLength(1);
     });
 
-    it('a creator’s delete of a leave an org admin started leaves it the org’s', async () => {
+    // Owner, review round 3: a delete of a piece already leaving adds its
+    // side, so the other side's Keep cannot undo it.
+    it('a creator’s delete of a leave an org admin started adds the creator’s side, no new round', async () => {
       const [holder] = await seedTestUsers(db, 1);
       const row = await piece();
       await bought(row.id, holder);
       await service.delete(row.id, creatorId);
-      await db
-        .update(content)
-        .set({ leavingByOrg: true })
-        .where(eq(content.id, row.id));
+      await orgOnly(row.id);
 
       await service.delete(row.id, creatorId);
 
-      expect((await stored(row.id)).leavingByOrg).toBe(true);
+      const after = await stored(row.id);
+      expect([after.leavingByCreator, after.leavingByOrg]).toEqual([
+        true,
+        true,
+      ]);
+      expect(await noticesOf(row.id)).toHaveLength(1);
     });
 
     it("refuses another creator's piece as not found", async () => {
@@ -522,6 +534,50 @@ describe('ContentService: the leaving notice', () => {
     // A period kept before any email was tried emailed nobody (owner,
     // review round 2): it starts no gap, so a silent delete and Keep cannot
     // hold off the next delete, the other side's included.
+    // `attempts > 0` is "may have been told" (§2), whatever the answer: a
+    // try still in flight, or one the sender refused, starts the gap too.
+    it.each([
+      'in-flight',
+      'refused',
+    ] as const)('starts the gap from a period whose email was tried (%s)', async (answer) => {
+      const [holder] = await seedTestUsers(db, 1);
+      const row = await piece();
+      await bought(row.id, holder);
+      await service.delete(row.id, creatorId);
+      await tick(row.id, holder, 'leaving', answer);
+      await service.keep(row.id, creatorId);
+
+      await expect(service.delete(row.id, creatorId)).rejects.toMatchObject(
+        TOO_SOON
+      );
+    });
+
+    // The gap runs from the LAST period that emailed anyone, never the first.
+    it('measures the gap from the latest emailed period', async () => {
+      const [holder] = await seedTestUsers(db, 1);
+      const row = await piece();
+      await bought(row.id, holder);
+      const start = Date.UTC(2031, 4, 1, 12);
+      clockAt(start);
+      await service.delete(row.id, creatorId);
+      await tick(row.id, holder, 'leaving');
+      await service.keep(row.id, creatorId);
+      const second = start + 2 * DAY_MS;
+      clockAt(second);
+      await service.delete(row.id, creatorId);
+      await tick(row.id, holder, 'leaving');
+      await service.keep(row.id, creatorId);
+      clockAt(second + HOUR_MS);
+
+      await expect(service.delete(row.id, creatorId)).rejects.toMatchObject({
+        ...TOO_SOON,
+        context: {
+          ...TOO_SOON.context,
+          retryAt: new Date(second + GAP_MS).toISOString(),
+        },
+      });
+    });
+
     it('starts no gap from a period that emailed nobody', async () => {
       const [holder] = await seedTestUsers(db, 1);
       const row = await piece();
@@ -628,7 +684,7 @@ describe('ContentService: the leaving notice', () => {
 
       const { result } = await service.keep(row.id, creatorId);
 
-      expect(result).toEqual({ kept: true, staying: 0 });
+      expect(result).toEqual({ kept: true, staying: 0, stillLeavingBy: null });
       const after = await stored(row.id);
       expect(after.leavesAt).toBeNull();
       expect(after.status).toBe('archived');
@@ -760,16 +816,13 @@ describe('ContentService: the leaving notice', () => {
       });
     });
 
-    // Whose delete started it (owner 2026-11-19): an org admin's is not the
-    // creator's to undo. @codex/admin's tests start one through its delete.
-    it('refuses to keep a leave an org admin’s delete started, writing nothing', async () => {
+    // Whose delete it is (owners 2026-11-19 and -20): an org admin's is not
+    // the creator's to undo. @codex/admin's tests make one through its delete.
+    it('refuses to keep a leave holding only an org admin’s delete, writing nothing', async () => {
       const { row, holder } = await heldBy();
       await service.delete(row.id, creatorId);
       await tick(row.id, holder, 'leaving');
-      await db
-        .update(content)
-        .set({ leavingByOrg: true })
-        .where(eq(content.id, row.id));
+      await orgOnly(row.id);
 
       await expect(service.keep(row.id, creatorId)).rejects.toMatchObject({
         ...NOT_YOURS,
@@ -783,12 +836,41 @@ describe('ContentService: the leaving notice', () => {
       expect((await stayingOf(row.id, holder)).all).toBe(0);
     });
 
+    it('withdraws only the creator’s delete when an org admin deleted it too: it still leaves', async () => {
+      const { row, holder } = await heldBy();
+      await service.delete(row.id, creatorId);
+      await tick(row.id, holder, 'leaving');
+      // Both sides, as an org admin's delete of it while leaving leaves it.
+      await db
+        .update(content)
+        .set({ leavingByOrg: true })
+        .where(eq(content.id, row.id));
+
+      const { result } = await service.keep(row.id, creatorId);
+
+      expect(result).toEqual({
+        kept: false,
+        staying: 0,
+        stillLeavingBy: 'org',
+      });
+      const after = await stored(row.id);
+      expect(after.leavesAt).not.toBeNull();
+      expect([after.leavingByCreator, after.leavingByOrg]).toEqual([
+        false,
+        true,
+      ]);
+      // Its owners were told it leaves, and it does: nothing is cancelled.
+      const [leaving] = await rowsOf(row.id, holder, 'leaving');
+      expect(leaving?.state).toBe('sent');
+      expect((await stayingOf(row.id, holder)).all).toBe(0);
+    });
+
     it('comes back unchanged for a piece that is not leaving', async () => {
       const row = await piece();
 
       const { result } = await service.keep(row.id, creatorId);
 
-      expect(result).toEqual({ kept: false, staying: 0 });
+      expect(result).toEqual({ kept: false, staying: 0, stillLeavingBy: null });
       expect((await stored(row.id)).status).toBe('published');
     });
 
@@ -832,13 +914,28 @@ describe('ContentService: the leaving notice', () => {
       }
       expect((await stored(row.id)).organizationId).toBe(orgId);
 
-      // A save naming its own org is no move.
+      // A save naming its own org is no move, nor one naming none, nor a
+      // bulk access change, whose fields never include the org.
       const saved = await service.update(
         row.id,
         { organizationId: orgId, title: 'Still leaving' },
         creatorId
       );
       expect(saved.title).toBe('Still leaving');
+      const retitled = await service.update(
+        row.id,
+        { title: 'Still leaving, again' },
+        creatorId
+      );
+      expect(retitled.title).toBe('Still leaving, again');
+      const access = await service.accessMany([row.id], creatorId, {
+        isFree: true,
+        isPurchasable: false,
+        priceCents: 0,
+        isFollowerGated: false,
+        isTeamOnly: false,
+      });
+      expect(access.results.map((r) => r.outcome)).toEqual(['unchanged']);
 
       await service.keep(row.id, creatorId);
       const moved = await service.update(

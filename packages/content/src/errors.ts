@@ -262,12 +262,12 @@ export class ContentLeavingError extends ConflictError {
 }
 
 /**
- * 403 with `details.code: 'CONTENT_LEAVE_NOT_YOURS'` (owner 2026-11-19): a
- * Keep by the side that did not start the leave. An org owner or admin's
- * delete is kept only by an org owner or admin (`POST
+ * 403 with `details.code: 'CONTENT_LEAVE_NOT_YOURS'` (owners 2026-11-19 and
+ * -20): a Keep by a side whose delete the leave does not hold. An org owner
+ * or admin's delete is withdrawn only by an org owner or admin (`POST
  * /api/admin/content/:contentId/keep`), the creator's only by the creator
  * (`POST /api/content/:id/keep`), so neither can undo the other's delete and
- * put the piece back on sale. `startedBy` says whose delete it was.
+ * put the piece back on sale. `startedBy` says whose delete it is.
  */
 export class LeaveNotYoursError extends ForbiddenError {
   constructor(contentId: string, startedBy: 'org' | 'creator') {

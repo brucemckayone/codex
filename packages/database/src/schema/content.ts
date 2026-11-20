@@ -373,11 +373,15 @@ export const content = pgTable(
     // To the millisecond, as `content_leaving_notices.round` copies it: a
     // value read into JS then matches back.
     leavesAt: timestamp('leaves_at', { withTimezone: true, precision: 3 }),
-    // Whose delete started the leave (owner 2026-11-19): true when an org
-    // owner or admin's did. Only the side that started a leave can Keep it,
-    // so a creator cannot undo an org admin's delete and put the piece back
-    // on sale, nor an org admin the creator's. True only while `leaves_at`
-    // is set (the CHECK below); Keep and a takedown clear both.
+    // Whose delete the leave is (owners 2026-11-19 and -20): the creator's,
+    // an org owner or admin's, or both, when the other side deleted it too
+    // while it was leaving. A Keep withdraws only its own side's delete, and
+    // the piece stays leaving while either side still wants it gone, so a
+    // creator cannot undo an org admin's delete and put the piece back on
+    // sale, nor an org admin the creator's, in either order. A piece is
+    // leaving exactly when one is set (the CHECK below); a takedown clears
+    // both with the date.
+    leavingByCreator: boolean('leaving_by_creator').notNull().default(false),
     leavingByOrg: boolean('leaving_by_org').notNull().default(false),
     // The creator's choice when selling (owner D8, 2026-11-17): whether the
     // people who own this piece may download it while it is leaving. On by
@@ -491,11 +495,12 @@ export const content = pgTable(
       'check_content_leaving_not_scheduled',
       sql`${table.leavesAt} IS NULL OR ${table.publishRequestedAt} IS NULL`
     ),
-    // Only a leaving piece has a side that started its leave: a write that
-    // clears the date without the flag (a takedown, a Keep) fails here.
+    // A piece has a leave date exactly when a side wants it gone: a write
+    // that clears the date but not the sides (a takedown, a Keep) or sets
+    // it with no side (which nobody could then Keep) fails here.
     check(
-      'check_content_leaving_by_org',
-      sql`NOT ${table.leavingByOrg} OR ${table.leavesAt} IS NOT NULL`
+      'check_content_leaving_sides',
+      sql`(${table.leavesAt} IS NOT NULL) = (${table.leavingByCreator} OR ${table.leavingByOrg})`
     ),
   ]
 );

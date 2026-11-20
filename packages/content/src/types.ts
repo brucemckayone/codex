@@ -430,12 +430,16 @@ export type DeleteContentResult =
 export type DeleteContentResponse = SingleItemResponse<DeleteContentResult>;
 
 /**
- * What Keep did (Codex-a6ofh.6): `kept` when the piece was leaving, and how
- * many people are to be told it stays.
+ * What Keep did (Codex-a6ofh.6): `kept` when the piece was leaving and no
+ * longer is, and how many people are to be told it stays. `stillLeavingBy`
+ * names the other side when both wanted it gone (owner 2026-11-20): this
+ * side's delete is withdrawn, but the other's stands, so it still leaves on
+ * its date and nobody is emailed. Null otherwise.
  */
 export interface KeepContentResult {
   kept: boolean;
   staying: number;
+  stillLeavingBy: 'creator' | 'org' | null;
 }
 
 /**

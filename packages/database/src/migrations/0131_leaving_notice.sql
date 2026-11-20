@@ -23,6 +23,7 @@ CREATE TABLE "content_leaving_notices" (
 );
 --> statement-breakpoint
 ALTER TABLE "content" ADD COLUMN "leaves_at" timestamp (3) with time zone;--> statement-breakpoint
+ALTER TABLE "content" ADD COLUMN "leaving_by_creator" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "content" ADD COLUMN "leaving_by_org" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "content" ADD COLUMN "owners_can_download" boolean DEFAULT true NOT NULL;--> statement-breakpoint
 ALTER TABLE "content_leaving_notices" ADD CONSTRAINT "content_leaving_notices_content_id_content_id_fk" FOREIGN KEY ("content_id") REFERENCES "public"."content"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
@@ -33,4 +34,4 @@ CREATE INDEX "idx_content_leaving_notices_user" ON "content_leaving_notices" USI
 CREATE INDEX "idx_content_leaving" ON "content" USING btree ("leaves_at") WHERE "content"."leaves_at" IS NOT NULL AND "content"."deleted_at" IS NULL;--> statement-breakpoint
 ALTER TABLE "content" ADD CONSTRAINT "check_content_leaving_not_published" CHECK ("content"."leaves_at" IS NULL OR "content"."status" <> 'published');--> statement-breakpoint
 ALTER TABLE "content" ADD CONSTRAINT "check_content_leaving_not_scheduled" CHECK ("content"."leaves_at" IS NULL OR "content"."publish_requested_at" IS NULL);--> statement-breakpoint
-ALTER TABLE "content" ADD CONSTRAINT "check_content_leaving_by_org" CHECK (NOT "content"."leaving_by_org" OR "content"."leaves_at" IS NOT NULL);
+ALTER TABLE "content" ADD CONSTRAINT "check_content_leaving_sides" CHECK (("content"."leaves_at" IS NOT NULL) = ("content"."leaving_by_creator" OR "content"."leaving_by_org"));

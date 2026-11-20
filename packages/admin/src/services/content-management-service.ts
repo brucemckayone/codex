@@ -339,6 +339,7 @@ export class AdminContentManagementService extends BaseService {
             status: schema.content.status,
             offSaleAt: schema.content.offSaleAt,
             leavesAt: schema.content.leavesAt,
+            leavingByCreator: schema.content.leavingByCreator,
             leavingByOrg: schema.content.leavingByOrg,
           })
           .from(schema.content)
@@ -368,12 +369,13 @@ export class AdminContentManagementService extends BaseService {
   }
 
   /**
-   * Keep it (owner 2026-11-19): an org owner or admin cancels the leave an
-   * org admin's delete started (`keepLeaving`, @codex/content), so the
-   * creator alone cannot undo it. A leave the creator's own delete started
-   * is theirs to keep (403, `LeaveNotYoursError`). A piece that is not
-   * leaving comes back `kept: false`, writing nothing. Scoped to the
-   * organization.
+   * Keep it (owners 2026-11-19 and -20): an org owner or admin withdraws the
+   * org's delete (`keepLeaving`, @codex/content). When the creator deleted it
+   * too, the piece still leaves (`kept: false`, `stillLeavingBy:
+   * 'creator'`): the org cannot undo the creator's delete, as the creator
+   * cannot undo the org's. A leave that holds only the creator's delete is
+   * theirs to keep (403, `LeaveNotYoursError`). A piece that is not leaving
+   * comes back `kept: false`, writing nothing. Scoped to the organization.
    */
   async keepContent(
     organizationId: string,
@@ -385,6 +387,7 @@ export class AdminContentManagementService extends BaseService {
           .select({
             id: schema.content.id,
             leavesAt: schema.content.leavesAt,
+            leavingByCreator: schema.content.leavingByCreator,
             leavingByOrg: schema.content.leavingByOrg,
           })
           .from(schema.content)

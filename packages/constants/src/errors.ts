@@ -44,8 +44,9 @@ export const ERROR_CODES = {
   // A publish of a piece that is leaving (Codex-a6ofh.6): its owners were
   // told it goes, so it is kept first, never put back on sale in place.
   CONTENT_LEAVING: 'CONTENT_LEAVING',
-  // A Keep by the side that did not start the leave (owner 2026-11-19): an
-  // org admin's delete is kept by an org admin, the creator's by the creator.
+  // A Keep by a side whose delete the leave does not hold (owners 2026-11-19
+  // and -20): an org admin's delete is withdrawn by an org admin, the
+  // creator's by the creator.
   CONTENT_LEAVE_NOT_YOURS: 'CONTENT_LEAVE_NOT_YOURS',
   // A delete less than LEAVING_ROUND_GAP_HOURS after the piece's last notice
   // period that emailed anyone started (owner 2026-11-19): `retryAt` says

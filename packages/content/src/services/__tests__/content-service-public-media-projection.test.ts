@@ -93,6 +93,7 @@ describe('ContentService.listPublic — media item projection (Codex-ve5eh)', ()
       publishRequestedAt: false,
       publishBlockedReason: false,
       leavesAt: false,
+      leavingByCreator: false,
       leavingByOrg: false,
       ownersCanDownload: false,
     });
@@ -135,6 +136,7 @@ describe("ContentService.list({ scope: 'browse' }) — catalogue projection (Cod
       publishRequestedAt: false,
       publishBlockedReason: false,
       leavesAt: false,
+      leavingByCreator: false,
       leavingByOrg: false,
       ownersCanDownload: false,
     });

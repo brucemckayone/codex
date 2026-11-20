@@ -447,8 +447,8 @@ app.post(
  * Delete content (an org owner or admin, any creator's piece in the org),
  * as the creator's own delete (owner 2026-11-19, Codex-a6ofh.6): one nobody
  * holds is deleted at once, one people hold leaves in 30 days, its holders
- * emailed. The leave is the org's: only an org admin can Keep it (`POST
- * .../keep`), never the creator. Never a takedown: that is `POST
+ * emailed. The leave holds the org's delete, which only an org admin can
+ * withdraw (`POST .../keep`), never the creator. Never a takedown: that is `POST
  * .../takedown`, platform admins only. See publish handler for URL slot
  * rationale.
  */
@@ -493,11 +493,12 @@ app.delete(
 
 /**
  * POST /api/admin/content/:contentId/keep
- * Keep it (owner 2026-11-19, Codex-a6ofh.6): an org owner or admin cancels
- * the leave an org admin's delete started, so the creator alone cannot undo
- * it. A leave the creator's own delete started is theirs to keep (403
- * CONTENT_LEAVE_NOT_YOURS); a piece not leaving answers `kept: false`.
- * Answers `{ data: { kept, staying } }`. See publish handler for URL slot
+ * Keep it (owners 2026-11-19 and -20, Codex-a6ofh.6): an org owner or admin
+ * withdraws the org's delete. When the creator deleted it too, it still
+ * leaves (`kept: false`, `stillLeavingBy: 'creator'`). A leave holding only
+ * the creator's delete is theirs to keep (403 CONTENT_LEAVE_NOT_YOURS); a
+ * piece not leaving answers `kept: false`. Answers `{ data: { kept,
+ * staying, stillLeavingBy } }`. See publish handler for URL slot
  * rationale.
  */
 app.post(
