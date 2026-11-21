@@ -310,6 +310,101 @@ describe('Showreel layouts', () => {
   });
 });
 
+describe("Showreel's sizers: every piece's words, unseen, hold the words' slot (WP-5b)", () => {
+  /** The film, two essays and a recording with a preview of its own. */
+  const WITH_PREVIEW: ReelEntry[] = [
+    ...REEL,
+    {
+      type: 'piece',
+      piece: piece('Drum Journey', {
+        kind: 'audio',
+        previewUrl: 'http://localhost:4100/org/hls/drum/preview/preview.m3u8',
+        cta: 'Listen',
+      }),
+      show: 'still',
+    },
+  ];
+  const sizers = () => [
+    ...document.querySelectorAll('.reel__slot > .reel__sizers > .reel__sizer'),
+  ];
+
+  for (const layout of ['corner', 'wide', 'name'] as const) {
+    it(`${layout}: one per piece, each its own words, out of sight, out of the tree and out of reach`, () => {
+      render(layout, { reel: WITH_PREVIEW });
+      const box = q('.reel__slot > .reel__sizers');
+      expect(box?.getAttribute('aria-hidden')).toBe('true');
+      expect(box?.hasAttribute('inert')).toBe(true);
+      const each = sizers();
+      expect(each).toHaveLength(WITH_PREVIEW.length);
+      expect(
+        each.map((s) => s.querySelector('.reel__kicker b')?.textContent)
+      ).toEqual(['01', '02', '03', '04']);
+      // Name: the film's slide carries the org's line, as the words do.
+      expect(each[0].querySelector('.reel__title')?.textContent?.trim()).toBe(
+        layout === 'name' ? 'Ancestral healing.' : 'Of Blood & Bones'
+      );
+      expect(each[3].querySelector('.reel__title')?.textContent?.trim()).toBe(
+        'Drum Journey'
+      );
+      expect(
+        each.map((s) => s.querySelector('.reel__btn')?.textContent?.trim())
+      ).toEqual([
+        'Play the preview',
+        'Read the essay',
+        'Read the essay',
+        'Listen',
+      ]);
+      // The preview's stand-in where the piece shows a preview: not the
+      // film's, whose main button plays it.
+      expect(
+        each.map((s) => s.querySelector('.reel__sizer-preview') !== null)
+      ).toEqual([false, false, false, true]);
+      // Nothing a visitor, the fit, the probes or axe could meet.
+      expect(
+        box?.querySelectorAll(
+          '[data-ink], [id], [role], [tabindex], [href], [aria-label], a, button, input, select, textarea, .reel__ghost, .reel__round, .reel__preview, .reel__swap'
+        )
+      ).toHaveLength(0);
+      // Behind the words in the page's order: the first of each is the words' own.
+      for (const part of [
+        '.reel__kicker',
+        '.reel__title',
+        '.reel__row',
+        '.reel__btn',
+      ]) {
+        expect(q(part)?.closest('.reel__words'), part).not.toBeNull();
+      }
+    });
+  }
+
+  it("Wide: each sizer's title at the size its own piece's title shows at", () => {
+    // 60 px a character at 100 px, in words 1000 px wide.
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () =>
+        ({
+          font: '',
+          measureText: (text: string) => ({ width: text.length * 60 }),
+        }) as unknown as CanvasRenderingContext2D
+    );
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    render('wide', { reel: WITH_PREVIEW });
+    // floor(100 * 1000 / (length * 60)), within 72 and 150.
+    expect(
+      sizers().map(
+        (s) => s.querySelector<HTMLElement>('.reel__title')?.style.fontSize
+      )
+    ).toEqual(['104px', '79px', '79px', '138px']);
+    const shownSize = () =>
+      q<HTMLElement>('.reel__words .reel__title')?.style.fontSize;
+    expect(shownSize()).toBe('104px');
+    // The next piece's title takes its own size as it shows.
+    frame(PIECE_MS + 100);
+    frame(CUT);
+    expect(title()).toBe('The Medicine of Grief');
+    expect(shownSize()).toBe('79px');
+  });
+});
+
 describe('Showreel clock', () => {
   it('moves on after a piece, the words a beat behind', () => {
     render();

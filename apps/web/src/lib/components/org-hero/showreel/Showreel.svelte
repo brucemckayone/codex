@@ -311,17 +311,21 @@
   const current = $derived(words[shown] ?? words[0]);
   // In the name window the name is the headline, so the film's slide
   // carries the org's line instead (the mock's).
-  const lineFirst = $derived(layout === 'name' && reel[shown]?.type === 'film' && !!current?.line);
+  const lineFirstAt = (i: number) => layout === 'name' && reel[i]?.type === 'film' && !!words[i]?.line;
+  const lineFirst = $derived(lineFirstAt(shown));
 
   // ── the theatre: a piece's preview with sound (Codex-1yd58.8) ──
   const theatres = $derived(reel.map((entry, i) => theatreFor(entry, words[i]?.title ?? name)));
   let theatre = $state<{ index: number; item: TheatreItem } | null>(null);
   // The film's main button plays its preview there, unless a press plays the
   // full film (Codex-0hkkt): that one keeps the page's own film player.
-  const mainOpensTheatre = $derived.by(() => {
-    const entry = reel[shown];
-    return entry?.type === 'film' && !entry.film.fullFilm && !!theatres[shown];
-  });
+  const mainOpensAt = (i: number) => {
+    const entry = reel[i];
+    return entry?.type === 'film' && !entry.film.fullFilm && !!theatres[i];
+  };
+  const mainOpensTheatre = $derived(mainOpensAt(shown));
+  /** The piece's preview with sound, where its main button plays something else. */
+  const previewAt = (i: number) => !!theatres[i] && !mainOpensAt(i);
   /**
    * What opened the theatre, given focus back as it closes. The body or the
    * root is none (Safari focuses no clicked button: review L5); then the
@@ -567,19 +571,23 @@
     };
   }
 
-  let wideSize = $state<number | null>(null);
+  // Every piece's title fitted to the words' width, so each sizer holds its
+  // piece's words at the size they show at (`sizer`), and the one on show
+  // takes its own the moment it shows.
+  let wideSizes = $state<number[] | null>(null);
   $effect(() => {
     const el = titleEl;
-    const title = current?.title ?? '';
+    const titles = words.map((w) => w.title);
     if (layout !== 'wide' || !desktop.current || !el) {
-      wideSize = null;
+      wideSizes = null;
       return;
     }
     return refit(() => {
       const available = el.parentElement?.clientWidth ?? 0;
-      wideSize = fitTitle(widthAt100(el, title), available, WIDE_TITLE.min, WIDE_TITLE.max);
+      wideSizes = titles.map((title) => fitTitle(widthAt100(el, title), available, WIDE_TITLE.min, WIDE_TITLE.max));
     });
   });
+  const wideSize = $derived(wideSizes?.[shown] ?? null);
 
   let nameFit = $state<NameLines | null>(null);
   $effect(() => {
@@ -1203,7 +1211,7 @@
     {:else}
       <a class="reel__btn" href={now.action.href}>{now.action.label}</a>
     {/if}
-    {#if theatres[shown] && !mainOpensTheatre}
+    {#if previewAt(shown)}
       <button
         type="button"
         class="reel__ghost reel__preview"
@@ -1215,6 +1223,47 @@
         <span class="reel__preview-label">{m.org_hero_reel_preview_sound()}</span>
       </button>
     {/if}
+  </div>
+{/snippet}
+
+<!--
+  A piece's words as they lay out when it shows, unseen (WP-5b): one per
+  piece, stacked under the words in their slot, so the slot is always the
+  tallest piece's height and a short screen's hero, grown to hold it, keeps
+  its height as the pieces change. Out of sight, out of the accessibility
+  tree and inert, with no control, link, id or `data-ink`: the fit, the
+  probes, axe and the tab order never meet one. Its preview is a stand-in
+  with the preview's box (`.reel__sizer-preview`), not the ghost the fit reads.
+-->
+{#snippet sizer(w: ReelWords, i: number)}
+  <div class="reel__sizer">
+    <p class="reel__kicker"><b>{w.number}</b> <span>{w.kicker}</span></p>
+    {#if lineFirstAt(i)}
+      <h2 class="reel__title reel__title--line">{w.line}</h2>
+    {:else}
+      <h2
+        class="reel__title"
+        data-long={w.title.length > 20 ? '' : undefined}
+        style:font-size={wideSizes?.[i] ? `${wideSizes[i]}px` : undefined}
+      >
+        {w.title}
+      </h2>
+    {/if}
+    <div class="reel__row">
+      {#if w.line && !lineFirstAt(i)}<p class="reel__line">{w.line}</p>{/if}
+      <div class="reel__acts">
+        <span class="reel__btn">
+          {#if w.action.kind === 'film'}<PlayIcon size={16} aria-hidden="true" />{/if}
+          {w.action.label}
+        </span>
+        {#if previewAt(i)}
+          <span class="reel__sizer-preview">
+            <Volume2Icon size={16} aria-hidden="true" />
+            <span class="reel__preview-label">{m.org_hero_reel_preview_sound()}</span>
+          </span>
+        {/if}
+      </div>
+    </div>
   </div>
 {/snippet}
 
@@ -1273,7 +1322,12 @@
     {@render top()}
     {#if layout === 'name'}{@render nameWindow()}{/if}
     {@render segments()}
-    {#if current}{@render playingNow(current)}{/if}
+    <div class="reel__slot">
+      {#if current}{@render playingNow(current)}{/if}
+      <div class="reel__sizers" aria-hidden="true" inert>
+        {#each words as w, i (i)}{@render sizer(w, i)}{/each}
+      </div>
+    </div>
     {@render entries()}
   </div>
   {#if theatre}
@@ -1454,18 +1508,26 @@
     mask-image: var(--_clear);
   }
 
+  /* ── the parts in flow (WP-5b): the top bar at the head; the words, the
+     index or the strip, and the pause at the foot; the room between them the
+     grid's flexible row. On a tall screen that row takes the rest, so each
+     part sits where it sat when placed on the reel; on a short one the hero
+     grows to hold them all, and never clips or overlaps its own words. The
+     name window and the phone's segments and pause are placed on it still. */
   .reel__inner {
-    position: absolute;
-    inset: 0;
+    position: relative;
+    min-height: inherit;
+    display: grid;
+    grid-template: auto minmax(var(--space-6), 1fr) auto / minmax(0, 1fr);
+    padding: var(--space-10) var(--_gutter) 0;
     isolation: isolate;
+    /* Corner's words take 56% of the reel's width (`cqw`, below). */
+    container-type: inline-size;
   }
 
   /* ── the top: the org, its facts and Follow ── */
   .reel__top {
-    position: absolute;
-    top: var(--space-10);
-    left: var(--_gutter);
-    right: var(--_gutter);
+    grid-area: 1 / 1 / 2 / -1;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1622,12 +1684,39 @@
     box-shadow: 0 0 0 calc(var(--space-1-5) + var(--border-width-thick) + var(--space-0-5)) var(--_scrim);
   }
 
-  /* ── what is playing ── */
-  .reel__words {
-    position: absolute;
-    left: var(--_gutter);
-    bottom: var(--space-20);
-    width: min(var(--container-content), 56%);
+  /* ── what is playing: the words over their pieces' sizers, at the foot ── */
+  .reel__slot {
+    grid-area: 3 / 1;
+    align-self: end;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    margin-bottom: calc(var(--space-24) + var(--space-4));
+  }
+
+  .reel__slot > *,
+  .reel__sizers > * {
+    grid-area: 1 / 1;
+    align-self: end;
+  }
+
+  .reel__sizers {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    visibility: hidden;
+  }
+
+  /* A sizer's preview: the preview button's box (`.reel__ghost`, at
+     `.reel__preview`'s height), without the classes the fit reads. */
+  .reel__sizer-preview {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: var(--space-12);
+    padding: 0 var(--space-4);
+    border: var(--border-width) solid transparent;
+    font-size: var(--text-sm);
+    white-space: nowrap;
   }
 
   .reel__kicker {
@@ -1758,32 +1847,40 @@
      (its ::after), so the strip's pool covers it as before. Above the reel's
      other words, so nothing laid over its place takes its press. */
   .reel__ctl {
-    position: absolute;
-    right: var(--_gutter);
-    bottom: var(--space-9);
+    position: relative;
     z-index: 1;
+    grid-area: 3 / 1;
+    justify-self: end;
+    align-self: end;
+    margin-bottom: var(--space-9);
   }
 
   /* ── Corner: the index on the right, the pause atop it ──
      The pause and the index share one grid cell: the index keeps the pause's
-     room at its top, so its pool covers both, as when the pause sat inside it. */
+     room at its top, so its pool covers both, as when the pause sat inside it.
+     The words span the room above as well as the foot's row, so the index
+     alone sizes that row and the pause stays at its top. */
   .reel[data-layout='corner'] .reel__inner {
-    display: grid;
-    grid-template: minmax(0, 1fr) auto / minmax(0, 1fr) var(--container-drawer);
-    padding: 0 var(--_gutter) var(--space-20);
+    grid-template: auto minmax(var(--space-6), 1fr) auto / minmax(0, 1fr) var(--container-drawer);
+    padding-bottom: var(--space-20);
+  }
+
+  .reel[data-layout='corner'] .reel__slot {
+    grid-area: 2 / 1 / 4 / 2;
+    /* 56% of the reel's width (its gutters with the inner's content box),
+       and never into the index's column. */
+    width: min(var(--container-content), calc((100cqw + 2 * var(--_gutter)) * 0.56), 100%);
+    margin: var(--space-6) 0 0;
   }
 
   .reel[data-layout='corner'] .reel__ctl,
   .reel__index {
-    grid-area: 2 / 2;
+    grid-area: 3 / 2;
   }
 
   .reel[data-layout='corner'] .reel__ctl {
-    position: relative;
-    right: auto;
-    bottom: auto;
-    justify-self: end;
     align-self: start;
+    margin-bottom: 0;
   }
 
   .reel__index {
@@ -1860,15 +1957,19 @@
 
   /* ── Wide and Name: the strip along the foot ── */
   .reel__strip {
-    position: absolute;
-    left: var(--_gutter);
-    right: var(--_gutter);
-    bottom: var(--space-9);
+    grid-area: 3 / 1;
+    align-self: end;
     display: grid;
     grid-auto-columns: minmax(0, 1fr);
     grid-auto-flow: column;
     gap: var(--space-5);
     align-items: end;
+  }
+
+  /* Where the pause stands too. On the inner's own: `.reel ol`'s margin
+     reset outranks the strip's class. */
+  .reel__inner > .reel__strip {
+    margin-bottom: var(--space-9);
   }
 
   /* The pause's column, the strip's last (the pause is drawn over it). */
@@ -1896,12 +1997,6 @@
     top: 0;
     bottom: auto;
     background: var(--_line);
-  }
-
-  .reel[data-layout='wide'] .reel__words {
-    right: var(--_gutter);
-    width: auto;
-    bottom: calc(var(--space-24) + var(--space-4));
   }
 
   .reel[data-layout='wide'] .reel__title {
@@ -1962,11 +2057,7 @@
     background-image: none;
   }
 
-  .reel[data-layout='name'] .reel__words {
-    left: var(--_gutter);
-    right: var(--_gutter);
-    width: auto;
-    bottom: calc(var(--space-24) + var(--space-4));
+  .reel[data-layout='name'] .reel__slot {
     text-align: center;
   }
 
@@ -2045,16 +2136,22 @@
       height: var(--space-9);
     }
 
+    /* One column; the top bar under the segments. */
+    .reel__inner,
+    .reel[data-layout='corner'] .reel__inner {
+      grid-template: auto minmax(var(--space-6), 1fr) auto / minmax(0, 1fr);
+      padding: calc(var(--space-12) + var(--space-2)) var(--_gutter) 0;
+    }
+
+    /* Placed on the inner, out of the grid's cells: a grid area would hold
+       it instead (Corner's pause sat at the foot's right, under the words). */
     .reel__ctl,
     .reel[data-layout='corner'] .reel__ctl {
       position: absolute;
+      grid-area: auto;
       top: var(--space-3);
       right: var(--_gutter);
-      bottom: auto;
-    }
-
-    .reel__top {
-      top: calc(var(--space-12) + var(--space-2));
+      margin: 0;
     }
 
     /* The mock's phone: the org, its segments and pause; Follow and the
@@ -2068,14 +2165,12 @@
       display: none;
     }
 
-    .reel__words,
-    .reel[data-layout='wide'] .reel__words,
-    .reel[data-layout='name'] .reel__words {
-      left: var(--_gutter);
-      right: var(--_gutter);
-      /* Clear of the app's tab bar (`.org-main`'s own bottom padding). */
-      bottom: calc(var(--space-20) + var(--space-2));
+    .reel__slot,
+    .reel[data-layout='corner'] .reel__slot {
+      grid-area: 3 / 1;
       width: auto;
+      /* Clear of the app's tab bar (`.org-main`'s own bottom padding). */
+      margin: 0 0 calc(var(--space-20) + var(--space-2));
     }
 
     .reel__title {
@@ -2119,7 +2214,8 @@
     }
 
     /* The mock's: on a phone the preview is its icon, named for the ear. */
-    .reel__preview {
+    .reel__preview,
+    .reel__sizer-preview {
       width: var(--space-12);
       padding: 0;
     }

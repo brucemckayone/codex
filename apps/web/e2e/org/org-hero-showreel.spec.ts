@@ -636,7 +636,8 @@ test.describe('the Showreel on a landing', () => {
     baseURL,
   }) => {
     const page = await open(browser, baseURL);
-    const button = page.locator('.reel__btn');
+    // The words' own: each piece's sizer copies its button's box (WP-5b).
+    const button = page.locator('.reel__words .reel__btn');
     const label = (await button.textContent())?.trim() ?? '';
     // Only the full film plays in the page's own player: a preview opens the
     // reel's own theatre (Codex-1yd58.8, org-hero-theatre.spec.ts).

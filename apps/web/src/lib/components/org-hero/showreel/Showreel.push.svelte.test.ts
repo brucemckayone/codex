@@ -360,3 +360,62 @@ describe("Showreel's index bars follow the piece on show (WP-6 review r2, R2-M2)
     expect(now.at).toBeLessThan(0.2);
   });
 });
+
+/**
+ * WP-5b review r4: the reel-of-one checks above say only "never zooms back
+ * out", which a push stuck at 0 would pass too. The positive control: it
+ * rises over the first piece, then holds at its peak ("eased out, then
+ * held"), and a reel of three still restarts each new piece.
+ */
+describe('Showreel push-in: a reel of one pushes in once, then holds at its peak (WP-5b review r4)', () => {
+  /** The zoom past 1 the push reaches and holds: pushZoom's end (8%). */
+  const TOP_ZOOM = pushZoom(Number.POSITIVE_INFINITY) - 1;
+  /** Run `ms` of frames, keeping each reading's lowest and highest. */
+  function span(ms: number, read: () => Reading): { min: number; max: number } {
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (let t = 0; t < ms; t += 16) {
+      one();
+      const { at } = read();
+      min = Math.min(min, at);
+      max = Math.max(max, at);
+    }
+    return { min, max };
+  }
+
+  for (const [where, read, peak] of [
+    ['the canvas', onCanvas, TOP_ZOOM],
+    // the page reads the share played (0-1), not the zoom
+    ["the page's own still", onPage, 1],
+  ] as const) {
+    it(`on ${where}: rises over the first piece, then sits at its peak for two rounds more`, () => {
+      render(ONE);
+      const el = read().el;
+      // Control 1: it moves in the first piece (a push stuck at 0 fails here).
+      const first = span(PIECE_MS - 32, read);
+      expect(first.min).toBeLessThan(peak * 0.1);
+      expect(first.max).toBeGreaterThan(peak * 0.95);
+      // Control 2: through the wrap and two more rounds, it stays at the peak.
+      const after = span(PIECE_MS * 2 + 200, read);
+      expect(after.min).toBeGreaterThan(peak * 0.95);
+      expect(after.max).toBeLessThanOrEqual(peak + 1e-9);
+      // the same still all along: a reel of one never cuts
+      expect(read().el).toBe(el);
+    });
+
+    it(`on ${where}: a reel of three still starts each new piece from its push's start (restart control)`, () => {
+      render(THREE);
+      const firstEl = read().el;
+      span(PIECE_MS - 32, read);
+      // through the clock's move and the stage's following it
+      let fresh: Reading | null = null;
+      for (let t = 0; t < 2000 && !fresh; t += 16) {
+        one();
+        const now = read();
+        if (now.el && now.el !== firstEl) fresh = now;
+      }
+      expect(fresh).not.toBeNull();
+      expect(fresh?.at ?? 1).toBeLessThan(peak * 0.25);
+    });
+  }
+});
