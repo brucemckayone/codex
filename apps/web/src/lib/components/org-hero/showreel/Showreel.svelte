@@ -189,9 +189,13 @@
   });
   const words = $derived(reel.map((entry, i) => reelWords(entry, i, { name, description, filmDuration })));
   const media = $derived(reel.map((entry) => reelMedia(entry, mode)));
+  // WP-5b: the compositor places a portrait piece, and draws the surface and
+  // the stills' push-in on the footage alone. A reel held still pushes none in.
   const look = $derived<FilmLook>({
     frame: layout === 'name' ? 'film-name' : 'film-fill',
     band: options['reel-band'],
+    surface: options['reel-surface'],
+    push: options['reel-push'] === 'on' && moves,
   });
 
   let rootEl: HTMLElement | undefined = $state();

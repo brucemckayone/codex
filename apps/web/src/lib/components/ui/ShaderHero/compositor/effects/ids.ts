@@ -8,7 +8,8 @@
  * axis, so the two cannot drift.
  *
  * WP-3 ships the five blends, three frames and one layer (grain) as the
- * registry's proof. WP-8 adds the other layers, WP-5 the film frames.
+ * registry's proof. WP-8 adds the other layers, WP-5 the film frames, and
+ * WP-5b the portrait frame and the passes over the piece's own picture.
  */
 
 /** How a second preset meets the base. */
@@ -66,7 +67,7 @@ export const BRAND_FRAME_IDS = [
  * (`showreelFeed.setLook`). A brand's `shader-frame` never can: with no film
  * attached, a film frame would draw the picture and nothing of its own.
  */
-const FILM_FRAME_IDS = ['film-fill', 'film-name'] as const;
+const FILM_FRAME_IDS = ['film-fill', 'film-name', 'film-portrait'] as const;
 export const FRAME_IDS = [...BRAND_FRAME_IDS, ...FILM_FRAME_IDS] as const;
 export type FrameId = (typeof FRAME_IDS)[number];
 export type FilmFrameId = (typeof FILM_FRAME_IDS)[number];
@@ -76,6 +77,40 @@ export type BrandFrameId = (typeof BRAND_FRAME_IDS)[number];
 export const PASSTHROUGH_FRAME: BrandFrameId = 'shader-only';
 /** The film filling its stage: a film frame's fallback with no name mask. */
 export const FILM_FILL_FRAME: FilmFrameId = 'film-fill';
+/**
+ * A portrait film or picture flush right at the stage's full height, its left
+ * edge fading into the brand's picture (owner, 2026-11-21). No look names it:
+ * the compositor puts it in `film-fill`'s place on a desktop when filling
+ * would crop too much of the piece (`../portrait.ts`).
+ */
+export const FILM_PORTRAIT_FRAME: FilmFrameId = 'film-portrait';
+
+/**
+ * The surfaces over the footage a Showreel can name (WP-5b, owner
+ * 2026-11-21): the hero option `reel-surface`, beside 'none'. No halftone.
+ */
+export const REEL_SURFACES = ['duotone', 'colour', 'grain'] as const;
+export type ReelSurface = (typeof REEL_SURFACES)[number];
+
+/**
+ * The passes run on the piece's OWN picture before a film frame samples it
+ * (`../media-pass.ts`): the stills' push-in, then the look's surface. They
+ * treat the film alone, so the brand's picture round it is untouched. Their
+ * ids are unique across every axis (the compositor caches a pass by its id).
+ */
+export const MEDIA_PASS_IDS = [
+  'media-push',
+  'surface-duotone',
+  'surface-colour',
+  'surface-grain',
+] as const;
+export type MediaPassId = (typeof MEDIA_PASS_IDS)[number];
+/** The pass that draws each surface. */
+export const SURFACE_PASS: Readonly<Record<ReelSurface, MediaPassId>> = {
+  duotone: 'surface-duotone',
+  colour: 'surface-colour',
+  grain: 'surface-grain',
+};
 
 const has = <T extends string>(ids: readonly T[], id: string): id is T =>
   (ids as readonly string[]).includes(id);

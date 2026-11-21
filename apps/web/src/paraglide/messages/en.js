@@ -10383,6 +10383,22 @@ export const branding_hero_field_reel_surface = () => `Over every piece`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_surface_duotone = () => `Duotone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_surface_colour = () => `Your colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_reel_surface_grain = () => `Film grain`
 
 
@@ -10391,7 +10407,7 @@ export const branding_hero_reel_surface_grain = () => `Film grain`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_surface_halftone = () => `Halftone`
+export const branding_hero_field_reel_push = () => `Pictures`
 
 
 /**
@@ -10399,7 +10415,7 @@ export const branding_hero_reel_surface_halftone = () => `Halftone`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_surface_reeded = () => `Reeded glass`
+export const branding_hero_reel_push_on = () => `Push in slowly`
 
 
 /**
@@ -10407,15 +10423,7 @@ export const branding_hero_reel_surface_reeded = () => `Reeded glass`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_surface_red = () => `Your colour`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_surface_shader = () => `Through the shader`
+export const branding_hero_reel_push_off = () => `Hold still`
 
 
 /**

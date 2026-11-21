@@ -47,6 +47,8 @@ export const UNIFORMS = {
   u_band: 'float',
   /** Where the band gives way: from x to y of the stage, measured down. */
   u_ramp: 'vec2',
+  /** The stills' push-in (WP-5b): how far the piece's picture is drawn in; 1 for none. */
+  u_zoom: 'float',
 } as const;
 
 export type UniformName = keyof typeof UNIFORMS;

@@ -524,8 +524,13 @@ describe('Showreel paths', () => {
 describe('Showreel and the window’s shader', () => {
   it("tells it the layout's film frame, the stage, and the still once it loads", () => {
     render('corner');
-    // The band at its default: the film gives way at its foot (owner, V1).
-    expect(showreelFeed.look).toEqual({ frame: 'film-fill', band: 'fade' });
+    // The band at its default: the film gives way at its foot (owner, V1),
+    // and no surface over it (owner, 2026-11-21, 5b).
+    expect(showreelFeed.look).toMatchObject({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'none',
+    });
     expect(showreelFeed.stage).not.toBeNull();
     const still = q<HTMLImageElement>('.reel-stage__item[data-on] img');
     still?.dispatchEvent(new Event('load'));
@@ -535,7 +540,10 @@ describe('Showreel and the window’s shader', () => {
 
   it('asks for the film through the name in the Name window', () => {
     render('name');
-    expect(showreelFeed.look).toEqual({ frame: 'film-name', band: 'fade' });
+    expect(showreelFeed.look).toMatchObject({
+      frame: 'film-name',
+      band: 'fade',
+    });
   });
 
   it('hands it the video once it has a frame, and lets go of everything on unmount', async () => {

@@ -14,7 +14,7 @@
  * All PURE, so the arithmetic is under test; WP-5's Showreel calls
  * `setStage` with a box from `stageBoxFrom`.
  */
-import type { FilmFrameId } from './effects/ids';
+import type { FilmFrameId, ReelSurface } from './effects/ids';
 
 type Vec2 = readonly [number, number];
 
@@ -31,11 +31,15 @@ export type FilmBand = 'none' | 'under' | 'fade' | 'edges';
 
 /**
  * How the Showreel shows its film (WP-5): which film frame (its layout's),
- * and its band.
+ * and its band. WP-5b adds what is drawn on the piece's own picture first:
+ * a surface over the footage (`reel-surface`; none when absent) and the
+ * stills' push-in (`reel-push`; off when absent).
  */
 export interface FilmLook {
   readonly frame: FilmFrameId;
   readonly band: FilmBand;
+  readonly surface?: ReelSurface | 'none';
+  readonly push?: boolean;
 }
 
 /** The band as the film frame reads it (`u_band`). */

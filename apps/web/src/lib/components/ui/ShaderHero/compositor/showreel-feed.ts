@@ -25,6 +25,13 @@ let mask: TexImageSource | null = null;
 let look: FilmLook | null = null;
 let listener: ((changed: FeedField) => void) | null = null;
 
+/** The same look, field by field: a derived look is a new object each time. */
+const sameLook = (a: FilmLook, b: FilmLook): boolean =>
+  a.frame === b.frame &&
+  a.band === b.band &&
+  (a.surface ?? 'none') === (b.surface ?? 'none') &&
+  (a.push ?? false) === (b.push ?? false);
+
 export const showreelFeed = {
   get media(): StageMedia | null {
     return media;
@@ -60,11 +67,7 @@ export const showreelFeed = {
   },
   /** How the film is shown; null for the brand's own frame. */
   setLook(next: FilmLook | null): void {
-    if (
-      next === look ||
-      (next && look && next.frame === look.frame && next.band === look.band)
-    )
-      return;
+    if (next === look || (next && look && sameLook(next, look))) return;
     look = next;
     listener?.('look');
   },

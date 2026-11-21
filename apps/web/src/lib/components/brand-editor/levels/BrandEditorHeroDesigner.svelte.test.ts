@@ -143,7 +143,8 @@ describe('the Showreel group: shown whenever the hero is a Showreel', () => {
     expect(showreel()?.textContent).toContain(
       'Get people watching plays your film and pieces as a Showreel.'
     );
-    // A field for every reel axis the hero has (WP-5a added reel-edge).
+    // A field for every reel axis the hero has (WP-5a added reel-edge, WP-5b
+    // reel-push).
     const reelAxes = HERO_OPTION_KEYS.filter((key) => key.startsWith('reel-'));
     expect(
       [...(showreel()?.querySelectorAll('.hero-designer__field') ?? [])].map(
@@ -224,6 +225,38 @@ describe('the options', () => {
     option('reel-edge', 'Outline').click();
     flushSync();
     expect(light()['hero-opt-reel-edge']).toBe('outline');
+  });
+
+  test('the surface offers the owner’s three over the footage, and no halftone (5b)', () => {
+    render({ 'hero-opt-purpose': 'consume' });
+    const names = [
+      ...document.querySelectorAll(
+        '.hero-designer__field[data-key="reel-surface"] [role="radio"]'
+      ),
+    ].map((radio) => radio.textContent?.trim());
+    expect(names).toEqual([
+      'Auto',
+      'None',
+      'Duotone',
+      'Your colour',
+      'Film grain',
+    ]);
+    option('reel-surface', 'Duotone').click();
+    flushSync();
+    expect(light()['hero-opt-reel-surface']).toBe('duotone');
+  });
+
+  test('Pictures push in slowly or hold still, and writes the choice (5b)', () => {
+    render({ 'hero-opt-purpose': 'consume' });
+    const names = [
+      ...document.querySelectorAll(
+        '.hero-designer__field[data-key="reel-push"] [role="radio"]'
+      ),
+    ].map((radio) => radio.textContent?.trim());
+    expect(names).toEqual(['Auto', 'Push in slowly', 'Hold still']);
+    option('reel-push', 'Hold still').click();
+    flushSync();
+    expect(light()['hero-opt-reel-push']).toBe('off');
   });
 
   test('a brand colour that cannot keep its floor over film is warned of', () => {
