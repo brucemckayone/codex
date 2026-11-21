@@ -249,7 +249,9 @@ describe('the options', () => {
         { 'hero-opt-purpose': 'consume', 'player-text': '#CB213C' },
         { backgroundColor: '#0F0000' }
       );
-      expect(warning()).toContain('This colour is hard to read over film');
+      expect(warning()).toContain(
+        'Your player text colour is hard to read over film'
+      );
       expect(warning()).toContain(
         "On your light theme's background it reaches 3.75:1"
       );

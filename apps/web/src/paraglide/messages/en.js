@@ -10479,7 +10479,7 @@ export const branding_hero_reel_edge_outline = () => `Outline`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_ink_warning_title = () => `This colour is hard to read over film`
+export const branding_hero_reel_ink_warning_title = () => `Your player text colour is hard to read over film`
 
 
 /**
