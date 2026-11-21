@@ -242,7 +242,6 @@ export function serialiseLayers(layers: readonly EditedLayer[]): string | null {
     .join(',');
 }
 
-/** The stack and every layer item, as `readStack` reads them. */
 /**
  * A stack as a brand's tokens name it: its frame is always a brand frame
  * (`isBrandFrameId`), never one of the Showreel's film frames, which only the
@@ -252,6 +251,7 @@ export interface BrandStackConfig extends StackConfig {
   readonly frame: BrandFrameId;
 }
 
+/** The stack and every layer item, as `readStack` reads them. */
 export interface StackReading {
   readonly stack: BrandStackConfig;
   readonly items: readonly LayerItem[];

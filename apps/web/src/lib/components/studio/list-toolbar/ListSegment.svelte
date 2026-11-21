@@ -56,8 +56,11 @@
     const radios = [
       ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="radio"]'),
     ];
-    const from = radios.indexOf(event.target as HTMLElement);
-    const to = ((from === -1 ? 0 : from + step) + options.length) % options.length;
+    // From the focused option, or, with the group itself focused (a click on
+    // its gap, a script's focus), from the tab stop: never from the first.
+    const focused = radios.indexOf(event.target as HTMLElement);
+    const from = focused === -1 ? options.findIndex((option) => option.value === tabStop) : focused;
+    const to = (from + step + options.length) % options.length;
     onSelect(options[to].value);
     radios[to]?.focus();
   }

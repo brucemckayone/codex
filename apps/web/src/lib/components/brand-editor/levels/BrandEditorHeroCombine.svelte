@@ -71,6 +71,8 @@
   }
 
   const { base, overrides, readControl, onControl }: Props = $props();
+  /** The section's name: one per mount, so two Combines never share an id. */
+  const titleId = $props.id();
 
   /** A message, called at render so it reads in the visitor's language. */
   type Words = () => string;
@@ -226,8 +228,8 @@
   const value = (e: Event) => Number((e.target as HTMLInputElement).value);
 </script>
 
-<section class="combine" aria-labelledby="combine-title">
-  <span class="combine__title" id="combine-title">{m.branding_combine_title()}</span>
+<section class="combine" aria-labelledby={titleId}>
+  <span class="combine__title" id={titleId}>{m.branding_combine_title()}</span>
   <div class="combine__group">
     <p class="combine__hint">{m.branding_combine_lede({ preset: baseLabel })}</p>
 
@@ -466,6 +468,12 @@
 
   .combine__tune[open] summary {
     margin-block-end: var(--space-2);
+  }
+
+  /* Its own ring, as the rail's other controls draw it (R14). */
+  .combine__tune summary:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   .combine__layer {
