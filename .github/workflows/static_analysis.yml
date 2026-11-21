@@ -152,6 +152,20 @@ jobs:
       - name: Shader gate self-test
         run: pnpm --filter web run shaders:check:test
 
+      # Codex-1yd58 WP-6: the Showreel's 480 film passes (each film frame with
+      # every motion effect), as text: no effect declares its own uniform,
+      # none reads one the compositor never sets, no two share a pass id (the
+      # program cache key), no flashing effect reads the real clock. Planted
+      # cases first, then the REAL passes, bundled with esbuild and checked
+      # with no glslang, so a registry fault fails here in seconds. The
+      # shader gate below runs these checks again and compiles every pass.
+      # See apps/web/scripts/shader-gate.mjs.
+      - name: Film pass gate self-test
+        run: pnpm --filter web run shaders:gate:test
+
+      - name: Film pass gate (the real passes, as text)
+        run: pnpm --filter web run shaders:gate
+
       - name: Install glslang (GLSL compiler for the shader gate)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glslang-tools
 

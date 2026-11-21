@@ -11,6 +11,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "shaders:check": "node scripts/validate-shaders.mjs",
+    "shaders:gate": "node scripts/shader-gate.mjs",
+    "shaders:gate:test": "node --test scripts/shader-gate.test.mjs",
     "shaders:check:test": "node --test scripts/glsl-source.test.mjs",
     "test:e2e": "playwright test --project=e2e",
     "test:e2e:ui": "playwright test --ui",

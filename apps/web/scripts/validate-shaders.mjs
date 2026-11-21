@@ -20,6 +20,8 @@
  *   node apps/web/scripts/validate-shaders.mjs flow ink  # only these
  *   node apps/web/scripts/validate-shaders.mjs compositor # only the
  *                                     # compositor's passes (Codex-1yd58.4)
+ *                                     # and the Showreel's film passes,
+ *                                     # every motion composed (Codex-1yd58.7)
  *
  * Exit code 0 means every shader compiled. Non-zero prints the offending
  * shader, the glslang diagnostic, and the source line it points at.
@@ -44,7 +46,14 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reversedSmoothsteps, stripComments } from './glsl-source.mjs';
+import {
+  declaredUniforms,
+  reversedSmoothsteps,
+  stripComments,
+  uniformDeclarations,
+} from './glsl-source.mjs';
+import { loadEsbuild } from './load-esbuild.mjs';
+import { bundleFilmPasses, filmGateProblems } from './shader-gate.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SHADER_DIR = path.resolve(
@@ -52,29 +61,7 @@ const SHADER_DIR = path.resolve(
   '../src/lib/components/ui/ShaderHero/shaders'
 );
 
-/**
- * esbuild is not a direct dependency of `apps/web` — it arrives transitively
- * through Vite. Resolving it via Vite's own require path avoids adding a
- * devDependency (and so avoids touching package.json / the lockfile) while
- * still using the exact esbuild the app builds with.
- */
-async function loadEsbuild() {
-  const req = createRequire(path.join(HERE, '../package.json'));
-  const candidates = ['esbuild', 'vite'];
-  for (const from of candidates) {
-    try {
-      const base =
-        from === 'esbuild' ? req.resolve('esbuild') : req.resolve('vite');
-      const inner = createRequire(base);
-      return await import(`file://${inner.resolve('esbuild')}`);
-    } catch {
-      // Try the next resolution root.
-    }
-  }
-  throw new Error(
-    'Could not resolve esbuild (tried apps/web and via vite). Run `pnpm install`.'
-  );
-}
+// `loadEsbuild` lives in load-esbuild.mjs, shared with shader-gate.mjs.
 
 /**
  * `#version 300 es` shaders are ESSL3. glslang needs to be told the stage; it
@@ -283,9 +270,11 @@ async function main() {
   }
   const esbuild = await loadEsbuild();
 
-  // `compositor` alone checks only the compositor's passes.
+  // `compositor` alone checks only the compositor's passes, the Showreel's
+  // film passes among them.
   if (filter.length > 0 && filter.every((f) => f === 'compositor')) {
     await checkCompositor(esbuild);
+    await checkFilmPasses(esbuild);
     return;
   }
 
@@ -450,6 +439,7 @@ async function main() {
 
   if (filter.length === 0 || filter.includes('compositor')) {
     await checkCompositor(esbuild);
+    await checkFilmPasses(esbuild);
   }
 }
 
@@ -463,22 +453,7 @@ const REGISTRY = path.resolve(
  */
 const MIN_EFFECTS = 28;
 
-/**
- * Every uniform a GLSL source declares, as `[name, type]` (comments stripped
- * first).
- */
-function uniformDeclarations(source) {
-  return [
-    ...stripComments(source).matchAll(
-      /^\s*uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(\w+)\s+(\w+)/gm
-    ),
-  ].map(([, type, name]) => [name, type]);
-}
-
-/** Every uniform name a GLSL source declares. */
-function declaredUniforms(source) {
-  return uniformDeclarations(source).map(([name]) => name);
-}
+// `uniformDeclarations` and `declaredUniforms` live in glsl-source.mjs.
 
 const WEBGL_UTILS = path.resolve(
   HERE,
@@ -930,6 +905,55 @@ async function checkCompositor(esbuild) {
           (effect) => effect.axis === 'layer' || effect.axis === 'media'
         ),
         assembleEffect
+      );
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The Showreel's film passes (Codex-1yd58.7, WP-6): each film frame composed
+ * with every motion effect (`everyFilmPass`, 480 passes), assembled exactly
+ * as the compositor assembles it (`assembleFilmPass`), must pass the text
+ * checks (`filmGateProblems`, shader-gate.mjs, which CI also runs without
+ * glslang), then compile.
+ */
+async function checkFilmPasses(esbuild) {
+  const work = mkdtempSync(path.join(tmpdir(), 'glsl-film-'));
+  try {
+    let film;
+    try {
+      film = await bundleFilmPasses(esbuild, work);
+    } catch (err) {
+      fail(`\n✖ film passes\n  could not bundle/import: ${err.message}`);
+      return;
+    }
+    const problems = filmGateProblems(film);
+    for (const { name, message } of problems) fail(`\n✖ ${name}: ${message}`);
+    let failed = problems.length > 0;
+    for (const pass of film.passes) {
+      const source = film.assemble(pass);
+      const scratch = path.join(
+        work,
+        `film-${pass.id.replace(/[^\w-]/g, '_')}.frag`
+      );
+      writeFileSync(scratch, source, 'utf8');
+      try {
+        execFileSync('glslangValidator', ['-S', 'frag', scratch], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (err) {
+        const diagnostic = `${err.stdout ?? ''}${err.stderr ?? ''}`.trim();
+        failed = true;
+        fail(`\n✖ film:${pass.id}\n${diagnostic}`);
+        const line = firstErrorLine(diagnostic);
+        if (line) fail(context(source, line));
+      }
+    }
+    if (!failed) {
+      console.log(
+        `✓ ${film.passes.length} Showreel film passes compiled, every uniform set`
       );
     }
   } finally {

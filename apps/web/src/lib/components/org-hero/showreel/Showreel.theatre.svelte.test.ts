@@ -19,6 +19,7 @@ import {
 } from '$lib/org-hero/hero-config';
 import type { ReelEntry } from '$lib/org-hero/reel';
 import { PIECE_MS } from '$lib/org-hero/showreel/reel-clock.svelte';
+import { CUT_TIMING } from '$lib/org-hero/showreel/reel-reveal';
 import {
   flushSync,
   mount,
@@ -108,6 +109,11 @@ let frames: FrameRequestCallback[] = [];
 let clock = 0;
 let media = { reduced: false, desktop: true };
 let onfilm = vi.fn();
+/**
+ * A cut's fall and a frame: the words, the index and the stage take the next
+ * piece at the cut's bottom, with its picture (WP-6, review M4).
+ */
+const CUT = CUT_TIMING.outMs + 32;
 
 /** Run frames until `ms` has passed, 16 ms apart, then the words' swap. */
 function frame(ms: number) {
@@ -162,7 +168,7 @@ const go = (i: number) => {
   document
     .querySelectorAll<HTMLButtonElement>('.reel__index .reel__item')
     [i]?.click();
-  frame(1);
+  frame(CUT);
 };
 const previewButton = () => q<HTMLButtonElement>('.reel__preview');
 /** The index's button for the piece now playing, as the owner's decision names it. */
@@ -280,6 +286,9 @@ describe('The Showreel opens its theatre', () => {
       'Preview with sound'
     );
     go(2);
+    // A pick in the last cut's rise waits for it (a cut never turns round,
+    // WCAG 2.3.1); the words come in with the picture (WP-6).
+    frame(CUT_TIMING.inMs + CUT);
     // An essay has nothing to hear.
     expect(previewButton()).toBeNull();
   });
@@ -295,6 +304,7 @@ describe('The Showreel opens its theatre', () => {
     // The control: closed, the same frames move it on.
     q<HTMLButtonElement>('.theatre__round[data-role="close"]')?.click();
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(current()).toBe('Drum Journey');
   });
 
@@ -317,7 +327,7 @@ describe('The Showreel opens its theatre', () => {
     render();
     q<HTMLButtonElement>('.reel__btn')?.click();
     seen.read()?.onended?.('end');
-    frame(1);
+    frame(CUT);
     expect(q('.theatre')).toBeNull();
     expect(current()).toBe('Drum Journey');
 
@@ -429,6 +439,7 @@ describe('The Showreel opens its theatre', () => {
     frame(1);
     expect(document.activeElement).toBe(document.body);
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(current()).not.toBe(before);
   });
 
@@ -447,7 +458,7 @@ describe('The Showreel opens its theatre', () => {
           })
         );
       }
-      frame(1);
+      frame(CUT);
     };
     q<HTMLButtonElement>('.reel__btn')?.click();
     press(q('.theatre__player video') as Element);

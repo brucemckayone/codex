@@ -63,6 +63,7 @@
   import { prefersSavingData, reelMode } from '$lib/org-hero/showreel/playback';
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
   import { reelMedia } from '$lib/org-hero/showreel/reel-media';
+  import { useReelMotion } from '$lib/org-hero/showreel/reel-motion.svelte';
   import { pieceSeconds } from '$lib/org-hero/showreel/reel-push';
   import {
     FIRST_PAINT,
@@ -90,6 +91,7 @@
     wordRoom,
   } from '$lib/org-hero/showreel/reel-scrim';
   import { type ReelWords, reelWords } from '$lib/org-hero/showreel/reel-words';
+  import { drawTitleMask } from '$lib/org-hero/showreel/title-mask';
   import { logger } from '$lib/observability';
   import { type TheatreItem, theatreFor } from '$lib/org-hero/showreel/theatre';
   import { themeState } from '$lib/theme.svelte';
@@ -227,9 +229,13 @@
   let shownKey = $state(untrack(() => keys[0] ?? ''));
   const shown = $derived(Math.max(0, keys.indexOf(shownKey)));
   let swap = $state<'' | 'out' | 'in'>('');
+  // The entry the words wait to show: they come in with its picture, at the
+  // cut's bottom (WP-6, the motion's effect below), never over the last one.
+  let due = $state<string | null>(null);
   $effect(() => {
     const target = keys[clock.index] ?? '';
     const on = untrack(() => shownKey);
+    due = null;
     if (target === on) {
       // Back where the words already are, before they went out (two quick
       // picks): bring them back in.
@@ -238,15 +244,15 @@
       });
       return;
     }
-    // Still, or the entry on show has left the reel: show where the clock is.
+    // Still, or the entry on show has left the reel: no swap, the words
+    // change with the picture.
     if (!clock.moves || reducedMotion.current || !keys.includes(on)) {
-      shownKey = target;
+      due = target;
       return;
     }
     swap = 'out';
     const timer = setTimeout(() => {
-      shownKey = target;
-      swap = 'in';
+      due = target;
     }, OUT_MS);
     return () => clearTimeout(timer);
   });
@@ -254,13 +260,15 @@
   // the stills' push-in on the footage alone, the push-in by the reel's own
   // clock (it holds when the reel does). A reel held still pushes none in.
   // The push reads the piece ON SHOW (review M1r2): the clock moves on
-  // OUT_MS before the words and the stage do, and until they follow, the
-  // still on show keeps its last reading (its full push), never the next
-  // piece's 0 under the old picture. The next starts about OUT_MS in.
+  // before the words and the stage do, and until they follow, the still on
+  // show keeps its last reading (its full push), never the next piece's 0
+  // under the old picture. They follow at the cut's bottom (WP-6, review
+  // M4), so the next starts about the cut's fall in, out of sight there.
   // A push restarts only when the piece on show CHANGES (review M1r3): a
   // reel of one goes round to the same piece (`go(0)`), and a visitor may
-  // re-pick the piece on show, and either zeroes the clock under the same
-  // still. On the same piece the push holds what it has reached.
+  // re-pick the piece on show or go back to it mid-fall (WP-6 r2 R2-M3);
+  // each zeroes the clock under the same still. On the same piece the push
+  // holds what it has reached.
   // Canvas (`pieceSeconds`) and page (`--_push-progress`) read this one.
   let pushProgress = 0;
   let pushKey = '';
@@ -426,6 +434,38 @@
       onScreen
   );
 
+  // ── motion (WP-6): the hero's four motion settings, in the window's shader ──
+  // The logic is the hook's (`reel-motion.svelte.ts`). The stage shows the
+  // piece it names: the one going out until the cut's bottom.
+  const reelMotion = useReelMotion({
+    options: () => options,
+    frame: () => look.frame,
+    root: () => rootEl,
+    keys: () => keys,
+    index: () => clock.index,
+    paused: () => clock.paused || pressed || !onScreen,
+    moves: () => moves,
+    phone: () => !desktop.current,
+    reducedMotion: () => reducedMotion.current,
+    filmPlaying: () => filmPlaying,
+  });
+  // The words come in when the stage shows their piece (review M4): at the
+  // cut's bottom, never over the piece going out. With no stage named yet
+  // (the hook not run), as soon as they are out.
+  $effect(() => {
+    const key = due;
+    if (key === null) return;
+    const at = reelMotion.stage;
+    const staged = at === null ? null : (keys[at] ?? null);
+    if (staged !== null && staged !== key) return;
+    untrack(() => {
+      due = null;
+      if (shownKey === key) return;
+      shownKey = key;
+      if (swap === 'out') swap = 'in';
+    });
+  });
+
   // ── holds: the pointer over the words, index or strip; focus; a press ──
   function hover(on: boolean) {
     return (event: PointerEvent) => {
@@ -565,6 +605,35 @@
     };
   });
   $effect(() => () => showreelFeed.setNameMask(null));
+
+  // ── the title as the film's window on Corner and Wide (WP-6, owner 2026-11-21) ──
+  // "Through the name" runs on every layout: there the big title's words are
+  // the letters (`title-mask.ts`). The Name window's mask stays the effect
+  // above's: this one never draws on that layout, and draws after it.
+  const titleWindow = $derived(
+    layout !== 'name' && (options['reel-opening'] === 'name' || options['reel-film'] === 'name')
+  );
+  $effect(() => {
+    const el = titleEl;
+    void current?.title;
+    void wideSize;
+    if (layout === 'name') return;
+    if (!titleWindow || !el) {
+      showreelFeed.setNameMask(null);
+      return;
+    }
+    // Going out: the window stays where the last title sat until the next is in.
+    if (swap === 'out') return;
+    let live = true;
+    let stop = () => {};
+    void tick().then(() => {
+      if (live) stop = refit(() => showreelFeed.setNameMask(drawTitleMask(el)));
+    });
+    return () => {
+      live = false;
+      stop();
+    };
+  });
 
   // ── contrast: the pools' least opacity for the inks as resolved ──
   let probe: CanvasRenderingContext2D | null = null;
@@ -1161,7 +1230,7 @@
   onpointerup={() => pressEnd(true)}
   onpointercancel={() => pressEnd(false)}
 >
-  <ReelStage bind:this={stage} {media} {keys} index={shown} {playing} {look} withheld={theatre?.item.kind === 'audio'} />
+  <ReelStage bind:this={stage} {media} {keys} index={reelMotion.stage ?? shown} {playing} {look} withheld={theatre?.item.kind === 'audio'} />
   <div class="reel__scrim-top" aria-hidden="true"></div>
   <div class="reel__scrim-foot" aria-hidden="true"></div>
 

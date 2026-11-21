@@ -49,3 +49,20 @@ export function reversedSmoothsteps(source) {
     .filter(([, lo, hi]) => Number.parseFloat(lo) >= Number.parseFloat(hi))
     .map(([call]) => `${call}…)`);
 }
+
+/**
+ * Every uniform a GLSL source declares, as `[name, type]` (comments stripped
+ * first). An array (`uniform vec4 u_trail[24];`) is its name.
+ */
+export function uniformDeclarations(source) {
+  return [
+    ...stripComments(source).matchAll(
+      /^\s*uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(\w+)\s+(\w+)/gm
+    ),
+  ].map(([, type, name]) => [name, type]);
+}
+
+/** Every uniform name a GLSL source declares. */
+export function declaredUniforms(source) {
+  return uniformDeclarations(source).map(([name]) => name);
+}

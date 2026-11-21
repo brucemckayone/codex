@@ -133,7 +133,7 @@
         { key: 'reel-layout', label: m.branding_hero_field_reel_layout, values: { corner: m.branding_hero_reel_layout_corner, wide: m.branding_hero_reel_layout_wide, name: m.branding_hero_reel_layout_name } },
         { key: 'reel-peek', label: m.branding_hero_field_reel_peek, values: { on: m.branding_hero_reel_peek_on, off: m.branding_hero_reel_peek_off } },
         { key: 'reel-pointer', label: m.branding_hero_field_reel_pointer, values: { liquid: m.branding_hero_reel_pointer_liquid, smoke: m.branding_hero_reel_pointer_smoke, glitch: m.branding_hero_reel_pointer_glitch, none: m.branding_hero_none } },
-        { key: 'reel-trans', label: m.branding_hero_field_reel_trans, values: { burn: m.branding_hero_reel_trans_burn, liquid: m.branding_hero_reel_trans_liquid, glitch: m.branding_hero_reel_trans_glitch } },
+        { key: 'reel-trans', label: m.branding_hero_field_reel_trans, values: { burn: m.branding_hero_reel_trans_burn, liquid: m.branding_hero_reel_trans_liquid, glitch: m.branding_hero_reel_trans_glitch, 'light-leak': m.branding_hero_reel_trans_light_leak } },
         { key: 'reel-surface', label: m.branding_hero_field_reel_surface, values: { none: m.branding_hero_none, duotone: m.branding_hero_reel_surface_duotone, colour: m.branding_hero_reel_surface_colour, grain: m.branding_hero_reel_surface_grain }, needsShader: true },
         { key: 'reel-push', label: m.branding_hero_field_reel_push, values: { on: m.branding_hero_reel_push_on, off: m.branding_hero_reel_push_off } },
         { key: 'reel-band', label: m.branding_hero_field_reel_band, values: { fade: m.branding_hero_reel_band_fade, under: m.branding_hero_reel_band_under, edges: m.branding_hero_reel_band_edges, none: m.branding_hero_none }, needsShader: true },

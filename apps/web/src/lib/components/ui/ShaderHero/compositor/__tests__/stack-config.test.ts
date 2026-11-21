@@ -232,7 +232,7 @@ describe('getStackConfig', () => {
   // The film frames are the Showreel's look (WP-5): a brand naming one would
   // draw the picture and nothing of its own on every other page.
   it('never takes a film frame from the brand', () => {
-    for (const frame of ['film-fill', 'film-name']) {
+    for (const frame of ['film-fill', 'film-name', 'film-portrait']) {
       document.body.innerHTML = '';
       layout({ '--brand-shader-frame': frame });
       expect(getStackConfig(undefined, 'flow').frame).toBe('shader-only');

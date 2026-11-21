@@ -10,7 +10,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { reversedSmoothsteps, stripComments } from './glsl-source.mjs';
+import {
+  declaredUniforms,
+  reversedSmoothsteps,
+  stripComments,
+  uniformDeclarations,
+} from './glsl-source.mjs';
 
 const glsl = (body) =>
   `#version 300 es\nprecision highp float;\nvoid main() {\n${body}\n}\n`;
@@ -68,6 +73,29 @@ describe('stripComments', () => {
     assert.equal(
       stripComments('const u = "https://x"; // note\nf(); /* b */ g();'),
       'const u = "https://x"; \nf();   g();'
+    );
+  });
+});
+
+describe('uniformDeclarations and declaredUniforms', () => {
+  test('read plain, qualified and array declarations', () => {
+    const source =
+      'uniform float u_a;\n  uniform highp vec2 u_b;\nuniform vec4 u_trail[24];\nuniform sampler2D u_scene;';
+    assert.deepEqual(declaredUniforms(source), [
+      'u_a',
+      'u_b',
+      'u_trail',
+      'u_scene',
+    ]);
+    assert.deepEqual(uniformDeclarations(source)[2], ['u_trail', 'vec4']);
+  });
+
+  test('skip commented declarations', () => {
+    assert.deepEqual(
+      declaredUniforms(
+        '// uniform float u_a;\n/*\nuniform float u_b;\n*/\nuniform float u_c;'
+      ),
+      ['u_c']
     );
   });
 });

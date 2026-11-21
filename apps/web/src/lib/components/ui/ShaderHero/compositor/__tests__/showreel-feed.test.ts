@@ -3,6 +3,9 @@
  * film before any compositor exists, and tells its one reader what changed.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { STILL_MOTION } from '../effects/motion-ids';
+import { restMotion } from '../effects/motion-uniforms';
+import type { FilmMotion } from '../film-motion';
 import { showreelFeed } from '../showreel-feed';
 import { stageBoxFrom } from '../stage';
 
@@ -12,6 +15,45 @@ afterEach(() => {
   showreelFeed.setStage(null);
   showreelFeed.setNameMask(null);
   showreelFeed.setLook(null);
+  showreelFeed.setMotion(null);
+});
+
+// WP-6 (Codex-1yd58.7): the motion is the Showreel's `FilmMotion`, its
+// values written in place each frame; a frame they moved is its own word.
+describe('showreelFeed motion', () => {
+  const motion = (): FilmMotion => ({
+    choice: STILL_MOTION,
+    values: restMotion(),
+    running: null,
+  });
+
+  it('holds the motion the Showreel sets, and says so once per new one', () => {
+    const changed = vi.fn();
+    showreelFeed.onChange(changed);
+    const first = motion();
+    showreelFeed.setMotion(first);
+    // The same object again (its values moved in place): no change.
+    showreelFeed.setMotion(first);
+    expect(showreelFeed.motion).toBe(first);
+    const next = motion();
+    showreelFeed.setMotion(next);
+    showreelFeed.setMotion(null);
+    showreelFeed.setMotion(null);
+    expect(changed.mock.calls).toEqual([['motion'], ['motion'], ['motion']]);
+    expect(showreelFeed.motion).toBeNull();
+  });
+
+  it('says a frame moved only while it holds a motion', () => {
+    const changed = vi.fn();
+    showreelFeed.onChange(changed);
+    showreelFeed.motionFrame();
+    expect(changed).not.toHaveBeenCalled();
+    showreelFeed.setMotion(motion());
+    changed.mockClear();
+    showreelFeed.motionFrame();
+    showreelFeed.motionFrame();
+    expect(changed.mock.calls).toEqual([['frame'], ['frame']]);
+  });
 });
 
 describe('showreelFeed', () => {

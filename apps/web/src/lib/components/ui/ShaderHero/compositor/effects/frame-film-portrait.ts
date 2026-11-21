@@ -3,6 +3,19 @@ import { FILM_GLSL, FILM_UNIFORMS, SMOKE_GLSL, SMOKE_UNIFORMS } from './film';
 import { BAND_GLSL, BAND_UNIFORMS } from './film-band';
 
 /**
+ * Where a portrait film sits on a landscape stage, shared with the
+ * Showreel's film pass with its motion (`film-pass.ts`, WP-6), so the two
+ * place it alike. GLSL text placed after `FILM_GLSL`.
+ */
+export const PORTRAIT_GLSL = `// The share of the film's width its left edge fades in over.
+const float LEAD = 0.5;
+// The film's width at the stage's height, as a share of the stage's width.
+float portraitWidth() {
+  float w = u_rect.w * u_mediaSize.x / max(u_mediaSize.y, 1.0) / max(u_rect.z, 1.0);
+  return clamp(w, 0.001, 1.0);
+}`;
+
+/**
  * A portrait film or picture on a landscape stage (owner, 2026-11-21): held
  * at the stage's full height and flush right, with no frame. Its left half
  * fades in from the brand's picture, so the words on the left sit over the
@@ -25,13 +38,7 @@ export const frameFilmPortrait: FrameEffect = {
   glsl: `${FILM_GLSL}
 ${SMOKE_GLSL}
 ${BAND_GLSL}
-// The share of the film's width its left edge fades in over.
-const float LEAD = 0.5;
-// The film's width at the stage's height, as a share of the stage's width.
-float portraitWidth() {
-  float w = u_rect.w * u_mediaSize.x / max(u_mediaSize.y, 1.0) / max(u_rect.z, 1.0);
-  return clamp(w, 0.001, 1.0);
-}
+${PORTRAIT_GLSL}
 void main() {
   vec3 s = texture(u_scene, v_uv).rgb;
   vec2 local = stageLocal();

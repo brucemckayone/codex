@@ -65,8 +65,8 @@ export const HERO_OPTION_VALUES = {
   // owner, 2026-11-21)
   'reel-peek': ['on', 'off'],
   'reel-pointer': ['liquid', 'smoke', 'glitch', 'none'],
-  // between pieces
-  'reel-trans': ['burn', 'liquid', 'glitch'],
+  // between pieces; 'light-leak' is one of the owner's WP-1b picks
+  'reel-trans': ['burn', 'liquid', 'glitch', 'light-leak'],
   // a treatment over every picture and film, drawn by the shader on the
   // footage alone, tinted from the brand (owner, 2026-11-21: off by default;
   // no halftone)
