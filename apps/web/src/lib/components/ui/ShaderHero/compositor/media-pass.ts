@@ -49,8 +49,6 @@ export interface MediaContext {
   readonly reducedMotion: boolean;
   /** The piece is a picture, not footage. */
   readonly still: boolean;
-  /** Seconds since this piece's picture was attached. */
-  readonly elapsed: number;
 }
 
 /** What runs in place of `id` here, as in the plan; null: dropped. */
@@ -71,11 +69,12 @@ export function planMedia(
   const steps: MediaStep[] = [];
   if (look.push && ctx.still) {
     const push = fallen('media-push', ctx);
+    // by the reel's clock, which holds when the reel holds (review M2)
     if (push)
       steps.push({
         effect: push,
         amount: push.amount,
-        zoom: pushZoom(ctx.elapsed),
+        zoom: pushZoom(look.push()),
       });
   }
   const surface = look.surface ?? 'none';

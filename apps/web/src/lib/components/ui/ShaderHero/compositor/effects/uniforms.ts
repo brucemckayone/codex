@@ -49,6 +49,14 @@ export const UNIFORMS = {
   u_ramp: 'vec2',
   /** The stills' push-in (WP-5b): how far the piece's picture is drawn in; 1 for none. */
   u_zoom: 'float',
+  /** The surfaces' tint (WP-5b review L6): the brand's OWN primary, from its
+   *  tokens, never the shader's custom palette (`u_brandPrimary`). */
+  u_tint: 'vec3',
+  /** The duotone's dark, middle and pale (`../duotone.ts`), from the brand's
+   *  own primary and ground; none at black or white. */
+  u_toneDeep: 'vec3',
+  u_toneMid: 'vec3',
+  u_tonePale: 'vec3',
 } as const;
 
 export type UniformName = keyof typeof UNIFORMS;

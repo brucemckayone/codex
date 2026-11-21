@@ -1279,6 +1279,7 @@
   "branding_hero_showreel_lede": "How your film and featured pieces play through the shader.",
   "branding_hero_showreel_auto_note": "{purpose} plays your film and pieces as a Showreel.",
   "branding_hero_resolved_hint": "Your page shows “{value}” instead.",
+  "branding_hero_needs_shader": "Drawn by the shader. Choose one in Hero Effects to see it.",
   "branding_hero_field_reel_layout": "Layout",
   "branding_hero_reel_layout_corner": "Corner",
   "branding_hero_reel_layout_wide": "Wide title",

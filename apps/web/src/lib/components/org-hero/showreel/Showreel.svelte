@@ -54,6 +54,7 @@
   import { prefersSavingData, reelMode } from '$lib/org-hero/showreel/playback';
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
   import { reelMedia } from '$lib/org-hero/showreel/reel-media';
+  import { pieceSeconds } from '$lib/org-hero/showreel/reel-push';
   import {
     focusInk,
     glowLeaves,
@@ -195,12 +196,14 @@
   const words = $derived(reel.map((entry, i) => reelWords(entry, i, { name, description, filmDuration })));
   const media = $derived(reel.map((entry) => reelMedia(entry, mode)));
   // WP-5b: the compositor places a portrait piece, and draws the surface and
-  // the stills' push-in on the footage alone. A reel held still pushes none in.
+  // the stills' push-in on the footage alone, the push-in by the reel's own
+  // clock (it holds when the reel does). A reel held still pushes none in.
+  const pushClock = pieceSeconds(clock);
   const look = $derived<FilmLook>({
     frame: layout === 'name' ? 'film-name' : 'film-fill',
     band: options['reel-band'],
     surface: options['reel-surface'],
-    push: options['reel-push'] === 'on' && moves,
+    push: options['reel-push'] === 'on' && moves ? pushClock : null,
   });
 
   let rootEl: HTMLElement | undefined = $state();

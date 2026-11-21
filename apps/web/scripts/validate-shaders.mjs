@@ -507,6 +507,11 @@ const IDENTITY_VALUES = {
   u_rect: [0, 0, 1, 1],
   u_fade: 1,
   u_hasMedia: 0,
+  // the surfaces' brand tint and duotone stops (WP-5b), unlike the picture
+  u_tint: [0.78, 0.12, 0.16],
+  u_toneDeep: [0.1, 0.05, 0.06],
+  u_toneMid: [0.78, 0.12, 0.16],
+  u_tonePale: [0.95, 0.81, 0.82],
 };
 
 /**

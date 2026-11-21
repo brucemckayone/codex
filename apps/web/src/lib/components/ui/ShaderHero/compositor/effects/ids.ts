@@ -80,8 +80,8 @@ export const FILM_FILL_FRAME: FilmFrameId = 'film-fill';
 /**
  * A portrait film or picture flush right at the stage's full height, its left
  * edge fading into the brand's picture (owner, 2026-11-21). No look names it:
- * the compositor puts it in `film-fill`'s place on a desktop when filling
- * would crop too much of the piece (`../portrait.ts`).
+ * the compositor puts it in `film-fill`'s place on a landscape stage when
+ * filling would crop too much of the piece (`../portrait.ts`).
  */
 export const FILM_PORTRAIT_FRAME: FilmFrameId = 'film-portrait';
 

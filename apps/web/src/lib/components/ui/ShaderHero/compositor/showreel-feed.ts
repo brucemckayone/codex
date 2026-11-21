@@ -30,7 +30,8 @@ const sameLook = (a: FilmLook, b: FilmLook): boolean =>
   a.frame === b.frame &&
   a.band === b.band &&
   (a.surface ?? 'none') === (b.surface ?? 'none') &&
-  (a.push ?? false) === (b.push ?? false);
+  // the same clock: Showreel makes one for the visit
+  (a.push ?? null) === (b.push ?? null);
 
 export const showreelFeed = {
   get media(): StageMedia | null {

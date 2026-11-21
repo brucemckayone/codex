@@ -49,6 +49,7 @@ import {
   type FBO,
   VERTEX_SHADER,
 } from '../webgl-utils';
+import { duotoneStops } from './duotone';
 import type { Effect } from './effects/effect';
 import {
   FILM_PORTRAIT_FRAME,
@@ -243,10 +244,12 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
 
   let media: MediaSlot | null = null;
   let mediaTex: WebGLTexture | null = null;
-  /** The frame time this media was first drawn at: the push-in's start. */
-  let mediaSince: number | null = null;
   /** The targets the passes over the media draw into (WP-5b). */
   const mediaRunner = createMediaRunner();
+  /** The look and piece a target could not be made for: not tried again
+   *  until either changes, so a driver out of memory is not asked each
+   *  frame (review L7). */
+  let treatRefused: { look: FilmLook | null; el: StageMedia } | null = null;
   let stage: StageBox | null = null;
   let look: FilmLook | null = null;
   /** The last stack given the look's film frame, kept so the plan's cache
@@ -282,7 +285,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
   function filmFrame(f: CompositeFrame): FilmFrameId | null {
     if (!media || !look) return null;
     const [, , w, h] = stagePx(f);
-    return placedFrame(look.frame, [w, h], mediaSize(), f.phone);
+    return placedFrame(look.frame, [w, h], mediaSize());
   }
 
   function passFor(effect: Effect): Pass | null {
@@ -485,6 +488,8 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       if (mediaTex) gl.deleteTexture(mediaTex);
     }
     mediaRunner.drop(deleteThem ? (target) => destroyFBO(gl, target) : null);
+    // a restored context may well have the memory a lost one had not
+    treatRefused = null;
     passes.clear();
     quad = null;
     a = b = ping = pong = null;
@@ -605,7 +610,8 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       current.frame.uniforms.includes('u_media') &&
       stageVisible(rect, ow, oh, fade) &&
       uploadMedia();
-    const { colors } = f.baseConfig;
+    const { colors, brand } = f.baseConfig;
+    const [toneDeep, toneMid, tonePale] = duotoneStops(brand.primary, brand.bg);
     const values: SharedValues = {
       u_pointer: [f.mouse.x, f.mouse.y],
       u_brandPrimary: colors.primary,
@@ -619,6 +625,11 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       u_band: look ? BAND_CODE[look.band] : 0,
       u_ramp: bandRamp(look?.band ?? 'none', f.phone),
       u_zoom: 1,
+      // the surfaces tint from the brand's own tokens (review L6)
+      u_tint: brand.primary,
+      u_toneDeep: toneDeep,
+      u_toneMid: toneMid,
+      u_tonePale: tonePale,
     };
     // Drawn before u_media is bound, so no unit holds a target it draws into.
     const placed = current.frame.id === FILM_PORTRAIT_FRAME;
@@ -630,8 +641,9 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
 
   /**
    * The piece's picture with the look's push-in and surface drawn on it
-   * (`media-pass.ts`), or null to show it as it is: no look asks for either,
-   * or a target could not be made (logged once, and the film still shows).
+   * (`media-pass.ts`), or null to show it as it is: no look asks for either
+   * (its targets freed), or a target could not be made (logged once, the
+   * film still shows, and not tried again for this look and piece).
    */
   function treatMedia(
     f: CompositeFrame,
@@ -640,14 +652,18 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     values: SharedValues
   ): WebGLTexture | null {
     if (!media || !mediaTex) return null;
-    mediaSince ??= f.time;
+    if (treatRefused?.look === look && treatRefused.el === media.el) {
+      return null;
+    }
     const steps = planMedia(look, {
       phone: f.phone,
       reducedMotion: f.reducedMotion,
       still: !isVideo(media.el),
-      elapsed: f.time - mediaSince,
     });
-    if (steps.length === 0) return null;
+    if (steps.length === 0) {
+      freeTreated();
+      return null;
+    }
     const size = treatedSize(mediaSize(), [rect[2], rect[3]], f.output, placed);
     try {
       return mediaRunner.run(steps, mediaTex, size, {
@@ -665,8 +681,17 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       });
     } catch (thrown) {
       failed('targets', thrown);
+      treatRefused = { look, el: media.el };
+      freeTreated();
       return null;
     }
+  }
+
+  /** Delete the treated picture's targets (only forget them when lost). */
+  function freeTreated() {
+    mediaRunner.drop(
+      gl.isContextLost() ? null : (target) => destroyFBO(gl, target)
+    );
   }
 
   /** A blended with B into ping. The picture so far: ping, or A unblended. */
@@ -771,8 +796,11 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       media = null;
       if (mediaTex && !gl.isContextLost()) gl.deleteTexture(mediaTex);
       mediaTex = null;
-      mediaSince = null;
-      if (!next) return;
+      if (!next) {
+        // the film detached: its treated picture goes with it (review L7)
+        freeTreated();
+        return;
+      }
       media = {
         el: next,
         fresh: true,

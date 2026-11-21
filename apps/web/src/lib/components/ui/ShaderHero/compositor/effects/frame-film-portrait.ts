@@ -3,14 +3,14 @@ import { FILM_GLSL, FILM_UNIFORMS, SMOKE_GLSL, SMOKE_UNIFORMS } from './film';
 import { BAND_GLSL, BAND_UNIFORMS } from './film-band';
 
 /**
- * A portrait film or picture on a desktop (owner, 2026-11-21): held at the
- * stage's full height and flush right, with no frame. Its left half fades in
- * from the brand's picture, so the words on the left sit over the shader and
- * no edge or column shows. The band gives way as in `film-fill`.
+ * A portrait film or picture on a landscape stage (owner, 2026-11-21): held
+ * at the stage's full height and flush right, with no frame. Its left half
+ * fades in from the brand's picture, so the words on the left sit over the
+ * shader and no edge or column shows. The band gives way as in `film-fill`.
  *
  * No look names it: the compositor draws it in `film-fill`'s place when
- * filling would crop more than 40% of a piece narrower than the stage
- * (`../portrait.ts`). The film is contained, never stretched or cropped.
+ * filling would crop more than 40% of a portrait piece (`../portrait.ts`).
+ * The film is contained, never stretched or cropped.
  */
 export const frameFilmPortrait: FrameEffect = {
   id: 'film-portrait',
@@ -18,9 +18,9 @@ export const frameFilmPortrait: FrameEffect = {
   label: 'The film flush right, fading in from the left',
   uniforms: [...FILM_UNIFORMS, ...SMOKE_UNIFORMS, ...BAND_UNIFORMS],
   amount: 1,
-  // A phone fills its stage: the plan never reaches here there, but a frame
-  // must name one of its own axis.
-  phoneFallback: 'film-fill',
+  // The stage's shape decides, not the device (review L4): a phone held
+  // sideways is placed as a desktop is.
+  phoneFallback: 'film-portrait',
   reducedMotionFallback: 'film-portrait',
   glsl: `${FILM_GLSL}
 ${SMOKE_GLSL}

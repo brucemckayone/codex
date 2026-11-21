@@ -119,6 +119,30 @@ describe('shader palette resolution', () => {
     expectRgb(cfg.colors.secondary, [0x12 / 255, 0x34 / 255, 0x56 / 255]);
   });
 
+  it('keeps the brand’s own primary and ground beside a custom shader palette (5b L6)', () => {
+    // The Showreel's surfaces over the footage tint from these: the brand
+    // tokens, never the shader's own palette.
+    const el = mountLayout({
+      '--color-brand-primary': '#ff0000',
+      '--brand-bg': '#ffffff',
+      '--brand-shader-use-custom-colors': '1',
+      '--brand-shader-color-primary': '#008080',
+      '--brand-shader-color-bg': '#123456',
+    });
+
+    const cfg = getShaderConfig(el, 'ripple');
+
+    expectRgb(cfg.colors.primary, [0, 128 / 255, 128 / 255]);
+    expectRgb(cfg.brand.primary, [1, 0, 0]);
+    expectRgb(cfg.brand.bg, [1, 1, 1]);
+  });
+
+  it('keeps the platform defaults as the brand’s own with no brand set', () => {
+    const cfg = getShaderConfig(mountLayout({}), 'ripple');
+    expectRgb(cfg.brand.primary, PLATFORM_DEFAULT_PRIMARY);
+    expectRgb(cfg.brand.bg, PLATFORM_DEFAULT_BG);
+  });
+
   it('ignores custom colours while the flag is off', () => {
     // REGRESSION GUARD. The brand editor's colour inputs always hold a value,
     // so the shader-color-* keys can be present while the creator has chosen

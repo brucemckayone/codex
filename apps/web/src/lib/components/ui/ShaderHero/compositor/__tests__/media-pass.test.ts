@@ -22,8 +22,9 @@ const DESK: MediaContext = {
   phone: false,
   reducedMotion: false,
   still: true,
-  elapsed: 0,
 };
+/** The reel's clock, `s` seconds into the piece. */
+const at = (s: number) => () => s;
 
 const ids = (steps: readonly MediaStep[]) => steps.map((s) => s.effect.id);
 
@@ -54,16 +55,16 @@ describe('planMedia', () => {
     expect(planMedia({ frame: 'film-fill', band: 'fade' }, DESK)).toEqual([]);
     expect(
       planMedia(
-        { frame: 'film-fill', band: 'fade', surface: 'none', push: false },
+        { frame: 'film-fill', band: 'fade', surface: 'none', push: null },
         DESK
       )
     ).toEqual([]);
   });
 
-  it('pushes in a still, at the zoom for its time on screen', () => {
+  it('pushes in a still, at the zoom for how far the reel has played it', () => {
     const steps = planMedia(
-      { frame: 'film-fill', band: 'fade', push: true },
-      { ...DESK, elapsed: 3 }
+      { frame: 'film-fill', band: 'fade', push: at(3) },
+      DESK
     );
     expect(ids(steps)).toEqual(['media-push']);
     expect(steps[0].zoom).toBe(pushZoom(3));
@@ -73,7 +74,7 @@ describe('planMedia', () => {
   it('pushes in no film: footage moves on its own', () => {
     expect(
       planMedia(
-        { frame: 'film-fill', band: 'fade', push: true },
+        { frame: 'film-fill', band: 'fade', push: at(3) },
         { ...DESK, still: false }
       )
     ).toEqual([]);
@@ -81,8 +82,8 @@ describe('planMedia', () => {
 
   it('holds a still under reduced motion, and keeps its surface', () => {
     const steps = planMedia(
-      { frame: 'film-fill', band: 'fade', push: true, surface: 'duotone' },
-      { ...DESK, reducedMotion: true, elapsed: 5 }
+      { frame: 'film-fill', band: 'fade', push: at(5), surface: 'duotone' },
+      { ...DESK, reducedMotion: true }
     );
     expect(ids(steps)).toEqual(['surface-duotone']);
   });
@@ -94,7 +95,7 @@ describe('planMedia', () => {
       ['grain', 'surface-grain'],
     ] as const) {
       const steps = planMedia(
-        { frame: 'film-fill', band: 'fade', push: true, surface },
+        { frame: 'film-fill', band: 'fade', push: at(0), surface },
         DESK
       );
       expect(ids(steps)).toEqual(['media-push', id]);
@@ -107,7 +108,7 @@ describe('planMedia', () => {
     const look = {
       frame: 'film-fill',
       band: 'fade',
-      push: true,
+      push: at(1),
       surface: 'grain',
     } as const;
     expect(ids(planMedia(look, { ...DESK, phone: true }))).toEqual(
@@ -150,7 +151,7 @@ describe('createMediaRunner', () => {
     ({ tex: { tex: n } as unknown as WebGLTexture, w: 1, h: 1 }) as FBO;
   const input = { media: true } as unknown as WebGLTexture;
   const steps = planMedia(
-    { frame: 'film-fill', band: 'fade', push: true, surface: 'duotone' },
+    { frame: 'film-fill', band: 'fade', push: at(0), surface: 'duotone' },
     DESK
   );
 

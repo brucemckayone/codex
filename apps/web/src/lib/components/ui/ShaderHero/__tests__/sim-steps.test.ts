@@ -41,6 +41,7 @@ const BASE = {
     accent: rgb(1, 0.6, 0.05),
     bg: rgb(0.06, 0.09, 0.17),
   },
+  brand: { primary: rgb(0.5, 0.2, 0.9), bg: rgb(0.06, 0.09, 0.17) },
 };
 const PRESETS: Record<
   string,

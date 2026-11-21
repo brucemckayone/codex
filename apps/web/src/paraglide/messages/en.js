@@ -10255,6 +10255,14 @@ export const branding_hero_resolved_hint = (params) => `Your page shows “${par
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_needs_shader = () => `Drawn by the shader. Choose one in Hero Effects to see it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_field_reel_layout = () => `Layout`
 
 

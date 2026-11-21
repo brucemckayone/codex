@@ -1,11 +1,15 @@
 /**
- * The frame rule (WP-5b, owner 2026-11-21): a portrait film or picture that
- * filling the stage would crop by more than 40% (a 9:16 preview on a desktop
- * screen; Of Blood & Bones' 720x1280 previews and 1200x1500 stills both) is
- * not cropped. It sits flush right at the stage's full height and its left
- * edge fades into the brand's picture (`effects/frame-film-portrait.ts`).
- * Desktop only: a phone's stage is portrait, so its film fills. Automatic,
- * with no setting of its own (owner, 2026-11-19, Q2).
+ * The frame rule (WP-5b, owner 2026-11-21): a PORTRAIT film or picture
+ * (taller than wide: OBB's 720x1280 previews and 1200x1500 stills) on a
+ * landscape-shaped stage, that filling would crop by more than 40%, is not
+ * cropped. It sits flush right at the stage's full height and its left edge
+ * fades into the brand's picture (`effects/frame-film-portrait.ts`).
+ *
+ * The stage's shape decides, not the device (review L4): a phone held
+ * sideways places it too; one held upright has a portrait stage, which
+ * crops it little, so it fills. A square or landscape piece always fills
+ * (review M3: the owner said portrait). Automatic, with no setting of its
+ * own (owner, 2026-11-19, Q2).
  *
  * PURE, so the rule is under test without a GL context.
  */
@@ -32,21 +36,19 @@ export function coverCrop(rect: Size, media: Size): number {
 
 /**
  * The film frame drawn for the look's `frame` with this media in this
- * stage: `film-fill` gives way to `film-portrait` on a desktop for a piece
- * narrower than the stage that filling would crop past `PORTRAIT_CROP`. A
- * wide piece (a banner) always fills: placed at the stage's height it would
- * overflow it. Every other frame is kept.
+ * stage: `film-fill` gives way to `film-portrait` for a portrait piece on a
+ * landscape stage that filling would crop past `PORTRAIT_CROP`. Every other
+ * frame is kept.
  */
 export function placedFrame(
   frame: FilmFrameId,
   rect: Size,
-  media: Size,
-  phone: boolean
+  media: Size
 ): FilmFrameId {
-  if (frame !== FILM_FILL_FRAME || phone) return frame;
-  const narrower =
-    media[0] / Math.max(media[1], 1) < rect[0] / Math.max(rect[1], 1);
-  return narrower && coverCrop(rect, media) > PORTRAIT_CROP
+  if (frame !== FILM_FILL_FRAME) return frame;
+  const portrait = media[1] > media[0];
+  const landscape = rect[0] > rect[1];
+  return portrait && landscape && coverCrop(rect, media) > PORTRAIT_CROP
     ? FILM_PORTRAIT_FRAME
     : frame;
 }

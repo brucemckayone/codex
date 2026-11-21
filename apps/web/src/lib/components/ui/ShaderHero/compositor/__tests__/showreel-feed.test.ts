@@ -76,6 +76,7 @@ describe('showreelFeed', () => {
   });
 
   it('names a change of surface or push-in, and reads an absent one as none (5b)', () => {
+    const seconds = () => 1;
     const changed = vi.fn();
     showreelFeed.onChange(changed);
     showreelFeed.setLook({ frame: 'film-fill', band: 'fade' });
@@ -84,7 +85,7 @@ describe('showreelFeed', () => {
       frame: 'film-fill',
       band: 'fade',
       surface: 'none',
-      push: false,
+      push: null,
     });
     showreelFeed.setLook({
       frame: 'film-fill',
@@ -100,9 +101,27 @@ describe('showreelFeed', () => {
       frame: 'film-fill',
       band: 'fade',
       surface: 'grain',
-      push: true,
+      push: seconds,
     });
-    expect(changed.mock.calls).toEqual([['look'], ['look'], ['look']]);
-    expect(showreelFeed.look).toMatchObject({ surface: 'grain', push: true });
+    // the same clock again is no change; another clock is one
+    showreelFeed.setLook({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'grain',
+      push: seconds,
+    });
+    showreelFeed.setLook({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'grain',
+      push: () => 0,
+    });
+    expect(changed.mock.calls).toEqual([
+      ['look'],
+      ['look'],
+      ['look'],
+      ['look'],
+    ]);
+    expect(showreelFeed.look).toMatchObject({ surface: 'grain' });
   });
 });
