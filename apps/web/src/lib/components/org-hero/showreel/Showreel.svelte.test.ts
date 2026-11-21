@@ -1088,7 +1088,7 @@ describe('Showreel push-in follows the piece on show (WP-5b review r2, M1r2)', (
    * Save-Data: every entry shows its still and the reel still moves on, so
    * every piece pushes in. Then 16 ms frames, the words' timer advancing
    * alongside as a browser runs them, through the first piece's end and the
-   * beat (OUT_MS) the words and the stage take to follow the clock.
+   * cut's fall the words and the stage take to follow the clock.
    */
   function throughTheCut(read: () => { el: unknown; at: number }) {
     vi.stubGlobal('navigator', {
@@ -1117,7 +1117,10 @@ describe('Showreel push-in follows the piece on show (WP-5b review r2, M1r2)', (
     let last: { el: unknown; at: number } | null = null;
     const backwards: string[] = [];
     let cut = false;
-    for (let t = 0; t < PIECE_MS + 600; t += 16) {
+    // Through the first piece's end and on to the cut, whenever it comes (at
+    // the cut's bottom since WP-6 M4), and a beat after: at most two pieces.
+    let after = 0;
+    for (let t = 0; t < PIECE_MS * 2 && after < 10; t += 16) {
       one();
       const now = read();
       if (now.el && last && last.el === now.el && now.at < last.at - 1e-9) {
@@ -1126,6 +1129,7 @@ describe('Showreel push-in follows the piece on show (WP-5b review r2, M1r2)', (
         );
       }
       if (last && last.el !== now.el) cut = true;
+      if (cut) after += 1;
       last = now;
     }
     // The cut came, and the next piece starts near 0, never a held full push.

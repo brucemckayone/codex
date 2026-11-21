@@ -270,11 +270,28 @@
   // each zeroes the clock under the same still. On the same piece the push
   // holds what it has reached.
   // Canvas (`pieceSeconds`) and page (`--_push-progress`) read this one.
+  //
+  // How far into the piece ON SHOW, the one reading both follow: the
+  // clock's while it is on that piece; until the words and the stage follow
+  // it to the next, the last, so the index's bar and the phone's segment
+  // stay with their highlight through the cut's fall (WP-6 review r2 R2-M2:
+  // the bar under the old highlight ran back to 0 and refilled). A new
+  // piece on show starts from 0 until the clock is on it. A piece played
+  // again (a reel of one, a re-pick) starts its bar again: the push alone
+  // holds what it has reached.
+  let shownProgress = 0;
+  let progressKey = '';
+  function progressOnShow(): number {
+    if (keys[clock.index] === shownKey) shownProgress = clock.progress;
+    else if (progressKey !== shownKey) shownProgress = 0;
+    progressKey = shownKey;
+    return shownProgress;
+  }
   let pushProgress = 0;
   let pushKey = '';
   function pushOnShow(): number {
-    if (keys[clock.index] !== shownKey) return pushProgress;
-    pushProgress = shownKey === pushKey ? Math.max(pushProgress, clock.progress) : clock.progress;
+    const now = progressOnShow();
+    pushProgress = shownKey === pushKey ? Math.max(pushProgress, now) : now;
     pushKey = shownKey;
     return pushProgress;
   }
@@ -337,7 +354,12 @@
     // H1, 2026-11-21: Svelte switches the branch before the render effect
     // that clears `inert`).
     flushSync();
-    const back = !moved && opener?.isConnected ? opener : nextFocus();
+    // The opener only while its words are still the clock's piece (WP-7
+    // review r4 LOW 1): pressed inside a pick's out-beat, it is fading out,
+    // and the cut's bottom takes it away (a film's button becomes a piece's
+    // link), so focus would fall to the body.
+    const theirs = keys[clock.index] === shownKey;
+    const back = !moved && theirs && opener?.isConnected ? opener : nextFocus();
     back?.focus({ preventScroll: true });
     // Firefox fires no focusout for a focused node that is removed: the
     // keyboard hold follows where focus is now, never where it was.
@@ -351,7 +373,8 @@
    * current index button"; WCAG 2.4.3); where the index is out of sight (a
    * phone's), the reel's pause. In that order, never by tree order, where
    * the pause comes first (WP-7 review r2). By the clock, since the index's
-   * `aria-current` follows only once the words' swap lands, OUT_MS later.
+   * `aria-current` follows only once the words' swap lands, at the cut's
+   * bottom (WP-6 review M4).
    * Where checkVisibility is missing (Safari before 17.4) a stop serves as
    * Dialog's does.
    */
@@ -371,7 +394,7 @@
     const step = (now: number) => {
       c.tick(Math.min(100, now - last));
       last = now;
-      root.style.setProperty('--_progress', String(c.progress));
+      root.style.setProperty('--_progress', String(progressOnShow()));
       root.style.setProperty('--_push-progress', String(pushOnShow()));
       frame = requestAnimationFrame(step);
     };
@@ -379,17 +402,18 @@
     return () => cancelAnimationFrame(frame);
   });
   // Each piece starts its bar from 0, under a hold too (an index pick while
-  // the pointer rests on the index), when no frame writes it; and the push
-  // follows the piece on show when it changes (its own swap, out of a frame).
-  $effect(() => {
-    void clock.starts;
-    rootEl?.style.setProperty('--_progress', String(clock.progress));
-  });
+  // the pointer rests on the index), when no frame writes it; and the bar
+  // and the push follow the piece on show when it changes (its own swap,
+  // out of a frame).
   $effect(() => {
     void clock.starts;
     void shownKey;
     const root = rootEl;
-    if (root) untrack(() => root.style.setProperty('--_push-progress', String(pushOnShow())));
+    if (!root) return;
+    untrack(() => {
+      root.style.setProperty('--_progress', String(progressOnShow()));
+      root.style.setProperty('--_push-progress', String(pushOnShow()));
+    });
   });
 
   // A phone's press and hold pauses, while it lasts (owner, 2026-11-19).

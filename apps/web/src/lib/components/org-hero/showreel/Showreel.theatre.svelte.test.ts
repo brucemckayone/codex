@@ -636,3 +636,56 @@ describe("a preview's end moves the reel on only when the reel moves on (playbac
     expect(current()).toBe('The Medicine of Grief');
   });
 });
+
+/**
+ * WP-7 review round 4 (LOW 1): a theatre opened AND closed inside the
+ * out-beat of a pick the visitor just made. Since WP-6 M4 the words, and
+ * with them the film's button, follow the clock only at the cut's bottom,
+ * held at opacity 0 meanwhile. Focus went back to that fading opener, which
+ * the cut then removed (the film's button becomes the recording's link), so
+ * it fell to the body. The owner (Codex-1yd58.8): "focus returns to the
+ * opener or the current index button"; WCAG 2.4.3.
+ */
+describe('a theatre opened and closed inside the out-beat of a pick (WP-6 M4 x WP-7, review r4 LOW 1)', () => {
+  /** No ancestor in the reel drawn at opacity 0 (jsdom has no checkVisibility). */
+  const drawn = (el: Element | null) => {
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      if (getComputedStyle(n).opacity === '0') return false;
+    }
+    return !!el?.isConnected;
+  };
+
+  it('focus ends on the current index button, in sight, never on the body, once the cut lands', () => {
+    render();
+    // The visitor picks the recording: the film's words start out, held at
+    // opacity 0 until the cut's bottom.
+    document
+      .querySelectorAll<HTMLButtonElement>('.reel__index .reel__item')[1]
+      ?.click();
+    flushSync();
+    expect(q('.reel__words')?.getAttribute('data-swap')).toBe('out');
+    // Inside that beat, the film's button is still mounted, and pressed.
+    const opener = q<HTMLButtonElement>('.reel__btn') as HTMLButtonElement;
+    expect(opener.tagName).toBe('BUTTON');
+    opener.focus();
+    opener.click();
+    expect(q('.theatre')).not.toBeNull();
+    // Escape at once, still inside the beat.
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    );
+    flushSync();
+    expect(q('.theatre')).toBeNull();
+    // The cut lands: the recording's words, and its link in place of the
+    // film's button; then the words' fade-in.
+    frame(CUT_TIMING.inMs + CUT);
+    expect(current()).toBe('Drum Journey');
+    expect(opener.isConnected).toBe(false);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(currentIndexButton());
+    const focused = document.activeElement as HTMLElement;
+    expect(
+      focused.checkVisibility?.({ opacityProperty: true }) ?? drawn(focused)
+    ).toBe(true);
+  });
+});

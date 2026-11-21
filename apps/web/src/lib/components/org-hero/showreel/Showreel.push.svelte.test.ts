@@ -22,6 +22,7 @@ import {
 } from '$lib/org-hero/hero-config';
 import type { ReelEntry } from '$lib/org-hero/reel';
 import { PIECE_MS } from '$lib/org-hero/showreel/reel-clock.svelte';
+import { CUT_TIMING } from '$lib/org-hero/showreel/reel-reveal';
 import {
   flushSync,
   mount,
@@ -160,6 +161,15 @@ const onPage = (): Reading => ({
   at: Number(q('.reel')?.style.getPropertyValue('--_push-progress') || 0),
 });
 
+/** Frames until the stage shows another still than `from` (the cut's bottom), at most two pieces' worth. */
+function untilTheCut(from: unknown): boolean {
+  for (let t = 0; t < PIECE_MS * 2; t += 16) {
+    one();
+    if (onPage().el !== from) return true;
+  }
+  return false;
+}
+
 /** `ms` of frames; every frame the same still drew back out, as `t: from -> to`. */
 function backwardsOver(
   ms: number,
@@ -279,9 +289,74 @@ describe('Showreel push-in when the visitor re-picks the piece on show (WP-5b re
 
   it('still starts the next piece from the start of its push', () => {
     render(THREE);
-    for (let t = 0; t < PIECE_MS + 600; t += 16) one();
-    // The cut came (OUT_MS after the clock), and the new still starts near 0.
+    const first = onPage().el;
+    // Whenever the cut comes (the stage swaps at its bottom, WP-6 M4), the
+    // new still starts near 0: its clock has run only the cut's fall.
+    expect(untilTheCut(first)).toBe(true);
     expect(onPage().at).toBeLessThan(0.2);
     expect(onCanvas().at).toBeLessThan(0.2 * 0.08);
+  });
+});
+
+describe('Showreel push-in when the visitor goes back to the piece on show mid-cut (WP-6 review r2, R2-M3)', () => {
+  it("keeps its still's push when the clock leaves it and a pick brings it back before the cut", () => {
+    render(THREE);
+    const first = onPage();
+    // Past the first piece's end, half the cut's fall in: the clock is on
+    // the next piece, the still on show is still the first.
+    let last = first;
+    for (let t = 0; t < PIECE_MS + CUT_TIMING.outMs / 2; t += 16) {
+      one();
+      last = onPage();
+    }
+    expect(last.el).toBe(first.el);
+    expect(last.at).toBeGreaterThan(0.9);
+    // Back to it, in the fall: the clock starts it again from 0.
+    q<HTMLButtonElement>('.reel__index .reel__item')?.click();
+    expect(backwardsOver(1200, onPage, last)).toEqual([]);
+    expect(onPage().el).toBe(first.el);
+  });
+});
+
+describe("Showreel's index bars follow the piece on show (WP-6 review r2, R2-M2)", () => {
+  /** The item marked current, and how far its bar is drawn (`--_progress`). */
+  const bar = () => ({
+    on: q('.reel__index [aria-current="true"] .reel__t')?.textContent ?? '',
+    at: Number(q('.reel')?.style.getPropertyValue('--_progress') || 0),
+  });
+
+  it("never runs the current item's bar backward through a cut", () => {
+    render(THREE);
+    let last = bar();
+    const backwards: string[] = [];
+    const seen = new Set([last.on]);
+    for (let t = 0; t < PIECE_MS * 2 + 2000; t += 16) {
+      one();
+      const now = bar();
+      if (now.on === last.on && now.at < last.at - 1e-9) {
+        backwards.push(
+          `${t} ms on ${now.on}: ${last.at.toFixed(4)} -> ${now.at.toFixed(4)}`
+        );
+      }
+      seen.add(now.on);
+      last = now;
+    }
+    // Before: ['7008 ms on Of Blood & Bones: 0.9989 -> 0.0023', …], through
+    // each cut's fall, the bar refilling under the old highlight.
+    expect(backwards).toEqual([]);
+    // Two cuts came, and each new item's bar started from near 0.
+    expect(seen.size).toBe(3);
+  });
+
+  it('starts the new item from near 0 when the highlight moves', () => {
+    render(THREE);
+    const first = bar().on;
+    let now = bar();
+    while (now.on === first && clock < PIECE_MS * 2) {
+      one();
+      now = bar();
+    }
+    expect(now.on).not.toBe(first);
+    expect(now.at).toBeLessThan(0.2);
   });
 });
