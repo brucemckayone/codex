@@ -49,6 +49,7 @@ const compositor = vi.hoisted(() => ({
   setStage: vi.fn(),
   setNameMask: vi.fn(),
   setLook: vi.fn(),
+  setMotion: vi.fn(),
   // Whether a frame of the film is on the GPU (ShaderHero's `data-film`).
   mediaReady: vi.fn(() => false),
   destroy: vi.fn(),
@@ -89,6 +90,12 @@ vi.mock('../shader-config', async (importOriginal) => ({
 }));
 
 import { createCompositor } from '../compositor/compositor';
+import {
+  type MotionChoice,
+  STILL_MOTION,
+} from '../compositor/effects/motion-ids';
+import { restMotion } from '../compositor/effects/motion-uniforms';
+import type { FilmMotion } from '../compositor/film-motion';
 import { showreelFeed } from '../compositor/showreel-feed';
 import { BARE_STACK, type StackConfig } from '../compositor/stack-config';
 import { resetJFACache } from '../jfa-sdf';
@@ -1106,6 +1113,7 @@ describe('ShaderHero stack', () => {
     showreelFeed.setStage(null);
     showreelFeed.setNameMask(null);
     showreelFeed.setLook(null);
+    showreelFeed.setMotion(null);
     // A phone at DPR 3: the scene renders at DPR 1, the output at 2.
     vi.stubGlobal('devicePixelRatio', 3);
     box = { width: 390, height: 844 };
@@ -1828,6 +1836,55 @@ describe('ShaderHero stack', () => {
     const fade = { frame: 'film-fill', band: 'fade' } as const;
     showreelFeed.setLook(fade);
     expect(compositor.setLook).toHaveBeenLastCalledWith(fade);
+  });
+
+  // WP-6 (Codex-1yd58.7): the Showreel's motion reaches the compositor as
+  // its look does, and a frozen hero draws each frame the motion moves.
+  const motionOf = (choice: MotionChoice = STILL_MOTION): FilmMotion => ({
+    choice,
+    values: restMotion(),
+    running: null,
+  });
+
+  it('hands the compositor the Showreel’s motion, on attach and as it changes (WP-6)', async () => {
+    const first = motionOf();
+    showreelFeed.setMotion(first);
+    showreelFeed.setMedia(film());
+    await start({ tone: true });
+    step(1);
+    await settle();
+    expect(compositor.setMotion).toHaveBeenLastCalledWith(first);
+    // A new motion is its own message: it is no name mask.
+    const masks = compositor.setNameMask.mock.calls.length;
+    const next = motionOf({ ...STILL_MOTION, pointer: 'smoke' });
+    showreelFeed.setMotion(next);
+    expect(compositor.setMotion).toHaveBeenLastCalledWith(next);
+    expect(compositor.setNameMask).toHaveBeenCalledTimes(masks);
+    showreelFeed.setMotion(null);
+    expect(compositor.setMotion).toHaveBeenLastCalledWith(null);
+  });
+
+  it('draws a frozen hero again for each frame its motion moves, and no more (WP-6)', async () => {
+    showreelFeed.setMedia(film());
+    await start({ tone: true, still: true });
+    step(1);
+    await settle();
+    step(3);
+    const drawn = compositor.render.mock.calls.length;
+    // No motion: a motion frame is no word at all.
+    showreelFeed.motionFrame();
+    step(3);
+    expect(compositor.render).toHaveBeenCalledTimes(drawn);
+
+    showreelFeed.setMotion(motionOf());
+    step(3);
+    const still = compositor.render.mock.calls.length;
+    showreelFeed.motionFrame();
+    step(1);
+    expect(compositor.render).toHaveBeenCalledTimes(still + 1);
+    // Frozen again: nothing more until the motion moves.
+    step(3);
+    expect(compositor.render).toHaveBeenCalledTimes(still + 1);
   });
 
   // The Showreel hides its own copy of the film only while the canvas shows

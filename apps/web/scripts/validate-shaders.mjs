@@ -20,6 +20,8 @@
  *   node apps/web/scripts/validate-shaders.mjs flow ink  # only these
  *   node apps/web/scripts/validate-shaders.mjs compositor # only the
  *                                     # compositor's passes (Codex-1yd58.4)
+ *                                     # and the Showreel's film passes,
+ *                                     # every motion composed (Codex-1yd58.7)
  *
  * Exit code 0 means every shader compiled. Non-zero prints the offending
  * shader, the glslang diagnostic, and the source line it points at.
@@ -39,6 +41,11 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  declaredUniforms,
+  filmPassProblems,
+  stripComments,
+} from './shader-gate.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SHADER_DIR = path.resolve(
@@ -176,30 +183,8 @@ const AUDIO_UNIFORMS = new Set([
  */
 const IGNORED_UNIFORMS = new Set(['gl_DepthRange']);
 
-/**
- * Remove comments from TS or GLSL source before any textual presence test.
- *
- * Both directions of the coverage check need this, and both were wrong before
- * it existed:
- *  - the RENDERER side counted a uniform named in a comment as wired,
- *    including a commented-OUT upload call — the likeliest way real wiring
- *    gets disabled, so the check was blind to its own worst case;
- *  - the SHADER side counted a block-commented declaration as declared,
- *    because `^\s*uniform` matches the inner line of a `/* ... *\/` block.
- *
- * Block comments go FIRST: a `//` inside a block comment must not be treated
- * as a line comment and truncate the strip early.
- *
- * The `[^:]` guard on the line-comment pattern keeps `https://` intact, and
- * replacing with `$1` rather than `''` preserves the character before the
- * `//` — otherwise a trailing comment eats the `;` or `}` that precedes it,
- * which would break any assertion matching a statement terminator.
- */
-function stripComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
+// `stripComments` and `declaredUniforms` live in shader-gate.mjs (with why
+// comments go first), shared with the film passes' checks.
 
 /**
  * Check that every uniform a shader DECLARES is actually reachable from its
@@ -294,9 +279,11 @@ async function main() {
   const filter = process.argv.slice(2);
   const esbuild = await loadEsbuild();
 
-  // `compositor` alone checks only the compositor's passes.
+  // `compositor` alone checks only the compositor's passes, the Showreel's
+  // film passes among them.
   if (filter.length > 0 && filter.every((f) => f === 'compositor')) {
     await checkCompositor(esbuild);
+    await checkFilmPasses(esbuild);
     return;
   }
 
@@ -451,24 +438,17 @@ async function main() {
 
   if (filter.length === 0 || filter.includes('compositor')) {
     await checkCompositor(esbuild);
+    await checkFilmPasses(esbuild);
   }
 }
 
-const REGISTRY = path.resolve(
+const EFFECTS_DIR = path.resolve(
   HERE,
-  '../src/lib/components/ui/ShaderHero/compositor/effects/registry.ts'
+  '../src/lib/components/ui/ShaderHero/compositor/effects'
 );
+const REGISTRY = path.join(EFFECTS_DIR, 'registry.ts');
 /** WP-3 ships 9 effects; fewer means the registry moved or emptied. */
 const MIN_EFFECTS = 9;
-
-/** Every uniform a GLSL source declares (comments stripped first). */
-function declaredUniforms(source) {
-  return [
-    ...stripComments(source).matchAll(
-      /^\s*uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?\w+\s+(\w+)/gm
-    ),
-  ].map((m) => m[1]);
-}
 
 /**
  * The compositor's passes (Codex-1yd58.4): each effect in the registry,
@@ -561,6 +541,95 @@ async function checkCompositor(esbuild) {
     if (failures.length === 0) {
       console.log(
         `✓ ${EFFECTS.length} compositor passes compiled, every uniform set`
+      );
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The Showreel's film passes (Codex-1yd58.7, WP-6): each film frame composed
+ * with every motion effect (`everyFilmPass`, 320 passes), assembled exactly
+ * as the compositor assembles it (`assembleFilmPass`), must compile, and
+ * must pass `filmPassProblems` (shader-gate.mjs): no effect declares its own
+ * uniform, no pass reads one the compositor never sets, no two share an id.
+ *
+ * The registry is bundled through a stdin entry that re-exports the four
+ * names from their own modules, so no module needs to export them for this.
+ */
+async function checkFilmPasses(esbuild) {
+  const work = mkdtempSync(path.join(tmpdir(), 'glsl-film-'));
+  try {
+    const bundled = path.join(work, 'film-passes.mjs');
+    let mod;
+    try {
+      await esbuild.build({
+        stdin: {
+          contents: [
+            "export { assembleFilmPass, everyFilmPass } from './film-pass';",
+            "export { MOTION_EFFECTS } from './motion-registry';",
+            "export { FILM_PASS_UNIFORMS } from './motion-uniforms';",
+          ].join('\n'),
+          resolveDir: EFFECTS_DIR,
+          sourcefile: 'film-passes-entry.ts',
+          loader: 'ts',
+        },
+        outfile: bundled,
+        bundle: true,
+        format: 'esm',
+        platform: 'neutral',
+        logLevel: 'silent',
+      });
+      mod = await import(`file://${bundled}`);
+    } catch (err) {
+      fail(`\n✖ film passes\n  could not bundle/import: ${err.message}`);
+      return;
+    }
+    const { assembleFilmPass, everyFilmPass, MOTION_EFFECTS, FILM_PASS_UNIFORMS } =
+      mod;
+    if (
+      typeof assembleFilmPass !== 'function' ||
+      typeof everyFilmPass !== 'function' ||
+      !Array.isArray(MOTION_EFFECTS) ||
+      !Array.isArray(FILM_PASS_UNIFORMS)
+    ) {
+      fail(
+        '\n✖ film passes\n  exports no assembleFilmPass / everyFilmPass / MOTION_EFFECTS / FILM_PASS_UNIFORMS'
+      );
+      return;
+    }
+    const passes = everyFilmPass();
+    const problems = filmPassProblems({
+      passes,
+      assemble: assembleFilmPass,
+      settable: FILM_PASS_UNIFORMS,
+      effects: MOTION_EFFECTS,
+    });
+    for (const { name, message } of problems) fail(`\n✖ ${name}: ${message}`);
+    let failed = problems.length > 0;
+    for (const pass of passes) {
+      const source = assembleFilmPass(pass);
+      const scratch = path.join(
+        work,
+        `film-${pass.id.replace(/[^\w-]/g, '_')}.frag`
+      );
+      writeFileSync(scratch, source, 'utf8');
+      try {
+        execFileSync('glslangValidator', ['-S', 'frag', scratch], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (err) {
+        const diagnostic = `${err.stdout ?? ''}${err.stderr ?? ''}`.trim();
+        failed = true;
+        fail(`\n✖ film:${pass.id}\n${diagnostic}`);
+        const line = firstErrorLine(diagnostic);
+        if (line) fail(context(source, line));
+      }
+    }
+    if (!failed) {
+      console.log(
+        `✓ ${passes.length} Showreel film passes compiled, every uniform set`
       );
     }
   } finally {

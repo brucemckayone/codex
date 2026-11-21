@@ -184,8 +184,13 @@ describe('PointerTrail', () => {
     const puff = slot(packed, 1);
     expect(puff[1]).toBeGreaterThan(0.5);
     expect(puff[3]).toBeGreaterThan(0.09 * 1.1);
-    trail.leave();
-    expect(slot(trail.pack(1000, 'smoke', out()), 0)).toEqual([0, 0, 0, 0]);
+    // Smoke with inertia (WP-6): the head no longer vanishes with the
+    // pointer; it stays, fading, where the smoke drifted to
+    // (`reel-trail-inertia.test.ts` pins the drift and the fade).
+    trail.leave(1000);
+    const head = slot(trail.pack(1000, 'smoke', out()), 0);
+    expect(head.slice(0, 2).map((v) => +v.toFixed(4))).toEqual([0.25, 0.5]);
+    expect(head[2]).toBeGreaterThan(0);
     expect(slot(trail.pack(1000, 'smoke', out()), 1)[2]).toBeGreaterThan(0);
   });
 

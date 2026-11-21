@@ -17,6 +17,7 @@ import {
 } from '$lib/org-hero/hero-config';
 import type { ReelEntry } from '$lib/org-hero/reel';
 import { PIECE_MS } from '$lib/org-hero/showreel/reel-clock.svelte';
+import { CUT_TIMING } from '$lib/org-hero/showreel/reel-reveal';
 import {
   flushSync,
   mount,
@@ -693,6 +694,9 @@ describe('Showreel keeps what the visitor chose', () => {
     const props = render('corner', { reel: FOOTAGE });
     await settle();
     pick(2);
+    // The stage takes the picked piece at the cut's bottom (WP-6), so the
+    // film never swaps under a picture still showing the last one.
+    frame(CUT_TIMING.outMs + 32);
     await settle();
     expect(title()).toBe('River Songs');
     const playing = videoOf(2) as HTMLVideoElement;
@@ -892,6 +896,8 @@ describe('Showreel stage: the films', () => {
     expect(ahead.hasAttribute('data-framed')).toBe(true);
 
     frame(PIECE_MS + 100);
+    // The stage takes the next piece at the cut's bottom (WP-6).
+    frame(CUT_TIMING.outMs + 32);
     await settle();
     expect(current()).toBe('Bone Deep');
     // A teardown would have dropped its frame; it is what the canvas shows.

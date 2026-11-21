@@ -38,7 +38,11 @@ import type { ShaderRenderer } from '../../renderer-types';
 import type { ShaderConfig } from '../../shader-config';
 import { type CompositeFrame, createCompositor } from '../compositor';
 import type { LayerEffect } from '../effects/effect';
+import { type MotionChoice, STILL_MOTION } from '../effects/motion-ids';
+import { POINTERS } from '../effects/motion-registry';
+import { restMotion } from '../effects/motion-uniforms';
 import { FRAMES, LAYERS } from '../effects/registry';
+import type { FilmMotion } from '../film-motion';
 import { governFlash } from '../flash';
 import { BARE_STACK, type StackConfig } from '../stack-config';
 import { stageBoxFrom } from '../stage';
@@ -83,6 +87,8 @@ const GL_METHODS = new Set([
   'uniform2f',
   'uniform3f',
   'uniform4f',
+  // The film pass's trail (WP-6): an array, set in one call.
+  'uniform4fv',
   'vertexAttribPointer',
 ]);
 
@@ -953,5 +959,167 @@ describe('the Showreel look (WP-5, Codex-1yd58.6)', () => {
     expect(compositor.mediaReady()).toBe(false);
     compositor.setMedia(null);
     expect(compositor.mediaReady()).toBe(false);
+  });
+});
+
+// WP-6 (Codex-1yd58.7): with the Showreel's motion, a film frame is drawn as
+// its composed film pass, for the effects that run HERE (the compositor's
+// own phone, reduced-motion and mask), reading the values the Showreel
+// writes in place, and saying what it ran.
+describe('the Showreel motion (WP-6, Codex-1yd58.7)', () => {
+  const visible = stageBoxFrom(
+    { left: 20, top: 100, width: 350, height: 600 },
+    0,
+    600
+  );
+  const stack: StackConfig = {
+    ...BARE_STACK,
+    frame: 'shader-only',
+    layers: [],
+  };
+  /** The arguments after the location of the last `method` set on `name`. */
+  const lastSet = (
+    fake: ReturnType<typeof fakeGl>,
+    method: string,
+    name: string
+  ) =>
+    fake.calls
+      .filter(
+        ([k, a]) =>
+          k === method && (a[0] as { uniform: string } | null)?.uniform === name
+      )
+      .at(-1)?.[1]
+      .slice(1);
+  const motionOf = (choice: MotionChoice): FilmMotion => ({
+    choice,
+    values: restMotion(),
+    running: null,
+  });
+  /** A compositor showing a film in the Fill frame. */
+  function filming(fake: ReturnType<typeof fakeGl>) {
+    const compositor = createCompositor(fake.gl);
+    compositor.setMedia(fakeVideo().el);
+    compositor.setStage(visible);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    return compositor;
+  }
+  /** Each compile of a composed film pass (its hooks are in no other pass). */
+  const filmCompiles = (fake: ReturnType<typeof fakeGl>) =>
+    fake
+      .named('shaderSource')
+      .filter(([, source]) => String(source).includes('void reelPointer'))
+      .length;
+
+  it('draws the film frame as its composed pass, reading the motion the Showreel wrote', () => {
+    const fake = fakeGl();
+    const compositor = filming(fake);
+    const motion = motionOf({ ...STILL_MOTION, pointer: 'smoke' });
+    motion.values.u_reveal = 0.4;
+    motion.values.u_trail.set([0.5, 0.25, 1, 0.1]);
+    compositor.setMotion(motion);
+    expect(compositor.render(frame({ stack, phone: false }))).toBe(true);
+
+    // One pass onto the canvas at the output size, the smoke's hook in it,
+    // in place of WP-5's frame.
+    const out = fake.draws.at(-1) as Draw;
+    expect(out.framebuffer).toBeNull();
+    expect(out.viewport).toEqual([0, 0, 780, 1688]);
+    expect(drewWith(out, POINTERS.smoke)).toBe(true);
+    expect(drewWith(out, FRAMES['film-fill'])).toBe(false);
+    // The values as written: the trail as one array, by reference.
+    expect(lastSet(fake, 'uniform1f', 'u_reveal')).toEqual([0.4]);
+    expect(lastSet(fake, 'uniform4fv', 'u_trail')?.[0]).toBe(
+      motion.values.u_trail
+    );
+    // The flashing effects' clock is the governed one, never the real one.
+    expect(lastSet(fake, 'uniform1f', 'u_flashTime')).toEqual([
+      governFlash(2.9),
+    ]);
+    // And what it ran, for the Showreel's driver.
+    expect(motion.running).toEqual({
+      trans: 'fade',
+      pointer: 'smoke',
+      opening: 'none',
+      into: 'fade',
+    });
+  });
+
+  it('runs what this frame can: reduced motion drops the glitch pointer', () => {
+    const fake = fakeGl();
+    const compositor = filming(fake);
+    const motion = motionOf({ ...STILL_MOTION, pointer: 'glitch' });
+    compositor.setMotion(motion);
+    compositor.render(frame({ stack, reducedMotion: true }));
+    expect(motion.running?.pointer).toBe('none');
+    expect(drewWith(fake.draws.at(-1) as Draw, POINTERS.none)).toBe(true);
+    compositor.render(frame({ stack, reducedMotion: false }));
+    expect(motion.running?.pointer).toBe('glitch');
+    expect(drewWith(fake.draws.at(-1) as Draw, POINTERS.glitch)).toBe(true);
+  });
+
+  it('runs the opening through the name only once its mask is on the GPU', () => {
+    const fake = fakeGl();
+    const compositor = filming(fake);
+    const motion = motionOf({ ...STILL_MOTION, opening: 'name' });
+    compositor.setMotion(motion);
+    compositor.render(frame({ stack }));
+    expect(motion.running?.opening).toBe('none');
+    compositor.setNameMask({ kind: 'mask-canvas' } as unknown as TexImageSource);
+    compositor.render(frame({ stack }));
+    expect(motion.running?.opening).toBe('name');
+  });
+
+  it('draws WP-5’s film frame when the composed pass will not compile, tried once, and says nothing runs', () => {
+    const fake = fakeGl({
+      failCompile: (src) => src.includes('void reelPointer'),
+    });
+    const compositor = filming(fake);
+    const motion = motionOf(STILL_MOTION);
+    compositor.setMotion(motion);
+    expect(compositor.render(frame({ stack }))).toBe(true);
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['film-fill'])).toBe(true);
+    expect(motion.running).toBeNull();
+    const tried = filmCompiles(fake);
+    expect(tried).toBeGreaterThan(0);
+    compositor.render(frame({ stack }));
+    expect(filmCompiles(fake)).toBe(tried);
+  });
+
+  it('draws the brand’s own frame while no film shows, and runs nothing', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    const motion = motionOf(STILL_MOTION);
+    // Left from a film that has gone.
+    motion.running = { ...STILL_MOTION };
+    compositor.setMotion(motion);
+    compositor.render(frame({ stack }));
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['shader-only'])).toBe(
+      true
+    );
+    expect(motion.running).toBeNull();
+  });
+
+  it('draws WP-5’s film frame again once the motion is taken away', () => {
+    const fake = fakeGl();
+    const compositor = filming(fake);
+    compositor.setMotion(motionOf(STILL_MOTION));
+    compositor.render(frame({ stack }));
+    compositor.setMotion(null);
+    compositor.render(frame({ stack }));
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['film-fill'])).toBe(true);
+  });
+
+  it('compiles each composed pass once, and again after a lost context', () => {
+    const fake = fakeGl();
+    const compositor = filming(fake);
+    compositor.setMotion(motionOf(STILL_MOTION));
+    compositor.render(frame({ stack }));
+    expect(filmCompiles(fake)).toBe(1);
+    compositor.render(frame({ stack }));
+    expect(filmCompiles(fake)).toBe(1);
+    compositor.forget();
+    compositor.render(frame({ stack }));
+    expect(filmCompiles(fake)).toBe(2);
   });
 });

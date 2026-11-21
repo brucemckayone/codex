@@ -134,6 +134,14 @@ jobs:
       - name: Output-door gate self-test
         run: pnpm --filter web run check:output-door:test
 
+      # Codex-1yd58 WP-6: shaders:check's textual checks of the Showreel's
+      # 320 film passes (no effect declares its own uniform, none reads one
+      # the compositor never sets, no two share a pass id). The compile needs
+      # glslang, so shaders:check stays local; its pure half is self-tested
+      # here. See apps/web/scripts/shader-gate.mjs.
+      - name: Shader gate self-test (film passes)
+        run: pnpm --filter web run shaders:gate:test
+
       - name: Output-door gate (ShaderHero draws through bindOutput)
         run: pnpm --filter web run check:output-door
 

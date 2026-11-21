@@ -25,7 +25,8 @@
  * (so a context restore rebuilds them): `setMedia` (the piece's video or
  * image, uploaded once per new frame, `requestVideoFrameCallback` where the
  * browser has it), `setStage` (the film's frame, `stage.ts`), `setNameMask`
- * (the org's name, for the name frames).
+ * (the org's name, for the name frames). WP-6 adds `setMotion`: with it, a
+ * film frame is drawn as its composed film pass (`film-motion.ts`).
  */
 import { bindOutput, setOutputTarget } from '../output-target';
 import {
@@ -44,8 +45,15 @@ import {
   VERTEX_SHADER,
 } from '../webgl-utils';
 import type { Effect } from './effects/effect';
+import { assembleFilmPass, type FilmPass } from './effects/film-pass';
 import { PASSTHROUGH_FRAME } from './effects/ids';
 import { assembleEffect, FRAMES } from './effects/registry';
+import { createFilmMotionPasses, type FilmMotion } from './film-motion';
+import {
+  type FilmPassLocations,
+  filmPassValues,
+  setFilmPassUniforms,
+} from './film-pass-values';
 import {
   isSampler,
   SAMPLER_UNITS,
@@ -115,6 +123,13 @@ export interface Compositor {
   /** How the Showreel shows its film, or null for the brand's own frame. */
   setLook(look: FilmLook | null): void;
   /**
+   * The Showreel's motion (WP-6), or null for none. With it, a film frame is
+   * drawn as its composed film pass (`composeFilmPass`), reading the values
+   * the Showreel writes in place each frame; the effects the pass ran are
+   * written back to `motion.running`.
+   */
+  setMotion(motion: FilmMotion | null): void;
+  /**
    * A frame of the media is on the GPU, so the canvas shows the film and
    * the page can hide its own copy of it (ShaderHero's `data-film`). A lost
    * context clears it until the media uploads again.
@@ -130,6 +145,12 @@ export interface Compositor {
 interface Pass {
   prog: WebGLProgram;
   locs: [UniformName, WebGLUniformLocation | null][];
+}
+
+/** A composed film pass's program (WP-6): its uniforms reach past `UNIFORMS`. */
+interface FilmProgram {
+  prog: WebGLProgram;
+  locs: FilmPassLocations;
 }
 
 interface MediaSlot {
@@ -233,6 +254,12 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
   let mediaTex: WebGLTexture | null = null;
   let stage: StageBox | null = null;
   let look: FilmLook | null = null;
+  /** The Showreel's motion (WP-6): its film frames draw as composed passes. */
+  let motion: FilmMotion | null = null;
+  const filmPasses = createFilmMotionPasses();
+  // A composed film pass that will not compile stays null: tried once, then
+  // the WP-5 film frame draws in its place.
+  const filmPrograms = new Map<string, FilmProgram | null>();
   /** The last stack given the look's film frame, kept so the plan's cache
    *  (by identity) holds while neither changes. */
   let framedFor: {
@@ -277,6 +304,28 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       : null;
     passes.set(effect.id, pass);
     return pass;
+  }
+
+  /** A composed film pass's program, made once per pass id (WP-6). */
+  function filmProgramFor(pass: FilmPass): FilmProgram | null {
+    const known = filmPrograms.get(pass.id);
+    if (known !== undefined) return known;
+    const prog = createProgram(
+      gl,
+      VERTEX_SHADER,
+      assembleFilmPass(pass),
+      `shader_hero:compositor:film:${pass.id}`
+    );
+    const program = prog
+      ? {
+          prog,
+          locs: pass.uniforms.map(
+            (name) => [name, gl.getUniformLocation(prog, name)] as const
+          ),
+        }
+      : null;
+    filmPrograms.set(pass.id, program);
+    return program;
   }
 
   function setUniforms(pass: Pass, values: UniformValues) {
@@ -447,6 +496,8 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
   function dropGl(deleteThem: boolean) {
     if (deleteThem) {
       for (const pass of passes.values()) if (pass) gl.deleteProgram(pass.prog);
+      for (const film of filmPrograms.values())
+        if (film) gl.deleteProgram(film.prog);
       for (const target of [a, b, ping, pong])
         if (target) destroyFBO(gl, target);
       if (quad) gl.deleteBuffer(quad.buffer);
@@ -454,6 +505,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       if (mediaTex) gl.deleteTexture(mediaTex);
     }
     passes.clear();
+    filmPrograms.clear();
     quad = null;
     a = b = ping = pong = null;
     maskTex = null;
@@ -644,9 +696,50 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
   ): boolean {
     const passthrough = FRAMES[PASSTHROUGH_FRAME];
     return (
+      filmMotionPass(f, current, picture, values) ||
       draw(current.frame, picture.tex, null, f.output, values, 1, f.time) ||
       draw(passthrough, picture.tex, null, f.output, values, 1, f.time)
     );
+  }
+
+  /**
+   * The Showreel's film frame with its motion (WP-6), onto the canvas: the
+   * frame's composed film pass, for the effects the motion chose after this
+   * frame's fallbacks, which it writes back to `motion.running`. False: no
+   * motion, a frame that is no film frame, or a pass that will not compile,
+   * and the frame draws as it is (the WP-5 film frame, then shader only).
+   */
+  function filmMotionPass(
+    f: CompositeFrame,
+    current: StackPlan,
+    picture: FBO,
+    values: SharedValues
+  ): boolean {
+    if (!motion) return false;
+    const chosen = filmPasses.passFor(current.frame.id, motion.choice, {
+      phone: f.phone,
+      reducedMotion: f.reducedMotion,
+      hasMask: maskTex !== null,
+    });
+    const program = chosen ? filmProgramFor(chosen.pass) : null;
+    if (!chosen || !program || !quad) {
+      // Nothing it chose is drawn: its driver moves nothing.
+      motion.running = null;
+      return false;
+    }
+    motion.running = chosen.running;
+    bindOutput(gl);
+    gl.viewport(0, 0, f.output[0], f.output[1]);
+    gl.useProgram(program.prog);
+    quad.bind(program.prog);
+    bindUnit(SAMPLER_UNITS.u_scene, picture.tex);
+    setFilmPassUniforms(
+      gl,
+      program.locs,
+      filmPassValues(values, f.output, f.time, motion.values)
+    );
+    drawQuad(gl);
+    return true;
   }
 
   /**
@@ -713,6 +806,10 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
 
     setLook(next) {
       look = next;
+    },
+
+    setMotion(next) {
+      motion = next;
     },
 
     mediaReady() {

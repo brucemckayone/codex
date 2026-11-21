@@ -54,6 +54,7 @@
   import { prefersSavingData, reelMode } from '$lib/org-hero/showreel/playback';
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
   import { reelMedia } from '$lib/org-hero/showreel/reel-media';
+  import { useReelMotion } from '$lib/org-hero/showreel/reel-motion.svelte';
   import {
     focusInk,
     glowLeaves,
@@ -291,6 +292,22 @@
     clock.hold('away', !onScreen);
   });
   const playing = $derived(mode === 'footage' && !clock.paused && !pressed && pageVisible && onScreen);
+
+  // ── motion (WP-6): the hero's four motion settings, in the window's shader ──
+  // The logic is the hook's (`reel-motion.svelte.ts`). The stage shows the
+  // piece it names: the one going out until the cut's bottom.
+  const reelMotion = useReelMotion({
+    options: () => options,
+    frame: () => look.frame,
+    root: () => rootEl,
+    keys: () => keys,
+    index: () => clock.index,
+    paused: () => clock.paused || pressed || !onScreen,
+    moves: () => moves,
+    phone: () => !desktop.current,
+    reducedMotion: () => reducedMotion.current,
+    filmPlaying: () => filmPlaying,
+  });
 
   // ── holds: the pointer over the words, index or strip; focus; a press ──
   function hover(on: boolean) {
@@ -886,7 +903,7 @@
   onpointerup={() => pressEnd(true)}
   onpointercancel={() => pressEnd(false)}
 >
-  <ReelStage bind:this={stage} {media} {keys} index={shown} {playing} {look} />
+  <ReelStage bind:this={stage} {media} {keys} index={reelMotion.stage ?? shown} {playing} {look} />
   <div class="reel__scrim-top" aria-hidden="true"></div>
   <div class="reel__scrim-foot" aria-hidden="true"></div>
 

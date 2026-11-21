@@ -6,6 +6,13 @@ import { TRAIL_POINTS } from './motion-uniforms';
  * pointer has been, a veil as thick as the smoke is dark, thinning over the
  * words. One soft field, the MAX of the trail's gaussians, never their sum
  * or a cut-out: the v3 threshold read "bitty... clumps" to the owner.
+ *
+ * Smoke WITH INERTIA (owner, 2026-11-20): the field drifts on after the
+ * pointer stops. That motion is the trail's, not this hook's: each point of
+ * `u_trail` is packed where its carried velocity has taken it
+ * (`PointerTrail`, `org-hero/showreel/reel-trail.ts`), so the GLSL draws the
+ * same field at rest and in drift. Under reduced motion the trail packs it
+ * static, so it stays the visitor's own motion.
  */
 export const pointerSmoke: PointerEffect = {
   id: 'smoke',

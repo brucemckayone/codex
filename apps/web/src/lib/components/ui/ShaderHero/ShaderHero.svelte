@@ -515,17 +515,19 @@
         redrawFrozen();
       });
 
-    // The Showreel's film, its frame and the org's name (WP-5) reach the
-    // window's shader through `showreelFeed`. A film attaches a compositor
-    // (`syncStack`), even with no preset; a frozen hero draws again to show
-    // what changed.
+    // The Showreel's film, its frame and the org's name (WP-5), and its
+    // motion (WP-6), reach the window's shader through `showreelFeed`. A film
+    // attaches a compositor (`syncStack`), even with no preset; a frozen hero
+    // draws again to show what changed, the motion's values each frame they
+    // move (`frame`: a moving hero draws them anyway).
     if (tone)
       showreelFeed.onChange((changed) => {
         if (compositor) {
           if (changed === 'media') compositor.setMedia(showreelFeed.media);
           else if (changed === 'stage') compositor.setStage(showreelFeed.stage);
           else if (changed === 'look') compositor.setLook(showreelFeed.look);
-          else compositor.setNameMask(showreelFeed.mask);
+          else if (changed === 'mask') compositor.setNameMask(showreelFeed.mask);
+          else if (changed === 'motion') compositor.setMotion(showreelFeed.motion);
         }
         if (changed === 'media') scheduleFrame();
         redrawFrozen();
@@ -846,6 +848,7 @@
         made.setStage(showreelFeed.stage);
         made.setNameMask(showreelFeed.mask);
         made.setLook(showreelFeed.look);
+        made.setMotion(showreelFeed.motion);
       }
       // The canvas rises to the display DPR; the presets keep the scene's.
       resize(true);
