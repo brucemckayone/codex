@@ -5,6 +5,7 @@
  * a runner with its target and draw handed in, so no GL context.
  */
 import { describe, expect, it, vi } from 'vitest';
+import type { FBO } from '../../webgl-utils';
 import { MEDIA } from '../effects/registry';
 import {
   createMediaRunner,
@@ -16,7 +17,6 @@ import {
   pushZoom,
   treatedSize,
 } from '../media-pass';
-import type { FBO } from '../../webgl-utils';
 
 const DESK: MediaContext = {
   phone: false,
@@ -127,9 +127,9 @@ describe('treatedSize', () => {
   it('is the stage’s height for a placed portrait, which never covers it', () => {
     // flush right at 1800 tall, not covering 2880 wide
     // (720 x 1800/1280 is 1012.5, rounded up)
-    expect(
-      treatedSize([720, 1280], [2880, 1800], [2880, 1800], true)
-    ).toEqual([1013, 1800]);
+    expect(treatedSize([720, 1280], [2880, 1800], [2880, 1800], true)).toEqual([
+      1013, 1800,
+    ]);
   });
 
   it('is capped at the canvas’s longest side', () => {

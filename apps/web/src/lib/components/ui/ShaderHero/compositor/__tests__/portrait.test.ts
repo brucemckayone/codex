@@ -41,9 +41,7 @@ describe('placedFrame', () => {
     expect(placedFrame('film-fill', [700, 1200], [720, 1280], true)).toBe(
       'film-fill'
     );
-    expect(placedFrame('film-fill', DESK, [720, 1280], true)).toBe(
-      'film-fill'
-    );
+    expect(placedFrame('film-fill', DESK, [720, 1280], true)).toBe('film-fill');
   });
 
   it('fills when the crop is at or under the threshold', () => {

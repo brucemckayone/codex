@@ -648,12 +648,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       elapsed: f.time - mediaSince,
     });
     if (steps.length === 0) return null;
-    const size = treatedSize(
-      mediaSize(),
-      [rect[2], rect[3]],
-      f.output,
-      placed
-    );
+    const size = treatedSize(mediaSize(), [rect[2], rect[3]], f.output, placed);
     try {
       return mediaRunner.run(steps, mediaTex, size, {
         target: (old, at) => sized(gl, old, at),

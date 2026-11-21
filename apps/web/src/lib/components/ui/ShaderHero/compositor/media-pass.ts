@@ -99,9 +99,7 @@ export function treatedSize(
   placed = false
 ): Size {
   const [mw, mh] = [Math.max(media[0], 1), Math.max(media[1], 1)];
-  const shown = placed
-    ? rect[1] / mh
-    : Math.max(rect[0] / mw, rect[1] / mh);
+  const shown = placed ? rect[1] / mh : Math.max(rect[0] / mw, rect[1] / mh);
   const cap = Math.max(output[0], output[1], 1) / Math.max(mw, mh);
   const scale = Math.min(shown, cap);
   return [
