@@ -5,7 +5,9 @@
  * fallbacks, which the Showreel's driver moves the uniforms for.
  */
 import { describe, expect, it } from 'vitest';
+import { BAND_GLSL } from '../effects/film-band';
 import { composeFilmPass } from '../effects/film-pass';
+import { PORTRAIT_GLSL } from '../effects/frame-film-portrait';
 import type { MotionChoice } from '../effects/motion-ids';
 import { planMotion } from '../effects/motion-registry';
 import { createFilmMotionPasses, runningIds } from '../film-motion';
@@ -53,5 +55,23 @@ describe('createFilmMotionPasses', () => {
     // Back again: the one made before, not a new one.
     expect(passes.passFor('film-fill', choice, desk)).toBe(first);
     expect(passes.passFor('film-fill', { ...choice }, desk)).toBe(first);
+  });
+
+  it('composes the portrait frame too, as WP-5b places its film (fill, name and portrait)', () => {
+    const passes = createFilmMotionPasses();
+    const portrait = passes.passFor('film-portrait', choice, desk);
+    expect(portrait?.pass.id.startsWith('film-portrait+')).toBe(true);
+    expect(portrait?.running).toEqual(choice);
+    // At rest it places the film and gives way as WP-5's frames do: the
+    // portrait frame's own placement, and the shared band.
+    expect(portrait?.pass.glsl).toContain(PORTRAIT_GLSL);
+    expect(portrait?.pass.glsl).toContain(BAND_GLSL);
+    const fill = passes.passFor('film-fill', choice, desk)?.pass.glsl ?? '';
+    expect(fill).toContain(BAND_GLSL);
+    expect(fill).toContain('float frame = bandShows(local);');
+    expect(fill).not.toContain(PORTRAIT_GLSL);
+    // The Name window has no band: its letters are the frame.
+    const name = passes.passFor('film-name', choice, desk)?.pass.glsl ?? '';
+    expect(name).not.toContain(BAND_GLSL);
   });
 });

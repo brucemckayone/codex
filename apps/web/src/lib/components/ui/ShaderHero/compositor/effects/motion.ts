@@ -137,7 +137,7 @@ vec3 glitchedFilm(vec2 at, float k) {
   float h = hash12(vec2(row * 7.13, floor(u_flashTime * 14.0)));
   vec2 g = at + vec2(step(0.62, h) * (h - 0.62) * 0.3 * k, 0.0);
   vec2 split = vec2(0.007 * k, 0.0);
-  vec3 c = vec3(film(stageAt(g + split)).r, film(stageAt(g)).g, film(stageAt(g - split)).b);
+  vec3 c = vec3(frameFilm(stageAt(g + split)).r, frameFilm(stageAt(g)).g, frameFilm(stageAt(g - split)).b);
   if (hash12(vec2(row, floor(u_flashTime * 9.0) * 3.1)) > 1.0 - 0.05 * k) c = mix(c, u_brandPrimary, 0.4);
   return c;
 }

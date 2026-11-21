@@ -2,8 +2,10 @@
  * Whether the ink the Showreel draws its words in can keep its floor over the
  * footage (Codex-1yd58 WP-9): the editor's warning, judged as the reel judges
  * a word. Every reel word is the reel's `--_ink` or `--_ink-soft`, never a
- * brand colour, and which ink that is turns on the theme's ground
- * (Showreel.svelte's `--_light`, from `--_gy` at the 0.1791 pivot):
+ * brand colour, and which ink that is turns on the theme's ground: the
+ * reel's own switch, `groundPoles` (reel-scrim.ts; Showreel.svelte's
+ * `--_light`), from `--_gy`, light AT the 0.1791 pivot and above, as the page's
+ * `bindingLuminance` holds a light page whose darkest surface is mid grey:
  *
  * - On a LIGHT ground the ink is the page's derived `--color-text-primary`,
  *   which keeps its floor on that ground by construction, so a light ground
@@ -24,13 +26,16 @@
  * The ratio is the reel's own (`contrast` in reel-scrim.ts), never a copy, so
  * the editor and the reel agree on every colour.
  */
-import { contrast, type Rgb } from '$lib/org-hero/showreel/reel-scrim';
+import {
+  contrast,
+  groundPoles,
+  type Rgb,
+} from '$lib/org-hero/showreel/reel-scrim';
 import {
   groundLuminanceVars,
   PLATFORM_GROUND_LUMINANCE,
   paintableColour,
 } from './ground';
-import { TEXT_ON_BRAND_LUMINANCE_PIVOT } from './ink';
 import { hexToSrgb } from './oklch-math';
 
 /** The floor of the reel's body-size words (its `ratioOf`: 4.5, large 3). */
@@ -113,6 +118,14 @@ function shown(ratio: number): number {
 }
 
 /**
+ * Whether the reel reads this ground luminance as light: its ink pole is
+ * black (`groundPoles`), so the editor and the reel never disagree at the
+ * pivot.
+ */
+const readsLight = (groundY: number): boolean =>
+  groundPoles(groundY).ink.every((channel) => channel === 0);
+
+/**
  * A warning for each theme whose reel ink cannot keep its floor on its
  * ground, light first; none when every theme's can.
  */
@@ -121,8 +134,8 @@ export function reelInkWarnings(brand: ReelInkBrand): ReelInkWarning[] {
   const y = groundY(brand);
   const warnings: ReelInkWarning[] = [];
   for (const theme of THEMES) {
-    // `--_light` is 1 just past the pivot: a light ground's ink always passes.
-    if (y[theme] > TEXT_ON_BRAND_LUMINANCE_PIVOT) continue;
+    // A light ground's ink is the derived text colour: it always passes.
+    if (readsLight(y[theme])) continue;
     const ink = rgbOf(playerText(brand, theme));
     const under = rgbOf(ground[theme]);
     if (!ink || !under) continue;

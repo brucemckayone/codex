@@ -70,6 +70,18 @@ vi.mock('../compositor/stack-config', async (importOriginal) => {
       actual.getStackConfig(...args),
   };
 });
+// The phone's layer budget: off as shipped, on where a test says (WP-11).
+const layerBudgetFlag = vi.hoisted(() => ({ on: false }));
+vi.mock('../compositor/layer-budget', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../compositor/layer-budget')>();
+  return {
+    ...actual,
+    get PHONE_LAYER_BUDGET() {
+      return layerBudgetFlag.on;
+    },
+  };
+});
 const { logger } = vi.hoisted(() => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -224,6 +236,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  layerBudgetFlag.on = false;
   for (const release of releases) release();
   releases = [];
   if (app) unmount(app);
@@ -1312,6 +1325,114 @@ describe('ShaderHero stack', () => {
     expect(second.destroy).toHaveBeenCalledTimes(1);
     expect(compositor.destroy).toHaveBeenCalledTimes(1);
     expect(isLive()).toBe(true);
+  });
+
+  describe('the phone budget for layers (WP-11, behind PHONE_LAYER_BUDGET)', () => {
+    const layered = {
+      ...BARE_STACK,
+      layers: [
+        { id: 'grain', amount: null },
+        { id: 'glow', amount: null },
+      ],
+    } as StackConfig;
+    /** The stack the compositor was last asked to draw. */
+    const drawnLayers = () => {
+      const frame: unknown = compositor.render.mock.calls.at(-1)?.[0];
+      return (frame as { stack: StackConfig }).stack.layers.map((l) => l.id);
+    };
+    const slow = (count: number) => {
+      for (let i = 0; i < count; i++) {
+        clock += 40;
+        step(1);
+      }
+    };
+    const cuts = () => events('warn', 'shader_hero.stack_budget_layer_dropped');
+
+    it('cuts nothing while off, as shipped: a layers-only stack stays whole', async () => {
+      brandStack.value = layered;
+      await start({ tone: true });
+      step(1);
+      await settle();
+      slow(241);
+      expect(cuts()).toEqual([]);
+      expect(drawnLayers()).toEqual(['grain', 'glow']);
+    });
+
+    it('on, cuts the last layer each slow window on a phone, logs each, and goes bare after the last', async () => {
+      layerBudgetFlag.on = true;
+      brandStack.value = layered;
+      await start({ tone: true });
+      step(1);
+      await settle();
+      // 120 frames 40 ms apart: a 95th percentile far over 25 ms.
+      slow(121);
+      expect(cuts()).toEqual([
+        [
+          'shader_hero.stack_budget_layer_dropped',
+          { layer: 'glow', remaining: 1, p95Ms: 40, frames: 120 },
+        ],
+      ]);
+      step(1);
+      expect(drawnLayers()).toEqual(['grain']);
+      // judged afresh on the lighter stack: another slow window cuts again
+      slow(120);
+      expect(cuts()).toHaveLength(2);
+      expect(cuts()[1]).toEqual([
+        'shader_hero.stack_budget_layer_dropped',
+        { layer: 'grain', remaining: 0, p95Ms: 40, frames: 120 },
+      ]);
+      // bare: today's path, without a compositor
+      step(1);
+      await settle();
+      expect(compositor.destroy).toHaveBeenCalledTimes(1);
+      expect(isLive()).toBe(true);
+      // nothing left to judge
+      slow(121);
+      expect(cuts()).toHaveLength(2);
+    });
+
+    it('on, drops the second preset first, then judges the layers afresh', async () => {
+      layerBudgetFlag.on = true;
+      const second = {
+        init: vi.fn(() => true),
+        render: vi.fn(),
+        resize: vi.fn(),
+        reset: vi.fn(),
+        destroy: vi.fn(),
+      } satisfies ShaderRenderer;
+      vi.mocked(loadRenderer).mockImplementation(async (id) =>
+        id === 'flow' ? second : renderer
+      );
+      brandStack.value = { ...layered, second: 'flow' };
+      await start({ tone: true });
+      step(1);
+      await settle();
+      slow(121);
+      expect(events('warn', 'shader_hero.stack_budget_dropped')).toHaveLength(
+        1
+      );
+      expect(cuts()).toEqual([]);
+      step(1);
+      expect(second.destroy).toHaveBeenCalledTimes(1);
+      slow(121);
+      expect(cuts()).toEqual([
+        [
+          'shader_hero.stack_budget_layer_dropped',
+          { layer: 'glow', remaining: 1, p95Ms: 40, frames: 120 },
+        ],
+      ]);
+    });
+
+    it('on, judges a desktop never', async () => {
+      layerBudgetFlag.on = true;
+      box = { width: 1440, height: 900 };
+      brandStack.value = layered;
+      await start({ tone: true });
+      step(1);
+      await settle();
+      slow(241);
+      expect(cuts()).toEqual([]);
+    });
   });
 
   it('prevents a lost context’s default (or it is never restored), and stops its loop', async () => {

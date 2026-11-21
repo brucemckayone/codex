@@ -385,7 +385,7 @@ describe('ReelMotion opening', () => {
   });
 
   it('waits in the opening’s own first frame, so it starts from what shows (review L9)', () => {
-    for (const frame of ['film-fill', 'film-name'] as const) {
+    for (const frame of ['film-fill', 'film-name', 'film-portrait'] as const) {
       const driver = opening({ frame });
       runs(driver);
       driver.frame(0);

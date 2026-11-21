@@ -29,9 +29,11 @@
 
   ── CONTRAST BY CONSTRUCTION ───────────────────────────────────────────────
   Two full-width soft scrims, as the mock draws them, one from the top and
-  one from the foot, in the brand's own ground (`--color-background`,
-  darkened only as far as its inks need, `scrimTint`). Each holds the least
-  opacity (`--_pool`) under which every ink keeps 4.5:1 (3:1 large) over ANY
+  one from the foot, in the brand's own ground (`--color-background`),
+  deepened on a dark brand or paled on a light one only as far as its inks
+  need (`scrimTint`; which way from the ground alone, `groundPoles`, and a
+  colour that veil cannot carry is lifted toward the other pole). Each holds
+  the least opacity (`--_pool`) under which every ink keeps 4.5:1 (3:1 large) over ANY
   film pixel (`reel-scrim.ts`) as far as its words reach, measured from the
   laid-out words, then fades away. The foot scrim is clear again at the
   hero's very edge, where the page's own fade-in takes over, so the hero
@@ -39,12 +41,18 @@
   colour, mixed toward the ink only as far as 3:1 over any frame needs
   (`focusInk`).
 -->
+<script lang="ts" module>
+  /** The brands (by their solved tint) whose uncarried inks were reported this page load (review R6). */
+  const warnedBrands = new Set<string>();
+</script>
+
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { tick, untrack } from 'svelte';
+  import { flushSync, tick, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { preloadPlayerOnIntent } from '$lib/components/player/load-core';
-  import { PlayIcon } from '$lib/components/ui/Icon';
+  import { clock as lengthOf } from '$lib/components/player/timeline';
+  import { PlayIcon, Volume2Icon } from '$lib/components/ui/Icon';
   import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-feed';
   import type { FilmLook } from '$lib/components/ui/ShaderHero/compositor/stage';
   import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
@@ -55,18 +63,21 @@
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
   import { reelMedia } from '$lib/org-hero/showreel/reel-media';
   import { useReelMotion } from '$lib/org-hero/showreel/reel-motion.svelte';
+  import { pieceSeconds } from '$lib/org-hero/showreel/reel-push';
   import {
+    FIRST_PAINT,
     focusInk,
     glowLeaves,
+    groundPoles,
     growShades,
     haloAlpha,
     type Ink,
-    inkPole,
     liftStep,
     MAX_SCRIM_ALPHA,
     type Need,
     outlineAlpha,
     over,
+    ownPole,
     type Rgb,
     SHADE_PEAK_MAX,
     SHADES,
@@ -76,14 +87,15 @@
     scrimTint,
     shadeFloor,
     shadeProps,
-    veilPole,
   } from '$lib/org-hero/showreel/reel-scrim';
   import { type ReelWords, reelWords } from '$lib/org-hero/showreel/reel-words';
   import { drawTitleMask } from '$lib/org-hero/showreel/title-mask';
   import { logger } from '$lib/observability';
+  import { type TheatreItem, theatreFor } from '$lib/org-hero/showreel/theatre';
   import { themeState } from '$lib/theme.svelte';
   import * as m from '$paraglide/messages';
   import ReelStage from './ReelStage.svelte';
+  import ReelTheatre from './ReelTheatre.svelte';
 
   interface Props {
     reel: readonly ReelEntry[];
@@ -150,8 +162,6 @@
   const NAME_MAX = { desk: 228, phone: 138 };
   /** The Wide title's range (the mock's). */
   const WIDE_TITLE = { min: 72, max: 150 };
-  /** The SSR pool until the inks are read: dark enough for white text. */
-  const POOL_FALLBACK = 0.9;
 
   // The complement of `--below-md` (breakpoints.css), as the landing reads it.
   const desktop = new MediaQuery('(min-width: 48rem)');
@@ -196,9 +206,15 @@
   });
   const words = $derived(reel.map((entry, i) => reelWords(entry, i, { name, description, filmDuration })));
   const media = $derived(reel.map((entry) => reelMedia(entry, mode)));
+  // WP-5b: the compositor places a portrait piece, and draws the surface and
+  // the stills' push-in on the footage alone, the push-in by the reel's own
+  // clock (it holds when the reel does). A reel held still pushes none in.
+  const pushClock = pieceSeconds(clock);
   const look = $derived<FilmLook>({
     frame: layout === 'name' ? 'film-name' : 'film-fill',
     band: options['reel-band'],
+    surface: options['reel-surface'],
+    push: options['reel-push'] === 'on' && moves ? pushClock : null,
   });
 
   let rootEl: HTMLElement | undefined = $state();
@@ -245,6 +261,62 @@
   // carries the org's line instead (the mock's).
   const lineFirst = $derived(layout === 'name' && reel[shown]?.type === 'film' && !!current?.line);
 
+  // ── the theatre: a piece's preview with sound (Codex-1yd58.8) ──
+  const theatres = $derived(reel.map((entry, i) => theatreFor(entry, words[i]?.title ?? name)));
+  let theatre = $state<{ index: number; item: TheatreItem } | null>(null);
+  // The film's main button plays its preview there, unless a press plays the
+  // full film (Codex-0hkkt): that one keeps the page's own film player.
+  const mainOpensTheatre = $derived.by(() => {
+    const entry = reel[shown];
+    return entry?.type === 'film' && !entry.film.fullFilm && !!theatres[shown];
+  });
+  /**
+   * What opened the theatre, given focus back as it closes. The body or the
+   * root is none (Safari focuses no clicked button: review L5); then the
+   * index's current piece takes it (`nextFocus`).
+   */
+  let theatreOpener: HTMLElement | null = null;
+  /** In the press's own tick, so the theatre's player keeps the sound. */
+  function openTheatre() {
+    const item = theatres[shown];
+    if (!item) return;
+    const at = document.activeElement;
+    theatreOpener =
+      at instanceof HTMLElement && at !== document.body && at !== document.documentElement ? at : null;
+    theatre = { index: shown, item };
+    flushSync();
+  }
+  function closeTheatre(reason: 'closed' | 'ended') {
+    const at = theatre?.index;
+    const opener = theatreOpener;
+    theatreOpener = null;
+    theatre = null;
+    // Played to its end, the reel carries on (the mock's), and its film
+    // button goes with the piece: focus takes the index's current one.
+    const ended = reason === 'ended' && at === clock.index;
+    if (ended) clock.next();
+    // The reel behind stops being inert in this flush, and only then can it
+    // take focus: asked while it still was, focus fell to the body (review
+    // H1, 2026-11-21: Svelte switches the branch before the render effect
+    // that clears `inert`).
+    flushSync();
+    const back = !ended && opener?.isConnected ? opener : nextFocus();
+    back?.focus({ preventScroll: true });
+    // Firefox fires no focusout for a focused node that is removed: the
+    // keyboard hold follows where focus is now, never where it was.
+    const now = document.activeElement;
+    clock.hold('focus', now instanceof Element && !!rootEl?.contains(now) && now.matches(':focus-visible'));
+  }
+  /**
+   * What takes focus when a swap removed the button that opened it. Where
+   * checkVisibility is missing (Safari before 17.4) the first stop serves,
+   * as Dialog's does.
+   */
+  function nextFocus(): HTMLElement | null {
+    const stops = rootEl?.querySelectorAll<HTMLElement>('.reel__item[aria-current="true"], .reel__round') ?? [];
+    return [...stops].find((stop) => stop.checkVisibility?.() ?? true) ?? null;
+  }
+
   // ── time: the clock runs while nothing stops it ──
   $effect(() => {
     const root = rootEl;
@@ -277,7 +349,7 @@
   });
 
   $effect(() => {
-    clock.hold('film', filmPlaying);
+    clock.hold('film', filmPlaying || theatre !== null);
   });
 
   // The tab or the hero out of view: nothing plays, nothing moves on.
@@ -302,9 +374,16 @@
     clock.hold('away', !onScreen);
   });
   // The footage stops while a film plays over it (the hero's, or the phone's
-  // pop-up): a page never decodes two films at once (2026-11-21).
+  // pop-up) and while the theatre plays its own copy, with sound: a page
+  // never decodes two films at once (2026-11-21).
   const playing = $derived(
-    mode === 'footage' && !clock.paused && !filmPlaying && !pressed && pageVisible && onScreen
+    mode === 'footage' &&
+      !clock.paused &&
+      !filmPlaying &&
+      !theatre &&
+      !pressed &&
+      pageVisible &&
+      onScreen
   );
 
   // ── motion (WP-6): the hero's four motion settings, in the window's shader ──
@@ -358,7 +437,8 @@
   let press: { x: number; y: number; timer: ReturnType<typeof setTimeout>; held: boolean } | null = null;
   function pressStart(event: PointerEvent) {
     if (event.pointerType === 'mouse' || !event.isPrimary) return;
-    if (event.target instanceof Element && event.target.closest('a, button, input')) return;
+    // A press in the theatre is the theatre's, never a tap on the reel.
+    if (event.target instanceof Element && event.target.closest('a, button, input, [role="dialog"]')) return;
     const timer = setTimeout(() => {
       if (!press) return;
       press.held = true;
@@ -573,11 +653,24 @@
     // fit reads the brand's colours: within this task, so never painted.
     root.dataset.fitting = '';
     try {
+      // A colour easing back from its lift reads as the lift (a transition's
+      // start value), which the fit would take for the brand's (review R1).
+      // The reel's words ease no colour; should one ever, it lands here at
+      // once, so every colour read is the brand's own. `getAnimations`
+      // flushes style, so the ease the removal starts is listed (Chrome,
+      // calibrated 2026-11-21); jsdom has no Web Animations.
+      for (const motion of root.getAnimations?.({ subtree: true }) ?? []) {
+        if (easesColour(motion)) motion.finish();
+      }
       solveScrims(root, ground.rgb);
     } finally {
       delete root.dataset.fitting;
     }
     return true;
+  }
+  /** A CSS transition of `color` (a `CSSTransition`). */
+  function easesColour(motion: Animation): boolean {
+    return 'transitionProperty' in motion && motion.transitionProperty === 'color';
   }
   function solveScrims(root: HTMLElement, ground: Rgb) {
     const box = root.getBoundingClientRect();
@@ -608,10 +701,17 @@
         gap = Math.min(gap, box.bottom - r.bottom);
       }
     }
+    // The veil's pole from the ground alone, by the switch CSS draws the first
+    // paint with (`--_light`: `--_gy`, 0 when unset, at the 0.1791 pivot):
+    // a dark brand keeps a dark veil whatever its inks are (owner,
+    // 2026-11-21), and every colour that fails is lifted toward white.
+    const groundY = Number.parseFloat(getComputedStyle(root).getPropertyValue('--_gy'));
+    const { veil, ink: pole } = groundPoles(Number.isFinite(groundY) ? groundY : 0);
     // Whole channels, as CSS will paint them: the alpha is solved for these.
-    // `scrimTint` passes over a brand colour no scrim of the pole can carry
-    // (OBB's red): it is lifted or outlined in its own pole below.
-    const [r, g, b] = scrimTint(ground, allInks);
+    // A colour no scrim of the veil's pole can carry (a player text the
+    // creator set, as #CB213C on #0F0000) is lifted below toward `pole`, or
+    // ringed in its own: `scrimTint` solves it as that pole.
+    const [r, g, b] = scrimTint(ground, veil, allInks, pole);
     const tint: Rgb = [Math.round(r), Math.round(g), Math.round(b)];
     root.style.setProperty('--_scrim', `rgb(${tint.join(' ')})`);
     // Each scrimmed thing's own need (`scrimAlpha` for its COMPUTED ink, with
@@ -624,17 +724,17 @@
       bottom: (r.bottom - box.top) / box.height,
     });
     // A colour that cannot keep its floor where it sits is lifted toward the
-    // ink that stands furthest from the veil (`inkPole`: white over a dark
-    // one), a twentieth at a time, just far enough, over the footage only
+    // ink pole opposite the veil (`pole`: white over a dark brand's), a
+    // twentieth at a time, just far enough, over the footage only
     // (owner, 2026-11-20); never toward the reel's own ink, which a creator
     // may set to that very colour (review, 2026-11-21). What it must pass:
     // in 'shadow', a shade must carry it; a control's own fill carries any
     // colour a scrim of the tint carries by MAX_SCRIM_ALPHA; in 'outline', a
     // word no scrim carries keeps its colour inside a ring of its own pole,
-    // so it needs only a ring that can. Each group of words glows softly in the brand's dark at its
-    // strongest word's need (GLOW_SHARE, from the 1 px ring probe), and the
-    // corner shades grow only as far as each word still needs past it.
-    const pole = inkPole(tint);
+    // so it needs only a ring that can. Each group of words glows softly in
+    // the brand's dark at its strongest word's need (GLOW_SHARE, from the
+    // 1 px ring probe), and the corner shades grow only as far as each word
+    // still needs past it.
     const carried = (ink: Ink, ratio: number) => {
       const need = scrimAlpha([{ ink, ratio }], tint);
       return need !== null && glowLeaves(need, need) <= SHADE_PEAK_MAX;
@@ -646,7 +746,7 @@
       return need !== null && need <= MAX_SCRIM_ALPHA;
     };
     const ringed = (ink: Ink, ratio: number, under: number) =>
-      solvable(ink, ratio) || outlineAlpha({ ink, ratio }, under, tint, veilPole([{ ink, ratio }])) !== null;
+      solvable(ink, ratio) || outlineAlpha({ ink, ratio }, under, tint, ownPole([{ ink, ratio }])) !== null;
     const roles = laid.flatMap(({ el, r }) => {
       // Its own ink and any child's in another (the kicker's number), so the
       // strictest of them is solved.
@@ -706,28 +806,41 @@
       if (further.length === 0) break;
       for (const role of further) role.step += 1;
     }
-    // Checked, never assumed: every role must now have a solved need (or, in
-    // 'outline', a ring of its own pole that carries it). One that does not
-    // wears the pole outright; one the pole cannot rescue either is reported,
-    // and drawn solid.
+    // Checked, never assumed: every role must now have a solved need that
+    // what is drawn under it meets (in 'shadow', its shades with its group's
+    // glow: a shade that falls short is no solve, review R4), or, in
+    // 'outline', a ring of its own pole that carries it. One that does not
+    // wears the pole outright; one the pole cannot rescue either is reported.
+    const short = (role: Role) => {
+      const need = needOf(role);
+      if (need === null || role.fill || edge !== 'shadow') return false;
+      const left = glowLeaves(need, glows.get(groupOf(role.el)) ?? 0);
+      return left > shadeFloor(role.span, shades) + 1e-9;
+    };
     const solved = (role: Role) => {
-      if (needOf(role) !== null) return true;
+      if (needOf(role) !== null) return !short(role);
       if (role.fill || edge === 'shadow') return false;
       const under = shadeFloor(role.span, shades);
       const inks = inksOf(role);
-      const own = veilPole(inks);
+      const own = ownPole(inks);
       return inks.every((ink) => outlineAlpha(ink, under, tint, own) !== null);
     };
+    const unrescued: string[] = [];
     for (const role of roles) {
       if (solved(role)) continue;
       role.lifted = role.nodes;
       role.step = 20;
-      if (!solved(role)) {
-        logger.warn('Showreel: an ink no scrim of the tint carries, drawn solid', {
-          tint: tint.join(' '),
-          role: role.el.className,
-        });
-      }
+      if (!solved(role)) unrescued.push(role.el.className);
+    }
+    // Once per brand a page load (review R6): every fit of it would say the same.
+    const brand = tint.join(' ');
+    if (unrescued.length > 0 && !warnedBrands.has(brand)) {
+      warnedBrands.add(brand);
+      logger.warn('Showreel: inks the reel cannot carry over every frame, even in its pole', {
+        tint: brand,
+        edge,
+        roles: unrescued.join(' | '),
+      });
     }
     drawShades(root, shades);
     for (const role of roles) {
@@ -755,7 +868,7 @@
       }
       if (edge !== 'outline') continue;
       if (need === null) {
-        const own = veilPole(inks);
+        const own = ownPole(inks);
         const alpha = Math.max(...inks.map((ink) => outlineAlpha(ink, under, tint, own) ?? 1));
         el.style.setProperty('--_ring-tint', `rgb(${own.join(' ')})`);
         el.style.setProperty('--_halo', String(alpha));
@@ -826,9 +939,13 @@
     const brand = root.closest('[data-org-brand]');
     if (brand) restyled.observe(brand, { attributes: true, attributeFilter: ['style', 'class'] });
     // A colour still easing (a link's `--transition-colors`) reads as its
-    // in-between value: measure again once it has landed.
+    // in-between value: measure again once it has landed. Never for a lift's
+    // own ease, which the fit lands itself (`fitScrims`): fitting again on
+    // it, every fit's lift would ask for the next one (review R1).
     const landed = (event: TransitionEvent) => {
-      if (event.propertyName === 'color') fit();
+      if (event.propertyName !== 'color') return;
+      if (event.target instanceof Element && event.target.closest('[data-lifted]')) return;
+      fit();
     };
     root.addEventListener('transitionend', landed);
     return () => {
@@ -954,17 +1071,39 @@
     {/if}
     <div class="reel__row reel__swap">
       {#if now.line && !lineFirst}<p class="reel__line" data-ink="body">{now.line}</p>{/if}
-      <div class="reel__acts">
-        {#if now.action.kind === 'film'}
-          <button type="button" class="reel__btn" onclick={onfilm} {@attach preloadPlayerOnIntent}>
-            <PlayIcon size={16} aria-hidden="true" />
-            {now.action.label}
-          </button>
-        {:else}
-          <a class="reel__btn" href={now.action.href}>{now.action.label}</a>
-        {/if}
-      </div>
+      {@render acts(now)}
     </div>
+  </div>
+{/snippet}
+
+<!-- Its button, and the preview with sound where its button plays something else. -->
+{#snippet acts(now: ReelWords)}
+  <div class="reel__acts">
+    {#if now.action.kind === 'film'}
+      <button
+        type="button"
+        class="reel__btn"
+        onclick={mainOpensTheatre ? openTheatre : onfilm}
+        {@attach preloadPlayerOnIntent}
+      >
+        <PlayIcon size={16} aria-hidden="true" />
+        {now.action.label}
+      </button>
+    {:else}
+      <a class="reel__btn" href={now.action.href}>{now.action.label}</a>
+    {/if}
+    {#if theatres[shown] && !mainOpensTheatre}
+      <button
+        type="button"
+        class="reel__ghost reel__preview"
+        aria-label={m.org_hero_reel_preview_sound()}
+        onclick={openTheatre}
+        {@attach preloadPlayerOnIntent}
+      >
+        <Volume2Icon size={16} aria-hidden="true" />
+        <span class="reel__preview-label">{m.org_hero_reel_preview_sound()}</span>
+      </button>
+    {/if}
   </div>
 {/snippet}
 
@@ -992,9 +1131,12 @@
   data-edge={edge}
   data-mode={mode}
   data-paused={clock.paused ? '' : undefined}
+  data-theatre={theatre?.item.kind}
   aria-roledescription="carousel"
   aria-label={m.org_hero_reel_label()}
-  style:--_pool={POOL_FALLBACK}
+  style:--_pool={FIRST_PAINT.pool}
+  style:--_fp-deepen={FIRST_PAINT.deepen}
+  style:--_fp-pale={FIRST_PAINT.pale}
   style:--_peak-top={firstShades['--_peak-top']}
   style:--_top-0={firstShades['--_top-0']}
   style:--_top-1={firstShades['--_top-1']}
@@ -1008,13 +1150,13 @@
   onpointerup={() => pressEnd(true)}
   onpointercancel={() => pressEnd(false)}
 >
-  <ReelStage bind:this={stage} {media} {keys} index={reelMotion.stage ?? shown} {playing} {look} />
+  <ReelStage bind:this={stage} {media} {keys} index={reelMotion.stage ?? shown} {playing} {look} withheld={theatre?.item.kind === 'audio'} />
   <div class="reel__scrim-top" aria-hidden="true"></div>
   <div class="reel__scrim-foot" aria-hidden="true"></div>
 
   {@render filmLayer?.()}
 
-  <div class="reel__inner" inert={filmOpen}>
+  <div class="reel__inner" inert={filmOpen || theatre !== null}>
     {@render pause()}
     {@render top()}
     {#if layout === 'name'}{@render nameWindow()}{/if}
@@ -1022,6 +1164,17 @@
     {#if current}{@render playingNow(current)}{/if}
     {@render entries()}
   </div>
+  {#if theatre}
+    <ReelTheatre
+      item={theatre.item}
+      closeLabel={m.org_hero_reel_theatre_close()}
+      caption={(seconds) =>
+        seconds === null
+          ? m.player_preview_label()
+          : m.org_hero_reel_theatre_caption({ length: lengthOf(seconds) })}
+      onclose={closeTheatre}
+    />
+  {/if}
 </section>
 
 <style>
@@ -1037,7 +1190,10 @@
        brand's secondary token: that one mixes `--color-text`, which a brand
        re-tuned from dark to light can still hold pale (OBB on 2026-11-20:
        pink on cream, which no veil carries). */
-    --_light: clamp(0, (var(--_gy, 0) - 0.1791) * 1e12, 1);
+    /* The page's own switch (review R2): org-brand.css's `--_gw`, turned
+       round, so a light page bound AT the pivot (`bindingLuminance`) is light
+       here too; `groundPoles` reads the same. Unset, it reads dark. */
+    --_light: calc(1 - clamp(0, (0.1791 - var(--_gy, 0)) * 1e12, 1));
     --_ink: color-mix(
       in srgb,
       var(--color-text-primary) calc(var(--_light) * 100%),
@@ -1056,19 +1212,24 @@
        brand colour and no soft ink before the fit has carried them (review
        M3, 2026-11-21). */
     --_pole-ink: color-mix(in srgb, black calc(var(--_light) * 100%), white);
-    /* Until fitScrims has measured: the brand's ground (a deep shade of it
-       under white ink), held over the header and the foot's lower two thirds. */
+    /* Until fitScrims has measured: the brand's ground, a deep shade of it
+       under white ink or a pale one under dark (`FIRST_PAINT`, set on the
+       root: pale enough that every word clears its floor's margin on a light
+       ground at the pivot, review R5), held over the header and the foot's
+       lower two thirds. */
     --_scrim: color-mix(
       in oklab,
-      black calc((1 - var(--_light)) * 64%),
-      var(--color-background)
+      white calc(var(--_light) * var(--_fp-pale, 0.2) * 100%),
+      color-mix(in oklab, black calc((1 - var(--_light)) * var(--_fp-deepen, 0.64) * 100%), var(--color-background))
     );
     --_top-reach: 12%;
     --_foot-reach: 66%;
     --_foot-clear: 0px;
     /* The ring is drawn over film, not the page's ground: until fitScrims
-       has solved the brand's focus colour against the scrim, the reel's ink. */
-    --color-focus: var(--_ink);
+       has solved the brand's focus colour against the scrim (`focusInk`),
+       the pole's ink, never the player text, which a creator may set dark on
+       a dark brand (review R3: #8B1A2B). */
+    --color-focus: var(--_pole-ink);
     --_glass-a: 0.55;
     --_line: color-mix(in srgb, var(--_ink) 22%, transparent);
     --_progress: 0;
@@ -1080,6 +1241,15 @@
     overflow: hidden;
     color: var(--_ink);
     touch-action: pan-y;
+  }
+
+  /* No colour eases on the reel's words or its links (review R1): a link's
+     `--transition-colors` read back its START value, the lift, in the very
+     task the fit took the lift off, so the fit judged it carried and dropped
+     it, and its transitionend fitted again: a fit every 230 ms, the scrim
+     flickering. Their background and border still ease. */
+  .reel :is([data-ink], [data-ink] *, a, .reel__ghost, .reel__round) {
+    transition-property: background-color, border-color;
   }
 
   /* The first paint (see `--_pole-ink`): set aside only while a fit reads
@@ -1395,6 +1565,26 @@
     display: flex;
     gap: var(--space-3);
     margin-top: var(--space-8);
+  }
+
+  .reel__preview {
+    min-height: var(--space-12);
+  }
+
+  /* ── the theatre's room: the words and the index step aside (the mock's) ── */
+  .reel__inner,
+  .reel__scrim-top,
+  .reel__scrim-foot {
+    transition: opacity var(--duration-slow) var(--ease-out);
+  }
+
+  .reel[data-theatre] .reel__inner,
+  .reel[data-theatre] .reel__scrim-top {
+    opacity: 0;
+  }
+
+  .reel[data-theatre] .reel__scrim-foot {
+    opacity: 0.45;
   }
 
   .reel__btn {
@@ -1800,6 +1990,16 @@
       flex: 1;
       justify-content: center;
       font-size: var(--text-base);
+    }
+
+    /* The mock's: on a phone the preview is its icon, named for the ear. */
+    .reel__preview {
+      width: var(--space-12);
+      padding: 0;
+    }
+
+    .reel__preview-label {
+      display: none;
     }
 
     .reel__window {

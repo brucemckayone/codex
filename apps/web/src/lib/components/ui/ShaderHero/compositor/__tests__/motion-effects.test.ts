@@ -255,7 +255,8 @@ describe('composeFilmPass', () => {
   it('gives every combination its own pass id (the pass cache key)', () => {
     const passes = everyFilmPass();
     expect(passes).toHaveLength(
-      2 *
+      // fill, name, and WP-5b's portrait
+      3 *
         TRANS_IDS.length *
         POINTER_IDS.length *
         OPENING_IDS.length *

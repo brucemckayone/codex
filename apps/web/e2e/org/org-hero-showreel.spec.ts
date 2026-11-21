@@ -5,131 +5,30 @@
  * that never move on by themselves; Save-Data draws stills that still move on
  * (owner Q3); with no WebGL2 the page's own copy of the film shows, and with
  * it the film is hidden there only while the window's canvas draws it
- * (`data-film`); the film button opens the film and the reel holds for it,
- * on a phone too, where focus comes back to the button when the pop-up
- * closes; on a phone a tap moves on, or back on the left third.
+ * (`data-film`); a full film's button opens the film and the reel holds for
+ * it, on a phone too, where focus comes back to the button when the pop-up
+ * closes (a preview opens the reel's theatre: org-hero-theatre.spec.ts); on a
+ * phone a tap moves on, or back on the left third.
  *
- * Measured on of-blood-and-bones without a DB write: the landing's HTML is
- * rewritten in the browser to set the hero options the brand editor would
- * save (`brandFineTune.tokenOverrides`, the keys set last so they win). The
- * server rendered the org's stored hero; hydration redraws it as the
- * Showreel, as a saved change would draw on the next load.
- *
- * A fulfilled document has no address, so Chrome's Local Network Access
- * counts it public and blocks its requests to the local servers: the flags
- * below lift that for this file only.
+ * Measured on of-blood-and-bones without a DB write, through
+ * `helpers/showreel.ts`: the landing's HTML is rewritten in the browser to set
+ * the hero options the brand editor would save, and `SHOWREEL_LAUNCH` lifts
+ * Chrome's Local Network Access block on the fulfilled document for this file
+ * only.
  */
 
+import { expect, test } from '@playwright/test';
 import {
-  type Browser,
-  type BrowserContextOptions,
-  expect,
-  type Page,
-  test,
-} from '@playwright/test';
-import { E2E_BASE_URL } from '../helpers/origin';
+  currentPiece as current,
+  MOVES_ON,
+  ORG,
+  offTheWords,
+  openShowreel as open,
+  PIECE_MS,
+  SHOWREEL_LAUNCH,
+} from '../helpers/showreel';
 
-const ORG = 'of-blood-and-bones';
-/** `PIECE_MS` in reel-clock.svelte.ts: how long each piece plays. */
-const PIECE_MS = 7000;
-/** A piece, plus the words' swap and a slow CI frame. */
-const MOVES_ON = PIECE_MS + 5000;
-
-test.use({
-  launchOptions: {
-    args: [
-      '--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights',
-      '--autoplay-policy=no-user-gesture-required',
-    ],
-  },
-});
-
-const origin = (baseURL: string) => {
-  const u = new URL(baseURL);
-  return `${u.protocol}//${ORG}.${u.host}`;
-};
-
-/** The brand's stored overrides in the page's data: a JSON string, or null. */
-const PAYLOAD = /brandFineTune:\{tokenOverrides:("(?:[^"\\]|\\.)*"|null)/;
-
-/**
- * The landing's HTML with these hero options set as the editor saves them,
- * or null when it carries no brand payload to set them on.
- */
-function withHeroOptions(
-  html: string,
-  keys: Record<string, string>
-): string | null {
-  const match = PAYLOAD.exec(html);
-  if (!match) return null;
-  const stored: Record<string, string> =
-    match[1] === 'null' ? {} : JSON.parse(JSON.parse(match[1]));
-  const set = Object.fromEntries(
-    Object.entries(keys).map(([key, value]) => [`hero-opt-${key}`, value])
-  );
-  const literal = JSON.stringify(JSON.stringify({ ...stored, ...set })).replace(
-    /</g,
-    '\\u003C'
-  );
-  return html.replace(
-    match[0],
-    () => `brandFineTune:{tokenOverrides:${literal}`
-  );
-}
-
-async function open(
-  browser: Browser,
-  baseURL: string | undefined,
-  {
-    context: contextOptions = {},
-    keys = {},
-    init,
-  }: {
-    context?: BrowserContextOptions;
-    keys?: Record<string, string>;
-    init?: () => void;
-  } = {}
-): Promise<Page> {
-  const url = `${origin(baseURL ?? E2E_BASE_URL)}/`;
-  const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
-    ...contextOptions,
-  });
-  if (init) await context.addInitScript(init);
-  const page = await context.newPage();
-  let rewritten = false;
-  await page.route(url, async (route) => {
-    const response = await route.fetch();
-    const body = withHeroOptions(await response.text(), {
-      purpose: 'consume',
-      comp: 'showreel',
-      'reel-layout': 'corner',
-      ...keys,
-    });
-    rewritten = body !== null;
-    await route.fulfill({ response, body: body ?? undefined });
-  });
-  await page.goto(url);
-  test.skip(
-    !rewritten,
-    `${ORG}'s landing has no brand payload to set the Showreel on`
-  );
-  await expect(page.locator('.reel')).toBeVisible({ timeout: 30_000 });
-  // The server draws the Showreel too (the consume default), so in sight is
-  // not yet hydrated, and a click then does nothing. The bar's first write
-  // (`--_progress`) is the browser's own: the reel is live from there.
-  await expect(page.locator('.reel')).toHaveAttribute('style', /--_progress/, {
-    timeout: 30_000,
-  });
-  return page;
-}
-
-/** The piece the index says is playing. */
-const current = (page: Page) =>
-  page.locator('.reel [aria-current="true"] .reel__t');
-
-/** Somewhere over the frame, off the words, the index and the strip. */
-const offTheWords = (page: Page) => page.mouse.move(720, 220);
+test.use(SHOWREEL_LAUNCH);
 
 test.describe('the Showreel on a landing', () => {
   test('moves on by itself, holds while paused, and plays again (WCAG 2.2.2)', async ({
@@ -253,6 +152,34 @@ test.describe('the Showreel on a landing', () => {
     // it reaches that as it is (OBB's red does: 3.75:1 on its dark).
     expect(ring?.ratio).toBeGreaterThanOrEqual(3);
     if (ring?.brandPasses) expect(ring.isBrand).toBe(true);
+    await page.context().close();
+  });
+
+  test("before the fit, the ring is the pole's ink, never a creator's dark player text (review R3)", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL);
+    const ring = await page.locator('.reel').evaluate((reel) => {
+      // The first paint, as it stands before the fit: no solved ring, no
+      // `data-fit`, and a player text set dark on OBB's dark.
+      reel.style.removeProperty('--color-focus');
+      reel.removeAttribute('data-fit');
+      reel.style.setProperty('--color-player-text', '#8B1A2B');
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--color-focus)';
+      reel.append(probe);
+      const canvas = document.createElement('canvas').getContext('2d', {
+        willReadFrequently: true,
+      });
+      if (!canvas) return null;
+      canvas.fillStyle = getComputedStyle(probe).color;
+      canvas.fillRect(0, 0, 1, 1);
+      probe.remove();
+      return [...canvas.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+    });
+    // OBB is dark: its pole's ink is white.
+    expect(ring).toEqual([255, 255, 255]);
     await page.context().close();
   });
 
@@ -473,9 +400,11 @@ test.describe('the Showreel on a landing', () => {
     const page = await open(browser, baseURL);
     const button = page.locator('.reel__btn');
     const label = (await button.textContent())?.trim() ?? '';
+    // Only the full film plays in the page's own player: a preview opens the
+    // reel's own theatre (Codex-1yd58.8, org-hero-theatre.spec.ts).
     test.skip(
-      !/^(Play the preview|Watch our film)/.test(label),
-      `${ORG}'s reel opens on no film here ("${label}")`
+      !/^Watch our film/.test(label),
+      `${ORG}'s reel plays no full film here ("${label}")`
     );
     await button.click();
     await expect(page.locator('.hero-film')).toBeVisible();
@@ -506,9 +435,11 @@ test.describe('the Showreel on a landing', () => {
     });
     const button = page.locator('.reel__words .reel__btn');
     const label = (await button.textContent())?.trim() ?? '';
+    // Only the full film plays in the page's pop-up: a preview opens the
+    // reel's own theatre (Codex-1yd58.8, org-hero-theatre.spec.ts).
     test.skip(
-      !/^(Play the preview|Watch our film)/.test(label),
-      `${ORG}'s reel opens on no film here ("${label}")`
+      !/^Watch our film/.test(label),
+      `${ORG}'s reel plays no full film here ("${label}")`
     );
     await button.click();
     const modal = page.locator('.intro-modal');

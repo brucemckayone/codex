@@ -152,7 +152,7 @@ jobs:
       - name: Shader gate self-test
         run: pnpm --filter web run shaders:check:test
 
-      # Codex-1yd58 WP-6: the Showreel's 320 film passes (each film frame with
+      # Codex-1yd58 WP-6: the Showreel's 480 film passes (each film frame with
       # every motion effect), as text: no effect declares its own uniform,
       # none reads one the compositor never sets, no two share a pass id (the
       # program cache key), no flashing effect reads the real clock. Planted

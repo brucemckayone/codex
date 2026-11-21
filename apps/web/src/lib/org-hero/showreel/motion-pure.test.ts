@@ -377,7 +377,11 @@ describe('intoAt', () => {
 
   it('starts every way into the film at rest, so the press never jumps', () => {
     for (const kind of INTO_IDS)
-      for (const frame of ['film-fill', 'film-name'] as const) {
+      for (const frame of [
+        'film-fill',
+        'film-name',
+        'film-portrait',
+      ] as const) {
         const start = intoAt(0, kind, frame, depth);
         expect(start, `${kind} ${frame}`).toMatchObject({
           zoom: 1,
@@ -395,7 +399,11 @@ describe('intoAt', () => {
 
   it('hands off within 1.2 s, the film filling the stage', () => {
     for (const kind of INTO_IDS)
-      for (const frame of ['film-fill', 'film-name'] as const) {
+      for (const frame of [
+        'film-fill',
+        'film-name',
+        'film-portrait',
+      ] as const) {
         const length = intoLength(kind, frame);
         expect(length).toBeLessThanOrEqual(1200);
         expect(intoAt(length - 1, kind, frame, depth).handOff).toBe(false);
@@ -409,7 +417,7 @@ describe('intoAt', () => {
   });
 
   it('dives through the name in no more than the research allows', () => {
-    for (const frame of ['film-fill', 'film-name'] as const) {
+    for (const frame of ['film-fill', 'film-name', 'film-portrait'] as const) {
       const dives: number[] = [];
       for (let ms = 0; ms <= 1300; ms += 10)
         if (intoAt(ms, 'name', frame, depth).dive > 0) dives.push(ms);

@@ -49,9 +49,11 @@
     /** The footage plays: not paused, with the tab and the hero in view. */
     playing: boolean;
     look: FilmLook;
+    /** A recording's theatre is open: the shader alone, behind its cover. */
+    withheld?: boolean;
   }
 
-  let { media, keys, index, playing, look }: Props = $props();
+  let { media, keys, index, playing, look, withheld = false }: Props = $props();
 
   /** Rebuilds of one entry's player after a decode error, before it shows its still. */
   const RESTARTS = 2;
@@ -89,7 +91,8 @@
   $effect(() => {
     const video = videos[on];
     const still = stills[on];
-    if (video && shows(on)) showreelFeed.setMedia(video);
+    if (withheld) showreelFeed.setMedia(null);
+    else if (video && shows(on)) showreelFeed.setMedia(video);
     else showreelFeed.setMedia(still && loaded[on] ? still : null);
   });
 
@@ -266,6 +269,7 @@
   class="reel-stage"
   bind:this={stageEl}
   data-frame={look.frame}
+  data-withheld={withheld ? '' : undefined}
   data-band={look.band === 'none' ? undefined : look.band}
   aria-hidden="true"
 >
@@ -374,6 +378,11 @@
   /* The Name window shows the film through the letters (the title's own
      background in the page); the stage behind stays out of sight. */
   .reel-stage[data-frame='film-name'] {
+    opacity: 0;
+  }
+
+  /* A recording's theatre: its cover sits over the shader alone. */
+  .reel-stage[data-withheld] {
     opacity: 0;
   }
 

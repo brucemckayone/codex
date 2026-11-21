@@ -32,6 +32,12 @@ const shared: FrameShared = {
   u_hasMedia: 1,
   u_band: 2,
   u_ramp: [0.5, 0.95],
+  // WP-5b: the stills' push-in and the surfaces' brand tint and duotone.
+  u_zoom: 1,
+  u_tint: [0.8, 0.1, 0.2],
+  u_toneDeep: [0.1, 0.02, 0.04],
+  u_toneMid: [0.8, 0.1, 0.2],
+  u_tonePale: [0.96, 0.82, 0.84],
 };
 
 describe('filmPassValues', () => {

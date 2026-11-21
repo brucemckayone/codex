@@ -183,6 +183,16 @@ interface ShaderConfigBase {
     accent: [number, number, number];
     bg: [number, number, number];
   };
+  /**
+   * The org's OWN primary and ground, from its brand tokens, whatever the
+   * shader's palette (`colors` is the custom shader palette when one is
+   * opted into). The Showreel's surfaces over the footage tint from these
+   * (WP-5b review L6): the film plays in the org's colours, not the shader's.
+   */
+  brand: {
+    primary: [number, number, number];
+    bg: [number, number, number];
+  };
 }
 
 export interface SutureConfig extends ShaderConfigBase {
@@ -649,6 +659,25 @@ export function getShaderConfig(
     (style ? readBrandVar(style, 'shader-use-custom-colors', isDark) : null) ===
     '1';
 
+  /** One slot of the org's own brand palette, else the platform default. */
+  const brandSlot = (
+    slot: 'primary' | 'secondary' | 'accent' | 'bg',
+    fallback: [number, number, number]
+  ): [number, number, number] => {
+    if (!style) return fallback;
+    if (slot === 'bg') {
+      // The org's background is injected as `--brand-bg` (+ `--brand-bg-dark`),
+      // NOT `--color-brand-bg`, which no stylesheet defines. Reading that name
+      // sent every org's shader to the navy platform default whatever its own
+      // background was. `readBrandVar` applies the page's own rule (the -dark
+      // value in dark mode, else the light one), so the shader's ground is the
+      // ground the page paints around it. No background set: the default, as before.
+      const raw = readBrandVar(style, 'bg', isDark);
+      return (raw ? parseCssColor(raw) : null) ?? fallback;
+    }
+    return readColorVar(style, `brand-${slot}`) ?? fallback;
+  };
+
   /**
    * Resolve one palette slot: custom shader colour when opted in and parseable,
    * else the org brand colour, else the platform default.
@@ -665,24 +694,15 @@ export function getShaderConfig(
       const parsed = raw ? parseCssColor(raw) : null;
       if (parsed) return parsed;
     }
-    if (!style) return fallback;
-    if (slot === 'bg') {
-      // The org's background is injected as `--brand-bg` (+ `--brand-bg-dark`),
-      // NOT `--color-brand-bg`, which no stylesheet defines. Reading that name
-      // sent every org's shader to the navy platform default whatever its own
-      // background was. `readBrandVar` applies the page's own rule (the -dark
-      // value in dark mode, else the light one), so the shader's ground is the
-      // ground the page paints around it. No background set: the default, as before.
-      const raw = readBrandVar(style, 'bg', isDark);
-      return (raw ? parseCssColor(raw) : null) ?? fallback;
-    }
-    return readColorVar(style, `brand-${slot}`) ?? fallback;
+    return brandSlot(slot, fallback);
   };
 
-  const primary = paletteSlot('primary', [0.486, 0.227, 0.929]);
+  const PRIMARY: [number, number, number] = [0.486, 0.227, 0.929];
+  const BG: [number, number, number] = [0.059, 0.09, 0.165];
+  const primary = paletteSlot('primary', PRIMARY);
   const secondary = paletteSlot('secondary', [0.925, 0.282, 0.6]);
   const accent = paletteSlot('accent', [0.961, 0.62, 0.043]);
-  const bg = paletteSlot('bg', [0.059, 0.09, 0.165]);
+  const bg = paletteSlot('bg', BG);
 
   // Read logo URL for SDF-based shader integration
   const logoUrl = style ? readBrandVar(style, 'shader-logo-url', isDark) : null;
@@ -714,6 +734,7 @@ export function getShaderConfig(
       accent: accent as [number, number, number],
       bg: bg as [number, number, number],
     },
+    brand: { primary: brandSlot('primary', PRIMARY), bg: brandSlot('bg', BG) },
   };
 
   const rv = (key: string, def: number) =>

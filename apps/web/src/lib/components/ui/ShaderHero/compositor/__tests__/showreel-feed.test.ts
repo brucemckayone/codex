@@ -116,4 +116,54 @@ describe('showreelFeed', () => {
     ]);
     expect(showreelFeed.look).toBeNull();
   });
+
+  it('names a change of surface or push-in, and reads an absent one as none (5b)', () => {
+    const seconds = () => 1;
+    const changed = vi.fn();
+    showreelFeed.onChange(changed);
+    showreelFeed.setLook({ frame: 'film-fill', band: 'fade' });
+    // absent is 'none' and no push: the same look
+    showreelFeed.setLook({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'none',
+      push: null,
+    });
+    showreelFeed.setLook({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'grain',
+    });
+    showreelFeed.setLook({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'grain',
+    });
+    showreelFeed.setLook({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'grain',
+      push: seconds,
+    });
+    // the same clock again is no change; another clock is one
+    showreelFeed.setLook({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'grain',
+      push: seconds,
+    });
+    showreelFeed.setLook({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'grain',
+      push: () => 0,
+    });
+    expect(changed.mock.calls).toEqual([
+      ['look'],
+      ['look'],
+      ['look'],
+      ['look'],
+    ]);
+    expect(showreelFeed.look).toMatchObject({ surface: 'grain' });
+  });
 });

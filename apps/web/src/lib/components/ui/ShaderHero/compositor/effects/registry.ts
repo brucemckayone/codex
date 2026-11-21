@@ -1,6 +1,7 @@
 /**
  * The effect registry (Codex-1yd58.4, plan §5.5): every blend, layer and frame
- * a brand's shader stack can name, and how a pass's source is assembled.
+ * a brand's shader stack can name, the Showreel's passes over the piece's own
+ * picture (`MEDIA`, WP-5b), and how a pass's source is assembled.
  *
  * Plain data and strings, importing nothing from the app, so
  * `scripts/validate-shaders.mjs` can bundle it in Node, compile every pass
@@ -11,14 +12,21 @@ import { blendMix } from './blend-mix';
 import { blendMultiply } from './blend-multiply';
 import { blendScreen } from './blend-screen';
 import { blendSmokeKey } from './blend-smoke-key';
-import type { BlendEffect, Effect, FrameEffect, LayerEffect } from './effect';
+import type {
+  BlendEffect,
+  Effect,
+  FrameEffect,
+  LayerEffect,
+  MediaEffect,
+} from './effect';
 import { frameFilmFill } from './frame-film-fill';
 import { frameFilmName } from './frame-film-name';
+import { frameFilmPortrait } from './frame-film-portrait';
 import { frameNameGlows } from './frame-name-glows';
 import { frameShaderOnly } from './frame-shader-only';
 import { frameThroughName } from './frame-through-name';
 import { HEADER } from './header';
-import type { BlendId, FrameId, LayerId } from './ids';
+import type { BlendId, FrameId, LayerId, MediaPassId } from './ids';
 import { layerChroma } from './layer-chroma';
 import { layerCrt } from './layer-crt';
 import { layerDither } from './layer-dither';
@@ -34,6 +42,10 @@ import { layerMonotone } from './layer-monotone';
 import { layerMosaic } from './layer-mosaic';
 import { layerReeded } from './layer-reeded';
 import { layerShaderLight } from './layer-shader-light';
+import { mediaPush } from './media-push';
+import { surfaceColour } from './surface-colour';
+import { surfaceDuotone } from './surface-duotone';
+import { surfaceGrain } from './surface-grain';
 import { declareUniforms, UNIFORMS } from './uniforms';
 
 export const BLENDS: Record<BlendId, BlendEffect> = {
@@ -68,6 +80,15 @@ export const FRAMES: Record<FrameId, FrameEffect> = {
   'name-glows': frameNameGlows,
   'film-fill': frameFilmFill,
   'film-name': frameFilmName,
+  'film-portrait': frameFilmPortrait,
+};
+
+/** The passes over the piece's own picture, in the order they run (WP-5b). */
+export const MEDIA: Record<MediaPassId, MediaEffect> = {
+  'media-push': mediaPush,
+  'surface-duotone': surfaceDuotone,
+  'surface-colour': surfaceColour,
+  'surface-grain': surfaceGrain,
 };
 
 /** Every effect, for the gate and the tests. */
@@ -75,6 +96,7 @@ export const EFFECTS: readonly Effect[] = [
   ...Object.values(BLENDS),
   ...Object.values(LAYERS),
   ...Object.values(FRAMES),
+  ...Object.values(MEDIA),
 ];
 
 /** The fragment source of one pass: header, its uniforms, its body. */

@@ -61,10 +61,10 @@ describe('filmPassProblems', () => {
     assert.deepEqual(problems(), []);
   });
 
-  test('wants the whole cross product: 320 passes by default', () => {
-    assert.equal(MIN_FILM_PASSES, 320);
+  test('wants the whole cross product: 480 passes by default', () => {
+    assert.equal(MIN_FILM_PASSES, 480);
     const found = filmPassProblems({
-      passes: passes(319),
+      passes: passes(479),
       assemble,
       settable: SETTABLE,
       effects: [],
@@ -72,11 +72,11 @@ describe('filmPassProblems', () => {
     assert.equal(found.length, 1);
     assert.match(
       found[0].message,
-      /only 319 film pass\(es\), expected at least 320/
+      /only 479 film pass\(es\), expected at least 480/
     );
     assert.deepEqual(
       filmPassProblems({
-        passes: passes(320),
+        passes: passes(480),
         assemble,
         settable: SETTABLE,
         effects: [],

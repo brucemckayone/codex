@@ -29,10 +29,11 @@ const EFFECTS_DIR = path.resolve(
 );
 
 /**
- * The Showreel draws 2 film frames × 5 transitions × 4 pointers × 2 openings
- * × 4 ways into the film. Fewer means the motion registry moved or emptied.
+ * The Showreel draws 3 film frames (fill, name, and WP-5b's portrait) × 5
+ * transitions × 4 pointers × 2 openings × 4 ways into the film. Fewer means
+ * the motion registry moved or emptied.
  */
-export const MIN_FILM_PASSES = 320;
+export const MIN_FILM_PASSES = 480;
 
 /**
  * What is wrong with the Showreel's film passes, the compile aside. Each

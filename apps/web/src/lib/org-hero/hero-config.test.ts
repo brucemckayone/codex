@@ -281,7 +281,7 @@ describe('the Showreel', () => {
   const REEL_AXES = HERO_OPTION_KEYS.filter((key) => key.startsWith('reel-'));
 
   it('is the default for a consume org with a reel, every reel option at its first value', () => {
-    expect(REEL_AXES).toHaveLength(10);
+    expect(REEL_AXES).toHaveLength(11);
     const o = defaultOptions('consume', FULL);
     expect(o).toMatchObject({
       comp: 'showreel',
@@ -297,6 +297,11 @@ describe('the Showreel', () => {
     expect(o['reel-band']).toBe('fade');
     // The owner's pick (2026-11-20): no outline unless the creator asks.
     expect(o['reel-edge']).toBe('shadow');
+    // The owner's picks (2026-11-21, the 5b board): the peek and the stills'
+    // push-in on, no surface over the footage.
+    expect(o['reel-peek']).toBe('on');
+    expect(o['reel-push']).toBe('on');
+    expect(o['reel-surface']).toBe('none');
   });
 
   it('is never the default for an org without a reel, shader or not: that org keeps today’s hero', () => {
@@ -318,7 +323,7 @@ describe('the Showreel', () => {
     expect(
       resolveHero(
         'consume',
-        { 'reel-surface': 'shader', 'reel-band': 'under' },
+        { 'reel-surface': 'duotone', 'reel-band': 'under' },
         noShader
       )
     ).toMatchObject({ 'reel-surface': 'none', 'reel-band': 'none' });
@@ -327,20 +332,22 @@ describe('the Showreel', () => {
         resolveHero('consume', { 'reel-band': band }, noShader)['reel-band']
       ).toBe('none');
     }
-    // a surface that is not the shader's stays
-    expect(
-      resolveHero('consume', { 'reel-surface': 'grain' }, noShader)[
-        'reel-surface'
-      ]
-    ).toBe('grain');
+    // every surface is drawn by the shader, on the footage (WP-5b)
+    for (const surface of ['duotone', 'colour', 'grain'] as const) {
+      expect(
+        resolveHero('consume', { 'reel-surface': surface }, noShader)[
+          'reel-surface'
+        ]
+      ).toBe('none');
+    }
     // with a shader, both stay
     expect(
       resolveHero(
         'consume',
-        { 'reel-surface': 'shader', 'reel-band': 'under' },
+        { 'reel-surface': 'grain', 'reel-band': 'under' },
         FULL
       )
-    ).toMatchObject({ 'reel-surface': 'shader', 'reel-band': 'under' });
+    ).toMatchObject({ 'reel-surface': 'grain', 'reel-band': 'under' });
   });
 
   it('is never the default for any other purpose', () => {
@@ -354,10 +361,11 @@ describe('the Showreel', () => {
     const chosen = {
       comp: 'showreel',
       'reel-layout': 'wide',
-      'reel-peek': 'on',
+      'reel-peek': 'off',
       'reel-pointer': 'glitch',
       'reel-trans': 'liquid',
-      'reel-surface': 'halftone',
+      'reel-surface': 'duotone',
+      'reel-push': 'off',
       'reel-band': 'fade',
       'reel-edge': 'outline',
       'reel-opening': 'none',
@@ -502,8 +510,15 @@ describe('the Showreel', () => {
       'hero-opt-comp': 'showreel',
       'hero-opt-reel-layout': 'diagonal',
       'hero-opt-reel-loop': 'off',
+      // a surface offered before the 5b board, never shipped: unknown now
+      'hero-opt-reel-surface': 'halftone',
+      'hero-opt-reel-push': 'off',
     });
-    expect(s.options).toEqual({ comp: 'showreel', 'reel-loop': 'off' });
+    expect(s.options).toEqual({
+      comp: 'showreel',
+      'reel-loop': 'off',
+      'reel-push': 'off',
+    });
     expect(writeHeroSetting({}, 'reel-surface', 'grain')).toEqual({
       'hero-opt-reel-surface': 'grain',
     });
@@ -581,10 +596,11 @@ describe('stored values are a contract', () => {
       entrance: ['rise', 'reveal', 'fade', 'none'],
       logo: ['s', 'm', 'l'],
       'reel-layout': ['corner', 'wide', 'name'],
-      'reel-peek': ['off', 'on'],
+      'reel-peek': ['on', 'off'],
       'reel-pointer': ['liquid', 'smoke', 'glitch', 'none'],
       'reel-trans': ['burn', 'liquid', 'glitch', 'light-leak'],
-      'reel-surface': ['none', 'grain', 'halftone', 'reeded', 'red', 'shader'],
+      'reel-surface': ['none', 'duotone', 'colour', 'grain'],
+      'reel-push': ['on', 'off'],
       'reel-band': ['fade', 'under', 'edges', 'none'],
       'reel-edge': ['shadow', 'outline'],
       'reel-opening': ['name', 'none'],
