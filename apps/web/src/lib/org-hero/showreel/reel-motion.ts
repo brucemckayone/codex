@@ -364,7 +364,11 @@ export class ReelMotion {
     v.u_reveal = cut.reveal;
     v.u_cut = cut.cuts;
     this.#stage = cut.shown;
-    let busy = !this.#paused && cut.reveal < 1;
+    // Frames while a cut is due, not only while its picture moves: the first
+    // frame after a pick can read it still in full (that frame began before
+    // the pick was made), and stopping there leaves the stage on the last
+    // piece, its words never coming in.
+    let busy = !this.#paused && this.#reveal.cutting(now);
 
     const pointer = running?.pointer;
     if (pointer === 'liquid' || pointer === 'smoke') {

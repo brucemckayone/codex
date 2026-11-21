@@ -48,6 +48,18 @@ describe('RevealClock', () => {
     expect(clock.at(1000 + FULL_CUT)).toEqual({ reveal: 1, shown: 1, cuts: 1 });
   });
 
+  it('says a cut is under way from the pick to its rest, before its fall begins too (reveal still 1)', () => {
+    const clock = new RevealClock(0);
+    expect(clock.cutting(0)).toBe(false);
+    clock.cut(1, 1000);
+    // Read at a time before the pick: the cut is due all the same.
+    expect(clock.cutting(990)).toBe(true);
+    expect(clock.at(1000).reveal).toBe(1);
+    expect(clock.cutting(1000)).toBe(true);
+    expect(clock.cutting(1000 + FULL_CUT - 1)).toBe(true);
+    expect(clock.cutting(1000 + FULL_CUT)).toBe(false);
+  });
+
   it('retargets a pick made during the fall: the fall goes on', () => {
     const clock = new RevealClock(0);
     clock.cut(1, 0);

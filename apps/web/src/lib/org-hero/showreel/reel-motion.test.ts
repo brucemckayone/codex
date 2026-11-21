@@ -114,6 +114,40 @@ describe('ReelMotion between pieces', () => {
     expect(driver.stage).toBe(2);
   });
 
+  // A pick is stamped by the clock (`performance.now()`) when its handler
+  // runs; a frame by the rAF time it BEGAN, which comes before a handler run
+  // inside it. Its first frame then reads the piece still in full (reveal
+  // 1). It must keep asking for frames, or the cut never runs, the stage
+  // never names the piece, and its words never come in (the reduced-motion
+  // pick that stayed on piece 01: e2e org-hero-showreel, lane A).
+  it.each([
+    ['a frame begun before the pick', 999],
+    ['a frame stamped with the pick', 1000],
+  ])('keeps asking for frames for a cut not yet falling: %s (reduced motion)', (_, at) => {
+    const driver = new ReelMotion(setup({ reducedMotion: true }));
+    driver.follow(KEYS, 0, 0);
+    driver.follow(KEYS, 1, 1000);
+    expect(driver.frame(at)).toBe(true);
+    expect(driver.stage).toBe(0);
+    driver.frame(1000 + REDUCED_CUT_TIMING.outMs);
+    expect(driver.stage).toBe(1);
+  });
+
+  it('keeps asking for frames for a fall MIN_CUT_GAP_MS holds off (a pick right after a pause cut one short)', () => {
+    const driver = new ReelMotion(setup());
+    runs(driver);
+    driver.follow(KEYS, 0, 0);
+    driver.follow(KEYS, 1, 1000); // starts at 1000
+    driver.frame(1100);
+    driver.pause(1100); // lands on b at once
+    driver.play(1150);
+    driver.follow(KEYS, 2, 1200); // falls from 1000 + MIN_CUT_GAP_MS
+    expect(driver.frame(1210)).toBe(true);
+    expect(driver.stage).toBe(1);
+    driver.frame(1000 + MIN_CUT_GAP_MS + CUT_TIMING.outMs);
+    expect(driver.stage).toBe(2);
+  });
+
   it('starts on the clock’s piece, and shows a piece a refresh moved at its new place, no cut', () => {
     const driver = new ReelMotion(setup());
     // Before it hears the reel, it names no piece by key.

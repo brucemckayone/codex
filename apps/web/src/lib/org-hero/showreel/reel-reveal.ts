@@ -106,6 +106,17 @@ export class RevealClock {
     return this.#waiting ?? this.#target;
   }
 
+  /**
+   * A cut is under way at `now`, or due: its fall may not have begun yet,
+   * the reveal still 1 (a pick stamped after the frame reading it began, or
+   * a fall `MIN_CUT_GAP_MS` holds off). A loop that stops on the reveal alone
+   * stops before such a cut runs.
+   */
+  cutting(now: number): boolean {
+    this.#advance(now);
+    return this.#phase.kind !== 'rest';
+  }
+
   /** Stop the cut where it is (the reel's pause, its holds). */
   pause(now: number): void {
     if (this.#pausedAt === null) this.#pausedAt = now;
