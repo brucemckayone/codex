@@ -234,7 +234,8 @@ function baseOptions(facts: HeroFacts): HeroOptions {
     'reel-push': 'on',
     'reel-band': 'fade',
     'reel-edge': 'shadow',
-    'reel-opening': 'name',
+    // Corner's; the layout decides it (`dependentDefaults`)
+    'reel-opening': 'none',
     'reel-film': 'name',
     'reel-loop': 'on',
   };
@@ -303,13 +304,33 @@ function purposeDefaults(
   }
 }
 
+/**
+ * The defaults that hang on another option, once the purpose's and the org's
+ * own are in (`set`): only a key neither set takes one. The opening through
+ * the name is the Name window's own; on Corner and Wide the reel opens on its
+ * film, and a creator who turns the title opening on gets it (owner,
+ * 2026-11-21, the WP-6 board's N, then A). Read, never stored, so an org
+ * that never chose an opening follows the layout it has now.
+ */
+function dependentDefaults(
+  options: HeroOptions,
+  set: Partial<HeroOptions>
+): HeroOptions {
+  if (set['reel-opening'] !== undefined) return options;
+  return {
+    ...options,
+    'reel-opening': options['reel-layout'] === 'name' ? 'name' : 'none',
+  };
+}
+
 /** The purpose's defaults with nothing changed: what an "Auto" choice means. */
 export function defaultOptions(
   purpose: HeroPurpose,
   facts: HeroFacts
 ): HeroOptions {
+  const purposes = purposeDefaults(purpose, facts);
   return applyFallbacks(
-    { ...baseOptions(facts), ...purposeDefaults(purpose, facts) },
+    dependentDefaults({ ...baseOptions(facts), ...purposes }, purposes),
     facts
   );
 }
@@ -326,8 +347,9 @@ export function resolveHero(
   // or from one.
   const { comp, ...rest } = options;
   const chosen = comp === 'showreel' && !facts.hasReel ? rest : options;
+  const set = { ...purposeDefaults(purpose, facts), ...chosen };
   return applyFallbacks(
-    { ...baseOptions(facts), ...purposeDefaults(purpose, facts), ...chosen },
+    dependentDefaults({ ...baseOptions(facts), ...set }, set),
     facts
   );
 }

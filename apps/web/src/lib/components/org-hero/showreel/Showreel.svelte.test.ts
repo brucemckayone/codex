@@ -137,6 +137,8 @@ function render(
     logoUrl?: string;
     peek?: 'on' | 'off';
     push?: 'on' | 'off';
+    /** A stored opening; unset, the layout's default (Auto). */
+    opening?: 'name' | 'none';
   } = {}
 ) {
   const options = resolveHero(
@@ -147,6 +149,7 @@ function render(
       'reel-loop': over.loop ?? 'on',
       ...(over.peek ? { 'reel-peek': over.peek } : {}),
       ...(over.push ? { 'reel-push': over.push } : {}),
+      ...(over.opening ? { 'reel-opening': over.opening } : {}),
     },
     { ...FACTS, ...over.facts }
   );
@@ -1872,7 +1875,7 @@ describe('Showreel: the title as the window on Corner and Wide (WP-6, owner 2026
     'corner',
     'wide',
   ] as const)('on %s, draws the title words as the mask, so the opening and the way in run through them', async (layout) => {
-    const props = render(layout);
+    const props = render(layout, { opening: 'name' });
     // The draw waits for the DOM (`tick()`, a frame under Svelte's async mode).
     frame(16);
     await settle();
@@ -1881,9 +1884,32 @@ describe('Showreel: the title as the window on Corner and Wide (WP-6, owner 2026
     // below the box's top, where the page sets the glyphs (title-mask.ts).
     expect(drawn.map(([text]) => text)).toEqual(['Of', 'Blood', '&', 'Bones']);
     expect(drawn[1]).toEqual(['Blood', box(1).left, box(1).top + 62]);
-    // The defaults choose "through the name" both ways; with the title as
-    // the window, both run (before: no mask, so no opening and the smoke).
+    // A title opening turned on, and the way in by its default, both through
+    // the name; with the title as the window, both run (before: no mask, so
+    // no opening and the smoke).
     expect(running(props)).toMatchObject({ opening: 'name', into: 'name' });
+  });
+
+  it.each([
+    'corner',
+    'wide',
+  ] as const)('on %s, with the opening on Auto, opens on its film: the film fills from the first frame, and the way in still runs through the title (owner, 2026-11-21)', async (layout) => {
+    const props = render(layout);
+    expect(props.options['reel-opening']).toBe('none');
+    frame(16);
+    await settle();
+    // The title is still the way in's window.
+    expect(showreelFeed.mask).toBeInstanceOf(HTMLCanvasElement);
+    expect(running(props)).toMatchObject({ opening: 'none', into: 'name' });
+    // The film over the whole stage at once: no letters holding it.
+    expect(showreelFeed.motion?.values.u_nameWeight).toBe(0);
+  });
+
+  it('on Corner, a title opening turned on holds the film to the letters from the first frame (the board’s A)', async () => {
+    render('corner', { opening: 'name' });
+    frame(16);
+    await settle();
+    expect(showreelFeed.motion?.values.u_nameWeight).toBe(1);
   });
 
   it('on Name, draws the org’s name on the same baseline, word by word (R3-M1)', async () => {
