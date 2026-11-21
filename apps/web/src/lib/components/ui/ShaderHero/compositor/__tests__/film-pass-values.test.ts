@@ -28,6 +28,8 @@ const shared: FrameShared = {
   u_bgColor: [0.05, 0.05, 0.05],
   u_rect: [20, 30, 400, 600],
   u_fade: 1,
+  // the name's letters at the top of the page (the scroll fix's (c))
+  u_nameFade: 1,
   u_mediaSize: [720, 1280],
   u_hasMedia: 1,
   u_band: 2,

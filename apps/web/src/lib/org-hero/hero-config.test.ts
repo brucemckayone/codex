@@ -11,6 +11,8 @@ import {
   HERO_PURPOSE_COPY,
   HERO_PURPOSES,
   type HeroFacts,
+  type HeroOptions,
+  type HeroPurpose,
   heroConsumeLabel,
   heroFacts,
   heroFreeNote,
@@ -291,8 +293,13 @@ describe('the Showreel', () => {
       micro: 'off',
     });
     for (const axis of REEL_AXES) {
+      // The opening's default hangs on the layout (below).
+      if (axis === 'reel-opening') continue;
       expect(o[axis]).toBe(HERO_OPTION_VALUES[axis][0]);
     }
+    // The owner's pick (2026-11-21, the WP-6 board's N): Corner, the default
+    // layout, opens on its film.
+    expect(o['reel-opening']).toBe('none');
     // The owner's pick (2026-11-20, V1): the film gives way at its foot.
     expect(o['reel-band']).toBe('fade');
     // The owner's pick (2026-11-20): no outline unless the creator asks.
@@ -461,6 +468,34 @@ describe('the Showreel', () => {
     expect(
       resolveHero('consume', { comp: 'statement', proof: 'shelf' }, FULL).proof
     ).toBe('shelf');
+  });
+
+  it('opens on its film on Corner and Wide, through the name on the Name window, unless the creator says otherwise (owner, 2026-11-21)', () => {
+    const opening = (
+      options: Partial<HeroOptions>,
+      purpose: HeroPurpose = 'consume'
+    ) =>
+      resolveHero(purpose, { comp: 'showreel', ...options }, FULL)[
+        'reel-opening'
+      ];
+    // Auto: no stored opening. The layout decides.
+    expect(opening({})).toBe('none');
+    expect(opening({ 'reel-layout': 'corner' })).toBe('none');
+    expect(opening({ 'reel-layout': 'wide' })).toBe('none');
+    expect(opening({ 'reel-layout': 'name' })).toBe('name');
+    expect(opening({ 'reel-layout': 'wide' }, 'grow')).toBe('none');
+    // A stored opening is the creator's, on every layout: a title opening
+    // turned on plays (the board's A), and none stays none. No migration.
+    for (const layout of HERO_OPTION_VALUES['reel-layout'])
+      for (const stored of HERO_OPTION_VALUES['reel-opening'])
+        expect(
+          opening({ 'reel-layout': layout, 'reel-opening': stored }),
+          `${layout} ${stored}`
+        ).toBe(stored);
+    // A logo leading alone still rules the name out, Auto or not.
+    expect(opening({ 'reel-layout': 'name', lead: 'logo' })).toBe('none');
+    // What Auto means, as the purpose's own defaults say it.
+    expect(defaultOptions('consume', FULL)['reel-opening']).toBe('none');
   });
 
   it('never plays through a name that is out of sight', () => {

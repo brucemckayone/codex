@@ -39,6 +39,8 @@ export const UNIFORMS = {
   u_rect: 'vec4',
   /** How much of the stage shows as the hero scrolls away, 0-1. */
   u_fade: 'float',
+  /** How much of the name mask's letters show as the page scrolls, 0-1 (`nameFade`). */
+  u_nameFade: 'float',
   /** The media's own size in pixels (for `coverUv`). */
   u_mediaSize: 'vec2',
   /** 1 once a media frame is uploaded, else 0. */

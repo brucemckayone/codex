@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { HEADER } from '../effects/header';
 import {
   coverUv,
+  NAME_FADE_PX,
+  nameFade,
   type StageBox,
   stageBoxFrom,
   stageFade,
@@ -116,6 +118,20 @@ describe('the fixed stage', () => {
   it('fades at once with no distance to fade over', () => {
     expect(stageFade(0, 0)).toBe(1);
     expect(stageFade(1, 0)).toBe(0);
+  });
+
+  // The canvas's letters hold still with the stage, so they fade over the
+  // first NAME_FADE_PX of scroll, before they part from the page's words by
+  // more than that; the page's own glyphs take the name back over the same
+  // span (owner, 2026-11-21, the scroll fix's (c)).
+  it('fades the letters out over the first 32 px of scroll, far sooner than the film', () => {
+    expect(NAME_FADE_PX).toBe(32);
+    expect(nameFade(0)).toBe(1);
+    expect(nameFade(16)).toBeCloseTo(0.5, 6);
+    expect(nameFade(32)).toBe(0);
+    expect(nameFade(150)).toBe(0);
+    // iOS's rubber band at the top scrolls below 0: the letters stay whole
+    expect(nameFade(-40)).toBe(1);
   });
 
   it('is visible only while it shows and overlaps the canvas', () => {

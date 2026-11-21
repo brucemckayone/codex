@@ -19,7 +19,8 @@
  * changes on purpose, this file has done its job (proving the split) and is
  * deleted. One exception, landed with the split (WP-5b, Codex-1yd58.6): the
  * owner's own 2026-11-21 changes are carried into the copy, marked `5b:` at
- * each of its three places, and nothing else.
+ * each of its three places, and WP-6's opening default by layout (Codex-
+ * 1yd58.7, the same day), marked `WP-6:`, and nothing else.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -319,8 +320,9 @@ describe('D. whole option sets', () => {
 
 /**
  * hero-config.ts at 61d2dfe83, from baseOptions to the end of applyFallbacks,
- * verbatim but for two `export` keywords and the owner's three 5b changes
- * (marked `5b:`), inside a function so its names stay out of this module's
+ * verbatim but for two `export` keywords, the owner's three 5b changes
+ * (marked `5b:`) and WP-6's opening default (marked `WP-6:`), inside a
+ * function so its names stay out of this module's
  * scope. Never edit it to match the live code.
  */
 function frozenBeforeSplit() {
@@ -426,10 +428,28 @@ function frozenBeforeSplit() {
     }
   }
 
+  // WP-6: the opening's default hangs on the layout (owner, 2026-11-21): the
+  // Name window opens through the name, Corner and Wide on their film, unless
+  // the purpose or the org set it.
+  function openingByLayout(
+    options: HeroOptions,
+    set: Partial<HeroOptions>
+  ): HeroOptions {
+    if (set['reel-opening'] !== undefined) return options;
+    return {
+      ...options,
+      'reel-opening': options['reel-layout'] === 'name' ? 'name' : 'none',
+    };
+  }
+
   /** The purpose's defaults with nothing changed: what an "Auto" choice means. */
   function defaultOptions(purpose: HeroPurpose, facts: HeroFacts): HeroOptions {
     return applyFallbacks(
-      { ...baseOptions(facts), ...purposeDefaults(purpose, facts) },
+      // WP-6: through openingByLayout
+      openingByLayout(
+        { ...baseOptions(facts), ...purposeDefaults(purpose, facts) },
+        purposeDefaults(purpose, facts)
+      ),
       facts
     );
   }
@@ -446,7 +466,15 @@ function frozenBeforeSplit() {
     const { comp, ...rest } = options;
     const chosen = comp === 'showreel' && !facts.hasReel ? rest : options;
     return applyFallbacks(
-      { ...baseOptions(facts), ...purposeDefaults(purpose, facts), ...chosen },
+      // WP-6: through openingByLayout
+      openingByLayout(
+        {
+          ...baseOptions(facts),
+          ...purposeDefaults(purpose, facts),
+          ...chosen,
+        },
+        { ...purposeDefaults(purpose, facts), ...chosen }
+      ),
       facts
     );
   }
