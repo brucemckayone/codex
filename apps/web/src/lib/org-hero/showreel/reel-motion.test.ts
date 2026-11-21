@@ -532,6 +532,35 @@ describe('ReelMotion into the film', () => {
     expect(v.u_fill).toBe(0);
   });
 
+  // Scrolled past the letters' fade (NAME_FADE_PX) there are no letters to
+  // dive through, and those the canvas holds still are not where the page
+  // set them: the way in goes straight to the film filling its stage (owner,
+  // 2026-11-21, the scroll fix's (c)).
+  it.each([
+    'film-name',
+    'film-fill',
+  ] as const)('on %s, scrolled past the letters, goes straight into the film filling: no dive', (frame) => {
+    const mask = barMask();
+    const driver = new ReelMotion(
+      setup({ frame, choice: { ...QUIET, into: 'name' } }),
+      { maskPixels: () => mask }
+    );
+    runs(driver);
+    const v = driver.motion.values;
+    driver.enterFilm(1000, 16 / 9, true);
+    // The hand-off on the first frame: the film fills, held there.
+    expect(driver.frame(1000)).toBe(false);
+    expect(v.u_fill).toBe(1);
+    expect(v.u_dive).toBe(0);
+    driver.frame(1300);
+    expect(v.u_dive).toBe(0);
+    expect(v.u_fill).toBe(1);
+    // It comes back as any way in does.
+    driver.leaveFilm(5000);
+    expect(driver.frame(5000 + LEAVE_MS)).toBe(false);
+    expect(v.u_fill).toBe(0);
+  });
+
   it('turns the smoke at its peak, the film filling its stage from there', () => {
     const driver = new ReelMotion(
       setup({ choice: { ...QUIET, into: 'smoke' } })

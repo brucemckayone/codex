@@ -11,7 +11,8 @@
  *   - the reel paused: a cut under way ends at once on its piece;
  *   - the pointer over the reel, and a sideways swipe on a phone;
  *   - the film playing, in the hero or the phone's pop-up: the way into it;
- *   - the canvas showing the film for the first time: the opening.
+ *   - the canvas showing the film for the first time: the opening;
+ *   - the page scrolling over the letters' fade (`NAME_FADE_PX`).
  *
  * Frames run only while something moves (`ReelMotion.frame` says), woken
  * by each of those, so a reel at rest costs no frame at all. Each frame the
@@ -29,6 +30,10 @@
 import { untrack } from 'svelte';
 import type { FilmFrameId } from '$lib/components/ui/ShaderHero/compositor/effects/ids';
 import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-feed';
+import {
+  NAME_FADE_PX,
+  nameFade,
+} from '$lib/components/ui/ShaderHero/compositor/stage';
 import type { MaskPixels } from './deepest-point';
 import {
   type MotionSettings,
@@ -97,6 +102,21 @@ export function maskPixelsOf(source: TexImageSource | null): MaskPixels | null {
 function viewportAspect(): number {
   const { clientWidth, clientHeight } = document.documentElement;
   return clientWidth > 0 && clientHeight > 0 ? clientWidth / clientHeight : 1;
+}
+
+/**
+ * Whether CSS alone can take the name back as the page scrolls: a
+ * scroll-driven animation over a set range (`animation-range`). Firefox 159
+ * ships the timeline; where the range is missing, the ink's share is written
+ * from a scroll listener instead (`--_ink-back`), a frame late: a fade.
+ */
+function inkFollowsScrollInCss(): boolean {
+  return (
+    typeof CSS !== 'undefined' &&
+    typeof CSS.supports === 'function' &&
+    CSS.supports('animation-timeline: scroll()') &&
+    CSS.supports('animation-range: 0 32px')
+  );
 }
 
 /**
@@ -181,16 +201,51 @@ export function useReelMotion(source: ReelMotionSource): {
   });
 
   // The film plays: the way into it; it stops: the band and letters return.
+  // Scrolled past the letters' fade, it goes straight to the film filling.
   let inFilm = false;
   $effect(() => {
     const playing = source.filmPlaying();
     untrack(() => {
       if (!driver || playing === inFilm) return;
       inFilm = playing;
-      if (playing) driver.enterFilm(now(), viewportAspect());
+      if (playing)
+        driver.enterFilm(
+          now(),
+          viewportAspect(),
+          window.scrollY >= NAME_FADE_PX
+        );
       else driver.leaveFilm(now());
       wake();
     });
+  });
+
+  // The letters hold still with the stage in the window (WP-1's), so they
+  // go over the first NAME_FADE_PX of scroll (`u_nameFade`) and the page's
+  // own glyphs take the name back (the Showreel's ink; owner, 2026-11-21).
+  // A frozen hero (paused, reduced motion, the static path) draws only when
+  // told: a scroll that touches the span tells it, and none past it, where
+  // nothing the letters show changes. The CSS reads the span's length; where
+  // it cannot follow the scroll itself, the ink's share is written here.
+  $effect(() => {
+    const root = source.root();
+    if (!root) return;
+    root.style.setProperty('--_name-fade-px', `${NAME_FADE_PX}px`);
+    const css = inkFollowsScrollInCss();
+    const ink = (y: number) => {
+      if (!css) root.style.setProperty('--_ink-back', String(1 - nameFade(y)));
+    };
+    let last = window.scrollY;
+    ink(last);
+    const scrolled = () => {
+      const y = window.scrollY;
+      if (Math.min(last, y) < NAME_FADE_PX) {
+        ink(y);
+        showreelFeed.motionFrame();
+      }
+      last = y;
+    };
+    window.addEventListener('scroll', scrolled, { passive: true });
+    return () => window.removeEventListener('scroll', scrolled);
   });
 
   // The pointer over the reel; on a phone, a sideways swipe. In output uv:

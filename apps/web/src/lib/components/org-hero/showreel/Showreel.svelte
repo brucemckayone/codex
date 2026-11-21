@@ -2034,9 +2034,29 @@
     color: var(--_ink);
   }
 
+  /* The canvas draws the name while the page is at the top. Its letters hold
+     still with the film, so they go over the first NAME_FADE_PX of scroll
+     (`--_name-fade-px`, the hook's), and the page's own glyphs take the name
+     back over the same span (owner, 2026-11-21): a scroll-driven animation,
+     in step with the scroll; elsewhere the hook's `--_ink-back`, a frame late. */
   :global(.org-layout:has(> .shader-hero--fullpage[data-film])) .reel__window {
-    color: transparent;
+    color: color-mix(in srgb, var(--_ink) calc(var(--_ink-back, 0) * 100%), transparent);
     background-image: none;
+  }
+
+  @supports (animation-timeline: scroll()) and (animation-range: 0 32px) {
+    :global(.org-layout:has(> .shader-hero--fullpage[data-film])) .reel__window {
+      color: transparent;
+      animation: reel-ink-back linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 var(--_name-fade-px, 32px);
+    }
+  }
+
+  @keyframes reel-ink-back {
+    to {
+      color: var(--_ink);
+    }
   }
 
   .reel[data-layout='name'] .reel__slot {

@@ -80,6 +80,7 @@ import {
   BAND_CODE,
   bandRamp,
   type FilmLook,
+  nameFade,
   type RectPx,
   type StageBox,
   type StageMedia,
@@ -672,6 +673,8 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       u_bgColor: colors.bg,
       u_rect: rect,
       u_fade: fade,
+      // the name's letters, held still with the stage, go within a short scroll
+      u_nameFade: nameFade(f.scrollY),
       u_mediaSize: mediaSize(),
       u_hasMedia: hasMedia ? 1 : 0,
       u_band: look ? BAND_CODE[look.band] : 0,

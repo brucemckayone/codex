@@ -38,6 +38,7 @@ import {
 } from './deepest-point';
 import {
   intoAt,
+  intoLength,
   LEAVE_MS,
   leaveAt,
   type NameFrame,
@@ -329,11 +330,17 @@ export class ReelMotion {
   /**
    * The film opened (in the hero or the phone's pop-up): the way into it
    * runs. Through the name, the dive falls into the name's thickest stroke,
-   * deep enough for the letter to cover the `aspect`-wide output.
+   * deep enough for the letter to cover the `aspect`-wide output. `scrolled`
+   * past the letters' fade (`NAME_FADE_PX`), there are no letters to dive
+   * through, and the canvas holds them where the page sat at the top: it
+   * starts where the film fills its stage (owner, 2026-11-21).
    */
-  enterFilm(now: number, aspect: number): void {
+  enterFilm(now: number, aspect: number, scrolled = false): void {
     const kind = this.#motion.running?.into ?? null;
-    this.#intoFrom = now;
+    const straight = kind === 'name' && scrolled;
+    this.#intoFrom = straight
+      ? now - intoLength('name', this.#setup.frame)
+      : now;
     this.#intoKind = kind;
     this.#leaveFrom = null;
     // The opening gives way to the film.
@@ -341,7 +348,7 @@ export class ReelMotion {
     this.#openingDue = false;
     this.#openWaitFrom = null;
     this.#opened = true;
-    if (kind === 'name') this.#aimDive(aspect);
+    if (kind === 'name' && !straight) this.#aimDive(aspect);
   }
 
   /** The film closed: the band and the letters come back. */

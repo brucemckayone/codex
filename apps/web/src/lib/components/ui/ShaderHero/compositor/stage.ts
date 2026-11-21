@@ -145,6 +145,22 @@ export function stageFade(scrollY: number, fadeDistance: number): number {
 }
 
 /**
+ * How far a scroll takes the canvas's letters out, in CSS px (owner,
+ * 2026-11-21, the scroll fix's (c)). The name mask is held in window space
+ * with the stage, so a scrolled letter sits that far below the word the page
+ * scrolled away: legible as a second title. Gone within this span, a letter
+ * is never further off than it (plus a frame's scroll at a fling: the fade
+ * reads a frame-old `scrollY`, which a fade hides), and the page's own glyphs
+ * take the name back over the same span (the Showreel's ink).
+ */
+export const NAME_FADE_PX = 32;
+
+/** How much of the canvas's letters show at `scrollY`: 1 at the top, 0 from `NAME_FADE_PX`. */
+export function nameFade(scrollY: number): number {
+  return Math.min(1, Math.max(0, 1 - scrollY / NAME_FADE_PX));
+}
+
+/**
  * Whether any of the film shows. Culling: when it does not (faded out, or
  * off the canvas), the compositor neither samples nor uploads the media.
  */

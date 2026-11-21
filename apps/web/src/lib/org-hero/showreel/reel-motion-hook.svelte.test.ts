@@ -333,6 +333,78 @@ describe('useReelMotion and the film', () => {
   });
 });
 
+// The canvas's letters hold still in the window, so they fade over the
+// first NAME_FADE_PX of scroll and the page's own glyphs take the name back
+// (owner, 2026-11-21, the scroll fix's (c)).
+describe('useReelMotion and the scroll', () => {
+  const own = Object.getOwnPropertyDescriptor(window, 'scrollY');
+  function scrollTo(y: number) {
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: y });
+    window.dispatchEvent(new Event('scroll'));
+  }
+  afterEach(() => {
+    if (own) Object.defineProperty(window, 'scrollY', own);
+    else Reflect.deleteProperty(window, 'scrollY');
+  });
+
+  it('tells a frozen hero to draw while a scroll crosses the letters’ fade, and never beyond it', () => {
+    render({ moves: false });
+    runs();
+    const said: string[] = [];
+    showreelFeed.onChange((changed) => said.push(changed));
+    scrollTo(16);
+    expect(said).toContain('frame');
+    said.length = 0;
+    // From inside the fade to past it in one event: the letters must go.
+    scrollTo(200);
+    expect(said).toContain('frame');
+    said.length = 0;
+    // Past it both ways: nothing the letters show changes.
+    scrollTo(300);
+    expect(said).not.toContain('frame');
+    // Back over it in one event: the letters return.
+    scrollTo(0);
+    expect(said).toContain('frame');
+  });
+
+  it('hands the CSS the fade’s length, and writes the ink’s share only where CSS cannot follow the scroll itself', () => {
+    vi.stubGlobal('CSS', { supports: () => false });
+    render();
+    expect(root()?.style.getPropertyValue('--_name-fade-px')).toBe('32px');
+    expect(root()?.style.getPropertyValue('--_ink-back')).toBe('0');
+    scrollTo(16);
+    expect(root()?.style.getPropertyValue('--_ink-back')).toBe('0.5');
+    scrollTo(64);
+    expect(root()?.style.getPropertyValue('--_ink-back')).toBe('1');
+    if (app) unmount(app);
+    app = null;
+    document.body.innerHTML = '';
+    vi.stubGlobal('CSS', { supports: () => true });
+    render();
+    scrollTo(16);
+    expect(root()?.style.getPropertyValue('--_ink-back')).toBe('');
+  });
+
+  it('a film pressed scrolled past the letters goes straight into the film filling, with no dive', () => {
+    const props = render({ options: { ...SETTINGS, 'reel-film': 'name' } });
+    runs({ into: 'name' });
+    scrollTo(100);
+    props.filmPlaying = true;
+    frame(16);
+    expect(held().values.u_fill).toBe(1);
+    expect(held().values.u_dive).toBe(0);
+  });
+
+  it('at the top, a film pressed runs the way in through the name as before', () => {
+    const props = render({ options: { ...SETTINGS, 'reel-film': 'name' } });
+    runs({ into: 'name' });
+    scrollTo(0);
+    props.filmPlaying = true;
+    frame(16);
+    expect(held().values.u_fill).toBe(0);
+  });
+});
+
 describe('useReelMotion and the opening', () => {
   const OPENING: MotionSettings = { ...SETTINGS, 'reel-opening': 'name' };
   function hero() {

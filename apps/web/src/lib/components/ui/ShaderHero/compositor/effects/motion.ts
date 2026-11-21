@@ -90,6 +90,7 @@ export const MOTION_GLSL_UNIFORMS: readonly FilmPassUniform[] = [
   'u_nameZoom',
   'u_nameCentre',
   'u_nameAlpha',
+  'u_nameFade',
   'u_dive',
 ];
 
@@ -145,10 +146,12 @@ vec3 glitchedFilm(vec2 at, float k) {
 vec2 nameAt(vec2 uv, float zoom) {
   return uv + (u_nameCentre - uv) * (1.0 - 1.0 / zoom);
 }
-// How much the letters of the name let the film through here.
+// How much the letters of the name let the film through here. The mask is
+// held where the page sat at the top, so its letters go within a short
+// scroll (u_nameFade), and the page's own glyphs take the name back.
 float nameVeil(vec2 uv, vec2 warp) {
   vec2 nv = nameAt(uv + warp * 0.7, u_nameZoom);
-  return texture(u_mask, nv).r * inStage(nv) * u_nameAlpha;
+  return texture(u_mask, nv).r * inStage(nv) * u_nameAlpha * u_nameFade;
 }
 // A dive's rim: the letters' edges streak outward, in the brand's primary,
 // as the view falls through them; strongest half way.
@@ -158,5 +161,5 @@ vec3 nameStreak(vec2 uv) {
   for (int i = 1; i <= 8; i++)
     smear += texture(u_mask, nameAt(uv, u_nameZoom * (1.0 + 0.035 * float(i) * u_dive))).r;
   float rim = max(smear / 8.0 - sharp, 0.0);
-  return u_brandPrimary * rim * sin(3.14159265 * u_dive) * 1.4;
+  return u_brandPrimary * rim * sin(3.14159265 * u_dive) * 1.4 * u_nameFade;
 }`;
