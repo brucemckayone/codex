@@ -602,31 +602,13 @@
     });
   });
 
-  // The name as the film's window: drawn where the page lays it out, at the
-  // window's size, white on black (the compositor reads its red channel).
+  // The name as the film's window: drawn where the page lays it out, each
+  // word on its baseline in its letter-spacing, at the window's size, white
+  // on black (the compositor reads its red channel). The title's own
+  // placement (`title-mask.ts`): one for both windows (review R3-M1). Its
+  // translateY(-50%) is where the name rests, so it stays in.
   function drawMask(el: HTMLElement) {
-    const width = document.documentElement.clientWidth;
-    const height = document.documentElement.clientHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const style = getComputedStyle(el);
-    ctx.scale(dpr, dpr);
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = '#fff';
-    ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    for (const line of el.querySelectorAll<HTMLElement>('[data-line]')) {
-      const box = line.getBoundingClientRect();
-      // Its place in the document: the canvas holds it in window space.
-      ctx.fillText(line.textContent ?? '', box.left + box.width / 2, box.top + window.scrollY + box.height / 2);
-    }
-    showreelFeed.setNameMask(canvas);
+    showreelFeed.setNameMask(drawTitleMask(el, { undoTranslation: false }));
   }
   $effect(() => {
     const el = windowEl;

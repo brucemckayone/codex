@@ -22,7 +22,7 @@ import {
   ReelMotion,
   type ReelMotionSetup,
 } from './reel-motion';
-import { CUT_TIMING, REDUCED_CUT_TIMING } from './reel-reveal';
+import { CUT_TIMING, MIN_CUT_GAP_MS, REDUCED_CUT_TIMING } from './reel-reveal';
 import { PHONE_TRAIL_POINTS } from './reel-trail';
 
 const QUIET: MotionChoice = { ...STILL_MOTION, trans: 'burn' };
@@ -536,5 +536,80 @@ describe('ReelMotion into the film', () => {
     driver.enterFilm(300, 1.6);
     driver.frame(300);
     expect(driver.motion.values.u_nameAlpha).toBe(1);
+  });
+});
+
+// Review round 3: after R2-M1's pause, play resumes from the landed piece
+// (wp6-review-r3/pause-resume.probe.test.ts). A cut never turns round and
+// cuts start at least MIN_CUT_GAP_MS apart (reel-reveal.ts).
+describe('pause mid-cut, then play (R2-M1, review round 3)', () => {
+  const keys = ['a', 'b', 'c'];
+  const cutSetup: ReelMotionSetup = {
+    choice: { trans: 'burn', pointer: 'none', opening: 'none', into: 'smoke' },
+    frame: 'film-fill',
+    phone: false,
+    reducedMotion: false,
+    moves: true,
+  };
+  const start = () => {
+    const d = new ReelMotion(cutSetup);
+    d.follow(keys, 0, 0);
+    d.frame(0);
+    return d;
+  };
+
+  it('a pause mid-fall lands on the heading piece, fully shown', () => {
+    const d = start();
+    d.follow(keys, 1, 1000); // fall 1000 -> 1640
+    d.frame(1300);
+    expect(d.stageKey).toBe('a');
+    d.pause(1300);
+    d.frame(1301);
+    expect(d.stageKey).toBe('b');
+    expect(d.motion.values.u_reveal).toBe(1);
+    d.frame(60_000);
+    expect(d.stageKey).toBe('b');
+  });
+
+  it('a pause in a rise lands on the pick waiting there', () => {
+    const d = start();
+    d.follow(keys, 1, 1000);
+    d.frame(1700); // b rising
+    d.follow(keys, 2, 1800); // waits
+    d.pause(1900);
+    d.frame(1901);
+    expect(d.stageKey).toBe('c');
+    expect(d.motion.values.u_reveal).toBe(1);
+  });
+
+  it('play moves nothing; the next cut starts from the landed piece', () => {
+    const d = start();
+    d.follow(keys, 1, 1000);
+    d.frame(1300);
+    d.pause(1300);
+    d.play(9000);
+    d.frame(9001);
+    expect(d.stageKey).toBe('b');
+    expect(d.motion.values.u_reveal).toBe(1); // no resumed half-fall
+    const cutsBefore = d.motion.values.u_cut;
+    d.follow(keys, 2, 10_000);
+    d.frame(10_001);
+    expect(d.stageKey).toBe('b');
+    expect(d.motion.values.u_reveal).toBeGreaterThan(0.99);
+    d.frame(10_000 + CUT_TIMING.outMs);
+    expect(d.stageKey).toBe('c');
+    expect(d.motion.values.u_cut).toBe(cutsBefore + 1);
+  });
+
+  it('a cut right after play keeps the three-a-second floor', () => {
+    const d = start();
+    d.follow(keys, 1, 1000); // the cut the pause ends started at 1000
+    d.pause(1100);
+    d.play(1150);
+    d.follow(keys, 2, 1200); // would start 200 ms after the last start
+    d.frame(1000 + MIN_CUT_GAP_MS - 1);
+    expect(d.motion.values.u_reveal).toBe(1); // not started yet
+    d.frame(1000 + MIN_CUT_GAP_MS + CUT_TIMING.outMs);
+    expect(d.stageKey).toBe('c');
   });
 });
