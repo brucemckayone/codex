@@ -29,6 +29,7 @@ import {
   haloAlpha,
   type Ink,
   inkPole,
+  liftedNodes,
   liftInk,
   liftStep,
   MAX_SCRIM_ALPHA,
@@ -37,8 +38,10 @@ import {
   ownPole,
   RAMP,
   type Rgb,
+  RING_MARGIN,
   RING_TAKE_UP,
   rampAt,
+  ringHalo,
   SHADE_PEAK_MAX,
   SHADE_REACH_MAX,
   SHADES,
@@ -440,6 +443,13 @@ describe("reel-scrim: the scrim in the brand's own ground", () => {
   // only the foot's left shade reaches, and an index row at the right.
   const KICKER = { left: 0.094, top: 0.329, right: 0.208, bottom: 0.349 };
   const ROW = { left: 0.677, top: 0.391, right: 0.943, bottom: 0.418 };
+  // Those two, a corner word, and the header's facts line.
+  const SPANS = [
+    KICKER,
+    ROW,
+    { left: 0.02, top: 0.9, right: 0.2, bottom: 0.95 },
+    { left: 0.6, top: 0.04, right: 0.88, bottom: 0.07 },
+  ];
   const soft = (rgb: Rgb): Ink => ({ rgb, alpha: 0.8 });
 
   it("holds a mid grey to each word's room in Shadow: its film label no longer short mid-reel (review r3 n1)", () => {
@@ -460,7 +470,13 @@ describe("reel-scrim: the scrim in the brand's own ground", () => {
       [{ ...kicker, room }],
       WHITE_VEIL
     );
-    expect(left(roomy)).toBeLessThanOrEqual(shadeFloor(KICKER, SHADES_CAP));
+    // Carried by what the fit DRAWS for it (review r4 M1): its carrier grown,
+    // the rest as drawn, never every ellipse at its cap at once.
+    const drawn = growShades([{ span: KICKER, need: left(roomy) }]);
+    expect(drawn.short).toEqual([]);
+    expect(shadeFloor(KICKER, drawn.shades)).toBeGreaterThanOrEqual(
+      left(roomy)
+    );
     // A deeper shade of the same grey, never the pole.
     expect(roomy[0]).toBeLessThan(capped[0]);
     expect(roomy[0]).toBeGreaterThan(0);
@@ -496,6 +512,50 @@ describe("reel-scrim: the scrim in the brand's own ground", () => {
       },
     ];
     expect(scrimTint(OBB, BLACK_VEIL, words, WHITE_VEIL)).toEqual(OBB);
+  });
+
+  it('is carried by the shades growShades grows for it, when it needs no more than its room (review r4 M1)', () => {
+    const room = wordRoom('shadow', KICKER);
+    expect(room).toBeGreaterThan(0);
+    // What the shades must lay under it, its own glow counted at the least it
+    // lays, as wordRoom counts it.
+    const left = glowLeaves(room, room);
+    const { shades, short } = growShades([{ span: KICKER, need: left }]);
+    // Before: about 0.645 laid against 0.71 needed (the room counted all four
+    // ellipses at their cap; the growth raises only the one that carries it).
+    expect(shadeFloor(KICKER, shades)).toBeGreaterThanOrEqual(left);
+    expect(short).toEqual([]);
+  });
+
+  it('is exactly what its carrier alone can lay at its glyphs: one hundredth more is not carried (review r4 M1)', () => {
+    // The carrier at its cap (peak SHADE_PEAK_MAX, twice its reach), the other
+    // three ellipses as drawn: the most the fit grows for this word alone.
+    for (const span of SPANS) {
+      const room = wordRoom('shadow', span);
+      const more = Math.round((room + 0.01) * 100) / 100;
+      expect(
+        growShades([{ span, need: glowLeaves(more, more) }]).short
+      ).toHaveLength(1);
+    }
+  });
+
+  it('can only deepen a tint, never lighten it: the room is never above the all-caps one it replaced', () => {
+    const allCaps = (span: typeof KICKER) => {
+      let room = 0;
+      for (let step = 1; step <= 100; step++) {
+        const need = step / 100;
+        if (glowLeaves(need, need) > shadeFloor(span, SHADES_CAP)) break;
+        room = need;
+      }
+      return room;
+    };
+    for (const span of SPANS) {
+      const alone = growShades([{ span, need: SHADE_PEAK_MAX }]).shades;
+      expect(shadeFloor(span, alone)).toBeLessThanOrEqual(
+        shadeFloor(span, SHADES_CAP) + 1e-9
+      );
+      expect(wordRoom('shadow', span)).toBeLessThanOrEqual(allCaps(span));
+    }
   });
 
   it('gives a word more room where the shades lay more: the corner over the middle band', () => {
@@ -870,6 +930,64 @@ describe('the header: soft corners, and a halo for what its words still need', (
     expect(need).toBe(0.63);
     // Where the shades lay 0.3, the halo adds 1 − 0.37/0.7, up to a hundredth.
     expect(haloAlpha(0.63, 0.3)).toBe(0.48);
+  });
+});
+
+describe('the nodes a short role lifts, each round (WP-5a review r4 LOW)', () => {
+  type Node = { name: string; ink: Ink };
+  const a: Node = { name: 'a', ink: { rgb: [203, 33, 60], alpha: 1 } };
+  const b: Node = { name: 'b', ink: { rgb: [255, 255, 255], alpha: 0.8 } };
+  const c: Node = { name: 'c', ink: { rgb: [255, 255, 255], alpha: 1 } };
+
+  it('takes the nodes that fail now, and keeps every node already lifted', () => {
+    // Round 1: only a fails.
+    const first = liftedNodes([a, b, c], [], (ink) => ink === a.ink);
+    expect(first).toEqual([a]);
+    // Round 2: the group's glow fell as a's lift lowered its need, and b,
+    // which passed at entry, is short now: it joins, a stays (never forced
+    // straight to the pole at step 20 for want of a lift).
+    const second = liftedNodes([a, b, c], first, (ink) => ink === b.ink);
+    expect(second).toEqual([a, b]);
+  });
+
+  it('keeps the nodes in their order, and lifts none when none fail', () => {
+    expect(liftedNodes([a, b, c], [], () => false)).toEqual([]);
+    expect(liftedNodes([a, b, c], [c], (ink) => ink === a.ink)).toEqual([a, c]);
+  });
+});
+
+describe("the 'outline' ring: a margin over the solved halo (review r4, OBB's index \"02\")", () => {
+  it('draws the solved halo and RING_MARGIN more, in hundredths', () => {
+    for (let need = 0.05; need <= 0.95; need += 0.05) {
+      for (let under = 0; under < need; under += 0.07) {
+        const halo = haloAlpha(need, under);
+        if (halo === 0) continue;
+        const ring = ringHalo(need, under);
+        expect(ring).toBe(
+          Math.min(1, Math.round((halo + RING_MARGIN) * 100) / 100)
+        );
+        expect(Math.round(ring * 100)).toBeCloseTo(ring * 100, 9);
+      }
+    }
+  });
+
+  it('draws no ring where the shades already carry the word, and never past solid', () => {
+    expect(ringHalo(0.4, 0.4)).toBe(0);
+    expect(ringHalo(0.4, 0.55)).toBe(0);
+    expect(ringHalo(1, 0)).toBe(1);
+    expect(ringHalo(0.99, 0)).toBe(1);
+  });
+
+  it("OBB's index: the group solved 0.59 (need 0.62 where its least shade lays 0.09), drawn 0.61", () => {
+    const soft: Ink = { rgb: [255, 255, 255], alpha: 0.8 };
+    const need = scrimAlpha([{ ink: soft, ratio: 4.5 }], [1, 0, 0]);
+    expect(need).toBe(0.62);
+    expect(haloAlpha(0.62, 0.09)).toBe(0.59);
+    expect(ringHalo(0.62, 0.09)).toBe(0.61);
+    // The margin is two hundredths: measured on the ring probe (white frame,
+    // 1440 Corner), "02" read 4.47 at the solved halo, 4.54 at +0.01, and
+    // 4.60 at +0.02, the least that clears 4.5 x FLOOR_MARGIN (4.59).
+    expect(RING_MARGIN).toBe(0.02);
   });
 });
 

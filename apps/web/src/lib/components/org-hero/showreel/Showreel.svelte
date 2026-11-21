@@ -73,6 +73,7 @@
     growShades,
     haloAlpha,
     type Ink,
+    liftedNodes,
     liftStep,
     MAX_SCRIM_ALPHA,
     type Need,
@@ -80,6 +81,7 @@
     over,
     ownPole,
     type Rgb,
+    ringHalo,
     SHADE_PEAK_MAX,
     SHADES,
     SHADES_CAP,
@@ -899,14 +901,15 @@
       const further = grown.short.flatMap((n) => {
         const role = asked.get(n);
         if (!role || role.step >= 20) return [];
-        if (role.lifted.length === 0) {
-          const under = shadeFloor(role.span, shades);
-          const glow = glows.get(groupOf(role.el)) ?? 0;
-          role.lifted = role.nodes.filter(({ ink }) => {
-            const need = scrimAlpha([{ ink, ratio: role.ratio }], tint);
-            return need === null || glowLeaves(need, glow) > under + 1e-9;
-          });
-        }
+        // Its failing nodes taken again each round, with those it already
+        // lifts (review r4 LOW): as a lift lowers one node's need, the
+        // group's glow can fall and a node that passed turn short.
+        const under = shadeFloor(role.span, shades);
+        const glow = glows.get(groupOf(role.el)) ?? 0;
+        role.lifted = liftedNodes(role.nodes, role.lifted, (ink) => {
+          const need = scrimAlpha([{ ink, ratio: role.ratio }], tint);
+          return need === null || glowLeaves(need, glow) > under + 1e-9;
+        });
         return role.lifted.length > 0 ? [role] : [];
       });
       if (further.length === 0) break;
@@ -986,7 +989,8 @@
         continue;
       }
       const group = groupOf(el);
-      groups.set(group, Math.max(groups.get(group) ?? 0, haloAlpha(need, under)));
+      // Its ring at the solved halo and RING_MARGIN more (review r4 "02").
+      groups.set(group, Math.max(groups.get(group) ?? 0, ringHalo(need, under)));
     }
     // The most any word needs, after its lift: what a word not yet fitted
     // holds meanwhile. Never a solid scrim taken for a colour the lift rescued.

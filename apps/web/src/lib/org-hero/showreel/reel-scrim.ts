@@ -461,15 +461,23 @@ export const RING_TAKE_UP = 1.6;
 /**
  * The most a word's own scrim need may be where it sits (its glyphs' `span`)
  * for what can be drawn there to carry it, in hundredths as the needs are
- * (review r3 n1, n3). In 'shadow', what the cap's shades lay at its glyphs,
- * with its own soft glow counted at the least it lays (its group's is never
- * weaker); in 'outline', a ring still short of solid over the shades as
- * drawn.
+ * (review r3 n1, n3). In 'shadow', what `growShades` draws at its glyphs for
+ * this word alone: the ellipse that carries it at its most, the other three
+ * as drawn (review r4 M1: the room had counted all four at their cap, while
+ * the growth raises only the carrier, so a word held to it was still short
+ * where it sat: OBB's kicker 0.645 laid against 0.71), with its own soft glow
+ * counted at the least it lays (its group's is never weaker). Never every
+ * ellipse grown for it: that darkens more of the film than the word needs.
+ * In 'outline', a ring still short of solid over the shades as drawn.
  */
 export function wordRoom(edge: 'shadow' | 'outline', span: Span): number {
+  const alone =
+    edge === 'shadow'
+      ? shadeFloor(span, growShades([{ span, need: SHADE_PEAK_MAX }]).shades)
+      : 0;
   const fits =
     edge === 'shadow'
-      ? (need: number) => glowLeaves(need, need) <= shadeFloor(span, SHADES_CAP)
+      ? (need: number) => glowLeaves(need, need) <= alone
       : (need: number) =>
           haloAlpha(need, shadeFloor(span, SHADES)) * RING_TAKE_UP <= 1;
   let room = 0;
@@ -490,6 +498,26 @@ export function haloAlpha(need: number, under: number): number {
     1,
     Math.ceil((1 - (1 - need) / (1 - under)) * 100 - 1e-9) / 100
   );
+}
+
+/**
+ * What 'outline' draws over a group's solved halo (review r4): the 1 px ring
+ * round a small glyph's faint edge lays less than the halo asks, so OBB's
+ * index "02" read 4.47 on the ring probe against 4.5 (white frame, 1440
+ * Corner; grey 100 and 110 the same, 4.48). Measured over every group: +0.01
+ * read 4.54, +0.02 read 4.60, the least that clears the floor with
+ * FLOOR_MARGIN (4.59), for a dE2000 on the ring's pixels of 0.19 mean, 1.97
+ * at most. Only the drawing takes it: `wordRoom` still bounds the tint by the
+ * solved halo, so the tint is as before.
+ */
+export const RING_MARGIN = 0.02;
+
+/** A group's ring strength in 'outline': its solved halo and RING_MARGIN, none where the shades carry it. */
+export function ringHalo(need: number, under: number): number {
+  const halo = haloAlpha(need, under);
+  return halo === 0
+    ? 0
+    : Math.min(1, Math.round((halo + RING_MARGIN) * 100) / 100);
 }
 
 /**
@@ -547,6 +575,21 @@ export function liftStep(
     }
   }
   return null;
+}
+
+/**
+ * The nodes a short role lifts this round, in their order: those it already
+ * lifts, and every other that `fails` now (review r4 LOW). Taken again each
+ * round, never once at entry: as a lift lowers one node's need, its group's
+ * glow can fall, and a node that passed at entry turns short. Left out, it
+ * skipped the lift and wore the pole at step 20.
+ */
+export function liftedNodes<T extends { ink: Ink }>(
+  nodes: readonly T[],
+  lifted: readonly T[],
+  fails: (ink: Ink) => boolean
+): T[] {
+  return nodes.filter((node) => lifted.includes(node) || fails(node.ink));
 }
 
 /**
