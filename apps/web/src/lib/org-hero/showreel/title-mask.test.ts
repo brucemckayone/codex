@@ -46,13 +46,22 @@ describe('titleWords and drawTitleMask', () => {
   });
   let rise = 0;
   let style: Partial<CSSStyleDeclaration> = {};
-  let drawn: { text: string; x: number; y: number; font: string }[] = [];
+  let drawn: {
+    text: string;
+    x: number;
+    y: number;
+    font: string;
+    baseline: string;
+  }[] = [];
   let context: Record<string, unknown> | null = null;
+  /** The font's content area as measureText reports it (`fontBoundingBox*`). */
+  let metrics = { fontBoundingBoxAscent: 62, fontBoundingBoxDescent: 18 };
 
   beforeEach(() => {
     rise = 0;
     style = { transform: 'none' };
     drawn = [];
+    metrics = { fontBoundingBoxAscent: 62, fontBoundingBoxDescent: 18 };
     Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
       configurable: true,
       value(this: Range) {
@@ -85,8 +94,15 @@ describe('titleWords and drawTitleMask', () => {
       scale() {},
       fillRect() {},
       fillText(text: string, x: number, y: number) {
-        drawn.push({ text, x, y, font: String(context?.font) });
+        drawn.push({
+          text,
+          x,
+          y,
+          font: String(context?.font),
+          baseline: String(context?.textBaseline),
+        });
       },
+      measureText: () => metrics,
       font: '',
       fillStyle: '',
       textAlign: '',
@@ -133,7 +149,7 @@ describe('titleWords and drawTitleMask', () => {
     expect(titleWords(el).map((w) => w.text)).toEqual(['River', 'Songs']);
   });
 
-  it('draws each word white on black in the title’s font, its middle line through its box’s', () => {
+  it('draws each word white on black in the title’s font, on its baseline where the page sets it', () => {
     style = {
       transform: 'none',
       fontWeight: '400',
@@ -143,22 +159,46 @@ describe('titleWords and drawTitleMask', () => {
     };
     const canvas = drawTitleMask(title('Of Blood'));
     expect(canvas).toBeInstanceOf(HTMLCanvasElement);
+    // The box is the font's content area (80 = ascent 62 + descent 18), so
+    // the baseline is its ascent below the box's top. NOT the box's middle
+    // on the em square's middle ('middle', top + 40): that put every glyph
+    // 8 CSS px above the page's at 96 px in OBB's serif (the WP-6 board).
     expect(drawn).toEqual([
       {
         text: 'Of',
         x: box(0).left,
-        y: box(0).top + 40,
+        y: box(0).top + 62,
         font: '400 96px Brand Serif',
+        baseline: 'alphabetic',
       },
       {
         text: 'Blood',
         x: box(1).left,
-        y: box(1).top + 40,
+        y: box(1).top + 62,
         font: '400 96px Brand Serif',
+        baseline: 'alphabetic',
       },
     ]);
     expect(context?.letterSpacing).toBe('-0.02em');
     expect(context?.fillStyle).toBe('#fff');
+  });
+
+  it('centres the font’s content area in a box of another height, as CSS’s half-leading does', () => {
+    // A box 80 high round a content area of 100 (ascent 76, descent 24):
+    // the area overhangs it 10 px top and bottom, so the baseline sits at
+    // 80/2 - 100/2 + 76 = 66 below the box's top.
+    metrics = { fontBoundingBoxAscent: 76, fontBoundingBoxDescent: 24 };
+    drawTitleMask(title('Of'));
+    expect(drawn.map(({ y, baseline }) => ({ y, baseline }))).toEqual([
+      { y: box(0).top + 66, baseline: 'alphabetic' },
+    ]);
+  });
+
+  it('places the baseline at four fifths of the box where the font reports no content area', () => {
+    // A browser without `fontBoundingBox*` (Firefox before 116).
+    metrics = {} as typeof metrics;
+    drawTitleMask(title('Of'));
+    expect(drawn.map(({ y }) => y)).toEqual([box(0).top + 64]);
   });
 
   it('draws no mask for a title with no words, so the motion falls back', () => {

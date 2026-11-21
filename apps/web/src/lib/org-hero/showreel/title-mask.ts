@@ -112,8 +112,20 @@ export function drawTitleMask(el: HTMLElement): HTMLCanvasElement | null {
   if (style.letterSpacing && style.letterSpacing !== 'normal')
     ctx.letterSpacing = style.letterSpacing;
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  for (const word of words)
-    ctx.fillText(word.text, word.left, word.top + word.height / 2);
+  // Each word on its baseline where the page sets it: the font's content
+  // area (its ascent and descent) centred in the word's box, as CSS lays
+  // glyphs in a line (half-leading). The em square's middle ('middle' at
+  // the box's middle) sits higher in most faces: 8 CSS px at 96 px in OBB's
+  // serif, a copy of the title showing above its ink (the WP-6 board).
+  ctx.textBaseline = 'alphabetic';
+  for (const word of words) {
+    const { fontBoundingBoxAscent: ascent, fontBoundingBoxDescent: descent } =
+      ctx.measureText(word.text);
+    const area = ascent + descent;
+    const baseline = Number.isFinite(area)
+      ? word.top + (word.height - area) / 2 + ascent
+      : word.top + word.height * 0.8;
+    ctx.fillText(word.text, word.left, baseline);
+  }
   return canvas;
 }

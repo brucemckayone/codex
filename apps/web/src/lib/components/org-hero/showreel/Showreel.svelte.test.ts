@@ -1723,7 +1723,12 @@ describe('Showreel: the title as the window on Corner and Wide (WP-6, owner 2026
           fillText(text: string, x: number, y: number) {
             drawn.push([text, x, y]);
           },
-          measureText: () => ({ width: 100 }),
+          // the font's content area: 62 + 18 = the boxes' 80
+          measureText: () => ({
+            width: 100,
+            fontBoundingBoxAscent: 62,
+            fontBoundingBoxDescent: 18,
+          }),
           getImageData: () => ({ data: [0, 0, 0, 255] }),
           fillStyle: '#000',
           font: '',
@@ -1759,13 +1764,10 @@ describe('Showreel: the title as the window on Corner and Wide (WP-6, owner 2026
     frame(16);
     await settle();
     expect(showreelFeed.mask).toBeInstanceOf(HTMLCanvasElement);
-    // Each word, at its laid-out box, its middle line through the box's.
+    // Each word, at its laid-out box, on its baseline: the font's ascent
+    // below the box's top, where the page sets the glyphs (title-mask.ts).
     expect(drawn.map(([text]) => text)).toEqual(['Of', 'Blood', '&', 'Bones']);
-    expect(drawn[1]).toEqual([
-      'Blood',
-      box(1).left,
-      box(1).top + box(1).height / 2,
-    ]);
+    expect(drawn[1]).toEqual(['Blood', box(1).left, box(1).top + 62]);
     // The defaults choose "through the name" both ways; with the title as
     // the window, both run (before: no mask, so no opening and the smoke).
     expect(running(props)).toMatchObject({ opening: 'name', into: 'name' });
