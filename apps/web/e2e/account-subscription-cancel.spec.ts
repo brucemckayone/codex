@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { loginAsSeedViewer } from './helpers/seed-auth';
+import { workerUrl } from './helpers/workers';
 
 /**
  * Account Subscription Cancel Flow E2E Tests
@@ -72,17 +73,24 @@ test.describe
     test.beforeAll(async ({ request }) => {
       // Skip the suite cleanly if the auth worker isn't up — matches auth-flow.spec.ts
       try {
-        const res = await request.get('http://localhost:42069/health');
-        if (!res.ok()) test.skip(true, 'Auth worker not running on port 42069');
+        const res = await request.get(`${workerUrl('AUTH')}/health`);
+        if (!res.ok())
+          test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
       } catch {
-        test.skip(true, 'Auth worker not running on port 42069');
+        test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
       }
       try {
-        const res = await request.get('http://localhost:42072/health');
+        const res = await request.get(`${workerUrl('ECOMMERCE')}/health`);
         if (!res.ok())
-          test.skip(true, 'Ecom-api worker not running on port 42072');
+          test.skip(
+            true,
+            `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+          );
       } catch {
-        test.skip(true, 'Ecom-api worker not running on port 42072');
+        test.skip(
+          true,
+          `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+        );
       }
     });
 

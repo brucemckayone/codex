@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { loginAsSeedViewer, SEED_VIEWER_2 } from './helpers/seed-auth';
+import { workerUrl } from './helpers/workers';
 
 /**
  * Cross-Device Subscription Visibility-Change E2E Tests
@@ -31,7 +32,7 @@ import { loginAsSeedViewer, SEED_VIEWER_2 } from './helpers/seed-auth';
  * Idempotency: afterEach reactivates if CANCELLING so the next run starts clean.
  *
  * Prereqs (matches playwright.config.ts webServer list):
- *   - auth (42069), ecom-api (42072), organization-api (42075), content-api (4001)
+ *   - auth, ecom-api, organization-api and content-api (ports: SERVICE_PORTS)
  *   - SvelteKit dev server on lvh.me, the default port (wildcard DNS → 127.0.0.1)
  */
 
@@ -48,17 +49,24 @@ function subscriptionCard(
 test.describe('Cross-device subscription sync via visibilitychange', () => {
   test.beforeAll(async ({ request }) => {
     try {
-      const res = await request.get('http://localhost:42069/health');
-      if (!res.ok()) test.skip(true, 'Auth worker not running on port 42069');
+      const res = await request.get(`${workerUrl('AUTH')}/health`);
+      if (!res.ok())
+        test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
     } catch {
-      test.skip(true, 'Auth worker not running on port 42069');
+      test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
     }
     try {
-      const res = await request.get('http://localhost:42072/health');
+      const res = await request.get(`${workerUrl('ECOMMERCE')}/health`);
       if (!res.ok())
-        test.skip(true, 'Ecom-api worker not running on port 42072');
+        test.skip(
+          true,
+          `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+        );
     } catch {
-      test.skip(true, 'Ecom-api worker not running on port 42072');
+      test.skip(
+        true,
+        `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+      );
     }
   });
 

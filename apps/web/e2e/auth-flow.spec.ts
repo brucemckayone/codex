@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { test } from './fixtures/auth';
+import { workerUrl } from './helpers/workers';
 
 /**
  * Auth Flow E2E Tests
@@ -9,10 +10,10 @@ import { test } from './fixtures/auth';
  *
  * Prerequisites:
  * - SvelteKit dev server running (auto-started by Playwright config)
- * - Auth worker running on port 42069 (`cd workers/auth && pnpm dev`)
+ * - Auth worker running on its SERVICE_PORTS.AUTH port (`cd workers/auth && pnpm dev`)
  */
 
-const AUTH_WORKER_URL = 'http://localhost:42069';
+const AUTH_WORKER_URL = workerUrl('AUTH');
 
 const TEST_USER = {
   name: 'E2E Test User',
@@ -57,10 +58,11 @@ test.describe
   .serial('Auth Flow E2E', () => {
     test.beforeAll(async ({ request }) => {
       try {
-        const res = await request.get('http://localhost:42069/health');
-        if (!res.ok()) test.skip(true, 'Auth worker not running on port 42069');
+        const res = await request.get(`${workerUrl('AUTH')}/health`);
+        if (!res.ok())
+          test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
       } catch {
-        test.skip(true, 'Auth worker not running on port 42069');
+        test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
       }
     });
 

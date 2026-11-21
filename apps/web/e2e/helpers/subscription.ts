@@ -8,7 +8,6 @@
  * specs 01 and 02 don't need them.
  */
 
-import { SERVICE_PORTS } from '@codex/constants';
 import type { Page } from '@playwright/test';
 import {
   aliasSessionCookies,
@@ -16,15 +15,16 @@ import {
   parseSetCookieStrings,
 } from './auth-cookies';
 import { E2E_HOST, E2E_ORIGIN, orgOrigin } from './origin';
+import { workerUrl } from './workers';
 
 /**
  * The auth worker on `lvh.me`. A call that SETS cookies must use this host,
  * not localhost (e2e/CLAUDE.md, "Cookie domain gotcha"), so it is not
- * buildServiceUrl's localhost URL; the port is `SERVICE_PORTS.AUTH`.
+ * buildServiceUrl's localhost URL. Ports come from SERVICE_PORTS (workers.ts).
  */
-const AUTH_LVH = `http://lvh.me:${SERVICE_PORTS.AUTH}`;
+const AUTH_LVH = workerUrl('AUTH', 'lvh.me');
 /** The auth worker on localhost, as the test-only fast-register has used. */
-const AUTH_LOCAL = `http://localhost:${SERVICE_PORTS.AUTH}`;
+const AUTH_LOCAL = workerUrl('AUTH');
 
 import {
   loadValidatedSeededCreatorCookies,

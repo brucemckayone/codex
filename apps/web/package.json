@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "shaders:check": "node scripts/validate-shaders.mjs",
+    "shaders:check:test": "node --test scripts/glsl-source.test.mjs",
     "test:e2e": "playwright test --project=e2e",
     "test:e2e:ui": "playwright test --ui",
     "test:a11y": "start-server-and-test storybook 6006 'playwright test --project=a11y'",

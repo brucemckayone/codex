@@ -147,6 +147,11 @@ jobs:
       # runner's own Chrome runs the layers: no Playwright browser download.
       # CI=true (set by Actions) makes a missing browser or WebGL2 a FAILURE,
       # never a skip. See apps/web/scripts/validate-shaders.mjs.
+      # The gate's text checks (glsl-source.mjs: the smoothstep edge rule on
+      # every preset source and compositor pass), planted cases first.
+      - name: Shader gate self-test
+        run: pnpm --filter web run shaders:check:test
+
       - name: Install glslang (GLSL compiler for the shader gate)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glslang-tools
 

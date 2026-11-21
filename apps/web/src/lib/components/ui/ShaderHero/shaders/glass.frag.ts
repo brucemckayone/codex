@@ -128,6 +128,9 @@ const float DRIFT_SCALE = 0.3;
  * does not change across a pixel quad, which made the line's two smoothstep
  * edges EQUAL: undefined in GLSL ES 3.00 (a 0/0 at the edge). A floor this
  * far below a pixel's width changes nothing wherever fwidth() is above it.
+ * The shader gate's smoothstep check (validate-shaders.mjs) cannot catch
+ * this: it judges literal edges, and these are expressions that only meet
+ * at run time, in a pixel whose distance is flat.
  */
 const float MIN_RAMP = 1e-5;
 
