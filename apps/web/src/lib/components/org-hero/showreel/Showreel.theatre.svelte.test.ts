@@ -323,6 +323,114 @@ describe('The Showreel opens its theatre', () => {
     expect(q('.reel__inner')?.inert).toBe(false);
   });
 
+  /**
+   * Every focus call as it lands: on what, and whether that was inside an
+   * inert subtree then. Svelte sets `inert` as the property, which the test
+   * DOM never reflects to the attribute, so the ancestors' property is read.
+   */
+  function watchFocus() {
+    const inInert = (el: HTMLElement) => {
+      for (let at: HTMLElement | null = el; at; at = at.parentElement) {
+        if (at.inert) return true;
+      }
+      return false;
+    };
+    const calls: { el: HTMLElement; inert: boolean }[] = [];
+    const focus = HTMLElement.prototype.focus;
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (
+      this: HTMLElement,
+      options?: FocusOptions
+    ) {
+      const inert = inInert(this);
+      calls.push({ el: this, inert });
+      // As a browser does: nothing inside an inert subtree takes focus.
+      if (!inert) focus.call(this, options);
+    });
+    return calls;
+  }
+  /** The stops the reel gives focus to when nothing it can return to opened the theatre. */
+  const fallbackStops = () => [
+    ...document.querySelectorAll(
+      '.reel__item[aria-current="true"], .reel__round'
+    ),
+  ];
+
+  it('gives focus back to what opened it only once the reel behind is no longer inert (review H1)', () => {
+    const calls = watchFocus();
+    render();
+    const opener = q<HTMLButtonElement>('.reel__btn') as HTMLButtonElement;
+    opener.focus();
+    opener.click();
+    expect(q('.reel__inner')?.inert).toBe(true);
+    q<HTMLButtonElement>('.theatre__round[data-role="close"]')?.click();
+    frame(1);
+    expect(q('.reel__inner')?.inert).toBe(false);
+    // Asked while the reel was still inert, a browser drops it to the body.
+    const back = calls.filter((call) => call.el === opener);
+    expect(back.length).toBeGreaterThan(1);
+    expect(back.every((call) => !call.inert)).toBe(true);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('gives it back on Escape too', () => {
+    watchFocus();
+    render();
+    const opener = q<HTMLButtonElement>('.reel__btn') as HTMLButtonElement;
+    opener.focus();
+    opener.click();
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    );
+    frame(1);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  for (const [label, active] of [
+    ['the body', () => document.body],
+    ['the root', () => document.documentElement],
+  ] as const) {
+    it(`takes ${label} for no opener, as Safari leaves a clicked button (review L5): focus goes to the index`, () => {
+      watchFocus();
+      render();
+      const opener = q<HTMLButtonElement>('.reel__btn') as HTMLButtonElement;
+      // Safari focuses no button a click presses.
+      const at = vi
+        .spyOn(document, 'activeElement', 'get')
+        .mockReturnValue(active());
+      opener.click();
+      at.mockRestore();
+      q<HTMLButtonElement>('.theatre__round[data-role="close"]')?.click();
+      frame(1);
+      expect(fallbackStops()).toContain(document.activeElement);
+    });
+  }
+
+  it('lets the keyboard hold go when focus could not come back into the reel (Firefox: no focusout for a removed node)', () => {
+    // A browser's :focus-visible for keyboard focus (the hold's own test does the same).
+    const matches = Element.prototype.matches;
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string
+    ) {
+      return selector === ':focus-visible'
+        ? this === document.activeElement
+        : matches.call(this, selector);
+    });
+    render();
+    const opener = q<HTMLButtonElement>('.reel__btn') as HTMLButtonElement;
+    opener.focus();
+    opener.click();
+    flushSync();
+    const before = current();
+    // Nothing in the reel takes focus back (as if every stop were gone).
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(() => {});
+    q<HTMLButtonElement>('.theatre__round[data-role="close"]')?.click();
+    frame(1);
+    expect(document.activeElement).toBe(document.body);
+    frame(PIECE_MS + 100);
+    expect(current()).not.toBe(before);
+  });
+
   it("never takes a press inside the theatre as a tap on the reel (a phone's)", () => {
     media.desktop = false;
     render();

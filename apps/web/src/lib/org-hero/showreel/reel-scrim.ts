@@ -112,15 +112,29 @@ const WHITE: Rgb = [255, 255, 255];
  * and every colour that cannot keep its floor is lifted toward white; a light
  * brand's is the mirror, a pale veil and lifts toward black. Never from the
  * inks: a player text no dark veil carries (#CB213C on #0F0000) once turned
- * the whole veil pale. The same switch as Showreel's `--_light` and its first
- * paint's `--_pole-ink`: the ground's luminance (`--_gy`), light only above
- * the pivot the page's own inks turn on.
+ * the whole veil pale. The PAGE's own switch (review R2, 2026-11-21), as
+ * Showreel's `--_light` and its first paint's `--_pole-ink` read it too: the
+ * binding luminance (`--_gy`, `bindingLuminance`) is light AT the pivot and
+ * above, since a light page whose darkest surface is mid grey binds exactly
+ * there (org-brand.css's `--_gw`). Read strictly above, grey 120-135 grounds
+ * got a dark veil on a light page.
  */
 export function groundPoles(groundY: number): { veil: Rgb; ink: Rgb } {
-  return groundY > TEXT_ON_BRAND_LUMINANCE_PIVOT
+  return groundY >= TEXT_ON_BRAND_LUMINANCE_PIVOT
     ? { veil: WHITE, ink: BLACK }
     : { veil: BLACK, ink: WHITE };
 }
+
+/**
+ * The first paint's scrim, until the fit has read the brand's colours (and
+ * with no script at all): its ground deepened toward black by `deepen` on a
+ * dark brand, or paled toward white by `pale` on a light one, mixed in oklab
+ * as the stylesheet mixes them (Showreel sets these on its root), held at
+ * `pool` and glowing at that pool. Pale enough that every word clears
+ * FLOOR_MARGIN on the darkest light ground there is, one at the pivot (review
+ * R5, 2026-11-21: unpaled, a grey-140 kicker read 4.57).
+ */
+export const FIRST_PAINT = { deepen: 0.64, pale: 0.2, pool: 0.9 } as const;
 
 /**
  * The pole these inks stand furthest from (their worst decides): white for a
@@ -154,14 +168,28 @@ export function inkPole(scrim: Rgb): Rgb {
  * that not even a solid one can (a player text the creator set, as #CB213C on
  * #0F0000: 3.82:1 even on black) no tint helps: counted, it drove the tint to
  * the pole for nothing (2026-11-20). The reel lifts or outlines such a colour
- * itself, and the ground stays the brand's when it is the only ink.
+ * itself, so with the ink `pole` it is lifted toward, it is solved as the
+ * pole, as it will be drawn: a light page held AT the pivot (a grey 120)
+ * whose light text no pale veil carries keeps a tint black can still be
+ * carried on, never its mid grey with no room left (review R2's probe,
+ * 2026-11-21: 24 of 27 words short over black). Over a ground that already
+ * carries the pole (OBB's dark), the ground stays the brand's.
  */
 export function scrimTint(
   ground: Rgb,
   veil: Rgb,
-  inks: readonly { ink: Ink; ratio: number }[]
+  inks: readonly { ink: Ink; ratio: number }[],
+  pole?: Rgb
 ): Rgb {
-  const carriable = inks.filter((ink) => scrimAlpha([ink], veil) !== null);
+  const carriable = inks.flatMap((entry) => {
+    if (scrimAlpha([entry], veil) !== null) return [entry];
+    if (!pole) return [];
+    const lifted = {
+      ink: { rgb: pole, alpha: entry.ink.alpha },
+      ratio: entry.ratio,
+    };
+    return scrimAlpha([lifted], veil) !== null ? [lifted] : [];
+  });
   for (let step = 0; step <= 20; step++) {
     const tint = over(veil, step / 20, ground);
     const alpha = scrimAlpha(carriable, tint);

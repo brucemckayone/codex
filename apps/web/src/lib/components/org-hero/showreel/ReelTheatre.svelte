@@ -6,9 +6,12 @@
   hero (or plays whole on the dark where filling would crop more than 40%
   of it: `theatreFit`); a recording shows its cover over the brand's
   shader, its name, and a waveform of its sound. Along the foot a bar gives
-  pause, the time, sound and close. Escape closes it, Tab stays inside, and
-  focus goes back to what opened it. On a phone it takes the whole screen
-  and the page behind holds still. It says when the preview played to its
+  pause, the time, sound and close. Escape closes it and Tab stays inside;
+  the Showreel gives focus back to what opened it, once the reel behind is
+  no longer inert (review H1, 2026-11-21: asked from here, while it still
+  was, focus fell to the body). On a phone it takes the whole screen, the
+  page's own tab bar steps aside (`data-covers-page`), and the page behind
+  holds still. It says when the preview played to its
   end (`onclose('ended')`), so the reel carries on.
 
   It plays through `PreviewPlayerCore`, as every film on the site does,
@@ -23,7 +26,10 @@
   A recording's sound is read through an AnalyserNode (`reel-waveform.ts`),
   only from hls.js's same-origin stream and only while the context the
   press made is running: tapping a stream the page may not read would
-  silence it. Anywhere else, or under reduced motion, the bars rest.
+  silence it. Anywhere else the bars rest; under reduced motion no context
+  is made at all (they would rest anyway). A context the system interrupts
+  (an iPhone's call, Siri) is resumed when it says so, and again on each
+  press of the bar, which is the gesture a resume may wait for.
 
   ── PAUSE ─────────────────────────────────────────────────────────────────
   The reel's own pause is hidden while the theatre is open, so the
@@ -53,8 +59,6 @@
     caption?: (seconds: number | null) => string;
     /** `ended`: the preview played to its end, and the reel carries on. */
     onclose: (reason: 'closed' | 'ended') => void;
-    /** Where focus goes on close when what opened it has gone (a swap removed it). */
-    fallbackFocus?: () => HTMLElement | null | undefined;
   }
 
   const {
@@ -62,7 +66,6 @@
     closeLabel = m.player_close(),
     caption = () => m.player_preview_label(),
     onclose,
-    fallbackFocus,
   }: Props = $props();
 
   const SILENT: PlayerClock = {
@@ -147,8 +150,10 @@
   const fit = $derived(theatreFit(boxSize, filmSize));
 
   // ── a recording's waveform ──
-  // Made in the press's tick, so it starts running (reel-waveform.ts).
-  const context = untrack(() => item.kind) === 'audio' ? makeContext() : null;
+  // Made in the press's tick, so it starts running (reel-waveform.ts). None
+  // under reduced motion: its bars would rest, so nothing taps the sound.
+  const context =
+    untrack(() => item.kind) === 'audio' && !untrack(() => reducedMotion.current) ? makeContext() : null;
   function makeContext(): AudioContext | null {
     if (typeof AudioContext === 'undefined') return null;
     const made = new AudioContext();
@@ -157,6 +162,21 @@
     void made.resume().catch(() => {});
     return made;
   }
+  /** Run the context again if it stopped: once tapped, the sound goes through it. */
+  function wake() {
+    if (context && context.state !== 'running' && context.state !== 'closed') {
+      void context.resume().catch(() => {});
+    }
+  }
+  // An interruption (an iPhone's call, Siri, another app's sound) leaves it
+  // suspended or 'interrupted', and a tapped recording silent: resume it as
+  // soon as it says so (review M3).
+  $effect(() => {
+    const ctx = context;
+    if (!ctx) return;
+    ctx.addEventListener('statechange', wake);
+    return () => ctx.removeEventListener('statechange', wake);
+  });
   let tap = $state.raw<WaveTap | null>(null);
   $effect(() => {
     const el = media;
@@ -218,17 +238,10 @@
     return lockScroll();
   });
 
-  // ── focus: in on open, back to the opener on close ──
-  const opener =
-    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+  // ── focus: in on open. The Showreel gives it back on close, once the reel
+  // behind it is no longer inert (review H1). ──
   $effect(() => {
     pauseButton?.focus({ preventScroll: true });
-  });
-  $effect(() => () => {
-    const back = opener?.isConnected ? opener : fallbackFocus?.();
-    back?.focus({ preventScroll: true });
   });
 
   /**
@@ -249,10 +262,17 @@
     const target = tabTarget(stops, at, { back: event.shiftKey, inside: root.contains(at), root });
     if (!target) return;
     event.preventDefault();
-    target.focus();
+    // A mouse user tabbing back in from the header is not scrolled (review L7).
+    target.focus({ preventScroll: true });
+  }
+
+  function togglePlay() {
+    wake();
+    core?.toggle();
   }
 
   function toggleSound() {
+    wake();
     // A refused start: sound now, and a paused preview plays with it.
     if (now.askSound) {
       core?.toggleMute();
@@ -276,6 +296,7 @@
   role="dialog"
   aria-modal="true"
   aria-label={item.title}
+  data-covers-page={desktop.current ? undefined : ''}
   tabindex="-1"
   bind:this={root}
 >
@@ -329,7 +350,7 @@
       data-role="pause"
       aria-label={now.offerPlay ? m.player_play() : m.player_pause()}
       aria-busy={busy}
-      onclick={() => core?.toggle()}
+      onclick={togglePlay}
       bind:this={pauseButton}
     >
       {#if now.offerPlay}
@@ -555,8 +576,10 @@
 
   /* ── a phone: the whole screen, and the bar in two rows (the mock's) ── */
   @media (--below-md) {
-    /* Over the whole screen, the tab bar included: the theatre's own room,
-       as IntroVideoModal's is on a phone. */
+    /* Over the whole screen: the theatre's own room, as IntroVideoModal's is
+       on a phone. The page's tab bar is fixed above the page's own stacking
+       context, so it steps aside for `data-covers-page` instead (review M2:
+       it painted over the bar, and Search stayed live under the sound). */
     .theatre {
       position: fixed;
       z-index: var(--z-modal);
@@ -579,7 +602,8 @@
 
     .theatre__bar {
       inset-inline: var(--space-3);
-      inset-block-end: var(--space-5);
+      /* Clear of a phone's home indicator (review M2). */
+      inset-block-end: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
       display: grid;
       grid-template-columns: var(--space-10) minmax(0, 1fr) var(--space-10) var(--space-10);
       grid-template-areas:

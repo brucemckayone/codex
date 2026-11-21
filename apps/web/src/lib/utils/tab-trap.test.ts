@@ -26,6 +26,16 @@ describe('tabTarget', () => {
     ).toBe('close');
   });
 
+  it('brings focus back to the stops from inside the modal but on none of them (review L4)', () => {
+    // The player's own focusable box, after a click on the picture.
+    expect(tabTarget(stops, 'player', { back: false, inside: true })).toBe(
+      'pause'
+    );
+    expect(tabTarget(stops, 'player', { back: true, inside: true })).toBe(
+      'close'
+    );
+  });
+
   it('leaves every other move to the browser', () => {
     expect(tabTarget(stops, 'pause', { back: false, inside: true })).toBeNull();
     expect(tabTarget(stops, 'sound', { back: true, inside: true })).toBeNull();

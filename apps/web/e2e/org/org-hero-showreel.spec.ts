@@ -155,6 +155,34 @@ test.describe('the Showreel on a landing', () => {
     await page.context().close();
   });
 
+  test("before the fit, the ring is the pole's ink, never a creator's dark player text (review R3)", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL);
+    const ring = await page.locator('.reel').evaluate((reel) => {
+      // The first paint, as it stands before the fit: no solved ring, no
+      // `data-fit`, and a player text set dark on OBB's dark.
+      reel.style.removeProperty('--color-focus');
+      reel.removeAttribute('data-fit');
+      reel.style.setProperty('--color-player-text', '#8B1A2B');
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--color-focus)';
+      reel.append(probe);
+      const canvas = document.createElement('canvas').getContext('2d', {
+        willReadFrequently: true,
+      });
+      if (!canvas) return null;
+      canvas.fillStyle = getComputedStyle(probe).color;
+      canvas.fillRect(0, 0, 1, 1);
+      probe.remove();
+      return [...canvas.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+    });
+    // OBB is dark: its pole's ink is white.
+    expect(ring).toEqual([255, 255, 255]);
+    await page.context().close();
+  });
+
   test('no band over the film: the shades are soft radials anchored off the reel (owner)', async ({
     browser,
     baseURL,

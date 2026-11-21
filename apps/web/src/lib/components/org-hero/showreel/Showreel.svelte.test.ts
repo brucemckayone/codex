@@ -234,6 +234,7 @@ beforeEach(() => {
 afterEach(() => {
   if (app) unmount(app);
   app = null;
+  Reflect.deleteProperty(Element.prototype, 'getAnimations');
   document.body.innerHTML = '';
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -1061,6 +1062,12 @@ describe('Showreel and a film playing over it', () => {
  * ink; the root's `--color-background` is the brand's ground, and its `--_gy`
  * the ground's luminance when given (unset, it reads dark, as CSS's
  * `var(--_gy, 0)` does).
+ *
+ * `easeFrom(nodes)` starts each node's colour easing back from what it wears
+ * now, as a link's `--transition-colors` would once its lift comes off: it
+ * reads as that start value until it lands, as Chrome does (calibrated
+ * 2026-11-21), listed meanwhile by `getAnimations({ subtree })` as a colour
+ * transition, which `finish()` lands. `eases()` counts the eases still running.
  */
 function paintable({
   ground,
@@ -1073,6 +1080,7 @@ function paintable({
   brand?: Record<string, string>;
   groundY?: string;
 }) {
+  const easing = new Map<Element, string>();
   const parse = (css: string): [number, number, number, number] | null => {
     const hex = /^#([0-9a-f]{6})$/i.exec(css.trim());
     if (hex?.[1]) {
@@ -1114,6 +1122,8 @@ function paintable({
     const colour = () => {
       const inline = (el as HTMLElement).style?.getPropertyValue('color');
       if (inline) return inline;
+      const from = easing.get(el);
+      if (from) return from;
       for (const [selector, value] of Object.entries(brand)) {
         if (el.matches(selector)) return value;
       }
@@ -1136,6 +1146,29 @@ function paintable({
       },
     });
   });
+  // jsdom has no Web Animations: the colour eases alone, as CSSTransitions.
+  Object.defineProperty(Element.prototype, 'getAnimations', {
+    configurable: true,
+    value(this: Element, options?: GetAnimationsOptions) {
+      return [...easing.keys()]
+        .filter(
+          (node) => node === this || (options?.subtree && this.contains(node))
+        )
+        .map((node) => ({
+          transitionProperty: 'color',
+          finish: () => easing.delete(node),
+        }));
+    },
+  });
+  return {
+    easeFrom(nodes: Iterable<Element>) {
+      for (const node of nodes) {
+        const now = (node as HTMLElement).style.getPropertyValue('color');
+        if (now) easing.set(node, now);
+      }
+    },
+    eases: () => easing.size,
+  };
 }
 
 /** One more fit, as a colour landing asks for one. */
@@ -1215,7 +1248,9 @@ describe("Showreel's fit over the film", () => {
     expect(follow?.style.getPropertyValue('color')).not.toBe(RED);
     expect(pause?.hasAttribute('data-lifted')).toBe(false);
     expect(pause?.style.getPropertyValue('--_halo')).not.toBe('');
-    expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+    // Whether the shades then carry each word is the probes' (review R4): this
+    // DOM lays every word over the whole box, where no corner reaches, and the
+    // once-a-page-load report for this ground may already have gone.
     expect(solved().pool).not.toBe('1');
   });
 
@@ -1257,7 +1292,8 @@ describe("Showreel's fit over the film", () => {
       expect(g).toBeGreaterThanOrEqual(33);
       expect(b).toBeGreaterThanOrEqual(60);
     }
-    expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+    // Whether the shades then carry each word is the probes' (review R4), as
+    // in the rescue above.
     expect(solved().pool).not.toBe('1');
   });
 
@@ -1281,8 +1317,77 @@ describe("Showreel's fit over the film", () => {
       expect(g).toBe(r);
       expect(b).toBe(r);
     }
-    expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+    // Whether the shades then carry each word is the probes' (Tide, grey):
+    // this DOM lays every word over the whole box, where no corner reaches.
     expect(solved().pool).not.toBe('1');
+  });
+
+  it('never takes a link still easing back from its lift for the brand colour: it lands the ease, keeps the lift, and the fit holds (review R1)', async () => {
+    const paint = paintable({
+      ground: '#0F0000',
+      ink: WHITE,
+      brand: { a: RED },
+    });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const first = solved();
+    const links = [...document.querySelectorAll('.reel a[data-lifted]')];
+    expect(links.length).toBeGreaterThan(0);
+    const lifts = links.map((a) =>
+      (a as HTMLElement).style.getPropertyValue('color')
+    );
+    for (let n = 0; n < 3; n++) {
+      // The lift comes off, and the link reads as it still: its ease's start.
+      paint.easeFrom(links);
+      refit();
+      // Landed at once, so the fit read the brand's red, and lifted it again.
+      expect(paint.eases()).toBe(0);
+      expect(solved()).toEqual(first);
+      expect(links.every((a) => a.hasAttribute('data-lifted'))).toBe(true);
+      expect(
+        links.map((a) => (a as HTMLElement).style.getPropertyValue('color'))
+      ).toEqual(lifts);
+    }
+  });
+
+  it("fits again when a colour lands, never when a lift's own does: no fit asks for the next (review R1)", async () => {
+    paintable({ ground: '#0F0000', ink: WHITE, brand: { a: RED } });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const link = q('.reel a[data-lifted]');
+    expect(link).not.toBeNull();
+    const fits = vi.spyOn(window, 'requestAnimationFrame');
+    const lands = (target: Element | null) => {
+      const landed = new Event('transitionend', { bubbles: true });
+      Object.defineProperty(landed, 'propertyName', { value: 'color' });
+      target?.dispatchEvent(landed);
+    };
+    const before = fits.mock.calls.length;
+    lands(link);
+    expect(fits.mock.calls.length).toBe(before);
+    lands(q('.reel'));
+    expect(fits.mock.calls.length).toBe(before + 1);
+  });
+
+  it('counts a shade that falls short as no solve: the word wears the pole, and the report comes once a page load (review R4, R6)', async () => {
+    // Every word white on a light brand: lifted toward black. This DOM lays
+    // each word over the whole box, out of every corner shade's reach, so
+    // none is carried by its shades: each wears the pole outright.
+    paintable({ ground: '#F2EDE4', ink: WHITE, groundY: '0.85' });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const words = [...document.querySelectorAll('.reel [data-ink="body"]')];
+    expect(words.length).toBeGreaterThan(0);
+    for (const word of words) {
+      expect(channels(word), word.className).toEqual([0, 0, 0]);
+    }
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledTimes(1);
+    // Every fit of the same brand finds the same: it says so once.
+    for (let n = 0; n < 3; n++) refit();
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledTimes(1);
   });
 
   it('marks data-fit only when the fit has run: never on a page it could not read', async () => {

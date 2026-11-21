@@ -59,7 +59,7 @@ let frames: FrameRequestCallback[] = [];
 let media = { desktop: true, reduced: false };
 
 /** A stand-in AudioContext that says what was wired to what. */
-class FakeContext {
+class FakeContext extends EventTarget {
   static made: FakeContext[] = [];
   /** How a new context starts: a browser may leave one suspended. */
   static starts: AudioContextState = 'running';
@@ -68,11 +68,20 @@ class FakeContext {
   readonly wired: string[] = [];
   readonly tapped: HTMLMediaElement[] = [];
   closed = false;
+  /** Each resume asked for. */
+  resumes = 0;
   constructor() {
+    super();
     FakeContext.made.push(this);
   }
   resume() {
+    this.resumes += 1;
     return Promise.resolve();
+  }
+  /** The system takes it, as an iPhone's call does ('interrupted' there). */
+  interrupt() {
+    this.state = 'suspended';
+    this.dispatchEvent(new Event('statechange'));
   }
   close() {
     this.closed = true;
@@ -104,7 +113,6 @@ function render(
   item: TheatreItem,
   over: {
     caption?: (seconds: number | null) => string;
-    fallbackFocus?: () => HTMLElement | null;
   } = {}
 ) {
   const onclose = vi.fn();
@@ -211,28 +219,12 @@ describe('ReelTheatre, a film', () => {
     expect(FakeContext.made).toHaveLength(0);
   });
 
-  it('takes focus on its pause button, and gives it back to what opened it', () => {
+  it('takes focus on its pause button as it opens (the Showreel gives it back on close)', () => {
     const opener = document.createElement('button');
     document.body.appendChild(opener);
     opener.focus();
     render(FILM);
     expect(document.activeElement).toBe(button('pause'));
-    unmount(app!);
-    app = null;
-    expect(document.activeElement).toBe(opener);
-  });
-
-  it('gives focus to the fallback when a swap removed what opened it', () => {
-    const opener = document.createElement('button');
-    const fallback = document.createElement('button');
-    document.body.appendChild(opener);
-    document.body.appendChild(fallback);
-    opener.focus();
-    render(FILM, { fallbackFocus: () => fallback });
-    opener.remove();
-    unmount(app!);
-    app = null;
-    expect(document.activeElement).toBe(fallback);
   });
 
   it('closes on Escape and on its close button, and says when the preview played to its end', () => {
@@ -246,11 +238,29 @@ describe('ReelTheatre, a film', () => {
     expect(onclose).toHaveBeenCalledTimes(3);
   });
 
-  it('keeps Tab inside: from the last control to the first, and back', () => {
+  it('keeps Tab inside: from the last control to the first, and back, never scrolling the page', () => {
     render(FILM);
     button('close').focus();
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
     key('Tab');
     expect(document.activeElement).toBe(button('pause'));
+    key('Tab', true);
+    expect(document.activeElement).toBe(button('close'));
+    // A mouse user tabbing back in from the header stays where they were (review L7).
+    expect(focus.mock.calls).toEqual([
+      [{ preventScroll: true }],
+      [{ preventScroll: true }],
+    ]);
+  });
+
+  it("brings Tab back to its bar from the player's own box, which a click focuses (review L4)", () => {
+    render(FILM);
+    const box = q<HTMLElement>('.theatre__player') as HTMLElement;
+    box.tabIndex = -1;
+    box.focus();
+    key('Tab');
+    expect(document.activeElement).toBe(button('pause'));
+    box.focus();
     key('Tab', true);
     expect(document.activeElement).toBe(button('close'));
   });
@@ -370,12 +380,31 @@ describe('ReelTheatre, a recording', () => {
     expect(levels().every((level) => level === '')).toBe(true);
   });
 
-  it('rests its bars under reduced motion', () => {
+  it('rests its bars under reduced motion, and makes no audio graph to tap the sound (review L6)', () => {
     media.reduced = true;
     render(RECORDING);
+    expect(FakeContext.made).toHaveLength(0);
     playsFrom('blob:http://x/1');
     frame();
     expect(levels().every((level) => level === '')).toBe(true);
+  });
+
+  it('resumes a context the system interrupted: as it says so, and on each press of its bar (review M3)', () => {
+    render(RECORDING);
+    const [context] = FakeContext.made;
+    if (!context) throw new Error('a recording makes its context');
+    const made = context.resumes;
+    // Running, a press asks nothing of it.
+    button('pause').click();
+    expect(context.resumes).toBe(made);
+    // An iPhone's call takes it: it says so, and is resumed at once.
+    context.interrupt();
+    expect(context.resumes).toBe(made + 1);
+    // Still taken (a resume waits for a gesture there): each press asks again.
+    button('pause').click();
+    expect(context.resumes).toBe(made + 2);
+    button('sound').click();
+    expect(context.resumes).toBe(made + 3);
   });
 
   it('closes its audio graph as it closes', () => {
@@ -399,6 +428,13 @@ describe('ReelTheatre on a phone', () => {
   it('leaves the page free on a desktop, inside the hero', () => {
     render(FILM);
     expect(scroll.lockScroll).not.toHaveBeenCalled();
+    expect(q('.theatre')?.hasAttribute('data-covers-page')).toBe(false);
+  });
+
+  it("stands for the whole screen, so the page's own tab bar steps aside (review M2)", () => {
+    media.desktop = false;
+    render(FILM);
+    expect(q('.theatre')?.hasAttribute('data-covers-page')).toBe(true);
   });
 
   it('draws fewer bars', () => {

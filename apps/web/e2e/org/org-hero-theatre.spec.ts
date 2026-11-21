@@ -350,6 +350,17 @@ test.describe('the Showreel theatre', () => {
       expect(box.width).toBeGreaterThanOrEqual(389);
       expect(box.height).toBeGreaterThanOrEqual(843);
     }
+    // Nothing of the page paints over its foot: the tab bar steps aside, so
+    // the bar's second row is the theatre's, and Search is out of reach
+    // (review M2).
+    expect(
+      await page.evaluate(
+        () => !!document.elementFromPoint(195, 820)?.closest('[role="dialog"]')
+      )
+    ).toBe(true);
+    await expect(
+      page.getByRole('navigation', { name: 'Mobile navigation' })
+    ).toBeHidden();
 
     // Held: the wheel moves nothing behind it.
     const top = await page.evaluate(() => window.scrollY);
