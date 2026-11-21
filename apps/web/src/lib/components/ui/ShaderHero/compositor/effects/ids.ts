@@ -25,16 +25,37 @@ export type BlendId = (typeof BLEND_IDS)[number];
 export const LAYER_IDS = ['grain'] as const;
 export type LayerId = (typeof LAYER_IDS)[number];
 
-/** What the picture is seen through: the last pass, drawn to the canvas. */
-export const FRAME_IDS = ['shader-only', 'through-name', 'name-glows'] as const;
+/**
+ * What the picture is seen through: the last pass, drawn to the canvas. These
+ * are the frames a brand's stack may name: the brand editor offers these.
+ */
+export const BRAND_FRAME_IDS = [
+  'shader-only',
+  'through-name',
+  'name-glows',
+] as const;
+/**
+ * The Showreel's film frames (WP-5, Codex-1yd58.6): the piece's film over the
+ * picture, inside the stage. Only the Showreel's look names one
+ * (`showreelFeed.setLook`). A brand's `shader-frame` never can: with no film
+ * attached, a film frame would draw the picture and nothing of its own.
+ */
+const FILM_FRAME_IDS = ['film-fill', 'film-name'] as const;
+export const FRAME_IDS = [...BRAND_FRAME_IDS, ...FILM_FRAME_IDS] as const;
 export type FrameId = (typeof FRAME_IDS)[number];
+export type FilmFrameId = (typeof FILM_FRAME_IDS)[number];
+export type BrandFrameId = (typeof BRAND_FRAME_IDS)[number];
 
 /** The frame that draws the picture as it is: every other frame's last resort. */
-export const PASSTHROUGH_FRAME: FrameId = 'shader-only';
+export const PASSTHROUGH_FRAME: BrandFrameId = 'shader-only';
+/** The film filling its stage: a film frame's fallback with no name mask. */
+export const FILM_FILL_FRAME: FilmFrameId = 'film-fill';
 
 const has = <T extends string>(ids: readonly T[], id: string): id is T =>
   (ids as readonly string[]).includes(id);
 
 export const isBlendId = (id: string): id is BlendId => has(BLEND_IDS, id);
 export const isLayerId = (id: string): id is LayerId => has(LAYER_IDS, id);
-export const isFrameId = (id: string): id is FrameId => has(FRAME_IDS, id);
+/** A frame a brand's stack may name: any but the Showreel's film frames. */
+export const isBrandFrameId = (id: string): id is BrandFrameId =>
+  has(BRAND_FRAME_IDS, id);

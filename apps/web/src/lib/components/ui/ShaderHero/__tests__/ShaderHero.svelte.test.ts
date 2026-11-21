@@ -48,6 +48,9 @@ const compositor = vi.hoisted(() => ({
   setMedia: vi.fn(),
   setStage: vi.fn(),
   setNameMask: vi.fn(),
+  setLook: vi.fn(),
+  // Whether a frame of the film is on the GPU (ShaderHero's `data-film`).
+  mediaReady: vi.fn(() => false),
   destroy: vi.fn(),
   forget: vi.fn(),
 }));
@@ -1102,6 +1105,7 @@ describe('ShaderHero stack', () => {
     showreelFeed.setMedia(null);
     showreelFeed.setStage(null);
     showreelFeed.setNameMask(null);
+    showreelFeed.setLook(null);
     // A phone at DPR 3: the scene renders at DPR 1, the output at 2.
     vi.stubGlobal('devicePixelRatio', 3);
     box = { width: 390, height: 844 };
@@ -1111,6 +1115,7 @@ describe('ShaderHero stack', () => {
     vi.mocked(resetJFACache).mockClear();
     for (const fn of Object.values(compositor)) fn.mockClear();
     compositor.render.mockImplementation(() => true);
+    compositor.mediaReady.mockReturnValue(false);
     renderer.init.mockClear();
     renderer.resize.mockClear();
     renderer.destroy.mockClear();
@@ -1810,6 +1815,58 @@ describe('ShaderHero stack', () => {
     showreelFeed.setNameMask(mask);
     expect(compositor.setStage).toHaveBeenLastCalledWith(box);
     expect(compositor.setNameMask).toHaveBeenLastCalledWith(mask);
+  });
+
+  it('hands the compositor the Showreel’s look, on attach and as it changes (WP-5)', async () => {
+    const look = { frame: 'film-name', band: 'none' } as const;
+    showreelFeed.setLook(look);
+    showreelFeed.setMedia(film());
+    await start({ tone: true });
+    step(1);
+    await settle();
+    expect(compositor.setLook).toHaveBeenLastCalledWith(look);
+    const fade = { frame: 'film-fill', band: 'fade' } as const;
+    showreelFeed.setLook(fade);
+    expect(compositor.setLook).toHaveBeenLastCalledWith(fade);
+  });
+
+  // The Showreel hides its own copy of the film only while the canvas shows
+  // it: a lost context or a detached compositor shows the page's again.
+  it('says `data-film` only while the compositor holds a frame of the film', async () => {
+    const hasFilm = () => {
+      flushSync();
+      return root().hasAttribute('data-film');
+    };
+    showreelFeed.setMedia(film());
+    await start({ tone: true });
+    step(1);
+    await settle();
+    step(1);
+    expect(compositor.render).toHaveBeenCalled();
+    expect(hasFilm()).toBe(false);
+
+    compositor.mediaReady.mockReturnValue(true);
+    step(1);
+    expect(hasFilm()).toBe(true);
+
+    contextLost = true;
+    canvas().dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    expect(hasFilm()).toBe(false);
+  });
+
+  it('drops `data-film` when the film ends and the compositor detaches', async () => {
+    showreelFeed.setMedia(film());
+    compositor.mediaReady.mockReturnValue(true);
+    await start({ tone: true });
+    step(1);
+    await settle();
+    step(1);
+    flushSync();
+    expect(root().hasAttribute('data-film')).toBe(true);
+    showreelFeed.setMedia(null);
+    step(2);
+    flushSync();
+    expect(root().hasAttribute('data-film')).toBe(false);
   });
 });
 

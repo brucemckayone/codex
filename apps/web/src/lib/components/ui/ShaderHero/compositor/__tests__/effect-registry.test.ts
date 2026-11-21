@@ -8,7 +8,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Effect } from '../effects/effect';
 import { HEADER } from '../effects/header';
-import { BLEND_IDS, FRAME_IDS, LAYER_IDS } from '../effects/ids';
+import {
+  BLEND_IDS,
+  BRAND_FRAME_IDS,
+  FRAME_IDS,
+  isBrandFrameId,
+  LAYER_IDS,
+  PASSTHROUGH_FRAME,
+} from '../effects/ids';
 import {
   assembleEffect,
   BLENDS,
@@ -110,5 +117,19 @@ describe('effect registry', () => {
 
   it('marks no WP-3 effect as flashing: grain moves pixels, not the picture', () => {
     expect(EFFECTS.filter((e) => e.flashes).map((e) => e.id)).toEqual([]);
+  });
+});
+
+describe('the frames a brand may name', () => {
+  it("are every frame but the Showreel's film frames, which FRAME_IDS still holds", () => {
+    const film = ['film-fill', 'film-name'];
+    expect(FRAME_IDS).toEqual(expect.arrayContaining(film));
+    for (const id of film) {
+      expect(BRAND_FRAME_IDS).not.toContain(id);
+      expect(isBrandFrameId(id)).toBe(false);
+    }
+    expect([...BRAND_FRAME_IDS, ...film].sort()).toEqual([...FRAME_IDS].sort());
+    for (const id of BRAND_FRAME_IDS) expect(isBrandFrameId(id)).toBe(true);
+    expect(BRAND_FRAME_IDS).toContain(PASSTHROUGH_FRAME);
   });
 });

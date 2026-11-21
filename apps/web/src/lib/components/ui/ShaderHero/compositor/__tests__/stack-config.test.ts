@@ -215,6 +215,16 @@ describe('getStackConfig', () => {
     expect(stack.frame).toBe('through-name');
   });
 
+  // The film frames are the Showreel's look (WP-5): a brand naming one would
+  // draw the picture and nothing of its own on every other page.
+  it('never takes a film frame from the brand', () => {
+    for (const frame of ['film-fill', 'film-name']) {
+      document.body.innerHTML = '';
+      layout({ '--brand-shader-frame': frame });
+      expect(getStackConfig(undefined, 'flow').frame).toBe('shader-only');
+    }
+  });
+
   it('prefers each -dark value in the dark theme, and only then', () => {
     const el = layout({
       '--brand-shader-second': 'ripple',

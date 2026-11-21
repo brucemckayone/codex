@@ -11,6 +11,7 @@ afterEach(() => {
   showreelFeed.setMedia(null);
   showreelFeed.setStage(null);
   showreelFeed.setNameMask(null);
+  showreelFeed.setLook(null);
 });
 
 describe('showreelFeed', () => {
@@ -53,5 +54,24 @@ describe('showreelFeed', () => {
     showreelFeed.onChange(null);
     showreelFeed.setMedia({} as HTMLVideoElement);
     expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('takes a look that says the same thing as no change (WP-5)', () => {
+    const changed = vi.fn();
+    showreelFeed.onChange(changed);
+    showreelFeed.setLook({ frame: 'film-fill', band: 'none' });
+    // A new object, the same frame and band: the Showreel re-renders often.
+    showreelFeed.setLook({ frame: 'film-fill', band: 'none' });
+    showreelFeed.setLook({ frame: 'film-name', band: 'none' });
+    showreelFeed.setLook({ frame: 'film-name', band: 'fade' });
+    showreelFeed.setLook(null);
+    showreelFeed.setLook(null);
+    expect(changed.mock.calls).toEqual([
+      ['look'],
+      ['look'],
+      ['look'],
+      ['look'],
+    ]);
+    expect(showreelFeed.look).toBeNull();
   });
 });

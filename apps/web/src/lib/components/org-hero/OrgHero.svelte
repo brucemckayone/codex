@@ -42,7 +42,9 @@
     type HeroOptions,
     type OrgHeroPiece,
   } from '$lib/org-hero/hero-config';
+  import type { ReelEntry } from '$lib/org-hero/reel';
   import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
+  import Showreel from './showreel/Showreel.svelte';
 
   interface Props {
     options: HeroOptions;
@@ -68,6 +70,8 @@
     } | null;
     /** The film is playing inside the hero (desktop): the words step aside. */
     filmOpen: boolean;
+    /** The film is playing anywhere, the hero or the phone's pop-up: the Showreel holds. */
+    filmPlaying: boolean;
     following: boolean;
     followBusy: boolean;
     onfilm: (event: MouseEvent) => void;
@@ -76,6 +80,8 @@
     filmChip?: HTMLButtonElement;
     /** The page's in-hero film player, drawn inside the hero's box. */
     filmLayer?: Snippet;
+    /** What the Showreel plays (`buildReel`); read only by `comp: 'showreel'`. */
+    reel?: readonly ReelEntry[];
   }
 
   let {
@@ -91,13 +97,26 @@
     consumeNote,
     film,
     filmOpen,
+    filmPlaying,
     following,
     followBusy,
     onfilm,
     onfollow,
     filmChip = $bindable(),
     filmLayer,
+    reel = [],
   }: Props = $props();
+
+  // The Showreel draws its own hero; resolveHero only picks it with a reel.
+  const showreel = $derived(o.comp === 'showreel' && reel.length > 0);
+  // Join or Explore sits top right beside Follow (owner, 2026-11-19).
+  const reelAction = $derived(
+    o.main === 'join'
+      ? { href: hrefs.join, label: m.org_hero_join_name({ name }) }
+      : o.main === 'explore'
+        ? { href: hrefs.explore, label: m.org_hero_explore_everything() }
+        : null
+  );
 
   // A picture that fails (deleted, missing variant, CDN hiccup) is dropped, and
   // the hero draws what it would without it: the name where the logo was, the
@@ -256,6 +275,27 @@
   }
 </script>
 
+{#if showreel}
+<Showreel
+  {reel}
+  options={o}
+  {name}
+  {description}
+  logoUrl={o.lead !== 'name' && shows(logoUrl) ? logoUrl : ''}
+  onlogofail={markFailed}
+  facts={o.proof === 'facts' ? factsSentence : ''}
+  action={reelAction}
+  exploreHref={hrefs.explore}
+  filmDuration={film?.duration ?? null}
+  {following}
+  {followBusy}
+  {onfollow}
+  onfilm={pressFilm}
+  {filmOpen}
+  {filmPlaying}
+  {filmLayer}
+/>
+{:else}
 <section
   class="org-hero"
   data-hero-root
@@ -488,6 +528,7 @@
     {/if}
   </div>
 </section>
+{/if}
 
 <style>
   /* ── root + ink ───────────────────────────────────────────────────────── */

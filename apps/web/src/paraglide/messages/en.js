@@ -1491,6 +1491,94 @@ export const org_hero_explore_everything = () => `Explore everything`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_play_preview = () => `Play the preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_label = () => `Showreel`
+
+
+/**
+ * @param {{ number: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_slide = (params) => `${params.number} of ${params.total}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_pause = () => `Pause the reel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_play = () => `Play the reel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_film_kicker = () => `Our film`
+
+
+/**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_film_kicker_duration = (params) => `Our film, ${params.duration}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_film = () => `Film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_recording = () => `Recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_essay = () => `Essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_portal = () => `Portal`
+
+
+/**
  * @param {{ name: NonNullable<unknown> }} params
  * @returns {string}
  */

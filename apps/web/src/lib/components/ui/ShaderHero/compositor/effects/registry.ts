@@ -12,6 +12,8 @@ import { blendMultiply } from './blend-multiply';
 import { blendScreen } from './blend-screen';
 import { blendSmokeKey } from './blend-smoke-key';
 import type { BlendEffect, Effect, FrameEffect, LayerEffect } from './effect';
+import { frameFilmFill } from './frame-film-fill';
+import { frameFilmName } from './frame-film-name';
 import { frameNameGlows } from './frame-name-glows';
 import { frameShaderOnly } from './frame-shader-only';
 import { frameThroughName } from './frame-through-name';
@@ -36,6 +38,8 @@ export const FRAMES: Record<FrameId, FrameEffect> = {
   'shader-only': frameShaderOnly,
   'through-name': frameThroughName,
   'name-glows': frameNameGlows,
+  'film-fill': frameFilmFill,
+  'film-name': frameFilmName,
 };
 
 /** Every effect, for the gate and the tests. */

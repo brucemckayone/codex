@@ -137,6 +137,11 @@
   // brand shader paints under the words, so their ink stays the page's
   // (white shader ink on a light brand would vanish).
   let drawn = $state(false);
+  // `data-film` (Codex-1yd58.6): the canvas shows the Showreel's film (a
+  // frame of it is on the GPU and the last frame composited). The Showreel
+  // hides its own copy of the film only then, so with no WebGL2, a lost
+  // context or a broken compositor its DOM film shows instead.
+  let film = $state(false);
 
   onMount(() => {
     if (!canvasEl || !browser) return;
@@ -519,6 +524,7 @@
         if (compositor) {
           if (changed === 'media') compositor.setMedia(showreelFeed.media);
           else if (changed === 'stage') compositor.setStage(showreelFeed.stage);
+          else if (changed === 'look') compositor.setLook(showreelFeed.look);
           else compositor.setNameMask(showreelFeed.mask);
         }
         if (changed === 'media') scheduleFrame();
@@ -554,6 +560,7 @@
     function hidden(state: 'none' | 'failed') {
       drawn = false;
       live = false;
+      film = false;
       if (canvasEl) canvasEl.style.opacity = '0';
       report(state);
     }
@@ -838,6 +845,7 @@
         made.setMedia(showreelFeed.media);
         made.setStage(showreelFeed.stage);
         made.setNameMask(showreelFeed.mask);
+        made.setLook(showreelFeed.look);
       }
       // The canvas rises to the display DPR; the presets keep the scene's.
       resize(true);
@@ -851,6 +859,7 @@
       if (!compositor) return;
       compositor.destroy();
       compositor = null;
+      film = false;
       // Back to today's canvas, the scene's own size.
       resize(true);
       redrawFrozen();
@@ -952,7 +961,10 @@
           // A preset threw inside it: the loop must not die with it.
           thrown = error;
         }
-        if (composited) return true;
+        if (composited) {
+          film = compositor.mediaReady();
+          return true;
+        }
         // Lost mid-frame: the loss handler's, and the restore rebuilds it.
         if (glContext.isContextLost()) return false;
         if (thrown !== undefined) reportCompositorFailure('render', thrown);
@@ -1280,6 +1292,7 @@
   aria-hidden="true"
   data-live={live ? '' : undefined}
   data-drawn={drawn ? '' : undefined}
+  data-film={film ? '' : undefined}
 >
   {#if browser && hasWebGL}
     <canvas

@@ -872,3 +872,86 @@ describe('forget and destroy', () => {
     expect(fake.named('deleteFramebuffer')).toEqual([]);
   });
 });
+
+describe('the Showreel look (WP-5, Codex-1yd58.6)', () => {
+  const visible = stageBoxFrom(
+    { left: 20, top: 100, width: 350, height: 600 },
+    0,
+    600
+  );
+  const set = (fake: ReturnType<typeof fakeGl>, name: string) =>
+    fake.calls
+      .filter(
+        ([k, a]) =>
+          k.startsWith('uniform') &&
+          (a[0] as { uniform: string })?.uniform === name
+      )
+      .at(-1)?.[1]
+      .slice(1);
+
+  it("draws the look's film frame in place of the brand's, only while a film is attached", () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const stack = { ...BARE_STACK, frame: 'shader-only' as const, layers: [] };
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    compositor.render(frame({ stack }));
+    // No film: the brand's own frame.
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['shader-only'])).toBe(
+      true
+    );
+
+    compositor.setMedia(fakeVideo().el);
+    compositor.setStage(visible);
+    compositor.render(frame({ stack }));
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['film-fill'])).toBe(true);
+
+    compositor.setLook(null);
+    compositor.render(frame({ stack }));
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['shader-only'])).toBe(
+      true
+    );
+  });
+
+  it("hands the band to the film frame: off for none, each band's code and its ramp for the screen", () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setMedia(fakeVideo().el);
+    compositor.setStage(visible);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    compositor.render(frame());
+    expect(set(fake, 'u_band')).toEqual([0]);
+
+    // The codes are the film frame's GLSL contract (1 under, 2 fade, 3 edges):
+    // pinned as numbers, not read back from the table that makes them. The
+    // ramps (desk, phone) start a tenth below the mock's (owner, 2026-11-20).
+    const bands = [
+      ['under', 1, [0.4, 0.82], [0.38, 0.76]],
+      ['fade', 2, [0.5, 0.95], [0.44, 0.84]],
+      ['edges', 3, [0.5, 0.95], [0.44, 0.84]],
+    ] as const;
+    for (const [band, code, desk, phone] of bands) {
+      compositor.setLook({ frame: 'film-fill', band });
+      compositor.render(frame({ phone: true }));
+      expect(set(fake, 'u_band')).toEqual([code]);
+      expect(set(fake, 'u_ramp')).toEqual(phone);
+      compositor.render(frame({ phone: false }));
+      expect(set(fake, 'u_ramp')).toEqual(desk);
+    }
+  });
+
+  it('is media-ready once a frame of the film is on the GPU, and not after a lost context', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    expect(compositor.mediaReady()).toBe(false);
+    compositor.setMedia(fakeVideo().el);
+    expect(compositor.mediaReady()).toBe(false);
+    compositor.setStage(visible);
+    compositor.render(frame());
+    expect(compositor.mediaReady()).toBe(true);
+    compositor.forget();
+    expect(compositor.mediaReady()).toBe(false);
+    compositor.setMedia(null);
+    expect(compositor.mediaReady()).toBe(false);
+  });
+});

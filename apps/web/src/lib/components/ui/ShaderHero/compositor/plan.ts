@@ -4,7 +4,7 @@
  * PURE, so the choices are under test without a GL context.
  */
 import type { BlendEffect, FrameEffect, LayerEffect } from './effects/effect';
-import { PASSTHROUGH_FRAME } from './effects/ids';
+import { FILM_FILL_FRAME, PASSTHROUGH_FRAME } from './effects/ids';
 import { BLENDS, FRAMES, LAYERS } from './effects/registry';
 import type { StackConfig } from './stack-config';
 
@@ -63,9 +63,11 @@ export function planStack(stack: StackConfig, ctx: PlanContext): StackPlan {
   }
 
   let frame = FRAMES[fallen(FRAMES, stack.frame, ctx) ?? stack.frame];
-  // A name frame with no name to draw through draws the picture as it is.
+  // A name frame with no name to draw through draws the picture as it is,
+  // or, a film frame, the film filling its stage.
   if (!ctx.hasMask && frame.uniforms.includes('u_mask')) {
-    frame = FRAMES[PASSTHROUGH_FRAME];
+    const film = frame.uniforms.includes('u_media');
+    frame = FRAMES[film ? FILM_FILL_FRAME : PASSTHROUGH_FRAME];
   }
   return { blend, layers, frame };
 }

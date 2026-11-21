@@ -34,7 +34,7 @@ import {
   type BlendId,
   type FrameId,
   isBlendId,
-  isFrameId,
+  isBrandFrameId,
   isLayerId,
   type LayerId,
   PASSTHROUGH_FRAME,
@@ -149,7 +149,7 @@ export function parseStack(
     blend: isBlendId(blend) ? blend : BARE_STACK.blend,
     blendAmount: amountOf(read('shader-blend-amount')),
     layers: parseLayers(read('shader-layers')),
-    frame: isFrameId(frame) ? frame : BARE_STACK.frame,
+    frame: isBrandFrameId(frame) ? frame : BARE_STACK.frame,
   };
 }
 
