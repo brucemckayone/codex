@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PUSH_SECONDS,
   pushZoom,
-} from '$lib/components/ui/ShaderHero/compositor/media-pass';
+} from '$lib/components/ui/ShaderHero/compositor/stage';
 import { PIECE_MS, ReelClock } from './reel-clock.svelte';
 import { pieceSeconds } from './reel-push';
 

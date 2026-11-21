@@ -8,7 +8,10 @@
  * (`data-film`); a full film's button opens the film and the reel holds for
  * it, on a phone too, where focus comes back to the button when the pop-up
  * closes (a preview opens the reel's theatre: org-hero-theatre.spec.ts); on a
- * phone a tap moves on, or back on the left third.
+ * phone a tap moves on, or back on the left third. With no WebGL2 the page's
+ * still pushes in on the reel's clock and holds while paused (none under
+ * reduced motion), and the peek stops the hero short of the screen so the
+ * first section shows above the fold (WP-5b, owner 2026-11-21).
  *
  * Measured on of-blood-and-bones without a DB write, through
  * `helpers/showreel.ts`: the landing's HTML is rewritten in the browser to set
@@ -29,6 +32,36 @@ import {
 } from '../helpers/showreel';
 
 test.use(SHOWREEL_LAUNCH);
+
+/** No WebGL2: the page's own copy of the film is the film. Self-contained (an init script). */
+function withoutWebGL2() {
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value(this: HTMLCanvasElement, ...args: Parameters<typeof getContext>) {
+      return args[0] === 'webgl2' ? null : getContext.apply(this, args);
+    },
+  });
+}
+
+/** No WebGL2 and Save-Data: every piece the page's own still, moving on. Self-contained. */
+function stillsWithoutWebGL2() {
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value(this: HTMLCanvasElement, ...args: Parameters<typeof getContext>) {
+      return args[0] === 'webgl2' ? null : getContext.apply(this, args);
+    },
+  });
+  Object.defineProperty(Navigator.prototype, 'connection', {
+    configurable: true,
+    get: () => ({
+      saveData: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }),
+  });
+}
 
 test.describe('the Showreel on a landing', () => {
   test('moves on by itself, holds while paused, and plays again (WCAG 2.2.2)', async ({
@@ -325,20 +358,7 @@ test.describe('the Showreel on a landing', () => {
     browser,
     baseURL,
   }) => {
-    const page = await open(browser, baseURL, {
-      init: () => {
-        const getContext = HTMLCanvasElement.prototype.getContext;
-        Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
-          configurable: true,
-          value(
-            this: HTMLCanvasElement,
-            ...args: Parameters<typeof getContext>
-          ) {
-            return args[0] === 'webgl2' ? null : getContext.apply(this, args);
-          },
-        });
-      },
-    });
+    const page = await open(browser, baseURL, { init: withoutWebGL2 });
     await page.waitForTimeout(3000);
     await expect(page.locator('.shader-hero--fullpage[data-film]')).toHaveCount(
       0
@@ -347,6 +367,85 @@ test.describe('the Showreel on a landing', () => {
     await expect(page.locator('.reel-stage__item[data-on] img')).toBeVisible();
     await page.context().close();
   });
+
+  test("with no WebGL2, the page's still pushes in over its piece on the reel's clock, and holds while paused (WP-5b)", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL, { init: stillsWithoutWebGL2 });
+    await expect(page.locator('.reel')).toHaveAttribute('data-mode', 'stills');
+    await expect(page.locator('.reel-stage[data-push]')).toHaveCount(1);
+    const img = page.locator('.reel-stage__item[data-on] img');
+    const scale = () =>
+      img.evaluate((el) => {
+        const t = getComputedStyle(el).transform;
+        return t === 'none' ? 1 : new DOMMatrixReadOnly(t).a;
+      });
+    // Drawn in about its centre as the piece plays, never past 8%.
+    await expect.poll(scale, { timeout: 6000 }).toBeGreaterThan(1.02);
+    expect(await scale()).toBeLessThanOrEqual(1.0801);
+    // Paused, the move holds where it is (WCAG 2.2.2).
+    await page.locator('.reel__ctl .reel__round').click();
+    await page.waitForTimeout(200);
+    const held = await scale();
+    await page.waitForTimeout(1200);
+    expect(await scale()).toBe(held);
+    await page.context().close();
+  });
+
+  test('with no WebGL2 and reduced motion, no still pushes in', async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL, {
+      init: withoutWebGL2,
+      context: { reducedMotion: 'reduce' },
+    });
+    await expect(page.locator('.reel-stage[data-push]')).toHaveCount(0);
+    expect(
+      await page
+        .locator('.reel-stage__item[data-on] img')
+        .evaluate((el) => getComputedStyle(el).transform)
+    ).toBe('none');
+    await page.context().close();
+  });
+
+  for (const [viewport, lift] of [
+    [{ width: 1440, height: 900 }, 150],
+    [{ width: 390, height: 844 }, 132],
+  ] as const) {
+    test(`the peek at ${viewport.width}: the hero stops the mock's ${lift} px short of the screen, at the org's density, and the first section shows above the fold (owner)`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const page = await open(browser, baseURL, { context: { viewport } });
+      await expect(page.locator('.reel')).toHaveAttribute('data-peek', '');
+      // The lift is spacing, so it follows the brand's density (OBB's 0.85: 127.5 px).
+      const density = await page
+        .locator('.reel')
+        .evaluate(
+          (reel) =>
+            Number.parseFloat(
+              getComputedStyle(reel).getPropertyValue('--brand-density-scale')
+            ) || 1
+        );
+      const short = lift * density;
+      const hero = await page.locator('.reel').boundingBox();
+      expect(
+        Math.abs(viewport.height - (hero?.height ?? 0) - short)
+      ).toBeLessThan(1);
+      // Just under the hero's foot, the page's next section, in sight.
+      const under = await page.evaluate(
+        ([x, y]) => {
+          const at = document.elementFromPoint(x, y);
+          return at ? !at.closest('.reel') : false;
+        },
+        [viewport.width / 2, viewport.height - short + 8] as const
+      );
+      expect(under).toBe(true);
+      await page.context().close();
+    });
+  }
 
   test("with WebGL2, the film is hidden in the page only while the window's canvas draws it", async ({
     browser,

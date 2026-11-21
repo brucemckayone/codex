@@ -156,8 +156,9 @@
   const PRESS_MS = 350;
   /** A pointer that moves further than this is a swipe or a scroll, never a tap. */
   const TAP_SLOP = 10;
-  /** The name window's largest size, desktop and phone (the mock's). */
-  const NAME_MAX = { desk: 228, phone: 138 };
+  /** The name window's largest size: desktop (with the peek, smaller) and
+   *  phone, the mock's 228 or 196, and 138. */
+  const NAME_MAX = { desk: 228, deskPeek: 196, phone: 138 };
   /** The Wide title's range (the mock's). */
   const WIDE_TITLE = { min: 72, max: 150 };
 
@@ -170,6 +171,14 @@
   });
 
   const layout = $derived(options['reel-layout']);
+  /**
+   * The peek (owner, 2026-11-21: on by default): the hero stops a lift short
+   * of the screen's foot (`--_lift`), so the landing's first section, its
+   * featured row, rises above the fold. Off when the org has no featured row
+   * (`resolveHero`). The stage is the hero's own box, so the film ends at the
+   * hero's foot too; the fit and the name measure again.
+   */
+  const peek = $derived(options['reel-peek'] === 'on');
   /** How the words keep their contrast over the film (owner, 2026-11-20). */
   const edge = $derived(options['reel-edge']);
   /**
@@ -468,7 +477,7 @@
   let nameFit = $state<NameLines | null>(null);
   $effect(() => {
     const el = windowEl;
-    const max = desktop.current ? NAME_MAX.desk : NAME_MAX.phone;
+    const max = desktop.current ? (peek ? NAME_MAX.deskPeek : NAME_MAX.desk) : NAME_MAX.phone;
     if (layout !== 'name' || !el) {
       nameFit = null;
       return;
@@ -841,6 +850,7 @@
   $effect(() => {
     const root = rootEl;
     void layout;
+    void peek;
     void shown;
     void edge;
     void themeState.theme;
@@ -1061,6 +1071,7 @@
   bind:this={rootEl}
   data-hero-root
   data-layout={layout}
+  data-peek={peek ? '' : undefined}
   data-edge={edge}
   data-mode={mode}
   data-paused={clock.paused ? '' : undefined}
@@ -1166,14 +1177,22 @@
     --_glass-a: 0.55;
     --_line: color-mix(in srgb, var(--_ink) 22%, transparent);
     --_progress: 0;
+    /* The peek's lift: none until `data-peek` sets it. */
+    --_lift: 0px;
 
     position: relative;
     z-index: 2;
     isolation: isolate;
-    min-height: 100svh;
+    min-height: calc(100svh - var(--_lift));
     overflow: hidden;
     color: var(--_ink);
     touch-action: pan-y;
+  }
+
+  /* The peek: the hero a lift short of the screen's foot (the mock's 150 px;
+     132 on a phone, below), so the featured row rises above the fold. */
+  .reel[data-peek] {
+    --_lift: calc(var(--space-32) + var(--space-5) + var(--space-0-5));
   }
 
   /* No colour eases on the reel's words or its links (review R1): a link's
@@ -1832,6 +1851,10 @@
   @media (--below-md) {
     .reel {
       --_gutter: var(--space-4);
+    }
+
+    .reel[data-peek] {
+      --_lift: calc(var(--space-32) + var(--space-1));
     }
 
     .reel__segs {

@@ -9,6 +9,10 @@
 import type { IntroFilm } from '@codex/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-feed';
+import {
+  PUSH_DEPTH,
+  PUSH_SECONDS,
+} from '$lib/components/ui/ShaderHero/compositor/stage';
 import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
 import {
   type HeroFacts,
@@ -121,11 +125,19 @@ function render(
     filmOpen?: boolean;
     facts?: Partial<HeroFacts>;
     logoUrl?: string;
+    peek?: 'on' | 'off';
+    push?: 'on' | 'off';
   } = {}
 ) {
   const options = resolveHero(
     'consume',
-    { comp: 'showreel', 'reel-layout': layout, 'reel-loop': over.loop ?? 'on' },
+    {
+      comp: 'showreel',
+      'reel-layout': layout,
+      'reel-loop': over.loop ?? 'on',
+      ...(over.peek ? { 'reel-peek': over.peek } : {}),
+      ...(over.push ? { 'reel-push': over.push } : {}),
+    },
     { ...FACTS, ...over.facts }
   );
   const props = $state({
@@ -993,6 +1005,50 @@ describe('Showreel stage: the films', () => {
     pauseButton()?.click();
     flushSync();
     expect(at).toBe(0);
+  });
+});
+
+describe('Showreel and the peek (owner, 2026-11-21: on by default)', () => {
+  it('stops the hero a lift short of the screen by default, so the featured row rises above the fold', () => {
+    render();
+    expect(q('.reel')?.hasAttribute('data-peek')).toBe(true);
+  });
+
+  it('fills the screen when the org has no featured row to rise', () => {
+    render('corner', { facts: { hasFeatured: false } });
+    expect(q('.reel')?.hasAttribute('data-peek')).toBe(false);
+  });
+
+  it('fills the screen when the creator turns the peek off', () => {
+    render('corner', { peek: 'off' });
+    expect(q('.reel')?.hasAttribute('data-peek')).toBe(false);
+  });
+});
+
+describe('Showreel stage: the push-in where the page draws the film (WP-5b)', () => {
+  it("pushes the still on show in by default, by the compositor's numbers, on the reel's clock", () => {
+    render();
+    const stage = q('.reel-stage');
+    expect(stage?.hasAttribute('data-push')).toBe(true);
+    expect(stage?.style.getPropertyValue('--_push-depth')).toBe(
+      String(PUSH_DEPTH)
+    );
+    // A push takes one piece: the reel's progress through it, as it is.
+    expect(Number(stage?.style.getPropertyValue('--_push-rate'))).toBe(
+      PIECE_MS / 1000 / PUSH_SECONDS
+    );
+    expect(Number(stage?.style.getPropertyValue('--_push-rate'))).toBe(1);
+  });
+
+  it('pushes no still in with the reel held still (reduced motion)', () => {
+    media.reduced = true;
+    render();
+    expect(q('.reel-stage')?.hasAttribute('data-push')).toBe(false);
+  });
+
+  it('pushes no still in when the creator turns the push-in off', () => {
+    render('corner', { push: 'off' });
+    expect(q('.reel-stage')?.hasAttribute('data-push')).toBe(false);
   });
 });
 

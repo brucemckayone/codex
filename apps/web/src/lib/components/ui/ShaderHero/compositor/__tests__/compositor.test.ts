@@ -41,9 +41,8 @@ import { duotoneStops } from '../duotone';
 import type { LayerEffect } from '../effects/effect';
 import { FRAMES, LAYERS, MEDIA } from '../effects/registry';
 import { governFlash } from '../flash';
-import { pushZoom } from '../media-pass';
 import { BARE_STACK, type StackConfig } from '../stack-config';
-import { stageBoxFrom } from '../stage';
+import { pushZoom, stageBoxFrom } from '../stage';
 
 interface Handle {
   kind: string;
