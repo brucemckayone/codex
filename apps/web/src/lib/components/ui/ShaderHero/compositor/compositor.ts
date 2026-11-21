@@ -26,6 +26,12 @@
  * image, uploaded once per new frame, `requestVideoFrameCallback` where the
  * browser has it), `setStage` (the film's frame, `stage.ts`), `setNameMask`
  * (the org's name, for the name frames).
+ *
+ * WP-5b's two hooks (Codex-1yd58.6), kept to their own files: the frame rule
+ * (`portrait.ts`: a portrait piece on a desktop is placed, not cropped) picks
+ * the film frame, and the passes over the piece's own picture
+ * (`media-pass.ts`: the stills' push-in, the surface over the footage) draw
+ * into a target the film frame samples in place of the raw media.
  */
 import { bindOutput, setOutputTarget } from '../output-target';
 import {
@@ -43,8 +49,13 @@ import {
   type FBO,
   VERTEX_SHADER,
 } from '../webgl-utils';
+import { duotoneStops } from './duotone';
 import type { Effect } from './effects/effect';
-import { PASSTHROUGH_FRAME } from './effects/ids';
+import {
+  FILM_PORTRAIT_FRAME,
+  type FilmFrameId,
+  PASSTHROUGH_FRAME,
+} from './effects/ids';
 import { assembleEffect, FRAMES } from './effects/registry';
 import {
   isSampler,
@@ -53,7 +64,9 @@ import {
   type UniformValues,
 } from './effects/uniforms';
 import { effectTime } from './flash';
+import { createMediaRunner, planMedia, treatedSize } from './media-pass';
 import { type PlanContext, planStack, type StackPlan } from './plan';
+import { placedFrame } from './portrait';
 import type { StackConfig } from './stack-config';
 import {
   BAND_CODE,
@@ -231,27 +244,48 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
 
   let media: MediaSlot | null = null;
   let mediaTex: WebGLTexture | null = null;
+  /** The targets the passes over the media draw into (WP-5b). */
+  const mediaRunner = createMediaRunner();
+  /** The look and piece a target could not be made for: not tried again
+   *  until either changes, so a driver out of memory is not asked each
+   *  frame (review L7). */
+  let treatRefused: { look: FilmLook | null; el: StageMedia } | null = null;
   let stage: StageBox | null = null;
   let look: FilmLook | null = null;
   /** The last stack given the look's film frame, kept so the plan's cache
    *  (by identity) holds while neither changes. */
   let framedFor: {
     from: StackConfig;
-    look: FilmLook;
+    frame: FilmFrameId;
     stack: StackConfig;
   } | null = null;
 
   let plan: StackPlan | null = null;
   let planFor: (PlanContext & { stack: StackConfig }) | null = null;
 
-  /** The stack this frame draws: with a film attached and a look, its frame
-   *  is the Showreel's film frame; otherwise the brand's own. */
-  function framed(from: StackConfig): StackConfig {
-    if (!media || !look) return from;
-    if (framedFor?.from !== from || framedFor.look !== look) {
-      framedFor = { from, look, stack: { ...from, frame: look.frame } };
+  /** The stack this frame draws: with a film frame (a film attached and a
+   *  look), that frame; otherwise the brand's own. */
+  function framed(from: StackConfig, frame: FilmFrameId | null): StackConfig {
+    if (!frame) return from;
+    if (framedFor?.from !== from || framedFor.frame !== frame) {
+      framedFor = { from, frame, stack: { ...from, frame } };
     }
     return framedFor.stack;
+  }
+
+  /** The stage in output pixels, origin bottom left; 0x0 with none. */
+  function stagePx(f: CompositeFrame): RectPx {
+    return stage
+      ? stageRect(stage, f.canvasBox, f.output[0], f.output[1])
+      : [0, 0, 0, 0];
+  }
+
+  /** The look's film frame as placed for this media in this stage
+   *  (`portrait.ts`), or null with no film or no look. */
+  function filmFrame(f: CompositeFrame): FilmFrameId | null {
+    if (!media || !look) return null;
+    const [, , w, h] = stagePx(f);
+    return placedFrame(look.frame, [w, h], mediaSize());
   }
 
   function passFor(effect: Effect): Pass | null {
@@ -453,6 +487,9 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       if (maskTex) gl.deleteTexture(maskTex);
       if (mediaTex) gl.deleteTexture(mediaTex);
     }
+    mediaRunner.drop(deleteThem ? (target) => destroyFBO(gl, target) : null);
+    // a restored context may well have the memory a lost one had not
+    treatRefused = null;
     passes.clear();
     quad = null;
     a = b = ping = pong = null;
@@ -567,15 +604,14 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
    */
   function frameInputs(f: CompositeFrame, current: StackPlan): SharedValues {
     const [ow, oh] = f.output;
-    const rect: RectPx = stage
-      ? stageRect(stage, f.canvasBox, ow, oh)
-      : [0, 0, 0, 0];
+    const rect = stagePx(f);
     const fade = stage ? stageFade(f.scrollY, stage.fadeDistance) : 0;
     const hasMedia =
       current.frame.uniforms.includes('u_media') &&
       stageVisible(rect, ow, oh, fade) &&
       uploadMedia();
-    const { colors } = f.baseConfig;
+    const { colors, brand } = f.baseConfig;
+    const [toneDeep, toneMid, tonePale] = duotoneStops(brand.primary, brand.bg);
     const values: SharedValues = {
       u_pointer: [f.mouse.x, f.mouse.y],
       u_brandPrimary: colors.primary,
@@ -588,10 +624,74 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       u_hasMedia: hasMedia ? 1 : 0,
       u_band: look ? BAND_CODE[look.band] : 0,
       u_ramp: bandRamp(look?.band ?? 'none', f.phone),
+      u_zoom: 1,
+      // the surfaces tint from the brand's own tokens (review L6)
+      u_tint: brand.primary,
+      u_toneDeep: toneDeep,
+      u_toneMid: toneMid,
+      u_tonePale: tonePale,
     };
+    // Drawn before u_media is bound, so no unit holds a target it draws into.
+    const placed = current.frame.id === FILM_PORTRAIT_FRAME;
+    const treated = hasMedia ? treatMedia(f, rect, placed, values) : null;
     bindUnit(SAMPLER_UNITS.u_mask, maskTex);
-    bindUnit(SAMPLER_UNITS.u_media, hasMedia ? mediaTex : null);
+    bindUnit(SAMPLER_UNITS.u_media, hasMedia ? (treated ?? mediaTex) : null);
     return values;
+  }
+
+  /**
+   * The piece's picture with the look's push-in and surface drawn on it
+   * (`media-pass.ts`), or null to show it as it is: no look asks for either
+   * (its targets freed), or a target could not be made (logged once, the
+   * film still shows, and not tried again for this look and piece).
+   */
+  function treatMedia(
+    f: CompositeFrame,
+    rect: RectPx,
+    placed: boolean,
+    values: SharedValues
+  ): WebGLTexture | null {
+    if (!media || !mediaTex) return null;
+    if (treatRefused?.look === look && treatRefused.el === media.el) {
+      return null;
+    }
+    const steps = planMedia(look, {
+      phone: f.phone,
+      reducedMotion: f.reducedMotion,
+      still: !isVideo(media.el),
+    });
+    if (steps.length === 0) {
+      freeTreated();
+      return null;
+    }
+    const size = treatedSize(mediaSize(), [rect[2], rect[3]], f.output, placed);
+    try {
+      return mediaRunner.run(steps, mediaTex, size, {
+        target: (old, at) => sized(gl, old, at),
+        draw: (step, from, into, at) =>
+          draw(
+            step.effect,
+            from,
+            into,
+            at,
+            { ...values, u_zoom: step.zoom },
+            step.amount,
+            f.time
+          ),
+      });
+    } catch (thrown) {
+      failed('targets', thrown);
+      treatRefused = { look, el: media.el };
+      freeTreated();
+      return null;
+    }
+  }
+
+  /** Delete the treated picture's targets (only forget them when lost). */
+  function freeTreated() {
+    mediaRunner.drop(
+      gl.isContextLost() ? null : (target) => destroyFBO(gl, target)
+    );
   }
 
   /** A blended with B into ping. The picture so far: ping, or A unblended. */
@@ -633,9 +733,9 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
 
   /** The frame, onto the canvas. One that will not compile falls back to
    *  the picture as it is. False: nothing reached the canvas. The layers
-   *  above treat the shader alone; a treatment OVER the film (the post-frame
-   *  surface slot, 5b) goes after this pass, which then draws into a target
-   *  rather than the canvas. */
+   *  above treat the shader alone; the look's surface treats the film alone,
+   *  drawn on the piece's picture before this pass samples it
+   *  (`treatMedia`, 5b). */
   function framePass(
     f: CompositeFrame,
     current: StackPlan,
@@ -674,7 +774,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       const sceneB = presetPasses(f, sceneA, offered);
 
       const current = stackPlan({
-        stack: framed(f.stack),
+        stack: framed(f.stack, filmFrame(f)),
         phone: f.phone,
         reducedMotion: f.reducedMotion,
         hasSecond: sceneB !== null,
@@ -696,7 +796,11 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       media = null;
       if (mediaTex && !gl.isContextLost()) gl.deleteTexture(mediaTex);
       mediaTex = null;
-      if (!next) return;
+      if (!next) {
+        // the film detached: its treated picture goes with it (review L7)
+        freeTreated();
+        return;
+      }
       media = {
         el: next,
         fresh: true,

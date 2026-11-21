@@ -458,10 +458,10 @@ const REGISTRY = path.resolve(
   '../src/lib/components/ui/ShaderHero/compositor/effects/registry.ts'
 );
 /**
- * 5 blends, 15 layers (WP-8) and 3 frames; fewer means the registry moved or
- * emptied.
+ * 5 blends, 15 layers (WP-8), 4 frames and 4 passes over the media (WP-5b);
+ * fewer means the registry moved or emptied.
  */
-const MIN_EFFECTS = 23;
+const MIN_EFFECTS = 28;
 
 /**
  * Every uniform a GLSL source declares, as `[name, type]` (comments stripped
@@ -491,6 +491,12 @@ const IDENTITY_SIZES = [
 ];
 /** Sixteen beats (glitch draws only on some), for a layer that reads the clock. */
 const IDENTITY_TIMES = Array.from({ length: 16 }, (_, k) => 0.25 + k * 0.5);
+/**
+ * The push-in's `u_zoom` at amount 1 (its depth, `media-pass.ts`
+ * PUSH_DEPTH); at amount 0 it is 1, so the push-in is judged as a layer is:
+ * unchanged at 0, changed at 1.
+ */
+const PUSH_AT_ONE = 0.08;
 /** Off-centre, and brand colours unlike each other and the picture. */
 const IDENTITY_VALUES = {
   u_pointer: [0.37, 0.61],
@@ -501,13 +507,26 @@ const IDENTITY_VALUES = {
   u_rect: [0, 0, 1, 1],
   u_fade: 1,
   u_hasMedia: 0,
+  // the surfaces' brand tint and duotone stops (WP-5b), unlike the picture
+  u_tint: [0.78, 0.12, 0.16],
+  u_toneDeep: [0.1, 0.05, 0.06],
+  u_toneMid: [0.78, 0.12, 0.16],
+  u_tonePale: [0.95, 0.81, 0.82],
 };
 
 /**
  * Runs in the page: draws each layer over a fixed noise picture at amount 0
  * and at 1, and reports the largest channel change (0-255) from its input.
  */
-function renderLayers({ vs, layers, sizes, times, values, units }) {
+function renderLayers({
+  vs,
+  layers,
+  sizes,
+  times,
+  values,
+  units,
+  PUSH_AT_ONE,
+}) {
   const gl = document.createElement('canvas').getContext('webgl2');
   if (!gl) return { noWebgl2: true };
   const shader = (type, src) => {
@@ -606,7 +625,13 @@ function renderLayers({ vs, layers, sizes, times, values, units }) {
     gl.bindBuffer(gl.ARRAY_BUFFER, quad);
     gl.enableVertexAttribArray(pos);
     gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
-    const result = { id: layer.id, atZero: 0, zeroAt: null, atOne: 0 };
+    const result = {
+      id: layer.id,
+      axis: layer.axis,
+      atZero: 0,
+      zeroAt: null,
+      atOne: 0,
+    };
     for (const t of targets) {
       const bind = (unit, tex) => {
         gl.activeTexture(gl.TEXTURE0 + unit);
@@ -630,7 +655,9 @@ function renderLayers({ vs, layers, sizes, times, values, units }) {
                     ? time
                     : name === 'u_amount'
                       ? amount
-                      : values[name];
+                      : name === 'u_zoom'
+                        ? 1 + amount * PUSH_AT_ONE
+                        : values[name];
             if (v === undefined) throw new Error(`no test value for ${name}`);
             if (type === 'sampler2D') gl.uniform1i(loc, v);
             else if (type === 'float') gl.uniform1f(loc, v);
@@ -684,7 +711,9 @@ function unavailable(why) {
 /**
  * Every LAYER at amount 0 must draw its input unchanged (WP-8 review L1): a
  * brand's `glow:0` is a saved, valid stack, and `glitch:0` once still tore
- * bands. glslang compiles a pass but runs nothing, so each layer is RUN here:
+ * bands. So must every pass over the media (WP-5b): a surface at 0, and the
+ * push-in at `u_zoom` 1, its first frame. glslang compiles a pass but runs
+ * nothing, so each layer is RUN here:
  * WebGL2 in headless Chromium on SwiftShader (no GPU, the same answer on any
  * machine), over a noise picture, at a short size and one past 900 px tall
  * (where a layer scaled with the canvas, as mosaic was, still pixelated at
@@ -735,6 +764,7 @@ async function checkLayerIdentity(layers, assembleEffect) {
       const fs = assembleEffect(effect);
       return {
         id: effect.id,
+        axis: effect.axis,
         fs,
         readsTime: effect.uniforms.includes('u_time'),
         uniforms: uniformDeclarations(fs),
@@ -748,6 +778,7 @@ async function checkLayerIdentity(layers, assembleEffect) {
         sizes: IDENTITY_SIZES,
         times: IDENTITY_TIMES,
         values: IDENTITY_VALUES,
+        PUSH_AT_ONE,
         // the harness's own units: it binds and sets each sampler itself
         units: { u_scene: 0, u_second: 1, u_mask: 2, u_media: 3 },
       });
@@ -765,7 +796,7 @@ async function checkLayerIdentity(layers, assembleEffect) {
     }
     let bad = 0;
     for (const r of results) {
-      const name = `compositor:layer:${r.id}`;
+      const name = `compositor:${r.axis}:${r.id}`;
       if (r.error) {
         bad++;
         fail(`\n✖ ${name}: did not build in WebGL2: ${r.error}`);
@@ -773,7 +804,7 @@ async function checkLayerIdentity(layers, assembleEffect) {
         bad++;
         fail(
           `\n✖ ${name}: at amount 0 it changes its input by ${r.atZero}/255 (${r.zeroAt})` +
-            '\n  Scale every change by u_amount, so 0 draws the input unchanged.'
+            '\n  Scale every change by u_amount (u_zoom for the push-in), so 0 draws the input unchanged.'
         );
       } else if (r.atOne < 8) {
         bad++;
@@ -784,7 +815,7 @@ async function checkLayerIdentity(layers, assembleEffect) {
     }
     if (bad === 0) {
       console.log(
-        `✓ ${results.length} layers draw their input unchanged at amount 0 (run in WebGL2, SwiftShader)`
+        `✓ ${results.length} layers and media passes draw their input unchanged at amount 0 (run in WebGL2, SwiftShader)`
       );
     }
   } finally {
@@ -895,7 +926,9 @@ async function checkCompositor(esbuild) {
         `✓ ${EFFECTS.length} compositor passes compiled, every uniform set`
       );
       await checkLayerIdentity(
-        EFFECTS.filter((effect) => effect.axis === 'layer'),
+        EFFECTS.filter(
+          (effect) => effect.axis === 'layer' || effect.axis === 'media'
+        ),
         assembleEffect
       );
     }

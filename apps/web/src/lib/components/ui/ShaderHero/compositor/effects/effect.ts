@@ -6,7 +6,7 @@
  * `fragColor`. A blend also reads `u_second`; a frame is the last pass and
  * draws to the canvas at the output size.
  */
-import type { BlendId, FrameId, LayerId } from './ids';
+import type { BlendId, FrameId, LayerId, MediaPassId } from './ids';
 import type { UniformName } from './uniforms';
 
 interface EffectBase<Axis extends string, Id extends string> {
@@ -49,4 +49,12 @@ export interface FrameEffect extends EffectBase<'frame', FrameId> {
   reducedMotionFallback: FrameId;
 }
 
-export type Effect = BlendEffect | LayerEffect | FrameEffect;
+/**
+ * A pass over the piece's own picture, before its film frame (WP-5b,
+ * `../media-pass.ts`): `u_scene` is the film or still, and it draws into a
+ * target the frame then samples as `u_media`. Like a layer it may be dropped
+ * (null): the push-in, under reduced motion.
+ */
+export type MediaEffect = EffectBase<'media', MediaPassId>;
+
+export type Effect = BlendEffect | LayerEffect | FrameEffect | MediaEffect;

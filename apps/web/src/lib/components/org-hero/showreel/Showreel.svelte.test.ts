@@ -234,6 +234,7 @@ beforeEach(() => {
 afterEach(() => {
   if (app) unmount(app);
   app = null;
+  Reflect.deleteProperty(Element.prototype, 'getAnimations');
   document.body.innerHTML = '';
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -524,8 +525,13 @@ describe('Showreel paths', () => {
 describe('Showreel and the window’s shader', () => {
   it("tells it the layout's film frame, the stage, and the still once it loads", () => {
     render('corner');
-    // The band at its default: the film gives way at its foot (owner, V1).
-    expect(showreelFeed.look).toEqual({ frame: 'film-fill', band: 'fade' });
+    // The band at its default: the film gives way at its foot (owner, V1),
+    // and no surface over it (owner, 2026-11-21, 5b).
+    expect(showreelFeed.look).toMatchObject({
+      frame: 'film-fill',
+      band: 'fade',
+      surface: 'none',
+    });
     expect(showreelFeed.stage).not.toBeNull();
     const still = q<HTMLImageElement>('.reel-stage__item[data-on] img');
     still?.dispatchEvent(new Event('load'));
@@ -535,7 +541,10 @@ describe('Showreel and the window’s shader', () => {
 
   it('asks for the film through the name in the Name window', () => {
     render('name');
-    expect(showreelFeed.look).toEqual({ frame: 'film-name', band: 'fade' });
+    expect(showreelFeed.look).toMatchObject({
+      frame: 'film-name',
+      band: 'fade',
+    });
   });
 
   it('hands it the video once it has a frame, and lets go of everything on unmount', async () => {
@@ -1050,17 +1059,28 @@ describe('Showreel and a film playing over it', () => {
  * and `#hex` as a canvas does (the fit's colour probe), and each element's
  * computed colour as a browser cascades it here: its own inline colour first
  * (a lift's `!important`), then a brand colour by selector, then the reel's
- * ink; the root's `--color-background` is the brand's ground.
+ * ink; the root's `--color-background` is the brand's ground, and its `--_gy`
+ * the ground's luminance when given (unset, it reads dark, as CSS's
+ * `var(--_gy, 0)` does).
+ *
+ * `easeFrom(nodes)` starts each node's colour easing back from what it wears
+ * now, as a link's `--transition-colors` would once its lift comes off: it
+ * reads as that start value until it lands, as Chrome does (calibrated
+ * 2026-11-21), listed meanwhile by `getAnimations({ subtree })` as a colour
+ * transition, which `finish()` lands. `eases()` counts the eases still running.
  */
 function paintable({
   ground,
   ink,
   brand = {},
+  groundY = '',
 }: {
   ground: string;
   ink: string;
   brand?: Record<string, string>;
+  groundY?: string;
 }) {
+  const easing = new Map<Element, string>();
   const parse = (css: string): [number, number, number, number] | null => {
     const hex = /^#([0-9a-f]{6})$/i.exec(css.trim());
     if (hex?.[1]) {
@@ -1102,6 +1122,8 @@ function paintable({
     const colour = () => {
       const inline = (el as HTMLElement).style?.getPropertyValue('color');
       if (inline) return inline;
+      const from = easing.get(el);
+      if (from) return from;
       for (const [selector, value] of Object.entries(brand)) {
         if (el.matches(selector)) return value;
       }
@@ -1111,16 +1133,42 @@ function paintable({
       get(target, prop) {
         if (prop === 'color') return colour();
         if (prop === 'getPropertyValue') {
-          return (name: string) =>
-            name === '--color-background' && el.matches('.reel')
-              ? ground
-              : target.getPropertyValue(name);
+          return (name: string) => {
+            if (el.matches('.reel')) {
+              if (name === '--color-background') return ground;
+              if (name === '--_gy' && groundY) return groundY;
+            }
+            return target.getPropertyValue(name);
+          };
         }
         const value = Reflect.get(target, prop, target);
         return typeof value === 'function' ? value.bind(target) : value;
       },
     });
   });
+  // jsdom has no Web Animations: the colour eases alone, as CSSTransitions.
+  Object.defineProperty(Element.prototype, 'getAnimations', {
+    configurable: true,
+    value(this: Element, options?: GetAnimationsOptions) {
+      return [...easing.keys()]
+        .filter(
+          (node) => node === this || (options?.subtree && this.contains(node))
+        )
+        .map((node) => ({
+          transitionProperty: 'color',
+          finish: () => easing.delete(node),
+        }));
+    },
+  });
+  return {
+    easeFrom(nodes: Iterable<Element>) {
+      for (const node of nodes) {
+        const now = (node as HTMLElement).style.getPropertyValue('color');
+        if (now) easing.set(node, now);
+      }
+    },
+    eases: () => easing.size,
+  };
 }
 
 /** One more fit, as a colour landing asks for one. */
@@ -1174,7 +1222,7 @@ describe("Showreel's fit over the film", () => {
   it("rescues a brand colour that IS the reel's ink: lifted toward the pole, never toward itself", async () => {
     // The creator set the player's text to the brand's red: the reel's own
     // ink is the red, so a lift toward the ink would go nowhere. Its soft
-    // ink stays the player's white at 80%, so the veil stays the brand's dark.
+    // ink stays the player's white at 80% (the next test drops even that).
     paintable({
       ground: '#0F0000',
       ink: RED,
@@ -1200,8 +1248,146 @@ describe("Showreel's fit over the film", () => {
     expect(follow?.style.getPropertyValue('color')).not.toBe(RED);
     expect(pause?.hasAttribute('data-lifted')).toBe(false);
     expect(pause?.style.getPropertyValue('--_halo')).not.toBe('');
-    expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+    // Whether the shades then carry each word is the probes' (review R4): this
+    // DOM lays every word over the whole box, where no corner reaches, and the
+    // once-a-page-load report for this ground may already have gone.
     expect(solved().pool).not.toBe('1');
+  });
+
+  /** An element's colour as the fit wrote it inline: its channels. */
+  const channels = (el: Element) =>
+    ((el as HTMLElement).style.getPropertyValue('color').match(/[\d.]+/g) ?? [])
+      .slice(0, 3)
+      .map(Number);
+  const scrimChannels = () =>
+    (solved().scrim.match(/[\d.]+/g) ?? []).map(Number);
+
+  it('keeps a dark veil when EVERY ink is the red (#CB213C on #0F0000), and lifts every word that fails toward white (owner, 2026-11-21)', async () => {
+    // The player text is the red, and nothing gives any word another colour:
+    // every word, control and soft ink is the red. Read from the inks, the
+    // veil paled toward white for it; read from the ground, it stays dark.
+    paintable({ ground: '#0F0000', ink: RED });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const [sr = 255, sg = 255, sb = 255] = scrimChannels();
+    expect(sr).toBeLessThanOrEqual(15);
+    expect(sg).toBe(0);
+    expect(sb).toBe(0);
+    // Every body word fails as the red (3.82:1 even on black): each one is
+    // lifted, and toward white, every channel at least the red's.
+    const words = [...document.querySelectorAll('.reel [data-ink="body"]')];
+    expect(words.length).toBeGreaterThan(0);
+    for (const word of words) {
+      expect(word.hasAttribute('data-lifted'), word.className).toBe(true);
+      const [r = 0, g = 0, b = 0] = channels(word);
+      expect(r).toBeGreaterThanOrEqual(203);
+      expect(g).toBeGreaterThan(33);
+      expect(b).toBeGreaterThan(60);
+    }
+    // Nothing anywhere is lifted toward anything but white.
+    for (const lifted of document.querySelectorAll('[data-lifted]')) {
+      const [r = 0, g = 0, b = 0] = channels(lifted);
+      expect(r).toBeGreaterThanOrEqual(203);
+      expect(g).toBeGreaterThanOrEqual(33);
+      expect(b).toBeGreaterThanOrEqual(60);
+    }
+    // Whether the shades then carry each word is the probes' (review R4), as
+    // in the rescue above.
+    expect(solved().pool).not.toBe('1');
+  });
+
+  it('keeps a pale veil when every ink is white on a light brand, and lifts every word toward black: the mirror', async () => {
+    paintable({ ground: '#F5F0E6', ink: WHITE, groundY: '0.87' });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    // The brand's own pale ground, or paler: never deepened for the white.
+    const [sr = 0, sg = 0, sb = 0] = scrimChannels();
+    expect(sr).toBeGreaterThanOrEqual(245);
+    expect(sg).toBeGreaterThanOrEqual(240);
+    expect(sb).toBeGreaterThanOrEqual(230);
+    const words = [...document.querySelectorAll('.reel [data-ink="body"]')];
+    expect(words.length).toBeGreaterThan(0);
+    for (const word of words) {
+      expect(word.hasAttribute('data-lifted'), word.className).toBe(true);
+      const [r = 255, g = 255, b = 255] = channels(word);
+      // Toward black: one grey, darker than the white it was.
+      expect(r).toBeLessThan(255);
+      expect(g).toBe(r);
+      expect(b).toBe(r);
+    }
+    // Whether the shades then carry each word is the probes' (Tide, grey):
+    // this DOM lays every word over the whole box, where no corner reaches.
+    expect(solved().pool).not.toBe('1');
+  });
+
+  it('never takes a link still easing back from its lift for the brand colour: it lands the ease, keeps the lift, and the fit holds (review R1)', async () => {
+    const paint = paintable({
+      ground: '#0F0000',
+      ink: WHITE,
+      brand: { a: RED },
+    });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const first = solved();
+    const links = [...document.querySelectorAll('.reel a[data-lifted]')];
+    expect(links.length).toBeGreaterThan(0);
+    const lifts = links.map((a) =>
+      (a as HTMLElement).style.getPropertyValue('color')
+    );
+    for (let n = 0; n < 3; n++) {
+      // The lift comes off, and the link reads as it still: its ease's start.
+      paint.easeFrom(links);
+      refit();
+      // Landed at once, so the fit read the brand's red, and lifted it again.
+      expect(paint.eases()).toBe(0);
+      expect(solved()).toEqual(first);
+      expect(links.every((a) => a.hasAttribute('data-lifted'))).toBe(true);
+      expect(
+        links.map((a) => (a as HTMLElement).style.getPropertyValue('color'))
+      ).toEqual(lifts);
+    }
+  });
+
+  it("fits again when a colour lands, never when a lift's own does: no fit asks for the next (review R1)", async () => {
+    paintable({ ground: '#0F0000', ink: WHITE, brand: { a: RED } });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const link = q('.reel a[data-lifted]');
+    expect(link).not.toBeNull();
+    const fits = vi.spyOn(window, 'requestAnimationFrame');
+    const lands = (target: Element | null) => {
+      const landed = new Event('transitionend', { bubbles: true });
+      Object.defineProperty(landed, 'propertyName', { value: 'color' });
+      target?.dispatchEvent(landed);
+    };
+    const before = fits.mock.calls.length;
+    lands(link);
+    expect(fits.mock.calls.length).toBe(before);
+    lands(q('.reel'));
+    expect(fits.mock.calls.length).toBe(before + 1);
+  });
+
+  it('counts a shade that falls short as no solve: the word wears the pole, and the report comes once a page load (review R4, R6)', async () => {
+    // Every word white on a light brand: lifted toward black. This DOM lays
+    // each word over the whole box, out of every corner shade's reach, so
+    // none is carried by its shades: each wears the pole outright.
+    paintable({ ground: '#F2EDE4', ink: WHITE, groundY: '0.85' });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const words = [...document.querySelectorAll('.reel [data-ink="body"]')];
+    expect(words.length).toBeGreaterThan(0);
+    for (const word of words) {
+      expect(channels(word), word.className).toEqual([0, 0, 0]);
+    }
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledTimes(1);
+    // Every fit of the same brand finds the same: it says so once.
+    for (let n = 0; n < 3; n++) refit();
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledTimes(1);
   });
 
   it('marks data-fit only when the fit has run: never on a page it could not read', async () => {

@@ -37,9 +37,11 @@ import { bindOutput } from '../../output-target';
 import type { ShaderRenderer } from '../../renderer-types';
 import type { ShaderConfig } from '../../shader-config';
 import { type CompositeFrame, createCompositor } from '../compositor';
+import { duotoneStops } from '../duotone';
 import type { LayerEffect } from '../effects/effect';
-import { FRAMES, LAYERS } from '../effects/registry';
+import { FRAMES, LAYERS, MEDIA } from '../effects/registry';
 import { governFlash } from '../flash';
+import { pushZoom } from '../media-pass';
 import { BARE_STACK, type StackConfig } from '../stack-config';
 import { stageBoxFrom } from '../stage';
 
@@ -95,8 +97,9 @@ function fakeGl({
 }: {
   failCompile?: (source: string) => boolean;
   /** Every framebuffer reports incomplete, as one whose storage the driver
-   *  could not give (out of memory) does. */
-  incomplete?: boolean;
+   *  could not give (out of memory) does; a function: those made while it
+   *  says so. */
+  incomplete?: boolean | (() => boolean);
   /** A source whose upload throws, as a cross-origin one without CORS does. */
   tainted?: unknown;
   /** The context is lost at this call (mid-frame, after the top check). */
@@ -128,7 +131,9 @@ function fakeGl({
     },
     createFramebuffer: () => (lost ? null : make('framebuffer')),
     checkFramebufferStatus: () =>
-      incomplete ? 'FRAMEBUFFER_INCOMPLETE_ATTACHMENT' : 'FRAMEBUFFER_COMPLETE',
+      (typeof incomplete === 'function' ? incomplete() : incomplete)
+        ? 'FRAMEBUFFER_INCOMPLETE_ATTACHMENT'
+        : 'FRAMEBUFFER_COMPLETE',
     texImage2D: (...args: unknown[]) => {
       if (tainted !== null && args.at(-1) === tainted) {
         throw new DOMException('The image is tainted', 'SecurityError');
@@ -254,6 +259,9 @@ const config = {
     accent: [0.7, 0.8, 0.9],
     bg: [0.05, 0.05, 0.05],
   },
+  // The org's own tokens, unlike the palette above (as a brand with its own
+  // shader colours on): the surfaces over the footage tint from these (5b).
+  brand: { primary: [0.8, 0.1, 0.2], bg: [0.96, 0.94, 0.9] },
 } as unknown as ShaderConfig;
 
 function frame(over: Partial<CompositeFrame> = {}): CompositeFrame {
@@ -953,5 +961,336 @@ describe('the Showreel look (WP-5, Codex-1yd58.6)', () => {
     expect(compositor.mediaReady()).toBe(false);
     compositor.setMedia(null);
     expect(compositor.mediaReady()).toBe(false);
+  });
+});
+
+describe('the Showreel look over the piece (WP-5b, Codex-1yd58.6)', () => {
+  const visible = stageBoxFrom(
+    { left: 20, top: 100, width: 350, height: 600 },
+    0,
+    600
+  );
+  const stack = { ...BARE_STACK, frame: 'shader-only' as const, layers: [] };
+  /** A 1440x900 desktop window at 2x, the stage filling it. */
+  const desktop = (over: Partial<CompositeFrame> = {}) =>
+    frame({
+      stack,
+      phone: false,
+      scene: [1440, 900],
+      secondSize: [720, 450],
+      output: [2880, 1800],
+      canvasBox: { left: 0, bottom: 900, width: 1440, height: 900 },
+      ...over,
+    });
+  const wide = stageBoxFrom(
+    { left: 0, top: 0, width: 1440, height: 900 },
+    0,
+    600
+  );
+  const still = (naturalWidth: number, naturalHeight: number) =>
+    ({
+      complete: true,
+      naturalWidth,
+      naturalHeight,
+    }) as unknown as HTMLImageElement;
+  /** The value last set for `name`, by any pass. */
+  const last = (fake: ReturnType<typeof fakeGl>, name: string) =>
+    fake.calls
+      .filter(
+        ([k, a]) =>
+          k.startsWith('uniform') &&
+          (a[0] as { uniform: string })?.uniform === name
+      )
+      .at(-1)?.[1]
+      .slice(1);
+  /** A piece clock the test moves by hand: the reel's seconds into it. */
+  const pieceClock = (start = 0) => {
+    const clock = { seconds: start };
+    return { clock, seconds: () => clock.seconds };
+  };
+  const pushes = (fake: ReturnType<typeof fakeGl>) =>
+    fake.draws.some((d) => drewWith(d, MEDIA['media-push']));
+
+  it('places a portrait film flush right on a landscape stage, and fills a portrait phone’s stage with it', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    // 720x1280 in a 1440x900 stage: filling would crop 65% of it.
+    compositor.setMedia(fakeVideo().el);
+    compositor.setStage(wide);
+    compositor.render(desktop());
+    const out = fake.draws.at(-1) as Draw;
+    expect(out.framebuffer).toBeNull();
+    expect(drewWith(out, FRAMES['film-portrait'])).toBe(true);
+
+    // The same film on a phone held upright: its stage is portrait, so the
+    // film fills it.
+    compositor.setStage(visible);
+    compositor.render(frame({ stack }));
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['film-fill'])).toBe(true);
+
+    // A still too (1200x1500, 4:5), on the desktop.
+    compositor.setMedia(still(1200, 1500));
+    compositor.setStage(wide);
+    compositor.render(desktop());
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['film-portrait'])).toBe(
+      true
+    );
+  });
+
+  it('places it on a phone held sideways too: the rule is the stage’s shape, not the device (L4)', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    compositor.setMedia(fakeVideo().el);
+    // a 667x375 phone on its side, at 3x: under 768 wide, so a phone
+    compositor.setStage(
+      stageBoxFrom({ left: 0, top: 0, width: 667, height: 375 }, 0, 600)
+    );
+    compositor.render(
+      frame({
+        stack,
+        phone: true,
+        scene: [667, 375],
+        secondSize: [334, 188],
+        output: [2001, 1125],
+        canvasBox: { left: 0, bottom: 375, width: 667, height: 375 },
+      })
+    );
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['film-portrait'])).toBe(
+      true
+    );
+  });
+
+  it('fills with a square or a landscape piece, however much it crops (M3)', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    // an ultrawide window, 2560x950, the stage filling it
+    compositor.setStage(
+      stageBoxFrom({ left: 0, top: 0, width: 2560, height: 950 }, 0, 600)
+    );
+    const ultrawide = desktop({
+      scene: [2560, 950],
+      secondSize: [1280, 475],
+      output: [2560, 950],
+      canvasBox: { left: 0, bottom: 950, width: 2560, height: 950 },
+    });
+    // 1:1 crops 63% of itself there, 4:3 50%, 3:2 44%
+    for (const [w, h] of [
+      [1000, 1000],
+      [1600, 1200],
+      [1500, 1000],
+    ]) {
+      compositor.setMedia(still(w, h));
+      compositor.render(ultrawide);
+      expect(
+        drewWith(fake.draws.at(-1) as Draw, FRAMES['film-fill']),
+        `${w}x${h}`
+      ).toBe(true);
+    }
+  });
+
+  it('draws the surface on the film before its frame, which samples that in its place', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setMedia(fakeVideo().el);
+    compositor.setStage(visible);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    compositor.render(frame({ stack }));
+    // No surface: the base, then the frame reading the film as it is.
+    expect(fake.draws).toHaveLength(2);
+    const film = (fake.draws.at(-1) as Draw).units[3];
+    expect(film?.kind).toBe('texture');
+
+    fake.reset();
+    compositor.setLook({
+      frame: 'film-fill',
+      band: 'none',
+      surface: 'duotone',
+    });
+    compositor.render(frame({ stack }));
+    expect(fake.draws).toHaveLength(3);
+    const [, surface, out] = fake.draws;
+    expect(drewWith(surface, MEDIA['surface-duotone'])).toBe(true);
+    // From the film, into a target the size the stage shows it at: the
+    // 720x1280 film covering the 700x1200 stage.
+    expect(surface.units[0]).toBe(film);
+    expect(surface.framebuffer?.kind).toBe('framebuffer');
+    expect(surface.viewport).toEqual([0, 0, 700, 1244]);
+    // The frame samples the treated film, not the film.
+    expect(drewWith(out, FRAMES['film-fill'])).toBe(true);
+    expect(out.units[3]).toBe(surface.framebuffer?.tex);
+    expect(out.units[3]).not.toBe(film);
+  });
+
+  it('tints the surfaces from the brand’s own tokens, never the shader’s custom palette (L6)', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setMedia(fakeVideo().el);
+    compositor.setStage(visible);
+    const brand = { primary: [0.8, 0.1, 0.2], bg: [0.96, 0.94, 0.9] } as const;
+    // the frame's own palette: the custom shader colours, unlike the brand
+    expect(config.colors.primary).not.toEqual(brand.primary);
+
+    compositor.setLook({ frame: 'film-fill', band: 'none', surface: 'colour' });
+    compositor.render(frame({ stack }));
+    expect(last(fake, 'u_tint')).toEqual(brand.primary);
+
+    compositor.setLook({
+      frame: 'film-fill',
+      band: 'none',
+      surface: 'duotone',
+    });
+    compositor.render(frame({ stack }));
+    const [deep, mid, pale] = duotoneStops(brand.primary, brand.bg);
+    expect(last(fake, 'u_toneDeep')).toEqual(deep);
+    expect(last(fake, 'u_toneMid')).toEqual(mid);
+    expect(last(fake, 'u_tonePale')).toEqual(pale);
+  });
+
+  it('pushes a still in by the reel’s clock, then the surface over that', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const { clock, seconds } = pieceClock();
+    compositor.setMedia(still(1600, 900));
+    compositor.setStage(visible);
+    compositor.setLook({
+      frame: 'film-fill',
+      band: 'none',
+      surface: 'grain',
+      push: seconds,
+    });
+    compositor.render(frame({ stack, time: 10 }));
+    const [, push, grain, out] = fake.draws;
+    expect(drewWith(push, MEDIA['media-push'])).toBe(true);
+    expect(last(fake, 'u_zoom')).toEqual([1]);
+    // The surface reads the pushed picture, in the other target.
+    expect(grain.units[0]).toBe(push.framebuffer?.tex);
+    expect(grain.framebuffer).not.toBe(push.framebuffer);
+    expect(out.units[3]).toBe(grain.framebuffer?.tex);
+
+    clock.seconds = 3.5;
+    compositor.render(frame({ stack, time: 13.5 }));
+    expect(last(fake, 'u_zoom')?.[0]).toBeCloseTo(pushZoom(3.5), 6);
+  });
+
+  it('holds the push-in while the reel holds: paused 1 s in, 5 s later it goes on from there (M2)', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const { clock, seconds } = pieceClock();
+    compositor.setMedia(still(1600, 900));
+    compositor.setStage(visible);
+    compositor.setLook({ frame: 'film-fill', band: 'none', push: seconds });
+    compositor.render(frame({ stack, time: 20 }));
+    clock.seconds = 1;
+    compositor.render(frame({ stack, time: 21 }));
+    const paused = last(fake, 'u_zoom')?.[0] as number;
+    expect(paused).toBeCloseTo(1.021, 3);
+    // Paused (or the tab hidden): the page's clock runs on, the reel's holds.
+    compositor.render(frame({ stack, time: 26 }));
+    expect(last(fake, 'u_zoom')?.[0]).toBe(paused);
+    // Played again: on from where it was, no snap.
+    clock.seconds = 1 + 1 / 60;
+    compositor.render(frame({ stack, time: 26 + 1 / 60 }));
+    const next = last(fake, 'u_zoom')?.[0] as number;
+    expect(next).toBeGreaterThan(paused);
+    expect(next - paused).toBeLessThan(0.001);
+  });
+
+  it('pushes in no film, and no still under reduced motion: it holds', () => {
+    const look = {
+      frame: 'film-fill',
+      band: 'none',
+      push: pieceClock(2).seconds,
+    } as const;
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setMedia(fakeVideo().el);
+    compositor.setStage(visible);
+    compositor.setLook(look);
+    compositor.render(frame({ stack }));
+    expect(pushes(fake)).toBe(false);
+
+    fake.reset();
+    compositor.setMedia(still(1600, 900));
+    compositor.render(frame({ stack, reducedMotion: true }));
+    expect(pushes(fake)).toBe(false);
+    expect(fake.draws).toHaveLength(2);
+  });
+
+  it('frees its two targets when the look drops the surface and the push-in, and when the film detaches (L7)', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    const treat = {
+      frame: 'film-fill',
+      band: 'none',
+      surface: 'grain',
+      push: pieceClock(1).seconds,
+    } as const;
+    compositor.setMedia(still(1600, 900));
+    compositor.setStage(visible);
+    compositor.setLook(treat);
+    compositor.render(frame({ stack }));
+    const [, push, grain] = fake.draws;
+    const targets = [push.framebuffer, grain.framebuffer];
+    const deleted = () =>
+      fake
+        .named('deleteFramebuffer')
+        .filter(([fb]) => targets.some((target) => target === fb));
+    expect(deleted()).toHaveLength(0);
+
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    compositor.render(frame({ stack }));
+    expect(deleted()).toHaveLength(2);
+
+    // Again, and the film goes: freed with it.
+    fake.reset();
+    compositor.setLook(treat);
+    compositor.render(frame({ stack }));
+    const made = fake.draws.slice(1, 3).map((d) => d.framebuffer);
+    compositor.setMedia(null);
+    expect(
+      fake
+        .named('deleteFramebuffer')
+        .filter(([fb]) => made.some((target) => target === fb))
+    ).toHaveLength(2);
+  });
+
+  it('tries a target that failed once for this look and piece, then shows the film as it is (L7)', () => {
+    let failing = false;
+    const fake = fakeGl({ incomplete: () => failing });
+    const compositor = createCompositor(fake.gl);
+    compositor.setMedia(fakeVideo().el);
+    compositor.setStage(visible);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    // the frame's own targets, made while the driver could
+    compositor.render(frame({ stack }));
+    const film = (fake.draws.at(-1) as Draw).units[3];
+
+    failing = true;
+    fake.reset();
+    compositor.setLook({
+      frame: 'film-fill',
+      band: 'none',
+      surface: 'duotone',
+    });
+    for (let i = 0; i < 4; i++) compositor.render(frame({ stack }));
+    // One attempt, not one a frame.
+    expect(fake.named('createFramebuffer')).toHaveLength(1);
+    // The film still shows, untreated.
+    expect((fake.draws.at(-1) as Draw).units[3]).toBe(film);
+    expect(fake.draws.some((d) => drewWith(d, MEDIA['surface-duotone']))).toBe(
+      false
+    );
+
+    // A new look is a new try.
+    failing = false;
+    compositor.setLook({ frame: 'film-fill', band: 'none', surface: 'grain' });
+    compositor.render(frame({ stack }));
+    expect(fake.named('createFramebuffer')).toHaveLength(2);
+    expect(fake.draws.some((d) => drewWith(d, MEDIA['surface-grain']))).toBe(
+      true
+    );
   });
 });

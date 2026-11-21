@@ -89,7 +89,9 @@ describe('R4b: a brand storing nothing paints the old line', () => {
   // old flat piece, and no edge glow lighting a dark came on a light ground.
   it('glass at 0: a 1 px hard edge, the ground at 18%, flat pieces', () => {
     const glsl = code(GLASS_FRAG);
-    expect(glsl).toContain('float aa = fwidth(edge);');
+    // floored where fwidth() is 0 (WP-11, MIN_RAMP): no change wherever a
+    // pixel's width is above the floor, so still the 1 px edge
+    expect(glsl).toContain('float aa = max(fwidth(edge), MIN_RAMP);');
     expect(glsl).toContain(
       'float leadRamp = max(aa, u_lineSoftness * u_border * 0.4);'
     );

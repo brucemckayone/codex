@@ -118,6 +118,23 @@ export function reportStackBudget(
   });
 }
 
+/**
+ * Log the phone budget cutting a layer from a layers-only stack
+ * (`shader_hero.stack_budget_layer_dropped`, behind PHONE_LAYER_BUDGET,
+ * WP-11): which, how many are left drawing, and the window that broke it.
+ */
+export function reportLayerBudget(
+  cut: { layer: string; remaining: number },
+  breach: { p95Ms: number; frames: number }
+): void {
+  logger.warn('shader_hero.stack_budget_layer_dropped', {
+    layer: cut.layer,
+    remaining: cut.remaining,
+    p95Ms: Math.round(breach.p95Ms * 10) / 10,
+    frames: breach.frames,
+  });
+}
+
 /** What of the compositor failed: its module, a target, a pass, an upload,
  *  or a throw out of its render. */
 export type CompositorFailure =

@@ -17,7 +17,9 @@
  *
  * The frozen copy is never edited to match the live code. When a fallback
  * changes on purpose, this file has done its job (proving the split) and is
- * deleted.
+ * deleted. One exception, landed with the split (WP-5b, Codex-1yd58.6): the
+ * owner's own 2026-11-21 changes are carried into the copy, marked `5b:` at
+ * each of its three places, and nothing else.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -271,7 +273,8 @@ describe('C. the words, the lead and the reel', () => {
     ]);
     expectSame(
       sweep(table(HERO_PURPOSES, choices, facts)),
-      6 * (3 * 5 * 2 * 6 * 4) * 2 ** 4
+      // 5b: four surfaces (none, duotone, colour, grain), not six
+      6 * (3 * 5 * 2 * 4 * 4) * 2 ** 4
     );
   });
 });
@@ -316,8 +319,9 @@ describe('D. whole option sets', () => {
 
 /**
  * hero-config.ts at 61d2dfe83, from baseOptions to the end of applyFallbacks,
- * verbatim but for two `export` keywords, inside a function so its names stay
- * out of this module's scope. Never edit it to match the live code.
+ * verbatim but for two `export` keywords and the owner's three 5b changes
+ * (marked `5b:`), inside a function so its names stay out of this module's
+ * scope. Never edit it to match the live code.
  */
 function frozenBeforeSplit() {
   /** The org's own starting point, before any purpose. */
@@ -344,10 +348,13 @@ function frozenBeforeSplit() {
       entrance: 'rise',
       logo: 'm',
       'reel-layout': 'corner',
-      'reel-peek': 'off',
+      // 5b: the peek on by default (owner, 2026-11-21)
+      'reel-peek': 'on',
       'reel-pointer': 'liquid',
       'reel-trans': 'burn',
       'reel-surface': 'none',
+      // 5b: the stills' push-in, a new axis, on by default
+      'reel-push': 'on',
       'reel-band': 'fade',
       'reel-edge': 'shadow',
       'reel-opening': 'name',
@@ -489,7 +496,9 @@ function frozenBeforeSplit() {
     }
     // the shader surface and the shader band are drawn by the shader
     if (!facts.hasShader) {
-      if (c['reel-surface'] === 'shader') c['reel-surface'] = 'none';
+      // 5b: the surfaces are now duotone, colour and grain, every one drawn
+      // by the shader (the 'shader' surface is gone), so all give way
+      c['reel-surface'] = 'none';
       c['reel-band'] = 'none';
     }
     if (c.bg === 'shader' && !facts.hasShader) c.bg = 'gradient';

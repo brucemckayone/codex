@@ -142,7 +142,8 @@ describe('the Showreel group: shown whenever the hero is a Showreel', () => {
     expect(showreel()?.textContent).toContain(
       'Get people watching plays your film and pieces as a Showreel.'
     );
-    // A field for every reel axis the hero has (WP-5a added reel-edge).
+    // A field for every reel axis the hero has (WP-5a added reel-edge, WP-5b
+    // reel-push).
     const reelAxes = HERO_OPTION_KEYS.filter((key) => key.startsWith('reel-'));
     expect(
       [...(showreel()?.querySelectorAll('.hero-designer__field') ?? [])].map(
@@ -223,6 +224,72 @@ describe('the options', () => {
     option('reel-edge', 'Outline').click();
     flushSync();
     expect(light()['hero-opt-reel-edge']).toBe('outline');
+  });
+
+  test('the surface offers the owner’s three over the footage, and no halftone (5b)', () => {
+    render({ 'hero-opt-purpose': 'consume' });
+    const names = [
+      ...document.querySelectorAll(
+        '.hero-designer__field[data-key="reel-surface"] [role="radio"]'
+      ),
+    ].map((radio) => radio.textContent?.trim());
+    expect(names).toEqual([
+      'Auto',
+      'None',
+      'Duotone',
+      'Your colour',
+      'Film grain',
+    ]);
+    option('reel-surface', 'Duotone').click();
+    flushSync();
+    expect(light()['hero-opt-reel-surface']).toBe('duotone');
+  });
+
+  test('greys the surface and the band on an org with no shader, and says why (L5)', () => {
+    const unavailable = (key: string) =>
+      document.querySelector<HTMLElement>(
+        `.hero-designer__field[data-key="${key}"]`
+      );
+    render({ 'hero-opt-purpose': 'consume' });
+    for (const key of ['reel-surface', 'reel-band']) {
+      const field = unavailable(key);
+      expect(field?.hasAttribute('data-needs-shader'), key).toBe(true);
+      expect(
+        field?.querySelector('.hero-designer__needs-shader')?.textContent
+      ).toBe(m.branding_hero_needs_shader());
+    }
+    // what the shader does not draw stays as it is
+    expect(unavailable('reel-push')?.hasAttribute('data-needs-shader')).toBe(
+      false
+    );
+    // a choice can still be made, for when a shader is chosen
+    option('reel-surface', 'Duotone').click();
+    flushSync();
+    expect(light()['hero-opt-reel-surface']).toBe('duotone');
+  });
+
+  test('with a shader, the surface and the band are as any other field (L5)', () => {
+    render({ 'hero-opt-purpose': 'consume', 'shader-preset': 'flow' });
+    for (const key of ['reel-surface', 'reel-band']) {
+      const field = document.querySelector(
+        `.hero-designer__field[data-key="${key}"]`
+      );
+      expect(field?.hasAttribute('data-needs-shader'), key).toBe(false);
+      expect(field?.querySelector('.hero-designer__needs-shader')).toBeNull();
+    }
+  });
+
+  test('Pictures push in slowly or hold still, and writes the choice (5b)', () => {
+    render({ 'hero-opt-purpose': 'consume' });
+    const names = [
+      ...document.querySelectorAll(
+        '.hero-designer__field[data-key="reel-push"] [role="radio"]'
+      ),
+    ].map((radio) => radio.textContent?.trim());
+    expect(names).toEqual(['Auto', 'Push in slowly', 'Hold still']);
+    option('reel-push', 'Hold still').click();
+    flushSync();
+    expect(light()['hero-opt-reel-push']).toBe('off');
   });
 
   describe('the warning judges the ink the reel draws its words in', () => {

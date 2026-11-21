@@ -14,7 +14,7 @@
  * All PURE, so the arithmetic is under test; WP-5's Showreel calls
  * `setStage` with a box from `stageBoxFrom`.
  */
-import type { FilmFrameId } from './effects/ids';
+import type { FilmFrameId, ReelSurface } from './effects/ids';
 
 type Vec2 = readonly [number, number];
 
@@ -30,12 +30,24 @@ export type StageMedia = HTMLVideoElement | HTMLImageElement;
 export type FilmBand = 'none' | 'under' | 'fade' | 'edges';
 
 /**
+ * How far the reel has played the piece on show, in seconds, read once a
+ * frame. It holds while the reel holds (paused, held, off screen), where the
+ * page's own clock runs on (WP-5b review M2).
+ */
+export type PieceSeconds = () => number;
+
+/**
  * How the Showreel shows its film (WP-5): which film frame (its layout's),
- * and its band.
+ * and its band. WP-5b adds what is drawn on the piece's own picture first:
+ * a surface over the footage (`reel-surface`; none when absent) and the
+ * stills' push-in (`reel-push`), driven by the reel's clock: off when absent
+ * or null.
  */
 export interface FilmLook {
   readonly frame: FilmFrameId;
   readonly band: FilmBand;
+  readonly surface?: ReelSurface | 'none';
+  readonly push?: PieceSeconds | null;
 }
 
 /** The band as the film frame reads it (`u_band`). */

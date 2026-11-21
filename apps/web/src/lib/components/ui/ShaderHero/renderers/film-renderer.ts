@@ -129,7 +129,8 @@ export function createFilmRenderer(): ShaderRenderer {
       let musicalRate = IDLE_CLOCK_RATE;
       if (!a.silent) {
         musicalRate =
-          prevBeatPhase < 0
+          // no previous sample, or no time between them (a frozen clock)
+          prevBeatPhase < 0 || dt <= 0
             ? IDLE_CLOCK_RATE
             : Math.min(
                 MAX_CLOCK_RATE,

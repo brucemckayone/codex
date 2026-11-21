@@ -61,13 +61,19 @@ export const HERO_OPTION_VALUES = {
   logo: ['s', 'm', 'l'],
   // The Showreel's own options. Every other composition leaves them unread.
   'reel-layout': ['corner', 'wide', 'name'],
-  // the first featured pieces rise just above the fold
-  'reel-peek': ['off', 'on'],
+  // the first featured pieces rise just above the fold (on by default:
+  // owner, 2026-11-21)
+  'reel-peek': ['on', 'off'],
   'reel-pointer': ['liquid', 'smoke', 'glitch', 'none'],
   // between pieces
   'reel-trans': ['burn', 'liquid', 'glitch'],
-  // a treatment over every picture and film
-  'reel-surface': ['none', 'grain', 'halftone', 'reeded', 'red', 'shader'],
+  // a treatment over every picture and film, drawn by the shader on the
+  // footage alone, tinted from the brand (owner, 2026-11-21: off by default;
+  // no halftone)
+  'reel-surface': ['none', 'duotone', 'colour', 'grain'],
+  // the stills push in slowly while they show (on by default: owner,
+  // 2026-11-21); held still under reduced motion
+  'reel-push': ['on', 'off'],
   // where the film gives way to the shader: its foot evenly ('fade', the
   // default: owner, 2026-11-20), its foot through the smoke ('under'), all
   // round ('edges'), or nowhere
@@ -221,10 +227,11 @@ function baseOptions(facts: HeroFacts): HeroOptions {
     entrance: 'rise',
     logo: 'm',
     'reel-layout': 'corner',
-    'reel-peek': 'off',
+    'reel-peek': 'on',
     'reel-pointer': 'liquid',
     'reel-trans': 'burn',
     'reel-surface': 'none',
+    'reel-push': 'on',
     'reel-band': 'fade',
     'reel-edge': 'shadow',
     'reel-opening': 'name',
@@ -386,9 +393,9 @@ function showreelFallbacks(c: HeroOptions, facts: HeroFacts): void {
 
 /** The ground behind the words, and the reel's parts the shader draws. */
 function groundFallbacks(c: HeroOptions, facts: HeroFacts): void {
-  // the shader surface and the shader band are drawn by the shader
+  // every surface (WP-5b) and the band are drawn by the shader
   if (!facts.hasShader) {
-    if (c['reel-surface'] === 'shader') c['reel-surface'] = 'none';
+    c['reel-surface'] = 'none';
     c['reel-band'] = 'none';
   }
   if (c.bg === 'shader' && !facts.hasShader) c.bg = 'gradient';

@@ -24,6 +24,7 @@
   import { answers, brandEditor, previewResolved } from '$lib/brand-editor';
   import { reelInkWarnings } from '$lib/brand-editor/reel-ink-warning';
   import ListSegment from '$lib/components/studio/list-toolbar/ListSegment.svelte';
+  import { orgShader } from '$lib/page-builder/org-grounds';
   import * as m from '$paraglide/messages';
   import {
     clearHeroSettings,
@@ -50,6 +51,8 @@
       key: K;
       label: Words;
       values: Readonly<Record<HeroOptions[K], Words>>;
+      /** Drawn by the shader: greyed, and says so, on an org with none. */
+      needsShader?: true;
     };
   }[HeroOptionKey];
 
@@ -128,11 +131,12 @@
       showreel: true,
       fields: [
         { key: 'reel-layout', label: m.branding_hero_field_reel_layout, values: { corner: m.branding_hero_reel_layout_corner, wide: m.branding_hero_reel_layout_wide, name: m.branding_hero_reel_layout_name } },
-        { key: 'reel-peek', label: m.branding_hero_field_reel_peek, values: { off: m.branding_hero_reel_peek_off, on: m.branding_hero_reel_peek_on } },
+        { key: 'reel-peek', label: m.branding_hero_field_reel_peek, values: { on: m.branding_hero_reel_peek_on, off: m.branding_hero_reel_peek_off } },
         { key: 'reel-pointer', label: m.branding_hero_field_reel_pointer, values: { liquid: m.branding_hero_reel_pointer_liquid, smoke: m.branding_hero_reel_pointer_smoke, glitch: m.branding_hero_reel_pointer_glitch, none: m.branding_hero_none } },
         { key: 'reel-trans', label: m.branding_hero_field_reel_trans, values: { burn: m.branding_hero_reel_trans_burn, liquid: m.branding_hero_reel_trans_liquid, glitch: m.branding_hero_reel_trans_glitch } },
-        { key: 'reel-surface', label: m.branding_hero_field_reel_surface, values: { none: m.branding_hero_none, grain: m.branding_hero_reel_surface_grain, halftone: m.branding_hero_reel_surface_halftone, reeded: m.branding_hero_reel_surface_reeded, red: m.branding_hero_reel_surface_red, shader: m.branding_hero_reel_surface_shader } },
-        { key: 'reel-band', label: m.branding_hero_field_reel_band, values: { fade: m.branding_hero_reel_band_fade, under: m.branding_hero_reel_band_under, edges: m.branding_hero_reel_band_edges, none: m.branding_hero_none } },
+        { key: 'reel-surface', label: m.branding_hero_field_reel_surface, values: { none: m.branding_hero_none, duotone: m.branding_hero_reel_surface_duotone, colour: m.branding_hero_reel_surface_colour, grain: m.branding_hero_reel_surface_grain }, needsShader: true },
+        { key: 'reel-push', label: m.branding_hero_field_reel_push, values: { on: m.branding_hero_reel_push_on, off: m.branding_hero_reel_push_off } },
+        { key: 'reel-band', label: m.branding_hero_field_reel_band, values: { fade: m.branding_hero_reel_band_fade, under: m.branding_hero_reel_band_under, edges: m.branding_hero_reel_band_edges, none: m.branding_hero_none }, needsShader: true },
         { key: 'reel-edge', label: m.branding_hero_field_reel_edge, values: { shadow: m.branding_hero_reel_edge_shadow, outline: m.branding_hero_reel_edge_outline } },
         { key: 'reel-opening', label: m.branding_hero_field_reel_opening, values: { name: m.branding_hero_reel_opening_name, none: m.branding_hero_none } },
         { key: 'reel-film', label: m.branding_hero_field_reel_film, values: { name: m.branding_hero_reel_film_name, smoke: m.branding_hero_reel_film_smoke, liquid: m.branding_hero_reel_film_liquid } },
@@ -165,6 +169,9 @@
   );
   const isShowreel = $derived(storedComp === 'showreel' || showreelOnAuto);
   const groups = $derived(GROUPS.filter((group) => !group.showreel || isShowreel));
+  // The surfaces and the band are drawn by the shader (hero-config's ground
+  // step sets them aside without one), read as the page reads it.
+  const hasShader = $derived(orgShader(null, brandEditor.pending));
   // The ink the reel draws its words in, on each theme's ground, as the reel
   // judges a word (reel-scrim's `contrast`): below the floor, Text over
   // footage decides what the reel does with it. Both themes, whichever is
@@ -260,7 +267,13 @@
         {#each group.fields as field (field.key)}
           {@const current = settings.options[field.key] ?? null}
           {@const instead = shownInstead(field, current)}
-          <div class="hero-designer__field" data-key={field.key} data-changed={current !== null ? '' : undefined}>
+          {@const unavailable = field.needsShader === true && !hasShader}
+          <div
+            class="hero-designer__field"
+            data-key={field.key}
+            data-changed={current !== null ? '' : undefined}
+            data-needs-shader={unavailable ? '' : undefined}
+          >
             <span class="hero-designer__field-label">{field.label()}</span>
             <ListSegment
               label={field.label()}
@@ -269,7 +282,9 @@
               wrap
               onSelect={(value) => setOption(field.key, value === '' ? null : value)}
             />
-            {#if instead}
+            {#if unavailable}
+              <p class="hero-designer__needs-shader">{m.branding_hero_needs_shader()}</p>
+            {:else if instead}
               <p class="hero-designer__instead">{m.branding_hero_resolved_hint({ value: instead })}</p>
             {/if}
             {#if field.key === 'reel-edge' && inkWarnings.length > 0}
@@ -400,6 +415,17 @@
     margin: 0;
     font-size: var(--text-xs);
     color: var(--color-status-warning-text);
+  }
+
+  /* drawn by the shader, and the org has none: greyed, still choosable */
+  .hero-designer__field[data-needs-shader] :global(.segment) {
+    opacity: var(--opacity-50, 0.5);
+  }
+
+  .hero-designer__needs-shader {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
   }
 
   .hero-designer__warning {
