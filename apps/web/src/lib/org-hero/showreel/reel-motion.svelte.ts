@@ -8,7 +8,7 @@
  *   - the hero's four motion settings, the layout's film frame, a phone,
  *     reduced motion and the static path (`configure`);
  *   - the piece the clock is on: a cut (`follow`);
- *   - the reel paused: the cut stops where it is;
+ *   - the reel paused: a cut under way ends at once on its piece;
  *   - the pointer over the reel, and a sideways swipe on a phone;
  *   - the film playing, in the hero or the phone's pop-up: the way into it;
  *   - the canvas showing the film for the first time: the opening.
@@ -153,15 +153,17 @@ export function useReelMotion(source: ReelMotionSource): {
     showreelFeed.setMotion(null);
   });
 
-  // Paused: the cut stops where it is. Before the cuts' effect, so a pause
-  // and a pick in one flush (a click on the pause, then the index) reach
-  // the driver in the order the visitor made them.
+  // Paused: a cut under way ends at once on the piece it was going to, and
+  // the stage names it now, so its words come in (review R2-M1). Before the
+  // cuts' effect, so a pause and a pick in one flush (a click on the pause,
+  // then the index) reach the driver in the order the visitor made them.
   $effect(() => {
     const paused = source.paused();
     untrack(() => {
       if (!driver) return;
       if (paused) driver.pause(now());
       else driver.play(now());
+      stageKey = driver.stageKey;
       wake();
     });
   });

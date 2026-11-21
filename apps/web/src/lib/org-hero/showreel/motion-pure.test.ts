@@ -126,6 +126,27 @@ describe('RevealClock', () => {
     expect(clock.at(2000 + CUT_TIMING.outMs).shown).toBe(1);
   });
 
+  it('says which piece the cut under way is going to: its target, a pick waiting in the rise, or the piece at rest (R2-M1)', () => {
+    const clock = new RevealClock(0);
+    expect(clock.headingTo(0)).toBe(0);
+    clock.cut(1, 100);
+    // Mid-fall: the target, though the stage still shows the last piece.
+    expect(clock.headingTo(300)).toBe(1);
+    expect(clock.at(300).shown).toBe(0);
+    // A pick in the fall retargets it.
+    clock.cut(2, 400);
+    expect(clock.headingTo(500)).toBe(2);
+    // In the rise, a pick waits, and it is what the cut is going to.
+    const rise = 100 + CUT_TIMING.outMs + 50;
+    expect(clock.at(rise).shown).toBe(2);
+    clock.cut(0, rise);
+    expect(clock.headingTo(rise + 10)).toBe(0);
+    // At rest: the piece shown.
+    const done = rise + CUT_TIMING.inMs + CUT_TIMING.outMs + CUT_TIMING.inMs;
+    expect(clock.at(done)).toMatchObject({ reveal: 1, shown: 0 });
+    expect(clock.headingTo(done)).toBe(0);
+  });
+
   it('jumps with no cut', () => {
     const clock = new RevealClock(0);
     clock.cut(1, 0);

@@ -97,6 +97,15 @@ export class RevealClock {
     this.#waiting = null;
   }
 
+  /**
+   * The piece the cut under way is going to at `now`: the latest pick
+   * waiting for a rise to end, else its target; at rest, the piece shown.
+   */
+  headingTo(now: number): number {
+    this.#advance(now);
+    return this.#waiting ?? this.#target;
+  }
+
   /** Stop the cut where it is (the reel's pause, its holds). */
   pause(now: number): void {
     if (this.#pausedAt === null) this.#pausedAt = now;

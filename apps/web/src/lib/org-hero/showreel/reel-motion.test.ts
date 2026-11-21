@@ -174,19 +174,74 @@ describe('ReelMotion between pieces', () => {
     expect(driver.stageKey).toBe(KEYS[2]);
   });
 
-  it('stops a cut where it is while the reel is paused, and carries it on', () => {
+  // Review R2-M1: the words come in with their piece's picture, so a cut
+  // frozen by a pause would keep them out, hidden, for the whole pause.
+  it('a pause mid-fall shows the piece the cut was going to, at once and at rest (R2-M1)', () => {
     const driver = new ReelMotion(setup());
+    runs(driver);
+    driver.follow(KEYS, 0, 0);
+    driver.frame(0);
+    // The reel moves on (or an index pick): the fall runs 1000 to 1640.
+    driver.follow(KEYS, 1, 1000);
+    driver.frame(1300);
+    expect(driver.stageKey).toBe(KEYS[0]);
+    expect(driver.motion.values.u_reveal).toBeLessThan(1);
+    // The visitor pauses to read the new piece (or a press holds it).
+    driver.pause(1300);
+    expect(driver.stageKey).toBe(KEYS[1]);
+    // At rest: nothing moves, so it asks for no frames, however long.
+    expect(driver.frame(60_000)).toBe(false);
+    expect(driver.stageKey).toBe(KEYS[1]);
+    expect(driver.motion.values.u_reveal).toBe(1);
+    // Play moves nothing on: the cut is done.
+    driver.play(60_000);
+    expect(driver.frame(60_000 + CUT_TIMING.outMs / 2)).toBe(false);
+    expect(driver.motion.values.u_reveal).toBe(1);
+    expect(driver.stage).toBe(1);
+  });
+
+  it('a pause in a rise with a pick waiting shows the waiting pick (R2-M1)', () => {
+    const driver = new ReelMotion(setup());
+    runs(driver);
+    driver.follow(KEYS, 0, 0);
+    driver.frame(0);
+    // The fall runs 1000 to 1640, the rise to 2790.
+    driver.follow(KEYS, 1, 1000);
+    driver.frame(1700);
+    expect(driver.stageKey).toBe(KEYS[1]);
+    // Picked during the rise: it waits for the rise to end...
+    driver.follow(KEYS, 2, 1800);
+    driver.frame(1850);
+    expect(driver.stageKey).toBe(KEYS[1]);
+    // ...but not for a pause.
+    driver.pause(1900);
+    driver.frame(60_000);
+    expect(driver.stageKey).toBe(KEYS[2]);
+    expect(driver.motion.values.u_reveal).toBe(1);
+  });
+
+  it('a pause in a rise with nothing waiting ends the rise on its piece', () => {
+    const driver = new ReelMotion(setup());
+    runs(driver);
     driver.follow(KEYS, 0, 0);
     driver.follow(KEYS, 1, 100);
-    driver.frame(420);
-    const held = driver.motion.values.u_reveal;
-    driver.pause(420);
-    // Paused, nothing moves, so it asks for no frames.
-    expect(driver.frame(2000)).toBe(false);
-    expect(driver.motion.values.u_reveal).toBeCloseTo(held, 9);
-    driver.play(2000);
-    driver.frame(2000 + 320);
+    driver.frame(100 + CUT_TIMING.outMs + 200);
+    expect(driver.motion.values.u_reveal).toBeLessThan(1);
+    driver.pause(100 + CUT_TIMING.outMs + 200);
+    expect(driver.frame(5000)).toBe(false);
     expect(driver.stage).toBe(1);
+    expect(driver.motion.values.u_reveal).toBe(1);
+  });
+
+  it('a pause at rest changes nothing', () => {
+    const driver = new ReelMotion(setup());
+    runs(driver);
+    driver.follow(KEYS, 2, 0);
+    driver.frame(10);
+    driver.pause(20);
+    expect(driver.frame(30)).toBe(false);
+    expect(driver.stage).toBe(2);
+    expect(driver.motion.values.u_cut).toBe(0);
   });
 });
 

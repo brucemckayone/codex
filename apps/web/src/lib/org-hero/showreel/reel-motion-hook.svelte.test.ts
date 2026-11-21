@@ -227,19 +227,28 @@ describe('useReelMotion and the stage', () => {
     expect(held().values.u_reveal).toBe(1);
   });
 
-  it('holds a cut where it is while paused, and carries it on', () => {
+  it('a pause during a cut shows the piece it was going to at once, so its words can come in (R2-M1)', () => {
     const props = render();
     runs();
     props.index = 1;
     frame(CUT_TIMING.outMs / 2);
-    const at = held().values.u_reveal;
-    props.paused = true;
-    frame(2000);
-    expect(held().values.u_reveal).toBeCloseTo(at, 6);
+    expect(held().values.u_reveal).toBeLessThan(1);
     expect(stage()).toBe('0');
+    // Paused mid-fall (the pause sits over the index on Corner): the stage
+    // names the piece at once, never the half-faded one for the pause.
+    props.paused = true;
+    flushSync();
+    expect(stage()).toBe('1');
+    frame(2000);
+    expect(stage()).toBe('1');
+    expect(held().values.u_reveal).toBe(1);
+    // At rest: no frames asked for while paused.
+    expect(frames).toHaveLength(0);
+    // Play moves nothing on.
     props.paused = false;
     frame(CUT_TIMING.outMs);
     expect(stage()).toBe('1');
+    expect(held().values.u_reveal).toBe(1);
   });
 });
 

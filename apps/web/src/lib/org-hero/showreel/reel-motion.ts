@@ -236,9 +236,19 @@ export class ReelMotion {
     this.#reveal.cut(index, now);
   }
 
-  /** The reel paused: the cut stops where it is. */
+  /**
+   * The reel paused: its pause, a press held, the hero off screen. A cut
+   * under way ends at once on the piece it was going to, a pick waiting in
+   * its rise included, as a pick made while paused shows at once (`follow`).
+   * The visitor stopped the motion, and the words, which come in with their
+   * piece's picture, must never wait out a pause hidden, their film button
+   * reachable by Tab but unseen (review R2-M1; WCAG 2.2.2, 2.4.7).
+   */
   pause(now: number): void {
     this.#paused = true;
+    const to = this.#reveal.headingTo(now);
+    this.#reveal.jump(to);
+    this.#stage = to;
     this.#reveal.pause(now);
   }
 
