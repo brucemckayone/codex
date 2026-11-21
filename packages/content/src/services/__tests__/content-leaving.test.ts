@@ -315,6 +315,13 @@ describe('ContentService: the leaving notice', () => {
 
       expect(result.outcome).toBe('leaving');
       expect(result.holders).toBe(2);
+      // This delete started the leave, and wrote its owners' emails; the
+      // creator's own, so it holds the creator's side alone.
+      expect(result).toMatchObject({
+        started: true,
+        leavingByCreator: true,
+        leavingByOrg: false,
+      });
       const after = await stored(row.id);
       expect(after.deletedAt).toBeNull();
       expect(after.status).toBe('archived');
@@ -449,7 +456,14 @@ describe('ContentService: the leaving notice', () => {
 
       const { result: again } = await service.delete(row.id, creatorId);
 
-      expect(again).toEqual(first);
+      // The same date, holders and sides, but no new round: it started
+      // nothing, and names no other side (a personal piece has no org).
+      expect(first).toMatchObject({ started: true });
+      expect(again).toEqual({ ...first, started: false });
+      expect(again).toMatchObject({
+        leavingByCreator: true,
+        leavingByOrg: false,
+      });
       expect(await noticesOf(row.id)).toHaveLength(1);
     });
 
@@ -462,8 +476,16 @@ describe('ContentService: the leaving notice', () => {
       await service.delete(row.id, creatorId);
       await orgOnly(row.id);
 
-      await service.delete(row.id, creatorId);
+      const { result } = await service.delete(row.id, creatorId);
 
+      // Its side added to a leave already under way: nobody is emailed, and
+      // both deletes hold it now.
+      expect(result).toMatchObject({
+        outcome: 'leaving',
+        started: false,
+        leavingByCreator: true,
+        leavingByOrg: true,
+      });
       const after = await stored(row.id);
       expect([after.leavingByCreator, after.leavingByOrg]).toEqual([
         true,
@@ -954,6 +976,37 @@ describe('ContentService: the leaving notice', () => {
         creatorId
       );
       expect(moved.organizationId).toBe(otherOrg);
+    });
+  });
+
+  // Owner 2026-11-21: its owners were emailed whether they can download it.
+  describe('the download switch while it leaves', () => {
+    it('refuses a change until it is kept; the same value passes, and a change after Keep', async () => {
+      const [holder] = await seedTestUsers(db, 1);
+      const row = await piece({ ownersCanDownload: true });
+      await bought(row.id, holder);
+      await service.delete(row.id, creatorId);
+
+      await expect(
+        service.update(row.id, { ownersCanDownload: false }, creatorId)
+      ).rejects.toMatchObject(LEAVING_REFUSED);
+      expect((await stored(row.id)).ownersCanDownload).toBe(true);
+
+      // The form sends it every save: as it was, it is no change.
+      const saved = await service.update(
+        row.id,
+        { ownersCanDownload: true, title: 'Still leaving' },
+        creatorId
+      );
+      expect(saved.title).toBe('Still leaving');
+
+      await service.keep(row.id, creatorId);
+      const changed = await service.update(
+        row.id,
+        { ownersCanDownload: false },
+        creatorId
+      );
+      expect(changed.ownersCanDownload).toBe(false);
     });
   });
 

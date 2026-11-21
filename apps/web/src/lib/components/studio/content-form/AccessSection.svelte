@@ -21,15 +21,25 @@
   (mockup w4), each with a few words under its name, and wrap as chips on a
   phone (mockup w8b). Its host holds the choice and saves it.
 
+  On Buy once, the "Owners can download it" switch (Codex-a6ofh.6, owner
+  N1-B): whether the piece's owners can download it if it is ever removed.
+  Only a host that passes `ownersCanDownload` shows it: the content list's
+  bulk change does not, so each piece keeps its own. It is a switch, never a
+  radio: the options above are the one radio group. While the piece leaves
+  (`downloadLocked`, owner 2026-11-21) it is held as its owners were told,
+  until a Keep, and says so.
+
   @prop organizationId     The piece's org; null for personal content
   @prop onPriceChange      The price as typed, in pounds
   @prop tiers              The org's ACTIVE tiers (the options); `[]` until loaded
   @prop tiersState         Whether the options AND the item's ticks are loaded
   @prop selectedTierIds    The item's whole set, inactive tiers included
+  @prop ownersCanDownload  The download switch's setting; undefined shows no switch
+  @prop downloadLocked     Why the switch is held as it is (its owners were told); null when it can change
 -->
 <script lang="ts">
   import { PRICE_LIMITS } from '@codex/constants';
-  import { Alert, Button } from '$lib/components/ui';
+  import { Alert, Button, Switch } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import * as m from '$paraglide/messages';
   import type { SubscriptionTier } from '$lib/types';
@@ -71,6 +81,13 @@
      * tiers there (Codex-a6ofh.3.5, owner D-b5).
      */
     offerPaidTiers?: boolean;
+    /**
+     * Whether owners can download it if it leaves (Codex-a6ofh.6, N1-B), on
+     * Buy once. Undefined offers no switch.
+     */
+    ownersCanDownload?: boolean;
+    onOwnersCanDownloadChange?: (on: boolean) => void;
+    downloadLocked?: string | null;
   }
 
   const {
@@ -87,7 +104,12 @@
     onSelectFromTier,
     connectReady = true,
     offerPaidTiers = true,
+    ownersCanDownload,
+    onOwnersCanDownloadChange,
+    downloadLocked = null,
   }: Props = $props();
+
+  const uid = $props.id();
 
   // The worker refuses 1p–99p (Codex-2hxff.32); warn before the save does.
   const priceNum = $derived(parseFloat(priceVal || '0') || 0);
@@ -336,6 +358,27 @@
               </Alert>
             {/if}
           {/if}
+        </div>
+      {/if}
+
+      {#if accessTypeVal === 'paid' && ownersCanDownload !== undefined}
+        <div class="download-field">
+          <Switch
+            checked={ownersCanDownload}
+            disabled={downloadLocked !== null}
+            onCheckedChange={(on) => onOwnersCanDownloadChange?.(on)}
+            aria-labelledby="{uid}-download"
+            aria-describedby={downloadLocked === null
+              ? `${uid}-download-hint`
+              : `${uid}-download-hint ${uid}-download-locked`}
+          />
+          <span class="download-text">
+            <span id="{uid}-download" class="download-label">{m.studio_leaving_download_label()}</span>
+            <span id="{uid}-download-hint" class="field-hint">{m.studio_leaving_download_hint()}</span>
+            {#if downloadLocked !== null}
+              <span id="{uid}-download-locked" class="field-hint">{downloadLocked}</span>
+            {/if}
+          </span>
         </div>
       {/if}
     </div>
@@ -591,6 +634,27 @@
 
   .picker-summary {
     color: var(--color-text-secondary);
+  }
+
+  /* The download switch (N1-B): the row's full width, under the price. */
+  .download-field {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .download-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
+  }
+
+  .download-label {
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
   }
 
   .tier-skeleton {

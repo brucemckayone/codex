@@ -383,6 +383,12 @@ describe('ContentService: bulk actions', () => {
       expect(outcomes(report.results)).toEqual(['leaving', 'done']);
       const [leaving] = report.results;
       expect(holdersOf(leaving)).toBe(2);
+      // Whose deletes hold it (Codex-a6ofh.6): the creator's, as it started.
+      expect(leaving).toMatchObject({
+        started: true,
+        leavingByCreator: true,
+        leavingByOrg: false,
+      });
       const after = await stored(sold.id);
       expect(after.deletedAt).toBeNull();
       expect(leaving?.outcome === 'leaving' ? leaving.leavesAt : null).toBe(

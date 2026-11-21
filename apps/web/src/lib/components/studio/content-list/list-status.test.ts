@@ -36,6 +36,28 @@ describe('listStatus', () => {
     });
   });
 
+  it('a piece leaving reads Leaving, and goes back with Keep it (Codex-a6ofh.6)', () => {
+    expect(
+      listStatus({
+        status: 'archived',
+        publishedAt: '2026-11-01',
+        leavesAt: '2026-12-20T10:00:00.000Z',
+      })
+    ).toEqual({
+      label: m.studio_leaving_status(),
+      variant: 'leaving',
+      toggle: m.studio_leaving_keep(),
+    });
+    // Kept: no date, so off sale again.
+    expect(
+      listStatus({
+        status: 'archived',
+        publishedAt: '2026-11-01',
+        leavesAt: null,
+      }).variant
+    ).toBe('off-sale');
+  });
+
   it('archived is Off sale too, the tab that lists it (Codex-a6ofh.3.6)', () => {
     expect(
       listStatus({ status: 'archived', publishedAt: '2026-11-01' })

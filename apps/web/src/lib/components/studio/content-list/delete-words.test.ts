@@ -1,11 +1,23 @@
 /**
- * The Delete dialog's Unpublish instead (Codex-a6ofh.3.5, owner D-b4,
- * Codex-dz997): offered only where the people who have a piece keep it.
+ * The Delete dialog's words (Codex-a6ofh.6, mockup leaving-notice.html LN1,
+ * LN2): a piece people own leaves on its date, its owners emailed; Unpublish
+ * instead only where unpublishing keeps it for them (Codex-dz997).
  */
 import { describe, expect, it } from 'vitest';
+import { formatSentenceDate } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import { joinNames } from '../plan-picker/select-from-tier';
-import { type DeletePiece, heldNotice, unpublishOffer } from './delete-words';
+import {
+  type DeletePiece,
+  deletedWords,
+  manyNotice,
+  oneNotice,
+  tooWords,
+  unknownWords,
+} from './delete-words';
+
+const LEAVES_ON = new Date('2026-12-20T10:00:00.000Z');
+const date = formatSentenceDate(LEAVES_ON);
 
 function held(id: string, fields: Partial<DeletePiece> = {}): DeletePiece {
   return {
@@ -13,177 +25,211 @@ function held(id: string, fields: Partial<DeletePiece> = {}): DeletePiece {
     title: `Piece ${id}`,
     slug: `piece-${id}`,
     status: 'published',
-    holderCount: 3,
+    holderCount: 57,
     courseOnly: false,
     isTeamOnly: false,
     isFollowerGated: false,
     isTierGated: false,
-    priceCents: 800,
+    priceCents: 499,
+    ownersCanDownload: true,
     ...fields,
   };
 }
 
-/** A free lesson in a paid course: its course buyers have it. */
+const nobodys = (id: string, fields: Partial<DeletePiece> = {}) =>
+  held(id, { holderCount: 0, ...fields });
+
+/** A free lesson in a paid course: its course buyers own it. */
 const freeLesson = (id: string) => held(id, { priceCents: null });
 
-describe('unpublishOffer', () => {
-  it('offers a priced piece: its people keep watching', () => {
-    expect(unpublishOffer([held('a')])).toEqual({
-      ids: ['a'],
-      words: m.studio_content_delete_unpublish_keeps_it(),
+describe('oneNotice (LN1)', () => {
+  it('says who owns it, when it leaves, and offers Unpublish instead (the mockup)', () => {
+    expect(oneNotice(held('a'), LEAVES_ON)).toEqual({
+      title: m.studio_leaving_delete_owners({ count: 57 }),
+      body: m.studio_leaving_delete_body_download({ date }),
+      aside: `${m.studio_leaving_delete_keep_any_time({ date })} ${m.studio_leaving_delete_unpublish_instead()}`,
+      unpublish: true,
     });
   });
 
-  it('never offers a Free piece, and says unpublishing ends it too', () => {
-    expect(unpublishOffer([freeLesson('a')])).toEqual({
-      ids: [],
-      words: m.studio_content_delete_unpublish_ends_it(),
-    });
-    expect(unpublishOffer([freeLesson('a'), freeLesson('b')])).toEqual({
-      ids: [],
-      words: m.studio_content_delete_unpublish_ends_them(),
-    });
-  });
-
-  it('when every one is kept, they keep it; "them" is all of them', () => {
-    expect(unpublishOffer([held('a'), held('b')])).toEqual({
-      ids: ['a', 'b'],
-      words: m.studio_content_delete_unpublish_keeps_them(),
-    });
-  });
-
-  it('in a mix, names the ones that stay up first, then the ones the button takes down', () => {
-    // One of each: each by its title; the button's "it" is the last named.
-    expect(unpublishOffer([held('a'), freeLesson('c')])).toEqual({
-      ids: ['a'],
-      words: `${m.studio_content_delete_unpublish_ends_named_stays({ name: '“Piece c”' })} ${m.studio_content_delete_unpublish_keeps_named({ name: '“Piece a”' })}`,
-    });
-    const offer = unpublishOffer([
-      held('a'),
-      held('b'),
-      freeLesson('c'),
-      freeLesson('d'),
-    ]);
-    expect(offer.ids).toEqual(['a', 'b']);
-    expect(offer.words).toBe(
-      `${m.studio_content_delete_unpublish_ends_named_many_stays({ titles: joinNames(['“Piece c”', '“Piece d”']) })} ${m.studio_content_delete_unpublish_keeps_named_many({ titles: joinNames(['“Piece a”', '“Piece b”']) })}`
+  it('counts one owner as one', () => {
+    expect(oneNotice(held('a', { holderCount: 1 }), LEAVES_ON)?.title).toBe(
+      m.studio_leaving_delete_owners_one()
     );
   });
 
-  it('names every piece, however many, so two groups never read alike', () => {
-    // Four of each (a selection holds up to 15): never "4 of them" twice.
-    const keeps = ['a', 'b', 'c', 'd'].map((id) => held(id));
-    const ends = ['e', 'f', 'g', 'h'].map((id) => freeLesson(id));
-    const offer = unpublishOffer([...keeps, ...ends]);
-    const titles = (ids: string[]) =>
-      joinNames(ids.map((id) => `“Piece ${id}”`));
-    expect(offer.ids).toEqual(['a', 'b', 'c', 'd']);
-    expect(offer.words).toBe(
-      `${m.studio_content_delete_unpublish_ends_named_many_stays({ titles: titles(['e', 'f', 'g', 'h']) })} ${m.studio_content_delete_unpublish_keeps_named_many({ titles: titles(['a', 'b', 'c', 'd']) })}`
-    );
-    // Beside a draft, the live ones are named, not counted.
+  it('says watch, never download, when the creator turned downloads off (N1-B)', () => {
     expect(
-      unpublishOffer([...keeps, held('z', { status: 'draft' })]).words
-    ).toBe(
-      m.studio_content_delete_unpublish_keeps_named_many({
-        titles: titles(['a', 'b', 'c', 'd']),
+      oneNotice(held('a', { ownersCanDownload: false }), LEAVES_ON)?.body
+    ).toBe(m.studio_leaving_delete_body_watch({ date }));
+  });
+
+  it('never offers Unpublish instead for a Free piece, and says it would end it too', () => {
+    expect(oneNotice(freeLesson('a'), LEAVES_ON)).toMatchObject({
+      aside: `${m.studio_leaving_delete_keep_any_time({ date })} ${m.studio_content_delete_unpublish_ends_it()}`,
+      unpublish: false,
+    });
+  });
+
+  it('says nothing of unpublishing a piece already off sale', () => {
+    expect(
+      oneNotice(held('a', { status: 'archived' }), LEAVES_ON)
+    ).toMatchObject({
+      aside: m.studio_leaving_delete_keep_any_time({ date }),
+      unpublish: false,
+    });
+  });
+
+  it('is nothing for a piece nobody owns: today’s words, deleted at once', () => {
+    expect(oneNotice(nobodys('a'), LEAVES_ON)).toBeNull();
+  });
+});
+
+describe('manyNotice (LN2)', () => {
+  it('says how many go now, and names the ones that leave (the mockup)', () => {
+    const notice = manyNotice(
+      [nobodys('a'), nobodys('b'), nobodys('c'), held('d'), held('e')],
+      LEAVES_ON
+    );
+    expect(notice).toEqual({
+      going: m.studio_leaving_delete_going({ count: 3 }),
+      leaving: {
+        title: m.studio_leaving_delete_leave_title({ count: 2, date }),
+        body: m.studio_leaving_delete_leave_many_download({
+          titles: joinNames(['“Piece d”', '“Piece e”']),
+        }),
+      },
+    });
+  });
+
+  it('never sums owners: one course’s buyers are in every lesson’s count', () => {
+    const notice = manyNotice(
+      [held('d'), held('e', { holderCount: 3 })],
+      LEAVES_ON
+    );
+    // Their owners, never "60 owners".
+    expect(notice.leaving?.body).toBe(
+      m.studio_leaving_delete_leave_many_download({
+        titles: joinNames(['“Piece d”', '“Piece e”']),
+      })
+    );
+    expect(notice.going).toBeNull();
+  });
+
+  it('one that leaves is named alone; one going now beside it reads as one', () => {
+    expect(manyNotice([nobodys('a'), held('d')], LEAVES_ON)).toEqual({
+      going: m.studio_leaving_delete_going_one(),
+      leaving: {
+        title: m.studio_leaving_delete_leave_title_one({ date }),
+        body: m.studio_leaving_delete_leave_one_download({ name: '“Piece d”' }),
+      },
+    });
+  });
+
+  it('says watch for them all when any of them turned downloads off', () => {
+    const notice = manyNotice(
+      [held('d'), held('e', { ownersCanDownload: false })],
+      LEAVES_ON
+    );
+    expect(notice.leaving?.body).toBe(
+      m.studio_leaving_delete_leave_many_watch({
+        titles: joinNames(['“Piece d”', '“Piece e”']),
       })
     );
   });
 
-  it('gives a shared title its address, so two of a name never read alike', () => {
-    const paid = held('p', { title: 'Introduction', slug: 'intro-paid' });
-    const free = held('f', {
-      title: 'Introduction',
-      slug: 'intro-free',
-      priceCents: null,
+  it('keeps today’s words when nobody owns any of them', () => {
+    expect(manyNotice([nobodys('a'), nobodys('b')], LEAVES_ON)).toEqual({
+      going: m.studio_content_delete_many_body({ count: 2 }),
+      leaving: null,
     });
-    expect(unpublishOffer([paid, free, held('a')])).toEqual({
-      ids: ['p', 'a'],
-      words: `${m.studio_content_delete_unpublish_ends_named_stays({ name: '“Introduction” (/intro-free)' })} ${m.studio_content_delete_unpublish_keeps_named_many({ titles: joinNames(['“Introduction” (/intro-paid)', '“Piece a”']) })}`,
-    });
+    expect(manyNotice([nobodys('a')], LEAVES_ON).going).toBe(
+      m.studio_content_delete_many_body_one()
+    );
   });
 
-  it('gives a title shared with a deleted piece its address too', () => {
-    const kept = held('b', { title: 'Introduction', slug: 'intro' });
-    const going = held('o', {
-      title: 'Introduction',
-      slug: 'intro-old',
-      holderCount: 0,
-    });
-    // The deleted one is weighed for names only: nobody has it.
-    expect(unpublishOffer([going, kept, freeLesson('c')])).toEqual({
-      ids: ['b'],
-      words: `${m.studio_content_delete_unpublish_ends_named_stays({ name: '“Piece c”' })} ${m.studio_content_delete_unpublish_keeps_named({ name: '“Introduction” (/intro)' })}`,
-    });
-    expect(heldNotice('many', [going, kept], null)?.title).toBe(
-      m.studio_content_delete_kept_one_title({
+  it('gives a title a deleted piece shares with a leaving one its address', () => {
+    const going = nobodys('o', { title: 'Introduction', slug: 'intro-old' });
+    const leaving = held('b', { title: 'Introduction', slug: 'intro' });
+    expect(manyNotice([going, leaving], LEAVES_ON).leaving?.body).toBe(
+      m.studio_leaving_delete_leave_one_download({
         name: '“Introduction” (/intro)',
       })
     );
   });
+});
 
-  it('says nothing of unpublishing a draft', () => {
+describe('deletedWords', () => {
+  it('says a deleted piece is deleted, and one already gone too', () => {
+    const deleted = m.studio_content_deleted_one({ title: 'A' });
     expect(
-      unpublishOffer([held('a', { status: 'draft' }), freeLesson('b')])
-    ).toEqual({
-      ids: [],
-      // Only the live one is weighed; beside a draft, it is named.
-      words: m.studio_content_delete_unpublish_ends_named({
-        name: '“Piece b”',
-      }),
-    });
-    // Two that would lose it, beside a draft: by name, both of them.
-    expect(
-      unpublishOffer([
-        held('z', { status: 'draft' }),
-        freeLesson('b'),
-        freeLesson('c'),
-      ]).words
-    ).toBe(
-      m.studio_content_delete_unpublish_ends_named_many({
-        titles: joinNames(['“Piece b”', '“Piece c”']),
-      })
+      deletedWords('A', { outcome: 'deleted', leavesAt: null, holders: 0 })
+    ).toBe(deleted);
+    expect(deletedWords('A', null)).toBe(deleted);
+  });
+
+  it('says when a leaving piece goes, and that its owners are emailed', () => {
+    const leavesAt = LEAVES_ON.toISOString();
+    const leaving = {
+      outcome: 'leaving',
+      leavesAt,
+      started: true,
+      leavingByCreator: true,
+      leavingByOrg: false,
+    } as const;
+    expect(deletedWords('A', { ...leaving, holders: 57 })).toBe(
+      m.studio_leaving_deleted({ title: 'A', date, count: 57 })
     );
-    expect(unpublishOffer([held('a', { status: 'draft' })])).toEqual({
-      ids: [],
-      words: null,
+    expect(deletedWords('A', { ...leaving, holders: 1 })).toBe(
+      m.studio_leaving_deleted_one_owner({ title: 'A', date })
+    );
+  });
+
+  // A delete that only added its side (design §4) emailed nobody.
+  it('says a delete beside the org’s leaves even if the org keeps it, nobody emailed again', () => {
+    const leavesAt = LEAVES_ON.toISOString();
+    const words = deletedWords('A', {
+      outcome: 'leaving',
+      leavesAt,
+      holders: 57,
+      started: false,
+      leavingByCreator: true,
+      leavingByOrg: true,
     });
+    expect(words).toBe(m.studio_leaving_deleted_too({ title: 'A', date }));
+    expect(words).not.toMatch(/emailed/);
+  });
+
+  // Review round 2: a repeat of the creator's own (a second tab) names no org.
+  it('says a repeat of the creator’s own delete was already leaving, naming no org', () => {
+    const leavesAt = LEAVES_ON.toISOString();
+    const words = deletedWords('A', {
+      outcome: 'leaving',
+      leavesAt,
+      holders: 57,
+      started: false,
+      leavingByCreator: true,
+      leavingByOrg: false,
+    });
+    expect(words).toBe(m.studio_leaving_deleted_again({ title: 'A', date }));
+    expect(words).not.toMatch(/org/);
   });
 });
 
-describe('heldNotice', () => {
-  const ends = m.studio_content_delete_unpublish_ends_it();
-
-  it('the row menu says by how many people, then what unpublishing does', () => {
-    expect(heldNotice('one', [freeLesson('a')], ends)).toEqual({
-      title: m.studio_content_delete_bought_title({ count: 3 }),
-      body: `${m.studio_content_delete_bought_body()} ${ends}`,
-    });
-    expect(
-      heldNotice('one', [held('a', { holderCount: 1 })], null)?.title
-    ).toBe(m.studio_content_delete_bought_title_one());
+describe('unknownWords', () => {
+  it('says what a delete does either way, never that nobody owns it', () => {
+    const words = unknownWords(LEAVES_ON);
+    expect(words).toBe(m.studio_leaving_delete_unknown({ date }));
+    expect(words).not.toBe(m.studio_content_delete_one_body());
   });
+});
 
-  it('the bulk bar names the one it leaves alone, or counts them', () => {
-    expect(heldNotice('many', [held('a')], null)).toEqual({
-      title: m.studio_content_delete_kept_one_title({ name: '“Piece a”' }),
-      body: m.studio_content_delete_kept_one_body({ count: 3 }),
-    });
-    expect(heldNotice('many', [held('a'), held('b')], null)).toEqual({
-      title: m.studio_content_delete_kept_title({ count: 2 }),
-      body: m.studio_content_delete_kept_body(),
-    });
-  });
-
-  it('is nothing when nobody has any of them', () => {
-    expect(heldNotice('many', [], null)).toBeNull();
-    expect(
-      heldNotice('many', [held('a', { holderCount: 0 })], null)
-    ).toBeNull();
-    expect(unpublishOffer([held('a', { holderCount: 0 })])).toEqual({
-      ids: [],
-      words: null,
-    });
+// "Delete it too" (owner 2026-11-20): a leave only the org's delete holds.
+describe('tooWords', () => {
+  it('says its owners were already told, never that they are emailed today', () => {
+    const words = tooWords(LEAVES_ON.toISOString());
+    expect(words).toBe(m.studio_leaving_delete_too_body({ date }));
+    expect(words).toMatch(/already told/);
+    expect(words).not.toMatch(/emailed today/);
   });
 });

@@ -19,7 +19,8 @@
  * @codex/admin and @codex/worker-utils.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ServiceRegistry } from '@codex/worker-utils';
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 
 interface Policy {
   auth?: string;
@@ -133,11 +134,13 @@ const PLATFORM_OWNER = { id: 'support_user', role: 'platform_owner' };
 const ORG_ADMIN = { id: 'org_admin_user', role: 'creator' };
 const CREATOR = { id: 'creator_user', role: 'creator' };
 
+/** Typed by the service's own methods, so a mock the service outgrew fails typecheck. */
+type AdminContent = ServiceRegistry['adminContent'];
 let adminContent: {
-  deleteContent: ReturnType<typeof vi.fn>;
-  keepContent: ReturnType<typeof vi.fn>;
-  takedownContent: ReturnType<typeof vi.fn>;
-  refreshAfterChange: ReturnType<typeof vi.fn>;
+  deleteContent: Mock<AdminContent['deleteContent']>;
+  keepContent: Mock<AdminContent['keepContent']>;
+  takedownContent: Mock<AdminContent['takedownContent']>;
+  refreshAfterChange: Mock<AdminContent['refreshAfterChange']>;
 };
 
 beforeEach(() => {
@@ -239,10 +242,14 @@ describe('DELETE /api/admin/content/:contentId', () => {
 
   it('answers a held piece’s date and keeps its cover', async () => {
     const leavesAt = '2031-03-31T12:00:00.000Z';
+    // The org's delete started the leave: its side alone holds it.
     adminContent.deleteContent.mockResolvedValue({
       outcome: 'leaving',
-      leavesAt,
+      leavesAt: new Date(leavesAt),
       holders: 2,
+      started: true,
+      leavingByCreator: false,
+      leavingByOrg: true,
       creatorId: CREATOR.id,
     });
 
@@ -250,7 +257,14 @@ describe('DELETE /api/admin/content/:contentId', () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      data: { outcome: 'leaving', leavesAt, holders: 2 },
+      data: {
+        outcome: 'leaving',
+        leavesAt,
+        holders: 2,
+        started: true,
+        leavingByCreator: false,
+        leavingByOrg: true,
+      },
     });
     expect(adminContent.deleteContent.mock.calls).toEqual([[ORG_ID, PIECE]]);
     expect(coversCleared()).toEqual([]);
@@ -287,12 +301,18 @@ describe('POST /api/admin/content/:contentId/keep', () => {
   });
 
   it('declares the org-management policy, and asks with the org', async () => {
-    adminContent.keepContent.mockResolvedValue({ kept: true, staying: 1 });
+    adminContent.keepContent.mockResolvedValue({
+      kept: true,
+      staying: 1,
+      stillLeavingBy: null,
+    });
 
     const res = await call('POST', '/keep');
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ data: { kept: true, staying: 1 } });
+    expect(await res.json()).toEqual({
+      data: { kept: true, staying: 1, stillLeavingBy: null },
+    });
     expect(adminContent.keepContent.mock.calls).toEqual([[ORG_ID, PIECE]]);
     expect(state.policies).toEqual([
       {
@@ -305,7 +325,11 @@ describe('POST /api/admin/content/:contentId/keep', () => {
   });
 
   it('refreshes nothing for a piece that was not leaving', async () => {
-    adminContent.keepContent.mockResolvedValue({ kept: false, staying: 0 });
+    adminContent.keepContent.mockResolvedValue({
+      kept: false,
+      staying: 0,
+      stillLeavingBy: null,
+    });
 
     await call('POST', '/keep');
 

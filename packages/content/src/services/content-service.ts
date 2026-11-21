@@ -896,6 +896,8 @@ export class ContentService extends BaseService {
             shaderPreset: validated.shaderPreset || null,
             shaderConfig: validated.shaderConfig ?? null,
             featured: validated.featured ?? false,
+            // The download switch (Codex-a6ofh.6, N1-B): on unless sent off.
+            ownersCanDownload: validated.ownersCanDownload ?? true,
             // Content access POLICY flags (SPEC §6.1) — hard-replace the old
             // (accessType, minimumTierId). Flags are separable/non-exclusive.
             isPurchasable: validated.isPurchasable ?? false,
@@ -1040,8 +1042,13 @@ export class ContentService extends BaseService {
       // Surface current category memberships (WP-5) so the studio edit form can
       // pre-select them — critical because update REPLACES the set, so a form
       // that submitted an empty selection would otherwise wipe every tag.
-      // A dead category never shows as a live selection.
-      const membershipRows = await this.liveCategoryIds(this.db, id);
+      // A dead category never shows as a live selection. Beside it, who holds
+      // the piece (Codex-a6ofh.6): the editor's Delete says how many people
+      // own it, the count the list's rows carry.
+      const [membershipRows, holders] = await Promise.all([
+        this.liveCategoryIds(this.db, id),
+        holderCountsOf(this.db, [id]),
+      ]);
 
       // The item's tiers (Codex-2hxff.91), so the editor's tier picker can
       // pre-tick them: the editor refuses to save a set it never read.
@@ -1071,6 +1078,7 @@ export class ContentService extends BaseService {
         ...(wired ?? result),
         categoryIds: membershipRows.map((row) => row.categoryId),
         thumbnailFrame: frame ?? null,
+        holderCount: holders.get(id) ?? 0,
       };
     } catch (error) {
       this.handleError(error, 'get');
@@ -1263,6 +1271,18 @@ export class ContentService extends BaseService {
           (validated.organizationId ?? null) !== existing.organizationId
         ) {
           throw new ContentLeavingError(id, 'move');
+        }
+
+        // Whether its owners can download it is what they were emailed when
+        // it was deleted (owner 2026-11-21): it holds until a Keep, so the
+        // promise does. An unchanged value is no change (the form sends it
+        // every save); a Keep frees it, and a later delete emails the new one.
+        if (
+          existing.leavesAt &&
+          validated.ownersCanDownload !== undefined &&
+          validated.ownersCanDownload !== existing.ownersCanDownload
+        ) {
+          throw new ContentLeavingError(id, 'download');
         }
 
         // Moving the row into a different org needs the same team membership
@@ -2562,8 +2582,9 @@ export class ContentService extends BaseService {
    * Delete content (owner D1, Codex-a6ofh.6): a soft delete, or, for a piece
    * people hold, the leaving notice. It goes off sale and leaves on a date
    * {@link LEAVING_NOTICE_DAYS} days out, its holders keep it until then and
-   * each is emailed (`deleteOrLeave`). Deleting a leaving piece again changes
-   * nothing. Scoped to the creator's own pieces.
+   * each is emailed (`deleteOrLeave`). Deleting a leaving piece again starts
+   * no new round and emails nobody; it adds the creator's side if the org's
+   * delete alone held it. Scoped to the creator's own pieces.
    *
    * @param id - Content ID
    * @param creatorId - Creator ID (for authorization)
@@ -3293,6 +3314,9 @@ export class ContentService extends BaseService {
         outcome: 'leaving',
         leavesAt: result.leavesAt.toISOString(),
         holders: result.holders,
+        started: result.started,
+        leavingByCreator: result.leavingByCreator,
+        leavingByOrg: result.leavingByOrg,
         touched,
       };
     });

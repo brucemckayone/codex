@@ -28,13 +28,17 @@
   @prop {(busy: boolean, failed: boolean) => void} [oncoverbusy] - A cover is going up or coming off; failed once that ended in a problem, said here
   @prop {(busy: boolean) => void} [oncategorybusy] - A category made in the fold is on its way
   @prop {(invalid: boolean) => void} [onslugcheck] - What is typed in the link is not one
+
+  Who can watch carries Buy once's "Owners can download it" switch, and on a
+  live piece people own, the line that a move to Followers or Team only
+  keeps it for them (Codex-a6ofh.6, mockups N1-B and LN5).
 -->
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { Alert, Button } from '$lib/components/ui';
   import * as Accordion from '$lib/components/ui/Accordion';
   import ContentCard from '$lib/components/ui/ContentCard/ContentCard.svelte';
-  import { LockIcon } from '$lib/components/ui/Icon';
+  import { InfoIcon, LockIcon } from '$lib/components/ui/Icon';
   import { getCategories } from '$lib/remote/categories.remote';
   import type { ContentWithRelations } from '$lib/types';
   import { accessGroupToFlags, type ContentAccessKind } from '$lib/utils/content-access';
@@ -42,6 +46,7 @@
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import * as m from '$paraglide/messages';
   import AccessSection from '../content-form/AccessSection.svelte';
+  import { ownersKeepLine } from '../content-list/access-change';
   import OrganizeSection from '../content-form/OrganizeSection.svelte';
   import SlugField from '../content-form/SlugField.svelte';
   import { logReadFailure } from '../media-library/log-read-failure';
@@ -69,6 +74,8 @@
     coverChanged?: string | null | undefined;
     oncoverchange: (next: string | null | undefined) => void;
     live?: boolean;
+    /** Why the download switch is held (a leaving piece's owners were told); null when it can change. */
+    downloadLocked?: string | null;
     oncoverbusy?: (busy: boolean, failed: boolean) => void;
     oncategorybusy?: (busy: boolean) => void;
     onslugcheck?: (invalid: boolean) => void;
@@ -88,6 +95,7 @@
     coverChanged,
     oncoverchange,
     live = false,
+    downloadLocked = null,
     oncoverbusy,
     oncategorybusy,
     onslugcheck,
@@ -124,6 +132,9 @@
 
   /** What a save sends for the access group: what the card reads. */
   const flags = $derived(accessGroupToFlags(access, organizationId));
+
+  /** A live piece on sale that people own, moved to Followers or Team only: they keep it (LN5). */
+  const ownersKeep = $derived(live ? ownersKeepLine(content, access) : null);
 
   // ── How it looks in lists ──────────────────────────────────────────────
   const cover = $derived(coverChanged === undefined ? savedCover : coverChanged);
@@ -211,7 +222,16 @@
     onPriceChange={changePrice}
     onTierToggle={toggleTier}
     onSelectFromTier={selectTiersFrom}
+    ownersCanDownload={session.values.ownersCanDownload}
+    onOwnersCanDownloadChange={(on) => onchange('ownersCanDownload', on)}
+    {downloadLocked}
   />
+  {#if ownersKeep}
+    <p class="owners-keep">
+      <InfoIcon size={14} />
+      <span>{ownersKeep}</span>
+    </p>
+  {/if}
   <!-- The Publish step says this in its checklist; a live piece has none, so here, by the options it affects. -->
   {#if live && reads.connectUnread}
     <Alert variant="warning">
@@ -320,6 +340,21 @@
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
+  }
+
+  /* LN5: its owners keep it, by the options that would move it. */
+  .owners-keep {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-status-info-text);
+  }
+
+  .owners-keep :global(svg) {
+    flex-shrink: 0;
+    margin-top: var(--space-0-5);
   }
 
   .settings-card {

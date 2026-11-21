@@ -969,6 +969,12 @@ describe('AdminContentManagementService', () => {
         holders: 1,
         creatorId,
       });
+      // The org's delete started it: its side alone holds it.
+      expect(result).toMatchObject({
+        started: true,
+        leavingByCreator: false,
+        leavingByOrg: true,
+      });
       const after = await stored(piece.id);
       expect(after.deletedAt).toBeNull();
       expect(after.leavesAt?.getTime()).toBe(result.leavesAt?.getTime());
@@ -1011,6 +1017,12 @@ describe('AdminContentManagementService', () => {
         outcome: 'leaving',
         leavesAt: first.leavesAt,
         holders: 1,
+      });
+      // Its side added to the creator's: no new round, both hold it.
+      expect(again).toMatchObject({
+        started: false,
+        leavingByCreator: true,
+        leavingByOrg: true,
       });
       const after = await stored(piece.id);
       expect([after.leavingByCreator, after.leavingByOrg]).toEqual([

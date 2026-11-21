@@ -251,13 +251,21 @@ export class ContentAlreadyLiveError extends ConflictError {
  * publish in place would tell nobody. And a leave belongs to its org: moved,
  * an org admin's leave could be kept by another org's admins (owner
  * 2026-11-19), and one moved to personal by nobody.
+ *
+ * `download`: a change to whether its owners can download it, which they
+ * were told when it was deleted (owner 2026-11-21).
  */
 export class ContentLeavingError extends ConflictError {
-  constructor(contentId: string, action: 'publish' | 'move' = 'publish') {
-    super(`This is leaving. Keep it first, then ${action} it.`, {
-      contentId,
-      code: ERROR_CODES.CONTENT_LEAVING,
-    });
+  constructor(
+    contentId: string,
+    action: 'publish' | 'move' | 'download' = 'publish'
+  ) {
+    super(
+      action === 'download'
+        ? 'Its owners were told when it was deleted whether they can download it. Keep it first, then change that.'
+        : `This is leaving. Keep it first, then ${action} it.`,
+      { contentId, code: ERROR_CODES.CONTENT_LEAVING }
+    );
   }
 }
 

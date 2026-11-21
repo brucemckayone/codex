@@ -55,9 +55,8 @@ export function sharedPrice(pieces: readonly AccessPiece[]): number | null {
   return only ?? null;
 }
 
+/** A line under the sheet: what the change does. */
 export interface AccessLine {
-  /** `warning`: some pieces will be left alone. */
-  tone: 'info' | 'warning';
   text: string;
 }
 
@@ -75,14 +74,6 @@ function buyersKeep(pieces: readonly AccessPiece[]): string | null {
     ? m.studio_content_access_buyers_keep_one()
     : m.studio_content_access_buyers_keep({ count: buyers });
 }
-
-/**
- * Left alone by a move to Followers or Team only (owner R1): a piece people
- * have, unless it is course-only, which the access decision answers before
- * either gate, so its course holders keep it, as the server judges it.
- */
-const leftAloneByGate = (piece: AccessPiece) =>
-  isHeld(piece) && !piece.courseOnly;
 
 function withBuyers(text: string, pieces: readonly AccessPiece[]): string {
   const keep = buyersKeep(pieces);
@@ -108,7 +99,7 @@ function repriceLine(
           to,
         })
       : m.studio_content_access_reprice_many({ count: repriced.length, to });
-  return { tone: 'info', text: withBuyers(text, repriced) };
+  return { text: withBuyers(text, repriced) };
 }
 
 function stopsSoldLine(
@@ -121,13 +112,14 @@ function stopsSoldLine(
     stopping.length === 1
       ? m.studio_content_access_stops_sold_one()
       : m.studio_content_access_stops_sold({ count: stopping.length });
-  return { tone: 'info', text: buyersStay ? withBuyers(text, stopping) : text };
+  return { text: buyersStay ? withBuyers(text, stopping) : text };
 }
 
 /**
  * What the change does, in the mockup's words: a price that changes, pieces
- * that stop being sold, tiers kept, and (owner R1) the bought pieces a move
- * to Followers or Team only leaves alone, since both end a buyer's playback.
+ * that stop being sold, and tiers kept. A move to Followers or Team only
+ * takes every piece off sale, and the people who have one keep it (owner D2,
+ * Codex-a6ofh.6 mockup LN5), so none is left alone any more.
  */
 export function accessChangeLines(
   pieces: readonly AccessPiece[],
@@ -140,10 +132,7 @@ export function accessChangeLines(
         choice.priceCents > 0 ? repriceLine(pieces, choice.priceCents) : null
       );
       if (pieces.some((piece) => piece.isTierGated)) {
-        lines.push({
-          tone: 'info',
-          text: m.studio_content_access_keeps_tiers(),
-        });
+        lines.push({ text: m.studio_content_access_keeps_tiers() });
       }
       break;
     case 'subscribers':
@@ -154,28 +143,28 @@ export function accessChangeLines(
       );
       break;
     case 'followers':
-    case 'team': {
-      const bought = pieces.filter(leftAloneByGate);
-      const [only] = bought;
-      if (only) {
-        lines.push({
-          tone: 'warning',
-          text:
-            bought.length === 1
-              ? m.studio_content_access_left_alone_one({ title: only.title })
-              : m.studio_content_access_left_alone({ count: bought.length }),
-        });
-      }
-      lines.push(
-        stopsSoldLine(
-          pieces.filter((piece) => !leftAloneByGate(piece)),
-          false
-        )
-      );
+    case 'team':
+      lines.push(stopsSoldLine(pieces, true));
       break;
-    }
     default:
       lines.push(stopsSoldLine(pieces, false));
   }
   return lines.filter((line): line is AccessLine => line !== null);
+}
+
+/**
+ * The live editor's line for one piece on sale that people own, moved to
+ * Followers or Team only (Codex-a6ofh.6, mockup LN5): it stops being sold,
+ * and they keep it. Null for any other piece or choice.
+ */
+export function ownersKeepLine(
+  piece: AccessPiece,
+  choice: DraftAccess
+): string | null {
+  if (choice.kind !== 'followers' && choice.kind !== 'team') return null;
+  if (!forSale(piece) || !isHeld(piece)) return null;
+  const owners = piece.holderCount ?? 0;
+  return owners === 1
+    ? m.studio_leaving_access_owners_keep_one()
+    : m.studio_leaving_access_owners_keep({ count: owners });
 }

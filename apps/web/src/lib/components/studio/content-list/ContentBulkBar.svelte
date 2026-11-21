@@ -3,7 +3,8 @@
 
   The content list's selection bar (Codex-a6ofh.3.5, mockup L2): how many
   are selected, and what can be done to them, one request each. Publish
-  shows with a draft selected, Unpublish with a live piece. Add to category
+  shows with a draft selected, Unpublish with a live piece, and Delete with
+  a piece not already leaving (Codex-a6ofh.6). Add to category
   is the org studio's, for a member who can read its categories. At most
   CONTENT_BULK_MAX are held (owner D-b3), and the bar says so at the cap.
   While an action runs its buttons wait, and its live region says what is
@@ -27,6 +28,7 @@
     busy: string | null;
     canPublish: boolean;
     canUnpublish: boolean;
+    canDelete: boolean;
     /** Add to category's choices; undefined offers no Add to category. */
     categories?: readonly Category[];
     onPublish: () => void;
@@ -43,6 +45,7 @@
     busy,
     canPublish,
     canUnpublish,
+    canDelete,
     categories,
     onPublish,
     onUnpublish,
@@ -94,10 +97,12 @@
       <UsersIcon size={14} />
       {m.studio_content_bulk_change_access()}
     </Button>
-    <Button size="sm" variant="secondary" disabled={waiting} onclick={onDelete}>
-      <TrashIcon size={14} />
-      {m.studio_content_bulk_delete()}
-    </Button>
+    {#if canDelete}
+      <Button size="sm" variant="secondary" disabled={waiting} onclick={onDelete}>
+        <TrashIcon size={14} />
+        {m.studio_content_bulk_delete()}
+      </Button>
+    {/if}
     <Button
       size="sm"
       variant="ghost"

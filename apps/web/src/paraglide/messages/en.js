@@ -8703,22 +8703,6 @@ export const studio_content_form_price_help = () => `Leave at £0.00 for free co
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_delete_confirm_title = () => `Delete Content`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_delete_confirm_description = () => `Are you sure you want to delete this content? This action cannot be undone.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_delete_success = () => `Content deleted successfully`
 
 
@@ -34163,22 +34147,6 @@ export const studio_content_access_stops_sold = (params) => `${params.count} pie
 
 
 /**
- * @param {{ title: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_access_left_alone_one = (params) => `“${params.title}” will be left alone: people have it, bought or given, and this would end their playback.`
-
-
-/**
- * @param {{ count: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_access_left_alone = (params) => `${params.count} pieces people have, bought or given, will be left alone: this would end their playback.`
-
-
-/**
  * @param {{ count: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -34203,139 +34171,11 @@ export const studio_content_delete_many_body_one = () => `1 will be deleted. Nob
 
 
 /**
- * @param {{ name: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_one_title = (params) => `${params.name} will be left alone.`
-
-
-/**
- * @param {{ count: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_one_body = (params) => `${params.count} people have it, bought or given, and deleting it would end their playback.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_one_body_single = () => `1 person has it, bought or given, and deleting it would end their playback.`
-
-
-/**
- * @param {{ count: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_title = (params) => `${params.count} pieces will be left alone.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_kept_body = () => `People have them, bought or given, and deleting them would end their playback.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_keeps_it = () => `Unpublishing it takes it off sale, and they keep watching.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_keeps_them = () => `Unpublishing them takes them off sale, and they keep watching.`
-
-
-/**
- * @param {{ name: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_keeps_named = (params) => `Unpublishing ${params.name} takes it off sale, and they keep watching.`
-
-
-/**
- * @param {{ titles: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_keeps_named_many = (params) => `Unpublishing ${params.titles} takes them off sale, and they keep watching.`
-
-
-/**
  * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_delete_unpublish_ends_it = () => `Unpublishing it would end their playback too.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_them = () => `Unpublishing them would end their playback too.`
-
-
-/**
- * @param {{ name: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_named = (params) => `Unpublishing ${params.name} would end their playback too.`
-
-
-/**
- * @param {{ titles: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_named_many = (params) => `Unpublishing ${params.titles} would end their playback too.`
-
-
-/**
- * @param {{ name: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_named_stays = (params) => `Unpublishing ${params.name} would end their playback too, so it stays up.`
-
-
-/**
- * @param {{ titles: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_ends_named_many_stays = (params) => `Unpublishing ${params.titles} would end their playback too, so they stay up.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_it = () => `Unpublish it instead`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_unpublish_them = () => `Unpublish them instead`
 
 
 /**
@@ -34360,30 +34200,6 @@ export const studio_content_delete_one_title = (params) => `Delete “${params.t
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_delete_one_body = () => `Nobody can watch a deleted piece, and this can’t be undone.`
-
-
-/**
- * @param {{ count: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_bought_title = (params) => `${params.count} people have it.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_bought_title_one = () => `1 person has it.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_content_delete_bought_body = () => `Deleting ends their playback, and it can’t be undone.`
 
 
 /**
@@ -34416,6 +34232,566 @@ export const studio_content_delete_failed = (params) => `Couldn’t delete “${
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_deleted_one = (params) => `Deleted “${params.title}”.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_status = () => `Leaving`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_row = (params) => `Leaves ${params.date} · ${params.count} owners emailed`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_row_one = (params) => `Leaves ${params.date} · 1 owner emailed`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_row_short = (params) => `Leaves ${params.date}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_owners = (params) => `${params.count} owners`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_owners_one = () => `1 owner`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_owners_keep_until = (params) => `Owners keep it until ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_org_note = (params) => `Your org’s delete still stands · leaves ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_org_too = () => `Your org deleted it too`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bar_org_too = () => `Your org deleted it too, so Keep it withdraws only your delete.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_too = () => `Delete it too: it leaves even if your org keeps it`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_too_named = (params) => `Delete “${params.title}” too: it leaves even if your org keeps it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_too_menu = () => `Delete it too…`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_too_title = (params) => `Delete “${params.title}” too?`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_too_body = (params) => `Your org already deleted it, and it leaves Revelations on ${params.date}. Its owners were already told, so nobody is emailed again. Deleting it too means it leaves even if your org keeps it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_too_confirm = () => `Delete it too`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_deleted_too = (params) => `Deleted “${params.title}” too. It leaves on ${params.date}, even if your org keeps it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_keep = () => `Keep it`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_keep_named = (params) => `Keep “${params.title}”`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_keeping = () => `Keeping…`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_kept = (params) => `Kept “${params.title}”. It stays off sale.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_kept_org_stands = (params) => `Your delete of “${params.title}” is withdrawn, but your org’s delete still stands · leaves ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_kept_here = () => `Kept. It stays off sale.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_kept_here_org_stands = (params) => `Your delete is withdrawn, but your org’s delete still stands · leaves ${params.date}`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_keep_not_yours = (params) => `An org admin deleted “${params.title}”, so only an org admin can keep it.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_keep_failed = (params) => `Couldn’t keep “${params.title}”. Try again.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_keep_hint = (params) => `It leaves on ${params.date}. Keeping it cancels that, and it stays off sale.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_publish_refused = () => `It’s leaving. Keep it first, then publish it.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_owners = (params) => `${params.count} people own it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_owners_one = () => `1 person owns it.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_body_download = (params) => `It goes off sale now and leaves Revelations on ${params.date}. We’ll email them today, and they can download it until then.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_body_watch = (params) => `It goes off sale now and leaves Revelations on ${params.date}. We’ll email them today, and they can watch it until then.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_keep_any_time = (params) => `You can keep it any time before ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_unpublish_instead = () => `Unpublishing instead takes it off sale, and they keep it for good.`
+
+
+/**
+ * @param {{ days: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_in_days = (params) => `Delete in ${params.days} days`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_going = (params) => `${params.count} are deleted now. Nobody owns them, and this can’t be undone.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_going_one = () => `1 is deleted now. Nobody owns it, and this can’t be undone.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_leave_title = (params) => `${params.count} leave on ${params.date}:`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_leave_title_one = (params) => `1 leaves on ${params.date}:`
+
+
+/**
+ * @param {{ titles: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_leave_many_download = (params) => `${params.titles}. Their owners are emailed today and can download them until then.`
+
+
+/**
+ * @param {{ titles: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_leave_many_watch = (params) => `${params.titles}. Their owners are emailed today and can watch them until then.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_leave_one_download = (params) => `${params.name}. Its owners are emailed today and can download it until then.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_leave_one_watch = (params) => `${params.name}. Its owners are emailed today and can watch it until then.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_too_soon = (params) => `Owners were emailed under a day ago. Delete again after ${params.time}.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_too_soon_tomorrow = (params) => `Owners were emailed under a day ago. Delete again after ${params.time} tomorrow.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, date: NonNullable<unknown>, count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_deleted = (params) => `“${params.title}” leaves on ${params.date}. We’re emailing its ${params.count} owners today.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_deleted_one_owner = (params) => `“${params.title}” leaves on ${params.date}. We’re emailing its 1 owner today.`
+
+
+/**
+ * @param {{ done: NonNullable<unknown>, count: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bulk_deleted_leave = (params) => `${params.done} deleted · ${params.count} leave on ${params.date}.`
+
+
+/**
+ * @param {{ done: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bulk_deleted_leave_one = (params) => `${params.done} deleted · 1 leaves on ${params.date}.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bulk_leave = (params) => `${params.count} leave on ${params.date}.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bulk_leave_one = (params) => `1 leaves on ${params.date}.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bar_title = (params) => `Leaving on ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bar_off_sale = () => `Off sale.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bar_download = (params) => `Off sale. ${params.count} people own it and can download it until then.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bar_download_one = () => `Off sale. 1 person owns it and can download it until then.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bar_watch = (params) => `Off sale. ${params.count} people own it and can watch it until then.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_bar_watch_one = () => `Off sale. 1 person owns it and can watch it until then.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_access_owners_keep = (params) => `It stops being sold. The ${params.count} people who own it keep it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_access_owners_keep_one = () => `It stops being sold. The 1 person who owns it keeps it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_download_label = () => `Owners can download it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_download_hint = () => `If you ever remove it, they can keep a copy.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_download_locked = () => `Owners were told when you deleted it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_download_locked_org = () => `Owners were told when your org deleted it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_download_locked_both = () => `Owners were told when it was deleted.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_download_refused = () => `It’s leaving, and its owners were told whether they can download it, so that stays until you keep it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_download_unsaved = () => `Your change to “Owners can download it” isn’t saved, so they’d be told what’s saved now. Update first to send it.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_delete_unknown = (params) => `If anyone owns it, it goes off sale now and leaves Revelations on ${params.date}, and they’re emailed today. If nobody does, it’s deleted now, and that can’t be undone.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_keep_gone = (params) => `“${params.title}” has already left Revelations, so there’s nothing to keep.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_deleted_again = (params) => `“${params.title}” was already leaving. It leaves on ${params.date}, and nobody is emailed again.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_leaving_too_soon_on = (params) => `Owners were emailed under a day ago. Delete again after ${params.time} on ${params.date}.`
 
 
 /**

@@ -99,6 +99,33 @@ export function formatSentenceDate(
     : dayMonthYearFormatter.format(date);
 }
 
+const dayShortMonthFormatter = new Intl.DateTimeFormat(LOCALE, {
+  day: 'numeric',
+  month: 'short',
+  timeZone: SENTENCE_DATE_TIME_ZONE,
+});
+
+const dayShortMonthYearFormatter = new Intl.DateTimeFormat(LOCALE, {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  timeZone: SENTENCE_DATE_TIME_ZONE,
+});
+
+/**
+ * {@link formatSentenceDate} where room is short (a list row, a result
+ * line): `12 Nov`, with the year only when it is not this year's.
+ */
+export function formatShortSentenceDate(
+  dateStr: string | Date,
+  now: Date = new Date()
+): string {
+  const date = new Date(dateStr);
+  return yearFormatter.format(date) === yearFormatter.format(now)
+    ? dayShortMonthFormatter.format(date)
+    : dayShortMonthYearFormatter.format(date);
+}
+
 /**
  * Format an instant as a 24-hour clock time in the RUNTIME's zone: `16:00`.
  *

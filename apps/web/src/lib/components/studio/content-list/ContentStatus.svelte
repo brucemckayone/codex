@@ -3,15 +3,15 @@
 
   A piece's status in the content list (Codex-a6ofh.3.1): a dot and its
   words, as `listStatus` says it. Once live and not on sale it is "Off
-  sale", muted, never a draft (owner, 2026-11-05). The dot is decoration;
-  the words carry the state.
+  sale", muted, never a draft (owner, 2026-11-05). A piece leaving
+  (Codex-a6ofh.6, mockup LN3) is its own warning pill, "Leaving". The dot is
+  decoration; the words carry the state.
 -->
 <script lang="ts">
-  import type { PublicationState } from '@codex/constants';
-  import { listStatus } from './list-status';
+  import { type ListStatusPiece, listStatus } from './list-status';
 
   interface Props {
-    piece: PublicationState;
+    piece: ListStatusPiece;
   }
 
   const { piece }: Props = $props();
@@ -51,5 +51,18 @@
 
   .content-status[data-status='off-sale'] .status-dot {
     background-color: var(--color-text-muted);
+  }
+
+  /* Leaving (LN3): a warning pill, so it stands out from the Off sale rows it is filed with. */
+  .content-status[data-status='leaving'] {
+    padding: var(--space-0-5) var(--space-2);
+    border-radius: var(--radius-full);
+    background-color: var(--color-status-warning-surface);
+    color: var(--color-status-warning-text);
+    font-weight: var(--font-medium);
+  }
+
+  .content-status[data-status='leaving'] .status-dot {
+    background-color: var(--color-warning);
   }
 </style>

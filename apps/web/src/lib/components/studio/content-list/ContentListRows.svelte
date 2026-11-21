@@ -7,9 +7,10 @@
   its ⋯ menu. About six pieces a screen, where a card shows one and a half.
   A phone's Grid is still the cards (`ContentListGrid`).
 
-  The one more fact, as the mockup's rows: the tier a subscriber piece is
-  in, else its count (sales, or views), else when it was last changed. The
-  same words as the table and the cards (`row-facts`).
+  The one more fact, as the mockup's rows: a leaving piece's owners (LN3),
+  else the tier a subscriber piece is in, else its count (sales, or views),
+  else when it was last changed. The same words as the table and the cards
+  (`row-facts`).
 
   The whole row is the title's link; the box (the bulk bar's) and the menu
   sit above it.
@@ -24,7 +25,14 @@
   import ContentStatus from './ContentStatus.svelte';
   import ContentThumb from './ContentThumb.svelte';
   import type { ContentSelection } from './content-selection.svelte';
-  import { accessWords, countWords, rowHref, rowLine, type TierName } from './row-facts';
+  import {
+    accessWords,
+    countWords,
+    type LeavingLine,
+    rowHref,
+    rowLine,
+    type TierName,
+  } from './row-facts';
 
   interface Props {
     items: ContentWithRelations[];
@@ -34,9 +42,13 @@
     selection: ContentSelection;
     /** A row's ⋯ menu, given the row and where its title opens it. */
     rowMenu: Snippet<[ContentWithRelations, string]>;
+    /** Keep it or Delete it too, on a leaving row's line (Codex-a6ofh.6, LN3). */
+    onLeaveAction: (row: ContentWithRelations, action: LeavingLine['action']) => void;
+    /** An action on the list is under way: the line's action waits. */
+    busy: boolean;
   }
 
-  const { items, payouts, tierName, selection, rowMenu }: Props = $props();
+  const { items, payouts, tierName, selection, rowMenu, onLeaveAction, busy }: Props = $props();
 </script>
 
 <ul class="content-rows" role="list">
@@ -44,7 +56,11 @@
     {@const line = rowLine(row, payouts)}
     {@const href = rowHref(row, line)}
     {@const access = accessWords(row, tierName)}
-    {@const fact = access.detail ?? countWords(row) ?? formatRelativeTime(row.updatedAt)}
+    {@const fact =
+      (line?.kind === 'leaving' ? line.owners : null) ??
+      access.detail ??
+      countWords(row) ??
+      formatRelativeTime(row.updatedAt)}
     <li class="crow" data-content-id={row.id} data-selected={selection.has(row.id) || undefined}>
       <span class="crow-tool"><ContentSelectBox {selection} {row} /></span>
       <ContentThumb piece={row} variant="compact" />
@@ -54,7 +70,7 @@
           <ContentStatus piece={row} />
           <span class="crow-fact">{access.label} · {fact}</span>
         </span>
-        {#if line}<ContentRowLine {line} />{/if}
+        {#if line}<ContentRowLine {line} title={row.title} compact {busy} onaction={(action) => onLeaveAction(row, action)} />{/if}
       </div>
       <span class="crow-tool">{@render rowMenu(row, href)}</span>
     </li>

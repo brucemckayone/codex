@@ -183,7 +183,8 @@ export interface ContentWithRelations extends Content {
    * How many people would lose it, paid for or given, through the piece or
    * a course that holds it (Codex-a6ofh.3.5, owner 2026-11-13): what a bulk
    * delete, or a move to Followers or Team only, leaves alone. The studio
-   * list's rows only, beside `buyerCount`.
+   * list's rows, beside `buyerCount`, and `ContentService.get` (the editor's
+   * Delete, Codex-a6ofh.6).
    */
   holderCount?: number;
   /**
@@ -419,12 +420,26 @@ export type UnpublishContentResponse = SingleItemResponse<Content>;
 
 /**
  * What a delete did (Codex-a6ofh.6): `deleted` at once, as nobody holds it,
- * or `leaving` on `leavesAt`, its `holders` keeping it until then and each
- * emailed. A piece already leaving answers `leaving` with its date as it was.
+ * or `leaving` on `leavesAt`, its `holders` keeping it until then. A piece
+ * already leaving answers `leaving` with its date as it was.
+ *
+ * `started` says which: true when this delete started the leave and wrote
+ * its owners' emails; false when the piece was already leaving and this
+ * delete only added its side (or repeated it), with no new round and no
+ * email (design §4). `leavingByCreator` and `leavingByOrg` are whose deletes
+ * hold the leave once this one is written, so a screen says whose it is
+ * without a guess: a repeat names no other side.
  */
 export type DeleteContentResult =
   | { outcome: 'deleted'; leavesAt: null; holders: 0 }
-  | { outcome: 'leaving'; leavesAt: Date; holders: number };
+  | {
+      outcome: 'leaving';
+      leavesAt: Date;
+      holders: number;
+      started: boolean;
+      leavingByCreator: boolean;
+      leavingByOrg: boolean;
+    };
 
 /** Response for DELETE /api/content/:id */
 export type DeleteContentResponse = SingleItemResponse<DeleteContentResult>;

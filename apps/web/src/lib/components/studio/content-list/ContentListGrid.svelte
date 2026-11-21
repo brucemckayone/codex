@@ -24,6 +24,7 @@
     accessWords,
     categoryWords,
     countWords,
+    type LeavingLine,
     rowHref,
     rowLine,
     type TierName,
@@ -39,9 +40,13 @@
     selection: ContentSelection;
     /** A card's ⋯ menu, given the row and where its title opens it. */
     rowMenu: Snippet<[ContentWithRelations, string]>;
+    /** Keep it or Delete it too, on a leaving card's line (Codex-a6ofh.6, LN3). */
+    onLeaveAction: (row: ContentWithRelations, action: LeavingLine['action']) => void;
+    /** An action on the list is under way: the line's action waits. */
+    busy: boolean;
   }
 
-  const { items, payouts, tierName, showCategories, selection, rowMenu }: Props = $props();
+  const { items, payouts, tierName, showCategories, selection, rowMenu, onLeaveAction, busy }: Props = $props();
 </script>
 
 <ul class="content-grid" role="list">
@@ -64,7 +69,7 @@
           {/if}
           {#if counted}<span class="card-fact">{counted}</span>{/if}
         </span>
-        {#if line}<ContentRowLine {line} />{/if}
+        {#if line}<ContentRowLine {line} title={row.title} {busy} onaction={(action) => onLeaveAction(row, action)} />{/if}
       </div>
       <!-- After the title's link, so they sit above the card-wide link. -->
       <span class="card-tool card-select"><ContentSelectBox {selection} {row} /></span>

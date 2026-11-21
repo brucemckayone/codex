@@ -744,7 +744,9 @@ app.post(
  * DELETE /api/content/:id
  * Delete content (Codex-a6ofh.6): one nobody holds is deleted at once; one
  * people hold goes off sale and leaves in 30 days, its holders emailed and
- * keeping it until then. Deleting a leaving piece again changes nothing.
+ * keeping it until then. Deleting a leaving piece again starts no new round
+ * and emails nobody; it adds the creator's side if the org's delete alone
+ * held it.
  *
  * Security: Creator/Admin only, Strict rate limit (5 req/15min)
  * @returns {DeleteContentResponse}

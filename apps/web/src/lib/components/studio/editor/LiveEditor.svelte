@@ -17,6 +17,15 @@
   The tab is in the address (`?tab=settings`), swapped in place, so a reload
   opens where the creator was. Mounted by `ContentEditor`, once per visit.
 
+  A piece leaving (Codex-a6ofh.6, mockup LN4): the bar says when it goes,
+  with Keep it, and its edits still go with Update. A Delete of a piece
+  people own leaves the editor where it is, on it leaving; Keep it, from the
+  bar or Settings, puts it back off sale. A leave only the org's delete
+  holds offers Delete it too instead, from the bar or Settings: the
+  creator's delete beside the org's, its owners not emailed again; then
+  Keep it withdraws only theirs (owner 2026-11-20). The Delete dialog and
+  the publish toggle are this editor's, so the bar and Settings share them.
+
   @prop {ContentWithRelations} content - The piece, read on arriving
   @prop {EditorContentType} contentType - The piece's type
   @prop {string | null} organizationId - The org it is filed in; null in the personal studio
@@ -26,17 +35,46 @@
   @prop {LiveTab} [tab] - The tab the address asks for
 -->
 <script lang="ts">
+  import { CONTENT_STATUS, ERROR_CODES } from '@codex/constants';
   import { untrack } from 'svelte';
   import { replaceState } from '$app/navigation';
   import { page } from '$app/state';
   import * as Tabs from '$lib/components/ui/Tabs';
   import { toast } from '$lib/components/ui/Toast/toast-store';
+  import { describeThrown } from '$lib/client-log';
+  import { logger } from '$lib/observability';
+  import { remoteErrorMessage } from '$lib/page-builder/builder-save';
+  import { deleteContent, keepContent, readLeaveState } from '$lib/remote/content.remote';
   import { getMediaItem } from '$lib/remote/media.remote';
-  import type { ContentWithRelations } from '$lib/types';
+  import {
+    isReadOutage,
+    queryErrorMessage,
+    remoteErrorCode,
+    remoteErrorStatus,
+  } from '$lib/remote/query-result';
+  import type { ContentDeleteOutcome, ContentWithRelations } from '$lib/types';
+  import { formatSentenceDate } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
+  import DeleteContentDialog, { type DeleteTarget } from '../content-list/DeleteContentDialog.svelte';
+  import { deletedWords } from '../content-list/delete-words';
+  import {
+    canKeep,
+    downloadLockedWords,
+    keepRefusalWords,
+    type Leave,
+    leaveOf,
+    tooSoonWords,
+  } from '../content-list/leaving-words';
+  import { logReadFailure } from '../media-library/log-read-failure';
+  import { togglePublishStatus } from '../publish-toggle';
   import { savedDraftValues } from './canvas-text';
   import { createDraftSession, type LeaveAnswer, type LeaveReason } from './draft-session.svelte';
-  import { type EditorContentType, LIVE_TAB_PARAM, type LiveTab } from './editor-url';
+  import {
+    CONTENT_LIST_HREF,
+    type EditorContentType,
+    LIVE_TAB_PARAM,
+    type LiveTab,
+  } from './editor-url';
   import LeaveDialog from './LeaveDialog.svelte';
   import LiveBar from './LiveBar.svelte';
   import LiveSettings from './LiveSettings.svelte';
@@ -65,6 +103,231 @@
 
   /** On sale now, until Unpublish here (and back with Publish again). */
   let published = $state(untrack(() => content.status === 'published'));
+
+  // ── Its leave (Codex-a6ofh.6) ──────────────────────────────────────────
+  /** As read, then as a Delete or a Keep here leaves it; null when it isn't leaving. */
+  let leavesOn = $state<Leave | null>(untrack(() => leaveOf(content)));
+  /** Bumped by every change of the leave here, so a read sent before one is dropped. */
+  let leaveChanges = 0;
+  function setLeave(next: Leave | null) {
+    leavesOn = next;
+    leaveChanges += 1;
+  }
+  /**
+   * How many people own it: the read's, then a delete's own count. Null when
+   * the read did not say (a content-api older than this editor): not known,
+   * never "nobody", so the Delete dialog says what a delete does either way.
+   */
+  let owners = $state<number | null>(untrack(() => content.holderCount ?? null));
+  let keeping = $state(false);
+
+  /**
+   * Keep it: the creator's delete withdrawn, the piece off sale. When an org
+   * admin deleted it too, it still leaves, now on the org's delete alone (a
+   * note and Delete it too again), and a Keep refused as not theirs says so.
+   */
+  async function keep() {
+    const leave = leavesOn;
+    if (keeping || leave === null) return;
+    keeping = true;
+    try {
+      const outcome = await keepContent(content.id);
+      if (outcome.stillLeavingBy === 'org') {
+        setLeave({ ...leave, heldBy: 'org' });
+        toast.success(
+          m.studio_leaving_kept_here_org_stands({ date: formatSentenceDate(leave.leavesAt) })
+        );
+      } else {
+        setLeave(null);
+        toast.success(m.studio_leaving_kept_here());
+      }
+    } catch (err) {
+      logReadFailure('studio_live.keep_failed', err, { contentId: content.id });
+      toast.error(keepRefused(err, leave));
+    } finally {
+      keeping = false;
+    }
+  }
+
+  /**
+   * A refused Keep in words, the leave set as the refusal says it stands: an
+   * org admin's (403), a lapsed sign-in, the piece already gone (the day-30
+   * delete or a takedown finished while this tab was open: no Keep is left),
+   * or the refusal's own words, as the content list's Keep says them. An
+   * outage names the piece.
+   */
+  function keepRefused(err: unknown, leave: Leave): string {
+    const notYours = keepRefusalWords(err, content.title);
+    if (notYours) {
+      setLeave({ ...leave, heldBy: 'org' });
+      return notYours;
+    }
+    if (remoteErrorStatus(err) === 401) return m.studio_content_draft_signed_out();
+    if (remoteErrorCode(err) === ERROR_CODES.CONTENT_NOT_FOUND) {
+      setLeave(null);
+      return m.studio_leaving_keep_gone({ title: content.title });
+    }
+    return (
+      (isReadOutage(err) ? null : remoteErrorMessage(err)) ??
+      m.studio_leaving_keep_failed({ title: content.title })
+    );
+  }
+
+  // ── Unpublish, or publish again ────────────────────────────────────────
+  let toggling = $state(false);
+  /** The toggle says how it went (a toast either way); a failure leaves it as it was. */
+  async function togglePublished(): Promise<void> {
+    toggling = true;
+    try {
+      const next = await togglePublishStatus(content.id, published ? 'published' : 'draft');
+      published = next === 'published';
+    } catch (err) {
+      // Said in the toggle's own toast, which keeps a refusal's words; the
+      // toggle logs nothing, so it is logged here, by the studio's one rule.
+      logReadFailure('studio_live.publish_toggle_failed', err, { contentId: content.id, published });
+    } finally {
+      toggling = false;
+    }
+  }
+
+  // ── Delete (Codex-a6ofh.6, mockup LN1) ─────────────────────────────────
+  let confirmingDelete = $state(false);
+  let deleting = $state(false);
+  /** Why the dialog's last Delete was refused (too soon), said in it. */
+  let deleteRefusal = $state<string | null>(null);
+  /**
+   * The piece as the dialog weighs it: on sale as this visit has it, owned
+   * by `owners` (not known: absent). A leave only the org's delete holds is
+   * Delete it too.
+   */
+  const deleteTarget = $derived.by((): DeleteTarget | null => {
+    if (!confirmingDelete) return null;
+    const piece = {
+      ...content,
+      status: published ? CONTENT_STATUS.PUBLISHED : CONTENT_STATUS.DRAFT,
+      holderCount: owners ?? undefined,
+      ownersCanDownload: savedDownload,
+    };
+    return leavesOn && !canKeep(leavesOn)
+      ? { mode: 'too', piece, leavesAt: leavesOn.leavesAt }
+      : { mode: 'one', piece };
+  });
+  /** Said in the dialog while the switch's change is unsaved and someone may own it. */
+  const deleteNote = $derived.by(() =>
+    deleteTarget?.mode === 'one' && downloadUnsaved && owners !== 0
+      ? m.studio_leaving_delete_download_unsaved()
+      : null
+  );
+
+  function closeDelete() {
+    confirmingDelete = false;
+    deleteRefusal = null;
+  }
+
+  /** Unpublish instead (LN1): its owners keep it for good. */
+  async function unpublishInstead() {
+    closeDelete();
+    await togglePublished();
+  }
+
+  async function deletePiece() {
+    deleting = true;
+    deleteRefusal = null;
+    let outcome: ContentDeleteOutcome | null = null;
+    try {
+      outcome = await deleteContent(content.id);
+    } catch (err) {
+      // Gone already (deleted in another tab): what this delete was for. By
+      // the piece's own code: any other 404 (a route, a stale build) is not.
+      if (remoteErrorCode(err) === ERROR_CODES.CONTENT_NOT_FOUND) {
+        logger.warn('studio_live.delete_already_gone', { contentId: content.id });
+      } else {
+        logReadFailure('studio_live.delete_failed', err, { contentId: content.id });
+        // Too soon after its last notice: said in the dialog, which stays.
+        deleteRefusal = tooSoonWords(err);
+        if (deleteRefusal === null) {
+          const status = remoteErrorStatus(err);
+          // A lapsed sign-in says what to do, as Update's does; a refusal (a
+          // rule) keeps its words. Any 404 but the piece's own is the
+          // platform's, not the creator's to read.
+          const refused = status !== undefined && status >= 400 && status < 500 && status !== 404;
+          toast.error(
+            status === 401
+              ? m.studio_content_draft_signed_out()
+              : (refused && queryErrorMessage(err)) || m.studio_content_form_delete_error()
+          );
+        }
+        deleting = false;
+        return;
+      }
+    }
+    if (outcome?.outcome === 'leaving') {
+      // Its owners keep it until then: the editor stays, on it leaving (LN4),
+      // held by the sides the delete answered with.
+      toast.success(deletedWords(content.title, outcome));
+      closeDelete();
+      deleting = false;
+      setLeave(leaveOf(outcome));
+      owners = outcome.holders;
+      published = false;
+      // The switch holds as they were told until a Keep: a change not sent
+      // can't go now, so it goes back to what is saved.
+      if (downloadUnsaved) session.set('ownersCanDownload', savedDownload);
+      return;
+    }
+    // Nothing is left to update: the move away neither asks nor waits.
+    toast.success(m.studio_content_form_delete_success());
+    await session
+      .leave(CONTENT_LIST_HREF)
+      .catch((err) => logger.warn('studio_live.leave_after_delete_failed', describeThrown(err)));
+    deleting = false;
+  }
+
+  /**
+   * Its leave, read fresh: an Update refused as leaving says it started
+   * elsewhere (an org admin, another tab), so the bar, the lock and Keep (or
+   * not) follow what is read. A Keep or a delete here while the read is out
+   * is newer: the read is dropped. Answers the leave as it then stands, or
+   * undefined when the read failed (logged), which is not "not leaving".
+   */
+  async function readSides(): Promise<Leave | null | undefined> {
+    const asked = leaveChanges;
+    try {
+      const read = leaveOf(await readLeaveState(content.id));
+      if (leaveChanges === asked) setLeave(read);
+    } catch (err) {
+      logReadFailure('studio_live.leave_sides_read_failed', err, { contentId: content.id });
+      return undefined;
+    }
+    return leavesOn;
+  }
+
+  /**
+   * An Update refused because it started leaving elsewhere while the switch
+   * was changed here (owner 2026-11-21): its leave is read, so the bar, the
+   * lock and Keep show. Leaving, the switch goes back to what its owners were
+   * told, and the bar's refusal goes with it ("Keep it first" is no way out
+   * of a leave only the org's delete holds); the words follow whose it is:
+   * only the creator's own waits for their Keep. Unread, the screen can't
+   * say: a reload can. Not leaving after all (kept meanwhile), the change
+   * stays, for the next Update.
+   */
+  async function downloadRefused() {
+    const leave = await readSides();
+    if (leave === null) {
+      toast.error(m.studio_content_draft_save_failed());
+      return;
+    }
+    session.set('ownersCanDownload', savedDownload);
+    session.dismissRefusal();
+    toast.error(
+      leave === undefined
+        ? m.studio_editor_failed()
+        : leave.heldBy === 'creator'
+          ? m.studio_leaving_download_refused()
+          : downloadLockedWords(leave.heldBy)
+    );
+  }
 
   // ── Leaving ────────────────────────────────────────────────────────────
   /** The question the session is asking; null when none is. */
@@ -150,6 +413,13 @@
     })
   );
 
+  /**
+   * Whether its owners can download it, as saved: what a delete tells them.
+   * The switch's unsaved change goes only with Update (the review's M2).
+   */
+  const savedDownload = $derived(session.savedValues.ownersCanDownload);
+  const downloadUnsaved = $derived(session.changedKeys.includes('ownersCanDownload'));
+
   // ── The tabs ───────────────────────────────────────────────────────────
   let tab = $state<string>(untrack(() => initialTab));
   /** Settings mounts the first time it opens, and stays, so its reads wait for that. */
@@ -208,6 +478,10 @@
       const result = await session.flush();
       // A refusal is the bar's to say: its words stay until fixed or discarded.
       if (result.ok) toast.success(published ? m.studio_live_updated() : m.studio_live_updated_unpublished());
+      // It started leaving elsewhere (another tab, an org admin).
+      else if (result.code === ERROR_CODES.CONTENT_LEAVING && downloadUnsaved) {
+        void downloadRefused();
+      }
     } finally {
       updating = false;
     }
@@ -222,7 +496,22 @@
 
 <div class="editor">
   <Tabs.Root bind:value={() => tab, switchTab} defaultValue={initialTab}>
-    <LiveBar {session} {published} onupdate={update} ondiscard={discard} {updating} {updateHint} {waiting} />
+    <LiveBar
+      {session}
+      {published}
+      onupdate={update}
+      ondiscard={discard}
+      {updating}
+      {updateHint}
+      {waiting}
+      {leavesOn}
+      owners={owners ?? 0}
+      ownersCanDownload={savedDownload}
+      {keeping}
+      onkeep={keep}
+      ondeletetoo={() => (confirmingDelete = true)}
+      {deleting}
+    />
     <!-- Said while the carried changes still wait: Update or Discard ends it. -->
     <p class="live-carried" role="status" data-type={contentType}>{carriedWords}</p>
     <div class="editor-body" inert={updating}>
@@ -254,7 +543,13 @@
               {creatorUsername}
               {authorName}
               {published}
-              onpublishedchange={(next) => (published = next)}
+              {toggling}
+              ontoggle={togglePublished}
+              {leavesOn}
+              {keeping}
+              onkeep={keep}
+              {deleting}
+              ondelete={() => (confirmingDelete = true)}
               oncoverbusy={(busy, failed) => {
                 settingsCoverBusy = busy;
                 if (failed) session.stay();
@@ -270,6 +565,16 @@
 </div>
 
 <LeaveDialog reason={asked} changes={session.changeCount} onanswer={(given) => answer?.(given)} />
+
+<DeleteContentDialog
+  target={deleteTarget}
+  busy={deleting || toggling}
+  refusal={deleteRefusal}
+  note={deleteNote}
+  onDelete={deletePiece}
+  onUnpublish={unpublishInstead}
+  onClose={closeDelete}
+/>
 
 <style>
   .editor {

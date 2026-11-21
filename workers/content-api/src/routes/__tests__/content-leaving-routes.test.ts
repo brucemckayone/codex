@@ -118,7 +118,14 @@ describe('the leaving notice routes', () => {
     it('answers a held piece with its date and holders, and keeps its cover', async () => {
       contentSpies.delete.mockResolvedValue({
         organizationId: ORG_ID,
-        result: { outcome: 'leaving', leavesAt: LEAVES_AT, holders: 2 },
+        result: {
+          outcome: 'leaving',
+          leavesAt: LEAVES_AT,
+          holders: 2,
+          started: true,
+          leavingByCreator: true,
+          leavingByOrg: false,
+        },
       });
 
       const res = await call('DELETE', `/${PIECE}`);
@@ -130,11 +137,44 @@ describe('the leaving notice routes', () => {
           outcome: 'leaving',
           leavesAt: LEAVES_AT.toISOString(),
           holders: 2,
+          started: true,
+          leavingByCreator: true,
+          leavingByOrg: false,
         },
       });
       expect(coversCleared()).toEqual([]);
       expect(orgsBumped()).toEqual([ORG_ID]);
       expect(reasons()).toEqual(['content_leaving']);
+    });
+
+    // A delete that only added its side to a leave under way (design §4):
+    // the screen words it as such, since nobody was emailed.
+    it('says when a delete only added its side, starting no round', async () => {
+      contentSpies.delete.mockResolvedValue({
+        organizationId: ORG_ID,
+        result: {
+          outcome: 'leaving',
+          leavesAt: LEAVES_AT,
+          holders: 2,
+          started: false,
+          leavingByCreator: true,
+          leavingByOrg: true,
+        },
+      });
+
+      const res = await call('DELETE', `/${PIECE}`);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        data: {
+          outcome: 'leaving',
+          leavesAt: LEAVES_AT.toISOString(),
+          holders: 2,
+          started: false,
+          leavingByCreator: true,
+          leavingByOrg: true,
+        },
+      });
     });
 
     it('clears the cover of a piece deleted at once', async () => {

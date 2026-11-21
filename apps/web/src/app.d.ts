@@ -53,9 +53,12 @@ declare global {
       message: string;
       code?: string;
       /**
-       * An ISO-8601 instant after which a refused write can succeed. Set by
-       * `updateCourseMonetisation` for a course plan Stripe refuses until the
-       * hour turns (Codex-2hxff.66); the browser shows it in local time.
+       * An ISO-8601 instant after which a refused write can succeed, set by
+       * `forwardClientErrors` (`retryAfterFrom`) for two callers:
+       * `updateCourseMonetisation`, for a course plan Stripe refuses until the
+       * hour turns (Codex-2hxff.66, `details.retryAfter`), and `deleteContent`,
+       * for a delete too soon after its owners were emailed (Codex-a6ofh.6,
+       * `details.retryAt`). The browser shows it in local time.
        */
       retryAfter?: string;
       /**

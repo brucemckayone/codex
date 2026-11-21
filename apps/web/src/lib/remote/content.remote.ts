@@ -474,21 +474,67 @@ export const getContentBatch = query.batch(z.string().uuid(), async (ids) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Delete content by ID. A refusal keeps its status and words
+ * Delete content by ID (Codex-a6ofh.6): `deleted` at once, or `leaving` on
+ * its date when people own it. A refusal keeps its status and words
  * ({@link forwardClientErrors}): a lapsed sign-in or a piece already gone is
  * not an outage. A piece already gone says so by its own code
  * (`CONTENT_NOT_FOUND`), which the editor treats as done; a 404 alone is not.
+ * One deleted again too soon after its owners were emailed (409
+ * `CONTENT_LEAVING_TOO_SOON`) keeps its code, and when it can go again
+ * (`details.retryAt`) as `retryAfter`, so the dialog says that time in the
+ * creator's own zone.
  *
  * Usage:
  * ```typescript
- * await deleteContent(contentId);
+ * const { outcome, leavesAt } = await deleteContent(contentId);
  * ```
  */
 export const deleteContent = command(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
   return forwardClientErrors(() => api.content.delete(id), {
+    detailCodes: [
+      ERROR_CODES.CONTENT_NOT_FOUND,
+      ERROR_CODES.CONTENT_LEAVING_TOO_SOON,
+    ],
+    retryAfterFrom: 'retryAt',
+  });
+});
+
+/**
+ * Whose deletes hold a piece's leave, read fresh (Codex-a6ofh.6): an Update
+ * refused with 409 `CONTENT_LEAVING` says it started leaving elsewhere, and
+ * the editor reads whose it is, so it shows the leave, the lock and Keep (or
+ * not). Only these fields go back, as {@link readPublishState} does, without
+ * refreshing the page's own read.
+ */
+export const readLeaveState = command(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  const row = await forwardClientErrors(() => api.content.get(id), {
     detailCodes: [ERROR_CODES.CONTENT_NOT_FOUND],
+  });
+  return {
+    leavesAt: row.leavesAt,
+    leavingByCreator: row.leavingByCreator,
+    leavingByOrg: row.leavingByOrg,
+  };
+});
+
+/**
+ * Keep a leaving piece (Codex-a6ofh.6): `POST /api/content/:id/keep`. It
+ * stays off sale. A leave only an org admin's delete holds is refused by its
+ * own code (`CONTENT_LEAVE_NOT_YOURS`), and a piece already gone by
+ * `CONTENT_NOT_FOUND`.
+ */
+export const keepContent = command(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return forwardClientErrors(() => api.content.keep(id), {
+    detailCodes: [
+      ERROR_CODES.CONTENT_LEAVE_NOT_YOURS,
+      ERROR_CODES.CONTENT_NOT_FOUND,
+    ],
   });
 });
 
@@ -603,6 +649,8 @@ const CANCEL_REFUSAL_CODES = [ERROR_CODES.CONTENT_ALREADY_LIVE] as const;
 const SAVE_REFUSAL_CODES = [
   ...PUBLISH_REFUSAL_CODES,
   ERROR_CODES.CONTENT_ALREADY_LIVE,
+  // A leaving piece's move, or its download switch (Codex-a6ofh.6).
+  ERROR_CODES.CONTENT_LEAVING,
 ] as const;
 
 /**

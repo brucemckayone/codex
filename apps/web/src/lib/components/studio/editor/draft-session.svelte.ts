@@ -114,6 +114,11 @@ export interface DraftValues {
   featured: boolean;
   access: DraftAccess;
   /**
+   * Whether owners can download it if it leaves (Codex-a6ofh.6, owner
+   * N1-B): Buy once's switch. On unless the creator turns it off.
+   */
+  ownersCanDownload: boolean;
+  /**
    * The cover. A draft's upload writes the row itself, so only a piece that
    * has been live sets it here: a cover staged for Update, or null to remove
    * it (Codex-a6ofh.2.5).
@@ -253,6 +258,19 @@ export interface DraftSession {
   /** The title the server holds: what the piece is called where it is live. */
   readonly savedTitle: string;
   /**
+   * Every field as the server holds it: set as the piece was read, and again
+   * as each save lands (Codex-a6ofh.6: what a delete now tells its owners).
+   */
+  readonly savedValues: Readonly<DraftValues>;
+  /** The fields a save would send: what is not saved yet. */
+  readonly changedKeys: readonly (keyof DraftValues)[];
+  /**
+   * Forget the last save's refusal once the field it refused is put back
+   * (Codex-a6ofh.6: a leaving piece's download switch), so the bar no longer
+   * says it while the other changes still wait.
+   */
+  dismissRefusal(): void;
+  /**
    * Open the piece in the live editor, carrying every change not on its row
    * (but its address: a live piece keeps its own), to wait for Update
    * (owner, 2026-11-09). Only once it {@link DraftSession.wentLiveElsewhere}.
@@ -323,6 +341,7 @@ const EMPTY: DraftValues = {
   tags: [],
   featured: false,
   access: { kind: 'free', priceCents: 0, tierIds: null },
+  ownersCanDownload: true,
   thumbnailUrl: null,
   shaderPreset: null,
 };
@@ -1376,6 +1395,15 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     },
     get savedTitle() {
       return baseline.title.trim();
+    },
+    get savedValues() {
+      return baseline;
+    },
+    get changedKeys() {
+      return toSend;
+    },
+    dismissRefusal() {
+      autosave.dismissError();
     },
     get openLiveProblem() {
       return openProblem;

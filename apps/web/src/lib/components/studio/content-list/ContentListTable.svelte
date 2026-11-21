@@ -28,6 +28,7 @@
   import {
     accessWords,
     categoryWords,
+    type LeavingLine,
     rowHref,
     rowLine,
     salesShown,
@@ -45,9 +46,13 @@
     selection: ContentSelection;
     /** A row's ⋯ menu, given the row and where its title opens it. */
     rowMenu: Snippet<[ContentWithRelations, string]>;
+    /** Keep it or Delete it too, on a leaving row's line (Codex-a6ofh.6, LN3). */
+    onLeaveAction: (row: ContentWithRelations, action: LeavingLine['action']) => void;
+    /** An action on the list is under way: the line's action waits. */
+    busy: boolean;
   }
 
-  const { items, payouts, tierName, showCategories, selection, rowMenu }: Props = $props();
+  const { items, payouts, tierName, showCategories, selection, rowMenu, onLeaveAction, busy }: Props = $props();
 </script>
 
 {#snippet count(value: string | null)}
@@ -94,7 +99,7 @@
                 {row.title}
               </a>
               <span class="row-slug">/{row.slug}</span>
-              {#if line}<ContentRowLine {line} />{/if}
+              {#if line}<ContentRowLine {line} title={row.title} {busy} onaction={(action) => onLeaveAction(row, action)} />{/if}
             </span>
           </div>
         </Table.Cell>

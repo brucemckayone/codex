@@ -8,6 +8,10 @@
  * L1); an archived piece is Off sale too, the tab that lists both
  * (Codex-a6ofh.3.6). ContentStatus (the table and the cards) and the
  * Access cell's "Buyers keep access" both ask here.
+ *
+ * A piece leaving (Codex-a6ofh.6, mockup LN3) is off sale with a date, and
+ * filed under Off sale with the rest, but reads "Leaving": it goes back with
+ * Keep it, never Publish again, which its leave refuses.
  */
 import {
   CONTENT_LIFECYCLE,
@@ -22,11 +26,16 @@ export function isOffSale(piece: PublicationState): boolean {
   return contentLifecycle(piece) === CONTENT_LIFECYCLE.OFF_SALE;
 }
 
-/** How it looks: its lifecycle, the one the list's tabs file it under. */
-export type ListStatusVariant = ContentLifecycle;
+/** How it looks: its lifecycle, the one the list's tabs file it under, or leaving. */
+export type ListStatusVariant = ContentLifecycle | 'leaving';
+
+/** A piece as its status reads it: its lifecycle, and its leave when it has one. */
+export type ListStatusPiece = PublicationState & {
+  leavesAt?: string | null;
+};
 
 const WORDS: Record<
-  ContentLifecycle,
+  ListStatusVariant,
   { label: () => string; toggle: () => string }
 > = {
   [CONTENT_LIFECYCLE.PUBLISHED]: {
@@ -41,15 +50,19 @@ const WORDS: Record<
     label: m.studio_content_status_draft,
     toggle: m.studio_content_form_publish,
   },
+  leaving: {
+    label: m.studio_leaving_status,
+    toggle: m.studio_leaving_keep,
+  },
 };
 
-export function listStatus(piece: PublicationState): {
+export function listStatus(piece: ListStatusPiece): {
   label: string;
   variant: ListStatusVariant;
   /** What its publish toggle says. */
   toggle: string;
 } {
-  const variant = contentLifecycle(piece);
+  const variant = piece.leavesAt != null ? 'leaving' : contentLifecycle(piece);
   const words = WORDS[variant];
   return { label: words.label(), variant, toggle: words.toggle() };
 }

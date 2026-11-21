@@ -287,7 +287,15 @@ export async function deleteOrLeave(
         .where(eq(content.id, piece.id));
     }
     const holders = await leavingRowsOf(tx, piece.id, piece.leavesAt);
-    return { outcome: 'leaving', leavesAt: piece.leavesAt, holders };
+    // This side added (or already there), the other as it was.
+    return {
+      outcome: 'leaving',
+      leavesAt: piece.leavesAt,
+      holders,
+      started: false,
+      leavingByCreator: by === 'creator' || piece.leavingByCreator,
+      leavingByOrg: by === 'org' || piece.leavingByOrg,
+    };
   }
 
   await cancelOpen(tx, piece.id, ['staying'], now);
@@ -345,7 +353,14 @@ export async function deleteOrLeave(
       updatedAt: now,
     })
     .where(eq(content.id, piece.id));
-  return { outcome: 'leaving', leavesAt, holders: written.holders };
+  return {
+    outcome: 'leaving',
+    leavesAt,
+    holders: written.holders,
+    started: true,
+    leavingByCreator: by === 'creator',
+    leavingByOrg: by === 'org',
+  };
 }
 
 /**

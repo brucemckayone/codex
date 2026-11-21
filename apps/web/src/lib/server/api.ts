@@ -204,6 +204,8 @@ import type {
   ConnectAccountStatusResponse,
   ConnectDashboardResponse,
   ConnectOnboardResponse,
+  ContentDeleteOutcome,
+  ContentKeepOutcome,
   ContentWithRelations,
   CurrentSubscription,
   CustomerGrant,
@@ -1253,11 +1255,24 @@ export function createServerApi(
         ),
 
       /**
-       * Delete content
+       * Delete content (Codex-a6ofh.6): `deleted` at once when nobody holds
+       * it, else `leaving` on `leavesAt`, its holders emailed. Refused with
+       * 409 CONTENT_LEAVING_TOO_SOON (`details.retryAt`) less than a day
+       * after the last notice that emailed anyone.
        */
       delete: (id: string) =>
-        request<void>('content', `/api/content/${id}`, {
+        request<ContentDeleteOutcome>('content', `/api/content/${id}`, {
           method: 'DELETE',
+        }),
+
+      /**
+       * Keep a leaving piece (Codex-a6ofh.6): the creator withdraws their own
+       * delete, and it stays off sale. Refused with 403
+       * CONTENT_LEAVE_NOT_YOURS when only an org admin's delete holds it.
+       */
+      keep: (id: string) =>
+        request<ContentKeepOutcome>('content', `/api/content/${id}/keep`, {
+          method: 'POST',
         }),
 
       /**

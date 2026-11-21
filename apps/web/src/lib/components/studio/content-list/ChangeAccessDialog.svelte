@@ -25,7 +25,7 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
-  import { InfoIcon, AlertTriangleIcon } from '$lib/components/ui/Icon';
+  import { InfoIcon } from '$lib/components/ui/Icon';
   import { listTiers } from '$lib/remote/subscription.remote';
   import { connectQueryState, type PayoutsRead } from '$lib/utils/connect-readiness';
   import {
@@ -159,12 +159,8 @@
         {#if lines.length > 0}
           <ul class="access-lines">
             {#each lines as line (line.text)}
-              <li class="access-line" data-tone={line.tone}>
-                {#if line.tone === 'warning'}
-                  <AlertTriangleIcon size={14} />
-                {:else}
-                  <InfoIcon size={14} />
-                {/if}
+              <li class="access-line">
+                <InfoIcon size={14} />
                 <span>{line.text}</span>
               </li>
             {/each}
@@ -204,10 +200,6 @@
     gap: var(--space-2);
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-  }
-
-  .access-line[data-tone='warning'] {
-    color: var(--color-status-warning-text);
   }
 
   .access-line :global(svg) {

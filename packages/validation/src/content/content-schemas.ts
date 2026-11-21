@@ -478,6 +478,11 @@ const baseContentSchema = z.object({
   // Management/staff-only (was accessType 'team').
   isTeamOnly: z.boolean().optional(),
 
+  // Whether owners may download a leaving piece (Codex-a6ofh.6, owner N1-B):
+  // the editor's "Owners can download it" switch. No `.default()`: the
+  // column defaults to true, and an update that never mentions it keeps it.
+  ownersCanDownload: z.boolean().optional(),
+
   // Shader preset for immersive audio playback mode
   shaderPreset: z
     .string()
