@@ -11,12 +11,10 @@ import {
   createMediaRunner,
   type MediaContext,
   type MediaStep,
-  PUSH_DEPTH,
-  PUSH_SECONDS,
   planMedia,
-  pushZoom,
   treatedSize,
 } from '../media-pass';
+import { PUSH_DEPTH, PUSH_SECONDS, pushZoom } from '../stage';
 
 const DESK: MediaContext = {
   phone: false,

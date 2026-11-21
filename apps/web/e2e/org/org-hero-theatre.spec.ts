@@ -148,14 +148,19 @@ async function focusCameBack(page: Page, opener: Locator): Promise<boolean> {
     })
     .catch(() => false);
   if (onOpener) return true;
-  return page.evaluate(() => {
-    const at = document.activeElement;
-    return (
-      at?.getAttribute('aria-current') === 'true' &&
-      at.closest('nav')?.getAttribute('aria-label') === 'Showreel'
-    );
-  });
+  return onIndexItem(page);
 }
+
+/**
+ * True when focus is on exactly the index's button for the piece on show:
+ * never the reel's pause, which comes before it (WP-7 review r2).
+ */
+const onIndexItem = (page: Page) =>
+  page.evaluate(
+    () =>
+      document.activeElement ===
+      document.querySelector('.reel__index .reel__item[aria-current="true"]')
+  );
 
 /** Videos outside every dialog that are playing: the reel's stage footage. */
 const stagePlaying = (page: Page) =>
@@ -333,6 +338,9 @@ test.describe('the Showreel theatre', () => {
     await expect(currentItem(page)).not.toHaveText(piece, {
       timeout: MOVES_ON,
     });
+    // Its button went with the piece: focus is on the next piece's in the
+    // index, never the reel's pause (owner, Codex-1yd58.8; WP-7 review r2).
+    await expect.poll(() => onIndexItem(page)).toBe(true);
     await page.context().close();
   });
 

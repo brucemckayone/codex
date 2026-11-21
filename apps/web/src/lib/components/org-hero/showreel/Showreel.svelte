@@ -58,6 +58,7 @@
   import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
   import type { HeroOptions } from '$lib/org-hero/hero-config';
   import type { ReelEntry } from '$lib/org-hero/reel';
+  import { type GlyphBox, glyphBox } from '$lib/org-hero/showreel/glyph-box';
   import { fitTitle, type NameLines, nameLines } from '$lib/org-hero/showreel/name-lines';
   import { prefersSavingData, reelMode } from '$lib/org-hero/showreel/playback';
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
@@ -87,6 +88,7 @@
     scrimTint,
     shadeFloor,
     shadeProps,
+    wordRoom,
   } from '$lib/org-hero/showreel/reel-scrim';
   import { type ReelWords, reelWords } from '$lib/org-hero/showreel/reel-words';
   import { drawTitleMask } from '$lib/org-hero/showreel/title-mask';
@@ -158,8 +160,9 @@
   const PRESS_MS = 350;
   /** A pointer that moves further than this is a swipe or a scroll, never a tap. */
   const TAP_SLOP = 10;
-  /** The name window's largest size, desktop and phone (the mock's). */
-  const NAME_MAX = { desk: 228, phone: 138 };
+  /** The name window's largest size: desktop (with the peek, smaller) and
+   *  phone, the mock's 228 or 196, and 138. */
+  const NAME_MAX = { desk: 228, deskPeek: 196, phone: 138 };
   /** The Wide title's range (the mock's). */
   const WIDE_TITLE = { min: 72, max: 150 };
 
@@ -172,6 +175,14 @@
   });
 
   const layout = $derived(options['reel-layout']);
+  /**
+   * The peek (owner, 2026-11-21: on by default): the hero stops a lift short
+   * of the screen's foot (`--_lift`), so the landing's first section, its
+   * featured row, rises above the fold. Off when the org has no featured row
+   * (`resolveHero`). The stage is the hero's own box, so the film ends at the
+   * hero's foot too; the fit and the name measure again.
+   */
+  const peek = $derived(options['reel-peek'] === 'on');
   /** How the words keep their contrast over the film (owner, 2026-11-20). */
   const edge = $derived(options['reel-edge']);
   /**
@@ -206,17 +217,6 @@
   });
   const words = $derived(reel.map((entry, i) => reelWords(entry, i, { name, description, filmDuration })));
   const media = $derived(reel.map((entry) => reelMedia(entry, mode)));
-  // WP-5b: the compositor places a portrait piece, and draws the surface and
-  // the stills' push-in on the footage alone, the push-in by the reel's own
-  // clock (it holds when the reel does). A reel held still pushes none in.
-  const pushClock = pieceSeconds(clock);
-  const look = $derived<FilmLook>({
-    frame: layout === 'name' ? 'film-name' : 'film-fill',
-    band: options['reel-band'],
-    surface: options['reel-surface'],
-    push: options['reel-push'] === 'on' && moves ? pushClock : null,
-  });
-
   let rootEl: HTMLElement | undefined = $state();
   let titleEl: HTMLElement | undefined = $state();
   /** The stage, to retry a refused film from the visitor's own touch. */
@@ -255,6 +255,31 @@
       due = target;
     }, OUT_MS);
     return () => clearTimeout(timer);
+  });
+  // WP-5b: the compositor places a portrait piece, and draws the surface and
+  // the stills' push-in on the footage alone, the push-in by the reel's own
+  // clock (it holds when the reel does). A reel held still pushes none in.
+  // The push reads the piece ON SHOW (review M1r2): the clock moves on
+  // before the words and the stage do, and until they follow, the still on
+  // show keeps its last reading (its full push), never the next piece's 0
+  // under the old picture. They follow at the cut's bottom (WP-6, review
+  // M4), so the next starts about the cut's fall in, out of sight there.
+  // Canvas (`pieceSeconds`) and page (`--_push-progress`) read this one.
+  let pushProgress = 0;
+  function pushOnShow(): number {
+    if (keys[clock.index] === shownKey) pushProgress = clock.progress;
+    return pushProgress;
+  }
+  const pushClock = pieceSeconds({
+    get progress() {
+      return pushOnShow();
+    },
+  });
+  const look = $derived<FilmLook>({
+    frame: layout === 'name' ? 'film-name' : 'film-fill',
+    band: options['reel-band'],
+    surface: options['reel-surface'],
+    push: options['reel-push'] === 'on' && moves ? pushClock : null,
   });
   const current = $derived(words[shown] ?? words[0]);
   // In the name window the name is the headline, so the film's slide
@@ -308,13 +333,20 @@
     clock.hold('focus', now instanceof Element && !!rootEl?.contains(now) && now.matches(':focus-visible'));
   }
   /**
-   * What takes focus when a swap removed the button that opened it. Where
-   * checkVisibility is missing (Safari before 17.4) the first stop serves,
-   * as Dialog's does.
+   * What takes focus when the theatre's opener cannot (an 'ended' close; a
+   * Safari click, which focuses nothing): the index's button for the piece
+   * the CLOCK is on, as the owner decided (Codex-1yd58.8: "the opener or the
+   * current index button"; WCAG 2.4.3); where the index is out of sight (a
+   * phone's), the reel's pause. In that order, never by tree order, where
+   * the pause comes first (WP-7 review r2). By the clock, since the index's
+   * `aria-current` follows only once the words' swap lands, OUT_MS later.
+   * Where checkVisibility is missing (Safari before 17.4) a stop serves as
+   * Dialog's does.
    */
   function nextFocus(): HTMLElement | null {
-    const stops = rootEl?.querySelectorAll<HTMLElement>('.reel__item[aria-current="true"], .reel__round') ?? [];
-    return [...stops].find((stop) => stop.checkVisibility?.() ?? true) ?? null;
+    const inSight = (el: HTMLElement | null | undefined) => (el && (el.checkVisibility?.() ?? true) ? el : null);
+    const item = rootEl?.querySelectorAll<HTMLElement>('.reel__item')[clock.index];
+    return inSight(item) ?? inSight(rootEl?.querySelector<HTMLElement>('.reel__round')) ?? null;
   }
 
   // ── time: the clock runs while nothing stops it ──
@@ -328,16 +360,24 @@
       c.tick(Math.min(100, now - last));
       last = now;
       root.style.setProperty('--_progress', String(c.progress));
+      root.style.setProperty('--_push-progress', String(pushOnShow()));
       frame = requestAnimationFrame(step);
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
   });
   // Each piece starts its bar from 0, under a hold too (an index pick while
-  // the pointer rests on the index), when no frame writes it.
+  // the pointer rests on the index), when no frame writes it; and the push
+  // follows the piece on show when it changes (its own swap, out of a frame).
   $effect(() => {
     void clock.starts;
     rootEl?.style.setProperty('--_progress', String(clock.progress));
+  });
+  $effect(() => {
+    void clock.starts;
+    void shownKey;
+    const root = rootEl;
+    if (root) untrack(() => root.style.setProperty('--_push-progress', String(pushOnShow())));
   });
 
   // A phone's press and hold pauses, while it lasts (owner, 2026-11-19).
@@ -506,7 +546,7 @@
   let nameFit = $state<NameLines | null>(null);
   $effect(() => {
     const el = windowEl;
-    const max = desktop.current ? NAME_MAX.desk : NAME_MAX.phone;
+    const max = desktop.current ? (peek ? NAME_MAX.deskPeek : NAME_MAX.desk) : NAME_MAX.phone;
     if (layout !== 'name' || !el) {
       nameFit = null;
       return;
@@ -658,9 +698,13 @@
       // The reel's words ease no colour; should one ever, it lands here at
       // once, so every colour read is the brand's own. `getAnimations`
       // flushes style, so the ease the removal starts is listed (Chrome,
-      // calibrated 2026-11-21); jsdom has no Web Animations.
-      for (const motion of root.getAnimations?.({ subtree: true }) ?? []) {
-        if (easesColour(motion)) motion.finish();
+      // calibrated 2026-11-21); jsdom has no Web Animations. Only the words
+      // the fit reads: a theatre's hover or the film layer's ease, inside the
+      // same reel, keeps its own 100 ms (wp4-review r3).
+      for (const node of root.querySelectorAll<HTMLElement>(`${SCRIMMED}, :is(${SCRIMMED}) *`)) {
+        for (const motion of node.getAnimations?.() ?? []) {
+          if (easesColour(motion)) motion.finish();
+        }
       }
       solveScrims(root, ground.rgb);
     } finally {
@@ -675,7 +719,15 @@
   function solveScrims(root: HTMLElement, ground: Rgb) {
     const box = root.getBoundingClientRect();
     const laid = [...root.querySelectorAll<HTMLElement>(SCRIMMED)]
-      .map((el) => ({ el, r: el.getBoundingClientRect() }))
+      // In 'shadow', each word judged where its glyphs sit (`glyphBox`, review
+      // R4), never its block's far end. In 'outline' by its box: the ring and
+      // its halo reach past the glyphs, and judged by them alone the index's
+      // "02" fell short (4.47:1 on OBB). A control by its own box, which its
+      // fill covers.
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return { el, r, glyphs: el.matches(FILLED) || edge === 'outline' ? r : glyphBox(el) };
+      })
       // Out of sight (the screen readers' name) or not laid out.
       .filter(({ r }) => r.width > 1 && r.height > 1);
     const inHeader = (el: HTMLElement) => el.closest('.reel__top') !== null;
@@ -687,14 +739,26 @@
       bar && bar.height > 1 ? bar.bottom - box.top : 0,
       ...laid.filter(({ el }) => inHeader(el)).map(({ r }) => r.bottom - box.top)
     );
-    const allInks: { ink: Ink; ratio: number }[] = [];
+    // A box as fractions of the reel's.
+    const span = (r: GlyphBox) => ({
+      left: (r.left - box.left) / box.width,
+      top: (r.top - box.top) / box.height,
+      right: (r.right - box.left) / box.width,
+      bottom: (r.bottom - box.top) / box.height,
+    });
+    // Each word's ink, with the most it may need where its glyphs sit
+    // (`wordRoom`, review r3 n1, n3); a control's fill has the scrim's cap.
+    const allInks: { ink: Ink; ratio: number; room?: number }[] = [];
     let top = 0;
     let foot = 0;
     let gap = box.height;
-    for (const { el, r } of laid) {
+    for (const { el, r, glyphs } of laid) {
       const header = inHeader(el) || r.bottom - box.top <= headerFoot;
       const ink = rgba(getComputedStyle(el).color);
-      if (ink) allInks.push({ ink, ratio: ratioOf(el) });
+      if (ink) {
+        const room = el.matches(FILLED) ? undefined : wordRoom(edge, span(glyphs));
+        allInks.push({ ink, ratio: ratioOf(el), room });
+      }
       if (header) top = Math.max(top, r.bottom - box.top);
       else {
         foot = Math.max(foot, box.bottom - r.top);
@@ -716,13 +780,7 @@
     root.style.setProperty('--_scrim', `rgb(${tint.join(' ')})`);
     // Each scrimmed thing's own need (`scrimAlpha` for its COMPUTED ink, with
     // FLOOR_MARGIN; a brand colour is solved as it is, never as an assumed
-    // white or dark), over its box. Null: no scrim of the tint can carry it.
-    const span = (r: DOMRect) => ({
-      left: (r.left - box.left) / box.width,
-      top: (r.top - box.top) / box.height,
-      right: (r.right - box.left) / box.width,
-      bottom: (r.bottom - box.top) / box.height,
-    });
+    // white or dark), over its glyphs. Null: no scrim of the tint can carry it.
     // A colour that cannot keep its floor where it sits is lifted toward the
     // ink pole opposite the veil (`pole`: white over a dark brand's), a
     // twentieth at a time, just far enough, over the footage only
@@ -747,12 +805,12 @@
     };
     const ringed = (ink: Ink, ratio: number, under: number) =>
       solvable(ink, ratio) || outlineAlpha({ ink, ratio }, under, tint, ownPole([{ ink, ratio }])) !== null;
-    const roles = laid.flatMap(({ el, r }) => {
+    const roles = laid.flatMap(({ el, glyphs }) => {
       // Its own ink and any child's in another (the kicker's number), so the
       // strictest of them is solved.
       const ratio = ratioOf(el);
       const fill = el.matches(FILLED);
-      const at = span(r);
+      const at = span(glyphs);
       const drawn = shadeFloor(at, SHADES);
       const fits = (ink: Ink) =>
         fill ? filled(ink, ratio) : edge === 'shadow' ? carried(ink, ratio) : ringed(ink, ratio, drawn);
@@ -798,10 +856,22 @@
       }
       const grown = growShades([...asked.keys()]);
       shades = grown.shades;
-      // A lifted word still short where it sits: one step further, and again.
+      // A word still short where it sits: one step further, and again. A
+      // colour carried as it is but short here (review r3 M1) starts at its
+      // failing nodes, from step 0, a twentieth at a time like any lift;
+      // only one still short at the pole itself wears it outright (below).
       const further = grown.short.flatMap((n) => {
         const role = asked.get(n);
-        return role && role.lifted.length > 0 && role.step < 20 ? [role] : [];
+        if (!role || role.step >= 20) return [];
+        if (role.lifted.length === 0) {
+          const under = shadeFloor(role.span, shades);
+          const glow = glows.get(groupOf(role.el)) ?? 0;
+          role.lifted = role.nodes.filter(({ ink }) => {
+            const need = scrimAlpha([{ ink, ratio: role.ratio }], tint);
+            return need === null || glowLeaves(need, glow) > under + 1e-9;
+          });
+        }
+        return role.lifted.length > 0 ? [role] : [];
       });
       if (further.length === 0) break;
       for (const role of further) role.step += 1;
@@ -908,6 +978,7 @@
   $effect(() => {
     const root = rootEl;
     void layout;
+    void peek;
     void shown;
     void edge;
     void themeState.theme;
@@ -1128,6 +1199,7 @@
   bind:this={rootEl}
   data-hero-root
   data-layout={layout}
+  data-peek={peek ? '' : undefined}
   data-edge={edge}
   data-mode={mode}
   data-paused={clock.paused ? '' : undefined}
@@ -1233,14 +1305,24 @@
     --_glass-a: 0.55;
     --_line: color-mix(in srgb, var(--_ink) 22%, transparent);
     --_progress: 0;
+    /* The piece on show's progress, for the stage's push-in (`pushOnShow`). */
+    --_push-progress: 0;
+    /* The peek's lift: none until `data-peek` sets it. */
+    --_lift: 0px;
 
     position: relative;
     z-index: 2;
     isolation: isolate;
-    min-height: 100svh;
+    min-height: calc(100svh - var(--_lift));
     overflow: hidden;
     color: var(--_ink);
     touch-action: pan-y;
+  }
+
+  /* The peek: the hero a lift short of the screen's foot (the mock's 150 px;
+     132 on a phone, below), so the featured row rises above the fold. */
+  .reel[data-peek] {
+    --_lift: calc(var(--space-32) + var(--space-5) + var(--space-0-5));
   }
 
   /* No colour eases on the reel's words or its links (review R1): a link's
@@ -1899,6 +1981,10 @@
   @media (--below-md) {
     .reel {
       --_gutter: var(--space-4);
+    }
+
+    .reel[data-peek] {
+      --_lift: calc(var(--space-32) + var(--space-1));
     }
 
     .reel__segs {

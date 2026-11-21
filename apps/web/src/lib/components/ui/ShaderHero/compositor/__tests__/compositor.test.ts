@@ -46,9 +46,8 @@ import { restMotion } from '../effects/motion-uniforms';
 import { FRAMES, LAYERS, MEDIA } from '../effects/registry';
 import type { FilmMotion } from '../film-motion';
 import { governFlash } from '../flash';
-import { pushZoom } from '../media-pass';
 import { BARE_STACK, type StackConfig } from '../stack-config';
-import { stageBoxFrom } from '../stage';
+import { pushZoom, stageBoxFrom } from '../stage';
 
 interface Handle {
   kind: string;

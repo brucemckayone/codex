@@ -171,6 +171,12 @@ const go = (i: number) => {
   frame(CUT);
 };
 const previewButton = () => q<HTMLButtonElement>('.reel__preview');
+/** The index's button for the piece now playing, as the owner's decision names it. */
+const currentIndexButton = () =>
+  q<HTMLButtonElement>('.reel__index .reel__item[aria-current="true"]');
+const reelPause = () => q<HTMLButtonElement>('.reel__ctl .reel__round');
+const close = () =>
+  q<HTMLButtonElement>('.theatre__round[data-role="close"]')?.click();
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -358,12 +364,6 @@ describe('The Showreel opens its theatre', () => {
     });
     return calls;
   }
-  /** The stops the reel gives focus to when nothing it can return to opened the theatre. */
-  const fallbackStops = () => [
-    ...document.querySelectorAll(
-      '.reel__item[aria-current="true"], .reel__round'
-    ),
-  ];
 
   it('gives focus back to what opened it only once the reel behind is no longer inert (review H1)', () => {
     const calls = watchFocus();
@@ -411,7 +411,8 @@ describe('The Showreel opens its theatre', () => {
       at.mockRestore();
       q<HTMLButtonElement>('.theatre__round[data-role="close"]')?.click();
       frame(1);
-      expect(fallbackStops()).toContain(document.activeElement);
+      // The index's button for the piece, never the reel's pause before it.
+      expect(document.activeElement).toBe(currentIndexButton());
     });
   }
 
@@ -494,5 +495,58 @@ describe('The Showreel opens its theatre', () => {
     flushSync();
     expect(q('.theatre')).toBeNull();
     expect(play.mock.contexts).toContain(video);
+  });
+});
+
+/**
+ * WP-7 review round 2 (MEDIUM): with no opener to go back to, focus goes to
+ * the index's button for the piece the clock is on (the owner's decision,
+ * Codex-1yd58.8: "the opener or the current index button"; WCAG 2.4.3),
+ * never the reel's pause, which comes first in the tree.
+ */
+describe('the theatre gives focus to the current index button when its opener cannot take it (owner, 2026-11-20)', () => {
+  it("after the preview plays to its end, focus is on the index's button for the piece the reel moved on to, not the reel's pause", () => {
+    render();
+    const opener = q<HTMLButtonElement>('.reel__btn') as HTMLButtonElement;
+    opener.focus();
+    opener.click();
+    seen.read()?.onended?.('end');
+    // The words' swap lands (frame advances past OUT_MS).
+    frame(1);
+    expect(q('.theatre')).toBeNull();
+    expect(current()).toBe('Drum Journey');
+    expect(currentIndexButton()).not.toBeNull();
+    expect(document.activeElement).not.toBe(reelPause());
+    expect(document.activeElement).toBe(currentIndexButton());
+  });
+
+  it('with no opener (Safari focuses no clicked button), a close gives focus to the index button of the same piece', () => {
+    render();
+    const opener = q<HTMLButtonElement>('.reel__btn') as HTMLButtonElement;
+    const at = vi
+      .spyOn(document, 'activeElement', 'get')
+      .mockReturnValue(document.body);
+    opener.click();
+    at.mockRestore();
+    close();
+    frame(1);
+    expect(current()).toBe('Of Blood & Bones');
+    expect(document.activeElement).not.toBe(reelPause());
+    expect(document.activeElement).toBe(currentIndexButton());
+  });
+
+  it("the same from a recording's Preview with sound", () => {
+    render();
+    go(1);
+    expect(current()).toBe('Drum Journey');
+    const at = vi
+      .spyOn(document, 'activeElement', 'get')
+      .mockReturnValue(document.body);
+    previewButton()?.click();
+    at.mockRestore();
+    close();
+    frame(1);
+    expect(document.activeElement).not.toBe(reelPause());
+    expect(document.activeElement).toBe(currentIndexButton());
   });
 });

@@ -20,20 +20,9 @@ import type { FBO } from '../webgl-utils';
 import type { MediaEffect } from './effects/effect';
 import { type MediaPassId, SURFACE_PASS } from './effects/ids';
 import { MEDIA } from './effects/registry';
-import type { FilmLook } from './stage';
+import { type FilmLook, pushZoom } from './stage';
 
 type Size = readonly [number, number];
-
-/** How long a picture takes to push in: one piece (`reel-clock` PIECE_MS). */
-export const PUSH_SECONDS = 7;
-/** How far it is drawn in by then: 8% (the v4 mock's and the 5b board's). */
-export const PUSH_DEPTH = 0.08;
-
-/** The push-in's zoom `elapsed` seconds into a piece: eased out, then held. */
-export function pushZoom(elapsed: number): number {
-  const t = Math.min(1, Math.max(0, elapsed / PUSH_SECONDS));
-  return 1 + PUSH_DEPTH * (1 - (1 - t) * (1 - t));
-}
 
 export interface MediaStep {
   readonly effect: MediaEffect;

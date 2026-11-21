@@ -10,6 +10,11 @@ import type { IntroFilm } from '@codex/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFilmMotionPasses } from '$lib/components/ui/ShaderHero/compositor/film-motion';
 import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-feed';
+import {
+  PUSH_DEPTH,
+  PUSH_SECONDS,
+  pushZoom,
+} from '$lib/components/ui/ShaderHero/compositor/stage';
 import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
 import {
   type HeroFacts,
@@ -130,11 +135,19 @@ function render(
     filmOpen?: boolean;
     facts?: Partial<HeroFacts>;
     logoUrl?: string;
+    peek?: 'on' | 'off';
+    push?: 'on' | 'off';
   } = {}
 ) {
   const options = resolveHero(
     'consume',
-    { comp: 'showreel', 'reel-layout': layout, 'reel-loop': over.loop ?? 'on' },
+    {
+      comp: 'showreel',
+      'reel-layout': layout,
+      'reel-loop': over.loop ?? 'on',
+      ...(over.peek ? { 'reel-peek': over.peek } : {}),
+      ...(over.push ? { 'reel-push': over.push } : {}),
+    },
     { ...FACTS, ...over.facts }
   );
   const props = $state({
@@ -1026,6 +1039,122 @@ describe('Showreel stage: the films', () => {
   });
 });
 
+describe('Showreel and the peek (owner, 2026-11-21: on by default)', () => {
+  it('stops the hero a lift short of the screen by default, so the featured row rises above the fold', () => {
+    render();
+    expect(q('.reel')?.hasAttribute('data-peek')).toBe(true);
+  });
+
+  it('fills the screen when the org has no featured row to rise', () => {
+    render('corner', { facts: { hasFeatured: false } });
+    expect(q('.reel')?.hasAttribute('data-peek')).toBe(false);
+  });
+
+  it('fills the screen when the creator turns the peek off', () => {
+    render('corner', { peek: 'off' });
+    expect(q('.reel')?.hasAttribute('data-peek')).toBe(false);
+  });
+});
+
+describe('Showreel stage: the push-in where the page draws the film (WP-5b)', () => {
+  it("pushes the still on show in by default, by the compositor's numbers, on the reel's clock", () => {
+    render();
+    const stage = q('.reel-stage');
+    expect(stage?.hasAttribute('data-push')).toBe(true);
+    expect(stage?.style.getPropertyValue('--_push-depth')).toBe(
+      String(PUSH_DEPTH)
+    );
+    // A push takes one piece: the reel's progress through it, as it is.
+    expect(Number(stage?.style.getPropertyValue('--_push-rate'))).toBe(
+      PIECE_MS / 1000 / PUSH_SECONDS
+    );
+    expect(Number(stage?.style.getPropertyValue('--_push-rate'))).toBe(1);
+  });
+
+  it('pushes no still in with the reel held still (reduced motion)', () => {
+    media.reduced = true;
+    render();
+    expect(q('.reel-stage')?.hasAttribute('data-push')).toBe(false);
+  });
+
+  it('pushes no still in when the creator turns the push-in off', () => {
+    render('corner', { push: 'off' });
+    expect(q('.reel-stage')?.hasAttribute('data-push')).toBe(false);
+  });
+});
+
+describe('Showreel push-in follows the piece on show (WP-5b review r2, M1r2)', () => {
+  /**
+   * Save-Data: every entry shows its still and the reel still moves on, so
+   * every piece pushes in. Then 16 ms frames, the words' timer advancing
+   * alongside as a browser runs them, through the first piece's end and the
+   * beat (OUT_MS) the words and the stage take to follow the clock.
+   */
+  function throughTheCut(read: () => { el: unknown; at: number }) {
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      connection: { saveData: true },
+    });
+    render();
+    flushSync();
+    expect(q('.reel')?.dataset.mode).toBe('stills');
+    for (const img of document.querySelectorAll<HTMLImageElement>(
+      '.reel-stage img'
+    )) {
+      img.dispatchEvent(new Event('load'));
+    }
+    flushSync();
+    const one = () => {
+      flushSync();
+      clock += 16;
+      const due = frames;
+      frames = [];
+      for (const callback of due) callback(clock);
+      flushSync();
+      vi.advanceTimersByTime(16);
+      flushSync();
+    };
+    let last: { el: unknown; at: number } | null = null;
+    const backwards: string[] = [];
+    let cut = false;
+    for (let t = 0; t < PIECE_MS + 600; t += 16) {
+      one();
+      const now = read();
+      if (now.el && last && last.el === now.el && now.at < last.at - 1e-9) {
+        backwards.push(
+          `${t} ms: ${last.at.toFixed(4)} -> ${now.at.toFixed(4)}`
+        );
+      }
+      if (last && last.el !== now.el) cut = true;
+      last = now;
+    }
+    // The cut came, and the next piece starts near 0, never a held full push.
+    expect(cut).toBe(true);
+    expect(last?.at ?? 1).toBeLessThan(0.5);
+    return backwards;
+  }
+
+  it('never zooms the canvas still back out while that same still is on show', () => {
+    const backwards = throughTheCut(() => ({
+      el: showreelFeed.media,
+      // What the compositor reads each frame (media-pass.ts `planMedia`).
+      at: pushZoom(showreelFeed.look?.push?.() ?? 0) - 1,
+    }));
+    // Before: ['7008 ms: 0.0800 -> 0.0004'] or near: the old still snapped
+    // back out for OUT_MS before the cut.
+    expect(backwards).toEqual([]);
+  });
+
+  it("never draws the page's own still back out while it is on show", () => {
+    const backwards = throughTheCut(() => ({
+      el: q('.reel-stage__item[data-on] img'),
+      // What the stage's push-in reads (ReelStage: `--_push-progress`).
+      at: Number(q('.reel')?.style.getPropertyValue('--_push-progress') || 0),
+    }));
+    expect(backwards).toEqual([]);
+  });
+});
+
 describe('Showreel and a webfont that lands late', () => {
   it('fits again when a face finishes loading after fonts.ready, and marks the fit after the fonts', async () => {
     // A page's FontFaceSet whose `ready` resolved before the brand's face had
@@ -1418,6 +1547,75 @@ describe("Showreel's fit over the film", () => {
     // Every fit of the same brand finds the same: it says so once.
     for (let n = 0; n < 3; n++) refit();
     expect(vi.mocked(logger.warn)).toHaveBeenCalledTimes(1);
+  });
+
+  it('lifts a carried colour that its shades fall short under just far enough, never straight onto the pole (owner 2026-11-20; wp4-review r3 M1)', async () => {
+    const CORAL = 'rgb(230, 90, 100)';
+    paintable({
+      ground: '#0F0000',
+      ink: WHITE,
+      brand: { '.reel__kicker, .reel__kicker span': CORAL },
+    });
+    // The reel 1000 x 1000; the kicker in the middle band, where only the foot's
+    // left ellipse reaches; every other word over the whole box, as elsewhere in
+    // this file.
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(
+      function (this: HTMLElement) {
+        const box = this.matches('.reel__kicker')
+          ? { left: 300, top: 450, right: 500, bottom: 470 }
+          : { left: 0, top: 0, right: 1000, bottom: 1000 };
+        return {
+          ...box,
+          width: box.right - box.left,
+          height: box.bottom - box.top,
+          x: box.left,
+          y: box.top,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+    );
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const kicker = q('.reel__kicker');
+    expect(kicker).not.toBeNull();
+    if (!kicker) return;
+    // It needed a lift (its shades fall short), and got one...
+    expect(kicker.hasAttribute('data-lifted')).toBe(true);
+    const [r = 0, g = 0, b = 0] = channels(kicker);
+    // ...toward white (every channel at least the coral's)...
+    expect(r).toBeGreaterThanOrEqual(230);
+    expect(g).toBeGreaterThan(90);
+    expect(b).toBeGreaterThan(100);
+    // ...but only as far as it needs: still the brand's coral, never the pole.
+    // Fails today: the code paints [255, 255, 255].
+    expect([r, g, b]).not.toEqual([255, 255, 255]);
+  });
+
+  it("lands only the reel's own words' colour eases, never another's inside it (a theatre's, the film layer's): wp4-review r3 LOW", async () => {
+    const paint = paintable({
+      ground: '#0F0000',
+      ink: WHITE,
+      brand: { a: RED },
+    });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    // A colour easing on the film layer, as a theatre's hover or a theme
+    // switch would ease one: none of the reel's words.
+    const layer = q('.reel-stage');
+    expect(layer).not.toBeNull();
+    if (!layer) return;
+    layer.style.setProperty('color', 'rgb(1, 2, 3)');
+    paint.easeFrom([layer]);
+    expect(paint.eases()).toBe(1);
+    refit();
+    expect(paint.eases()).toBe(1);
+    // A lifted link's own ease still lands at once (review R1).
+    paint.easeFrom(document.querySelectorAll('.reel a[data-lifted]'));
+    expect(paint.eases()).toBeGreaterThan(1);
+    refit();
+    expect(paint.eases()).toBe(1);
   });
 
   it('marks data-fit only when the fit has run: never on a page it could not read', async () => {

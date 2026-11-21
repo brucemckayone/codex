@@ -36,9 +36,10 @@ export interface LayerBudget {
   /** Cut the last layer still drawn, or null with none left (or off). */
   cut(stack: StackConfig): LayerCut | null;
   /**
-   * The brand's stack less its cut layers: the same object while nothing is
-   * cut, and the same cut copy while neither changes (the compositor plans
-   * once per stack, by identity).
+   * The brand's stack less its cut layers: the same object, unread, while
+   * nothing is cut (so with the flag off the frame does exactly what it did
+   * before), and the same cut copy while neither changes (the compositor
+   * plans once per stack, by identity).
    */
   apply(stack: StackConfig): StackConfig;
 }
@@ -76,6 +77,10 @@ export function createLayerBudget(enabled: boolean): LayerBudget {
     },
 
     apply(stack) {
+      // Nothing cut, which is always so while the flag is off: today's stack,
+      // read for nothing. This runs twice a frame (syncStack and draw), so no
+      // key is built until a cut has been made (WP-5b review r2, L1r2).
+      if (cuts === 0) return stack;
       const n = cutsOf(stack);
       if (n === 0) return stack;
       if (applied?.from !== stack || applied.cuts !== n) {
