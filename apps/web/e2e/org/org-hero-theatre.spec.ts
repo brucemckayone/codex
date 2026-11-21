@@ -4,8 +4,9 @@
  * theatre: a preview with sound inside the hero. On a desktop it fills the
  * hero and the page still scrolls; on a phone it takes the whole screen and
  * the page behind holds still. Its bar gives pause, the time, sound and
- * close; Tab stays inside; Escape closes it on the same piece and focus goes
- * back to what opened it (or to the index's current piece when that is gone).
+ * close; the reel behind it is inert and Tab stays inside; Escape closes it
+ * on the same piece and focus goes back to what opened it (or to the index's
+ * current piece when that is gone).
  * While it plays, the reel's own stage footage holds (a page never decodes
  * two films at once) and the reel holds on its piece; at the preview's end it
  * closes and the reel moves on. A recording shows its cover, and with no
@@ -15,108 +16,43 @@
  * has the Pause/Play button. Lane A re-cut the hook that opens it while this
  * was written, so the spec names what a visitor sees.
  *
- * Measured on of-blood-and-bones without a DB write, as the Showreel's own
- * spec is: the landing's HTML is rewritten in the browser to set the hero
- * options the brand editor would save (`brandFineTune.tokenOverrides`).
+ * Measured on of-blood-and-bones without a DB write, through the Showreel's
+ * own spec's setup (`helpers/showreel.ts`): the landing's HTML is rewritten in
+ * the browser to set the hero options the brand editor would save
+ * (`brandFineTune.tokenOverrides`).
  *
  * Needs (WP-11 checklist §1.2 and §1.3): the dev CDN for the previews, and a
  * browser that decodes H.264/AAC (system Chrome, `channel: 'chrome'`; the
  * bundled Chromium ships without them). Every test that needs a playing
  * preview skips, saying why, when none plays here; count that skip as NOT
  * PROVEN. A fulfilled document has no address, so Chrome's Local Network
- * Access counts it public: the flags below lift that for this file only.
+ * Access counts it public: `SHOWREEL_LAUNCH` lifts that for this file only.
+ * Its flags also let every start keep its sound, so a muted start here is the
+ * theatre's own doing (a refused one is ReelTheatre.svelte.test.ts's).
  */
 
 import {
-  type Browser,
   type BrowserContextOptions,
   expect,
   type Locator,
   type Page,
   test,
 } from '@playwright/test';
-import { orgOrigin } from '../helpers/origin';
+import {
+  MOVES_ON,
+  ORG,
+  openShowreel as open,
+  PIECE_MS,
+  SHOWREEL_LAUNCH,
+} from '../helpers/showreel';
 
-const ORG = 'of-blood-and-bones';
-/** `PIECE_MS` in reel-clock.svelte.ts: how long each piece plays. */
-const PIECE_MS = 7000;
-/** A piece, plus the words' swap and a slow CI frame. */
-const MOVES_ON = PIECE_MS + 5000;
 const PHONE: BrowserContextOptions = {
   viewport: { width: 390, height: 844 },
   isMobile: true,
   hasTouch: true,
 };
 
-test.use({
-  launchOptions: {
-    args: [
-      '--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights',
-      '--autoplay-policy=no-user-gesture-required',
-    ],
-  },
-});
-
-/** The brand's stored overrides in the page's data: a JSON string, or null. */
-const PAYLOAD = /brandFineTune:\{tokenOverrides:("(?:[^"\\]|\\.)*"|null)/;
-
-/** The landing's HTML with the Showreel set as the editor saves it, or null. */
-function withShowreel(html: string): string | null {
-  const match = PAYLOAD.exec(html);
-  if (!match) return null;
-  const stored: Record<string, string> =
-    match[1] === 'null' ? {} : JSON.parse(JSON.parse(match[1]));
-  const set = {
-    'hero-opt-purpose': 'consume',
-    'hero-opt-comp': 'showreel',
-    'hero-opt-reel-layout': 'corner',
-  };
-  const literal = JSON.stringify(JSON.stringify({ ...stored, ...set })).replace(
-    /</g,
-    '\\u003C'
-  );
-  return html.replace(
-    match[0],
-    () => `brandFineTune:{tokenOverrides:${literal}`
-  );
-}
-
-async function open(
-  browser: Browser,
-  baseURL: string | undefined,
-  {
-    context: contextOptions = {},
-    init,
-  }: { context?: BrowserContextOptions; init?: () => void } = {}
-): Promise<Page> {
-  const url = `${orgOrigin(ORG, baseURL)}/`;
-  const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
-    ...contextOptions,
-  });
-  if (init) await context.addInitScript(init);
-  const page = await context.newPage();
-  let rewritten = false;
-  await page.route(url, async (route) => {
-    const response = await route.fetch();
-    const body = withShowreel(await response.text());
-    rewritten = body !== null;
-    await route.fulfill({ response, body: body ?? undefined });
-  });
-  await page.goto(url);
-  test.skip(
-    !rewritten,
-    `${ORG}'s landing has no brand payload to set the Showreel on`
-  );
-  const reel = showreel(page);
-  await expect(reel).toBeVisible({ timeout: 30_000 });
-  // The server draws the Showreel too, so in sight is not yet hydrated. The
-  // bar's first write (`--_progress`) is the browser's own: live from there.
-  await expect(reel).toHaveAttribute('style', /--_progress/, {
-    timeout: 30_000,
-  });
-  return page;
-}
+test.use(SHOWREEL_LAUNCH);
 
 const showreel = (page: Page) => page.getByRole('region', { name: 'Showreel' });
 
@@ -277,11 +213,12 @@ test.describe('the Showreel theatre', () => {
     await controls.pause.click();
     await expect(controls.pause).toHaveAccessibleName('Pause');
 
-    // Sound: a refused start asks for a tap first; then it mutes and back.
-    if ((await controls.sound.getAttribute('aria-label')) === 'Tap for sound') {
-      await controls.sound.click();
-    }
+    // Sound: the press started it with its sound (nothing here refuses a
+    // start), and it mutes and back.
     await expect(controls.sound).toHaveAccessibleName('Mute');
+    expect(
+      await controls.media.first().evaluate((el: HTMLMediaElement) => el.muted)
+    ).toBe(false);
     await controls.sound.click();
     await expect(controls.sound).toHaveAccessibleName('Unmute');
     expect(
@@ -311,7 +248,12 @@ test.describe('the Showreel theatre', () => {
   }) => {
     const page = await open(browser, baseURL);
     const piece = (await currentItem(page).textContent()) ?? '';
+    // Behind it, the reel takes no focus and no press: inert while it is open.
+    const behindInert = () =>
+      currentItem(page).evaluate((el) => el.closest('[inert]') !== null);
+    expect(await behindInert()).toBe(false);
     const { opener, theatre } = await openTheatre(page);
+    expect(await behindInert()).toBe(true);
     // Round the bar's three controls and past either end, both ways.
     for (const key of ['Tab', 'Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab']) {
       await page.keyboard.press(key);
@@ -319,6 +261,7 @@ test.describe('the Showreel theatre', () => {
     }
     await page.keyboard.press('Escape');
     await expect(theatre).toHaveCount(0);
+    expect(await behindInert()).toBe(false);
     await expect(currentItem(page)).toHaveText(piece);
     await expect.poll(() => focusCameBack(page, opener)).toBe(true);
     await page.context().close();

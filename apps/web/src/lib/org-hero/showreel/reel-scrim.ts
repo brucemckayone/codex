@@ -12,6 +12,7 @@
  * over the black-to-white greys and the six pure hues. Composited per
  * channel in sRGB, as browsers composite.
  */
+import { TEXT_ON_BRAND_LUMINANCE_PIVOT } from '$lib/brand-editor/ink';
 
 /** sRGB channels 0-255. */
 export type Rgb = readonly [number, number, number];
@@ -106,10 +107,28 @@ const BLACK: Rgb = [0, 0, 0];
 const WHITE: Rgb = [255, 255, 255];
 
 /**
- * Where a veil moves to carry these inks: black under light inks, white under
- * dark ones, whichever the inks stand further from (their worst decides).
+ * The veil's pole and the ink pole opposite it, from the GROUND alone (owner,
+ * 2026-11-21): a dark brand's veil stays its own dark, moved toward black,
+ * and every colour that cannot keep its floor is lifted toward white; a light
+ * brand's is the mirror, a pale veil and lifts toward black. Never from the
+ * inks: a player text no dark veil carries (#CB213C on #0F0000) once turned
+ * the whole veil pale. The same switch as Showreel's `--_light` and its first
+ * paint's `--_pole-ink`: the ground's luminance (`--_gy`), light only above
+ * the pivot the page's own inks turn on.
  */
-export function veilPole(inks: readonly { ink: Ink; ratio: number }[]): Rgb {
+export function groundPoles(groundY: number): { veil: Rgb; ink: Rgb } {
+  return groundY > TEXT_ON_BRAND_LUMINANCE_PIVOT
+    ? { veil: WHITE, ink: BLACK }
+    : { veil: BLACK, ink: WHITE };
+}
+
+/**
+ * The pole these inks stand furthest from (their worst decides): white for a
+ * dark ink, black for a light one. What 'outline' rings a word no scrim
+ * carries in, so it keeps its own colour inside a ring that reads (a red's is
+ * white). Never the veil's: that is the ground's (`groundPoles`).
+ */
+export function ownPole(inks: readonly { ink: Ink; ratio: number }[]): Rgb {
   const from = (pole: Rgb) =>
     Math.min(...inks.map(({ ink }) => contrast(ink.rgb, pole)));
   return from(WHITE) > from(BLACK) ? WHITE : BLACK;
@@ -117,9 +136,7 @@ export function veilPole(inks: readonly { ink: Ink; ratio: number }[]): Rgb {
 
 /**
  * The ink that stands furthest from a veil of `scrim`: white on a dark one,
- * black on a light one. What a colour no scrim carries is lifted toward, and
- * the last resort of every ink the reel solves: never the reel's own ink,
- * which a creator may set to the very brand colour that needs the lift.
+ * black on a light one. The focus ring's last resort (`focusInk`).
  */
 export function inkPole(scrim: Rgb): Rgb {
   return contrast(WHITE, scrim) >= contrast(BLACK, scrim) ? WHITE : BLACK;
@@ -127,30 +144,30 @@ export function inkPole(scrim: Rgb): Rgb {
 
 /**
  * The scrim's colour: the brand's own ground (`--color-background`, what the
- * shader's ground and the page use), moved toward its inks' pole (`veilPole`)
- * only as far as they need to keep their ratio at no more than
- * `MAX_SCRIM_ALPHA`. A dark brand under white ink keeps its ground, or gets a
- * deeper shade of it; a light brand under its own dark text keeps its ground,
- * or gets a paler one. The pole itself when nothing nearer will do.
+ * shader's ground and the page use), moved toward the veil's pole (`veil`,
+ * from `groundPoles`) only as far as its inks need to keep their ratio at no
+ * more than `MAX_SCRIM_ALPHA`. A dark brand keeps its ground, or gets a deeper
+ * shade of it; a light brand keeps its ground, or gets a paler one. The pole
+ * itself when nothing nearer will do.
  *
- * Solved only from the inks a scrim of the pole can carry at all. A brand
- * colour that not even a solid one can (OBB's red, 3.82:1 on black) no tint
- * helps: counted, it drove the tint to the pole for nothing (2026-11-20). The
- * reel lifts or outlines such a colour itself, and the ground stays the
- * brand's when it is the only ink.
+ * Solved only from the inks a scrim of the pole can carry at all. A colour
+ * that not even a solid one can (a player text the creator set, as #CB213C on
+ * #0F0000: 3.82:1 even on black) no tint helps: counted, it drove the tint to
+ * the pole for nothing (2026-11-20). The reel lifts or outlines such a colour
+ * itself, and the ground stays the brand's when it is the only ink.
  */
 export function scrimTint(
   ground: Rgb,
+  veil: Rgb,
   inks: readonly { ink: Ink; ratio: number }[]
 ): Rgb {
-  const pole = veilPole(inks);
-  const carriable = inks.filter((ink) => scrimAlpha([ink], pole) !== null);
+  const carriable = inks.filter((ink) => scrimAlpha([ink], veil) !== null);
   for (let step = 0; step <= 20; step++) {
-    const tint = over(pole, step / 20, ground);
+    const tint = over(veil, step / 20, ground);
     const alpha = scrimAlpha(carriable, tint);
     if (alpha !== null && alpha <= MAX_SCRIM_ALPHA) return tint;
   }
-  return pole;
+  return veil;
 }
 
 /**
@@ -429,11 +446,12 @@ export function glowLeaves(need: number, glow: number): number {
 }
 
 /**
- * A brand colour that no shade can carry (the 'shadow' edge, owner
- * 2026-11-20: OBB's red is 3.75:1 at best on its own dark): lifted toward
- * `toward` (the reel passes `inkPole` of its scrim, never its own ink, which
- * may be that same colour), in twentieths, just far enough that `carried`
- * accepts it. The colour as it is when it already passes; null when not even
+ * A colour that no shade can carry (the 'shadow' edge, owner 2026-11-20: a
+ * player text the creator set, as #CB213C on #0F0000, is 3.75:1 on that
+ * ground and 3.82:1 even on black): lifted toward `toward` (the reel passes
+ * `groundPoles`'s ink, white on a dark brand, never its own ink, which may be
+ * that same colour), in twentieths, just far enough that `carried` accepts
+ * it. The colour as it is when it already passes; null when not even
  * `toward` itself does, so a caller never takes an unchecked last step.
  */
 export function liftInk(

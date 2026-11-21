@@ -1058,16 +1058,20 @@ describe('Showreel and a film playing over it', () => {
  * and `#hex` as a canvas does (the fit's colour probe), and each element's
  * computed colour as a browser cascades it here: its own inline colour first
  * (a lift's `!important`), then a brand colour by selector, then the reel's
- * ink; the root's `--color-background` is the brand's ground.
+ * ink; the root's `--color-background` is the brand's ground, and its `--_gy`
+ * the ground's luminance when given (unset, it reads dark, as CSS's
+ * `var(--_gy, 0)` does).
  */
 function paintable({
   ground,
   ink,
   brand = {},
+  groundY = '',
 }: {
   ground: string;
   ink: string;
   brand?: Record<string, string>;
+  groundY?: string;
 }) {
   const parse = (css: string): [number, number, number, number] | null => {
     const hex = /^#([0-9a-f]{6})$/i.exec(css.trim());
@@ -1119,10 +1123,13 @@ function paintable({
       get(target, prop) {
         if (prop === 'color') return colour();
         if (prop === 'getPropertyValue') {
-          return (name: string) =>
-            name === '--color-background' && el.matches('.reel')
-              ? ground
-              : target.getPropertyValue(name);
+          return (name: string) => {
+            if (el.matches('.reel')) {
+              if (name === '--color-background') return ground;
+              if (name === '--_gy' && groundY) return groundY;
+            }
+            return target.getPropertyValue(name);
+          };
         }
         const value = Reflect.get(target, prop, target);
         return typeof value === 'function' ? value.bind(target) : value;
@@ -1182,7 +1189,7 @@ describe("Showreel's fit over the film", () => {
   it("rescues a brand colour that IS the reel's ink: lifted toward the pole, never toward itself", async () => {
     // The creator set the player's text to the brand's red: the reel's own
     // ink is the red, so a lift toward the ink would go nowhere. Its soft
-    // ink stays the player's white at 80%, so the veil stays the brand's dark.
+    // ink stays the player's white at 80% (the next test drops even that).
     paintable({
       ground: '#0F0000',
       ink: RED,
@@ -1208,6 +1215,72 @@ describe("Showreel's fit over the film", () => {
     expect(follow?.style.getPropertyValue('color')).not.toBe(RED);
     expect(pause?.hasAttribute('data-lifted')).toBe(false);
     expect(pause?.style.getPropertyValue('--_halo')).not.toBe('');
+    expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+    expect(solved().pool).not.toBe('1');
+  });
+
+  /** An element's colour as the fit wrote it inline: its channels. */
+  const channels = (el: Element) =>
+    ((el as HTMLElement).style.getPropertyValue('color').match(/[\d.]+/g) ?? [])
+      .slice(0, 3)
+      .map(Number);
+  const scrimChannels = () =>
+    (solved().scrim.match(/[\d.]+/g) ?? []).map(Number);
+
+  it('keeps a dark veil when EVERY ink is the red (#CB213C on #0F0000), and lifts every word that fails toward white (owner, 2026-11-21)', async () => {
+    // The player text is the red, and nothing gives any word another colour:
+    // every word, control and soft ink is the red. Read from the inks, the
+    // veil paled toward white for it; read from the ground, it stays dark.
+    paintable({ ground: '#0F0000', ink: RED });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const [sr = 255, sg = 255, sb = 255] = scrimChannels();
+    expect(sr).toBeLessThanOrEqual(15);
+    expect(sg).toBe(0);
+    expect(sb).toBe(0);
+    // Every body word fails as the red (3.82:1 even on black): each one is
+    // lifted, and toward white, every channel at least the red's.
+    const words = [...document.querySelectorAll('.reel [data-ink="body"]')];
+    expect(words.length).toBeGreaterThan(0);
+    for (const word of words) {
+      expect(word.hasAttribute('data-lifted'), word.className).toBe(true);
+      const [r = 0, g = 0, b = 0] = channels(word);
+      expect(r).toBeGreaterThanOrEqual(203);
+      expect(g).toBeGreaterThan(33);
+      expect(b).toBeGreaterThan(60);
+    }
+    // Nothing anywhere is lifted toward anything but white.
+    for (const lifted of document.querySelectorAll('[data-lifted]')) {
+      const [r = 0, g = 0, b = 0] = channels(lifted);
+      expect(r).toBeGreaterThanOrEqual(203);
+      expect(g).toBeGreaterThanOrEqual(33);
+      expect(b).toBeGreaterThanOrEqual(60);
+    }
+    expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+    expect(solved().pool).not.toBe('1');
+  });
+
+  it('keeps a pale veil when every ink is white on a light brand, and lifts every word toward black: the mirror', async () => {
+    paintable({ ground: '#F5F0E6', ink: WHITE, groundY: '0.87' });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    // The brand's own pale ground, or paler: never deepened for the white.
+    const [sr = 0, sg = 0, sb = 0] = scrimChannels();
+    expect(sr).toBeGreaterThanOrEqual(245);
+    expect(sg).toBeGreaterThanOrEqual(240);
+    expect(sb).toBeGreaterThanOrEqual(230);
+    const words = [...document.querySelectorAll('.reel [data-ink="body"]')];
+    expect(words.length).toBeGreaterThan(0);
+    for (const word of words) {
+      expect(word.hasAttribute('data-lifted'), word.className).toBe(true);
+      const [r = 255, g = 255, b = 255] = channels(word);
+      // Toward black: one grey, darker than the white it was.
+      expect(r).toBeLessThan(255);
+      expect(g).toBe(r);
+      expect(b).toBe(r);
+    }
     expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
     expect(solved().pool).not.toBe('1');
   });
