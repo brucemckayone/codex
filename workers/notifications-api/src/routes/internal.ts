@@ -36,6 +36,7 @@ app.post(
         creatorId,
         category,
         userId,
+        platformTemplate,
       } = ctx.input.body;
 
       const result = await ctx.services.notifications.sendEmail({
@@ -47,6 +48,7 @@ app.post(
         creatorId,
         category,
         userId,
+        platformTemplate,
       });
 
       return {

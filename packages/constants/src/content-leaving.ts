@@ -126,3 +126,133 @@ export const CONTENT_LEAVING_NOTICE_REASONS = [
 
 export type ContentLeavingNoticeReason =
   (typeof CONTENT_LEAVING_NOTICE_REASONS)[number];
+
+// ─── WP-4: the sweep and its emails (Codex-a6ofh.6.4) ───────────────────────
+//
+// media-api's hourly maintenance run calls content-api's
+// `POST /internal/content/leaving-sweep`, which sends the notices due, adds
+// the reminders and finishes the deletes whose day has come
+// (`ContentLeavingNoticeService`, `@codex/content`).
+
+/**
+ * A notice is tried at most this many times. The fifth try's own answer ends
+ * it (`abandoned`, with that answer's reason), and a row still open with
+ * this many tries, its last one cut off before an answer, is abandoned as
+ * `unknown`: a cut-off send may have gone.
+ */
+export const LEAVING_NOTICE_MAX_TRIES = 5;
+
+/**
+ * The lease between tries (owner): a notice claimed less than this long ago
+ * is left alone, so a send in flight, or one cut off after it went, is never
+ * taken by the next tick. The claim counts the try and stamps its time.
+ */
+export const LEAVING_NOTICE_LEASE_MS = 6 * 60 * 60 * 1000;
+
+/** The day-27 reminder: added once a piece leaves within this many days. */
+export const LEAVING_REMINDER_DAYS = 3;
+
+/** Notices one tick claims at most; the next tick takes the rest. */
+export const LEAVING_SWEEP_NOTICES_PER_TICK = 1000;
+
+/** Sends one tick has in flight at once. */
+export const LEAVING_SWEEP_SEND_BATCH = 8;
+
+/**
+ * Pieces one tick finishes deleting (their day has come), and pieces it
+ * adds reminders for.
+ */
+export const LEAVING_SWEEP_PIECES_PER_TICK = 50;
+
+/**
+ * Owners' libraries one tick bumps for the `leaving` notices it claims
+ * (owner: the bump goes with the claim, no cursor), and so the `leaving`
+ * notices it claims at most: as many as the tick claims. A delete bumps 500
+ * owners inline (`DEFAULT_MAX_LIBRARY_FANOUT`); these reach the rest.
+ *
+ * Sized to the tick's subrequest budget: content-api's one invocation, which
+ * a paid-plan Worker gives 10,000 subrequests by default, KV and R2 included
+ * (developers.cloudflare.com/workers/platform/limits; content-api sets no
+ * `limits`). The database is one connection, so its queries don't count. A
+ * heavy tick spends at most:
+ * - the sends: 1,000 notifications-api calls (LEAVING_SWEEP_NOTICES_PER_TICK);
+ * - these bumps: 1,000 KV writes;
+ * - the day-30 owners' bumps: 5,000 (LEAVING_SWEEP_COMPLETION_BUMPS_PER_TICK);
+ * - the day-30 refresh of the rest: 1 catalogue key, about 6 keys an org for
+ *   up to 50 orgs (300), and their subscribers and team, up to 500;
+ * - the 50 deleted covers' R2 files: about 4 each (200).
+ * About 8,000 in all, leaving 2,000 to spare.
+ */
+export const LEAVING_SWEEP_LIBRARY_BUMPS_PER_TICK =
+  LEAVING_SWEEP_NOTICES_PER_TICK;
+
+/**
+ * Owners' libraries one tick bumps for the pieces it deletes on their day
+ * (design §5 step 3: every owner, no 500 cap), within the budget above.
+ * Owners past it are logged, not bumped: a library page refetches on mount,
+ * so a missed bump only keeps a card in a tab already open.
+ */
+export const LEAVING_SWEEP_COMPLETION_BUMPS_PER_TICK = 5000;
+
+/** Those owners are read this many at a time. */
+export const LEAVING_SWEEP_HOLDERS_PAGE = 500;
+
+/**
+ * And bumped this many at once, the deadline checked between chunks: a
+ * Worker has 6 calls waiting at once, so a whole page of 500 writes, queued
+ * behind the day-30 refresh's own, could outrun the route's time.
+ */
+export const LEAVING_SWEEP_BUMP_CHUNK = 50;
+
+/**
+ * No send starts after this, counted from the tick's start (owner: the route
+ * is synchronous). Claims left unsent are given back as they were.
+ */
+export const LEAVING_SWEEP_SEND_BUDGET_MS = 4 * 60 * 1000;
+
+/**
+ * How long media-api waits for a tick: the send budget, the last batch, the
+ * reminders and the completions after it.
+ */
+export const LEAVING_SWEEP_CALL_TIMEOUT_MS =
+  LEAVING_SWEEP_SEND_BUDGET_MS + 2 * 60 * 1000;
+
+/**
+ * The route's own time, counted from its start: no chunk of day-30 owners'
+ * bumps starts after it, so the tick answers before media-api gives up
+ * (LEAVING_SWEEP_CALL_TIMEOUT_MS). The 30 s margin covers what may still
+ * run past it: the chunk in flight (up to LEAVING_SWEEP_BUMP_CHUNK KV
+ * writes, 6 at a time, queued behind the refresh's ~800), the count read
+ * for the not-bumped warn, and the answer's way back to media-api.
+ */
+export const LEAVING_SWEEP_ROUTE_DEADLINE_MS =
+  LEAVING_SWEEP_CALL_TIMEOUT_MS - 30 * 1000;
+
+/** The email each kind of notice sends: a global, transactional template. */
+export const CONTENT_LEAVING_NOTICE_TEMPLATES = {
+  leaving: 'content-leaving',
+  reminder: 'content-leaving-reminder',
+  staying: 'content-staying',
+  removed: 'content-removed',
+} as const satisfies Record<ContentLeavingNoticeKind, string>;
+
+export type ContentLeavingNoticeTemplate =
+  (typeof CONTENT_LEAVING_NOTICE_TEMPLATES)[ContentLeavingNoticeKind];
+
+/**
+ * The leaving email's button, and what it says to do before the date (owner,
+ * D8): the templates can't branch, so the sender picks one. With the
+ * creator's download on, a video or audio owner keeps the original ("Download
+ * it") and an article's saves it ("Save it as a PDF"); with it off they
+ * watch, listen or read it while they can.
+ */
+export const CONTENT_LEAVING_ACTION_LABELS = [
+  'Download it',
+  'Save it as a PDF',
+  'Watch it',
+  'Listen to it',
+  'Read it',
+] as const;
+
+export type ContentLeavingActionLabel =
+  (typeof CONTENT_LEAVING_ACTION_LABELS)[number];

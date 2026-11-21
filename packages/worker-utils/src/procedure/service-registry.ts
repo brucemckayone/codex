@@ -38,6 +38,7 @@ import type { CachePresetName } from '@codex/constants';
 // Service imports
 import {
   CategoriesService,
+  ContentLeavingNoticeService,
   ContentService,
   MediaItemService,
 } from '@codex/content';
@@ -88,6 +89,10 @@ import {
   TranscodingService,
 } from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
+import {
+  contentLeavingSweeperFor,
+  leavingNoticeLinkFor,
+} from '../content-leaving';
 import { contentApiUrlFor, WorkerContentReadyNotifier } from '../content-ready';
 import {
   type SendEmailToWorkerParams,
@@ -435,6 +440,7 @@ export async function createServiceRegistry(
 
   // Service instances (created on demand)
   let _content: ContentService | undefined;
+  let _contentLeaving: ContentLeavingNoticeService | undefined;
   let _categories: CategoriesService | undefined;
   let _media: MediaItemService | undefined;
   let _access: ContentAccessService | undefined;
@@ -661,6 +667,23 @@ export async function createServiceRegistry(
         }
       }
       return _content;
+    },
+
+    get contentLeaving() {
+      if (!_contentLeaving) {
+        // The leaving notice's sweep (Codex-a6ofh.6.4), content-api's
+        // worker route only. Each email is AWAITED: its answer decides the
+        // notice's row, so the send needs no ExecutionContext of its own.
+        // The library bumps go on the tracked cache; the sweep awaits them.
+        _contentLeaving = new ContentLeavingNoticeService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          mailer: (email) => sendEmailToWorkerAwaited(env, email),
+          contentUrlFor: leavingNoticeLinkFor(env.ENVIRONMENT),
+          cache: env.CACHE_KV ? buildTrackedCache(env.CACHE_KV) : undefined,
+        });
+      }
+      return _contentLeaving;
     },
 
     get categories() {
@@ -1360,6 +1383,9 @@ export async function createServiceRegistry(
           alerts: getTranscodingAlerts(),
           mediaStatus: getMediaStatusFeed(),
           contentReady: getContentReadyNotifier(),
+          // The leaving notice's sweep (Codex-a6ofh.6.4): its call is
+          // awaited, so it needs no execution context.
+          contentLeaving: contentLeavingSweeperFor(env, _obs),
         });
       }
       return _transcodingMaintenance;

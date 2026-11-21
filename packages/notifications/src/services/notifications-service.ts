@@ -79,6 +79,12 @@ interface SendEmailParams {
    * test send carrying them must never read as a real send.
    */
   testSend?: boolean;
+  /**
+   * The global template only, never an org's or creator's of that name
+   * (`internalSendEmailSchema`): a platform notice about an org, such as
+   * the takedown email. `organizationId` still dresses it in the org's brand.
+   */
+  platformTemplate?: boolean;
 }
 
 export class NotificationsService extends BaseService {
@@ -262,11 +268,12 @@ export class NotificationsService extends BaseService {
       }
     }
 
-    // 1. Resolve Template
+    // 1. Resolve Template. A platform notice skips the org's and creator's
+    // overrides; the brand below still comes from the org.
     const template = await this.templateRepository.findTemplate(
       templateName,
-      organizationId,
-      creatorId
+      params.platformTemplate ? null : organizationId,
+      params.platformTemplate ? null : creatorId
     );
 
     if (!template) {

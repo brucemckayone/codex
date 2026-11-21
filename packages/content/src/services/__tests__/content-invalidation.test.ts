@@ -828,6 +828,37 @@ describe('invalidateContentAccessMany', () => {
     );
   });
 
+  it('leaves the holders to its caller with holders: false, a subscribing holder too', async () => {
+    const db = makeDb({
+      holders: [{ userId: 'u-buyer' }, { userId: 'u-buyer-subscriber' }],
+      subscriptions: [{ userId: 'u-buyer-subscriber' }, { userId: 'u-sub' }],
+      organizationMemberships: [{ userId: 'u-team' }],
+    });
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+
+    await invalidateContentAccessMany({
+      db,
+      cache,
+      waitUntil,
+      pieces: [{ id: CONTENT_ID, organizationId: ORG_ID }],
+      reason: 'content_deleted',
+      catalogue: false,
+      holders: false,
+    });
+    await Promise.all(promises);
+
+    const userBumps = invalidate.mock.calls
+      .map((args) => args[0])
+      .filter((key) => typeof key === 'string' && key.startsWith('user:'));
+    expect(userBumps.sort()).toEqual(
+      [
+        CacheType.COLLECTION_USER_LIBRARY('u-sub'),
+        CacheType.COLLECTION_USER_LIBRARY('u-team'),
+      ].sort()
+    );
+  });
+
   it('does nothing for no pieces', async () => {
     const db = makeDb();
     const { cache, invalidate } = makeCache();

@@ -32,8 +32,9 @@ export function contentApiUrlFor(env: { ENVIRONMENT?: string }): string {
 /**
  * A refusal no retry cures: a secret, route or contract fault that switches
  * publish when ready off for everyone, not a blip. 408 and 429 are blips.
+ * The leaving sweep's caller reads its answers the same way.
  */
-const refusesForGood = (status: number) =>
+export const refusesForGood = (status: number) =>
   status >= 400 && status < 500 && status !== 408 && status !== 429;
 
 export class WorkerContentReadyNotifier implements ContentReadyNotifier {

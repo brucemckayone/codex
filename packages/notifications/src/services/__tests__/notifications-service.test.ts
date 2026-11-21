@@ -1,6 +1,8 @@
 import { EMAIL_SEND_STATUS } from '@codex/constants';
 import { TEST_SEND_METADATA } from '@codex/database';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { EmailTemplate } from '@codex/database/schema';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TemplateRepository } from '../../repositories/template-repository';
 import type { Database, EmailProvider } from '../../types';
 import { NotificationsService } from '../notifications-service';
 
@@ -599,6 +601,86 @@ describe('NotificationsService', () => {
       await send();
 
       expect(logged()).toEqual({ ...fields, ...bookkeeping });
+    });
+  });
+
+  // The takedown email (Codex-a6ofh.6.4, owner 2026-11-21): the platform's
+  // words about an org's piece, so the org being moderated can't write them.
+  describe('a platform notice', () => {
+    const orgOverride = {
+      id: 'org-template',
+      name: 'content-removed',
+      subject: 'Removed by mistake: buy it again at https://elsewhere.test',
+      htmlBody: '<p>Buy it again elsewhere</p>',
+      textBody: 'Buy it again elsewhere',
+      scope: 'organization',
+      organizationId: 'org-1',
+    };
+    const platforms = {
+      id: 'global-template',
+      name: 'content-removed',
+      subject: '"{{contentTitle}}" has been removed',
+      htmlBody: '<p>Questions? Write to {{supportEmail}}</p>',
+      textBody: 'Questions? Write to {{supportEmail}}',
+      scope: 'global',
+    };
+
+    beforeEach(() => {
+      // The repository's contract, as its own suite pins it: the org's
+      // template when it is asked for the org's, else the global one.
+      vi.spyOn(TemplateRepository.prototype, 'findTemplate').mockImplementation(
+        async (_name, organizationId) =>
+          (organizationId === orgOverride.organizationId
+            ? orgOverride
+            : platforms) as unknown as EmailTemplate
+      );
+      (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        messageId: 'msg-1',
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    const takedown = (platformTemplate?: boolean) =>
+      service.sendEmail({
+        to: 'owner@example.com',
+        templateName: 'content-removed',
+        data: { userName: 'Riley', contentTitle: 'Flow' },
+        organizationId: 'org-1',
+        category: 'transactional',
+        platformTemplate,
+      });
+
+    it("sends the global template over the org's own, in the org's brand", async () => {
+      const brand = vi.spyOn(
+        service as unknown as {
+          resolveBrandTokens: (organizationId: string) => Promise<unknown>;
+        },
+        'resolveBrandTokens'
+      );
+
+      await takedown(true);
+
+      expect(mockEmailProvider.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: '"Flow" has been removed',
+          html: '<p>Questions? Write to support@codex.io</p>',
+        }),
+        expect.anything()
+      );
+      expect(brand).toHaveBeenCalledWith('org-1');
+    });
+
+    it("any other send still takes the org's template of that name", async () => {
+      await takedown();
+
+      expect(mockEmailProvider.send).toHaveBeenCalledWith(
+        expect.objectContaining({ subject: orgOverride.subject }),
+        expect.anything()
+      );
     });
   });
 });

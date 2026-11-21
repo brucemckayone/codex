@@ -27,6 +27,7 @@ import type { CachePresetName } from '@codex/constants';
 // Service type imports (for typing only)
 import type {
   CategoriesService,
+  ContentLeavingNoticeService,
   ContentService,
   MediaItemService,
 } from '@codex/content';
@@ -139,6 +140,11 @@ export type InferInput<T extends InputSchema | undefined> =
 export interface ServiceRegistry {
   // Content domain
   content: ContentService;
+  /**
+   * The leaving notice's sweep (Codex-a6ofh.6.4): the owners' emails and the
+   * day-27 reminders. Global by design: content-api's worker route only.
+   */
+  contentLeaving: ContentLeavingNoticeService;
   media: MediaItemService;
   /**
    * Per-space topic taxonomy (org landing "Browse by topic"). Scoped CRUD +

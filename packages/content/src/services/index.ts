@@ -28,6 +28,17 @@ export {
 // The leaving notice's writes (Codex-a6ofh.6): shared with @codex/admin's
 // delete, Keep and takedown
 export { deleteOrLeave, keepLeaving, takedownPiece } from './content-leaving';
+// The leaving notice's sweep (Codex-a6ofh.6.4): its emails and reminders
+export {
+  ContentLeavingNoticeService,
+  type ContentLeavingNoticeServiceConfig,
+  type LeavingNoticeDelivery,
+  type LeavingNoticeEmail,
+  type LeavingNoticeLinker,
+  type LeavingNoticeMailer,
+  type LeavingNoticePage,
+  type LeavingNoticeTally,
+} from './content-leaving-sweep';
 // Content Service
 export {
   CATALOGUE_CONTENT_COLUMNS,

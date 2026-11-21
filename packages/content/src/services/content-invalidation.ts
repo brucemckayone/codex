@@ -262,6 +262,13 @@ export interface InvalidateContentAccessManyArgs
    * about one write a second to a key.
    */
   catalogue?: boolean;
+  /**
+   * Bump the pieces' holders too. Default true. The leaving sweep's day-30
+   * deletes pass false: it pages their holders itself, with no cap
+   * (`ContentLeavingNoticeService.bumpOwnersOf`), and a key written twice in
+   * a second can be refused. A holder who also subscribes is left out too.
+   */
+  holders?: boolean;
   /** Merged into every log line, e.g. the one piece's id. */
   logContext?: Record<string, unknown>;
 }
@@ -288,6 +295,7 @@ export async function invalidateContentAccessMany(
     includeFollowers = false,
     maxFanout = DEFAULT_MAX_LIBRARY_FANOUT,
     catalogue = true,
+    holders: bumpHolders = true,
     logContext = { pieces: pieces.length },
   } = args;
   if (pieces.length === 0) return;
@@ -322,6 +330,9 @@ export async function invalidateContentAccessMany(
     includeFollowers,
   });
 
+  if (!bumpHolders) {
+    for (const userId of holders) everyone.delete(userId);
+  }
   if (everyone.size === 0) {
     return;
   }
@@ -332,7 +343,7 @@ export async function invalidateContentAccessMany(
   // kept piece) they wait for their next focus, as everyone else here does.
   let bumped = [...everyone];
   if (everyone.size > maxFanout) {
-    bumped = [...holders].slice(0, maxFanout);
+    bumped = bumpHolders ? [...holders].slice(0, maxFanout) : [];
     logger?.warn('content-invalidation: fanout capped to holders', {
       ...logContext,
       reason,

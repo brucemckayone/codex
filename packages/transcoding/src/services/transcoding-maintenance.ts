@@ -4,6 +4,9 @@
  * a new trigger would wake Neon on its own cadence.
  *
  * Steps run in order, each on its own so one failing never stops the next:
+ * 0. The leaving notice's sweep (Codex-a6ofh.6.4): one call to content-api,
+ *    which sends the owners' emails and finishes the deletes due. First, as
+ *    the longest call; media-api runs it alone when RunPod is not set up.
  * 1. Endpoint check: raise max workers if RunPod scaled the endpoint down
  *    (first, so the ping below reaches an awake endpoint).
  * 2. Keep-alive ping, once a day: RunPod pauses an endpoint after 7 days
@@ -41,7 +44,10 @@ import {
   InternalServiceError,
   type ServiceConfig,
 } from '@codex/service-errors';
-import { MEDIA_STATUS_RESYNC_MAX_ROWS } from '@codex/validation';
+import {
+  type ContentLeavingSweepReport,
+  MEDIA_STATUS_RESYNC_MAX_ROWS,
+} from '@codex/validation';
 import {
   and,
   asc,
@@ -53,6 +59,7 @@ import {
   lt,
   sql,
 } from 'drizzle-orm';
+import type { ContentLeavingSweeper } from '../content-leaving';
 import type { ContentReadyNotifier } from '../content-ready';
 import {
   type JobAnswer,
@@ -114,6 +121,8 @@ interface TranscodingMaintenanceConfig extends ServiceConfig {
   mediaStatus?: MediaStatusFeed;
   /** Publish when ready (Codex-a6ofh.2.8). Absent: no publishWhenReady step. */
   contentReady?: ContentReadyNotifier;
+  /** The leaving notice's sweep (Codex-a6ofh.6.4). Absent: no contentLeaving step. */
+  contentLeaving?: ContentLeavingSweeper;
 }
 
 /** The lifecycle states the live status mirrors (the rest are terminal). */
@@ -153,6 +162,12 @@ export interface MaintenanceReport {
     deferred: number;
     more: boolean;
   } | null;
+  /**
+   * What content-api's leaving sweep did this tick (Codex-a6ofh.6.4): the
+   * owners' emails, the reminders added and the pieces deleted on their day.
+   * Null when the step did not run, or failed (`failedSteps`).
+   */
+  contentLeaving: ContentLeavingSweepReport | null;
   /** Writes and claims that matched nothing: a webhook, a Retry or another run got there first. */
   raced: number;
   /** Steps that threw; the run went on. */
@@ -198,6 +213,7 @@ export class TranscodingMaintenance extends BaseService {
   private readonly alerts?: TranscodingAlerts;
   private readonly mediaStatus?: MediaStatusFeed;
   private readonly contentReady?: ContentReadyNotifier;
+  private readonly contentLeaving?: ContentLeavingSweeper;
 
   constructor(config: TranscodingMaintenanceConfig) {
     super(config);
@@ -206,6 +222,7 @@ export class TranscodingMaintenance extends BaseService {
     this.alerts = config.alerts;
     this.mediaStatus = config.mediaStatus;
     this.contentReady = config.contentReady;
+    this.contentLeaving = config.contentLeaving;
   }
 
   /** One run. NEVER THROWS: a failing step is logged and reported. */
@@ -224,6 +241,7 @@ export class TranscodingMaintenance extends BaseService {
       uploads: { arrived: 0, incomplete: 0, unknown: 0 },
       resynced: null,
       publishWhenReady: null,
+      contentLeaving: null,
       raced: 0,
       failedSteps: [],
     };
@@ -240,6 +258,14 @@ export class TranscodingMaintenance extends BaseService {
       }
     };
 
+    // First, while the run's whole budget is ahead: its one call can take
+    // minutes (content-api's send budget), and every step after it stops at
+    // the deadline, so none can push it past the cron's wall. It touches no
+    // media.
+    await step('contentLeaving', async () => {
+      if (!this.contentLeaving) return;
+      report.contentLeaving = await this.contentLeaving.sweep();
+    });
     // A setup fault is reported every run; the alerts mail it once a day.
     await step('endpoint', async () => {
       report.endpoint = await this.transcoding.ensureEndpointAwake(

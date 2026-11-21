@@ -126,7 +126,8 @@ function fanContentInvalidationMany(
   executionCtx: ExecutionContext,
   pieces: BulkTouchedPiece[],
   reason: ContentInvalidationReason,
-  obs?: ObservabilityClient
+  obs?: ObservabilityClient,
+  holders = true
 ): void {
   if (pieces.length === 0) return;
   fanOut(env, executionCtx, obs, { pieces: pieces.length, reason }, (deps) =>
@@ -135,6 +136,7 @@ function fanContentInvalidationMany(
       pieces,
       reason,
       catalogue: false,
+      holders,
     })
   );
 }
@@ -187,13 +189,17 @@ function fanOut(
  * per-piece refreshes would write one KV key fifteen times, and KV keeps
  * about one write a second to a key, so the last ones would be lost and
  * public pages stay stale for the cache's TTL.
+ *
+ * `holders: false` leaves the pieces' holders out: the leaving sweep's
+ * day-30 deletes bump every one of them itself, uncapped.
  */
 export function afterBulkChange(
   env: HonoEnv['Bindings'],
   executionCtx: ExecutionContext,
   touched: BulkTouchedPiece[],
   reason: ContentInvalidationReason | null,
-  obs?: ObservabilityClient
+  obs?: ObservabilityClient,
+  { holders = true }: { holders?: boolean } = {}
 ): void {
   if (touched.length === 0) return;
   for (const organizationId of orgsOf(touched)) {
@@ -217,7 +223,7 @@ export function afterBulkChange(
         })
     );
   }
-  fanContentInvalidationMany(env, executionCtx, touched, reason, obs);
+  fanContentInvalidationMany(env, executionCtx, touched, reason, obs, holders);
 }
 
 /**
