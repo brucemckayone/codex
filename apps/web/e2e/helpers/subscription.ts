@@ -8,6 +8,7 @@
  * specs 01 and 02 don't need them.
  */
 
+import { SERVICE_PORTS } from '@codex/constants';
 import type { Page } from '@playwright/test';
 import {
   aliasSessionCookies,
@@ -15,6 +16,16 @@ import {
   parseSetCookieStrings,
 } from './auth-cookies';
 import { E2E_HOST, E2E_ORIGIN, orgOrigin } from './origin';
+
+/**
+ * The auth worker on `lvh.me`. A call that SETS cookies must use this host,
+ * not localhost (e2e/CLAUDE.md, "Cookie domain gotcha"), so it is not
+ * buildServiceUrl's localhost URL; the port is `SERVICE_PORTS.AUTH`.
+ */
+const AUTH_LVH = `http://lvh.me:${SERVICE_PORTS.AUTH}`;
+/** The auth worker on localhost, as the test-only fast-register has used. */
+const AUTH_LOCAL = `http://localhost:${SERVICE_PORTS.AUTH}`;
+
 import {
   loadValidatedSeededCreatorCookies,
   saveSeededCreatorCookies,
@@ -144,14 +155,15 @@ export async function signInSeededCreatorForCapture(): Promise<
   // BetterAuth's `validateFormCsrf` middleware (Node 22 undici auto-sends
   // `sec-fetch-mode: cors`; without Origin BetterAuth throws 403
   // MISSING_OR_NULL_ORIGIN).
-  const response = await fetch('http://lvh.me:42069/api/auth/sign-in/email', {
+  const response = await fetch(`${AUTH_LVH}/api/auth/sign-in/email`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       // Origin MUST match BetterAuth's trustedOrigins for the test env
       // (packages/urls/src/cors-origins.ts case 'test'): the web app's
       // origin (origin.ts; the default port is in the trusted list).
-      // Using lvh.me:42069 here gets rejected with INVALID_ORIGIN.
+      // Using the auth worker's own origin here gets rejected with
+      // INVALID_ORIGIN.
       Origin: E2E_ORIGIN,
     },
     body: JSON.stringify({
@@ -208,17 +220,14 @@ export async function createFreshOwnerWithBypass(opts: {
   const orgName = opts.orgName ?? `E2E x0pa Org ${timestamp}`;
 
   // Step 1: Fast-register (test endpoint, NOT rate-limited).
-  const registerRes = await fetch(
-    'http://localhost:42069/api/test/fast-register',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: 'http://localhost:42069',
-      },
-      body: JSON.stringify({ email, password, name, role: 'customer' }),
-    }
-  );
+  const registerRes = await fetch(`${AUTH_LOCAL}/api/test/fast-register`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: AUTH_LOCAL,
+    },
+    body: JSON.stringify({ email, password, name, role: 'customer' }),
+  });
   if (!registerRes.ok) {
     throw new Error(
       `createFreshOwnerWithBypass: fast-register failed ${registerRes.status}: ${await registerRes.text()}`
@@ -236,7 +245,7 @@ export async function createFreshOwnerWithBypass(opts: {
 
   // Step 2: Sign in — the first charge to this brand-new credential.
   // lvh.me host + Origin header — see captureSeededCreatorCookies note above.
-  const signInRes = await fetch('http://lvh.me:42069/api/auth/sign-in/email', {
+  const signInRes = await fetch(`${AUTH_LVH}/api/auth/sign-in/email`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

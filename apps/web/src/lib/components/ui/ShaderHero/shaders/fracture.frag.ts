@@ -96,6 +96,14 @@ ${MOTION_HELPERS}
  */
 const float CUT_SWAY = 0.32;
 
+/**
+ * The narrowest anti-alias ramp (WP-11). fwidth() is 0 where the distance
+ * does not change across a pixel quad, which made the line's two smoothstep
+ * edges EQUAL: undefined in GLSL ES 3.00 (a 0/0 at the edge). A floor this
+ * far below a pixel's width changes nothing wherever fwidth() is above it.
+ */
+const float MIN_RAMP = 1e-5;
+
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -182,7 +190,7 @@ void main() {
 
   // ── Border: hard by default (1 px of anti-alias) ───────────────────
   // Softness blurs it either side of the same weight (R4's soft line).
-  float fw = fwidth(minEdge);
+  float fw = max(fwidth(minEdge), MIN_RAMP);
   float ramp = max(fw, u_lineSoftness * u_border * 0.65);
   float borderMask = 1.0 - smoothstep(u_border - ramp, u_border + ramp, minEdge);
 

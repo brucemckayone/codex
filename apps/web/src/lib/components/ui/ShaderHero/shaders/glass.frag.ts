@@ -123,6 +123,14 @@ const float SPLIT_CHANCE = 0.35;
 const float SPLIT_OFFSET = 0.2;
 const float DRIFT_SCALE = 0.3;
 
+/**
+ * The narrowest anti-alias ramp (WP-11). fwidth() is 0 where the distance
+ * does not change across a pixel quad, which made the line's two smoothstep
+ * edges EQUAL: undefined in GLSL ES 3.00 (a 0/0 at the edge). A floor this
+ * far below a pixel's width changes nothing wherever fwidth() is above it.
+ */
+const float MIN_RAMP = 1e-5;
+
 float hash21(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -301,7 +309,7 @@ void main() {
   // Softness widens the edge to R4's soft ramp at the same weight; the tint
   // moves the colour to R4's: a dark came on a dark ground, a brand-tinted
   // line on a light one.
-  float aa = fwidth(edge);
+  float aa = max(fwidth(edge), MIN_RAMP);
   float leadEdge = u_border * 0.75;
   float leadRamp = max(aa, u_lineSoftness * u_border * 0.4);
   float borderMask = smoothstep(leadEdge - leadRamp, leadEdge + leadRamp, edge);
