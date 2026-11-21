@@ -260,11 +260,9 @@ test.describe('the Showreel on a landing', () => {
     baseURL,
   }) => {
     const page = await open(browser, baseURL);
-    // fitScrims has drawn the solved shades.
-    await expect(page.locator('.reel')).toHaveAttribute(
-      'style',
-      /--_foot-0: ellipse/
-    );
+    // fitScrims has drawn the solved shades: the server's first paint (the
+    // cap) carries `--_foot-0` too, so wait for the fit's own mark.
+    await expect(page.locator('.reel')).toHaveAttribute('data-fit', '');
     const shades = await page.locator('.reel').evaluate((reel) =>
       ['.reel__scrim-top', '.reel__scrim-foot'].map((sel) => {
         const el = reel.querySelector(sel);
@@ -298,10 +296,7 @@ test.describe('the Showreel on a landing', () => {
   }) => {
     const read = async (keys: Record<string, string>) => {
       const page = await open(browser, baseURL, { keys });
-      await expect(page.locator('.reel')).toHaveAttribute(
-        'style',
-        /--_foot-0: ellipse/
-      );
+      await expect(page.locator('.reel')).toHaveAttribute('data-fit', '');
       const out = await page.locator('.reel').evaluate((reel) => ({
         edge: reel.getAttribute('data-edge'),
         // Each word's text-shadow layers as [x, y, blur] in px, colours dropped.

@@ -116,6 +116,16 @@ export function veilPole(inks: readonly { ink: Ink; ratio: number }[]): Rgb {
 }
 
 /**
+ * The ink that stands furthest from a veil of `scrim`: white on a dark one,
+ * black on a light one. What a colour no scrim carries is lifted toward, and
+ * the last resort of every ink the reel solves: never the reel's own ink,
+ * which a creator may set to the very brand colour that needs the lift.
+ */
+export function inkPole(scrim: Rgb): Rgb {
+  return contrast(WHITE, scrim) >= contrast(BLACK, scrim) ? WHITE : BLACK;
+}
+
+/**
  * The scrim's colour: the brand's own ground (`--color-background`, what the
  * shader's ground and the page use), moved toward its inks' pole (`veilPole`)
  * only as far as they need to keep their ratio at no more than
@@ -420,32 +430,38 @@ export function glowLeaves(need: number, glow: number): number {
 
 /**
  * A brand colour that no shade can carry (the 'shadow' edge, owner
- * 2026-11-20: OBB's red is 3.75:1 at best on its own dark): lifted toward the
- * reel's own ink, in twentieths, just far enough that `carried` accepts it.
- * The colour as it is when it already passes; the reel's ink when nothing
- * nearer does.
+ * 2026-11-20: OBB's red is 3.75:1 at best on its own dark): lifted toward
+ * `toward` (the reel passes `inkPole` of its scrim, never its own ink, which
+ * may be that same colour), in twentieths, just far enough that `carried`
+ * accepts it. The colour as it is when it already passes; null when not even
+ * `toward` itself does, so a caller never takes an unchecked last step.
  */
 export function liftInk(
   ink: Ink,
   toward: Rgb,
   carried: (ink: Ink) => boolean
-): Ink {
+): Ink | null {
   const step = liftStep(ink, toward, carried);
-  return { rgb: over(toward, step / 20, ink.rgb), alpha: ink.alpha };
+  return step === null
+    ? null
+    : { rgb: over(toward, step / 20, ink.rgb), alpha: ink.alpha };
 }
 
-/** `liftInk`'s step, in twentieths toward `toward`: 0 when it passes as is. */
+/**
+ * `liftInk`'s step, in twentieths toward `toward`: 0 when it passes as is, 20
+ * when only `toward` itself does, and null when even that fails.
+ */
 export function liftStep(
   ink: Ink,
   toward: Rgb,
   carried: (ink: Ink) => boolean
-): number {
-  for (let step = 0; step < 20; step++) {
+): number | null {
+  for (let step = 0; step <= 20; step++) {
     if (carried({ rgb: over(toward, step / 20, ink.rgb), alpha: ink.alpha })) {
       return step;
     }
   }
-  return 20;
+  return null;
 }
 
 /**
@@ -483,16 +499,19 @@ export const FOCUS_RATIO = 3;
  * and the reel draws over film: the brand's focus colour, mixed toward the
  * reel's own ink only as far as it needs to keep 3:1 over any frame under the
  * scrim at `alpha` (with `FLOOR_MARGIN`). A colour that passes as it is stays
- * the brand's own. The ink is the last resort, since the scrim was solved
- * for it.
+ * the brand's own. When no mix toward the ink passes (the ink is itself a
+ * brand colour the scrim cannot carry), toward `inkPole` instead, and the
+ * pole itself last: every ring returned is checked, never assumed.
  */
 export function focusInk(focus: Rgb, ink: Rgb, scrim: Rgb, alpha: number): Rgb {
-  for (let step = 0; step <= 20; step++) {
-    const ring = over(ink, step / 20, focus);
-    const ratio = worstContrast({ rgb: ring, alpha: 1 }, scrim, alpha);
-    if (ratio >= FOCUS_RATIO * FLOOR_MARGIN) {
-      return ring;
+  const passes = (ring: Rgb) =>
+    worstContrast({ rgb: ring, alpha: 1 }, scrim, alpha) >=
+    FOCUS_RATIO * FLOOR_MARGIN;
+  for (const toward of [ink, inkPole(scrim)]) {
+    for (let step = 0; step <= 20; step++) {
+      const ring = over(toward, step / 20, focus);
+      if (passes(ring)) return ring;
     }
   }
-  return ink;
+  return inkPole(scrim);
 }
