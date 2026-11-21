@@ -31,7 +31,7 @@ import {
  * Prereqs:
  *   - auth-worker (42069), organization-api (42071), ecom-api (42072) up
  *     (playwright.config.ts auto-starts these on local).
- *   - SvelteKit dev server on lvh.me:5173 (also auto-started).
+ *   - SvelteKit dev server on lvh.me, the default port (also auto-started).
  *   - For 1.c: `pnpm db:seed` has run with STRIPE_SECRET_KEY set.
  */
 

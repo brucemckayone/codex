@@ -38,10 +38,18 @@ const isNode = (value: unknown): value is AstNode =>
 /**
  * The local names a component's scripts import ShaderHero under: the named
  * export from any barrel (`{ ShaderHero }`, `{ ShaderHero as Hero }`) or the
- * default export of ShaderHero.svelte.
+ * default export of ShaderHero.svelte; and each namespace import of a module
+ * that provides it, with the member that is ShaderHero (`* as UI` from the
+ * barrel: `<UI.ShaderHero>`; of ShaderHero.svelte: `<UI.default>`). Only the
+ * ShaderHero barrel re-exports it, so another module's namespace (paraglide's
+ * `* as m`) is not one.
  */
-function shaderHeroNames(root: AstNode): Set<string> {
+function shaderHeroImports(root: AstNode): {
+  names: Set<string>;
+  namespaces: Map<string, string>;
+} {
   const names = new Set<string>();
+  const namespaces = new Map<string, string>();
   for (const script of [root.module, root.instance]) {
     if (!isNode(script) || !isNode(script.content)) continue;
     const body = script.content.body;
@@ -60,10 +68,95 @@ function shaderHeroNames(root: AstNode): Set<string> {
           from.endsWith('ShaderHero.svelte')
         )
           names.add(local);
+        if (
+          spec.type === 'ImportNamespaceSpecifier' &&
+          from.includes('ShaderHero')
+        )
+          namespaces.set(
+            local,
+            from.endsWith('ShaderHero.svelte') ? 'default' : 'ShaderHero'
+          );
       }
     }
   }
-  return names;
+  return { names, namespaces };
+}
+
+/** Type-only positions: a name there cannot mount anything. */
+const TYPE_ONLY = new Set([
+  'TSTypeAnnotation',
+  'TSTypeReference',
+  'TSTypeQuery',
+]);
+
+/**
+ * Fail CLOSED on a ShaderHero this counter cannot see mount: any use of an
+ * imported ShaderHero other than as a tag (`<svelte:component
+ * this={ShaderHero}>`, `const C = ShaderHero`, a namespace's
+ * `UI.ShaderHero` in script) and any dynamic `import()` that may load it. A
+ * miss there would let a second `tone` writer through the one-writer check.
+ */
+function assertOnlyTagUses(
+  root: AstNode,
+  names: Set<string>,
+  namespaces: Map<string, string>
+): void {
+  const seen = new Set<object>();
+  const fail = (what: string): never => {
+    throw new Error(
+      `toneWriters cannot count a ShaderHero used ${what}: mount it as a tag, or count this file by hand`
+    );
+  };
+  const visit = (value: unknown, parent: AstNode | null, key: string): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, parent, key);
+      return;
+    }
+    if (!isNode(value) || seen.has(value)) return;
+    seen.add(value);
+    if (value.type === 'ImportDeclaration') return;
+    if (value.type && TYPE_ONLY.has(value.type)) return;
+    if (value.type === 'ImportExpression') {
+      const source = isNode(value.source) ? value.source : null;
+      const literal =
+        source?.type === 'Literal' && typeof source.value === 'string';
+      if (!literal || String(source?.value).includes('ShaderHero'))
+        fail('through a dynamic import()');
+    }
+    if (value.type === 'Identifier') {
+      const name = String(value.name);
+      // A property key or a non-computed member is a name, not a use.
+      const isKey =
+        (parent?.type === 'MemberExpression' &&
+          key === 'property' &&
+          !parent.computed) ||
+        (parent?.type === 'Property' &&
+          key === 'key' &&
+          !parent.computed &&
+          !parent.shorthand);
+      if (!isKey && names.has(name)) fail(`as a value (${name})`);
+      if (!isKey && namespaces.has(name)) {
+        const member =
+          parent?.type === 'MemberExpression' && key === 'object'
+            ? parent
+            : null;
+        const prop =
+          member && !member.computed && isNode(member.property)
+            ? String(member.property.name)
+            : null;
+        // Another member is another export; the ShaderHero member, `UI[x]`
+        // or a bare `UI` may be ShaderHero.
+        if (prop === null || prop === namespaces.get(name))
+          fail(`through its namespace (${name})`);
+      }
+    }
+    for (const [childKey, child] of Object.entries(value)) {
+      visit(child, value, childKey);
+    }
+  };
+  visit(root.instance, null, '');
+  visit(root.module, null, '');
+  visit(root.fragment, null, '');
 }
 
 /** An attribute value that is the literal `{false}`. */
@@ -88,7 +181,15 @@ function isLiteralFalse(value: unknown): boolean {
 function toneWriters(source: string): number {
   const root: unknown = parse(source, { modern: true });
   if (!isNode(root)) throw new Error('svelte/compiler parse returned no AST');
-  const names = shaderHeroNames(root);
+  const { names, namespaces } = shaderHeroImports(root);
+  assertOnlyTagUses(root, names, namespaces);
+  const isShaderHero = (name: string): boolean => {
+    if (names.has(name)) return true;
+    const [ns, member, ...rest] = name.split('.');
+    return (
+      rest.length === 0 && member !== undefined && namespaces.get(ns) === member
+    );
+  };
   let writers = 0;
   const seen = new Set<object>();
   const visit = (value: unknown): void => {
@@ -98,7 +199,7 @@ function toneWriters(source: string): number {
     }
     if (!isNode(value) || seen.has(value)) return;
     seen.add(value);
-    if (value.type === 'Component' && names.has(String(value.name))) {
+    if (value.type === 'Component' && isShaderHero(String(value.name))) {
       const attributes = Array.isArray(value.attributes)
         ? value.attributes
         : [];
@@ -185,6 +286,20 @@ describe('toneWriters, which the one-writer check counts with', () => {
         "import Hero from '$lib/components/ui/ShaderHero/ShaderHero.svelte';"
       ),
     ],
+    [
+      'a namespace import',
+      mount(
+        '<UI.ShaderHero tone />',
+        "import * as UI from '$lib/components/ui/ShaderHero';"
+      ),
+    ],
+    [
+      'a namespace of the .svelte module',
+      mount(
+        '<UI.default tone />',
+        "import * as UI from '$lib/components/ui/ShaderHero/ShaderHero.svelte';"
+      ),
+    ],
   ])('counts %s', (_name, source) => {
     expect(toneWriters(source)).toBe(1);
   });
@@ -196,7 +311,62 @@ describe('toneWriters, which the one-writer check counts with', () => {
       'another component called Hero',
       mount('<Hero tone />', "import Hero from './Hero.svelte';"),
     ],
+    [
+      'another member of the ShaderHero namespace',
+      mount(
+        '<UI.Other tone />',
+        "import * as UI from '$lib/components/ui/ShaderHero';"
+      ),
+    ],
+    // The real app's false alarm: paraglide's messages, read by key.
+    [
+      "another module's namespace, used by key",
+      mount(
+        '<p>{m[key]()}</p>',
+        "import * as m from '$lib/paraglide/messages';\nconst key = 'x';"
+      ),
+    ],
+    [
+      'the .svelte module namespace, another member',
+      mount(
+        '<UI.Other tone />',
+        "import * as UI from '$lib/components/ui/ShaderHero/ShaderHero.svelte';"
+      ),
+    ],
   ])('does not count %s', (_name, source) => {
     expect(toneWriters(source)).toBe(0);
+  });
+
+  // WP-11: a ShaderHero it cannot see mount fails the check, rather than
+  // counting 0 and letting a second `tone` writer through.
+  it.each([
+    [
+      '<svelte:component this={ShaderHero}>',
+      mount('<svelte:component this={ShaderHero} tone />'),
+    ],
+    [
+      'a component held in a variable',
+      mount('<C tone />', `${barrel}\nconst C = ShaderHero;`),
+    ],
+    [
+      'a namespace member in script',
+      mount(
+        '<C tone />',
+        "import * as UI from '$lib/components/ui/ShaderHero';\nconst C = UI.ShaderHero;"
+      ),
+    ],
+    [
+      'a dynamic import()',
+      mount(
+        "{#await import('$lib/components/ui/ShaderHero') then m}<m.ShaderHero tone />{/await}",
+        ''
+      ),
+    ],
+    [
+      'a dynamic import() of a computed path',
+      mount('<p>x</p>', 'const p = "./x"; const m = import(p);'),
+    ],
+  ])('fails closed on %s', (_name, source) => {
+    expect(() => toneWriters(source)).toThrow(/cannot count a ShaderHero/);
   });
 });

@@ -137,6 +137,17 @@ jobs:
       - name: Output-door gate (ShaderHero draws through bindOutput)
         run: pnpm --filter web run check:output-door
 
+      # Codex-1yd58 WP-11: the e2e suite finds the web app through ONE helper,
+      # apps/web/e2e/helpers/origin.ts (PLAYWRIGHT_BASE_URL or the default).
+      # A default port written anywhere else under e2e/ breaks every run
+      # against another port (the epic worktree's :3000 dev server). Text-only;
+      # see apps/web/scripts/check-e2e-ports.mjs. Self-test first.
+      - name: E2E origin gate self-test
+        run: pnpm --filter web run check:e2e-ports:test
+
+      - name: E2E origin gate (no hardcoded default port under e2e/)
+        run: pnpm --filter web run check:e2e-ports
+
       # Codex-ea1hd WP9: the data-access contract drift gate.
       #
       # Two grep-based rules over packages/*/src, workers/*/src and apps/*/src:

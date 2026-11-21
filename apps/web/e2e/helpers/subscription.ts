@@ -14,6 +14,7 @@ import {
   type BrowserCookie,
   parseSetCookieStrings,
 } from './auth-cookies';
+import { E2E_HOST, E2E_ORIGIN, orgOrigin } from './origin';
 import {
   loadValidatedSeededCreatorCookies,
   saveSeededCreatorCookies,
@@ -44,7 +45,7 @@ export const STUDIO_ALPHA = {
   slug: 'studio-alpha',
   name: 'Studio Alpha',
   /** Use {@link buildOrgUrl} via {@link import('@playwright/test').Page} `baseURL` for portable URL building. */
-  baseUrl: 'http://studio-alpha.lvh.me:5173',
+  baseUrl: orgOrigin('studio-alpha'),
 } as const;
 
 /**
@@ -59,10 +60,10 @@ export function buildOrgUrl(
 ): string {
   const base = new URL(page.url());
   // If page hasn't navigated yet (about:blank), fall back to the configured
-  // baseURL via context options. lvh.me:5173 is the dev default.
+  // base URL (origin.ts).
   const protocol =
     base.protocol === 'about:' || !base.protocol ? 'http:' : base.protocol;
-  const host = base.host && base.host !== '' ? base.host : 'lvh.me:5173';
+  const host = base.host && base.host !== '' ? base.host : E2E_HOST;
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${protocol}//${orgSlug}.${host}${cleanPath}`;
 }
@@ -148,10 +149,10 @@ export async function signInSeededCreatorForCapture(): Promise<
     headers: {
       'Content-Type': 'application/json',
       // Origin MUST match BetterAuth's trustedOrigins for the test env
-      // (packages/urls/src/cors-origins.ts case 'test') — lvh.me:5173 is
-      // the Playwright webServer port and an entry in the trusted list.
+      // (packages/urls/src/cors-origins.ts case 'test'): the web app's
+      // origin (origin.ts; the default port is in the trusted list).
       // Using lvh.me:42069 here gets rejected with INVALID_ORIGIN.
-      Origin: 'http://lvh.me:5173',
+      Origin: E2E_ORIGIN,
     },
     body: JSON.stringify({
       email: SEEDED_CREATOR.email,
@@ -239,10 +240,10 @@ export async function createFreshOwnerWithBypass(opts: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      // Origin matches the Playwright webServer port (lvh.me:5173) which
-      // is in BetterAuth's trustedOrigins for `test` env — see note in
+      // Origin is the web app's origin (origin.ts), which is in
+      // BetterAuth's trustedOrigins for `test` env — see note in
       // captureSeededCreatorCookies above.
-      Origin: 'http://lvh.me:5173',
+      Origin: E2E_ORIGIN,
     },
     body: JSON.stringify({ email, password }),
   });

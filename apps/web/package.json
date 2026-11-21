@@ -27,6 +27,8 @@
     "check:load-retry:test": "node --test scripts/check-load-retry.test.mjs",
     "check:output-door": "node scripts/check-output-door.mjs",
     "check:output-door:test": "node --test scripts/check-output-door.test.mjs",
+    "check:e2e-ports": "node scripts/check-e2e-ports.mjs",
+    "check:e2e-ports:test": "node --test scripts/check-e2e-ports.test.mjs",
     "check:svelte-baseline": "svelte-kit sync && node scripts/check-svelte-baseline.mjs",
     "check:svelte-baseline:test": "node --test scripts/check-svelte-baseline.test.mjs",
     "lint": "biome lint --write .",

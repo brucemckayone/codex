@@ -32,7 +32,7 @@ import { loginAsSeedViewer, SEED_VIEWER_2 } from './helpers/seed-auth';
  *
  * Prereqs (matches playwright.config.ts webServer list):
  *   - auth (42069), ecom-api (42072), organization-api (42075), content-api (4001)
- *   - SvelteKit dev server on lvh.me:5173 (wildcard DNS → 127.0.0.1)
+ *   - SvelteKit dev server on lvh.me, the default port (wildcard DNS → 127.0.0.1)
  */
 
 const SEEDED_ORG_SLUG = 'studio-alpha';

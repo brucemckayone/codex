@@ -13,15 +13,14 @@ import {
 } from '@codex/test-utils/e2e';
 import { expect, type Page } from '@playwright/test';
 import { aliasSessionCookies } from './auth-cookies';
-
-const BASE_PORT = 5173;
+import { E2E_BASE_URL, orgUrl } from './origin';
 
 /**
  * Navigate to the studio root on an org subdomain.
  * Waits for the studio layout to be visible.
  */
 export async function navigateToStudio(page: Page, orgSlug: string) {
-  await page.goto(`http://${orgSlug}.lvh.me:${BASE_PORT}/studio`, {
+  await page.goto(orgUrl(E2E_BASE_URL, orgSlug, '/studio'), {
     waitUntil: 'load',
   });
   // Wait for the studio layout container
@@ -50,7 +49,7 @@ export async function navigateToStudioPage(
   path: string
 ) {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  await page.goto(`http://${orgSlug}.lvh.me:${BASE_PORT}/studio${cleanPath}`, {
+  await page.goto(orgUrl(E2E_BASE_URL, orgSlug, `/studio${cleanPath}`), {
     waitUntil: 'load',
   });
   // Wait for the studio shell to mount (proves hydration has begun and the
@@ -72,7 +71,7 @@ export async function navigateToOrgPage(
   path: string = '/'
 ) {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  await page.goto(`http://${orgSlug}.lvh.me:${BASE_PORT}${cleanPath}`, {
+  await page.goto(orgUrl(E2E_BASE_URL, orgSlug, cleanPath), {
     waitUntil: 'load',
   });
   await page.evaluate(() => new Promise(requestAnimationFrame));
@@ -82,7 +81,7 @@ export async function navigateToOrgPage(
  * Inject cookies for an org member into the page context.
  *
  * Cookies MUST be attached to `.lvh.me` (leading dot) so Chromium sends them
- * on requests to any `<slug>.lvh.me:5173` host. Playwright's `addCookies`
+ * on requests to any `<slug>.lvh.me` host, at any port. Playwright's `addCookies`
  * stores the cookie at the literal domain you give it; without the leading
  * dot, the cookie is scoped to the apex only and is NOT sent on subdomain
  * navigation — studio tests then see `locals.user = null` in

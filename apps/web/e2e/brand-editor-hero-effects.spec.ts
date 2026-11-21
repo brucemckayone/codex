@@ -3,6 +3,7 @@ import { dbHttp, schema } from '@codex/database';
 import { extractSessionCookie, parseCookieString } from '@codex/test-utils/e2e';
 import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { expect, test } from '@playwright/test';
+import { E2E_BASE_URL, orgOrigin } from './helpers/origin';
 
 /**
  * Brand Editor — Hero Effects (Phase 2 manifest renderer)
@@ -48,16 +49,11 @@ const SHADER_INTENSITY_NON_DEFAULT = '1.5';
 const AUTH_URL = getServiceUrl('auth', true);
 
 /**
- * Build the org-subdomain URL for the org the test owns.
- * Uses `lvh.me` (RFC 6761 wildcard → 127.0.0.1) per the dev-stack convention.
- * Port comes from PLAYWRIGHT_BASE_URL (default 5173 in playwright.config).
+ * Build the org-subdomain URL for the org the test owns, on the suite's
+ * base URL (origin.ts: PLAYWRIGHT_BASE_URL, or the default).
  */
 function buildOrgUrl(slug: string, params: string = ''): string {
-  // Prefer the running dev stack on :3000 if PLAYWRIGHT_BASE_URL points at it,
-  // otherwise fall back to :5173 (Playwright config default).
-  const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://lvh.me:5173';
-  const port = new URL(baseUrl).port || '5173';
-  return `http://${slug}.lvh.me:${port}/${params}`;
+  return `${orgOrigin(slug)}/${params}`;
 }
 
 /**
@@ -241,9 +237,8 @@ test.describe
 
     test.beforeAll(async () => {
       // Health-gate: don't bother running if the stack isn't up.
-      const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://lvh.me:5173';
       try {
-        const r = await fetch(`${baseUrl}/api/health`);
+        const r = await fetch(`${E2E_BASE_URL}/api/health`);
         if (!r.ok) test.skip(true, `Web app not healthy: ${r.status}`);
       } catch (e) {
         test.skip(true, `Web app unreachable: ${(e as Error).message}`);

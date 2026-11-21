@@ -47,7 +47,7 @@ import { expect, test } from '@playwright/test';
  * Option A is recommended.
  *
  * Follow the Codex-a8g6h patterns exactly (see account-subscription-cancel.spec.ts):
- *   - baseURL from playwright.config.ts (http://lvh.me:5173)
+ *   - baseURL from playwright.config.ts (E2E_BASE_URL, helpers/origin.ts)
  *   - login via the real form + auth worker
  *   - health-probe bail-out in beforeAll so missing workers skip cleanly
  *   - idempotent teardown — clear the revocation key in afterEach

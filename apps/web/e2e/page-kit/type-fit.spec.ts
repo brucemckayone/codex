@@ -41,6 +41,7 @@
  * `TYPE_FIT_BRANDS` and `TYPE_FIT_WIDTHS` narrow the run; `TYPE_FIT_EYEBROW`
  * sets the hero's eyebrow, a chip on Soft and Poster.
  */
+
 import { writeFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
 import {
@@ -51,6 +52,7 @@ import {
   headingRuns,
   widestRun,
 } from '../../src/lib/page-builder/kit/model/long-heading';
+import { orgOrigin } from '../helpers/origin';
 import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 test.skip(!process.env.TYPE_FIT, 'opt-in: TYPE_FIT=1 (a development route)');
@@ -366,7 +368,7 @@ test('a borrowed Type holds its base’s hero fit', async ({ browser }) => {
           // and the log says which were read).
           try {
             await page.goto(
-              `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${base}&type=${type}&brand=${brand}&only=hero&layout=${layout}&theme=light&chrome=0${EYEBROW ? `&eyebrow=${encodeURIComponent(EYEBROW)}` : ''}`
+              `${orgOrigin('studio-alpha')}/studio/page-kit?style=${base}&type=${type}&brand=${brand}&only=hero&layout=${layout}&theme=light&chrome=0${EYEBROW ? `&eyebrow=${encodeURIComponent(EYEBROW)}` : ''}`
             );
             await page
               .locator('.lp-section[data-lp-type="hero"] .hero__headline')
