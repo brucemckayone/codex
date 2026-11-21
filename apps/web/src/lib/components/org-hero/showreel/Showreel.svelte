@@ -257,10 +257,17 @@
   // OUT_MS before the words and the stage do, and until they follow, the
   // still on show keeps its last reading (its full push), never the next
   // piece's 0 under the old picture. The next starts about OUT_MS in.
+  // A push restarts only when the piece on show CHANGES (review M1r3): a
+  // reel of one goes round to the same piece (`go(0)`), and a visitor may
+  // re-pick the piece on show, and either zeroes the clock under the same
+  // still. On the same piece the push holds what it has reached.
   // Canvas (`pieceSeconds`) and page (`--_push-progress`) read this one.
   let pushProgress = 0;
+  let pushKey = '';
   function pushOnShow(): number {
-    if (keys[clock.index] === shownKey) pushProgress = clock.progress;
+    if (keys[clock.index] !== shownKey) return pushProgress;
+    pushProgress = shownKey === pushKey ? Math.max(pushProgress, clock.progress) : clock.progress;
+    pushKey = shownKey;
     return pushProgress;
   }
   const pushClock = pieceSeconds({

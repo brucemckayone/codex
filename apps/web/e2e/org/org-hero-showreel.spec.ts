@@ -11,7 +11,8 @@
  * phone a tap moves on, or back on the left third. With no WebGL2 the page's
  * still pushes in on the reel's clock and holds while paused (none under
  * reduced motion), and the peek stops the hero short of the screen so the
- * first section shows above the fold (WP-5b, owner 2026-11-21).
+ * first section's cards show above the fold, the section starting at the
+ * hero's foot (WP-5b, owner 2026-11-21, Q1-B).
  *
  * Measured on of-blood-and-bones without a DB write, through
  * `helpers/showreel.ts`: the landing's HTML is rewritten in the browser to set
@@ -20,7 +21,7 @@
  * only.
  */
 
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import {
   currentPiece as current,
   MOVES_ON,
@@ -61,6 +62,41 @@ function stillsWithoutWebGL2() {
       removeEventListener: () => {},
     }),
   });
+}
+
+/**
+ * The landing's first two sections under the hero: each one's top and top
+ * spacing, the first one's label height and first card's top, and `spacing`
+ * (a token) as this page resolves it, at the brand's density.
+ */
+function underTheHero(page: Page, spacing: string) {
+  return page.evaluate((token) => {
+    const area = document.querySelector('[data-hero-root] ~ .content-area');
+    const [first, second] = [...(area?.children ?? [])];
+    const label = first?.querySelector('header');
+    const card = first?.querySelector('.feature-carousel__slide');
+    if (!first || !second || !label || !card) {
+      throw new Error(
+        'no first section with a label and a card, or no second section'
+      );
+    }
+    const place = (el: Element) => ({
+      top: el.getBoundingClientRect().top,
+      pad: Number.parseFloat(getComputedStyle(el).paddingTop),
+    });
+    const probe = document.createElement('div');
+    probe.style.paddingTop = `var(${token})`;
+    first.append(probe);
+    const resolved = Number.parseFloat(getComputedStyle(probe).paddingTop);
+    probe.remove();
+    return {
+      first: place(first),
+      second: place(second),
+      label: label.getBoundingClientRect().height,
+      card: { top: card.getBoundingClientRect().top },
+      token: resolved,
+    };
+  }, spacing);
 }
 
 test.describe('the Showreel on a landing', () => {
@@ -481,11 +517,13 @@ test.describe('the Showreel on a landing', () => {
     await page.context().close();
   });
 
-  for (const [viewport, lift] of [
-    [{ width: 1440, height: 900 }, 150],
-    [{ width: 390, height: 844 }, 132],
+  // The lift (the mock's px), and the token the first section's top spacing
+  // is at this width (the landing's `.section`, `--below-md` on a phone).
+  for (const [viewport, lift, spacing] of [
+    [{ width: 1440, height: 900 }, 150, '--space-12'],
+    [{ width: 390, height: 844 }, 132, '--space-8'],
   ] as const) {
-    test(`the peek at ${viewport.width}: the hero stops the mock's ${lift} px short of the screen, at the org's density, and the first section shows above the fold (owner)`, async ({
+    test(`the peek at ${viewport.width}: the hero stops the mock's ${lift} px short of the screen, at the org's density, and the first section's cards show above the fold (owner)`, async ({
       browser,
       baseURL,
     }) => {
@@ -514,7 +552,37 @@ test.describe('the Showreel on a landing', () => {
         [viewport.width / 2, viewport.height - short + 8] as const
       );
       expect(under).toBe(true);
+      // Owner Q1-B: the first section starts at the hero's foot, its label
+      // kept, so the lift less the label is the card in sight (OBB at 1440:
+      // 127.5 - 21.1 = 106.4 px).
+      const peeking = await underTheHero(page, spacing);
+      expect(peeking.first.pad).toBe(0);
+      expect(
+        Math.abs(peeking.first.top - (hero?.y ?? 0) - (hero?.height ?? 0))
+      ).toBeLessThan(1);
+      expect(
+        Math.abs(peeking.card.top - peeking.first.top - peeking.label)
+      ).toBeLessThan(1);
+      expect(
+        Math.abs(viewport.height - peeking.card.top - (short - peeking.label))
+      ).toBeLessThan(1);
       await page.context().close();
+
+      // With the peek off, the first section keeps its token spacing; with
+      // it on or off, the second keeps its own.
+      const whole = await open(browser, baseURL, {
+        context: { viewport },
+        keys: { 'reel-peek': 'off' },
+      });
+      await expect(whole.locator('.reel')).not.toHaveAttribute('data-peek', '');
+      const unpeeked = await underTheHero(whole, spacing);
+      expect(unpeeked.first.pad).toBeGreaterThan(0);
+      expect(Math.abs(unpeeked.first.pad - unpeeked.token)).toBeLessThan(0.5);
+      expect(Math.abs(peeking.second.pad - unpeeked.second.pad)).toBeLessThan(
+        0.5
+      );
+      expect(peeking.second.pad).toBeGreaterThan(0);
+      await whole.context().close();
     });
   }
 

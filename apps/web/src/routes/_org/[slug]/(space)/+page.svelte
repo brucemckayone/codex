@@ -1687,6 +1687,18 @@
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black var(--landing-overlap));
   }
 
+  /* The hero's peek (owner Q1-B, 2026-11-21): a hero that stops short of the
+     screen's foot (`data-peek`) hands that room to the first section's cards,
+     so the section starts at the hero's foot, its label kept. Keyed on the
+     hero's own mark, a sibling of this area, so no section knows of the reel
+     and no root `:has()` restyles the page. With the peek off, unchanged.
+     The sibling step sits inside `:global()`: the hero is a component's
+     root, which Svelte cannot see as a sibling, so it dropped the rule as
+     unused (css_unused_selector). The section itself stays scoped. */
+  :global([data-hero-root][data-peek] ~ .content-area) > :first-child {
+    padding-top: 0;
+  }
+
   /*
     Generic page section shell — centered, gutter padding, capped at the
     project's --container-xl. Stacked sections use flex to space the header
