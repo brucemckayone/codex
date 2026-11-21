@@ -44,6 +44,8 @@ import type {
   ContentHeldBy,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  LeavingDownloadResponse,
+  LeavingPrintResponse,
   MediaPreviewResponse,
   OrgFilmStreamResponse,
   WithdrawnContent,
@@ -64,6 +66,11 @@ import {
   hasCourseEntitlement,
   resolveCourseEntitlementsBatch,
 } from './content-access/entitlements-resolver';
+import {
+  getLeavingDownload,
+  getLeavingPrint,
+  type LeavingDeps,
+} from './content-access/leaving-download';
 import {
   listUserLibrary as buildUserLibrary,
   type UserLibraryResponse,
@@ -1025,6 +1032,60 @@ export class ContentAccessService
     } catch (error) {
       this.handleError(error, 'getMediaPreviewStream');
     }
+  }
+
+  /**
+   * An owner's download of a leaving video or audio piece (Codex-a6ofh.6.5):
+   * a signed GET of the original upload, saved as the piece's slug, for
+   * {@link MEDIA_PREVIEW_TTL_SECONDS}. The rules are in
+   * `./content-access/leaving-download.ts`.
+   *
+   * @throws {ContentNotFoundError} every refusal, one 404
+   * @throws {R2SigningError} signing failed
+   */
+  async getLeavingDownload(
+    userId: string,
+    contentId: string
+  ): Promise<LeavingDownloadResponse> {
+    try {
+      return await getLeavingDownload(
+        this.leavingDeps(),
+        userId,
+        contentId,
+        MEDIA_PREVIEW_TTL_SECONDS
+      );
+    } catch (error) {
+      this.handleError(error, 'getLeavingDownload');
+    }
+  }
+
+  /**
+   * A leaving article for its owner's print view (Codex-a6ofh.6.5), by its
+   * detail URL's key: title, byline and stored body, under the same
+   * eligibility as the download.
+   *
+   * @throws {ContentNotFoundError} every refusal, one 404
+   */
+  async getLeavingPrint(
+    userId: string,
+    query: WithdrawnContentQuery
+  ): Promise<LeavingPrintResponse> {
+    try {
+      return await getLeavingPrint(this.leavingDeps(), userId, query);
+    } catch (error) {
+      this.handleError(error, 'getLeavingPrint');
+    }
+  }
+
+  /** The collaborators the leaving download and print read use. */
+  private leavingDeps(): LeavingDeps {
+    return {
+      db: this.db,
+      obs: this.obs,
+      purchaseService: this.purchaseService,
+      revocation: this.revocation,
+      r2: this.r2,
+    };
   }
 
   /**

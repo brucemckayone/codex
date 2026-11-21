@@ -17,11 +17,12 @@ Wraps `R2Bucket` binding with retry logic and optional presigned URL generation.
 | `putJson(key, obj, metadata?)` | Upload JSON | Auto-sets `Content-Type: application/json` |
 | `get(key)` | Retrieve object | Returns `R2ObjectBody \| null` |
 | `head(key)` | Object metadata, no body | Returns `R2Object \| null`; `uploaded` is when the key was last written |
+| `objectExists(key)` | Is an object stored there? | A `head` with no body; `R2SigningClient` has the same method |
 | `delete(key)` | Delete object | |
 | `list(options?)` | List objects | Supports prefix, cursor, limit |
 | `createMultipartUpload(key, options?)` | Start multipart upload | For large files |
 | `resumeMultipartUpload(key, uploadId)` | Resume multipart | |
-| `generateSignedUrl(key, expirySeconds)` | Presigned GET URL | Requires `signingConfig` in constructor |
+| `generateSignedUrl(key, expirySeconds, contentDisposition?)` | Presigned GET URL | Requires `signingConfig` in constructor. `contentDisposition` rides signed as `response-content-disposition` (e.g. `attachment;filename="x.mp4"`, no space: a `+` on the wire would not match the signature) |
 | `generateSignedUploadUrl(key, contentType, expirySeconds?)` | Presigned PUT URL | Requires `signingConfig`; default 3600s |
 
 ```ts

@@ -1503,6 +1503,34 @@ export function createServerApi(
           `/api/access/content/withdrawn?${new URLSearchParams(key)}`
         ),
 
+      // ── Leaving notice: an owner's copy (Codex-a6ofh.6.5) ──────────────
+      /**
+       * An owner's copy of a LEAVING video or audio piece: a 15-minute signed
+       * link to the original that saves as `filename`, and its size (null
+       * when none was recorded). A 404 for every refusal. Its button is the
+       * page note's (WP-7): ask when the owner does, so the 15 minutes start
+       * then.
+       */
+      leavingDownload: (contentId: string) =>
+        request<import('@codex/access').LeavingDownloadResponse>(
+          'access',
+          `/api/access/content/${encodeURIComponent(contentId)}/download`
+        ),
+
+      /**
+       * A LEAVING article for its owner's print view, by its detail URL's
+       * key: title, byline and stored body. A 404 for every refusal. Read
+       * only by the print pages' server loads.
+       */
+      leavingPrint: (
+        key: ({ orgId: string } | { creatorId: string }) & { slug: string }
+      ) =>
+        request<import('@codex/access').LeavingPrintResponse>(
+          'access',
+          `/api/access/content/print?${new URLSearchParams(key)}`
+        ),
+      // ── end leaving notice ─────────────────────────────────────────────
+
       /**
        * Get playback progress
        */

@@ -78,6 +78,7 @@ function buildService(
     r2: {
       generateSignedUrl: vi.fn(async () => 'https://signed.example/stub'),
       getObjectText: vi.fn(async () => null),
+      objectExists: vi.fn(async () => true),
     },
     purchaseService: {
       verifyPurchase: vi.fn(async () => options.purchased ?? false),

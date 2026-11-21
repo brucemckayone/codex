@@ -2715,6 +2715,30 @@ export const content_detail_journey_see_journey = (params) => `See the ${params.
 
 
 /**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_print_byline = (params) => `By ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_print_hint = () => `Choose “Save as PDF” in your browser’s print dialog to keep a copy.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_print_save = () => `Save as PDF`
+
+
+/**
  * 
  * @returns {string}
  */

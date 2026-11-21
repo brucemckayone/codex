@@ -515,6 +515,9 @@ describe('ContentAccessService Integration', () => {
           async getObjectText(key: string) {
             return objects[key] ?? null;
           },
+          async objectExists(key: string) {
+            return key in objects;
+          },
         },
       });
 

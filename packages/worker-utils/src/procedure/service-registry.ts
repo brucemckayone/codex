@@ -12,8 +12,10 @@ import {
   CourseAccessService,
   CourseInsightsService,
   CourseJourneyService,
+  DevR2Signer,
   EntitlementsService,
   PlanAccessService,
+  type R2Signer,
 } from '@codex/access';
 import {
   AdminAnalyticsService,
@@ -751,29 +753,13 @@ export async function createServiceRegistry(
     get access() {
       if (!_access) {
         // Build R2Signer: dev uses unsigned CDN URLs, prod uses R2 presigned URLs
-        let r2Signer: {
-          generateSignedUrl(
-            r2Key: string,
-            expirySeconds: number
-          ): Promise<string>;
-          getObjectText(r2Key: string): Promise<string | null>;
-        };
+        let r2Signer: R2Signer;
         const isDev = getEnvironment() === 'development';
 
         if (isDev && env.R2_PUBLIC_URL_BASE) {
-          // Development: unsigned dev-cdn URLs (Miniflare R2 serves without signatures)
-          const baseUrl = env.R2_PUBLIC_URL_BASE;
-          r2Signer = {
-            async generateSignedUrl(r2Key: string, _expirySeconds: number) {
-              return `${baseUrl}/${r2Key}`;
-            },
-            // HLS playlist proxy reads `.m3u8` bytes via dev-cdn (Miniflare R2).
-            async getObjectText(r2Key: string) {
-              const response = await fetch(`${baseUrl}/${r2Key}`);
-              if (!response.ok) return null;
-              return response.text();
-            },
-          };
+          // Development: unsigned dev-cdn URLs (Miniflare R2 serves without
+          // signatures), the access package's one dev signer.
+          r2Signer = new DevR2Signer(env.R2_PUBLIC_URL_BASE);
         } else if (env.MEDIA_BUCKET) {
           // Production: presigned R2 URLs via R2Service
           const accountId =

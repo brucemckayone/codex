@@ -53,6 +53,7 @@ describe('buildStreamingResponse signing failures', () => {
     const r2 = {
       generateSignedUrl: vi.fn().mockRejectedValue(signFailure),
       getObjectText: vi.fn(),
+      objectExists: vi.fn(),
     };
 
     const err = await rejectionOf(
@@ -90,7 +91,11 @@ describe('buildStreamingResponse signing failures', () => {
       buildStreamingResponse(
         audioTarget,
         {
-          r2: { generateSignedUrl: vi.fn(), getObjectText: vi.fn() },
+          r2: {
+            generateSignedUrl: vi.fn(),
+            getObjectText: vi.fn(),
+            objectExists: vi.fn(),
+          },
           contentApiBaseUrl: undefined,
           hlsTokenSecret: 'test-secret',
           obs: obs as unknown as ObservabilityClient,

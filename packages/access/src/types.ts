@@ -164,3 +164,32 @@ export type {
  * Returns null (204 No Content)
  */
 export type UpdatePlaybackProgressResponse = null;
+
+/**
+ * Response for GET /api/access/content/:id/download (Codex-a6ofh.6.5): an
+ * owner's copy of a video or audio piece that is leaving, the original upload.
+ * Every refusal is the same 404.
+ */
+export interface LeavingDownloadResponse {
+  /** A 15-minute signed GET of the original that saves as `filename`. */
+  url: string;
+  /** The piece's slug and the original's extension, ASCII only. */
+  filename: string;
+  /** The original's size, or null when none was recorded at upload. */
+  sizeBytes: number | null;
+  /** ISO 8601. After it the link no longer opens. */
+  expiresAt: string;
+}
+
+/**
+ * Response for GET /api/access/content/print (Codex-a6ofh.6.5): a leaving
+ * article an owner may save as a PDF, for its print view. The body is the
+ * stored one, never rendered here. Every refusal is the same 404.
+ */
+export interface LeavingPrintResponse {
+  contentId: string;
+  title: string;
+  /** The creator's public name, for the byline. */
+  creatorName: string;
+  body: ContentBodySource;
+}

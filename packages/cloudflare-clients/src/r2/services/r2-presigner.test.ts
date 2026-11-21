@@ -13,7 +13,7 @@
  *    object" half belongs to the dedicated spike (needs an uploaded object).
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { R2Presigner } from './r2-presigner';
 import type { R2SigningConfig } from './r2-service';
 
@@ -84,6 +84,53 @@ describe('R2Presigner (structural)', () => {
   });
 });
 
+describe('R2Presigner (download disposition, Codex-a6ofh.6.5)', () => {
+  const presigner = new R2Presigner(FAKE_CONFIG);
+  const key = 'creator/originals/media_1/video.mp4';
+  const attachment = 'attachment;filename="breathing.mp4"';
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('carries the disposition and the 15-minute expiry R2 answers with', async () => {
+    const url = new URL(await presigner.presignGet(key, 900, attachment));
+
+    expect(url.searchParams.get('response-content-disposition')).toBe(
+      attachment
+    );
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('900');
+    // Sent exactly as signed: aws4fetch canonicalises with %-escapes, and a
+    // `+` for a space on the wire would not match them. The value has no space.
+    expect(url.search).toContain(
+      'response-content-disposition=attachment%3Bfilename%3D%22breathing.mp4%22'
+    );
+  });
+
+  it('signs the disposition, so the URL’s holder cannot change it', async () => {
+    // One instant for every URL, so only the disposition differs.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-20T12:00:00.000Z'));
+    const signatureOf = async (disposition?: string) =>
+      new URL(
+        await presigner.presignGet(key, 900, disposition)
+      ).searchParams.get('X-Amz-Signature');
+
+    const bare = await signatureOf();
+    const asAttachment = await signatureOf(attachment);
+    const renamed = await signatureOf('attachment;filename="other.mp4"');
+
+    expect(bare).toBe(await signatureOf());
+    expect(asAttachment).not.toBe(bare);
+    expect(renamed).not.toBe(asAttachment);
+  });
+
+  it('adds no disposition when none is asked for', async () => {
+    const url = new URL(await presigner.presignGet(key, 600));
+    expect(url.searchParams.has('response-content-disposition')).toBe(false);
+  });
+});
+
 describe('R2Presigner (real R2 acceptance)', () => {
   it.skipIf(!hasCreds)(
     'R2 accepts the signature on a GET — 404 for a missing key, never 403',
@@ -92,6 +139,19 @@ describe('R2Presigner (real R2 acceptance)', () => {
       const key = `__aws4fetch_probe__/${Date.now()}.ts`;
       const res = await fetch(await presigner.presignGet(key, 300));
       // 403 = SignatureDoesNotMatch (rejected). 404 = NoSuchKey (accepted, absent).
+      expect(res.status).not.toBe(403);
+      expect(res.status).toBe(404);
+    }
+  );
+
+  it.skipIf(!hasCreds)(
+    'R2 accepts a signed download disposition — 404 for a missing key, never 403',
+    async () => {
+      const presigner = new R2Presigner(ENV_CONFIG);
+      const key = `__aws4fetch_probe__/${Date.now()}.mp4`;
+      const res = await fetch(
+        await presigner.presignGet(key, 300, 'attachment;filename="probe.mp4"')
+      );
       expect(res.status).not.toBe(403);
       expect(res.status).toBe(404);
     }

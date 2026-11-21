@@ -109,6 +109,11 @@ export class R2Service {
     return this.withRetries(() => this.bucket.head(key));
   }
 
+  /** Whether an object is stored under `key`: a {@link head} with no body. */
+  async objectExists(key: string): Promise<boolean> {
+    return (await this.head(key)) !== null;
+  }
+
   /**
    * Retrieve an object's body decoded as UTF-8 text, or `null` when the object
    * is absent. Used by the HLS playlist proxy to read `.m3u8` files for
@@ -154,12 +159,15 @@ export class R2Service {
    *
    * @param r2Key - The object key in the bucket (e.g., "{creatorId}/hls/{mediaId}/master.m3u8")
    * @param expirySeconds - URL validity in seconds (max 604800 = 7 days)
+   * @param contentDisposition - Optional `Content-Disposition` R2 answers with
+   *   (signed, so the URL's holder cannot change it), e.g. an attachment
    * @returns Presigned URL string
    * @throws Error if signing config not provided or S3 client fails
    */
   async generateSignedUrl(
     r2Key: string,
-    expirySeconds: number
+    expirySeconds: number,
+    contentDisposition?: string
   ): Promise<string> {
     if (!this.presigner) {
       throw new ValidationError(
@@ -169,7 +177,7 @@ export class R2Service {
       );
     }
 
-    return this.presigner.presignGet(r2Key, expirySeconds);
+    return this.presigner.presignGet(r2Key, expirySeconds, contentDisposition);
   }
 
   /**

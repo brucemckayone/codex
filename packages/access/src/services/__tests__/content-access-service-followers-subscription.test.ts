@@ -128,6 +128,7 @@ function buildService(stub: StubDb) {
   const signer = {
     generateSignedUrl: vi.fn(async () => 'https://signed.example/stub'),
     getObjectText: vi.fn(async () => null),
+    objectExists: vi.fn(async () => true),
   };
 
   const verifyPurchase = vi.fn(async () => false);
