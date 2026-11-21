@@ -324,13 +324,20 @@
     clock.hold('focus', now instanceof Element && !!rootEl?.contains(now) && now.matches(':focus-visible'));
   }
   /**
-   * What takes focus when a swap removed the button that opened it. Where
-   * checkVisibility is missing (Safari before 17.4) the first stop serves,
-   * as Dialog's does.
+   * What takes focus when the theatre's opener cannot (an 'ended' close; a
+   * Safari click, which focuses nothing): the index's button for the piece
+   * the CLOCK is on, as the owner decided (Codex-1yd58.8: "the opener or the
+   * current index button"; WCAG 2.4.3); where the index is out of sight (a
+   * phone's), the reel's pause. In that order, never by tree order, where
+   * the pause comes first (WP-7 review r2). By the clock, since the index's
+   * `aria-current` follows only once the words' swap lands, OUT_MS later.
+   * Where checkVisibility is missing (Safari before 17.4) a stop serves as
+   * Dialog's does.
    */
   function nextFocus(): HTMLElement | null {
-    const stops = rootEl?.querySelectorAll<HTMLElement>('.reel__item[aria-current="true"], .reel__round') ?? [];
-    return [...stops].find((stop) => stop.checkVisibility?.() ?? true) ?? null;
+    const inSight = (el: HTMLElement | null | undefined) => (el && (el.checkVisibility?.() ?? true) ? el : null);
+    const item = rootEl?.querySelectorAll<HTMLElement>('.reel__item')[clock.index];
+    return inSight(item) ?? inSight(rootEl?.querySelector<HTMLElement>('.reel__round')) ?? null;
   }
 
   // ── time: the clock runs while nothing stops it ──

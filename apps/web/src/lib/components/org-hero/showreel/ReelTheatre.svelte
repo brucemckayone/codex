@@ -28,8 +28,9 @@
   press made is running: tapping a stream the page may not read would
   silence it. Anywhere else the bars rest; under reduced motion no context
   is made at all (they would rest anyway). A context the system interrupts
-  (an iPhone's call, Siri) is resumed when it says so, and again on each
-  press of the bar, which is the gesture a resume may wait for.
+  (an iPhone's call, Siri) is resumed when it says so, again on each press
+  of the bar, which is the gesture a resume may wait for, and whenever the
+  recording plays again with no press in the page (the lock screen, AirPods).
 
   ── PAUSE ─────────────────────────────────────────────────────────────────
   The reel's own pause is hidden while the theatre is open, so the
@@ -176,6 +177,15 @@
     if (!ctx) return;
     ctx.addEventListener('statechange', wake);
     return () => ctx.removeEventListener('statechange', wake);
+  });
+  // The system can play the recording again by itself (the lock screen,
+  // AirPods): no press in the page, so the context would stay taken until
+  // the next one. Its element's play is the cue (review r2 LOW).
+  $effect(() => {
+    const el = media;
+    if (!el || !context) return;
+    el.addEventListener('play', wake);
+    return () => el.removeEventListener('play', wake);
   });
   let tap = $state.raw<WaveTap | null>(null);
   $effect(() => {

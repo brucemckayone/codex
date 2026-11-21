@@ -63,7 +63,8 @@ class FakeContext extends EventTarget {
   static made: FakeContext[] = [];
   /** How a new context starts: a browser may leave one suspended. */
   static starts: AudioContextState = 'running';
-  state: AudioContextState = FakeContext.starts;
+  /** WebKit's own 'interrupted' too (a call, the lock screen). */
+  state: AudioContextState | 'interrupted' = FakeContext.starts;
   readonly destination = { node: 'speakers' };
   readonly wired: string[] = [];
   readonly tapped: HTMLMediaElement[] = [];
@@ -405,6 +406,18 @@ describe('ReelTheatre, a recording', () => {
     expect(context.resumes).toBe(made + 2);
     button('sound').click();
     expect(context.resumes).toBe(made + 3);
+  });
+
+  it('resumes it when the system plays the recording again with no press in the page (the lock screen, AirPods)', () => {
+    render(RECORDING);
+    const [context] = FakeContext.made;
+    if (!context) throw new Error('a recording makes its context');
+    // Taken by the system, and its own resume refused: it stays taken.
+    context.state = 'interrupted';
+    const made = context.resumes;
+    // The lock screen's play: the element plays again, and the context with it.
+    video().dispatchEvent(new Event('play'));
+    expect(context.resumes).toBe(made + 1);
   });
 
   it('closes its audio graph as it closes', () => {
