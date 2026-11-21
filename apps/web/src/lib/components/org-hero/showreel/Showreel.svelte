@@ -324,16 +324,20 @@
     const opener = theatreOpener;
     theatreOpener = null;
     theatre = null;
-    // Played to its end, the reel carries on (the mock's), and its film
-    // button goes with the piece: focus takes the index's current one.
-    const ended = reason === 'ended' && at === clock.index;
-    if (ended) clock.next();
+    // Played to its end, the reel carries on as it would have (the mock's;
+    // plan §4), and its film button goes with the piece: focus takes the
+    // index's current one. A reel that never moves on by itself (`static`:
+    // Loop off, reduced motion; playback.ts) or that the visitor paused
+    // (WCAG 2.2.2) stays on its piece, and focus goes back to the opener
+    // (WP-7 review r3). Not `clock.running`: the film's hold is still on.
+    const moved = reason === 'ended' && at === clock.index && clock.moves && !clock.paused;
+    if (moved) clock.next();
     // The reel behind stops being inert in this flush, and only then can it
     // take focus: asked while it still was, focus fell to the body (review
     // H1, 2026-11-21: Svelte switches the branch before the render effect
     // that clears `inert`).
     flushSync();
-    const back = !ended && opener?.isConnected ? opener : nextFocus();
+    const back = !moved && opener?.isConnected ? opener : nextFocus();
     back?.focus({ preventScroll: true });
     // Firefox fires no focusout for a focused node that is removed: the
     // keyboard hold follows where focus is now, never where it was.

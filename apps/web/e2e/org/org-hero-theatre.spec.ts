@@ -344,6 +344,46 @@ test.describe('the Showreel theatre', () => {
     await page.context().close();
   });
 
+  // WP-7 review r3: with Loop off the reel never moves on by itself
+  // (playback.ts `static`), a preview's end included, so the piece stays and
+  // focus goes back to the button that opened it. On OBB the last piece is a
+  // portal, which has no preview, so this ends the film's; the wrap from the
+  // last piece round to the first is Showreel.theatre.svelte.test.ts's.
+  test('with Loop off, at the end of the preview the theatre closes, the piece stays, and focus goes back to its opener', async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL, { keys: { 'reel-loop': 'off' } });
+    const piece = (await currentItem(page).textContent()) ?? '';
+    const { opener, theatre } = await openTheatre(page);
+    await requirePlaying(theatre);
+    await bar(theatre)
+      .media.first()
+      .evaluate(
+        (el: HTMLMediaElement) =>
+          new Promise<void>((resolve) => {
+            const seek = () => {
+              el.currentTime = Math.max(0, el.duration - 0.5);
+              resolve();
+            };
+            if (Number.isFinite(el.duration) && el.duration > 1) seek();
+            else el.addEventListener('durationchange', seek, { once: true });
+          })
+      );
+    await expect(theatre).toHaveCount(0, { timeout: 10_000 });
+    await expect
+      .poll(() =>
+        opener
+          .evaluate((el) => el === document.activeElement)
+          .catch(() => false)
+      )
+      .toBe(true);
+    // Well past the words' beat (OUT_MS) a move would take: the same piece.
+    await page.waitForTimeout(1500);
+    await expect(currentItem(page)).toHaveText(piece);
+    await page.context().close();
+  });
+
   test('on a phone it takes the whole screen and the page behind holds still', async ({
     browser,
     baseURL,

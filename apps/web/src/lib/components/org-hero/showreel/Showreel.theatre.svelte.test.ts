@@ -104,6 +104,21 @@ const reelWith = (film: IntroFilm): ReelEntry[] => [
   { type: 'piece', piece: piece('The Medicine of Grief'), show: 'still' },
 ];
 
+/** The film, an essay, and a recording LAST: the end of a Loop-off reel. */
+const endingOnARecording = (film: IntroFilm): ReelEntry[] => [
+  { type: 'film', film, show: 'footage' },
+  { type: 'piece', piece: piece('The Medicine of Grief'), show: 'still' },
+  {
+    type: 'piece',
+    piece: piece('Drum Journey', {
+      kind: 'audio',
+      previewUrl: DRUM_PREVIEW,
+      cta: 'Listen',
+    }),
+    show: 'still',
+  },
+];
+
 let app: ReturnType<typeof mount> | null = null;
 let frames: FrameRequestCallback[] = [];
 let clock = 0;
@@ -129,17 +144,23 @@ function frame(ms: number) {
   flushSync();
 }
 
-function render(film: IntroFilm = FILM) {
+function render(
+  film: IntroFilm = FILM,
+  {
+    loop = 'on',
+    reel = reelWith(film),
+  }: { loop?: 'on' | 'off'; reel?: ReelEntry[] } = {}
+) {
   onfilm = vi.fn();
   const options = resolveHero(
     'consume',
-    { comp: 'showreel', 'reel-layout': 'corner', 'reel-loop': 'on' },
+    { comp: 'showreel', 'reel-layout': 'corner', 'reel-loop': loop },
     FACTS
   );
   app = mount(Showreel, {
     target: document.body,
     props: {
-      reel: reelWith(film),
+      reel,
       options,
       name: 'Of Blood & Bones',
       description: 'Ancestral healing.',
@@ -511,8 +532,8 @@ describe('the theatre gives focus to the current index button when its opener ca
     opener.focus();
     opener.click();
     seen.read()?.onended?.('end');
-    // The words' swap lands (frame advances past OUT_MS).
-    frame(1);
+    // The words' swap lands at the cut's bottom, with the picture (WP-6 M4).
+    frame(CUT);
     expect(q('.theatre')).toBeNull();
     expect(current()).toBe('Drum Journey');
     expect(currentIndexButton()).not.toBeNull();
@@ -548,5 +569,70 @@ describe('the theatre gives focus to the current index button when its opener ca
     frame(1);
     expect(document.activeElement).not.toBe(reelPause());
     expect(document.activeElement).toBe(currentIndexButton());
+  });
+});
+
+/**
+ * WP-7 review round 3 (MEDIUM): a preview's end moves the reel on only when
+ * the reel itself moves on. playback.ts (owner, 2026-11-19): `static` is
+ * "reduced motion, or the creator turned 'Loop and move on' off. No video
+ * and no moving on; the visitor's own index, strip or tap still changes
+ * piece"; plan §4's "at the end the reel carries on" is as it would have,
+ * and plan §6's "pause holds it" (WCAG 2.2.2). With the piece kept, its
+ * opener is still there, so focus goes back to it.
+ */
+describe("a preview's end moves the reel on only when the reel moves on (playback.ts `static`; plan §4)", () => {
+  it("Loop off: the preview's end keeps the piece, and focus goes back to the button that opened it", () => {
+    render(FILM, { loop: 'off', reel: endingOnARecording(FILM) });
+    expect(current()).toBe('Of Blood & Bones');
+    const opener = q<HTMLButtonElement>('.reel__btn') as HTMLButtonElement;
+    opener.focus();
+    opener.click();
+    expect(q('.theatre')).not.toBeNull();
+    seen.read()?.onended?.('end');
+    frame(CUT);
+    expect(q('.theatre')).toBeNull();
+    // "No moving on": the piece on show stays.
+    expect(current()).toBe('Of Blood & Bones');
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('Loop off, on the LAST piece: the end never loops the reel round to its first', () => {
+    render(FILM, { loop: 'off', reel: endingOnARecording(FILM) });
+    go(2);
+    expect(current()).toBe('Drum Journey');
+    const opener = previewButton() as HTMLButtonElement;
+    opener.focus();
+    opener.click();
+    expect(q('.theatre')).not.toBeNull();
+    seen.read()?.onended?.('end');
+    frame(CUT);
+    expect(q('.theatre')).toBeNull();
+    // Before: clock.next() -> go(3) wrapped to 0, the film, and focus went
+    // to that piece's index button. Its words follow when its picture does.
+    expect(document.activeElement).toBe(opener);
+    frame(CUT_TIMING.inMs + CUT);
+    expect(current()).toBe('Drum Journey');
+  });
+
+  it("the visitor's own pause holds through a preview's end (WCAG 2.2.2)", () => {
+    render(FILM, { loop: 'on', reel: endingOnARecording(FILM) });
+    reelPause()?.click();
+    flushSync();
+    expect(reelPause()?.getAttribute('aria-label')).toBe('Play the reel');
+    const before = current();
+    q<HTMLButtonElement>('.reel__btn')?.click();
+    seen.read()?.onended?.('end');
+    frame(CUT);
+    expect(q('.theatre')).toBeNull();
+    expect(current()).toBe(before);
+  });
+
+  it('the control: with Loop on and no pause, the end still moves the reel on (the owner\'s "at the end the reel moves on")', () => {
+    render(FILM, { loop: 'on', reel: endingOnARecording(FILM) });
+    q<HTMLButtonElement>('.reel__btn')?.click();
+    seen.read()?.onended?.('end');
+    frame(CUT);
+    expect(current()).toBe('The Medicine of Grief');
   });
 });
