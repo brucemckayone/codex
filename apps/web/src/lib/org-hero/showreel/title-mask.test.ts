@@ -194,11 +194,34 @@ describe('titleWords and drawTitleMask', () => {
     ]);
   });
 
-  it('places the baseline at four fifths of the box where the font reports no content area', () => {
-    // A browser without `fontBoundingBox*` (Firefox before 116).
+  it('measures the page’s own baseline where the font reports no content area, and leaves no trace', () => {
+    // A browser without `fontBoundingBox*` (Firefox before 116): a zero-size
+    // inline-block at the title's end sits on its last line's baseline, here
+    // 70 below the last word's box top. Never 'middle' (top + 40).
     metrics = {} as typeof metrics;
-    drawTitleMask(title('Of'));
-    expect(drawn.map(({ y }) => y)).toEqual([box(0).top + 64]);
+    const el = title('Of Blood');
+    const seen: string[] = [];
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        seen.push(this.style.display);
+        const bottom = box(1).top + 70;
+        return {
+          top: bottom,
+          bottom,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 0,
+          x: 0,
+          y: bottom,
+          toJSON: () => ({}),
+        };
+      }
+    );
+    drawTitleMask(el);
+    expect(seen).toEqual(['inline-block']);
+    expect(drawn.map(({ y }) => y)).toEqual([box(0).top + 70, box(1).top + 70]);
+    expect(el.childNodes).toHaveLength(1);
   });
 
   it('draws no mask for a title with no words, so the motion falls back', () => {

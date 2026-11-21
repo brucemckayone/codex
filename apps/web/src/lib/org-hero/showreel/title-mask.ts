@@ -85,6 +85,29 @@ export function titleWords(el: HTMLElement): MaskWord[] {
 const MAX_DPR = 2;
 
 /**
+ * How far below a word box's top the page sets the baseline, measured in the
+ * page, for a browser whose `measureText` reports no content area (Firefox
+ * before 116): a zero-size inline-block's bottom sits on its line's
+ * baseline, so one at the end of the title, on its last word's line,
+ * measures it for every word (one font, one size). It is taken out at once.
+ */
+function measuredBaseline(el: HTMLElement, last: MaskWord): number {
+  const view = el.ownerDocument.defaultView;
+  const shift = translationOf(view?.getComputedStyle(el).transform ?? 'none');
+  const marker = el.ownerDocument.createElement('span');
+  marker.style.cssText =
+    'display:inline-block;width:0;height:0;vertical-align:baseline';
+  el.appendChild(marker);
+  try {
+    const { bottom } = marker.getBoundingClientRect();
+    // in document space, as the words are
+    return bottom - shift.y + (view?.scrollY ?? 0) - last.top;
+  } finally {
+    marker.remove();
+  }
+}
+
+/**
  * The title `el` drawn as the film's window: a window-sized canvas, the words
  * white on black in the title's font. Null when there is no word to draw (no
  * title, or one not laid out), so "through the name" falls back.
@@ -118,14 +141,18 @@ export function drawTitleMask(el: HTMLElement): HTMLCanvasElement | null {
   // the box's middle) sits higher in most faces: 8 CSS px at 96 px in OBB's
   // serif, a copy of the title showing above its ink (the WP-6 board).
   ctx.textBaseline = 'alphabetic';
+  let measured: number | null = null;
   for (const word of words) {
     const { fontBoundingBoxAscent: ascent, fontBoundingBoxDescent: descent } =
       ctx.measureText(word.text);
     const area = ascent + descent;
-    const baseline = Number.isFinite(area)
-      ? word.top + (word.height - area) / 2 + ascent
-      : word.top + word.height * 0.8;
-    ctx.fillText(word.text, word.left, baseline);
+    let below: number;
+    if (Number.isFinite(area)) below = (word.height - area) / 2 + ascent;
+    else {
+      measured ??= measuredBaseline(el, words[words.length - 1] ?? word);
+      below = measured;
+    }
+    ctx.fillText(word.text, word.left, word.top + below);
   }
   return canvas;
 }
