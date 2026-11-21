@@ -32,6 +32,7 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { createFrameBudget, PHONE_MAX_WIDTH } from './compositor/budget';
+  import { createLayerBudget, PHONE_LAYER_BUDGET } from './compositor/layer-budget';
   import type { Compositor } from './compositor/compositor';
   import { showreelFeed } from './compositor/showreel-feed';
   import {
@@ -58,6 +59,7 @@
     reportContextRestored,
     reportRendererFailure,
     reportRetryFailure,
+    reportLayerBudget,
     reportSecondFailure,
     reportStackBudget,
   } from './renderer-failure';
@@ -205,6 +207,8 @@
     /** The phone budget dropped the second preset, for the session. */
     let secondDropped = false;
     const budget = createFrameBudget();
+    /** Then the layers, last first, behind its flag (WP-11, `layer-budget.ts`). */
+    const layerBudget = createLayerBudget(PHONE_LAYER_BUDGET);
 
     // ── RAF scheduling ─────────────────────────────────────────
     // Guarded re-prime: the loop re-schedules itself only from the render
@@ -787,13 +791,17 @@
      */
     let groundStack: StackConfig = BARE_STACK;
     let groundFrom: StackConfig | null = null;
-    function stackNow(): StackConfig {
+    function brandStackNow(): StackConfig {
       if (renderer || currentPreset !== 'none') return cachedStack;
       if (groundFrom !== cachedStack) {
         groundFrom = cachedStack;
         groundStack = { ...cachedStack, second: null, layers: [] };
       }
       return groundStack;
+    }
+    /** What it draws of that: less the layers the phone budget has cut. */
+    function stackNow(): StackConfig {
+      return layerBudget.apply(brandStackNow());
     }
 
     /** Bring the second slot and the compositor in line with the stack. */
@@ -1053,14 +1061,26 @@
     }
 
     /** The phone budget: two presets that cannot hold the frame rate lose
-     *  the second (the next frame's `syncStack` drops it). */
+     *  the second (the next frame's `syncStack` drops it). Then, behind its
+     *  flag, a layers-only stack loses its last layer each slow window,
+     *  judged afresh after each cut (WP-11, `layer-budget.ts`). */
     function judgeBudget(intervalMs: number) {
-      if (!secondPreset || !secondRenderer || !compositor) return;
-      if (cssWidth >= PHONE_MAX_WIDTH) return;
+      if (!compositor || cssWidth >= PHONE_MAX_WIDTH) return;
+      const second = secondPreset !== null && secondRenderer !== null;
+      if (!second && !layerBudget.judges(brandStackNow())) return;
       const breach = budget.push(intervalMs);
       if (!breach) return;
-      secondDropped = true;
-      reportStackBudget(secondPreset, breach);
+      if (secondPreset && second) {
+        secondDropped = true;
+        reportStackBudget(secondPreset, breach);
+        // the lighter stack, judged afresh (its layers, behind their flag)
+        budget.reset();
+        return;
+      }
+      const cut = layerBudget.cut(brandStackNow());
+      if (!cut) return;
+      reportLayerBudget(cut, breach);
+      budget.reset();
     }
 
     function frame() {
