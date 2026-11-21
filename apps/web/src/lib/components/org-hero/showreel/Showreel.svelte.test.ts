@@ -8,6 +8,7 @@
 
 import type { IntroFilm } from '@codex/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createFilmMotionPasses } from '$lib/components/ui/ShaderHero/compositor/film-motion';
 import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-feed';
 import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
 import {
@@ -17,6 +18,7 @@ import {
 } from '$lib/org-hero/hero-config';
 import type { ReelEntry } from '$lib/org-hero/reel';
 import { PIECE_MS } from '$lib/org-hero/showreel/reel-clock.svelte';
+import { motionChoice } from '$lib/org-hero/showreel/reel-motion';
 import { CUT_TIMING } from '$lib/org-hero/showreel/reel-reveal';
 import {
   flushSync,
@@ -87,6 +89,12 @@ const REEL: ReelEntry[] = [
 ];
 
 let app: ReturnType<typeof mount> | null = null;
+/**
+ * A cut's fall and a frame: the words, the index and the stage take the next
+ * piece at the cut's bottom, with its picture (WP-6, review M4), so a test
+ * that waits for the next piece waits this long past the clock's turn.
+ */
+const CUT = CUT_TIMING.outMs + 32;
 let frames: FrameRequestCallback[] = [];
 let clock = 0;
 let media = { reduced: false, desktop: true };
@@ -294,6 +302,10 @@ describe('Showreel clock', () => {
     frame(PIECE_MS - 100);
     expect(current()).toBe('Of Blood & Bones');
     frame(200);
+    // Out with the clock; in with the picture, at the cut's bottom (WP-6).
+    expect(current()).toBe('Of Blood & Bones');
+    expect(q('.reel__words')?.dataset.swap).toBe('out');
+    frame(CUT);
     expect(current()).toBe('The Medicine of Grief');
     expect(title()).toBe('The Medicine of Grief');
   });
@@ -315,6 +327,7 @@ describe('Showreel clock', () => {
     flushSync();
     expect(shaderTone.held).toBe(false);
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(current()).toBe('The Medicine of Grief');
   });
 
@@ -323,6 +336,7 @@ describe('Showreel clock', () => {
     const words = q('.reel__words') as HTMLElement;
     pointer('pointerenter', words, { pointerType: 'touch' });
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(current()).toBe('The Medicine of Grief');
 
     pointer('pointerenter', words, { pointerType: 'mouse' });
@@ -330,6 +344,7 @@ describe('Showreel clock', () => {
     expect(current()).toBe('The Medicine of Grief');
     pointer('pointerleave', words, { pointerType: 'mouse' });
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(current()).toBe('Fire Ceremony at Dusk');
   });
 
@@ -367,6 +382,7 @@ describe('Showreel clock', () => {
     // A mouse click focuses the button without :focus-visible.
     pause.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(current()).toBe('The Medicine of Grief');
   });
 
@@ -378,6 +394,7 @@ describe('Showreel clock', () => {
     expect(current()).toBe('Of Blood & Bones');
     pointer('pointerleave', pause, { pointerType: 'mouse' });
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(current()).toBe('The Medicine of Grief');
   });
 
@@ -386,7 +403,7 @@ describe('Showreel clock', () => {
     document
       .querySelectorAll<HTMLButtonElement>('.reel__index .reel__item')[2]
       ?.click();
-    frame(16);
+    frame(CUT);
     expect(current()).toBe('Fire Ceremony at Dusk');
   });
 });
@@ -411,7 +428,7 @@ describe('Showreel on a phone', () => {
       clientX: x + moveBy,
       clientY: 400,
     });
-    frame(16);
+    frame(CUT);
   };
 
   beforeEach(() => {
@@ -423,6 +440,9 @@ describe('Showreel on a phone', () => {
     tap(300);
     expect(title()).toBe('The Medicine of Grief');
     tap(60);
+    // A tap in the last cut's rise waits for it: a cut never turns round
+    // (WCAG 2.3.1), and the words come in with the picture (WP-6).
+    frame(CUT_TIMING.inMs + CUT);
     expect(title()).toBe('Of Blood & Bones');
   });
 
@@ -451,6 +471,7 @@ describe('Showreel on a phone', () => {
     frame(16);
     expect(title()).toBe('Of Blood & Bones');
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(title()).toBe('The Medicine of Grief');
   });
 
@@ -484,7 +505,7 @@ describe('Showreel paths', () => {
     document
       .querySelectorAll<HTMLButtonElement>('.reel__index .reel__item')[1]
       ?.click();
-    frame(16);
+    frame(CUT);
     expect(current()).toBe('The Medicine of Grief');
   });
 
@@ -505,6 +526,7 @@ describe('Showreel paths', () => {
     expect(document.querySelectorAll('video')).toHaveLength(0);
     expect(shaderTone.held).toBe(false);
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(current()).toBe('The Medicine of Grief');
   });
 
@@ -636,7 +658,7 @@ const pick = (i: number) => {
   document
     .querySelectorAll<HTMLButtonElement>('.reel__index .reel__item')
     [i]?.click();
-  frame(16);
+  frame(CUT);
 };
 /**
  * Two films attach at once here (the one on show and the next), and vitest
@@ -677,6 +699,7 @@ describe('Showreel keeps what the visitor chose', () => {
     expect(current()).toBe('The Medicine of Grief');
     pointer('pointerleave', index, { pointerType: 'mouse' });
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(current()).toBe('Fire Ceremony at Dusk');
   });
 
@@ -797,6 +820,7 @@ describe('Showreel and the film playing', () => {
     // Closed, the reel moves on again.
     props.filmPlaying = false;
     frame(PIECE_MS + 100);
+    frame(CUT);
     expect(title()).toBe('The Medicine of Grief');
   });
 });
@@ -850,7 +874,7 @@ describe('Showreel names the org as the hero says', () => {
     document
       .querySelectorAll<HTMLButtonElement>('.reel__strip .reel__item')[2]
       ?.click();
-    frame(16);
+    frame(CUT);
     expect(window()?.hasAttribute('data-still')).toBe(false);
   });
 });
@@ -1217,5 +1241,177 @@ describe("Showreel's fit over the film", () => {
     frame(32);
     expect(q('.reel')?.hasAttribute('data-fit')).toBe(false);
     expect(solved().scrim).toBe('');
+  });
+});
+
+describe('Showreel words and the picture (WP-6, review M4)', () => {
+  const TITLES = [
+    'Of Blood & Bones',
+    'The Medicine of Grief',
+    'Fire Ceremony at Dusk',
+  ];
+  const onStage = () =>
+    [...document.querySelectorAll('.reel-stage__item')].findIndex((el) =>
+      el.hasAttribute('data-on')
+    );
+
+  it("never shows the next piece's words over the last one's picture", () => {
+    render();
+    document
+      .querySelectorAll<HTMLButtonElement>('.reel__index .reel__item')[2]
+      ?.click();
+    let cameIn = -1;
+    for (let t = 16; t <= 1500; t += 16) {
+      frame(16);
+      const out = q('.reel__words')?.dataset.swap === 'out';
+      // Out, the words are hidden; in, they name the picture on the stage.
+      if (!out) expect(title(), `at ${t} ms`).toBe(TITLES[onStage()]);
+      if (cameIn < 0 && title() === TITLES[2]) cameIn = t;
+    }
+    // They came in, with their picture, at the cut's bottom.
+    expect(onStage()).toBe(2);
+    expect(cameIn).toBeGreaterThanOrEqual(CUT_TIMING.outMs);
+    expect(cameIn).toBeLessThan(CUT_TIMING.outMs + 64);
+  });
+
+  it('a pick while paused shows its words and picture together, at once', () => {
+    render();
+    pauseButton()?.click();
+    flushSync();
+    document
+      .querySelectorAll<HTMLButtonElement>('.reel__index .reel__item')[1]
+      ?.click();
+    frame(16);
+    expect(onStage()).toBe(1);
+    expect(title()).toBe(TITLES[1]);
+  });
+});
+
+describe('Showreel: the title as the window on Corner and Wide (WP-6, owner 2026-11-21)', () => {
+  /** Each word's box, laid out in a row: Range has no layout in jsdom. */
+  const box = (i: number) => ({
+    left: 40 + 120 * i,
+    top: 300,
+    width: 100,
+    height: 80,
+  });
+  let drawn: [string, number, number][] = [];
+  let restore: (() => void) | null = null;
+
+  beforeEach(() => {
+    drawn = [];
+    const doc = document.documentElement;
+    for (const [side, size] of [
+      ['clientWidth', 1280],
+      ['clientHeight', 800],
+    ] as const)
+      Object.defineProperty(doc, side, { configurable: true, value: size });
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value(this: Range) {
+        const text = this.startContainer.textContent ?? '';
+        const before = text.slice(0, this.startOffset).trim();
+        const i = before ? before.split(/\s+/).length : 0;
+        const { left, top, width, height } = box(i);
+        return {
+          left,
+          top,
+          width,
+          height,
+          right: left + width,
+          bottom: top + height,
+          x: left,
+          y: top,
+        };
+      },
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () =>
+        ({
+          scale() {},
+          fillRect() {},
+          clearRect() {},
+          drawImage() {},
+          fillText(text: string, x: number, y: number) {
+            drawn.push([text, x, y]);
+          },
+          measureText: () => ({ width: 100 }),
+          getImageData: () => ({ data: [0, 0, 0, 255] }),
+          fillStyle: '#000',
+          font: '',
+          textAlign: 'left',
+          textBaseline: 'middle',
+        }) as unknown as CanvasRenderingContext2D
+    );
+    restore = () => {
+      Reflect.deleteProperty(doc, 'clientWidth');
+      Reflect.deleteProperty(doc, 'clientHeight');
+      Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
+    };
+  });
+  afterEach(() => {
+    restore?.();
+    restore = null;
+  });
+
+  /** What the compositor's pass runs with the mask the Showreel handed it. */
+  const running = (props: ReturnType<typeof render>) =>
+    createFilmMotionPasses().passFor('film-fill', motionChoice(props.options), {
+      phone: false,
+      reducedMotion: false,
+      hasMask: showreelFeed.mask !== null,
+    })?.running;
+
+  it.each([
+    'corner',
+    'wide',
+  ] as const)('on %s, draws the title words as the mask, so the opening and the way in run through them', async (layout) => {
+    const props = render(layout);
+    // The draw waits for the DOM (`tick()`, a frame under Svelte's async mode).
+    frame(16);
+    await settle();
+    expect(showreelFeed.mask).toBeInstanceOf(HTMLCanvasElement);
+    // Each word, at its laid-out box, its middle line through the box's.
+    expect(drawn.map(([text]) => text)).toEqual(['Of', 'Blood', '&', 'Bones']);
+    expect(drawn[1]).toEqual([
+      'Blood',
+      box(1).left,
+      box(1).top + box(1).height / 2,
+    ]);
+    // The defaults choose "through the name" both ways; with the title as
+    // the window, both run (before: no mask, so no opening and the smoke).
+    expect(running(props)).toMatchObject({ opening: 'name', into: 'name' });
+  });
+
+  it('falls back only when there is no title to draw', async () => {
+    const props = render('corner', {
+      reel: [
+        { type: 'piece', piece: piece(''), show: 'still' },
+        ...REEL.slice(1),
+      ],
+    });
+    frame(16);
+    await settle();
+    expect(showreelFeed.mask).toBeNull();
+    expect(running(props)).toMatchObject({ opening: 'none', into: 'smoke' });
+  });
+
+  it('draws no window when neither the opening nor the way in plays through the name', async () => {
+    const options = resolveHero(
+      'consume',
+      {
+        comp: 'showreel',
+        'reel-layout': 'corner',
+        'reel-opening': 'none',
+        'reel-film': 'smoke',
+      },
+      FACTS
+    );
+    expect(options['reel-opening']).toBe('none');
+    const props = render('corner');
+    props.options = options;
+    frame(16);
+    await settle();
+    expect(showreelFeed.mask).toBeNull();
   });
 });

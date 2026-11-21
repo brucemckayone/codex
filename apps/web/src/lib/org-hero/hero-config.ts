@@ -64,8 +64,8 @@ export const HERO_OPTION_VALUES = {
   // the first featured pieces rise just above the fold
   'reel-peek': ['off', 'on'],
   'reel-pointer': ['liquid', 'smoke', 'glitch', 'none'],
-  // between pieces
-  'reel-trans': ['burn', 'liquid', 'glitch'],
+  // between pieces; 'light-leak' is one of the owner's WP-1b picks
+  'reel-trans': ['burn', 'liquid', 'glitch', 'light-leak'],
   // a treatment over every picture and film
   'reel-surface': ['none', 'grain', 'halftone', 'reeded', 'red', 'shader'],
   // where the film gives way to the shader: its foot evenly ('fade', the

@@ -271,7 +271,10 @@ export function useReelMotion(source: ReelMotionSource): {
       observer.disconnect();
       clearTimeout(timer);
     }
-    observer.observe(hero, { attributes: true, attributeFilter: ['data-film'] });
+    observer.observe(hero, {
+      attributes: true,
+      attributeFilter: ['data-film'],
+    });
     return stop;
   });
 

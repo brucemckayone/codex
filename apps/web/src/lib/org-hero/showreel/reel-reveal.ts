@@ -10,6 +10,10 @@
  * for the rise to end, and the latest waiting pick wins. So the picture's
  * light falls and rises at most once per full cut, however fast the visitor
  * clicks: what keeps the light leak and the glitch inside WCAG 2.3.1.
+ *
+ * Both timings take at least 400 ms a cut, under 3 a second, and no two
+ * cuts START closer than `MIN_CUT_GAP_MS`: that binds only a cut started
+ * right after a `jump()` cut the last one short (a pick while paused).
  */
 import { easeIn, easeOut, through } from './reel-ease';
 
@@ -21,8 +25,13 @@ export interface CutTiming {
 }
 
 export const CUT_TIMING: CutTiming = { outMs: 640, inMs: 1150 };
-/** Under reduced motion: a short fade through the brand's picture. */
-export const REDUCED_CUT_TIMING: CutTiming = { outMs: 150, inMs: 150 };
+/**
+ * Under reduced motion: a short fade through the brand's picture, 400 ms in
+ * all, so even back to back it dips at most 2.5 times a second (WCAG 2.3.1).
+ */
+export const REDUCED_CUT_TIMING: CutTiming = { outMs: 200, inMs: 200 };
+/** The least time between two cuts' starts: 3 a second at most (WCAG 2.3.1). */
+export const MIN_CUT_GAP_MS = 1000 / 3;
 
 type Phase =
   | { readonly kind: 'rest' }
@@ -47,6 +56,8 @@ export class RevealClock {
   #waiting: number | null = null;
   #cuts = 0;
   #pausedAt: number | null = null;
+  /** When the last cut started (its fall's `from`). */
+  #lastStart = Number.NEGATIVE_INFINITY;
   /** The timing the next cut starts with. */
   timing: CutTiming;
 
@@ -70,11 +81,12 @@ export class RevealClock {
     }
     if (to === this.#shown) return;
     this.#target = to;
-    this.#phase = {
-      kind: 'out',
-      from: this.#pausedAt ?? now,
-      timing: this.timing,
-    };
+    const from = Math.max(
+      this.#pausedAt ?? now,
+      this.#lastStart + MIN_CUT_GAP_MS
+    );
+    this.#lastStart = from;
+    this.#phase = { kind: 'out', from, timing: this.timing };
   }
 
   /** Show piece `to` at once, with no cut: the first piece, or a new reel. */
@@ -140,6 +152,7 @@ export class RevealClock {
       return false;
     }
     this.#target = next;
+    this.#lastStart = top;
     this.#phase = { kind: 'out', from: top, timing: this.timing };
     return true;
   }

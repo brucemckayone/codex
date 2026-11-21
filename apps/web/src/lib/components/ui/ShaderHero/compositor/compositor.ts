@@ -48,18 +48,18 @@ import type { Effect } from './effects/effect';
 import { assembleFilmPass, type FilmPass } from './effects/film-pass';
 import { PASSTHROUGH_FRAME } from './effects/ids';
 import { assembleEffect, FRAMES } from './effects/registry';
-import { createFilmMotionPasses, type FilmMotion } from './film-motion';
-import {
-  type FilmPassLocations,
-  filmPassValues,
-  setFilmPassUniforms,
-} from './film-pass-values';
 import {
   isSampler,
   SAMPLER_UNITS,
   type UniformName,
   type UniformValues,
 } from './effects/uniforms';
+import { createFilmMotionPasses, type FilmMotion } from './film-motion';
+import {
+  type FilmPassLocations,
+  filmPassValues,
+  setFilmPassUniforms,
+} from './film-pass-values';
 import { effectTime } from './flash';
 import { type PlanContext, planStack, type StackPlan } from './plan';
 import type { StackConfig } from './stack-config';

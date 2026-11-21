@@ -370,6 +370,30 @@ describe('the Showreel', () => {
     expect(o.align).toBe('start');
   });
 
+  it('offers the light leak between pieces, kept under every purpose and layout (owner’s WP-1b pick)', () => {
+    for (const purpose of HERO_PURPOSES)
+      for (const layout of ['corner', 'wide', 'name'] as const) {
+        const o = resolveHero(
+          purpose,
+          {
+            comp: 'showreel',
+            'reel-layout': layout,
+            'reel-trans': 'light-leak',
+          },
+          FULL
+        );
+        expect(o['reel-trans'], `${purpose} ${layout}`).toBe('light-leak');
+      }
+    // A logo that leads alone, or no reel's name in sight, never moves it.
+    expect(
+      resolveHero(
+        'consume',
+        { comp: 'showreel', 'reel-trans': 'light-leak', lead: 'logo' },
+        FULL
+      )['reel-trans']
+    ).toBe('light-leak');
+  });
+
   it('chosen with no reel to play, gives way to the purpose’s own hero', () => {
     // exactly the hero the org would have with no choice made, for every purpose
     for (const facts of [NO_REEL, BARE]) {
@@ -559,7 +583,7 @@ describe('stored values are a contract', () => {
       'reel-layout': ['corner', 'wide', 'name'],
       'reel-peek': ['off', 'on'],
       'reel-pointer': ['liquid', 'smoke', 'glitch', 'none'],
-      'reel-trans': ['burn', 'liquid', 'glitch'],
+      'reel-trans': ['burn', 'liquid', 'glitch', 'light-leak'],
       'reel-surface': ['none', 'grain', 'halftone', 'reeded', 'red', 'shader'],
       'reel-band': ['fade', 'under', 'edges', 'none'],
       'reel-edge': ['shadow', 'outline'],

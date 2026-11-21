@@ -10375,6 +10375,14 @@ export const branding_hero_reel_trans_glitch = () => `Glitch`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_trans_light_leak = () => `Light leak`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_field_reel_surface = () => `Over every piece`
 
 

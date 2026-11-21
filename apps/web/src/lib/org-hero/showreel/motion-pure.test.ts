@@ -133,11 +133,11 @@ describe('RevealClock', () => {
     expect(clock.at(10)).toEqual({ reveal: 1, shown: 4, cuts: 0 });
   });
 
-  it('cuts in 300 ms under reduced motion', () => {
+  it('cuts in 400 ms under reduced motion', () => {
     const clock = new RevealClock(0, REDUCED_CUT_TIMING);
     clock.cut(1, 0);
-    expect(clock.at(150)).toEqual({ reveal: 0, shown: 1, cuts: 1 });
-    expect(clock.at(300).reveal).toBe(1);
+    expect(clock.at(200)).toEqual({ reveal: 0, shown: 1, cuts: 1 });
+    expect(clock.at(400).reveal).toBe(1);
   });
 });
 

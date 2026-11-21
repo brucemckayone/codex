@@ -91,6 +91,15 @@ export interface ReelMotionOptions {
 /** The name at rest: as drawn, all of it, no dive. */
 const NAME_REST: NameFrame = { zoom: 1, alpha: 1, weight: 0, dive: 0 };
 
+/**
+ * How long an opening waits for the pass to say what it runs
+ * (`FilmMotion.running` still null: a new choice the compositor has not
+ * drawn yet). Its frames meanwhile make a frozen hero draw, so the pass
+ * says within a frame or two; past this it never will (no film pass at
+ * all), and the letters show at rest.
+ */
+export const OPEN_DEFER_MS = 1000;
+
 export class ReelMotion {
   #motion: FilmMotion;
   #setup: ReelMotionSetup;
@@ -111,8 +120,11 @@ export class ReelMotion {
    */
   #openingDue = false;
   #openingFrom: number | null = null;
-  /** It has run, or been ruled out: once a visit. */
+  /** The canvas showed the film, or the film opened: once a visit. */
   #opened = false;
+  /** The canvas showed the film while the pass had not said what it runs. */
+  #openWaitFrom: number | null = null;
+  #openAspect = 1;
 
   #intoFrom: number | null = null;
   #intoKind: IntoId | null = null;
@@ -122,7 +134,11 @@ export class ReelMotion {
 
   constructor(setup: ReelMotionSetup, options: ReelMotionOptions = {}) {
     this.#setup = setup;
-    this.#motion = { choice: setup.choice, values: restMotion(), running: null };
+    this.#motion = {
+      choice: setup.choice,
+      values: restMotion(),
+      running: null,
+    };
     this.#trail = new PointerTrail(
       setup.phone ? PHONE_TRAIL_POINTS : undefined
     );
@@ -176,8 +192,10 @@ export class ReelMotion {
   #apply(setup: ReelMotionSetup): void {
     this.#trail.motion = setup.reducedMotion ? 'still' : 'drift';
     this.#reveal.timing = setup.reducedMotion ? REDUCED_CUT_TIMING : CUT_TIMING;
+    // Before the canvas shows the film, or while the opening waits for its
+    // pass: once it has started, or been ruled out, never again.
     const mayOpen =
-      !this.#opened &&
+      (!this.#opened || this.#openWaitFrom !== null) &&
       setup.choice.opening === 'name' &&
       setup.moves &&
       !setup.reducedMotion;
@@ -267,16 +285,35 @@ export class ReelMotion {
   /**
    * The canvas shows the film for the first time: the opening starts, when
    * one is due and the pass runs it; otherwise the letters show at once.
-   * Once a visit. On the Corner and Wide layouts it dives through the name,
-   * deep enough for the letter to cover the `aspect`-wide output.
+   * One shot a visit, whatever the choice is now: an opening chosen later
+   * (the editor's live preview) never holds the letters dark, the canvas
+   * having shown the film already. While the pass has not said what it
+   * runs, the opening waits for it (`OPEN_DEFER_MS` at most), never ruled
+   * out on a null. On the Corner and Wide layouts it dives through the
+   * name, deep enough for the letter to cover the `aspect`-wide output.
    */
   open(now: number, aspect: number): void {
-    if (this.#opened || !this.#openingDue) return;
+    if (this.#opened) return;
     this.#opened = true;
+    if (!this.#openingDue) return;
+    this.#openWaitFrom = now;
+    this.#openAspect = aspect;
+    this.#settleOpening(now);
+  }
+
+  /** The opening the canvas asked for, once the pass says what it runs. */
+  #settleOpening(now: number): void {
+    const from = this.#openWaitFrom;
+    if (from === null) return;
+    const running = this.#motion.running;
+    if (this.#openingDue && running === null && now - from < OPEN_DEFER_MS)
+      return;
+    this.#openWaitFrom = null;
+    const runs = this.#openingDue && running?.opening === 'name';
     this.#openingDue = false;
-    if (this.#motion.running?.opening !== 'name') return;
+    if (!runs) return;
     this.#openingFrom = now;
-    if (this.#setup.frame !== 'film-name') this.#aimDive(aspect);
+    if (this.#setup.frame !== 'film-name') this.#aimDive(this.#openAspect);
   }
 
   /**
@@ -292,6 +329,7 @@ export class ReelMotion {
     // The opening gives way to the film.
     this.#openingFrom = null;
     this.#openingDue = false;
+    this.#openWaitFrom = null;
     this.#opened = true;
     if (kind === 'name') this.#aimDive(aspect);
   }
@@ -334,10 +372,16 @@ export class ReelMotion {
   #name(now: number): boolean {
     const v = this.#motion.values;
     const frame = this.#setup.frame;
+    this.#settleOpening(now);
     v.u_nameCentre = this.#point ? [this.#point.x, this.#point.y] : [0.5, 0.5];
 
     if (this.#intoFrom !== null && this.#intoKind !== null) {
-      const into = intoAt(now - this.#intoFrom, this.#intoKind, frame, this.#depth);
+      const into = intoAt(
+        now - this.#intoFrom,
+        this.#intoKind,
+        frame,
+        this.#depth
+      );
       this.#setName(into);
       v.u_into = into.into;
       v.u_fill = into.fill;
@@ -372,9 +416,15 @@ export class ReelMotion {
         }
       }
     }
-    // Waiting to open: the letters hold dark, so they fade in from nothing.
-    this.#setName(this.#openingDue ? { ...NAME_REST, alpha: 0 } : NAME_REST);
-    return busy;
+    // Waiting to open: the opening's own first frame, so it starts from
+    // exactly what shows (the letters dark, the film already held to them).
+    this.#setName(
+      this.#openingDue
+        ? openingAt(0, frame !== 'film-name', this.#depth)
+        : NAME_REST
+    );
+    // Waiting for the pass: frames, so a frozen hero draws and it says.
+    return busy || this.#openWaitFrom !== null;
   }
 
   #setName(name: NameFrame): void {

@@ -1064,7 +1064,9 @@ describe('the Showreel motion (WP-6, Codex-1yd58.7)', () => {
     compositor.setMotion(motion);
     compositor.render(frame({ stack }));
     expect(motion.running?.opening).toBe('none');
-    compositor.setNameMask({ kind: 'mask-canvas' } as unknown as TexImageSource);
+    compositor.setNameMask({
+      kind: 'mask-canvas',
+    } as unknown as TexImageSource);
     compositor.render(frame({ stack }));
     expect(motion.running?.opening).toBe('name');
   });

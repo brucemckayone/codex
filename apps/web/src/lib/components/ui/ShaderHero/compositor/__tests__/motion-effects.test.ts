@@ -139,7 +139,7 @@ describe('motion effects', () => {
       expect(effect.phoneFallback).toBe(effect.id);
   });
 
-  it('under reduced motion: cuts fade, no opening, no glitch, and the pointer still answers', () => {
+  it('under reduced motion: cuts fade, no opening, no glitch, no liquid, and the smoke still answers, static', () => {
     const reduced = (table: Record<string, MotionEffect>) =>
       Object.fromEntries(
         Object.values(table).map((e) => [e.id, e.reducedMotionFallback])
@@ -152,7 +152,8 @@ describe('motion effects', () => {
       fade: 'fade',
     });
     expect(reduced(POINTERS)).toEqual({
-      liquid: 'liquid',
+      // Its rings spread on after the pointer stops (review M5).
+      liquid: 'none',
       smoke: 'smoke',
       glitch: 'none',
       none: 'none',
@@ -222,6 +223,19 @@ describe('planMotion', () => {
       'none',
       'fade',
     ]);
+  });
+
+  it('under reduced motion turns the liquid pointer off and keeps the smoke (review M5)', () => {
+    const reduced = { ...base, reducedMotion: true };
+    const pointer = (id: 'liquid' | 'smoke') =>
+      planMotion({ ...choice, pointer: id }, reduced).pointer.id;
+    expect(pointer('liquid')).toBe('none');
+    // The smoke stays: its trail is static under reduced motion (reel-trail).
+    expect(pointer('smoke')).toBe('smoke');
+    // Without reduced motion the liquid runs as chosen.
+    expect(planMotion({ ...choice, pointer: 'liquid' }, base).pointer.id).toBe(
+      'liquid'
+    );
   });
 
   it('draws nothing moving for the still choice', () => {

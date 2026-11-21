@@ -27,7 +27,8 @@ const head = (trail: PointerTrail, now: number) =>
 /** The newest point's slot: the last one with any strength. */
 const newest = (packed: Float32Array) => {
   let at = 1;
-  for (let i = 1; i < TRAIL_POINTS; i++) if ((packed[i * 4 + 2] ?? 0) > 0) at = i;
+  for (let i = 1; i < TRAIL_POINTS; i++)
+    if ((packed[i * 4 + 2] ?? 0) > 0) at = i;
   return at;
 };
 
@@ -143,7 +144,8 @@ describe('smoke with inertia', () => {
     const once = new PointerTrail();
     const stop = sweep(often);
     sweep(once);
-    for (let ms = 0; ms <= 700; ms += 7) often.pack(stop.t + ms, 'smoke', out());
+    for (let ms = 0; ms <= 700; ms += 7)
+      often.pack(stop.t + ms, 'smoke', out());
     expect(head(often, stop.t + 700)).toEqual(head(once, stop.t + 700));
   });
 

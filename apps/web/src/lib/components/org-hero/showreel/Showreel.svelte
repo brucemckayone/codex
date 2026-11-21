@@ -79,6 +79,7 @@
     veilPole,
   } from '$lib/org-hero/showreel/reel-scrim';
   import { type ReelWords, reelWords } from '$lib/org-hero/showreel/reel-words';
+  import { drawTitleMask } from '$lib/org-hero/showreel/title-mask';
   import { logger } from '$lib/observability';
   import { themeState } from '$lib/theme.svelte';
   import * as m from '$paraglide/messages';
@@ -212,9 +213,13 @@
   let shownKey = $state(untrack(() => keys[0] ?? ''));
   const shown = $derived(Math.max(0, keys.indexOf(shownKey)));
   let swap = $state<'' | 'out' | 'in'>('');
+  // The entry the words wait to show: they come in with its picture, at the
+  // cut's bottom (WP-6, the motion's effect below), never over the last one.
+  let due = $state<string | null>(null);
   $effect(() => {
     const target = keys[clock.index] ?? '';
     const on = untrack(() => shownKey);
+    due = null;
     if (target === on) {
       // Back where the words already are, before they went out (two quick
       // picks): bring them back in.
@@ -223,15 +228,15 @@
       });
       return;
     }
-    // Still, or the entry on show has left the reel: show where the clock is.
+    // Still, or the entry on show has left the reel: no swap, the words
+    // change with the picture.
     if (!clock.moves || reducedMotion.current || !keys.includes(on)) {
-      shownKey = target;
+      due = target;
       return;
     }
     swap = 'out';
     const timer = setTimeout(() => {
-      shownKey = target;
-      swap = 'in';
+      due = target;
     }, OUT_MS);
     return () => clearTimeout(timer);
   });
@@ -316,6 +321,22 @@
     phone: () => !desktop.current,
     reducedMotion: () => reducedMotion.current,
     filmPlaying: () => filmPlaying,
+  });
+  // The words come in when the stage shows their piece (review M4): at the
+  // cut's bottom, never over the piece going out. With no stage named yet
+  // (the hook not run), as soon as they are out.
+  $effect(() => {
+    const key = due;
+    if (key === null) return;
+    const at = reelMotion.stage;
+    const staged = at === null ? null : (keys[at] ?? null);
+    if (staged !== null && staged !== key) return;
+    untrack(() => {
+      due = null;
+      if (shownKey === key) return;
+      shownKey = key;
+      if (swap === 'out') swap = 'in';
+    });
   });
 
   // ── holds: the pointer over the words, index or strip; focus; a press ──
@@ -456,6 +477,35 @@
     };
   });
   $effect(() => () => showreelFeed.setNameMask(null));
+
+  // ── the title as the film's window on Corner and Wide (WP-6, owner 2026-11-21) ──
+  // "Through the name" runs on every layout: there the big title's words are
+  // the letters (`title-mask.ts`). The Name window's mask stays the effect
+  // above's: this one never draws on that layout, and draws after it.
+  const titleWindow = $derived(
+    layout !== 'name' && (options['reel-opening'] === 'name' || options['reel-film'] === 'name')
+  );
+  $effect(() => {
+    const el = titleEl;
+    void current?.title;
+    void wideSize;
+    if (layout === 'name') return;
+    if (!titleWindow || !el) {
+      showreelFeed.setNameMask(null);
+      return;
+    }
+    // Going out: the window stays where the last title sat until the next is in.
+    if (swap === 'out') return;
+    let live = true;
+    let stop = () => {};
+    void tick().then(() => {
+      if (live) stop = refit(() => showreelFeed.setNameMask(drawTitleMask(el)));
+    });
+    return () => {
+      live = false;
+      stop();
+    };
+  });
 
   // ── contrast: the pools' least opacity for the inks as resolved ──
   let probe: CanvasRenderingContext2D | null = null;

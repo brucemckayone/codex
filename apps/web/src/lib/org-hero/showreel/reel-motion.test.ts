@@ -15,9 +15,14 @@ import {
   TRAIL_POINTS,
 } from '$lib/components/ui/ShaderHero/compositor/effects/motion-uniforms';
 import { deepestPoint, type MaskPixels } from './deepest-point';
-import { intoLength, LEAVE_MS } from './name-motion';
+import { intoLength, LEAVE_MS, openingAt } from './name-motion';
+import {
+  motionChoice,
+  OPEN_DEFER_MS,
+  ReelMotion,
+  type ReelMotionSetup,
+} from './reel-motion';
 import { CUT_TIMING, REDUCED_CUT_TIMING } from './reel-reveal';
-import { motionChoice, ReelMotion, type ReelMotionSetup } from './reel-motion';
 import { PHONE_TRAIL_POINTS } from './reel-trail';
 
 const QUIET: MotionChoice = { ...STILL_MOTION, trans: 'burn' };
@@ -187,7 +192,9 @@ describe('ReelMotion between pieces', () => {
 
 describe('ReelMotion pointer', () => {
   it('packs the trail in the style the pass runs, and none for a pointer that reads none', () => {
-    const driver = new ReelMotion(setup({ choice: { ...QUIET, pointer: 'smoke' } }));
+    const driver = new ReelMotion(
+      setup({ choice: { ...QUIET, pointer: 'smoke' } })
+    );
     const v = driver.motion.values;
     driver.pointerMove(0.5, 0.5, 0, 1);
     runs(driver);
@@ -213,9 +220,12 @@ describe('ReelMotion pointer', () => {
   });
 
   it('asks for frames while the smoke drifts on after the pointer stops, and none once it rests', () => {
-    const driver = new ReelMotion(setup({ choice: { ...QUIET, pointer: 'smoke' } }));
+    const driver = new ReelMotion(
+      setup({ choice: { ...QUIET, pointer: 'smoke' } })
+    );
     runs(driver);
-    for (let t = 0; t <= 192; t += 16) driver.pointerMove(0.3 + t * 0.0005, 0.5, t, 1);
+    for (let t = 0; t <= 192; t += 16)
+      driver.pointerMove(0.3 + t * 0.0005, 0.5, t, 1);
     expect(driver.frame(300)).toBe(true);
     expect(slot(driver.motion.values.u_trail, 0)[0]).toBeGreaterThan(0.396);
     expect(driver.frame(3400)).toBe(false);
@@ -259,7 +269,8 @@ describe('ReelMotion pointer', () => {
       setup({ reducedMotion: true, choice: { ...QUIET, pointer: 'smoke' } })
     );
     runs(driver);
-    for (let t = 0; t <= 192; t += 16) driver.pointerMove(0.3 + t * 0.0005, 0.5, t, 1);
+    for (let t = 0; t <= 192; t += 16)
+      driver.pointerMove(0.3 + t * 0.0005, 0.5, t, 1);
     driver.frame(600);
     expect(slot(driver.motion.values.u_trail, 0)[0]).toBeCloseTo(0.396, 5);
   });
@@ -268,7 +279,11 @@ describe('ReelMotion pointer', () => {
 describe('ReelMotion opening', () => {
   const opening = (over: Partial<ReelMotionSetup> = {}) =>
     new ReelMotion(
-      setup({ frame: 'film-name', choice: { ...QUIET, opening: 'name' }, ...over })
+      setup({
+        frame: 'film-name',
+        choice: { ...QUIET, opening: 'name' },
+        ...over,
+      })
     );
 
   it('holds the letters dark until the canvas shows the film, then fades the film into them', () => {
@@ -312,6 +327,76 @@ describe('ReelMotion opening', () => {
       const driver = opening(over);
       driver.frame(0);
       expect(driver.motion.values.u_nameAlpha, JSON.stringify(over)).toBe(1);
+    }
+  });
+
+  it('is one shot a visit: an opening chosen after the canvas showed the film never holds the letters dark (review M2)', () => {
+    // None at first: the canvas shows the film, and that was the moment.
+    const driver = new ReelMotion(setup({ frame: 'film-name' }));
+    runs(driver);
+    driver.open(100, 1.6);
+    driver.frame(100);
+    expect(driver.motion.values.u_nameAlpha).toBe(1);
+    // The editor's live preview switches the opening on.
+    driver.configure(
+      setup({ frame: 'film-name', choice: { ...QUIET, opening: 'name' } })
+    );
+    runs(driver);
+    for (const at of [200, 1000, 5000]) {
+      driver.frame(at);
+      expect(driver.motion.values.u_nameAlpha, `at ${at}`).toBe(1);
+    }
+  });
+
+  it('waits for the pass when it has not said what it runs, then opens (review L7)', () => {
+    const driver = opening();
+    const v = driver.motion.values;
+    // The canvas shows the film before the compositor drew this choice.
+    driver.open(100, 1.6);
+    // Never ruled out on a null: it waits dark, and asks for frames so a
+    // frozen hero draws and the pass says.
+    expect(driver.frame(116)).toBe(true);
+    expect(v.u_nameAlpha).toBe(0);
+    runs(driver);
+    expect(driver.frame(132)).toBe(true);
+    driver.frame(132 + 400);
+    expect(v.u_nameAlpha).toBeGreaterThan(0);
+    expect(v.u_nameAlpha).toBeLessThan(1);
+    driver.frame(132 + 1400);
+    expect(v.u_nameAlpha).toBe(1);
+  });
+
+  it('a pass that turns out to run no opening shows the letters at rest', () => {
+    const driver = opening();
+    driver.open(100, 1.6);
+    driver.frame(116);
+    runs(driver, { opening: 'none' });
+    expect(driver.frame(132)).toBe(false);
+    expect(driver.motion.values.u_nameAlpha).toBe(1);
+  });
+
+  it('stops waiting when no pass ever says: the letters show at rest', () => {
+    const driver = opening();
+    driver.open(100, 1.6);
+    expect(driver.frame(100 + OPEN_DEFER_MS - 16)).toBe(true);
+    expect(driver.motion.values.u_nameAlpha).toBe(0);
+    expect(driver.frame(100 + OPEN_DEFER_MS)).toBe(false);
+    expect(driver.motion.values.u_nameAlpha).toBe(1);
+  });
+
+  it('waits in the opening’s own first frame, so it starts from what shows (review L9)', () => {
+    for (const frame of ['film-fill', 'film-name'] as const) {
+      const driver = opening({ frame });
+      runs(driver);
+      driver.frame(0);
+      const v = driver.motion.values;
+      const first = openingAt(0, frame !== 'film-name', 1);
+      expect(
+        [v.u_nameZoom, v.u_nameAlpha, v.u_nameWeight, v.u_dive],
+        frame
+      ).toEqual([first.zoom, first.alpha, first.weight, first.dive]);
+      // The film held to the letters already: the opening's start, no pop.
+      expect(v.u_nameWeight, frame).toBe(1);
     }
   });
 });
@@ -359,7 +444,9 @@ describe('ReelMotion into the film', () => {
   });
 
   it('turns the smoke at its peak, the film filling its stage from there', () => {
-    const driver = new ReelMotion(setup({ choice: { ...QUIET, into: 'smoke' } }));
+    const driver = new ReelMotion(
+      setup({ choice: { ...QUIET, into: 'smoke' } })
+    );
     runs(driver);
     const v = driver.motion.values;
     driver.enterFilm(0, 1.5);
@@ -372,7 +459,9 @@ describe('ReelMotion into the film', () => {
   });
 
   it('moves nothing into a film no pass draws', () => {
-    const driver = new ReelMotion(setup({ choice: { ...QUIET, into: 'smoke' } }));
+    const driver = new ReelMotion(
+      setup({ choice: { ...QUIET, into: 'smoke' } })
+    );
     driver.enterFilm(0, 1.5);
     expect(driver.frame(520)).toBe(false);
     expect(driver.motion.values.u_into).toBe(0);
@@ -381,7 +470,10 @@ describe('ReelMotion into the film', () => {
 
   it('gives way to the film: an opening running stops', () => {
     const driver = new ReelMotion(
-      setup({ frame: 'film-name', choice: { ...QUIET, opening: 'name', into: 'fade' } })
+      setup({
+        frame: 'film-name',
+        choice: { ...QUIET, opening: 'name', into: 'fade' },
+      })
     );
     runs(driver);
     driver.open(0, 1.6);

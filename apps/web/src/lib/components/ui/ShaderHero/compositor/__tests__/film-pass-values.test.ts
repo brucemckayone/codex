@@ -14,8 +14,8 @@ import {
 import { SAMPLER_UNITS } from '../effects/uniforms';
 import {
   type FilmPassLocations,
-  filmPassValues,
   type FrameShared,
+  filmPassValues,
   setFilmPassUniforms,
 } from '../film-pass-values';
 import { governFlash } from '../flash';
@@ -77,8 +77,7 @@ describe('setFilmPassUniforms', () => {
     } as unknown as WebGL2RenderingContext;
     return { gl, calls };
   }
-  const loc = (name: string) =>
-    ({ name }) as unknown as WebGLUniformLocation;
+  const loc = (name: string) => ({ name }) as unknown as WebGLUniformLocation;
 
   it('sets samplers to their units, the trail as one array, the rest by size', () => {
     const { gl, calls } = recordingGl();

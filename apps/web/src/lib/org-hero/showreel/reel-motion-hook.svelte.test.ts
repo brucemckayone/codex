@@ -16,8 +16,8 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
-import Harness from './ReelMotionHarness.test.svelte';
 import { LEAVE_MS } from './name-motion';
+import Harness from './ReelMotionHarness.test.svelte';
 import type { MotionSettings } from './reel-motion';
 import { OPEN_WAIT_MS } from './reel-motion.svelte';
 import { CUT_TIMING } from './reel-reveal';
@@ -249,7 +249,11 @@ describe('useReelMotion and the pointer', () => {
     runs();
     const said: string[] = [];
     showreelFeed.onChange((changed) => said.push(changed));
-    pointer('pointermove', { pointerType: 'mouse', clientX: 250, clientY: 125 });
+    pointer('pointermove', {
+      pointerType: 'mouse',
+      clientX: 250,
+      clientY: 125,
+    });
     frame(32);
     expect(held().values.u_pointerOn).toBe(1);
     // The head of the trail, at the pointer in output uv (y up).
@@ -266,13 +270,29 @@ describe('useReelMotion and the pointer', () => {
   it('on a phone, a sideways swipe drives the smoke and a vertical one stays the page’s scroll', () => {
     render({ phone: true });
     runs();
-    pointer('pointerdown', { pointerType: 'touch', clientX: 100, clientY: 100 });
-    pointer('pointermove', { pointerType: 'touch', clientX: 103, clientY: 160 });
+    pointer('pointerdown', {
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 100,
+    });
+    pointer('pointermove', {
+      pointerType: 'touch',
+      clientX: 103,
+      clientY: 160,
+    });
     frame(16);
     expect(held().values.u_pointerOn).toBe(0);
     pointer('pointerup', { pointerType: 'touch', clientX: 103, clientY: 160 });
-    pointer('pointerdown', { pointerType: 'touch', clientX: 100, clientY: 100 });
-    pointer('pointermove', { pointerType: 'touch', clientX: 160, clientY: 103 });
+    pointer('pointerdown', {
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 100,
+    });
+    pointer('pointermove', {
+      pointerType: 'touch',
+      clientX: 160,
+      clientY: 103,
+    });
     frame(16);
     expect(held().values.u_pointerOn).toBe(1);
   });
@@ -280,7 +300,11 @@ describe('useReelMotion and the pointer', () => {
   it('moves no trail for a pointer effect the pass does not run', () => {
     render();
     runs({ pointer: 'none' });
-    pointer('pointermove', { pointerType: 'mouse', clientX: 250, clientY: 125 });
+    pointer('pointermove', {
+      pointerType: 'mouse',
+      clientX: 250,
+      clientY: 125,
+    });
     frame(32);
     expect([...held().values.u_trail].every((n) => n === 0)).toBe(true);
   });
@@ -305,7 +329,7 @@ describe('useReelMotion and the opening', () => {
   function hero() {
     const el = document.createElement('div');
     el.className = 'shader-hero shader-hero--fullpage';
-    document.body.append(el);
+    document.body.appendChild(el);
     return el;
   }
   const settle = async () => {
@@ -346,5 +370,23 @@ describe('useReelMotion and the opening', () => {
     runs();
     frame(400);
     expect(held().values.u_nameAlpha).toBeGreaterThan(0);
+  });
+
+  it('a live switch from None to Name after the canvas showed the film keeps the letters, never dark for good (review M2)', () => {
+    const canvas = hero();
+    canvas.setAttribute('data-film', '');
+    // None at first: the canvas already shows the film, the moment passes.
+    const props = render({ options: SETTINGS, frame: 'film-name' });
+    runs();
+    frame(64);
+    expect(held().values.u_nameAlpha).toBe(1);
+    // The editor's live preview turns the opening on.
+    props.options = OPENING;
+    flushSync();
+    runs();
+    for (const ms of [16, 400, 2000]) {
+      frame(ms);
+      expect(held().values.u_nameAlpha, `after ${ms} ms`).toBe(1);
+    }
   });
 });
