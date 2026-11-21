@@ -2,8 +2,9 @@
  * The title as the film's window on the Corner and Wide layouts (Codex-1yd58.7,
  * WP-6; owner, 2026-11-21): the big title words are the letters "through the
  * name" plays in, so the opening and the way into the film run on every
- * layout, the defaults included. The Name window draws the org's name the
- * same way (Showreel's `drawMask`, from `name-lines`).
+ * layout, the defaults included. The Name window's mask is drawn here too
+ * (Showreel's `drawMask`, review R3-M1): one placement for both, so neither
+ * window's letters sit off the page's.
  *
  * The title wraps where the page wraps it (`text-wrap: balance`), so its
  * lines are read from the page, never re-wrapped here: each word's box comes
@@ -53,12 +54,36 @@ export function translationOf(transform: string): { x: number; y: number } {
   };
 }
 
+/** How a window's own translation is read. */
+export interface MaskOptions {
+  /**
+   * Take the element's computed translation back out (the default): the
+   * title's swap moves it a few px for a moment, and the window is where it
+   * SITS. False where the translation is where the element rests (the Name
+   * window is centred by `translateY(-50%)`).
+   */
+  readonly undoTranslation?: boolean;
+}
+
+/** The translation `el`'s words are taken back by, in px. */
+function shiftOf(
+  el: HTMLElement,
+  options: MaskOptions
+): { x: number; y: number } {
+  if (options.undoTranslation === false) return { x: 0, y: 0 };
+  const view = el.ownerDocument.defaultView;
+  return translationOf(view?.getComputedStyle(el).transform ?? 'none');
+}
+
 /** Each word of the title `el` where it sits, in document space. */
-export function titleWords(el: HTMLElement): MaskWord[] {
+export function titleWords(
+  el: HTMLElement,
+  options: MaskOptions = {}
+): MaskWord[] {
   const doc = el.ownerDocument;
   const view = doc.defaultView;
   if (!view) return [];
-  const shift = translationOf(view.getComputedStyle(el).transform);
+  const shift = shiftOf(el, options);
   const words: MaskWord[] = [];
   const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -88,16 +113,28 @@ const MAX_DPR = 2;
  * How far below a word box's top the page sets the baseline, measured in the
  * page, for a browser whose `measureText` reports no content area (Firefox
  * before 116): a zero-size inline-block's bottom sits on its line's
- * baseline, so one at the end of the title, on its last word's line,
- * measures it for every word (one font, one size). It is taken out at once.
+ * baseline, so one after the last word, on its line, measures it for every
+ * word (one font, one size). It goes in that word's own element: on a flex
+ * window (the Name window's lines are flex items) one added to the window
+ * would be a flex item, its bottom on no line's baseline. Taken out at once.
  */
-function measuredBaseline(el: HTMLElement, last: MaskWord): number {
-  const view = el.ownerDocument.defaultView;
-  const shift = translationOf(view?.getComputedStyle(el).transform ?? 'none');
-  const marker = el.ownerDocument.createElement('span');
+function measuredBaseline(
+  el: HTMLElement,
+  last: MaskWord,
+  options: MaskOptions
+): number {
+  const doc = el.ownerDocument;
+  const view = doc.defaultView;
+  const shift = shiftOf(el, options);
+  let host: Element = el;
+  const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode())
+    if (/\S/.test(node.textContent ?? '') && node.parentElement)
+      host = node.parentElement;
+  const marker = doc.createElement('span');
   marker.style.cssText =
     'display:inline-block;width:0;height:0;vertical-align:baseline';
-  el.appendChild(marker);
+  host.appendChild(marker);
   try {
     const { bottom } = marker.getBoundingClientRect();
     // in document space, as the words are
@@ -108,17 +145,21 @@ function measuredBaseline(el: HTMLElement, last: MaskWord): number {
 }
 
 /**
- * The title `el` drawn as the film's window: a window-sized canvas, the words
- * white on black in the title's font. Null when there is no word to draw (no
+ * The title `el` (or the Name window's name) drawn as the film's window: a
+ * window-sized canvas, the words white on black in its font, each on its
+ * baseline where the page sets it. Null when there is no word to draw (no
  * title, or one not laid out), so "through the name" falls back.
  */
-export function drawTitleMask(el: HTMLElement): HTMLCanvasElement | null {
+export function drawTitleMask(
+  el: HTMLElement,
+  options: MaskOptions = {}
+): HTMLCanvasElement | null {
   const doc = el.ownerDocument;
   const view = doc.defaultView;
   const { clientWidth: width, clientHeight: height } = doc.documentElement;
   // No window laid out (a page not rendered yet): nothing to place words in.
   if (!view || width <= 0 || height <= 0) return null;
-  const words = titleWords(el);
+  const words = titleWords(el, options);
   if (words.length === 0) return null;
   const dpr = Math.min(view.devicePixelRatio || 1, MAX_DPR);
   const canvas = doc.createElement('canvas');
@@ -149,7 +190,11 @@ export function drawTitleMask(el: HTMLElement): HTMLCanvasElement | null {
     let below: number;
     if (Number.isFinite(area)) below = (word.height - area) / 2 + ascent;
     else {
-      measured ??= measuredBaseline(el, words[words.length - 1] ?? word);
+      measured ??= measuredBaseline(
+        el,
+        words[words.length - 1] ?? word,
+        options
+      );
       below = measured;
     }
     ctx.fillText(word.text, word.left, word.top + below);

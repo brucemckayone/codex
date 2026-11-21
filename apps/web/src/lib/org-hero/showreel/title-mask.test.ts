@@ -143,6 +143,22 @@ describe('titleWords and drawTitleMask', () => {
     expect(words[1]?.top).toBe(box(1).top);
   });
 
+  it('keeps a translation where the window rests (the Name window’s translateY(-50%))', () => {
+    // Centred by its transform: every word box 100 px up, and that is where
+    // the name sits, so the mask keeps it (the title takes its swap's out).
+    rise = -100;
+    style = { transform: 'matrix(1, 0, 0, 1, 0, -100)' };
+    const el = title('Of Blood');
+    expect(titleWords(el, { undoTranslation: false })[1]?.top).toBe(
+      box(1, -100).top
+    );
+    drawTitleMask(el, { undoTranslation: false });
+    expect(drawn.map(({ y }) => y)).toEqual([
+      box(0, -100).top + 62,
+      box(1, -100).top + 62,
+    ]);
+  });
+
   it('reads words across the title’s own elements, as the page wraps them', () => {
     const el = title('');
     el.innerHTML = 'River <em>Songs</em>';
@@ -222,6 +238,68 @@ describe('titleWords and drawTitleMask', () => {
     expect(seen).toEqual(['inline-block']);
     expect(drawn.map(({ y }) => y)).toEqual([box(0).top + 70, box(1).top + 70]);
     expect(el.childNodes).toHaveLength(1);
+  });
+
+  it('on a flex window (the Name window’s lines are flex items), measures inside the last word’s own line', () => {
+    // A marker added to the window itself would be a flex item, its bottom on
+    // no line's baseline: it goes in the last word's own element.
+    metrics = {} as typeof metrics;
+    const el = title('');
+    el.innerHTML =
+      '<span data-line>Of Blood</span><span data-line>&amp; Bones</span>';
+    const parents: (Element | null)[] = [];
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        parents.push(this.parentElement);
+        const bottom = box(1).top + 70;
+        return {
+          top: bottom,
+          bottom,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 0,
+          x: 0,
+          y: bottom,
+          toJSON: () => ({}),
+        };
+      }
+    );
+    drawTitleMask(el);
+    expect(parents).toEqual([el.lastElementChild]);
+    expect(el.lastElementChild?.childNodes).toHaveLength(1);
+  });
+
+  it('sets Libre Baskerville on its baseline in a 1-em line box, and its fallback within 0.03 em', () => {
+    // OBB's heading font as Chrome reads the file: ascent 970, descent 270
+    // per 1000 (measured on the page). The Name window's lines are 1-em line
+    // boxes; at 80 px, the baseline is (80 - 99.2) / 2 + 77.6 = 68 below the
+    // box's top, where the page sets it (0.85 em).
+    metrics = { fontBoundingBoxAscent: 77.6, fontBoundingBoxDescent: 21.6 };
+    drawTitleMask(title('Of'));
+    expect(drawn[0]?.y).toBeCloseTo(box(0).top + 68, 6);
+    // Without the metrics, the page's own baseline (the marker), not a share
+    // of the box (four fifths would be 0.05 em high here).
+    drawn = [];
+    metrics = {} as typeof metrics;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      () =>
+        ({
+          top: box(0).top + 68,
+          bottom: box(0).top + 68,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect
+    );
+    drawTitleMask(title('Of'));
+    expect(
+      Math.abs((drawn[0]?.y ?? 0) - (box(0).top + 68))
+    ).toBeLessThanOrEqual(0.03 * 80);
   });
 
   it('draws no mask for a title with no words, so the motion falls back', () => {

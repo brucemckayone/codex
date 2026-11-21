@@ -1673,6 +1673,24 @@ describe('Showreel words and the picture (WP-6, review M4)', () => {
     expect(onStage()).toBe(1);
     expect(title()).toBe(TITLES[1]);
   });
+
+  it('a pause during a pick’s cut shows its words and picture together, at once (R2-M1)', () => {
+    render();
+    document
+      .querySelectorAll<HTMLButtonElement>('.reel__index .reel__item')[1]
+      ?.click();
+    // Mid-fall: the words are out, the last piece's picture still on.
+    frame(16);
+    frame(300);
+    expect(q('.reel__words')?.dataset.swap).toBe('out');
+    expect(onStage()).toBe(0);
+    pauseButton()?.click();
+    flushSync();
+    frame(16);
+    expect(onStage()).toBe(1);
+    expect(title()).toBe(TITLES[1]);
+    expect(q('.reel__words')?.dataset.swap).not.toBe('out');
+  });
 });
 
 describe('Showreel: the title as the window on Corner and Wide (WP-6, owner 2026-11-21)', () => {
@@ -1771,6 +1789,18 @@ describe('Showreel: the title as the window on Corner and Wide (WP-6, owner 2026
     // The defaults choose "through the name" both ways; with the title as
     // the window, both run (before: no mask, so no opening and the smoke).
     expect(running(props)).toMatchObject({ opening: 'name', into: 'name' });
+  });
+
+  it('on Name, draws the org’s name on the same baseline, word by word (R3-M1)', async () => {
+    render('name');
+    frame(16);
+    await settle();
+    expect(showreelFeed.mask).toBeInstanceOf(HTMLCanvasElement);
+    // The Name window's mask places its words as the title's does: each at
+    // its laid-out box, on its baseline (before: each line centred on the
+    // em square's middle, 'middle' at its box's middle, ~0.065 em high).
+    expect(drawn.map(([text]) => text)).toEqual(['Of', 'Blood', '&', 'Bones']);
+    expect(drawn[1]).toEqual(['Blood', box(1).left, box(1).top + 62]);
   });
 
   it('falls back only when there is no title to draw', async () => {
