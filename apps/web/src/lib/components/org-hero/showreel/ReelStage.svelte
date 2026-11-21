@@ -24,11 +24,12 @@
   With `look.push` (WP-5b, owner 2026-11-21: on by default), the still on
   show is drawn slowly in about its centre over its piece, by the curve the
   compositor's `media-push` draws on the canvas (`pushZoom`, stage.ts), on
-  the same clock: the reel's own (`--_progress`, which the reel writes each
-  frame, as `pieceSeconds` reads it for the canvas). So it restarts as its
-  piece comes round, holds wherever it is while the reel holds (paused,
-  pressed, a hidden tab: WCAG 2.2.2), and runs under the canvas too, so a
-  lost context hands over mid-move. Footage plays, so a video with a frame
+  the same clock: the reel's progress through the piece ON SHOW
+  (`--_push-progress`, written each frame from what the canvas's
+  `pieceSeconds` reads), never the clock's next piece under the old picture
+  (review M1r2). So it starts again as its piece comes round, holds wherever
+  it is while the reel holds (paused, pressed, a hidden tab: WCAG 2.2.2),
+  and runs under the canvas too, so a lost context hands over mid-move. Footage plays, so a video with a frame
   never pushes; with the reel held still (reduced motion), no still does.
 
   ── iOS DECODE ERROR 3 ─────────────────────────────────────────────────────
@@ -370,11 +371,12 @@
   }
 
   /* The push-in (see THE PUSH-IN): the still on show, never footage with a
-     frame. `pushZoom`'s curve, eased out then held, at the piece's share
-     played (`--_progress`, 0 to 1) over the share of it a push takes. */
+     frame. `pushZoom`'s curve, eased out then held, at the share played of
+     the piece on show (`--_push-progress`, 0 to 1) over the share of it a
+     push takes. */
   @media (prefers-reduced-motion: no-preference) {
     .reel-stage[data-push] .reel-stage__item[data-on]:not(:has(> video[data-framed])) > img {
-      --_t: min(1, var(--_progress, 0) * var(--_push-rate));
+      --_t: min(1, var(--_push-progress, 0) * var(--_push-rate));
 
       transform: scale(calc(1 + var(--_push-depth) * (1 - (1 - var(--_t)) * (1 - var(--_t)))));
     }

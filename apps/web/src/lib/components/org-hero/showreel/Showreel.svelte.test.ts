@@ -12,6 +12,7 @@ import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-
 import {
   PUSH_DEPTH,
   PUSH_SECONDS,
+  pushZoom,
 } from '$lib/components/ui/ShaderHero/compositor/stage';
 import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
 import {
@@ -1049,6 +1050,78 @@ describe('Showreel stage: the push-in where the page draws the film (WP-5b)', ()
   it('pushes no still in when the creator turns the push-in off', () => {
     render('corner', { push: 'off' });
     expect(q('.reel-stage')?.hasAttribute('data-push')).toBe(false);
+  });
+});
+
+describe('Showreel push-in follows the piece on show (WP-5b review r2, M1r2)', () => {
+  /**
+   * Save-Data: every entry shows its still and the reel still moves on, so
+   * every piece pushes in. Then 16 ms frames, the words' timer advancing
+   * alongside as a browser runs them, through the first piece's end and the
+   * beat (OUT_MS) the words and the stage take to follow the clock.
+   */
+  function throughTheCut(read: () => { el: unknown; at: number }) {
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      connection: { saveData: true },
+    });
+    render();
+    flushSync();
+    expect(q('.reel')?.dataset.mode).toBe('stills');
+    for (const img of document.querySelectorAll<HTMLImageElement>(
+      '.reel-stage img'
+    )) {
+      img.dispatchEvent(new Event('load'));
+    }
+    flushSync();
+    const one = () => {
+      flushSync();
+      clock += 16;
+      const due = frames;
+      frames = [];
+      for (const callback of due) callback(clock);
+      flushSync();
+      vi.advanceTimersByTime(16);
+      flushSync();
+    };
+    let last: { el: unknown; at: number } | null = null;
+    const backwards: string[] = [];
+    let cut = false;
+    for (let t = 0; t < PIECE_MS + 600; t += 16) {
+      one();
+      const now = read();
+      if (now.el && last && last.el === now.el && now.at < last.at - 1e-9) {
+        backwards.push(
+          `${t} ms: ${last.at.toFixed(4)} -> ${now.at.toFixed(4)}`
+        );
+      }
+      if (last && last.el !== now.el) cut = true;
+      last = now;
+    }
+    // The cut came, and the next piece starts near 0, never a held full push.
+    expect(cut).toBe(true);
+    expect(last?.at ?? 1).toBeLessThan(0.5);
+    return backwards;
+  }
+
+  it('never zooms the canvas still back out while that same still is on show', () => {
+    const backwards = throughTheCut(() => ({
+      el: showreelFeed.media,
+      // What the compositor reads each frame (media-pass.ts `planMedia`).
+      at: pushZoom(showreelFeed.look?.push?.() ?? 0) - 1,
+    }));
+    // Before: ['7008 ms: 0.0800 -> 0.0004'] or near: the old still snapped
+    // back out for OUT_MS before the cut.
+    expect(backwards).toEqual([]);
+  });
+
+  it("never draws the page's own still back out while it is on show", () => {
+    const backwards = throughTheCut(() => ({
+      el: q('.reel-stage__item[data-on] img'),
+      // What the stage's push-in reads (ReelStage: `--_push-progress`).
+      at: Number(q('.reel')?.style.getPropertyValue('--_push-progress') || 0),
+    }));
+    expect(backwards).toEqual([]);
   });
 });
 

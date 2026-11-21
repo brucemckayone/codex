@@ -393,6 +393,47 @@ test.describe('the Showreel on a landing', () => {
     await page.context().close();
   });
 
+  test("with no WebGL2, the page's still never draws back out before its cut: the push reads the piece on show (WP-5b review M1r2)", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL, { init: stillsWithoutWebGL2 });
+    await expect(page.locator('.reel')).toHaveAttribute('data-mode', 'stills');
+    // Every frame through a piece's end and the beat the stage takes to cut:
+    // the still on show and its scale.
+    const { backwards, cuts } = await page.evaluate(
+      (ms) =>
+        new Promise<{ backwards: string[]; cuts: number }>((done) => {
+          const backwards: string[] = [];
+          let cuts = 0;
+          let last: { src: string; scale: number } | null = null;
+          const start = performance.now();
+          const look = (now: number) => {
+            const img = document.querySelector<HTMLImageElement>(
+              '.reel-stage__item[data-on] img'
+            );
+            const t = img ? getComputedStyle(img).transform : 'none';
+            const scale = t === 'none' ? 1 : new DOMMatrixReadOnly(t).a;
+            const src = img?.currentSrc ?? '';
+            if (last && last.src === src && scale < last.scale - 1e-6) {
+              backwards.push(
+                `${Math.round(now - start)} ms: ${last.scale.toFixed(4)} -> ${scale.toFixed(4)}`
+              );
+            }
+            if (last && last.src !== src) cuts += 1;
+            last = { src, scale };
+            if (now - start < ms) requestAnimationFrame(look);
+            else done({ backwards, cuts });
+          };
+          requestAnimationFrame(look);
+        }),
+      PIECE_MS + 1500
+    );
+    expect(cuts).toBeGreaterThan(0);
+    expect(backwards).toEqual([]);
+    await page.context().close();
+  });
+
   test('with no WebGL2 and reduced motion, no still pushes in', async ({
     browser,
     baseURL,

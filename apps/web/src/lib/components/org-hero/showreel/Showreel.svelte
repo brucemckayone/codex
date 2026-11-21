@@ -213,17 +213,6 @@
   });
   const words = $derived(reel.map((entry, i) => reelWords(entry, i, { name, description, filmDuration })));
   const media = $derived(reel.map((entry) => reelMedia(entry, mode)));
-  // WP-5b: the compositor places a portrait piece, and draws the surface and
-  // the stills' push-in on the footage alone, the push-in by the reel's own
-  // clock (it holds when the reel does). A reel held still pushes none in.
-  const pushClock = pieceSeconds(clock);
-  const look = $derived<FilmLook>({
-    frame: layout === 'name' ? 'film-name' : 'film-fill',
-    band: options['reel-band'],
-    surface: options['reel-surface'],
-    push: options['reel-push'] === 'on' && moves ? pushClock : null,
-  });
-
   let rootEl: HTMLElement | undefined = $state();
   let titleEl: HTMLElement | undefined = $state();
   /** The stage, to retry a refused film from the visitor's own touch. */
@@ -258,6 +247,30 @@
       swap = 'in';
     }, OUT_MS);
     return () => clearTimeout(timer);
+  });
+  // WP-5b: the compositor places a portrait piece, and draws the surface and
+  // the stills' push-in on the footage alone, the push-in by the reel's own
+  // clock (it holds when the reel does). A reel held still pushes none in.
+  // The push reads the piece ON SHOW (review M1r2): the clock moves on
+  // OUT_MS before the words and the stage do, and until they follow, the
+  // still on show keeps its last reading (its full push), never the next
+  // piece's 0 under the old picture. The next starts about OUT_MS in.
+  // Canvas (`pieceSeconds`) and page (`--_push-progress`) read this one.
+  let pushProgress = 0;
+  function pushOnShow(): number {
+    if (keys[clock.index] === shownKey) pushProgress = clock.progress;
+    return pushProgress;
+  }
+  const pushClock = pieceSeconds({
+    get progress() {
+      return pushOnShow();
+    },
+  });
+  const look = $derived<FilmLook>({
+    frame: layout === 'name' ? 'film-name' : 'film-fill',
+    band: options['reel-band'],
+    surface: options['reel-surface'],
+    push: options['reel-push'] === 'on' && moves ? pushClock : null,
   });
   const current = $derived(words[shown] ?? words[0]);
   // In the name window the name is the headline, so the film's slide
@@ -331,16 +344,24 @@
       c.tick(Math.min(100, now - last));
       last = now;
       root.style.setProperty('--_progress', String(c.progress));
+      root.style.setProperty('--_push-progress', String(pushOnShow()));
       frame = requestAnimationFrame(step);
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
   });
   // Each piece starts its bar from 0, under a hold too (an index pick while
-  // the pointer rests on the index), when no frame writes it.
+  // the pointer rests on the index), when no frame writes it; and the push
+  // follows the piece on show when it changes (its own swap, out of a frame).
   $effect(() => {
     void clock.starts;
     rootEl?.style.setProperty('--_progress', String(clock.progress));
+  });
+  $effect(() => {
+    void clock.starts;
+    void shownKey;
+    const root = rootEl;
+    if (root) untrack(() => root.style.setProperty('--_push-progress', String(pushOnShow())));
   });
 
   // A phone's press and hold pauses, while it lasts (owner, 2026-11-19).
@@ -1177,6 +1198,8 @@
     --_glass-a: 0.55;
     --_line: color-mix(in srgb, var(--_ink) 22%, transparent);
     --_progress: 0;
+    /* The piece on show's progress, for the stage's push-in (`pushOnShow`). */
+    --_push-progress: 0;
     /* The peek's lift: none until `data-peek` sets it. */
     --_lift: 0px;
 
