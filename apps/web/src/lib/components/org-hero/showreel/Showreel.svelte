@@ -54,7 +54,7 @@
   import { clock as lengthOf } from '$lib/components/player/timeline';
   import { PlayIcon, Volume2Icon } from '$lib/components/ui/Icon';
   import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-feed';
-  import type { FilmLook } from '$lib/components/ui/ShaderHero/compositor/stage';
+  import { type FilmLook, NAME_FADE_PX } from '$lib/components/ui/ShaderHero/compositor/stage';
   import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
   import type { HeroOptions } from '$lib/org-hero/hero-config';
   import type { ReelEntry } from '$lib/org-hero/reel';
@@ -1277,6 +1277,7 @@
   style:--_fp-deepen={FIRST_PAINT.deepen}
   style:--_fp-pale={FIRST_PAINT.pale}
   style:--_wide-max={`${WIDE_TITLE.max}px`}
+  style:--_name-fade-px={`${NAME_FADE_PX}px`}
   style:--_peak-top={firstShades['--_peak-top']}
   style:--_top-0={firstShades['--_top-0']}
   style:--_top-1={firstShades['--_top-1']}
@@ -2052,7 +2053,7 @@
 
   /* The canvas draws the name while the page is at the top. Its letters hold
      still with the film, so they go over the first NAME_FADE_PX of scroll
-     (`--_name-fade-px`, the hook's), and the page's own glyphs take the name
+     (`--_name-fade-px`, on the root from the first paint), and the page's own glyphs take the name
      back over the same span (owner, 2026-11-21): a scroll-driven animation,
      in step with the scroll; elsewhere the hook's `--_ink-back`, a frame late. */
   :global(.org-layout:has(> .shader-hero--fullpage[data-film])) .reel__window {
