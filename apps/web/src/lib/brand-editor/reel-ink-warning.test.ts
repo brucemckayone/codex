@@ -8,6 +8,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
+import { groundPoles } from '$lib/org-hero/showreel/reel-scrim';
+import { groundLuminanceVars } from './ground';
+import { TEXT_ON_BRAND_LUMINANCE_PIVOT } from './ink';
 import {
   PLATFORM_PAGE_GROUND,
   REEL_BODY_FLOOR,
@@ -127,6 +130,43 @@ describe('reelInkWarnings: a light ground never warns', () => {
         ink
       ).toEqual([]);
     }
+  });
+});
+
+describe("reelInkWarnings: the reel's own light/dark switch, light AT the pivot", () => {
+  // A light page whose darkest surface is mid grey binds exactly at the pivot
+  // (`bindingLuminance`). The reel reads that as LIGHT (review R2,
+  // `groundPoles`), so the editor must too: read strictly above, grey 120 and
+  // 135 were judged dark, and white player text on them was warned of.
+  test.each([
+    ['grey 120', '#787878'],
+    ['grey 135', '#878787'],
+  ])('%s binds exactly at the pivot, where the reel reads light: no warning', (_, grey) => {
+    const y = groundLuminanceVars({ background: grey })['--brand-ground-y'];
+    expect(y).toBe(TEXT_ON_BRAND_LUMINANCE_PIVOT.toFixed(4));
+    // The reel's own verdict at that luminance: a light ground's black ink pole.
+    expect(groundPoles(Number(y)).ink).toEqual([0, 0, 0]);
+    expect(
+      reelInkWarnings({
+        background: grey,
+        tokenOverrides: playerText('#FFFFFF'),
+      })
+    ).toEqual([]);
+  });
+
+  test('just under the pivot the ground is dark, and a failing player text is warned of', () => {
+    // #0F0000 binds well under it; the switch is the same one either side.
+    const y = Number(
+      groundLuminanceVars({ background: OBB_GROUND })['--brand-ground-y']
+    );
+    expect(y).toBeLessThan(TEXT_ON_BRAND_LUMINANCE_PIVOT);
+    expect(groundPoles(y).ink).toEqual([255, 255, 255]);
+    expect(
+      reelInkWarnings({
+        background: OBB_GROUND,
+        tokenOverrides: playerText('#CB213C'),
+      }).map((w) => w.theme)
+    ).toEqual(['light', 'dark']);
   });
 });
 
