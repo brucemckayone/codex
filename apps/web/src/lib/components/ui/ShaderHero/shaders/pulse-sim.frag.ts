@@ -72,7 +72,7 @@ void main() {
   // Audio: bass-driven radial pulse from center
   if (u_bass > 0.3) {
     float dist = length(v_uv - vec2(0.5));
-    float ring = smoothstep(0.25, 0.15, dist) * smoothstep(0.0, 0.1, dist);
+    float ring = (1.0 - smoothstep(0.15, 0.25, dist)) * smoothstep(0.0, 0.1, dist);
     next += ring * u_bass * 0.08;
   }
 

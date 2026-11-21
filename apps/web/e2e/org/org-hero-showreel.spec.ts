@@ -27,6 +27,7 @@ import {
   type Page,
   test,
 } from '@playwright/test';
+import { E2E_BASE_URL } from '../helpers/origin';
 
 const ORG = 'of-blood-and-bones';
 /** `PIECE_MS` in reel-clock.svelte.ts: how long each piece plays. */
@@ -89,7 +90,7 @@ async function open(
     init?: () => void;
   } = {}
 ): Promise<Page> {
-  const url = `${origin(baseURL ?? 'http://lvh.me:5173')}/`;
+  const url = `${origin(baseURL ?? E2E_BASE_URL)}/`;
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     ...contextOptions,

@@ -9,7 +9,8 @@ End-to-end tests against the SvelteKit app, running against the full local stack
 ## Strict Rules
 
 ### Cookies & Auth
-- **MUST** POST to `lvh.me:42069` (NOT `localhost:42069`) when an HTTP call sets cookies — see [Cookie domain gotcha](#cookie-domain-gotcha)
+- **MUST** POST to the auth worker on `lvh.me` (`workerUrl('AUTH', 'lvh.me')`, NOT `localhost`) when an HTTP call sets cookies — see [Cookie domain gotcha](#cookie-domain-gotcha)
+- **MUST** build every URL from `helpers/origin.ts` (the web app: `E2E_BASE_URL`, `orgOrigin()`, `orgUrl()`) and `helpers/workers.ts` (a worker: `workerUrl()`, on its `SERVICE_PORTS` port). **NEVER** write a port out, in code or a comment: `check:e2e-ports` (CI static analysis) fails on the app's default port outside `origin.ts` and on any `SERVICE_PORTS` value anywhere under `e2e/`
 - **MUST** inject BOTH `better-auth.session_token` AND `codex-session` cookies — use `aliasSessionCookies()` from `helpers/auth-cookies.ts`
 - **MUST** scope cookies to `.lvh.me` (leading dot) so they propagate to every `*.lvh.me` subdomain
 - **NEVER** hand-roll the cookie aliasing logic — extend `helpers/auth-cookies.ts` if a new input shape needs support
@@ -34,12 +35,12 @@ End-to-end tests against the SvelteKit app, running against the full local stack
 
 The auth worker emits `Set-Cookie: ...; Domain=.lvh.me; Path=/; HttpOnly; SameSite=Lax`. Chromium silently REJECTS the cookie unless the response host matches the cookie's Domain attribute.
 
-- ✅ POST to `http://lvh.me:42069/api/test/fast-signin` → cookie accepted
-- ❌ POST to `http://localhost:42069/api/test/fast-signin` → cookie silently dropped
+- ✅ POST to `${workerUrl('AUTH', 'lvh.me')}/api/test/fast-signin` → cookie accepted
+- ❌ POST to `${workerUrl('AUTH')}/api/test/fast-signin` (localhost) → cookie silently dropped
 
 This is the single most expensive gotcha — it cost hours during PR #261's debug cycle. The symptom: `loginAsSeedViewer` returns successfully, but the next `page.goto('/library')` redirects to `/login` because no session cookie ever reached the browser.
 
-Health checks (`request.get('http://localhost:42069/health')`) are fine — they don't set cookies. Only cookie-setting endpoints need `lvh.me`.
+Health checks (``request.get(`${workerUrl('AUTH')}/health`)``, on localhost) are fine — they don't set cookies. Only cookie-setting endpoints need `lvh.me`.
 
 ---
 
@@ -136,12 +137,14 @@ Three escape hatches:
 **Health-check fixture**: All auth-dependent specs should skip cleanly when the auth worker isn't running — pattern:
 
 ```typescript
+import { workerUrl } from './helpers/workers';
+
 test.beforeAll(async ({ request }) => {
   try {
-    const res = await request.get('http://localhost:42069/health');
-    if (!res.ok()) test.skip(true, 'Auth worker not running on port 42069');
+    const res = await request.get(`${workerUrl('AUTH')}/health`);
+    if (!res.ok()) test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
   } catch {
-    test.skip(true, 'Auth worker not running on port 42069');
+    test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
   }
 });
 ```

@@ -14,9 +14,9 @@ import {
   parseCookieString,
 } from '@codex/test-utils/e2e';
 import { expect, type Page, test } from '@playwright/test';
+import { E2E_BASE_URL, orgOrigin } from './helpers/origin';
 
-const PORT = 5173;
-const PLATFORM_BASE = `http://lvh.me:${PORT}`;
+const PLATFORM_BASE = E2E_BASE_URL;
 
 // All tests run in a single worker so the results array is consolidated
 test.describe.configure({ mode: 'serial' });
@@ -369,7 +369,7 @@ test.describe('Platform (authenticated)', () => {
 
 test.describe('Org public', () => {
   function orgUrl(path: string = '/') {
-    return `http://${orgSlug}.lvh.me:${PORT}${path}`;
+    return `${orgOrigin(orgSlug)}${path}`;
   }
 
   test('#8 Org homepage', async ({ page }) => {
@@ -413,7 +413,7 @@ test.describe('Studio (authenticated)', () => {
   });
 
   function studioUrl(path: string = '') {
-    return `http://${orgSlug}.lvh.me:${PORT}/studio${path}`;
+    return `${orgOrigin(orgSlug)}/studio${path}`;
   }
 
   test('#13 Dashboard', async ({ page }) => {

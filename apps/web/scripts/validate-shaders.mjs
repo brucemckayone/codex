@@ -44,6 +44,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reversedSmoothsteps, stripComments } from './glsl-source.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SHADER_DIR = path.resolve(
@@ -180,31 +181,6 @@ const AUDIO_UNIFORMS = new Set([
  * by a renderer, so their absence is not a defect.
  */
 const IGNORED_UNIFORMS = new Set(['gl_DepthRange']);
-
-/**
- * Remove comments from TS or GLSL source before any textual presence test.
- *
- * Both directions of the coverage check need this, and both were wrong before
- * it existed:
- *  - the RENDERER side counted a uniform named in a comment as wired,
- *    including a commented-OUT upload call — the likeliest way real wiring
- *    gets disabled, so the check was blind to its own worst case;
- *  - the SHADER side counted a block-commented declaration as declared,
- *    because `^\s*uniform` matches the inner line of a `/* ... *\/` block.
- *
- * Block comments go FIRST: a `//` inside a block comment must not be treated
- * as a line comment and truncate the strip early.
- *
- * The `[^:]` guard on the line-comment pattern keeps `https://` intact, and
- * replacing with `$1` rather than `''` preserves the character before the
- * `//` — otherwise a trailing comment eats the `;` or `}` that precedes it,
- * which would break any assertion matching a statement terminator.
- */
-function stripComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
 
 /**
  * Check that every uniform a shader DECLARES is actually reachable from its
@@ -392,6 +368,16 @@ async function main() {
         writeFileSync(scratch, source, 'utf8');
         checked++;
 
+        // WP-11: every preset source, as every compositor pass (one checker).
+        const reversed = reversedSmoothsteps(source);
+        if (reversed.length > 0) {
+          failures.push(`${file}:${exportName}`);
+          fail(
+            `\n✖ ${file} → ${exportName}: smoothstep with edge0 >= edge1, undefined in GLSL ES 3.00 (§8.3): ${reversed.join(' ; ')}` +
+              '\n  Write 1.0 - smoothstep(lo, hi, x) for a falling edge.'
+          );
+        }
+
         try {
           execFileSync('glslangValidator', ['-S', stage, scratch], {
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -492,26 +478,6 @@ function uniformDeclarations(source) {
 /** Every uniform name a GLSL source declares. */
 function declaredUniforms(source) {
   return uniformDeclarations(source).map(([name]) => name);
-}
-
-/** A GLSL float literal, signed: `0.95`, `.5`, `1.`, `-2`, `1e-3`. */
-const GLSL_NUMBER = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`;
-const LITERAL_SMOOTHSTEP = new RegExp(
-  String.raw`\bsmoothstep\s*\(\s*(${GLSL_NUMBER})\s*,\s*(${GLSL_NUMBER})\s*,`,
-  'g'
-);
-
-/**
- * Each `smoothstep` whose two edges are literals and not rising (edge0 >=
- * edge1). GLSL ES 3.00 §8.3 leaves the result UNDEFINED for those: glslang
- * compiles it and a desktop driver happens to mirror the curve, but another
- * may return 0 or garbage (WP-8 review M1: the lab's light leak). Edges that
- * are expressions cannot be judged here and are left alone.
- */
-function reversedSmoothsteps(source) {
-  return [...stripComments(source).matchAll(LITERAL_SMOOTHSTEP)]
-    .filter(([, lo, hi]) => Number.parseFloat(lo) >= Number.parseFloat(hi))
-    .map(([call]) => `${call}…)`);
 }
 
 const WEBGL_UTILS = path.resolve(

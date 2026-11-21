@@ -31,12 +31,14 @@
  * `TYPE_LIFT_ALL=1` reads every Type on every base, offered or not;
  * `TYPE_LIFT_BASES`, `TYPE_LIFT_FACES` and `TYPE_LIFT_WIDTHS` narrow the run.
  */
+
 import { expect, type Page, test } from '@playwright/test';
 import {
   TYPE_FACET_BASES,
   TYPE_FACETS,
 } from '../../src/lib/page-builder/kit/model/ids';
 import { widestRun } from '../../src/lib/page-builder/kit/model/long-heading';
+import { orgOrigin } from '../helpers/origin';
 import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 test.skip(!process.env.TYPE_LIFT, 'opt-in: TYPE_LIFT=1 (a development route)');
@@ -224,7 +226,7 @@ test('an entrance’s clip cuts no glyph of any Type', async ({ browser }) => {
           if (!clips) continue;
           const name = `${width} ${base} as ${type || 'its own'} in ${face ?? `brand ${brand}`}`;
           await page.goto(
-            `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${base}${type ? `&type=${type}` : ''}&brand=${brand}&media=off&theme=light&chrome=0`
+            `${orgOrigin('studio-alpha')}/studio/page-kit?style=${base}${type ? `&type=${type}` : ''}&brand=${brand}&media=off&theme=light&chrome=0`
           );
           await page
             .locator('.lp .lp-section')

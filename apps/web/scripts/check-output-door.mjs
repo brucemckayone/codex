@@ -71,10 +71,15 @@ const MIN_SOURCES = 20;
 /** After the `)` of one of these, a `/` starts a regex (`if (x) /re/.test(x)`). */
 const CONTROL_WORDS = new Set(['if', 'while', 'for', 'with']);
 
-/** After one of these (or nothing), a `/` starts a regex, not a division. */
-const REGEX_AFTER = new Set([...'(,=:[!&|?{};+-*%<>~^']);
+/**
+ * After one of these (or nothing), a `/` starts a regex, not a division. The
+ * spread `...` is one token here: `[.../re/.exec(s)]`.
+ */
+const REGEX_AFTER = new Set([...'(,=:[!&|?{};+-*%<>~^', '...']);
 const REGEX_AFTER_WORDS = new Set([
   'return',
+  // `export default /re/`; a property named `default` is a name (dotted).
+  'default',
   'typeof',
   'case',
   'do',
@@ -91,6 +96,9 @@ const REGEX_AFTER_WORDS = new Set([
 
 /** `text` with every character but a newline turned into a space. */
 const blank = (text) => text.replace(/[^\n]/g, ' ');
+
+/** A character that continues a JS name: `π` and `ä` as well as `\w`. */
+const NAME_CHAR = /[\p{ID_Continue}$\u200c\u200d]/u;
 
 /**
  * The source with its comments blanked (same length, newlines kept, so an
@@ -112,6 +120,10 @@ export function blankComments(source) {
   let dotted = false;
   let before = '';
   let inWord = false;
+  // A line break since the last token. JS and TypeScript take no postfix
+  // `!`, `++` or `--` across one, so `a\n!/re/.test(s)` starts with a prefix
+  // not, and a regex follows it.
+  let newline = false;
   // Brace depth of each `${` we are inside, innermost last.
   const templates = [];
   let braces = 0;
@@ -127,13 +139,14 @@ export function blankComments(source) {
     before = '';
     dotted = false;
     inWord = false;
+    newline = false;
   };
   /** The name just read is a keyword (not a property named like one). */
   const keyword = () => !dotted && REGEX_AFTER_WORDS.has(word);
   // Whether the last token ends an operand (a name that is not a keyword, a
-  // closing bracket): what a postfix `!`, `++` or `--` needs.
+  // closing bracket) on this line: what a postfix `!`, `++` or `--` needs.
   const operand = () =>
-    prev === ')' || prev === ']' || (prev === 'x' && !keyword());
+    !newline && (prev === ')' || prev === ']' || (prev === 'x' && !keyword()));
 
   // Scan a template literal body from `i` (just past its opening backtick or
   // a closing `}` of `${}`) to its end or its next `${`.
@@ -184,6 +197,7 @@ export function blankComments(source) {
           at: i,
         };
       out += blank(source.slice(i, end + 2));
+      if (source.slice(i, end + 2).includes('\n')) newline = true;
       i = end + 2;
       inWord = false;
       continue;
@@ -223,6 +237,13 @@ export function blankComments(source) {
     if ((c === '+' || c === '-') && next === c && operand()) {
       out += c + c;
       i += 2;
+      endToken();
+      continue;
+    }
+    if (c === '.' && next === '.' && source[i + 2] === '.') {
+      out += '...';
+      i += 3;
+      prev = '...';
       endToken();
       continue;
     }
@@ -293,18 +314,24 @@ export function blankComments(source) {
       }
       braces--;
     }
-    out += c;
-    i++;
-    if (/[\w$]/.test(c)) {
+    // One code point: a name may hold a character outside the BMP.
+    const ch = String.fromCodePoint(source.codePointAt(i) ?? 0);
+    out += ch;
+    i += ch.length;
+    if (NAME_CHAR.test(ch)) {
       if (!inWord) {
         before = word;
-        dotted = prev === '.';
-        word = c;
-      } else word += c;
+        // After `.` or `#` (`this.#delete`) a name is a property, never a
+        // keyword.
+        dotted = prev === '.' || prev === '#';
+        word = ch;
+        newline = false;
+      } else word += ch;
       inWord = true;
       prev = 'x';
-    } else if (/\s/.test(c)) {
+    } else if (/\s/.test(ch)) {
       inWord = false;
+      if (ch === '\n') newline = true;
     } else {
       prev = c;
       endToken();
