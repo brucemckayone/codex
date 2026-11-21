@@ -1507,6 +1507,30 @@ export const org_hero_reel_label = () => `Showreel`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_preview_sound = () => `Preview with sound`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_theatre_close = () => `Close the preview`
+
+
+/**
+ * @param {{ length: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_theatre_caption = (params) => `Preview, ${params.length}`
+
+
+/**
  * @param {{ number: NonNullable<unknown>, total: NonNullable<unknown> }} params
  * @returns {string}
  */

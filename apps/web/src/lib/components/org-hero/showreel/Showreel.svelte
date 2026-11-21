@@ -29,9 +29,11 @@
 
   ── CONTRAST BY CONSTRUCTION ───────────────────────────────────────────────
   Two full-width soft scrims, as the mock draws them, one from the top and
-  one from the foot, in the brand's own ground (`--color-background`,
-  darkened only as far as its inks need, `scrimTint`). Each holds the least
-  opacity (`--_pool`) under which every ink keeps 4.5:1 (3:1 large) over ANY
+  one from the foot, in the brand's own ground (`--color-background`),
+  deepened on a dark brand or paled on a light one only as far as its inks
+  need (`scrimTint`; which way from the ground alone, `groundPoles`, and a
+  colour that veil cannot carry is lifted toward the other pole). Each holds
+  the least opacity (`--_pool`) under which every ink keeps 4.5:1 (3:1 large) over ANY
   film pixel (`reel-scrim.ts`) as far as its words reach, measured from the
   laid-out words, then fades away. The foot scrim is clear again at the
   hero's very edge, where the page's own fade-in takes over, so the hero
@@ -41,10 +43,11 @@
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { tick, untrack } from 'svelte';
+  import { flushSync, tick, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { preloadPlayerOnIntent } from '$lib/components/player/load-core';
-  import { PlayIcon } from '$lib/components/ui/Icon';
+  import { clock as lengthOf } from '$lib/components/player/timeline';
+  import { PlayIcon, Volume2Icon } from '$lib/components/ui/Icon';
   import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-feed';
   import type { FilmLook } from '$lib/components/ui/ShaderHero/compositor/stage';
   import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
@@ -57,15 +60,16 @@
   import {
     focusInk,
     glowLeaves,
+    groundPoles,
     growShades,
     haloAlpha,
     type Ink,
-    inkPole,
     liftStep,
     MAX_SCRIM_ALPHA,
     type Need,
     outlineAlpha,
     over,
+    ownPole,
     type Rgb,
     SHADE_PEAK_MAX,
     SHADES,
@@ -75,13 +79,14 @@
     scrimTint,
     shadeFloor,
     shadeProps,
-    veilPole,
   } from '$lib/org-hero/showreel/reel-scrim';
   import { type ReelWords, reelWords } from '$lib/org-hero/showreel/reel-words';
   import { logger } from '$lib/observability';
+  import { type TheatreItem, theatreFor } from '$lib/org-hero/showreel/theatre';
   import { themeState } from '$lib/theme.svelte';
   import * as m from '$paraglide/messages';
   import ReelStage from './ReelStage.svelte';
+  import ReelTheatre from './ReelTheatre.svelte';
 
   interface Props {
     reel: readonly ReelEntry[];
@@ -239,6 +244,38 @@
   // carries the org's line instead (the mock's).
   const lineFirst = $derived(layout === 'name' && reel[shown]?.type === 'film' && !!current?.line);
 
+  // ── the theatre: a piece's preview with sound (Codex-1yd58.8) ──
+  const theatres = $derived(reel.map((entry, i) => theatreFor(entry, words[i]?.title ?? name)));
+  let theatre = $state<{ index: number; item: TheatreItem } | null>(null);
+  // The film's main button plays its preview there, unless a press plays the
+  // full film (Codex-0hkkt): that one keeps the page's own film player.
+  const mainOpensTheatre = $derived.by(() => {
+    const entry = reel[shown];
+    return entry?.type === 'film' && !entry.film.fullFilm && !!theatres[shown];
+  });
+  /** In the press's own tick, so the theatre's player keeps the sound. */
+  function openTheatre() {
+    const item = theatres[shown];
+    if (!item) return;
+    theatre = { index: shown, item };
+    flushSync();
+  }
+  function closeTheatre(reason: 'closed' | 'ended') {
+    const at = theatre?.index;
+    theatre = null;
+    // Played to its end, the reel carries on (the mock's).
+    if (reason === 'ended' && at === clock.index) clock.next();
+  }
+  /**
+   * What takes focus when a swap removed the button that opened it. Where
+   * checkVisibility is missing (Safari before 17.4) the first stop serves,
+   * as Dialog's does.
+   */
+  function nextFocus(): HTMLElement | null {
+    const stops = rootEl?.querySelectorAll<HTMLElement>('.reel__item[aria-current="true"], .reel__round') ?? [];
+    return [...stops].find((stop) => stop.checkVisibility?.() ?? true) ?? null;
+  }
+
   // ── time: the clock runs while nothing stops it ──
   $effect(() => {
     const root = rootEl;
@@ -271,7 +308,7 @@
   });
 
   $effect(() => {
-    clock.hold('film', filmPlaying);
+    clock.hold('film', filmPlaying || theatre !== null);
   });
 
   // The tab or the hero out of view: nothing plays, nothing moves on.
@@ -296,9 +333,16 @@
     clock.hold('away', !onScreen);
   });
   // The footage stops while a film plays over it (the hero's, or the phone's
-  // pop-up): a page never decodes two films at once (2026-11-21).
+  // pop-up) and while the theatre plays its own copy, with sound: a page
+  // never decodes two films at once (2026-11-21).
   const playing = $derived(
-    mode === 'footage' && !clock.paused && !filmPlaying && !pressed && pageVisible && onScreen
+    mode === 'footage' &&
+      !clock.paused &&
+      !filmPlaying &&
+      !theatre &&
+      !pressed &&
+      pageVisible &&
+      onScreen
   );
 
   // ── holds: the pointer over the words, index or strip; focus; a press ──
@@ -320,7 +364,8 @@
   let press: { x: number; y: number; timer: ReturnType<typeof setTimeout>; held: boolean } | null = null;
   function pressStart(event: PointerEvent) {
     if (event.pointerType === 'mouse' || !event.isPrimary) return;
-    if (event.target instanceof Element && event.target.closest('a, button, input')) return;
+    // A press in the theatre is the theatre's, never a tap on the reel.
+    if (event.target instanceof Element && event.target.closest('a, button, input, [role="dialog"]')) return;
     const timer = setTimeout(() => {
       if (!press) return;
       press.held = true;
@@ -541,10 +586,17 @@
         gap = Math.min(gap, box.bottom - r.bottom);
       }
     }
+    // The veil's pole from the ground alone, by the switch CSS draws the first
+    // paint with (`--_light`: `--_gy`, 0 when unset, at the 0.1791 pivot):
+    // a dark brand keeps a dark veil whatever its inks are (owner,
+    // 2026-11-21), and every colour that fails is lifted toward white.
+    const groundY = Number.parseFloat(getComputedStyle(root).getPropertyValue('--_gy'));
+    const { veil, ink: pole } = groundPoles(Number.isFinite(groundY) ? groundY : 0);
     // Whole channels, as CSS will paint them: the alpha is solved for these.
-    // `scrimTint` passes over a brand colour no scrim of the pole can carry
-    // (OBB's red): it is lifted or outlined in its own pole below.
-    const [r, g, b] = scrimTint(ground, allInks);
+    // `scrimTint` passes over a colour no scrim of the pole can carry (a
+    // player text the creator set, as #CB213C on #0F0000): below, it is
+    // lifted toward `pole`, or ringed in its own.
+    const [r, g, b] = scrimTint(ground, veil, allInks);
     const tint: Rgb = [Math.round(r), Math.round(g), Math.round(b)];
     root.style.setProperty('--_scrim', `rgb(${tint.join(' ')})`);
     // Each scrimmed thing's own need (`scrimAlpha` for its COMPUTED ink, with
@@ -557,17 +609,17 @@
       bottom: (r.bottom - box.top) / box.height,
     });
     // A colour that cannot keep its floor where it sits is lifted toward the
-    // ink that stands furthest from the veil (`inkPole`: white over a dark
-    // one), a twentieth at a time, just far enough, over the footage only
+    // ink pole opposite the veil (`pole`: white over a dark brand's), a
+    // twentieth at a time, just far enough, over the footage only
     // (owner, 2026-11-20); never toward the reel's own ink, which a creator
     // may set to that very colour (review, 2026-11-21). What it must pass:
     // in 'shadow', a shade must carry it; a control's own fill carries any
     // colour a scrim of the tint carries by MAX_SCRIM_ALPHA; in 'outline', a
     // word no scrim carries keeps its colour inside a ring of its own pole,
-    // so it needs only a ring that can. Each group of words glows softly in the brand's dark at its
-    // strongest word's need (GLOW_SHARE, from the 1 px ring probe), and the
-    // corner shades grow only as far as each word still needs past it.
-    const pole = inkPole(tint);
+    // so it needs only a ring that can. Each group of words glows softly in
+    // the brand's dark at its strongest word's need (GLOW_SHARE, from the
+    // 1 px ring probe), and the corner shades grow only as far as each word
+    // still needs past it.
     const carried = (ink: Ink, ratio: number) => {
       const need = scrimAlpha([{ ink, ratio }], tint);
       return need !== null && glowLeaves(need, need) <= SHADE_PEAK_MAX;
@@ -579,7 +631,7 @@
       return need !== null && need <= MAX_SCRIM_ALPHA;
     };
     const ringed = (ink: Ink, ratio: number, under: number) =>
-      solvable(ink, ratio) || outlineAlpha({ ink, ratio }, under, tint, veilPole([{ ink, ratio }])) !== null;
+      solvable(ink, ratio) || outlineAlpha({ ink, ratio }, under, tint, ownPole([{ ink, ratio }])) !== null;
     const roles = laid.flatMap(({ el, r }) => {
       // Its own ink and any child's in another (the kicker's number), so the
       // strictest of them is solved.
@@ -648,7 +700,7 @@
       if (role.fill || edge === 'shadow') return false;
       const under = shadeFloor(role.span, shades);
       const inks = inksOf(role);
-      const own = veilPole(inks);
+      const own = ownPole(inks);
       return inks.every((ink) => outlineAlpha(ink, under, tint, own) !== null);
     };
     for (const role of roles) {
@@ -688,7 +740,7 @@
       }
       if (edge !== 'outline') continue;
       if (need === null) {
-        const own = veilPole(inks);
+        const own = ownPole(inks);
         const alpha = Math.max(...inks.map((ink) => outlineAlpha(ink, under, tint, own) ?? 1));
         el.style.setProperty('--_ring-tint', `rgb(${own.join(' ')})`);
         el.style.setProperty('--_halo', String(alpha));
@@ -887,17 +939,39 @@
     {/if}
     <div class="reel__row reel__swap">
       {#if now.line && !lineFirst}<p class="reel__line" data-ink="body">{now.line}</p>{/if}
-      <div class="reel__acts">
-        {#if now.action.kind === 'film'}
-          <button type="button" class="reel__btn" onclick={onfilm} {@attach preloadPlayerOnIntent}>
-            <PlayIcon size={16} aria-hidden="true" />
-            {now.action.label}
-          </button>
-        {:else}
-          <a class="reel__btn" href={now.action.href}>{now.action.label}</a>
-        {/if}
-      </div>
+      {@render acts(now)}
     </div>
+  </div>
+{/snippet}
+
+<!-- Its button, and the preview with sound where its button plays something else. -->
+{#snippet acts(now: ReelWords)}
+  <div class="reel__acts">
+    {#if now.action.kind === 'film'}
+      <button
+        type="button"
+        class="reel__btn"
+        onclick={mainOpensTheatre ? openTheatre : onfilm}
+        {@attach preloadPlayerOnIntent}
+      >
+        <PlayIcon size={16} aria-hidden="true" />
+        {now.action.label}
+      </button>
+    {:else}
+      <a class="reel__btn" href={now.action.href}>{now.action.label}</a>
+    {/if}
+    {#if theatres[shown] && !mainOpensTheatre}
+      <button
+        type="button"
+        class="reel__ghost reel__preview"
+        aria-label={m.org_hero_reel_preview_sound()}
+        onclick={openTheatre}
+        {@attach preloadPlayerOnIntent}
+      >
+        <Volume2Icon size={16} aria-hidden="true" />
+        <span class="reel__preview-label">{m.org_hero_reel_preview_sound()}</span>
+      </button>
+    {/if}
   </div>
 {/snippet}
 
@@ -925,6 +999,7 @@
   data-edge={edge}
   data-mode={mode}
   data-paused={clock.paused ? '' : undefined}
+  data-theatre={theatre?.item.kind}
   aria-roledescription="carousel"
   aria-label={m.org_hero_reel_label()}
   style:--_pool={POOL_FALLBACK}
@@ -941,13 +1016,13 @@
   onpointerup={() => pressEnd(true)}
   onpointercancel={() => pressEnd(false)}
 >
-  <ReelStage bind:this={stage} {media} {keys} index={shown} {playing} {look} />
+  <ReelStage bind:this={stage} {media} {keys} index={shown} {playing} {look} withheld={theatre?.item.kind === 'audio'} />
   <div class="reel__scrim-top" aria-hidden="true"></div>
   <div class="reel__scrim-foot" aria-hidden="true"></div>
 
   {@render filmLayer?.()}
 
-  <div class="reel__inner" inert={filmOpen}>
+  <div class="reel__inner" inert={filmOpen || theatre !== null}>
     {@render pause()}
     {@render top()}
     {#if layout === 'name'}{@render nameWindow()}{/if}
@@ -955,6 +1030,18 @@
     {#if current}{@render playingNow(current)}{/if}
     {@render entries()}
   </div>
+  {#if theatre}
+    <ReelTheatre
+      item={theatre.item}
+      closeLabel={m.org_hero_reel_theatre_close()}
+      caption={(seconds) =>
+        seconds === null
+          ? m.player_preview_label()
+          : m.org_hero_reel_theatre_caption({ length: lengthOf(seconds) })}
+      onclose={closeTheatre}
+      fallbackFocus={nextFocus}
+    />
+  {/if}
 </section>
 
 <style>
@@ -1328,6 +1415,26 @@
     display: flex;
     gap: var(--space-3);
     margin-top: var(--space-8);
+  }
+
+  .reel__preview {
+    min-height: var(--space-12);
+  }
+
+  /* ── the theatre's room: the words and the index step aside (the mock's) ── */
+  .reel__inner,
+  .reel__scrim-top,
+  .reel__scrim-foot {
+    transition: opacity var(--duration-slow) var(--ease-out);
+  }
+
+  .reel[data-theatre] .reel__inner,
+  .reel[data-theatre] .reel__scrim-top {
+    opacity: 0;
+  }
+
+  .reel[data-theatre] .reel__scrim-foot {
+    opacity: 0.45;
   }
 
   .reel__btn {
@@ -1733,6 +1840,16 @@
       flex: 1;
       justify-content: center;
       font-size: var(--text-base);
+    }
+
+    /* The mock's: on a phone the preview is its icon, named for the ear. */
+    .reel__preview {
+      width: var(--space-12);
+      padding: 0;
+    }
+
+    .reel__preview-label {
+      display: none;
     }
 
     .reel__window {

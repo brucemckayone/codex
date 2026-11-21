@@ -254,6 +254,13 @@ export const ALLOWLIST = [
     reason:
       "Permanent: a full-screen video player, outside the Dialog by the owner's decision",
   },
+  {
+    file: 'src/lib/components/org-hero/showreel/ReelTheatre.svelte',
+    rule: 'own-dialog',
+    expect: 2,
+    reason:
+      "Permanent: the Showreel's theatre, a player over the hero (full screen on a phone), outside the Dialog as IntroVideoModal is",
+  },
 ];
 
 /** Classes the Dialog family renders. Outside ui/Dialog/ none is restyled. */

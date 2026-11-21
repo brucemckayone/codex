@@ -20,6 +20,7 @@ import {
   focusInk,
   GLOW_SHARE,
   glowLeaves,
+  groundPoles,
   growShades,
   HEADER_SHADE,
   haloAlpha,
@@ -30,6 +31,7 @@ import {
   MAX_SCRIM_ALPHA,
   outlineAlpha,
   over,
+  ownPole,
   RAMP,
   type Rgb,
   rampAt,
@@ -42,7 +44,6 @@ import {
   shadeAt,
   shadeFloor,
   shadeProps,
-  veilPole,
   worstContrast,
 } from './reel-scrim';
 import { filmButtonLabel, reelWords } from './reel-words';
@@ -389,14 +390,73 @@ describe("reel-scrim: the scrim in the brand's own ground", () => {
     { ink: SOFT, ratio: 4.5 },
   ];
   const OBB: Rgb = [15, 0, 0];
+  /** #0F0000's relative luminance: OBB's dark ground as `--_gy` carries it. */
+  const OBB_Y = 0.00097;
+  const BLACK_VEIL: Rgb = [0, 0, 0];
+  const WHITE_VEIL: Rgb = [255, 255, 255];
+  /** The most a scrim of `scrim` may cover the film to carry `ink` at 4.5:1. */
+  const carriedOn = (scrim: Rgb) => (ink: Ink) =>
+    (scrimAlpha([{ ink, ratio: 4.5 }], scrim) ?? 1) <= MAX_SCRIM_ALPHA;
 
-  it("keeps a dark brand's ground exactly as it is, never black", () => {
-    expect(scrimTint(OBB, INKS)).toEqual(OBB);
+  it('takes the veil from the ground alone: dark with white lifts on a dark brand, the mirror on a light one (owner, 2026-11-21)', () => {
+    expect(groundPoles(OBB_Y)).toEqual({ veil: BLACK_VEIL, ink: WHITE_VEIL });
+    // The platform's light ground (org-brand.css's fallback `--_gy`).
+    expect(groundPoles(0.7835)).toEqual({ veil: WHITE_VEIL, ink: BLACK_VEIL });
+    // Showreel's `--_light`, clamp(0, (gy - 0.1791) * 1e12, 1): light only
+    // above the pivot, so the fit and the first paint never disagree.
+    expect(groundPoles(0.1791).veil).toEqual(BLACK_VEIL);
+    expect(groundPoles(0.1792).veil).toEqual(WHITE_VEIL);
   });
 
-  it('gives a light ground under white ink the lightest shade of it that carries the inks', () => {
+  it('keeps a dark veil when every ink is #CB213C on #0F0000, and lifts each toward white', () => {
+    const red: Ink = { rgb: [203, 33, 60], alpha: 1 };
+    const reds = [
+      { ink: red, ratio: 4.5 },
+      { ink: { ...red, alpha: 0.8 }, ratio: 4.5 },
+    ];
+    const { veil, ink } = groundPoles(OBB_Y);
+    // Read from the inks, the veil would pale: the red stands further from
+    // white than from black (5.49:1 against 3.82:1).
+    expect(ownPole(reds)).toEqual(WHITE_VEIL);
+    // Read from the ground, it is the brand's own dark, exactly.
+    expect(scrimTint(OBB, veil, reds)).toEqual(OBB);
+    // Each red is lifted toward white until that dark carries it.
+    expect(ink).toEqual(WHITE_VEIL);
+    for (const { ink: each } of reds) {
+      expect(carriedOn(OBB)(each)).toBe(false);
+      const lifted = liftInk(each, ink, carriedOn(OBB));
+      if (lifted === null) throw new Error('white carries a red on the dark');
+      expect(lifted.rgb).not.toEqual(each.rgb);
+      for (const i of [0, 1, 2] as const) {
+        expect(lifted.rgb[i]).toBeGreaterThanOrEqual(each.rgb[i]);
+      }
+      expect(carriedOn(OBB)(lifted)).toBe(true);
+    }
+  });
+
+  it('keeps a pale veil when every ink is white on a light brand, and lifts each toward black', () => {
+    const cream: Rgb = [245, 240, 230];
+    const { veil, ink } = groundPoles(0.87);
+    expect(ownPole(INKS)).toEqual(BLACK_VEIL);
+    expect(scrimTint(cream, veil, INKS)).toEqual(cream);
+    expect(ink).toEqual(BLACK_VEIL);
+    const lifted = liftInk(WHITE, ink, carriedOn(cream));
+    if (lifted === null) throw new Error('black carries a white on the pale');
+    expect(lifted.rgb).not.toEqual(WHITE.rgb);
+    for (const i of [0, 1, 2] as const) {
+      expect(lifted.rgb[i]).toBeLessThanOrEqual(WHITE.rgb[i]);
+    }
+    expect(carriedOn(cream)(lifted)).toBe(true);
+  });
+
+  it("keeps a dark brand's ground exactly as it is under white ink, never black", () => {
+    expect(scrimTint(OBB, BLACK_VEIL, INKS)).toEqual(OBB);
+  });
+
+  it('moves a ground toward its veil only as far as the inks need: the lightest shade of it that carries them', () => {
+    // The solver's own rule, on a ground that has far to go for white ink.
     const ocean: Rgb = [240, 249, 255];
-    const tint = scrimTint(ocean, INKS);
+    const tint = scrimTint(ocean, BLACK_VEIL, INKS);
     // A shade of the ground: every channel scaled by one factor (its hue kept).
     const k = tint[2] / ocean[2];
     expect(k).toBeGreaterThan(0);
@@ -411,21 +471,16 @@ describe("reel-scrim: the scrim in the brand's own ground", () => {
     expect(alpha === null || alpha > MAX_SCRIM_ALPHA).toBe(true);
   });
 
-  it('is black when nothing lighter will do', () => {
+  it("is the veil's pole itself when nothing nearer will do, either way", () => {
     const grey = [
       { ink: { rgb: [128, 128, 128], alpha: 1 } as Ink, ratio: 4.5 },
     ];
-    expect(scrimTint([255, 255, 255], grey)).toEqual([0, 0, 0]);
-  });
-
-  it('is white when nothing darker will do under a dark ink', () => {
-    // A grey that stands further from black than from white: its veil pales,
-    // and only white itself (past the cap) would carry it.
+    expect(scrimTint([255, 255, 255], BLACK_VEIL, grey)).toEqual([0, 0, 0]);
+    // A grey only a white veil past the cap would carry.
     const greyish = [
       { ink: { rgb: [110, 110, 110], alpha: 1 } as Ink, ratio: 4.5 },
     ];
-    expect(veilPole(greyish)).toEqual([255, 255, 255]);
-    expect(scrimTint([0, 0, 0], greyish)).toEqual([255, 255, 255]);
+    expect(scrimTint([0, 0, 0], WHITE_VEIL, greyish)).toEqual([255, 255, 255]);
   });
 
   // A light brand's reel reads in its own light theme (owner, 2026-11-20):
@@ -437,19 +492,19 @@ describe("reel-scrim: the scrim in the brand's own ground", () => {
     { ink: TEXT_SOFT, ratio: 4.5 },
   ];
 
-  it('moves the veil away from its inks: toward black under white ink, toward white under dark text', () => {
-    expect(veilPole(INKS)).toEqual([0, 0, 0]);
-    expect(veilPole(DARK_INKS)).toEqual([255, 255, 255]);
+  it("rings a word in the pole its own inks stand furthest from: the outline's, never the veil's", () => {
+    expect(ownPole(INKS)).toEqual([0, 0, 0]);
+    expect(ownPole(DARK_INKS)).toEqual([255, 255, 255]);
     // Mixed, the worst ink decides; none at all keeps the dark default.
-    expect(veilPole([...DARK_INKS, { ink: SOFT, ratio: 4.5 }])).toEqual([
+    expect(ownPole([...DARK_INKS, { ink: SOFT, ratio: 4.5 }])).toEqual([
       0, 0, 0,
     ]);
-    expect(veilPole([])).toEqual([0, 0, 0]);
+    expect(ownPole([])).toEqual([0, 0, 0]);
   });
 
   it("keeps a light brand's ground exactly as its veil under its dark text, never grey", () => {
     const ocean: Rgb = [240, 249, 255];
-    expect(scrimTint(ocean, DARK_INKS)).toEqual(ocean);
+    expect(scrimTint(ocean, WHITE_VEIL, DARK_INKS)).toEqual(ocean);
     expect(scrimAlpha(DARK_INKS, ocean) ?? 1).toBeLessThanOrEqual(
       MAX_SCRIM_ALPHA
     );
@@ -457,7 +512,7 @@ describe("reel-scrim: the scrim in the brand's own ground", () => {
 
   it('pales a mid ground toward white for dark text, only as far as it needs', () => {
     const mid: Rgb = [150, 160, 170];
-    const tint = scrimTint(mid, DARK_INKS);
+    const tint = scrimTint(mid, WHITE_VEIL, DARK_INKS);
     // Paler, never darker, in every channel.
     for (const i of [0, 1, 2] as const) {
       expect(tint[i]).toBeGreaterThanOrEqual(mid[i]);
@@ -827,7 +882,7 @@ describe("the 'shadow' edge's soft glow, and a brand colour over footage", () =>
   });
 
   it('outlines a colour in its own pole: the least pale ring that keeps it over any frame', () => {
-    const pole = veilPole([{ ink: red, ratio: 4.5 }]);
+    const pole = ownPole([{ ink: red, ratio: 4.5 }]);
     expect(pole).toEqual(white);
     const under = 0.3;
     const worst = (alpha: number) =>
@@ -852,15 +907,17 @@ describe("the 'shadow' edge's soft glow, and a brand colour over footage", () =>
     ).toBeNull();
   });
 
-  it("tints from the inks a scrim can carry: OBB's red never drives it to black", () => {
+  it("tints from the inks a scrim can carry, and keeps the dark veil for OBB's red alone (owner, 2026-11-21)", () => {
     const whiteInk = { ink: { rgb: white, alpha: 1 }, ratio: 4.5 };
     const redInk = { ink: red, ratio: 4.5 };
+    const { veil } = groundPoles(0.00097);
     expect(scrimAlpha([redInk], [0, 0, 0])).toBeNull();
-    expect(scrimTint(tint, [whiteInk, redInk])).toEqual(tint);
-    // The red alone stands further from white than from black: its veil
-    // pales toward that pole instead, the only one that carries it.
-    expect(veilPole([redInk])).toEqual(white);
-    expect(scrimTint(tint, [redInk])).toEqual(white);
+    expect(scrimTint(tint, veil, [whiteInk, redInk])).toEqual(tint);
+    // The red alone stands further from white than from black, so a veil
+    // read from the inks paled to white for it (until 2026-11-21). The
+    // ground's dark holds instead, and the red is lifted to read on it.
+    expect(ownPole([redInk])).toEqual(white);
+    expect(scrimTint(tint, veil, [redInk])).toEqual(tint);
   });
 });
 
