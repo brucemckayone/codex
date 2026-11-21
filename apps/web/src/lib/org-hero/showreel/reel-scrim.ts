@@ -352,6 +352,10 @@ export interface Need {
  * radial with no edge. A word no shade can carry (its need above the most a
  * shade may lay) is left to the caller: it is not let grow the shade for
  * nothing. `short` holds the words still short when a shade is at its most.
+ * A word whose centre no drawn ellipse reaches (the reel's middle, about x
+ * 0.4-0.6, y 0.2-0.45) is given the first, the header's left, by the
+ * tie-break, which lays it ~0 alone: no scrimmed word sits there in any
+ * layout today; a new one placed there would need its own carrier.
  */
 export function growShades(
   needs: readonly Need[],
@@ -468,7 +472,8 @@ export const RING_TAKE_UP = 1.6;
  * where it sat: OBB's kicker 0.645 laid against 0.71), with its own soft glow
  * counted at the least it lays (its group's is never weaker). Never every
  * ellipse grown for it: that darkens more of the film than the word needs.
- * In 'outline', a ring still short of solid over the shades as drawn.
+ * In 'outline', a ring still short of solid over the shades as drawn: the
+ * solved halo's, whose drawn margin may clip at solid (`RING_MARGIN`).
  */
 export function wordRoom(edge: 'shadow' | 'outline', span: Span): number {
   const alone =
@@ -509,6 +514,17 @@ export function haloAlpha(need: number, under: number): number {
  * FLOOR_MARGIN (4.59), for a dE2000 on the ring's pixels of 0.19 mean, 1.97
  * at most. Only the drawing takes it: `wordRoom` still bounds the tint by the
  * solved halo, so the tint is as before.
+ *
+ * Its clip at solid is safe by construction (review r5 L1): ringHalo is
+ * min(1, halo + RING_MARGIN), never under the halo, so the drawn ring,
+ * min(1, ringHalo x RING_TAKE_UP), never falls under the solved halo's own
+ * share, which is at most 1 at the room. At the room's edge the ring is solid
+ * and the clip eats part of the margin, never the need: at 231c269fa "02"
+ * read 4.60 on grey 100, grey 110 and OBB and 4.63 on grey 135, the index
+ * ring clipped from 1.024 to 1. Bounding the room by the drawn ring instead
+ * put the kicker's and the index rows' rooms under the soft ink's need in its
+ * pole (0.60 against 0.62), and grey 110's "02" read 4.48: the pin in
+ * showreel-pure.test.ts.
  */
 export const RING_MARGIN = 0.02;
 

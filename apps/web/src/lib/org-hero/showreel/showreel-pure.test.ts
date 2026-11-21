@@ -46,6 +46,7 @@ import {
   SHADE_REACH_MAX,
   SHADES,
   SHADES_CAP,
+  type Span,
   scrimAlpha,
   scrimTint,
   shadeAt,
@@ -539,7 +540,7 @@ describe("reel-scrim: the scrim in the brand's own ground", () => {
     }
   });
 
-  it('can only deepen a tint, never lighten it: the room is never above the all-caps one it replaced', () => {
+  it("a word's room never rises above its all-caps room (review r4 M1)", () => {
     const allCaps = (span: typeof KICKER) => {
       let room = 0;
       for (let step = 1; step <= 100; step++) {
@@ -1342,5 +1343,82 @@ describe('the first paint, in both edges: the cap, until the fit runs', () => {
       }
     }
     expect(least).toBeGreaterThanOrEqual(-1e-12);
+  });
+});
+
+/**
+ * The pin (WP-5a review r5, L1): no Outline room under what its word's ink
+ * needs in its pole. A word whose room falls under that need has no tint
+ * that carries it within the room, so the tint goes to the cap, and Outline's
+ * check counts any solved need as met. At HEAD the kicker's and the index
+ * row's rooms (0.62) EQUAL the soft ink's need in the black pole (0.62): no
+ * slack. L1 as first written shrank those rooms by the ring's margin, and
+ * grey 110's "02" read 4.48 on the ring probe.
+ *
+ * The spans are every fixture this file holds. Ten are OBB's Corner at 1440:
+ * its kicker and an index row by their glyphs (review r3), and its eight
+ * words by their boxes (the first paint's table, review R5). Two stand in
+ * for a word in the foot's corner and the header's facts line. No span here
+ * is measured from Wide, Name or a phone.
+ */
+describe("Outline's room never under its ink's need in the pole: the soft ink's knife edge (WP-5a review r5, L1)", () => {
+  const ROLES: readonly [string, Span, 'ink' | 'soft', number][] = [
+    [
+      'kicker, by its glyphs',
+      { left: 0.094, top: 0.329, right: 0.208, bottom: 0.349 },
+      'soft',
+      4.5,
+    ],
+    [
+      'index row, by its glyphs',
+      { left: 0.677, top: 0.391, right: 0.943, bottom: 0.418 },
+      'soft',
+      4.5,
+    ],
+    [
+      'a word in the foot corner',
+      { left: 0.02, top: 0.9, right: 0.2, bottom: 0.95 },
+      'soft',
+      4.5,
+    ],
+    [
+      'the facts line',
+      { left: 0.6, top: 0.04, right: 0.88, bottom: 0.07 },
+      'soft',
+      4.5,
+    ],
+    ['name', { left: 0.03, top: 0.03, right: 0.3, bottom: 0.1 }, 'ink', 4.5],
+    ['facts', { left: 0.6, top: 0.04, right: 0.78, bottom: 0.07 }, 'soft', 4.5],
+    ['join', { left: 0.8, top: 0.03, right: 0.88, bottom: 0.08 }, 'soft', 4.5],
+    ['kicker', { left: 0.03, top: 0.5, right: 0.3, bottom: 0.53 }, 'soft', 4.5],
+    ['title', { left: 0.03, top: 0.55, right: 0.56, bottom: 0.7 }, 'ink', 3],
+    ['line', { left: 0.03, top: 0.72, right: 0.5, bottom: 0.8 }, 'soft', 4.5],
+    ['row', { left: 0.72, top: 0.4, right: 0.97, bottom: 0.43 }, 'soft', 4.5],
+    ['all', { left: 0.72, top: 0.86, right: 0.85, bottom: 0.89 }, 'ink', 4.5],
+  ];
+  /** A role's ink in its pole: the main ink solid, the soft one at 80%. */
+  const needInPole = (groundY: number, kind: 'ink' | 'soft', ratio: number) => {
+    const { veil, ink } = groundPoles(groundY);
+    return scrimAlpha(
+      [{ ink: { rgb: ink, alpha: kind === 'soft' ? 0.8 : 1 }, ratio }],
+      veil
+    );
+  };
+
+  it('holds every role at or above its ink in its pole, on a dark ground and a light one', () => {
+    const short: string[] = [];
+    // OBB's dark ground (a black veil) and the platform's light one (white).
+    for (const groundY of [0.00097, 0.7835]) {
+      for (const [role, span, kind, ratio] of ROLES) {
+        const need = needInPole(groundY, kind, ratio);
+        const room = wordRoom('outline', span);
+        if (need === null || room < need) {
+          short.push(
+            `${role} (${kind}, gy ${groundY}): room ${room}, need ${need}`
+          );
+        }
+      }
+    }
+    expect(short).toEqual([]);
   });
 });
