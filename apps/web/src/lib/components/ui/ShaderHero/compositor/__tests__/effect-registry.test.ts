@@ -6,9 +6,22 @@
  * effect of its own axis.
  */
 import { describe, expect, it } from 'vitest';
+import {
+  BLEND_AMOUNTS,
+  LAYER_AMOUNTS,
+  MOVING_LAYER_IDS,
+} from '../effects/amounts';
 import type { Effect } from '../effects/effect';
 import { HEADER } from '../effects/header';
-import { BLEND_IDS, FRAME_IDS, LAYER_IDS } from '../effects/ids';
+import {
+  BLEND_IDS,
+  BRAND_FRAME_IDS,
+  FRAME_IDS,
+  isBrandFrameId,
+  LAYER_IDS,
+  PASSTHROUGH_FRAME,
+  SURFACE_ONLY_LAYER_IDS,
+} from '../effects/ids';
 import {
   assembleEffect,
   BLENDS,
@@ -70,8 +83,14 @@ describe('effect registry', () => {
     expect(effect.glsl).toMatch(/void main\(\)/);
     // Its uniforms are generated from its list; it declares none itself.
     expect(effect.glsl).not.toMatch(/^\s*uniform\s/m);
-    // Only a blend has a second preset to read.
-    expect(effect.uniforms.includes('u_second')).toBe(effect.axis === 'blend');
+    // Only a blend has a second preset to read, and only a surface-only
+    // layer is handed the shader's own picture there (WP-8).
+    const surfaceOnly = (SURFACE_ONLY_LAYER_IDS as readonly string[]).includes(
+      effect.id
+    );
+    expect(effect.uniforms.includes('u_second')).toBe(
+      effect.axis === 'blend' || surfaceOnly
+    );
   });
 
   it('assembles a pass as the header, its declarations, then its body', () => {
@@ -108,7 +127,70 @@ describe('effect registry', () => {
     }
   });
 
-  it('marks no WP-3 effect as flashing: grain moves pixels, not the picture', () => {
-    expect(EFFECTS.filter((e) => e.flashes).map((e) => e.id)).toEqual([]);
+  it("mirrors each layer's and blend's own amount for the parse and the editor", () => {
+    for (const id of LAYER_IDS)
+      expect(LAYER_AMOUNTS[id], id).toBe(LAYERS[id].amount);
+    for (const id of BLEND_IDS)
+      expect(BLEND_AMOUNTS[id], id).toBe(BLENDS[id].amount);
+  });
+
+  it('mirrors the layers reduced motion drops, for the editor to say so', () => {
+    const dropped = LAYER_IDS.filter(
+      (id) => LAYERS[id].reducedMotionFallback === null
+    );
+    expect([...MOVING_LAYER_IDS].sort()).toEqual([...dropped].sort());
+  });
+
+  it('classifies every effect that reads the clock, and marks only those that flash', () => {
+    const readers = EFFECTS.filter((e) => e.uniforms.includes('u_time')).map(
+      (e) => `${e.axis}:${e.id}`
+    );
+    expect(readers.sort()).toEqual(Object.keys(CLOCK_READERS).sort());
+    for (const effect of EFFECTS) {
+      const key = `${effect.axis}:${effect.id}`;
+      expect(effect.flashes ?? false, key).toBe(
+        CLOCK_READERS[key]?.flashes ?? false
+      );
+    }
   });
 });
+
+describe('the frames a brand may name', () => {
+  it("are every frame but the Showreel's film frames, which FRAME_IDS still holds", () => {
+    const film = ['film-fill', 'film-name'];
+    expect(FRAME_IDS).toEqual(expect.arrayContaining(film));
+    for (const id of film) {
+      expect(BRAND_FRAME_IDS).not.toContain(id);
+      expect(isBrandFrameId(id)).toBe(false);
+    }
+    expect([...BRAND_FRAME_IDS, ...film].sort()).toEqual([...FRAME_IDS].sort());
+    for (const id of BRAND_FRAME_IDS) expect(isBrandFrameId(id)).toBe(true);
+    expect(BRAND_FRAME_IDS).toContain(PASSTHROUGH_FRAME);
+  });
+});
+
+/**
+ * Every effect that reads `u_time`, and whether it FLASHES: changes the
+ * light of the picture over time, so `effectTime` holds its clock to 3 steps
+ * a second (WCAG 2.3.1). One that only moves pixels is not a flash. A new
+ * reader of the clock fails the test above until it is listed here, with its
+ * reason.
+ */
+const CLOCK_READERS: Record<string, { flashes: boolean; why: string }> = {
+  'layer:glitch': {
+    flashes: true,
+    why: 'a burst tears and splits whole bands at once, changing their light',
+  },
+  'layer:leak': {
+    flashes: true,
+    why: 'it adds light, drifting across the frame',
+  },
+  'layer:grain': {
+    flashes: false,
+    why: 'zero-mean noise per pixel: the light of any area holds',
+  },
+  'layer:liquid': {
+    flashes: false,
+    why: 'it moves pixels near the pointer, adding or taking no light',
+  },
+};

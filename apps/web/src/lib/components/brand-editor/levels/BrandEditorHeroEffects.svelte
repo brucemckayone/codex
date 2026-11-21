@@ -13,6 +13,7 @@
     updateOverride as updateOverrideHelper,
   } from '$lib/brand-editor/hero-fx-helpers';
   import { resolvePresetId } from '$lib/components/ui/ShaderHero/shader-config';
+  import BrandEditorHeroCombine from './BrandEditorHeroCombine.svelte';
   import ControlField from './ControlField.svelte';
 
   // ── Read current overrides ─────────────────────────────────────────────
@@ -172,6 +173,14 @@
         {/each}
       </section>
     {/if}
+
+    <!-- WP-9: build on this preset (second, blend, layers, frame). -->
+    <BrandEditorHeroCombine
+      base={activePreset}
+      {overrides}
+      readControl={readControlValue}
+      onControl={updateOverride}
+    />
   {/if}
 </div>
 

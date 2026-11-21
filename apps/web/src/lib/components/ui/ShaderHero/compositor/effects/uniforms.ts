@@ -43,6 +43,10 @@ export const UNIFORMS = {
   u_mediaSize: 'vec2',
   /** 1 once a media frame is uploaded, else 0. */
   u_hasMedia: 'float',
+  /** The Showreel's band (`FilmLook.band`): 0 none, 1 the film gives way. */
+  u_band: 'float',
+  /** Where the band gives way: from x to y of the stage, measured down. */
+  u_ramp: 'vec2',
 } as const;
 
 export type UniformName = keyof typeof UNIFORMS;

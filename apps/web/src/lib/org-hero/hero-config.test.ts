@@ -78,6 +78,23 @@ describe('readHeroSettings', () => {
     expect(s.options).toEqual({ comp: 'split' });
   });
 
+  it('reads the words-over-footage choice, and drops a value it does not know (the shadow stays)', () => {
+    expect(
+      readHeroSettings({
+        'hero-opt-purpose': 'consume',
+        'hero-opt-reel-edge': 'outline',
+      }).options
+    ).toEqual({ 'reel-edge': 'outline' });
+    const unknown = readHeroSettings({
+      'hero-opt-purpose': 'consume',
+      'hero-opt-reel-edge': 'glow',
+    });
+    expect(unknown.options).toEqual({});
+    expect(resolveHero('consume', unknown.options, FULL)['reel-edge']).toBe(
+      'shadow'
+    );
+  });
+
   it('ignores a purpose it does not know', () => {
     expect(
       readHeroSettings({ 'hero-opt-purpose': 'sell-hard' }).purpose
@@ -264,7 +281,7 @@ describe('the Showreel', () => {
   const REEL_AXES = HERO_OPTION_KEYS.filter((key) => key.startsWith('reel-'));
 
   it('is the default for a consume org with a reel, every reel option at its first value', () => {
-    expect(REEL_AXES).toHaveLength(9);
+    expect(REEL_AXES).toHaveLength(10);
     const o = defaultOptions('consume', FULL);
     expect(o).toMatchObject({
       comp: 'showreel',
@@ -276,6 +293,10 @@ describe('the Showreel', () => {
     for (const axis of REEL_AXES) {
       expect(o[axis]).toBe(HERO_OPTION_VALUES[axis][0]);
     }
+    // The owner's pick (2026-11-20, V1): the film gives way at its foot.
+    expect(o['reel-band']).toBe('fade');
+    // The owner's pick (2026-11-20): no outline unless the creator asks.
+    expect(o['reel-edge']).toBe('shadow');
   });
 
   it('is never the default for an org without a reel, shader or not: that org keeps today’s hero', () => {
@@ -301,9 +322,11 @@ describe('the Showreel', () => {
         noShader
       )
     ).toMatchObject({ 'reel-surface': 'none', 'reel-band': 'none' });
-    expect(
-      resolveHero('consume', { 'reel-band': 'fade' }, noShader)['reel-band']
-    ).toBe('none');
+    for (const band of ['fade', 'edges'] as const) {
+      expect(
+        resolveHero('consume', { 'reel-band': band }, noShader)['reel-band']
+      ).toBe('none');
+    }
     // a surface that is not the shader's stays
     expect(
       resolveHero('consume', { 'reel-surface': 'grain' }, noShader)[
@@ -336,6 +359,7 @@ describe('the Showreel', () => {
       'reel-trans': 'liquid',
       'reel-surface': 'halftone',
       'reel-band': 'fade',
+      'reel-edge': 'outline',
       'reel-opening': 'none',
       'reel-film': 'liquid',
       'reel-loop': 'off',
@@ -537,7 +561,8 @@ describe('stored values are a contract', () => {
       'reel-pointer': ['liquid', 'smoke', 'glitch', 'none'],
       'reel-trans': ['burn', 'liquid', 'glitch'],
       'reel-surface': ['none', 'grain', 'halftone', 'reeded', 'red', 'shader'],
-      'reel-band': ['none', 'under', 'fade'],
+      'reel-band': ['fade', 'under', 'edges', 'none'],
+      'reel-edge': ['shadow', 'outline'],
       'reel-opening': ['name', 'none'],
       'reel-film': ['name', 'smoke', 'liquid'],
       'reel-loop': ['on', 'off'],

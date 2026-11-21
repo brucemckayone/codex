@@ -24,7 +24,12 @@
  * Exit code 0 means every shader compiled. Non-zero prints the offending
  * shader, the glslang diagnostic, and the source line it points at.
  *
- * Requires `glslangValidator` on PATH (`brew install glslang`).
+ * Requires `glslangValidator` on PATH (`brew install glslang`; in CI,
+ * `apt-get install glslang-tools`), and for the compositor's layers a
+ * Chromium to RUN them in: `SHADERS_CHROME` (a path), else Playwright's
+ * Chromium, else the system Chrome. Each must draw its input unchanged at
+ * amount 0. With no browser it is skipped, loudly, except under `CI=true`,
+ * where it fails.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -292,6 +297,14 @@ function checkUniformCoverage(preset, sources) {
 
 async function main() {
   const filter = process.argv.slice(2);
+  try {
+    execFileSync('glslangValidator', ['--version'], { stdio: 'ignore' });
+  } catch {
+    fail(
+      '\n✖ glslangValidator is not on PATH: `brew install glslang`, or `apt-get install glslang-tools`'
+    );
+    return;
+  }
   const esbuild = await loadEsbuild();
 
   // `compositor` alone checks only the compositor's passes.
@@ -458,16 +471,359 @@ const REGISTRY = path.resolve(
   HERE,
   '../src/lib/components/ui/ShaderHero/compositor/effects/registry.ts'
 );
-/** WP-3 ships 9 effects; fewer means the registry moved or emptied. */
-const MIN_EFFECTS = 9;
+/**
+ * 5 blends, 15 layers (WP-8) and 3 frames; fewer means the registry moved or
+ * emptied.
+ */
+const MIN_EFFECTS = 23;
 
-/** Every uniform a GLSL source declares (comments stripped first). */
-function declaredUniforms(source) {
+/**
+ * Every uniform a GLSL source declares, as `[name, type]` (comments stripped
+ * first).
+ */
+function uniformDeclarations(source) {
   return [
     ...stripComments(source).matchAll(
-      /^\s*uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?\w+\s+(\w+)/gm
+      /^\s*uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(\w+)\s+(\w+)/gm
     ),
-  ].map((m) => m[1]);
+  ].map(([, type, name]) => [name, type]);
+}
+
+/** Every uniform name a GLSL source declares. */
+function declaredUniforms(source) {
+  return uniformDeclarations(source).map(([name]) => name);
+}
+
+/** A GLSL float literal, signed: `0.95`, `.5`, `1.`, `-2`, `1e-3`. */
+const GLSL_NUMBER = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`;
+const LITERAL_SMOOTHSTEP = new RegExp(
+  String.raw`\bsmoothstep\s*\(\s*(${GLSL_NUMBER})\s*,\s*(${GLSL_NUMBER})\s*,`,
+  'g'
+);
+
+/**
+ * Each `smoothstep` whose two edges are literals and not rising (edge0 >=
+ * edge1). GLSL ES 3.00 §8.3 leaves the result UNDEFINED for those: glslang
+ * compiles it and a desktop driver happens to mirror the curve, but another
+ * may return 0 or garbage (WP-8 review M1: the lab's light leak). Edges that
+ * are expressions cannot be judged here and are left alone.
+ */
+function reversedSmoothsteps(source) {
+  return [...stripComments(source).matchAll(LITERAL_SMOOTHSTEP)]
+    .filter(([, lo, hi]) => Number.parseFloat(lo) >= Number.parseFloat(hi))
+    .map(([call]) => `${call}…)`);
+}
+
+const WEBGL_UTILS = path.resolve(
+  HERE,
+  '../src/lib/components/ui/ShaderHero/webgl-utils.ts'
+);
+/** Short, and past 900 px tall: a layer that scales with the canvas there. */
+const IDENTITY_SIZES = [
+  [96, 64],
+  [72, 1350],
+];
+/** Sixteen beats (glitch draws only on some), for a layer that reads the clock. */
+const IDENTITY_TIMES = Array.from({ length: 16 }, (_, k) => 0.25 + k * 0.5);
+/** Off-centre, and brand colours unlike each other and the picture. */
+const IDENTITY_VALUES = {
+  u_pointer: [0.37, 0.61],
+  u_brandPrimary: [0.78, 0.12, 0.16],
+  u_brandSecondary: [0.35, 0.38, 0.42],
+  u_brandAccent: [0.95, 0.68, 0.2],
+  u_bgColor: [0.96, 0.94, 0.9],
+  u_rect: [0, 0, 1, 1],
+  u_fade: 1,
+  u_hasMedia: 0,
+};
+
+/**
+ * Runs in the page: draws each layer over a fixed noise picture at amount 0
+ * and at 1, and reports the largest channel change (0-255) from its input.
+ */
+function renderLayers({ vs, layers, sizes, times, values, units }) {
+  const gl = document.createElement('canvas').getContext('webgl2');
+  if (!gl) return { noWebgl2: true };
+  const shader = (type, src) => {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS))
+      throw new Error(gl.getShaderInfoLog(sh) ?? 'compile failed');
+    return sh;
+  };
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+    gl.STATIC_DRAW
+  );
+  // Hashed noise over two ramps: every texel unlike its neighbours.
+  const picture = (w, h, seed) => {
+    const data = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const n = (k) =>
+          Math.imul(
+            (x * 73856093) ^ (y * 19349663) ^ ((seed + k) * 83492791),
+            2654435761
+          ) >>> 24;
+        const i = (y * w + x) * 4;
+        data[i] = (n(1) + (x * 255) / w) / 2;
+        data[i + 1] = (n(2) + (y * 255) / h) / 2;
+        data[i + 2] = n(3);
+        data[i + 3] = 255;
+      }
+    }
+    return data;
+  };
+  // As the compositor's scene: RGBA8, linear, clamped.
+  const texture = (w, h, data) => {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA8,
+      w,
+      h,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      data
+    );
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  };
+  const targets = sizes.map(([w, h]) => {
+    const scene = picture(w, h, 1);
+    const target = texture(w, h, null);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      target,
+      0
+    );
+    return {
+      w,
+      h,
+      scene,
+      sceneTex: texture(w, h, scene),
+      secondTex: texture(w, h, picture(w, h, 7)),
+      fbo,
+    };
+  });
+  const results = [];
+  for (const layer of layers) {
+    const prog = gl.createProgram();
+    try {
+      gl.attachShader(prog, shader(gl.VERTEX_SHADER, vs));
+      gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, layer.fs));
+    } catch (err) {
+      results.push({ id: layer.id, error: String(err.message) });
+      continue;
+    }
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      results.push({ id: layer.id, error: gl.getProgramInfoLog(prog) });
+      continue;
+    }
+    gl.useProgram(prog);
+    const pos = gl.getAttribLocation(prog, 'a_position');
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.enableVertexAttribArray(pos);
+    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+    const result = { id: layer.id, atZero: 0, zeroAt: null, atOne: 0 };
+    for (const t of targets) {
+      const bind = (unit, tex) => {
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+      };
+      bind(units.u_scene, t.sceneTex);
+      bind(units.u_second, t.secondTex);
+      bind(units.u_mask, t.sceneTex);
+      bind(units.u_media, t.sceneTex);
+      for (const time of layer.readsTime ? times : [times[0]]) {
+        for (const amount of [0, 1]) {
+          for (const [name, type] of layer.uniforms) {
+            const loc = gl.getUniformLocation(prog, name);
+            if (loc === null) continue;
+            const v =
+              name in units
+                ? units[name]
+                : name === 'u_resolution' || name === 'u_mediaSize'
+                  ? [t.w, t.h]
+                  : name === 'u_time'
+                    ? time
+                    : name === 'u_amount'
+                      ? amount
+                      : values[name];
+            if (v === undefined) throw new Error(`no test value for ${name}`);
+            if (type === 'sampler2D') gl.uniform1i(loc, v);
+            else if (type === 'float') gl.uniform1f(loc, v);
+            else gl[`uniform${v.length}fv`](loc, v);
+          }
+          gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+          gl.viewport(0, 0, t.w, t.h);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+          const out = new Uint8Array(t.w * t.h * 4);
+          gl.readPixels(0, 0, t.w, t.h, gl.RGBA, gl.UNSIGNED_BYTE, out);
+          let most = 0;
+          let at = null;
+          for (let i = 0; i < out.length; i += 4) {
+            for (let c = 0; c < 3; c++) {
+              const d = Math.abs(out[i + c] - t.scene[i + c]);
+              if (d > most) {
+                most = d;
+                at = `${t.w}x${t.h} px ${(i / 4) % t.w},${Math.floor(i / 4 / t.w)} t=${time}`;
+              }
+            }
+          }
+          if (amount === 0 && most > result.atZero) {
+            result.atZero = most;
+            result.zeroAt = at;
+          }
+          if (amount === 1) result.atOne = Math.max(result.atOne, most);
+        }
+      }
+    }
+    results.push(result);
+  }
+  return { results };
+}
+
+/**
+ * The layer render cannot run here: no browser, or no WebGL2. In CI
+ * (`CI=true`, which GitHub Actions sets) that FAILS, so the check can never
+ * pass there by not running; on a machine without a browser it is a loud
+ * skip, and CI still runs it.
+ */
+function unavailable(why) {
+  if (process.env.CI === 'true') {
+    fail(`\n✖ layer identity\n  ${why}; in CI it must run, so it fails`);
+    return;
+  }
+  console.warn(
+    `⚠ layer identity SKIPPED: ${why}. CI runs it and fails closed; install Chrome, or \`pnpm --filter web exec playwright install chromium\`, to run it here.`
+  );
+}
+
+/**
+ * Every LAYER at amount 0 must draw its input unchanged (WP-8 review L1): a
+ * brand's `glow:0` is a saved, valid stack, and `glitch:0` once still tore
+ * bands. glslang compiles a pass but runs nothing, so each layer is RUN here:
+ * WebGL2 in headless Chromium on SwiftShader (no GPU, the same answer on any
+ * machine), over a noise picture, at a short size and one past 900 px tall
+ * (where a layer scaled with the canvas, as mosaic was, still pixelated at
+ * 0), and at sixteen beats for one that reads the clock. Calibrated in the
+ * same run: at amount 1 each must change its input, or the check proves
+ * nothing. A largest change of 1/255 is allowed for rounding.
+ */
+async function checkLayerIdentity(layers, assembleEffect) {
+  const vs = readFileSync(WEBGL_UTILS, 'utf8').match(
+    /export const VERTEX_SHADER = `([\s\S]*?)`;/
+  )?.[1];
+  if (!vs) {
+    fail(`\n✖ layer identity\n  no VERTEX_SHADER found in ${WEBGL_UTILS}`);
+    return;
+  }
+  let chromium;
+  try {
+    ({ chromium } = createRequire(import.meta.url)('@playwright/test'));
+  } catch (err) {
+    fail(`\n✖ layer identity\n  cannot load @playwright/test: ${err.message}`);
+    return;
+  }
+  // SwiftShader, ANGLE's CPU renderer: no GPU, the same pixels anywhere.
+  // Recent Chrome will not fall back to it without the unsafe flag.
+  const args = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+  // SHADERS_CHROME names the one browser to use (CI's system Chrome);
+  // otherwise Playwright's own Chromium, else the system Chrome.
+  const candidates = process.env.SHADERS_CHROME
+    ? [{ executablePath: process.env.SHADERS_CHROME }]
+    : [{}, { channel: 'chrome' }];
+  let browser = null;
+  let launchError = '';
+  for (const candidate of candidates) {
+    try {
+      browser = await chromium.launch({ headless: true, args, ...candidate });
+      break;
+    } catch (err) {
+      launchError = err.message.split('\n')[0];
+    }
+  }
+  if (!browser) {
+    unavailable(`no browser would launch (${launchError})`);
+    return;
+  }
+  try {
+    const page = await browser.newPage();
+    const input = layers.map((effect) => {
+      const fs = assembleEffect(effect);
+      return {
+        id: effect.id,
+        fs,
+        readsTime: effect.uniforms.includes('u_time'),
+        uniforms: uniformDeclarations(fs),
+      };
+    });
+    let rendered;
+    try {
+      rendered = await page.evaluate(renderLayers, {
+        vs,
+        layers: input,
+        sizes: IDENTITY_SIZES,
+        times: IDENTITY_TIMES,
+        values: IDENTITY_VALUES,
+        // the harness's own units: it binds and sets each sampler itself
+        units: { u_scene: 0, u_second: 1, u_mask: 2, u_media: 3 },
+      });
+    } catch (err) {
+      rendered = { error: err.message.split('\n')[0] };
+    }
+    const { error, noWebgl2, results } = rendered;
+    if (noWebgl2) {
+      unavailable('the browser gave no WebGL2 context');
+      return;
+    }
+    if (error) {
+      fail(`\n✖ layer identity\n  ${error}`);
+      return;
+    }
+    let bad = 0;
+    for (const r of results) {
+      const name = `compositor:layer:${r.id}`;
+      if (r.error) {
+        bad++;
+        fail(`\n✖ ${name}: did not build in WebGL2: ${r.error}`);
+      } else if (r.atZero > 1) {
+        bad++;
+        fail(
+          `\n✖ ${name}: at amount 0 it changes its input by ${r.atZero}/255 (${r.zeroAt})` +
+            '\n  Scale every change by u_amount, so 0 draws the input unchanged.'
+        );
+      } else if (r.atOne < 8) {
+        bad++;
+        fail(
+          `\n✖ ${name}: at amount 1 it changes its input by only ${r.atOne}/255, so its identity at 0 proves nothing`
+        );
+      }
+    }
+    if (bad === 0) {
+      console.log(
+        `✓ ${results.length} layers draw their input unchanged at amount 0 (run in WebGL2, SwiftShader)`
+      );
+    }
+  } finally {
+    await browser.close();
+  }
 }
 
 /**
@@ -481,7 +837,9 @@ function declaredUniforms(source) {
  * declarations are generated from its effect's `uniforms` list. So the two
  * ways a pass could read a uniform nobody sets, and get a silent zero, are:
  * its body declares one itself, or its list names one outside the table
- * (past the type check, through a cast). Both fail here.
+ * (past the type check, through a cast). Both fail here, as does a
+ * smoothstep with literal edges not rising (`reversedSmoothsteps`). When all
+ * compile, each layer is then run (`checkLayerIdentity`).
  */
 async function checkCompositor(esbuild) {
   const work = mkdtempSync(path.join(tmpdir(), 'glsl-compositor-'));
@@ -547,6 +905,14 @@ async function checkCompositor(esbuild) {
             "\n  List them in the effect's `uniforms`; the declarations are generated from it."
         );
       }
+      const reversed = reversedSmoothsteps(source);
+      if (reversed.length > 0) {
+        failures.push(name);
+        fail(
+          `\n✖ ${name}: smoothstep with edge0 >= edge1, undefined in GLSL ES 3.00 (§8.3): ${reversed.join(' ; ')}` +
+            '\n  Write 1.0 - smoothstep(lo, hi, x) for a falling edge.'
+        );
+      }
       const unset = [
         ...new Set([...declaredUniforms(source), ...effect.uniforms]),
       ].filter((u) => !settable.has(u));
@@ -561,6 +927,10 @@ async function checkCompositor(esbuild) {
     if (failures.length === 0) {
       console.log(
         `✓ ${EFFECTS.length} compositor passes compiled, every uniform set`
+      );
+      await checkLayerIdentity(
+        EFFECTS.filter((effect) => effect.axis === 'layer'),
+        assembleEffect
       );
     }
   } finally {

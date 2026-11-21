@@ -5,7 +5,11 @@
   (drag it, or focus it and press ↑ / ↓), its remove button, the drop marker
   and the "Add" button that stops at the field's maximum. What a row CONTAINS
   is the caller's `row` snippet; which value moved is the caller's business —
-  this only reports indices, and announces each move.
+  this only reports indices, and announces each move and removal. A caller
+  whose Add needs a choice (the brand editor's layers, WP-9) passes its own
+  `add` snippet in place of the button, and its own words for the full list.
+  After a removal the focus goes to the row that took its place, else to the
+  Add, else to the row before: never to the page.
 -->
 <script lang="ts">
   import { type Snippet, tick } from 'svelte';
@@ -18,14 +22,29 @@
     max?: number;
     /** A row's plain name for its controls, e.g. "Point 2". */
     labelFor: (index: number) => string;
-    addLabel: string;
+    addLabel?: string;
     onMove: (from: number, to: number) => void;
     onRemove: (index: number) => void;
-    onAdd: () => void;
+    onAdd?: () => void;
     row: Snippet<[number]>;
+    /** The caller's own Add (a menu, say), given whether the list is full. */
+    add?: Snippet<[boolean]>;
+    /** What a full list says, in place of the general line. */
+    fullMessage?: string;
   }
 
-  const { count, max, labelFor, addLabel, onMove, onRemove, onAdd, row }: Props = $props();
+  const {
+    count,
+    max,
+    labelFor,
+    addLabel,
+    onMove,
+    onRemove,
+    onAdd,
+    row,
+    add,
+    fullMessage,
+  }: Props = $props();
 
   const hintId = $props.id();
   const rows: HTMLElement[] = $state([]);
@@ -34,8 +53,23 @@
     null
   );
   let announcement = $state('');
+  /** Holds the Add (ours or the caller's), for the focus after a removal. */
+  let addSlot: HTMLElement | undefined = $state();
 
   const full = $derived(max !== undefined && count >= max);
+
+  async function remove(index: number): Promise<void> {
+    const item = labelFor(index);
+    onRemove(index);
+    // Read now, while the caller is still here: after the tick it may be gone
+    // (removing a row can end the editor that held it), and only the DOM
+    // refs below are safe to touch.
+    const left = count;
+    announcement = m.studio_page_editor_row_removed({ item });
+    await tick();
+    const next = index < left ? grips[index] : null;
+    (next ?? addSlot?.querySelector<HTMLElement>('button') ?? grips[index - 1])?.focus();
+  }
 
   async function move(from: number, to: number): Promise<void> {
     if (to < 0 || to >= count || to === from) return;
@@ -126,7 +160,7 @@
             class="rows__remove"
             aria-label={m.studio_page_editor_row_remove({ item: labelFor(index) })}
             title={m.studio_page_editor_row_remove({ item: labelFor(index) })}
-            onclick={() => onRemove(index)}
+            onclick={() => void remove(index)}
           >
             <TrashIcon size={16} />
           </button>
@@ -134,12 +168,18 @@
       {/each}
     </ol>
   {/if}
-  <button type="button" class="rows__add" disabled={full} onclick={onAdd}>
-    <PlusIcon size={16} />
-    {addLabel}
-  </button>
+  <div class="rows__add-slot" bind:this={addSlot}>
+    {#if add}
+      {@render add(full)}
+    {:else if onAdd}
+      <button type="button" class="rows__add" disabled={full} onclick={onAdd}>
+        <PlusIcon size={16} />
+        {addLabel}
+      </button>
+    {/if}
+  </div>
   {#if full && max !== undefined}
-    <p class="rows__full">{m.studio_page_editor_rows_full({ max: String(max) })}</p>
+    <p class="rows__full">{fullMessage ?? m.studio_page_editor_rows_full({ max: String(max) })}</p>
   {/if}
   <p class="sr-only" aria-live="polite">{announcement}</p>
 </div>
@@ -252,6 +292,11 @@
   .rows__add:focus-visible {
     outline: var(--border-width-thick) solid var(--color-text);
     outline-offset: var(--focus-offset);
+  }
+
+  /* Only a handle on the Add: it lays out as the grid's own item. */
+  .rows__add-slot {
+    display: contents;
   }
 
   .rows__full {

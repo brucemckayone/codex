@@ -69,7 +69,7 @@
   import { StructuredData } from '$lib/components/seo';
   import OrgHero from '$lib/components/org-hero/OrgHero.svelte';
   import { orgShader } from '$lib/page-builder/org-grounds';
-  import { brandEditor } from '$lib/brand-editor';
+  import { brandEditor, reportPreviewResolved } from '$lib/brand-editor';
   import {
     contentKindForHero,
     heroContentType,
@@ -682,6 +682,17 @@
   const heroContentKind = $derived(
     contentKindForHero(heroOptions?.spot === 'film' ? { kind: 'video' } : heroSpot, stats?.content)
   );
+  // In the brand studio's live preview, tell the editor what this hero
+  // resolved to, and from which choices, for its hints (WP-9). Null when it
+  // draws the classic hero. Inert on a visitor's page.
+  $effect(() => {
+    reportPreviewResolved(
+      heroOptions ? { options: heroOptions, kind: heroContentKind, chosen: heroSettings } : null
+    );
+  });
+  // Leaving the landing inside the preview (a link followed) withdraws the
+  // report, so no hint stays up about a hero that is no longer drawn.
+  $effect(() => () => reportPreviewResolved(null));
   const heroConsumeNote = $derived(
     data.allContent.some((c) => deriveContentAccessKind(c) === 'free')
       ? heroFreeNote(heroContentKind)
@@ -763,11 +774,13 @@
       consumeNote={heroConsumeNote}
       film={heroFilm}
       filmOpen={filmInHero}
+      filmPlaying={introFilm !== null && filmSrc !== null}
       following={isFollowing}
       followBusy={followLoading}
       onfilm={pressFilm}
       onfollow={handleFollowToggle}
       filmLayer={inlineFilm}
+      reel={heroReel}
       bind:filmChip
     />
   {:else}

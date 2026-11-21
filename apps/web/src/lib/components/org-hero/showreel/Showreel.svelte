@@ -1,0 +1,1681 @@
+<!--
+  @component Showreel
+
+  The org hero's Showreel (Codex-1yd58.6, plan §4; the v4 mock in
+  docs/handover/org-landing-sources/showreel, git-ignored): the org's film,
+  then its featured pieces, one at a time, through the brand's own shader.
+  OrgHero renders it for `comp: 'showreel'`; the reel itself is decided in
+  `$lib/org-hero/reel.ts`.
+
+  ── LAYOUTS ────────────────────────────────────────────────────────────────
+  Corner: the playing title lower left, the index on the right. Wide: the
+  title set across the width, its line and button on one row, the strip
+  along the foot. Name window: the org's name, very large, is the window the
+  film plays through; the playing piece sits beneath it. On a phone the
+  index becomes story segments; a tap on the left third goes back, the rest
+  forward; a press and hold pauses. The film holds still in the window while
+  these words scroll over it (the fixed stage, WP-1).
+
+  ── WHAT STOPS IT ──────────────────────────────────────────────────────────
+  Pause (WCAG 2.2.2) stops everything that moves: the reel, the footage and
+  the shader (`shaderTone.hold`). Its button comes first in the reel's tab
+  order. A phone's press and hold pauses the same way while it lasts (owner,
+  2026-11-19). A hold stops only the moving on: the pointer over the words,
+  the index or the strip (a mouse resting on the film is no hold), focus
+  inside, the film playing (in the hero or the phone's pop-up), or the hero
+  off screen. Reduced motion, or "Loop and move on" off,
+  is the static path: stills, no moving on, the shader held. Save-Data plays
+  stills that still move on (owner, 2026-11-19).
+
+  ── CONTRAST BY CONSTRUCTION ───────────────────────────────────────────────
+  Two full-width soft scrims, as the mock draws them, one from the top and
+  one from the foot, in the brand's own ground (`--color-background`,
+  darkened only as far as its inks need, `scrimTint`). Each holds the least
+  opacity (`--_pool`) under which every ink keeps 4.5:1 (3:1 large) over ANY
+  film pixel (`reel-scrim.ts`) as far as its words reach, measured from the
+  laid-out words, then fades away. The foot scrim is clear again at the
+  hero's very edge, where the page's own fade-in takes over, so the hero
+  hands over to the page with no line. The focus ring is the brand's focus
+  colour, mixed toward the ink only as far as 3:1 over any frame needs
+  (`focusInk`).
+-->
+<script lang="ts">
+  import type { Snippet } from 'svelte';
+  import { tick, untrack } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { preloadPlayerOnIntent } from '$lib/components/player/load-core';
+  import { PlayIcon } from '$lib/components/ui/Icon';
+  import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-feed';
+  import type { FilmLook } from '$lib/components/ui/ShaderHero/compositor/stage';
+  import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
+  import type { HeroOptions } from '$lib/org-hero/hero-config';
+  import type { ReelEntry } from '$lib/org-hero/reel';
+  import { fitTitle, type NameLines, nameLines } from '$lib/org-hero/showreel/name-lines';
+  import { prefersSavingData, reelMode } from '$lib/org-hero/showreel/playback';
+  import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
+  import { reelMedia } from '$lib/org-hero/showreel/reel-media';
+  import {
+    focusInk,
+    glowLeaves,
+    growShades,
+    haloAlpha,
+    type Ink,
+    liftStep,
+    type Need,
+    outlineAlpha,
+    over,
+    type Rgb,
+    SHADE_PEAK_MAX,
+    SHADES,
+    SHADES_CAP,
+    type Shade,
+    scrimAlpha,
+    scrimTint,
+    shadeFloor,
+    shadeProps,
+    veilPole,
+  } from '$lib/org-hero/showreel/reel-scrim';
+  import { type ReelWords, reelWords } from '$lib/org-hero/showreel/reel-words';
+  import { themeState } from '$lib/theme.svelte';
+  import * as m from '$paraglide/messages';
+  import ReelStage from './ReelStage.svelte';
+
+  interface Props {
+    reel: readonly ReelEntry[];
+    options: HeroOptions;
+    name: string;
+    description: string;
+    /** The logo, or '' for none (OrgHero's: '' too once it has failed). */
+    logoUrl: string;
+    /**
+     * The logo failed to load: OrgHero's own handler, which drops it, logs it
+     * and hands back '' (so the name returns where it led alone).
+     */
+    onlogofail: (event: Event & { currentTarget: HTMLImageElement }) => void;
+    /** The facts as one sentence ("4 portals, 14 films and 15 essays"), or ''. */
+    facts: string;
+    /** Join or Explore, beside Follow (owner, 2026-11-19), or null. */
+    action: { href: string; label: string } | null;
+    exploreHref: string;
+    /** The intro film's length, for its kicker and button. */
+    filmDuration: string | null;
+    following: boolean;
+    followBusy: boolean;
+    onfollow: () => void;
+    /** The film button: opens the film in full, or its preview with sound. */
+    onfilm: (event: MouseEvent & { currentTarget: HTMLButtonElement }) => void;
+    /** The film is playing inside the hero (desktop): the words step aside. */
+    filmOpen: boolean;
+    /**
+     * The film is playing anywhere: in the hero, or in the phone's pop-up.
+     * The reel holds on it, so the button the page returns focus to stays.
+     */
+    filmPlaying: boolean;
+    /** The page's in-hero film player, drawn inside the hero's box. */
+    filmLayer?: Snippet;
+  }
+
+  let {
+    reel,
+    options,
+    name,
+    description,
+    logoUrl,
+    onlogofail,
+    facts,
+    action,
+    exploreHref,
+    filmDuration,
+    following,
+    followBusy,
+    onfollow,
+    onfilm,
+    filmOpen,
+    filmPlaying,
+    filmLayer,
+  }: Props = $props();
+
+  /** The words go out (`--duration-normal`), the film cuts, the words come in. */
+  const OUT_MS = 200;
+  /** A press longer than this holds the reel instead of tapping it on. */
+  const PRESS_MS = 350;
+  /** A pointer that moves further than this is a swipe or a scroll, never a tap. */
+  const TAP_SLOP = 10;
+  /** The name window's largest size, desktop and phone (the mock's). */
+  const NAME_MAX = { desk: 228, phone: 138 };
+  /** The Wide title's range (the mock's). */
+  const WIDE_TITLE = { min: 72, max: 150 };
+  /** The SSR pool until the inks are read: dark enough for white text. */
+  const POOL_FALLBACK = 0.9;
+
+  // The complement of `--below-md` (breakpoints.css), as the landing reads it.
+  const desktop = new MediaQuery('(min-width: 48rem)');
+  const reducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)');
+  let saveData = $state(false);
+  $effect(() => {
+    saveData = prefersSavingData(window);
+  });
+
+  const layout = $derived(options['reel-layout']);
+  /** How the words keep their contrast over the film (owner, 2026-11-20). */
+  const edge = $derived(options['reel-edge']);
+  /**
+   * The shades the server draws, until the fit has measured a word. 'shadow'
+   * paints the cap, the most the fit may grow them to, so every word passes
+   * from the first paint and never shows an outline (owner, 2026-11-21); the
+   * fit then eases them back. 'outline' paints them as drawn: its rings carry
+   * the words at the `--_pool` fallback. Strength only: nothing moves.
+   */
+  const firstShades = $derived(shadeProps(edge === 'shadow' ? SHADES_CAP : SHADES));
+  const mode = $derived(
+    reelMode({ reducedMotion: reducedMotion.current, saveData, loop: options['reel-loop'] === 'on' })
+  );
+  // One clock for the visit. The landing hands over a new `reel` whenever its
+  // data refreshes (a tab return, the activity poll), so the clock follows
+  // what the reel holds, never its identity: a pause, the holds and the piece
+  // on show all survive it (WCAG 2.2.2).
+  const moves = $derived(mode !== 'static');
+  const clock = new ReelClock(
+    untrack(() => reel.length),
+    untrack(() => moves)
+  );
+  const keys = $derived(reelKeys(reel));
+  $effect.pre(() => {
+    const now = keys;
+    untrack(() => clock.follow(now));
+  });
+  $effect.pre(() => {
+    clock.moves = moves;
+  });
+  const words = $derived(reel.map((entry, i) => reelWords(entry, i, { name, description, filmDuration })));
+  const media = $derived(reel.map((entry) => reelMedia(entry, mode)));
+  const look = $derived<FilmLook>({
+    frame: layout === 'name' ? 'film-name' : 'film-fill',
+    band: options['reel-band'],
+  });
+
+  let rootEl: HTMLElement | undefined = $state();
+  let titleEl: HTMLElement | undefined = $state();
+  /** The stage, to retry a refused film from the visitor's own touch. */
+  let stage: ReturnType<typeof ReelStage> | undefined;
+  let windowEl: HTMLElement | undefined = $state();
+
+  // ── the words follow the clock, a beat behind (out, cut, in) ──
+  // The entry on show, by its key: a refresh that moves it (a piece added
+  // or removed before it) shows the same entry at its new place, no swap.
+  let shownKey = $state(untrack(() => keys[0] ?? ''));
+  const shown = $derived(Math.max(0, keys.indexOf(shownKey)));
+  let swap = $state<'' | 'out' | 'in'>('');
+  $effect(() => {
+    const target = keys[clock.index] ?? '';
+    const on = untrack(() => shownKey);
+    if (target === on) {
+      // Back where the words already are, before they went out (two quick
+      // picks): bring them back in.
+      untrack(() => {
+        if (swap === 'out') swap = 'in';
+      });
+      return;
+    }
+    // Still, or the entry on show has left the reel: show where the clock is.
+    if (!clock.moves || reducedMotion.current || !keys.includes(on)) {
+      shownKey = target;
+      return;
+    }
+    swap = 'out';
+    const timer = setTimeout(() => {
+      shownKey = target;
+      swap = 'in';
+    }, OUT_MS);
+    return () => clearTimeout(timer);
+  });
+  const current = $derived(words[shown] ?? words[0]);
+  // In the name window the name is the headline, so the film's slide
+  // carries the org's line instead (the mock's).
+  const lineFirst = $derived(layout === 'name' && reel[shown]?.type === 'film' && !!current?.line);
+
+  // ── time: the clock runs while nothing stops it ──
+  $effect(() => {
+    const root = rootEl;
+    const c = clock;
+    if (!root || !c.running) return;
+    let frame = 0;
+    let last = performance.now();
+    const step = (now: number) => {
+      c.tick(Math.min(100, now - last));
+      last = now;
+      root.style.setProperty('--_progress', String(c.progress));
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  });
+  // Each piece starts its bar from 0, under a hold too (an index pick while
+  // the pointer rests on the index), when no frame writes it.
+  $effect(() => {
+    void clock.starts;
+    rootEl?.style.setProperty('--_progress', String(clock.progress));
+  });
+
+  // A phone's press and hold pauses, while it lasts (owner, 2026-11-19).
+  const pressed = $derived(clock.holding('press'));
+  // Pause, the press and the static path hold the window's shader too (owner Q6).
+  $effect(() => {
+    if (!clock.paused && !pressed && clock.moves) return;
+    return shaderTone.hold();
+  });
+
+  $effect(() => {
+    clock.hold('film', filmPlaying);
+  });
+
+  // The tab or the hero out of view: nothing plays, nothing moves on.
+  let pageVisible = $state(true);
+  let onScreen = $state(true);
+  $effect(() => {
+    const root = rootEl;
+    if (!root) return;
+    const visibility = () => (pageVisible = document.visibilityState === 'visible');
+    visibility();
+    document.addEventListener('visibilitychange', visibility);
+    const observer = new IntersectionObserver(([entry]) => {
+      onScreen = entry?.isIntersecting ?? true;
+    });
+    observer.observe(root);
+    return () => {
+      document.removeEventListener('visibilitychange', visibility);
+      observer.disconnect();
+    };
+  });
+  $effect(() => {
+    clock.hold('away', !onScreen);
+  });
+  const playing = $derived(mode === 'footage' && !clock.paused && !pressed && pageVisible && onScreen);
+
+  // ── holds: the pointer over the words, index or strip; focus; a press ──
+  function hover(on: boolean) {
+    return (event: PointerEvent) => {
+      if (event.pointerType === 'mouse') clock.hold('pointer', on);
+    };
+  }
+  // Keyboard focus holds (a reader tabbing through); a click's focus does not,
+  // or Play would wait for a click elsewhere before it plays.
+  function focusIn(event: FocusEvent) {
+    clock.hold('focus', event.target instanceof Element && event.target.matches(':focus-visible'));
+  }
+  function focusOut(event: FocusEvent) {
+    const to = event.relatedTarget;
+    if (!(to instanceof Node && rootEl?.contains(to))) clock.hold('focus', false);
+  }
+
+  let press: { x: number; y: number; timer: ReturnType<typeof setTimeout>; held: boolean } | null = null;
+  function pressStart(event: PointerEvent) {
+    if (event.pointerType === 'mouse' || !event.isPrimary) return;
+    if (event.target instanceof Element && event.target.closest('a, button, input')) return;
+    const timer = setTimeout(() => {
+      if (!press) return;
+      press.held = true;
+      clock.hold('press', true);
+    }, PRESS_MS);
+    press = { x: event.clientX, y: event.clientY, timer, held: false };
+  }
+  function pressMove(event: PointerEvent) {
+    if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > TAP_SLOP) pressEnd(false);
+  }
+  /** `tapped`: the press ended where it began; a swipe, scroll or cancel is not a tap. */
+  function pressEnd(tapped: boolean) {
+    if (!press) return;
+    clearTimeout(press.timer);
+    const { held, x } = press;
+    press = null;
+    clock.hold('press', false);
+    // A film the browser refused to autoplay may play from a touch: a tap or
+    // a press's release is the gesture it waits for (a film-only reel has no
+    // other piece to tap on to).
+    if (tapped) stage?.retry();
+    if (held || !tapped || !rootEl) return;
+    const box = rootEl.getBoundingClientRect();
+    if (x - box.left < box.width / 3) clock.back();
+    else clock.next();
+  }
+
+  // ── type that fits: the Wide title, the name window ──
+  let measurer: CanvasRenderingContext2D | null = null;
+  function widthAt100(el: HTMLElement, text: string): number {
+    measurer ??= document.createElement('canvas').getContext('2d');
+    if (!measurer) return 0;
+    const style = getComputedStyle(el);
+    measurer.font = `${style.fontWeight} 100px ${style.fontFamily}`;
+    return measurer.measureText(text).width;
+  }
+  /** Run `fit` now, once the fonts are in, and on every resize. */
+  function refit(fit: () => void) {
+    fit();
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) fit();
+    });
+    window.addEventListener('resize', fit);
+    return () => {
+      live = false;
+      window.removeEventListener('resize', fit);
+    };
+  }
+
+  let wideSize = $state<number | null>(null);
+  $effect(() => {
+    const el = titleEl;
+    const title = current?.title ?? '';
+    if (layout !== 'wide' || !desktop.current || !el) {
+      wideSize = null;
+      return;
+    }
+    return refit(() => {
+      const available = el.parentElement?.clientWidth ?? 0;
+      wideSize = fitTitle(widthAt100(el, title), available, WIDE_TITLE.min, WIDE_TITLE.max);
+    });
+  });
+
+  let nameFit = $state<NameLines | null>(null);
+  $effect(() => {
+    const el = windowEl;
+    const max = desktop.current ? NAME_MAX.desk : NAME_MAX.phone;
+    if (layout !== 'name' || !el) {
+      nameFit = null;
+      return;
+    }
+    return refit(() => {
+      nameFit = nameLines(name, (text) => widthAt100(el, text), el.clientWidth, max);
+    });
+  });
+
+  // The name as the film's window: drawn where the page lays it out, at the
+  // window's size, white on black (the compositor reads its red channel).
+  function drawMask(el: HTMLElement) {
+    const width = document.documentElement.clientWidth;
+    const height = document.documentElement.clientHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const style = getComputedStyle(el);
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = '#fff';
+    ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const line of el.querySelectorAll<HTMLElement>('[data-line]')) {
+      const box = line.getBoundingClientRect();
+      // Its place in the document: the canvas holds it in window space.
+      ctx.fillText(line.textContent ?? '', box.left + box.width / 2, box.top + window.scrollY + box.height / 2);
+    }
+    showreelFeed.setNameMask(canvas);
+  }
+  $effect(() => {
+    const el = windowEl;
+    if (!nameFit || !el) {
+      showreelFeed.setNameMask(null);
+      return;
+    }
+    let live = true;
+    void tick().then(() => {
+      if (live) drawMask(el);
+    });
+    return () => {
+      live = false;
+    };
+  });
+  $effect(() => () => showreelFeed.setNameMask(null));
+
+  // ── contrast: the pools' least opacity for the inks as resolved ──
+  let probe: CanvasRenderingContext2D | null = null;
+  function rgba(color: string): { rgb: Rgb; alpha: number } | null {
+    probe ??= document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+    if (!probe || !color) return null;
+    probe.clearRect(0, 0, 1, 1);
+    probe.fillStyle = '#010203';
+    probe.fillStyle = color;
+    if (probe.fillStyle === '#010203') return null;
+    probe.fillRect(0, 0, 1, 1);
+    const [r = 0, g = 0, b = 0, a = 255] = probe.getImageData(0, 0, 1, 1).data;
+    return { rgb: [r, g, b], alpha: a / 255 };
+  }
+  /** What a scrim covers: its words, and the controls drawn in their ink. */
+  const SCRIMMED = '[data-ink], .reel__round, .reel__ghost';
+  /** Room the scrims keep past the last word, before they ease away. */
+  const SCRIM_MARGIN = 24;
+  /** The controls whose own glass fill carries their label or icon. */
+  const FILLED = '.reel__ghost, .reel__round';
+  /** The groups of words that read as one block: one outline strength each. */
+  const GROUPED = '.reel__sig, .reel__meta, .reel__words, .reel__index, .reel__strip';
+  /** The shades as solved: each scrim's peak, and its two ellipses. */
+  function drawShades(root: HTMLElement, shades: readonly Shade[]) {
+    for (const [prop, value] of Object.entries(shadeProps(shades))) {
+      root.style.setProperty(prop, value);
+    }
+  }
+  /** The ratio each scrimmed thing keeps: large text and the round icon
+   *  control 3:1 (WCAG 1.4.3, 1.4.11), body text and the ghost's label 4.5:1. */
+  function ratioOf(el: HTMLElement): number {
+    if (el.dataset.ink) return el.dataset.ink === 'large' ? 3 : 4.5;
+    return el.classList.contains('reel__round') ? 3 : 4.5;
+  }
+  /**
+   * The scrims' tint and least opacity for the inks as resolved, and how far
+   * each must hold it. No bands (owner, 2026-11-20): soft radial shades at
+   * the header's corners and rising in from the foot's (`HEADER_SHADE`,
+   * `FOOT_SHADE`), and each word's own halo (or a control's own fill) as
+   * strong as its ink still needs over what the shades lay at its weakest
+   * point. The header is its words and controls, and any control lying wholly
+   * above the header's foot (the phone's pause); the foot is the rest. Each holds the least
+   * opacity its own inks need. Below the foot's lowest word it clears over
+   * all the room left (no margin: the held opacity already covers that word's
+   * whole line box), so the hand-over to the page is as long and soft as the
+   * layout allows.
+   */
+  function fitScrims(root: HTMLElement) {
+    const ground = rgba(getComputedStyle(root).getPropertyValue('--color-background'));
+    if (!ground) return;
+    const box = root.getBoundingClientRect();
+    const laid = [...root.querySelectorAll<HTMLElement>(SCRIMMED)]
+      .map((el) => ({ el, r: el.getBoundingClientRect() }))
+      // Out of sight (the screen readers' name) or not laid out.
+      .filter(({ r }) => r.width > 1 && r.height > 1);
+    const inHeader = (el: HTMLElement) => el.closest('.reel__top') !== null;
+    // The header bar's own box, laid out even when it shows no words (Name
+    // on a phone), so the pause above it still counts as the header's.
+    const bar = root.querySelector('.reel__top')?.getBoundingClientRect();
+    const headerFoot = Math.max(
+      0,
+      bar && bar.height > 1 ? bar.bottom - box.top : 0,
+      ...laid.filter(({ el }) => inHeader(el)).map(({ r }) => r.bottom - box.top)
+    );
+    const topInks: { ink: Ink; ratio: number }[] = [];
+    const footInks: { ink: Ink; ratio: number }[] = [];
+    let top = 0;
+    let foot = 0;
+    let gap = box.height;
+    for (const { el, r } of laid) {
+      const header = inHeader(el) || r.bottom - box.top <= headerFoot;
+      const ink = rgba(getComputedStyle(el).color);
+      if (ink) (header ? topInks : footInks).push({ ink, ratio: ratioOf(el) });
+      if (header) top = Math.max(top, r.bottom - box.top);
+      else {
+        foot = Math.max(foot, box.bottom - r.top);
+        gap = Math.min(gap, box.bottom - r.bottom);
+      }
+    }
+    // Whole channels, as CSS will paint them: the alpha is solved for these.
+    // `scrimTint` passes over a brand colour no scrim of the pole can carry
+    // (OBB's red): it is lifted or outlined in its own pole below.
+    const [r, g, b] = scrimTint(ground.rgb, [...topInks, ...footInks]);
+    const tint: Rgb = [Math.round(r), Math.round(g), Math.round(b)];
+    // The most any ink needs: what a word not yet fitted holds meanwhile.
+    const pool = scrimAlpha([...topInks, ...footInks], tint) ?? 1;
+    root.style.setProperty('--_scrim', `rgb(${tint.join(' ')})`);
+    root.style.setProperty('--_pool', String(pool));
+    // Each scrimmed thing's own need (`scrimAlpha` for its COMPUTED ink, with
+    // FLOOR_MARGIN; a brand colour is solved as it is, never as an assumed
+    // white or dark), over its box. Null: no scrim of the tint can carry it.
+    const span = (r: DOMRect) => ({
+      left: (r.left - box.left) / box.width,
+      top: (r.top - box.top) / box.height,
+      right: (r.right - box.left) / box.width,
+      bottom: (r.bottom - box.top) / box.height,
+    });
+    // An earlier fit's lifts and own poles come off first, so every colour is
+    // read as the brand set it.
+    for (const node of root.querySelectorAll<HTMLElement>('[data-lifted], [data-own-pole]')) {
+      node.style.removeProperty('color');
+      node.style.removeProperty('--_ring-tint');
+      node.style.removeProperty('--_halo');
+      node.style.removeProperty('--_ring2');
+      node.style.removeProperty('--_soft');
+      delete node.dataset.lifted;
+      delete node.dataset.ownPole;
+    }
+    // In 'shadow', a brand colour no shade can carry where its word sits
+    // (OBB's red on its own dark: 3.75:1 at best) is lifted toward the reel's
+    // ink, a twentieth at a time, just far enough, over the footage only
+    // (owner, 2026-11-20). Each group of words glows softly in the brand's
+    // dark at its strongest word's need, the glow laying its share
+    // (GLOW_SHARE, from the 1 px ring probe), and the corner shades grow only
+    // as far as each word still needs past it. 'outline': the shades as
+    // drawn, and an outline. A control's own fill carries its label.
+    const reelInk = rgba(getComputedStyle(root).color)?.rgb;
+    const carried = (ink: Ink, ratio: number) => {
+      const need = scrimAlpha([{ ink, ratio }], tint);
+      return need !== null && glowLeaves(need, need) <= SHADE_PEAK_MAX;
+    };
+    const roles = laid.flatMap(({ el, r }) => {
+      // Its own ink and any child's in another (the kicker's number), so the
+      // strictest of them is solved.
+      const ratio = ratioOf(el);
+      const fill = el.matches(FILLED);
+      const nodes = [el, ...el.querySelectorAll<HTMLElement>('*')].flatMap((node) => {
+        const ink = rgba(getComputedStyle(node).color);
+        return ink ? [{ node, ink }] : [];
+      });
+      if (nodes.length === 0) return [];
+      // The coloured nodes a shade cannot carry as they are: the ones a lift
+      // moves, from the least step that carries each anywhere.
+      const lifted = nodes.filter(
+        ({ ink }) => edge === 'shadow' && !fill && reelInk !== undefined && !carried(ink, ratio)
+      );
+      let step = 0;
+      for (const { ink } of lifted) {
+        if (reelInk) step = Math.max(step, liftStep(ink, reelInk, (l) => carried(l, ratio)));
+      }
+      return [{ el, span: span(r), ratio, fill, nodes, lifted, step }];
+    });
+    const inksOf = (role: (typeof roles)[number]) =>
+      role.nodes.map(({ ink }) => ({
+        ink:
+          reelInk && role.lifted.some((l) => l.ink === ink)
+            ? { rgb: over(reelInk, role.step / 20, ink.rgb), alpha: ink.alpha }
+            : ink,
+        ratio: role.ratio,
+      }));
+    const needOf = (role: (typeof roles)[number]) => scrimAlpha(inksOf(role), tint);
+    const groupOf = (el: HTMLElement) => el.closest<HTMLElement>(GROUPED) ?? el;
+    let shades: readonly Shade[] = SHADES;
+    const glows = new Map<HTMLElement, number>();
+    for (let round = 0; round <= 20; round++) {
+      glows.clear();
+      for (const role of roles) {
+        const need = needOf(role);
+        if (role.fill || need === null) continue;
+        const group = groupOf(role.el);
+        glows.set(group, Math.max(glows.get(group) ?? 0, need));
+      }
+      if (edge === 'outline') break;
+      const asked = new Map<Need, (typeof roles)[number]>();
+      for (const role of roles) {
+        const need = needOf(role);
+        if (role.fill || need === null) continue;
+        const left = glowLeaves(need, glows.get(groupOf(role.el)) ?? 0);
+        if (left <= SHADE_PEAK_MAX) asked.set({ span: role.span, need: left }, role);
+      }
+      const grown = growShades([...asked.keys()]);
+      shades = grown.shades;
+      // A lifted word still short where it sits: one step further, and again.
+      const further = grown.short.flatMap((n) => {
+        const role = asked.get(n);
+        return role && role.lifted.length > 0 && role.step < 20 ? [role] : [];
+      });
+      if (further.length === 0) break;
+      for (const role of further) role.step += 1;
+    }
+    drawShades(root, shades);
+    for (const role of roles) {
+      if (!reelInk || role.lifted.length === 0) continue;
+      for (const { node, ink } of role.lifted) {
+        const [lr, lg, lb] = over(reelInk, role.step / 20, ink.rgb).map(Math.round);
+        node.style.setProperty('color', `rgb(${lr} ${lg} ${lb} / ${ink.alpha})`, 'important');
+        node.dataset.lifted = '';
+      }
+    }
+    // A control's fill, exactly what its label still needs. In 'outline', one
+    // strength per group (its strongest word's), so each group reads as one
+    // block; a word no scrim of the tint can carry (red on a dark brand)
+    // keeps its colour and is outlined in its own pole instead.
+    const groups = new Map<HTMLElement, number>();
+    for (const role of roles) {
+      const { el, span: at, fill } = role;
+      const inks = inksOf(role);
+      const need = needOf(role);
+      const under = shadeFloor(at, shades);
+      if (fill) {
+        el.style.setProperty('--_halo', String(haloAlpha(need ?? 1, under)));
+        continue;
+      }
+      if (edge !== 'outline') continue;
+      if (need === null) {
+        const own = veilPole(inks);
+        const alpha = Math.max(...inks.map((ink) => outlineAlpha(ink, under, tint, own) ?? 1));
+        el.style.setProperty('--_ring-tint', `rgb(${own.join(' ')})`);
+        el.style.setProperty('--_halo', String(alpha));
+        // Its own pole stays close to its glyphs: a second solid ring and no
+        // soft glow, so a pale ring never washes the white words beside it.
+        el.style.setProperty('--_ring2', '1');
+        el.style.setProperty('--_soft', '0');
+        el.dataset.ownPole = '';
+        continue;
+      }
+      const group = groupOf(el);
+      groups.set(group, Math.max(groups.get(group) ?? 0, haloAlpha(need, under)));
+    }
+    for (const [group, halo] of groups) group.style.setProperty('--_halo', String(halo));
+    for (const [group, glow] of glows) group.style.setProperty('--_glow', String(glow));
+    // The ring from the brand's focus colour as the page has it (the
+    // parent's: the reel's own is this one), and the reel's ink. It is drawn
+    // on its own band of the solid scrim (the focus rule's box-shadow), so
+    // that is what it keeps 3:1 against, whatever the frame.
+    const focus = rgba(getComputedStyle(root.parentElement ?? root).getPropertyValue('--color-focus'));
+    const ink = rgba(getComputedStyle(root).color);
+    if (focus && ink) {
+      const ring = focusInk(focus.rgb, ink.rgb, tint, 1).map(Math.round);
+      root.style.setProperty('--color-focus', `rgb(${ring.join(' ')})`);
+    }
+    root.style.setProperty('--_top-reach', `${Math.ceil(top + SCRIM_MARGIN)}px`);
+    root.style.setProperty('--_foot-reach', `${Math.ceil(foot + SCRIM_MARGIN)}px`);
+    root.style.setProperty('--_foot-clear', `${Math.max(0, Math.floor(gap))}px`);
+  }
+  // Again for each piece (its words differ), on a resize, once the fonts are
+  // in, and whenever the inks may have turned: the theme toggled, or the
+  // brand repainted in place (the editor's live preview, hydration's own
+  // brand). Once a frame at most, however many arrive in it.
+  $effect(() => {
+    const root = rootEl;
+    void layout;
+    void shown;
+    void edge;
+    void themeState.theme;
+    if (!root) return;
+    let live = true;
+    let frame = 0;
+    // `data-fit`: a fit has run since the fonts were in (what a probe waits on).
+    let fontsIn = !document.fonts;
+    const fit = () => {
+      if (!live || frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (!live) return;
+        fitScrims(root);
+        if (fontsIn) root.dataset.fit = '';
+      });
+    };
+    void tick().then(fit);
+    void document.fonts?.ready.then(() => {
+      fontsIn = true;
+      fit();
+    });
+    // `ready` is one promise, and it can resolve before a face has begun to
+    // load (a fast hydration beats the webfont). A face that lands later moves
+    // the words the fit measured: fit again whenever one does (2026-11-21).
+    document.fonts?.addEventListener('loadingdone', fit);
+    const resized = new ResizeObserver(fit);
+    resized.observe(root);
+    const restyled = new MutationObserver(fit);
+    const brand = root.closest('[data-org-brand]');
+    if (brand) restyled.observe(brand, { attributes: true, attributeFilter: ['style', 'class'] });
+    // A colour still easing (a link's `--transition-colors`) reads as its
+    // in-between value: measure again once it has landed.
+    const landed = (event: TransitionEvent) => {
+      if (event.propertyName === 'color') fit();
+    };
+    root.addEventListener('transitionend', landed);
+    return () => {
+      live = false;
+      cancelAnimationFrame(frame);
+      document.fonts?.removeEventListener('loadingdone', fit);
+      resized.disconnect();
+      restyled.disconnect();
+      root.removeEventListener('transitionend', landed);
+    };
+  });
+
+  const strip = $derived(layout !== 'corner');
+  // With the logo leading alone the name stays in the page for screen
+  // readers (OrgHero's rule), and in sight when there is no logo to lead,
+  // a failed one included (OrgHero hands back '' for it).
+  const nameHidden = $derived(options.lead === 'logo' && !!logoUrl);
+</script>
+
+{#snippet item(w: ReelWords, i: number, kind: boolean)}
+  <li>
+    <button type="button" class="reel__item" aria-current={i === shown ? 'true' : undefined} onclick={() => clock.go(i)}>
+      <span class="reel__n" data-ink="body">{w.number}</span>
+      <span class="reel__t" data-ink="body">{w.title}</span>
+      {#if kind}<span class="reel__k" data-ink="body">{w.kind}</span>{/if}
+      <span class="reel__bar" aria-hidden="true"><i></i></span>
+    </button>
+  </li>
+{/snippet}
+
+<!-- The pause, first in the reel's tab order (WCAG 2.2.2), drawn where each
+     layout keeps it: atop the index, at the strip's end, by the phone's segments. -->
+{#snippet pause()}
+  <div class="reel__ctl">
+    <!-- The mouse resting on it holds the reel, as over the index it sits by. -->
+    <button
+      type="button"
+      class="reel__round"
+      onpointerenter={hover(true)}
+      onpointerleave={hover(false)}
+      aria-label={clock.paused ? m.org_hero_reel_play() : m.org_hero_reel_pause()}
+      onclick={() => clock.togglePause()}
+    >
+      {#if clock.paused}
+        <PlayIcon size={14} aria-hidden="true" />
+      {:else}
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z" fill="currentColor" /></svg>
+      {/if}
+    </button>
+  </div>
+{/snippet}
+
+<!-- The org, its facts, Follow and its Join or Explore. -->
+{#snippet top()}
+  <header class="reel__top">
+    <div class="reel__sig">
+      {#if logoUrl}<img src={logoUrl} alt="" onerror={onlogofail} />{/if}
+      {#if layout !== 'name'}<h1 class={['reel__name', { 'sr-only': nameHidden }]} data-ink="body">{name}</h1>{/if}
+    </div>
+    <div class="reel__meta">
+      {#if facts}<span data-ink="body">{facts}</span>{/if}
+      <button type="button" class="reel__ghost" onclick={onfollow} disabled={followBusy}>
+        {following ? m.org_following() : m.org_hero_follow_short()}
+      </button>
+      {#if action}<a class="reel__ghost" href={action.href}>{action.label}</a>{/if}
+    </div>
+  </header>
+{/snippet}
+
+<!-- The Name window: the org's name, the film's window. -->
+{#snippet nameWindow()}
+  <h1
+    class="reel__window"
+    bind:this={windowEl}
+    data-still={media[shown]?.still ? '' : undefined}
+    style:font-size={nameFit ? `${nameFit.size}px` : undefined}
+    style:--_still={media[shown]?.still ? `url("${media[shown]?.still}")` : undefined}
+  >
+    {#if nameFit}
+      {#each nameFit.lines as line, i (i)}<span data-line>{line}</span>{/each}
+    {:else}
+      <span data-line>{name}</span>
+    {/if}
+  </h1>
+{/snippet}
+
+<!-- The phone's story segments. -->
+{#snippet segments()}
+  <div class="reel__segs">
+    <ol>
+      {#each words as _, i (i)}
+        <li data-on={i === shown ? '' : undefined} data-done={i < shown ? '' : undefined}><i></i></li>
+      {/each}
+    </ol>
+  </div>
+{/snippet}
+
+<!-- What is playing: its number and kind, its title, its line and its button. -->
+{#snippet playingNow(now: ReelWords)}
+  <div
+    class="reel__words"
+    data-swap={swap || undefined}
+    role="group"
+    aria-roledescription="slide"
+    aria-label={m.org_hero_reel_slide({ number: now.number, total: String(reel.length).padStart(2, '0') })}
+    aria-live={clock.running ? 'off' : 'polite'}
+    onpointerenter={hover(true)}
+    onpointerleave={hover(false)}
+  >
+    <p class="reel__kicker reel__swap" data-ink="body"><b>{now.number}</b> <span>{now.kicker}</span></p>
+    {#if lineFirst}
+      <h2 class="reel__title reel__title--line reel__swap" data-ink="body">{now.line}</h2>
+    {:else}
+      <h2
+        class="reel__title reel__swap"
+        bind:this={titleEl}
+        data-ink="large"
+        data-long={now.title.length > 20 ? '' : undefined}
+        style:font-size={wideSize ? `${wideSize}px` : undefined}
+      >
+        {now.title}
+      </h2>
+    {/if}
+    <div class="reel__row reel__swap">
+      {#if now.line && !lineFirst}<p class="reel__line" data-ink="body">{now.line}</p>{/if}
+      <div class="reel__acts">
+        {#if now.action.kind === 'film'}
+          <button type="button" class="reel__btn" onclick={onfilm} {@attach preloadPlayerOnIntent}>
+            <PlayIcon size={16} aria-hidden="true" />
+            {now.action.label}
+          </button>
+        {:else}
+          <a class="reel__btn" href={now.action.href}>{now.action.label}</a>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/snippet}
+
+<!-- Every entry: the strip along the foot (Wide, Name), or the index (Corner). -->
+{#snippet entries()}
+  {#if strip}
+    <ol class="reel__strip" onpointerenter={hover(true)} onpointerleave={hover(false)}>
+      {#each words as w, i (i)}{@render item(w, i, false)}{/each}
+    </ol>
+  {:else}
+    <nav class="reel__index" aria-label={m.org_hero_reel_label()} onpointerenter={hover(true)} onpointerleave={hover(false)}>
+      <ol>
+        {#each words as w, i (i)}{@render item(w, i, true)}{/each}
+      </ol>
+      <a class="reel__all" href={exploreHref} data-ink="body">{m.org_hero_explore_everything()}</a>
+    </nav>
+  {/if}
+{/snippet}
+
+<section
+  class="reel"
+  bind:this={rootEl}
+  data-hero-root
+  data-layout={layout}
+  data-edge={edge}
+  data-mode={mode}
+  data-paused={clock.paused ? '' : undefined}
+  aria-roledescription="carousel"
+  aria-label={m.org_hero_reel_label()}
+  style:--_pool={POOL_FALLBACK}
+  style:--_peak-top={firstShades['--_peak-top']}
+  style:--_top-0={firstShades['--_top-0']}
+  style:--_top-1={firstShades['--_top-1']}
+  style:--_peak-foot={firstShades['--_peak-foot']}
+  style:--_foot-0={firstShades['--_foot-0']}
+  style:--_foot-1={firstShades['--_foot-1']}
+  onfocusin={focusIn}
+  onfocusout={focusOut}
+  onpointerdown={pressStart}
+  onpointermove={pressMove}
+  onpointerup={() => pressEnd(true)}
+  onpointercancel={() => pressEnd(false)}
+>
+  <ReelStage bind:this={stage} {media} {keys} index={shown} {playing} {look} />
+  <div class="reel__scrim-top" aria-hidden="true"></div>
+  <div class="reel__scrim-foot" aria-hidden="true"></div>
+
+  {@render filmLayer?.()}
+
+  <div class="reel__inner" inert={filmOpen}>
+    {@render pause()}
+    {@render top()}
+    {#if layout === 'name'}{@render nameWindow()}{/if}
+    {@render segments()}
+    {#if current}{@render playingNow(current)}{/if}
+    {@render entries()}
+  </div>
+</section>
+
+<style>
+  .reel {
+    --_gutter: var(--space-24);
+    /* 1 on a light ground, 0 on a dark one: the theme's ground luminance as
+       the page resolves it (org-brand.css's `--_gy`, from the brand editor's
+       `--brand-ground-y`), at the 0.1791 pivot the page's own inks turn on,
+       so the right ink is there from the server's first paint. A light
+       brand's reel reads in its own light palette, its text over a veil of
+       its ground; a dark one keeps the player's white over its dark. The
+       soft ink is the main one at the player's 80% either way, never the
+       brand's secondary token: that one mixes `--color-text`, which a brand
+       re-tuned from dark to light can still hold pale (OBB on 2026-11-20:
+       pink on cream, which no veil carries). */
+    --_light: clamp(0, (var(--_gy, 0) - 0.1791) * 1e12, 1);
+    --_ink: color-mix(
+      in srgb,
+      var(--color-text-primary) calc(var(--_light) * 100%),
+      var(--color-player-text)
+    );
+    --_ink-soft: color-mix(
+      in srgb,
+      color-mix(in srgb, var(--color-text-primary) calc(var(--opacity-80, 0.8) * 100%), transparent)
+        calc(var(--_light) * 100%),
+      var(--color-player-text-secondary)
+    );
+    /* Until fitScrims has measured: the brand's ground (a deep shade of it
+       under white ink), held over the header and the foot's lower two thirds. */
+    --_scrim: color-mix(
+      in oklab,
+      black calc((1 - var(--_light)) * 64%),
+      var(--color-background)
+    );
+    --_top-reach: 12%;
+    --_foot-reach: 66%;
+    --_foot-clear: 0px;
+    /* The ring is drawn over film, not the page's ground: until fitScrims
+       has solved the brand's focus colour against the scrim, the reel's ink. */
+    --color-focus: var(--_ink);
+    --_glass-a: 0.55;
+    --_line: color-mix(in srgb, var(--_ink) 22%, transparent);
+    --_progress: 0;
+
+    position: relative;
+    z-index: 2;
+    isolation: isolate;
+    min-height: 100svh;
+    overflow: hidden;
+    color: var(--_ink);
+    touch-action: pan-y;
+  }
+
+  .reel :global(p),
+  .reel h1,
+  .reel h2,
+  .reel ol {
+    margin: 0;
+  }
+
+  .reel ol {
+    padding: 0;
+    list-style: none;
+  }
+
+  /* ── the shades: soft radials, no band (owner, 2026-11-20) ── */
+  /* The header's two corners and the foot's two radials (V-A, the owner's
+     pick): ellipses anchored off the box, so no edge ever shows over the
+     film, on RAMP's eased stops at their peak (its tail lands with no slope,
+     so no ellipse ends in a kink). reel-scrim.ts holds the same
+     ellipses (HEADER_SHADE, FOOT_SHADE), and fitScrims solves each word's
+     halo over what they lay under it. */
+  .reel__scrim-top,
+  .reel__scrim-foot {
+    --_ramp:
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 100%), transparent) 0%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 98.52%), transparent) 10%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 94.16%), transparent) 20%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 87.07%), transparent) 30%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 77.54%), transparent) 40%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 65.98%), transparent) 50%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 52.85%), transparent) 60%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 38.77%), transparent) 70%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 24.43%), transparent) 80%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 16.63%), transparent) 85%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 8.67%), transparent) 90%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 2.49%), transparent) 95%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 0.66%), transparent) 97.5%,
+      color-mix(in srgb, var(--_scrim) calc(var(--_peak) * 0.11%), transparent) 99%,
+      transparent 100%;
+
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  /* Behind the name, and behind the facts and Follow. */
+  .reel__scrim-top {
+    --_peak: var(--_peak-top, 0.6);
+
+    background:
+      radial-gradient(var(--_top-0, ellipse 36% 22% at 2% -6%), var(--_ramp)),
+      radial-gradient(var(--_top-1, ellipse 64% 24% at 100% -6%), var(--_ramp));
+  }
+
+  /* Rising in from off the bottom-left behind the words, and off the
+     bottom-right behind the index. Below the lowest word it clears again
+     (smoothstep's stops over all the room left), so the hero's edge draws
+     only what the page below it draws, with no line. */
+  .reel__scrim-foot {
+    --_peak: var(--_peak-foot, 0.94);
+    --_clear: linear-gradient(
+      to top,
+      transparent 0,
+      rgb(0 0 0 / 0.05) calc(var(--_foot-clear) * 0.13),
+      rgb(0 0 0 / 0.2) calc(var(--_foot-clear) * 0.29),
+      rgb(0 0 0 / 0.55) calc(var(--_foot-clear) * 0.53),
+      rgb(0 0 0 / 0.85) calc(var(--_foot-clear) * 0.76),
+      rgb(0 0 0) var(--_foot-clear)
+    );
+
+    background:
+      radial-gradient(var(--_foot-0, ellipse 78% 82% at 0% 108%), var(--_ramp)),
+      radial-gradient(var(--_foot-1, ellipse 60% 82% at 102% 108%), var(--_ramp));
+    mask-image: var(--_clear);
+  }
+
+  .reel__inner {
+    position: absolute;
+    inset: 0;
+    isolation: isolate;
+  }
+
+  /* ── the top: the org, its facts and Follow ── */
+  .reel__top {
+    position: absolute;
+    top: var(--space-10);
+    left: var(--_gutter);
+    right: var(--_gutter);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-6);
+  }
+
+  .reel__sig,
+  .reel__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .reel__sig img {
+    height: var(--space-10);
+    width: auto;
+  }
+
+  .reel__name {
+    font-family: var(--font-heading);
+    font-size: var(--text-xl);
+    font-weight: var(--font-normal);
+    color: var(--_ink);
+  }
+
+  .reel__meta {
+    font-size: var(--text-sm);
+    color: var(--_ink-soft);
+  }
+
+  /* The 'shadow' edge (the default; owner, 2026-11-20): no outline, a soft
+     glow round every word in the brand's own dark (a light brand's pale
+     ground), blurred all through, at its group's strongest need (`--_glow`).
+     It lays a share of that on the ground touching the glyphs (GLOW_SHARE,
+     from the 1 px ring probe), and the shades grow only for the rest. */
+  .reel[data-edge='shadow'] [data-ink] {
+    --_g: color-mix(in srgb, var(--_scrim) calc(var(--_glow, var(--_pool)) * 100%), transparent);
+
+    text-shadow:
+      0 0 2px var(--_g),
+      0 0 6px var(--_g),
+      0 0 14px var(--_g);
+  }
+
+  /* The 'outline' edge (a creator's choice; owner, 2026-11-20): each word
+     outlined in the brand's own dark (or a light brand's pale ground), close
+     round its glyphs, never a box. Unblurred 1 px offsets all round and
+     softened 2 px ones, at the group's solved strength (`--_halo`, set on
+     each group, its strongest word's) taken up by 1.6, so the ring touching
+     each stroke keeps the word's floor over any frame; then a soft glow. A
+     word no scrim of the tint can carry is outlined in its own pole
+     (`--_ring-tint`: red on a dark brand, pale) at its own strength. */
+  .reel[data-edge='outline'] [data-ink] {
+    --_h: var(--_halo, var(--_pool));
+    --_h-ring: color-mix(
+      in srgb,
+      var(--_ring-tint, var(--_scrim)) calc(min(1, var(--_h) * 1.6) * 100%),
+      transparent
+    );
+    --_h-soft: color-mix(
+      in srgb,
+      var(--_ring-tint, var(--_scrim)) calc(var(--_h) * var(--_soft, 1) * 100%),
+      transparent
+    );
+    --_h-ring2: color-mix(
+      in srgb,
+      var(--_ring-tint, var(--_scrim)) calc(min(1, var(--_h) * 1.6) * var(--_ring2, 0) * 100%),
+      transparent
+    );
+
+    text-shadow:
+      1px 0 0 var(--_h-ring),
+      -1px 0 0 var(--_h-ring),
+      0 1px 0 var(--_h-ring),
+      0 -1px 0 var(--_h-ring),
+      1px 1px 0 var(--_h-ring),
+      -1px -1px 0 var(--_h-ring),
+      1px -1px 0 var(--_h-ring),
+      -1px 1px 0 var(--_h-ring),
+      2px 0 1px var(--_h-ring),
+      -2px 0 1px var(--_h-ring),
+      0 2px 1px var(--_h-ring),
+      0 -2px 1px var(--_h-ring),
+      2px 2px 0 var(--_h-ring2),
+      -2px -2px 0 var(--_h-ring2),
+      2px -2px 0 var(--_h-ring2),
+      -2px 2px 0 var(--_h-ring2),
+      2px 0 0 var(--_h-ring2),
+      -2px 0 0 var(--_h-ring2),
+      0 2px 0 var(--_h-ring2),
+      0 -2px 0 var(--_h-ring2),
+      0 0 6px var(--_h-soft),
+      0 0 14px var(--_h-soft);
+  }
+
+  .reel__ghost,
+  .reel__round {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    border: var(--border-width) solid var(--_line);
+    /* Glass, solved: at least the glass's own shade, and as much as the
+       label or icon still needs over the shades under it (`--_halo`). */
+    background: color-mix(
+      in srgb,
+      var(--_scrim) calc(max(var(--_glass-a), var(--_halo, var(--_pool))) * 100%),
+      transparent
+    );
+    color: var(--_ink);
+    backdrop-filter: blur(var(--blur-md));
+    cursor: pointer;
+    text-decoration: none;
+  }
+
+  .reel__ghost {
+    white-space: nowrap;
+    min-height: var(--space-9);
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-button);
+    font-size: var(--text-sm);
+  }
+
+  .reel__round {
+    width: var(--space-9);
+    height: var(--space-9);
+    border-radius: var(--radius-full);
+  }
+
+  .reel__round svg {
+    width: var(--space-3-5);
+    height: var(--space-3-5);
+  }
+
+  /* R14's ring, on keyboard focus only. A row of the index or strip, and the
+     "All" link, have no inline padding (their words sit on the box's edges),
+     so their ring stands further off and rounds, clear of "01" and "Film". */
+  .reel__ghost:focus-visible,
+  .reel__round:focus-visible,
+  .reel__btn:focus-visible,
+  .reel__item:focus-visible,
+  .reel__all:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+    /* Its own band of the solid scrim under the ring and a little past it:
+       a two-tone indicator, so the ring keeps 3:1 over any frame. */
+    box-shadow: 0 0 0 calc(var(--space-0-5) + var(--border-width-thick) + var(--space-0-5)) var(--_scrim);
+  }
+
+  .reel__item:focus-visible,
+  .reel__all:focus-visible {
+    outline-offset: var(--space-1-5);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 0 0 calc(var(--space-1-5) + var(--border-width-thick) + var(--space-0-5)) var(--_scrim);
+  }
+
+  /* ── what is playing ── */
+  .reel__words {
+    position: absolute;
+    left: var(--_gutter);
+    bottom: var(--space-20);
+    width: min(var(--container-content), 56%);
+  }
+
+  .reel__kicker {
+    /* Not the page's 65ch prose measure: it is centred in the Name window. */
+    max-width: none;
+    display: flex;
+    gap: var(--space-3);
+    align-items: baseline;
+    font-size: var(--text-base);
+    color: var(--_ink-soft);
+  }
+
+  .reel__kicker b {
+    font-weight: var(--font-normal);
+    font-variant-numeric: tabular-nums;
+    color: var(--_ink);
+  }
+
+  .reel__title {
+    margin-top: var(--space-4);
+    font-family: var(--font-heading);
+    font-weight: var(--font-normal);
+    font-size: calc(var(--text-display) * 1.3);
+    line-height: var(--leading-none);
+    color: var(--_ink);
+    text-wrap: balance;
+  }
+
+  .reel__title[data-long] {
+    font-size: calc(var(--text-display) * 1.1);
+  }
+
+  .reel__title--line {
+    max-width: 52ch;
+    margin-inline: auto;
+    font-size: var(--text-2xl);
+    line-height: var(--leading-relaxed);
+  }
+
+  .reel__row {
+    margin-top: var(--space-5);
+  }
+
+  .reel__line {
+    max-width: 54ch;
+    font-size: var(--text-lg);
+    line-height: var(--leading-relaxed);
+    color: var(--_ink-soft);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .reel__acts {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-8);
+  }
+
+  .reel__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    min-height: var(--space-12);
+    padding: 0 var(--space-6);
+    border: none;
+    border-radius: var(--radius-button);
+    background: var(--color-interactive);
+    color: var(--color-on-interactive);
+    font-size: var(--text-lg);
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  /* out, cut, in */
+  .reel__words[data-swap='out'] .reel__swap {
+    opacity: 0;
+    transform: translateY(var(--space-1-5));
+    transition:
+      opacity var(--duration-normal) var(--ease-in),
+      transform var(--duration-normal) var(--ease-in);
+  }
+
+  .reel__words[data-swap='in'] .reel__swap {
+    animation: reel-rise var(--duration-slower) var(--ease-out) both;
+  }
+
+  .reel__words[data-swap='in'] .reel__swap:nth-child(2) {
+    animation-delay: calc(var(--duration-fast) / 2);
+  }
+
+  .reel__words[data-swap='in'] .reel__swap:nth-child(3) {
+    animation-delay: var(--duration-fast);
+  }
+
+  @keyframes reel-rise {
+    from {
+      opacity: 0;
+      transform: translateY(var(--space-3));
+    }
+  }
+
+  /* ── the pause: first in the tab order, drawn where each layout keeps it ──
+     Wide and Name: at the strip's end, in the column the strip keeps for it
+     (its ::after), so the strip's pool covers it as before. Above the reel's
+     other words, so nothing laid over its place takes its press. */
+  .reel__ctl {
+    position: absolute;
+    right: var(--_gutter);
+    bottom: var(--space-9);
+    z-index: 1;
+  }
+
+  /* ── Corner: the index on the right, the pause atop it ──
+     The pause and the index share one grid cell: the index keeps the pause's
+     room at its top, so its pool covers both, as when the pause sat inside it. */
+  .reel[data-layout='corner'] .reel__inner {
+    display: grid;
+    grid-template: minmax(0, 1fr) auto / minmax(0, 1fr) var(--container-drawer);
+    padding: 0 var(--_gutter) var(--space-20);
+  }
+
+  .reel[data-layout='corner'] .reel__ctl,
+  .reel__index {
+    grid-area: 2 / 2;
+  }
+
+  .reel[data-layout='corner'] .reel__ctl {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    justify-self: end;
+    align-self: start;
+  }
+
+  .reel__index {
+    padding-top: calc(var(--space-9) + var(--space-3-5));
+  }
+
+  .reel__index .reel__item {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--space-9) minmax(0, 1fr) auto;
+    gap: var(--space-2);
+    align-items: baseline;
+    width: 100%;
+    padding: var(--space-3) 0;
+    border: none;
+    border-top: var(--border-width) solid var(--_line);
+    background: none;
+    color: var(--_ink-soft);
+    font-size: var(--text-base);
+    text-align: start;
+    cursor: pointer;
+  }
+
+  .reel__index li:last-child .reel__item {
+    border-bottom: var(--border-width) solid var(--_line);
+  }
+
+  .reel__item[aria-current] {
+    color: var(--_ink);
+  }
+
+  .reel__n,
+  .reel__k {
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .reel__t {
+    font-family: var(--font-heading);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .reel__bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--space-0-5);
+    overflow: hidden;
+  }
+
+  /* A piece's progress: the index's and strip's bars, the phone's segments. */
+  .reel__bar i,
+  .reel__segs li i {
+    display: block;
+    height: 100%;
+    background: var(--_ink);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+
+  [aria-current] > .reel__bar i {
+    transform: scaleX(var(--_progress));
+  }
+
+  .reel__all {
+    display: inline-block;
+    margin-top: var(--space-3-5);
+    font-size: var(--text-sm);
+    color: var(--_ink);
+  }
+
+  /* ── Wide and Name: the strip along the foot ── */
+  .reel__strip {
+    position: absolute;
+    left: var(--_gutter);
+    right: var(--_gutter);
+    bottom: var(--space-9);
+    display: grid;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    gap: var(--space-5);
+    align-items: end;
+  }
+
+  /* The pause's column, the strip's last (the pause is drawn over it). */
+  .reel__strip::after {
+    content: '';
+  }
+
+  .reel__strip .reel__item {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-2-5);
+    align-items: baseline;
+    width: 100%;
+    padding: var(--space-3) 0 0;
+    border: none;
+    background: none;
+    color: var(--_ink-soft);
+    font-size: var(--text-sm);
+    text-align: start;
+    cursor: pointer;
+  }
+
+  .reel__strip .reel__bar {
+    top: 0;
+    bottom: auto;
+    background: var(--_line);
+  }
+
+  .reel[data-layout='wide'] .reel__words {
+    right: var(--_gutter);
+    width: auto;
+    bottom: calc(var(--space-24) + var(--space-4));
+  }
+
+  .reel[data-layout='wide'] .reel__title {
+    font-size: calc(var(--text-display) * 1.6);
+    white-space: nowrap;
+  }
+
+  .reel[data-layout='wide'] .reel__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: var(--space-12);
+  }
+
+  .reel[data-layout='wide'] .reel__line {
+    max-width: 46ch;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  .reel[data-layout='wide'] .reel__acts {
+    margin-top: 0;
+    flex: none;
+  }
+
+  /* ── Name window: the name is the window; the piece beneath ── */
+  .reel__window {
+    position: absolute;
+    left: var(--_gutter);
+    right: var(--_gutter);
+    top: 36%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: var(--font-heading);
+    font-weight: var(--font-normal);
+    font-size: calc(var(--text-display) * 2.8);
+    line-height: var(--leading-none);
+    text-align: center;
+    /* The canvas draws the letters as the film's window; without it (no
+       WebGL2, a lost context, before hydration) the still shows through them. */
+    color: transparent;
+    background-image: var(--_still, none);
+    background-size: cover;
+    background-position: center;
+    background-clip: text;
+    -webkit-background-clip: text;
+  }
+
+  /* With no still to show through, the name is drawn in ink. */
+  .reel__window:not([data-still]) {
+    color: var(--_ink);
+  }
+
+  :global(.org-layout:has(> .shader-hero--fullpage[data-film])) .reel__window {
+    color: transparent;
+    background-image: none;
+  }
+
+  .reel[data-layout='name'] .reel__words {
+    left: var(--_gutter);
+    right: var(--_gutter);
+    width: auto;
+    bottom: calc(var(--space-24) + var(--space-4));
+    text-align: center;
+  }
+
+  .reel[data-layout='name'] .reel__kicker,
+  .reel[data-layout='name'] .reel__acts {
+    justify-content: center;
+  }
+
+  .reel[data-layout='name'] .reel__title {
+    font-size: var(--text-5xl);
+  }
+
+  .reel[data-layout='name'] .reel__title--line {
+    font-size: var(--text-xl);
+  }
+
+  .reel[data-layout='name'] .reel__line {
+    display: none;
+  }
+
+  .reel[data-layout='name'] .reel__acts {
+    margin-top: var(--space-6);
+  }
+
+  /* ── the phone's story segments (hidden on a desktop) ── */
+  .reel__segs {
+    display: none;
+  }
+
+  .reel__segs ol {
+    display: flex;
+    flex: 1;
+    gap: var(--space-1);
+  }
+
+  .reel__segs li {
+    flex: 1;
+    height: var(--space-0-5);
+    border-radius: var(--radius-full);
+    background: var(--_line);
+    overflow: hidden;
+  }
+
+  .reel__segs li[data-done] i {
+    transform: none;
+  }
+
+  .reel__segs li[data-on] i {
+    transform: scaleX(var(--_progress));
+  }
+
+  @media (--below-md) {
+    .reel {
+      --_gutter: var(--space-4);
+    }
+
+    .reel__segs {
+      position: absolute;
+      top: var(--space-3);
+      left: var(--_gutter);
+      right: var(--_gutter);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    /* The pause's place, top right, which the segments' pool covers. */
+    .reel__segs::after {
+      content: '';
+      flex: none;
+      width: var(--space-9);
+      height: var(--space-9);
+    }
+
+    .reel__ctl,
+    .reel[data-layout='corner'] .reel__ctl {
+      position: absolute;
+      top: var(--space-3);
+      right: var(--_gutter);
+      bottom: auto;
+    }
+
+    .reel__top {
+      top: calc(var(--space-12) + var(--space-2));
+    }
+
+    /* The mock's phone: the org, its segments and pause; Follow and the
+       org's action wait for the page below. */
+    .reel__meta {
+      display: none;
+    }
+
+    .reel__index,
+    .reel__strip {
+      display: none;
+    }
+
+    .reel__words,
+    .reel[data-layout='wide'] .reel__words,
+    .reel[data-layout='name'] .reel__words {
+      left: var(--_gutter);
+      right: var(--_gutter);
+      /* Clear of the app's tab bar (`.org-main`'s own bottom padding). */
+      bottom: calc(var(--space-20) + var(--space-2));
+      width: auto;
+    }
+
+    .reel__title {
+      font-size: calc(var(--text-display) * 0.9);
+    }
+
+    .reel__title[data-long] {
+      font-size: calc(var(--text-display) * 0.78);
+    }
+
+    .reel[data-layout='wide'] .reel__title {
+      font-size: calc(var(--text-display) * 1.13);
+      white-space: normal;
+    }
+
+    .reel[data-layout='wide'] .reel__row {
+      display: block;
+    }
+
+    .reel[data-layout='name'] .reel__title {
+      font-size: calc(var(--text-display) * 0.6);
+    }
+
+    .reel__title--line,
+    .reel[data-layout='name'] .reel__title--line {
+      font-size: var(--text-lg);
+    }
+
+    .reel__line {
+      font-size: var(--text-base);
+    }
+
+    .reel__acts {
+      margin-top: var(--space-5);
+    }
+
+    .reel__btn {
+      flex: 1;
+      justify-content: center;
+      font-size: var(--text-base);
+    }
+
+    .reel__window {
+      font-size: calc(var(--text-display) * 3.1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reel__words .reel__swap {
+      animation: none;
+      transition: none;
+    }
+  }
+</style>

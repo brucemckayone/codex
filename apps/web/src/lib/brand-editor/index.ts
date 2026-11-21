@@ -2,6 +2,7 @@
 export { brandEditor } from './brand-editor-store.svelte';
 export type {
   BrandPreviewMessage,
+  BrandPreviewResolved,
   BrandPreviewSender,
 } from './brand-preview-bridge';
 // Brand Editor - Live preview bridge (Codex-cijzb · WP-1.4)
@@ -10,8 +11,10 @@ export type {
 // (not $lib/components/brand-editor) to stay inside the WP-0.2 bundle boundary.
 export {
   BRAND_PREVIEW_MESSAGE_TYPE,
+  BRAND_PREVIEW_RESOLVED_TYPE,
   createBrandPreviewSender,
   initBrandPreviewBridge,
+  reportPreviewResolved,
 } from './brand-preview-bridge';
 // Brand Editor - CSS Injection
 export {
@@ -37,6 +40,7 @@ export {
 export { writeBackLayoutBrandInputs } from './layout-brand-inputs.svelte';
 // Brand Editor - Navigation
 export { LEVELS } from './levels';
+export { answers, previewResolved } from './preview-resolved.svelte';
 
 // Brand Editor - Palette Generator (internal use only; import directly from ./palette-generator)
 

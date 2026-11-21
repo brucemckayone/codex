@@ -12,12 +12,28 @@ import { blendMultiply } from './blend-multiply';
 import { blendScreen } from './blend-screen';
 import { blendSmokeKey } from './blend-smoke-key';
 import type { BlendEffect, Effect, FrameEffect, LayerEffect } from './effect';
+import { frameFilmFill } from './frame-film-fill';
+import { frameFilmName } from './frame-film-name';
 import { frameNameGlows } from './frame-name-glows';
 import { frameShaderOnly } from './frame-shader-only';
 import { frameThroughName } from './frame-through-name';
 import { HEADER } from './header';
 import type { BlendId, FrameId, LayerId } from './ids';
+import { layerChroma } from './layer-chroma';
+import { layerCrt } from './layer-crt';
+import { layerDither } from './layer-dither';
+import { layerDuotone } from './layer-duotone';
+import { layerGlitch } from './layer-glitch';
+import { layerGlow } from './layer-glow';
 import { layerGrain } from './layer-grain';
+import { layerHalftone } from './layer-halftone';
+import { layerInk } from './layer-ink';
+import { layerLeak } from './layer-leak';
+import { layerLiquid } from './layer-liquid';
+import { layerMonotone } from './layer-monotone';
+import { layerMosaic } from './layer-mosaic';
+import { layerReeded } from './layer-reeded';
+import { layerShaderLight } from './layer-shader-light';
 import { declareUniforms, UNIFORMS } from './uniforms';
 
 export const BLENDS: Record<BlendId, BlendEffect> = {
@@ -30,12 +46,28 @@ export const BLENDS: Record<BlendId, BlendEffect> = {
 
 export const LAYERS: Record<LayerId, LayerEffect> = {
   grain: layerGrain,
+  halftone: layerHalftone,
+  crt: layerCrt,
+  chroma: layerChroma,
+  glitch: layerGlitch,
+  leak: layerLeak,
+  duotone: layerDuotone,
+  dither: layerDither,
+  ink: layerInk,
+  glow: layerGlow,
+  mosaic: layerMosaic,
+  liquid: layerLiquid,
+  reeded: layerReeded,
+  monotone: layerMonotone,
+  'shader-light': layerShaderLight,
 };
 
 export const FRAMES: Record<FrameId, FrameEffect> = {
   'shader-only': frameShaderOnly,
   'through-name': frameThroughName,
   'name-glows': frameNameGlows,
+  'film-fill': frameFilmFill,
+  'film-name': frameFilmName,
 };
 
 /** Every effect, for the gate and the tests. */
