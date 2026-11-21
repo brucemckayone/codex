@@ -27,9 +27,11 @@
  * `KIT_SWEEP_STYLES=bold,poster`, `KIT_SWEEP_BRANDS=0,org`,
  * `KIT_SWEEP_THEMES=dark` and `KIT_SWEEP_WIDTHS=390` narrow the run.
  */
+
 import { expect, type Page, test } from '@playwright/test';
 import { PAGE_STYLE_IDS } from '../../src/lib/page-builder/kit/model/ids';
 import { kitAxe } from '../helpers/axe';
+import { orgOrigin } from '../helpers/origin';
 import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 test.skip(!process.env.KIT_SWEEP, 'opt-in: KIT_SWEEP=1 (a development route)');
@@ -89,7 +91,7 @@ for (const style of STYLES)
           for (const theme of THEMES) {
             const at = `${style} brand ${brand} ${theme} ${width}`;
             await page.goto(
-              `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}&brand=${brand}&theme=${theme}&chrome=0`
+              `${orgOrigin('studio-alpha')}/studio/page-kit?style=${style}&brand=${brand}&theme=${theme}&chrome=0`
             );
             await expect(page.locator('.lp .lp-section').first()).toBeVisible({
               timeout: 90_000,

@@ -29,6 +29,8 @@
     maxLabel?: string;
     ariaValueText?: string;
     oninput: (e: Event) => void;
+    /** The value cannot change now (the caller says why, nearby). */
+    disabled?: boolean;
     /** Optional class forwarded to root — composition seam per R13 inverse. */
     class?: string;
   }
@@ -45,6 +47,7 @@
     maxLabel,
     ariaValueText,
     oninput,
+    disabled = false,
     class: className,
   }: Props = $props();
 
@@ -77,6 +80,7 @@
       class="slider-field__slider"
       aria-valuetext={ariaValueText}
       aria-describedby={describedBy}
+      {disabled}
     />
     {#if maxLabel}
       <span id="{id}-max-hint" class="slider-field__hint slider-field__hint--end">{maxLabel}</span>
@@ -132,5 +136,10 @@
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);
+  }
+
+  .slider-field__slider:disabled {
+    cursor: not-allowed;
+    opacity: var(--opacity-60);
   }
 </style>

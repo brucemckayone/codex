@@ -30,7 +30,11 @@
     tokenOverrideText,
   } from '@codex/validation';
   import type { BrandingSettingsResponse } from '@codex/shared-types';
-  import { brandEditor, createBrandPreviewSender } from '$lib/brand-editor';
+  import {
+    brandEditor,
+    createBrandPreviewSender,
+    previewResolved,
+  } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { getBrandingSettings, updateBrandingCommand } from '$lib/remote/branding.remote';
   import { getPublicContent } from '$lib/remote/content.remote';
@@ -202,6 +206,11 @@
   // The seam (register frame + push snapshot) lives in a pure, unit-tested
   // helper so a dropped call can't ship green — see preview-wiring.ts.
   const previewWiring = createPreviewWiring(previewSender);
+  // What the framed landing's hero resolved to (WP-9): the Composition and
+  // Effects controls show a hint where it differs from the choice.
+  const stopResolved = previewSender.onResolved((resolved) => {
+    previewResolved.current = resolved;
+  });
 
   // Push pending on every change. $state.snapshot deep-reads pending, so this
   // $effect re-runs on any nested field change; the sender debounces the post
@@ -215,11 +224,15 @@
   // Register each (re)loaded frame + immediately sync it to current pending, so
   // a route change / reload in the canvas reflects in-progress edits at once.
   function handleFrameLoad(detail: PreviewFrameLoad): void {
+    // A new document reports afresh (only the landing reports at all).
+    previewResolved.current = null;
     previewWiring.registerFrame(detail);
   }
 
   onDestroy(() => {
+    stopResolved();
     previewSender.destroy();
+    previewResolved.current = null;
   });
 
   let saving = $state(false);

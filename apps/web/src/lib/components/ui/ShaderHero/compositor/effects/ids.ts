@@ -21,9 +21,35 @@ export const BLEND_IDS = [
 ] as const;
 export type BlendId = (typeof BLEND_IDS)[number];
 
-/** Passes run over the picture, in order, after the blend. */
-export const LAYER_IDS = ['grain'] as const;
+/**
+ * Passes run over the picture, in order, after the blend. The ids are the
+ * WP-1b lab's, so the owner's saved combos read as they were saved (WP-8).
+ */
+export const LAYER_IDS = [
+  'grain',
+  'halftone',
+  'crt',
+  'chroma',
+  'glitch',
+  'leak',
+  'duotone',
+  'dither',
+  'ink',
+  'glow',
+  'mosaic',
+  'liquid',
+  'reeded',
+  'monotone',
+  'shader-light',
+] as const;
 export type LayerId = (typeof LAYER_IDS)[number];
+
+/**
+ * Layers only the Showreel's surface slot runs (WP-5b), never a brand's
+ * stack: they read the brand shader's picture as `u_second` beside the one
+ * they treat, which only that slot binds.
+ */
+export const SURFACE_ONLY_LAYER_IDS: readonly LayerId[] = ['shader-light'];
 
 /**
  * What the picture is seen through: the last pass, drawn to the canvas. These

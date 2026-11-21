@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { workerUrl } from './helpers/workers';
 
 /**
  * Pricing Page — CANCELLING warning + Reactivate flow E2E (PR 2)
@@ -115,24 +116,37 @@ test.describe
   .serial('Org pricing page — CANCELLING warning + reactivate', () => {
     test.beforeAll(async ({ request }) => {
       try {
-        const res = await request.get('http://localhost:42069/health');
-        if (!res.ok()) test.skip(true, 'Auth worker not running on port 42069');
+        const res = await request.get(`${workerUrl('AUTH')}/health`);
+        if (!res.ok())
+          test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
       } catch {
-        test.skip(true, 'Auth worker not running on port 42069');
+        test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
       }
       try {
-        const res = await request.get('http://localhost:42072/health');
+        const res = await request.get(`${workerUrl('ECOMMERCE')}/health`);
         if (!res.ok())
-          test.skip(true, 'Ecom-api worker not running on port 42072');
+          test.skip(
+            true,
+            `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+          );
       } catch {
-        test.skip(true, 'Ecom-api worker not running on port 42072');
+        test.skip(
+          true,
+          `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+        );
       }
       try {
-        const res = await request.get('http://localhost:42075/health');
+        const res = await request.get(`${workerUrl('ORGANIZATION')}/health`);
         if (!res.ok())
-          test.skip(true, 'Organization-api worker not running on port 42075');
+          test.skip(
+            true,
+            `Organization-api worker not running at ${workerUrl('ORGANIZATION')}`
+          );
       } catch {
-        test.skip(true, 'Organization-api worker not running on port 42075');
+        test.skip(
+          true,
+          `Organization-api worker not running at ${workerUrl('ORGANIZATION')}`
+        );
       }
     });
 

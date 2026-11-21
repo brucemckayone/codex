@@ -61,7 +61,9 @@
     growShades,
     haloAlpha,
     type Ink,
+    inkPole,
     liftStep,
+    MAX_SCRIM_ALPHA,
     type Need,
     outlineAlpha,
     over,
@@ -77,6 +79,7 @@
     veilPole,
   } from '$lib/org-hero/showreel/reel-scrim';
   import { type ReelWords, reelWords } from '$lib/org-hero/showreel/reel-words';
+  import { logger } from '$lib/observability';
   import { themeState } from '$lib/theme.svelte';
   import * as m from '$paraglide/messages';
   import ReelStage from './ReelStage.svelte';
@@ -161,13 +164,15 @@
   /** How the words keep their contrast over the film (owner, 2026-11-20). */
   const edge = $derived(options['reel-edge']);
   /**
-   * The shades the server draws, until the fit has measured a word. 'shadow'
-   * paints the cap, the most the fit may grow them to, so every word passes
-   * from the first paint and never shows an outline (owner, 2026-11-21); the
-   * fit then eases them back. 'outline' paints them as drawn: its rings carry
-   * the words at the `--_pool` fallback. Strength only: nothing moves.
+   * The shades the server draws, until the fit has measured a word: the cap,
+   * the most the fit may grow them to, in both edges, with every word in the
+   * pole ink (`--_pole-ink`), so every word passes from the first paint and
+   * 'shadow' never shows an outline (owner, 2026-11-21). The fit then eases
+   * them back: to what each word needs in 'shadow', to as drawn in 'outline'
+   * (drawn, its first paint left the grey-140 ground's index 4.43:1).
+   * Strength only: nothing moves.
    */
-  const firstShades = $derived(shadeProps(edge === 'shadow' ? SHADES_CAP : SHADES));
+  const firstShades = shadeProps(SHADES_CAP);
   const mode = $derived(
     reelMode({ reducedMotion: reducedMotion.current, saveData, loop: options['reel-loop'] === 'on' })
   );
@@ -291,7 +296,11 @@
   $effect(() => {
     clock.hold('away', !onScreen);
   });
-  const playing = $derived(mode === 'footage' && !clock.paused && !pressed && pageVisible && onScreen);
+  // The footage stops while a film plays over it (the hero's, or the phone's
+  // pop-up): a page never decodes two films at once (2026-11-21).
+  const playing = $derived(
+    mode === 'footage' && !clock.paused && !filmPlaying && !pressed && pageVisible && onScreen
+  );
 
   // ── motion (WP-6): the hero's four motion settings, in the window's shader ──
   // The logic is the hook's (`reel-motion.svelte.ts`). The stage shows the
@@ -494,9 +503,33 @@
    * whole line box), so the hand-over to the page is as long and soft as the
    * layout allows.
    */
-  function fitScrims(root: HTMLElement) {
+  function fitScrims(root: HTMLElement): boolean {
     const ground = rgba(getComputedStyle(root).getPropertyValue('--color-background'));
-    if (!ground) return;
+    if (!ground) return false;
+    // An earlier fit's lifts and own poles come off FIRST, before any colour
+    // is read, so every colour is the brand's as it set it. Read after them,
+    // the last fit's lift counted as the brand's colour and each fit drew a
+    // new tint, creeping toward black (review, 2026-11-21).
+    for (const node of root.querySelectorAll<HTMLElement>('[data-lifted], [data-own-pole]')) {
+      node.style.removeProperty('color');
+      node.style.removeProperty('--_ring-tint');
+      node.style.removeProperty('--_halo');
+      node.style.removeProperty('--_ring2');
+      node.style.removeProperty('--_soft');
+      delete node.dataset.lifted;
+      delete node.dataset.ownPole;
+    }
+    // The first paint's pole ink (until `data-fit`) stands aside while the
+    // fit reads the brand's colours: within this task, so never painted.
+    root.dataset.fitting = '';
+    try {
+      solveScrims(root, ground.rgb);
+    } finally {
+      delete root.dataset.fitting;
+    }
+    return true;
+  }
+  function solveScrims(root: HTMLElement, ground: Rgb) {
     const box = root.getBoundingClientRect();
     const laid = [...root.querySelectorAll<HTMLElement>(SCRIMMED)]
       .map((el) => ({ el, r: el.getBoundingClientRect() }))
@@ -511,15 +544,14 @@
       bar && bar.height > 1 ? bar.bottom - box.top : 0,
       ...laid.filter(({ el }) => inHeader(el)).map(({ r }) => r.bottom - box.top)
     );
-    const topInks: { ink: Ink; ratio: number }[] = [];
-    const footInks: { ink: Ink; ratio: number }[] = [];
+    const allInks: { ink: Ink; ratio: number }[] = [];
     let top = 0;
     let foot = 0;
     let gap = box.height;
     for (const { el, r } of laid) {
       const header = inHeader(el) || r.bottom - box.top <= headerFoot;
       const ink = rgba(getComputedStyle(el).color);
-      if (ink) (header ? topInks : footInks).push({ ink, ratio: ratioOf(el) });
+      if (ink) allInks.push({ ink, ratio: ratioOf(el) });
       if (header) top = Math.max(top, r.bottom - box.top);
       else {
         foot = Math.max(foot, box.bottom - r.top);
@@ -529,12 +561,9 @@
     // Whole channels, as CSS will paint them: the alpha is solved for these.
     // `scrimTint` passes over a brand colour no scrim of the pole can carry
     // (OBB's red): it is lifted or outlined in its own pole below.
-    const [r, g, b] = scrimTint(ground.rgb, [...topInks, ...footInks]);
+    const [r, g, b] = scrimTint(ground, allInks);
     const tint: Rgb = [Math.round(r), Math.round(g), Math.round(b)];
-    // The most any ink needs: what a word not yet fitted holds meanwhile.
-    const pool = scrimAlpha([...topInks, ...footInks], tint) ?? 1;
     root.style.setProperty('--_scrim', `rgb(${tint.join(' ')})`);
-    root.style.setProperty('--_pool', String(pool));
     // Each scrimmed thing's own need (`scrimAlpha` for its COMPUTED ink, with
     // FLOOR_MARGIN; a brand colour is solved as it is, never as an assumed
     // white or dark), over its box. Null: no scrim of the tint can carry it.
@@ -544,60 +573,60 @@
       right: (r.right - box.left) / box.width,
       bottom: (r.bottom - box.top) / box.height,
     });
-    // An earlier fit's lifts and own poles come off first, so every colour is
-    // read as the brand set it.
-    for (const node of root.querySelectorAll<HTMLElement>('[data-lifted], [data-own-pole]')) {
-      node.style.removeProperty('color');
-      node.style.removeProperty('--_ring-tint');
-      node.style.removeProperty('--_halo');
-      node.style.removeProperty('--_ring2');
-      node.style.removeProperty('--_soft');
-      delete node.dataset.lifted;
-      delete node.dataset.ownPole;
-    }
-    // In 'shadow', a brand colour no shade can carry where its word sits
-    // (OBB's red on its own dark: 3.75:1 at best) is lifted toward the reel's
-    // ink, a twentieth at a time, just far enough, over the footage only
-    // (owner, 2026-11-20). Each group of words glows softly in the brand's
-    // dark at its strongest word's need, the glow laying its share
-    // (GLOW_SHARE, from the 1 px ring probe), and the corner shades grow only
-    // as far as each word still needs past it. 'outline': the shades as
-    // drawn, and an outline. A control's own fill carries its label.
-    const reelInk = rgba(getComputedStyle(root).color)?.rgb;
+    // A colour that cannot keep its floor where it sits is lifted toward the
+    // ink that stands furthest from the veil (`inkPole`: white over a dark
+    // one), a twentieth at a time, just far enough, over the footage only
+    // (owner, 2026-11-20); never toward the reel's own ink, which a creator
+    // may set to that very colour (review, 2026-11-21). What it must pass:
+    // in 'shadow', a shade must carry it; a control's own fill carries any
+    // colour a scrim of the tint carries by MAX_SCRIM_ALPHA; in 'outline', a
+    // word no scrim carries keeps its colour inside a ring of its own pole,
+    // so it needs only a ring that can. Each group of words glows softly in the brand's dark at its
+    // strongest word's need (GLOW_SHARE, from the 1 px ring probe), and the
+    // corner shades grow only as far as each word still needs past it.
+    const pole = inkPole(tint);
     const carried = (ink: Ink, ratio: number) => {
       const need = scrimAlpha([{ ink, ratio }], tint);
       return need !== null && glowLeaves(need, need) <= SHADE_PEAK_MAX;
     };
+    const solvable = (ink: Ink, ratio: number) => scrimAlpha([{ ink, ratio }], tint) !== null;
+    // A control's fill may cover the film as far as any scrim may.
+    const filled = (ink: Ink, ratio: number) => {
+      const need = scrimAlpha([{ ink, ratio }], tint);
+      return need !== null && need <= MAX_SCRIM_ALPHA;
+    };
+    const ringed = (ink: Ink, ratio: number, under: number) =>
+      solvable(ink, ratio) || outlineAlpha({ ink, ratio }, under, tint, veilPole([{ ink, ratio }])) !== null;
     const roles = laid.flatMap(({ el, r }) => {
       // Its own ink and any child's in another (the kicker's number), so the
       // strictest of them is solved.
       const ratio = ratioOf(el);
       const fill = el.matches(FILLED);
+      const at = span(r);
+      const drawn = shadeFloor(at, SHADES);
+      const fits = (ink: Ink) =>
+        fill ? filled(ink, ratio) : edge === 'shadow' ? carried(ink, ratio) : ringed(ink, ratio, drawn);
       const nodes = [el, ...el.querySelectorAll<HTMLElement>('*')].flatMap((node) => {
         const ink = rgba(getComputedStyle(node).color);
         return ink ? [{ node, ink }] : [];
       });
       if (nodes.length === 0) return [];
-      // The coloured nodes a shade cannot carry as they are: the ones a lift
-      // moves, from the least step that carries each anywhere.
-      const lifted = nodes.filter(
-        ({ ink }) => edge === 'shadow' && !fill && reelInk !== undefined && !carried(ink, ratio)
-      );
+      // The nodes that cannot pass as they are: the ones a lift moves, from
+      // the least step that passes each, or the pole itself.
+      const lifted = nodes.filter(({ ink }) => !fits(ink));
       let step = 0;
-      for (const { ink } of lifted) {
-        if (reelInk) step = Math.max(step, liftStep(ink, reelInk, (l) => carried(l, ratio)));
-      }
-      return [{ el, span: span(r), ratio, fill, nodes, lifted, step }];
+      for (const { ink } of lifted) step = Math.max(step, liftStep(ink, pole, fits) ?? 20);
+      return [{ el, span: at, ratio, fill, nodes, lifted, step }];
     });
-    const inksOf = (role: (typeof roles)[number]) =>
+    type Role = (typeof roles)[number];
+    const inksOf = (role: Role) =>
       role.nodes.map(({ ink }) => ({
-        ink:
-          reelInk && role.lifted.some((l) => l.ink === ink)
-            ? { rgb: over(reelInk, role.step / 20, ink.rgb), alpha: ink.alpha }
-            : ink,
+        ink: role.lifted.some((l) => l.ink === ink)
+          ? { rgb: over(pole, role.step / 20, ink.rgb), alpha: ink.alpha }
+          : ink,
         ratio: role.ratio,
       }));
-    const needOf = (role: (typeof roles)[number]) => scrimAlpha(inksOf(role), tint);
+    const needOf = (role: Role) => scrimAlpha(inksOf(role), tint);
     const groupOf = (el: HTMLElement) => el.closest<HTMLElement>(GROUPED) ?? el;
     let shades: readonly Shade[] = SHADES;
     const glows = new Map<HTMLElement, number>();
@@ -610,7 +639,7 @@
         glows.set(group, Math.max(glows.get(group) ?? 0, need));
       }
       if (edge === 'outline') break;
-      const asked = new Map<Need, (typeof roles)[number]>();
+      const asked = new Map<Need, Role>();
       for (const role of roles) {
         const need = needOf(role);
         if (role.fill || need === null) continue;
@@ -627,11 +656,33 @@
       if (further.length === 0) break;
       for (const role of further) role.step += 1;
     }
+    // Checked, never assumed: every role must now have a solved need (or, in
+    // 'outline', a ring of its own pole that carries it). One that does not
+    // wears the pole outright; one the pole cannot rescue either is reported,
+    // and drawn solid.
+    const solved = (role: Role) => {
+      if (needOf(role) !== null) return true;
+      if (role.fill || edge === 'shadow') return false;
+      const under = shadeFloor(role.span, shades);
+      const inks = inksOf(role);
+      const own = veilPole(inks);
+      return inks.every((ink) => outlineAlpha(ink, under, tint, own) !== null);
+    };
+    for (const role of roles) {
+      if (solved(role)) continue;
+      role.lifted = role.nodes;
+      role.step = 20;
+      if (!solved(role)) {
+        logger.warn('Showreel: an ink no scrim of the tint carries, drawn solid', {
+          tint: tint.join(' '),
+          role: role.el.className,
+        });
+      }
+    }
     drawShades(root, shades);
     for (const role of roles) {
-      if (!reelInk || role.lifted.length === 0) continue;
       for (const { node, ink } of role.lifted) {
-        const [lr, lg, lb] = over(reelInk, role.step / 20, ink.rgb).map(Math.round);
+        const [lr, lg, lb] = over(pole, role.step / 20, ink.rgb).map(Math.round);
         node.style.setProperty('color', `rgb(${lr} ${lg} ${lb} / ${ink.alpha})`, 'important');
         node.dataset.lifted = '';
       }
@@ -641,11 +692,13 @@
     // block; a word no scrim of the tint can carry (red on a dark brand)
     // keeps its colour and is outlined in its own pole instead.
     const groups = new Map<HTMLElement, number>();
+    let pool = 0;
     for (const role of roles) {
       const { el, span: at, fill } = role;
       const inks = inksOf(role);
       const need = needOf(role);
       const under = shadeFloor(at, shades);
+      if (need !== null) pool = Math.max(pool, need);
       if (fill) {
         el.style.setProperty('--_halo', String(haloAlpha(need ?? 1, under)));
         continue;
@@ -666,6 +719,9 @@
       const group = groupOf(el);
       groups.set(group, Math.max(groups.get(group) ?? 0, haloAlpha(need, under)));
     }
+    // The most any word needs, after its lift: what a word not yet fitted
+    // holds meanwhile. Never a solid scrim taken for a colour the lift rescued.
+    root.style.setProperty('--_pool', String(pool));
     for (const [group, halo] of groups) group.style.setProperty('--_halo', String(halo));
     for (const [group, glow] of glows) group.style.setProperty('--_glow', String(glow));
     // The ring from the brand's focus colour as the page has it (the
@@ -702,8 +758,7 @@
       frame = requestAnimationFrame(() => {
         frame = 0;
         if (!live) return;
-        fitScrims(root);
-        if (fontsIn) root.dataset.fit = '';
+        if (fitScrims(root) && fontsIn) root.dataset.fit = '';
       });
     };
     void tick().then(fit);
@@ -944,6 +999,13 @@
         calc(var(--_light) * 100%),
       var(--color-player-text-secondary)
     );
+    /* The ink that stands furthest from the veil: white over a dark brand's,
+       black over a light one's. Every word wears it until the fit has solved
+       the brand's own colours over this film (`data-fit`), and with no script
+       at all, so the first paint is never weaker than the fitted one: no
+       brand colour and no soft ink before the fit has carried them (review
+       M3, 2026-11-21). */
+    --_pole-ink: color-mix(in srgb, black calc(var(--_light) * 100%), white);
     /* Until fitScrims has measured: the brand's ground (a deep shade of it
        under white ink), held over the header and the foot's lower two thirds. */
     --_scrim: color-mix(
@@ -968,6 +1030,12 @@
     overflow: hidden;
     color: var(--_ink);
     touch-action: pan-y;
+  }
+
+  /* The first paint (see `--_pole-ink`): set aside only while a fit reads
+     the brand's colours (`data-fitting`, within one task, never painted). */
+  .reel:not([data-fit]):not([data-fitting]) :is([data-ink], [data-ink] *, .reel__ghost, .reel__round) {
+    color: var(--_pole-ink) !important;
   }
 
   .reel :global(p),

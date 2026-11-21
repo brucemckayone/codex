@@ -29,6 +29,11 @@
  * + helpers already shipped to the public chunk; it adds no heavy editor code.
  */
 import { browser } from '$app/environment';
+import type {
+  HeroContentKind,
+  HeroOptions,
+  HeroSettings,
+} from '$lib/org-hero/hero-config';
 import { brandEditor } from './brand-editor-store.svelte';
 import type { BrandEditorState } from './types';
 
@@ -63,6 +68,64 @@ function isBrandPreviewMessage(data: unknown): data is BrandPreviewMessage {
   );
 }
 
+/** Versioned type of the frame's report back to the studio (WP-9). */
+export const BRAND_PREVIEW_RESOLVED_TYPE = 'codex:brand-preview-resolved:v1';
+
+/**
+ * What the framed landing's hero resolved to: the options it draws once the
+ * org's facts have had their say (a Showreel with no featured pieces draws no
+ * peek), and the kind of content its words name. The brand editor shows a
+ * hint where these differ from the choice, and names the purposes in the
+ * org's own kind ("Get people listening").
+ *
+ * `chosen` is what it resolved FROM (the purpose and the stored options), so
+ * the editor can tell a report on its current choices from one still on its
+ * way back after an edit, and hints only on the first.
+ */
+export interface BrandPreviewResolved {
+  readonly options: HeroOptions;
+  readonly kind: HeroContentKind;
+  readonly chosen: HeroSettings;
+}
+
+/**
+ * Iframe → parent report message. `resolved: null` withdraws the last one:
+ * the landing has gone (the preview navigated) or draws no new hero.
+ */
+export interface BrandPreviewResolvedMessage {
+  readonly type: typeof BRAND_PREVIEW_RESOLVED_TYPE;
+  readonly resolved: BrandPreviewResolved | null;
+}
+
+const CONTENT_KINDS: readonly string[] = ['watch', 'listen', 'read'];
+
+/** Shallow tag-and-shape check, as for the preview message. */
+function isResolvedMessage(data: unknown): data is BrandPreviewResolvedMessage {
+  if (typeof data !== 'object' || data === null) return false;
+  const msg = data as { type?: unknown; resolved?: unknown };
+  if (msg.type !== BRAND_PREVIEW_RESOLVED_TYPE) return false;
+  if (msg.resolved === null) return true;
+  const resolved = msg.resolved as {
+    options?: unknown;
+    kind?: unknown;
+    chosen?: { purpose?: unknown; options?: unknown } | null;
+  };
+  return (
+    typeof resolved === 'object' &&
+    resolved !== null &&
+    typeof resolved.options === 'object' &&
+    resolved.options !== null &&
+    typeof resolved.kind === 'string' &&
+    CONTENT_KINDS.includes(resolved.kind) &&
+    typeof resolved.chosen === 'object' &&
+    resolved.chosen !== null &&
+    (resolved.chosen.purpose === null ||
+      typeof resolved.chosen.purpose === 'string') &&
+    typeof resolved.chosen.options === 'object' &&
+    resolved.chosen.options !== null
+  );
+}
+
 // ── Parent side: sender ─────────────────────────────────────────────────────
 
 export interface BrandPreviewSender {
@@ -74,7 +137,16 @@ export interface BrandPreviewSender {
   register(element: HTMLIFrameElement, targetOrigin: string): void;
   /** Debounced broadcast of the latest pending state to every tracked frame. */
   send(vars: BrandEditorState): void;
-  /** Stop the debounce timer and forget all tracked frames. */
+  /**
+   * Hear each tracked frame's report of what its hero resolved to, or null
+   * when it withdraws one. Accepted only from a tracked frame's own window,
+   * at the origin it was registered with, carrying the versioned report
+   * type. Returns a teardown.
+   */
+  onResolved(
+    listener: (resolved: BrandPreviewResolved | null) => void
+  ): () => void;
+  /** Stop the debounce timer, forget all tracked frames, drop listeners. */
   destroy(): void;
 }
 
@@ -84,6 +156,8 @@ export interface BrandPreviewSenderOptions {
    * ~50ms ≈ one animation frame.
    */
   readonly debounceMs?: number;
+  /** The studio window reports arrive at. Injectable for tests. */
+  readonly target?: Pick<Window, 'addEventListener' | 'removeEventListener'>;
 }
 
 /**
@@ -96,7 +170,9 @@ export function createBrandPreviewSender(
   options: BrandPreviewSenderOptions = {}
 ): BrandPreviewSender {
   const debounceMs = options.debounceMs ?? 50;
+  const target = options.target ?? (browser ? globalThis.window : undefined);
   const frames = new Map<HTMLIFrameElement, string>();
+  const teardowns = new Set<() => void>();
   let latest: BrandEditorState | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -155,10 +231,30 @@ export function createBrandPreviewSender(
         if (latest) broadcast(latest);
       }, debounceMs);
     },
+    onResolved(listener) {
+      if (!target) return () => {};
+      function onMessage(event: MessageEvent): void {
+        if (!isResolvedMessage(event.data)) return;
+        for (const [element, origin] of frames) {
+          if (event.source !== element.contentWindow) continue;
+          if (event.origin !== origin) return; // our frame, wrong origin
+          listener(event.data.resolved);
+          return;
+        }
+      }
+      target.addEventListener('message', onMessage);
+      const teardown = () => {
+        target.removeEventListener('message', onMessage);
+        teardowns.delete(teardown);
+      };
+      teardowns.add(teardown);
+      return teardown;
+    },
     destroy() {
       clearTimer();
       frames.clear();
       latest = null;
+      for (const teardown of [...teardowns]) teardown();
     },
   };
 }
@@ -176,8 +272,9 @@ export function createBrandPreviewSender(
  * from the direct parent frame (the studio document), it is same-origin as this
  * document, and it carries the versioned preview type. Anything else is ignored.
  * An accepted message drives the store's pending state (see module header) — no
- * reload. The applier NEVER posts a message, so it cannot bounce an echo back to
- * the sender.
+ * reload. The applier never posts a message, so it cannot bounce an echo back
+ * to the sender; the one message a framed page sends is its hero's report
+ * (`reportPreviewResolved`), a different type the sender never re-broadcasts.
  *
  * @param target Window to bind to; defaults to the ambient window. Injectable for tests.
  * @returns teardown that removes the listener (no-op when not embedded).
@@ -202,4 +299,43 @@ export function initBrandPreviewBridge(
 
   target.addEventListener('message', onMessage);
   return () => target.removeEventListener('message', onMessage);
+}
+
+/** The last report each window posted, so a repeat is not sent again. */
+const reported = new WeakMap<Window, string>();
+
+/**
+ * From a framed landing, tell the studio what its hero resolved to (WP-9).
+ *
+ * INERT unless this page is the studio's live preview: embedded, and showing
+ * pending edits (the applier has opened the store). It posts only to the
+ * direct parent, at this document's own origin (never `'*'`), so a page
+ * embedded anywhere else reaches no one. Repeats of the same report are
+ * dropped: the hero re-resolves on every edit. Null withdraws the last
+ * report, as the landing leaves (a link followed inside the preview).
+ *
+ * @param target Window to post from; defaults to the ambient window. Injectable for tests.
+ */
+export function reportPreviewResolved(
+  resolved: BrandPreviewResolved | null,
+  target: Window = globalThis.window
+): void {
+  if (!browser || !target || target.parent === target) return;
+  if (!brandEditor.isOpen) return;
+  // Plain copies: a reactive proxy does not survive postMessage's clone.
+  const message: BrandPreviewResolvedMessage = {
+    type: BRAND_PREVIEW_RESOLVED_TYPE,
+    resolved: resolved && {
+      options: { ...resolved.options },
+      kind: resolved.kind,
+      chosen: {
+        purpose: resolved.chosen.purpose,
+        options: { ...resolved.chosen.options },
+      },
+    },
+  };
+  const key = JSON.stringify(message.resolved);
+  if (reported.get(target) === key) return;
+  reported.set(target, key);
+  target.parent.postMessage(message, target.location.origin);
 }

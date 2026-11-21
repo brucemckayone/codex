@@ -9,7 +9,8 @@
  *
  * Measured on the org's own path (no carrier, no DB write): studio-alpha
  * carries the seeded 'glow' preset — cut since, so it paints as its survivor
- * 'ether' (`CUT_PRESET_ALIASES`) — of-blood-and-bones none. The words are
+ * 'ether' (`CUT_PRESET_ALIASES`) — of-blood-and-bones whatever its page data
+ * stores (none on the seed; the owner's real brand on a dev stack). The words are
  * held to their floors on the proven veil (`--_atmos-floor`) over the two
  * worst backdrops (pure black and pure white bound every shader frame, 03
  * §5.1), from the section's live tokens: its ground, the veil's strength and
@@ -242,8 +243,31 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
+/** The brand's stored overrides in the page's data: a JSON string, or null. */
+const PAYLOAD = /brandFineTune:\{tokenOverrides:("(?:[^"\\]|\\.)*"|null)/;
+
+/**
+ * The org's stored shader preset, read from the page's own data: 'none' when
+ * it stores none. Read, not assumed: the seed gives of-blood-and-bones no
+ * shader, and the owner's real brand on a dev stack gives it one.
+ */
+function storedPreset(html: string): string {
+  const match = PAYLOAD.exec(html);
+  if (!match) {
+    expect(
+      html.includes('brandFineTune:null'),
+      'the page data carries no brandFineTune the spec can read'
+    ).toBe(true);
+    return 'none';
+  }
+  if (match[1] === 'null') return 'none';
+  const overrides: Record<string, unknown> = JSON.parse(JSON.parse(match[1]));
+  const preset = overrides['shader-preset'];
+  return typeof preset === 'string' ? preset : 'none';
+}
+
 for (const theme of ['light', 'dark'] as const) {
-  test(`of-blood-and-bones (no shader) ${theme}: its pages keep their Style's schemes`, async ({
+  test(`of-blood-and-bones (its own stored preset) ${theme}: the shader draws exactly when it stores one, and with none its pages keep their Style's schemes`, async ({
     browser,
     baseURL,
   }) => {
@@ -254,10 +278,12 @@ for (const theme of ['light', 'dark'] as const) {
       'ancestral-threads',
       theme
     );
+    const preset = storedPreset(await page.content());
     const read = await page.evaluate(readAtmosphere);
     await page.context().close();
-    const detail = JSON.stringify(read);
-    expect(read.shaderActive, detail).toBe(false);
+    const detail = `preset ${preset}: ${JSON.stringify(read)}`;
+    expect(read.shaderActive, detail).toBe(preset !== 'none');
+    if (preset !== 'none') return;
     expect(read.atmosphere, detail).toEqual([]);
     expect(read.atmosphereAttr, detail).toBeNull();
   });

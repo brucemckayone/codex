@@ -314,8 +314,9 @@ export function resolveHero(
   facts: HeroFacts
 ): HeroOptions {
   // A chosen Showreel with nothing to play is set aside, so the purpose's own
-  // hero draws: what an org saw before the Showreel existed. This is the
-  // Showreel's only fallback; applyFallbacks has none.
+  // hero draws: what an org saw before the Showreel existed. This is the only
+  // place a Showreel gives way: applyFallbacks never changes a composition to
+  // or from one.
   const { comp, ...rest } = options;
   const chosen = comp === 'showreel' && !facts.hasReel ? rest : options;
   return applyFallbacks(
@@ -352,21 +353,39 @@ function pictureFor(
 
 /**
  * Whatever the org can't support falls back to the nearest thing it can, so
- * no combination draws an empty frame or a dead button.
+ * no combination draws an empty frame or a dead button. The steps run in this
+ * order, each on what the ones before it settled.
  */
 function applyFallbacks(input: HeroOptions, facts: HeroFacts): HeroOptions {
   const c = { ...input };
-  // A Showreel reaching here has a reel: the consume default asks for one,
-  // and resolveHero sets aside a chosen Showreel without one, so the
-  // purpose's own hero draws instead.
-  if (c.comp === 'showreel') {
-    // The reel plays in the brand shader's ground, or on a plain one when the
-    // org has no shader (owner, 2026-11-19). It takes the spotlight's place:
-    // no spotlight, and no shelf repeating the pieces its index lists.
-    c.bg = facts.hasShader ? 'shader' : 'plain';
-    c.spot = 'none';
-    if (c.proof === 'shelf') c.proof = 'facts';
-  }
+  showreelFallbacks(c, facts);
+  groundFallbacks(c, facts);
+  frameFallbacks(c, facts);
+  wordFallbacks(c, facts);
+  leadFallbacks(c, facts);
+  reelFallbacks(c, facts);
+  if (!HERO_ALIGN_ALLOWED[c.comp].includes(c.align))
+    c.align = HERO_ALIGN_ALLOWED[c.comp][0];
+  return c;
+}
+
+/**
+ * A Showreel reaching here has a reel: the consume default asks for one, and
+ * resolveHero sets aside a chosen Showreel without one, so the purpose's own
+ * hero draws instead. The reel plays in the brand shader's ground, or on a
+ * plain one when the org has no shader (owner, 2026-11-19). It takes the
+ * spotlight's place: no spotlight, and no shelf repeating the pieces its index
+ * lists.
+ */
+function showreelFallbacks(c: HeroOptions, facts: HeroFacts): void {
+  if (c.comp !== 'showreel') return;
+  c.bg = facts.hasShader ? 'shader' : 'plain';
+  c.spot = 'none';
+  if (c.proof === 'shelf') c.proof = 'facts';
+}
+
+/** The ground behind the words, and the reel's parts the shader draws. */
+function groundFallbacks(c: HeroOptions, facts: HeroFacts): void {
   // the shader surface and the shader band are drawn by the shader
   if (!facts.hasShader) {
     if (c['reel-surface'] === 'shader') c['reel-surface'] = 'none';
@@ -375,25 +394,51 @@ function applyFallbacks(input: HeroOptions, facts: HeroFacts): HeroOptions {
   if (c.bg === 'shader' && !facts.hasShader) c.bg = 'gradient';
   if (c.bg === 'film' && !facts.hasFilmLoop)
     c.bg = facts.hasShader ? 'shader' : 'gradient';
-  // The composition first (what can this org fill?), then which piece fills it:
-  // the other order handed a bare org a spotlight on a piece it doesn't have.
-  const anyPiece = facts.hasFeatured || facts.hasLatest;
+}
+
+function hasAnyPiece(facts: HeroFacts): boolean {
+  return facts.hasFeatured || facts.hasLatest;
+}
+
+/**
+ * The composition first (what can this org fill?), then which piece fills it:
+ * the other order handed a bare org a spotlight on a piece it doesn't have.
+ * Statement and Centre draw no piece, so they have no step of their own.
+ */
+function frameFallbacks(c: HeroOptions, facts: HeroFacts): void {
   if (c.spot === 'film' && !facts.hasFilmLoop) c.spot = 'none';
-  // A billboard or a panel draws ONE piece's picture: check the piece the spot
-  // lands on, not whichever piece happens to have one.
-  if (
-    (c.comp === 'billboard' || c.comp === 'split') &&
-    !pictureFor(spotPiece(c.spot, facts), facts)
-  ) {
-    c.comp = anyPiece ? 'showcase' : 'statement';
-  }
-  if (c.comp === 'showcase' && !anyPiece && c.spot !== 'film')
+  if (c.comp === 'billboard' || c.comp === 'split') pictureFallbacks(c, facts);
+  if (c.comp === 'showcase') showcaseFallbacks(c, facts);
+  spotFallbacks(c, facts);
+}
+
+/**
+ * A billboard or a panel (Split) draws ONE piece's picture: check the piece
+ * the spot lands on, not whichever piece happens to have one.
+ */
+function pictureFallbacks(c: HeroOptions, facts: HeroFacts): void {
+  if (!pictureFor(spotPiece(c.spot, facts), facts))
+    c.comp = hasAnyPiece(facts) ? 'showcase' : 'statement';
+}
+
+/**
+ * A Showcase frame holds a piece or the film; with neither it is a Statement.
+ * Holding the film, the film fills the frame, so it never also loops behind
+ * the words.
+ */
+function showcaseFallbacks(c: HeroOptions, facts: HeroFacts): void {
+  if (!hasAnyPiece(facts) && c.spot !== 'film') {
     c.comp = 'statement';
+    return;
+  }
+  if (c.bg === 'film' && c.spot === 'film')
+    c.bg = facts.hasShader ? 'shader' : 'gradient';
+}
+
+/** The piece the spot lands on, once the composition is settled. */
+function spotFallbacks(c: HeroOptions, facts: HeroFacts): void {
   // only a Showcase frame can hold the film; a panel or billboard wants a picture
   if (c.spot === 'film' && c.comp !== 'showcase') c.spot = 'none';
-  // the film fills the frame, so it never also loops behind the words
-  if (c.bg === 'film' && c.comp === 'showcase' && c.spot === 'film')
-    c.bg = facts.hasShader ? 'shader' : 'gradient';
   if (c.spot === 'featured' && !facts.hasFeatured)
     c.spot = facts.hasLatest ? 'latest' : 'none';
   if (c.spot === 'latest' && !facts.hasLatest)
@@ -405,17 +450,32 @@ function applyFallbacks(input: HeroOptions, facts: HeroFacts): HeroOptions {
   ) {
     c.spot = facts.hasFeatured ? 'featured' : 'latest';
   }
+}
+
+/** The call to action, the small print and the line need something to show. */
+function wordFallbacks(c: HeroOptions, facts: HeroFacts): void {
   if (c.main === 'film' && !facts.hasFilm) c.main = 'explore';
   if (c.main === 'join' && !facts.canJoin) c.main = 'explore';
   if (c.proof === 'facts' && !facts.hasFacts) c.proof = 'none';
   if (c.proof === 'shelf' && !facts.hasLatest) c.proof = 'none';
   if (c.line === 'desc' && !facts.hasDescription) c.line = 'none';
-  // the classic hero's "hide the name" switch: the logo leads alone, and the
-  // name stays in the page for screen readers
+}
+
+/**
+ * The classic hero's "hide the name" switch: the logo leads alone, and the
+ * name stays in the page for screen readers. With no logo, the name leads.
+ */
+function leadFallbacks(c: HeroOptions, facts: HeroFacts): void {
   if (facts.hideTitle) c.lead = 'logo';
   if (c.lead !== 'name' && !facts.hasLogo) c.lead = 'name';
-  // With the logo leading alone the name is out of sight, so the reel never
-  // plays through it: no name window, no opening or way into the film by it.
+}
+
+/**
+ * The reel's own keys, once the lead is settled. With the logo leading alone
+ * the name is out of sight, so the reel never plays through it: no name
+ * window, no opening or way into the film by it.
+ */
+function reelFallbacks(c: HeroOptions, facts: HeroFacts): void {
   if (c.lead === 'logo') {
     if (c['reel-layout'] === 'name') c['reel-layout'] = 'corner';
     if (c['reel-opening'] === 'name') c['reel-opening'] = 'none';
@@ -423,9 +483,6 @@ function applyFallbacks(input: HeroOptions, facts: HeroFacts): HeroOptions {
   }
   // the peek lifts the featured row, so it needs one
   if (c['reel-peek'] === 'on' && !facts.hasFeatured) c['reel-peek'] = 'off';
-  if (!HERO_ALIGN_ALLOWED[c.comp].includes(c.align))
-    c.align = HERO_ALIGN_ALLOWED[c.comp][0];
-  return c;
 }
 
 /**

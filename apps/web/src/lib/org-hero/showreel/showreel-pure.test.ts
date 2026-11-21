@@ -24,6 +24,7 @@ import {
   HEADER_SHADE,
   haloAlpha,
   type Ink,
+  inkPole,
   liftInk,
   liftStep,
   MAX_SCRIM_ALPHA,
@@ -507,11 +508,24 @@ describe('reel-scrim: the focus ring over film', () => {
     );
   });
 
-  it('falls back to the ink when no mix holds', () => {
+  it('mixes toward the pole when no mix toward the ink holds, and checks what it returns', () => {
     // A near-grey ring and a grey ink on a solid grey scrim: no mix of the
-    // two reaches 3:1, so the ring takes the ink, never the failing colour.
+    // two reaches 3:1. The ink itself fails too, so it is never the answer
+    // (it was, unchecked, until 2026-11-21): the ring turns toward the pole.
     const grey: Rgb = [128, 128, 128];
-    expect(focusInk([140, 140, 140], grey, grey, 1)).toEqual(grey);
+    const ring = focusInk([140, 140, 140], grey, grey, 1);
+    expect(ring).not.toEqual(grey);
+    expect(
+      worstContrast({ rgb: ring, alpha: 1 }, grey, 1)
+    ).toBeGreaterThanOrEqual(FOCUS_RATIO * FLOOR_MARGIN);
+    // The creator's red as the reel's own ink, on a navy: no mix of red and
+    // red holds there (2.54:1), and the pole does.
+    const navy: Rgb = [30, 40, 90];
+    const red: Rgb = [203, 33, 60];
+    const solved = focusInk(red, red, navy, 1);
+    expect(
+      worstContrast({ rgb: solved, alpha: 1 }, navy, 1)
+    ).toBeGreaterThanOrEqual(FOCUS_RATIO * FLOOR_MARGIN);
   });
 
   it("follows a light brand's dark ink: its blue mixed toward the text until 3:1 over any frame", () => {
@@ -779,9 +793,11 @@ describe("the 'shadow' edge's soft glow, and a brand colour over footage", () =>
     const body = carried(4.5);
     expect(body(red)).toBe(false);
     const step = liftStep(red, white, body);
+    if (step === null) throw new Error('white carries the red');
     expect(step).toBeGreaterThan(0);
     expect(step).toBeLessThan(20);
     const lifted = liftInk(red, white, body);
+    if (lifted === null) throw new Error('a lift that passes');
     expect(lifted).toEqual({ rgb: over(white, step / 20, red.rgb), alpha: 1 });
     expect(body(lifted)).toBe(true);
     // The least: a twentieth nearer the red is still short.
@@ -790,8 +806,24 @@ describe("the 'shadow' edge's soft glow, and a brand colour over footage", () =>
     );
     // White passes as it is: no lift.
     expect(liftStep({ rgb: white, alpha: 1 }, white, body)).toBe(0);
-    // Nothing nearer passes: the reel's ink itself.
-    expect(liftInk(red, white, () => false)).toEqual({ rgb: white, alpha: 1 });
+    // Nothing passes, not even the pole: null, so a caller never takes an
+    // unchecked last step (it took 20, unchecked, until 2026-11-21).
+    expect(liftStep(red, white, () => false)).toBeNull();
+    expect(liftInk(red, white, () => false)).toBeNull();
+    // Toward itself (the creator's red as the reel's own ink): nothing.
+    expect(liftStep(red, red.rgb, body)).toBeNull();
+    // Only the pole itself passes: step 20, checked.
+    const onlyWhite = (ink: Ink) => ink.rgb.every((c) => c > 254.5);
+    expect(liftStep(red, white, onlyWhite)).toBe(20);
+  });
+
+  it('lifts toward the ink that stands furthest from the veil: white over a dark one, black over a light one', () => {
+    expect(inkPole([15, 0, 0])).toEqual(white);
+    expect(inkPole([30, 40, 90])).toEqual(white);
+    expect(inkPole([240, 249, 255])).toEqual([0, 0, 0]);
+    // The split falls where white and black stand equally far.
+    expect(inkPole([118, 118, 118])).toEqual([0, 0, 0]);
+    expect(inkPole([116, 116, 116])).toEqual(white);
   });
 
   it('outlines a colour in its own pole: the least pale ring that keeps it over any frame', () => {
@@ -832,7 +864,7 @@ describe("the 'shadow' edge's soft glow, and a brand colour over footage", () =>
   });
 });
 
-describe("the 'shadow' edge's first paint: the cap, until the fit runs", () => {
+describe('the first paint, in both edges: the cap, until the fit runs', () => {
   it('is every shade at its peak cap and twice its reach, anchored where it was, as CSS draws it', () => {
     expect(shadeProps(SHADES_CAP)).toEqual({
       '--_peak-top': '0.94',
@@ -842,7 +874,7 @@ describe("the 'shadow' edge's first paint: the cap, until the fit runs", () => {
       '--_foot-0': 'ellipse 156% 164% at 0% 108%',
       '--_foot-1': 'ellipse 120% 164% at 102% 108%',
     });
-    // As drawn: what 'outline' paints first, and the stylesheet's fallbacks.
+    // As drawn: what 'outline' eases back to, and the stylesheet's fallbacks.
     expect(shadeProps(SHADES)).toEqual({
       '--_peak-top': '0.6',
       '--_top-0': 'ellipse 36% 22% at 2% -6%',
