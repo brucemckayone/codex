@@ -108,7 +108,7 @@ void main() {
   // Mouse influence on cracks: the pointer in the same units, so the halo
   // is a circle too.
   float mouseDist = distance(uv, u_mouse * u_resolution / shortSide);
-  float mouseInfluence = u_mouseActive * smoothstep(0.4, 0.0, mouseDist);
+  float mouseInfluence = u_mouseActive * (1.0 - smoothstep(0.0, 0.4, mouseDist));
   float burstInfluence = u_burst;
   float effectiveCrackWidth = u_crackWidth * (1.0 + mouseInfluence * 2.0 + burstInfluence * 4.0);
 
@@ -180,7 +180,7 @@ void main() {
   color += u_brandAccent * mouseInfluence * 0.6 * u_heat;
 
   // Click eruption: strong accent burst
-  float eruptionMask = burstInfluence * smoothstep(0.5, 0.0, mouseDist);
+  float eruptionMask = burstInfluence * (1.0 - smoothstep(0.0, 0.5, mouseDist));
   color = mix(color, u_brandAccent * 1.8, eruptionMask);
 
   // ── Bloom-adjacent halo around cracks ──────────────────────

@@ -5,6 +5,7 @@ import {
   createFreshOwnerWithBypass,
   STUDIO_ALPHA,
 } from '../helpers/subscription';
+import { workerUrl } from '../helpers/workers';
 
 /**
  * Studio Stripe Connect Onboarding E2E Tests
@@ -29,9 +30,9 @@ import {
  *              activates real-Stripe Connect; chargesEnabled=true).
  *
  * Prereqs:
- *   - auth-worker (42069), organization-api (42071), ecom-api (42072) up
+ *   - auth-worker, organization-api and ecom-api up (ports: SERVICE_PORTS)
  *     (playwright.config.ts auto-starts these on local).
- *   - SvelteKit dev server on lvh.me:5173 (also auto-started).
+ *   - SvelteKit dev server on lvh.me, the default port (also auto-started).
  *   - For 1.c: `pnpm db:seed` has run with STRIPE_SECRET_KEY set.
  */
 
@@ -62,24 +63,37 @@ test.describe('Studio Stripe Connect Onboarding', () => {
   test.beforeAll(async ({ request }) => {
     // Health probes mirror account-subscription-cancel.spec.ts:91-106.
     try {
-      const res = await request.get('http://localhost:42069/health');
-      if (!res.ok()) test.skip(true, 'Auth worker not running on port 42069');
+      const res = await request.get(`${workerUrl('AUTH')}/health`);
+      if (!res.ok())
+        test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
     } catch {
-      test.skip(true, 'Auth worker not running on port 42069');
+      test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
     }
     try {
-      const res = await request.get('http://localhost:42072/health');
+      const res = await request.get(`${workerUrl('ECOMMERCE')}/health`);
       if (!res.ok())
-        test.skip(true, 'Ecom-api worker not running on port 42072');
+        test.skip(
+          true,
+          `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+        );
     } catch {
-      test.skip(true, 'Ecom-api worker not running on port 42072');
+      test.skip(
+        true,
+        `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+      );
     }
     try {
-      const res = await request.get('http://localhost:42071/health');
+      const res = await request.get(`${workerUrl('ORGANIZATION')}/health`);
       if (!res.ok())
-        test.skip(true, 'Organization-api worker not running on port 42071');
+        test.skip(
+          true,
+          `Organization-api worker not running at ${workerUrl('ORGANIZATION')}`
+        );
     } catch {
-      test.skip(true, 'Organization-api worker not running on port 42071');
+      test.skip(
+        true,
+        `Organization-api worker not running at ${workerUrl('ORGANIZATION')}`
+      );
     }
 
     // One fresh org-owner user with NO Connect account yet, signed in once

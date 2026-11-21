@@ -27,6 +27,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserCookie } from './auth-cookies';
+import { workerUrl } from './workers';
 
 /**
  * Hard upper bound on cache age. BetterAuth sessions live far longer than
@@ -60,9 +61,12 @@ async function isSessionAlive(
   expectedEmail: string
 ): Promise<boolean> {
   try {
-    const response = await fetch('http://lvh.me:42069/api/auth/get-session', {
-      headers: { Cookie: toCookieHeader(cookies) },
-    });
+    const response = await fetch(
+      `${workerUrl('AUTH', 'lvh.me')}/api/auth/get-session`,
+      {
+        headers: { Cookie: toCookieHeader(cookies) },
+      }
+    );
     if (!response.ok) return false;
     const body = (await response.json()) as {
       user?: { email?: string } | null;

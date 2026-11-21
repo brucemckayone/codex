@@ -94,6 +94,26 @@ describe('ListSegment: the arrow keys', () => {
     expect(document.activeElement?.textContent?.trim()).toBe('Beta');
   });
 
+  test('with the group itself focused, Right and Left move from the tab stop, not the first', () => {
+    const props = render('b');
+    const group = document.querySelector<HTMLElement>('[role="radiogroup"]');
+    group?.focus();
+    press('ArrowRight');
+    expect(props.value).toBe('c');
+    expect(document.activeElement?.textContent?.trim()).toBe('Gamma');
+    group?.focus();
+    press('ArrowLeft');
+    expect(props.value).toBe('b');
+    expect(document.activeElement?.textContent?.trim()).toBe('Beta');
+  });
+
+  test('with nothing checked and the group focused, Right moves on from the first', () => {
+    const props = render('');
+    document.querySelector<HTMLElement>('[role="radiogroup"]')?.focus();
+    press('ArrowRight');
+    expect(props.value).toBe('b');
+  });
+
   test('another key does nothing', () => {
     const props = render('a');
     radios()[0].focus();

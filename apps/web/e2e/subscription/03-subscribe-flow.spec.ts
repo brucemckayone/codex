@@ -1,6 +1,7 @@
 import { expect, type Frame, test } from '@playwright/test';
 import { loginAsSeedViewer } from '../helpers/seed-auth';
 import { buildOrgUrl, STUDIO_ALPHA } from '../helpers/subscription';
+import { SERVICE_PORTS } from '../helpers/workers';
 
 /**
  * Subscribe Flow — Codex-x0pa step 5 ("Customer subscribes to a tier").
@@ -21,7 +22,7 @@ import { buildOrgUrl, STUDIO_ALPHA } from '../helpers/subscription';
  * Mirrors the redirect-interception pattern in
  * 01-studio-connect-onboarding.spec.ts (1.b).
  *
- * Prereqs: auth (42069), ecom-api (42072), organization-api (42071) up;
+ * Prereqs: auth, ecom-api and organization-api up (ports: SERVICE_PORTS);
  * `pnpm db:seed` (Studio Alpha Connect active + Standard/Pro tiers with real
  * Stripe test-mode prices; james@test.com seeded with NO subscription).
  */
@@ -34,9 +35,9 @@ test.describe('Subscribe flow (Codex-x0pa step 5)', () => {
 
   test.beforeAll(async ({ request }) => {
     const probes: Array<[number, string]> = [
-      [42069, 'auth'],
-      [42072, 'ecom-api'],
-      [42071, 'organization-api'],
+      [SERVICE_PORTS.AUTH, 'auth'],
+      [SERVICE_PORTS.ECOMMERCE, 'ecom-api'],
+      [SERVICE_PORTS.ORGANIZATION, 'organization-api'],
     ];
     for (const [port, name] of probes) {
       try {

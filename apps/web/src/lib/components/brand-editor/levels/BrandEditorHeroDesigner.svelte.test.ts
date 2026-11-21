@@ -32,24 +32,23 @@ const ORG_ID = '00000000-0000-4000-8000-000000000000';
 
 function brand(
   tokenOverrides: Record<string, string | null>,
-  colours: Partial<
-    Pick<BrandEditorState, 'primaryColor' | 'backgroundColor'>
-  > = {}
+  colours: Partial<Omit<BrandEditorState, 'tokenOverrides'>> = {}
 ): BrandEditorState {
   return {
-    primaryColor: colours.primaryColor ?? '#3B82F6',
+    primaryColor: '#3B82F6',
     secondaryColor: null,
     accentColor: null,
-    backgroundColor: colours.backgroundColor ?? null,
+    backgroundColor: null,
     fontBody: null,
     fontHeading: null,
     radius: 0.5,
     density: 1,
     logoUrl: null,
-    tokenOverrides,
     darkOverrides: null,
     darkTokenOverrides: null,
     heroLayout: 'default',
+    ...colours,
+    tokenOverrides,
   };
 }
 
@@ -259,28 +258,71 @@ describe('the options', () => {
     expect(light()['hero-opt-reel-push']).toBe('off');
   });
 
-  test('a brand colour that cannot keep its floor over film is warned of', () => {
-    // OBB: its primary red on its own dark is 3.75:1, under the 4.5 floor.
-    render(
-      { 'hero-opt-purpose': 'consume' },
-      { primaryColor: '#CB213C', backgroundColor: '#0F0000' }
-    );
+  describe('the warning judges the ink the reel draws its words in', () => {
     const warning = () =>
       document.querySelector(
         '.hero-designer__field[data-key="reel-edge"] [data-ink-warning]'
       )?.textContent;
-    expect(warning()).toContain('This colour is hard to read over film');
-    expect(warning()).toContain('it reaches 3.75:1');
-    expect(warning()).toContain('needs 4.5:1');
-    if (component) unmount(component);
-    component = null;
-    brandEditor.close();
+    const reset = () => {
+      if (component) unmount(component);
+      component = null;
+      brandEditor.close();
+    };
 
-    render(
-      { 'hero-opt-purpose': 'consume' },
-      { primaryColor: '#FFFFFF', backgroundColor: '#0F0000' }
-    );
-    expect(warning()).toBeUndefined();
+    test("OBB's red primary is no reel word's colour: its words are white, so no warning", () => {
+      render(
+        { 'hero-opt-purpose': 'consume' },
+        { primaryColor: '#CB213C', backgroundColor: '#0F0000' }
+      );
+      expect(warning()).toBeUndefined();
+    });
+
+    test('a player text of #CB213C on #0F0000 is warned of, at 3.75 against 4.5', () => {
+      render(
+        { 'hero-opt-purpose': 'consume', 'player-text': '#CB213C' },
+        { backgroundColor: '#0F0000' }
+      );
+      expect(warning()).toContain('This colour is hard to read over film');
+      expect(warning()).toContain(
+        "On your light theme's background it reaches 3.75:1"
+      );
+      expect(warning()).toContain('needs 4.5:1');
+      expect(warning()).toContain('Shadow lightens it');
+      reset();
+
+      render(
+        { 'hero-opt-purpose': 'consume', 'player-text': '#6a6a6a' },
+        { backgroundColor: '#0F0000' }
+      );
+      expect(warning()).toContain("On your light theme's background");
+    });
+
+    test('it names the theme that falls short: here only the dark one', () => {
+      render(
+        { 'hero-opt-purpose': 'consume' },
+        {
+          backgroundColor: '#FFFFFF',
+          darkOverrides: { backgroundColor: '#0F0000' },
+          darkTokenOverrides: { 'player-text': '#CB213C' },
+        }
+      );
+      const lines = [
+        ...document.querySelectorAll('[data-ink-warning] [data-theme-warning]'),
+      ].map((line) => line.getAttribute('data-theme-warning'));
+      expect(lines).toEqual(['dark']);
+      expect(warning()).toContain(
+        "On your dark theme's background it reaches 3.75:1"
+      );
+      expect(warning()).not.toContain("light theme's");
+    });
+
+    test('a light ground never warns, so "lightens" and "a light outline" stay true', () => {
+      render(
+        { 'hero-opt-purpose': 'consume', 'player-text': '#FFFF00' },
+        { backgroundColor: '#FFFFFF' }
+      );
+      expect(warning()).toBeUndefined();
+    });
   });
 
   test('each field is a radio group named by its label', () => {

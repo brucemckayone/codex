@@ -22,7 +22,7 @@
 -->
 <script lang="ts">
   import { answers, brandEditor, previewResolved } from '$lib/brand-editor';
-  import { reelInkWarning } from '$lib/brand-editor/reel-ink-warning';
+  import { reelInkWarnings } from '$lib/brand-editor/reel-ink-warning';
   import ListSegment from '$lib/components/studio/list-toolbar/ListSegment.svelte';
   import * as m from '$paraglide/messages';
   import {
@@ -166,11 +166,17 @@
   );
   const isShowreel = $derived(storedComp === 'showreel' || showreelOnAuto);
   const groups = $derived(GROUPS.filter((group) => !group.showreel || isShowreel));
-  // The brand's ink on its ground, on the theme being edited, as the reel
+  // The ink the reel draws its words in, on each theme's ground, as the reel
   // judges a word (reel-scrim's `contrast`): below the floor, Text over
-  // footage decides what the reel does with it.
-  const inkWarning = $derived(
-    reelInkWarning(brandEditor.getThemeColor('primaryColor'), brandEditor.getThemeColor('backgroundColor'))
+  // footage decides what the reel does with it. Both themes, whichever is
+  // being edited, each named in its own line.
+  const inkWarnings = $derived(
+    reelInkWarnings({
+      background: brandEditor.pending?.backgroundColor,
+      backgroundDark: brandEditor.pending?.darkOverrides?.backgroundColor,
+      tokenOverrides: brandEditor.pending?.tokenOverrides,
+      darkTokenOverrides: brandEditor.pending?.darkTokenOverrides,
+    })
   );
 
   /** The segment's options: Auto (no stored value, '') and every value. */
@@ -267,15 +273,18 @@
             {#if instead}
               <p class="hero-designer__instead">{m.branding_hero_resolved_hint({ value: instead })}</p>
             {/if}
-            {#if field.key === 'reel-edge' && inkWarning}
+            {#if field.key === 'reel-edge' && inkWarnings.length > 0}
               <div class="hero-designer__warning" data-ink-warning>
                 <strong>{m.branding_hero_reel_ink_warning_title()}</strong>
-                <p>
-                  {m.branding_hero_reel_ink_warning_body({
-                    ratio: String(inkWarning.ratio),
-                    floor: String(inkWarning.floor),
-                  })}
-                </p>
+                {#each inkWarnings as warning (warning.theme)}
+                  {@const numbers = { ratio: String(warning.ratio), floor: String(warning.floor) }}
+                  <p data-theme-warning={warning.theme}>
+                    {warning.theme === 'dark'
+                      ? m.branding_hero_reel_ink_warning_dark(numbers)
+                      : m.branding_hero_reel_ink_warning_light(numbers)}
+                  </p>
+                {/each}
+                <p>{m.branding_hero_reel_ink_warning_fix()}</p>
               </div>
             {/if}
           </div>

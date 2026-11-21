@@ -1008,6 +1008,7 @@ describe('Showreel and a webfont that lands late', () => {
       value: faces,
     });
     try {
+      paintable({ ground: '#0F0000', ink: WHITE });
       render('corner');
       await faces.ready;
       await Promise.resolve();
@@ -1030,5 +1031,193 @@ describe('Showreel and a webfont that lands late', () => {
     } finally {
       Reflect.deleteProperty(document, 'fonts');
     }
+  });
+});
+
+describe('Showreel and a film playing over it', () => {
+  it('pauses its own footage while the film plays, and plays it again after, so a page never decodes two films at once', async () => {
+    media.desktop = false;
+    const props = render();
+    await settle();
+    const video = videoOf(0) as HTMLVideoElement;
+    const paused = vi.mocked(HTMLMediaElement.prototype.pause);
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    paused.mockClear();
+    props.filmPlaying = true;
+    flushSync();
+    expect(paused.mock.contexts).toContain(video);
+    play.mockClear();
+    props.filmPlaying = false;
+    flushSync();
+    expect(play.mock.contexts).toContain(video);
+  });
+});
+
+/**
+ * The fit as a browser runs it, in jsdom: a 2d context that parses `rgb()`
+ * and `#hex` as a canvas does (the fit's colour probe), and each element's
+ * computed colour as a browser cascades it here: its own inline colour first
+ * (a lift's `!important`), then a brand colour by selector, then the reel's
+ * ink; the root's `--color-background` is the brand's ground.
+ */
+function paintable({
+  ground,
+  ink,
+  brand = {},
+}: {
+  ground: string;
+  ink: string;
+  brand?: Record<string, string>;
+}) {
+  const parse = (css: string): [number, number, number, number] | null => {
+    const hex = /^#([0-9a-f]{6})$/i.exec(css.trim());
+    if (hex?.[1]) {
+      const n = Number.parseInt(hex[1], 16);
+      return [n >> 16, (n >> 8) & 255, n & 255, 1];
+    }
+    const fn =
+      /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)$/i.exec(
+        css.trim()
+      );
+    if (!fn) return null;
+    return [Number(fn[1]), Number(fn[2]), Number(fn[3]), Number(fn[4] ?? 1)];
+  };
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => {
+    let fill = '#010203';
+    let px: [number, number, number, number] = [0, 0, 0, 0];
+    const context = {
+      clearRect() {},
+      get fillStyle() {
+        return fill;
+      },
+      set fillStyle(value: string) {
+        if (parse(value)) fill = value;
+      },
+      fillRect() {
+        px = parse(fill) ?? px;
+      },
+      getImageData: () => ({
+        data: [px[0], px[1], px[2], Math.round(px[3] * 255)],
+      }),
+      measureText: () => ({ width: 100 }),
+      font: '',
+    };
+    return context as unknown as CanvasRenderingContext2D;
+  });
+  const real = window.getComputedStyle.bind(window);
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) => {
+    const style = real(el, pseudo);
+    const colour = () => {
+      const inline = (el as HTMLElement).style?.getPropertyValue('color');
+      if (inline) return inline;
+      for (const [selector, value] of Object.entries(brand)) {
+        if (el.matches(selector)) return value;
+      }
+      return ink;
+    };
+    return new Proxy(style, {
+      get(target, prop) {
+        if (prop === 'color') return colour();
+        if (prop === 'getPropertyValue') {
+          return (name: string) =>
+            name === '--color-background' && el.matches('.reel')
+              ? ground
+              : target.getPropertyValue(name);
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  });
+}
+
+/** One more fit, as a colour landing asks for one. */
+function refit() {
+  const reel = q('.reel');
+  const landed = new Event('transitionend', { bubbles: true });
+  Object.defineProperty(landed, 'propertyName', { value: 'color' });
+  reel?.dispatchEvent(landed);
+  frame(32);
+}
+
+/** The reel's solved tint and pool as it last wrote them. */
+const solved = () => {
+  const reel = q('.reel');
+  return {
+    scrim: reel?.style.getPropertyValue('--_scrim') ?? '',
+    pool: reel?.style.getPropertyValue('--_pool') ?? '',
+  };
+};
+
+const RED = 'rgb(203, 33, 60)';
+const WHITE = 'rgb(255, 255, 255)';
+
+describe("Showreel's fit over the film", () => {
+  for (const [label, ground] of [
+    ["OBB's dark", '#0F0000'],
+    ['a navy', '#1E285A'],
+  ] as const) {
+    it(`is the same fit every time on ${label}, its own lifts never read as the brand's colour`, async () => {
+      paintable({
+        ground,
+        ink: WHITE,
+        brand: { '.reel__name, .reel__kicker, .reel__kicker *': RED },
+      });
+      render('corner');
+      await Promise.resolve();
+      frame(32);
+      const first = solved();
+      expect(first.scrim).not.toBe('');
+      for (let n = 2; n <= 5; n++) {
+        refit();
+        expect(solved()).toEqual(first);
+      }
+      // A word was lifted, so the pool holds what the lifted words need:
+      // never a solid scrim taken silently for the red.
+      expect(document.querySelector('[data-lifted]')).not.toBeNull();
+      expect(first.pool).not.toBe('1');
+    });
+  }
+
+  it("rescues a brand colour that IS the reel's ink: lifted toward the pole, never toward itself", async () => {
+    // The creator set the player's text to the brand's red: the reel's own
+    // ink is the red, so a lift toward the ink would go nowhere. Its soft
+    // ink stays the player's white at 80%, so the veil stays the brand's dark.
+    paintable({
+      ground: '#0F0000',
+      ink: RED,
+      brand: { '.reel__line, .reel__kicker span': 'rgba(255, 255, 255, 0.8)' },
+    });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const name = q('.reel__name');
+    const lifted = name?.style.getPropertyValue('color') ?? '';
+    expect(lifted).not.toBe('');
+    // Toward white: every channel at least the red's, and lighter overall.
+    const [r = 0, g = 0, b = 0] = (lifted.match(/[\d.]+/g) ?? []).map(Number);
+    expect(r).toBeGreaterThanOrEqual(203);
+    expect(g).toBeGreaterThan(33);
+    expect(b).toBeGreaterThan(60);
+    // The controls' own labels too. Follow's (4.5:1) red is more than any
+    // fill of the dark can carry: lifted. The pause icon's (3:1) red its fill
+    // can carry (3.82:1 on the dark): kept. Nothing reported as drawn solid.
+    const follow = q('.reel__ghost');
+    const pause = q('.reel__round');
+    expect(follow?.hasAttribute('data-lifted')).toBe(true);
+    expect(follow?.style.getPropertyValue('color')).not.toBe(RED);
+    expect(pause?.hasAttribute('data-lifted')).toBe(false);
+    expect(pause?.style.getPropertyValue('--_halo')).not.toBe('');
+    expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+    expect(solved().pool).not.toBe('1');
+  });
+
+  it('marks data-fit only when the fit has run: never on a page it could not read', async () => {
+    paintable({ ground: '', ink: WHITE });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    expect(q('.reel')?.hasAttribute('data-fit')).toBe(false);
+    expect(solved().scrim).toBe('');
   });
 });

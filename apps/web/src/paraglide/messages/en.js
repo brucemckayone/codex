@@ -10495,7 +10495,23 @@ export const branding_hero_reel_ink_warning_title = () => `This colour is hard t
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_ink_warning_body = (params) => `On your background it reaches ${params.ratio}:1, and text this size needs ${params.floor}:1. Over footage, Shadow lightens it just enough to read; Outline keeps your colour and adds a light outline. Everywhere else on your page it stays as you set it.`
+export const branding_hero_reel_ink_warning_light = (params) => `On your light theme's background it reaches ${params.ratio}:1, and text this size needs ${params.floor}:1.`
+
+
+/**
+ * @param {{ ratio: NonNullable<unknown>, floor: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_dark = (params) => `On your dark theme's background it reaches ${params.ratio}:1, and text this size needs ${params.floor}:1.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_fix = () => `Over footage, Shadow lightens it just enough to read; Outline keeps your colour and adds a light outline. Everywhere else on your page it stays as you set it.`
 
 
 /**

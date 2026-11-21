@@ -280,7 +280,7 @@ void main() {
   // Standard radial darkening, but with a soft lift where the cursor is.
   vec2 mouseOffset = (u_mouse - 0.5) * 2.0;
   float mouseDist = length(vc - mouseOffset * 0.3);
-  float spotlight = smoothstep(1.2, 0.0, mouseDist) * 0.12;
+  float spotlight = (1.0 - smoothstep(0.0, 1.2, mouseDist)) * 0.12;
   float vig = clamp(1.0 - r2 * u_vignette + spotlight, 0.0, 1.2);
   color *= vig;
 

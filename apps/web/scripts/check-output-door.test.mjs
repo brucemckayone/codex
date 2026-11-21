@@ -88,6 +88,12 @@ describe('what is allowed', () => {
     'a division after obj.if(...)': 'const q = obj.if(a) / 2;',
     // ... and so is one named like `new` or `delete`: it divides.
     'a division after a property named new': 'const half = sizes.new / 2;',
+    // A private name, or a name outside ASCII, is a name too (WP-11).
+    'a division after a private name like a keyword':
+      'const half = this.#delete / 2;',
+    'a division after a postfix ! on a non-ASCII name': 'const half = π! / 2;',
+    'a division after a postfix ! on a name outside the BMP':
+      'const half = 𝑥! / 2;',
   };
   for (const [name, source] of Object.entries(allowed)) {
     test(name, () => {
@@ -123,14 +129,19 @@ describe('nothing hides the code after it', () => {
       'const r = opts.delete / 2; // a /* b',
     'a regex after for await (...)':
       'for await (const s of xs) /\\/*x/.test(s);',
+    // WP-11: a regex after a spread, after `export default`, and after a `!`
+    // that starts a line: no postfix `!` reaches across a line break.
+    'a regex after a spread': 'const r = [.../\\/*x/.exec(s)];',
+    'a regex after export default': 'export default /\\/*x/;',
+    'a regex after a ! that starts a line': 'const a = b\n!/\\/*x/.test(s);',
   };
   for (const [name, hider] of Object.entries(hiders)) {
     test(name, () => {
       // A later block comment gives a phantom `/*` something to run on to.
-      assert.deepEqual(
-        lines(`${hider}\n${bind}\n/* a later comment */\n`),
-        [2]
-      );
+      const at = hider.split('\n').length + 1;
+      assert.deepEqual(lines(`${hider}\n${bind}\n/* a later comment */\n`), [
+        at,
+      ]);
     });
   }
 });
@@ -215,6 +226,20 @@ describe('svelte files', () => {
       '<Script />',
     ].join('\n');
     assert.deepEqual(lines(source, 'Thing.svelte'), [6]);
+  });
+
+  // The module script is code too: an instance-only reader passed every test
+  // above (WP-11).
+  test('finds a bind in a <script module>', () => {
+    const source =
+      '<script module lang="ts">\n  gl.bindFramebuffer(gl.FRAMEBUFFER, null);\n</script>\n<p>x</p>';
+    assert.deepEqual(lines(source, 'Thing.svelte'), [2]);
+  });
+
+  test('finds a bind in a legacy <script context="module">', () => {
+    const source =
+      '<script context="module">\n  gl.bindFramebuffer(gl.FRAMEBUFFER, null);\n</script>\n<script>\n  const a = 1;\n</script>';
+    assert.deepEqual(lines(source, 'Thing.svelte'), [2]);
   });
 
   test('a style block is not code, and a <!-- in it opens nothing', () => {

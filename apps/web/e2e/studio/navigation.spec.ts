@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from '../fixtures/auth';
+import { E2E_BASE_URL, orgUrl } from '../helpers/origin';
 import { expectClickNavigates } from '../helpers/spa-nav';
 import {
   cleanupSharedStudioAuth,
@@ -291,7 +292,7 @@ test.describe('Studio Navigation - Unauthenticated', () => {
     await page.context().clearCookies();
 
     await page.goto(
-      `http://${member.member.organization.slug}.lvh.me:5173/studio`,
+      orgUrl(E2E_BASE_URL, member.member.organization.slug, '/studio'),
       { waitUntil: 'load' }
     );
 
