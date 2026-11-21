@@ -365,6 +365,10 @@ describe("Showreel's sizers: every piece's words, unseen, hold the words' slot (
           '[data-ink], [id], [role], [tabindex], [href], [aria-label], a, button, input, select, textarea, .reel__ghost, .reel__round, .reel__preview, .reel__swap'
         )
       ).toHaveLength(0);
+      // No heading either: the server's HTML would hand a crawler every
+      // piece's title as one more heading (WP-5b review r5).
+      expect(box?.querySelectorAll('h1, h2, h3, h4, h5, h6')).toHaveLength(0);
+      expect(document.querySelectorAll('.reel h2')).toHaveLength(1);
       // Behind the words in the page's order: the first of each is the words' own.
       for (const part of [
         '.reel__kicker',
@@ -377,7 +381,7 @@ describe("Showreel's sizers: every piece's words, unseen, hold the words' slot (
     });
   }
 
-  it("Wide: each sizer's title at the size its own piece's title shows at", () => {
+  it("Wide: the sizers never take the fit's size (they hold the title at its most, review r5 S5); the title on show takes its own as it shows", () => {
     // 60 px a character at 100 px, in words 1000 px wide.
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
       () =>
@@ -388,12 +392,15 @@ describe("Showreel's sizers: every piece's words, unseen, hold the words' slot (
     );
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
     render('wide', { reel: WITH_PREVIEW });
-    // floor(100 * 1000 / (length * 60)), within 72 and 150.
+    // What the CSS holds Wide's sizer titles at: WIDE_TITLE.max, from the
+    // server's first paint (an inline size would come with the fit, after it).
+    expect(q('.reel')?.style.getPropertyValue('--_wide-max')).toBe('150px');
     expect(
       sizers().map(
         (s) => s.querySelector<HTMLElement>('.reel__title')?.style.fontSize
       )
-    ).toEqual(['104px', '79px', '79px', '138px']);
+    ).toEqual(['', '', '', '']);
+    // floor(100 * 1000 / (length * 60)), within 72 and 150.
     const shownSize = () =>
       q<HTMLElement>('.reel__words .reel__title')?.style.fontSize;
     expect(shownSize()).toBe('104px');

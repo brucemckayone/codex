@@ -571,9 +571,9 @@
     };
   }
 
-  // Every piece's title fitted to the words' width, so each sizer holds its
-  // piece's words at the size they show at (`sizer`), and the one on show
-  // takes its own the moment it shows.
+  // Every piece's title fitted to the words' width, so the one on show takes
+  // its own the moment it shows. The sizers never take one: they hold Wide's
+  // title at its most from the first paint (`--_wide-max`, review r5 S5).
   let wideSizes = $state<number[] | null>(null);
   $effect(() => {
     const el = titleEl;
@@ -1215,21 +1215,17 @@
   its height as the pieces change. Out of sight, out of the accessibility
   tree and inert, with no control, link, id or `data-ink`: the fit, the
   probes, axe and the tab order never meet one. Its preview is a stand-in
-  with the preview's box (`.reel__sizer-preview`), not the ghost the fit reads.
+  with the preview's box (`.reel__sizer-preview`), not the ghost the fit reads;
+  its title is no heading, with the heading's box (a crawler reads the server's
+  HTML, and would meet every piece's title as one more heading).
 -->
 {#snippet sizer(w: ReelWords, i: number)}
   <div class="reel__sizer">
     <p class="reel__kicker"><b>{w.number}</b> <span>{w.kicker}</span></p>
     {#if lineFirstAt(i)}
-      <h2 class="reel__title reel__title--line">{w.line}</h2>
+      <div class="reel__title reel__title--line">{w.line}</div>
     {:else}
-      <h2
-        class="reel__title"
-        data-long={w.title.length > 20 ? '' : undefined}
-        style:font-size={wideSizes?.[i] ? `${wideSizes[i]}px` : undefined}
-      >
-        {w.title}
-      </h2>
+      <div class="reel__title" data-long={w.title.length > 20 ? '' : undefined}>{w.title}</div>
     {/if}
     <div class="reel__row">
       {#if w.line && !lineFirstAt(i)}<p class="reel__line">{w.line}</p>{/if}
@@ -1280,6 +1276,7 @@
   style:--_pool={FIRST_PAINT.pool}
   style:--_fp-deepen={FIRST_PAINT.deepen}
   style:--_fp-pale={FIRST_PAINT.pale}
+  style:--_wide-max={`${WIDE_TITLE.max}px`}
   style:--_peak-top={firstShades['--_peak-top']}
   style:--_top-0={firstShades['--_top-0']}
   style:--_top-1={firstShades['--_top-1']}
@@ -1685,6 +1682,25 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     visibility: hidden;
+  }
+
+  /* A sizer's title is no heading: it takes what the words' h2 has as one,
+     the reel's heading margin (`.reel h2`, which outranks `.reel__title`'s
+     own) and base.css's tracking, so its box is the words' title's. */
+  .reel__sizer .reel__title {
+    margin: 0;
+    letter-spacing: var(--tracking-tight);
+  }
+
+  /* Wide's sizers hold the title, on its one line, at the most its fit sets
+     (`--_wide-max`, WIDE_TITLE.max) or at the size it paints before the fit,
+     the larger: the slot is one height from the first paint through every
+     fit, so a short screen's hero never grows when the fit lands (review r5
+     S5: 17-21 px). */
+  @media (--breakpoint-md) {
+    .reel[data-layout='wide'] .reel__sizer .reel__title {
+      font-size: max(var(--_wide-max), calc(var(--text-display) * 1.6));
+    }
   }
 
   /* A sizer's preview: the preview button's box (`.reel__ghost`, at

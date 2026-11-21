@@ -262,12 +262,24 @@ test.describe('the Showreel in flow (WP-5b)', () => {
               (s) => s.getBoundingClientRect().height
             )
           );
-          const w = words.getBoundingClientRect();
-          const s = sizer.getBoundingClientRect();
+          const box = (el: Element | null | undefined) => {
+            const r = el?.getBoundingClientRect();
+            return r ? [r.width, r.height, r.left, r.right, r.bottom] : [];
+          };
+          const parts = (root: Element) => ({
+            kicker: box(root.querySelector('.reel__kicker')),
+            title: box(root.querySelector('.reel__title')),
+            row: box(root.querySelector('.reel__row')),
+            all: box(root),
+          });
+          const heldTitle = sizer.querySelector('.reel__title');
           return {
             hero: reel.getBoundingClientRect().height,
-            words: [w.top, w.bottom, w.left, w.right],
-            sizer: [s.top, s.bottom, s.left, s.right],
+            words: parts(words),
+            sizer: parts(sizer),
+            heldSize: heldTitle
+              ? Number.parseFloat(getComputedStyle(heldTitle).fontSize)
+              : 0,
             slot: slot.getBoundingClientRect().height,
             tallest,
             hidden: getComputedStyle(sizer).visibility,
@@ -275,13 +287,53 @@ test.describe('the Showreel in flow (WP-5b)', () => {
         }, n - 1);
         expect(read).not.toBeNull();
         if (!read) return;
-        // The piece's sizer lays its words out as they show: a sizer that
-        // drifted from the words would hold the slot at the wrong height.
-        read.words.forEach((edge, i) => {
-          expect
-            .soft(Math.abs(edge - read.sizer[i]), `piece ${n}: sizer edge ${i}`)
-            .toBeLessThanOrEqual(0.5);
-        });
+        // The piece's sizer lays its words out as they show, part by part:
+        // one that drifted from the words would hold the slot at the wrong
+        // height. Wide's title alone is held at its most, on its one line
+        // (WIDE_TITLE.max, review r5 S5), so it is never short of the fit.
+        const held = layout === 'wide';
+        for (const part of ['kicker', 'title', 'row'] as const) {
+          const [ww, wh, wl, wr] = read.words[part];
+          const [sw, sh, sl, sr] = read.sizer[part];
+          for (const [what, a, b] of [
+            ['width', ww, sw],
+            ['left', wl, sl],
+            ['right', wr, sr],
+          ] as const) {
+            expect
+              .soft(Math.abs(a - b), `piece ${n}: ${part} ${what}`)
+              .toBeLessThanOrEqual(0.5);
+          }
+          if (part === 'title' && held) {
+            expect
+              .soft(read.heldSize, `piece ${n}: held title`)
+              .toBeGreaterThanOrEqual(150);
+            expect
+              .soft(Math.abs(sh - read.heldSize), `piece ${n}: one line`)
+              .toBeLessThanOrEqual(0.5);
+            expect
+              .soft(sh, `piece ${n}: never short of the title`)
+              .toBeGreaterThanOrEqual(wh - 0.5);
+          } else {
+            expect
+              .soft(Math.abs(wh - sh), `piece ${n}: ${part} height`)
+              .toBeLessThanOrEqual(0.5);
+          }
+        }
+        // And the whole: the same bottom, the same height but the held title's.
+        const titleGap = read.sizer.title[1] - read.words.title[1];
+        expect
+          .soft(
+            Math.abs(read.sizer.all[1] - read.words.all[1] - titleGap),
+            `piece ${n}: sizer height`
+          )
+          .toBeLessThanOrEqual(0.5);
+        expect
+          .soft(
+            Math.abs(read.sizer.all[4] - read.words.all[4]),
+            `piece ${n}: sizer bottom`
+          )
+          .toBeLessThanOrEqual(0.5);
         expect
           .soft(read.slot, `piece ${n}: the slot`)
           .toBeCloseTo(read.tallest, 1);
@@ -293,6 +345,57 @@ test.describe('the Showreel in flow (WP-5b)', () => {
       expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(
         0.5
       );
+      await page.context().close();
+    });
+  }
+
+  // Review r5 S5: the server paints Wide's titles at their CSS size and the
+  // fit sets each its own after hydration. Read the hero as fitted, then with
+  // every title in the slot stripped of its inline size (the server's paint),
+  // then fitted again: before the sizers held the title at its most, a short
+  // screen's hero grew 17-21 px when the fit landed.
+  for (const viewport of [
+    { width: 844, height: 390 },
+    { width: 1280, height: 560 },
+  ]) {
+    test(`Wide at ${viewport.width}x${viewport.height}: the hero is one height before the title fit and after it (review r5 S5)`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const page = await open(browser, baseURL, {
+        context: { viewport },
+        keys: { 'reel-layout': 'wide' },
+      });
+      await fitted(page);
+      await page.evaluate(() => document.fonts.ready);
+      const read = await page.evaluate(() => {
+        const reel = document.querySelector('.reel');
+        const visible = document.querySelector<HTMLElement>(
+          '.reel__words .reel__title'
+        );
+        if (!reel || !visible) return null;
+        const titles = [
+          ...document.querySelectorAll<HTMLElement>('.reel__slot .reel__title'),
+        ];
+        const height = () => reel.getBoundingClientRect().height;
+        const fitted = height();
+        const fittedSize = getComputedStyle(visible).fontSize;
+        const saved = titles.map((t) => t.style.fontSize);
+        for (const t of titles) t.style.fontSize = '';
+        const painted = height();
+        const paintedSize = getComputedStyle(visible).fontSize;
+        titles.forEach((t, i) => {
+          t.style.fontSize = saved[i];
+        });
+        return { fitted, painted, again: height(), fittedSize, paintedSize };
+      });
+      expect(read).not.toBeNull();
+      if (!read) return;
+      // The instrument: stripping the fit's size changed the title's size,
+      // and putting it back restored the hero.
+      expect(read.paintedSize).not.toBe(read.fittedSize);
+      expect(Math.abs(read.again - read.fitted)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(read.fitted - read.painted)).toBeLessThanOrEqual(0.5);
       await page.context().close();
     });
   }
