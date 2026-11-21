@@ -1519,6 +1519,75 @@ describe("Showreel's fit over the film", () => {
     expect(vi.mocked(logger.warn)).toHaveBeenCalledTimes(1);
   });
 
+  it('lifts a carried colour that its shades fall short under just far enough, never straight onto the pole (owner 2026-11-20; wp4-review r3 M1)', async () => {
+    const CORAL = 'rgb(230, 90, 100)';
+    paintable({
+      ground: '#0F0000',
+      ink: WHITE,
+      brand: { '.reel__kicker, .reel__kicker span': CORAL },
+    });
+    // The reel 1000 x 1000; the kicker in the middle band, where only the foot's
+    // left ellipse reaches; every other word over the whole box, as elsewhere in
+    // this file.
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(
+      function (this: HTMLElement) {
+        const box = this.matches('.reel__kicker')
+          ? { left: 300, top: 450, right: 500, bottom: 470 }
+          : { left: 0, top: 0, right: 1000, bottom: 1000 };
+        return {
+          ...box,
+          width: box.right - box.left,
+          height: box.bottom - box.top,
+          x: box.left,
+          y: box.top,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+    );
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const kicker = q('.reel__kicker');
+    expect(kicker).not.toBeNull();
+    if (!kicker) return;
+    // It needed a lift (its shades fall short), and got one...
+    expect(kicker.hasAttribute('data-lifted')).toBe(true);
+    const [r = 0, g = 0, b = 0] = channels(kicker);
+    // ...toward white (every channel at least the coral's)...
+    expect(r).toBeGreaterThanOrEqual(230);
+    expect(g).toBeGreaterThan(90);
+    expect(b).toBeGreaterThan(100);
+    // ...but only as far as it needs: still the brand's coral, never the pole.
+    // Fails today: the code paints [255, 255, 255].
+    expect([r, g, b]).not.toEqual([255, 255, 255]);
+  });
+
+  it("lands only the reel's own words' colour eases, never another's inside it (a theatre's, the film layer's): wp4-review r3 LOW", async () => {
+    const paint = paintable({
+      ground: '#0F0000',
+      ink: WHITE,
+      brand: { a: RED },
+    });
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    // A colour easing on the film layer, as a theatre's hover or a theme
+    // switch would ease one: none of the reel's words.
+    const layer = q('.reel-stage');
+    expect(layer).not.toBeNull();
+    if (!layer) return;
+    layer.style.setProperty('color', 'rgb(1, 2, 3)');
+    paint.easeFrom([layer]);
+    expect(paint.eases()).toBe(1);
+    refit();
+    expect(paint.eases()).toBe(1);
+    // A lifted link's own ease still lands at once (review R1).
+    paint.easeFrom(document.querySelectorAll('.reel a[data-lifted]'));
+    expect(paint.eases()).toBeGreaterThan(1);
+    refit();
+    expect(paint.eases()).toBe(1);
+  });
+
   it('marks data-fit only when the fit has run: never on a page it could not read', async () => {
     paintable({ ground: '', ink: WHITE });
     render('corner');

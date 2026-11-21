@@ -216,6 +216,36 @@ test.describe('the Showreel on a landing', () => {
     await page.context().close();
   });
 
+  test("OBB's words are carried where their glyphs sit: the fit reports none uncarried (review R4)", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL, {
+      // Every warning the page logs, from its first fit on.
+      init: () => {
+        const said: string[] = [];
+        Object.defineProperty(window, '__reelWarnings', { value: said });
+        const warn = console.warn.bind(console);
+        console.warn = (...args: unknown[]) => {
+          said.push(args.map(String).join(' '));
+          warn(...args);
+        };
+      },
+    });
+    await expect(page.locator('.reel')).toHaveAttribute('data-fit', '', {
+      timeout: 15_000,
+    });
+    // A piece later, its words fitted again.
+    await page.locator('.reel__index .reel__item').nth(1).click();
+    await page.waitForTimeout(1500);
+    const said = await page.evaluate(
+      () =>
+        (window as Window & { __reelWarnings?: string[] }).__reelWarnings ?? []
+    );
+    expect(said.filter((line) => line.includes('cannot carry'))).toEqual([]);
+    await page.context().close();
+  });
+
   test('no band over the film: the shades are soft radials anchored off the reel (owner)', async ({
     browser,
     baseURL,

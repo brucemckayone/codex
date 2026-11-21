@@ -159,41 +159,54 @@ export function inkPole(scrim: Rgb): Rgb {
 /**
  * The scrim's colour: the brand's own ground (`--color-background`, what the
  * shader's ground and the page use), moved toward the veil's pole (`veil`,
- * from `groundPoles`) only as far as its inks need to keep their ratio at no
- * more than `MAX_SCRIM_ALPHA`. A dark brand keeps its ground, or gets a deeper
- * shade of it; a light brand keeps its ground, or gets a paler one. The pole
- * itself when nothing nearer will do.
+ * from `groundPoles`) only as far as its inks need. A dark brand keeps its
+ * ground, or gets a deeper shade of it; a light brand keeps its ground, or
+ * gets a paler one. The pole itself when nothing nearer will do.
+ *
+ * How far each ink may need its scrim: no more than `MAX_SCRIM_ALPHA`, and
+ * for a word, no more than its own `room` (`wordRoom`): what can be drawn
+ * where it sits. The cap alone let a mid grey stop at a need of 0.9 that the
+ * shades can never lay mid-reel (0.62 to 0.78 there), so every word in that
+ * band was short by construction, and every Outline ring there solid with no
+ * headroom (review r3 n1, n3: grey 100's film label 4.04:1, its Outline 20 of
+ * 27 words short). A room even the veil's pole cannot meet is held to the cap
+ * alone: such a word is lifted, as before.
  *
  * Solved only from the inks a scrim of the pole can carry at all. A colour
  * that not even a solid one can (a player text the creator set, as #CB213C on
  * #0F0000: 3.82:1 even on black) no tint helps: counted, it drove the tint to
  * the pole for nothing (2026-11-20). The reel lifts or outlines such a colour
- * itself, so with the ink `pole` it is lifted toward, it is solved as the
- * pole, as it will be drawn: a light page held AT the pivot (a grey 120)
- * whose light text no pale veil carries keeps a tint black can still be
- * carried on, never its mid grey with no room left (review R2's probe,
- * 2026-11-21: 24 of 27 words short over black). Over a ground that already
- * carries the pole (OBB's dark), the ground stays the brand's.
+ * itself, toward the ink `pole` (required: an ink-blind tint is the R2
+ * regression), so it is solved as that pole, as it will be drawn: a light
+ * page held AT the pivot (a grey 120) whose light text no pale veil carries
+ * keeps a tint black can still be carried on, never its mid grey with no room
+ * left (review R2's probe, 2026-11-21: 24 of 27 words short over black). Over
+ * a ground that already carries the pole (OBB's dark), the ground stays the
+ * brand's.
  */
 export function scrimTint(
   ground: Rgb,
   veil: Rgb,
-  inks: readonly { ink: Ink; ratio: number }[],
-  pole?: Rgb
+  inks: readonly { ink: Ink; ratio: number; room?: number }[],
+  pole: Rgb
 ): Rgb {
-  const carriable = inks.flatMap((entry) => {
+  const asDrawn = inks.flatMap((entry) => {
     if (scrimAlpha([entry], veil) !== null) return [entry];
-    if (!pole) return [];
-    const lifted = {
-      ink: { rgb: pole, alpha: entry.ink.alpha },
-      ratio: entry.ratio,
-    };
+    const lifted = { ...entry, ink: { rgb: pole, alpha: entry.ink.alpha } };
     return scrimAlpha([lifted], veil) !== null ? [lifted] : [];
+  });
+  const held = asDrawn.map((entry) => {
+    const room = Math.min(MAX_SCRIM_ALPHA, entry.room ?? MAX_SCRIM_ALPHA);
+    const atPole = scrimAlpha([entry], veil) ?? 1;
+    return { entry, most: atPole <= room ? room : MAX_SCRIM_ALPHA };
   });
   for (let step = 0; step <= 20; step++) {
     const tint = over(veil, step / 20, ground);
-    const alpha = scrimAlpha(carriable, tint);
-    if (alpha !== null && alpha <= MAX_SCRIM_ALPHA) return tint;
+    const fits = held.every(({ entry, most }) => {
+      const need = scrimAlpha([entry], tint);
+      return need !== null && need <= most;
+    });
+    if (fits) return tint;
   }
   return veil;
 }
@@ -436,6 +449,32 @@ export function shadeFloor(
     }
   }
   return least;
+}
+
+/**
+ * The ring's strength in 'outline' (Showreel's `--_h-ring`): its group's halo
+ * taken up by this, so from a halo of 1 / RING_TAKE_UP the ring is solid,
+ * with no headroom left over a lighter frame (review r3 n3).
+ */
+export const RING_TAKE_UP = 1.6;
+
+/**
+ * The most a word's own scrim need may be where it sits (its glyphs' `span`)
+ * for what can be drawn there to carry it, in hundredths as the needs are
+ * (review r3 n1, n3). In 'shadow', what the cap's shades lay at its glyphs,
+ * with its own soft glow counted at the least it lays (its group's is never
+ * weaker); in 'outline', a ring still short of solid over the shades as
+ * drawn.
+ */
+export function wordRoom(edge: 'shadow' | 'outline', span: Span): number {
+  const fits =
+    edge === 'shadow'
+      ? (need: number) => glowLeaves(need, need) <= shadeFloor(span, SHADES_CAP)
+      : (need: number) =>
+          haloAlpha(need, shadeFloor(span, SHADES)) * RING_TAKE_UP <= 1;
+  let room = 0;
+  for (let step = 1; step <= 100 && fits(step / 100); step++) room = step / 100;
+  return room;
 }
 
 /**

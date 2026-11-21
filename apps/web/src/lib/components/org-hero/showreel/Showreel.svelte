@@ -58,6 +58,7 @@
   import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
   import type { HeroOptions } from '$lib/org-hero/hero-config';
   import type { ReelEntry } from '$lib/org-hero/reel';
+  import { type GlyphBox, glyphBox } from '$lib/org-hero/showreel/glyph-box';
   import { fitTitle, type NameLines, nameLines } from '$lib/org-hero/showreel/name-lines';
   import { prefersSavingData, reelMode } from '$lib/org-hero/showreel/playback';
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
@@ -86,6 +87,7 @@
     scrimTint,
     shadeFloor,
     shadeProps,
+    wordRoom,
   } from '$lib/org-hero/showreel/reel-scrim';
   import { type ReelWords, reelWords } from '$lib/org-hero/showreel/reel-words';
   import { logger } from '$lib/observability';
@@ -628,9 +630,13 @@
       // The reel's words ease no colour; should one ever, it lands here at
       // once, so every colour read is the brand's own. `getAnimations`
       // flushes style, so the ease the removal starts is listed (Chrome,
-      // calibrated 2026-11-21); jsdom has no Web Animations.
-      for (const motion of root.getAnimations?.({ subtree: true }) ?? []) {
-        if (easesColour(motion)) motion.finish();
+      // calibrated 2026-11-21); jsdom has no Web Animations. Only the words
+      // the fit reads: a theatre's hover or the film layer's ease, inside the
+      // same reel, keeps its own 100 ms (wp4-review r3).
+      for (const node of root.querySelectorAll<HTMLElement>(`${SCRIMMED}, :is(${SCRIMMED}) *`)) {
+        for (const motion of node.getAnimations?.() ?? []) {
+          if (easesColour(motion)) motion.finish();
+        }
       }
       solveScrims(root, ground.rgb);
     } finally {
@@ -645,7 +651,15 @@
   function solveScrims(root: HTMLElement, ground: Rgb) {
     const box = root.getBoundingClientRect();
     const laid = [...root.querySelectorAll<HTMLElement>(SCRIMMED)]
-      .map((el) => ({ el, r: el.getBoundingClientRect() }))
+      // In 'shadow', each word judged where its glyphs sit (`glyphBox`, review
+      // R4), never its block's far end. In 'outline' by its box: the ring and
+      // its halo reach past the glyphs, and judged by them alone the index's
+      // "02" fell short (4.47:1 on OBB). A control by its own box, which its
+      // fill covers.
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return { el, r, glyphs: el.matches(FILLED) || edge === 'outline' ? r : glyphBox(el) };
+      })
       // Out of sight (the screen readers' name) or not laid out.
       .filter(({ r }) => r.width > 1 && r.height > 1);
     const inHeader = (el: HTMLElement) => el.closest('.reel__top') !== null;
@@ -657,14 +671,26 @@
       bar && bar.height > 1 ? bar.bottom - box.top : 0,
       ...laid.filter(({ el }) => inHeader(el)).map(({ r }) => r.bottom - box.top)
     );
-    const allInks: { ink: Ink; ratio: number }[] = [];
+    // A box as fractions of the reel's.
+    const span = (r: GlyphBox) => ({
+      left: (r.left - box.left) / box.width,
+      top: (r.top - box.top) / box.height,
+      right: (r.right - box.left) / box.width,
+      bottom: (r.bottom - box.top) / box.height,
+    });
+    // Each word's ink, with the most it may need where its glyphs sit
+    // (`wordRoom`, review r3 n1, n3); a control's fill has the scrim's cap.
+    const allInks: { ink: Ink; ratio: number; room?: number }[] = [];
     let top = 0;
     let foot = 0;
     let gap = box.height;
-    for (const { el, r } of laid) {
+    for (const { el, r, glyphs } of laid) {
       const header = inHeader(el) || r.bottom - box.top <= headerFoot;
       const ink = rgba(getComputedStyle(el).color);
-      if (ink) allInks.push({ ink, ratio: ratioOf(el) });
+      if (ink) {
+        const room = el.matches(FILLED) ? undefined : wordRoom(edge, span(glyphs));
+        allInks.push({ ink, ratio: ratioOf(el), room });
+      }
       if (header) top = Math.max(top, r.bottom - box.top);
       else {
         foot = Math.max(foot, box.bottom - r.top);
@@ -686,13 +712,7 @@
     root.style.setProperty('--_scrim', `rgb(${tint.join(' ')})`);
     // Each scrimmed thing's own need (`scrimAlpha` for its COMPUTED ink, with
     // FLOOR_MARGIN; a brand colour is solved as it is, never as an assumed
-    // white or dark), over its box. Null: no scrim of the tint can carry it.
-    const span = (r: DOMRect) => ({
-      left: (r.left - box.left) / box.width,
-      top: (r.top - box.top) / box.height,
-      right: (r.right - box.left) / box.width,
-      bottom: (r.bottom - box.top) / box.height,
-    });
+    // white or dark), over its glyphs. Null: no scrim of the tint can carry it.
     // A colour that cannot keep its floor where it sits is lifted toward the
     // ink pole opposite the veil (`pole`: white over a dark brand's), a
     // twentieth at a time, just far enough, over the footage only
@@ -717,12 +737,12 @@
     };
     const ringed = (ink: Ink, ratio: number, under: number) =>
       solvable(ink, ratio) || outlineAlpha({ ink, ratio }, under, tint, ownPole([{ ink, ratio }])) !== null;
-    const roles = laid.flatMap(({ el, r }) => {
+    const roles = laid.flatMap(({ el, glyphs }) => {
       // Its own ink and any child's in another (the kicker's number), so the
       // strictest of them is solved.
       const ratio = ratioOf(el);
       const fill = el.matches(FILLED);
-      const at = span(r);
+      const at = span(glyphs);
       const drawn = shadeFloor(at, SHADES);
       const fits = (ink: Ink) =>
         fill ? filled(ink, ratio) : edge === 'shadow' ? carried(ink, ratio) : ringed(ink, ratio, drawn);
@@ -768,10 +788,22 @@
       }
       const grown = growShades([...asked.keys()]);
       shades = grown.shades;
-      // A lifted word still short where it sits: one step further, and again.
+      // A word still short where it sits: one step further, and again. A
+      // colour carried as it is but short here (review r3 M1) starts at its
+      // failing nodes, from step 0, a twentieth at a time like any lift;
+      // only one still short at the pole itself wears it outright (below).
       const further = grown.short.flatMap((n) => {
         const role = asked.get(n);
-        return role && role.lifted.length > 0 && role.step < 20 ? [role] : [];
+        if (!role || role.step >= 20) return [];
+        if (role.lifted.length === 0) {
+          const under = shadeFloor(role.span, shades);
+          const glow = glows.get(groupOf(role.el)) ?? 0;
+          role.lifted = role.nodes.filter(({ ink }) => {
+            const need = scrimAlpha([{ ink, ratio: role.ratio }], tint);
+            return need === null || glowLeaves(need, glow) > under + 1e-9;
+          });
+        }
+        return role.lifted.length > 0 ? [role] : [];
       });
       if (further.length === 0) break;
       for (const role of further) role.step += 1;
