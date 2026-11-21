@@ -165,6 +165,16 @@ describe('Combine: what each control writes', () => {
     expect(light()).not.toHaveProperty('shader-blend-amount');
   });
 
+  test("the frame offers a brand's three frames, never the Showreel's film frames", () => {
+    render({ 'shader-preset': 'flow' });
+    const names = [
+      ...document.querySelectorAll(
+        '.combine [role="radiogroup"][aria-label="Frame"] [role="radio"]'
+      ),
+    ].map((radio) => radio.textContent?.trim());
+    expect(names).toEqual(['Shader only', 'Through the name', 'Name glows']);
+  });
+
   test('the frame writes its id, and Shader only removes it', () => {
     render({ 'shader-preset': 'flow' });
     click(radio('Frame', 'Name glows'));

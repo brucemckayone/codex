@@ -1491,6 +1491,94 @@ export const org_hero_explore_everything = () => `Explore everything`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_play_preview = () => `Play the preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_label = () => `Showreel`
+
+
+/**
+ * @param {{ number: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_slide = (params) => `${params.number} of ${params.total}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_pause = () => `Pause the reel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_play = () => `Play the reel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_film_kicker = () => `Our film`
+
+
+/**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_film_kicker_duration = (params) => `Our film, ${params.duration}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_film = () => `Film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_recording = () => `Recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_essay = () => `Essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_portal = () => `Portal`
+
+
+/**
  * @param {{ name: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -10352,6 +10440,54 @@ export const branding_hero_reel_band_under = () => `Under the words`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_reel_band_fade = () => `Fade`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_edges = () => `All round`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_edge = () => `Text over footage`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_edge_shadow = () => `Shadow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_edge_outline = () => `Outline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_title = () => `This colour is hard to read over film`
+
+
+/**
+ * @param {{ ratio: NonNullable<unknown>, floor: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_body = (params) => `On your background it reaches ${params.ratio}:1, and text this size needs ${params.floor}:1. Over footage, Shadow lightens it just enough to read; Outline keeps your colour and adds a light outline. Everywhere else on your page it stays as you set it.`
 
 
 /**

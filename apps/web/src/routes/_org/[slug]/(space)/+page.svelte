@@ -774,11 +774,13 @@
       consumeNote={heroConsumeNote}
       film={heroFilm}
       filmOpen={filmInHero}
+      filmPlaying={introFilm !== null && filmSrc !== null}
       following={isFollowing}
       followBusy={followLoading}
       onfilm={pressFilm}
       onfollow={handleFollowToggle}
       filmLayer={inlineFilm}
+      reel={heroReel}
       bind:filmChip
     />
   {:else}

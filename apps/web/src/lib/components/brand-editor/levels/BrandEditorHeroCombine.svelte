@@ -40,8 +40,8 @@
   import {
     BLEND_IDS,
     type BlendId,
-    FRAME_IDS,
-    type FrameId,
+    BRAND_FRAME_IDS,
+    type BrandFrameId,
     LAYER_IDS,
     type LayerId,
     PASSTHROUGH_FRAME,
@@ -86,7 +86,7 @@
     difference: { label: m.branding_combine_blend_difference, desc: m.branding_combine_blend_difference_desc },
     'smoke-key': { label: m.branding_combine_blend_smoke_key, desc: m.branding_combine_blend_smoke_key_desc },
   };
-  const FRAME_WORDS: Readonly<Record<FrameId, { label: Words; desc: Words }>> = {
+  const FRAME_WORDS: Readonly<Record<BrandFrameId, { label: Words; desc: Words }>> = {
     'shader-only': { label: m.branding_combine_frame_shader_only, desc: m.branding_combine_frame_shader_only_desc },
     'through-name': { label: m.branding_combine_frame_through_name, desc: m.branding_combine_frame_through_name_desc },
     'name-glows': { label: m.branding_combine_frame_name_glows, desc: m.branding_combine_frame_name_glows_desc },
@@ -377,7 +377,7 @@
       <ListSegment
         label={m.branding_combine_frame()}
         value={stack.frame}
-        options={FRAME_IDS.map((id) => ({ value: id, label: FRAME_WORDS[id].label }))}
+        options={BRAND_FRAME_IDS.map((id) => ({ value: id, label: FRAME_WORDS[id].label }))}
         wrap
         onSelect={(id) => write.frame(id)}
       />

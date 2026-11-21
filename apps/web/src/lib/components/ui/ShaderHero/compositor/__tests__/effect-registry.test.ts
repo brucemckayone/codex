@@ -15,8 +15,11 @@ import type { Effect } from '../effects/effect';
 import { HEADER } from '../effects/header';
 import {
   BLEND_IDS,
+  BRAND_FRAME_IDS,
   FRAME_IDS,
+  isBrandFrameId,
   LAYER_IDS,
+  PASSTHROUGH_FRAME,
   SURFACE_ONLY_LAYER_IDS,
 } from '../effects/ids';
 import {
@@ -149,6 +152,20 @@ describe('effect registry', () => {
         CLOCK_READERS[key]?.flashes ?? false
       );
     }
+  });
+});
+
+describe('the frames a brand may name', () => {
+  it("are every frame but the Showreel's film frames, which FRAME_IDS still holds", () => {
+    const film = ['film-fill', 'film-name'];
+    expect(FRAME_IDS).toEqual(expect.arrayContaining(film));
+    for (const id of film) {
+      expect(BRAND_FRAME_IDS).not.toContain(id);
+      expect(isBrandFrameId(id)).toBe(false);
+    }
+    expect([...BRAND_FRAME_IDS, ...film].sort()).toEqual([...FRAME_IDS].sort());
+    for (const id of BRAND_FRAME_IDS) expect(isBrandFrameId(id)).toBe(true);
+    expect(BRAND_FRAME_IDS).toContain(PASSTHROUGH_FRAME);
   });
 });
 

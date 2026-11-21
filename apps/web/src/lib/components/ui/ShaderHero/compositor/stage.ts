@@ -14,11 +14,52 @@
  * All PURE, so the arithmetic is under test; WP-5's Showreel calls
  * `setStage` with a box from `stageBoxFrom`.
  */
+import type { FilmFrameId } from './effects/ids';
 
 type Vec2 = readonly [number, number];
 
 /** What a film frame can show: the piece's video, or its still. */
 export type StageMedia = HTMLVideoElement | HTMLImageElement;
+
+/**
+ * Where the film gives way to the brand's picture (the v4 mock's bands):
+ * 'under', the smoke takes its foot, the brightest smoke last; 'fade', its
+ * foot fades out evenly; 'edges', 'fade' and its sides and top give way
+ * through the same smoke edge, so the picture frames the film all round.
+ */
+export type FilmBand = 'none' | 'under' | 'fade' | 'edges';
+
+/**
+ * How the Showreel shows its film (WP-5): which film frame (its layout's),
+ * and its band.
+ */
+export interface FilmLook {
+  readonly frame: FilmFrameId;
+  readonly band: FilmBand;
+}
+
+/** The band as the film frame reads it (`u_band`). */
+export const BAND_CODE: Record<FilmBand, number> = {
+  none: 0,
+  under: 1,
+  fade: 2,
+  edges: 3,
+};
+
+/**
+ * Where the band gives way, down the stage, as fractions of its height from
+ * the top. These are the v4 mock's ramps moved a tenth lower (owner,
+ * 2026-11-20: the footage felt "cramped"), so the film keeps the open frame
+ * and gives way behind the words and the index. ReelStage's stills' masks
+ * use the same numbers.
+ */
+export function bandRamp(
+  band: FilmBand,
+  phone: boolean
+): readonly [number, number] {
+  if (band === 'under') return phone ? [0.38, 0.76] : [0.4, 0.82];
+  return phone ? [0.44, 0.84] : [0.5, 0.95];
+}
 /** x, y, width, height in output pixels, origin bottom left (GL's). */
 export type RectPx = readonly [number, number, number, number];
 

@@ -22,6 +22,7 @@
 -->
 <script lang="ts">
   import { answers, brandEditor, previewResolved } from '$lib/brand-editor';
+  import { reelInkWarning } from '$lib/brand-editor/reel-ink-warning';
   import ListSegment from '$lib/components/studio/list-toolbar/ListSegment.svelte';
   import * as m from '$paraglide/messages';
   import {
@@ -131,7 +132,8 @@
         { key: 'reel-pointer', label: m.branding_hero_field_reel_pointer, values: { liquid: m.branding_hero_reel_pointer_liquid, smoke: m.branding_hero_reel_pointer_smoke, glitch: m.branding_hero_reel_pointer_glitch, none: m.branding_hero_none } },
         { key: 'reel-trans', label: m.branding_hero_field_reel_trans, values: { burn: m.branding_hero_reel_trans_burn, liquid: m.branding_hero_reel_trans_liquid, glitch: m.branding_hero_reel_trans_glitch } },
         { key: 'reel-surface', label: m.branding_hero_field_reel_surface, values: { none: m.branding_hero_none, grain: m.branding_hero_reel_surface_grain, halftone: m.branding_hero_reel_surface_halftone, reeded: m.branding_hero_reel_surface_reeded, red: m.branding_hero_reel_surface_red, shader: m.branding_hero_reel_surface_shader } },
-        { key: 'reel-band', label: m.branding_hero_field_reel_band, values: { none: m.branding_hero_none, under: m.branding_hero_reel_band_under, fade: m.branding_hero_reel_band_fade } },
+        { key: 'reel-band', label: m.branding_hero_field_reel_band, values: { fade: m.branding_hero_reel_band_fade, under: m.branding_hero_reel_band_under, edges: m.branding_hero_reel_band_edges, none: m.branding_hero_none } },
+        { key: 'reel-edge', label: m.branding_hero_field_reel_edge, values: { shadow: m.branding_hero_reel_edge_shadow, outline: m.branding_hero_reel_edge_outline } },
         { key: 'reel-opening', label: m.branding_hero_field_reel_opening, values: { name: m.branding_hero_reel_opening_name, none: m.branding_hero_none } },
         { key: 'reel-film', label: m.branding_hero_field_reel_film, values: { name: m.branding_hero_reel_film_name, smoke: m.branding_hero_reel_film_smoke, liquid: m.branding_hero_reel_film_liquid } },
         { key: 'reel-loop', label: m.branding_hero_field_reel_loop, values: { on: m.branding_hero_reel_loop_on, off: m.branding_hero_reel_loop_off } },
@@ -163,6 +165,12 @@
   );
   const isShowreel = $derived(storedComp === 'showreel' || showreelOnAuto);
   const groups = $derived(GROUPS.filter((group) => !group.showreel || isShowreel));
+  // The brand's ink on its ground, on the theme being edited, as the reel
+  // judges a word (reel-scrim's `contrast`): below the floor, Text over
+  // footage decides what the reel does with it.
+  const inkWarning = $derived(
+    reelInkWarning(brandEditor.getThemeColor('primaryColor'), brandEditor.getThemeColor('backgroundColor'))
+  );
 
   /** The segment's options: Auto (no stored value, '') and every value. */
   function optionsOf(field: Field) {
@@ -257,6 +265,17 @@
             />
             {#if instead}
               <p class="hero-designer__instead">{m.branding_hero_resolved_hint({ value: instead })}</p>
+            {/if}
+            {#if field.key === 'reel-edge' && inkWarning}
+              <div class="hero-designer__warning" data-ink-warning>
+                <strong>{m.branding_hero_reel_ink_warning_title()}</strong>
+                <p>
+                  {m.branding_hero_reel_ink_warning_body({
+                    ratio: String(inkWarning.ratio),
+                    floor: String(inkWarning.floor),
+                  })}
+                </p>
+              </div>
             {/if}
           </div>
         {/each}
@@ -372,6 +391,22 @@
     margin: 0;
     font-size: var(--text-xs);
     color: var(--color-status-warning-text);
+  }
+
+  .hero-designer__warning {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-status-warning-border);
+    border-radius: var(--radius-md);
+    background: var(--color-status-warning-surface);
+    color: var(--color-status-warning-text);
+    font-size: var(--text-xs);
+  }
+
+  .hero-designer__warning p {
+    margin: 0;
   }
 
   .hero-designer__quiet {

@@ -68,7 +68,15 @@ export const HERO_OPTION_VALUES = {
   'reel-trans': ['burn', 'liquid', 'glitch'],
   // a treatment over every picture and film
   'reel-surface': ['none', 'grain', 'halftone', 'reeded', 'red', 'shader'],
-  'reel-band': ['none', 'under', 'fade'],
+  // where the film gives way to the shader: its foot evenly ('fade', the
+  // default: owner, 2026-11-20), its foot through the smoke ('under'), all
+  // round ('edges'), or nowhere
+  'reel-band': ['fade', 'under', 'edges', 'none'],
+  // how the words keep their contrast over the footage (owner, 2026-11-20):
+  // the corner shadows grown as far as each word needs ('shadow', the
+  // default), or the shadows as they are and an outline round each word's
+  // glyphs ('outline')
+  'reel-edge': ['shadow', 'outline'],
   'reel-opening': ['name', 'none'],
   // how "Watch our film" opens into the full frame
   'reel-film': ['name', 'smoke', 'liquid'],
@@ -217,7 +225,8 @@ function baseOptions(facts: HeroFacts): HeroOptions {
     'reel-pointer': 'liquid',
     'reel-trans': 'burn',
     'reel-surface': 'none',
-    'reel-band': 'none',
+    'reel-band': 'fade',
+    'reel-edge': 'shadow',
     'reel-opening': 'name',
     'reel-film': 'name',
     'reel-loop': 'on',

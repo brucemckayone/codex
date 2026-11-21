@@ -62,6 +62,21 @@ describe('planStack', () => {
     );
   });
 
+  // WP-5 (Codex-1yd58.6): the Name window's film needs the name to show
+  // through; without it, the film fills its stage rather than vanishing.
+  it('draws the film through the name as the film filling its stage until there is a name mask', () => {
+    const named = { ...stack, frame: 'film-name' } as const;
+    expect(planStack(named, ctx({ hasMask: false })).frame).toBe(
+      FRAMES['film-fill']
+    );
+    expect(planStack(named, ctx({ hasMask: true })).frame).toBe(
+      FRAMES['film-name']
+    );
+    expect(
+      planStack({ ...stack, frame: 'film-fill' }, ctx({ hasMask: false })).frame
+    ).toBe(FRAMES['film-fill']);
+  });
+
   it('applies the phone and reduced-motion fallbacks (WP-3’s effects keep themselves)', () => {
     for (const over of [
       { phone: true },

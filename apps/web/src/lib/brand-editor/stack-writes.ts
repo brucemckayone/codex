@@ -21,7 +21,7 @@ import { TOKEN_OVERRIDE_VALUE_MAX } from '@codex/validation';
 import { BLEND_AMOUNTS } from '$lib/components/ui/ShaderHero/compositor/effects/amounts';
 import {
   type BlendId,
-  type FrameId,
+  type BrandFrameId,
   PASSTHROUGH_FRAME,
 } from '$lib/components/ui/ShaderHero/compositor/effects/ids';
 import {
@@ -81,7 +81,7 @@ export interface StackWriter {
     layers: readonly EditedLayer[],
     kept: readonly KeptLayerItem[]
   ): boolean;
-  frame(id: FrameId): void;
+  frame(id: BrandFrameId): void;
 }
 
 export function createStackWriter(deps: StackWriterDeps): StackWriter {

@@ -56,6 +56,9 @@ import { effectTime } from './flash';
 import { type PlanContext, planStack, type StackPlan } from './plan';
 import type { StackConfig } from './stack-config';
 import {
+  BAND_CODE,
+  bandRamp,
+  type FilmLook,
   type RectPx,
   type StageBox,
   type StageMedia,
@@ -109,6 +112,14 @@ export interface Compositor {
   setStage(stage: StageBox | null): void;
   /** The org's name, white on black, the canvas's size (WP-5). */
   setNameMask(mask: TexImageSource | null): void;
+  /** How the Showreel shows its film, or null for the brand's own frame. */
+  setLook(look: FilmLook | null): void;
+  /**
+   * A frame of the media is on the GPU, so the canvas shows the film and
+   * the page can hide its own copy of it (ShaderHero's `data-film`). A lost
+   * context clears it until the media uploads again.
+   */
+  mediaReady(): boolean;
   /** Free every GL object it made. */
   destroy(): void;
   /** Forget every GL object WITHOUT deleting it (its context was lost):
@@ -221,9 +232,27 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
   let media: MediaSlot | null = null;
   let mediaTex: WebGLTexture | null = null;
   let stage: StageBox | null = null;
+  let look: FilmLook | null = null;
+  /** The last stack given the look's film frame, kept so the plan's cache
+   *  (by identity) holds while neither changes. */
+  let framedFor: {
+    from: StackConfig;
+    look: FilmLook;
+    stack: StackConfig;
+  } | null = null;
 
   let plan: StackPlan | null = null;
   let planFor: (PlanContext & { stack: StackConfig }) | null = null;
+
+  /** The stack this frame draws: with a film attached and a look, its frame
+   *  is the Showreel's film frame; otherwise the brand's own. */
+  function framed(from: StackConfig): StackConfig {
+    if (!media || !look) return from;
+    if (framedFor?.from !== from || framedFor.look !== look) {
+      framedFor = { from, look, stack: { ...from, frame: look.frame } };
+    }
+    return framedFor.stack;
+  }
 
   function passFor(effect: Effect): Pass | null {
     const known = passes.get(effect.id);
@@ -557,6 +586,8 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       u_fade: fade,
       u_mediaSize: mediaSize(),
       u_hasMedia: hasMedia ? 1 : 0,
+      u_band: look ? BAND_CODE[look.band] : 0,
+      u_ramp: bandRamp(look?.band ?? 'none', f.phone),
     };
     bindUnit(SAMPLER_UNITS.u_mask, maskTex);
     bindUnit(SAMPLER_UNITS.u_media, hasMedia ? mediaTex : null);
@@ -601,7 +632,10 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
   }
 
   /** The frame, onto the canvas. One that will not compile falls back to
-   *  the picture as it is. False: nothing reached the canvas. */
+   *  the picture as it is. False: nothing reached the canvas. The layers
+   *  above treat the shader alone; a treatment OVER the film (the post-frame
+   *  surface slot, 5b) goes after this pass, which then draws into a target
+   *  rather than the canvas. */
   function framePass(
     f: CompositeFrame,
     current: StackPlan,
@@ -640,7 +674,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       const sceneB = presetPasses(f, sceneA, offered);
 
       const current = stackPlan({
-        stack: f.stack,
+        stack: framed(f.stack),
         phone: f.phone,
         reducedMotion: f.reducedMotion,
         hasSecond: sceneB !== null,
@@ -677,6 +711,14 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       stage = next;
     },
 
+    setLook(next) {
+      look = next;
+    },
+
+    mediaReady() {
+      return media?.uploaded === true;
+    },
+
     setNameMask(next) {
       maskSource = next;
       maskDirty = next !== null;
@@ -691,6 +733,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       media = null;
       maskSource = null;
       stage = null;
+      look = null;
       dropGl(!gl.isContextLost());
     },
 

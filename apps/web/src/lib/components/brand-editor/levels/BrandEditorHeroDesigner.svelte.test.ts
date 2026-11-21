@@ -13,6 +13,7 @@ import { brandEditor, previewResolved } from '$lib/brand-editor';
 import type { BrandEditorState } from '$lib/brand-editor/types';
 import {
   defaultOptions,
+  HERO_OPTION_KEYS,
   type HeroContentKind,
   type HeroFacts,
   type HeroOptions,
@@ -30,13 +31,16 @@ import BrandEditorHeroDesigner from './BrandEditorHeroDesigner.svelte';
 const ORG_ID = '00000000-0000-4000-8000-000000000000';
 
 function brand(
-  tokenOverrides: Record<string, string | null>
+  tokenOverrides: Record<string, string | null>,
+  colours: Partial<
+    Pick<BrandEditorState, 'primaryColor' | 'backgroundColor'>
+  > = {}
 ): BrandEditorState {
   return {
-    primaryColor: '#3B82F6',
+    primaryColor: colours.primaryColor ?? '#3B82F6',
     secondaryColor: null,
     accentColor: null,
-    backgroundColor: null,
+    backgroundColor: colours.backgroundColor ?? null,
     fontBody: null,
     fontHeading: null,
     radius: 0.5,
@@ -88,8 +92,11 @@ function report(
 }
 
 let component: ReturnType<typeof mount> | null = null;
-function render(tokenOverrides: Record<string, string | null>) {
-  brandEditor.open(ORG_ID, brand(tokenOverrides));
+function render(
+  tokenOverrides: Record<string, string | null>,
+  colours: Parameters<typeof brand>[1] = {}
+) {
+  brandEditor.open(ORG_ID, brand(tokenOverrides, colours));
   component = mount(BrandEditorHeroDesigner, { target: document.body });
   flushSync();
 }
@@ -136,8 +143,15 @@ describe('the Showreel group: shown whenever the hero is a Showreel', () => {
     expect(showreel()?.textContent).toContain(
       'Get people watching plays your film and pieces as a Showreel.'
     );
+    // A field for every reel axis the hero has (WP-5a added reel-edge).
+    const reelAxes = HERO_OPTION_KEYS.filter((key) => key.startsWith('reel-'));
+    expect(
+      [...(showreel()?.querySelectorAll('.hero-designer__field') ?? [])].map(
+        (field) => field.getAttribute('data-key')
+      )
+    ).toEqual(expect.arrayContaining(reelAxes));
     expect(showreel()?.querySelectorAll('.hero-designer__field')).toHaveLength(
-      9
+      reelAxes.length
     );
   });
 
@@ -181,6 +195,59 @@ describe('the options', () => {
     expect(option('reel-layout', 'Auto').getAttribute('aria-checked')).toBe(
       'true'
     );
+  });
+
+  test('the band offers Auto and every value the hero draws, in its order', () => {
+    render({ 'hero-opt-purpose': 'consume' });
+    const names = [
+      ...document.querySelectorAll(
+        '.hero-designer__field[data-key="reel-band"] [role="radio"]'
+      ),
+    ].map((radio) => radio.textContent?.trim());
+    expect(names).toEqual([
+      'Auto',
+      'Fade',
+      'Under the words',
+      'All round',
+      'None',
+    ]);
+  });
+
+  test('Text over footage offers Shadow and Outline, and writes the choice', () => {
+    render({ 'hero-opt-purpose': 'consume' });
+    const names = [
+      ...document.querySelectorAll(
+        '.hero-designer__field[data-key="reel-edge"] [role="radio"]'
+      ),
+    ].map((radio) => radio.textContent?.trim());
+    expect(names).toEqual(['Auto', 'Shadow', 'Outline']);
+    option('reel-edge', 'Outline').click();
+    flushSync();
+    expect(light()['hero-opt-reel-edge']).toBe('outline');
+  });
+
+  test('a brand colour that cannot keep its floor over film is warned of', () => {
+    // OBB: its primary red on its own dark is 3.75:1, under the 4.5 floor.
+    render(
+      { 'hero-opt-purpose': 'consume' },
+      { primaryColor: '#CB213C', backgroundColor: '#0F0000' }
+    );
+    const warning = () =>
+      document.querySelector(
+        '.hero-designer__field[data-key="reel-edge"] [data-ink-warning]'
+      )?.textContent;
+    expect(warning()).toContain('This colour is hard to read over film');
+    expect(warning()).toContain('it reaches 3.75:1');
+    expect(warning()).toContain('needs 4.5:1');
+    if (component) unmount(component);
+    component = null;
+    brandEditor.close();
+
+    render(
+      { 'hero-opt-purpose': 'consume' },
+      { primaryColor: '#FFFFFF', backgroundColor: '#0F0000' }
+    );
+    expect(warning()).toBeUndefined();
   });
 
   test('each field is a radio group named by its label', () => {

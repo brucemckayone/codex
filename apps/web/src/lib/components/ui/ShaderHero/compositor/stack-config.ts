@@ -38,9 +38,10 @@ import {
 import { LAYER_AMOUNTS } from './effects/amounts';
 import {
   type BlendId,
+  type BrandFrameId,
   type FrameId,
   isBlendId,
-  isFrameId,
+  isBrandFrameId,
   isLayerId,
   type LayerId,
   PASSTHROUGH_FRAME,
@@ -242,8 +243,17 @@ export function serialiseLayers(layers: readonly EditedLayer[]): string | null {
 }
 
 /** The stack and every layer item, as `readStack` reads them. */
+/**
+ * A stack as a brand's tokens name it: its frame is always a brand frame
+ * (`isBrandFrameId`), never one of the Showreel's film frames, which only the
+ * compositor's own look sets (`framed`).
+ */
+export interface BrandStackConfig extends StackConfig {
+  readonly frame: BrandFrameId;
+}
+
 export interface StackReading {
-  readonly stack: StackConfig;
+  readonly stack: BrandStackConfig;
   readonly items: readonly LayerItem[];
 }
 
@@ -278,7 +288,7 @@ export function readStack(
       blend: isBlendId(blend) ? blend : BARE_STACK.blend,
       blendAmount: amountOf(read('shader-blend-amount')),
       layers,
-      frame: isFrameId(frame) ? frame : BARE_STACK.frame,
+      frame: isBrandFrameId(frame) ? frame : PASSTHROUGH_FRAME,
     },
     items,
   };
