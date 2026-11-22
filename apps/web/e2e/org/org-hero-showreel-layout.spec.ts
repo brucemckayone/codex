@@ -915,6 +915,16 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
       test
         .info()
         .annotations.push({ type: 'lines', description: `${at.lines.length}` });
+      // On one line (a brand whose font sets the name narrower) there is no
+      // break, so the balance check below reads nothing: said on the test,
+      // never failed, as the name may fit on any brand.
+      if (at.lines.length < 2) {
+        test.info().annotations.push({
+          type: 'one-line',
+          description:
+            "the name fits on one line on this brand: no break, so its balance went unchecked here; the long-name cell's name breaks on any brand, its lines held to what the measure needs",
+        });
+      }
       // Balanced: no word moved across a break brings its lines closer.
       for (const [i, past] of (await unbalance(page)).entries()) {
         expect

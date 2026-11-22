@@ -8,8 +8,8 @@
  * What the landing resolves from these keys and these facts is the web app's
  * `hero-config.test.ts` ("the seeded OBB's stored hero"): consume with a reel
  * is the Showreel, and the peek stays on while a featured piece exists. Here,
- * the seed's half: the keys, the brand the other suites pin, and the featured
- * rows the peek and the reel are made of.
+ * the seed's half: the keys, the brand the other suites pin, the logo the top
+ * bar draws, and the featured rows the peek and the reel are made of.
  *
  * The database is a fake that records each insert's rows: no DB, no network.
  */
@@ -74,6 +74,11 @@ describe("the seeded of-blood-and-bones' stored hero", () => {
     expect(row.introVideoMediaItemId ?? null).toBeNull();
     // e2e/page-kit/brand-fidelity.spec.ts ("an org background with no dark one")
     expect(row.darkModeOverrides ?? null).toBeNull();
+  });
+
+  it('keeps a logo for the top bar: the Showreel suite fails one late and lays the name beside it', async () => {
+    const row = await bonesBranding();
+    expect(row.logoUrl).toEqual(expect.stringMatching(/^https?:\/\/\S+$/));
   });
 
   it('has at least two featured, published pieces with a picture: the reel and the peek', async () => {
