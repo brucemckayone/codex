@@ -1,7 +1,7 @@
 /**
- * Which passes a stack runs (Codex-1yd58.4): the blend only while a second
- * preset draws, the layers in order with their amounts, the frame, and the
- * name frames' fall back to shader only until a name mask is set.
+ * Which passes a stack runs: the blend only while a second preset draws, the
+ * layers in order with their amounts, the frame, and the name frames' fall back
+ * to shader only until a name mask is set.
  */
 import { describe, expect, it } from 'vitest';
 import { BLENDS, FRAMES, LAYERS } from '../effects/registry';
@@ -62,8 +62,8 @@ describe('planStack', () => {
     );
   });
 
-  // WP-5 (Codex-1yd58.6): the Name window's film needs the name to show
-  // through; without it, the film fills its stage rather than vanishing.
+  // The Name window's film needs the name to show through; without it, the film
+  // fills its stage rather than vanishing.
   it('draws the film through the name as the film filling its stage until there is a name mask', () => {
     const named = { ...stack, frame: 'film-name' } as const;
     expect(planStack(named, ctx({ hasMask: false })).frame).toBe(
@@ -77,7 +77,7 @@ describe('planStack', () => {
     ).toBe(FRAMES['film-fill']);
   });
 
-  it('applies the phone and reduced-motion fallbacks (WP-3’s effects keep themselves)', () => {
+  it('applies the phone and reduced-motion fallbacks (the brand stack’s effects keep themselves)', () => {
     for (const over of [
       { phone: true },
       { reducedMotion: true },

@@ -48,8 +48,8 @@ describe('simGridFor', () => {
     expect(simGridFor(10_000, 100)).toEqual(simGridFor(4000, 1000));
   });
 
-  // WP-1d R3: lenia's 48-tap kernel runs at a 256² budget. Every caller that
-  // passes no base keeps SIM_BASE, so the grids above are unchanged.
+  // Lenia's 48-tap kernel runs at a 256² budget. Every caller that passes no
+  // base keeps SIM_BASE, so the grids above are unchanged.
   it('takes a smaller texel budget when given one, in the same shape', () => {
     expect(simGridFor(1440, 810, SIM_BASE)).toEqual(simGridFor(1440, 810));
     expect(simGridFor(800, 800, 256)).toEqual({ w: 256, h: 256, aspect: 1 });

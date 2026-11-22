@@ -1,9 +1,8 @@
 /**
- * The effect registry (Codex-1yd58.4, plan §5.5): every effect a stack can
- * name, one file each. What `shaders:check` cannot see is pinned here: the
- * ids are unique and match `ids.ts` (which the stack parse reads without the
- * GLSL), each sits on its own axis, and each has both fallbacks, naming an
- * effect of its own axis.
+ * The effect registry: every effect a stack can name, one file each. What
+ * `shaders:check` cannot see is pinned here: the ids are unique and match
+ * `ids.ts` (which the stack parse reads without the GLSL), each sits on its own
+ * axis, and each has both fallbacks, naming an effect of its own axis.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -103,8 +102,8 @@ describe('effect registry', () => {
     expect(effect.glsl).toMatch(/void main\(\)/);
     // Its uniforms are generated from its list; it declares none itself.
     expect(effect.glsl).not.toMatch(/^\s*uniform\s/m);
-    // Only a blend has a second preset to read, and only a surface-only
-    // layer is handed the shader's own picture there (WP-8).
+    // Only a blend has a second preset to read, and only a surface-only layer
+    // is handed the shader's own picture there.
     const surfaceOnly = (SURFACE_ONLY_LAYER_IDS as readonly string[]).includes(
       effect.id
     );

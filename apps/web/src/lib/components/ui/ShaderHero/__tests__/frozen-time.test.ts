@@ -1,12 +1,12 @@
 /**
- * Time that stands still moves nothing (Codex-1yd58.12, WP-11's visual-gate
- * drift). `createDeltaClock` handed back a sixtieth of a second for a frame
- * drawn at the same time as the last, so every preset that integrates its
- * own clock (`u_clock += dt * rate`) went on moving with the page's clock
- * frozen: a light org page drifted ~2.8 mean over 8 s under the visual
- * gate's frozen `performance.now`, and a reduced-motion still frame moved on
- * each redraw. A frame at the same time now advances nothing, with sound on
- * too (whose beat rate divides by dt).
+ * Time that stands still moves nothing (the visual gate's frozen page drifted).
+ * `createDeltaClock` handed back a sixtieth of a second for a frame drawn at
+ * the same time as the last, so every preset that integrates its own clock
+ * (`u_clock += dt * rate`) went on moving with the page's clock frozen: a light
+ * org page drifted ~2.8 mean over 8 s under the visual gate's frozen
+ * `performance.now`, and a reduced-motion still frame moved on each redraw. A
+ * frame at the same time now advances nothing, with sound on too (whose beat
+ * rate divides by dt).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeltaClock } from '../audio-uniforms';

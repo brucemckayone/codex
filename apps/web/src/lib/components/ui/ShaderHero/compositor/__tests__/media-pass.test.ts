@@ -1,8 +1,8 @@
 /**
- * The passes over the piece's own picture (WP-5b, Codex-1yd58.6): what the
- * look asks to be drawn on the film or still before its frame samples it,
- * at what size, and in what order the runner draws them. Pure planning and
- * a runner with its target and draw handed in, so no GL context.
+ * The passes over the piece's own picture: what the look asks to be drawn on
+ * the film or still before its frame samples it, at what size, and in what
+ * order the runner draws them. Pure planning and a runner with its target and
+ * draw handed in, so no GL context.
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { FBO } from '../../webgl-utils';

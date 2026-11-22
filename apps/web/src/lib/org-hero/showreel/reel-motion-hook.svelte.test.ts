@@ -1,11 +1,10 @@
 /**
- * `useReelMotion`, the Showreel's motion wired (Codex-1yd58.7, WP-6 wiring
- * part 1), as the Showreel calls it: on live props, in a harness. It hands
- * the window's shader its motion and lets go, follows the settings, the
- * picks, the pause, a refresh, the pointer and a phone's swipe, the film,
- * and the opening on the canvas's `data-film`. Frames are driven by hand
- * (`frame(ms)`), as in the Showreel's own tests; the compositor's half (it
- * writes `motion.running`) is played by `runs()`.
+ * `useReelMotion`, the Showreel's motion wired, as the Showreel calls it: on
+ * live props, in a harness. It hands the window's shader its motion and lets
+ * go, follows the settings, the picks, the pause, a refresh, the pointer and a
+ * phone's swipe, the film, and the opening on the canvas's `data-film`. Frames
+ * are driven by hand (`frame(ms)`), as in the Showreel's own tests; the
+ * compositor's half (it writes `motion.running`) is played by `runs()`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FilmFrameId } from '$lib/components/ui/ShaderHero/compositor/effects/ids';
@@ -227,7 +226,7 @@ describe('useReelMotion and the stage', () => {
     expect(held().values.u_reveal).toBe(1);
   });
 
-  it('a pause during a cut shows the piece it was going to at once, so its words can come in (R2-M1)', () => {
+  it('a pause during a cut shows the piece it was going to at once, so its words can come in', () => {
     const props = render();
     runs();
     props.index = 1;
@@ -333,9 +332,8 @@ describe('useReelMotion and the film', () => {
   });
 });
 
-// The canvas's letters hold still in the window, so they fade over the
-// first NAME_FADE_PX of scroll and the page's own glyphs take the name back
-// (owner, 2026-11-21, the scroll fix's (c)).
+// The canvas's letters hold still in the window, so they fade over the first
+// NAME_FADE_PX of scroll and the page's own glyphs take the name back.
 describe('useReelMotion and the scroll', () => {
   const own = Object.getOwnPropertyDescriptor(window, 'scrollY');
   function scrollTo(y: number) {
@@ -368,8 +366,8 @@ describe('useReelMotion and the scroll', () => {
     expect(said).toContain('frame');
   });
 
-  // The film fades too, over the stage's height (WP-1's `stageFade`): a
-  // paused, reduced-motion or Loop-off hero fades it as a playing one does.
+  // The film fades too, over the stage's height (`stageFade`): a paused,
+  // reduced-motion or Loop-off hero fades it as a playing one does.
   it('tells a frozen hero to draw while a scroll crosses the film’s own fade, the stage’s height, and never past it', () => {
     render({ moves: false });
     runs();
@@ -508,7 +506,7 @@ describe('useReelMotion and the opening', () => {
     expect(held().values.u_nameAlpha).toBeGreaterThan(0);
   });
 
-  it('a live switch from None to Name after the canvas showed the film keeps the letters, never dark for good (review M2)', () => {
+  it('a live switch from None to Name after the canvas showed the film keeps the letters, never dark for good', () => {
     const canvas = hero();
     canvas.setAttribute('data-film', '');
     // None at first: the canvas already shows the film, the moment passes.

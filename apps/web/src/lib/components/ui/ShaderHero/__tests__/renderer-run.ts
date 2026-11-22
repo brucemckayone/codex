@@ -1,8 +1,8 @@
 /**
  * Running a renderer frame by frame on the fake WebGL (fake-gl.ts), for the
- * WP-1d rework tests (Codex-1yd58): a palette, a sound to play, ShaderHero's
- * click decay, and `runFrames`, which renders a stretch of seconds at a
- * given frame rate and keeps what was drawn and uploaded after `from`.
+ * preset tests: a palette, a sound to play, ShaderHero's click decay, and
+ * `runFrames`, which renders a stretch of seconds at a given frame rate and
+ * keeps what was drawn and uploaded after `from`.
  */
 
 import { expect, vi } from 'vitest';

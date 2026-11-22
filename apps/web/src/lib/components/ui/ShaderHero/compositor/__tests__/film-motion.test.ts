@@ -1,8 +1,7 @@
 /**
- * The compositor's film passes for the Showreel's motion (Codex-1yd58.7,
- * WP-6 wiring part 1): one composed pass per film frame, choice and
- * context, made once, and with it the effects that pass RUNS after the
- * fallbacks, which the Showreel's driver moves the uniforms for.
+ * The compositor's film passes for the Showreel's motion: one composed pass per
+ * film frame, choice and context, made once, and with it the effects that pass
+ * RUNS after the fallbacks, which the Showreel's driver moves the uniforms for.
  */
 import { describe, expect, it } from 'vitest';
 import { BAND_GLSL } from '../effects/film-band';
@@ -57,12 +56,12 @@ describe('createFilmMotionPasses', () => {
     expect(passes.passFor('film-fill', { ...choice }, desk)).toBe(first);
   });
 
-  it('composes the portrait frame too, as WP-5b places its film (fill, name and portrait)', () => {
+  it('composes the portrait frame too, as the portrait frame places its film (fill, name and portrait)', () => {
     const passes = createFilmMotionPasses();
     const portrait = passes.passFor('film-portrait', choice, desk);
     expect(portrait?.pass.id.startsWith('film-portrait+')).toBe(true);
     expect(portrait?.running).toEqual(choice);
-    // At rest it places the film and gives way as WP-5's frames do: the
+    // At rest it places the film and gives way as the plain frames do: the
     // portrait frame's own placement, and the shared band.
     expect(portrait?.pass.glsl).toContain(PORTRAIT_GLSL);
     expect(portrait?.pass.glsl).toContain(BAND_GLSL);

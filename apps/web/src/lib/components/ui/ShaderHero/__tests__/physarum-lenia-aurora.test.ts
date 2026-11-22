@@ -16,11 +16,11 @@ import { fakeGl } from './fake-gl';
 import { audioAt, BASE, near, runFrames, uploads } from './renderer-run';
 
 /**
- * The R3 reworks (Codex-1yd58 WP-1d): physarum as particles that grow a vein
- * network before the first frame, lenia on the step clock at the owner's
- * tuning, and aurora's folds measured across the width. Each FBO preset: one
- * splash per click, the same speed at 60 and 120 Hz, a grid of the canvas's
- * shape (round on a phone), and a first frame already grown.
+ * Physarum as particles that grow a vein network before the first frame, lenia
+ * on the step clock at the lab's tuning, and aurora's folds measured across the
+ * width. Each FBO preset: one splash per click, the same speed at 60 and 120
+ * Hz, a grid of the canvas's shape (round on a phone), and a first frame
+ * already grown.
  */
 
 afterEach(() => {
@@ -198,7 +198,7 @@ describe('aurora: curtains a phone can see', () => {
   });
 });
 
-describe("what a brand that stored nothing paints: the owner's R3 tuning", () => {
+describe("what a brand that stored nothing paints: the lab's tuning", () => {
   function config(preset: string) {
     const el = document.createElement('div');
     el.className = 'org-layout';
@@ -225,9 +225,9 @@ describe("what a brand that stored nothing paints: the owner's R3 tuning", () =>
   });
 });
 
-describe('review round 1 (R2+R3 ports)', () => {
-  // MEDIUM. The musical clock divided by the step clock's dt, which is 0 when
-  // two frames share a timestamp (Firefox resistFingerprinting coarsens
+describe('a zero dt, a slow frame, float positions and a rotate', () => {
+  // The musical clock divided by the step clock's dt, which is 0 when two
+  // frames share a timestamp (Firefox resistFingerprinting coarsens
   // performance.now): NaN, and the pulse went black for the session.
   it.each([
     ['lenia', createLeniaRenderer, LENIA],
@@ -243,10 +243,10 @@ describe('review round 1 (R2+R3 ports)', () => {
     expect(Number.isFinite(fake.uniforms.get('uClock') as number)).toBe(true);
   });
 
-  // LOW 2. A slow frame catches up to 2 x the steps a frame, and never fewer
-  // than 4, so iOS Low Power (30 fps) keeps full speed at speed 4; the cap of
-  // 4 ran it at half. Round 2: speed 1 at 20 fps owes 3 steps a frame, and a
-  // cap of 2 x 1 ran 2.
+  // A slow frame catches up to 2 x the steps a frame, and never fewer than 4,
+  // so iOS Low Power (30 fps) keeps full speed at speed 4; the cap of 4 ran it
+  // at half. And speed 1 at 20 fps owes 3 steps a frame, where a cap of 2 x 1
+  // ran 2.
   it.each([
     { speed: 4, fps: 30, steps: 720 },
     { speed: 1, fps: 20, steps: 180 },
@@ -260,8 +260,8 @@ describe('review round 1 (R2+R3 ports)', () => {
     ).toBe(steps);
   });
 
-  // LOW 3. The agents are 32-bit float positions: read at high precision
-  // (ESSL3's default sampler2D precision is lowp).
+  // The agents are 32-bit float positions: read at high precision (ESSL3's
+  // default sampler2D precision is lowp).
   it('reads the agent texture through a highp sampler wherever it is sampled', () => {
     for (const src of [PHYSARUM_DEPOSIT_VERT, PHYSARUM_AGENT_FRAG]) {
       const code = src
@@ -271,8 +271,8 @@ describe('review round 1 (R2+R3 ports)', () => {
     }
   });
 
-  // LOW 4. A rotate (a real change of shape) keeps the agents and rebuilds
-  // only the trail with a short regrow; it re-ran all 120 warm-up steps.
+  // A rotate (a real change of shape) keeps the agents and rebuilds only the
+  // trail with a short regrow; it re-ran all 120 warm-up steps.
   it('physarum regrows briefly after a rotate, keeping its agents', () => {
     const fake = fakeGl(1440, 900);
     const renderer = createPhysarumRenderer();

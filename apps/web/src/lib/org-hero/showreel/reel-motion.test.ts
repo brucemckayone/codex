@@ -1,9 +1,9 @@
 /**
- * The Showreel's motion driver (Codex-1yd58.7, WP-6 wiring part 1): the
- * four motion settings turned into the values the window's shader draws the
- * film with, frame by frame. It moves the uniforms of the effects the pass
- * RUNS (`motion.running`, which the compositor writes as it draws), so each
- * test sets `running` as the compositor would. Time is handed in.
+ * The Showreel's motion driver: the four motion settings turned into the values
+ * the window's shader draws the film with, frame by frame. It moves the
+ * uniforms of the effects the pass RUNS (`motion.running`, which the compositor
+ * writes as it draws), so each test sets `running` as the compositor would.
+ * Time is handed in.
  */
 import { describe, expect, it } from 'vitest';
 import { STILL_MOTION } from '$lib/components/ui/ShaderHero/__tests__/motion-fixtures';
@@ -64,7 +64,7 @@ describe('motionChoice', () => {
 });
 
 describe('ReelMotion at rest', () => {
-  it('draws WP-5’s frame: every value at rest', () => {
+  it('draws the plain film frame: every value at rest', () => {
     const driver = new ReelMotion(setup());
     runs(driver);
     driver.follow(KEYS, 0, 0);
@@ -207,9 +207,9 @@ describe('ReelMotion between pieces', () => {
     expect(driver.stageKey).toBe(KEYS[2]);
   });
 
-  // Review R2-M1: the words come in with their piece's picture, so a cut
-  // frozen by a pause would keep them out, hidden, for the whole pause.
-  it('a pause mid-fall shows the piece the cut was going to, at once and at rest (R2-M1)', () => {
+  // The words come in with their piece's picture, so a cut frozen by a pause
+  // would keep them out, hidden, for the whole pause.
+  it('a pause mid-fall shows the piece the cut was going to, at once and at rest', () => {
     const driver = new ReelMotion(setup());
     runs(driver);
     driver.follow(KEYS, 0, 0);
@@ -233,7 +233,7 @@ describe('ReelMotion between pieces', () => {
     expect(driver.stage).toBe(1);
   });
 
-  it('a pause in a rise with a pick waiting shows the waiting pick (R2-M1)', () => {
+  it('a pause in a rise with a pick waiting shows the waiting pick', () => {
     const driver = new ReelMotion(setup());
     runs(driver);
     driver.follow(KEYS, 0, 0);
@@ -482,7 +482,7 @@ describe('ReelMotion opening', () => {
     }
   });
 
-  it('is one shot a visit: an opening chosen after the canvas showed the film never holds the letters dark (review M2)', () => {
+  it('is one shot a visit: an opening chosen after the canvas showed the film never holds the letters dark', () => {
     // None at first: the canvas shows the film, and that was the moment.
     const driver = new ReelMotion(setup({ frame: 'film-name' }));
     runs(driver);
@@ -500,7 +500,7 @@ describe('ReelMotion opening', () => {
     }
   });
 
-  it('waits for the pass when it has not said what it runs, then opens (review L7)', () => {
+  it('waits for the pass when it has not said what it runs, then opens', () => {
     const driver = opening();
     const v = driver.motion.values;
     // The canvas shows the film before the compositor drew this choice.
@@ -536,7 +536,7 @@ describe('ReelMotion opening', () => {
     expect(driver.motion.values.u_nameAlpha).toBe(1);
   });
 
-  it('waits in the opening’s own first frame, so it starts from what shows (review L9)', () => {
+  it('waits in the opening’s own first frame, so it starts from what shows', () => {
     for (const frame of ['film-fill', 'film-name', 'film-portrait'] as const) {
       const driver = opening({ frame });
       runs(driver);
@@ -595,10 +595,9 @@ describe('ReelMotion into the film', () => {
     expect(v.u_fill).toBe(0);
   });
 
-  // Scrolled past the letters' fade (NAME_FADE_PX) there are no letters to
-  // dive through, and those the canvas holds still are not where the page
-  // set them: the way in goes straight to the film filling its stage (owner,
-  // 2026-11-21, the scroll fix's (c)).
+  // Scrolled past the letters' fade (NAME_FADE_PX) there are no letters to dive
+  // through, and those the canvas holds still are not where the page set them:
+  // the way in goes straight to the film filling its stage.
   it.each([
     'film-name',
     'film-fill',
@@ -665,10 +664,9 @@ describe('ReelMotion into the film', () => {
   });
 });
 
-// Review round 3: after R2-M1's pause, play resumes from the landed piece
-// (wp6-review-r3/pause-resume.probe.test.ts). A cut never turns round and
-// cuts start at least MIN_CUT_GAP_MS apart (reel-reveal.ts).
-describe('pause mid-cut, then play (R2-M1, review round 3)', () => {
+// After a pause mid-cut, play resumes from the landed piece. A cut never turns
+// round and cuts start at least MIN_CUT_GAP_MS apart (reel-reveal.ts).
+describe('pause mid-cut, then play', () => {
   const keys = ['a', 'b', 'c'];
   const cutSetup: ReelMotionSetup = {
     choice: { trans: 'burn', pointer: 'none', opening: 'none', into: 'smoke' },

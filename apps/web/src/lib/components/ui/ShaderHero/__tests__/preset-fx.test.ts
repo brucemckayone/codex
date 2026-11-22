@@ -9,9 +9,9 @@ import {
 import { getShaderConfig } from '../shader-config';
 
 /**
- * Intensity, grain and vignette are each preset's own (Codex-1yd58 WP-1d).
- * getShaderConfig reads, in order: the preset's key, then the legacy shared
- * key (brands saved before WP-1d), then the preset's tuned default.
+ * Intensity, grain and vignette are each preset's own. getShaderConfig reads,
+ * in order: the preset's key, then the legacy shared key (older brands), then
+ * the preset's tuned default.
  */
 
 function mountLayout(props: Record<string, string>): HTMLElement {
@@ -78,7 +78,7 @@ describe('getShaderConfig: intensity, grain and vignette', () => {
     ).toEqual({ intensity: 2, grain: 0.04, vignette: 0.3 });
   });
 
-  it('falls back to the legacy shared key when the preset has none (a brand saved before WP-1d)', () => {
+  it('falls back to the legacy shared key when the preset has none (an older brand)', () => {
     expect(
       fx({
         '--brand-shader-preset': 'flow',
@@ -110,10 +110,9 @@ describe('getShaderConfig: intensity, grain and vignette', () => {
   });
 
   it('reaches a brand that stored nothing: suture paints 1.6, caustic 1.5', () => {
-    // Intended (R1 verdict, owner 2026-11-19): the tuned defaults are what a
-    // brand on that preset gets until it tunes its own. Before WP-1d both
-    // read the global 0.65; the WP-1c census found no production brand on
-    // suture or caustic.
+    // Intended: the tuned defaults are what a brand on that preset gets until
+    // it tunes its own. Both once read the global 0.65; a census found no
+    // production brand on suture or caustic.
     expect(fx({ '--brand-shader-preset': 'suture' })).toEqual({
       intensity: 1.6,
       grain: 0.025,
@@ -142,7 +141,7 @@ describe('getShaderConfig: intensity, grain and vignette', () => {
   });
 
   it("goes through the alias door: a cut id reads its survivor's keys", () => {
-    // nebula was cut to aurora (WP-1c).
+    // nebula was cut to aurora.
     expect(
       fx({
         '--brand-shader-preset': 'nebula',

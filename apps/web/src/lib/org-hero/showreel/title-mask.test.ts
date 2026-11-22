@@ -1,9 +1,9 @@
 /**
- * The title as the film's window on Corner and Wide (Codex-1yd58.7, WP-6;
- * owner, 2026-11-21): its words where the page lays them out, taken back by
- * the words' swap transform, drawn white on black in the title's font, and
- * no mask at all when there is no word to draw (so the motion falls back).
- * jsdom lays nothing out, so each word's Range box is given here.
+ * The title as the film's window on Corner and Wide: its words where the page
+ * lays them out, taken back by the words' swap transform, drawn white on black
+ * in the title's font, and no mask at all when there is no word to draw (so the
+ * motion falls back). jsdom lays nothing out, so each word's Range box is given
+ * here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -175,10 +175,10 @@ describe('titleWords and drawTitleMask', () => {
     };
     const canvas = drawTitleMask(title('Of Blood'));
     expect(canvas).toBeInstanceOf(HTMLCanvasElement);
-    // The box is the font's content area (80 = ascent 62 + descent 18), so
-    // the baseline is its ascent below the box's top. NOT the box's middle
-    // on the em square's middle ('middle', top + 40): that put every glyph
-    // 8 CSS px above the page's at 96 px in OBB's serif (the WP-6 board).
+    // The box is the font's content area (80 = ascent 62 + descent 18), so the
+    // baseline is its ascent below the box's top. NOT the box's middle on the
+    // em square's middle ('middle', top + 40): that put every glyph 8 CSS px
+    // above the page's at 96 px in OBB's serif.
     expect(drawn).toEqual([
       {
         text: 'Of',

@@ -1,7 +1,7 @@
 /**
- * The org layout's shader state (Codex-1yd58.3): one writer at a time, and
- * back to `pending` when that writer goes. The component's reports are
- * pinned in ShaderHero.svelte.test.ts ("ShaderHero live").
+ * The org layout's shader state: one writer at a time, and back to `pending`
+ * when that writer goes. The component's reports are pinned in
+ * ShaderHero.svelte.test.ts ("ShaderHero live").
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { type ShaderLiveWriter, shaderLive } from '../shader-live.svelte';

@@ -1,8 +1,8 @@
 /**
- * The fallback MECHANISM (Codex-1yd58.4). WP-3's own effects all keep
- * themselves on a phone and under reduced motion, so this file swaps in a
- * registry whose fallbacks differ: a layer dropped on phones, a layer
- * swapped for another under reduced motion, a frame and a blend swapped.
+ * The fallback MECHANISM. The brand stack's own effects all keep themselves on
+ * a phone and under reduced motion, so this file swaps in a registry whose
+ * fallbacks differ: a layer dropped on phones, a layer swapped for another
+ * under reduced motion, a frame and a blend swapped.
  */
 import { describe, expect, it, vi } from 'vitest';
 

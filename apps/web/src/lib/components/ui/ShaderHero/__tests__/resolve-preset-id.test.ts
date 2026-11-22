@@ -22,7 +22,7 @@ import {
 } from '../shader-config';
 
 /**
- * The alias door for the 25 presets cut on 2026-11-19 (Codex-1yd58 WP-1c).
+ * The alias door for the 25 presets cut from the set.
  *
  * A stored preset id outlives its preset — an org's `shader-preset` token and
  * `content.shader_preset` are free text — and before the door an unknown id
@@ -31,7 +31,7 @@ import {
  * an edit to the map that the owner did not approve fails here.
  */
 
-/** The owner-approved map, cut id → survivor (2026-11-19). */
+/** The owner-approved map, cut id → survivor. */
 const OWNER_MAP: Record<string, string> = {
   warp: 'suture',
   silk: 'film',

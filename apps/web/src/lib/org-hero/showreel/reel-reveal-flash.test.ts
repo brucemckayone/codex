@@ -1,8 +1,7 @@
 /**
- * The cut and WCAG 2.3.1, three flashes (Codex-1yd58.7, review M3): the
- * picture's light falls to the brand's picture and rises at each cut, so the
- * cuts may dip at most 3 times in any second, under both timings, however a
- * visitor taps, pauses and picks.
+ * The cut and WCAG 2.3.1, three flashes: the picture's light falls to the
+ * brand's picture and rises at each cut, so the cuts may dip at most 3 times in
+ * any second, under both timings, however a visitor taps, pauses and picks.
  */
 import { describe, expect, it } from 'vitest';
 import {

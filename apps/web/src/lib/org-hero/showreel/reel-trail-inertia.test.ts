@@ -1,6 +1,6 @@
 /**
- * Smoke with inertia, the Showreel's Smoke pointer (Codex-1yd58.7; owner,
- * 2026-11-20: "one soft continuous field, drifts after the pointer stops").
+ * Smoke with inertia, the Showreel's Smoke pointer: one soft continuous field
+ * that drifts on after the pointer stops.
  *
  * The smoke carries the pointer's velocity, which dies away exponentially,
  * so the field drifts on after the pointer stops or leaves and slows to a

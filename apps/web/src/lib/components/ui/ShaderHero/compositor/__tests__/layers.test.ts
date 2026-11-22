@@ -1,9 +1,9 @@
 /**
- * The stack's layers (Codex-1yd58.9, WP-8): the WP-1b lab's twelve, the
- * Showreel mock's reeded glass and brand monotone, and the surface-only
- * "through the shader". What `shaders:check` cannot see is pinned here: each
- * runs on any picture (the stack's, or the Showreel's film in its surface
- * slot), takes its colours from the brand, and falls back as the plan says.
+ * The stack's layers: the shader lab's twelve, the Showreel mock's reeded glass
+ * and brand monotone, and the surface-only "through the shader". What
+ * `shaders:check` cannot see is pinned here: each runs on any picture (the
+ * stack's, or the Showreel's film in its surface slot), takes its colours from
+ * the brand, and falls back as the plan says.
  */
 import { describe, expect, it } from 'vitest';
 import {

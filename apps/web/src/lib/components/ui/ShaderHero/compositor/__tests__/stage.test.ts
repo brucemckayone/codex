@@ -1,7 +1,6 @@
 /**
- * The stage arithmetic (Codex-1yd58.4): the fixed stage's rect (WP-1
- * variant C), its fade, and the culling that keeps a film that does not show
- * from being sampled or uploaded.
+ * The stage arithmetic: the fixed stage's rect, its fade, and the culling
+ * that keeps a film that does not show from being sampled or uploaded.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -53,10 +52,9 @@ describe('the fixed stage', () => {
     expect(stageFade(1, 0)).toBe(0);
   });
 
-  // The canvas's letters hold still with the stage, so they fade over the
-  // first NAME_FADE_PX of scroll, before they part from the page's words by
-  // more than that; the page's own glyphs take the name back over the same
-  // span (owner, 2026-11-21, the scroll fix's (c)).
+  // The canvas's letters hold still with the stage, so they fade over the first
+  // NAME_FADE_PX of scroll, before they part from the page's words by more than
+  // that; the page's own glyphs take the name back over the same span.
   it('fades the letters out over the first 32 px of scroll, far sooner than the film', () => {
     expect(NAME_FADE_PX).toBe(32);
     expect(nameFade(0)).toBe(1);
