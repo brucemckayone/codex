@@ -1802,6 +1802,51 @@ describe("Showreel's fit over the film", () => {
     expect(q('.reel')?.hasAttribute('data-fit')).toBe(false);
     expect(solved().scrim).toBe('');
   });
+
+  // wp4-review r6 L1: the warning was deduped on the solved tint alone, so a
+  // later fit under the same tint, short in a different role (after a piece
+  // change, a resize or a font landing), was never reported. Every word sits
+  // at the bottom-left corner, where the shades carry it, but one, mid-reel,
+  // where none reaches; fit 1 has the kicker there, fit 2 the name. The
+  // ground (#120203) is this test's alone, so no earlier test reported its
+  // tint, and white on a dark ground keeps the tint at the ground in both.
+  it('reports a role short in a later fit that the first report did not name: never silent for a short one (S1; wp4-review r6 L1)', async () => {
+    paintable({ ground: '#120203', ink: WHITE });
+    let far = '.reel__kicker';
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(
+      function (this: HTMLElement) {
+        const box = this.matches('.reel')
+          ? { left: 0, top: 0, right: 1000, bottom: 1000 }
+          : this.matches(far)
+            ? { left: 450, top: 300, right: 550, bottom: 320 }
+            : { left: 20, top: 900, right: 200, bottom: 950 };
+        return {
+          ...box,
+          width: box.right - box.left,
+          height: box.bottom - box.top,
+          x: box.left,
+          y: box.top,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+    );
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const said = () =>
+      vi.mocked(logger.warn).mock.calls.map((call) => JSON.stringify(call));
+    // Fit 1: the kicker is short, and named (passes today: the calibration).
+    expect(said().filter((line) => line.includes('reel__kicker'))).toHaveLength(
+      1
+    );
+    expect(said().some((line) => line.includes('reel__name'))).toBe(false);
+    // Fit 2: the kicker is carried again and the name is short instead.
+    far = '.reel__name';
+    refit();
+    expect(q('.reel__name')?.hasAttribute('data-lifted')).toBe(true);
+    // Fails today: no report names the name, since its tint was reported once.
+    expect(said().some((line) => line.includes('reel__name'))).toBe(true);
+  });
 });
 
 describe('Showreel words and the picture (WP-6, review M4)', () => {

@@ -42,8 +42,8 @@
   (`focusInk`).
 -->
 <script lang="ts" module>
-  /** The brands (by their solved tint) whose uncarried inks were reported this page load (review R6). */
-  const warnedBrands = new Set<string>();
+  /** The shortfalls (a solved tint and the roles it leaves short) reported this page load (review R6, r6 L1). */
+  const warnedShortfalls = new Set<string>();
 </script>
 
 <script lang="ts">
@@ -959,14 +959,18 @@
       role.step = 20;
       if (!solved(role)) unrescued.push(role.el.className);
     }
-    // Once per brand a page load (review R6): every fit of it would say the same.
+    // Once per shortfall a page load (review R6): every fit of it would say
+    // the same. Keyed on the roles too, so a later fit under the same tint
+    // that leaves a different role short says so (wp4-review r6 L1).
     const brand = tint.join(' ');
-    if (unrescued.length > 0 && !warnedBrands.has(brand)) {
-      warnedBrands.add(brand);
+    const shortRoles = unrescued.join(' | ');
+    const shortfall = `${brand} ${shortRoles}`;
+    if (unrescued.length > 0 && !warnedShortfalls.has(shortfall)) {
+      warnedShortfalls.add(shortfall);
       logger.warn('Showreel: inks the reel cannot carry over every frame, even in its pole', {
         tint: brand,
         edge,
-        roles: unrescued.join(' | '),
+        roles: shortRoles,
       });
     }
     drawShades(root, shades);

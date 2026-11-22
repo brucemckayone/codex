@@ -1167,6 +1167,38 @@ describe("the 'shadow' edge: a word its carrier leaves short takes a second, bou
     expect(shades).toEqual(grown);
     expect(short).toEqual([word]);
   });
+
+  // wp4-review r6 L2, pinned: the second carrier is not gated on a phone. On
+  // a 1440 desktop, a name long enough that its one carrier at its cap leaves
+  // it short (40 letters or more at OBB's need) takes the bounded second
+  // carrier too: carried, never a band (S3 as restated, 2026-11-22). OBB's
+  // own 16 letters are carried by the one, and nothing moves.
+  it("carries a desktop name its one carrier leaves short, never as a band; OBB's 16 letters are byte-unchanged (wp4-review r6 L2)", () => {
+    // The name's glyphs at 1440, the review's estimate from the CSS: after
+    // the 96 px gutter, a 40 px logo and its 12 px gap, about 11 px a letter,
+    // in a bar at y 0.03-0.07.
+    const deskName = (letters: number) => ({
+      left: 0.103,
+      top: 0.03,
+      right: 0.103 + (letters * 11) / 1440,
+      bottom: 0.07,
+    });
+    const long = [{ span: deskName(48), need: obb }];
+    const grown = growShades(long);
+    // The one carrier at its cap leaves it short.
+    expect(grown.short).toHaveLength(1);
+    const second = secondCarrier(long, grown.shades);
+    expect(second.short).toEqual([]);
+    const [top] = second.shades;
+    if (!top) throw new Error('the header shade');
+    expect(top).not.toEqual(grown.shades[0]);
+    expect(readsAsTwo(top)).toBe(true);
+    // OBB's own name: carried by the one, so the second takes nothing.
+    const own = [{ span: deskName(16), need: obb }];
+    const drawn = growShades(own);
+    expect(drawn.short).toEqual([]);
+    expect(secondCarrier(own, drawn.shades)).toEqual(drawn);
+  });
 });
 
 describe("the 'shadow' edge's soft glow, and a brand colour over footage", () => {

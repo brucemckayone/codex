@@ -159,6 +159,11 @@ function orgName(html: string): string | null {
  * (the markup's and the page data's), so the server and hydration both draw
  * it, or null when the page names no org. Plain names only: letters, digits,
  * spaces and `&`.
+ *
+ * Everywhere means everything titled with it too: OBB's first film carries
+ * the org's name, so it is retitled with the rest (the words, the index, the
+ * sizers). A test of the name reads the top bar's `.reel__name` alone, so the
+ * film's title never decides it.
  */
 function withOrgName(html: string, name: string): string | null {
   const seeded = orgName(html);

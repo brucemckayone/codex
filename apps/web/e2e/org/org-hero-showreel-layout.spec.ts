@@ -496,7 +496,11 @@ test.describe('the Showreel in flow (WP-5b)', () => {
  */
 test.describe("the org's name in the top bar (WP-5a)", () => {
   type Edge = { top: number; bottom: number; left: number; right: number };
-  /** The name's lines and box, the logo's, the pause's and the bar's, in the hero. */
+  /**
+   * The name's lines and box, the logo's, the pause's and the bar's, in the
+   * hero: the top bar's `.reel__name`, never the words, which `withOrgName`
+   * retitles with it where a film carries the org's name.
+   */
   const nameAt = (page: Page) =>
     page.evaluate(() => {
       const reel = document.querySelector('.reel');
@@ -538,7 +542,6 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
         ),
         pause: box(reel.querySelector('.reel__ctl')?.getBoundingClientRect()),
         top: box(reel.querySelector('.reel__top')?.getBoundingClientRect()),
-        words: box(reel.querySelector('.reel__words')?.getBoundingClientRect()),
       };
     });
   const overlap = (a?: Edge, b?: Edge) =>
@@ -575,9 +578,6 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
         .soft(overlap(line, at.logo), `line ${i + 1} over the logo`)
         .toBe(false);
     }
-    expect
-      .soft(overlap(at.top, at.words), 'the bar over the words')
-      .toBe(false);
     return at;
   }
 
@@ -593,6 +593,18 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
       await fitted(page);
       const at = await inside(page);
       expect(at.lines).toHaveLength(2);
+      // OBB's own name, so its own words: the bar, two lines tall, stays
+      // clear of them.
+      const wordsTop = await page.evaluate(() => {
+        const hero = document.querySelector('.reel')?.getBoundingClientRect();
+        const words = document
+          .querySelector('.reel__words')
+          ?.getBoundingClientRect();
+        return hero && words ? words.top - hero.top : null;
+      });
+      expect(wordsTop, 'the words').not.toBeNull();
+      expect(at.top?.bottom, 'the bar').toBeDefined();
+      expect(at.top?.bottom ?? 0).toBeLessThanOrEqual((wordsTop ?? 0) + 0.5);
       for (const line of at.lines) {
         expect(line.right - line.left).toBeLessThanOrEqual(7 * at.size + 0.5);
       }
