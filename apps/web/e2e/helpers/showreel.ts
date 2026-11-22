@@ -289,6 +289,9 @@ export async function openShowreel(
   });
   if (init) await context.addInitScript(init);
   const page = await context.newPage();
+  // A rewrite of the reel's own data leaves the server's markup and the
+  // client's apart, so its load must not break the page doing it.
+  const broken = introFilm || featureRecording ? loadBreaks(page) : null;
   let served = 'no response';
   const unset: string[] = [];
   // Set in the route handler, so typed past the narrowing of `null`.
@@ -341,7 +344,28 @@ export async function openShowreel(
     'server-drawn, not hydrated after 30 s'
   ).toHaveAttribute('style', /--_progress/, { timeout: 30_000 });
   if (film) await filmLeads(page, film, serverFirst);
+  if (broken) expect(broken, 'what broke as the page loaded').toEqual([]);
   return page;
+}
+
+/**
+ * What breaks a page as it loads: an uncaught error, or Svelte giving up on
+ * the server's markup (`hydration_mismatch`), which it repairs by drawing the
+ * page again. An attribute it keeps at the server's value
+ * (`hydration_attribute_changed`) is noted on the test, not failed: the
+ * rewrite moves which piece sits where.
+ */
+function loadBreaks(page: Page): string[] {
+  const broken: string[] = [];
+  page.on('pageerror', (error) => broken.push(`uncaught: ${error.message}`));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (/hydration_mismatch|hydration failed/i.test(text))
+      broken.push(`${message.type()}: ${text}`);
+    else if (/hydration_attribute_changed/.test(text))
+      test.info().annotations.push({ type: 'hydration', description: text });
+  });
+  return broken;
 }
 
 /**

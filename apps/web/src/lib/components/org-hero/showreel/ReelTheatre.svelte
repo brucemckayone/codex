@@ -427,9 +427,15 @@
     }
   }
 
+  /* The player's own layers stay in its place, under the bar that follows
+     it. Its error (`.player__error`) fills the player at `z-index: 2`, and
+     nothing between it and the theatre forms a stacking context, so without
+     this it stacked over the bar and took its taps: a preview that failed
+     could not be closed by pointer. */
   .theatre__player {
     position: absolute;
     inset: 0;
+    isolation: isolate;
   }
 
   .theatre[data-kind='audio'] .theatre__player {
