@@ -674,6 +674,16 @@ describe('Showreel paths', () => {
       q<HTMLImageElement>('.reel-stage img')?.getAttribute('fetchpriority')
     ).toBe('high');
   });
+
+  it('keeps a still that fails in its place, unseen (a load failure keeps its box)', () => {
+    render();
+    const still = q<HTMLImageElement>('.reel-stage img');
+    expect(still).not.toBeNull();
+    still?.dispatchEvent(new Event('error'));
+    flushSync();
+    expect(q<HTMLImageElement>('.reel-stage img')).toBe(still);
+    expect(still?.hasAttribute('data-failed')).toBe(true);
+  });
 });
 
 describe('Showreel and the window’s shader', () => {
