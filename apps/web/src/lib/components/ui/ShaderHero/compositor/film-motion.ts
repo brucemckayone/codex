@@ -1,9 +1,9 @@
 /**
- * The Showreel's motion as the compositor takes it (Codex-1yd58.7): the four
- * effects chosen, and this frame's values, which the Showreel writes in
- * place every frame (`showreelFeed.setMotion`). With motion, a film frame is
- * drawn as its composed film pass (`effects/film-pass.ts`); every other
- * frame is drawn as it is.
+ * The Showreel's motion as the compositor takes it: the four effects chosen,
+ * and this frame's values, which the Showreel writes in place every frame
+ * (`showreelFeed.setMotion`). With motion, a film frame is drawn as its
+ * composed film pass (`effects/film-pass.ts`); every other frame is drawn as it
+ * is.
  *
  * What a pass RUNS can differ from what was chosen: a phone, reduced motion
  * and a missing name mask each fall back (`planMotion`). The compositor
@@ -37,7 +37,7 @@ export interface FilmMotion {
 }
 
 /** A film frame's pass, and the effects it runs. */
-export interface FilmMotionPass {
+interface FilmMotionPass {
   readonly pass: FilmPass;
   readonly running: MotionChoice;
 }

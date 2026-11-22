@@ -1,5 +1,5 @@
 /**
- * Physarum agent seed (GLSL ES 3.0), WP-1d R3 (Codex-1yd58).
+ * Physarum agent seed (GLSL ES 3.0).
  *
  * One agent per texel of the agent texture: a random position over the whole
  * canvas and a random heading (R, G = position in uv, B = heading). The
@@ -29,11 +29,10 @@ void main() {
 `;
 
 /**
- * The agents after a real change of canvas shape (a rotate), WP-1d review
- * round 2. Positions are uv, so kept as they were a round vein loop on a
- * 390x844 phone became an oval 4.7x wider than tall at 844x390. Each agent
- * instead keeps its PIXEL offset from the centre: uScale is the old canvas
- * size over the new, per axis.
+ * The agents after a real change of canvas shape (a rotate). Positions are uv,
+ * so kept as they were a round vein loop on a 390x844 phone became an oval 4.7x
+ * wider than tall at 844x390. Each agent instead keeps its PIXEL offset from
+ * the centre: uScale is the old canvas size over the new, per axis.
  *
  * An agent that falls off the new canvas on one axis wraps on that axis and
  * moves half a canvas along the other, into the band the narrower axis left

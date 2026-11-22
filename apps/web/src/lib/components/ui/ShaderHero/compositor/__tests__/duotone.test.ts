@@ -1,9 +1,9 @@
 /**
- * The duotone's three stops (WP-5b review M1): the brand's dark, its
- * primary, a pale of it. On an extreme brand (Mono's #000 on #FFF and #FFF
- * on #0A0A0A, or any #000 ground) the old stops were literal black and
- * white. Every stop now keeps off the extremes, and a primary near black or
- * white gives a midpoint near mid-grey, so the footage keeps its light.
+ * The duotone's three stops: the brand's dark, its primary, a pale of it. On an
+ * extreme brand (Mono's #000 on #FFF and #FFF on #0A0A0A, or any #000 ground)
+ * the old stops were literal black and white. Every stop now keeps off the
+ * extremes, and a primary near black or white gives a midpoint near mid-grey,
+ * so the footage keeps its light.
  */
 import { describe, expect, it } from 'vitest';
 import { DUOTONE_FLOOR, duotoneStops, type Rgb } from '../duotone';

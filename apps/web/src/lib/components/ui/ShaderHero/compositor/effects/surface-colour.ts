@@ -1,10 +1,10 @@
 import type { MediaEffect } from './effect';
 
 /**
- * Your colour, over the footage (WP-5b, owner 2026-11-21): the piece keeps
- * its light, in the brand's primary's hue (the "colour" blend), so a film of
- * any colours plays in the org's own. The brand's own primary (`u_tint`),
- * never the shader's custom palette. Still: no clock.
+ * Your colour, over the footage: the piece keeps its light, in the brand's
+ * primary's hue (the "colour" blend), so a film of any colours plays in the
+ * org's own. The brand's own primary (`u_tint`), never the shader's custom
+ * palette. Still: no clock.
  *
  * `setLum` is the W3C compositing spec's, as `layer-shader-light` writes it.
  */

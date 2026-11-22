@@ -2,7 +2,7 @@
   ReelMotionHarness: calls `useReelMotion` as the Showreel does, once at
   init, on live props, so a test can drive the hook's effects (a pick, a
   pause, a refresh, the film, the pointer) and read the piece the stage
-  shows from `data-stage`. Test-only (Codex-1yd58.7, WP-6).
+  shows from `data-stage`. Test-only.
 -->
 <script lang="ts">
   import type { FilmFrameId } from '$lib/components/ui/ShaderHero/compositor/effects/ids';

@@ -1,7 +1,7 @@
 /**
- * What the Showreel (WP-5) hands the window's shader (Codex-1yd58.4): the
- * piece's film, where its frame sits, the org's name as a mask, and how the
- * film is shown (its look: the layout's film frame and the band).
+ * What the Showreel hands the window's shader: the piece's film, where its
+ * frame sits, the org's name as a mask, and how the film is shown (its look:
+ * the layout's film frame and the band).
  *
  * A module-level channel, as `shaderTone` is, because the two live apart:
  * the Showreel is in the page, the shader in the org layout. Only the org
@@ -14,11 +14,11 @@
  * stage, look or motion it already holds is no change; the mask is uploaded
  * on every set.
  *
- * The motion (WP-6) is the Showreel's `FilmMotion`: its four effects, and
- * values the Showreel writes IN PLACE each frame, so a moving hero draws
- * them with no message at all. A frozen hero (reduced motion, the reel's
- * pause) draws only when told: `motionFrame()` is that word, said by the
- * Showreel each frame its motion changed something.
+ * The motion is the Showreel's `FilmMotion`: its four effects, and values the
+ * Showreel writes IN PLACE each frame, so a moving hero draws them with no
+ * message at all. A frozen hero (reduced motion, the reel's pause) draws only
+ * when told: `motionFrame()` is that word, said by the Showreel each frame its
+ * motion changed something.
  */
 import type { FilmMotion } from './film-motion';
 import type { FilmLook, StageBox, StageMedia } from './stage';
@@ -84,9 +84,9 @@ export const showreelFeed = {
     listener?.('look');
   },
   /**
-   * The Showreel's motion (WP-6), or null for none: the film then draws as
-   * WP-5's frame. A new object is a new choice (the compositor composes its
-   * pass); its values are written in place, so they need no set.
+   * The Showreel's motion, or null for none: the film then draws as its plain
+   * frame. A new object is a new choice (the compositor composes its pass); its
+   * values are written in place, so they need no set.
    */
   setMotion(next: FilmMotion | null): void {
     if (next === motion) return;

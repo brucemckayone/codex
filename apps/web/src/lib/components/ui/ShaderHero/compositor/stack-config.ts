@@ -1,14 +1,14 @@
 /**
- * The brand's shader STACK (Codex-1yd58.4, plan §5.8), read from its CSS
- * custom properties as `shader-config.ts` reads the base preset's:
+ * The brand's shader STACK, read from its CSS custom properties as
+ * `shader-config.ts` reads the base preset's:
  *
  *   --brand-shader-second        a second preset id (through `resolvePresetId`)
  *   --brand-shader-blend         how it meets the base: mix | screen |
  *                                multiply | difference | smoke-key
  *   --brand-shader-blend-amount  0-1
- *   --brand-shader-layers        passes in order, `id:amount` (plan §3; the
- *                                amount optional, and `id amount` read
- *                                too), comma separated: `grain:0.4, halftone`
+ *   --brand-shader-layers        passes in order, `id:amount` (the amount
+ *                                optional, and `id amount` read too), comma
+ *                                separated: `grain:0.4, halftone`
  *   --brand-shader-frame         shader-only | through-name | name-glows
  *
  * each with a `-dark` twin the dark theme prefers, as every shader key has.
@@ -27,6 +27,7 @@
  * so a bare stack's hero loads none of the compositor or its GLSL.
  */
 import { logger } from '$lib/observability';
+import { clamp01 } from '../clamp';
 import {
   type LivePresetId,
   presetIsUnknown,
@@ -77,7 +78,7 @@ export interface StackConfig {
   readonly frame: FrameId;
 }
 
-/** The lab's own defaults (WP-1b): screen, no layers, shader only. */
+/** The lab's own defaults: screen, no layers, shader only. */
 export const BARE_STACK: StackConfig = Object.freeze({
   second: null,
   blend: 'screen',
@@ -96,11 +97,11 @@ export function isBareStack(stack: StackConfig): boolean {
 }
 
 /**
- * Whether the hero needs a compositor (owner, 2026-11-19): for a stack that
- * is more than its base, or for a film to show (WP-5's Showreel). A film
- * plays even with no base preset, on a plain ground of the brand's
- * background. With neither, today's path: the base alone, or, with no base,
- * nothing at all. A stack over no base draws nothing without a film.
+ * Whether the hero needs a compositor: for a stack that is more than its base,
+ * or for a film to show (the Showreel's). A film plays even with no base
+ * preset, on a plain ground of the brand's background. With neither, today's
+ * path: the base alone, or, with no base, nothing at all. A stack over no base
+ * draws nothing without a film.
  */
 export function needsCompositor(
   stack: StackConfig,
@@ -115,7 +116,7 @@ export function needsCompositor(
 function amountOf(text: string | undefined | null): number | null {
   if (text == null || text.trim() === '') return null;
   const n = Number(text);
-  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : null;
+  return Number.isFinite(n) ? clamp01(n) : null;
 }
 
 /** Why a layer item was skipped, as `shader.unknown_layer` reports it. */
@@ -220,7 +221,7 @@ export function readLayerItems(text: string | null): LayerItem[] {
 
 /** An amount as a token writes it: clamped to 0-1, at most two decimals. */
 export function formatAmount(amount: number): string {
-  return String(Math.round(Math.min(1, Math.max(0, amount)) * 100) / 100);
+  return String(Math.round(clamp01(amount) * 100) / 100);
 }
 
 /**

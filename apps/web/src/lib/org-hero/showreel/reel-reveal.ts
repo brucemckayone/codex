@@ -1,9 +1,9 @@
 /**
- * The cut between pieces (Codex-1yd58.7): the piece on show falls away to
- * the brand's picture, the stage swaps to the next piece at the bottom, and
- * that one rises in (the v4 mock's 640 ms ease-in, then 1150 ms ease-out).
- * It drives `u_reveal`; the stage shows `shown`, so one media slot is all a
- * cut needs. Time comes in from outside, so the rules are under test.
+ * The cut between pieces: the piece on show falls away to the brand's picture,
+ * the stage swaps to the next piece at the bottom, and that one rises in (the
+ * v4 mock's 640 ms ease-in, then 1150 ms ease-out). It drives `u_reveal`; the
+ * stage shows `shown`, so one media slot is all a cut needs. Time comes in from
+ * outside, so the rules are under test.
  *
  * A cut NEVER turns round half way. A pick during the fall retargets it (the
  * fall goes on and the latest pick swaps in); a pick during the rise waits

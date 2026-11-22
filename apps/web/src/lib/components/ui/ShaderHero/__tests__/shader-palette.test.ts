@@ -225,9 +225,9 @@ describe('shader palette resolution', () => {
 });
 
 describe('Liquid Logo (pulse) surface colour', () => {
-  // WP-1d: the surface paints the brand palette like every other preset. Its
-  // own picker (red by default, for every org) is gone, and a colour a brand
-  // stored before that is ignored rather than painted.
+  // The surface paints the brand palette like every other preset. Its own
+  // picker (red by default, for every org) is gone, and a colour a brand stored
+  // before that is ignored rather than painted.
   it('paints the brand palette, whatever pulse colour a brand stored', () => {
     const stored = getShaderConfig(
       mountLayout({ '--brand-shader-pulse-color': '#00ff00' }),

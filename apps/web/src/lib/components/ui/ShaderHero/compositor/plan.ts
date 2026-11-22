@@ -1,7 +1,7 @@
 /**
- * Which passes a stack runs this frame (Codex-1yd58.4): the stack's effects
- * with the phone and reduced-motion fallbacks applied, each with its amount.
- * PURE, so the choices are under test without a GL context.
+ * Which passes a stack runs this frame: the stack's effects with the phone and
+ * reduced-motion fallbacks applied, each with its amount. PURE, so the choices
+ * are under test without a GL context.
  */
 import type { BlendEffect, FrameEffect, LayerEffect } from './effects/effect';
 import { FILM_FILL_FRAME, PASSTHROUGH_FRAME } from './effects/ids';

@@ -4,12 +4,11 @@
  * 3-channel advection-diffusion on a ping-pong FBO shaped like the canvas
  * (sim-grid.ts, about 512² texels).
  *
- * WP-1d (Codex-1yd58): every distance is in texels / SIM_BASE (the deposit
- * radius, the curl field, the advection), so a drop is round and the flow
- * has the same grain on any canvas shape. On a square canvas each is the
- * size it always was in uv.
- * RGB = concentrations of primary / secondary / accent brand-colored ink
- * spreading through liquid via Laplacian diffusion + curl noise advection.
+ * Every distance is in texels / SIM_BASE (the deposit radius, the curl field,
+ * the advection), so a drop is round and the flow has the same grain on any
+ * canvas shape. On a square canvas each is the size it always was in uv. RGB =
+ * concentrations of primary / secondary / accent brand-colored ink spreading
+ * through liquid via Laplacian diffusion + curl noise advection.
  *
  * Uniforms:
  *   uState         — ping-pong simulation texture (RGB = ink concentrations)
@@ -78,9 +77,9 @@ float valueNoise(vec2 p) {
 }
 
 // The flow's potential: two value-noise lattices at different angles and
-// scales. One axis-aligned lattice left its grid in the ink: dye sheared
-// into straight horizontal and vertical fronts along the cell edges, which a
-// light ground shows plainly (WP-1d). Scaled so the flow keeps its speed.
+// scales. One axis-aligned lattice left its grid in the ink: dye sheared into
+// straight horizontal and vertical fronts along the cell edges, which a light
+// ground shows plainly. Scaled so the flow keeps its speed.
 const mat2 FLOW_ROT_A = mat2(0.8, 0.6, -0.6, 0.8);
 const mat2 FLOW_ROT_B = mat2(0.28, -0.96, 0.96, 0.28);
 float flowNoise(vec2 p) {

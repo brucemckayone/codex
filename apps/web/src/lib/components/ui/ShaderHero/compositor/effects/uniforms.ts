@@ -1,6 +1,5 @@
 /**
- * Every uniform a compositor pass may declare, with its GLSL type
- * (Codex-1yd58.4).
+ * Every uniform a compositor pass may declare, with its GLSL type.
  *
  * This table is the contract between the effects and the compositor. An
  * effect lists the names it reads (`Effect.uniforms`); `assembleEffect`
@@ -21,7 +20,7 @@ export const UNIFORMS = {
   u_second: 'sampler2D',
   /** The name mask, red channel (`setNameMask`). */
   u_mask: 'sampler2D',
-  /** The piece's video frame or image (`setMedia`, WP-5's film frames). */
+  /** The piece's video frame or image (`setMedia`, for the film frames). */
   u_media: 'sampler2D',
   /** The size, in pixels, of the target this pass draws into. */
   u_resolution: 'vec2',
@@ -49,9 +48,9 @@ export const UNIFORMS = {
   u_band: 'float',
   /** Where the band gives way: from x to y of the stage, measured down. */
   u_ramp: 'vec2',
-  /** The stills' push-in (WP-5b): how far the piece's picture is drawn in; 1 for none. */
+  /** The stills' push-in: how far the piece's picture is drawn in; 1 for none. */
   u_zoom: 'float',
-  /** The surfaces' tint (WP-5b review L6): the brand's OWN primary, from its
+  /** The surfaces' tint: the brand's OWN primary, from its
    *  tokens, never the shader's custom palette (`u_brandPrimary`). */
   u_tint: 'vec3',
   /** The duotone's dark, middle and pale (`../duotone.ts`), from the brand's
@@ -86,8 +85,41 @@ export type UniformValues = {
   [K in ValueName]: GlslValue[Exclude<(typeof UNIFORMS)[K], 'sampler2D'>];
 };
 
-export const isSampler = (name: UniformName): name is SamplerName =>
-  name in SAMPLER_UNITS;
+const isSampler = (name: string): name is SamplerName => name in SAMPLER_UNITS;
+
+/** A uniform's value: a float, a vec2, vec3 or vec4, or a packed vec4 array. */
+type UniformValue = number | Float32Array | readonly number[];
+
+/** Set one uniform by its value's shape (a packed array: `uniform4fv`). */
+function uploadUniform(
+  gl: WebGL2RenderingContext,
+  loc: WebGLUniformLocation,
+  v: UniformValue
+): void {
+  if (typeof v === 'number') gl.uniform1f(loc, v);
+  else if (v instanceof Float32Array) gl.uniform4fv(loc, v);
+  else if (v.length === 2) gl.uniform2f(loc, v[0], v[1]);
+  else if (v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]);
+  else gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
+}
+
+/**
+ * Set each of a pass's uniforms: a sampler to its fixed unit, the rest from
+ * `values` by their shape. A location the driver dropped (null) is skipped.
+ * `values` must hold every non-sampler name the locations can name, so a
+ * declared uniform is never left unset (reading zero).
+ */
+export function setPassUniforms<N extends string>(
+  gl: WebGL2RenderingContext,
+  locations: readonly (readonly [N, WebGLUniformLocation | null])[],
+  values: { readonly [K in Exclude<N, SamplerName>]: UniformValue }
+): void {
+  for (const [name, loc] of locations) {
+    if (loc === null) continue;
+    if (isSampler(name)) gl.uniform1i(loc, SAMPLER_UNITS[name]);
+    else uploadUniform(gl, loc, values[name]);
+  }
+}
 
 /** The GLSL declarations for a pass that reads `names`. */
 export function declareUniforms(names: readonly UniformName[]): string {

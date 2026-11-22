@@ -1,23 +1,22 @@
 /**
- * The pointer's trail over the reel (Codex-1yd58.7), for the pointer
- * effects (`pointer-liquid.ts`, `pointer-smoke.ts`): where the pointer has
- * been in the last two seconds, packed into `u_trail` each frame.
+ * The pointer's trail over the reel, for the pointer effects
+ * (`pointer-liquid.ts`, `pointer-smoke.ts`): where the pointer has been in the
+ * last two seconds, packed into `u_trail` each frame.
  *
  * Points are in output uv, origin bottom left, like `u_pointer`. A point is
- * laid only once the pointer has moved a step from the last one, so a
- * resting pointer adds nothing. On a phone a touch counts only once its
- * gesture is sideways (`SwipeGate`, plan §4): a vertical swipe stays the
- * page's scroll.
+ * laid only once the pointer has moved a step from the last one, so a resting
+ * pointer adds nothing. On a phone a touch counts only once its gesture is
+ * sideways (`SwipeGate`): a vertical swipe stays the page's scroll.
  *
- * SMOKE WITH INERTIA (owner, 2026-11-20: "one soft continuous field, drifts
- * after the pointer stops"). The smoke carries the pointer's velocity. Each
- * puff keeps the velocity it was laid with, and so does the smoke's head
- * after the last move. That velocity dies away exponentially (`DRIFT_MS`), so
- * a puff `age` ms old has moved `v * DRIFT_MS * (1 - e^(-age / DRIFT_MS))`:
- * fast at first, slowing, never further than `v * DRIFT_MS`. The puffs and
- * the head follow the same law, so the trail moves on as one field when the
- * pointer stops or leaves, and the head stays at its front. Liquid keeps its
- * rings where they were laid: its motion is the ripple's.
+ * SMOKE WITH INERTIA: one soft continuous field that drifts on after the
+ * pointer stops. The smoke carries the pointer's velocity. Each puff keeps the
+ * velocity it was laid with, and so does the smoke's head after the last move.
+ * That velocity dies away exponentially (`DRIFT_MS`), so a puff `age` ms old
+ * has moved `v * DRIFT_MS * (1 - e^(-age / DRIFT_MS))`: fast at first, slowing,
+ * never further than `v * DRIFT_MS`. The puffs and the head follow the same
+ * law, so the trail moves on as one field when the pointer stops or leaves, and
+ * the head stays at its front. Liquid keeps its rings where they were laid: its
+ * motion is the ripple's.
  *
  * Under reduced motion (`motion = 'still'`) the smoke is static: it sits
  * where the pointer has been, with no drift, no rise and no spread, and it
@@ -29,7 +28,7 @@ import { TRAIL_POINTS } from '$lib/components/ui/ShaderHero/compositor/effects/m
 /** How long a point lasts. */
 export const TRAIL_LIFE_MS = 2000;
 /** How far, in the output's height, the pointer moves before a new point. */
-export const TRAIL_STEP = 0.012;
+const TRAIL_STEP = 0.012;
 /** Points kept on a phone, where every one is a ring or a puff per pixel. */
 export const PHONE_TRAIL_POINTS = 12;
 /**

@@ -12,7 +12,7 @@ import type {
 import { fakeGl, seededRandom } from './fake-gl';
 
 /**
- * Simulation steps follow TIME, not frames (Codex-1yd58 WP-1d).
+ * Simulation steps follow TIME, not frames.
  *
  * The audio impulses (wanderer, beat splash, bass rumble, ambient) used to run
  * once a FRAME, outside the step clock, and a click queued a new splash on
@@ -185,10 +185,10 @@ describe('a click is one splash, at any frame rate', () => {
     // [preset, extra steps one click costs]
     ['ripple', 8],
     ['suture', 12],
-    // A CONTROL, not a proof: flow's click already rode its clocked input
-    // steps before WP-1d, so this case passes on the old code too (the
-    // ripple and suture cases fail on it). It pins that the port left
-    // flow's click at no extra steps.
+    // A CONTROL, not a proof: flow's click already rode its clocked input steps
+    // before the step clock, so this case passes on the old code too (the
+    // ripple and suture cases fail on it). It pins that the port left flow's
+    // click at no extra steps.
     ['flow', 0],
   ] as const)('%s: %i extra steps per click at 60 Hz and at 120 Hz', (id, extra) => {
     for (const fps of [60, 120]) {

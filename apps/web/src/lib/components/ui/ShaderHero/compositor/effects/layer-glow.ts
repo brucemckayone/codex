@@ -2,8 +2,8 @@ import type { LayerEffect } from './effect';
 
 /**
  * The bright parts bloom softly into the dark: one pass, twelve taps on a
- * golden-angle spiral. Thirteen reads a pixel, the dearest layer (measured on
- * the phone in WP-11). Still: no clock.
+ * golden-angle spiral. Thirteen reads a pixel, the dearest layer. Still: no
+ * clock.
  */
 export const layerGlow: LayerEffect = {
   id: 'glow',

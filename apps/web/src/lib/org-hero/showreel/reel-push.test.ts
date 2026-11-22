@@ -1,7 +1,7 @@
 /**
- * The stills' push-in runs on the REEL's clock (WP-5b review M2), never the
- * page's: paused, held or in a hidden tab, the reel holds, and the push-in
- * holds with it, then goes on from where it was.
+ * The stills' push-in runs on the REEL's clock, never the page's: paused, held
+ * or in a hidden tab, the reel holds, and the push-in holds with it, then goes
+ * on from where it was.
  */
 import { describe, expect, it } from 'vitest';
 import {

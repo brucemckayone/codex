@@ -15,12 +15,12 @@
  *  - Bloom halo on brightest contour lines (elevation-tinted)
  *  - Luminance-aware filmic grain
  *
- * WP-1d (Codex-1yd58): the terrain evolves IN PLACE. A bounded, slowly
- * moving domain warp reshapes the landforms around fixed homes, and each
- * finer octave circles its own small orbit, so the map breathes instead of
- * sliding: the old p += (0.3t, 0.2t) carried everything off to one side
- * forever. Every fifth contour is an index line (wider, brighter), and the
- * ground between lines carries a soft hillshade in the brand stops.
+ * The terrain evolves IN PLACE. A bounded, slowly moving domain warp reshapes
+ * the landforms around fixed homes, and each finer octave circles its own small
+ * orbit, so the map breathes instead of sliding: the old p += (0.3t, 0.2t)
+ * carried everything off to one side forever. Every fifth contour is an index
+ * line (wider, brighter), and the ground between lines carries a soft hillshade
+ * in the brand stops.
  */
 import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
 
@@ -185,8 +185,8 @@ void main() {
   // The ground between lines (as before: bg low, the height's stop high),
   // now lit by the hill: shadowed slopes sink, lit ones lift.
   vec3 fillColor = mix(u_bgColor * 0.6, base * 0.3, height);
-  // A gentle range: a deep shadow sank a light ground's darkest 5% and
-  // took dark text with it (the contrast check, WP-1d).
+  // A gentle range: a deep shadow sank a light ground's darkest 5% and took
+  // dark text with it (the contrast check).
   fillColor *= mix(0.85, 1.3, clamp(shade, 0.0, 1.0));
 
   vec3 color = mix(fillColor, lineColor, lineMask);

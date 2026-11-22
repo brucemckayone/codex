@@ -1,7 +1,6 @@
 /**
- * The Showreel's motion effects (Codex-1yd58.7, plan §3 and §6): what the
- * film does between pieces, under the pointer, as the reel opens and on the
- * way into the full film.
+ * The Showreel's motion effects: what the film does between pieces, under the
+ * pointer, as the reel opens and on the way into the full film.
  *
  * A motion effect is no pass of its own. Each one is a GLSL hook that the
  * Showreel's film frame calls (`film-pass.ts`), so a film with all its
@@ -10,11 +9,11 @@
  * much of it shows (`shows`), how torn it is (`glitch`), and light laid over
  * the frame (`glow`).
  *
- * Every hook is identity at its uniforms' REST (`restMotion`): it adds no
- * warp, multiplies `shows` by exactly 1 and adds no glow. So a frame drawn
- * at rest is the WP-5 film frame, pixel for pixel. A transition is also
- * exact at its ends: at `u_reveal` 1 the piece shows, at 0 the brand's
- * picture alone (the light leak alone adds its light there).
+ * Every hook is identity at its uniforms' REST (`restMotion`): it adds no warp,
+ * multiplies `shows` by exactly 1 and adds no glow. So a frame drawn at rest is
+ * the plain film frame, pixel for pixel. A transition is also exact at its
+ * ends: at `u_reveal` 1 the piece shows, at 0 the brand's picture alone (the
+ * light leak alone adds its light there).
  */
 import type {
   IntoId,

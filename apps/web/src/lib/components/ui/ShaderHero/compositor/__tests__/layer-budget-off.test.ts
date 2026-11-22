@@ -1,6 +1,5 @@
 /**
- * The layer budget costs nothing while it cuts nothing (WP-5b review r2,
- * L1r2; the reviewer's failing test, moved beside layer-budget.test.ts).
+ * The layer budget costs nothing while it cuts nothing.
  *
  * `stackNow()` runs twice a frame, from `syncStack` (via `readyToDraw`) and
  * from `draw`, and each call goes through `layerBudget.apply`. Before the fix,

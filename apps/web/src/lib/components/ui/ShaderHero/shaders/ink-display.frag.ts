@@ -6,14 +6,13 @@
  *   G channel → secondary color (bass rumble atmosphere)
  *   B channel → accent color    (beat splash)
  *
- * WP-1d (Codex-1yd58): ink is a PIGMENT on a light ground (each channel
- * multiplies the ground toward its colour, as ink on paper does) and an
- * EMISSION on a dark one (added over the ground), mixed by the ground's
- * luminance as lenia mixes its highlights. The ground is the brand's: the
- * tone curve works on the excursion either side of it (toneOverBg), so
- * clear water is exactly uBgColor. It used to add every ink over the
- * ground and ACES the sum, which on a light brand read as a grey blob and
- * shifted the ground itself. Wet-edge highlight via screen-space
+ * Ink is a PIGMENT on a light ground (each channel multiplies the ground toward
+ * its colour, as ink on paper does) and an EMISSION on a dark one (added over
+ * the ground), mixed by the ground's luminance as lenia mixes its highlights.
+ * The ground is the brand's: the tone curve works on the excursion either side
+ * of it (toneOverBg), so clear water is exactly uBgColor. It used to add every
+ * ink over the ground and ACES the sum, which on a light brand read as a grey
+ * blob and shifted the ground itself. Wet-edge highlight via screen-space
  * derivatives, a pre-tonemap saturation pump, vignette, and film grain.
  *
  * Audio modulation summary (immersive playback):

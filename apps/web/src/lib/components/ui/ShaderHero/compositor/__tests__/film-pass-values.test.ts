@@ -1,9 +1,8 @@
 /**
- * A Showreel film pass's values and how they reach its uniforms
- * (Codex-1yd58.7, WP-6 wiring part 1). Every name a composed pass can
- * declare gets a value (a declared, unset uniform reads zero, legal GLSL
- * nothing else would catch), the motion arrives as the Showreel wrote it,
- * and each uniform is set by its own type: the trail as one array.
+ * A Showreel film pass's values and how they reach its uniforms. Every name a
+ * composed pass can declare gets a value (a declared, unset uniform reads zero,
+ * legal GLSL nothing else would catch), the motion arrives as the Showreel
+ * wrote it, and each uniform is set by its own type: the trail as one array.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -11,12 +10,11 @@ import {
   restMotion,
   TRAIL_POINTS,
 } from '../effects/motion-uniforms';
-import { SAMPLER_UNITS } from '../effects/uniforms';
+import { SAMPLER_UNITS, setPassUniforms } from '../effects/uniforms';
 import {
   type FilmPassLocations,
   type FrameShared,
   filmPassValues,
-  setFilmPassUniforms,
 } from '../film-pass-values';
 import { governFlash } from '../flash';
 
@@ -34,7 +32,7 @@ const shared: FrameShared = {
   u_hasMedia: 1,
   u_band: 2,
   u_ramp: [0.5, 0.95],
-  // WP-5b: the stills' push-in and the surfaces' brand tint and duotone.
+  // The stills' push-in and the surfaces' brand tint and duotone.
   u_zoom: 1,
   u_tint: [0.8, 0.1, 0.2],
   u_toneDeep: [0.1, 0.02, 0.04],
@@ -67,7 +65,7 @@ describe('filmPassValues', () => {
   });
 });
 
-describe('setFilmPassUniforms', () => {
+describe('setPassUniforms, for a film pass', () => {
   function recordingGl() {
     const calls: [string, unknown[]][] = [];
     const record =
@@ -103,7 +101,7 @@ describe('setFilmPassUniforms', () => {
       // A name the driver optimised out: nothing is set for it.
       ['u_dive', null],
     ];
-    setFilmPassUniforms(gl, locations, values);
+    setPassUniforms(gl, locations, values);
     expect(calls).toEqual([
       ['uniform1i', [loc('u_scene'), SAMPLER_UNITS.u_scene]],
       ['uniform1i', [loc('u_mask'), SAMPLER_UNITS.u_mask]],
@@ -120,7 +118,7 @@ describe('setFilmPassUniforms', () => {
 
   it('never sets a sampler from the values, whatever they hold', () => {
     const { gl, calls } = recordingGl();
-    setFilmPassUniforms(
+    setPassUniforms(
       gl,
       [['u_media', loc('u_media')]],
       filmPassValues(shared, [1, 1], 0, restMotion())

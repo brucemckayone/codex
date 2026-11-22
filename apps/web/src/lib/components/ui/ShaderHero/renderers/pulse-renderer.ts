@@ -1,16 +1,16 @@
 /**
  * Liquid Logo renderer (preset id 'pulse') — implements ShaderRenderer.
  *
- * 3D perspective raymarched wave surface based on tomkh's wave equation.
- * Sim runs at 512x512 in a ping-pong double FBO (identical physics to ripple).
- * The grid stays SQUARE: it is the plane in world space (90 x 90 units), seen
- * in perspective, not the canvas, so a canvas-shaped grid would stretch it.
- * It runs on the step clock (Codex-1yd58 WP-1d): 120 steps a second at any
- * frame rate, input on every second step. It ran a fixed number of steps
- * per frame (twice as fast at 120 Hz) and queued a click splash on every
- * frame of the click's decay. R2b: it starts still, and only the pointer
- * and the sound move it (no idle drops, no seed, no logo attractor).
- * Display pass raymarches the heightfield from a configurable camera angle.
+ * 3D perspective raymarched wave surface based on tomkh's wave equation. Sim
+ * runs at 512x512 in a ping-pong double FBO (identical physics to ripple). The
+ * grid stays SQUARE: it is the plane in world space (90 x 90 units), seen in
+ * perspective, not the canvas, so a canvas-shaped grid would stretch it. It
+ * runs on the step clock: 120 steps a second at any frame rate, input on every
+ * second step. It ran a fixed number of steps per frame (twice as fast at 120
+ * Hz) and queued a click splash on every frame of the click's decay. It starts
+ * still, and only the pointer and the sound move it (no idle drops, no seed, no
+ * logo attractor). Display pass raymarches the heightfield from a configurable
+ * camera angle.
  *
  * Optional logo SDF integration: when an org logo URL is present in the
  * shader config, the logo is converted to a signed distance field (SDF)
@@ -24,6 +24,7 @@ import {
   SILENT_AUDIO,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { clamp01 } from '../clamp';
 import { createClickEdge } from '../click-edge';
 import type { SDFResult } from '../jfa-sdf';
 import { destroyLogoTexture, loadLogoTexture } from '../logo-texture';
@@ -40,6 +41,7 @@ import {
   type DoubleFBO,
   destroyDoubleFBO,
   drawQuad,
+  fillBoth,
   getUniforms,
   VERTEX_SHADER,
 } from '../webgl-utils';
@@ -135,7 +137,7 @@ function screenToHeightmapUV(
   const u = hitX / HEIGHTMAPSCALE + 0.5;
   const v = hitZ / HEIGHTMAPSCALE + 0.5;
   if (u < -0.05 || u > 1.05 || v < -0.05 || v > 1.05) return null;
-  return [Math.max(0, Math.min(1, u)), Math.max(0, Math.min(1, v))];
+  return [clamp01(u), clamp01(v)];
 }
 
 export function createPulseRenderer(): ShaderRenderer {
@@ -320,11 +322,10 @@ export function createPulseRenderer(): ShaderRenderer {
         : null;
 
       // ── Per-frame state ────────────────────────────────────
-      // Timers and the click edge follow time and are caught on the frame
-      // they land; the input steps below lay them.
-      // Drops come only with sound (R2b). With none, nothing moves the
-      // water but the pointer: idle drops every few seconds read as the
-      // surface pulsing by itself.
+      // Timers and the click edge follow time and are caught on the frame they
+      // land; the input steps below lay them. Drops come only with sound. With
+      // none, nothing moves the water but the pointer: idle drops every few
+      // seconds read as the surface pulsing by itself.
       if (audio?.active) {
         if (time - lastAmbientTime > Math.max(0.3, 1.5 - bass * 1.2)) {
           lastAmbientTime = time;
@@ -456,11 +457,7 @@ export function createPulseRenderer(): ShaderRenderer {
       gl.viewport(0, 0, SIM_RES, SIM_RES);
       gl.useProgram(initProg);
       quad.bind(initProg);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.read.fbo);
-      drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
-      drawQuad(gl);
-      bindOutput(gl);
+      fillBoth(gl, simBuf);
     },
 
     destroy(gl: WebGL2RenderingContext): void {

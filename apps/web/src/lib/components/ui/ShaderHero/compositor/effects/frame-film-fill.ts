@@ -3,10 +3,10 @@ import { FILM_GLSL, FILM_UNIFORMS, SMOKE_GLSL, SMOKE_UNIFORMS } from './film';
 import { BAND_GLSL, BAND_UNIFORMS } from './film-band';
 
 /**
- * The Showreel's Corner and Wide layouts (Codex-1yd58.6): the film fills its
- * stage over the brand's picture, which shows outside the stage. With a band
- * (`stage.ts` `FilmBand`) the film gives way to the picture: at its foot
- * ('under' through the smoke, 'fade' evenly), or all round ('edges').
+ * The Showreel's Corner and Wide layouts: the film fills its stage over the
+ * brand's picture, which shows outside the stage. With a band (`stage.ts`
+ * `FilmBand`) the film gives way to the picture: at its foot ('under' through
+ * the smoke, 'fade' evenly), or all round ('edges').
  */
 export const frameFilmFill: FrameEffect = {
   id: 'film-fill',

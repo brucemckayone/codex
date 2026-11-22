@@ -1,17 +1,16 @@
 /**
- * The passes over the piece's own picture (WP-5b, Codex-1yd58.6): the
- * stills' push-in, then the look's surface over the footage (`reel-surface`:
- * duotone, your colour or grain). They run on the film or still BEFORE its
- * film frame, into a target the frame then samples as `u_media`, so they
- * treat the piece alone: the brand's picture round it is untouched, in every
- * film frame (fill, the name window, the portrait placement) alike.
+ * The passes over the piece's own picture: the stills' push-in, then the look's
+ * surface over the footage (`reel-surface`: duotone, your colour or grain).
+ * They run on the film or still BEFORE its film frame, into a target the frame
+ * then samples as `u_media`, so they treat the piece alone: the brand's picture
+ * round it is untouched, in every film frame (fill, the name window, the
+ * portrait placement) alike.
  *
- * A treatment over the frame's output (the plan's first sketch, a slot after
- * the frame) would also restyle the shader round the film, and would need
- * the frame's coverage to keep off it; the owner's board treated only the
- * footage. A surface-only layer that reads the shader beside the film
- * (`layer-shader-light`) cannot run here, and is not one of the owner's
- * surfaces.
+ * A treatment over the frame's output (a slot after the frame) would also
+ * restyle the shader round the film, and would need the frame's coverage to
+ * keep off it; the surfaces treat only the footage. A surface-only layer that
+ * reads the shader beside the film (`layer-shader-light`) cannot run here, and
+ * is not one of the surfaces.
  *
  * The planning is PURE (under test); `createMediaRunner` only sequences the
  * passes, with the compositor's own target and draw handed in.
@@ -58,7 +57,7 @@ export function planMedia(
   const steps: MediaStep[] = [];
   if (look.push && ctx.still) {
     const push = fallen('media-push', ctx);
-    // by the reel's clock, which holds when the reel holds (review M2)
+    // by the reel's clock, which holds when the reel holds
     if (push)
       steps.push({
         effect: push,

@@ -1,7 +1,6 @@
 /**
- * The Showreel's film passes, checked as text (Codex-1yd58.7, WP-6): each
- * film frame composed with every motion effect (`everyFilmPass`), the
- * passes the compositor can draw.
+ * The Showreel's film passes, checked as text: each film frame composed with
+ * every motion effect (`everyFilmPass`), the passes the compositor can draw.
  *
  *   node apps/web/scripts/shader-gate.mjs   # the REAL passes, no glslang
  *
@@ -30,9 +29,9 @@ const EFFECTS_DIR = path.resolve(
 );
 
 /**
- * The Showreel draws 3 film frames (fill, name, and WP-5b's portrait) × 5
- * transitions × 4 pointers × 2 openings × 4 ways into the film. Fewer means
- * the motion registry moved or emptied.
+ * The Showreel draws 3 film frames (fill, name and portrait) × 5 transitions ×
+ * 4 pointers × 2 openings × 4 ways into the film. Fewer means the motion
+ * registry moved or emptied.
  */
 export const MIN_FILM_PASSES = 480;
 

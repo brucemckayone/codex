@@ -8,10 +8,9 @@ import { GLASS_FRAG } from '../shaders/glass.frag';
 import { fakeGl } from './fake-gl';
 
 /**
- * The R4b reworks (Codex-1yd58 WP-1d): glass and fracture keep their bold,
- * hard, dark lines by default (the owner's motif), and R4's softer line is a
- * set of creator settings. A brand that stores nothing paints the old line;
- * each new slider reaches its uniform.
+ * Glass and fracture keep their bold, hard, dark lines by default (the presets'
+ * motif), and the softer line is a set of creator settings. A brand that stores
+ * nothing paints the hard line; each new slider reaches its uniform.
  */
 
 afterEach(() => {
@@ -49,7 +48,7 @@ const code = (src: string) =>
     .replace(/\/\/.*$/gm, '')
     .replace(/\s+/g, ' ');
 
-describe('R4b: a brand storing nothing paints the old line', () => {
+describe('a brand storing nothing paints the hard line', () => {
   it.each([
     {
       preset: 'glass',
@@ -62,7 +61,7 @@ describe('R4b: a brand storing nothing paints the old line', () => {
     },
     {
       preset: 'fracture',
-      // Border, shadow and fill as before R4; fewer cuts, a calmer sway.
+      // The hard line's border, shadow and fill; fewer cuts, a calmer sway.
       want: {
         u_lineSoftness: 0,
         u_lineTint: 0,
@@ -89,8 +88,8 @@ describe('R4b: a brand storing nothing paints the old line', () => {
   // old flat piece, and no edge glow lighting a dark came on a light ground.
   it('glass at 0: a 1 px hard edge, the ground at 18%, flat pieces', () => {
     const glsl = code(GLASS_FRAG);
-    // floored where fwidth() is 0 (WP-11, MIN_RAMP): no change wherever a
-    // pixel's width is above the floor, so still the 1 px edge
+    // floored where fwidth() is 0 (MIN_RAMP): no change wherever a pixel's
+    // width is above the floor, so still the 1 px edge
     expect(glsl).toContain('float aa = max(fwidth(edge), MIN_RAMP);');
     expect(glsl).toContain(
       'float leadRamp = max(aa, u_lineSoftness * u_border * 0.4);'
@@ -119,7 +118,7 @@ describe('R4b: a brand storing nothing paints the old line', () => {
   });
 });
 
-describe('R4b: each new slider reaches its uniform', () => {
+describe('each new slider reaches its uniform', () => {
   it.each([
     ['glass', 'shader-glass-line-softness', 'u_lineSoftness'],
     ['glass', 'shader-glass-line-colour', 'u_lineTint'],

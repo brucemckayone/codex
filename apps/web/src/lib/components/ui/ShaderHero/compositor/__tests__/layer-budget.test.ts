@@ -1,9 +1,8 @@
 /**
- * The phone budget for the LAYERS (Codex-1yd58.12, WP-11 decision prep):
- * `judgeBudget` judged only stacks with a second preset, so a layers-only
- * stack (up to six after WP-8's dedupe; glow reads 13 texels a pixel, ink
- * 10) was never budgeted. Behind `PHONE_LAYER_BUDGET`, which the owner's
- * iPhone measurement decides, a slow window cuts the last layer still drawn.
+ * The phone budget for the LAYERS: `judgeBudget` judges only stacks with a
+ * second preset, so a layers-only stack (up to six layers; glow reads 13 texels
+ * a pixel, ink 10) needs its own. Behind `PHONE_LAYER_BUDGET`, which an iPhone
+ * measurement decides, a slow window cuts the last layer still drawn.
  */
 import { describe, expect, it } from 'vitest';
 import { createLayerBudget, PHONE_LAYER_BUDGET } from '../layer-budget';
@@ -16,7 +15,7 @@ const stackOf = (...ids: string[]): StackConfig => ({
 const ids = (stack: StackConfig) => stack.layers.map((l) => l.id);
 
 describe('createLayerBudget', () => {
-  it('is off until the owner’s iPhone measurement decides', () => {
+  it('is off until an iPhone measurement decides', () => {
     expect(PHONE_LAYER_BUDGET).toBe(false);
     const budget = createLayerBudget(false);
     const stack = stackOf('grain', 'glow');

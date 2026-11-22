@@ -31,19 +31,13 @@ import {
   AUDIO_UNIFORM_NAMES,
   createAudioFade,
   createDeltaClock,
+  createMusicalPace,
   uploadAudioUniforms,
 } from '../audio-uniforms';
-import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig } from '../shader-config';
 import { GLASS_FRAG } from '../shaders/glass.frag';
-import {
-  createProgram,
-  createQuad,
-  drawQuad,
-  getUniforms,
-  VERTEX_SHADER,
-} from '../webgl-utils';
+import { createSinglePass, setPalette } from './single-pass';
 
 const UNIFORM_NAMES = [
   'u_time',
@@ -70,9 +64,7 @@ const UNIFORM_NAMES = [
   ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
-type GlassUniform = (typeof UNIFORM_NAMES)[number];
-
-/** Fallbacks, matching shader-config's DEFAULTS (WP-1d R4b). */
+/** Fallbacks, matching shader-config's DEFAULTS. */
 const DEFAULTS = {
   cellSize: 5.0,
   border: 0.04,
@@ -95,41 +87,19 @@ const DEFAULTS = {
  */
 const IDLE_CLOCK_RATE = 1.0;
 
-/**
- * Upper bound on the differentiated musical clock, in clock-units per second.
- *
- * `beatPhase` advances at 0.35..1.5/s in normal operation, but the render loop
- * pauses (hidden tab, preset switch, reduced motion) while the analyser clamps
- * its own dt rather than freezing. One frame after a long pause can show a
- * large phase jump, and differentiating that unclamped would spike the rate
- * and jump every seed at once — a visible shear across the whole pane.
- */
-const MAX_CLOCK_RATE = 3.0;
-
 export function createGlassRenderer(): ShaderRenderer {
-  let program: WebGLProgram | null = null;
-  let uniforms: Record<GlassUniform, WebGLUniformLocation | null> | null = null;
-  let quad: ReturnType<typeof createQuad> | null = null;
-
+  const pass = createSinglePass(GLASS_FRAG, UNIFORM_NAMES);
   const audioFade = createAudioFade();
   const deltaClock = createDeltaClock();
-
+  const pace = createMusicalPace(IDLE_CLOCK_RATE);
   /** Integrated seed-drift clock. Monotone — see the file header. */
   let clock = 0;
-  /** Previous `beatPhase` sample, for differentiating the musical clock. */
-  let prevBeatPhase = -1;
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
-      program = createProgram(gl, VERTEX_SHADER, GLASS_FRAG);
-      if (!program) return false;
-
-      uniforms = getUniforms(gl, program, UNIFORM_NAMES);
-      quad = createQuad(gl);
-
+      if (!pass.init(gl)) return false;
       clock = 0;
-      prevBeatPhase = -1;
-
+      pace.reset();
       return true;
     },
 
@@ -142,58 +112,29 @@ export function createGlassRenderer(): ShaderRenderer {
       height: number,
       audio?: AudioState
     ): void {
-      if (!program || !uniforms || !quad) return;
+      const u = pass.begin(gl, width, height);
+      if (!u) return;
 
       const dt = deltaClock(time);
       const a = audioFade.update(audio, dt);
-
-      // Blend RATES, never positions.
-      let musicalRate = IDLE_CLOCK_RATE;
-      if (!a.silent) {
-        // The first audio frame has no previous sample to difference against;
-        // fall back to the idle rate rather than treating the whole
-        // accumulated phase as one frame's advance.
-        musicalRate =
-          // no previous sample, or no time between them (a frozen clock)
-          prevBeatPhase < 0 || dt <= 0
-            ? IDLE_CLOCK_RATE
-            : Math.min(
-                MAX_CLOCK_RATE,
-                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
-              );
-        prevBeatPhase = a.beatPhase;
-      } else {
-        prevBeatPhase = -1;
-      }
-      clock +=
-        dt * (IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active);
+      clock += dt * pace.rate(a, dt);
 
       // Glass uses direct mouse (no lerp) for instant fracture response
       const mx = mouse.active ? mouse.x : 0.5;
       const my = mouse.active ? mouse.y : 0.5;
 
-      gl.viewport(0, 0, width, height);
-      gl.useProgram(program);
-      quad.bind(program);
-
-      // Time + resolution + mouse
-      gl.uniform1f(uniforms.u_time, time);
-      gl.uniform2f(uniforms.u_resolution, width, height);
-      gl.uniform2f(uniforms.u_mouse, mx, my);
-      gl.uniform1f(uniforms.u_mouseActive, mouse.active ? 1.0 : 0.0);
-      gl.uniform1f(uniforms.u_burst, mouse.burstStrength);
+      gl.uniform1f(u.u_time, time);
+      gl.uniform2f(u.u_resolution, width, height);
+      gl.uniform2f(u.u_mouse, mx, my);
+      gl.uniform1f(u.u_mouseActive, mouse.active ? 1.0 : 0.0);
+      gl.uniform1f(u.u_burst, mouse.burstStrength);
 
       // Brand colours. Left as the configured palette rather than routed
       // through computeImmersiveColours(): cells pick a stop by hash and the
       // lead fringe cycles all three as interference orders, so rotating the
       // stops under audio would re-colour every pane at once.
-      const c = config.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      setPalette(gl, u, config.colors);
 
-      // Preset-specific config with defaults
       // Read from config if GlassConfig fields exist, otherwise use defaults
       const cfg = config as ShaderConfig & {
         cellSize?: number;
@@ -205,30 +146,21 @@ export function createGlassRenderer(): ShaderRenderer {
         lineTint?: number;
         pieceEdges?: number;
       };
-      gl.uniform1f(uniforms.u_cellSize, cfg.cellSize ?? DEFAULTS.cellSize);
-      gl.uniform1f(uniforms.u_border, cfg.border ?? DEFAULTS.border);
-      gl.uniform1f(uniforms.u_drift, cfg.drift ?? DEFAULTS.drift);
-      gl.uniform1f(uniforms.u_glow, cfg.glow ?? DEFAULTS.glow);
-      gl.uniform1f(uniforms.u_light, cfg.light ?? DEFAULTS.light);
-      gl.uniform1f(
-        uniforms.u_lineSoftness,
-        cfg.lineSoftness ?? DEFAULTS.lineSoftness
-      );
-      gl.uniform1f(uniforms.u_lineTint, cfg.lineTint ?? DEFAULTS.lineTint);
-      gl.uniform1f(
-        uniforms.u_pieceEdges,
-        cfg.pieceEdges ?? DEFAULTS.pieceEdges
-      );
-      gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
-      gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
-      gl.uniform1f(uniforms.u_clock, clock);
+      gl.uniform1f(u.u_cellSize, cfg.cellSize ?? DEFAULTS.cellSize);
+      gl.uniform1f(u.u_border, cfg.border ?? DEFAULTS.border);
+      gl.uniform1f(u.u_drift, cfg.drift ?? DEFAULTS.drift);
+      gl.uniform1f(u.u_glow, cfg.glow ?? DEFAULTS.glow);
+      gl.uniform1f(u.u_light, cfg.light ?? DEFAULTS.light);
+      gl.uniform1f(u.u_lineSoftness, cfg.lineSoftness ?? DEFAULTS.lineSoftness);
+      gl.uniform1f(u.u_lineTint, cfg.lineTint ?? DEFAULTS.lineTint);
+      gl.uniform1f(u.u_pieceEdges, cfg.pieceEdges ?? DEFAULTS.pieceEdges);
+      gl.uniform1f(u.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
+      gl.uniform1f(u.u_grain, cfg.grain ?? DEFAULTS.grain);
+      gl.uniform1f(u.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(u.u_clock, clock);
 
-      uploadAudioUniforms(gl, uniforms, a);
-
-      // Draw to screen (no FBO)
-      bindOutput(gl);
-      drawQuad(gl);
+      uploadAudioUniforms(gl, u, a);
+      pass.draw(gl);
     },
 
     resize(_gl: WebGL2RenderingContext, _width: number, _height: number): void {
@@ -240,19 +172,11 @@ export function createGlassRenderer(): ShaderRenderer {
       // leaving it running would resume the pane mid-orbit at whatever
       // arrangement the previous session reached.
       clock = 0;
-      prevBeatPhase = -1;
+      pace.reset();
     },
 
     destroy(gl: WebGL2RenderingContext): void {
-      if (program) {
-        gl.deleteProgram(program);
-        program = null;
-      }
-      if (quad) {
-        gl.deleteBuffer(quad.buffer);
-        quad = null;
-      }
-      uniforms = null;
+      pass.destroy(gl);
     },
   };
 }

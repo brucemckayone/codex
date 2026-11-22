@@ -1,7 +1,7 @@
 /**
- * The flash governor (Codex-1yd58.4; WCAG 2.3.1): an effect marked `flashes`
- * is given a clock with at most 3 values a second, so it cannot change the
- * picture's brightness more often than that, whatever its GLSL does.
+ * The flash governor (WCAG 2.3.1): an effect marked `flashes` is given a clock
+ * with at most 3 values a second, so it cannot change the picture's brightness
+ * more often than that, whatever its GLSL does.
  */
 import { describe, expect, it } from 'vitest';
 import { EFFECTS } from '../effects/registry';
@@ -70,8 +70,8 @@ describe('effectTime', () => {
     expect(effectTime({}, 2.9)).toBe(2.9);
   });
 
-  // Each registered effect that flashes (WP-8: glitch, leak), on the clock
-  // the compositor hands it, over ten seconds.
+  // Each registered effect that flashes (glitch, leak), on the clock the
+  // compositor hands it, over ten seconds.
   it.each(
     EFFECTS.filter((e) => e.flashes).map((e) => [e.id, e] as const)
   )('gives %s a clock that changes at most 3 times in any second', (_id, effect) => {

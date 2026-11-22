@@ -1,9 +1,9 @@
 /**
  * Each layer's and blend's own strength, the amount a token that names it
- * without one draws at, and the layers dropped under reduced motion (WP-9).
- * The effect files carry the same facts beside their GLSL; they are mirrored
- * here so the stack parse and the brand editor read them without loading any
- * GLSL, and `effect-registry.test.ts` holds the two equal.
+ * without one draws at, and the layers dropped under reduced motion. The effect
+ * files carry the same facts beside their GLSL; they are mirrored here so the
+ * stack parse and the brand editor read them without loading any GLSL, and
+ * `effect-registry.test.ts` holds the two equal.
  */
 import type { BlendId, LayerId } from './ids';
 

@@ -1,9 +1,9 @@
 import type { TransEffect } from './motion';
 
 /**
- * Between pieces, the light-leak cut (a WP-1b pick): three flares of the
- * brand's light, primary deepening to accent, flood in from one edge (a new
- * edge each cut) and the piece changes under them at their brightest.
+ * Between pieces, the light-leak cut: three flares of the brand's light,
+ * primary deepening to accent, flood in from one edge (a new edge each cut) and
+ * the piece changes under them at their brightest.
  *
  * One flash per cut: its light rises once and falls once, with the reveal,
  * and the reveal clock never turns a cut round, so a cut takes at least its

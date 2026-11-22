@@ -1,9 +1,9 @@
 /**
- * The Showreel's channel to the window's shader (Codex-1yd58.4): it holds the
- * film before any compositor exists, and tells its one reader what changed.
+ * The Showreel's channel to the window's shader: it holds the film before any
+ * compositor exists, and tells its one reader what changed.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { STILL_MOTION } from '../effects/motion-ids';
+import { STILL_MOTION } from '../../__tests__/motion-fixtures';
 import { restMotion } from '../effects/motion-uniforms';
 import type { FilmMotion } from '../film-motion';
 import { showreelFeed } from '../showreel-feed';
@@ -18,8 +18,8 @@ afterEach(() => {
   showreelFeed.setMotion(null);
 });
 
-// WP-6 (Codex-1yd58.7): the motion is the Showreel's `FilmMotion`, its
-// values written in place each frame; a frame they moved is its own word.
+// The motion is the Showreel's `FilmMotion`, its values written in place each
+// frame; a frame they moved is its own word.
 describe('showreelFeed motion', () => {
   const motion = (): FilmMotion => ({
     choice: STILL_MOTION,
@@ -98,7 +98,7 @@ describe('showreelFeed', () => {
     expect(changed).not.toHaveBeenCalled();
   });
 
-  it('takes a look that says the same thing as no change (WP-5)', () => {
+  it('takes a look that says the same thing as no change', () => {
     const changed = vi.fn();
     showreelFeed.onChange(changed);
     showreelFeed.setLook({ frame: 'film-fill', band: 'none' });

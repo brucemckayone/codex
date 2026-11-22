@@ -1,6 +1,6 @@
 /**
- * The phone budget's decision (Codex-1yd58.4): a window of 120 frames whose
- * 95th-percentile interval is over 25 ms drops the second preset, once.
+ * The phone budget's decision: a window of 120 frames whose 95th-percentile
+ * interval is over 25 ms drops the second preset, once.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -36,7 +36,7 @@ describe('percentile', () => {
 });
 
 describe('createFrameBudget', () => {
-  it('starts at 120 frames and 25 ms, as approved for WP-3', () => {
+  it('starts at 120 frames and 25 ms, the approved start values', () => {
     expect(BUDGET_FRAMES).toBe(120);
     expect(BUDGET_P95_MS).toBe(25);
   });

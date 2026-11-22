@@ -218,16 +218,67 @@ export function uploadAudioUniforms(
 }
 
 /**
+ * Upper bound on the differentiated musical clock, in clock-units per second.
+ *
+ * `beatPhase` advances at 0.35..1.5/s in normal operation, but the render loop
+ * pauses (hidden tab, preset switch, reduced motion) while the analyser clamps
+ * its own dt rather than freezing, so one frame after a long pause can show a
+ * large phase jump. Differentiated unclamped, that spikes the rate and lurches
+ * the scene exactly once.
+ */
+const MAX_PACE = 3.0;
+
+export interface MusicalPace {
+  /** This frame's pacing rate, in clock-units per second. */
+  rate(a: ResolvedAudio, dt: number): number;
+  /** Forget the last beat sample, as a preset's reset() does. */
+  reset(): void;
+}
+
+/**
+ * A preset's pacing rate: `idle` while silent, crossfading by the audio ramp
+ * to the rate the beat clock moves at. The preset integrates it
+ * (`clock += dt * rate`), blending RATES and never positions: `beatPhase`
+ * starts at zero while `u_time` does not, so a positional crossfade would run
+ * the clock backwards the moment playback starts.
+ */
+export function createMusicalPace(idle: number): MusicalPace {
+  /** Previous `beatPhase` sample, to differentiate; -1 for none. */
+  let prevBeatPhase = -1;
+  return {
+    rate(a, dt) {
+      let musical = idle;
+      if (!a.silent) {
+        musical =
+          // no previous sample, or no time between them (a frozen clock)
+          prevBeatPhase < 0 || dt <= 0
+            ? idle
+            : Math.min(
+                MAX_PACE,
+                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
+              );
+        prevBeatPhase = a.beatPhase;
+      } else {
+        prevBeatPhase = -1;
+      }
+      return idle + (musical - idle) * a.active;
+    },
+    reset() {
+      prevBeatPhase = -1;
+    },
+  };
+}
+
+/**
  * Frame-time tracker. Renderers receive absolute `time`, but the fade and any
  * damped motion need `dt` — and the render loop pauses (hidden tab, preset
  * switch), so a naive difference can be a large spike.
  *
  * Returns 1/60 on the first call and clamps thereafter. A frame at the SAME
- * time as the last is 0: time standing still moves nothing. It was a
- * sixtieth, so a preset integrating its own clock (`clock += dt * rate`)
- * went on moving under a frozen clock: a reduced-motion still drawn again,
- * and the visual gate's frozen page (Codex-1yd58.12). A caller dividing by
- * dt must guard 0.
+ * time as the last is 0: time standing still moves nothing. It was a sixtieth,
+ * so a preset integrating its own clock (`clock += dt * rate`) went on moving
+ * under a frozen clock: a reduced-motion still drawn again, and the visual
+ * gate's frozen page. A caller dividing by dt must guard 0.
  */
 export function createDeltaClock(): (time: number) => number {
   let prev = -1;

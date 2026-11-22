@@ -1,11 +1,11 @@
 /**
- * The uniforms the Showreel's motion effects read, beyond the compositor's
- * own (`uniforms.ts`), with their GLSL types (Codex-1yd58.7).
+ * The uniforms the Showreel's motion effects read, beyond the compositor's own
+ * (`uniforms.ts`), with their GLSL types.
  *
  * Every value has a REST: the value at which the motion does nothing. A film
  * frame drawn with every motion uniform at rest is, pixel for pixel, the film
- * frame WP-5 draws (`restMotion`, proven on a real GPU). So the drivers only
- * ever move a value away from rest and back.
+ * frame drawn with no motion (`restMotion`, proven on a real GPU). So the
+ * drivers only ever move a value away from rest and back.
  */
 import { UNIFORMS, type UniformName } from './uniforms';
 

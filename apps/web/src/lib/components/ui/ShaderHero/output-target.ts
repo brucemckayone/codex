@@ -1,10 +1,10 @@
 /**
- * The one door from a renderer to "the screen" (Codex-1yd58 WP-2).
+ * The one door from a renderer to "the screen".
  *
  * Every preset ends its frame by drawing into whatever output is bound: the
  * canvas (the default framebuffer), or, while the brand shader stack's
- * compositor (`compositor/compositor.ts`, Codex-1yd58.4) renders a preset, its
- * scene framebuffer, attached here. Every renderer, unchanged, draws into it.
+ * compositor (`compositor/compositor.ts`) renders a preset, its scene
+ * framebuffer, attached here. Every renderer, unchanged, draws into it.
  *
  * THE RULE: nothing under `ShaderHero/` calls
  * `gl.bindFramebuffer(gl.FRAMEBUFFER, null)` except this file (the

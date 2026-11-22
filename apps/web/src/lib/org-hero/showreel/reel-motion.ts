@@ -1,7 +1,6 @@
 /**
- * The Showreel's motion, frame by frame (Codex-1yd58.7, WP-6 wiring part 1):
- * the four motion settings, turned into the values the window's shader
- * draws the film with.
+ * The Showreel's motion, frame by frame: the four motion settings, turned into
+ * the values the window's shader draws the film with.
  *
  * The hero's settings name one effect per axis (`reel-trans`, `reel-pointer`,
  * `reel-opening`, `reel-film`: `motionChoice`). The compositor composes the
@@ -90,6 +89,10 @@ export interface ReelMotionOptions {
   readonly maskPixels?: () => MaskPixels | null;
 }
 
+/** A trail with a phone's fewer points, or the full set. */
+const trailFor = (phone: boolean) =>
+  new PointerTrail(phone ? PHONE_TRAIL_POINTS : undefined);
+
 /** The name at rest: as drawn, all of it, no dive. */
 const NAME_REST: NameFrame = { zoom: 1, alpha: 1, weight: 0, dive: 0 };
 
@@ -141,9 +144,7 @@ export class ReelMotion {
       values: restMotion(),
       running: null,
     };
-    this.#trail = new PointerTrail(
-      setup.phone ? PHONE_TRAIL_POINTS : undefined
-    );
+    this.#trail = trailFor(setup.phone);
     this.#maskPixels = options.maskPixels ?? (() => null);
     this.#apply(setup);
   }
@@ -184,11 +185,14 @@ export class ReelMotion {
     }
     if (was.phone !== setup.phone) {
       this.#trail.clear();
-      this.#trail = new PointerTrail(
-        setup.phone ? PHONE_TRAIL_POINTS : undefined
-      );
+      this.#trail = trailFor(setup.phone);
     }
     this.#apply(setup);
+  }
+
+  /** The opening and the way in dive through the name (Corner and Wide). */
+  get #dives(): boolean {
+    return this.#setup.frame !== 'film-name';
   }
 
   #apply(setup: ReelMotionSetup): void {
@@ -239,12 +243,12 @@ export class ReelMotion {
   }
 
   /**
-   * The reel paused: its pause, a press held, the hero off screen. A cut
-   * under way ends at once on the piece it was going to, a pick waiting in
-   * its rise included, as a pick made while paused shows at once (`follow`).
-   * The visitor stopped the motion, and the words, which come in with their
-   * piece's picture, must never wait out a pause hidden, their film button
-   * reachable by Tab but unseen (review R2-M1; WCAG 2.2.2, 2.4.7).
+   * The reel paused: its pause, a press held, the hero off screen. A cut under
+   * way ends at once on the piece it was going to, a pick waiting in its rise
+   * included, as a pick made while paused shows at once (`follow`). The visitor
+   * stopped the motion, and the words, which come in with their piece's
+   * picture, must never wait out a pause hidden, their film button reachable by
+   * Tab but unseen (WCAG 2.2.2, 2.4.7).
    */
   pause(now: number): void {
     this.#paused = true;
@@ -325,16 +329,16 @@ export class ReelMotion {
     this.#openingDue = false;
     if (!runs) return;
     this.#openingFrom = now;
-    if (this.#setup.frame !== 'film-name') this.#aimDive(this.#openAspect);
+    if (this.#dives) this.#aimDive(this.#openAspect);
   }
 
   /**
-   * The film opened (in the hero or the phone's pop-up): the way into it
-   * runs. Through the name, the dive falls into the name's thickest stroke,
-   * deep enough for the letter to cover the `aspect`-wide output. `scrolled`
-   * past the letters' fade (`NAME_FADE_PX`), there are no letters to dive
-   * through, and the canvas holds them where the page sat at the top: it
-   * starts where the film fills its stage (owner, 2026-11-21).
+   * The film opened (in the hero or the phone's pop-up): the way into it runs.
+   * Through the name, the dive falls into the name's thickest stroke, deep
+   * enough for the letter to cover the `aspect`-wide output. `scrolled` past
+   * the letters' fade (`NAME_FADE_PX`), there are no letters to dive through,
+   * and the canvas holds them where the page sat at the top: it starts where
+   * the film fills its stage.
    */
   enterFilm(now: number, aspect: number, scrolled = false): void {
     const kind = this.#motion.running?.into ?? null;
@@ -448,7 +452,7 @@ export class ReelMotion {
       } else {
         const opening = openingAt(
           now - this.#openingFrom,
-          frame !== 'film-name',
+          this.#dives,
           this.#depth
         );
         if (opening.done) this.#openingFrom = null;
@@ -461,9 +465,7 @@ export class ReelMotion {
     // Waiting to open: the opening's own first frame, so it starts from
     // exactly what shows (the letters dark, the film already held to them).
     this.#setName(
-      this.#openingDue
-        ? openingAt(0, frame !== 'film-name', this.#depth)
-        : NAME_REST
+      this.#openingDue ? openingAt(0, this.#dives, this.#depth) : NAME_REST
     );
     // Waiting for the pass: frames, so a frozen hero draws and it says.
     return busy || this.#openWaitFrom !== null;

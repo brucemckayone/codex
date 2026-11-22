@@ -139,10 +139,3 @@ vec3 audioTint(vec3 base, vec3 target, float signal, float depth) {
   return mix(base, target, clamp(signal * depth * u_audioActive, 0.0, 1.0));
 }
 `;
-
-/**
- * Convenience: the full audio block (uniforms + helpers) for shaders whose
- * uniform and function sections are adjacent. Most presets declare uniforms
- * near the top and helpers below, and should interpolate the two separately.
- */
-export const AUDIO_GLSL = `${AUDIO_UNIFORMS}\n${AUDIO_HELPERS}`;

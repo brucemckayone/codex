@@ -1,15 +1,11 @@
 /**
- * The ids a brand's shader stack can name, per axis (Codex-1yd58.4).
+ * The ids a brand's shader stack can name, per axis.
  *
  * Kept apart from the effects themselves so the stack parse
  * (`stack-config.ts`), which ShaderHero runs on every brand poll, never pulls
  * the GLSL into the hero's own chunk: a bare stack loads no compositor code.
  * The registry test pins that the registry holds exactly these ids, axis by
  * axis, so the two cannot drift.
- *
- * WP-3 ships the five blends, three frames and one layer (grain) as the
- * registry's proof. WP-8 adds the other layers, WP-5 the film frames, and
- * WP-5b the portrait frame and the passes over the piece's own picture.
  */
 
 /** How a second preset meets the base. */
@@ -24,7 +20,7 @@ export type BlendId = (typeof BLEND_IDS)[number];
 
 /**
  * Passes run over the picture, in order, after the blend. The ids are the
- * WP-1b lab's, so the owner's saved combos read as they were saved (WP-8).
+ * shader lab's, so combos saved there read as they were saved.
  */
 export const LAYER_IDS = [
   'grain',
@@ -46,9 +42,9 @@ export const LAYER_IDS = [
 export type LayerId = (typeof LAYER_IDS)[number];
 
 /**
- * Layers only the Showreel's surface slot runs (WP-5b), never a brand's
- * stack: they read the brand shader's picture as `u_second` beside the one
- * they treat, which only that slot binds.
+ * Layers only the Showreel's surface slot runs, never a brand's stack: they
+ * read the brand shader's picture as `u_second` beside the one they treat,
+ * which only that slot binds.
  */
 export const SURFACE_ONLY_LAYER_IDS: readonly LayerId[] = ['shader-light'];
 
@@ -62,10 +58,10 @@ export const BRAND_FRAME_IDS = [
   'name-glows',
 ] as const;
 /**
- * The Showreel's film frames (WP-5, Codex-1yd58.6): the piece's film over the
- * picture, inside the stage. Only the Showreel's look names one
- * (`showreelFeed.setLook`). A brand's `shader-frame` never can: with no film
- * attached, a film frame would draw the picture and nothing of its own.
+ * The Showreel's film frames: the piece's film over the picture, inside the
+ * stage. Only the Showreel's look names one (`showreelFeed.setLook`). A brand's
+ * `shader-frame` never can: with no film attached, a film frame would draw the
+ * picture and nothing of its own.
  */
 const FILM_FRAME_IDS = ['film-fill', 'film-name', 'film-portrait'] as const;
 export const FRAME_IDS = [...BRAND_FRAME_IDS, ...FILM_FRAME_IDS] as const;
@@ -79,18 +75,17 @@ export const PASSTHROUGH_FRAME: BrandFrameId = 'shader-only';
 export const FILM_FILL_FRAME: FilmFrameId = 'film-fill';
 /**
  * A portrait film or picture flush right at the stage's full height, its left
- * edge fading into the brand's picture (owner, 2026-11-21). No look names it:
- * the compositor puts it in `film-fill`'s place on a landscape stage when
- * filling would crop too much of the piece (`../portrait.ts`).
+ * edge fading into the brand's picture. No look names it: the compositor puts
+ * it in `film-fill`'s place on a landscape stage when filling would crop too
+ * much of the piece (`../portrait.ts`).
  */
 export const FILM_PORTRAIT_FRAME: FilmFrameId = 'film-portrait';
 
 /**
- * The surfaces over the footage a Showreel can name (WP-5b, owner
- * 2026-11-21): the hero option `reel-surface`, beside 'none'. No halftone.
+ * The surfaces over the footage a Showreel can name: the hero option
+ * `reel-surface`, beside 'none'. No halftone.
  */
-export const REEL_SURFACES = ['duotone', 'colour', 'grain'] as const;
-export type ReelSurface = (typeof REEL_SURFACES)[number];
+export type ReelSurface = 'duotone' | 'colour' | 'grain';
 
 /**
  * The passes run on the piece's OWN picture before a film frame samples it

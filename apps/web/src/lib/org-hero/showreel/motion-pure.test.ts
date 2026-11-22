@@ -1,8 +1,8 @@
 /**
- * The Showreel's motion drivers (Codex-1yd58.7): the cut between pieces,
- * the pointer's trail and the swipe that drives it on a phone, where a dive
- * into the name falls in, and the timelines of the opening and the way into
- * the film. Every one is pure, so time is handed in.
+ * The Showreel's motion drivers: the cut between pieces, the pointer's trail
+ * and the swipe that drives it on a phone, where a dive into the name falls in,
+ * and the timelines of the opening and the way into the film. Every one is
+ * pure, so time is handed in.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -138,7 +138,7 @@ describe('RevealClock', () => {
     expect(clock.at(2000 + CUT_TIMING.outMs).shown).toBe(1);
   });
 
-  it('says which piece the cut under way is going to: its target, a pick waiting in the rise, or the piece at rest (R2-M1)', () => {
+  it('says which piece the cut under way is going to: its target, a pick waiting in the rise, or the piece at rest', () => {
     const clock = new RevealClock(0);
     expect(clock.headingTo(0)).toBe(0);
     clock.cut(1, 100);
@@ -217,9 +217,9 @@ describe('PointerTrail', () => {
     const puff = slot(packed, 1);
     expect(puff[1]).toBeGreaterThan(0.5);
     expect(puff[3]).toBeGreaterThan(0.09 * 1.1);
-    // Smoke with inertia (WP-6): the head no longer vanishes with the
-    // pointer; it stays, fading, where the smoke drifted to
-    // (`reel-trail-inertia.test.ts` pins the drift and the fade).
+    // Smoke with inertia: the head no longer vanishes with the pointer; it
+    // stays, fading, where the smoke drifted to (`reel-trail-inertia.test.ts`
+    // pins the drift and the fade).
     trail.leave(1000);
     const head = slot(trail.pack(1000, 'smoke', out()), 0);
     expect(head.slice(0, 2).map((v) => +v.toFixed(4))).toEqual([0.25, 0.5]);

@@ -10,7 +10,7 @@ import { createProgram, withProgramLabel } from '../webgl-utils';
 /**
  * A program that will not build says so through the app logger, named by who
  * built it (`surface:preset`) and with whether the context was lost, and frees
- * what it did compile (Codex-1yd58.14).
+ * what it did compile.
  */
 
 const VERTEX = 1;

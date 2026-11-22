@@ -12,10 +12,9 @@
  * Mouse coordinates are pre-mapped to heightmap UV space by the renderer
  * (via camera ray-plane intersection) so the sim stays 2D-simple.
  *
- * WP-1d R2b (Codex-1yd58): nothing moves the water but the pointer and the
- * sound. The logo attractor is gone: it pushed an oscillating force along
- * the logo's edge on every step, so the surface pulsed by itself (the
- * owner: "pulsing by itself... distracting"). The logo is now a still
+ * Nothing moves the water but the pointer and the sound. There is no logo
+ * attractor: one pushed an oscillating force along the logo's edge on every
+ * step, so the surface pulsed by itself, which distracts. The logo is a still
  * relief in the display pass.
  *
  * Uniforms:

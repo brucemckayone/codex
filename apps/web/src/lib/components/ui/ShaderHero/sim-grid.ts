@@ -2,8 +2,8 @@
  * Shared helpers for the FBO-simulated presets (flow, suture, ripple, and the
  * reworks that follow them).
  *
- * WHY THIS EXISTS (Codex-1yd58 WP-1c, shader lab audit 2026-11-19)
- * ---------------------------------------------------------------
+ * WHY THIS EXISTS (the shader lab's audit)
+ * ----------------------------------------
  * 1. SHAPE. Every simulated preset ran a square 512x512 grid and stretched it
  *    over the canvas, so on a 16:9 hero every feature was ~1.8x wide and on a
  *    phone ~2x tall: ripples drew as ellipses, smoke as smears. `simGridFor`

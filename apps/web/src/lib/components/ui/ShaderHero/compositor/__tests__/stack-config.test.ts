@@ -1,7 +1,7 @@
 /**
- * The brand's shader stack, read from its `--brand-shader-*` tokens
- * (Codex-1yd58.4). What it cannot use is dropped, never an error, and a stack
- * that comes out as the base alone is bare: today's path, no compositor.
+ * The brand's shader stack, read from its `--brand-shader-*` tokens. What it
+ * cannot use is dropped, never an error, and a stack that comes out as the base
+ * alone is bare: today's path, no compositor.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -229,8 +229,8 @@ describe('getStackConfig', () => {
     expect(stack.frame).toBe('through-name');
   });
 
-  // The film frames are the Showreel's look (WP-5): a brand naming one would
-  // draw the picture and nothing of its own on every other page.
+  // The film frames are the Showreel's look: a brand naming one would draw the
+  // picture and nothing of its own on every other page.
   it('never takes a film frame from the brand', () => {
     for (const frame of ['film-fill', 'film-name', 'film-portrait']) {
       document.body.innerHTML = '';
@@ -270,8 +270,8 @@ describe('the stack keys reach the page', () => {
   });
 });
 
-// Plan §3 spells the layers `id:amount`; WP-3 read only `id amount`, so the
-// colon form parsed as an unknown id and drew the bare base (WP-8).
+// The layers are spelt `id:amount`; a reader of `id amount` alone parsed the
+// colon form as an unknown id and drew the bare base.
 describe('the layers token', () => {
   const layersOf = (value: string) =>
     parseStack(tokens({ 'shader-layers': value }), 'flow').layers;
@@ -315,8 +315,8 @@ describe('the layers token', () => {
   });
 
   // Each layer is a full pass, and the phone budget judges only stacks with a
-  // second preset (WP-11 measures the rest): a repeat would buy cost and no
-  // new look, so the cap counts distinct layers.
+  // second preset: a repeat would buy cost and no new look, so the cap counts
+  // distinct layers.
   it('keeps the first of a repeated layer, with its amount, in the colon form', () => {
     expect(layersOf('glow:0.3, glow:0.9, ink, glow')).toEqual([
       { id: 'glow', amount: 0.3 },
@@ -343,9 +343,9 @@ describe('the layers token', () => {
     ).toEqual(['glow', 'ink', 'grain', 'crt', 'chroma', 'mosaic']);
   });
 
-  it("reads the owner's saved lab combos, as the lab saved them", () => {
-    // The distinct chains of the 14 combos in shader-lab/reports.jsonl
-    // (2026-11-19), written `id:amount`.
+  it('reads the saved lab combos, as the lab saved them', () => {
+    // The distinct chains of the 14 combos in shader-lab/reports.jsonl, written
+    // `id:amount`.
     const chains = [
       'halftone:0.3',
       'grain:0.5',
@@ -454,8 +454,8 @@ describe('the layers token', () => {
   });
 });
 
-// The brand editor (WP-9) reads a token with readLayerItems / readStack and
-// writes one with serialiseLayers: one module owns the format both ways.
+// The brand editor reads a token with readLayerItems / readStack and writes one
+// with serialiseLayers: one module owns the format both ways.
 describe("the editor's reading and writing", () => {
   const layersOf = (value: string) =>
     parseStack(tokens({ 'shader-layers': value }), 'flow').layers;

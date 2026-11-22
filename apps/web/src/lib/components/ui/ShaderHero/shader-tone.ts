@@ -1,9 +1,9 @@
 /**
- * The channel between the org's moving background and a page that reads what
- * it draws (landing-builder 03 X54). The fullpage ShaderHero (`tone`) samples
- * its frames into the grid only while something has asked (`demand`), and
- * tells each listener when the grid changes; a new shader, new colours or a
- * new size clear it, since what it held no longer lies under the same cells.
+ * The channel between the org's moving background and a page that reads what it
+ * draws. The fullpage ShaderHero (`tone`) samples its frames into the grid only
+ * while something has asked (`demand`), and tells each listener when the grid
+ * changes; a new shader, new colours or a new size clear it, since what it held
+ * no longer lies under the same cells.
  */
 import { accumulateTone, emptyToneGrid, type ToneGrid } from './tone-grid';
 
@@ -55,8 +55,8 @@ class ShaderToneChannel {
 
   /**
    * Asks the shader to draw one frame and stop, as for reduced motion, while
-   * any page holds it: a page whose motion dial stops what moves on its own
-   * (landing-builder 03 X62). Returns the release.
+   * any page holds it: a page whose motion dial stops what moves on its
+   * own. Returns the release.
    */
   hold(): () => void {
     if (this.#holds++ === 0) this.#hold?.(true);

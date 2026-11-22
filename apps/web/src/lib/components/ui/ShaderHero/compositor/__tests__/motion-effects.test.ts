@@ -1,12 +1,13 @@
 /**
- * The Showreel's motion effects (Codex-1yd58.7). What `shaders:check` cannot
- * see is pinned here: the tables hold exactly the ids, each effect defines
- * its own axis's hook and lists exactly the uniforms it reads, an effect that
- * flashes never reads the real clock, and the fallbacks land where the plan
- * says. That every composed pass compiles is the gate's (scratch until the
- * wiring registers them).
+ * The Showreel's motion effects. What `shaders:check` cannot see is pinned
+ * here: the tables hold exactly the ids, each effect defines its own axis's
+ * hook and lists exactly the uniforms it reads, an effect that flashes never
+ * reads the real clock, and the fallbacks land where the plan says. That every
+ * composed pass compiles is the gate's (scratch until the wiring registers
+ * them).
  */
 import { describe, expect, it } from 'vitest';
+import { STILL_MOTION } from '../../__tests__/motion-fixtures';
 import {
   assembleFilmPass,
   composeFilmPass,
@@ -22,7 +23,6 @@ import {
   INTO_IDS,
   OPENING_IDS,
   POINTER_IDS,
-  STILL_MOTION,
   TRANS_IDS,
 } from '../effects/motion-ids';
 import {
@@ -152,7 +152,7 @@ describe('motion effects', () => {
       fade: 'fade',
     });
     expect(reduced(POINTERS)).toEqual({
-      // Its rings spread on after the pointer stops (review M5).
+      // Its rings spread on after the pointer stops.
       liquid: 'none',
       smoke: 'smoke',
       glitch: 'none',
@@ -225,7 +225,7 @@ describe('planMotion', () => {
     ]);
   });
 
-  it('under reduced motion turns the liquid pointer off and keeps the smoke (review M5)', () => {
+  it('under reduced motion turns the liquid pointer off and keeps the smoke', () => {
     const reduced = { ...base, reducedMotion: true };
     const pointer = (id: 'liquid' | 'smoke') =>
       planMotion({ ...choice, pointer: id }, reduced).pointer.id;
@@ -255,7 +255,7 @@ describe('composeFilmPass', () => {
   it('gives every combination its own pass id (the pass cache key)', () => {
     const passes = everyFilmPass();
     expect(passes).toHaveLength(
-      // fill, name, and WP-5b's portrait
+      // fill, name and portrait
       3 *
         TRANS_IDS.length *
         POINTER_IDS.length *

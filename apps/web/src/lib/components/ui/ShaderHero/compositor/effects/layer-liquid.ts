@@ -3,10 +3,9 @@ import type { LayerEffect } from './effect';
 /**
  * The picture swirls and ripples around the pointer like a finger in water,
  * adding nothing on top. It moves pixels, not light, so it does not flash.
- * Under reduced motion it is dropped: the one still frame would hold a swirl
- * at wherever the pointer last was. It reads the pointer's position only;
- * its presence (so it rests when the pointer leaves) comes with WP-6's
- * pointer strength.
+ * Under reduced motion it is dropped: the one still frame would hold a swirl at
+ * wherever the pointer last was. It reads the pointer's position only, not its
+ * presence, so it does not rest when the pointer leaves.
  */
 export const layerLiquid: LayerEffect = {
   id: 'liquid',

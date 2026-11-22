@@ -35,10 +35,10 @@
  * is a slightly different fixed kernel rather than added noise: the convolution
  * stays spatially smooth and nothing speckles.
  *
- * **Frame-rate independence (WP-1d R3, Codex-1yd58).** The renderer runs a
- * step clock (sim-grid.ts): `speed` x 60 steps a second at any frame rate,
- * each a fixed `uDt`. It ran `speed` substeps a frame with a frame-scaled dt
- * (clamped, so a 144 Hz display still ran about 20% fast).
+ * **Frame-rate independence.** The renderer runs a step clock (sim-grid.ts):
+ * `speed` x 60 steps a second at any frame rate, each a fixed `uDt`. It ran
+ * `speed` substeps a frame with a frame-scaled dt (clamped, so a 144 Hz display
+ * still ran about 20% fast).
  *
  * **Shape.** The grid has the canvas's shape at about LENIA_GRID_BASE²
  * texels, and the kernel, the pointer and the drops measure in texels, so a
@@ -179,11 +179,10 @@ void main() {
             * step(0.5, uMouseActive);
   newState += uDropGain * exp(-texelDistance2(uDropPos) / 0.0036);
 
-  // ---- 6. Clamp ----
-  // No edge damping (WP-1d R3): the grid wraps (REPEAT, set by the
-  // renderer), so a creature crossing an edge comes back on the other side.
-  // The damping it replaces killed every creature within 8 texels of an
-  // edge, and the ones beside that dead strip drew a frame round the hero.
+  // ---- 6. Clamp ---- No edge damping: the grid wraps (REPEAT, set by the
+  // renderer), so a creature crossing an edge comes back on the other side. The
+  // damping it replaces killed every creature within 8 texels of an edge, and
+  // the ones beside that dead strip drew a frame round the hero.
   newState = clamp(newState, 0.0, 1.0);
 
   fragColor = vec4(newState, 0.0, 0.0, 1.0);

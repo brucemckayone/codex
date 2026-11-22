@@ -16,10 +16,10 @@ import {
 } from '../start-renderer';
 
 /**
- * The renderer starter immersive mode and the studio preview share
- * (Codex-1yd58.14): a load that rejects is caught and logged, an init that
- * returns false or throws is an init failure, a renderer whose init failed is
- * destroyed, and an init failure retries ONCE on single-pass `film`.
+ * The renderer starter immersive mode and the studio preview share: a load that
+ * rejects is caught and logged, an init that returns false or throws is an init
+ * failure, a renderer whose init failed is destroyed, and an init failure
+ * retries ONCE on single-pass `film`.
  */
 
 /** A renderer stand-in whose init answers `init` (or throws it). */

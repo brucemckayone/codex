@@ -46,6 +46,7 @@ import {
   type DoubleFBO,
   destroyDoubleFBO,
   drawQuad,
+  fillBoth,
   getUniforms,
   VERTEX_SHADER,
 } from '../webgl-utils';
@@ -459,11 +460,7 @@ export function createFlowRenderer(): ShaderRenderer {
       gl.uniform1f(initU.uSeed, Math.random() * 100.0);
 
       // Seed both FBO sides
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.read.fbo);
-      drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
-      drawQuad(gl);
-      bindOutput(gl);
+      fillBoth(gl, simBuf);
     },
 
     destroy(gl: WebGL2RenderingContext): void {

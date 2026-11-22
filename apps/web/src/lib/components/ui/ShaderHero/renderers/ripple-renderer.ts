@@ -46,6 +46,7 @@ import {
   type DoubleFBO,
   destroyDoubleFBO,
   drawQuad,
+  fillBoth,
   getUniforms,
   VERTEX_SHADER,
 } from '../webgl-utils';
@@ -458,9 +459,9 @@ export function createRippleRenderer(): ShaderRenderer {
        * the sim on a still frame that takes no steps. At 60 Hz the count
        * and order are what they were.
        *
-       * Its complexity is render's per-frame impulse code, moved here as it
-       * was (render is simpler by as much). Split per impulse, it doubled
-       * the code ripple and suture already share (fallow dupes, WP-1d).
+       * Its complexity is render's per-frame impulse code, moved here as it was
+       * (render is simpler by as much). Split per impulse, it doubled the code
+       * ripple and suture already share (`fallow dupes`).
        */
       // fallow-ignore-next-line complexity
       const applyImpulses = (): void => {
@@ -706,11 +707,7 @@ export function createRippleRenderer(): ShaderRenderer {
       quad.bind(initProg);
 
       // Zero out both FBO sides (flat water)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.read.fbo);
-      drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
-      drawQuad(gl);
-      bindOutput(gl);
+      fillBoth(gl, simBuf);
     },
 
     destroy(gl: WebGL2RenderingContext): void {

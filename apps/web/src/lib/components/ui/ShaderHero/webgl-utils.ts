@@ -189,6 +189,18 @@ export function drawQuad(gl: WebGL2RenderingContext): void {
 }
 
 /**
+ * Draw the quad, with the program in use, into both sides of `buf`, then
+ * go back to the output: how a simulation lays down its starting field.
+ */
+export function fillBoth(gl: WebGL2RenderingContext, buf: DoubleFBO): void {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, buf.read.fbo);
+  drawQuad(gl);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, buf.write.fbo);
+  drawQuad(gl);
+  bindOutput(gl);
+}
+
+/**
  * Create an FBO with a specific internal format.
  * Generalizes createFBO for use cases beyond RGBA16F (e.g., R8 for SDFs).
  */

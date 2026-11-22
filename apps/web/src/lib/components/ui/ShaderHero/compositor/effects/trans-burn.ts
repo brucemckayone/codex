@@ -1,9 +1,9 @@
 import type { TransEffect } from './motion';
 
 /**
- * Between pieces, the smoke burn (the v4 mock's; the owner's "I LIKE THE
- * TRANSITION"): the brand's smoke takes the piece back, the darkest smoke
- * first, then burns the next one in, the brightest smoke first.
+ * Between pieces, the smoke burn (the v4 mock's): the brand's smoke takes the
+ * piece back, the darkest smoke first, then burns the next one in, the
+ * brightest smoke first.
  */
 export const transBurn: TransEffect = {
   id: 'burn',

@@ -1,9 +1,8 @@
 /**
- * The phone budget for the stack's LAYERS (Codex-1yd58.12, WP-11 decision
- * prep; the WP-8 review, 2026-11-20). `judgeBudget` judges a stack with a
+ * The phone budget for the stack's LAYERS. `judgeBudget` judges a stack with a
  * second preset (`budget.ts`): it drops the second, the heaviest pass. A
- * layers-only stack was never judged, though it holds up to six distinct
- * layers after WP-8's dedupe (glow reads 13 texels a pixel, ink 10).
+ * layers-only stack is not judged there, though it holds up to six distinct
+ * layers (glow reads 13 texels a pixel, ink 10).
  *
  * Behind `PHONE_LAYER_BUDGET`: on a phone whose frames break the budget
  * (`createFrameBudget`'s window), once there is no second preset left to
@@ -19,8 +18,8 @@ import type { LayerId } from './effects/ids';
 import type { StackConfig } from './stack-config';
 
 /**
- * OFF until the owner's iPhone measurement decides (WP-11): whether a
- * layers-only stack can miss the frame rate there, and so whether to cut.
+ * OFF until an iPhone measurement decides (WP-11): whether a layers-only stack
+ * can miss the frame rate there, and so whether to cut.
  */
 export const PHONE_LAYER_BUDGET = false;
 
@@ -79,7 +78,7 @@ export function createLayerBudget(enabled: boolean): LayerBudget {
     apply(stack) {
       // Nothing cut, which is always so while the flag is off: today's stack,
       // read for nothing. This runs twice a frame (syncStack and draw), so no
-      // key is built until a cut has been made (WP-5b review r2, L1r2).
+      // key is built until a cut has been made.
       if (cuts === 0) return stack;
       const n = cutsOf(stack);
       if (n === 0) return stack;

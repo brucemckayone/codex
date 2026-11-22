@@ -1,21 +1,21 @@
 /**
  * Glass fragment shader — Voronoi stained glass with a thin-film lead fringe.
  *
- * ## WP-1d R4b (Codex-1yd58): the came is the motif
+ * ## The came is the motif
  *
  * - **Irregular cells.** Seeds sat at their grid cell's centre plus a small
  *   orbit, so the pane read as a wobbly square grid. Each seed now sits off
  *   centre by a fixed hash, and about a third of the grid cells hold two
  *   seeds, so pieces vary about 2:1 in size.
- * - **The leading, by default, is the old came:** bold, hard (1 px of
- *   anti-alias), near-black. R4 made it thin, soft and tinted and the owner
- *   lost the stained glass, so each of those is now a setting:
- *   u_border (line weight), u_lineSoftness (hard to soft), u_lineTint (dark
- *   to the R4 ground tint).
+ * - **The leading, by default, is the bold came:** hard (1 px of
+ *   anti-alias), near-black. A thin, soft, tinted came loses the stained
+ *   glass, so each of those is a setting: u_border (line weight),
+ *   u_lineSoftness (hard to soft), u_lineTint (dark to a tint of the
+ *   ground).
  * - **Light.** Each piece is lit from one side by a slow light sweep, and its
  *   brightness is fixed (pieces no longer pulse one by one). u_pieceEdges
- *   bevels the pieces toward their lead (R4's roundness); 0, the default, is
- *   the old flat piece.
+ *   bevels the pieces toward their lead (a roundness); 0, the default, is
+ *   the flat piece.
  *
  * ## Earlier
  *
@@ -112,11 +112,11 @@ ${MOTION_HELPERS}
 const float MAX_SEED_DRIFT = 0.27;
 
 /**
- * WP-1d R4 seed layout, inside the same 3x3 bound (offset magnitude under
- * 0.396 from the cell centre): a lone seed is jittered up to SEED_JITTER per
- * axis (0.25 magnitude); a split cell's two seeds sit SPLIT_OFFSET either
- * side of it (0.2 + 0.06 jitter). The orbit is scaled by DRIFT_SCALE, so the
- * slider's top (0.27, 0.38 magnitude) adds at most 0.11: 0.36 in all.
+ * The seed layout, inside the same 3x3 bound (offset magnitude under 0.396 from
+ * the cell centre): a lone seed is jittered up to SEED_JITTER per axis (0.25
+ * magnitude); a split cell's two seeds sit SPLIT_OFFSET either side of it
+ * (0.2 + 0.06 jitter). The orbit is scaled by DRIFT_SCALE, so the slider's top
+ * (0.27, 0.38 magnitude) adds at most 0.11: 0.36 in all.
  */
 const float SEED_JITTER = 0.18;
 const float SPLIT_CHANCE = 0.35;
@@ -124,13 +124,13 @@ const float SPLIT_OFFSET = 0.2;
 const float DRIFT_SCALE = 0.3;
 
 /**
- * The narrowest anti-alias ramp (WP-11). fwidth() is 0 where the distance
- * does not change across a pixel quad, which made the line's two smoothstep
- * edges EQUAL: undefined in GLSL ES 3.00 (a 0/0 at the edge). A floor this
- * far below a pixel's width changes nothing wherever fwidth() is above it.
- * The shader gate's smoothstep check (validate-shaders.mjs) cannot catch
- * this: it judges literal edges, and these are expressions that only meet
- * at run time, in a pixel whose distance is flat.
+ * The narrowest anti-alias ramp. fwidth() is 0 where the distance does not
+ * change across a pixel quad, which made the line's two smoothstep edges EQUAL:
+ * undefined in GLSL ES 3.00 (a 0/0 at the edge). A floor this far below a
+ * pixel's width changes nothing wherever fwidth() is above it. The shader
+ * gate's smoothstep check (validate-shaders.mjs) cannot catch this: it judges
+ * literal edges, and these are expressions that only meet at run time, in a
+ * pixel whose distance is flat.
  */
 const float MIN_RAMP = 1e-5;
 
@@ -283,8 +283,8 @@ void main() {
   vec3 cellColor = palette[colorIdx];
 
   // Each piece its own fixed brightness and a subtle warm/cool shift, so the
-  // pane reads as real stained glass rather than three flat swatches. (Each
-  // piece pulsed on its own clock before R4.)
+  // pane reads as real stained glass rather than three flat swatches; no piece
+  // pulses on its own clock.
   float cellLight = 0.74 + 0.22 * hash21(nearestCell + vec2(41.7));
   float tintHash = hash21(nearestCell + vec2(17.3));
   vec3 tintedColor = mix(cellColor, mix(cellColor, u_brandAccent, 0.5), tintHash * 0.25);
@@ -309,9 +309,9 @@ void main() {
   // ── Leading ────────────────────────────────────────────────────────
   // The came: as wide as the old one (its ramp's centre, 0.75 of u_border),
   // hard-edged (1 px of anti-alias) and near-black (the ground at 18%).
-  // Softness widens the edge to R4's soft ramp at the same weight; the tint
-  // moves the colour to R4's: a dark came on a dark ground, a brand-tinted
-  // line on a light one.
+  // Softness widens the edge to a soft ramp at the same weight; the tint moves
+  // the colour: a dark came on a dark ground, a brand-tinted line on a light
+  // one.
   float aa = max(fwidth(edge), MIN_RAMP);
   float leadEdge = u_border * 0.75;
   float leadRamp = max(aa, u_lineSoftness * u_border * 0.4);
@@ -324,9 +324,8 @@ void main() {
   // ── Edge glow with a thin-film fringe ──────────────────────────────
   // A beat widens and brightens the glow. Edges are exactly where a transient
   // belongs on this preset: the outline lights up, the tessellation does not
-  // move.
-  // On a light ground the glow would light the came itself and grey it out,
-  // so with dark lines (u_lineTint 0) it is held back there (WP-1d R4b).
+  // move. On a light ground the glow would light the came itself and grey it
+  // out, so with dark lines (u_lineTint 0) it is held back there.
   float glowGain = u_glow * (1.0 + beatHit(1.4) * 0.5)
                  * mix(1.0, u_lineTint, onLight);
   float glowSpan = u_border * (0.5 + beatHit(1.8) * 0.4);

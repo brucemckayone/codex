@@ -1,5 +1,5 @@
 /**
- * Whether the org's moving background is painting (Codex-1yd58.3, WP-2).
+ * Whether the org's moving background is painting.
  *
  * The org layout's `data-hero-shader-active` gate, which about 25 page-kit and
  * layout rules read, used to come only from the stored brand tokens. So a
@@ -20,10 +20,10 @@
  * the gate renders the token guess exactly as it did before.
  *
  * 'pending' has no time limit. A renderer chunk whose request stalls (no
- * answer, no error) keeps the token guess until it resolves or fails, as the
- * gate did before WP-2. Bounding it would mean reporting a provisional
- * failure, and every slow but healthy load would then flash the page's
- * surfaces opaque and back: a product choice, left to WP-3's load budget.
+ * answer, no error) keeps the token guess until it resolves or fails, as a gate
+ * on the tokens alone would. Bounding it would mean reporting a provisional
+ * failure, and every slow but healthy load would then flash the page's surfaces
+ * opaque and back: a product choice, not this channel's.
  */
 
 /**

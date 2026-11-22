@@ -99,7 +99,7 @@ const int MAX_CURTAINS = 7;
 /**
  * Curtain x is measured in widths of a canvas at least this wide for its
  * height. Measured in heights, a phone's narrow canvas showed a tenth of one
- * fold: a flat band (WP-1d R3).
+ * fold: a flat band.
  */
 const float FOLD_ASPECT = 1.4;
 /** How far a fold lifts the lower edge, in band spreads. */
@@ -250,7 +250,7 @@ void main() {
     bandCentre += ripple * rippleAmp + shiver * shiverAmp;
 
 
-    // ── The curtain line (WP-1d R3) ──
+    // ── The curtain line ──
     // A sheet hanging from a wavy lower edge. The fold travels sideways
     // (speed scales this and only this) and wobbles; the edge rises and
     // falls with it, so the curtain reads as a folded ribbon, not a band.

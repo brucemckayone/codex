@@ -19,12 +19,11 @@ import { withProgramLabel } from './webgl-utils';
 /**
  * What a renderer that will not start is retried on, once.
  *
- * WHY. Immersive mode's last resort is `flow`, a two-pass simulation that
- * needs a float render target (`EXT_color_buffer_float`); the `nebula` it
- * replaced was single-pass and started on any WebGL 2 context. Without a
- * retry, a device with no float targets would close immersive mode on every
- * piece that has no shader of its own. `film` is single-pass, cheap, and one
- * the owner kept.
+ * WHY. Immersive mode's last resort is `flow`, a two-pass simulation that needs
+ * a float render target (`EXT_color_buffer_float`); the `nebula` it replaced
+ * was single-pass and started on any WebGL 2 context. Without a retry, a device
+ * with no float targets would close immersive mode on every piece that has no
+ * shader of its own. `film` is single-pass, cheap, and still in the set.
  */
 export const INIT_FALLBACK_PRESET: LivePresetId = 'film';
 

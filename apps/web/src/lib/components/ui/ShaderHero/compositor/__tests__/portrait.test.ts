@@ -1,9 +1,8 @@
 /**
- * The frame rule (WP-5b, owner 2026-11-21): a PORTRAIT piece on a
- * landscape-shaped stage, that filling would crop by more than 40%, is
- * placed flush right, not cropped. The rule is the stage's shape, not the
- * device (review L4): a phone held sideways places it too, one held upright
- * fills. Pure, so pinned here without a GL context.
+ * The frame rule: a PORTRAIT piece on a landscape-shaped stage, that filling
+ * would crop by more than 40%, is placed flush right, not cropped. The rule is
+ * the stage's shape, not the device: a phone held sideways places it too, one
+ * held upright fills. Pure, so pinned here without a GL context.
  */
 import { describe, expect, it } from 'vitest';
 import { coverCrop, PORTRAIT_CROP, placedFrame } from '../portrait';

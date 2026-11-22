@@ -1,9 +1,9 @@
 /**
- * A WebGL2 stand-in for renderer tests (Codex-1yd58 WP-1d): constants are
- * stable numbers, creators return objects, and every call a test does not
- * name is a no-op. It counts every draw made while a framebuffer is bound
- * (a simulation pass) apart from the screen draws (the display pass), and
- * keeps the last value each named uniform was set to.
+ * A WebGL2 stand-in for renderer tests: constants are stable numbers, creators
+ * return objects, and every call a test does not name is a no-op. It counts
+ * every draw made while a framebuffer is bound (a simulation pass) apart from
+ * the screen draws (the display pass), and keeps the last value each named
+ * uniform was set to.
  */
 
 export interface FakeGl {

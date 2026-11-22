@@ -6,9 +6,9 @@ import type { LayerEffect } from './effect';
  *
  * SURFACE-ONLY (`SURFACE_ONLY_LAYER_IDS`): it reads the picture it treats as
  * `u_scene` and the brand shader's own picture, without the film, as
- * `u_second`, which only the Showreel's surface slot binds (WP-5b). A
- * brand's stack never runs it. Where the two pictures are the same (outside
- * the film) it only lifts the contrast a little. Still: no clock.
+ * `u_second`, which only the Showreel's surface slot binds. A brand's stack
+ * never runs it. Where the two pictures are the same (outside the film) it only
+ * lifts the contrast a little. Still: no clock.
  */
 export const layerShaderLight: LayerEffect = {
   id: 'shader-light',

@@ -1,9 +1,9 @@
 /**
- * The compositor (Codex-1yd58.4) on a recording stand-in for WebGL2: what it
- * draws into what, in what order, at what size, and what its three WP-5
- * seams (`setMedia`, `setStage`, `setNameMask`) do before anything calls
- * them. The stand-in tracks the bound framebuffer, the texture on each unit
- * and the viewport, and records each draw with them.
+ * The compositor on a recording stand-in for WebGL2: what it draws into what,
+ * in what order, at what size, and what its three Showreel seams (`setMedia`,
+ * `setStage`, `setNameMask`) do before anything calls them. The stand-in tracks
+ * the bound framebuffer, the texture on each unit and the viewport, and records
+ * each draw with them.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,8 +12,8 @@ const { logger } = vi.hoisted(() => ({
 }));
 vi.mock('$lib/observability', () => ({ logger }));
 
-// A frame or layers in place of the plan's, for the passes WP-3 does not
-// ship (a film frame, a flashing layer). Unset, the real plan runs.
+// A frame or layers in place of the plan's, for the passes the brand's stack
+// cannot name (a film frame, a flashing layer). Unset, the real plan runs.
 const override = vi.hoisted(() => ({
   frame: null as unknown,
   layers: null as unknown,
@@ -33,6 +33,7 @@ vi.mock('../plan', async (importOriginal) => {
   };
 });
 
+import { STILL_MOTION } from '../../__tests__/motion-fixtures';
 import { bindOutput } from '../../output-target';
 import type { ShaderRenderer } from '../../renderer-types';
 import type { ShaderConfig } from '../../shader-config';
@@ -40,7 +41,7 @@ import { type CompositeFrame, createCompositor } from '../compositor';
 import { duotoneStops } from '../duotone';
 import type { LayerEffect } from '../effects/effect';
 import { PORTRAIT_GLSL } from '../effects/frame-film-portrait';
-import { type MotionChoice, STILL_MOTION } from '../effects/motion-ids';
+import type { MotionChoice } from '../effects/motion-ids';
 import { POINTERS } from '../effects/motion-registry';
 import { restMotion } from '../effects/motion-uniforms';
 import { FRAMES, LAYERS, MEDIA } from '../effects/registry';
@@ -89,7 +90,7 @@ const GL_METHODS = new Set([
   'uniform2f',
   'uniform3f',
   'uniform4f',
-  // The film pass's trail (WP-6): an array, set in one call.
+  // The film pass's trail: an array, set in one call.
   'uniform4fv',
   'vertexAttribPointer',
 ]);
@@ -448,7 +449,7 @@ describe('compositor render', () => {
 
   it('never draws into a target whose texture sits on a unit, film frame and all', () => {
     // A new target is bound where it is made: made after the film's unit was
-    // bound, it sat on that unit while a layer drew into it (review C2).
+    // bound, it sat on that unit while a layer drew into it.
     override.frame = filmFrame;
     const fake = fakeGl();
     const compositor = createCompositor(fake.gl);
@@ -590,7 +591,7 @@ describe('compositor render', () => {
   });
 });
 
-describe('setNameMask (WP-5 seam)', () => {
+describe('setNameMask', () => {
   it('draws a name frame as shader only until a mask is set, then through it', () => {
     const fake = fakeGl();
     const compositor = createCompositor(fake.gl);
@@ -627,7 +628,7 @@ describe('setNameMask (WP-5 seam)', () => {
   });
 });
 
-/** WP-5's kind of frame: it samples the film inside the stage. Its own id,
+/** A film frame's kind: it samples the film inside the stage. Its own id,
  *  so its pass is cached apart from the real frames'. */
 const filmFrame = {
   ...FRAMES['shader-only'],
@@ -671,7 +672,7 @@ function fakeVideo({ rvfc = true } = {}) {
 const uploadsOf = (fake: ReturnType<typeof fakeGl>, source: unknown) =>
   fake.named('texImage2D').filter((a) => a.at(-1) === source).length;
 
-describe('setMedia and setStage (WP-5 seams)', () => {
+describe('setMedia and setStage', () => {
   // The frame 100px down a 390x844 window, page at the top; fades over 600px.
   const visible = stageBoxFrom(
     { left: 20, top: 100, width: 350, height: 600 },
@@ -739,7 +740,7 @@ describe('setMedia and setStage (WP-5 seams)', () => {
     expect(uploadsOf(fake, el)).toBe(1);
   });
 
-  it('uploads nothing, however fresh, for a frame that never samples the film (all of WP-3’s)', () => {
+  it('uploads nothing, however fresh, for a frame that never samples the film (every brand frame)', () => {
     const fake = fakeGl();
     const compositor = createCompositor(fake.gl);
     const { el } = fakeVideo();
@@ -887,7 +888,7 @@ describe('forget and destroy', () => {
   });
 });
 
-describe('the Showreel look (WP-5, Codex-1yd58.6)', () => {
+describe('the Showreel look', () => {
   const visible = stageBoxFrom(
     { left: 20, top: 100, width: 350, height: 600 },
     0,
@@ -937,7 +938,7 @@ describe('the Showreel look (WP-5, Codex-1yd58.6)', () => {
 
     // The codes are the film frame's GLSL contract (1 under, 2 fade, 3 edges):
     // pinned as numbers, not read back from the table that makes them. The
-    // ramps (desk, phone) start a tenth below the mock's (owner, 2026-11-20).
+    // ramps (desk, phone) start a tenth below the mock's.
     const bands = [
       ['under', 1, [0.4, 0.82], [0.38, 0.76]],
       ['fade', 2, [0.5, 0.95], [0.44, 0.84]],
@@ -970,7 +971,7 @@ describe('the Showreel look (WP-5, Codex-1yd58.6)', () => {
   });
 });
 
-describe('the Showreel look over the piece (WP-5b, Codex-1yd58.6)', () => {
+describe('the Showreel look over the piece', () => {
   const visible = stageBoxFrom(
     { left: 20, top: 100, width: 350, height: 600 },
     0,
@@ -1301,11 +1302,11 @@ describe('the Showreel look over the piece (WP-5b, Codex-1yd58.6)', () => {
   });
 });
 
-// WP-6 (Codex-1yd58.7): with the Showreel's motion, a film frame is drawn as
-// its composed film pass, for the effects that run HERE (the compositor's
-// own phone, reduced-motion and mask), reading the values the Showreel
-// writes in place, and saying what it ran.
-describe('the Showreel motion (WP-6, Codex-1yd58.7)', () => {
+// With the Showreel's motion, a film frame is drawn as its composed film pass,
+// for the effects that run HERE (the compositor's own phone, reduced-motion and
+// mask), reading the values the Showreel writes in place, and saying what it
+// ran.
+describe('the Showreel motion', () => {
   const visible = stageBoxFrom(
     { left: 20, top: 100, width: 350, height: 600 },
     0,
@@ -1349,7 +1350,7 @@ describe('the Showreel motion (WP-6, Codex-1yd58.7)', () => {
       .filter(([, source]) => String(source).includes('void reelPointer'))
       .length;
 
-  it('draws a portrait piece on a desktop as the portrait film pass, its motion running (WP-5b)', () => {
+  it('draws a portrait piece on a desktop as the portrait film pass, its motion running', () => {
     const fake = fakeGl();
     const compositor = createCompositor(fake.gl);
     compositor.setLook({ frame: 'film-fill', band: 'none' });
@@ -1389,8 +1390,8 @@ describe('the Showreel motion (WP-6, Codex-1yd58.7)', () => {
     compositor.setMotion(motion);
     expect(compositor.render(frame({ stack, phone: false }))).toBe(true);
 
-    // One pass onto the canvas at the output size, the smoke's hook in it,
-    // in place of WP-5's frame.
+    // One pass onto the canvas at the output size, the smoke's hook in it, in
+    // place of the plain film frame.
     const out = fake.draws.at(-1) as Draw;
     expect(out.framebuffer).toBeNull();
     expect(out.viewport).toEqual([0, 0, 780, 1688]);
@@ -1441,7 +1442,7 @@ describe('the Showreel motion (WP-6, Codex-1yd58.7)', () => {
     expect(motion.running?.opening).toBe('name');
   });
 
-  it('draws WP-5’s film frame when the composed pass will not compile, tried once, and says nothing runs', () => {
+  it('draws the plain film frame when the composed pass will not compile, tried once, and says nothing runs', () => {
     const fake = fakeGl({
       failCompile: (src) => src.includes('void reelPointer'),
     });
@@ -1472,7 +1473,7 @@ describe('the Showreel motion (WP-6, Codex-1yd58.7)', () => {
     expect(motion.running).toBeNull();
   });
 
-  it('draws WP-5’s film frame again once the motion is taken away', () => {
+  it('draws the plain film frame again once the motion is taken away', () => {
     const fake = fakeGl();
     const compositor = filming(fake);
     compositor.setMotion(motionOf(STILL_MOTION));

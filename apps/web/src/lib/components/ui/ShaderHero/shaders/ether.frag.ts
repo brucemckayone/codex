@@ -21,7 +21,7 @@
  *  - u_level lifts saturation pump + ambient brightness.
  *  - u_beatPulse adds a short-lived overall brightness splash.
  *
- * WP-1d (Codex-1yd58):
+ * The form and its cost:
  *  - The form is the CENTREPIECE: centred on the canvas and fitted to its
  *    short side. nimitz's framing (/res.y - (0.9, 0.5)) is right for a
  *    1.8:1 canvas only; on a phone it put the form off-screen (black).
@@ -217,9 +217,9 @@ void main() {
   float midsSparkle = u_mids * u_audioActive;
 
   // -- Glow by the ground. On a light ground the glow turns the whole hero a
-  // mid-grey that neither a dark nor a light ink reads on (Tide's best ink
-  // 2.6 -> 1.4 at the owner's 1.5), so it is a third of the setting there;
-  // on a dark ground, the setting (WP-1d).
+  // mid-grey that neither a dark nor a light ink reads on (Tide's best ink 2.6
+  // -> 1.4 at a glow of 1.5), so it is a third of the setting there; on a dark
+  // ground, the setting.
   float bgLum = dot(u_bgColor, vec3(0.299, 0.587, 0.114));
   float glow = u_glow * mix(1.0 / 3.0, 1.0, 1.0 - smoothstep(0.35, 0.62, bgLum));
 

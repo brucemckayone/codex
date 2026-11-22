@@ -1,7 +1,7 @@
 /**
- * The effect registry (Codex-1yd58.4, plan §5.5): every blend, layer and frame
- * a brand's shader stack can name, the Showreel's passes over the piece's own
- * picture (`MEDIA`, WP-5b), and how a pass's source is assembled.
+ * The effect registry: every blend, layer and frame a brand's shader stack can
+ * name, the Showreel's passes over the piece's own picture (`MEDIA`), and how a
+ * pass's source is assembled.
  *
  * Plain data and strings, importing nothing from the app, so
  * `scripts/validate-shaders.mjs` can bundle it in Node, compile every pass
@@ -83,7 +83,7 @@ export const FRAMES: Record<FrameId, FrameEffect> = {
   'film-portrait': frameFilmPortrait,
 };
 
-/** The passes over the piece's own picture, in the order they run (WP-5b). */
+/** The passes over the piece's own picture, in the order they run. */
 export const MEDIA: Record<MediaPassId, MediaEffect> = {
   'media-push': mediaPush,
   'surface-duotone': surfaceDuotone,

@@ -4,7 +4,7 @@
  * behind an 80% cover and a 60px blur and every frame is a full-viewport
  * render (on CI's CPU-rendered context, ~8s per click on a studio page).
  *
- * And its `tone`: what it draws, sampled for a page that asks (03 X54).
+ * And its `tone`: what it draws, sampled for a page that asks.
  *
  * The render loop is driven by hand: requestAnimationFrame queues its
  * callbacks and `step()` runs one frame's worth. The WebGL context and the
@@ -39,7 +39,7 @@ vi.mock('../jfa-sdf', () => ({
   destroyJFACache: vi.fn(),
   resetJFACache: vi.fn(),
 }));
-// The stack's compositor: a stand-in that says it drew (Codex-1yd58.4).
+// The stack's compositor: a stand-in that says it drew.
 const compositor = vi.hoisted(() => ({
   // It reads the frame's `onSecondFailed`, as the real one does.
   render: vi.fn(
@@ -70,7 +70,7 @@ vi.mock('../compositor/stack-config', async (importOriginal) => {
       actual.getStackConfig(...args),
   };
 });
-// The phone's layer budget: off as shipped, on where a test says (WP-11).
+// The phone's layer budget: off as shipped, on where a test says.
 const layerBudgetFlag = vi.hoisted(() => ({ on: false }));
 vi.mock('../compositor/layer-budget', async (importOriginal) => {
   const actual =
@@ -102,10 +102,7 @@ vi.mock('../shader-config', async (importOriginal) => ({
 }));
 
 import { createCompositor } from '../compositor/compositor';
-import {
-  type MotionChoice,
-  STILL_MOTION,
-} from '../compositor/effects/motion-ids';
+import type { MotionChoice } from '../compositor/effects/motion-ids';
 import { restMotion } from '../compositor/effects/motion-uniforms';
 import type { FilmMotion } from '../compositor/film-motion';
 import { showreelFeed } from '../compositor/showreel-feed';
@@ -118,6 +115,7 @@ import type { ShaderPresetId } from '../shader-config';
 import { shaderLive } from '../shader-live.svelte';
 import { shaderStill } from '../shader-still.svelte';
 import { shaderTone } from '../shader-tone';
+import { STILL_MOTION } from './motion-fixtures';
 
 let frames: FrameRequestCallback[] = [];
 let resizeCallbacks: ResizeObserverCallback[] = [];
@@ -126,7 +124,7 @@ let app: ReturnType<typeof mount> | null = null;
 let clock = 0;
 let releases: (() => void)[] = [];
 const toneDraws = vi.fn();
-/** Copies of the studio's frame encoded (`shaderStill`, Codex-61zsk.73). */
+/** Copies of the studio's frame encoded (`shaderStill`). */
 let encoded = 0;
 let contextLost = false;
 /** The WebGL context's stand-in. */
@@ -283,7 +281,7 @@ describe('ShaderHero still', () => {
     expect(frames).toHaveLength(1);
   });
 
-  // 03 X62: a page's motion dial holds the window's shader still.
+  // A page's motion dial holds the window's shader still.
   it('stands still while a page holds it, and moves again when the last lets go', async () => {
     await start({ tone: true });
     step(3);
@@ -420,7 +418,7 @@ describe('ShaderHero tone', () => {
   });
 });
 
-// Codex-61zsk.73 (#20b): the studio's one frame, copied for the page editor.
+// The studio's one frame, copied for the page editor.
 describe('ShaderHero still copy', () => {
   it('copies the studio’s frame in the task that draws it, and again when a resize redraws it', async () => {
     box = { width: 1200, height: 800 };
@@ -696,8 +694,8 @@ describe('ShaderHero still copy', () => {
   });
 });
 
-// Codex-1yd58.14: a renderer that will not load or start leaves the CSS
-// fallback showing, says so once, and stops the loop until the preset changes.
+// A renderer that will not load or start leaves the CSS fallback showing, says
+// so once, and stops the loop until the preset changes.
 describe('ShaderHero renderer failure', () => {
   /** A renderer whose `init()` refuses, as a two-pass preset does with no
    *  float render targets. */
@@ -883,9 +881,9 @@ describe('ShaderHero renderer failure', () => {
   });
 });
 
-// Codex-1yd58.3: `data-live` on the root is what "a shader is painting" reads
-// (the home hero's ink, OrgHero's), and the `tone` instance reports the same
-// state to `shaderLive` for the org layout's gate.
+// `data-live` on the root is what "a shader is painting" reads (the home hero's
+// ink, OrgHero's), and the `tone` instance reports the same state to
+// `shaderLive` for the org layout's gate.
 describe('ShaderHero live', () => {
   const root = () => document.querySelector('.shader-hero') as HTMLElement;
   const canvas = () => document.querySelector('canvas') as HTMLCanvasElement;
@@ -1074,7 +1072,7 @@ describe('ShaderHero live', () => {
   });
 });
 
-// ── The brand shader stack and context restore (Codex-1yd58.4) ─────────
+// ── The brand shader stack and context restore ─────────
 describe('ShaderHero stack', () => {
   const root = () => document.querySelector('.shader-hero') as HTMLElement;
   const canvas = () => document.querySelector('canvas') as HTMLCanvasElement;
@@ -1327,7 +1325,7 @@ describe('ShaderHero stack', () => {
     expect(isLive()).toBe(true);
   });
 
-  describe('the phone budget for layers (WP-11, behind PHONE_LAYER_BUDGET)', () => {
+  describe('the phone budget for layers (behind PHONE_LAYER_BUDGET)', () => {
     const layered = {
       ...BARE_STACK,
       layers: [
@@ -1495,8 +1493,8 @@ describe('ShaderHero stack', () => {
     expect(isLive()).toBe(true);
   });
 
-  // Owner, 2026-11-19: an org with no brand shader still gets the Showreel,
-  // its film on a plain ground; with no film it draws nothing, as today.
+  // An org with no brand shader still gets the Showreel, its film on a plain
+  // ground; with no film it draws nothing, as today.
   const film = () =>
     ({ videoWidth: 720, videoHeight: 1280 }) as unknown as HTMLVideoElement;
 
@@ -1520,7 +1518,7 @@ describe('ShaderHero stack', () => {
       })
     );
     // Drawn (the Showreel keys on that), but not live: the words keep the
-    // page's ink, and the layout's gate hears 'none' (owner's call A).
+    // page's ink, and the layout's gate hears 'none'.
     expect(isDrawn()).toBe(true);
     expect(canvas().style.opacity).toBe('1');
     expect(isLive()).toBe(false);
@@ -1946,7 +1944,7 @@ describe('ShaderHero stack', () => {
     expect(compositor.setNameMask).toHaveBeenLastCalledWith(mask);
   });
 
-  it('hands the compositor the Showreel’s look, on attach and as it changes (WP-5)', async () => {
+  it('hands the compositor the Showreel’s look, on attach and as it changes', async () => {
     const look = { frame: 'film-name', band: 'none' } as const;
     showreelFeed.setLook(look);
     showreelFeed.setMedia(film());
@@ -1959,15 +1957,15 @@ describe('ShaderHero stack', () => {
     expect(compositor.setLook).toHaveBeenLastCalledWith(fade);
   });
 
-  // WP-6 (Codex-1yd58.7): the Showreel's motion reaches the compositor as
-  // its look does, and a frozen hero draws each frame the motion moves.
+  // The Showreel's motion reaches the compositor as its look does, and a frozen
+  // hero draws each frame the motion moves.
   const motionOf = (choice: MotionChoice = STILL_MOTION): FilmMotion => ({
     choice,
     values: restMotion(),
     running: null,
   });
 
-  it('hands the compositor the Showreel’s motion, on attach and as it changes (WP-6)', async () => {
+  it('hands the compositor the Showreel’s motion, on attach and as it changes', async () => {
     const first = motionOf();
     showreelFeed.setMotion(first);
     showreelFeed.setMedia(film());
@@ -1985,7 +1983,7 @@ describe('ShaderHero stack', () => {
     expect(compositor.setMotion).toHaveBeenLastCalledWith(null);
   });
 
-  it('draws a frozen hero again for each frame its motion moves, and no more (WP-6)', async () => {
+  it('draws a frozen hero again for each frame its motion moves, and no more', async () => {
     showreelFeed.setMedia(film());
     await start({ tone: true, still: true });
     step(1);
@@ -2049,7 +2047,7 @@ describe('ShaderHero stack', () => {
 });
 
 // A press is the burst's rise from one frame to the next: a renderer splashes
-// on each one (ripple's click edge, lane C's R1). One gesture, one rise.
+// on each one (ripple's click edge). One gesture, one rise.
 describe('ShaderHero press', () => {
   /** A renderer that keeps the burst each frame drew with. */
   function counting() {

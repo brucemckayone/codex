@@ -16,10 +16,9 @@ import { fakeGl, seededRandom } from './fake-gl';
 import { BASE, near, runFrames, uploads } from './renderer-run';
 
 /**
- * The R2 reworks (Codex-1yd58 WP-1d): ink on the step clock with a seeded
- * start, ether's rotation integrated on the CPU, Liquid Logo (id 'pulse')
- * still until touched, and the owner's tuning as the defaults a brand that
- * stored nothing paints.
+ * Ink on the step clock with a seeded start, ether's rotation integrated on the
+ * CPU, Liquid Logo (id 'pulse') still until touched, and the lab's tuning as
+ * the defaults a brand that stored nothing paints.
  */
 
 const INK = {
@@ -154,7 +153,7 @@ describe('ether: the rotation follows the speed it has, never time x a new speed
   });
 });
 
-describe("what a brand that stored nothing paints: the owner's tuning", () => {
+describe("what a brand that stored nothing paints: the lab's tuning", () => {
   function config(preset: string) {
     const el = document.createElement('div');
     el.className = 'org-layout';
@@ -171,7 +170,7 @@ describe("what a brand that stored nothing paints: the owner's tuning", () => {
       scale: 2.5,
       elevation: 2.8,
       octaves: 5,
-      // The owner's 2.25 failed the contrast check (OBB white text 3.6).
+      // An intensity of 2.25 failed the contrast check (OBB white text 3.6).
       intensity: 0.65,
     });
   });
@@ -249,7 +248,7 @@ describe('Liquid Logo (pulse): still until touched', () => {
   it('lays nothing in 10 s with no pointer and no sound, at 60 and 120 Hz; the pointer lays 60 a second', () => {
     for (const fps of [60, 120]) {
       const still = pulseRun({ fps, until: 11 });
-      // Before R2b an idle drop landed every 1.5 s or so: the self-pulse.
+      // An idle drop every 1.5 s or so would be the self-pulse.
       expect(still.deposits, `${fps} Hz`).toBe(0);
       // The water still steps (the clock runs): it has nothing to move it.
       expect(still.draws, `${fps} Hz`).toBe(1200);
