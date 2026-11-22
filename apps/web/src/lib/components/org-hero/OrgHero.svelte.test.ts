@@ -268,17 +268,24 @@ describe('OrgHero, as the Showreel', () => {
     );
   });
 
-  test('a logo leading alone that fails brings the name back into view, logged', () => {
+  test('a logo leading alone that fails keeps its box, unseen, and the name stands in for it, logged', () => {
     vi.mocked(logger.warn).mockReset();
     render(REEL, { hideTitle: true }, 'logo-reel-fails.png');
-    const name = () => target.querySelector('.reel__name');
+    const name = () => target.querySelector('h1.reel__name');
     expect(name()?.classList.contains('sr-only')).toBe(true);
 
     target.querySelector('.reel__sig img')?.dispatchEvent(new Event('error'));
     flushSync();
 
-    expect(target.querySelector('.reel__sig img')).toBeNull();
-    expect(name()?.classList.contains('sr-only')).toBe(false);
+    // A load failure keeps its box: the logo stays in the bar, unseen, and
+    // the name stands in over its place; the h1 stays for screen readers.
+    expect(
+      target.querySelector('.reel__sig img')?.hasAttribute('data-failed')
+    ).toBe(true);
+    expect(target.querySelector('.reel__stand-in')?.textContent).toBe(
+      'Of Blood & Bones'
+    );
+    expect(name()?.classList.contains('sr-only')).toBe(true);
     vi.runOnlyPendingTimers();
     expect(logger.warn).toHaveBeenCalledWith(
       'image.fallback_shown',

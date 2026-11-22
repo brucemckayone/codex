@@ -723,4 +723,79 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
     expect(await nameAt(page)).toEqual(ruled);
     await page.context().close();
   });
+
+  /**
+   * A logo that fails once the page has painted (its CDN down; CI starts no
+   * dev CDN, so there every seeded logo fails) keeps its box, unseen: a load
+   * failure must keep its box. On a desktop the logo sets the bar's height,
+   * so dropping it shortened the bar (68 to 66.4 px) and moved the name
+   * into its place. A logo leading alone gets the name as its stand-in, out
+   * of flow over its place. Read with the logo's request held (pending),
+   * then failed, and read again once the failure has landed (OrgHero marked
+   * it failed, or dropped it).
+   */
+  for (const [width, height, lead] of [
+    [1440, 900, 'both'],
+    [390, 844, 'both'],
+    [1440, 900, 'logo'],
+  ] as const) {
+    test(`a logo that fails late at ${width}x${height}, lead ${lead}: its box kept, nothing in the top bar moves`, async ({
+      browser,
+      baseURL,
+    }) => {
+      let fail = () => {};
+      const page = await open(browser, baseURL, {
+        context: { viewport: { width, height } },
+        keys: { lead },
+        failLogo: new Promise<void>((done) => {
+          fail = () => done();
+        }),
+      });
+      await page.evaluate(() => document.fonts.ready);
+      const failed = () =>
+        page.evaluate(() => {
+          const img = document.querySelector('.reel__sig img');
+          return !img || img.hasAttribute('data-failed');
+        });
+      expect(await failed(), 'the logo still pending at the first read').toBe(
+        false
+      );
+      const before = await nameAt(page);
+      fail();
+      await expect.poll(failed, { timeout: 20_000 }).toBe(true);
+      await frames(page);
+      const after = await nameAt(page);
+      for (const part of ['top', 'name'] as const) {
+        for (const edge of ['top', 'bottom', 'left', 'right'] as const) {
+          const was = before[part]?.[edge] ?? Number.NaN;
+          const is = after[part]?.[edge] ?? Number.NaN;
+          expect
+            .soft(Math.abs(is - was), `${part} ${edge}: ${is} (before ${was})`)
+            .toBeLessThanOrEqual(0.5);
+        }
+      }
+      if (lead === 'logo') {
+        // The name stands in where the logo was, in sight, clear of the pause.
+        const standIn = await page.evaluate(() => {
+          const el = document.querySelector('.reel__stand-in');
+          const r = el?.getBoundingClientRect();
+          const pause = document
+            .querySelector('.reel__ctl')
+            ?.getBoundingClientRect();
+          return r && pause
+            ? {
+                width: r.width,
+                clear: r.right <= pause.left || r.bottom <= pause.top,
+              }
+            : null;
+        });
+        expect(
+          standIn?.width,
+          'the name stands in for the logo'
+        ).toBeGreaterThan(0);
+        expect(standIn?.clear, 'the stand-in clear of the pause').toBe(true);
+      }
+      await page.context().close();
+    });
+  }
 });

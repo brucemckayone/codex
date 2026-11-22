@@ -162,6 +162,7 @@ function render(
     description: 'Ancestral healing.',
     logoUrl: over.logoUrl ?? '',
     onlogofail: vi.fn(),
+    logoFailed: false,
     facts: '4 portals and 15 essays',
     action: { href: '/pricing', label: 'Join Of Blood & Bones' },
     exploreHref: '/explore',
@@ -963,18 +964,35 @@ describe('Showreel names the org as the hero says', () => {
     expect(q('.reel__sig img')?.getAttribute('src')).toBe(LOGO);
   });
 
-  it("hands a logo that fails to the hero's own handler, and leads with the name once it goes", () => {
+  it("hands a logo that fails to the hero's own handler, keeps its box unseen, and stands the name in for it", () => {
     const props = render('corner', {
       facts: { hideTitle: true },
       logoUrl: LOGO,
     });
+    expect(q('.reel__stand-in')).toBeNull();
     q('.reel__sig img')?.dispatchEvent(new Event('error'));
     expect(props.onlogofail).toHaveBeenCalledTimes(1);
-    // OrgHero's answer to it: no logo.
-    props.logoUrl = '';
+    // OrgHero's answer to it: the logo failed.
+    props.logoFailed = true;
     flushSync();
-    expect(q('.reel__sig img')).toBeNull();
-    expect(q('.reel__name')?.classList.contains('sr-only')).toBe(false);
+    // A load failure keeps its box: the logo stays in the bar, unseen.
+    expect(q('.reel__sig img')?.getAttribute('src')).toBe(LOGO);
+    expect(q('.reel__sig img')?.hasAttribute('data-failed')).toBe(true);
+    // The name stands in over its place, unseen to screen readers, which
+    // keep the one heading.
+    const standIn = q('.reel__stand-in');
+    expect(standIn?.textContent).toBe('Of Blood & Bones');
+    expect(standIn?.getAttribute('aria-hidden')).toBe('true');
+    expect(q('h1.reel__name')?.classList.contains('sr-only')).toBe(true);
+  });
+
+  it('stands no name in for a failed logo that shared the bar with it', () => {
+    const props = render('corner', { logoUrl: LOGO });
+    props.logoFailed = true;
+    flushSync();
+    expect(q('.reel__sig img')?.hasAttribute('data-failed')).toBe(true);
+    expect(q('.reel__stand-in')).toBeNull();
+    expect(q('h1.reel__name')?.classList.contains('sr-only')).toBe(false);
   });
 
   it('shows the name with the logo, and alone when there is no logo to lead', () => {

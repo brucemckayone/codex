@@ -281,8 +281,9 @@
   options={o}
   {name}
   {description}
-  logoUrl={o.lead !== 'name' && shows(logoUrl) ? logoUrl : ''}
+  logoUrl={o.lead !== 'name' ? logoUrl : ''}
   onlogofail={markFailed}
+  logoFailed={failed.has(logoUrl)}
   facts={o.proof === 'facts' ? factsSentence : ''}
   action={reelAction}
   exploreHref={hrefs.explore}

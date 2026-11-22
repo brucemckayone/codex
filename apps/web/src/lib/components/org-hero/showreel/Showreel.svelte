@@ -108,13 +108,20 @@
     options: HeroOptions;
     name: string;
     description: string;
-    /** The logo, or '' for none (OrgHero's: '' too once it has failed). */
+    /** The logo, or '' for none. */
     logoUrl: string;
     /**
-     * The logo failed to load: OrgHero's own handler, which drops it, logs it
-     * and hands back '' (so the name returns where it led alone).
+     * The logo failed to load: OrgHero's own handler, which logs it and marks
+     * it failed (`logoFailed`).
      */
     onlogofail: (event: Event & { currentTarget: HTMLImageElement }) => void;
+    /**
+     * The logo failed (OrgHero's `markFailed`). It keeps its box, unseen, so
+     * nothing in the top bar moves when it fails after the first paint (a
+     * load failure must keep its box); a logo leading alone gets the name as
+     * its stand-in, drawn over its place.
+     */
+    logoFailed?: boolean;
     /** The facts as one sentence ("4 portals, 14 films and 15 essays"), or ''. */
     facts: string;
     /** Join or Explore, beside Follow (owner, 2026-11-19), or null. */
@@ -145,6 +152,7 @@
     description,
     logoUrl,
     onlogofail,
+    logoFailed = false,
     facts,
     action,
     exploreHref,
@@ -1034,7 +1042,8 @@
     root.style.setProperty('--_foot-clear', `${Math.max(0, Math.floor(gap))}px`);
   }
   // Again for each piece (its words differ), on a resize, once the fonts are
-  // in, and whenever the inks may have turned: the theme toggled, or the
+  // in, when a failed logo's stand-in shows (a word the header's shade must
+  // carry), and whenever the inks may have turned: the theme toggled, or the
   // brand repainted in place (the editor's live preview, hydration's own
   // brand). Once a frame at most, however many arrive in it.
   $effect(() => {
@@ -1043,6 +1052,7 @@
     void peek;
     void shown;
     void edge;
+    void standIn;
     void themeState.theme;
     if (!root) return;
     let live = true;
@@ -1094,8 +1104,13 @@
   const strip = $derived(layout !== 'corner');
   // With the logo leading alone the name stays in the page for screen
   // readers (OrgHero's rule), and in sight when there is no logo to lead,
-  // a failed one included (OrgHero hands back '' for it).
+  // and with a failed one too, where its stand-in shows it (`standIn`).
   const nameHidden = $derived(options.lead === 'logo' && !!logoUrl);
+  // A logo leading alone that failed: the name stands in over its place, out
+  // of flow, so its showing moves nothing (WP-0's fallback, under the rule
+  // that a load failure keeps its box). Unseen to screen readers, which have
+  // the h1 already.
+  const standIn = $derived(layout !== 'name' && nameHidden && logoFailed);
   // A word in the name longer than any phone's top bar holds (320 px less
   // the gutters, a logo and its gap, at 0.6 em a letter): it steps down and
   // breaks where it must on a phone, never past the reel (WP-5a).
@@ -1139,8 +1154,9 @@
 {#snippet top()}
   <header class="reel__top">
     <div class="reel__sig">
-      {#if logoUrl}<img src={logoUrl} alt="" onerror={onlogofail} />{/if}
+      {#if logoUrl}<img src={logoUrl} alt="" onerror={onlogofail} data-failed={logoFailed ? '' : undefined} />{/if}
       {#if layout !== 'name'}<h1 class={['reel__name', { 'sr-only': nameHidden }]} data-ink="body" data-long-word={longWord ? '' : undefined}>{name}</h1>{/if}
+      {#if standIn}<span class="reel__name reel__stand-in" aria-hidden="true" data-ink="body" data-long-word={longWord ? '' : undefined}>{name}</span>{/if}
     </div>
     <div class="reel__meta">
       {#if facts}<span data-ink="body">{facts}</span>{/if}
@@ -1560,6 +1576,27 @@
   .reel__sig img {
     height: var(--space-10);
     width: auto;
+  }
+
+  /* A failed logo keeps its box, unseen: dropped, the bar would lose its
+     height and the name its place after the first paint. */
+  .reel__sig {
+    position: relative;
+  }
+
+  .reel__sig img[data-failed] {
+    visibility: hidden;
+  }
+
+  /* The name standing in for a failed logo that led alone: over the logo's
+     place, centred on its box, out of flow so nothing moves when it shows.
+     Its own width, held by the name's measure where one applies (a phone's). */
+  .reel__stand-in {
+    position: absolute;
+    inset-block-start: 50%;
+    inset-inline-start: 0;
+    inline-size: max-content;
+    translate: 0 -50%;
   }
 
   .reel__name {

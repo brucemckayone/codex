@@ -268,6 +268,14 @@ export interface ShowreelOptions {
   featureRecording?: boolean;
   /** The org's name instead of its seeded one (`withOrgName`). */
   name?: string;
+  /**
+   * The top bar's logo request is held until this settles, then aborted, as
+   * a logo whose CDN is down fails (CI starts no dev CDN, so there every
+   * seeded logo fails). The test settles it once the page has hydrated and
+   * painted, which is when dropping the logo's box would move the bar. The
+   * page is opened at DOMContentLoaded: its load event waits on the logo.
+   */
+  failLogo?: Promise<unknown>;
 }
 
 /**
@@ -285,6 +293,7 @@ export async function openShowreel(
     introFilm,
     featureRecording = false,
     name,
+    failLogo,
   }: ShowreelOptions = {}
 ): Promise<Page> {
   const url = `${orgOrigin(ORG, baseURL)}/`;
@@ -333,9 +342,23 @@ export async function openShowreel(
       });
     if (featureRecording)
       set('a recording with a preview', withRecordingFeatured);
+    if (failLogo) {
+      const logo = /class="reel__sig[^"]*">(?:<!--[^>]*-->)?<img src="([^"]+)"/
+        .exec(body ?? html)?.[1]
+        ?.replaceAll('&amp;', '&');
+      if (logo)
+        await context.route(
+          (target) => target.href === logo,
+          async (logoRoute) => {
+            await failLogo;
+            await logoRoute.abort();
+          }
+        );
+      else unset.push('a logo in the top bar to fail');
+    }
     await route.fulfill({ response, body: body ?? undefined });
   });
-  await page.goto(url);
+  await page.goto(url, failLogo ? { waitUntil: 'domcontentloaded' } : {});
   // An error page has no payload either, so the status says which this is.
   expect(unset, `what ${ORG}'s landing (${served}) lacks`).toEqual([]);
   await expect(page.locator('.reel')).toBeVisible({ timeout: 30_000 });
