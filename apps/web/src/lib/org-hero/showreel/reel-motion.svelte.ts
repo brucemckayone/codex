@@ -219,17 +219,17 @@ export function useReelMotion(source: ReelMotionSource): {
     });
   });
 
-  // The letters hold still with the stage in the window (WP-1's), so they
-  // go over the first NAME_FADE_PX of scroll (`u_nameFade`) and the page's
-  // own glyphs take the name back (the Showreel's ink; owner, 2026-11-21).
-  // A frozen hero (paused, reduced motion, the static path) draws only when
-  // told: a scroll that touches the span tells it, and none past it, where
-  // nothing the letters show changes. The CSS reads the span's length; where
-  // it cannot follow the scroll itself, the ink's share is written here.
+  // What reads the scroll holds still in the window with the stage (WP-1's):
+  // the film fades over the stage's height (`stageFade`), and the letters
+  // over the first NAME_FADE_PX (`u_nameFade`), the page's own glyphs taking
+  // the name back (the Showreel's ink; owner, 2026-11-21). A frozen hero
+  // (paused, reduced motion, the static path) draws only when told: a scroll
+  // that touches either span tells it, as a playing hero would have drawn
+  // it, and none past both, where nothing changes. Where CSS cannot follow
+  // the scroll itself, the ink's share is written here.
   $effect(() => {
     const root = source.root();
     if (!root) return;
-    root.style.setProperty('--_name-fade-px', `${NAME_FADE_PX}px`);
     const css = inkFollowsScrollInCss();
     const ink = (y: number) => {
       if (!css) root.style.setProperty('--_ink-back', String(1 - nameFade(y)));
@@ -238,11 +238,11 @@ export function useReelMotion(source: ReelMotionSource): {
     ink(last);
     const scrolled = () => {
       const y = window.scrollY;
-      if (Math.min(last, y) < NAME_FADE_PX) {
-        ink(y);
-        showreelFeed.motionFrame();
-      }
+      const from = Math.min(last, y);
       last = y;
+      if (from < NAME_FADE_PX) ink(y);
+      const film = showreelFeed.stage?.fadeDistance ?? 0;
+      if (from < Math.max(NAME_FADE_PX, film)) showreelFeed.motionFrame();
     };
     window.addEventListener('scroll', scrolled, { passive: true });
     return () => window.removeEventListener('scroll', scrolled);

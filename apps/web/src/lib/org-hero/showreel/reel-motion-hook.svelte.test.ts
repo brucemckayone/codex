@@ -345,9 +345,10 @@ describe('useReelMotion and the scroll', () => {
   afterEach(() => {
     if (own) Object.defineProperty(window, 'scrollY', own);
     else Reflect.deleteProperty(window, 'scrollY');
+    showreelFeed.setStage(null);
   });
 
-  it('tells a frozen hero to draw while a scroll crosses the letters’ fade, and never beyond it', () => {
+  it('with no stage measured, tells a frozen hero to draw while a scroll crosses the letters’ fade, and never beyond it', () => {
     render({ moves: false });
     runs();
     const said: string[] = [];
@@ -367,10 +368,41 @@ describe('useReelMotion and the scroll', () => {
     expect(said).toContain('frame');
   });
 
-  it('hands the CSS the fade’s length, and writes the ink’s share only where CSS cannot follow the scroll itself', () => {
+  // The film fades too, over the stage's height (WP-1's `stageFade`): a
+  // paused, reduced-motion or Loop-off hero fades it as a playing one does.
+  it('tells a frozen hero to draw while a scroll crosses the film’s own fade, the stage’s height, and never past it', () => {
+    render({ moves: false });
+    runs();
+    showreelFeed.setStage({
+      left: 0,
+      top: 0,
+      width: 1000,
+      height: 600,
+      fadeDistance: 600,
+    });
+    const said: string[] = [];
+    showreelFeed.onChange((changed) => said.push(changed));
+    for (const [y, draws] of [
+      [16, true],
+      [200, true],
+      [300, true],
+      [599, true],
+      // from inside the film's fade to past it in one event: it must go
+      [900, true],
+      // past it both ways: nothing changes
+      [1200, false],
+      // back over it in one event: the film returns
+      [0, true],
+    ] as const) {
+      said.length = 0;
+      scrollTo(y);
+      expect(said.includes('frame'), `to ${y}`).toBe(draws);
+    }
+  });
+
+  it('writes the ink’s share only where CSS cannot follow the scroll itself', () => {
     vi.stubGlobal('CSS', { supports: () => false });
     render();
-    expect(root()?.style.getPropertyValue('--_name-fade-px')).toBe('32px');
     expect(root()?.style.getPropertyValue('--_ink-back')).toBe('0');
     scrollTo(16);
     expect(root()?.style.getPropertyValue('--_ink-back')).toBe('0.5');
