@@ -137,9 +137,10 @@ export function isLockNotAvailable(error: unknown): boolean {
  * failed query (`handleError` makes an InternalServiceError whose cause is
  * drizzle's wrapper, whose cause is the driver's error), and a wrapper's own
  * `code` is not the database's: a link carrying an HTTP `statusCode` (a
- * service error, a Stripe error) is passed over. With no code found, the
- * reason is the innermost error's. It runs in catch blocks, so it never
- * throws.
+ * service error, a Stripe error) is passed over. With a code found, the
+ * reason is that link's, the driver's. With none, it is the ORIGINAL error's
+ * (`messageForLog`), which keeps a wrapper's own specific message, as that
+ * doc says to. It runs in catch blocks, so it never throws.
  */
 export function dbErrorFacts(error: unknown): {
   code: string | null;
@@ -160,7 +161,7 @@ export function dbErrorFacts(error: unknown): {
       if (cause === undefined) break;
       link = cause;
     }
-    return { code: null, lockTimeout: false, reason: messageForLog(link) };
+    return { code: null, lockTimeout: false, reason: messageForLog(error) };
   } catch {
     return { code: null, lockTimeout: false, reason: messageForLog(error) };
   }

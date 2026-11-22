@@ -572,9 +572,16 @@ r10), so a repeat is one incident, never a new one:
   (`hourly_backstop`), a payment whose one count is £0 still had failed
   refunds open, so each was covered by the newest standing refund
   (`coveringRefundId`; `coveredRefundIds`). Nothing is owed and nothing
-  needs settling. Find out why the cover was missed: a refund made in the
-  Dashboard is expected; anything else is a defect to file. A charge with
-  any chargeback standing lost or owed again is never covered this way.
+  needs settling. Find out why the cover was missed. Two causes are
+  expected: a refund made in the Dashboard, and a race in support's own
+  refund on the charge page, when a refund fails at Stripe between the sync
+  support's request starts with and its read of Stripe's list (review r12):
+  support's refund then paid it, and the sync after it covers it here,
+  `source: refunds_sync`. Tell that one by its covering refund: open
+  `coveringRefundId` in Stripe, and support's own refund carries
+  `codex_support_key` in its metadata (and `codex_requested_by`, who asked).
+  Anything else is a defect to file. A charge with any chargeback standing
+  lost or owed again is never covered this way.
 - "Failed refunds were open on a payment that owes nothing and no refund
   stands on its charge, so the newest failed refund settled refunded
   elsewhere covered them: a cover was missed, or a refund was made outside

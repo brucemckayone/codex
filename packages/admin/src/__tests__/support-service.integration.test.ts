@@ -5505,7 +5505,9 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
                   purchaseId: charge.purchase.id,
                   code: null,
                   lockTimeout: false,
-                  reason: 'socket hang up',
+                  // The wrapper's own message: no Postgres code is under it,
+                  // and handleError has logged the cause it wrapped.
+                  reason: 'An unexpected error occurred',
                 },
               ],
             ]);

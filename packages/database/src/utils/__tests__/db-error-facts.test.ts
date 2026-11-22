@@ -72,6 +72,27 @@ describe('dbErrorFacts', () => {
     });
   });
 
+  it("keeps a wrapper's own message when no link down its chain is the database's", () => {
+    // A service's typed defect over a parse failure: nothing Postgres in it.
+    const wrapped = Object.assign(
+      new Error(
+        "A payment's failed refunds were read as something other than a list of ids"
+      ),
+      {
+        code: 'INTERNAL_ERROR',
+        statusCode: 500,
+        cause: new SyntaxError('Unexpected token o in JSON at position 1'),
+      }
+    );
+
+    expect(dbErrorFacts(wrapped)).toEqual({
+      code: null,
+      lockTimeout: false,
+      reason:
+        "A payment's failed refunds were read as something other than a list of ids",
+    });
+  });
+
   it('gives no code for a Stripe error, only its reason', () => {
     const stripe = Object.assign(new Error('No such charge'), {
       code: 'resource_missing',
