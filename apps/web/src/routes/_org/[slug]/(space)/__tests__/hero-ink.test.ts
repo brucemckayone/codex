@@ -57,6 +57,13 @@ const ORG_HERO = join(
   'org-hero',
   'OrgHero.svelte'
 );
+const HERO_SPOT = join(
+  WEB_SRC,
+  'lib',
+  'components',
+  'org-hero',
+  'HeroSpot.svelte'
+);
 
 const pageSource = readFileSync(PAGE, 'utf8');
 
@@ -378,6 +385,7 @@ describe('the painting-shader selector reads what ShaderHero writes', () => {
     for (const [file, source] of [
       ['page', pageSource],
       ['OrgHero', orgHero],
+      ['HeroSpot', readFileSync(HERO_SPOT, 'utf8')],
     ])
       expect(
         readRules(source).filter((r) => r.selector.includes('canvas[style')),
