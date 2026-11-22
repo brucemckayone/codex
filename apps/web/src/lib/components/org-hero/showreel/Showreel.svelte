@@ -59,7 +59,6 @@
   import type { HeroOptions } from '$lib/org-hero/hero-config';
   import type { ReelEntry } from '$lib/org-hero/reel';
   import { type GlyphBox, glyphBox } from '$lib/org-hero/showreel/glyph-box';
-  import { fitTitle, type NameLines, nameInRoom, nameLines, standInRun } from '$lib/org-hero/showreel/name-lines';
   import { prefersSavingData, reelMode } from '$lib/org-hero/showreel/playback';
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
   import { reelMedia } from '$lib/org-hero/showreel/reel-media';
@@ -94,8 +93,8 @@
     shadeProps,
     wordRoom,
   } from '$lib/org-hero/showreel/reel-scrim';
+  import { TYPE_FLOOR, useStandInRun, useTypeFit, WIDE_TITLE } from '$lib/org-hero/showreel/reel-type-fit.svelte';
   import { type ReelWords, reelWords } from '$lib/org-hero/showreel/reel-words';
-  import { drawTitleMask } from '$lib/org-hero/showreel/title-mask';
   import { logger } from '$lib/observability';
   import { type TheatreItem, theatreFor } from '$lib/org-hero/showreel/theatre';
   import { themeState } from '$lib/theme.svelte';
@@ -172,20 +171,6 @@
   const PRESS_MS = 350;
   /** A pointer that moves further than this is a swipe or a scroll, never a tap. */
   const TAP_SLOP = 10;
-  /** The name window's largest size: desktop (with the peek, smaller) and
-   *  phone, the mock's 228 or 196, and 138. */
-  const NAME_MAX = { desk: 228, deskPeek: 196, phone: 138 };
-  /** The Wide title's range (the mock's). */
-  const WIDE_TITLE = { min: 72, max: 150 };
-  /**
-   * The owner's floor (2026-11-22): on a short screen the big type shrinks
-   * with the room it has, never under this, Wide's least fitted size, and the
-   * hero grows only as far as the floor needs. Type already under it (a
-   * phone's) keeps its own size.
-   */
-  const TYPE_FLOOR = WIDE_TITLE.min;
-  /** Where the name window rests out of flow, its centre, as a share of the hero's height (`top: 36%`). */
-  const NAME_AT = 0.36;
   /** The longest word a phone's top bar holds whole, in letters (`longWord`). */
   const NAME_WORD_MAX = 17;
 
@@ -569,195 +554,18 @@
     else clock.next();
   }
 
-  // ── type that fits: the Wide title, the name window ──
-  let measurer: CanvasRenderingContext2D | null = null;
-  function widthAt100(el: HTMLElement, text: string): number {
-    measurer ??= document.createElement('canvas').getContext('2d');
-    if (!measurer) return 0;
-    const style = getComputedStyle(el);
-    measurer.font = `${style.fontWeight} 100px ${style.fontFamily}`;
-    return measurer.measureText(text).width;
-  }
-  /** Run `fit` now, once the fonts are in, and on every resize. */
-  function refit(fit: () => void) {
-    fit();
-    let live = true;
-    void document.fonts?.ready.then(() => {
-      if (live) fit();
-    });
-    window.addEventListener('resize', fit);
-    return () => {
-      live = false;
-      window.removeEventListener('resize', fit);
-    };
-  }
-
-  // Every piece's title fitted to the words' width, so the one on show takes
-  // its own the moment it shows. The sizers never take one: they hold Wide's
-  // title at its most from the first paint (`--_wide-max`, review r5 S5).
-  let wideSizes = $state<number[] | null>(null);
-  $effect(() => {
-    const el = titleEl;
-    const titles = words.map((w) => w.title);
-    if (layout !== 'wide' || !desktop.current || !el) {
-      wideSizes = null;
-      return;
-    }
-    return refit(() => {
-      const available = el.parentElement?.clientWidth ?? 0;
-      wideSizes = titles.map((title) => fitTitle(widthAt100(el, title), available, WIDE_TITLE.min, WIDE_TITLE.max));
-    });
-  });
-  const wideSize = $derived(wideSizes?.[shown] ?? null);
-
-  // The name as large as the width and its room let it be, never under
-  // TYPE_FLOOR. Out of flow (a tall screen) the window moves nothing, so the
-  // fit takes the room it has at its place, between the top bar and the
-  // words. On a short screen CSS puts it in flow (the owner's floor): the
-  // window fills the room between them, and CSS sets the name at the floor
-  // there, so the hero grows only where the floor needs it. The fit sets the
-  // name in that box and holds the box at what CSS drew (`nameBox`), so
-  // nothing moves when the page hydrates.
-  let nameFit = $state<NameLines | null>(null);
-  let nameBox = $state<number | null>(null);
-  $effect(() => {
-    const el = windowEl;
-    const max = desktop.current ? (peek ? NAME_MAX.deskPeek : NAME_MAX.desk) : NAME_MAX.phone;
-    // The words' slot is the room's foot: it moves with the pieces' words.
-    void words;
-    if (layout !== 'name' || !el) {
-      nameFit = null;
-      nameBox = null;
-      return;
-    }
-    return refit(() => {
-      const measure = (text: string) => widthAt100(el, text);
-      if (getComputedStyle(el).position === 'absolute') {
-        nameBox = null;
-        const room = roomAt(el);
-        nameFit =
-          room === null
-            ? nameLines(name, measure, el.clientWidth, max)
-            : nameInRoom(name, measure, el.clientWidth, max, room, TYPE_FLOOR);
-        return;
-      }
-      const drawn = drawnName(el);
-      const room = Math.max(drawn, rowRoom(el));
-      const fit = nameInRoom(name, measure, el.clientWidth, max, room, TYPE_FLOOR);
-      nameBox = drawn;
-      // A name the canvas sets taller than CSS drew it keeps CSS's, so the
-      // box never grows past the server's paint.
-      nameFit = fit.lines.length * fit.size <= room + 0.5 ? fit : null;
-    });
-  });
-  /**
-   * The name in flow as CSS draws it, the server's paint: the height of one
-   * run of text in the window's own rules (its size, `--_name-size`, the
-   * floor; its tracking, in em), wrapped to the window's width. A hidden copy
-   * of the window, with none of the fit's inline sizes, taken out at once.
-   */
-  function drawnName(el: HTMLElement): number {
-    const probe = el.cloneNode(false);
-    if (!(probe instanceof HTMLElement)) return 0;
-    probe.removeAttribute('style');
-    probe.style.cssText = `position:absolute;top:0;left:0;width:${el.clientWidth}px;margin:0;visibility:hidden`;
-    const run = document.createElement('span');
-    run.textContent = name;
-    probe.appendChild(run);
-    el.insertAdjacentElement('afterend', probe);
-    const height = probe.getBoundingClientRect().height;
-    probe.remove();
-    return height;
-  }
-  /**
-   * The room the window in flow has as CSS lays it out: the second row as the
-   * hero's least height leaves it, less the window's margins. Read from the
-   * inner's other rows, which the window never sizes, so the name the fit set
-   * last never inflates it.
-   */
-  function rowRoom(el: HTMLElement): number {
-    const inner = el.parentElement;
-    if (!inner) return 0;
-    const grid = getComputedStyle(inner);
-    const own = getComputedStyle(el);
-    const [bar = 0, , foot = 0] = grid.gridTemplateRows.split(' ').map(Number.parseFloat);
-    const room =
-      Number.parseFloat(grid.minHeight) -
-      Number.parseFloat(grid.paddingTop) -
-      Number.parseFloat(grid.paddingBottom) -
-      bar -
-      foot -
-      Number.parseFloat(own.marginTop) -
-      Number.parseFloat(own.marginBottom);
-    return Number.isFinite(room) ? Math.max(0, room) : 0;
-  }
-  /**
-   * The room the name has out of flow, at its place (NAME_AT of the hero's
-   * height, its centre): twice the less of its centre's reach up to the top
-   * bar's foot and down to the words' slot. The window, out of flow, moves
-   * neither. Null where nothing is laid out.
-   */
-  function roomAt(el: HTMLElement): number | null {
-    const inner = el.parentElement;
-    const top = inner?.querySelector('.reel__top')?.getBoundingClientRect();
-    const slot = inner?.querySelector('.reel__slot')?.getBoundingClientRect();
-    const box = inner?.getBoundingClientRect();
-    if (!top || !slot || !box || !(box.height > 0)) return null;
-    const centre = box.top + NAME_AT * box.height;
-    return Math.max(0, 2 * Math.min(centre - top.bottom, slot.top - centre));
-  }
-
-  // The name as the film's window: drawn where the page lays it out, each
-  // word on its baseline in its letter-spacing, at the window's size, white
-  // on black (the compositor reads its red channel). The title's own
-  // placement (`title-mask.ts`): one for both windows (review R3-M1). Its
-  // translateY(-50%) is where the name rests, so it stays in.
-  function drawMask(el: HTMLElement) {
-    showreelFeed.setNameMask(drawTitleMask(el, { undoTranslation: false }));
-  }
-  $effect(() => {
-    const el = windowEl;
-    if (!nameFit || !el) {
-      showreelFeed.setNameMask(null);
-      return;
-    }
-    let live = true;
-    void tick().then(() => {
-      if (live) drawMask(el);
-    });
-    return () => {
-      live = false;
-    };
-  });
-  $effect(() => () => showreelFeed.setNameMask(null));
-
-  // ── the title as the film's window on Corner and Wide (WP-6, owner 2026-11-21) ──
-  // "Through the name" runs on every layout: there the big title's words are
-  // the letters (`title-mask.ts`). The Name window's mask stays the effect
-  // above's: this one never draws on that layout, and draws after it.
-  const titleWindow = $derived(
-    layout !== 'name' && (options['reel-opening'] === 'name' || options['reel-film'] === 'name')
-  );
-  $effect(() => {
-    const el = titleEl;
-    void current?.title;
-    void wideSize;
-    if (layout === 'name') return;
-    if (!titleWindow || !el) {
-      showreelFeed.setNameMask(null);
-      return;
-    }
-    // Going out: the window stays where the last title sat until the next is in.
-    if (swap === 'out') return;
-    let live = true;
-    let stop = () => {};
-    void tick().then(() => {
-      if (live) stop = refit(() => showreelFeed.setNameMask(drawTitleMask(el)));
-    });
-    return () => {
-      live = false;
-      stop();
-    };
+  // ── type that fits: the Wide title, the name window, and both film windows' masks ──
+  // The logic is the hook's (`reel-type-fit.svelte.ts`).
+  const typeFit = useTypeFit({
+    titleEl: () => titleEl,
+    windowEl: () => windowEl,
+    options: () => options,
+    words: () => words,
+    shown: () => shown,
+    title: () => current?.title,
+    swap: () => swap,
+    name: () => name,
+    desktop: () => desktop.current,
   });
 
   // ── contrast: the pools' least opacity for the inks as resolved ──
@@ -1204,36 +1012,10 @@
   // that a load failure keeps its box). Unseen to screen readers, which have
   // the h1 already.
   const standIn = $derived(layout !== 'name' && nameHidden && logoFailed);
-  // The run it is held to (`standInRun`), measured as it shows and again
-  // whenever the bar or its meta resizes (the viewport's width, Follow
-  // turning to Following, a face landing). It shows once measured, so no
-  // frame paints it unbounded over the meta.
-  let standInRoom = $state<number | null>(null);
-  $effect(() => {
-    const bar = rootEl?.querySelector<HTMLElement>('.reel__top');
-    const sig = bar?.querySelector<HTMLElement>('.reel__sig');
-    if (!standIn || !bar || !sig) {
-      standInRoom = null;
-      return;
-    }
-    const meta = bar.querySelector<HTMLElement>('.reel__meta');
-    const measure = () => {
-      const box = bar.getBoundingClientRect();
-      const style = getComputedStyle(bar);
-      standInRoom = standInRun({
-        sigLeft: sig.getBoundingClientRect().left,
-        end: box.right - (Number.parseFloat(style.paddingRight) || 0),
-        gap: Number.parseFloat(style.columnGap) || 0,
-        meta: meta?.getBoundingClientRect() ?? null,
-      });
-    };
-    measure();
-    const resized = new ResizeObserver(measure);
-    resized.observe(bar);
-    if (meta) resized.observe(meta);
-    return () => resized.disconnect();
-  });
-  const showsStandIn = $derived(standIn && standInRoom !== null);
+  // The run it is held to, measured as it shows and on every resize of the
+  // bar or its meta (`reel-type-fit.svelte.ts`). It shows once measured.
+  const standInFit = useStandInRun({ root: () => rootEl, standIn: () => standIn });
+  const showsStandIn = $derived(standIn && standInFit.room !== null);
   // A word in the name longer than any phone's top bar holds (320 px less
   // the gutters, a logo and its gap, at 0.6 em a letter): it steps down and
   // breaks where it must on a phone, never past the reel (WP-5a).
@@ -1279,7 +1061,7 @@
     <div class="reel__sig">
       {#if logoUrl}<img src={logoUrl} alt="" onerror={onlogofail} data-failed={logoFailed ? '' : undefined} />{/if}
       {#if layout !== 'name'}<h1 class={['reel__name', { 'sr-only': nameHidden }]} data-ink="body" data-long-word={longWord ? '' : undefined}>{name}</h1>{/if}
-      {#if showsStandIn}<span class="reel__name reel__stand-in" aria-hidden="true" data-ink="body" data-long-word={longWord ? '' : undefined} style:--_room={`${standInRoom}px`}>{name}</span>{/if}
+      {#if showsStandIn}<span class="reel__name reel__stand-in" aria-hidden="true" data-ink="body" data-long-word={longWord ? '' : undefined} style:--_room={`${standInFit.room}px`}>{name}</span>{/if}
     </div>
     <div class="reel__meta">
       {#if facts}<span data-ink="body">{facts}</span>{/if}
@@ -1297,12 +1079,12 @@
     class="reel__window"
     bind:this={windowEl}
     data-still={media[shown]?.still ? '' : undefined}
-    style:font-size={nameFit ? `${nameFit.size}px` : undefined}
-    style:min-block-size={nameBox === null ? undefined : `${nameBox}px`}
+    style:font-size={typeFit.nameFit ? `${typeFit.nameFit.size}px` : undefined}
+    style:min-block-size={typeFit.nameBox === null ? undefined : `${typeFit.nameBox}px`}
     style:--_still={media[shown]?.still ? `url("${media[shown]?.still}")` : undefined}
   >
-    {#if nameFit}
-      {#each nameFit.lines as line, i (i)}<span data-line>{line}</span>{/each}
+    {#if typeFit.nameFit}
+      {#each typeFit.nameFit.lines as line, i (i)}<span data-line>{line}</span>{/each}
     {:else}
       <span data-line>{name}</span>
     {/if}
@@ -1341,7 +1123,7 @@
         bind:this={titleEl}
         data-ink="large"
         data-long={now.title.length > 20 ? '' : undefined}
-        style:--_size={wideSize ? `${wideSize}px` : undefined}
+        style:--_size={typeFit.wideSize ? `${typeFit.wideSize}px` : undefined}
       >
         {now.title}
       </h2>
