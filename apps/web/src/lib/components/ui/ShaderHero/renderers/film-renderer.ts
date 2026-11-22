@@ -13,19 +13,18 @@ import {
   AUDIO_UNIFORM_NAMES,
   createAudioFade,
   createDeltaClock,
+  createMusicalPace,
   uploadAudioUniforms,
 } from '../audio-uniforms';
-import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig } from '../shader-config';
 import { FILM_FRAG } from '../shaders/film.frag';
 import {
-  createProgram,
-  createQuad,
-  drawQuad,
-  getUniforms,
-  VERTEX_SHADER,
-} from '../webgl-utils';
+  createSinglePass,
+  easePointer,
+  restingPointer,
+  setPalette,
+} from './single-pass';
 
 const UNIFORM_NAMES = [
   'u_time',
@@ -48,8 +47,6 @@ const UNIFORM_NAMES = [
   ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
-type FilmUniform = (typeof UNIFORM_NAMES)[number];
-
 /** Default values for film preset. */
 const DEFAULTS = {
   filmScale: 3.0,
@@ -62,44 +59,26 @@ const DEFAULTS = {
   vignette: 0.2,
 } as const;
 
+/** Per-frame share of the way the eased pointer moves toward the real one. */
 const MOUSE_LERP = 0.04;
 
 /** Pacing rate with no audio, in clock-units/sec — matches the old wall-clock feel. */
 const IDLE_CLOCK_RATE = 1.0;
 
-/**
- * Cap on the differentiated musical clock. The render loop pauses while the
- * analyser clamps its own dt, so one frame after a long pause can show a large
- * phase jump — unclamped that spikes the rate and lurches the scene once.
- */
-const MAX_CLOCK_RATE = 3.0;
-
 export function createFilmRenderer(): ShaderRenderer {
-  let program: WebGLProgram | null = null;
-  let uniforms: Record<FilmUniform, WebGLUniformLocation | null> | null = null;
-  let quad: ReturnType<typeof createQuad> | null = null;
-
+  const pass = createSinglePass(FILM_FRAG, UNIFORM_NAMES);
   const audioFade = createAudioFade();
   const deltaClock = createDeltaClock();
+  const pace = createMusicalPace(IDLE_CLOCK_RATE);
   /** Integrated pacing clock. Monotone — see u_clock in the fragment shader. */
   let clock = 0;
-  /** Previous beatPhase sample, for differentiating the musical clock. */
-  let prevBeatPhase = -1;
-
-  // Internal lerped mouse state for smooth hover
-  let lerpedMouse = { x: 0.5, y: 0.5 };
+  // Eased for smooth hover; only its position is uploaded.
+  let pointer = restingPointer();
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
-      program = createProgram(gl, VERTEX_SHADER, FILM_FRAG);
-      if (!program) return false;
-
-      uniforms = getUniforms(gl, program, UNIFORM_NAMES);
-      quad = createQuad(gl);
-
-      // Reset lerped mouse to center
-      lerpedMouse = { x: 0.5, y: 0.5 };
-
+      if (!pass.init(gl)) return false;
+      pointer = restingPointer();
       return true;
     },
 
@@ -112,54 +91,9 @@ export function createFilmRenderer(): ShaderRenderer {
       height: number,
       audio?: AudioState
     ): void {
-      if (!program || !uniforms || !quad) return;
+      const u = pass.begin(gl, width, height);
+      if (!u) return;
 
-      // Lerp mouse for smooth hover effect
-      const targetX = mouse.active ? mouse.x : 0.5;
-      const targetY = mouse.active ? mouse.y : 0.5;
-      lerpedMouse.x += (targetX - lerpedMouse.x) * MOUSE_LERP;
-      lerpedMouse.y += (targetY - lerpedMouse.y) * MOUSE_LERP;
-
-      const dt = deltaClock(time);
-      const a = audioFade.update(audio, dt);
-
-      // Integrate the pacing clock by blending RATES, never positions.
-      // beatPhase starts at zero while u_time does not, so a positional
-      // crossfade sweeps the clock backwards the moment audio starts.
-      let musicalRate = IDLE_CLOCK_RATE;
-      if (!a.silent) {
-        musicalRate =
-          // no previous sample, or no time between them (a frozen clock)
-          prevBeatPhase < 0 || dt <= 0
-            ? IDLE_CLOCK_RATE
-            : Math.min(
-                MAX_CLOCK_RATE,
-                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
-              );
-        prevBeatPhase = a.beatPhase;
-      } else {
-        prevBeatPhase = -1;
-      }
-      const rate = IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active;
-
-      gl.viewport(0, 0, width, height);
-      gl.useProgram(program);
-      quad.bind(program);
-
-      // Time + resolution + mouse
-      gl.uniform1f(uniforms.u_time, time);
-      gl.uniform2f(uniforms.u_resolution, width, height);
-      gl.uniform2f(uniforms.u_mouse, lerpedMouse.x, lerpedMouse.y);
-      gl.uniform1f(uniforms.u_burstStrength, mouse.burstStrength);
-
-      // Brand colors
-      const c = config.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
-
-      // Preset-specific config with defaults
       // Read from config if FilmConfig fields exist, otherwise use defaults
       const cfg = config as ShaderConfig & {
         filmScale?: number;
@@ -168,26 +102,29 @@ export function createFilmRenderer(): ShaderRenderer {
         shift?: number;
         ripple?: number;
       };
+      easePointer(pointer, mouse, MOUSE_LERP);
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
+      clock += dt * pace.rate(a, dt) * (cfg.filmSpeed ?? DEFAULTS.filmSpeed);
 
-      // Accumulated here rather than beside the rate derivation above: film
-      // declares `cfg` AFTER its viewport call, and the accumulation is the one
-      // part that needs it. tsc caught the original ordering.
-      clock += dt * rate * (cfg.filmSpeed ?? DEFAULTS.filmSpeed);
-      gl.uniform1f(uniforms.u_filmScale, cfg.filmScale ?? DEFAULTS.filmScale);
-      gl.uniform1f(uniforms.u_filmSpeed, cfg.filmSpeed ?? DEFAULTS.filmSpeed);
-      gl.uniform1f(uniforms.u_bands, cfg.bands ?? DEFAULTS.bands);
-      gl.uniform1f(uniforms.u_shift, cfg.shift ?? DEFAULTS.shift);
-      gl.uniform1f(uniforms.u_ripple, cfg.ripple ?? DEFAULTS.ripple);
-      gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
-      gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(u.u_time, time);
+      gl.uniform2f(u.u_resolution, width, height);
+      gl.uniform2f(u.u_mouse, pointer.x, pointer.y);
+      gl.uniform1f(u.u_burstStrength, mouse.burstStrength);
+      setPalette(gl, u, cfg.colors);
 
-      // Draw to screen (no FBO)
-      gl.uniform1f(uniforms.u_clock, clock);
-      uploadAudioUniforms(gl, uniforms, a);
+      gl.uniform1f(u.u_filmScale, cfg.filmScale ?? DEFAULTS.filmScale);
+      gl.uniform1f(u.u_filmSpeed, cfg.filmSpeed ?? DEFAULTS.filmSpeed);
+      gl.uniform1f(u.u_bands, cfg.bands ?? DEFAULTS.bands);
+      gl.uniform1f(u.u_shift, cfg.shift ?? DEFAULTS.shift);
+      gl.uniform1f(u.u_ripple, cfg.ripple ?? DEFAULTS.ripple);
+      gl.uniform1f(u.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
+      gl.uniform1f(u.u_grain, cfg.grain ?? DEFAULTS.grain);
+      gl.uniform1f(u.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(u.u_clock, clock);
 
-      bindOutput(gl);
-      drawQuad(gl);
+      uploadAudioUniforms(gl, u, a);
+      pass.draw(gl);
     },
 
     resize(_gl: WebGL2RenderingContext, _width: number, _height: number): void {
@@ -196,21 +133,13 @@ export function createFilmRenderer(): ShaderRenderer {
 
     reset(_gl: WebGL2RenderingContext): void {
       clock = 0;
-      prevBeatPhase = -1;
-      // Reset lerped mouse to center on preset change.
-      lerpedMouse = { x: 0.5, y: 0.5 };
+      pace.reset();
+      // Reset the eased pointer to the centre on preset change.
+      pointer = restingPointer();
     },
 
     destroy(gl: WebGL2RenderingContext): void {
-      if (program) {
-        gl.deleteProgram(program);
-        program = null;
-      }
-      if (quad) {
-        gl.deleteBuffer(quad.buffer);
-        quad = null;
-      }
-      uniforms = null;
+      pass.destroy(gl);
     },
   };
 }
