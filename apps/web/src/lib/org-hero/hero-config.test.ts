@@ -671,6 +671,59 @@ describe('the Showreel', () => {
   });
 });
 
+/**
+ * The hero the seeded of-blood-and-bones stores, as the landing resolves it:
+ * the browser suite reads it from the server's HTML (Wide, peek on). The keys
+ * are the seed's (packages/database/scripts/seed/organizations.ts), and its
+ * test (`scripts/seed/__tests__/bones-hero.test.ts`) holds the seed to them
+ * and to the facts below: featured, published pieces with pictures (the reel
+ * and the peek), a logo URL, no shader preset, no intro film.
+ */
+describe("the seeded OBB's stored hero", () => {
+  const SEEDED = JSON.stringify({
+    'heading-color': '#A62B0C',
+    'heading-weight': '400',
+    'body-weight': '400',
+    'shadow-scale': '0.5',
+    'hero-opt-purpose': 'consume',
+    'hero-opt-comp': 'showreel',
+    'hero-opt-reel-layout': 'wide',
+    'hero-opt-reel-pointer': 'none',
+    'hero-opt-second': 'auto',
+  });
+  const SEED_FACTS: HeroFacts = {
+    ...FULL,
+    hasShader: false,
+    hasFilm: false,
+    hasFilmLoop: false,
+  };
+  const resolved = (facts: HeroFacts) => {
+    const { purpose, options } = readHeroSettings(parseHeroOverrides(SEEDED));
+    if (!purpose) throw new Error('the seeded overrides store no purpose');
+    return resolveHero(purpose, options, facts);
+  };
+
+  it('is the Showreel, Wide, with the peek on', () => {
+    expect(resolved(SEED_FACTS)).toMatchObject({
+      comp: 'showreel',
+      'reel-layout': 'wide',
+      'reel-peek': 'on',
+    });
+  });
+
+  it('with no featured piece, the peek goes off', () => {
+    expect(resolved({ ...SEED_FACTS, hasFeatured: false })['reel-peek']).toBe(
+      'off'
+    );
+  });
+
+  it('with no reel to play, it is not the Showreel', () => {
+    expect(resolved({ ...SEED_FACTS, hasReel: false }).comp).not.toBe(
+      'showreel'
+    );
+  });
+});
+
 describe('heroMayOfferJoin', () => {
   it('is true only where the hero can show Join', () => {
     expect(heroMayOfferJoin({ purpose: 'grow', options: {} })).toBe(true);

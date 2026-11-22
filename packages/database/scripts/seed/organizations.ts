@@ -339,6 +339,12 @@ export async function seedOrganizations(db: typeof DbClient) {
         'heading-weight': '400',
         'body-weight': '400',
         'shadow-scale': '0.5',
+        // The stored hero (Wide, peek on) the Showreel e2e cells read from the server's HTML.
+        'hero-opt-purpose': 'consume',
+        'hero-opt-comp': 'showreel',
+        'hero-opt-reel-layout': 'wide',
+        'hero-opt-reel-pointer': 'none',
+        'hero-opt-second': 'auto',
       }),
       createdAt: now,
       updatedAt: now,
