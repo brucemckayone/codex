@@ -29,6 +29,7 @@ import type {
 } from '$lib/components/ui/ShaderHero/compositor/effects/motion-ids';
 import { restMotion } from '$lib/components/ui/ShaderHero/compositor/effects/motion-uniforms';
 import type { FilmMotion } from '$lib/components/ui/ShaderHero/compositor/film-motion';
+import { NAME_FADE_PX } from '$lib/components/ui/ShaderHero/compositor/stage';
 import type { HeroOptions } from '../hero-config';
 import {
   deepestPoint,
@@ -344,11 +345,31 @@ export class ReelMotion {
     this.#intoKind = kind;
     this.#leaveFrom = null;
     // The opening gives way to the film.
+    this.#endOpening();
+    if (kind === 'name' && !straight) this.#aimDive(aspect);
+  }
+
+  /**
+   * The page scrolled to `y`. Past the letters' fade (`NAME_FADE_PX`) there
+   * are no letters to open through, so an opening running, or waiting to
+   * run, ends at once in its last frame: the film filling its stage, with no
+   * dive, as a film pressed there starts. Back under the fade nothing
+   * restarts: the opening is one shot a visit. True when that changes what
+   * is drawn.
+   */
+  scroll(y: number): boolean {
+    if (y < NAME_FADE_PX) return false;
+    const ended = this.#openingFrom !== null || this.#openingDue;
+    this.#endOpening();
+    return ended;
+  }
+
+  /** No opening, now or later this visit. */
+  #endOpening(): void {
     this.#openingFrom = null;
     this.#openingDue = false;
     this.#openWaitFrom = null;
     this.#opened = true;
-    if (kind === 'name' && !straight) this.#aimDive(aspect);
   }
 
   /** The film closed: the band and the letters come back. */

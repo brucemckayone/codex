@@ -226,7 +226,9 @@ export function useReelMotion(source: ReelMotionSource): {
   // (paused, reduced motion, the static path) draws only when told: a scroll
   // that touches either span tells it, as a playing hero would have drawn
   // it, and none past both, where nothing changes. Where CSS cannot follow
-  // the scroll itself, the ink's share is written here.
+  // the scroll itself, the ink's share is written here. Past the letters'
+  // fade an opening has nothing to open through, so the driver hears every
+  // scroll (`ReelMotion.scroll`), the page's first place included.
   $effect(() => {
     const root = source.root();
     if (!root) return;
@@ -234,12 +236,17 @@ export function useReelMotion(source: ReelMotionSource): {
     const ink = (y: number) => {
       if (!css) root.style.setProperty('--_ink-back', String(1 - nameFade(y)));
     };
+    const tell = (y: number) => {
+      if (driver?.scroll(y)) wake();
+    };
     let last = window.scrollY;
     ink(last);
+    tell(last);
     const scrolled = () => {
       const y = window.scrollY;
       const from = Math.min(last, y);
       last = y;
+      tell(y);
       if (from < NAME_FADE_PX) ink(y);
       const film = showreelFeed.stage?.fadeDistance ?? 0;
       if (from < Math.max(NAME_FADE_PX, film)) showreelFeed.motionFrame();

@@ -14,6 +14,7 @@ import {
   restMotion,
   TRAIL_POINTS,
 } from '$lib/components/ui/ShaderHero/compositor/effects/motion-uniforms';
+import { NAME_FADE_PX } from '$lib/components/ui/ShaderHero/compositor/stage';
 import { deepestPoint, type MaskPixels } from './deepest-point';
 import { intoLength, LEAVE_MS, openingAt } from './name-motion';
 import {
@@ -409,6 +410,70 @@ describe('ReelMotion opening', () => {
     driver.open(100, 1.6);
     driver.frame(100);
     expect(driver.motion.values.u_nameAlpha).toBe(1);
+  });
+
+  // Past the letters' fade there are no letters to open through: the opening
+  // ends at once in its last frame, the film filling its stage, with no dive.
+  const name = (v: ReelMotion['motion']['values']) => [
+    v.u_nameZoom,
+    v.u_nameAlpha,
+    v.u_nameWeight,
+    v.u_dive,
+  ];
+  const FILLING = [1, 1, 0, 0];
+
+  it('scrolled past the letters’ fade, an opening running ends at once in the film filling its stage', () => {
+    const driver = opening({ frame: 'film-fill' });
+    const v = driver.motion.values;
+    runs(driver);
+    driver.open(0, 1.6);
+    driver.frame(400);
+    // Mid-opening: the letters fading in, the slow breath before the dive.
+    expect(v.u_nameZoom).toBeGreaterThan(1);
+    expect(v.u_nameWeight).toBe(1);
+    expect(driver.scroll(NAME_FADE_PX)).toBe(true);
+    expect(driver.frame(416)).toBe(false);
+    expect(name(v)).toEqual(FILLING);
+    // Back under the fade nothing restarts: one shot a visit.
+    expect(driver.scroll(0)).toBe(false);
+    driver.frame(3000);
+    expect(name(v)).toEqual(FILLING);
+  });
+
+  it('scrolled within the letters’ fade, the opening runs its course', () => {
+    const driver = opening({ frame: 'film-fill' });
+    const v = driver.motion.values;
+    runs(driver);
+    driver.open(0, 1.6);
+    driver.frame(400);
+    expect(driver.scroll(NAME_FADE_PX - 1)).toBe(false);
+    // Into the dive (it starts at 2.6 s).
+    driver.frame(3000);
+    expect(v.u_dive).toBeGreaterThan(0);
+    expect(v.u_nameWeight).toBe(1);
+  });
+
+  it('scrolled past the letters’ fade before the canvas shows the film, it never opens', () => {
+    const driver = opening({ frame: 'film-fill' });
+    const v = driver.motion.values;
+    runs(driver);
+    driver.frame(0);
+    // Waiting to open: the letters dark.
+    expect(v.u_nameAlpha).toBe(0);
+    expect(driver.scroll(200)).toBe(true);
+    driver.frame(16);
+    expect(name(v)).toEqual(FILLING);
+    driver.open(100, 1.6);
+    expect(driver.frame(100)).toBe(false);
+    expect(name(v)).toEqual(FILLING);
+  });
+
+  it('a scroll with no opening running or due changes nothing', () => {
+    const driver = opening({ frame: 'film-fill' });
+    runs(driver);
+    driver.open(0, 1.6);
+    driver.frame(5000);
+    expect(driver.scroll(200)).toBe(false);
   });
 
   it('never holds them under reduced motion or on the static path', () => {

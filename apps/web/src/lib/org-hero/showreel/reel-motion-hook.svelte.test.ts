@@ -427,6 +427,29 @@ describe('useReelMotion and the scroll', () => {
     expect(held().values.u_dive).toBe(0);
   });
 
+  it('tells the driver: scrolled past the letters’ fade, a running opening ends at once in the film filling its stage', () => {
+    render({ options: { ...SETTINGS, 'reel-opening': 'name' } });
+    runs();
+    frame(400);
+    expect(held().values.u_nameZoom).toBeGreaterThan(1);
+    scrollTo(100);
+    frame(16);
+    const v = held().values;
+    expect([v.u_nameZoom, v.u_nameAlpha, v.u_nameWeight, v.u_dive]).toEqual([
+      1, 1, 0, 0,
+    ]);
+  });
+
+  it('scrolled within the letters’ fade, the opening runs on', () => {
+    render({ options: { ...SETTINGS, 'reel-opening': 'name' } });
+    runs();
+    frame(400);
+    scrollTo(16);
+    frame(16);
+    expect(held().values.u_nameZoom).toBeGreaterThan(1);
+    expect(held().values.u_nameWeight).toBe(1);
+  });
+
   it('at the top, a film pressed runs the way in through the name as before', () => {
     const props = render({ options: { ...SETTINGS, 'reel-film': 'name' } });
     runs({ into: 'name' });
