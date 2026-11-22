@@ -77,7 +77,7 @@ export const OPEN_WAIT_MS = 4000;
  * Showreel draws), for `deepestPoint`. Null for no mask, or one that is no
  * canvas.
  */
-export function maskPixelsOf(source: TexImageSource | null): MaskPixels | null {
+function maskPixelsOf(source: TexImageSource | null): MaskPixels | null {
   if (
     !source ||
     typeof HTMLCanvasElement === 'undefined' ||

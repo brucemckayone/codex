@@ -33,6 +33,7 @@ vi.mock('../plan', async (importOriginal) => {
   };
 });
 
+import { STILL_MOTION } from '../../__tests__/motion-fixtures';
 import { bindOutput } from '../../output-target';
 import type { ShaderRenderer } from '../../renderer-types';
 import type { ShaderConfig } from '../../shader-config';
@@ -40,7 +41,7 @@ import { type CompositeFrame, createCompositor } from '../compositor';
 import { duotoneStops } from '../duotone';
 import type { LayerEffect } from '../effects/effect';
 import { PORTRAIT_GLSL } from '../effects/frame-film-portrait';
-import { type MotionChoice, STILL_MOTION } from '../effects/motion-ids';
+import type { MotionChoice } from '../effects/motion-ids';
 import { POINTERS } from '../effects/motion-registry';
 import { restMotion } from '../effects/motion-uniforms';
 import { FRAMES, LAYERS, MEDIA } from '../effects/registry';

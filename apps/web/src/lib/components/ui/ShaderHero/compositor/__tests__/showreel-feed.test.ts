@@ -3,7 +3,7 @@
  * film before any compositor exists, and tells its one reader what changed.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { STILL_MOTION } from '../effects/motion-ids';
+import { STILL_MOTION } from '../../__tests__/motion-fixtures';
 import { restMotion } from '../effects/motion-uniforms';
 import type { FilmMotion } from '../film-motion';
 import { showreelFeed } from '../showreel-feed';

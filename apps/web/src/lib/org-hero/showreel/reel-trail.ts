@@ -29,7 +29,7 @@ import { TRAIL_POINTS } from '$lib/components/ui/ShaderHero/compositor/effects/m
 /** How long a point lasts. */
 export const TRAIL_LIFE_MS = 2000;
 /** How far, in the output's height, the pointer moves before a new point. */
-export const TRAIL_STEP = 0.012;
+const TRAIL_STEP = 0.012;
 /** Points kept on a phone, where every one is a ring or a puff per pixel. */
 export const PHONE_TRAIL_POINTS = 12;
 /**

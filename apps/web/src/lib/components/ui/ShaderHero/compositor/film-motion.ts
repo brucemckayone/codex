@@ -37,7 +37,7 @@ export interface FilmMotion {
 }
 
 /** A film frame's pass, and the effects it runs. */
-export interface FilmMotionPass {
+interface FilmMotionPass {
   readonly pass: FilmPass;
   readonly running: MotionChoice;
 }

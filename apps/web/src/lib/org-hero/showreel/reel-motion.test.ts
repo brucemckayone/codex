@@ -6,10 +6,8 @@
  * test sets `running` as the compositor would. Time is handed in.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  type MotionChoice,
-  STILL_MOTION,
-} from '$lib/components/ui/ShaderHero/compositor/effects/motion-ids';
+import { STILL_MOTION } from '$lib/components/ui/ShaderHero/__tests__/motion-fixtures';
+import type { MotionChoice } from '$lib/components/ui/ShaderHero/compositor/effects/motion-ids';
 import {
   restMotion,
   TRAIL_POINTS,

@@ -16,8 +16,6 @@
  */
 import type { FilmFrameId, ReelSurface } from './effects/ids';
 
-type Vec2 = readonly [number, number];
-
 /** What a film frame can show: the piece's video, or its still. */
 export type StageMedia = HTMLVideoElement | HTMLImageElement;
 
@@ -174,18 +172,4 @@ export function stageVisible(
   return (
     fade > 0 && w > 0 && h > 0 && x < outW && y < outH && x + w > 0 && y + h > 0
   );
-}
-
-/**
- * Cover-map a point inside a rect (0-1) onto media of the given size, as CSS
- * `object-fit: cover` does: the media fills the rect and its overflow is cut
- * evenly from both sides. The twin of the GLSL `coverUv` in
- * `effects/header.ts`; change them together.
- */
-export function coverUv(local: Vec2, rectPx: Vec2, mediaPx: Vec2): Vec2 {
-  const ra = rectPx[0] / Math.max(rectPx[1], 1);
-  const ma = mediaPx[0] / Math.max(mediaPx[1], 1);
-  if (ra <= 0 || ma <= 0) return local;
-  if (ma > ra) return [0.5 + ((local[0] - 0.5) * ra) / ma, local[1]];
-  return [local[0], 0.5 + ((local[1] - 0.5) * ma) / ra];
 }

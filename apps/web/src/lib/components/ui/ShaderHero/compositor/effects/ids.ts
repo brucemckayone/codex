@@ -86,11 +86,10 @@ export const FILM_FILL_FRAME: FilmFrameId = 'film-fill';
 export const FILM_PORTRAIT_FRAME: FilmFrameId = 'film-portrait';
 
 /**
- * The surfaces over the footage a Showreel can name (WP-5b, owner
- * 2026-11-21): the hero option `reel-surface`, beside 'none'. No halftone.
+ * The surfaces over the footage a Showreel can name: the hero option
+ * `reel-surface`, beside 'none'. No halftone.
  */
-export const REEL_SURFACES = ['duotone', 'colour', 'grain'] as const;
-export type ReelSurface = (typeof REEL_SURFACES)[number];
+export type ReelSurface = 'duotone' | 'colour' | 'grain';
 
 /**
  * The passes run on the piece's OWN picture before a film frame samples it

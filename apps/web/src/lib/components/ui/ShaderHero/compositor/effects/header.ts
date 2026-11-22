@@ -7,9 +7,6 @@
  * its effect's `uniforms` list (`registry.ts` `assembleEffect`), so a pass
  * declares exactly what the compositor sets for it, and `shaders:check` can
  * prove both sides agree.
- *
- * `coverUv` has a TypeScript twin in `../stage.ts`, under test; change them
- * together.
  */
 export const HEADER = `#version 300 es
 precision highp float;

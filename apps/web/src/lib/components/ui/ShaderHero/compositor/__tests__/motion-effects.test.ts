@@ -7,6 +7,7 @@
  * wiring registers them).
  */
 import { describe, expect, it } from 'vitest';
+import { STILL_MOTION } from '../../__tests__/motion-fixtures';
 import {
   assembleFilmPass,
   composeFilmPass,
@@ -22,7 +23,6 @@ import {
   INTO_IDS,
   OPENING_IDS,
   POINTER_IDS,
-  STILL_MOTION,
   TRANS_IDS,
 } from '../effects/motion-ids';
 import {

@@ -102,10 +102,7 @@ vi.mock('../shader-config', async (importOriginal) => ({
 }));
 
 import { createCompositor } from '../compositor/compositor';
-import {
-  type MotionChoice,
-  STILL_MOTION,
-} from '../compositor/effects/motion-ids';
+import type { MotionChoice } from '../compositor/effects/motion-ids';
 import { restMotion } from '../compositor/effects/motion-uniforms';
 import type { FilmMotion } from '../compositor/film-motion';
 import { showreelFeed } from '../compositor/showreel-feed';
@@ -118,6 +115,7 @@ import type { ShaderPresetId } from '../shader-config';
 import { shaderLive } from '../shader-live.svelte';
 import { shaderStill } from '../shader-still.svelte';
 import { shaderTone } from '../shader-tone';
+import { STILL_MOTION } from './motion-fixtures';
 
 let frames: FrameRequestCallback[] = [];
 let resizeCallbacks: ResizeObserverCallback[] = [];

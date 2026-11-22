@@ -44,11 +44,3 @@ export interface MotionChoice {
   readonly opening: OpeningId;
   readonly into: IntoId;
 }
-
-/** Nothing moves: what a film frame draws with no motion chosen. */
-export const STILL_MOTION: MotionChoice = {
-  trans: 'fade',
-  pointer: 'none',
-  opening: 'none',
-  into: 'fade',
-};
