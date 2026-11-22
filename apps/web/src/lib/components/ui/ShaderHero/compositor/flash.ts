@@ -1,5 +1,5 @@
 /**
- * The flash governor (Codex-1yd58.4, plan §5.8; WCAG 2.3.1 Three Flashes).
+ * The flash governor (WCAG 2.3.1 Three Flashes).
  *
  * An effect marked `flashes` can change the picture's brightness over time
  * (a glitch burst, a strobe-like leak). It never sees the real clock: it gets

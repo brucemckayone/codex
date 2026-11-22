@@ -1,6 +1,6 @@
 /**
- * The v4 mock's cubic easings (Codex-1yd58.7), shared by the reel's motion
- * timelines. Each takes and gives 0-1; a value outside is clamped first.
+ * The v4 mock's cubic easings, shared by the reel's motion timelines. Each
+ * takes and gives 0-1; a value outside is clamped first.
  */
 import { clamp01 } from '$lib/components/ui/ShaderHero/clamp';
 

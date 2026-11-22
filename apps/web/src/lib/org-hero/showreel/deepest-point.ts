@@ -1,7 +1,7 @@
 /**
- * Where a dive into the org's name falls in (Codex-1yd58.7): the middle of
- * the name's thickest stroke, so the view always lands inside a letter and
- * the zoomed letter fills the screen.
+ * Where a dive into the org's name falls in: the middle of the name's thickest
+ * stroke, so the view always lands inside a letter and the zoomed letter fills
+ * the screen.
  *
  * Read from a small copy of the name mask on the CPU (a 2D canvas, once per
  * mask), never from the GPU. A chamfer distance transform gives each pixel

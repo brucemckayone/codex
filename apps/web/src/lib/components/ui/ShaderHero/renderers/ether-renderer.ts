@@ -80,7 +80,7 @@ const UNIFORM_NAMES = [
 type EtherUniform = (typeof UNIFORM_NAMES)[number];
 
 /** Default values matching the prototype. */
-// The owner's tuning (WP-1d), which shader-config's DEFAULTS also carry.
+// The lab's tuning, which shader-config's DEFAULTS also carry.
 const DEFAULTS = {
   rotSpeed: 0.9,
   complexity: 8,

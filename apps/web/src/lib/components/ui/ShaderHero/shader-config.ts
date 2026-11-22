@@ -37,8 +37,8 @@ export type ShaderPresetId =
 export type LivePresetId = Exclude<ShaderPresetId, 'none'>;
 
 /**
- * The 25 presets cut on 2026-11-19 (owner, Codex-1yd58 WP-1c), each mapped to
- * the survivor nearest it in look and motion.
+ * The 25 presets cut from the set, each mapped to the survivor nearest it in
+ * look and motion.
  *
  * WHY A MAP AND NOT A MIGRATION. A stored preset id outlives its preset: the
  * org's `shader-preset` lives in its `tokenOverrides` JSON, and
@@ -185,9 +185,9 @@ interface ShaderConfigBase {
   };
   /**
    * The org's OWN primary and ground, from its brand tokens, whatever the
-   * shader's palette (`colors` is the custom shader palette when one is
-   * opted into). The Showreel's surfaces over the footage tint from these
-   * (WP-5b review L6): the film plays in the org's colours, not the shader's.
+   * shader's palette (`colors` is the custom shader palette when one is opted
+   * into). The Showreel's surfaces over the footage tint from these: the film
+   * plays in the org's colours, not the shader's.
    */
   brand: {
     primary: [number, number, number];
@@ -393,14 +393,14 @@ export const DEFAULTS = {
   vignette: FX_BASE.vignette,
   // Suture
   curl: 30,
-  // Owner's lab tunings (WP-1b, 2026-11-19), contrast-checked on three
-  // brand modes: suture's dissipation, advection and force; film's speed and
-  // bands; caustic's five below. (Shared intensity/grain/vignette and flow's
-  // tuning were measured and not adopted; see Codex-1yd58.14.)
+  // The lab's tunings, contrast-checked on three brand modes: suture's
+  // dissipation, advection and force; film's speed and bands; caustic's five
+  // below. (Shared intensity/grain/vignette and flow's tuning were measured and
+  // not adopted; see Codex-1yd58.14.)
   dissipation: 0.903,
   advection: 8.0,
   force: 2.7,
-  // Ether (the owner's tuning, WP-1d)
+  // Ether (the lab's tuning)
   rotationSpeed: 0.9,
   complexity: 8,
   zoom: 5.5,
@@ -412,7 +412,7 @@ export const DEFAULTS = {
   damping: 0.995,
   rippleSize: 0.03,
   refraction: 0.5,
-  // Pulse (the owner's view, shine and persistence, WP-1d)
+  // Pulse (the lab's view, shine and persistence)
   pulseDamping: 0.98,
   waveScale: 4.0,
   camHeight: 27,
@@ -425,7 +425,7 @@ export const DEFAULTS = {
   inkDropSize: 0.05,
   inkEvaporation: 0.997,
   inkCurl: 15,
-  // Topo (the owner's tuning, WP-1d)
+  // Topo (the lab's tuning)
   topoLineCount: 27,
   topoLineWidth: 1.0,
   topoSpeed: 0.4,
@@ -438,7 +438,7 @@ export const DEFAULTS = {
   glassDrift: 0.1,
   glassGlow: 0.2,
   glassLight: 0.15,
-  // The old came, by default (WP-1d R4b); 1 on each is R4's look.
+  // 0 by default: the hard lines; 1 on each gives the soft look.
   glassLineSoftness: 0,
   glassLineTint: 0,
   glassPieceEdges: 0,
@@ -479,16 +479,14 @@ export const DEFAULTS = {
   auroraHeight: 0.4,
   auroraSpread: 0.25,
   auroraShimmer: 0.8,
-  // Lenia
-  // The owner's tuning (WP-1d R3).
+  // Lenia The lab's tuning.
   leniaRadius: 15,
   leniaGrowth: 0.2,
   leniaWidth: 0.05,
   leniaSpeed: 4,
   leniaDt: 0.5,
-  // Fracture
-  // WP-1d R4b: fewer, larger shards and a calmer sway; the old bold, hard,
-  // dark lines, shadow and fill. Softness and tint 1 are R4's soft look.
+  // Fracture Fewer, larger shards and a calmer sway, with bold, hard, dark
+  // lines, shadow and fill. Softness and tint 1 give the soft look.
   fractureCuts: 5,
   fractureSpeed: 0.12,
   fractureBorder: 0.01,
@@ -708,8 +706,8 @@ export function getShaderConfig(
   const logoUrl = style ? readBrandVar(style, 'shader-logo-url', isDark) : null;
 
   // Intensity, grain and vignette belong to each preset (preset-fx-defaults
-  // .ts): its own key, then the legacy shared key a brand saved before
-  // WP-1d may hold, then the preset's tuned default. `none` has no keys.
+  // .ts): its own key, then the legacy shared key an older brand may hold, then
+  // the preset's tuned default. `none` has no keys.
   const fx = fxDefaultsFor(resolvedPreset);
   const fxValue = (setting: FxSetting): number => {
     if (!style) return fx[setting];
@@ -785,8 +783,8 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     rippleSize: rv('shader-ripple-size', DEFAULTS.rippleSize),
     refraction: rv('shader-refraction', DEFAULTS.refraction),
   }),
-  // Pulse paints the shared palette (WP-1d): its own colour picker, red for
-  // every org, is gone, and a stored `shader-pulse-color` is ignored.
+  // Pulse paints the shared palette: its own colour picker, red for every org,
+  // is gone, and a stored `shader-pulse-color` is ignored.
   pulse: (base, rv) => ({
     ...base,
     preset: 'pulse',

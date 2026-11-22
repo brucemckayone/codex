@@ -1,10 +1,9 @@
 /**
- * The title as the film's window on the Corner and Wide layouts (Codex-1yd58.7,
- * WP-6; owner, 2026-11-21): the big title words are the letters "through the
- * name" plays in, so the opening and the way into the film run on every
- * layout, the defaults included. The Name window's mask is drawn here too
- * (Showreel's `drawMask`, review R3-M1): one placement for both, so neither
- * window's letters sit off the page's.
+ * The title as the film's window on the Corner and Wide layouts: the big title
+ * words are the letters "through the name" plays in, so the opening and the way
+ * into the film run on every layout, the defaults included. The Name window's
+ * mask is drawn here too (Showreel's `drawMask`): one placement for both, so
+ * neither window's letters sit off the page's.
  *
  * The title wraps where the page wraps it (`text-wrap: balance`), so its
  * lines are read from the page, never re-wrapped here: each word's box comes
@@ -211,11 +210,11 @@ export function drawTitleMask(
   const spacing =
     tracked && !native ? Number.parseFloat(style.letterSpacing) || 0 : 0;
   ctx.textAlign = 'left';
-  // Each word on its baseline where the page sets it: the font's content
-  // area (its ascent and descent) centred in the word's box, as CSS lays
-  // glyphs in a line (half-leading). The em square's middle ('middle' at
-  // the box's middle) sits higher in most faces: 8 CSS px at 96 px in OBB's
-  // serif, a copy of the title showing above its ink (the WP-6 board).
+  // Each word on its baseline where the page sets it: the font's content area
+  // (its ascent and descent) centred in the word's box, as CSS lays glyphs in a
+  // line (half-leading). The em square's middle ('middle' at the box's middle)
+  // sits higher in most faces: 8 CSS px at 96 px in OBB's serif, a copy of the
+  // title showing above its ink.
   ctx.textBaseline = 'alphabetic';
   let measured: number | null = null;
   for (const word of words) {

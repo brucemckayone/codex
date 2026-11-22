@@ -1,12 +1,11 @@
 import type { MediaEffect } from './effect';
 
 /**
- * Duotone in the brand, over the footage (WP-5b; the 5b board's, which the
- * owner picked on 2026-11-21): the piece's light, a touch more contrasted,
- * mapped from the brand's dark through its primary to a pale of the primary.
- * The three stops are worked out once a frame from the brand's OWN tokens
- * (`../duotone.ts`, under test): never literal black or white, and a primary
- * near either drawn toward mid-grey (review M1). Still: no clock.
+ * Duotone in the brand, over the footage: the piece's light, a touch more
+ * contrasted, mapped from the brand's dark through its primary to a pale of the
+ * primary. The three stops are worked out once a frame from the brand's OWN
+ * tokens (`../duotone.ts`, under test): never literal black or white, and a
+ * primary near either drawn toward mid-grey. Still: no clock.
  */
 export const surfaceDuotone: MediaEffect = {
   id: 'surface-duotone',

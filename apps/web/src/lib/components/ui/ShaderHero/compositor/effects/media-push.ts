@@ -1,11 +1,10 @@
 import type { MediaEffect } from './effect';
 
 /**
- * The stills' push-in (WP-5b, owner 2026-11-21: on by default): a picture is
- * drawn slowly in about its centre over its piece (`../media-pass.ts`
- * `pushZoom`), so the reel never looks paused between films. Footage plays,
- * so it is never pushed. Under reduced motion it is dropped: the picture
- * holds still.
+ * The stills' push-in (on by default): a picture is drawn slowly in about its
+ * centre over its piece (`../media-pass.ts` `pushZoom`), so the reel never
+ * looks paused between films. Footage plays, so it is never pushed. Under
+ * reduced motion it is dropped: the picture holds still.
  */
 export const mediaPush: MediaEffect = {
   id: 'media-push',

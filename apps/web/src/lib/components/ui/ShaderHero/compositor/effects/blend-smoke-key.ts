@@ -1,8 +1,8 @@
 import type { BlendEffect } from './effect';
 
 /**
- * The second preset shows where the base is dark: the base's smoke keys it
- * in. The thresholds are the lab's, as the owner judged them (WP-1b).
+ * The second preset shows where the base is dark: the base's smoke keys it in.
+ * The thresholds are the shader lab's, as judged there.
  */
 export const blendSmokeKey: BlendEffect = {
   id: 'smoke-key',

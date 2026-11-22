@@ -2,12 +2,11 @@
  * Physarum simulation fragment shaders (GLSL ES 3.0): agents that follow
  * their own trail (Jones, 2010), so the trail draws a vein network.
  *
- * WP-1d R3 (Codex-1yd58): the agents are particles now. The old shader moved
- * an "agent density" field through the trail texture by a bilinear backtrace,
- * and every step of that blurred it: agents smeared below the deposit
- * threshold within seconds, so the picture stayed a faint mist (the lab, 18 s
- * in) and never drew a vein. Each agent is now one texel of an agent texture
- * (x, y, heading) that senses the trail ahead of it, turns toward the
+ * The agents are particles. Moving an "agent density" field through the trail
+ * texture by a bilinear backtrace blurs it every step: agents smear below the
+ * deposit threshold within seconds, so the picture stays a faint mist (the lab,
+ * 18 s in) and never draws a vein. Each agent is now one texel of an agent
+ * texture (x, y, heading) that senses the trail ahead of it, turns toward the
  * strongest of three sensors, steps forward and deposits where it lands.
  *
  * Three passes a step, all here:

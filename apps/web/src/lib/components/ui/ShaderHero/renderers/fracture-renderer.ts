@@ -69,7 +69,7 @@ const UNIFORM_NAMES = [
 
 type FractureUniform = (typeof UNIFORM_NAMES)[number];
 
-/** Fallbacks, matching shader-config's DEFAULTS (WP-1d R4b). */
+/** Fallbacks, matching shader-config's DEFAULTS. */
 const DEFAULTS = {
   cuts: 5,
   speed: 0.12,

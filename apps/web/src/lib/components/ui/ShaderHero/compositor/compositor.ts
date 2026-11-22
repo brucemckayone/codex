@@ -1,5 +1,5 @@
 /**
- * The brand shader stack's compositor (Codex-1yd58.4, plan §5.1-5.8).
+ * The brand shader stack's compositor.
  *
  * One WebGL2 context, the hero's own: no second canvas. Each frame:
  *
@@ -21,18 +21,18 @@
  * canvas is bound, as after any renderer, and the tone and still readers
  * see the composited frame.
  *
- * WP-5's seams, held as plain state and turned into GL on the next render
- * (so a context restore rebuilds them): `setMedia` (the piece's video or
+ * The Showreel's seams, held as plain state and turned into GL on the next
+ * render (so a context restore rebuilds them): `setMedia` (the piece's video or
  * image, uploaded once per new frame, `requestVideoFrameCallback` where the
  * browser has it), `setStage` (the film's frame, `stage.ts`), `setNameMask`
- * (the org's name, for the name frames). WP-6 adds `setMotion`: with it, a
- * film frame is drawn as its composed film pass (`film-motion.ts`).
+ * (the org's name, for the name frames) and `setMotion` (with it, a film frame
+ * is drawn as its composed film pass, `film-motion.ts`).
  *
- * WP-5b's two hooks (Codex-1yd58.6), kept to their own files: the frame rule
- * (`portrait.ts`: a portrait piece on a desktop is placed, not cropped) picks
- * the film frame, and the passes over the piece's own picture
- * (`media-pass.ts`: the stills' push-in, the surface over the footage) draw
- * into a target the film frame samples in place of the raw media.
+ * Two hooks kept to their own files: the frame rule (`portrait.ts`: a portrait
+ * piece on a desktop is placed, not cropped) picks the film frame, and the
+ * passes over the piece's own picture (`media-pass.ts`: the stills' push-in,
+ * the surface over the footage) draw into a target the film frame samples in
+ * place of the raw media.
  */
 import { bindOutput, setOutputTarget } from '../output-target';
 import {
@@ -127,19 +127,19 @@ export interface Compositor {
   /** Draw one frame. False: the compositor could not draw (nothing reached
    *  the canvas); the caller draws the base alone and detaches it. */
   render(frame: CompositeFrame): boolean;
-  /** The piece's film or still, or null for none (WP-5). */
+  /** The piece's film or still, or null for none. */
   setMedia(media: StageMedia | null): void;
-  /** Where the film's frame sits, or null for none (WP-5). */
+  /** Where the film's frame sits, or null for none. */
   setStage(stage: StageBox | null): void;
-  /** The org's name, white on black, the canvas's size (WP-5). */
+  /** The org's name, white on black, the canvas's size. */
   setNameMask(mask: TexImageSource | null): void;
   /** How the Showreel shows its film, or null for the brand's own frame. */
   setLook(look: FilmLook | null): void;
   /**
-   * The Showreel's motion (WP-6), or null for none. With it, a film frame is
-   * drawn as its composed film pass (`composeFilmPass`), reading the values
-   * the Showreel writes in place each frame; the effects the pass ran are
-   * written back to `motion.running`.
+   * The Showreel's motion, or null for none. With it, a film frame is drawn as
+   * its composed film pass (`composeFilmPass`), reading the values the Showreel
+   * writes in place each frame; the effects the pass ran are written back to
+   * `motion.running`.
    */
   setMotion(motion: FilmMotion | null): void;
   /**
@@ -160,7 +160,7 @@ interface Pass {
   locs: [UniformName, WebGLUniformLocation | null][];
 }
 
-/** A composed film pass's program (WP-6): its uniforms reach past `UNIFORMS`. */
+/** A composed film pass's program: its uniforms reach past `UNIFORMS`. */
 interface FilmProgram {
   prog: WebGLProgram;
   locs: FilmPassLocations;
@@ -265,19 +265,19 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
 
   let media: MediaSlot | null = null;
   let mediaTex: WebGLTexture | null = null;
-  /** The targets the passes over the media draw into (WP-5b). */
+  /** The targets the passes over the media draw into. */
   const mediaRunner = createMediaRunner();
   /** The look and piece a target could not be made for: not tried again
    *  until either changes, so a driver out of memory is not asked each
-   *  frame (review L7). */
+   *  frame. */
   let treatRefused: { look: FilmLook | null; el: StageMedia } | null = null;
   let stage: StageBox | null = null;
   let look: FilmLook | null = null;
-  /** The Showreel's motion (WP-6): its film frames draw as composed passes. */
+  /** The Showreel's motion: its film frames draw as composed passes. */
   let motion: FilmMotion | null = null;
   const filmPasses = createFilmMotionPasses();
-  // A composed film pass that will not compile stays null: tried once, then
-  // the WP-5 film frame draws in its place.
+  // A composed film pass that will not compile stays null: tried once, then the
+  // plain film frame draws in its place.
   const filmPrograms = new Map<string, FilmProgram | null>();
   /** The last stack given the look's film frame, kept so the plan's cache
    *  (by identity) holds while neither changes. */
@@ -340,7 +340,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     return pass;
   }
 
-  /** A composed film pass's program, made once per pass id (WP-6). */
+  /** A composed film pass's program, made once per pass id. */
   function filmProgramFor(pass: FilmPass): FilmProgram | null {
     const known = filmPrograms.get(pass.id);
     if (known !== undefined) return known;
@@ -672,7 +672,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       u_band: look ? BAND_CODE[look.band] : 0,
       u_ramp: bandRamp(look?.band ?? 'none', f.phone),
       u_zoom: 1,
-      // the surfaces tint from the brand's own tokens (review L6)
+      // the surfaces tint from the brand's own tokens
       u_tint: brand.primary,
       u_toneDeep: toneDeep,
       u_toneMid: toneMid,
@@ -798,11 +798,11 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
   }
 
   /**
-   * The Showreel's film frame with its motion (WP-6), onto the canvas: the
-   * frame's composed film pass, for the effects the motion chose after this
-   * frame's fallbacks, which it writes back to `motion.running`. False: no
-   * motion, a frame that is no film frame, or a pass that will not compile,
-   * and the frame draws as it is (the WP-5 film frame, then shader only).
+   * The Showreel's film frame with its motion, onto the canvas: the frame's
+   * composed film pass, for the effects the motion chose after this frame's
+   * fallbacks, which it writes back to `motion.running`. False: no motion, a
+   * frame that is no film frame, or a pass that will not compile, and the frame
+   * draws as it is (the plain film frame, then shader only).
    */
   function filmMotionPass(
     f: CompositeFrame,
@@ -885,7 +885,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       if (mediaTex && !gl.isContextLost()) gl.deleteTexture(mediaTex);
       mediaTex = null;
       if (!next) {
-        // the film detached: its treated picture goes with it (review L7)
+        // the film detached: its treated picture goes with it
         freeTreated();
         return;
       }

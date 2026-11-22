@@ -1,9 +1,9 @@
 /**
- * What the org's moving background has drawn, part by part (landing-builder
- * 03 X54). ShaderHero samples its own frame, scaled down to one pixel per
- * cell of a grid laid over the window, and keeps each cell's darkest and
- * lightest value per channel, so a page can ask how dark or light the shader
- * gets behind a given box: the page kit's live veil.
+ * What the org's moving background has drawn, part by part. ShaderHero samples
+ * its own frame, scaled down to one pixel per cell of a grid laid over the
+ * window, and keeps each cell's darkest and lightest value per channel, so a
+ * page can ask how dark or light the shader gets behind a given box: the page
+ * kit's live veil.
  *
  * A cell is about 30px square at 1440×900, so its sample averages about as
  * much of the frame as the shader's own blur does (a 20px blur averages more),

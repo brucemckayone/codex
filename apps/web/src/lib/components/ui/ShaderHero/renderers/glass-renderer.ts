@@ -72,7 +72,7 @@ const UNIFORM_NAMES = [
 
 type GlassUniform = (typeof UNIFORM_NAMES)[number];
 
-/** Fallbacks, matching shader-config's DEFAULTS (WP-1d R4b). */
+/** Fallbacks, matching shader-config's DEFAULTS. */
 const DEFAULTS = {
   cellSize: 5.0,
   border: 0.04,

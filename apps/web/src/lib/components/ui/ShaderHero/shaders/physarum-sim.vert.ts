@@ -1,5 +1,5 @@
 /**
- * Physarum deposit vertex shader (GLSL ES 3.0), WP-1d R3 (Codex-1yd58).
+ * Physarum deposit vertex shader (GLSL ES 3.0).
  *
  * Drawn as POINTS with no vertex attributes: vertex N is agent N, read from
  * the agent texture by `gl_VertexID`, and placed one texel wide on the trail

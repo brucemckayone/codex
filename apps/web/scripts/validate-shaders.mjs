@@ -19,9 +19,9 @@
  *   node apps/web/scripts/validate-shaders.mjs            # all shaders
  *   node apps/web/scripts/validate-shaders.mjs flow ink  # only these
  *   node apps/web/scripts/validate-shaders.mjs compositor # only the
- *                                     # compositor's passes (Codex-1yd58.4)
+ *                                     # compositor's passes
  *                                     # and the Showreel's film passes,
- *                                     # every motion composed (Codex-1yd58.7)
+ *                                     # every motion composed
  *
  * Exit code 0 means every shader compiled. Non-zero prints the offending
  * shader, the glslang diagnostic, and the source line it points at.
@@ -357,7 +357,7 @@ async function main() {
         writeFileSync(scratch, source, 'utf8');
         checked++;
 
-        // WP-11: every preset source, as every compositor pass (one checker).
+        // Every preset source, as every compositor pass (one checker).
         const reversed = reversedSmoothsteps(source);
         if (reversed.length > 0) {
           failures.push(`${file}:${exportName}`);
@@ -448,8 +448,8 @@ const REGISTRY = path.resolve(
   '../src/lib/components/ui/ShaderHero/compositor/effects/registry.ts'
 );
 /**
- * 5 blends, 15 layers (WP-8), 4 frames and 4 passes over the media (WP-5b);
- * fewer means the registry moved or emptied.
+ * 5 blends, 15 layers, 4 frames and 4 passes over the media; fewer means the
+ * registry moved or emptied.
  */
 const MIN_EFFECTS = 28;
 
@@ -482,7 +482,7 @@ const IDENTITY_VALUES = {
   u_rect: [0, 0, 1, 1],
   u_fade: 1,
   u_hasMedia: 0,
-  // the surfaces' brand tint and duotone stops (WP-5b), unlike the picture
+  // the surfaces' brand tint and duotone stops, unlike the picture
   u_tint: [0.78, 0.12, 0.16],
   u_toneDeep: [0.1, 0.05, 0.06],
   u_toneMid: [0.78, 0.12, 0.16],
@@ -684,17 +684,16 @@ function unavailable(why) {
 }
 
 /**
- * Every LAYER at amount 0 must draw its input unchanged (WP-8 review L1): a
- * brand's `glow:0` is a saved, valid stack, and `glitch:0` once still tore
- * bands. So must every pass over the media (WP-5b): a surface at 0, and the
- * push-in at `u_zoom` 1, its first frame. glslang compiles a pass but runs
- * nothing, so each layer is RUN here:
+ * Every LAYER at amount 0 must draw its input unchanged: a brand's `glow:0` is
+ * a saved, valid stack, and `glitch:0` once still tore bands. So must every
+ * pass over the media: a surface at 0, and the push-in at `u_zoom` 1, its first
+ * frame. glslang compiles a pass but runs nothing, so each layer is RUN here:
  * WebGL2 in headless Chromium on SwiftShader (no GPU, the same answer on any
  * machine), over a noise picture, at a short size and one past 900 px tall
- * (where a layer scaled with the canvas, as mosaic was, still pixelated at
- * 0), and at sixteen beats for one that reads the clock. Calibrated in the
- * same run: at amount 1 each must change its input, or the check proves
- * nothing. A largest change of 1/255 is allowed for rounding.
+ * (where a layer scaled with the canvas, as mosaic was, still pixelated at 0),
+ * and at sixteen beats for one that reads the clock. Calibrated in the same
+ * run: at amount 1 each must change its input, or the check proves nothing. A
+ * largest change of 1/255 is allowed for rounding.
  */
 async function checkLayerIdentity(layers, assembleEffect) {
   const vs = readFileSync(WEBGL_UTILS, 'utf8').match(
@@ -799,10 +798,9 @@ async function checkLayerIdentity(layers, assembleEffect) {
 }
 
 /**
- * The compositor's passes (Codex-1yd58.4): each effect in the registry,
- * assembled exactly as the compositor assembles it at runtime
- * (`assembleEffect`), must compile, and must declare only uniforms the
- * compositor sets.
+ * The compositor's passes: each effect in the registry, assembled exactly as
+ * the compositor assembles it at runtime (`assembleEffect`), must compile, and
+ * must declare only uniforms the compositor sets.
  *
  * The compositor sets every name in `UNIFORMS` (TypeScript makes its value
  * record complete, and each sampler has a fixed unit), and a pass's
@@ -913,11 +911,10 @@ async function checkCompositor(esbuild) {
 }
 
 /**
- * The Showreel's film passes (Codex-1yd58.7, WP-6): each film frame composed
- * with every motion effect (`everyFilmPass`, 480 passes), assembled exactly
- * as the compositor assembles it (`assembleFilmPass`), must pass the text
- * checks (`filmGateProblems`, shader-gate.mjs, which CI also runs without
- * glslang), then compile.
+ * The Showreel's film passes: each film frame composed with every motion effect
+ * (`everyFilmPass`, 480 passes), assembled exactly as the compositor assembles
+ * it (`assembleFilmPass`), must pass the text checks (`filmGateProblems`,
+ * shader-gate.mjs, which CI also runs without glslang), then compile.
  */
 async function checkFilmPasses(esbuild) {
   const work = mkdtempSync(path.join(tmpdir(), 'glsl-film-'));

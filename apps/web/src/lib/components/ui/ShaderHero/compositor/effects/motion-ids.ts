@@ -1,7 +1,7 @@
 /**
- * The Showreel's motion effects, per axis (Codex-1yd58.7, plan §3). Kept
- * apart from the GLSL, as `ids.ts` is, so the hero's settings can name them
- * without pulling the shaders into the page's chunk.
+ * The Showreel's motion effects, per axis. Kept apart from the GLSL, as
+ * `ids.ts` is, so the hero's settings can name them without pulling the shaders
+ * into the page's chunk.
  *
  * The axes are the Showreel's own settings (`hero-config.ts`): between
  * pieces, the pointer, the opening, and the way into the film. A setting's

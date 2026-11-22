@@ -1,6 +1,6 @@
 /**
- * The values a Showreel film pass is drawn with (Codex-1yd58.7, WP-6 wiring
- * part 1), and how they reach its uniforms.
+ * The values a Showreel film pass is drawn with, and how they reach its
+ * uniforms.
  *
  * A film pass may read any name in `FILM_PASS_UNIFORMS`: the compositor's own
  * (`uniforms.ts`) and the motion's (`motion-uniforms.ts`). `FilmPassValues`

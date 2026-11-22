@@ -18,7 +18,7 @@
   - `data-drawn` once the canvas shows any frame: a shader's, or the
     Showreel's plain ground, which is drawn but not live (no brand shader
     paints under the words)
-  - the brand shader STACK (Codex-1yd58.4): a second preset, a blend, layers
+  - the brand shader STACK: a second preset, a blend, layers
     and a frame, drawn through the compositor (`compositor/`). A bare stack,
     the base alone, takes today's path: no compositor, no framebuffer, the
     canvas at today's size.
@@ -85,17 +85,17 @@
      * shader sits far behind the content and its motion buys nothing: the
      * studio, behind an 80% cover and a 60px blur. There every frame costs a
      * full-viewport render (on a CPU-rendered context, as in CI, ~8s per
-     * click). Turning it off resumes the motion. With `tone` (the org
-     * layout's shader, so the studio's), that one frame is also copied for
-     * the page editor's Moving bands (`shaderStill`, Codex-61zsk.73).
+     * click). Turning it off resumes the motion. With `tone` (the org layout's
+     * shader, so the studio's), that one frame is also copied for the page
+     * editor's Moving bands (`shaderStill`).
      */
     still?: boolean;
     /**
      * Report what it draws, cell by cell, to `shaderTone`, while a page asks
-     * (the page kit's live veil, landing-builder 03 X54). For the one shader
-     * the window shows behind a page: the org layout's fullpage one. Read
-     * once, at mount. That shader also stands still while a page holds it
-     * (`shaderTone.hold`, its motion dial, 03 X62).
+     * (the page kit's live veil). For the one shader the window shows behind a
+     * page: the org layout's fullpage one. Read once, at mount. That shader
+     * also stands still while a page holds it (`shaderTone.hold`, its motion
+     * dial).
      */
     tone?: boolean;
   }
@@ -126,23 +126,23 @@
   let canvasEl: HTMLCanvasElement | undefined = $state();
   let containerEl: HTMLDivElement | undefined = $state();
   let hasWebGL = $state(true);
-  // `data-live` (Codex-1yd58.3): the canvas shows a frame that a renderer drew.
-  // What reads "a shader is painting" keys on this attribute, never on the
-  // canvas's inline style: the home hero's ink, OrgHero's shader ink, and
-  // (through `shaderLive`) the org layout's gate. It stays set through a
-  // preset switch, because the old frame stays on screen until the new
-  // renderer draws, and it is cleared when nothing would show.
+  // `data-live`: the canvas shows a frame that a renderer drew. What reads "a
+  // shader is painting" keys on this attribute, never on the canvas's inline
+  // style: the home hero's ink, OrgHero's shader ink, and (through
+  // `shaderLive`) the org layout's gate. It stays set through a preset switch,
+  // because the old frame stays on screen until the new renderer draws, and it
+  // is cleared when nothing would show.
   let live = $state(false);
-  // `data-drawn` (Codex-1yd58.4): the canvas shows a frame, a shader's or the
-  // Showreel's plain ground (its film with no brand shader under it). The
-  // Showreel keys on this one. A plain ground is drawn but NOT live: no
-  // brand shader paints under the words, so their ink stays the page's
-  // (white shader ink on a light brand would vanish).
+  // `data-drawn`: the canvas shows a frame, a shader's or the Showreel's plain
+  // ground (its film with no brand shader under it). The Showreel keys on this
+  // one. A plain ground is drawn but NOT live: no brand shader paints under the
+  // words, so their ink stays the page's (white shader ink on a light brand
+  // would vanish).
   let drawn = $state(false);
-  // `data-film` (Codex-1yd58.6): the canvas shows the Showreel's film (a
-  // frame of it is on the GPU and the last frame composited). The Showreel
-  // hides its own copy of the film only then, so with no WebGL2, a lost
-  // context or a broken compositor its DOM film shows instead.
+  // `data-film`: the canvas shows the Showreel's film (a frame of it is on the
+  // GPU and the last frame composited). The Showreel hides its own copy of the
+  // film only then, so with no WebGL2, a lost context or a broken compositor
+  // its DOM film shows instead.
   let film = $state(false);
 
   onMount(() => {
@@ -190,7 +190,7 @@
 
     const mouse: MouseState = { x: 0.5, y: 0.5, active: false, burstStrength: 0 };
 
-    // The stack (Codex-1yd58.4): see "Stack" below.
+    // The stack: see "Stack" below.
     let compositor: Compositor | null = null;
     /** Bumped per compositor load and detach: a load overtaken is discarded. */
     let compositorToken = 0;
@@ -207,7 +207,7 @@
     /** The phone budget dropped the second preset, for the session. */
     let secondDropped = false;
     const budget = createFrameBudget();
-    /** Then the layers, last first, behind its flag (WP-11, `layer-budget.ts`). */
+    /** Then the layers, last first, behind its flag (`layer-budget.ts`). */
     const layerBudget = createLayerBudget(PHONE_LAYER_BUDGET);
 
     // ── RAF scheduling ─────────────────────────────────────────
@@ -278,10 +278,10 @@
     // requires touching load-renderer.ts.
 
     // ── Canvas sizing ──────────────────────────────────────────
-    // Two sizes (plan §5.2). The SCENE is what the presets render at:
-    // today's canvas size, DPR 1 on a phone. The canvas itself is the scene,
-    // except while a compositor is attached: then its frame pass draws at the
-    // display DPR (<= 2) and only that pass pays for it.
+    // Two sizes. The SCENE is what the presets render at: today's canvas size,
+    // DPR 1 on a phone. The canvas itself is the scene, except while a
+    // compositor is attached: then its frame pass draws at the display DPR (<=
+    // 2) and only that pass pays for it.
     let sceneW = 0;
     let sceneH = 0;
     let cssWidth = 0;
@@ -364,7 +364,7 @@
       return cachedConfig;
     }
 
-    // ── Tone (03 X54) ──────────────────────────────────────────
+    // ── Tone ───────────────────────────────────────────────────
     // While a page asks, about twice a second, the part of the frame the
     // window shows, drawn small and averaged per cell, goes to `shaderTone`.
     // Read straight after render, in the same task: the drawing buffer is not
@@ -419,7 +419,7 @@
       );
     }
 
-    // ── Still (Codex-61zsk.73) ─────────────────────────────────
+    // ── Still ──────────────────────────────────────────────────
     // The studio's one frame, copied straight after it is drawn (as a tone
     // sample is, and for the same reason) for the page editor's Moving
     // bands. Only the studio's: the org layout's shader (`tone`) while it is
@@ -519,11 +519,11 @@
         redrawFrozen();
       });
 
-    // The Showreel's film, its frame and the org's name (WP-5), and its
-    // motion (WP-6), reach the window's shader through `showreelFeed`. A film
-    // attaches a compositor (`syncStack`), even with no preset; a frozen hero
-    // draws again to show what changed, the motion's values each frame they
-    // move (`frame`: a moving hero draws them anyway).
+    // The Showreel's film, its frame and the org's name, and its motion, reach
+    // the window's shader through `showreelFeed`. A film attaches a compositor
+    // (`syncStack`), even with no preset; a frozen hero draws again to show
+    // what changed, the motion's values each frame they move (`frame`: a moving
+    // hero draws them anyway).
     if (tone)
       showreelFeed.onChange((changed) => {
         if (compositor) {
@@ -537,7 +537,7 @@
         redrawFrozen();
       });
 
-    // ── Live (Codex-1yd58.3) ───────────────────────────────────
+    // ── Live ───────────────────────────────────────────────────
     // The canvas is shown only once a renderer has drawn into it, so the fade
     // in starts from a real frame, and `data-live`, which the hero's ink keys
     // on, flips in the same task as the fade it is timed to. (The canvas used
@@ -765,7 +765,7 @@
       return true;
     }
 
-    // ── Stack (Codex-1yd58.4, plan §5.8) ───────────────────────
+    // ── Stack ──────────────────────────────────────────────────
     // A stack that is more than the base, or a Showreel film (with or
     // without a base: `needsCompositor`), attaches a compositor (its own
     // chunk, loaded on first use) and the canvas rises to the display DPR;
@@ -1010,9 +1010,8 @@
      *
      * A preset that failed stays stopped until it changes (`retryObserver`):
      * whatever woke this frame (a resize, the tab coming back) is no reason to
-     * fail it again. With a film, it draws the plain ground instead (owner,
-     * 2026-11-19); without one, a plain ground it drew (for a film since
-     * ended) goes too.
+     * fail it again. With a film, it draws the plain ground instead; without
+     * one, a plain ground it drew (for a film since ended) goes too.
      *
      * Otherwise a new preset is switched to (async — may take a frame).
      * ensureRenderer calls scheduleFrame() on success and on 'none', so the
@@ -1034,10 +1033,10 @@
     /**
      * Bring the stack in line, and say whether there is anything to draw: a
      * base preset, or, with no preset at all, the Showreel's film on a plain
-     * ground of the brand's background, through a compositor (owner,
-     * 2026-11-19). A renderer still loading is not a plain ground: its old
-     * frame stays up. A plain ground that can no longer draw (its film ended,
-     * or the compositor broke) hides, as no preset does.
+     * ground of the brand's background, through a compositor. A renderer still
+     * loading is not a plain ground: its old frame stays up. A plain ground
+     * that can no longer draw (its film ended, or the compositor broke) hides,
+     * as no preset does.
      */
     function readyToDraw(): boolean {
       if (renderer) {
@@ -1066,7 +1065,7 @@
     /** The phone budget: two presets that cannot hold the frame rate lose
      *  the second (the next frame's `syncStack` drops it). Then, behind its
      *  flag, a layers-only stack loses its last layer each slow window,
-     *  judged afresh after each cut (WP-11, `layer-budget.ts`). */
+     *  judged afresh after each cut (`layer-budget.ts`). */
     function judgeBudget(intervalMs: number) {
       if (!compositor || cssWidth >= PHONE_MAX_WIDTH) return;
       const second = secondPreset !== null && secondRenderer !== null;
@@ -1220,7 +1219,7 @@
     const resizeObserver = new ResizeObserver(() => resize());
     if (containerEl) resizeObserver.observe(containerEl);
 
-    // ── Context loss and restore (Codex-1yd58.4) ────────────────
+    // ── Context loss and restore ───────────────────────────────
     // A lost context (a GPU reset, or the browser reclaiming its oldest)
     // shows nothing, so the page editor's bands go back to the glow and the
     // shader is no longer live. The loss is logged, and its default is

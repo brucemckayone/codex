@@ -1,8 +1,8 @@
 /**
- * The Showreel's motion, wired (Codex-1yd58.7, WP-6 wiring part 1): the
- * hook the Showreel calls once, at init. It keeps a `ReelMotion` (the pure
- * driver, `reel-motion.ts`) in step with the reel, hands its `FilmMotion` to
- * the window's shader (`showreelFeed.setMotion`), and runs its frames.
+ * The Showreel's motion, wired: the hook the Showreel calls once, at init. It
+ * keeps a `ReelMotion` (the pure driver, `reel-motion.ts`) in step with the
+ * reel, hands its `FilmMotion` to the window's shader
+ * (`showreelFeed.setMotion`), and runs its frames.
  *
  * In step with the reel:
  *   - the hero's four motion settings, the layout's film frame, a phone,
@@ -165,7 +165,7 @@ export function useReelMotion(source: ReelMotionSource): {
     });
   });
 
-  // Gone: the film draws as WP-5's frame again.
+  // Gone: the film draws with no motion again (`setMotion(null)`).
   $effect(() => () => {
     if (frameId !== 0) cancelAnimationFrame(frameId);
     frameId = 0;
@@ -173,10 +173,10 @@ export function useReelMotion(source: ReelMotionSource): {
     showreelFeed.setMotion(null);
   });
 
-  // Paused: a cut under way ends at once on the piece it was going to, and
-  // the stage names it now, so its words come in (review R2-M1). Before the
-  // cuts' effect, so a pause and a pick in one flush (a click on the pause,
-  // then the index) reach the driver in the order the visitor made them.
+  // Paused: a cut under way ends at once on the piece it was going to, and the
+  // stage names it now, so its words come in. Before the cuts' effect, so a
+  // pause and a pick in one flush (a click on the pause, then the index) reach
+  // the driver in the order the visitor made them.
   $effect(() => {
     const paused = source.paused();
     untrack(() => {
@@ -219,16 +219,16 @@ export function useReelMotion(source: ReelMotionSource): {
     });
   });
 
-  // What reads the scroll holds still in the window with the stage (WP-1's):
-  // the film fades over the stage's height (`stageFade`), and the letters
-  // over the first NAME_FADE_PX (`u_nameFade`), the page's own glyphs taking
-  // the name back (the Showreel's ink; owner, 2026-11-21). A frozen hero
-  // (paused, reduced motion, the static path) draws only when told: a scroll
-  // that touches either span tells it, as a playing hero would have drawn
-  // it, and none past both, where nothing changes. Where CSS cannot follow
-  // the scroll itself, the ink's share is written here. Past the letters'
-  // fade an opening has nothing to open through, so the driver hears every
-  // scroll (`ReelMotion.scroll`), the page's first place included.
+  // What reads the scroll holds still in the window with the stage: the film
+  // fades over the stage's height (`stageFade`), and the letters over the first
+  // NAME_FADE_PX (`u_nameFade`), the page's own glyphs taking the name back
+  // (the Showreel's ink). A frozen hero (paused, reduced motion, the static
+  // path) draws only when told: a scroll that touches either span tells it, as
+  // a playing hero would have drawn it, and none past both, where nothing
+  // changes. Where CSS cannot follow the scroll itself, the ink's share is
+  // written here. Past the letters' fade an opening has nothing to open
+  // through, so the driver hears every scroll (`ReelMotion.scroll`), the
+  // page's first place included.
   $effect(() => {
     const root = source.root();
     if (!root) return;

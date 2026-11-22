@@ -223,11 +223,10 @@ export function uploadAudioUniforms(
  * switch), so a naive difference can be a large spike.
  *
  * Returns 1/60 on the first call and clamps thereafter. A frame at the SAME
- * time as the last is 0: time standing still moves nothing. It was a
- * sixtieth, so a preset integrating its own clock (`clock += dt * rate`)
- * went on moving under a frozen clock: a reduced-motion still drawn again,
- * and the visual gate's frozen page (Codex-1yd58.12). A caller dividing by
- * dt must guard 0.
+ * time as the last is 0: time standing still moves nothing. It was a sixtieth,
+ * so a preset integrating its own clock (`clock += dt * rate`) went on moving
+ * under a frozen clock: a reduced-motion still drawn again, and the visual
+ * gate's frozen page. A caller dividing by dt must guard 0.
  */
 export function createDeltaClock(): (time: number) => number {
   let prev = -1;

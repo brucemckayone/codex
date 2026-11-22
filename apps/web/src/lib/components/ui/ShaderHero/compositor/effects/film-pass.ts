@@ -1,15 +1,13 @@
 /**
- * The Showreel's film frame with its motion (Codex-1yd58.7): one pass that
- * draws the film over the brand's picture and runs the four motion hooks
- * (`motion.ts`) inside it.
+ * The Showreel's film frame with its motion: one pass that draws the film over
+ * the brand's picture and runs the four motion hooks (`motion.ts`) inside it.
  *
- * At rest (`restMotion`) the pass draws exactly what WP-5's film frame
- * draws (`frame-film-fill.ts`, `frame-film-name.ts`, and WP-5b's
- * `frame-film-portrait.ts`): every hook leaves the motion untouched, the
- * film is sampled at the very point the frame samples it (`frameFilm`, as
- * that frame places it), it gives way through the same band (`bandShows`),
- * and nothing is multiplied but by exactly 1. A real-GPU probe compares the
- * two pixel for pixel.
+ * At rest (`restMotion`) the pass draws exactly what the plain film frame draws
+ * (`frame-film-fill.ts`, `frame-film-name.ts`, `frame-film-portrait.ts`): every
+ * hook leaves the motion untouched, the film is sampled at the very point the
+ * frame samples it (`frameFilm`, as that frame places it), it gives way through
+ * the same band (`bandShows`), and nothing is multiplied but by exactly 1. A
+ * real-GPU probe compares the two pixel for pixel.
  */
 
 import { FILM_GLSL, FILM_UNIFORMS, SMOKE_GLSL, SMOKE_UNIFORMS } from './film';
@@ -63,8 +61,8 @@ vec3 frameFilm(vec2 local) {
 /** What each film frame lets through, before the motion's own `shows`. */
 function frameTerm(frame: FilmFrameId, throughName: boolean): string {
   if (frame === 'film-name') return 'float frame = nameVeil(v_uv, mo.warp);';
-  // The band as WP-5's frames give way (1 with none); a portrait's left
-  // edge fades in from the brand's picture too.
+  // The band as the plain frames give way (1 with none); a portrait's left edge
+  // fades in from the brand's picture too.
   const band =
     frame === 'film-portrait'
       ? `float w = portraitWidth();

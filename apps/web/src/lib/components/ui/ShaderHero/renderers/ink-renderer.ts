@@ -21,14 +21,13 @@
  * a bass-breath UV warp on the ink sample, mid-driven brightness lift, and
  * a treble-driven wet-edge sharpening term for sparkle on ink boundaries.
  *
- * Simulation runs in a ping-pong double FBO shaped like the canvas (about
- * 512² texels, sim-grid.ts), on the step clock: 120 steps a second at any
- * frame rate, input on every second step (Codex-1yd58 WP-1d). It used to run
- * a square 512² grid (drops drew as ellipses) a fixed number of steps per
- * frame (twice as fast at 120 Hz), and started from clear water: black, or
- * the bare ground, until something stirred it. It now starts seeded and
- * warmed, and a slow idle trail keeps it alive with no audio.
- * Display pass renders to the full canvas viewport.
+ * Simulation runs in a ping-pong double FBO shaped like the canvas (about 512²
+ * texels, sim-grid.ts), on the step clock: 120 steps a second at any frame
+ * rate, input on every second step. It used to run a square 512² grid (drops
+ * drew as ellipses) a fixed number of steps per frame (twice as fast at 120
+ * Hz), and started from clear water: black, or the bare ground, until something
+ * stirred it. It now starts seeded and warmed, and a slow idle trail keeps it
+ * alive with no audio. Display pass renders to the full canvas viewport.
  */
 
 import {

@@ -1,8 +1,8 @@
 /**
- * Where a film frame's film gives way to the brand's picture (Codex-1yd58.6):
- * the Showreel's band (`stage.ts` `FilmBand`), shared by every frame that
- * fills its stage with the film, so 'film-fill' and 'film-portrait' give way
- * alike. GLSL text placed after `FILM_GLSL` and `SMOKE_GLSL`.
+ * Where a film frame's film gives way to the brand's picture: the Showreel's
+ * band (`stage.ts` `FilmBand`), shared by every frame that fills its stage with
+ * the film, so 'film-fill' and 'film-portrait' give way alike. GLSL text placed
+ * after `FILM_GLSL` and `SMOKE_GLSL`.
  */
 import type { UniformName } from './uniforms';
 

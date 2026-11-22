@@ -4,10 +4,10 @@
  * Raymarches the wave simulation heightfield from a 3D perspective camera,
  * producing a liquid surface. Based on the Shadertoy "4sKGWw" image pass.
  *
- * WP-1d (Codex-1yd58):
+ * The form:
  *  - The LOGO is a raised liquid form: its SDF lifts the surface into a
  *    plateau with rounded shoulders, and the waves ride over it. It holds
- *    still (R2b): only waves move, and only the pointer and the sound make
+ *    still: only waves move, and only the pointer and the sound make
  *    them. It used to steer the waves with a pulsing force (and glow a thin
  *    outline). No logo, no form: the plain surface.
  *  - Brand colours: the surface is the palette (primary in the troughs,
@@ -144,9 +144,9 @@ void main() {
     vec2 dd = vec2(0.25, 0.0);
     vec3 n = normalize(vec3(h0 - h(p + dd.xyy), dd.x, h0 - h(p + dd.yyx)));
 
-    // The palette: primary in the troughs, secondary on the crests, the
-    // logo in accent; mixed from the ground by intensity, from a floor of
-    // 30% so the form keeps its colour at the owner's 0.1.
+    // The palette: primary in the troughs, secondary on the crests, the logo in
+    // accent; mixed from the ground by intensity, from a floor of 30% so the
+    // form keeps its colour at the default 0.1.
     float crest = smoothstep(-0.5, 0.8, waves(p) / max(uWaveScale, 0.001));
     float logo = logoMask(p);
     vec3 palette = mix(uColorPrimary, uColorSecondary, crest);

@@ -104,8 +104,8 @@ export function reportSecondFailure(
 
 /**
  * Log the phone budget dropping a stack's second preset
- * (`shader_hero.stack_budget_dropped`), with the window's 95th-percentile
- * frame interval: the number WP-11 tunes the budget from.
+ * (`shader_hero.stack_budget_dropped`), with the window's 95th-percentile frame
+ * interval: the number the budget is tuned from.
  */
 export function reportStackBudget(
   preset: ShaderPresetId,
@@ -120,8 +120,8 @@ export function reportStackBudget(
 
 /**
  * Log the phone budget cutting a layer from a layers-only stack
- * (`shader_hero.stack_budget_layer_dropped`, behind PHONE_LAYER_BUDGET,
- * WP-11): which, how many are left drawing, and the window that broke it.
+ * (`shader_hero.stack_budget_layer_dropped`, behind PHONE_LAYER_BUDGET): which,
+ * how many are left drawing, and the window that broke it.
  */
 export function reportLayerBudget(
   cut: { layer: string; remaining: number },

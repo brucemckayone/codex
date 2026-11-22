@@ -1,5 +1,5 @@
 /**
- * One splash per click, for the FBO presets (Codex-1yd58 WP-1d).
+ * One splash per click, for the FBO presets.
  *
  * ShaderHero sets `mouse.burstStrength` to 1 on a click or tap and decays it
  * by elapsed time, to its 0.01 floor in about 0.47 s. The presets used to

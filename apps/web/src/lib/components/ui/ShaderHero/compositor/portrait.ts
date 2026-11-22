@@ -1,15 +1,14 @@
 /**
- * The frame rule (WP-5b, owner 2026-11-21): a PORTRAIT film or picture
- * (taller than wide: OBB's 720x1280 previews and 1200x1500 stills) on a
- * landscape-shaped stage, that filling would crop by more than 40%, is not
- * cropped. It sits flush right at the stage's full height and its left edge
- * fades into the brand's picture (`effects/frame-film-portrait.ts`).
+ * The frame rule: a PORTRAIT film or picture (taller than wide: OBB's 720x1280
+ * previews and 1200x1500 stills) on a landscape-shaped stage, that filling
+ * would crop by more than 40%, is not cropped. It sits flush right at the
+ * stage's full height and its left edge fades into the brand's picture
+ * (`effects/frame-film-portrait.ts`).
  *
- * The stage's shape decides, not the device (review L4): a phone held
- * sideways places it too; one held upright has a portrait stage, which
- * crops it little, so it fills. A square or landscape piece always fills
- * (review M3: the owner said portrait). Automatic, with no setting of its
- * own (owner, 2026-11-19, Q2).
+ * The stage's shape decides, not the device: a phone held sideways places it
+ * too; one held upright has a portrait stage, which crops it little, so it
+ * fills. A square or landscape piece always fills: the rule is for portrait
+ * pieces only. Automatic, with no setting of its own.
  *
  * PURE, so the rule is under test without a GL context.
  */

@@ -1,13 +1,13 @@
 /**
- * The studio's one frame of the org's moving background, for the page
- * editor (Codex-61zsk.73, #20b). The studio draws the org's shader once and
- * stops (`still`); straight after that draw the fullpage ShaderHero copies
- * the frame, small, into a picture here, and every Moving band the editor
- * draws (the canvas, each thumbnail, the Moving swatch) paints it under the
- * proven veil in place of the glow (`kit/atmosphere-still.ts`). A channel
- * beside `shaderTone`, so no second WebGL context and nothing polled: a copy
- * is taken only when the studio draws its frame again (a resize, a remount,
- * a brand change while a render paints the copy).
+ * The studio's one frame of the org's moving background, for the page editor.
+ * The studio draws the org's shader once and stops (`still`); straight after
+ * that draw the fullpage ShaderHero copies the frame, small, into a picture
+ * here, and every Moving band the editor draws (the canvas, each thumbnail, the
+ * Moving swatch) paints it under the proven veil in place of the glow
+ * (`kit/atmosphere-still.ts`). A channel beside `shaderTone`, so no second
+ * WebGL context and nothing polled: a copy is taken only when the studio draws
+ * its frame again (a resize, a remount, a brand change while a render paints
+ * the copy).
  */
 
 import { untrack } from 'svelte';

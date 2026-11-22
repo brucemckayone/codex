@@ -1,7 +1,7 @@
 /**
- * What the Showreel's film frames share (Codex-1yd58.6): where the stage is,
- * and the film as it fills it. GLSL text placed after a frame's generated
- * uniforms, so every frame using it must read the uniforms listed here.
+ * What the Showreel's film frames share: where the stage is, and the film as it
+ * fills it. GLSL text placed after a frame's generated uniforms, so every frame
+ * using it must read the uniforms listed here.
  */
 import type { UniformName } from './uniforms';
 

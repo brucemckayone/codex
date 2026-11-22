@@ -1,13 +1,13 @@
 /**
  * Fracture fragment shader — Space subdivided by animated half-plane cuts.
  *
- * ## WP-1d R4b (Codex-1yd58): the hard lines are the motif
+ * ## The hard lines are the motif
  *
  * - Fewer, larger shards: 5 cuts by default (8), and the cuts sway a
  *   quarter as far (CUT_SWAY), so the pattern breathes, not swings.
- * - The lines, by default, are the old ones: bold, hard, near-black, with
- *   the hard offset shadow. R4 softened and tinted them and the owner lost
- *   the post-modern look, so those are settings: u_border (line weight),
+ * - The lines, by default, are bold, hard, near-black, with the hard offset
+ *   shadow. Softened and tinted lines lose the post-modern look, so those
+ *   are settings: u_border (line weight),
  *   u_lineSoftness (hard to soft, which also fades the shadow), u_lineTint
  *   (dark to a tint of the ground).
  *
@@ -97,13 +97,13 @@ ${MOTION_HELPERS}
 const float CUT_SWAY = 0.32;
 
 /**
- * The narrowest anti-alias ramp (WP-11). fwidth() is 0 where the distance
- * does not change across a pixel quad, which made the line's two smoothstep
- * edges EQUAL: undefined in GLSL ES 3.00 (a 0/0 at the edge). A floor this
- * far below a pixel's width changes nothing wherever fwidth() is above it.
- * The shader gate's smoothstep check (validate-shaders.mjs) cannot catch
- * this: it judges literal edges, and these are expressions that only meet
- * at run time, in a pixel whose distance is flat.
+ * The narrowest anti-alias ramp. fwidth() is 0 where the distance does not
+ * change across a pixel quad, which made the line's two smoothstep edges EQUAL:
+ * undefined in GLSL ES 3.00 (a 0/0 at the edge). A floor this far below a
+ * pixel's width changes nothing wherever fwidth() is above it. The shader
+ * gate's smoothstep check (validate-shaders.mjs) cannot catch this: it judges
+ * literal edges, and these are expressions that only meet at run time, in a
+ * pixel whose distance is flat.
  */
 const float MIN_RAMP = 1e-5;
 
@@ -192,7 +192,7 @@ void main() {
   cellColor = tinted * 1.25 * audioLift(u_energy, 0.16);
 
   // ── Border: hard by default (1 px of anti-alias) ───────────────────
-  // Softness blurs it either side of the same weight (R4's soft line).
+  // Softness blurs it either side of the same weight (the soft line).
   float fw = max(fwidth(minEdge), MIN_RAMP);
   float ramp = max(fw, u_lineSoftness * u_border * 0.65);
   float borderMask = 1.0 - smoothstep(u_border - ramp, u_border + ramp, minEdge);
@@ -213,8 +213,8 @@ void main() {
   // that keeping some colour in it looks better than crushing it to black.
   float bgLum = dot(u_bgColor, vec3(0.299, 0.587, 0.114));
   float onLight = smootherstep(0.25, 0.8, bgLum);
-  // Dark by default (the old lines); the tint takes them to R4's tint of
-  // the ground, lighter on a dark ground and darker on a light one.
+  // Dark by default (the hard lines); the tint takes them to a tint of the
+  // ground, lighter on a dark ground and darker on a light one.
   vec3 tintLead = mix(
     mix(u_bgColor, u_brandPrimary, 0.35) * 1.4 + 0.04,
     mix(u_bgColor, u_brandPrimary, 0.4) * 0.7,

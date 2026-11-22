@@ -1,7 +1,7 @@
 /**
- * The Showreel's motion effects by axis (Codex-1yd58.7), and which ones a
- * film frame runs here: the phone's fallback, then reduced motion's, then,
- * with no name to draw through, an effect that needs none.
+ * The Showreel's motion effects by axis, and which ones a film frame runs here:
+ * the phone's fallback, then reduced motion's, then, with no name to draw
+ * through, an effect that needs none.
  *
  * Plain data and strings, importing nothing from the app, as `registry.ts`
  * is, so `shaders:check` can bundle it in Node.

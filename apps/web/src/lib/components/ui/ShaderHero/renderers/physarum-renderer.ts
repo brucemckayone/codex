@@ -8,12 +8,12 @@
  * agent deposits where it stands, drawn as a point. The display shades the
  * trail in the brand ramp.
  *
- * WP-1d R3 (Codex-1yd58). Before it, agents were a density field moved
- * through the trail texture by a bilinear backtrace, which blurred them on
- * every step, so the preset showed a faint mist and never a vein (18 s in,
- * in the lab). It also ran two steps a frame (twice as fast at 120 Hz),
- * queued a click burst on every frame of the click's decay, and stretched a
- * square 512x512 grid over the canvas. Now:
+ * Before the particles, agents were a density field moved through the trail
+ * texture by a bilinear backtrace, which blurred them on every step, so the
+ * preset showed a faint mist and never a vein (18 s in, in the lab). It also
+ * ran two steps a frame (twice as fast at 120 Hz), queued a click burst on
+ * every frame of the click's decay, and stretched a square 512x512 grid over
+ * the canvas. Now:
  * - the network has grown before the first frame shows (WARMUP_STEPS), so
  *   the still frame (reduced motion) is veins, not speckle;
  * - it runs 120 steps a second at any frame rate, input on every second

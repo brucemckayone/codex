@@ -1,6 +1,6 @@
 /**
- * The stage: where the piece's film sits on the canvas (Codex-1yd58.4; the
- * fixed stage decided by the WP-1 spike, variant C).
+ * The stage: where the piece's film sits on the canvas, held fixed in the
+ * window.
  *
  * A film composited at the hero box's LIVE position trails the words by a
  * frame on a phone (the page scrolls on the compositor thread; the canvas
@@ -11,8 +11,8 @@
  * hero leaves. Only the fade reads the scroll, and a fade a frame late is
  * invisible. Assumes the canvas is fixed to the window (the org layout's).
  *
- * All PURE, so the arithmetic is under test; WP-5's Showreel calls
- * `setStage` with a box from `stageBoxFrom`.
+ * All PURE, so the arithmetic is under test; the Showreel calls `setStage` with
+ * a box from `stageBoxFrom`.
  */
 import { clamp01 } from '../clamp';
 import type { FilmFrameId, ReelSurface } from './effects/ids';
@@ -29,18 +29,17 @@ export type StageMedia = HTMLVideoElement | HTMLImageElement;
 export type FilmBand = 'none' | 'under' | 'fade' | 'edges';
 
 /**
- * How far the reel has played the piece on show, in seconds, read once a
- * frame. It holds while the reel holds (paused, held, off screen), where the
- * page's own clock runs on (WP-5b review M2).
+ * How far the reel has played the piece on show, in seconds, read once a frame.
+ * It holds while the reel holds (paused, held, off screen), where the page's
+ * own clock runs on.
  */
 export type PieceSeconds = () => number;
 
 /**
- * How the Showreel shows its film (WP-5): which film frame (its layout's),
- * and its band. WP-5b adds what is drawn on the piece's own picture first:
- * a surface over the footage (`reel-surface`; none when absent) and the
- * stills' push-in (`reel-push`), driven by the reel's clock: off when absent
- * or null.
+ * How the Showreel shows its film: which film frame (its layout's), and its
+ * band; and what is drawn on the piece's own picture first: a surface over the
+ * footage (`reel-surface`; none when absent) and the stills' push-in
+ * (`reel-push`), driven by the reel's clock: off when absent or null.
  */
 export interface FilmLook {
   readonly frame: FilmFrameId;
@@ -75,11 +74,10 @@ export const BAND_CODE: Record<FilmBand, number> = {
 };
 
 /**
- * Where the band gives way, down the stage, as fractions of its height from
- * the top. These are the v4 mock's ramps moved a tenth lower (owner,
- * 2026-11-20: the footage felt "cramped"), so the film keeps the open frame
- * and gives way behind the words and the index. ReelStage's stills' masks
- * use the same numbers.
+ * Where the band gives way, down the stage, as fractions of its height from the
+ * top. These are the v4 mock's ramps moved a tenth lower, where the footage no
+ * longer feels cramped, so the film keeps the open frame and gives way behind
+ * the words and the index. ReelStage's stills' masks use the same numbers.
  */
 export function bandRamp(
   band: FilmBand,
@@ -144,13 +142,12 @@ export function stageFade(scrollY: number, fadeDistance: number): number {
 }
 
 /**
- * How far a scroll takes the canvas's letters out, in CSS px (owner,
- * 2026-11-21, the scroll fix's (c)). The name mask is held in window space
- * with the stage, so a scrolled letter sits that far below the word the page
- * scrolled away: legible as a second title. Gone within this span, a letter
- * is never further off than it (plus a frame's scroll at a fling: the fade
- * reads a frame-old `scrollY`, which a fade hides), and the page's own glyphs
- * take the name back over the same span (the Showreel's ink).
+ * How far a scroll takes the canvas's letters out, in CSS px. The name mask is
+ * held in window space with the stage, so a scrolled letter sits that far below
+ * the word the page scrolled away: legible as a second title. Gone within this
+ * span, a letter is never further off than it (plus a frame's scroll at a
+ * fling: the fade reads a frame-old `scrollY`, which a fade hides), and the
+ * page's own glyphs take the name back over the same span (the Showreel's ink).
  */
 export const NAME_FADE_PX = 32;
 

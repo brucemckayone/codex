@@ -1,8 +1,8 @@
 /**
- * The duotone surface's three stops (WP-5b, Codex-1yd58.6; review M1): the
- * footage's light mapped from the brand's dark, through its primary, to a
- * pale of the primary. Worked out here, once a frame, so the rule is under
- * test; the pass (`effects/surface-duotone.ts`) only blends between them.
+ * The duotone surface's three stops: the footage's light mapped from the
+ * brand's dark, through its primary, to a pale of the primary. Worked out here,
+ * once a frame, so the rule is under test; the pass
+ * (`effects/surface-duotone.ts`) only blends between them.
  *
  * Never literal black or white: every channel of every stop stays within
  * `DUOTONE_FLOOR` of the extremes. A primary near black or white (Mono's

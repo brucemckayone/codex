@@ -7,9 +7,9 @@
  *
  * ## What changed and why
  *
- * **No agent fronts (WP-1d R3).** The agents are particles now
- * (physarum-sim.frag.ts), each one texel; a front lit where they stand would
- * be 65,536 bright dots. The veins they draw are the picture.
+ * **No agent fronts.** The agents are particles (physarum-sim.frag.ts), each
+ * one texel; a front lit where they stand would be 65,536 bright dots. The
+ * veins they draw are the picture.
  *
  * **The node pulse.** It was `sin(uTime * 2.0 + trail * 10.0)`: 2 rad/s off the
  * wall clock, fast enough to read as a strobe over dense regions. It now runs

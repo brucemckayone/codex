@@ -21,11 +21,11 @@ export interface ResizedSim {
 
 /**
  * The simulated presets' resize, in one place so the three cannot drift.
- * Returns the grid and buffer for the caller to adopt and then reseed, or
- * null to keep what it has: no real change of shape (`simGridChanged`), no
- * buffer yet, or a lost context, which cannot allocate (restoring it is
- * WP-3, Codex-1yd58.4; until then the old grid is kept). It allocates BEFORE
- * destroying, so an allocation that throws leaves the old buffer intact.
+ * Returns the grid and buffer for the caller to adopt and then reseed, or null
+ * to keep what it has: no real change of shape (`simGridChanged`), no buffer
+ * yet, or a lost context, which cannot allocate (the old grid is kept). It
+ * allocates BEFORE destroying, so an allocation that throws leaves the old
+ * buffer intact.
  */
 export function resizeSim(
   gl: WebGL2RenderingContext,

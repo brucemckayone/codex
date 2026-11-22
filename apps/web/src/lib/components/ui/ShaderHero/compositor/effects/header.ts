@@ -1,6 +1,6 @@
 /**
- * What every compositor pass starts with (ported from the WP-1b shader lab's
- * HEADER, `shader-lab/src/passes.ts`): the version, the varyings the shared
+ * What every compositor pass starts with (ported from the shader lab's HEADER,
+ * `shader-lab/src/passes.ts`): the version, the varyings the shared
  * `VERTEX_SHADER` writes, and the helpers the effects share.
  *
  * No uniform is declared here. Each pass's uniform block is generated from

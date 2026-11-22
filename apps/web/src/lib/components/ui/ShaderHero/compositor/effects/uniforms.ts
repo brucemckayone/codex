@@ -1,6 +1,5 @@
 /**
- * Every uniform a compositor pass may declare, with its GLSL type
- * (Codex-1yd58.4).
+ * Every uniform a compositor pass may declare, with its GLSL type.
  *
  * This table is the contract between the effects and the compositor. An
  * effect lists the names it reads (`Effect.uniforms`); `assembleEffect`
@@ -21,7 +20,7 @@ export const UNIFORMS = {
   u_second: 'sampler2D',
   /** The name mask, red channel (`setNameMask`). */
   u_mask: 'sampler2D',
-  /** The piece's video frame or image (`setMedia`, WP-5's film frames). */
+  /** The piece's video frame or image (`setMedia`, for the film frames). */
   u_media: 'sampler2D',
   /** The size, in pixels, of the target this pass draws into. */
   u_resolution: 'vec2',
@@ -49,9 +48,9 @@ export const UNIFORMS = {
   u_band: 'float',
   /** Where the band gives way: from x to y of the stage, measured down. */
   u_ramp: 'vec2',
-  /** The stills' push-in (WP-5b): how far the piece's picture is drawn in; 1 for none. */
+  /** The stills' push-in: how far the piece's picture is drawn in; 1 for none. */
   u_zoom: 'float',
-  /** The surfaces' tint (WP-5b review L6): the brand's OWN primary, from its
+  /** The surfaces' tint: the brand's OWN primary, from its
    *  tokens, never the shader's custom palette (`u_brandPrimary`). */
   u_tint: 'vec3',
   /** The duotone's dark, middle and pale (`../duotone.ts`), from the brand's

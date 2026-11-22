@@ -6,7 +6,7 @@
  * convolution + Gaussian growth), display (four-stop concentric ramp).
  * `speed` sets the steps a second (x 60); `dt` the integration step.
  *
- * ## WP-1d R3 (Codex-1yd58)
+ * ## What changed and why
  *
  * - The step clock: `speed` x 60 steps a second at any frame rate, input on
  *   60 of them. It ran `speed` substeps a frame with a frame-scaled dt,
@@ -17,7 +17,7 @@
  *   1.8x wide on a 16:9 hero.
  * - The warm-up runs the brand's own rules, so the first frame (a reduced
  *   motion still) shows creatures grown under the rules the hero then plays.
- * - The owner's tuning (radius 15, growth 0.2, width 0.05, speed 4, dt 0.5)
+ * - The lab's tuning (radius 15, growth 0.2, width 0.05, speed 4, dt 0.5)
  *   is the default.
  *
  * ## Kept

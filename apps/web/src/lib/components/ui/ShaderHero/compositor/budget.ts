@@ -1,5 +1,5 @@
 /**
- * The phone budget for a two-preset stack (Codex-1yd58.4, plan §5.8).
+ * The phone budget for a two-preset stack.
  *
  * On a phone (under `PHONE_MAX_WIDTH` CSS px) the second preset already
  * renders at half the scene's size. If the frame interval's 95th percentile
@@ -7,8 +7,8 @@
  * the hero drops the second preset for the rest of its life (the org layout
  * mounts it once per session) and logs it. The base keeps drawing.
  *
- * START VALUES, owner-approved for WP-3 and to be tuned on the phone in
- * WP-11: 25 ms is 40 fps, a frame and a half late at 60.
+ * START VALUES, to be tuned on a real phone (WP-11): 25 ms is 40 fps, a frame
+ * and a half late at 60.
  */
 
 import { clamp01 } from '../clamp';

@@ -1,8 +1,8 @@
 /**
- * The reel's timed motion (Codex-1yd58.7): the opening through the name,
- * and the way into the film. Each is a pure function of the time since it
- * began, giving the motion uniforms it moves (the rest stay at
- * `restMotion`), so every moment is under test.
+ * The reel's timed motion: the opening through the name, and the way into the
+ * film. Each is a pure function of the time since it began, giving the motion
+ * uniforms it moves (the rest stay at `restMotion`), so every moment is under
+ * test.
  *
  * The dives follow the letter-dive research: a zoom of constant speed,
  * `zoom = depth ^ p`, with `p` easing in, never longer than 900 ms.
