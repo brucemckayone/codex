@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The e2e origin gate (Codex-1yd58 WP-11).
+ * The e2e origin gate.
  *
  * The e2e suite finds the web app through ONE helper,
  * `apps/web/e2e/helpers/origin.ts` (`E2E_BASE_URL`, `E2E_ORIGIN`, `E2E_HOST`,

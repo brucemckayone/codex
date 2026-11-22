@@ -1,7 +1,7 @@
 /**
  * The esbuild the app builds with, for the shader gates: validate-shaders.mjs
  * (shaders:check) and shader-gate.mjs (the film passes' text checks, which CI
- * runs without glslang). Moved out of validate-shaders.mjs (Codex-1yd58.7).
+ * runs without glslang).
  */
 import { createRequire } from 'node:module';
 import path from 'node:path';

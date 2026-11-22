@@ -1,7 +1,7 @@
 <!--
   @component BrandEditorHeroCombine
 
-  Hero › Effects › Combine (Codex-1yd58 WP-9): build on the base preset with a
+  Hero › Effects › Combine: build on the base preset with a
   second preset and how the two meet, up to six finishing layers in drawn
   order, and a frame. Every hero composition draws it.
 

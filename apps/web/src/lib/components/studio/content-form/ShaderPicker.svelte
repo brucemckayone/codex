@@ -42,7 +42,7 @@
    * `none` is re-described. In the brand editor it means "fall back to the
    * default gradient hero"; here it means "no shader of the piece's own", and
    * immersive mode then paints the org's brand shader, else flow
-   * (`AudioPlayer/immersive-preset.ts`, owner 2026-11-19). Same id, different
+   * (`AudioPlayer/immersive-preset.ts`, the owner's rule). Same id, different
    * consequence — so the description is overridden rather than inherited,
    * and worded from what actually plays: "Plays your brand's shader", or
    * "Plays Flow" where the brand has none (`noShaderPlays`). The brand's

@@ -16,7 +16,7 @@ Use this skill when implementing new shader presets for the ShaderHero system in
 
 The ShaderHero system renders animated WebGL2 shader backgrounds for organization hero sections. Each org can select a shader preset and configure it via the brand editor. The system reads configuration from CSS custom properties (`--brand-shader-*`) injected by the brand editor, and passes them as uniforms to GLSL ES 3.0 fragment shaders.
 
-**Current presets (16 + none), after the WP-1b shader lab cull (Codex-1yd58, 2026-11-19):** flow, suture, ripple, film, caustic (owner: keep), and ether, pulse, ink, topo, glass, flux, lava, physarum, aurora, lenia, fracture (owner: rework, Codex-1yd58.15).
+**Current presets (16 + none), after the shader lab cull:** flow, suture, ripple, film, caustic (the owner kept these as they were), and ether, pulse, ink, topo, glass, flux, lava, physarum, aurora, lenia, fracture (the owner had these reworked).
 
 **25 presets were cut.** Their ids still exist in stored data (branding `shader-preset`, content `shader_preset`), so every id goes through `resolvePresetId()` in `shader-config.ts`, which maps a cut id to its survivor via `CUT_PRESET_ALIASES`. Never turn a stored id into a renderer without it: an unknown id used to fall through to `'none'` and blank the org silently. A new preset is a survivor; a removed one is an alias entry, never a deletion alone.
 
@@ -242,7 +242,7 @@ Integer uniforms require special handling at three levels:
 
 ### 4. Post-processing chain
 
-Shaders end with a tone-map, intensity mix, vignette, grain and final clamp, as below. **The "75% brightness cap" this skill used to mandate is not what the presets do**: the WP-1b audit (2026-11-19) found it in only 4 of 60 shader files; the rest clamp at 1.0. Do not add it by rote. Hero text contrast is handled by the hero (tone sampling, ink choice, veil) and measured on the rendered page (Codex-t2t6o), not by capping the shader:
+Shaders end with a tone-map, intensity mix, vignette, grain and final clamp, as below. **The "75% brightness cap" this skill used to mandate is not what the presets do**: an audit found it in only 4 of 60 shader files; the rest clamp at 1.0. Do not add it by rote. Hero text contrast is handled by the hero (tone sampling, ink choice, veil) and measured on the rendered page (Codex-t2t6o), not by capping the shader:
 
 ```glsl
 // Reinhard tonemapping
@@ -372,9 +372,9 @@ out vec2 v_uv;
 void main() { v_uv = a_position * 0.5 + 0.5; gl_Position = vec4(a_position, 0, 1); }
 ```
 
-### 14. The output door (Codex-1yd58 WP-2)
+### 14. The output door
 
-A renderer reaches "the screen" ONLY through `bindOutput(gl)` from `output-target.ts`, both for its visible draw and whenever it finishes with one of its own framebuffers. Never `gl.bindFramebuffer(gl.FRAMEBUFFER, null)`: the brand shader stack's compositor (WP-3, Codex-1yd58.4, `ShaderHero/compositor/`) attaches its scene framebuffer as the output, and a raw null bind would draw to the canvas behind its back. The `check:output-door` gate (`apps/web/scripts/check-output-door.mjs`, a CI static-analysis step) fails on any raw null bind under `ShaderHero/` outside `output-target.ts`: `gl.`, `gl!.`, `gl?.` and cast receivers, `null` or `undefined` (also as one branch, `fbo ?? null`), `FRAMEBUFFER` or `DRAW_FRAMEBUFFER`, wrapped or not. Run it locally with `pnpm --filter web run check:output-door`. Import it in every renderer: `import { bindOutput } from '../output-target';` (both templates below do).
+A renderer reaches "the screen" ONLY through `bindOutput(gl)` from `output-target.ts`, both for its visible draw and whenever it finishes with one of its own framebuffers. Never `gl.bindFramebuffer(gl.FRAMEBUFFER, null)`: the brand shader stack's compositor (`ShaderHero/compositor/`) attaches its scene framebuffer as the output, and a raw null bind would draw to the canvas behind its back. The `check:output-door` gate (`apps/web/scripts/check-output-door.mjs`, a CI static-analysis step) fails on any raw null bind under `ShaderHero/` outside `output-target.ts`: `gl.`, `gl!.`, `gl?.` and cast receivers, `null` or `undefined` (also as one branch, `fbo ?? null`), `FRAMEBUFFER` or `DRAW_FRAMEBUFFER`, wrapped or not. Run it locally with `pnpm --filter web run check:output-door`. Import it in every renderer: `import { bindOutput } from '../output-target';` (both templates below do).
 
 ---
 

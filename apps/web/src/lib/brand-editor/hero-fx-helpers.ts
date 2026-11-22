@@ -1,7 +1,7 @@
 /**
  * Hero FX helpers — preset selection + override default-equality removal,
  * and `migrateSharedFx`, which folds a brand's legacy shared intensity/grain/
- * vignette into its preset's own keys when the editor opens it (WP-1d).
+ * vignette into its preset's own keys when the editor opens it.
  *
  * Extracted from BrandEditorHeroEffects.svelte (Codex-19h35 Phase 2) so the
  * two scoping-doc gotchas (Codex-6itei §4.2) can be unit-tested without
@@ -147,7 +147,7 @@ function foldDark(
 
 /**
  * Fold a brand's legacy SHARED intensity/grain/vignette into its current
- * preset's own keys (Codex-1yd58 WP-1d), so switching presets never carries
+ * preset's own keys, so switching presets never carries
  * them to another preset. The brand editor runs it on the brand it opens.
  *
  * Each theme keeps rendering what it rendered for its current preset:
@@ -159,8 +159,8 @@ function foldDark(
  * The shared keys are then dropped, even where a preset key already won:
  * left in place, every OTHER preset would still fall back to them.
  *
- * A theme with NO live preset drops them too, moving them nowhere (owner,
- * 2026-11-19: each preset gets its own defaults). They paint nothing there,
+ * A theme with NO live preset drops them too, moving them nowhere (the
+ * owner's rule: each preset gets its own defaults). They paint nothing there,
  * and kept, they became the fallback of whatever preset was picked next:
  * the "Still" look wrote intensity 0 and vignette 0 with preset none, so a
  * later pick of Flow painted 0 / 0 while its sliders read 0.65 / 0.2. (A

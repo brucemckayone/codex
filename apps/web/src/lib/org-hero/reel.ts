@@ -1,8 +1,8 @@
 /**
- * The Showreel's reel (Codex-1yd58): what the hero plays, in order. The org's
- * intro film, then up to five featured pieces when at least two of them can
- * be shown; else up to five of the latest. The two are never mixed (owner,
- * 2026-11-19). Featured content plays before featured portals: moving pieces
+ * The Showreel's reel: what the hero plays, in order. The org's intro film,
+ * then up to five featured pieces when at least two of them can be shown;
+ * else up to five of the latest. The two are never mixed (the owner's
+ * choice). Featured content plays before featured portals: moving pieces
  * lead (the spotlight, by contrast, puts a portal first).
  *
  * Each entry plays for a few seconds. A film with a preview plays its footage
@@ -99,7 +99,7 @@ export function buildReel<Row extends ReelRow>(input: {
       ? []
       : playable(rows.map((row) => toPiece(row, 'latest')));
   // A lone featured piece still plays when there is nothing newer: it never
-  // mixes, and it keeps the org's only showable piece (team lead, 2026-11-19).
+  // mixes, and it keeps the org's only showable piece.
   const pieces = latest.length > 0 ? latest : featured;
   return [...(lead ? [lead] : []), ...pieces.slice(0, MAX_PIECES)];
 }

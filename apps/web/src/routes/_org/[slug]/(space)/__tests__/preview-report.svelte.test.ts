@@ -1,9 +1,9 @@
 /**
- * The org landing's report to the brand studio (Codex-1yd58 WP-9): in the
+ * The org landing's report to the brand studio: in the
  * studio's live preview it tells the editor what its hero resolved to, and
  * from which choices; and when the preview leaves the landing (a link
  * followed inside it) it withdraws that report, so the editor keeps no hint
- * about a hero no longer drawn (review r1 L3).
+ * about a hero no longer drawn.
  *
  * Mounts the real `+page.svelte` as `resume-rail-dispute.svelte.test.ts`
  * does; the report itself is spied (its post is proven in the bridge's own

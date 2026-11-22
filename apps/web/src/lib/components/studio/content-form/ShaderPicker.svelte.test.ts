@@ -1,7 +1,7 @@
 /**
  * The studio's immersive shader picker: its None card says what a piece with
  * no shader actually plays — the brand's shader, or Flow where the brand has
- * none — and a blank saved value reads as None (Codex-1yd58.14).
+ * none — and a blank saved value reads as None.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {

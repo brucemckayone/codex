@@ -1,5 +1,5 @@
 /**
- * The brand editor's writes of the shader stack's keys (Codex-1yd58 WP-9),
+ * The brand editor's writes of the shader stack's keys,
  * kept out of `BrandEditorHeroCombine.svelte` so the rules are tested without
  * mounting it, as `hero-fx-helpers.ts` keeps the preset grid's.
  *

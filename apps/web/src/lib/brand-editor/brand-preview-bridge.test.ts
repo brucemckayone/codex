@@ -345,7 +345,7 @@ describe('initBrandPreviewBridge (iframe applier)', () => {
   });
 });
 
-// ── WP-9: the frame's report of what its hero resolved to ────────────────────
+// ── The frame's report of what its hero resolved to ─────────────────────────
 
 const RESOLVED: BrandPreviewResolved = {
   options: defaultOptions('consume', {

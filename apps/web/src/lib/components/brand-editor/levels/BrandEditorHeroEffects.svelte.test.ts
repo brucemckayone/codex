@@ -1,6 +1,6 @@
 /**
  * The hero effect's intensity / grain / vignette sliders show what the page
- * paints (Codex-1yd58 WP-1d), on either theme, for a brand saved before each
+ * paints, on either theme, for a brand saved before each
  * preset had its own keys.
  *
  * "Paints" is getShaderConfig over the CSS the pending brand emits, the
@@ -109,10 +109,11 @@ afterEach(() => {
 });
 
 describe('BrandEditorHeroEffects: the sliders show what the page paints', () => {
-  test('a pre-WP-1d "Still" brand that then picks Flow paints the defaults its sliders show', () => {
-    // What the Still atmosphere wrote before WP-1d: no shader, and the SHARED
-    // keys at 0. Kept, they became Flow's fallback: it painted 0 / 0 while its
-    // sliders read 0.65 / 0.2. The fold drops them on open (no live preset).
+  test('an older "Still" brand that then picks Flow paints the defaults its sliders show', () => {
+    // What the Still atmosphere wrote before each preset had its own keys: no
+    // shader, and the SHARED keys at 0. Kept, they became Flow's fallback: it
+    // painted 0 / 0 while its sliders read 0.65 / 0.2. The fold drops them on
+    // open (no live preset).
     const still = ATMOSPHERE_AXES.still;
     brandEditor.open(
       ORG_ID,

@@ -12,7 +12,7 @@
   the org changes are stored, so improving a purpose's defaults later reaches
   every org that never touched them.
 
-  The preview reports what the hero resolved to (WP-9, the preview bridge's
+  The preview reports what the hero resolved to (the preview bridge's
   resolved report): a field whose choice the page cannot show says what it
   shows instead, the purposes are named in the org's own kind ("Get people
   listening"), and the Showreel group shows whenever the hero is a Showreel,

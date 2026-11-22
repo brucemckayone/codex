@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Output-door gate (Codex-1yd58 WP-2): a ShaderHero renderer reaches "the
+ * Output-door gate: a ShaderHero renderer reaches "the
  * screen" only through `bindOutput(gl)` in ShaderHero/output-target.ts.
  *
  * The defect class. Every preset ends its frame by drawing into whatever
- * output is bound. The brand shader stack's compositor (WP-3, Codex-1yd58.4,
- * `ShaderHero/compositor/`) renders a preset into its own scene framebuffer,
+ * output is bound. The brand shader stack's compositor
+ * (`ShaderHero/compositor/`) renders a preset into its own scene framebuffer,
  * attached through `setOutputTarget`; every renderer that comes back with
  * `bindOutput(gl)` draws into it. One raw
  * `gl.bindFramebuffer(gl.FRAMEBUFFER, null)` would draw that preset to the

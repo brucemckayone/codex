@@ -33,7 +33,7 @@
     resolvePresetId(overrides['shader-preset']) ?? 'none'
   );
   // Intensity, grain and vignette write the ACTIVE preset's own keys, so a
-  // switch never carries one preset's tuning to the next (WP-1d).
+  // switch never carries one preset's tuning to the next.
   const fxControls = $derived(
     activePreset === 'none' ? [] : presetFxControls(activePreset)
   );
@@ -127,7 +127,7 @@
   </section>
 
   <!-- This preset's intensity/grain/vignette + its own controls (only when a
-       preset is active). Not "Global": each preset keeps its own (WP-1d). -->
+       preset is active). Not "Global": each preset keeps its own. -->
   {#if activePreset !== 'none'}
     <section class="hero-fx__section">
       <span class="hero-fx__section-label">This effect</span>
@@ -173,7 +173,7 @@
       </section>
     {/if}
 
-    <!-- WP-9: build on this preset (second, blend, layers, frame). -->
+    <!-- Build on this preset (second, blend, layers, frame). -->
     <BrandEditorHeroCombine
       base={activePreset}
       {overrides}

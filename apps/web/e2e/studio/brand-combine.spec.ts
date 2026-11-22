@@ -9,12 +9,12 @@ import {
 
 /**
  * Brand studio: Hero › Effects › Combine and Hero › Composition › Showreel
- * (Codex-1yd58 WP-9) save, and a reload reads them back from the server.
+ * save, and a reload reads them back from the server.
  * Hero › Effects' presets and sliders keep the brand's overrides minimal on
  * the rail: a slider back at its default leaves nothing to save (Gotcha #2),
  * and "None" clears every shader key, so the preset comes back at its
  * defaults (Gotcha #1). Those two were the retired `?brandEditor` overlay's
- * spec (brand-editor-hero-effects.spec.ts, quarantined, deleted in WP-11);
+ * spec (brand-editor-hero-effects.spec.ts, since deleted);
  * the helpers themselves are unit-tested in hero-fx-helpers.test.ts.
  *
  * The org is this suite's own (registerSharedStudioUser makes a fresh,

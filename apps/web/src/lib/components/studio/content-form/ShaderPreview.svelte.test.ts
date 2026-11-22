@@ -2,7 +2,7 @@
  * The studio's shader preview shows what immersive mode will actually play
  * for the piece (`immersivePreset`): its own shader, else the org's brand
  * shader — what the None card promises — else flow. A saved id that names no
- * preset says so in words, instead of a black box (Codex-1yd58.14).
+ * preset says so in words, instead of a black box.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ShaderConfig } from '$lib/components/ui/ShaderHero/shader-config';

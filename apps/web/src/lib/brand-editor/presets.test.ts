@@ -46,7 +46,7 @@ const SRC = resolve(HERE, '../..');
 
 // ── Source-derived expectations ────────────────────────────────────────────
 
-// The real set, not a parse of its source: since WP-1d it is not all string
+// The real set, not a parse of its source: it is not all string
 // literals (each preset's own intensity/grain/vignette keys are spread in from
 // preset-fx-defaults.ts), and a parse would call those keys unwritable.
 const WRITABLE_KEYS: ReadonlySet<string> = BRAND_PREFIX_KEYS;

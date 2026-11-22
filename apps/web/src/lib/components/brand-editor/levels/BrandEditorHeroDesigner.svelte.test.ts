@@ -1,5 +1,5 @@
 /**
- * Hero › Composition (Codex-1yd58 WP-9): the Showreel group shows whenever
+ * Hero › Composition: the Showreel group shows whenever
  * the hero IS a Showreel (chosen outright, or by its purpose on Auto, as the
  * preview reports), its options write `hero-opt-reel-*` with Auto removing
  * the key, a choice the page cannot show says what it shows instead, and the
@@ -142,8 +142,7 @@ describe('the Showreel group: shown whenever the hero is a Showreel', () => {
     expect(showreel()?.textContent).toContain(
       'Get people watching plays your film and pieces as a Showreel.'
     );
-    // A field for every reel axis the hero has (WP-5a added reel-edge, WP-5b
-    // reel-push).
+    // A field for every reel axis the hero has.
     const reelAxes = HERO_OPTION_KEYS.filter((key) => key.startsWith('reel-'));
     expect(
       [...(showreel()?.querySelectorAll('.hero-designer__field') ?? [])].map(

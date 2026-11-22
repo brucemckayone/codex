@@ -15,7 +15,7 @@ import { describe, expect, test } from 'vitest';
  * renderer loaded, and for good if WebGL was unavailable.
  *
  * So the ink is a function of ONE state: has the fullpage ShaderHero drawn
- * the frame its canvas shows (its root's `data-live`, Codex-1yd58.3)? This
+ * the frame its canvas shows (its root's `data-live`)? This
  * file pins both halves of that:
  *   - page state: every hero text colour resolves to the org's page tokens,
  *     never white and never a `--brand-hero-*` input;

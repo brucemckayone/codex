@@ -68,7 +68,7 @@ function isBrandPreviewMessage(data: unknown): data is BrandPreviewMessage {
   );
 }
 
-/** Versioned type of the frame's report back to the studio (WP-9). */
+/** Versioned type of the frame's report back to the studio. */
 export const BRAND_PREVIEW_RESOLVED_TYPE = 'codex:brand-preview-resolved:v1';
 
 /**
@@ -305,7 +305,7 @@ export function initBrandPreviewBridge(
 const reported = new WeakMap<Window, string>();
 
 /**
- * From a framed landing, tell the studio what its hero resolved to (WP-9).
+ * From a framed landing, tell the studio what its hero resolved to.
  *
  * INERT unless this page is the studio's live preview: embedded, and showing
  * pending edits (the applier has opened the store). It posts only to the

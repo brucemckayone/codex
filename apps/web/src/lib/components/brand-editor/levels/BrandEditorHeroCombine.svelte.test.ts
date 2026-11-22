@@ -1,5 +1,5 @@
 /**
- * Hero › Effects › Combine (Codex-1yd58 WP-9), mounted inside the Effects
+ * Hero › Effects › Combine, mounted inside the Effects
  * panel as the editor shows it: what each control writes to the brand's
  * stack keys, that a default is removed, that a retired layer stays in view
  * until removed, the six-layer cap, and the Dark theme's own stack.
