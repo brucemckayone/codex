@@ -1258,7 +1258,10 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       expect(report.owed.map((entry) => entry.stripePaymentIntentId)).toEqual([
         newer,
       ]);
-      expect(report.total).toBe(all.total);
+      // The total is every short loss, not the page of one: at least this
+      // file's two. It is `findShortLosses`' own count, so it is not compared
+      // with `all.total`: the database is shared, and another file's loss
+      // recorded or marked between that read and the sweep moves it.
       expect(report.total).toBeGreaterThanOrEqual(2);
     });
 

@@ -2418,7 +2418,18 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       );
 
       expect(await wonLate(sale)).toBe('none');
-      expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
+      // No refund of THIS payment (D62). The hourly sweep `reportedOwed` runs
+      // is global: another file's blocked payment in the shared database is
+      // asked through this fake too, so only this sale's asks are read.
+      expect(
+        vi.mocked(fake.stripe.refunds.create).mock.calls.filter(([params]) => {
+          const asked = params as Stripe.RefundCreateParams;
+          return (
+            asked.charge === sale.chargeId ||
+            asked.payment_intent === sale.paymentIntentId
+          );
+        })
+      ).toEqual([]);
 
       const mine = async (line: string) =>
         (await reportedOwed(line)).filter(
@@ -4648,11 +4659,13 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
               status: 'refunded',
               stripeRefundId: made.id,
             });
+            // This payment's line only: the sweep is global, and another
+            // file's blocked payment Stripe refuses logs the same line.
             expect(
-              errors.mock.calls.filter(
-                ([message]) =>
-                  message ===
-                  'Payment for an unavailable item could not be refunded'
+              linesOf(
+                errors,
+                'Payment for an unavailable item could not be refunded',
+                sale.purchase.id
               )
             ).toEqual([]);
             // The refund it made failed: owed, in the queue at its amount.
