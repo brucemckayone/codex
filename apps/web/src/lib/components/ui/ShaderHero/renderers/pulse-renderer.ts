@@ -41,6 +41,7 @@ import {
   type DoubleFBO,
   destroyDoubleFBO,
   drawQuad,
+  fillBoth,
   getUniforms,
   VERTEX_SHADER,
 } from '../webgl-utils';
@@ -456,11 +457,7 @@ export function createPulseRenderer(): ShaderRenderer {
       gl.viewport(0, 0, SIM_RES, SIM_RES);
       gl.useProgram(initProg);
       quad.bind(initProg);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.read.fbo);
-      drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
-      drawQuad(gl);
-      bindOutput(gl);
+      fillBoth(gl, simBuf);
     },
 
     destroy(gl: WebGL2RenderingContext): void {

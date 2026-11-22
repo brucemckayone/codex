@@ -64,6 +64,7 @@ import {
   type DoubleFBO,
   destroyDoubleFBO,
   drawQuad,
+  fillBoth,
   getUniforms,
   VERTEX_SHADER,
 } from '../webgl-utils';
@@ -297,11 +298,7 @@ export function createLeniaRenderer(): ShaderRenderer {
     gl.useProgram(initProg);
     quad.bind(initProg);
     gl.uniform2f(initTexelU, 1 / grid.w, 1 / grid.h);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.read.fbo);
-    drawQuad(gl);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
-    drawQuad(gl);
-    bindOutput(gl);
+    fillBoth(gl, simBuf);
     // Runs silent: this is bootstrapping the field, not playback, so reacting
     // to whatever was playing at reset would bake a transient into it.
     for (let i = 0; i < WARMUP_STEPS; i++) {
