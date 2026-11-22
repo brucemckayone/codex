@@ -231,12 +231,14 @@ test.describe('the Showreel on a landing', () => {
     const page = await open(browser, baseURL);
     const ring = await page.locator('.reel').evaluate((reel) => {
       // The first paint, as it stands before the fit: no solved ring, no
-      // `data-fit`, and a player text set dark on OBB's dark.
+      // `data-fit`, and a creator's player text set dark.
       reel.style.removeProperty('--color-focus');
       reel.removeAttribute('data-fit');
       reel.style.setProperty('--color-player-text', '#8B1A2B');
       const probe = document.createElement('span');
       probe.style.color = 'var(--color-focus)';
+      // The switch the pole is drawn by: 1 on a light ground, 0 on a dark.
+      probe.style.opacity = 'var(--_light)';
       reel.append(probe);
       const canvas = document.createElement('canvas').getContext('2d', {
         willReadFrequently: true,
@@ -244,11 +246,18 @@ test.describe('the Showreel on a landing', () => {
       if (!canvas) return null;
       canvas.fillStyle = getComputedStyle(probe).color;
       canvas.fillRect(0, 0, 1, 1);
+      const light = Number.parseFloat(getComputedStyle(probe).opacity);
       probe.remove();
-      return [...canvas.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+      return {
+        rgb: [...canvas.getImageData(0, 0, 1, 1).data.slice(0, 3)],
+        light,
+      };
     });
-    // OBB is dark: its pole's ink is white.
-    expect(ring).toEqual([255, 255, 255]);
+    // The brand's ground decides the pole (OBB's local brand is dark, its
+    // seed's light): exactly one of the two, never between.
+    expect([0, 1]).toContain(ring?.light);
+    // Its ink: white over a dark ground, black over a light one.
+    expect(ring?.rgb).toEqual(ring?.light === 1 ? [0, 0, 0] : [255, 255, 255]);
     await page.context().close();
   });
 
@@ -317,36 +326,107 @@ test.describe('the Showreel on a landing', () => {
     await page.context().close();
   });
 
+  /**
+   * An ink the shades carry only grown: more than they lay as drawn, less
+   * than the most they may grow to, by the scrim solver's own needs
+   * (`scrimAlpha`, then `glowLeaves`) for body and large text. It is set on
+   * both of the reel's inks, the page's text (a light ground's) and the
+   * player's (a dark one's), so the cell reads the same on any brand's
+   * ground: CI's seeded OBB is light, the local one dark.
+   */
+  const UNCARRIED = { 'text-primary': '#606060', 'player-text': '#909090' };
+
   test("'shadow' (the default) glows each word with no outline and grows the shades; 'outline' keeps them as drawn and outlines the words", async ({
     browser,
     baseURL,
   }) => {
-    const read = async (keys: Record<string, string>) => {
-      const page = await open(browser, baseURL, { keys });
+    const read = async (
+      keys: Record<string, string>,
+      tokens: Record<string, string> = UNCARRIED
+    ) => {
+      const page = await open(browser, baseURL, {
+        keys,
+        tokens,
+        // Every warning the page logs, from its first fit on.
+        init: () => {
+          const said: string[] = [];
+          Object.defineProperty(window, '__reelWarnings', { value: said });
+          const warn = console.warn.bind(console);
+          console.warn = (...args: unknown[]) => {
+            said.push(args.map(String).join(' '));
+            warn(...args);
+          };
+        },
+      });
       await expect(page.locator('.reel')).toHaveAttribute('data-fit', '');
-      const out = await page.locator('.reel').evaluate((reel) => ({
-        edge: reel.getAttribute('data-edge'),
-        // Each word's text-shadow layers as [x, y, blur] in px, colours dropped.
-        shadows: [...reel.querySelectorAll<HTMLElement>('[data-ink]')]
-          .filter((el) => el.getBoundingClientRect().width > 1)
-          .map((el) =>
-            getComputedStyle(el)
-              .textShadow.replace(/(rgba?|color)\([^)]*\)/g, '')
-              .split(',')
-              .map((layer) =>
-                (layer.match(/-?[\d.]+px/g) ?? []).map(parseFloat)
+      const out = await page.locator('.reel').evaluate((reel) => {
+        // The reel's ink as 0-255 channels, whatever form the page computes
+        // it in (a mixed colour computes as `color(srgb …)`).
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--_ink)';
+        reel.append(probe);
+        const canvas = document.createElement('canvas').getContext('2d', {
+          willReadFrequently: true,
+        });
+        if (!canvas) throw new Error('no 2d canvas');
+        canvas.fillStyle = getComputedStyle(probe).color;
+        canvas.fillRect(0, 0, 1, 1);
+        const ink = [...canvas.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+        probe.remove();
+        return {
+          edge: reel.getAttribute('data-edge'),
+          ink,
+          // Each word's text-shadow layers as [x, y, blur] in px, colours dropped.
+          shadows: [...reel.querySelectorAll<HTMLElement>('[data-ink]')]
+            .filter((el) => el.getBoundingClientRect().width > 1)
+            .map((el) =>
+              getComputedStyle(el)
+                .textShadow.replace(/(rgba?|color)\([^)]*\)/g, '')
+                .split(',')
+                .map((layer) =>
+                  (layer.match(/-?[\d.]+px/g) ?? []).map(parseFloat)
+                )
+                .filter((layer) => layer.length >= 2)
+            ),
+          // The shades as drawn: each one's peak, and each ellipse's radii
+          // (not their reach, which follows the words).
+          shades: Object.fromEntries(
+            [...reel.style]
+              .filter((prop) =>
+                /^--_(peak-(top|foot)|(top|foot)-\d+)$/.test(prop)
               )
-              .filter((layer) => layer.length >= 2)
-          ),
-        foot: reel.style.getPropertyValue('--_foot-0'),
-        peakTop: Number(reel.style.getPropertyValue('--_peak-top')),
-      }));
+              .map((prop) => {
+                const value = reel.style.getPropertyValue(prop);
+                const radii = /ellipse ([\d.]+)% ([\d.]+)%/.exec(value);
+                return [
+                  prop,
+                  radii
+                    ? [Number(radii[1]), Number(radii[2])]
+                    : [Number(value)],
+                ];
+              })
+          ) as Record<string, number[]>,
+          short: (
+            (window as Window & { __reelWarnings?: string[] }).__reelWarnings ??
+            []
+          ).filter((line) => line.includes('cannot carry')),
+        };
+      });
       await page.context().close();
       return out;
     };
-    const radius = (shape: string) =>
-      Number(/ellipse ([\d.]+)%/.exec(shape)?.[1] ?? Number.NaN);
     const shadow = await read({});
+    // The ink reached the reel: one of the planted greys, by its ground's pole.
+    const channels = (hex: string) =>
+      [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
+    expect(
+      Object.values(UNCARRIED).some((hex) =>
+        channels(hex).every(
+          (v, i) => Math.abs(v - (shadow.ink[i] ?? Number.NaN)) <= 1
+        )
+      ),
+      `the planted ink on the reel: rgb(${shadow.ink.join(', ')})`
+    ).toBe(true);
     expect(shadow.edge).toBe('shadow');
     expect(shadow.shadows.length).toBeGreaterThan(0);
     // A soft glow: blurred layers centred on the glyphs, never a ring.
@@ -367,13 +447,30 @@ test.describe('the Showreel on a landing', () => {
         )
       ).toBe(true);
     }
-    // Outline draws the shades as they are (HEADER_SHADE, FOOT_SHADE); shadow
-    // grows them, never smaller: OBB's bright film needs more than they lay.
-    expect(radius(outline.foot)).toBe(78);
-    expect(outline.peakTop).toBe(0.6);
-    expect(radius(shadow.foot)).toBeGreaterThanOrEqual(78);
-    expect(shadow.peakTop).toBeGreaterThanOrEqual(0.6);
-    expect(radius(shadow.foot) > 78 || shadow.peakTop > 0.6).toBe(true);
+    // Outline draws the shades as they are, whatever its inks: the same with
+    // the brand's own as with one they carry only grown.
+    const asDrawn = await read({ 'reel-edge': 'outline' }, {});
+    expect(Object.keys(outline.shades).length).toBeGreaterThan(0);
+    expect(outline.shades).toEqual(asDrawn.shades);
+    // Shadow grows them, never smaller, for the ink they carry only grown;
+    // or the solver says the ink is short (its report, `cannot carry`).
+    const changes = Object.entries(outline.shades).flatMap(([prop, drawn]) =>
+      drawn.map((was, i) => ({
+        what: `${prop}[${i}]`,
+        by: (shadow.shades[prop]?.[i] ?? Number.NaN) - was,
+      }))
+    );
+    for (const { what, by } of changes)
+      expect.soft(by, `${what}: never smaller`).toBeGreaterThanOrEqual(-1e-6);
+    const grew = changes.filter(({ by }) => by > 1e-6).map(({ what }) => what);
+    test.info().annotations.push({
+      type: 'shadow',
+      description: `ink rgb(${shadow.ink.join(', ')}); grew: ${grew.join(', ') || 'none'}; short: ${shadow.short.length}`,
+    });
+    expect(
+      grew.length > 0 || shadow.short.length > 0,
+      'grew, or reported short'
+    ).toBe(true);
   });
 
   test('reduced motion: stills, no film playing, no moving on by itself; the index still changes piece', async ({

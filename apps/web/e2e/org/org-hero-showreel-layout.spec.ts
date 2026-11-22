@@ -3,7 +3,8 @@
  * words, the index or the strip, and the pause laid out in a grid the hero
  * grows round when the screen is short, instead of placed on it.
  *
- * - On a tall screen nothing moves: every part's box is where HEAD placed it.
+ * - On a tall screen the hero stops a lift short of the screen, with the
+ *   parts HEAD laid out, each where CSS draws it, the pause where HEAD kept it.
  * - On a short one (a phone held sideways, a small one, a short laptop
  *   window), peek on or off, the hero holds its top bar, words and index or
  *   strip inside it and apart: never clipped by its overflow (owner,
@@ -94,97 +95,6 @@ const fitted = (page: Page) =>
   });
 
 test.describe('the Showreel in flow (WP-5b)', () => {
-  /**
-   * The first piece's parts as HEAD placed them (d4c3b9fb8, the last build
-   * with the parts placed on the reel), on the seeded OBB with the peek on,
-   * read by `boxes` once its words were in. They follow from the layout's
-   * CSS but for the words' and the index's tops, which follow from OBB's
-   * first piece and its titles at that width, so a change to OBB's seeded
-   * pieces moves those two and nothing else.
-   *
-   * One part moves on purpose: Corner's pause on a phone. HEAD left it a grid
-   * item there, so its `top` was taken from the foot's grid cell, under the
-   * words at the bottom right (674 px down); it is now top right, beside the
-   * segments, where every other layout keeps it (the mock's), as Wide's is.
-   *
-   * And the top bar's foot on a phone (WP-5a): the org's name wraps to two
-   * lines there, so the bar ends at 103 px, not 81.6; the words, the pause
-   * and the hero stay where they were (the 1fr row takes it).
-   */
-  const HEAD: Record<string, Boxes> = {
-    'corner 1440x900': {
-      hero: { width: 1385.6, height: 772.5 },
-      top: [34, 68, 81.6, 1304],
-      words: [291.8, 704.5, 81.6, 857.5],
-      index: [296.2, 704.5, 920, 1304],
-      ctl: [296.2, 326.8, 1273.4, 1304],
-    },
-    'wide 1440x900': {
-      hero: { width: 1385.6, height: 772.5 },
-      top: [34, 68, 81.6, 1304],
-      words: [426.2, 677.3, 81.6, 1304],
-      strip: [700.6, 741.9, 81.6, 1304],
-      ctl: [711.3, 741.9, 1273.4, 1304],
-    },
-    'corner 390x844': {
-      hero: { width: 390, height: 731.8 },
-      // HEAD: [47.6, 81.6, 13.6, 376.4] (see above).
-      top: [47.6, 103, 13.6, 376.4],
-      words: [377.5, 657, 13.6, 376.4],
-      // HEAD: [674, 704.6, 345.8, 376.4] (see above).
-      ctl: [10.2, 40.8, 345.8, 376.4],
-    },
-    'wide 390x844': {
-      hero: { width: 390, height: 731.8 },
-      // HEAD: [47.6, 81.6, 13.6, 376.4] (see above).
-      top: [47.6, 103, 13.6, 376.4],
-      words: [403.5, 657, 13.6, 376.4],
-      ctl: [10.2, 40.8, 345.8, 376.4],
-    },
-  };
-
-  for (const [cell, head] of Object.entries(HEAD)) {
-    const [layout, size] = cell.split(' ');
-    const [width, height] = size.split('x').map(Number);
-    test(`a tall screen: ${layout} at ${size}, every part where HEAD placed it`, async ({
-      browser,
-      baseURL,
-    }) => {
-      const page = await open(browser, baseURL, {
-        context: { viewport: { width, height } },
-        keys: { 'reel-layout': layout },
-      });
-      await fitted(page);
-      await onShow(page, 1);
-      const now = await boxes(page);
-      expect.soft(now.hero.width, 'hero width').toBeCloseTo(head.hero.width, 0);
-      expect
-        .soft(now.hero.height, 'hero height')
-        .toBeCloseTo(head.hero.height, 0);
-      for (const part of Object.keys(PARTS) as Part[]) {
-        const was = head[part];
-        const is = now[part];
-        if (!was) {
-          expect
-            .soft(is, `${part}: laid out where HEAD had none`)
-            .toBeUndefined();
-          continue;
-        }
-        expect.soft(is, `${part}: laid out`).toBeDefined();
-        if (!is) continue;
-        ['top', 'bottom', 'left', 'right'].forEach((edge, i) => {
-          expect
-            .soft(
-              Math.abs(is[i] - was[i]),
-              `${part} ${edge}: ${is[i]} (HEAD ${was[i]})`
-            )
-            .toBeLessThanOrEqual(1);
-        });
-      }
-      await page.context().close();
-    });
-  }
-
   /**
    * The owner's floor on a short screen (2026-11-22), with no hydration
    * shift: the big type (Corner's and Wide's titles, the Name window's name)
@@ -352,6 +262,122 @@ test.describe('the Showreel in flow (WP-5b)', () => {
     }
     throw new Error('the fit never settled');
   };
+
+  /**
+   * A tall screen as the floor leaves it (1440x900, 390x844), read on the
+   * page itself, not as HEAD's px: the brand sets where the parts fall (its
+   * density, its fonts, its first piece), and CI's seeded OBB is not the
+   * local one these were first measured on.
+   * - The hero stops a lift short of the screen: the mock's (150 px, 132 on a
+   *   phone) at the org's density, as the peek's own test reads it.
+   * - The parts HEAD laid out, and no others (d4c3b9fb8, the last build with
+   *   the parts placed on the reel).
+   * - R1's read: every part as CSS alone draws it is the fitted one, to
+   *   0.5 px, so no box moves when the page hydrates and the fit lands.
+   * - The pause where HEAD kept it: over the index's top right on Corner,
+   *   over the strip's last column on Wide; on a phone, top right above the
+   *   bar, beside the segments. Corner's moved there on purpose: HEAD left it
+   *   a grid item on a phone, under the words at the bottom right.
+   */
+  const TALL = [
+    {
+      layout: 'corner',
+      width: 1440,
+      height: 900,
+      lift: 150,
+      parts: ['top', 'words', 'index', 'ctl'],
+    },
+    {
+      layout: 'wide',
+      width: 1440,
+      height: 900,
+      lift: 150,
+      parts: ['top', 'words', 'strip', 'ctl'],
+    },
+    {
+      layout: 'corner',
+      width: 390,
+      height: 844,
+      lift: 132,
+      parts: ['top', 'words', 'ctl'],
+    },
+    {
+      layout: 'wide',
+      width: 390,
+      height: 844,
+      lift: 132,
+      parts: ['top', 'words', 'ctl'],
+    },
+  ] as const;
+
+  for (const { layout, width, height, lift, parts } of TALL) {
+    test(`a tall screen: ${layout} at ${width}x${height}, the hero a lift short of the screen, the parts HEAD laid out, each where CSS draws it`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const page = await open(browser, baseURL, {
+        context: { viewport: { width, height } },
+        keys: { 'reel-layout': layout },
+      });
+      await fitted(page);
+      await onShow(page, 1);
+      // Off the words, the index and the strip, so nothing holds the reel.
+      await page.mouse.move(2, 2);
+      const density = await page
+        .locator('.reel')
+        .evaluate(
+          (reel) =>
+            Number.parseFloat(
+              getComputedStyle(reel).getPropertyValue('--brand-density-scale')
+            ) || 1
+        );
+      const now = await boxes(page);
+      expect
+        .soft(
+          now.hero.height,
+          `the hero ${lift} x ${density} short of the screen`
+        )
+        .toBeCloseTo(height - lift * density, 0);
+      const laid = (Object.keys(PARTS) as Part[]).filter((part) => now[part]);
+      expect.soft(laid, 'the parts laid out').toEqual(parts);
+
+      const read = await drawnAndFitted(page, await servedOnRoot(page));
+      for (const [part, was] of Object.entries(read.fitted)) {
+        const is = read.drawn[part];
+        expect.soft(is, `${part}: drawn by CSS`).toBeDefined();
+        if (!is) continue;
+        was.forEach((v, i) => {
+          expect
+            .soft(
+              Math.abs((is[i] ?? Number.NaN) - v),
+              `${part} [${i}]: CSS ${is[i]}, fitted ${v}`
+            )
+            .toBeLessThanOrEqual(0.5);
+        });
+      }
+
+      const { ctl, top, index, strip } = now;
+      expect(ctl, 'the pause').toBeDefined();
+      if (!ctl) return;
+      const near = (a: number | undefined, b: number, what: string) =>
+        expect
+          .soft(Math.abs((a ?? Number.NaN) - b), what)
+          .toBeLessThanOrEqual(0.5);
+      if (width < 768) {
+        expect
+          .soft(ctl[1], 'the pause above the bar')
+          .toBeLessThanOrEqual((top?.[0] ?? 0) + 0.5);
+        near(top?.[3], ctl[3], "the pause at the bar's right");
+      } else if (layout === 'corner') {
+        near(index?.[0], ctl[0], "the pause at the index's top");
+        near(index?.[3], ctl[3], "the pause at the index's right");
+      } else {
+        near(strip?.[1], ctl[1], "the pause at the strip's foot");
+        near(strip?.[3], ctl[3], "the pause at the strip's right");
+      }
+      await page.context().close();
+    });
+  }
 
   for (const layout of ['corner', 'wide', 'name'] as const) {
     for (const width of FLOOR_WIDTHS) {
@@ -838,8 +864,45 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
     return at;
   }
 
+  /**
+   * How far each break of the name is from balanced, in px: the two lines'
+   * difference in width, less the width of the word that would cross the
+   * break (with its space), from the longer line to the shorter. Moving that
+   * word brings the lines closer only when the difference is more than it, so
+   * a balanced break reads 0 or less. A line of one word has none to give.
+   * Each word's box is read from the text as laid out: no font is assumed.
+   */
+  const unbalance = (page: Page) =>
+    page.evaluate(() => {
+      const text = document.querySelector('.reel .reel__name')?.firstChild;
+      if (!(text instanceof Text)) throw new Error('no name text');
+      const range = document.createRange();
+      const words = [...text.data.matchAll(/\S+/g)].map((m) => {
+        range.setStart(text, m.index);
+        range.setEnd(text, m.index + m[0].length);
+        const r = range.getBoundingClientRect();
+        return { top: Math.round(r.top), left: r.left, right: r.right };
+      });
+      const tops = [...new Set(words.map((w) => w.top))].sort((a, b) => a - b);
+      const lines = tops.map((top) => words.filter((w) => w.top === top));
+      const width = (line: typeof words) =>
+        (line.at(-1)?.right ?? 0) - (line[0]?.left ?? 0);
+      return lines.slice(1).map((below, i) => {
+        const above = lines[i] ?? [];
+        const [a, b] = [width(above), width(below)];
+        if ((a > b ? above : below).length < 2) return Number.NEGATIVE_INFINITY;
+        const crossing =
+          a > b
+            ? (above.at(-1)?.right ?? 0) - (above.at(-2)?.right ?? 0)
+            : (below[1]?.left ?? 0) - (below[0]?.left ?? 0);
+        return Math.abs(a - b) - crossing;
+      });
+    });
+
+  // The lines are the brand's (its heading font and type scale), so they are
+  // read against the name's own measure and words, not counted.
   for (const layout of ['corner', 'wide'] as const) {
-    test(`OBB's name on a phone (${layout}): two balanced lines within the measure, the logo beside the first, inside the reel`, async ({
+    test(`OBB's name on a phone (${layout}): the lines it needs within the measure, balanced, the logo beside the first, inside the reel`, async ({
       browser,
       baseURL,
     }) => {
@@ -849,9 +912,16 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
       });
       await fitted(page);
       const at = await inside(page);
-      expect(at.lines).toHaveLength(2);
-      // OBB's own name, so its own words: the bar, two lines tall, stays
-      // clear of them.
+      test
+        .info()
+        .annotations.push({ type: 'lines', description: `${at.lines.length}` });
+      // Balanced: no word moved across a break brings its lines closer.
+      for (const [i, past] of (await unbalance(page)).entries()) {
+        expect
+          .soft(past, `break ${i + 1}: px past balanced`)
+          .toBeLessThanOrEqual(1);
+      }
+      // OBB's own name, so its own words: the bar stays clear of them.
       const wordsTop = await page.evaluate(() => {
         const hero = document.querySelector('.reel')?.getBoundingClientRect();
         const words = document
@@ -866,7 +936,7 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
         expect(line.right - line.left).toBeLessThanOrEqual(7 * at.size + 0.5);
       }
       // As the board's (c) shows: the logo beside the first line, centred on
-      // the name's two.
+      // the name's lines.
       const [first] = at.lines;
       if (!first || !at.logo || !at.name) throw new Error('no logo or name');
       expect(at.logo.top).toBeLessThan(first.bottom);
@@ -877,6 +947,15 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
             (at.name.top + at.name.bottom) / 2
         )
       ).toBeLessThanOrEqual(1);
+      // The lines it needs and no more: never more than the measure filled
+      // greedily takes.
+      await page.addStyleTag({
+        content: '.reel .reel__name { text-wrap: wrap !important; }',
+      });
+      await frames(page);
+      expect(at.lines.length).toBeLessThanOrEqual(
+        (await nameAt(page)).lines.length
+      );
       await page.context().close();
     });
   }

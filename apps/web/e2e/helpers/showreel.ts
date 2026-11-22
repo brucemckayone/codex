@@ -52,20 +52,20 @@ export const SHOWREEL_LAUNCH = {
 const PAYLOAD = /brandFineTune:\{tokenOverrides:("(?:[^"\\]|\\.)*"|null)/;
 
 /**
- * The landing's HTML with these hero options set as the editor saves them,
- * or null when it carries no brand payload to set them on.
+ * The landing's HTML with these brand overrides stored, keyed as the editor
+ * saves them (the stored ones kept, these set over them), or null when it
+ * carries no brand payload to set them on. The org layout draws its
+ * overrides again as the page hydrates, so a colour set here is the page's
+ * from then on.
  */
-export function withHeroOptions(
+function withOverrides(
   html: string,
-  keys: Record<string, string>
+  set: Record<string, string>
 ): string | null {
   const match = PAYLOAD.exec(html);
   if (!match) return null;
   const stored: Record<string, string> =
     match[1] === 'null' ? {} : JSON.parse(JSON.parse(match[1]));
-  const set = Object.fromEntries(
-    Object.entries(keys).map(([key, value]) => [`hero-opt-${key}`, value])
-  );
   const literal = JSON.stringify(JSON.stringify({ ...stored, ...set })).replace(
     /</g,
     '\\u003C'
@@ -73,6 +73,22 @@ export function withHeroOptions(
   return html.replace(
     match[0],
     () => `brandFineTune:{tokenOverrides:${literal}`
+  );
+}
+
+/**
+ * The landing's HTML with these hero options set as the editor saves them,
+ * or null when it carries no brand payload to set them on.
+ */
+export function withHeroOptions(
+  html: string,
+  keys: Record<string, string>
+): string | null {
+  return withOverrides(
+    html,
+    Object.fromEntries(
+      Object.entries(keys).map(([key, value]) => [`hero-opt-${key}`, value])
+    )
   );
 }
 
@@ -294,6 +310,8 @@ export function withRecordingFeatured(html: string): string | null {
 export interface ShowreelOptions {
   context?: BrowserContextOptions;
   keys?: Record<string, string>;
+  /** Brand overrides besides the hero's, keyed as the editor saves them. */
+  tokens?: Record<string, string>;
   init?: () => void;
   /**
    * An intro film, played in full (true) or as its preview (false). Opt-in:
@@ -331,6 +349,7 @@ export async function openShowreel(
   {
     context: contextOptions = {},
     keys = {},
+    tokens,
     init,
     introFilm,
     featureRecording = false,
@@ -399,6 +418,7 @@ export async function openShowreel(
     };
     // First, so every rewrite after it reads the name the page will draw.
     if (name) set('an org name', (doc) => withOrgName(doc, name));
+    if (tokens) set('brand overrides', (doc) => withOverrides(doc, tokens));
     if (introFilm)
       set('an intro film', (doc) => {
         const done = withIntroFilm(doc, introFilm.fullFilm);
