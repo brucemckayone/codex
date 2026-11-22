@@ -224,6 +224,42 @@ function catalogueRows(html: string): { start: number; text: string }[] {
 }
 
 /**
+ * A plain, bright picture (#F2F2F2, 128x123: the shape of OBB's own logo, so
+ * the top bar lays out as it does with it) that every test of this file gets
+ * in place of the catalogue's and the org's pictures.
+ *
+ * Those live on the dev CDN, which CI never starts: there every one fails,
+ * and a failed still keeps its box unseen, so a test that needs a picture in
+ * sight (the no-WebGL2 still, a recording's cover) failed on a fresh seed
+ * while it passed on a local stack. A stand-in in every run keeps both on the
+ * same path. Footage is left alone: the seed's previews hold no segments,
+ * and the bundled Chromium decodes none.
+ */
+const STAND_IN_PICTURE = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAIAAAAB7CAIAAAAzCR9GAAAAvUlEQVR42u3RMQEAAAzCMPzLRQH3FOxJJTSpXosFAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgAAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAADoNJptczOzXHqyAAAAAElFTkSuQmCC',
+  'base64'
+);
+/** A picture by its path, for a request the browser types as something else. */
+const PICTURE_PATH = /\.(?:avif|gif|jpe?g|png|svg|webp)$/i;
+
+/**
+ * The origin the catalogue's pictures are served from (the dev CDN, as the
+ * seed writes their URLs), or null when no row has one.
+ */
+function picturesOrigin(html: string): string | null {
+  for (const { text } of catalogueRows(html)) {
+    const literal = stringAt(text, 'thumbnailUrl');
+    if (literal === null) continue;
+    try {
+      return new URL(JSON.parse(literal)).origin;
+    } catch {
+      // not an absolute URL: the next row's
+    }
+  }
+  return null;
+}
+
+/**
  * The landing's HTML with its newest recording that has a preview marked
  * featured, so the reel plays it, or null when the catalogue has no such
  * recording or no film with a preview. Its preview becomes the newest film's:
@@ -319,9 +355,30 @@ export async function openShowreel(
   // Set in the route handler, so typed past the narrowing of `null`.
   let film = null as { source: IntroFilmSource; name: string | null } | null;
   let serverFirst = null as string | null;
+  let pictures = null as string | null;
+  // Every picture from the catalogue's origin is the stand-in
+  // (`STAND_IN_PICTURE`). Registered first, so a later route wins over it:
+  // `failLogo`'s hold on the logo.
+  await context.route(
+    (target) => pictures !== null && target.origin === pictures,
+    (route) => {
+      const request = route.request();
+      const picture =
+        request.resourceType() === 'image' ||
+        PICTURE_PATH.test(new URL(request.url()).pathname);
+      return picture
+        ? route.fulfill({
+            contentType: 'image/png',
+            headers: { 'access-control-allow-origin': '*' },
+            body: STAND_IN_PICTURE,
+          })
+        : route.fallback();
+    }
+  );
   await page.route(url, async (route) => {
     const response = await route.fetch();
     const html = await response.text();
+    pictures = picturesOrigin(html);
     let body = withHeroOptions(html, {
       purpose: 'consume',
       comp: 'showreel',
