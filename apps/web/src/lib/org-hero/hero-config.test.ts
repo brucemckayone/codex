@@ -279,6 +279,70 @@ describe('fallbacks decide on the piece the spot lands on', () => {
   });
 });
 
+describe('every fallback rule, by name', () => {
+  const NO_SHADER: HeroFacts = { ...FULL, hasShader: false };
+  const NO_FEATURED: HeroFacts = {
+    ...FULL,
+    hasFeatured: false,
+    hasFeaturedImage: false,
+  };
+  const NO_LATEST: HeroFacts = {
+    ...FULL,
+    hasLatest: false,
+    hasLatestImage: false,
+  };
+  const NO_LOOP: HeroFacts = { ...FULL, hasFilmLoop: false };
+  // [rule, purpose, the org's choices, its facts, what it draws]
+  // biome-ignore format: one rule per row reads as the table it is
+  const RULES: ReadonlyArray<
+    [string, HeroPurpose, Partial<HeroOptions>, HeroFacts, Partial<HeroOptions>]
+  > = [
+    // the Showreel
+    ['a Showreel plays on the shader', 'consume', { comp: 'showreel', bg: 'film' }, FULL, { bg: 'shader' }],
+    ['a Showreel with no shader plays on a plain ground', 'consume', { comp: 'showreel' }, NO_SHADER, { bg: 'plain' }],
+    ['a Showreel has no spotlight', 'consume', { comp: 'showreel', spot: 'featured' }, FULL, { spot: 'none' }],
+    ['a Showreel shows the facts, not a shelf beside its index', 'consume', { comp: 'showreel', proof: 'shelf' }, FULL, { proof: 'facts' }],
+    // the ground
+    ['with no shader, the reel has no surface and no band', 'consume', { comp: 'showreel', 'reel-surface': 'grain', 'reel-band': 'under' }, NO_SHADER, { 'reel-surface': 'none', 'reel-band': 'none' }],
+    ['a shader ground with no shader is a gradient', 'grow', { comp: 'statement', bg: 'shader' }, NO_SHADER, { bg: 'gradient' }],
+    ['a film ground that cannot loop is the shader', 'grow', { comp: 'statement', bg: 'film' }, NO_LOOP, { bg: 'shader' }],
+    ['a film ground that cannot loop, with no shader, is a gradient', 'grow', { comp: 'statement', bg: 'film' }, { ...NO_LOOP, hasShader: false }, { bg: 'gradient' }],
+    // the frame
+    ['a film spot that cannot loop gives way to a piece', 'consume', { comp: 'showcase', spot: 'film' }, { ...NO_LOOP, hasReel: false }, { comp: 'showcase', spot: 'featured' }],
+    ["a panel or billboard whose piece has no picture is a Showcase", 'spotlight', { comp: 'split', spot: 'latest' }, { ...FULL, hasLatestImage: false }, { comp: 'showcase', spot: 'latest' }],
+    ['a panel or billboard with no piece at all is a Statement', 'spotlight', { comp: 'billboard' }, BARE, { comp: 'statement' }],
+    ['a Showcase with no piece and no film is a Statement', 'spotlight', { comp: 'showcase', spot: 'featured' }, BARE, { comp: 'statement', spot: 'none' }],
+    ['a Showcase the film fills draws no film behind it: the shader', 'consume', { comp: 'showcase', spot: 'film', bg: 'film' }, NO_REEL, { spot: 'film', bg: 'shader' }],
+    ['a Showcase the film fills draws no film behind it: a gradient with no shader', 'consume', { comp: 'showcase', spot: 'film', bg: 'film' }, { ...NO_REEL, hasShader: false }, { spot: 'film', bg: 'gradient' }],
+    ['only a Showcase holds the film', 'grow', { comp: 'statement', spot: 'film' }, FULL, { spot: 'none' }],
+    ['a featured spot with nothing featured takes the latest', 'grow', { comp: 'statement', spot: 'featured' }, NO_FEATURED, { spot: 'latest' }],
+    ['a featured spot with no piece at all is none', 'grow', { comp: 'statement', spot: 'featured' }, BARE, { spot: 'none' }],
+    ['a latest spot with nothing latest takes the featured', 'grow', { comp: 'statement', spot: 'latest' }, NO_LATEST, { spot: 'featured' }],
+    ['a latest spot with no piece at all is none', 'grow', { comp: 'statement', spot: 'latest' }, BARE, { spot: 'none' }],
+    ['a frame drawn round a piece always has one, featured first', 'grow', { comp: 'split', spot: 'none' }, FULL, { comp: 'split', spot: 'featured' }],
+    ['a frame drawn round a piece takes the latest when nothing is featured', 'grow', { comp: 'split', spot: 'none' }, NO_FEATURED, { comp: 'split', spot: 'latest' }],
+    // the words
+    ['a film button with no film is Explore', 'grow', { main: 'film' }, { ...NO_LOOP, hasFilm: false }, { main: 'explore' }],
+    ['a Join button with nothing to join is Explore', 'grow', { main: 'join' }, { ...FULL, canJoin: false }, { main: 'explore' }],
+    ['facts with none worth showing are none', 'grow', { comp: 'statement', proof: 'facts' }, { ...FULL, hasFacts: false }, { proof: 'none' }],
+    ['a shelf with nothing latest is none', 'grow', { comp: 'statement', proof: 'shelf' }, NO_LATEST, { proof: 'none' }],
+    ['a description line with no description is none', 'grow', { line: 'desc' }, { ...FULL, hasDescription: false }, { line: 'none' }],
+    // the lead
+    ['the hidden-name switch lets the logo lead alone', 'grow', { lead: 'both' }, { ...FULL, hideTitle: true }, { lead: 'logo' }],
+    ['with no logo, the name leads', 'grow', { lead: 'logo' }, { ...FULL, hasLogo: false }, { lead: 'name' }],
+    // the reel's own keys
+    ['with the logo alone, the Name window is Corner, and through the name is none and the smoke', 'consume', { comp: 'showreel', lead: 'logo', 'reel-layout': 'name', 'reel-opening': 'name', 'reel-film': 'name' }, FULL, { 'reel-layout': 'corner', 'reel-opening': 'none', 'reel-film': 'smoke' }],
+    ['the peek needs a featured row', 'consume', { comp: 'showreel', 'reel-peek': 'on' }, NO_FEATURED, { 'reel-peek': 'off' }],
+    // the alignment, last
+    ['an alignment the composition cannot draw takes its first', 'spotlight', { align: 'center' }, FULL, { comp: 'showcase', align: 'start' }],
+  ];
+
+  for (const [rule, purpose, options, facts, drawn] of RULES)
+    it(rule, () => {
+      expect(resolveHero(purpose, options, facts)).toMatchObject(drawn);
+    });
+});
+
 describe('the Showreel', () => {
   const REEL_AXES = HERO_OPTION_KEYS.filter((key) => key.startsWith('reel-'));
 
@@ -297,15 +361,14 @@ describe('the Showreel', () => {
       if (axis === 'reel-opening') continue;
       expect(o[axis]).toBe(HERO_OPTION_VALUES[axis][0]);
     }
-    // The owner's pick (2026-11-21, the WP-6 board's N): Corner, the default
-    // layout, opens on its film.
+    // The owner's pick: Corner, the default layout, opens on its film.
     expect(o['reel-opening']).toBe('none');
-    // The owner's pick (2026-11-20, V1): the film gives way at its foot.
+    // The owner's pick: the film gives way at its foot.
     expect(o['reel-band']).toBe('fade');
-    // The owner's pick (2026-11-20): no outline unless the creator asks.
+    // The owner's pick: no outline unless the creator asks.
     expect(o['reel-edge']).toBe('shadow');
-    // The owner's picks (2026-11-21, the 5b board): the peek and the stills'
-    // push-in on, no surface over the footage.
+    // The owner's picks: the peek and the stills' push-in on, no surface over
+    // the footage.
     expect(o['reel-peek']).toBe('on');
     expect(o['reel-push']).toBe('on');
     expect(o['reel-surface']).toBe('none');
@@ -339,7 +402,7 @@ describe('the Showreel', () => {
         resolveHero('consume', { 'reel-band': band }, noShader)['reel-band']
       ).toBe('none');
     }
-    // every surface is drawn by the shader, on the footage (WP-5b)
+    // every surface is drawn by the shader, on the footage
     for (const surface of ['duotone', 'colour', 'grain'] as const) {
       expect(
         resolveHero('consume', { 'reel-surface': surface }, noShader)[
@@ -385,7 +448,7 @@ describe('the Showreel', () => {
     expect(o.align).toBe('start');
   });
 
-  it('offers the light leak between pieces, kept under every purpose and layout (owner’s WP-1b pick)', () => {
+  it('offers the light leak between pieces, kept under every purpose and layout (the owner’s pick)', () => {
     for (const purpose of HERO_PURPOSES)
       for (const layout of ['corner', 'wide', 'name'] as const) {
         const o = resolveHero(
@@ -470,7 +533,7 @@ describe('the Showreel', () => {
     ).toBe('shelf');
   });
 
-  it('opens on its film on Corner and Wide, through the name on the Name window, unless the creator says otherwise (owner, 2026-11-21)', () => {
+  it('opens on its film on Corner and Wide, through the name on the Name window, unless the creator says otherwise (the owner’s pick)', () => {
     const opening = (
       options: Partial<HeroOptions>,
       purpose: HeroPurpose = 'consume'
