@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The e2e origin gate (Codex-1yd58 WP-11).
+ * The e2e origin gate.
  *
  * The e2e suite finds the web app through ONE helper,
  * `apps/web/e2e/helpers/origin.ts` (`E2E_BASE_URL`, `E2E_ORIGIN`, `E2E_HOST`,
@@ -29,9 +29,10 @@
  * Exit 0: clean. Exit 1: a hardcoded port, or the wrong tree. Exit 2: usage.
  */
 
-import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from '../../../scripts/checks/is-entrypoint.mjs';
 
 const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const E2E_DIR = join(WEB_ROOT, 'e2e');
@@ -291,21 +292,4 @@ function main() {
   );
 }
 
-/**
- * Whether this file is the process's entry. Compared as real paths: Node
- * resolves import.meta.url through symlinks but not argv[1], so a plain
- * comparison skips main() under a symlinked checkout and exits 0 unchecked.
- */
-function isEntrypoint() {
-  if (!process.argv[1]) return false;
-  try {
-    return (
-      realpathSync(process.argv[1]) ===
-      realpathSync(fileURLToPath(import.meta.url))
-    );
-  } catch {
-    return false;
-  }
-}
-
-if (isEntrypoint()) main();
+if (isEntrypoint(import.meta.url)) main();

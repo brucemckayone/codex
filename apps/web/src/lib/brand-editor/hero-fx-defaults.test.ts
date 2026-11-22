@@ -1,6 +1,6 @@
 /**
  * A slider's default is what the hero paints when the brand stored nothing
- * (Codex-1yd58 WP-1d). The editor shows HERO_FX_DEFAULTS until a value is
+ * The editor shows HERO_FX_DEFAULTS until a value is
  * stored, and drops an override set back to it; the hero paints
  * shader-config's DEFAULTS. When the two differ, the slider shows one value
  * while the page paints another, and moving it back to "default" stores a
@@ -12,12 +12,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { LIVE_PRESET_IDS } from '$lib/components/ui/ShaderHero/preset-fx-defaults';
 import { getShaderConfig } from '$lib/components/ui/ShaderHero/shader-config';
+import { HERO_FX_PRESET_CONTROLS, presetFxControls } from './hero-fx-controls';
 import { updateOverride } from './hero-fx-helpers';
-import {
-  HERO_FX_DEFAULTS,
-  HERO_FX_PRESET_CONTROLS,
-  presetFxControls,
-} from './hero-fx-presets';
+import { HERO_FX_DEFAULTS } from './hero-fx-presets';
 
 /** Each control key, and the config field the hero reads it into. */
 const FIELDS: Record<string, Record<string, string>> = {
@@ -76,7 +73,7 @@ const FIELDS: Record<string, Record<string, string>> = {
     'shader-lenia-speed': 'speed',
     'shader-lenia-dt': 'dt',
   },
-  // R4b: the hard, dark line by default; R4's soft line is three settings.
+  // The hard, dark line by default; the soft line is three settings.
   glass: {
     'shader-glass-cell-size': 'cellSize',
     'shader-glass-border': 'border',

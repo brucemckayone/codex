@@ -66,7 +66,7 @@ describe('selectPreset (GOTCHA #1 — Codex-6itei §4.2)', () => {
     expect(setOverride).toHaveBeenCalledWith('shader-preset', 'pulse');
   });
 
-  // Codex-1yd58: a brand saved on a cut preset holds that preset's params,
+  // A brand saved on a cut preset holds that preset's params,
   // which no live preset names, so the live list alone would leave them.
   it("'none' also clears every stale shader-* key the overrides hold, once", () => {
     const setOverride: SetOverride = vi.fn();

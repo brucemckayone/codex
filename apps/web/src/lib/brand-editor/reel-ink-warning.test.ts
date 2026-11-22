@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * The Showreel's ink warning judges the ink the reel draws its words in, not
- * a brand colour (WP-9 review, wp2: MEDIUM): on a dark ground that is the
+ * a brand colour: on a dark ground that is the
  * player text, on a light one the derived text colour, which always passes.
  */
 import { readFileSync } from 'node:fs';
@@ -135,8 +135,8 @@ describe('reelInkWarnings: a light ground never warns', () => {
 
 describe("reelInkWarnings: the reel's own light/dark switch, light AT the pivot", () => {
   // A light page whose darkest surface is mid grey binds exactly at the pivot
-  // (`bindingLuminance`). The reel reads that as LIGHT (review R2,
-  // `groundPoles`), so the editor must too: read strictly above, grey 120 and
+  // (`bindingLuminance`). The reel reads that as LIGHT (`groundPoles`),
+  // so the editor must too: read strictly above, grey 120 and
   // 135 were judged dark, and white player text on them was warned of.
   test.each([
     ['grey 120', '#787878'],

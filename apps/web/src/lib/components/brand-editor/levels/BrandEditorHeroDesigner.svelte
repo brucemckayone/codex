@@ -12,7 +12,7 @@
   the org changes are stored, so improving a purpose's defaults later reaches
   every org that never touched them.
 
-  The preview reports what the hero resolved to (WP-9, the preview bridge's
+  The preview reports what the hero resolved to (the preview bridge's
   resolved report): a field whose choice the page cannot show says what it
   shows instead, the purposes are named in the org's own kind ("Get people
   listening"), and the Showreel group shows whenever the hero is a Showreel,
@@ -53,6 +53,8 @@
       values: Readonly<Record<HeroOptions[K], Words>>;
       /** Drawn by the shader: greyed, and says so, on an org with none. */
       needsShader?: true;
+      /** A line under the choice, saying what a value's words mean. */
+      hint?: Words;
     };
   }[HeroOptionKey];
 
@@ -139,7 +141,9 @@
         { key: 'reel-band', label: m.branding_hero_field_reel_band, values: { fade: m.branding_hero_reel_band_fade, under: m.branding_hero_reel_band_under, edges: m.branding_hero_reel_band_edges, none: m.branding_hero_none }, needsShader: true },
         { key: 'reel-edge', label: m.branding_hero_field_reel_edge, values: { shadow: m.branding_hero_reel_edge_shadow, outline: m.branding_hero_reel_edge_outline } },
         { key: 'reel-opening', label: m.branding_hero_field_reel_opening, values: { name: m.branding_hero_reel_opening_name, none: m.branding_hero_none } },
-        { key: 'reel-film', label: m.branding_hero_field_reel_film, values: { name: m.branding_hero_reel_film_name, smoke: m.branding_hero_reel_film_smoke, liquid: m.branding_hero_reel_film_liquid } },
+        // The opening's and the film's 'name' play through the title on Corner and Wide
+        // and through the org's name on the Name window: one line, under the pair.
+        { key: 'reel-film', label: m.branding_hero_field_reel_film, values: { name: m.branding_hero_reel_film_name, smoke: m.branding_hero_reel_film_smoke, liquid: m.branding_hero_reel_film_liquid }, hint: m.branding_hero_reel_letters_hint },
         { key: 'reel-loop', label: m.branding_hero_field_reel_loop, values: { on: m.branding_hero_reel_loop_on, off: m.branding_hero_reel_loop_off } },
       ],
     },
@@ -282,6 +286,9 @@
               wrap
               onSelect={(value) => setOption(field.key, value === '' ? null : value)}
             />
+            {#if field.hint}
+              <p class="hero-designer__lede" data-hint>{field.hint()}</p>
+            {/if}
             {#if unavailable}
               <p class="hero-designer__needs-shader">{m.branding_hero_needs_shader()}</p>
             {:else if instead}

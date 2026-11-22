@@ -2,7 +2,7 @@ import type { HeroSettings } from '$lib/org-hero/hero-config';
 import type { BrandPreviewResolved } from './brand-preview-bridge';
 
 /**
- * What the studio preview's hero last reported it resolved to (WP-9), or
+ * What the studio preview's hero last reported it resolved to, or
  * null before its first report, once the frame loads another page, or once
  * the landing withdraws it (a link followed inside the preview). Only the
  * landing reports, so a field that reads this shows its hint there.

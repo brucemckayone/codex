@@ -1,6 +1,6 @@
 /**
- * Each preset keeps its own intensity, grain and vignette (Codex-1yd58 WP-1d,
- * owner 2026-11-19): the editor's sliders write `shader-<id>-*`, a brand saved
+ * Each preset keeps its own intensity, grain and vignette (the owner's rule):
+ * the editor's sliders write `shader-<id>-*`, a brand saved
  * with the legacy shared keys is folded into its preset's keys as the editor
  * opens it, and a switch never carries one preset's tuning to another.
  */
@@ -15,17 +15,14 @@ import {
   darkTokenOverridesToCssVars,
   tokenOverridesToCssVars,
 } from './css-injection';
+import { presetFxControls } from './hero-fx-controls';
 import {
   type FxOverrideMaps,
   migrateSharedFx,
   selectPreset,
   updateOverride,
 } from './hero-fx-helpers';
-import {
-  ALL_HERO_FX_SHADER_KEYS,
-  HERO_FX_DEFAULTS,
-  presetFxControls,
-} from './hero-fx-presets';
+import { ALL_HERO_FX_SHADER_KEYS, HERO_FX_DEFAULTS } from './hero-fx-presets';
 import { ATMOSPHERE_AXES, atmosphereShaderTokens } from './preset-axes';
 import type { BrandEditorState } from './types';
 
@@ -155,7 +152,7 @@ describe("migrateSharedFx: the fold into the preset's own keys", () => {
   });
 
   it("drops a theme's shared keys when it has no live preset: kept, the next preset picked would inherit them", () => {
-    // Owner, 2026-11-19: each preset gets its own defaults. The "Still" look
+    // The owner's rule: each preset gets its own defaults. The "Still" look
     // wrote intensity 0 and vignette 0 with no shader.
     expect(
       migrateSharedFx({
@@ -435,7 +432,8 @@ describe('brandEditor.open folds a legacy brand', () => {
    * The store's fingerprint of a brand already in the form the server hands
    * back (upper-case colours, a token map, a non-empty dark map, a layout):
    * there every normalisation it applies changes nothing. A row an editor
-   * wrote before WP-1d carries this print of the UNFOLDED brand.
+   * wrote before each preset had its own keys carries this print of the
+   * UNFOLDED brand.
    */
   const serverPrint = (brand: BrandEditorState) =>
     hash(canonicalJson({ ...brand, logoUrl: undefined }));
@@ -550,7 +548,7 @@ describe('what the page paints after the fold', () => {
   });
 
   it("keeps a brand's tuning on its own preset, and gives its other surfaces each preset's tuned default", () => {
-    // OWNER RULING (2026-11-19): "each preset's own defaults". Production OBB
+    // THE OWNER'S RULE: "each preset's own defaults". Production OBB
     // set the shared keys on flow. Its flow hero paints the same after the
     // fold; a surface on another preset (here caustic content in the
     // immersive player) stops inheriting flow's 0.75 after the next save and

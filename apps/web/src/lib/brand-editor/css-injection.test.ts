@@ -62,14 +62,14 @@ describe('tokenOverridesToCssVars', () => {
     );
   });
 
-  // Codex-1yd58: a cut preset's params, saved before the cut, name no key a
+  // A cut preset's params, saved before the cut, name no key a
   // live preset reads. Painted, each would be a stray `--color-shader-*`.
   it('paints no shader-* key outside BRAND_PREFIX_KEYS, light or dark', () => {
     const stored = {
       'shader-nebula-depth': '9',
       'shader-warp-strength': '1.5',
       'shader-flow-curl': '0.8',
-      // Liquid Logo's own colour, dropped in WP-1d: it paints the palette.
+      // Liquid Logo's own colour, dropped: it paints the palette.
       'shader-pulse-color': '#d10000',
       'text-secondary': '#555555',
     };

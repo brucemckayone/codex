@@ -88,7 +88,7 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-preset',
   // Intensity, grain and vignette are each preset's own
   // (`shader-<id>-intensity` etc., preset-fx-defaults.ts). The shared three
-  // stay so a brand saved before WP-1d still reads them as the fallback.
+  // stay so an older brand still reads them as the fallback.
   ...PRESET_FX_KEYS,
   'shader-intensity',
   'shader-grain',
@@ -145,7 +145,7 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-glass-drift',
   'shader-glass-glow',
   'shader-glass-light',
-  // WP-1d R4b: R4's softer came, as settings (0 is the old hard, dark one).
+  // The softer came, as settings (0 is the old hard, dark one).
   'shader-glass-line-softness',
   'shader-glass-line-colour',
   'shader-glass-piece-edges',
@@ -198,7 +198,7 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-fracture-border',
   'shader-fracture-shadow',
   'shader-fracture-fill',
-  // WP-1d R4b: R4's softer line, as settings (0 is the old hard, dark one).
+  // The softer line, as settings (0 is the old hard, dark one).
   'shader-fracture-line-softness',
   'shader-fracture-line-colour',
   // Flow
@@ -209,7 +209,7 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-flow-field-speed',
   // Logo SDF
   'shader-logo-url',
-  // The brand shader STACK (Codex-1yd58.4): a second preset, how it blends,
+  // The brand shader STACK: a second preset, how it blends,
   // the layers over it and the frame it is seen through. Read by
   // ShaderHero/compositor/stack-config.ts, not shader-config.ts.
   'shader-second',
@@ -298,7 +298,7 @@ const RETIRED_OVERRIDE_KEYS = new Set(['text-on-brand']);
  * key outside BRAND_PREFIX_KEYS. Every shader key a live preset or the shader
  * palette reads is in that set (`css-injection.test.ts` derives the reads from
  * `shader-config.ts`), so one outside it is a cut preset's param saved before
- * the cut (Codex-1yd58): nothing reads it, and painted it would only be a
+ * the cut: nothing reads it, and painted it would only be a
  * stray `--color-shader-*` on the org layout. A reserved key
  * (`shader-logo-url`) never gets this far: the mappers refuse it with the
  * save's own rule.

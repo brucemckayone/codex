@@ -1,5 +1,5 @@
 /**
- * The brand editor's writes of the stack keys (Codex-1yd58 WP-9): defaults
+ * The brand editor's writes of the stack keys: defaults
  * removed, "None" taking the blend keys with it, retired layers kept, and on
  * Dark over a light value the default written out, so the dark theme can say
  * "none" where light says something. The last is proven through the real

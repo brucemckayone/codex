@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * The org layout's `data-hero-shader-active` is the tokens' claim, corrected
- * by the fullpage shader's own report (Codex-1yd58.3).
+ * by the fullpage shader's own report.
  *
  * About 25 page-kit and layout rules read it, so a claim that a shader runs
  * when none draws (a renderer that failed, a dark theme resolving to 'none')
@@ -337,7 +337,7 @@ describe('toneWriters, which the one-writer check counts with', () => {
     expect(toneWriters(source)).toBe(0);
   });
 
-  // WP-11: a ShaderHero it cannot see mount fails the check, rather than
+  // A ShaderHero it cannot see mount fails the check, rather than
   // counting 0 and letting a second `tone` writer through.
   it.each([
     [

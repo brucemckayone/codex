@@ -206,7 +206,7 @@
   // The seam (register frame + push snapshot) lives in a pure, unit-tested
   // helper so a dropped call can't ship green — see preview-wiring.ts.
   const previewWiring = createPreviewWiring(previewSender);
-  // What the framed landing's hero resolved to (WP-9): the Composition and
+  // What the framed landing's hero resolved to: the Composition and
   // Effects controls show a hint where it differs from the choice.
   const stopResolved = previewSender.onResolved((resolved) => {
     previewResolved.current = resolved;

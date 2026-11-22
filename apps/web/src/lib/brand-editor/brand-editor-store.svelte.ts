@@ -40,7 +40,7 @@ const STORAGE_KEY = 'codex:brand-editor';
 // the page editor's rule (page-builder-store) (Codex-0keaj).
 
 /** What {@link open} did with the tab's crash-recovery row. */
-export type RecoveryOutcome = 'none' | 'restored' | 'discarded';
+type RecoveryOutcome = 'none' | 'restored' | 'discarded';
 
 interface RecoveryRow {
   orgId: string;
@@ -100,7 +100,7 @@ function fingerprint(brand: BrandEditorState): string {
 
 /**
  * The brand with its legacy shared intensity/grain/vignette folded into its
- * shader preset's own keys (`migrateSharedFx`, WP-1d), so a preset switch in
+ * shader preset's own keys (`migrateSharedFx`), so a preset switch in
  * the editor never inherits them. The page renders the same either way.
  *
  * Applied to the SAVED brand as the editor opens it, not only the draft, so
@@ -354,7 +354,8 @@ function recover(
   if (!isRecoveryRow(row)) return unusable('not a brand draft');
   if (row.orgId !== orgId) return 'none';
   const baseline = fingerprint(saved);
-  // A draft kept before WP-1d may still hold the shared shader keys.
+  // A draft kept before each preset had its own keys may still hold the
+  // shared shader keys.
   const draft = withPresetFx({ ...row.pending, logoUrl: saved.logoUrl });
   // Nothing in it that the saved brand does not already say.
   if (fingerprint(draft) === baseline) return 'none';
@@ -371,8 +372,8 @@ function recover(
 /**
  * Whether a recovery row was written against the brand the editor opened:
  * its `baseline` (the folded brand's print), or the print of `server`, the
- * brand as the server sent it. A row kept before WP-1d printed the brand
- * unfolded. The same brand, so its draft is safe to restore: matching the
+ * brand as the server sent it. A row kept before each preset had its own
+ * keys printed the brand unfolded. The same brand, so its draft is safe to restore: matching the
  * folded print alone would discard it with a false "brand has changed".
  */
 function editedFrom(

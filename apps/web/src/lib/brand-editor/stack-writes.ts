@@ -1,5 +1,5 @@
 /**
- * The brand editor's writes of the shader stack's keys (Codex-1yd58 WP-9),
+ * The brand editor's writes of the shader stack's keys,
  * kept out of `BrandEditorHeroCombine.svelte` so the rules are tested without
  * mounting it, as `hero-fx-helpers.ts` keeps the preset grid's.
  *
@@ -39,7 +39,7 @@ import type { SetOverride } from './hero-fx-helpers';
 export type KeptLayerItem = Extract<LayerItem, { kind: 'skipped' }>;
 
 /** The layers token for the drawn layers in order, then the kept items. */
-export function layersText(
+function layersText(
   layers: readonly EditedLayer[],
   kept: readonly KeptLayerItem[]
 ): string | null {

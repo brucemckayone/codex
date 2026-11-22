@@ -1,6 +1,5 @@
 /**
- * Org home hero — purpose-first configuration (round 2 of the org home hero
- * work; design pages in docs/handover/org-landing-sources/round2, git-ignored).
+ * Org home hero — purpose-first configuration.
  *
  * The model, in four layers:
  *   1. the org's FACTS (what it has: a logo, a shader, a film, featured work);
@@ -37,7 +36,7 @@ export type HeroPurpose = (typeof HERO_PURPOSES)[number];
 /** Every option and the values it can take. The first value is never implied. */
 export const HERO_OPTION_VALUES = {
   // 'showreel': the intro film, then the featured pieces, played one at a time
-  // through the brand shader (Codex-1yd58); its own options are the reel-* keys
+  // through the brand shader; its own options are the reel-* keys
   comp: ['statement', 'centre', 'showcase', 'split', 'billboard', 'showreel'],
   align: ['start', 'center', 'end'],
   height: ['full', 'tall', 'compact'],
@@ -61,24 +60,24 @@ export const HERO_OPTION_VALUES = {
   logo: ['s', 'm', 'l'],
   // The Showreel's own options. Every other composition leaves them unread.
   'reel-layout': ['corner', 'wide', 'name'],
-  // the first featured pieces rise just above the fold (on by default:
-  // owner, 2026-11-21)
+  // the first featured pieces rise just above the fold (on by default: the
+  // owner's choice)
   'reel-peek': ['on', 'off'],
   'reel-pointer': ['liquid', 'smoke', 'glitch', 'none'],
-  // between pieces; 'light-leak' is one of the owner's WP-1b picks
+  // between pieces; 'light-leak' is one of the owner's picks
   'reel-trans': ['burn', 'liquid', 'glitch', 'light-leak'],
   // a treatment over every picture and film, drawn by the shader on the
-  // footage alone, tinted from the brand (owner, 2026-11-21: off by default;
-  // no halftone)
+  // footage alone, tinted from the brand (off by default, and no halftone:
+  // the owner's choices)
   'reel-surface': ['none', 'duotone', 'colour', 'grain'],
-  // the stills push in slowly while they show (on by default: owner,
-  // 2026-11-21); held still under reduced motion
+  // the stills push in slowly while they show (on by default: the owner's
+  // choice); held still under reduced motion
   'reel-push': ['on', 'off'],
   // where the film gives way to the shader: its foot evenly ('fade', the
-  // default: owner, 2026-11-20), its foot through the smoke ('under'), all
-  // round ('edges'), or nowhere
+  // owner's default), its foot through the smoke ('under'), all round
+  // ('edges'), or nowhere
   'reel-band': ['fade', 'under', 'edges', 'none'],
-  // how the words keep their contrast over the footage (owner, 2026-11-20):
+  // how the words keep their contrast over the footage (the owner's two):
   // the corner shadows grown as far as each word needs ('shadow', the
   // default), or the shadows as they are and an outline round each word's
   // glyphs ('outline')
@@ -308,9 +307,9 @@ function purposeDefaults(
  * The defaults that hang on another option, once the purpose's and the org's
  * own are in (`set`): only a key neither set takes one. The opening through
  * the name is the Name window's own; on Corner and Wide the reel opens on its
- * film, and a creator who turns the title opening on gets it (owner,
- * 2026-11-21, the WP-6 board's N, then A). Read, never stored, so an org
- * that never chose an opening follows the layout it has now.
+ * film, and a creator who turns the title opening on gets it (the owner's
+ * choice). Read, never stored, so an org that never chose an opening follows
+ * the layout it has now.
  */
 function dependentDefaults(
   options: HeroOptions,
@@ -402,7 +401,7 @@ function applyFallbacks(input: HeroOptions, facts: HeroFacts): HeroOptions {
  * A Showreel reaching here has a reel: the consume default asks for one, and
  * resolveHero sets aside a chosen Showreel without one, so the purpose's own
  * hero draws instead. The reel plays in the brand shader's ground, or on a
- * plain one when the org has no shader (owner, 2026-11-19). It takes the
+ * plain one when the org has no shader (the owner's choice). It takes the
  * spotlight's place: no spotlight, and no shelf repeating the pieces its index
  * lists.
  */
@@ -415,7 +414,7 @@ function showreelFallbacks(c: HeroOptions, facts: HeroFacts): void {
 
 /** The ground behind the words, and the reel's parts the shader draws. */
 function groundFallbacks(c: HeroOptions, facts: HeroFacts): void {
-  // every surface (WP-5b) and the band are drawn by the shader
+  // every surface and the band are drawn by the shader
   if (!facts.hasShader) {
     c['reel-surface'] = 'none';
     c['reel-band'] = 'none';
@@ -500,13 +499,16 @@ function leadFallbacks(c: HeroOptions, facts: HeroFacts): void {
 }
 
 /**
- * The reel's own keys, once the lead is settled. With the logo leading alone
- * the name is out of sight, so the reel never plays through it: no name
- * window, no opening or way into the film by it.
+ * The reel's own keys, once the lead is settled. The Name window plays its
+ * opening and its way into the film through the org's name. With the logo
+ * leading alone that name is out of sight, so the window becomes Corner, and
+ * an opening or a way in through the name becomes none and the smoke. Corner
+ * and Wide play theirs through the piece's title, which the logo never hides,
+ * so there they stay as chosen.
  */
 function reelFallbacks(c: HeroOptions, facts: HeroFacts): void {
-  if (c.lead === 'logo') {
-    if (c['reel-layout'] === 'name') c['reel-layout'] = 'corner';
+  if (c.lead === 'logo' && c['reel-layout'] === 'name') {
+    c['reel-layout'] = 'corner';
     if (c['reel-opening'] === 'name') c['reel-opening'] = 'none';
     if (c['reel-film'] === 'name') c['reel-film'] = 'smoke';
   }

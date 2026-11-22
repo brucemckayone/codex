@@ -1,6 +1,6 @@
 /**
  * Whether the ink the Showreel draws its words in can keep its floor over the
- * footage (Codex-1yd58 WP-9): the editor's warning, judged as the reel judges
+ * footage: the editor's warning, judged as the reel judges
  * a word. Every reel word is the reel's `--_ink` or `--_ink-soft`, never a
  * brand colour, and which ink that is turns on the theme's ground: the
  * reel's own switch, `groundPoles` (reel-scrim.ts; Showreel.svelte's

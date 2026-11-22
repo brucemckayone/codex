@@ -19,19 +19,24 @@
  * Measured on of-blood-and-bones without a DB write, through the Showreel's
  * own spec's setup (`helpers/showreel.ts`): the landing's HTML is rewritten in
  * the browser to set the hero options the brand editor would save
- * (`brandFineTune.tokenOverrides`).
+ * (`brandFineTune.tokenOverrides`). Every test plays the intro film as its
+ * preview (`introFilm: { fullFilm: false }`), so its button opens the theatre
+ * whatever the seeded film is, and the recording's test puts a recording in
+ * the reel.
  *
  * Needs (WP-11 checklist §1.2 and §1.3): the dev CDN for the previews, and a
  * browser that decodes H.264/AAC (system Chrome, `channel: 'chrome'`; the
- * bundled Chromium ships without them). Every test that needs a playing
- * preview skips, saying why, when none plays here; count that skip as NOT
- * PROVEN. A fulfilled document has no address, so Chrome's Local Network
- * Access counts it public: `SHOWREEL_LAUNCH` lifts that for this file only.
- * Its flags also let every start keep its sound, so a muted start here is the
- * theatre's own doing (a refused one is ReelTheatre.svelte.test.ts's).
+ * bundled Chromium ships without them). A test that needs a playing preview
+ * skips only in a browser that decodes neither, saying so; count that skip
+ * as NOT PROVEN. With them, a preview that never plays fails. A fulfilled
+ * document has no address, so Chrome's Local Network Access counts it
+ * public: `SHOWREEL_LAUNCH` lifts that for this file only. Its flags also let
+ * every start keep its sound, so a muted start here is the theatre's own
+ * doing (a refused one is ReelTheatre.svelte.test.ts's).
  */
 
 import {
+  type Browser,
   type BrowserContextOptions,
   expect,
   type Locator,
@@ -40,11 +45,22 @@ import {
 } from '@playwright/test';
 import {
   MOVES_ON,
-  ORG,
-  openShowreel as open,
+  openShowreel,
   PIECE_MS,
   SHOWREEL_LAUNCH,
+  type ShowreelOptions,
 } from '../helpers/showreel';
+
+/** The Showreel with its intro film as a preview, whose button opens the theatre. */
+const open = (
+  browser: Browser,
+  baseURL: string | undefined,
+  options: ShowreelOptions = {}
+) =>
+  openShowreel(browser, baseURL, {
+    ...options,
+    introFilm: { fullFilm: false },
+  });
 
 const PHONE: BrowserContextOptions = {
   viewport: { width: 390, height: 844 },
@@ -79,33 +95,28 @@ const bar = (theatre: Locator) => ({
   media: theatre.locator('video, audio'),
 });
 
-/**
- * Press the reel's film button and wait for the theatre. Skips, saying why,
- * when the reel opens on no film, or on a full film (whose button opens the
- * full-film player, not the theatre).
- */
+/** Press the reel's "Play the preview" (`open` sets it) and wait for the theatre. */
 async function openTheatre(page: Page): Promise<{
   opener: Locator;
   theatre: Locator;
 }> {
-  const opener = showreel(page).getByRole('button', {
-    name: /^(Play the preview|Watch our film)/,
-  });
-  const label =
-    (await opener.count()) > 0
-      ? ((await opener.first().textContent())?.trim() ?? '')
-      : '';
-  test.skip(
-    !label.startsWith('Play the preview'),
-    label
-      ? `${ORG}'s film is a full film ("${label}"): its button opens the full-film player, not the theatre`
-      : `${ORG}'s reel opens on no film here`
-  );
-  await opener.first().click();
+  const opener = showreel(page)
+    .getByRole('button', { name: /^Play the preview/ })
+    .first();
+  await expect(opener, 'the film button plays the preview').toBeVisible();
+  await opener.click();
   const theatre = theatreOf(page);
   await expect(theatre).toBeVisible({ timeout: 15_000 });
-  return { opener: opener.first(), theatre };
+  return { opener, theatre };
 }
+
+/** Whether this browser decodes the previews' H.264 and AAC (the bundled Chromium decodes neither). */
+const decodesPreviews = (page: Page) =>
+  page.evaluate(
+    () =>
+      typeof MediaSource !== 'undefined' &&
+      MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E,mp4a.40.2"')
+  );
 
 /** Whether the theatre's preview gets going here (codecs, the dev CDN). */
 async function playsHere(media: Locator): Promise<boolean> {
@@ -133,11 +144,16 @@ async function playsHere(media: Locator): Promise<boolean> {
     .catch(() => false);
 }
 
+/** Skips where no preview can play (no codecs), and fails where one could but did not. */
 async function requirePlaying(theatre: Locator): Promise<void> {
   test.skip(
-    !(await playsHere(bar(theatre).media)),
-    'the preview never played here: run under system Chrome with the dev CDN up'
+    !(await decodesPreviews(theatre.page())),
+    "this browser decodes no H.264/AAC, so no preview can play: run under system Chrome (channel: 'chrome')"
   );
+  expect(
+    await playsHere(bar(theatre).media),
+    'the preview plays (it needs the dev CDN up)'
+  ).toBe(true);
 }
 
 /** True when focus is on the opener or, the opener gone, the index's current piece. */
@@ -435,6 +451,7 @@ test.describe('the Showreel theatre', () => {
     // No AudioContext, so nothing can read the sound: the theatre's state
     // with no CORS analyser, made certain.
     const page = await open(browser, baseURL, {
+      featureRecording: true,
       init: () => {
         Object.defineProperty(window, 'AudioContext', {
           configurable: true,
@@ -446,29 +463,26 @@ test.describe('the Showreel theatre', () => {
         });
       },
     });
-    const reel = showreel(page);
-    const items = page
+    // The index names each piece "<number> <title> <kind>".
+    const recordings = page
       .getByRole('navigation', { name: 'Showreel' })
-      .getByRole('button');
-    const slide = reel
-      .locator('[aria-roledescription="slide"]:visible')
-      .first();
+      .getByRole('button', { name: /Recording$/ });
     let opener: Locator | null = null;
-    for (let i = 0; i < (await items.count()); i++) {
-      await items.nth(i).click();
+    for (const item of await recordings.all()) {
+      const number = /^\s*(\d+)/.exec((await item.textContent()) ?? '')?.[1];
+      await item.click();
+      // The words swap in after the press: wait for that piece's own slide.
+      const slide = showreel(page).getByRole('group', {
+        name: new RegExp(`^${number} of `),
+      });
+      await expect(slide).toBeVisible();
       const preview = slide.getByRole('button', { name: /preview/i });
-      if (
-        /recording/i.test((await slide.textContent()) ?? '') &&
-        (await preview.count()) > 0
-      ) {
+      if ((await preview.count()) > 0) {
         opener = preview.first();
         break;
       }
     }
-    test.skip(
-      opener === null,
-      `no recording on ${ORG}'s reel offers its preview here`
-    );
+    expect(opener, 'a recording on the reel offers its preview').not.toBeNull();
     if (!opener) return;
     await opener.click();
     const theatre = theatreOf(page);

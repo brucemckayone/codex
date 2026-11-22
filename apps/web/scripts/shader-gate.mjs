@@ -11,10 +11,11 @@
  * each pass with glslang, which only a machine with glslang can. The pure
  * checks are self-tested with planted passes in `shader-gate.test.mjs`.
  */
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from '../../../scripts/checks/is-entrypoint.mjs';
 import {
   declaredUniforms,
   reversedSmoothsteps,
@@ -228,17 +229,4 @@ async function main() {
   }
 }
 
-/** Run as a script, not imported: argv[1] through symlinks, as the other gates. */
-function isMain() {
-  if (!process.argv[1]) return false;
-  try {
-    return (
-      realpathSync(process.argv[1]) ===
-      realpathSync(fileURLToPath(import.meta.url))
-    );
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) await main();
+if (isEntrypoint(import.meta.url)) await main();

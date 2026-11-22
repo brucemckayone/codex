@@ -683,7 +683,7 @@
     contentKindForHero(heroOptions?.spot === 'film' ? { kind: 'video' } : heroSpot, stats?.content)
   );
   // In the brand studio's live preview, tell the editor what this hero
-  // resolved to, and from which choices, for its hints (WP-9). Null when it
+  // resolved to, and from which choices, for its hints. Null when it
   // draws the classic hero. Inert on a visitor's page.
   $effect(() => {
     reportPreviewResolved(
@@ -1687,7 +1687,7 @@
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black var(--landing-overlap));
   }
 
-  /* The hero's peek (owner Q1-B, 2026-11-21): a hero that stops short of the
+  /* The hero's peek (the owner's choice): a hero that stops short of the
      screen's foot (`data-peek`) hands that room to the first section's cards,
      so the section starts at the hero's foot, its label kept. Keyed on the
      hero's own mark, a sibling of this area, so no section knows of the reel

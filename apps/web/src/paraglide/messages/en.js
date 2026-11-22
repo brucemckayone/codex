@@ -9447,14 +9447,6 @@ export const branding_hero_field_main = () => `Main button`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_main_consume = () => `Start watching`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_main_explore = () => `Explore`
 
 
@@ -10567,7 +10559,7 @@ export const branding_hero_field_reel_opening = () => `Opening`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_opening_name = () => `Through the name`
+export const branding_hero_reel_opening_name = () => `Through the letters`
 
 
 /**
@@ -10583,7 +10575,15 @@ export const branding_hero_field_reel_film = () => `Into the film`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_film_name = () => `Through the name`
+export const branding_hero_reel_film_name = () => `Through the letters`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_letters_hint = () => `Through the letters means through the big title, or through your name on the Name window.`
 
 
 /**

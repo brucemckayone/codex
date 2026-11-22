@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Output-door gate (Codex-1yd58 WP-2): a ShaderHero renderer reaches "the
+ * Output-door gate: a ShaderHero renderer reaches "the
  * screen" only through `bindOutput(gl)` in ShaderHero/output-target.ts.
  *
  * The defect class. Every preset ends its frame by drawing into whatever
- * output is bound. The brand shader stack's compositor (WP-3, Codex-1yd58.4,
- * `ShaderHero/compositor/`) renders a preset into its own scene framebuffer,
+ * output is bound. The brand shader stack's compositor
+ * (`ShaderHero/compositor/`) renders a preset into its own scene framebuffer,
  * attached through `setOutputTarget`; every renderer that comes back with
  * `bindOutput(gl)` draws into it. One raw
  * `gl.bindFramebuffer(gl.FRAMEBUFFER, null)` would draw that preset to the
@@ -57,10 +57,11 @@
  * other argument exits 2. Exported (`collectViolations`, `blankComments`,
  * `scanSource`) for the tests; `main()` runs only as the CLI entrypoint.
  */
-import { readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'svelte/compiler';
+import { isEntrypoint } from '../../../scripts/checks/is-entrypoint.mjs';
 
 const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const HERO_DIR = join(WEB_ROOT, 'src/lib/components/ui/ShaderHero');
@@ -531,21 +532,4 @@ function main() {
   );
 }
 
-/**
- * Whether this file is the process's entry. Compared as real paths: Node
- * resolves import.meta.url through symlinks but not argv[1], so a plain
- * comparison skips main() under a symlinked checkout and exits 0 unchecked.
- */
-function isEntrypoint() {
-  if (!process.argv[1]) return false;
-  try {
-    return (
-      realpathSync(process.argv[1]) ===
-      realpathSync(fileURLToPath(import.meta.url))
-    );
-  } catch {
-    return false;
-  }
-}
-
-if (isEntrypoint()) main();
+if (isEntrypoint(import.meta.url)) main();

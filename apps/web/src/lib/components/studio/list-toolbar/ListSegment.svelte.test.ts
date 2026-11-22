@@ -1,5 +1,5 @@
 /**
- * ListSegment's keyboard, the WAI-ARIA APG radio group's (WP-9 review): the
+ * ListSegment's keyboard, the WAI-ARIA APG radio group's: the
  * group is one tab stop, the checked option (else the first), and the arrow
  * keys move to the next or previous option and choose it, wrapping. Without
  * it a Showreel group of nine fields was about forty tab stops.

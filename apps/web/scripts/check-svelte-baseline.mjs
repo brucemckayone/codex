@@ -47,10 +47,11 @@
  *     --baseline  compare with another baseline file (the self-test uses this)
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from '../../../scripts/checks/is-entrypoint.mjs';
 
 const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DEFAULT_BASELINE = fileURLToPath(
@@ -292,20 +293,5 @@ export function run(argv, log = console) {
   return 0;
 }
 
-/**
- * Whether this file is the process's entry. Compared as real paths: Node
- * resolves import.meta.url through symlinks but not argv[1] (Codex-noyrq).
- */
-function isEntrypoint() {
-  if (!process.argv[1]) return false;
-  try {
-    return (
-      realpathSync(process.argv[1]) ===
-      realpathSync(fileURLToPath(import.meta.url))
-    );
-  } catch {
-    return false;
-  }
-}
-
-if (isEntrypoint()) process.exitCode = run(process.argv.slice(2));
+if (isEntrypoint(import.meta.url))
+  process.exitCode = run(process.argv.slice(2));
