@@ -25,7 +25,7 @@ const HAS_DB = ['LOCAL_PROXY', 'NEON_BRANCH'].includes(
 );
 
 /** The migration's file name: renumbering it at PR time changes this alone. */
-const MIGRATION_TAG = '0132_leaving_notice_templates';
+const MIGRATION_TAG = '0134_leaving_notice_templates';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION = readFileSync(

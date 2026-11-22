@@ -64,3 +64,70 @@ describe('requiresPayoutsToPublish (Codex-2hxff.14: any priced item)', () => {
     expect(requiresPayoutsToPublish(c)).toBe(false);
   });
 });
+
+/**
+ * canBeSold reads the access decision's branch table (Codex-z1t3c), so a new
+ * branch has to be classified before checkout can sell into it. Before that it
+ * was a hand-written list of negations: this is that form, frozen, and the
+ * table below proves the two agree on every flag combination.
+ */
+function canBeSoldAsHandWritten(c: Parameters<typeof canBeSold>[0]): boolean {
+  return (
+    c.isPurchasable &&
+    (c.priceCents ?? 0) >= PRICE_LIMITS.MIN_CENTS &&
+    !c.courseOnly &&
+    !c.isTeamOnly &&
+    !c.isFollowerGated &&
+    !(c.organizationId == null && c.isTierGated)
+  );
+}
+
+const BOTH = [false, true] as const;
+const PRICES = [
+  null,
+  0,
+  PRICE_LIMITS.MIN_CENTS - 1,
+  PRICE_LIMITS.MIN_CENTS,
+  1500,
+] as const;
+
+const everyFlagCombination = BOTH.flatMap((isPurchasable) =>
+  PRICES.flatMap((priceCents) =>
+    BOTH.flatMap((courseOnly) =>
+      BOTH.flatMap((isTeamOnly) =>
+        BOTH.flatMap((isFollowerGated) =>
+          BOTH.flatMap((isTierGated) =>
+            [null, ORG].map((organizationId) => ({
+              isPurchasable,
+              priceCents,
+              courseOnly,
+              isTeamOnly,
+              isFollowerGated,
+              isTierGated,
+              organizationId,
+            }))
+          )
+        )
+      )
+    )
+  )
+);
+
+describe('canBeSold reads the branch table, as the hand-written rule did', () => {
+  it('covers every flag combination', () => {
+    expect(everyFlagCombination).toHaveLength(2 * PRICES.length * 2 ** 5);
+  });
+
+  it('agrees with the hand-written rule on every flag combination', () => {
+    const disagreements = everyFlagCombination.filter(
+      (c) => canBeSold(c) !== canBeSoldAsHandWritten(c)
+    );
+    expect(disagreements).toEqual([]);
+  });
+
+  it('sells some combinations and refuses others (the table is not vacuous)', () => {
+    const sold = everyFlagCombination.filter((c) => canBeSold(c));
+    expect(sold.length).toBeGreaterThan(0);
+    expect(sold.length).toBeLessThan(everyFlagCombination.length);
+  });
+});

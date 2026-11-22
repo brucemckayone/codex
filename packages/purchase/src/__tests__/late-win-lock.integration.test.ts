@@ -173,6 +173,10 @@ describe('a late win racing a re-run of its loss', () => {
             organizationId: orgId,
             contentType: 'written',
             slug: createUniqueSlug('late-win-lock'),
+            // Published, as anything a checkout sells is: completion blocks a
+            // sale of content its buyer could not open (Codex-z1t3c, D54).
+            status: 'published',
+            publishedAt: new Date(),
           })
         )
         .returning()

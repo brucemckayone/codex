@@ -8,7 +8,10 @@
  *   undone;
  * - a failed one support settled as refunded elsewhere: the buyer has that
  *   money back another way, so it counts as if it had succeeded. A failed one
- *   not yet settled counts nothing (Codex-2hxff.28).
+ *   not yet settled counts nothing (Codex-2hxff.28), nor does one the
+ *   platform settled `covered_by_refund` (owner D73, `covered-refunds.ts`):
+ *   the later refund of everything owed that covered it counts instead, so
+ *   counting both would count the money twice.
  *
  * What went back to a payment's buyer, the admin revenue's `taken` and the
  * studio Sales "Refunds" alike, is those refunds plus its lost chargebacks,
@@ -33,12 +36,22 @@
  * And every reader ties a refund or a chargeback to its payment by one key: a
  * charge's readers by `stripe_charge_id` (`refundsOfCharge`,
  * `disputesOfCharge`), a purchase's by `refundsOfPurchase` and
- * `disputesOfPurchase`.
+ * `disputesOfPurchase`, and one payment's readers outside the ledger (what a
+ * blocked payment is owed, the restore, the late win's refund, and support's
+ * queue deferring a refund to its chargeback) by its charge
+ * (`refundsOfPayment`, `countedRefundOf`, `refundOfDispute`; review r7).
  */
 
 import type { RefundStatus } from '@codex/database/schema';
 import { disputes, payouts, purchases, refunds } from '@codex/database/schema';
-import { type AnyColumn, eq, inArray, type SQL, sql } from 'drizzle-orm';
+import {
+  type AnyColumn,
+  eq,
+  inArray,
+  type SQL,
+  type SQLWrapper,
+  sql,
+} from 'drizzle-orm';
 
 /**
  * The refunds that count against what was paid: made and not undone. A failed
@@ -76,9 +89,10 @@ export function countsAgainstCharge(): SQL {
  * holds a PaymentIntent, so the charge is the one the purchase's ledger
  * slices name (`payouts`), the same link the support search reads its charge
  * id by. That is the charge the detail and the revenue count by
- * `stripe_charge_id`, so a purchase's row and its charge count the same rows,
- * as `standingRefundFields` does. A purchase with no slices (before the
- * ledger) matches by `purchase_id` only.
+ * `stripe_charge_id`, so a purchase's row and its charge count the same rows.
+ * A purchase with no slices (before the ledger, or a blocked payment) matches
+ * by `purchase_id` only, so a reader of one payment outside the ledger keys
+ * on its charge instead (`refundsOfPayment`).
  *
  * Its own `sql`: interpolated whole, its columns keep their table even in a
  * single-table select (drizzle writes a field's TOP-LEVEL columns bare there,
@@ -101,6 +115,56 @@ export function disputesOfPurchase(): SQL {
 /** A `refunds` row (unaliased) of the charge `chargeId` names: a column, or a CTE's. */
 export function refundsOfCharge(chargeId: AnyColumn | SQL): SQL {
   return sql`${refunds.stripeChargeId} = ${chargeId}`;
+}
+
+/**
+ * A `refunds` row (unaliased) of one payment, read outside the ledger, keyed
+ * on its CHARGE (`chargeId`, review r7): every refund of that charge, linked
+ * to the purchase or not (one recorded before the purchase existed has no
+ * `purchase_id`, Codex-aa08z). Only with no charge known, the purchase's own
+ * rows (`purchaseId`). Each is a value or the outer query's column.
+ *
+ * Never the purchase's rows as well: every writer of `refunds.purchase_id`
+ * derives it from the refund's own PaymentIntent, and a PaymentIntent has one
+ * charge, so on real data the purchase's rows are its charge's; a union would
+ * only let a wrong or missing charge id pass unseen, and widen the count the
+ * day a writer links a refund some other way. Nor `purchase_id IS NULL` on
+ * the charge's: no reader can meet another purchase's refund on a charge.
+ * Never through the payout slices, as `refundsOfPurchase` is: a blocked
+ * payment writes none (review r6).
+ */
+export function refundsOfPayment(
+  purchaseId: SQLWrapper | string,
+  chargeId: SQLWrapper | string | null
+): SQL {
+  return chargeId === null
+    ? sql`(${refunds.purchaseId} = ${purchaseId})`
+    : sql`(${refunds.stripeChargeId} = ${chargeId})`;
+}
+
+/**
+ * A `refunds` row (unaliased) of the payment the outer query's `disputes` row
+ * (unaliased) disputes: on its charge (`refundsOfPayment`). The key support's
+ * queue defers a blocked payment's failed refund to its chargeback by, the
+ * same one its debt is counted by, so the queue and the owed count can't
+ * drift (review r7).
+ */
+export function refundOfDispute(): SQL {
+  return refundsOfPayment(disputes.purchaseId, disputes.stripeChargeId);
+}
+
+/**
+ * The refunds that count against one payment (`refundsOfPayment`,
+ * `countsAgainstCharge`): standing, or failed and settled refunded
+ * elsewhere. The one rule what a blocked payment is owed, a lost dispute's
+ * refunded amount, the failed-refund restore and the late win's refund all
+ * read (owner D66, D69), so none of them can disagree.
+ */
+export function countedRefundOf(
+  purchaseId: SQLWrapper | string,
+  chargeId: SQLWrapper | string | null
+): SQL {
+  return sql`(${refundsOfPayment(purchaseId, chargeId)} AND ${countsAgainstCharge()})`;
 }
 
 /** A `disputes` row (unaliased) of the charge `chargeId` names: a column, or a CTE's. */

@@ -25,6 +25,7 @@ import {
   supportChargeSearchQuerySchema,
   supportClosePriceMoveSchema,
   supportIssueRefundSchema,
+  supportPaidAnotherWaySchema,
   supportQueueQuerySchema,
   supportResolveCreatorDebtSchema,
   supportResolveCreditSchema,
@@ -221,6 +222,31 @@ export const issueSupportRefund = command(
       return { outcome: 'done' as const, result };
     } catch (error) {
       return toSupportFailure(error, 'issueSupportRefund', { chargeId });
+    }
+  }
+);
+
+/**
+ * Mark what a lost chargeback left owed on a blocked payment as paid another
+ * way (owner D61): the body is the dispute and the amount the page showed.
+ * A repeat answers `alreadyMarked: true`. Refusals come back by code:
+ * `SHORT_LOSS_CHANGED` (412: what's owed moved, so the page reloads) or
+ * `NOT_OWED_AFTER_LOSS` (422) with its `reason`.
+ */
+export const markPaidAnotherWay = command(
+  ownerOnly(
+    z.object({
+      chargeId: stripeChargeIdSchema,
+      body: supportPaidAnotherWaySchema,
+    })
+  ),
+  async ({ chargeId, body }) => {
+    const api = supportApi();
+    try {
+      const result = await api.markPaidAnotherWay(chargeId, body);
+      return { outcome: 'done' as const, result };
+    } catch (error) {
+      return toSupportFailure(error, 'markPaidAnotherWay', { chargeId });
     }
   }
 );

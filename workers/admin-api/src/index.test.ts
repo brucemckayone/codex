@@ -236,6 +236,15 @@ describe('Admin API Worker', () => {
           expectedRefundCount: 0,
         },
       },
+      // Owner D61: a short lost chargeback, paid another way.
+      {
+        method: 'POST',
+        path: `/api/admin/support/charges/${CHARGE}/paid-another-way`,
+        body: {
+          stripeDisputeId: 'du_1QjK7pXk9vRb88aQ',
+          expectedOwedCents: 500,
+        },
+      },
       { method: 'GET', path: '/api/admin/support/queue/counts' },
       { method: 'GET', path: '/api/admin/support/queue/failed-refunds' },
       { method: 'GET', path: '/api/admin/support/queue/creator-debts' },

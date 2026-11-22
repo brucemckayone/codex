@@ -362,7 +362,7 @@ If you have any questions, please contact our support team at {{supportEmail}}.
   },
   // The leaving notice (Codex-a6ofh.6.4): to a piece's owners, sent by
   // content-api's leaving sweep. The sender picks actionLabel (D8); the
-  // brand tokens come from the piece's org. Migration 0132 carries these to
+  // brand tokens come from the piece's org. Migration 0134 carries these to
   // production, so a change here needs a migration too.
   {
     name: 'content-leaving',

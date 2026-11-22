@@ -100,7 +100,7 @@ export const disputes = pgTable(
      * When the buyer was refunded outside Stripe (owner decision 2026-11-08,
      * "Block it in code"). From then on the charge is never refunded through
      * Stripe: support's refund route refuses it (`REFUNDED_OUTSIDE_STRIPE`).
-     * Three writers:
+     * Four writers:
      * - the runbook step that settles the charge by hand
      *   (docs/payments/operations.md, "Settling a late-win refund Stripe
      *   won't make"), in the transaction that marks the outcome;
@@ -108,16 +108,50 @@ export const disputes = pgTable(
      *   elsewhere when the charge's succeeded Stripe refunds don't cover
      *   it, in the transaction that resolves it (`settleRefundedElsewhere`,
      *   @codex/admin);
+     * - support marking a blocked payment's short lost chargeback "paid
+     *   another way" (owner D61, `markPaidAnotherWay`, @codex/admin), in the
+     *   update that adds to `paid_another_way_cents`;
      * - a manual UPDATE, with the owner's OK, for a buyer refunded another
      *   way that the settle never saw (docs/payments/release-checklist.md,
      *   R19 (b)).
      * No date is overwritten. The runbook step runs only on a charge with no
-     * refund recorded, so it never meets a set date; the other two guard
-     * with `IS NULL`.
+     * refund recorded, so it never meets a set date; the settle guards with
+     * `IS NULL`; and a mark keeps a date already set (`COALESCE`), under its
+     * guard that the amount is `unchanged` since the page read it, so a
+     * mark made again at the short stage (owner D66, D71) keeps the first
+     * date.
      */
     refundedOutsideStripeAt: timestamp('refunded_outside_stripe_at', {
       withTimezone: true,
     }),
+    /**
+     * Everything support has paid a blocked payment's buyer another way on
+     * this dispute, in pence (owner D61, D64, D66): each "Paid another way"
+     * mark ADDS what was owed when it was made, at either stage (`short`,
+     * `owed_again`), so a stage owed more after a mark is marked again. Only
+     * the marks write it, each guarded by the amount being `unchanged` since
+     * the page read it (`IS NOT DISTINCT FROM`), so a retry never adds twice.
+     * The first mark writes it with `refunded_outside_stripe_at`, so it is
+     * how that mark is told apart from the other writers of the date (never
+     * by comparing dates), and it is taken off what the buyer is owed
+     * (`owedAfterLoss`, @codex/purchase). The split between marks isn't
+     * stored (D68). Null for every other dispute.
+     */
+    paidAnotherWayCents: integer('paid_another_way_cents'),
+    /**
+     * When support first paid the buyer another way after a late win (owner
+     * D63): a late win on a charge marked paid another way takes the
+     * chargeback back from the buyer and makes no refund (D62), so the buyer
+     * is owed again until support marks it on the charge page. The mark at
+     * that stage adds to `paid_another_way_cents` and keeps a date already
+     * set (`COALESCE`, D71), under the same `unchanged` amount guard, so a
+     * later mark at that stage keeps the first date. Null for every other
+     * dispute.
+     */
+    lateWinRefundedOutsideStripeAt: timestamp(
+      'late_win_refunded_outside_stripe_at',
+      { withTimezone: true }
+    ),
     /**
      * The appeal of a lost chargeback, while it runs (owner D34):
      * `appeal_needs_response`, then `appeal_under_review`. Set only on a
@@ -183,6 +217,17 @@ export const disputes = pgTable(
     check(
       'check_disputes_appeal_status',
       sql`${table.appealStatus} IS NULL OR ${table.appealStatus} IN ('appeal_needs_response', 'appeal_under_review')`
+    ),
+    // Support's two "Paid another way" marks (owner D61, D63, D64). Safe for
+    // an older worker after a rollback: none writes either column, and no
+    // code clears `refunded_outside_stripe_at` or `late_won_at`.
+    check(
+      'check_disputes_paid_another_way',
+      sql`${table.paidAnotherWayCents} IS NULL OR (${table.paidAnotherWayCents} > 0 AND ${table.refundedOutsideStripeAt} IS NOT NULL)`
+    ),
+    check(
+      'check_disputes_late_win_paid_another_way',
+      sql`${table.lateWinRefundedOutsideStripeAt} IS NULL OR (${table.paidAnotherWayCents} IS NOT NULL AND ${table.lateWonAt} IS NOT NULL)`
     ),
   ]
 );

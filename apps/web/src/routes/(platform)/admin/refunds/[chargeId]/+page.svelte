@@ -24,6 +24,9 @@
   queue's Re-pay (or Count against this debt) on its history line. It opens
   the same dialog; once it answers, the charge and the counts reload once,
   and the notice says what was done.
+  "Mark as paid another way" on a short lost chargeback (owner D61) answers
+  the same way: the notice, one reload of the charge and the counts, and
+  focus on the notice.
 
   The not-found, error and loading states still name the page with an h1.
   Only the worker's own 404 is "not found": the remote guard's bare 404, like
@@ -45,6 +48,7 @@
   import RefundOutcomeAlert from '$lib/components/support/RefundOutcomeAlert.svelte';
   import RefundsCard from '$lib/components/support/RefundsCard.svelte';
   import SessionEndedAlert from '$lib/components/support/SessionEndedAlert.svelte';
+  import SettleNoticeAlert from '$lib/components/support/SettleNoticeAlert.svelte';
   import SplitCard from '$lib/components/support/SplitCard.svelte';
   import ResolveCreditDialog from '$lib/components/support/ResolveCreditDialog.svelte';
   import { type CreditTarget, targetFromLine } from '$lib/components/support/owed-view';
@@ -305,14 +309,7 @@
   {/if}
 
   {#if creditNotice}
-    <Alert
-      variant={creditNotice.variant}
-      tabindex={-1}
-      data-credit-notice
-      data-testid="credit-notice"
-    >
-      <p>{#if creditNotice.lead}<strong>{creditNotice.lead}</strong> {/if}{creditNotice.text}</p>
-    </Alert>
+    <SettleNoticeAlert notice={creditNotice} data-credit-notice data-testid="credit-notice" />
   {/if}
 
   {#if outcome}
@@ -347,6 +344,7 @@
         locked={reloadLock}
         onOutcome={handleOutcome}
         onStale={() => void reloadCharge()}
+        onSettled={(next) => void handleCreditFinished(next)}
       />
     </aside>
   </div>

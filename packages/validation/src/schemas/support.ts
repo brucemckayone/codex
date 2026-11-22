@@ -4,6 +4,7 @@
  * routes validate their input with these.
  */
 
+import { SHORT_LOSS_STAGES } from '@codex/constants';
 import { z } from 'zod';
 import { uuidSchema } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
@@ -225,6 +226,48 @@ export const supportToldAnotherWaySchema = z
 
 export type SupportToldAnotherWayInput = z.infer<
   typeof supportToldAnotherWaySchema
+>;
+
+// ─── A short lost chargeback, paid another way (owner D60, D61) ────────────
+
+/**
+ * A Stripe dispute (a chargeback or an inquiry): `du_…`, or `dp_…` for one
+ * Stripe opened under its older prefix, which it still answers to.
+ */
+export const stripeDisputeIdSchema = z
+  .string()
+  .regex(/^d[up]_[A-Za-z0-9]{8,64}$/, { message: 'Invalid dispute ID' });
+
+/**
+ * POST /api/admin/support/charges/:chargeId/paid-another-way. What the page
+ * showed: the dispute, the amount owed, which time it is owed (`stage`,
+ * owner D63: `short` after the loss, `owed_again` after a late win; `short`
+ * when absent, as a page loaded before the second stage sends it), and what
+ * was paid another way so far (`expectedPaidAnotherWayCents`, null before
+ * the first mark, and when absent). A mark ADDS what it pays (owner D66), so
+ * that total is how a repeat is known: moved with nothing owed is a repeat,
+ * moved with more owed is SHORT_LOSS_CHANGED, as is any other value that
+ * moved. Nothing else is accepted.
+ */
+export const supportPaidAnotherWaySchema = z
+  .object({
+    stripeDisputeId: stripeDisputeIdSchema,
+    expectedOwedCents: z
+      .number()
+      .int({ message: 'Must be a whole number of pence' })
+      .min(1, { message: 'Must be at least 1p' }),
+    expectedPaidAnotherWayCents: z
+      .number()
+      .int({ message: 'Must be a whole number of pence' })
+      .min(1, { message: 'Must be at least 1p' })
+      .nullable()
+      .default(null),
+    stage: z.enum(SHORT_LOSS_STAGES).default('short'),
+  })
+  .strict();
+
+export type SupportPaidAnotherWayInput = z.infer<
+  typeof supportPaidAnotherWaySchema
 >;
 
 // ─── Price moves (Codex-2hxff.85, .86; batch C1 Part B data design §2.5) ────

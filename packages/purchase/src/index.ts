@@ -85,6 +85,15 @@ export {
   type AgreementRevenueType,
   findActiveCreatorAgreementShare,
 } from './services/agreement-share';
+// The payments that grant and pay nothing (Codex-2hxff.14, Codex-z1t3c)
+export {
+  type BlockedPaymentKind,
+  blockedKind,
+  blockedPayment,
+  isDuplicatePayment,
+  isUnavailableBlock,
+  owedBlockedPayment,
+} from './services/blocked-payment';
 // One open checkout per buyer and item (Codex-2hxff.14, .15)
 export {
   CheckoutReservations,
@@ -98,6 +107,7 @@ export {
   countsAgainstCharge,
   disputesOfCharge,
   disputesOfPurchase,
+  refundOfDispute,
   refundsOfCharge,
   refundsOfPurchase,
   STANDING_REFUND_STATUSES,
@@ -105,6 +115,16 @@ export {
   settledElsewhereCentsIn,
   takenBack,
 } from './services/counted-refunds';
+// A refund of everything owed covers the failed refunds it included (owner
+// D73, review r8): support's refund of all that is left covers too, records
+// its set in the refund's metadata (review r9), and its settle locks a
+// charge's refunds as a cover does
+export {
+  coverIncludedRefunds,
+  coversMetadata,
+  lockRefundsOfCharge,
+  uncoveredFailedRefunds,
+} from './services/covered-refunds';
 // Entitlement + auto-enrollment write seam (Codex-2pryk WP-6)
 export {
   autoEnroll,
@@ -134,7 +154,6 @@ export {
 // Service
 export {
   type BuyerPurchase,
-  isDuplicatePayment,
   type PurchaseMailer,
   PurchaseService,
   type RefundAccessKept,
@@ -159,6 +178,15 @@ export {
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
   type RevenueSplit,
 } from './services/revenue-calculator';
+// A lost chargeback that left a blocked payment short (owner D59, D60), and
+// the one rule for where its debt is carried (review r7)
+export {
+  chargebackCarriesRefund,
+  findShortLosses,
+  lateWinBeingUndone,
+  owedOnPayment,
+  type ShortLoss,
+} from './services/short-loss';
 // Customer integrity helpers (Codex-qsvxf — Q4.4 belt-and-braces)
 export {
   findStripeCustomerCollisions,

@@ -59,9 +59,12 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  alertChargebacksHeldTooLong,
+  CHARGEBACK_HOLD_ALERT_DAYS,
   isGbpOrUnset,
   issueRefund,
   type LedgerDeps,
+  noOpenChargeback,
   type RecordSliceInput,
   recordPlatformFee,
   recordSplitOnce,
@@ -2121,19 +2124,22 @@ export class CourseSubscriptionService extends BaseService {
     stillOwed: Array<{ id: string; stripeSubscriptionId: string }>;
   }> {
     const recordedBefore = new Date(Date.now() - params.olderThanMs);
+    // One an open chargeback holds is left to the dispute, and one held past
+    // Stripe's dispute lifecycle is alerted (owner D58; @codex/payments
+    // dispute-hold). One raw fragment, never undefined: `and()` would be.
+    const unsettled = sql`(${courseSubscriptions.duplicateOfCourseSubscriptionId} IS NOT NULL AND ${courseSubscriptions.duplicateSettledAt} IS NULL)`;
     const owed = await this.db
       .select()
       .from(courseSubscriptions)
       .where(
         and(
-          isNotNull(courseSubscriptions.duplicateOfCourseSubscriptionId),
-          isNull(courseSubscriptions.duplicateSettledAt),
+          unsettled,
+          noOpenChargeback('courseSubscription', courseSubscriptions.id),
           lt(courseSubscriptions.createdAt, recordedBefore)
         )
       )
       .orderBy(asc(courseSubscriptions.createdAt))
       .limit(params.limit);
-
     let settled = 0;
     const stillOwed: Array<{ id: string; stripeSubscriptionId: string }> = [];
     for (const row of owed) {
@@ -2158,6 +2164,22 @@ export class CourseSubscriptionService extends BaseService {
         });
       }
     }
+    // After the refunds, which a failed check never stops (it logs its own
+    // error).
+    await alertChargebacksHeldTooLong(
+      { db: this.db, obs: this.obs },
+      {
+        link: 'courseSubscription',
+        check: 'duplicate_course_subscription_refunds_held',
+        owed: this.db
+          .select({ id: courseSubscriptions.id })
+          .from(courseSubscriptions)
+          .where(unsettled),
+        asOf: new Date(),
+        limit: params.limit,
+        message: `Duplicate course subscription refunds still held by a chargeback after ${CHARGEBACK_HOLD_ALERT_DAYS} days: check the dispute in Stripe, then refund them by hand`,
+      }
+    );
     return { settled, stillOwed };
   }
 

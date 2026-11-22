@@ -45,6 +45,8 @@
 import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   CONTENT_STATUS,
+  contentAccessBranch,
+  isContentReleased,
   ORGANIZATION_TEAM_ROLES,
   PURCHASE_STATUS,
 } from '@codex/constants';
@@ -297,14 +299,8 @@ async function decidePolicyAccess(
   const { db, purchaseService } = deps;
   const orgId = policy.organizationId;
 
-  // Fail-closed guard: orgless content can never tier-gate (Codex-up7bx).
-  // `subscription_tiers` is org-scoped, so the tier switch on content with NO
-  // `organizationId` is a semantically invalid row — deny before any branch.
-  if (orgId == null && policy.isTierGated) {
-    return deny('orgless_tier_gate');
-  }
-
   // User-scoped grant helpers. All return false for an anonymous (null) user.
+  // Closures only: none is called before the branch below picks its arm.
   const hasManagementMembership = async (): Promise<boolean> => {
     if (userId == null || orgId == null) return false;
     const row = await db.query.organizationMemberships.findFirst({
@@ -355,84 +351,98 @@ async function decidePolicyAccess(
     return hasStoredContentEntitlement(db, userId, contentId);
   };
 
-  // ── courseOnly — suppresses EVERY standalone path (SPEC §6.1). Reachable only
-  // via a course entitlement; the management bypass still applies (sees all org
-  // content). Placed before the standalone flag branches so it wins "regardless
-  // of the other flags".
-  if (policy.courseOnly) {
-    if (await viaOwnedCourse()) return grant('course');
-    if (await hasManagementMembership()) return grant('management');
-    return deny('course_only');
-  }
+  // The branch, in the decision's order: `contentAccessBranch` in
+  // @codex/constants holds it, so purchase completion reads the same order
+  // when it asks whether a buyer would be refused (Codex-z1t3c). Each arm's
+  // body, and so its queries and their order, is as before.
+  switch (contentAccessBranch(policy)) {
+    // ── Fail-closed guard: orgless content can never tier-gate
+    // (Codex-up7bx). `subscription_tiers` is org-scoped, so the tier switch on
+    // content with NO `organizationId` is a semantically invalid row — deny
+    // before any branch.
+    case 'orgless_tier_gate':
+      return deny('orgless_tier_gate');
 
-  // ── team-only — management role only (WP-1). ──────────────────────────────
-  if (policy.isTeamOnly) {
-    if (!orgId) return deny('team_only_requires_org');
-    return (await hasManagementMembership())
-      ? grant('team_management')
-      : deny('team_only');
-  }
+    // ── courseOnly — suppresses EVERY standalone path (SPEC §6.1). Reachable
+    // only via a course entitlement; the management bypass still applies (sees
+    // all org content). Placed before the standalone flag branches so it wins
+    // "regardless of the other flags".
+    case 'course_only':
+      if (await viaOwnedCourse()) return grant('course');
+      if (await hasManagementMembership()) return grant('management');
+      return deny('course_only');
 
-  // ── followers-only — active subscription OR follower row OR management. ────
-  // (Codex-xybr3: subscribers ⊇ followers.) Checked SEQUENTIALLY, subscription
-  // FIRST: an active subscriber is granted without the follower lookup ever
-  // running (the short-circuit the WP-1 streaming tree + its observability suite
-  // pin). Then the follower fallback (ex-subscribers with a live follow), then
-  // the management bypass.
-  if (policy.isFollowerGated) {
-    if (!orgId) return deny('followers_only_requires_org');
-    const sub = await grantingSubscription(null);
-    if (sub) return grantBySubscription('followers_subscription', sub);
-    if (await hasFollower()) return grant('followers_follower');
-    return (await hasManagementMembership())
-      ? grant('followers_management')
-      : deny('followers_only');
-  }
+    // ── team-only — management role only (WP-1). ────────────────────────────
+    case 'team_only':
+      if (!orgId) return deny('team_only_requires_org');
+      return (await hasManagementMembership())
+        ? grant('team_management')
+        : deny('team_only');
 
-  // ── tier-gated (subscribers) — the switch is on (orgId guaranteed by the
-  // orgless guard above). Subscription + purchase are independent → parallel;
-  // then the additive entitlements-table grant and the "via a course you own"
-  // arm; then management fallback. With no tier ticked no subscription
-  // matches, so a CLOSED item falls to purchase / grant / course / team and
-  // then `subscribers_only` — never to the free fallthrough below.
-  if (policy.isTierGated) {
-    if (!orgId) return deny('subscribers_only_requires_org');
-    const [sub, purchased] = await Promise.all([
-      grantingSubscription({ contentId }),
-      verifyPurchase(),
-    ]);
-    // Once the item is off offer, only some grants outlive that (see
-    // GRANT_SURVIVES_UNPUBLICATION), and a subscription's ends at renewal.
-    // So an unpublished item tries every arm that survives BEFORE the
-    // subscription: a subscriber who also bought it keeps it (owner, "one-off
-    // buyers keep what they bought"; Codex-2hxff.64). On offer, the
-    // subscription still answers first, as before.
-    const onOffer = policy.status === CONTENT_STATUS.PUBLISHED;
-    if (sub && onOffer)
-      return grantBySubscription('subscribers_subscription', sub);
-    if (purchased) return grant('subscribers_purchase');
-    if (await viaContentEntitlement()) return grant('subscribers_entitlement');
-    if (await viaOwnedCourse()) return grant('subscribers_course');
-    if (sub) return grantBySubscription('subscribers_subscription', sub);
-    return (await hasManagementMembership())
-      ? grant('subscribers_management')
-      : deny('subscribers_only');
-  }
+    // ── followers-only — active subscription OR follower row OR management.
+    // (Codex-xybr3: subscribers ⊇ followers.) Checked SEQUENTIALLY,
+    // subscription FIRST: an active subscriber is granted without the follower
+    // lookup ever running (the short-circuit the WP-1 streaming tree + its
+    // observability suite pin). Then the follower fallback (ex-subscribers
+    // with a live follow), then the management bypass.
+    case 'followers_only': {
+      if (!orgId) return deny('followers_only_requires_org');
+      const sub = await grantingSubscription(null);
+      if (sub) return grantBySubscription('followers_subscription', sub);
+      if (await hasFollower()) return grant('followers_follower');
+      return (await hasManagementMembership())
+        ? grant('followers_management')
+        : deny('followers_only');
+    }
 
-  // ── paid (priceCents > 0, no tier) — purchase first (WP-1), then the additive
-  // entitlements-table grant and via-course arm, then management fallback.
-  if ((policy.priceCents ?? 0) > 0) {
-    if (await verifyPurchase()) return grant('paid_purchase');
-    if (await viaContentEntitlement()) return grant('paid_entitlement');
-    if (await viaOwnedCourse()) return grant('paid_course');
-    if (!orgId) return deny('paid_requires_purchase');
-    return (await hasManagementMembership())
-      ? grant('paid_management')
-      : deny('paid');
-  }
+    // ── tier-gated (subscribers) — the switch is on (orgId guaranteed by the
+    // orgless guard above). Subscription + purchase are independent →
+    // parallel; then the additive entitlements-table grant and the "via a
+    // course you own" arm; then management fallback. With no tier ticked no
+    // subscription matches, so a CLOSED item falls to purchase / grant /
+    // course / team and then `subscribers_only` — never to the free
+    // fallthrough below.
+    case 'subscribers': {
+      if (!orgId) return deny('subscribers_only_requires_org');
+      const [sub, purchased] = await Promise.all([
+        grantingSubscription({ contentId }),
+        verifyPurchase(),
+      ]);
+      // Once the item is off offer, only some grants outlive that (see
+      // GRANT_SURVIVES_UNPUBLICATION), and a subscription's ends at renewal.
+      // So an unpublished item tries every arm that survives BEFORE the
+      // subscription: a subscriber who also bought it keeps it (owner,
+      // "one-off buyers keep what they bought"; Codex-2hxff.64). On offer, the
+      // subscription still answers first, as before.
+      const onOffer = policy.status === CONTENT_STATUS.PUBLISHED;
+      if (sub && onOffer)
+        return grantBySubscription('subscribers_subscription', sub);
+      if (purchased) return grant('subscribers_purchase');
+      if (await viaContentEntitlement())
+        return grant('subscribers_entitlement');
+      if (await viaOwnedCourse()) return grant('subscribers_course');
+      if (sub) return grantBySubscription('subscribers_subscription', sub);
+      return (await hasManagementMembership())
+        ? grant('subscribers_management')
+        : deny('subscribers_only');
+    }
 
-  // ── free / fallthrough — WP-1 granted here (free content, no price). ───────
-  return grant('free');
+    // ── paid (priceCents > 0, no tier) — purchase first (WP-1), then the
+    // additive entitlements-table grant and via-course arm, then management
+    // fallback.
+    case 'paid':
+      if (await verifyPurchase()) return grant('paid_purchase');
+      if (await viaContentEntitlement()) return grant('paid_entitlement');
+      if (await viaOwnedCourse()) return grant('paid_course');
+      if (!orgId) return deny('paid_requires_purchase');
+      return (await hasManagementMembership())
+        ? grant('paid_management')
+        : deny('paid');
+
+    // ── free / fallthrough — WP-1 granted here (free content, no price). ─────
+    case 'free':
+      return grant('free');
+  }
 }
 
 /**
@@ -542,16 +552,6 @@ async function decideContentAccess(
 }
 
 /**
- * Published now, or once. The course player's curriculum read and the
- * withdrawn-item read use the same rule, in SQL.
- */
-function isReleased(policy: ContentAccessPolicyRow): boolean {
-  return (
-    policy.status === CONTENT_STATUS.PUBLISHED || policy.publishedAt != null
-  );
-}
-
-/**
  * The publication rule, asked of a decision the policy branches made. Its own
  * function so {@link disputeHold} asks it of the grant a dispute holds back.
  */
@@ -564,7 +564,10 @@ function applyPublicationRule(
   // Also where a SOLD item lands once detached from its org: migration 0004's
   // trigger makes it a draft and nulls published_at. Denied either way
   // (Codex-7ncbh, "Nobody"); read a `never_released` refusal of a buyer as that.
-  if (!isReleased(policy)) return deny('never_released');
+  // Published now, or once: `isContentReleased` in @codex/constants, which
+  // purchase completion reads too (Codex-z1t3c). The course player's
+  // curriculum read and the withdrawn-item read use the same rule, in SQL.
+  if (!isContentReleased(policy)) return deny('never_released');
   if (subscriptionCoversOffSaleItem(decision, policy.offSaleAt)) {
     return decision;
   }
@@ -613,16 +616,18 @@ async function disputeHold(
   contentId: string,
   policy: ContentAccessPolicyRow
 ): Promise<DisputeHold | null> {
-  if (!isReleased(policy)) return null;
+  if (!isContentReleased(policy)) return null;
   const orgId = policy.organizationId;
-  if (orgId == null && policy.isTierGated) return null;
-  if (policy.courseOnly) return courseDisputeHold(db, userId, contentId);
-  if (policy.isTeamOnly) return null;
-
-  // The branch `decidePolicyAccess` takes: followers-only before tier-gated.
-  const followersOnly = policy.isFollowerGated;
-  const tierGated = !followersOnly && policy.isTierGated;
-  const paid = !followersOnly && !tierGated && (policy.priceCents ?? 0) > 0;
+  // The branch `decidePolicyAccess` takes, from the same rule.
+  const branch = contentAccessBranch(policy);
+  if (branch === 'course_only') {
+    return courseDisputeHold(db, userId, contentId);
+  }
+  // An orgless tier gate, team-only and free are none of these, so they read
+  // no grant a dispute holds and fall through to null.
+  const followersOnly = branch === 'followers_only';
+  const tierGated = branch === 'subscribers';
+  const paid = branch === 'paid';
 
   if (tierGated || paid) {
     const disputed = await db.query.purchases.findFirst({

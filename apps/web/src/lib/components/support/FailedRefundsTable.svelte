@@ -6,7 +6,21 @@
   balance again and the payees' shares are still taken back. Each row offers
   the two settlements; the page opens the confirm dialog. A row whose re-pay
   the server refused for a later cause (`repay-blocks.svelte.ts`) keeps Re-pay
-  disabled for the session, with the reason beside it.
+  disabled for the session, with the reason beside it. A blocked payment's
+  refund (`blockedPayment`, owner D55 and D57: a duplicate, or a blocked
+  sale) never offers Re-pay: it paid no one, and its buyer is still owed the
+  refund. The note beside it says which.
+
+  A blocked payment's refund waiting for its open chargeback
+  (`waitingForChargeback`, owner D67, D72; mockup
+  docs/handover/phase3-sources/pause-trials/support-short-loss.html, B1)
+  offers no settlement at all: a badge and a line say why, and what happens
+  once the bank decides. One whose chargeback was lost is not listed (D66).
+  One whose blocked payment is still owed its own refund
+  (`waitingForPaymentRefund`, review r8; copy owner D79) offers none either:
+  that refund includes it and covers it (owner D73). Both are counted in the
+  tab and the badge (D72). A late win's refund in flight shows no badge: a
+  settle meanwhile is refused, with its notice.
 
   @prop {FailedRefundItem[]} items
   @prop {(item, resolution) => void} onSettle
@@ -17,7 +31,11 @@
   import { Badge, Button } from '$lib/components/ui';
   import * as Table from '$lib/components/ui/Table';
   import { formatPrice } from '$lib/utils/format';
-  import { repayBlockReason } from './repay-blocks.svelte';
+  import {
+    REPAY_BLOCK_OF_PAYMENT,
+    type RepayBlockReason,
+    repayBlockReason,
+  } from './repay-blocks.svelte';
   import { formatDay, formatShortDay } from './support-format';
 
   interface Props {
@@ -66,6 +84,35 @@
     return m.support_failed_phone_part(dates);
   }
 
+  /**
+   * What keeps a row's Re-pay off, if anything: a refusal this session, or a
+   * blocked payment's refund, which is never re-paid (owner D55, D57).
+   */
+  function repayOff(item: FailedRefundItem): RepayBlockReason | null {
+    const blocked = item.blockedPayment;
+    return repayBlockReason(item.refundId) ?? (blocked ? REPAY_BLOCK_OF_PAYMENT[blocked] : null);
+  }
+
+  /** Why a row's Re-pay is off, said beside it. */
+  function repayOffNote(reason: RepayBlockReason): string {
+    switch (reason) {
+      case 'chargeback':
+        return m.support_repay_off_chargeback();
+      case 'needs_person':
+        return m.support_repay_off_needs_person();
+      case 'late_win_refund':
+        return m.support_repay_off_late_win();
+      case 'duplicate_payment':
+        return m.support_repay_off_duplicate();
+      case 'unavailable_sale':
+        return m.support_repay_off_unavailable();
+      case 'blocked_payment':
+        return m.support_repay_off_blocked_payment();
+      case 'later_refunds':
+        return m.support_repay_off_later_refunds();
+    }
+  }
+
   function chargeHref(chargeId: string): string {
     return `/admin/refunds/${encodeURIComponent(chargeId)}`;
   }
@@ -78,8 +125,20 @@
   </span>
 {/snippet}
 
-{#snippet actions(item: FailedRefundItem)}
-  {@const blockedBy = repayBlockReason(item.refundId)}
+{#snippet waiting(openedOn: string)}
+  <span class="waiting" data-testid="waiting-for-chargeback">
+    <Badge variant="info">{m.support_queue_waiting_badge()}</Badge>
+    <span class="action-note">{m.support_queue_waiting_note({ date: formatDay(openedOn) })}</span>
+  </span>
+{/snippet}
+{#snippet waitingRefund()}
+  <span class="waiting" data-testid="waiting-for-payment-refund">
+    <Badge variant="info">{m.support_queue_waiting_refund_badge()}</Badge>
+    <span class="action-note">{m.support_queue_waiting_refund_note()}</span>
+  </span>
+{/snippet}
+{#snippet settlements(item: FailedRefundItem)}
+  {@const blockedBy = repayOff(item)}
   <Button variant="secondary" size="sm" onclick={() => onSettle(item, 'refunded_elsewhere')}>
     {m.support_action_elsewhere()}
   </Button>
@@ -93,15 +152,16 @@
     {m.support_action_repay()}
   </Button>
   {#if blockedBy}
-    <span class="action-note" data-testid="repay-off">
-      {blockedBy === 'chargeback'
-        ? m.support_repay_off_chargeback()
-        : blockedBy === 'needs_person'
-          ? m.support_repay_off_needs_person()
-          : blockedBy === 'late_win_refund'
-            ? m.support_repay_off_late_win()
-            : m.support_repay_off_later_refunds()}
-    </span>
+    <span class="action-note" data-testid="repay-off">{repayOffNote(blockedBy)}</span>
+  {/if}
+{/snippet}
+{#snippet actions(item: FailedRefundItem)}
+  {#if item.waitingForChargeback}
+    {@render waiting(item.waitingForChargeback.openedOn)}
+  {:else if item.waitingForPaymentRefund}
+    {@render waitingRefund()}
+  {:else}
+    {@render settlements(item)}
   {/if}
 {/snippet}
 
@@ -246,6 +306,21 @@
   .table-actions .action-note {
     margin-left: auto;
     text-align: right;
+  }
+
+  /* In place of the settlements while the chargeback is open (D67), or the
+     payment's own refund is owed (review r8). */
+  .waiting {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-1-5);
+    text-align: right;
+  }
+
+  .row-item__actions .waiting {
+    align-items: flex-start;
+    text-align: left;
   }
 
   .queue-table :global(.table-cell) {

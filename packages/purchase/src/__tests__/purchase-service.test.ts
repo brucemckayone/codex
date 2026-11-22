@@ -5674,6 +5674,13 @@ describe('PurchaseService Integration', () => {
         verifyUserId
       );
       verifyContentId = content.id;
+      // Published, as anything a checkout sells is: completion blocks a sale
+      // of content its buyer could not open (Codex-z1t3c, D54). Publishing
+      // paid content needs payouts set up, so it is written directly.
+      await db
+        .update(schema.content)
+        .set({ status: 'published', publishedAt: new Date() })
+        .where(eq(schema.content.id, verifyContentId));
 
       // Add retrieve method to mock Stripe
       vi.mocked(mockStripe.checkout.sessions).retrieve = vi.fn();
@@ -7349,7 +7356,7 @@ describe('PurchaseService Integration', () => {
     }
 
     async function makePaidArticle(slugPrefix: string) {
-      return contentService.create(
+      const article = await contentService.create(
         {
           organizationId,
           title: 'Refund Race Article',
@@ -7361,6 +7368,13 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      // Published, as anything a checkout sells is (Codex-z1t3c, D54), and
+      // written directly: publishing paid content needs payouts set up.
+      await db
+        .update(schema.content)
+        .set({ status: 'published', publishedAt: new Date() })
+        .where(eq(schema.content.id, article.id));
+      return article;
     }
 
     it('rebuilds the purchase from the checkout session, records the refund, and fires NO transfers', async () => {

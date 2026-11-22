@@ -68,6 +68,24 @@ describe('issueRefund', () => {
     });
   });
 
+  it('a refund with no reason of Stripe’s (null) sends Stripe none, not a false one (Codex-z1t3c)', async () => {
+    const stripe = createMockStripe();
+
+    await issueRefund(stripe, {
+      paymentIntentId: 'pi_gone',
+      reason: null,
+      idempotencyKey: 'refund_unavailable_pi_gone',
+      environment: 'test',
+    });
+
+    const [params] = createCall(stripe);
+    expect(params).toEqual({
+      payment_intent: 'pi_gone',
+      metadata: { codex_env: 'test' },
+    });
+    expect(params).not.toHaveProperty('reason');
+  });
+
   it("the caller's metadata goes on the refund, and codex_env is always the caller's environment", async () => {
     const stripe = createMockStripe();
 

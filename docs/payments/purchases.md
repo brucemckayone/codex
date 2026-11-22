@@ -263,18 +263,35 @@ refund").
   `pending` and becomes `refunded` only once Stripe has refunded it, so no
   reader shows money as returned that is not.
 - **After the commit**, `issueRefund` (`@codex/payments`, the platform's one
-  refund call) refunds the charge in full under
-  `refund_duplicate_<PaymentIntent>`. A redelivered event asks again under the
-  same key, unless the duplicate is already `refunded`, and
-  `charge_already_refunded` counts as done.
+  refund call) refunds what the duplicate still owes under
+  `refund_duplicate_<PaymentIntent>_<amount>` (owner D73): what was paid less
+  the refunds that count, read after the charge's refunds are synced from
+  Stripe, so a refund an earlier attempt made counts even if its answer was
+  lost. A redelivered event asks again under the same key, unless the
+  duplicate is already `refunded`, and `charge_already_refunded` counts as
+  done. The refund covers the failed refunds it included
+  ([operations](operations.md#a-blocked-payments-chargeback-lost-short-paid-another-way),
+  "A refund of everything owed covers what it included").
 - **If Stripe refuses the refund**, the row stays `pending` and the failure is
   logged ("Duplicate payment could not be refunded", with Stripe's `code`). It
   is thrown as retryable whatever the cause, so Stripe redelivers the event
   through its retry window: a refusal such as a low platform balance can clear.
   One that never clears, such as a charge the buyer has disputed, ends with
   the dispute or is held for support (owner decision: a failed refund is held
-  for support). Support finds them with `duplicate_of_purchase_id IS NOT NULL
-  AND status = 'pending'`.
+  for support). The hourly owed-refund sweep retries it, except while a
+  chargeback on it is open (owner D56, widened to duplicates by D57), as a
+  blocked sale's (below). Support finds them with `duplicate_of_purchase_id
+  IS NOT NULL AND status = 'pending'`. A duplicate subscription to an org or
+  a course plan waits the same way, in its own sweep (owner D58): skipped
+  while a chargeback the dispute links to its row is open, and alerted at
+  error past 120 days. A plan duplicate's lost chargeback doesn't settle the
+  row, so the sweep asks Stripe again after one, as it did before D58.
+- **Its failed refund is never "creators re-paid"** (owner D55, widened to
+  duplicates by D57): a duplicate paid no one, so there is nothing to re-pay,
+  and the buyer is still owed it. The refusal and the queue are a blocked
+  sale's (below), in a duplicate's own words: "There's no access to give
+  back: this was a second payment for something {buyer} already has. {buyer}
+  is still owed this refund. Refund them another way."
 - **No receipt** is sent for it. Its `charge.refunded` sends the usual refund
   email, naming the item: "You still have {item}. This refunds a second
   payment for it." Every refund email now names the purchase's own item; it
@@ -299,6 +316,210 @@ Production held 0 duplicate completed purchases when it was written. To roll
 the code back, also run `DROP INDEX uq_purchases_completed_customer_content,
 uq_purchases_completed_customer_course;`. The `checkout_sessions` table and
 the new column can stay.
+
+### A payment for an item its buyer could no longer open when it landed
+
+A buyer can still be in Stripe Checkout when the content is deleted (one at a
+time or in bulk), moved to Team only (by PATCH or bulk access), or its
+organisation is deleted or it is detached from it; or when a course's
+organisation is deleted. Access then refuses them, so completing the sale
+would charge a buyer who cannot watch. It is blocked and refunded in full
+instead (`Codex-z1t3c`; owner D44 and 2026-11-15: "block and refund", a line
+in the existing refund email, and no checkout expiry).
+
+- **The rule is access's own** (owner D54, "match access exactly"): a sale is
+  blocked exactly when access would refuse a buyer whose only grant is that
+  purchase. `contentRefusesBuyers` in `@codex/constants` holds it: the content
+  or its organisation soft-deleted; never released (a draft with no
+  `published_at`, which is what migration 0004's trigger makes of content
+  detached from its organisation); a branch that never reads a purchase
+  (team-only, course-only, followers-only, orgless with a tier); or free and
+  no longer published. Paid or subscribers content stays open to its buyer
+  published or withdrawn, so it is never blocked. The access decision
+  switches on the same `contentAccessBranch` and `isContentReleased`, so a
+  branch added there must be classified here before it compiles, and
+  `content-buyer-refusal.integration.test.ts` in `@codex/access` runs every
+  case through both the predicate and the real `canView`.
+- **A course is blocked when its dashboard would refuse its buyer**:
+  `courseRefusesBuyers`, the rule `loadCourseSummaryById` (the dashboard's
+  and the in-course player's read) holds in SQL. That is its organisation
+  soft-deleted (`OrganizationService.delete` leaves its courses and their
+  entitlements in place, and nobody may open them: owner 2026-10-25,
+  `Codex-7ncbh`), the course soft-deleted (no code does that today), or a
+  course never released (not published, and no `published_at`). A course's
+  buyers keep it unpublished, archived or taken off sale (`Codex-yo4px`), so
+  none of those blocks it. `course-buyer-refusal.integration.test.ts` in
+  `@codex/access` holds the predicate and the dashboard together.
+- **Completion reads the item, then its organisation, `FOR SHARE`**, after
+  the buyer's item lock. A delete, an access change, a detach, a course edit
+  or an organisation delete holds its row `FOR NO KEY UPDATE` until it
+  commits, and the two conflict, so the completion waits, then reads what was
+  committed. The purchase INSERT's own foreign-key `FOR KEY SHARE` never
+  conflicted with them, which is how such a sale used to complete. The
+  organisation read is the one the locked item row names, so a content
+  detach in flight is waited out first. No writer locks an organisation and
+  then content or a course (`OrganizationService.update` and `.delete` write
+  the organisation row alone; content and course writers reach it only
+  through their foreign key's `FOR KEY SHARE`), and a completion locks one
+  item, so the order cannot deadlock. The self-heal's rebuild reads it the
+  same way, for content and courses alike. The wait is bounded: from these
+  reads to its commit the completion's `lock_timeout` is 5 seconds, because
+  it holds the buyer's item lock meanwhile and a stuck writer must not stall
+  the webhook. Past it, nothing is written and the completion is a 503
+  (`SERVICE_UNAVAILABLE`): Stripe redelivers, and the success page checks
+  again.
+- **Checkout creation refuses it too**, so no buyer is charged for one: content
+  through `contentRefusesBuyers` (`CONTENT_NOT_PURCHASABLE`, reason
+  `deleted`, once the existing checks pass, which leaves a deleted
+  organisation), and a course whose organisation is deleted
+  (`COURSE_NOT_PURCHASABLE`, reason `deleted`). Completion decides again, for
+  a Checkout already open.
+- **A blocked sale is recorded as a duplicate is**: `pending`, no access row,
+  no entitlement, no payout slice, its split kept for the record, and left
+  out of Sales and its totals. Its marker is `refund_reason = 'item_unavailable'`
+  (no migration). None of Stripe's refund reasons is that, and every writer of
+  the refund fields keeps it, so a later refund never writes Stripe's reason
+  over it. It is blocked whoever owns the item: no buyer can watch it.
+- **After the commit** it is refunded what it still owes (all of it, unless a
+  refund counts already) under `refund_unavailable_<PaymentIntent>_<amount>`,
+  as a duplicate is, with no refund reason (none of Stripe's fits). A refusal leaves it `pending`, logged once (not also as a
+  purchase that failed to complete: the row committed), and thrown as
+  retryable, and the hourly owed-refund sweep retries it with the duplicates,
+  except while a chargeback on it is OPEN (owner D56): Stripe refuses that
+  refund, and the dispute decides it. The disputes table says so
+  (`noOpenChargeback`, `@codex/payments` dispute-hold: a dispute names the
+  purchase by its PaymentIntent when it is recorded; one recorded before its
+  purchase existed is linked as the purchase lands, by completion or the
+  self-heal (by the charge, in the insert's transaction), or when the dispute
+  is next recorded; an inquiry never holds it), never the row's own
+  `disputed_at`, which only a win clears. A loss
+  records it refunded; any other end (a win, `prevented`, a close we never
+  recorded) leaves it owed, and the next sweep refunds it, so no end holds it
+  forever. One an open chargeback has held for over 120 days (past Stripe's
+  dispute lifecycle) is alerted at error by the sweep, once per run, with
+  the purchase and dispute ids: "Blocked refunds still held by a chargeback
+  after 120 days: check the dispute in Stripe, then refund them by hand".
+  It stays held while the dispute reads open. The check runs after the
+  sweep's refunds (each of the three sweeps) and can't stop them: a failure
+  logs its own error. The purchase sweep's second check (review r7) covers a
+  blocked payment already refunded whose refund then FAILED while its
+  chargeback is open, which waits in Failed refunds as "Waiting for the
+  chargeback" (owner D67): past the same 120 days it is alerted the same
+  way, with the purchase and dispute ids and when it opened: "Failed refunds
+  of blocked payments still waiting for a chargeback after 120 days: check
+  the dispute in Stripe; each stays waiting in Failed refunds until its close
+  is recorded". The refund is the dispute's by its charge.
+- **A blocked payment's refund that fails while its chargeback carries the
+  debt** (lost, or won late after a mark; review r7) is hidden from Failed
+  refunds, so the refund webhook's alert names the support charge page, the
+  charge and the dispute: "A blocked payment's refund failed at Stripe, and
+  its chargeback carries what is still owed: settle it on the support charge
+  page (Paid another way), not in Failed refunds, which doesn't list it".
+  Every other failed refund keeps the ordinary alert ("support must refund
+  the customer another way, or re-pay the creators").
+- **A chargeback lost for less than the payment** (owner D59) records the
+  row refunded by what the buyer has back: the refunds standing on the
+  charge (a pending blocked row records no part refund of its own) and the
+  chargeback, capped at what was paid. The standing refunds are the
+  dispute's charge's, or the webhook's own charge for a dispute with no row,
+  so an unlinked refund on it still counts (review r4). Nothing refunds the
+  rest, and Stripe won't refund a charged-back payment: an error alert names
+  the purchase, the dispute, the kind and the amount still owed in pence
+  (`owedCents`, GBP): "A lost chargeback refunded only part of a blocked
+  payment: pay the rest another way, then mark it paid on the support charge
+  page". Because that alert is logged once, the hourly sweep also reports
+  every such payment still owed, marked or not, from the stored rows, once per run,
+  after its refunds: "Blocked payments a lost chargeback refunded only in
+  part: pay the rest another way, then mark it paid on the support charge
+  page", newest dispute first, up to the sweep's limit, each with its
+  PaymentIntent, dispute, kind, `owedCents` and currency, and `total`, how
+  many there are in all. Support pays the rest outside Stripe, then presses
+  "Mark as paid another way" on the charge page, which shows what is still
+  owed in place of the refund form (owner D60, D61;
+  [operations.md](operations.md#a-blocked-payments-chargeback-lost-short-paid-another-way)).
+  The mark is the lost dispute's `refunded_outside_stripe_at` with what it
+  paid, `paid_another_way_cents` (owner D64), which each later mark adds to
+  (owner D66): the report leaves it out while nothing more is owed, and the
+  charge is never refunded through Stripe again. A late
+  win on a charge marked paid another way refunds nothing and alerts
+  support instead (owner D62): its refund of the rest of the charge would
+  pay the buyer twice. The bank has then taken the chargeback back from the
+  buyer, so they are owed again (owner D63): the report's second line,
+  "Blocked payments owed again after a late win: pay it another way, then
+  mark it paid on the support charge page", and the charge page say so
+  until support marks it again
+  (`late_win_refunded_outside_stripe_at`). The alerts, the report and the
+  charge page read one query (`findShortLosses`, `@codex/purchase`
+  short-loss.ts) on one sum for both stages (`owedAfterLoss`; the loss's
+  `unrecoveredAfterLoss` is the same sum for a lost, unmarked dispute):
+  paid, less the refunds that count on the charge (standing, or failed and
+  settled refunded elsewhere: the one rule, `countedRefundOf`, keyed on the
+  charge, never on payout slices, which a blocked payment doesn't have),
+  less everything paid another way, less the chargeback while it stands
+  lost. No dates are compared, and refunds that count and make the buyer
+  whole clear either stage. There is no automatic refund. A loss in full,
+  or a loss won late before any mark, alerts nothing. It is the debt's one
+  surface (owner D66): once the chargeback is lost, the payment's failed
+  refund leaves the Failed refunds queue and support can't settle it there
+  (422 `REFUND_DECIDED_BY_CHARGEBACK`); while the chargeback is open, it
+  waits there with no settle (D67).
+  Its alert for what is still owed names both kinds, and each row says
+  which it is (`blocked`: `duplicate`, the buyer kept the item, or
+  `unavailable`, the buyer has nothing). Support finds the ones still owed
+  with `refund_reason = 'item_unavailable' AND status = 'pending'`. The key
+  names the payment and the amount, as `refund_duplicate_` does, so a retry
+  of the same amount is never refunded twice; but Stripe keeps the first
+  response under a key for about 24 hours, a refusal included, so a retry
+  within that day gets the same refusal back. A refusal that clears sooner is
+  refunded about a day late, never twice. The amount is what was paid less
+  the refunds that count (owner D73), not what Stripe has left of the charge:
+  one made after a partial refund returns the rest, and one made after a
+  failed refund support settled as refunded elsewhere doesn't pay that part
+  again (Stripe's remainder knew nothing of it). An amount that moved since an
+  earlier attempt is a new key.
+- **No receipt** is sent. Its `charge.refunded` sends the usual refund email,
+  worded from the refunds standing now (`processRefund`'s `refundedInFull`
+  and `restOwed`), never the event's snapshot, so an event retried after the
+  rest landed still says "in full":
+  - "{item} is no longer available, so we've refunded you in full." once the
+    charge is refunded in full;
+  - "{item} is no longer available, so we're refunding your payment in full.
+    The rest will follow." for a part refund (support's, the Dashboard's, or
+    one that beat the checkout) while the row is `pending`: the checkout's
+    own refund or the hourly sweep refunds the rest;
+  - "{item} is no longer available. This refunds part of your payment." for
+    a part refund when nothing more is coming (the row is refunded already:
+    a refund that failed after it is support's).
+
+  The success page shows it as no longer active, never as a purchase still
+  being recorded.
+- **It never grants access later, and its failed refund is never "creators
+  re-paid"** (owner D55; a duplicate's too, D57): 422
+  `BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE` (`refuseBlockedPaymentRefund`,
+  `@codex/admin`), with the kind as `reason` (`unavailable` or `duplicate`),
+  refused before anything is read from Stripe or written, and logged at
+  error with an `errorId` and the kind. The
+  sale paid no one and granted nothing, so there is nothing to re-pay and no
+  access to give back, and the buyer is still owed the money. Support's queue
+  marks the row with its kind (`blockedPayment`) and offers no Re-pay; the
+  dialog says "There's no access to give back: the item was no longer
+  available. {buyer} is still owed this refund. Refund them another way."
+  (a duplicate's says it was a second payment for something the buyer
+  already has). Only "refunded another way" settles it. A late win refunds it, as for a duplicate, when
+  the loss had refunded it.
+- **A dispute of it keeps the org-wide streaming block** (owner D53). It
+  grants nothing, so the dispute ends access (`accessEnded: true`) and the
+  webhook writes the organisation's `purchase_dispute` revocation as for any
+  sale, unless the buyer holds the item through another purchase.
+- **It never hides the item in the buyer's library.** The library leaves a
+  purchase in flight (`pending`: the redirect beat the webhook) out of its
+  other arms, so the purchased arm owns it once it lands; a blocked sale is
+  not one (`refund_reason IS DISTINCT FROM 'item_unavailable'`, library.ts
+  `notAcquired`). So a follower still finds a followers-only item, and a
+  team member a team-only one, while its refund is owed.
+- **A course archived or taken off sale while Checkout is open** is still a
+  sale its buyer can use (`Codex-yo4px`), so it completes. Only the course
+  rule above blocks one.
 
 ## After payment
 
