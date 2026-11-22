@@ -172,6 +172,19 @@ describe('the Showreel group: shown whenever the hero is a Showreel', () => {
     report({ comp: 'showreel' });
     expect(showreel()).toBeNull();
   });
+
+  test('the opening and the film go "Through the letters", and one line under the pair says which', () => {
+    render({ 'hero-opt-purpose': 'spotlight', 'hero-opt-comp': 'showreel' });
+    const field = (key: string) =>
+      showreel()?.querySelector(`.hero-designer__field[data-key="${key}"]`);
+    for (const key of ['reel-opening', 'reel-film'])
+      expect(field(key)?.textContent, key).toContain('Through the letters');
+    expect(showreel()?.textContent).not.toContain('Through the name');
+    expect(field('reel-film')?.querySelector('[data-hint]')?.textContent).toBe(
+      'Through the letters means through the big title, or through your name on the Name window.'
+    );
+    expect(showreel()?.querySelectorAll('[data-hint]')).toHaveLength(1);
+  });
 });
 
 describe('the options', () => {
