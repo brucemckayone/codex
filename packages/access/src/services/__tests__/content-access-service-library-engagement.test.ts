@@ -22,6 +22,7 @@ import {
   createR2SigningClientFromEnv,
   type R2SigningClient,
 } from '@codex/cloudflare-clients';
+import { ITEM_UNAVAILABLE_REFUND_REASON } from '@codex/constants';
 import { ContentService, MediaItemService } from '@codex/content';
 import {
   content,
@@ -688,6 +689,119 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
       const row = result.items.find((i) => i.content.id === item.id);
       expect(row).toBeDefined();
       expect(row?.content.thumbnailUrl).toBeNull();
+    });
+  });
+
+  // A blocked sale (Codex-z1t3c) is a payment that landed after its item
+  // stopped selling to its buyer: `pending` until its refund lands, granting
+  // nothing. It is not a purchase in flight, so it must not hide the item from
+  // an arm that still opens it. An ordinary pending purchase (the redirect
+  // beat the webhook) still does.
+  describe('a blocked sale never counts as already acquired', () => {
+    const libraryInput = {
+      page: 1,
+      limit: 20,
+      filter: 'all',
+      sortBy: 'recent',
+      contentType: 'all',
+      accessType: 'all',
+      search: '',
+    } as const;
+
+    async function seedPendingPurchase(
+      buyerId: string,
+      contentId: string,
+      refundReason: string | null
+    ) {
+      await db.insert(purchases).values({
+        customerId: buyerId,
+        organizationId,
+        contentId,
+        amountPaidCents: 999,
+        currency: 'gbp',
+        platformFeeCents: 100,
+        organizationFeeCents: 0,
+        creatorPayoutCents: 899,
+        stripePaymentIntentId: `pi_test_${crypto.randomUUID()}`,
+        status: 'pending',
+        refundReason,
+      });
+    }
+
+    it('keeps a followers-only item under followers for a follower whose sale was blocked', async () => {
+      const [follower] = await seedTestUsers(db, 1);
+      await db
+        .insert(organizationFollowers)
+        .values({ userId: follower, organizationId });
+      const item = await createContentWithAccessType(
+        'followers',
+        'blocked-sale-follower'
+      );
+      await seedPendingPurchase(
+        follower,
+        item.id,
+        ITEM_UNAVAILABLE_REFUND_REASON
+      );
+
+      const result = await accessService.listUserLibrary(follower, {
+        ...libraryInput,
+        organizationId,
+      });
+
+      const row = result.items.find((i) => i.content.id === item.id);
+      expect(row?.accessType).toBe('followers');
+    });
+
+    it('keeps a team-only item under membership for a team member whose sale was blocked', async () => {
+      const [member] = await seedTestUsers(db, 1);
+      await db.insert(organizationMemberships).values({
+        userId: member,
+        organizationId,
+        role: 'creator',
+        status: 'active',
+      });
+      const item = await createContentWithAccessType(
+        'free',
+        'blocked-sale-team'
+      );
+      await db
+        .update(content)
+        .set({ isFree: false, isTeamOnly: true })
+        .where(eq(content.id, item.id));
+      await seedPendingPurchase(
+        member,
+        item.id,
+        ITEM_UNAVAILABLE_REFUND_REASON
+      );
+
+      const result = await accessService.listUserLibrary(member, {
+        ...libraryInput,
+        organizationId,
+      });
+
+      const row = result.items.find((i) => i.content.id === item.id);
+      expect(row?.accessType).toBe('membership');
+    });
+
+    it('still hides a followers-only item while an ordinary purchase of it is pending', async () => {
+      const [follower] = await seedTestUsers(db, 1);
+      await db
+        .insert(organizationFollowers)
+        .values({ userId: follower, organizationId });
+      const item = await createContentWithAccessType(
+        'followers',
+        'pending-sale-follower'
+      );
+      await seedPendingPurchase(follower, item.id, null);
+
+      const result = await accessService.listUserLibrary(follower, {
+        ...libraryInput,
+        organizationId,
+      });
+
+      expect(
+        result.items.find((i) => i.content.id === item.id)
+      ).toBeUndefined();
     });
   });
 });

@@ -283,7 +283,8 @@ export function roleLabel(role: PayeeRole): string {
 /**
  * A refund's status, as the refunds card shows it: Stripe's, except a failed
  * refund support settled as refunded elsewhere, which counts as refunded
- * (Codex-3xnta) and so never reads "Failed".
+ * (Codex-3xnta) and so never reads "Failed", and one a later refund of
+ * everything owed covered, a neutral "Covered" (owner D74).
  */
 export function refundStatus(
   refund: Pick<RefundRow, 'status' | 'resolution'>
@@ -293,6 +294,9 @@ export function refundStatus(
     refund.resolution === 'refunded_elsewhere'
   ) {
     return { label: m.support_action_elsewhere(), variant: 'neutral' };
+  }
+  if (refund.status === 'failed' && refund.resolution === 'covered_by_refund') {
+    return { label: m.support_refund_covered(), variant: 'neutral' };
   }
   switch (refund.status) {
     case 'pending':
@@ -308,6 +312,22 @@ export function refundStatus(
     default:
       return { label: humanise(refund.status), variant: 'neutral' };
   }
+}
+
+/**
+ * The line under a covered refund's "Covered" badge (owner D74): the refund
+ * that included it, and that refund's amount. Null for any other refund.
+ */
+export function refundCoveredLine(
+  refund: Pick<RefundRow, 'resolution' | 'coveredBy'>
+): string | null {
+  if (refund.resolution !== 'covered_by_refund' || !refund.coveredBy) {
+    return null;
+  }
+  return m.support_refund_covered_by({
+    refundId: refund.coveredBy.refundId,
+    amount: formatPrice(refund.coveredBy.amountCents),
+  });
 }
 
 /** Stripe's refund reason. */

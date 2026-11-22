@@ -17,6 +17,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+  disputes,
   organizationMemberships,
   organizations,
   payouts as payoutsTable,
@@ -1256,6 +1257,75 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
       });
       expect(after.stillOwed.map((row) => row.id)).not.toContain(badRow?.id);
       expect((await rowFor(bad.second.id))?.duplicateSettledAt).not.toBeNull();
+    });
+
+    // Owner D58: a duplicate's refund waits for an OPEN chargeback on it, as a
+    // purchase's does (Stripe refuses that refund), and only while it is open.
+    // The dispute names the duplicate's own row: `pauseForDispute` links it
+    // through the charge's payout rows, else the invoice Stripe says it paid
+    // (subscription-dispute.ts, resolveDisputedSubscription).
+    it('leaves a duplicate to its chargeback while it is open, and settles it once the chargeback has ended (owner D58)', async () => {
+      const dup = await subscribeTwice('d58-held');
+      asMock(stripe.refunds.create).mockRejectedValueOnce(
+        Object.assign(new Error('The charge is disputed'), {
+          type: 'StripeInvalidRequestError',
+          code: 'charge_disputed',
+        })
+      );
+      await expect(
+        service.handleSubscriptionCreated(dup.second)
+      ).rejects.toBeInstanceOf(ServiceUnavailableError);
+      await db
+        .update(subscriptions)
+        .set({ createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000) })
+        .where(eq(subscriptions.stripeSubscriptionId, dup.second.id));
+      const row = await rowFor(dup.second.id);
+      if (!row) throw new Error('duplicate not recorded');
+      const stripeDisputeId = `dp_d58_${randomUUID().slice(0, 8)}`;
+      await db.insert(disputes).values({
+        stripeDisputeId,
+        stripeChargeId: dup.chargeId,
+        subscriptionId: row.id,
+        amountCents: 999,
+        currency: 'gbp',
+        status: 'needs_response',
+        stripeCreatedAt: new Date(),
+      });
+      const askedForItsCharge = () =>
+        asMock(stripe.refunds.create).mock.calls.filter(
+          ([params]) => (params as { charge?: string }).charge === dup.chargeId
+        ).length;
+      asMock(stripe.refunds.create).mockClear();
+      asMock(stripe.refunds.create).mockResolvedValue({
+        id: `re_${randomUUID().slice(0, 8)}`,
+        object: 'refund',
+      });
+      try {
+        const held = await service.settleOwedDuplicates({
+          olderThanMs: 60 * 60 * 1000,
+          limit: 500,
+        });
+        expect(held.stillOwed.map((owed) => owed.id)).not.toContain(row.id);
+        expect(askedForItsCharge()).toBe(0);
+        expect((await rowFor(dup.second.id))?.duplicateSettledAt).toBeNull();
+
+        await db
+          .update(disputes)
+          .set({ status: 'won' })
+          .where(eq(disputes.stripeDisputeId, stripeDisputeId));
+        await service.settleOwedDuplicates({
+          olderThanMs: 60 * 60 * 1000,
+          limit: 500,
+        });
+        expect(askedForItsCharge()).toBe(1);
+        expect(
+          (await rowFor(dup.second.id))?.duplicateSettledAt
+        ).not.toBeNull();
+      } finally {
+        await db
+          .delete(disputes)
+          .where(eq(disputes.stripeDisputeId, stripeDisputeId));
+      }
     });
   });
 

@@ -23,8 +23,10 @@ import {
   lateWonChargeback,
   lateWonHistoryLine,
   NOW,
+  owedAgainDetail,
   refundRow,
   SLICES,
+  shortLossDetail,
   slice,
 } from '../__fixtures__/support-fixtures';
 import ChargebacksCard from '../ChargebacksCard.svelte';
@@ -79,6 +81,71 @@ describe('The charge', () => {
     });
     expect(text()).toContain('£24.00 · refunded outside Stripe on 8 Nov 2026');
     expect(text()).not.toContain(m.support_amount_none({ amount: '£24.00' }));
+  });
+
+  // Owner D59-D61 (pause-trials/support-short-loss.html S1, S3): where the
+  // money of a short lost chargeback went, before the mark and after.
+  test('a short lost chargeback: what came back through it, and what is still owed', () => {
+    render(ChargeSummaryCard, { detail: shortLossDetail(), now: NOW });
+    expect(text()).toContain(
+      '£15.00 · £10.00 back through the lost chargeback · £5.00 still owed to the buyer'
+    );
+    expect(text()).not.toContain(m.support_amount_none({ amount: '£15.00' }));
+  });
+
+  test('once marked: the same split, the rest paid another way and when, never only "refunded outside Stripe"', () => {
+    render(ChargeSummaryCard, {
+      detail: shortLossDetail({
+        paidAnotherWayCents: 500,
+        paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+        owedCents: 0,
+      }),
+      now: NOW,
+    });
+    expect(text()).toContain(
+      '£15.00 · £10.00 back through the lost chargeback · £5.00 paid another way (17 Nov 2026)'
+    );
+    expect(text()).not.toContain('£15.00 · refunded outside Stripe');
+  });
+
+  // Owner D66 (mockup B4): marked, then a refund that counted failed, so
+  // more is owed at the same stage.
+  test('marked, then owed more: what was paid another way and what is still owed', () => {
+    render(ChargeSummaryCard, {
+      detail: shortLossDetail({
+        paidAnotherWayCents: 200,
+        paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+        owedCents: 300,
+      }),
+      now: NOW,
+    });
+    expect(text()).toContain(
+      '£15.00 · £10.00 back through the lost chargeback · £2.00 paid another way · £3.00 still owed to the buyer'
+    );
+  });
+
+  // Owner D63 (A1, A3): after a late win on a charge paid another way.
+  test('owed again: what was paid another way, the late win, and what is owed again', () => {
+    render(ChargeSummaryCard, { detail: owedAgainDetail(), now: NOW });
+    expect(text()).toContain(
+      '£15.00 · £5.00 paid another way · chargeback won late · £10.00 owed to the buyer again'
+    );
+    expect(text()).not.toContain('£15.00 · refunded outside Stripe');
+  });
+
+  // Owner D66, D68 (mockup A3, B5): one total, and both stages' dates.
+  test('marked twice: the total paid another way, and both dates', () => {
+    render(ChargeSummaryCard, {
+      detail: owedAgainDetail({
+        paidAnotherWayCents: 1500,
+        owedCents: 0,
+        paidAgainOn: '2026-12-02T10:00:00.000Z',
+      }),
+      now: NOW,
+    });
+    expect(text()).toContain(
+      '£15.00 · £15.00 paid another way (17 Nov 2026, 2 Dec 2026)'
+    );
   });
 
   test('a window a late win lifted (Q7): no time limit, and never its passed date', () => {
@@ -340,6 +407,43 @@ describe('Refunds on this charge', () => {
       expect(badgeOf(id)?.textContent?.trim()).toBe(m.support_refund_failed());
       expect(badgeOf(id)?.getAttribute('data-variant')).toBe('error');
     }
+  });
+
+  test('a failed refund a later refund of everything owed covered reads a neutral "Covered", with the refund that included it and its amount (owner D74)', () => {
+    render(RefundsCard, {
+      detail: chargeDetail({
+        refunds: [
+          refundRow({
+            id: 're_covered',
+            status: 'failed',
+            failureReason: 'expired_or_canceled_card',
+            failureLabel: 'The card has expired or been cancelled',
+            resolution: 'covered_by_refund',
+            coveredBy: { refundId: 're_coverer', amountCents: 1500 },
+          }),
+          refundRow({ id: 're_coverer', amountCents: 1500 }),
+        ],
+      }),
+    });
+    const row = document.querySelector(
+      '[data-testid="refund-row"][data-refund-id="re_covered"]'
+    );
+    const badge = row?.querySelector('.badge');
+    expect(badge?.textContent?.trim()).toBe('Covered');
+    expect(badge?.getAttribute('data-variant')).toBe('neutral');
+    expect(
+      row?.querySelector('[data-testid="refund-covered"]')?.textContent?.trim()
+    ).toBe(
+      'Included in refund re_coverer (£15.00), so nothing more is owed for it.'
+    );
+    // The covering refund itself has no such line.
+    expect(
+      document
+        .querySelector(
+          '[data-testid="refund-row"][data-refund-id="re_coverer"]'
+        )
+        ?.querySelector('[data-testid="refund-covered"]')
+    ).toBeNull();
   });
 });
 

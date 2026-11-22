@@ -136,6 +136,10 @@ describe('a dispute pause racing a win', () => {
             organizationId: orgId,
             contentType: 'written',
             slug: createUniqueSlug('pause-race'),
+            // Published, as anything a checkout sells is: completion blocks a
+            // sale of content its buyer could not open (Codex-z1t3c, D54).
+            status: 'published',
+            publishedAt: new Date(),
           })
         )
         .returning()

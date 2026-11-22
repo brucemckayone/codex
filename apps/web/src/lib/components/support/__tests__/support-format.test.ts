@@ -13,6 +13,8 @@ import {
   matchedBy,
   payeeCell,
   payoutStatus,
+  refundCoveredLine,
+  refundStatus,
   takenHow,
   windowCell,
 } from '../support-format';
@@ -150,5 +152,41 @@ describe('labels', () => {
     });
     expect(payoutStatus(org).variant).toBe('warning');
     expect(takenHow(org)).toBe(m.support_taken_reduced());
+  });
+});
+
+describe('a refund on the refunds card', () => {
+  test('a failed refund reads "Failed"; settled refunded elsewhere, "Refunded another way"; covered by a later refund, "Covered" (owner D74)', () => {
+    expect(refundStatus({ status: 'failed', resolution: null })).toEqual({
+      label: m.support_refund_failed(),
+      variant: 'error',
+    });
+    expect(
+      refundStatus({ status: 'failed', resolution: 'refunded_elsewhere' })
+    ).toEqual({ label: m.support_action_elsewhere(), variant: 'neutral' });
+    expect(
+      refundStatus({ status: 'failed', resolution: 'covered_by_refund' })
+    ).toEqual({ label: 'Covered', variant: 'neutral' });
+    expect(
+      refundStatus({ status: 'failed', resolution: 'creators_repaid' })
+    ).toEqual({ label: m.support_refund_failed(), variant: 'error' });
+  });
+
+  test("a covered refund's line names the refund that included it and that refund's amount; any other refund has none", () => {
+    expect(
+      refundCoveredLine({
+        resolution: 'covered_by_refund',
+        coveredBy: { refundId: 're_1Qcover', amountCents: 1000 },
+      })
+    ).toBe(
+      'Included in refund re_1Qcover (£10.00), so nothing more is owed for it.'
+    );
+    expect(
+      refundCoveredLine({ resolution: 'refunded_elsewhere', coveredBy: null })
+    ).toBeNull();
+    // A coverer whose amount couldn't be read: the badge alone.
+    expect(
+      refundCoveredLine({ resolution: 'covered_by_refund', coveredBy: null })
+    ).toBeNull();
   });
 });

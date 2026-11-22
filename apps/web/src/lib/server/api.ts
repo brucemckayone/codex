@@ -37,6 +37,7 @@ import type {
   FollowerStats,
   HeldPriceMove,
   OwedToCreatorItem,
+  PaidAnotherWayResult,
   PriceChangeRestarted,
   PriceMoveRetried,
   RefundPreview,
@@ -140,6 +141,7 @@ import type {
   SupportChargeSearchQuery,
   SupportClosePriceMoveInput,
   SupportIssueRefundInput,
+  SupportPaidAnotherWayInput,
   SupportQueueQuery,
   SupportResolveCreatorDebtInput,
   SupportResolveCreditInput,
@@ -3349,6 +3351,20 @@ export function createServerApi(
         request<SupportRefundResult>(
           'admin',
           `/api/admin/support/charges/${encodeURIComponent(chargeId)}/refunds`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /**
+       * Mark what a lost chargeback left owed on a blocked payment as paid
+       * another way (owner D61). A repeat answers `alreadyMarked: true`.
+       */
+      markPaidAnotherWay: (
+        chargeId: string,
+        body: SupportPaidAnotherWayInput
+      ) =>
+        request<PaidAnotherWayResult>(
+          'admin',
+          `/api/admin/support/charges/${encodeURIComponent(chargeId)}/paid-another-way`,
           { method: 'POST', body: JSON.stringify(body) }
         ),
 

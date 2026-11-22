@@ -1004,3 +1004,109 @@ OK:
     UPDATE disputes SET appeal_status = NULL, updated_at = now()
      WHERE stripe_dispute_id IN ('du_…') AND appeal_status IS NOT NULL
     RETURNING stripe_dispute_id, status, appeal_status;
+
+## Paid another way, and owed again (migration `0131`)
+
+`0131` is drizzle-kit DDL, unedited (`Codex-z1t3c`; owner D61-D64). It adds
+two nullable columns to `disputes`, with no default:
+`paid_another_way_cents`, everything support has paid a blocked payment's
+buyer outside Stripe after a short lost chargeback (each mark adds to it,
+D66), and `late_win_refunded_outside_stripe_at`, the date of the mark made
+after that chargeback was won late (D63). Adding them rewrites nothing. And
+two CHECKs:
+
+- `check_disputes_paid_another_way`: an amount only above 0, and only with
+  the first mark's date (`refunded_outside_stripe_at`);
+- `check_disputes_late_win_paid_another_way`: the second mark's date only on
+  a late-won row (`late_won_at`) with an amount.
+
+Each scans `disputes` once under a lock: a moment on today's table, and
+every existing row has both columns NULL, so both pass. No backfill: nothing
+was marked paid another way before this release.
+
+### R25 — before any workers rollback past this release: charges paid another way, not won late
+
+A build before this release has no D62 guard: when a chargeback is won late,
+it refunds whatever Stripe has left of the charge, whether or not support
+paid the buyer another way. So before rolling back past this release, list
+the charges paid another way whose chargeback could still be won late:
+
+    SELECT stripe_dispute_id, stripe_charge_id, paid_another_way_cents
+    FROM disputes
+    WHERE paid_another_way_cents IS NOT NULL AND late_won_at IS NULL;
+
+Record the list with the rollback. Any of these won late while rolled back
+is refunded through Stripe on top of what was paid another way, so its buyer
+is paid twice, by up to `paid_another_way_cents`. The owner recovers the
+overpayment from the buyer or accounts for it, and records which, per
+dispute. A row already won late is safe once its undo is finished: its late
+win ran under this release's guard and made no refund, and nothing re-runs a
+finished one. One still being undone (`late_won_at` set,
+`outcome_applied_at` null) would be retried by the older workers'
+reconcile, which has no guard, so finish it before rolling back, or record
+it with the list:
+
+    SELECT stripe_dispute_id, stripe_charge_id, paid_another_way_cents
+    FROM disputes
+    WHERE paid_another_way_cents IS NOT NULL AND late_won_at IS NOT NULL
+      AND outcome_applied_at IS NULL;
+
+### Rollback
+
+The columns and both CHECKs stay on a workers rollback. The CHECKs bind
+nothing there: the older workers never write either column, and they test
+only those and two dates (`refunded_outside_stripe_at`, `late_won_at`) that
+no worker, older or newer, ever clears. The older workers don't read the
+amount, so a charge marked before the rollback shows as refunded outside
+Stripe on the support charge page, with no short-loss line, and the hourly
+alert for it returns only if what is owed rises after rolling forward.
+Before rolling back, run R25.
+
+## Covered refunds (migration `0132`)
+
+`0132` is drizzle-kit DDL, unedited (`Codex-z1t3c` review r8; owner D73). It
+adds one nullable column to `refunds`, with no default:
+`covered_by_refund_id`, the refund that paid a failed one back when the
+platform settles it `covered_by_refund` (a late win's refund, or a blocked
+payment's own, of everything still owed). Adding it rewrites nothing. And two
+CHECKs:
+
+- `check_refunds_resolution`, re-created with the third value: a resolution
+  only on a failed refund, and only `refunded_elsewhere`, `creators_repaid`
+  or `covered_by_refund`;
+- `check_refunds_covered_by`, new: a coverer exactly when the resolution is
+  `covered_by_refund`.
+
+Each scans `refunds` once under a lock: a moment on today's table, and every
+existing row has the column NULL and neither resolution new, so both pass. No
+backfill, and no query of existing rows: nothing live needs covering (owner
+D76).
+
+The blocked refunds' key now names the amount
+(`refund_duplicate_<PaymentIntent>_<amount>`,
+`refund_unavailable_<PaymentIntent>_<amount>`). One retried across the deploy
+asks under the new key, but its sync first records any refund the old key
+made, which then counts, so nothing is refunded twice.
+
+### Rollback
+
+The column and both CHECKs stay on a workers rollback. The CHECKs bind
+nothing there: the older workers never write the column or the new value,
+and every resolution they write has no coverer. A covered row is safe under
+them: it counts for nothing (they count `refunded_elsewhere` only), it is
+settled, so their Failed refunds never lists it, and their clawback keeps it.
+Their charge page shows it "Failed", which is cosmetic. Their blocked refund
+asks for Stripe's remainder again, which can over-refund a payment with a
+failed refund settled refunded elsewhere (the reason for this release).
+
+A database rollback past `0132` has to clear the covered rows first, since
+the old CHECK refuses the value, and that puts each back in Failed refunds,
+where a settle would pay its buyer a second time. So before rolling back the
+database, record which they are:
+
+    SELECT stripe_refund_id, covered_by_refund_id
+    FROM refunds
+    WHERE resolution = 'covered_by_refund';
+
+Keep the list with the rollback. Each was paid by its covering refund: none
+is to be paid again.

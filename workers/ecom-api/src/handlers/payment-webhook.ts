@@ -207,6 +207,15 @@ interface RefundedPurchase {
    * the buyer keeps the item through the purchase they made since.
    */
   lateWinKeptThrough?: { purchasedAt: string } | null;
+  /**
+   * A blocked sale's refund (Codex-z1t3c): its buyer could no longer open
+   * the item when the payment landed, so it is refunded in full.
+   */
+  itemUnavailable?: boolean;
+  /** The charge is refunded in full by the refunds standing now. */
+  refundedInFull?: boolean;
+  /** A blocked sale refunded in part, the rest still owed and to come. */
+  restOwed?: boolean;
 }
 
 type RefundCancellation = NonNullable<
@@ -294,11 +303,33 @@ function purchaseNote(
  *   ended.
  * - A late win refunds the FIRST payment of a buyer who bought it again
  *   (Codex-2hxff.70, Q1): the purchase they made since stands.
+ *
+ * Before both: a payment that landed when its buyer could no longer open the
+ * item (deleted, team-only, its organisation deleted, detached) was blocked
+ * and is refunded in full (Codex-z1t3c; owner 2026-11-15 and D54): the item
+ * is gone, so it says that, never "you still have it". Its words come from
+ * the purchase's fresh total (`processRefund`), never the event's snapshot,
+ * so an event retried after the rest landed still says "in full":
+ * - "in full" once the refunds standing now cover the charge
+ *   (`refundedInFull`);
+ * - "the rest will follow" only while the rest is owed and still to come
+ *   (`restOwed`: the row is `pending`, so its own refund or the hourly
+ *   owed-refund sweep makes it);
+ * - otherwise a part refund that promises nothing (the row is refunded
+ *   already, and a refund after that is support's).
  */
 function purchaseAccessNote(
   purchase: RefundedPurchase,
   contentTitle: string
 ): string {
+  if (purchase.itemUnavailable) {
+    if (purchase.refundedInFull) {
+      return `${contentTitle} is no longer available, so we've refunded you in full.`;
+    }
+    return purchase.restOwed
+      ? `${contentTitle} is no longer available, so we're refunding your payment in full. The rest will follow.`
+      : `${contentTitle} is no longer available. This refunds part of your payment.`;
+  }
   if (purchase.duplicatePayment && !purchase.accessEnded) {
     return `You still have ${contentTitle}. This refunds a second payment for it.`;
   }
@@ -638,6 +669,17 @@ async function handleRefundUpdated(
     return;
   }
   const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
+  // A blocked payment's failed refund whose chargeback carries what is still
+  // owed is the support charge page's, not Failed refunds' (owner D66, review
+  // r7). Read before the record, so a failure here is redelivered and still
+  // alerts (the record's change is what alerts).
+  const carriedBy =
+    refund.status === 'failed'
+      ? await service.chargebackCarryingRefund({
+          stripeRefundId: refund.id,
+          chargeId: charge.id,
+        })
+      : null;
 
   // First, so support sees a failure while a clawback step is still retrying.
   const changed = await service.recordRefund({
@@ -669,7 +711,19 @@ async function handleRefundUpdated(
       await service.restateStandingRefunds(paymentIntentId, charge.id);
     return;
   }
-  if (refund.status === 'failed' && changed) {
+  if (refund.status === 'failed' && changed && carriedBy) {
+    obs?.error(
+      "A blocked payment's refund failed at Stripe, and its chargeback carries what is still owed: settle it on the support charge page (Paid another way), not in Failed refunds, which doesn't list it",
+      {
+        errorId: crypto.randomUUID(),
+        refundId: refund.id,
+        chargeId,
+        disputeId: carriedBy,
+        amountCents: refund.amount,
+        failureReason: refund.failure_reason ?? null,
+      }
+    );
+  } else if (refund.status === 'failed' && changed) {
     obs?.error(
       "A refund failed at Stripe: support must refund the customer another way, or re-pay the creators. A subscription whose current period's payment it refunded in full has already been cancelled",
       {
@@ -977,7 +1031,8 @@ export async function processDispute(
       const ended = await purchase.processLostDispute(
         paymentIntentId,
         recorded.amountCents,
-        dispute.id
+        dispute.id,
+        { chargeId: charge.id }
       );
       effects.invalidateLibrary(ended?.userId);
       // Written when it opened, unless it opened already lost: again here.
@@ -1091,8 +1146,12 @@ async function undoLateWin(
   await restoreSubscriptionAfterWin(subscription, effects, disputeInput);
   const repaid = await purchase.repayWonDispute(dispute.id);
 
+  // A blocked sale (Codex-z1t3c) granted nothing, as a duplicate did: the
+  // late win refunds it if the loss did (`refundedByTheLoss`).
   const refund: LateWinRefundStep =
-    restored?.outcome === 'rebought' || restored?.outcome === 'duplicate'
+    restored?.outcome === 'rebought' ||
+    restored?.outcome === 'duplicate' ||
+    restored?.outcome === 'unavailable'
       ? await refundFirstPayment(deps, dispute.id, charge, recorded.purchaseId)
       : 'none';
   if (refund === 'pending') {

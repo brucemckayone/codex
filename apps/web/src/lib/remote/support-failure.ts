@@ -54,6 +54,8 @@ export interface SupportCommandFailure {
   disputeStatus: string | null;
   /**
    * `REPAY_BLOCKED_BY_LATER_CAUSE`: `chargeback` or `later_refunds`.
+   * `BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE`: `duplicate` or `unavailable`.
+   * `NOT_OWED_AFTER_LOSS`: `not_blocked`, `no_lost_dispute` or `not_short`.
    * `PRICE_MOVE_NOT_HELD`: why there is nothing to retry or close.
    */
   reason: string | null;

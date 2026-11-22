@@ -141,3 +141,19 @@ This policy promises behaviour the code does not have yet:
   from us, and what does that mean for VAT on digital services?
 - **L7 — prices and VAT.** Are displayed prices VAT-inclusive, and must the
   policy say so?
+- **L8 — a creator removes something customers bought outright
+  (Codex-a6ofh.6).** Each owner gets 30 days' notice by email and keeps
+  playback until the date. Where the creator allowed it when selling (on by
+  default), they can also download the original file, or save an article as a
+  PDF. No refund is given. A platform admin can remove a piece at once for a
+  legal or policy reason; owners are then emailed that it was removed.
+  (a) Is notice plus continued access (and a download where offered), without
+  a refund, enough under the Consumer Rights Act 2015's digital-content
+  provisions, given this policy says "You keep access for as long as it is
+  available on Revelations"? Should that line become, e.g., "for as long as
+  its creator keeps it on Revelations; if they remove it, you get 30 days'
+  notice"? (b) Where the creator turned downloads off, is anything owed beyond
+  the 30 days' notice? (c) Is a refund owed after an immediate admin takedown?
+  (d) A download hands over the original file, and a creator may have
+  licensed third-party music for streaming only: should the creator terms
+  carry a warranty that covers downloads?
