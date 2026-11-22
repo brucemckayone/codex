@@ -14,6 +14,7 @@ import {
   planMedia,
   treatedSize,
 } from '../media-pass';
+import { placedRect } from '../portrait';
 import { PUSH_DEPTH, PUSH_SECONDS, pushZoom } from '../stage';
 
 const DESK: MediaContext = {
@@ -116,6 +117,10 @@ describe('planMedia', () => {
 });
 
 describe('treatedSize', () => {
+  /** A 1440x900 stage at 2x, and OBB's 9:16 preview film. */
+  const DESK_STAGE = [2880, 1800] as const;
+  const FILM = [720, 1280] as const;
+
   it('is the size covering the stage shows the piece at, in its own shape', () => {
     // a 720x1280 film covering a 700x1200 stage: scaled by 700/720
     expect(treatedSize([720, 1280], [700, 1200], [780, 1688])).toEqual([
@@ -123,12 +128,40 @@ describe('treatedSize', () => {
     ]);
   });
 
-  it('is the stage’s height for a placed portrait, which never covers it', () => {
-    // flush right at 1800 tall, not covering 2880 wide
-    // (720 x 1800/1280 is 1012.5, rounded up)
-    expect(treatedSize([720, 1280], [2880, 1800], [2880, 1800], true)).toEqual([
-      1013, 1800,
-    ]);
+  it('is the width a placed piece is drawn at, 62% of the stage’s, for a film and a picture alike', () => {
+    // a 9:16 film at 62% of 2880 is 1785.6 wide, so 3174 tall: the frame
+    // trims 43% of that, top and bottom, and the shader never scales it up
+    expect(
+      treatedSize(
+        FILM,
+        DESK_STAGE,
+        DESK_STAGE,
+        placedRect('film-fill', DESK_STAGE, FILM)
+      )
+    ).toEqual([1786, 3174]);
+    // a 4:5 picture at the same width: 2232 tall, 19% of it trimmed
+    expect(
+      treatedSize(
+        [1200, 1500],
+        DESK_STAGE,
+        DESK_STAGE,
+        placedRect('film-fill', DESK_STAGE, [1200, 1500])
+      )
+    ).toEqual([1786, 2232]);
+  });
+
+  it('is capped by the part of a placed piece that shows, not by what the frame trims', () => {
+    // 3174 is past the canvas's 2880, but only 1800 of it shows. On a canvas
+    // half the size, what shows (720 wide by 726 of its height) is held to
+    // the canvas's 1440: 1.984x, so 1428x2540
+    expect(
+      treatedSize(
+        FILM,
+        DESK_STAGE,
+        [1440, 900],
+        placedRect('film-fill', DESK_STAGE, FILM)
+      )
+    ).toEqual([1428, 2540]);
   });
 
   it('is capped at the canvas’s longest side', () => {

@@ -42,6 +42,10 @@ export const UNIFORMS = {
   u_nameFade: 'float',
   /** The media's own size in pixels (for `coverUv`). */
   u_mediaSize: 'vec2',
+  /** A placed portrait piece (`../portrait.ts` `placedRect`): x the width
+   *  it is drawn at, a share of the stage's; y the share of its height that
+   *  shows, 1 - its crop. (1, 1) for a piece that is not placed. */
+  u_placed: 'vec2',
   /** 1 once a media frame is uploaded, else 0. */
   u_hasMedia: 'float',
   /** The Showreel's band (`FilmLook.band`): 0 none, 1 the film gives way. */

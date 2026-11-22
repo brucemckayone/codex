@@ -1045,6 +1045,53 @@ describe('the Showreel look over the piece', () => {
     );
   });
 
+  it('draws every placed piece, a film or a picture, 62% of the stage’s width, cover-cropped about its centre (u_placed)', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setLook({ frame: 'film-fill', band: 'none' });
+    compositor.setStage(wide);
+    compositor.setMedia(fakeVideo().el);
+    compositor.render(desktop());
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['film-portrait'])).toBe(
+      true
+    );
+    // 720x1280 at the stage's 1800 is 1012.5 of its 2880 (35.2%): drawn
+    // 62% wide, so 56.7% of its height shows (`portrait.ts` `placedRect`)
+    const film = last(fake, 'u_placed');
+    expect(film?.[0]).toBeCloseTo(0.62, 6);
+    expect(film?.[1]).toBeCloseTo(0.3515625 / 0.62, 6);
+
+    // a picture of the same shape: the same placing, one rule
+    compositor.setMedia(still(1080, 1920));
+    compositor.render(desktop());
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['film-portrait'])).toBe(
+      true
+    );
+    expect(last(fake, 'u_placed')).toEqual(film);
+  });
+
+  it('draws a placed piece’s treated picture at the width it is drawn at, so the shader never scales it up', () => {
+    const fake = fakeGl();
+    const compositor = createCompositor(fake.gl);
+    compositor.setLook({
+      frame: 'film-fill',
+      band: 'none',
+      surface: 'duotone',
+    });
+    compositor.setStage(wide);
+    compositor.setMedia(still(1152, 2048));
+    compositor.render(desktop());
+    const surface = fake.draws.find((d) =>
+      drewWith(d, MEDIA['surface-duotone'])
+    );
+    // 62% of 2880 is 1785.6: the 1152x2048 picture at that width is 3174
+    // tall, and the frame trims 43% of it
+    expect(surface?.viewport).toEqual([0, 0, 1786, 3174]);
+    expect(drewWith(fake.draws.at(-1) as Draw, FRAMES['film-portrait'])).toBe(
+      true
+    );
+  });
+
   it('places it on a phone held sideways too: the rule is the stage’s shape, not the device (L4)', () => {
     const fake = fakeGl();
     const compositor = createCompositor(fake.gl);

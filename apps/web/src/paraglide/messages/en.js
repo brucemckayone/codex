@@ -10495,6 +10495,14 @@ export const branding_hero_reel_band_edges = () => `All round`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_hint = () => `For landscape pieces. A portrait picture or film sits on the right, with no band.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_field_reel_edge = () => `Text over footage`
 
 

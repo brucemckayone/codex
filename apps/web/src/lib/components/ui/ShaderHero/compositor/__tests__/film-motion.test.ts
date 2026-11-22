@@ -61,10 +61,22 @@ describe('createFilmMotionPasses', () => {
     const portrait = passes.passFor('film-portrait', choice, desk);
     expect(portrait?.pass.id.startsWith('film-portrait+')).toBe(true);
     expect(portrait?.running).toEqual(choice);
-    // At rest it places the film and gives way as the plain frames do: the
-    // portrait frame's own placement, and the shared band.
+    // At rest it places the film and gives way as the plain portrait frame
+    // does: its own placement and left fade, and no band at its foot, so the
+    // piece shows top to bottom whatever the look's band.
     expect(portrait?.pass.glsl).toContain(PORTRAIT_GLSL);
-    expect(portrait?.pass.glsl).toContain(BAND_GLSL);
+    expect(portrait?.pass.glsl).toContain(
+      'float frame = portraitShows(local);'
+    );
+    expect(portrait?.pass.glsl).toContain(
+      'return texture(u_media, clamp(portraitUv(local), 0.0, 1.0)).rgb;'
+    );
+    expect(portrait?.pass.glsl).not.toContain(BAND_GLSL);
+    expect(portrait?.pass.glsl).not.toContain('bandShows(');
+    // where it is drawn, which the compositor sets per piece and stage
+    // (`portrait.ts` `placedRect`)
+    expect(portrait?.pass.uniforms).toContain('u_placed');
+    expect(portrait?.pass.uniforms).not.toContain('u_band');
     const fill = passes.passFor('film-fill', choice, desk)?.pass.glsl ?? '';
     expect(fill).toContain(BAND_GLSL);
     expect(fill).toContain('float frame = bandShows(local);');

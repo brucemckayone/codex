@@ -1,7 +1,8 @@
 /**
  * Where a film frame's film gives way to the brand's picture: the Showreel's
- * band (`stage.ts` `FilmBand`), shared by every frame that fills its stage with
- * the film, so 'film-fill' and 'film-portrait' give way alike. GLSL text placed
+ * band (`stage.ts` `FilmBand`), for the frame that fills its stage with the
+ * film ('film-fill', plain or with its motion). A placed portrait piece takes
+ * none: nothing gives way at its foot (`frame-film-portrait.ts`). GLSL text placed
  * after `FILM_GLSL` and `SMOKE_GLSL`.
  */
 import type { UniformName } from './uniforms';

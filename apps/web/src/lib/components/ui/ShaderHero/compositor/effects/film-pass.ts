@@ -5,14 +5,15 @@
  * At rest (`restMotion`) the pass draws exactly what the plain film frame draws
  * (`frame-film-fill.ts`, `frame-film-name.ts`, `frame-film-portrait.ts`): every
  * hook leaves the motion untouched, the film is sampled at the very point the
- * frame samples it (`frameFilm`, as that frame places it), it gives way through
- * the same band (`bandShows`), and nothing is multiplied but by exactly 1. A
- * real-GPU probe compares the two pixel for pixel.
+ * frame samples it (`frameFilm`, as that frame places it), it gives way as that
+ * frame does (the band, `bandShows`; a portrait piece's own left fade,
+ * `portraitShows`), and nothing is multiplied but by exactly 1. A real-GPU
+ * probe compares the two pixel for pixel.
  */
 
 import { FILM_GLSL, FILM_UNIFORMS, SMOKE_GLSL, SMOKE_UNIFORMS } from './film';
 import { BAND_GLSL, BAND_UNIFORMS } from './film-band';
-import { PORTRAIT_GLSL } from './frame-film-portrait';
+import { PORTRAIT_GLSL, PORTRAIT_UNIFORMS } from './frame-film-portrait';
 import { HEADER } from './header';
 import type { FilmFrameId } from './ids';
 import { MOTION_GLSL, MOTION_GLSL_UNIFORMS, type MotionSet } from './motion';
@@ -33,8 +34,9 @@ export interface FilmPass {
 
 /**
  * What each film frame adds before the motion: the film as the frame places
- * it (`frameFilm`, which the glitch samples too), and the band its film
- * gives way through. After `FILM_GLSL`, before `MOTION_GLSL`.
+ * it (`frameFilm`, which the glitch samples too), and what its film gives way
+ * through (the band, or a portrait piece's left fade). After `FILM_GLSL`,
+ * before `MOTION_GLSL`.
  */
 const FRAME_GLSL: Record<FilmFrameId, string> = {
   'film-fill': `${SMOKE_GLSL}
@@ -47,26 +49,22 @@ vec3 frameFilm(vec2 local) {
 vec3 frameFilm(vec2 local) {
   return film(local);
 }`,
-  'film-portrait': `${SMOKE_GLSL}
-${BAND_GLSL}
-${PORTRAIT_GLSL}
+  'film-portrait': `${PORTRAIT_GLSL}
 // The film as this frame places it: flush right at the stage's full
-// height, contained.
+// height, as wide as u_placed says, trimmed top and bottom.
 vec3 frameFilm(vec2 local) {
-  float w = portraitWidth();
-  return texture(u_media, clamp(vec2((local.x - (1.0 - w)) / w, local.y), 0.0, 1.0)).rgb;
+  return texture(u_media, clamp(portraitUv(local), 0.0, 1.0)).rgb;
 }`,
 };
 
 /** What each film frame lets through, before the motion's own `shows`. */
 function frameTerm(frame: FilmFrameId, throughName: boolean): string {
   if (frame === 'film-name') return 'float frame = nameVeil(v_uv, mo.warp);';
-  // The band as the plain frames give way (1 with none); a portrait's left edge
-  // fades in from the brand's picture too.
+  // As the plain frames give way: the band (1 with none), or a portrait
+  // piece's left edge fading in, with no band at its foot.
   const band =
     frame === 'film-portrait'
-      ? `float w = portraitWidth();
-  float frame = smoothstep(1.0 - w, 1.0 - w + w * LEAD, local.x) * bandShows(local);`
+      ? 'float frame = portraitShows(local);'
       : 'float frame = bandShows(local);';
   if (!throughName) return band;
   // The opening and the dive draw the film into the letters on these
@@ -81,7 +79,7 @@ function frameTerm(frame: FilmFrameId, throughName: boolean): string {
 const FRAME_UNIFORMS: Record<FilmFrameId, readonly FilmPassUniform[]> = {
   'film-fill': [...SMOKE_UNIFORMS, ...BAND_UNIFORMS],
   'film-name': [],
-  'film-portrait': [...SMOKE_UNIFORMS, ...BAND_UNIFORMS],
+  'film-portrait': PORTRAIT_UNIFORMS,
 };
 /** What `main` itself reads, and the name's weight it reads for a dive. */
 const MAIN_UNIFORMS: readonly FilmPassUniform[] = ['u_fill'];

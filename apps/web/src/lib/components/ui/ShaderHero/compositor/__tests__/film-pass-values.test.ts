@@ -29,6 +29,7 @@ const shared: FrameShared = {
   // the name's letters at the top of the page (the scroll fix's (c))
   u_nameFade: 1,
   u_mediaSize: [720, 1280],
+  u_placed: [1, 1],
   u_hasMedia: 1,
   u_band: 2,
   u_ramp: [0.5, 0.95],

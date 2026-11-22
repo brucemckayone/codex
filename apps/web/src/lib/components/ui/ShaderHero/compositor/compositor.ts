@@ -29,10 +29,10 @@
  * is drawn as its composed film pass, `film-motion.ts`).
  *
  * Two hooks kept to their own files: the frame rule (`portrait.ts`: a portrait
- * piece on a desktop is placed, not cropped) picks the film frame, and the
- * passes over the piece's own picture (`media-pass.ts`: the stills' push-in,
- * the surface over the footage) draw into a target the film frame samples in
- * place of the raw media.
+ * piece on a desktop is placed flush right, not filled) picks the film frame,
+ * and the passes over the piece's own picture (`media-pass.ts`: the stills'
+ * push-in, the surface over the footage) draw into a target the film frame
+ * samples in place of the raw media.
  */
 import { bindOutput, setOutputTarget } from '../output-target';
 import {
@@ -53,11 +53,7 @@ import {
 import { duotoneStops } from './duotone';
 import type { Effect } from './effects/effect';
 import { assembleFilmPass, type FilmPass } from './effects/film-pass';
-import {
-  FILM_PORTRAIT_FRAME,
-  type FilmFrameId,
-  PASSTHROUGH_FRAME,
-} from './effects/ids';
+import { type FilmFrameId, PASSTHROUGH_FRAME } from './effects/ids';
 import { assembleEffect, FRAMES } from './effects/registry';
 import {
   SAMPLER_UNITS,
@@ -73,7 +69,7 @@ import {
 import { effectTime } from './flash';
 import { createMediaRunner, planMedia, treatedSize } from './media-pass';
 import { type PlanContext, planStack, type StackPlan } from './plan';
-import { placedFrame } from './portrait';
+import { type PlacedRect, placedFrame, placedRect } from './portrait';
 import type { StackConfig } from './stack-config';
 import {
   BAND_CODE,
@@ -646,6 +642,13 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       uploadMedia();
     const { colors, brand } = f.baseConfig;
     const [toneDeep, toneMid, tonePale] = duotoneStops(brand.primary, brand.bg);
+    // Where a placed piece is drawn: the frame and its treated picture read
+    // the same rect (`portrait.ts`), so the two agree.
+    const placedAt = placedRect(
+      current.frame.id,
+      [rect[2], rect[3]],
+      mediaSize()
+    );
     const values: FrameShared = {
       u_pointer: [f.mouse.x, f.mouse.y],
       u_brandPrimary: colors.primary,
@@ -657,6 +660,9 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       // the name's letters, held still with the stage, go within a short scroll
       u_nameFade: nameFade(f.scrollY),
       u_mediaSize: mediaSize(),
+      u_placed: placedAt
+        ? [placedAt.x1 - placedAt.x0, 1 - placedAt.crop]
+        : [1, 1],
       u_hasMedia: hasMedia ? 1 : 0,
       u_band: look ? BAND_CODE[look.band] : 0,
       u_ramp: bandRamp(look?.band ?? 'none', f.phone),
@@ -668,8 +674,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       u_tonePale: tonePale,
     };
     // Drawn before u_media is bound, so no unit holds a target it draws into.
-    const placed = current.frame.id === FILM_PORTRAIT_FRAME;
-    const treated = hasMedia ? treatMedia(f, rect, placed, values) : null;
+    const treated = hasMedia ? treatMedia(f, rect, placedAt, values) : null;
     bindUnit(SAMPLER_UNITS.u_mask, maskTex);
     bindUnit(SAMPLER_UNITS.u_media, hasMedia ? (treated ?? mediaTex) : null);
     return values;
@@ -684,7 +689,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
   function treatMedia(
     f: CompositeFrame,
     rect: RectPx,
-    placed: boolean,
+    placed: PlacedRect | null,
     values: FrameShared
   ): WebGLTexture | null {
     if (!media || !mediaTex) return null;

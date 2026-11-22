@@ -19,6 +19,7 @@ import type { FBO } from '../webgl-utils';
 import type { MediaEffect } from './effects/effect';
 import { type MediaPassId, SURFACE_PASS } from './effects/ids';
 import { MEDIA } from './effects/registry';
+import type { PlacedRect } from './portrait';
 import { type FilmLook, pushZoom } from './stage';
 
 type Size = readonly [number, number];
@@ -76,19 +77,29 @@ export function planMedia(
 /**
  * The size the treated picture is drawn at: the size the stage shows it at,
  * so a grain is a screen pixel. Filling (or in the name window) it covers
- * the stage; placed (`film-portrait`), it is the stage's height. Capped at
- * the canvas's longest side, and never under 1.
+ * the stage, capped at the canvas's longest side. Placed (`film-portrait`),
+ * it is the width `placed` draws it at (`portrait.ts` `placedRect`, the
+ * frame's `u_placed`), so the shader never scales it up; the frame trims its
+ * top and bottom, so the cap holds the part that shows to the canvas's
+ * longest side, not the whole. Never under 1.
  */
 export function treatedSize(
   media: Size,
   rect: Size,
   output: Size,
-  placed = false
+  placed: PlacedRect | null = null
 ): Size {
   const [mw, mh] = [Math.max(media[0], 1), Math.max(media[1], 1)];
-  const shown = placed ? rect[1] / mh : Math.max(rect[0] / mw, rect[1] / mh);
-  const cap = Math.max(output[0], output[1], 1) / Math.max(mw, mh);
-  const scale = Math.min(shown, cap);
+  const longest = Math.max(output[0], output[1], 1);
+  const scale = placed
+    ? Math.min(
+        ((placed.x1 - placed.x0) * rect[0]) / mw,
+        longest / Math.max(mw, mh * (1 - placed.crop))
+      )
+    : Math.min(
+        Math.max(rect[0] / mw, rect[1] / mh),
+        longest / Math.max(mw, mh)
+      );
   return [
     Math.max(1, Math.round(mw * scale)),
     Math.max(1, Math.round(mh * scale)),

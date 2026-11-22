@@ -138,7 +138,7 @@
         { key: 'reel-trans', label: m.branding_hero_field_reel_trans, values: { burn: m.branding_hero_reel_trans_burn, liquid: m.branding_hero_reel_trans_liquid, glitch: m.branding_hero_reel_trans_glitch, 'light-leak': m.branding_hero_reel_trans_light_leak } },
         { key: 'reel-surface', label: m.branding_hero_field_reel_surface, values: { none: m.branding_hero_none, duotone: m.branding_hero_reel_surface_duotone, colour: m.branding_hero_reel_surface_colour, grain: m.branding_hero_reel_surface_grain }, needsShader: true },
         { key: 'reel-push', label: m.branding_hero_field_reel_push, values: { on: m.branding_hero_reel_push_on, off: m.branding_hero_reel_push_off } },
-        { key: 'reel-band', label: m.branding_hero_field_reel_band, values: { fade: m.branding_hero_reel_band_fade, under: m.branding_hero_reel_band_under, edges: m.branding_hero_reel_band_edges, none: m.branding_hero_none }, needsShader: true },
+        { key: 'reel-band', label: m.branding_hero_field_reel_band, values: { fade: m.branding_hero_reel_band_fade, under: m.branding_hero_reel_band_under, edges: m.branding_hero_reel_band_edges, none: m.branding_hero_none }, hint: m.branding_hero_reel_band_hint, needsShader: true },
         { key: 'reel-edge', label: m.branding_hero_field_reel_edge, values: { shadow: m.branding_hero_reel_edge_shadow, outline: m.branding_hero_reel_edge_outline } },
         { key: 'reel-opening', label: m.branding_hero_field_reel_opening, values: { name: m.branding_hero_reel_opening_name, none: m.branding_hero_none } },
         // The opening's and the film's 'name' play through the title on Corner and Wide

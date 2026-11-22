@@ -183,7 +183,21 @@ describe('the Showreel group: shown whenever the hero is a Showreel', () => {
     expect(field('reel-film')?.querySelector('[data-hint]')?.textContent).toBe(
       'Through the letters means through the big title, or through your name on the Name window.'
     );
-    expect(showreel()?.querySelectorAll('[data-hint]')).toHaveLength(1);
+    // one line for the pair, not one under each
+    const letters = [
+      ...(showreel()?.querySelectorAll('[data-hint]') ?? []),
+    ].filter((hint) => hint.textContent?.includes('Through the letters'));
+    expect(letters).toHaveLength(1);
+  });
+
+  test('the shader band says it is for landscape pieces: a portrait one sits on the right, with none', () => {
+    render({ 'hero-opt-purpose': 'spotlight', 'hero-opt-comp': 'showreel' });
+    const band = showreel()?.querySelector(
+      '.hero-designer__field[data-key="reel-band"]'
+    );
+    expect(band?.querySelector('[data-hint]')?.textContent).toBe(
+      'For landscape pieces. A portrait picture or film sits on the right, with no band.'
+    );
   });
 });
 
