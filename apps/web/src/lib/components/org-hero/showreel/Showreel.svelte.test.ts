@@ -998,10 +998,13 @@ describe('Showreel names the org as the hero says', () => {
     // A load failure keeps its box: the logo stays in the bar, unseen.
     expect(q('.reel__sig img')?.getAttribute('src')).toBe(LOGO);
     expect(q('.reel__sig img')?.hasAttribute('data-failed')).toBe(true);
-    // The name stands in over its place, unseen to screen readers, which
-    // keep the one heading.
+    // The name stands in over its place, held to the run the bar leaves
+    // free (measured: jsdom lays nothing out, so 0), a word the shade
+    // carries, and unseen to screen readers, which keep the one heading.
     const standIn = q('.reel__stand-in');
     expect(standIn?.textContent).toBe('Of Blood & Bones');
+    expect(standIn?.style.getPropertyValue('--_room')).toBe('0px');
+    expect(standIn?.dataset.ink).toBe('body');
     expect(standIn?.getAttribute('aria-hidden')).toBe('true');
     expect(q('h1.reel__name')?.classList.contains('sr-only')).toBe(true);
   });

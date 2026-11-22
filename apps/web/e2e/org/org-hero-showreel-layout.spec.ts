@@ -1017,14 +1017,20 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
    * failure must keep its box. On a desktop the logo sets the bar's height,
    * so dropping it shortened the bar (68 to 66.4 px) and moved the name
    * into its place. A logo leading alone gets the name as its stand-in, out
-   * of flow over its place. Read with the logo's request held (pending),
-   * then failed, and read again once the failure has landed (OrgHero marked
-   * it failed, or dropped it).
+   * of flow over its place and held to the run the bar leaves free beside
+   * its meta: in sight, and over neither the meta (Follow, the org's action)
+   * nor the pause, at the desktop widths where the meta comes nearest. Read with
+   * the logo's request held (pending), then failed, and read again once the
+   * failure has landed (OrgHero marked it failed, or dropped it).
    */
   for (const [width, height, lead] of [
     [1440, 900, 'both'],
     [390, 844, 'both'],
     [1440, 900, 'logo'],
+    [1024, 768, 'logo'],
+    [900, 900, 'logo'],
+    [820, 900, 'logo'],
+    [390, 844, 'logo'],
   ] as const) {
     test(`a logo that fails late at ${width}x${height}, lead ${lead}: its box kept, nothing in the top bar moves`, async ({
       browser,
@@ -1044,10 +1050,18 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
           const img = document.querySelector('.reel__sig img');
           return !img || img.hasAttribute('data-failed');
         });
+      const meta = () =>
+        page.evaluate(() => {
+          const r = document
+            .querySelector('.reel__meta')
+            ?.getBoundingClientRect();
+          return r ? [r.top, r.bottom, r.left, r.right] : null;
+        });
       expect(await failed(), 'the logo still pending at the first read').toBe(
         false
       );
       const before = await nameAt(page);
+      const metaBefore = await meta();
       fail();
       await expect.poll(failed, { timeout: 20_000 }).toBe(true);
       await frames(page);
@@ -1061,26 +1075,35 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
             .toBeLessThanOrEqual(0.5);
         }
       }
+      expect(await meta(), 'the meta where it was').toEqual(metaBefore);
       if (lead === 'logo') {
-        // The name stands in where the logo was, in sight, clear of the pause.
+        // The name stands in, in sight, over neither the meta nor the pause
+        // (each as laid out: a phone lays out no meta).
         const standIn = await page.evaluate(() => {
+          const laid = (selector: string) => {
+            const r = document.querySelector(selector)?.getBoundingClientRect();
+            return r && r.width > 1 && r.height > 1 ? r : null;
+          };
           const el = document.querySelector('.reel__stand-in');
-          const r = el?.getBoundingClientRect();
-          const pause = document
-            .querySelector('.reel__ctl')
-            ?.getBoundingClientRect();
-          return r && pause
-            ? {
-                width: r.width,
-                clear: r.right <= pause.left || r.bottom <= pause.top,
-              }
-            : null;
+          const r = laid('.reel__stand-in');
+          const over = (other: DOMRect | null) =>
+            !!r &&
+            !!other &&
+            r.left < other.right &&
+            other.left < r.right &&
+            r.top < other.bottom &&
+            other.top < r.bottom;
+          return {
+            shown: !!el && getComputedStyle(el).visibility === 'visible',
+            width: r?.width ?? 0,
+            overMeta: over(laid('.reel__meta')),
+            overPause: over(laid('.reel__ctl')),
+          };
         });
-        expect(
-          standIn?.width,
-          'the name stands in for the logo'
-        ).toBeGreaterThan(0);
-        expect(standIn?.clear, 'the stand-in clear of the pause').toBe(true);
+        expect(standIn.shown, 'the name stands in, in sight').toBe(true);
+        expect(standIn.width, 'the stand-in laid out').toBeGreaterThan(0);
+        expect(standIn.overMeta, 'the stand-in over the meta').toBe(false);
+        expect(standIn.overPause, 'the stand-in over the pause').toBe(false);
       }
       await page.context().close();
     });

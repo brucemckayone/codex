@@ -1,6 +1,8 @@
 /**
  * The org's name as the Showreel's window (Codex-1yd58.6): which words go on
- * which line, and how large, so the name fills the stage's width.
+ * which line, and how large, so the name fills the stage's width; the Wide
+ * title's size; and the run the top bar leaves a name standing in for a
+ * failed logo.
  *
  * At most two lines. Each way of breaking the name is sized to fit the width,
  * and the largest wins: "Of Blood & Bones" breaks as "Of Blood" / "& Bones",
@@ -103,4 +105,30 @@ export function fitTitle(
 ): number {
   if (width100 <= 0) return max;
   return Math.max(min, Math.min(max, Math.floor((100 * available) / width100)));
+}
+
+/** A laid-out box across the page, as `getBoundingClientRect` gives one. */
+interface Across {
+  readonly left: number;
+  readonly width: number;
+}
+
+/**
+ * The run the top bar has free for the name standing in for a failed logo:
+ * from the logo's place (`sigLeft`) to where the bar's content ends, or to
+ * the meta less the bar's gap where one is laid out (a phone lays out none).
+ * In whole pixels, never under 0. The stand-in is held to it out of flow, so
+ * the bar keeps no place for a name it shows only when the logo fails.
+ */
+export function standInRun(bar: {
+  sigLeft: number;
+  end: number;
+  gap: number;
+  meta: Across | null;
+}): number {
+  const beforeMeta =
+    bar.meta && bar.meta.width > 0
+      ? bar.meta.left - bar.gap
+      : Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.floor(Math.min(bar.end, beforeMeta) - bar.sigLeft));
 }

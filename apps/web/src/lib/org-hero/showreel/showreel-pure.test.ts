@@ -10,7 +10,7 @@ import { bindingLuminance } from '$lib/brand-editor/ground';
 import { TEXT_ON_BRAND_LUMINANCE_PIVOT } from '$lib/brand-editor/ink';
 import type { OrgHeroPiece } from '../hero-config';
 import type { ReelEntry } from '../reel';
-import { fitTitle, nameInRoom, nameLines } from './name-lines';
+import { fitTitle, nameInRoom, nameLines, standInRun } from './name-lines';
 import { prefersSavingData, reelMode } from './playback';
 import { PIECE_MS, ReelClock, reelKey, reelKeys } from './reel-clock.svelte';
 import { reelMedia } from './reel-media';
@@ -2037,5 +2037,27 @@ describe("Outline's room never under its ink's need in the pole: the soft ink's 
         role
       ).toBe(false);
     }
+  });
+});
+
+describe('standInRun', () => {
+  const bar = { sigLeft: 40, end: 1400, gap: 24 };
+
+  it('runs to the meta, less the bar gap, where the bar lays one out', () => {
+    expect(standInRun({ ...bar, meta: { left: 900, width: 500 } })).toBe(836);
+  });
+
+  it("runs to the bar's end where no meta is laid out (a phone's)", () => {
+    expect(standInRun({ ...bar, meta: { left: 0, width: 0 } })).toBe(1360);
+    expect(standInRun({ ...bar, meta: null })).toBe(1360);
+  });
+
+  it("never past the bar's end, even with the meta beyond it", () => {
+    expect(standInRun({ ...bar, meta: { left: 1500, width: 100 } })).toBe(1360);
+  });
+
+  it('in whole pixels, and never under 0', () => {
+    expect(standInRun({ ...bar, meta: { left: 899.7, width: 500 } })).toBe(835);
+    expect(standInRun({ ...bar, meta: { left: 50, width: 10 } })).toBe(0);
   });
 });

@@ -59,7 +59,7 @@
   import type { HeroOptions } from '$lib/org-hero/hero-config';
   import type { ReelEntry } from '$lib/org-hero/reel';
   import { type GlyphBox, glyphBox } from '$lib/org-hero/showreel/glyph-box';
-  import { fitTitle, type NameLines, nameInRoom, nameLines } from '$lib/org-hero/showreel/name-lines';
+  import { fitTitle, type NameLines, nameInRoom, nameLines, standInRun } from '$lib/org-hero/showreel/name-lines';
   import { prefersSavingData, reelMode } from '$lib/org-hero/showreel/playback';
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
   import { reelMedia } from '$lib/org-hero/showreel/reel-media';
@@ -1145,7 +1145,7 @@
     void peek;
     void shown;
     void edge;
-    void standIn;
+    void showsStandIn;
     void themeState.theme;
     if (!root) return;
     let live = true;
@@ -1204,6 +1204,36 @@
   // that a load failure keeps its box). Unseen to screen readers, which have
   // the h1 already.
   const standIn = $derived(layout !== 'name' && nameHidden && logoFailed);
+  // The run it is held to (`standInRun`), measured as it shows and again
+  // whenever the bar or its meta resizes (the viewport's width, Follow
+  // turning to Following, a face landing). It shows once measured, so no
+  // frame paints it unbounded over the meta.
+  let standInRoom = $state<number | null>(null);
+  $effect(() => {
+    const bar = rootEl?.querySelector<HTMLElement>('.reel__top');
+    const sig = bar?.querySelector<HTMLElement>('.reel__sig');
+    if (!standIn || !bar || !sig) {
+      standInRoom = null;
+      return;
+    }
+    const meta = bar.querySelector<HTMLElement>('.reel__meta');
+    const measure = () => {
+      const box = bar.getBoundingClientRect();
+      const style = getComputedStyle(bar);
+      standInRoom = standInRun({
+        sigLeft: sig.getBoundingClientRect().left,
+        end: box.right - (Number.parseFloat(style.paddingRight) || 0),
+        gap: Number.parseFloat(style.columnGap) || 0,
+        meta: meta?.getBoundingClientRect() ?? null,
+      });
+    };
+    measure();
+    const resized = new ResizeObserver(measure);
+    resized.observe(bar);
+    if (meta) resized.observe(meta);
+    return () => resized.disconnect();
+  });
+  const showsStandIn = $derived(standIn && standInRoom !== null);
   // A word in the name longer than any phone's top bar holds (320 px less
   // the gutters, a logo and its gap, at 0.6 em a letter): it steps down and
   // breaks where it must on a phone, never past the reel (WP-5a).
@@ -1249,7 +1279,7 @@
     <div class="reel__sig">
       {#if logoUrl}<img src={logoUrl} alt="" onerror={onlogofail} data-failed={logoFailed ? '' : undefined} />{/if}
       {#if layout !== 'name'}<h1 class={['reel__name', { 'sr-only': nameHidden }]} data-ink="body" data-long-word={longWord ? '' : undefined}>{name}</h1>{/if}
-      {#if standIn}<span class="reel__name reel__stand-in" aria-hidden="true" data-ink="body" data-long-word={longWord ? '' : undefined}>{name}</span>{/if}
+      {#if showsStandIn}<span class="reel__name reel__stand-in" aria-hidden="true" data-ink="body" data-long-word={longWord ? '' : undefined} style:--_room={`${standInRoom}px`}>{name}</span>{/if}
     </div>
     <div class="reel__meta">
       {#if facts}<span data-ink="body">{facts}</span>{/if}
@@ -1695,6 +1725,23 @@
     inset-inline-start: 0;
     inline-size: max-content;
     translate: 0 -50%;
+  }
+
+  /* From md, where the bar lays out its meta: held to the run left free
+     beside it (`--_room`), so a long name ends in an ellipsis short of
+     Follow, never over it. Clipped across only, so the glow round its
+     letters keeps its reach above and below; a pad each side, taken back by
+     its inset, keeps the glow at its start and past the ellipsis inside the
+     clip, and reaches no further than the bar's gap. */
+  @media (--breakpoint-md) {
+    .reel__stand-in {
+      inset-inline-start: calc(-1 * var(--space-3));
+      max-inline-size: calc(var(--_room) + 2 * var(--space-3));
+      padding-inline: var(--space-3);
+      overflow-x: clip;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
   }
 
   .reel__name {
