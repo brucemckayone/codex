@@ -14,6 +14,7 @@
  * All PURE, so the arithmetic is under test; WP-5's Showreel calls
  * `setStage` with a box from `stageBoxFrom`.
  */
+import { clamp01 } from '../clamp';
 import type { FilmFrameId, ReelSurface } from './effects/ids';
 
 /** What a film frame can show: the piece's video, or its still. */
@@ -61,7 +62,7 @@ export const PUSH_DEPTH = 0.08;
 
 /** The push-in's zoom `elapsed` seconds into a piece: eased out, then held. */
 export function pushZoom(elapsed: number): number {
-  const t = Math.min(1, Math.max(0, elapsed / PUSH_SECONDS));
+  const t = clamp01(elapsed / PUSH_SECONDS);
   return 1 + PUSH_DEPTH * (1 - (1 - t) * (1 - t));
 }
 
@@ -139,7 +140,7 @@ export function stageRect(
 /** How much of the film shows at `scrollY`: 1 at the top, 0 once faded. */
 export function stageFade(scrollY: number, fadeDistance: number): number {
   if (!(fadeDistance > 0)) return scrollY > 0 ? 0 : 1;
-  return Math.min(1, Math.max(0, 1 - scrollY / fadeDistance));
+  return clamp01(1 - scrollY / fadeDistance);
 }
 
 /**
@@ -155,7 +156,7 @@ export const NAME_FADE_PX = 32;
 
 /** How much of the canvas's letters show at `scrollY`: 1 at the top, 0 from `NAME_FADE_PX`. */
 export function nameFade(scrollY: number): number {
-  return Math.min(1, Math.max(0, 1 - scrollY / NAME_FADE_PX));
+  return clamp01(1 - scrollY / NAME_FADE_PX);
 }
 
 /**

@@ -86,8 +86,24 @@ export type UniformValues = {
   [K in ValueName]: GlslValue[Exclude<(typeof UNIFORMS)[K], 'sampler2D'>];
 };
 
-export const isSampler = (name: UniformName): name is SamplerName =>
+export const isSampler = (name: string): name is SamplerName =>
   name in SAMPLER_UNITS;
+
+/**
+ * Set one uniform by its value's shape: a float, a vec2, vec3 or vec4, or a
+ * packed vec4 array (`uniform4fv`).
+ */
+export function uploadUniform(
+  gl: WebGL2RenderingContext,
+  loc: WebGLUniformLocation,
+  v: number | Float32Array | readonly number[]
+): void {
+  if (typeof v === 'number') gl.uniform1f(loc, v);
+  else if (v instanceof Float32Array) gl.uniform4fv(loc, v);
+  else if (v.length === 2) gl.uniform2f(loc, v[0], v[1]);
+  else if (v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]);
+  else gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
+}
 
 /** The GLSL declarations for a pass that reads `names`. */
 export function declareUniforms(names: readonly UniformName[]): string {

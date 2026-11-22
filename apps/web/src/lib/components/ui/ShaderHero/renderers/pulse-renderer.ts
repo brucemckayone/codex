@@ -24,6 +24,7 @@ import {
   SILENT_AUDIO,
   uploadAudioUniforms,
 } from '../audio-uniforms';
+import { clamp01 } from '../clamp';
 import { createClickEdge } from '../click-edge';
 import type { SDFResult } from '../jfa-sdf';
 import { destroyLogoTexture, loadLogoTexture } from '../logo-texture';
@@ -135,7 +136,7 @@ function screenToHeightmapUV(
   const u = hitX / HEIGHTMAPSCALE + 0.5;
   const v = hitZ / HEIGHTMAPSCALE + 0.5;
   if (u < -0.05 || u > 1.05 || v < -0.05 || v > 1.05) return null;
-  return [Math.max(0, Math.min(1, u)), Math.max(0, Math.min(1, v))];
+  return [clamp01(u), clamp01(v)];
 }
 
 export function createPulseRenderer(): ShaderRenderer {

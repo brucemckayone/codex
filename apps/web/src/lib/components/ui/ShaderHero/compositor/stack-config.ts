@@ -27,6 +27,7 @@
  * so a bare stack's hero loads none of the compositor or its GLSL.
  */
 import { logger } from '$lib/observability';
+import { clamp01 } from '../clamp';
 import {
   type LivePresetId,
   presetIsUnknown,
@@ -115,7 +116,7 @@ export function needsCompositor(
 function amountOf(text: string | undefined | null): number | null {
   if (text == null || text.trim() === '') return null;
   const n = Number(text);
-  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : null;
+  return Number.isFinite(n) ? clamp01(n) : null;
 }
 
 /** Why a layer item was skipped, as `shader.unknown_layer` reports it. */
@@ -220,7 +221,7 @@ export function readLayerItems(text: string | null): LayerItem[] {
 
 /** An amount as a token writes it: clamped to 0-1, at most two decimals. */
 export function formatAmount(amount: number): string {
-  return String(Math.round(Math.min(1, Math.max(0, amount)) * 100) / 100);
+  return String(Math.round(clamp01(amount) * 100) / 100);
 }
 
 /**

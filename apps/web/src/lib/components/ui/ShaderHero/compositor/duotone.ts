@@ -9,6 +9,8 @@
  * #000 and #FFF) would make the middle stop an extreme and flatten half the
  * picture's light, so its middle is drawn to mid-grey. PURE.
  */
+import { clamp01 } from '../clamp';
+
 export type Rgb = readonly [number, number, number];
 
 /** How near black or white any stop may come. */
@@ -21,7 +23,7 @@ const PALE = 0.78;
 const luma = ([r, g, b]: Rgb): number => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
 function smoothstep(lo: number, hi: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
+  const t = clamp01((x - lo) / (hi - lo));
   return t * t * (3 - 2 * t);
 }
 

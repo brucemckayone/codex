@@ -11,9 +11,10 @@
  */
 import type { FilmPassUniform, MotionValues } from './effects/motion-uniforms';
 import {
+  isSampler,
   SAMPLER_UNITS,
-  type SamplerName,
   type UniformValues,
+  uploadUniform,
 } from './effects/uniforms';
 import { governFlash } from './flash';
 
@@ -24,7 +25,7 @@ export type FilmPassValues = UniformValues &
     u_flashTime: number;
   };
 
-/** The values every pass of a frame shares (the compositor's `frameInputs`). */
+/** The uniforms every pass of a frame shares (`frameInputs`); `draw` adds the rest. */
 export type FrameShared = Omit<
   UniformValues,
   'u_resolution' | 'u_amount' | 'u_time'
@@ -51,9 +52,6 @@ export function filmPassValues(
   };
 }
 
-const isSamplerName = (name: FilmPassUniform): name is SamplerName =>
-  name in SAMPLER_UNITS;
-
 /** A film pass's uniform locations, by name (null: the driver dropped it). */
 export type FilmPassLocations = readonly (readonly [
   FilmPassUniform,
@@ -71,15 +69,7 @@ export function setFilmPassUniforms(
 ): void {
   for (const [name, loc] of locations) {
     if (loc === null) continue;
-    if (isSamplerName(name)) {
-      gl.uniform1i(loc, SAMPLER_UNITS[name]);
-      continue;
-    }
-    const v = values[name];
-    if (typeof v === 'number') gl.uniform1f(loc, v);
-    else if (v instanceof Float32Array) gl.uniform4fv(loc, v);
-    else if (v.length === 2) gl.uniform2f(loc, v[0], v[1]);
-    else if (v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]);
-    else gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
+    if (isSampler(name)) gl.uniform1i(loc, SAMPLER_UNITS[name]);
+    else uploadUniform(gl, loc, values[name]);
   }
 }

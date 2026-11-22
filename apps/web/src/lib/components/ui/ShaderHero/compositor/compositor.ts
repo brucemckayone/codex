@@ -64,10 +64,12 @@ import {
   SAMPLER_UNITS,
   type UniformName,
   type UniformValues,
+  uploadUniform,
 } from './effects/uniforms';
 import { createFilmMotionPasses, type FilmMotion } from './film-motion';
 import {
   type FilmPassLocations,
+  type FrameShared,
   filmPassValues,
   setFilmPassUniforms,
 } from './film-pass-values';
@@ -90,9 +92,6 @@ import {
 } from './stage';
 
 export type Size = readonly [number, number];
-
-/** The uniforms every pass of a frame shares; `draw` adds the rest. */
-type SharedValues = Omit<UniformValues, 'u_resolution' | 'u_amount' | 'u_time'>;
 
 /** What one composited frame draws. */
 export interface CompositeFrame {
@@ -366,15 +365,8 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
   function setUniforms(pass: Pass, values: UniformValues) {
     for (const [name, loc] of pass.locs) {
       if (loc === null) continue;
-      if (isSampler(name)) {
-        gl.uniform1i(loc, SAMPLER_UNITS[name]);
-        continue;
-      }
-      const v = values[name];
-      if (typeof v === 'number') gl.uniform1f(loc, v);
-      else if (v.length === 2) gl.uniform2f(loc, v[0], v[1]);
-      else if (v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]);
-      else gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
+      if (isSampler(name)) gl.uniform1i(loc, SAMPLER_UNITS[name]);
+      else uploadUniform(gl, loc, values[name]);
     }
   }
 
@@ -389,7 +381,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     input: WebGLTexture,
     into: FBO | null,
     size: Size,
-    values: SharedValues,
+    values: FrameShared,
     amount: number,
     time: number
   ): boolean {
@@ -655,7 +647,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
    * bound to their units. Culling: when no film shows, or the frame never
    * samples it, nothing is uploaded.
    */
-  function frameInputs(f: CompositeFrame, current: StackPlan): SharedValues {
+  function frameInputs(f: CompositeFrame, current: StackPlan): FrameShared {
     const [ow, oh] = f.output;
     const rect = stagePx(f);
     const fade = stage ? stageFade(f.scrollY, stage.fadeDistance) : 0;
@@ -665,7 +657,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
       uploadMedia();
     const { colors, brand } = f.baseConfig;
     const [toneDeep, toneMid, tonePale] = duotoneStops(brand.primary, brand.bg);
-    const values: SharedValues = {
+    const values: FrameShared = {
       u_pointer: [f.mouse.x, f.mouse.y],
       u_brandPrimary: colors.primary,
       u_brandSecondary: colors.secondary,
@@ -704,7 +696,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     f: CompositeFrame,
     rect: RectPx,
     placed: boolean,
-    values: SharedValues
+    values: FrameShared
   ): WebGLTexture | null {
     if (!media || !mediaTex) return null;
     if (treatRefused?.look === look && treatRefused.el === media.el) {
@@ -755,7 +747,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     current: StackPlan,
     sceneA: FBO,
     sceneB: FBO | null,
-    values: SharedValues
+    values: FrameShared
   ): FBO {
     if (!current.blend || !sceneB || !ping) return sceneA;
     bindUnit(SAMPLER_UNITS.u_second, sceneB.tex);
@@ -770,7 +762,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     f: CompositeFrame,
     current: StackPlan,
     input: FBO,
-    values: SharedValues
+    values: FrameShared
   ): FBO {
     let picture = input;
     for (const { effect, amount } of current.layers) {
@@ -795,7 +787,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     f: CompositeFrame,
     current: StackPlan,
     picture: FBO,
-    values: SharedValues
+    values: FrameShared
   ): boolean {
     const passthrough = FRAMES[PASSTHROUGH_FRAME];
     return (
@@ -816,7 +808,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     f: CompositeFrame,
     current: StackPlan,
     picture: FBO,
-    values: SharedValues
+    values: FrameShared
   ): boolean {
     if (!motion) return false;
     const chosen = filmPasses.passFor(current.frame.id, motion.choice, {

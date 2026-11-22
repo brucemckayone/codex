@@ -8,6 +8,8 @@
  * Returns new colour arrays ready for gl.uniform3f() / gl.uniform3fv().
  */
 
+import { clamp01 } from './clamp';
+
 type RGB = [number, number, number];
 
 interface BrandColours {
@@ -31,10 +33,6 @@ function mix3(
 ): [number, number, number] {
   const u = 1 - t;
   return [a[0] * u + b[0] * t, a[1] * u + b[1] * t, a[2] * u + b[2] * t];
-}
-
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
 // Fixed palette targets for drifting

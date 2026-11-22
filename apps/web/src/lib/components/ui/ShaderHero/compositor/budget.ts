@@ -11,6 +11,8 @@
  * WP-11: 25 ms is 40 fps, a frame and a half late at 60.
  */
 
+import { clamp01 } from '../clamp';
+
 /** Below this many CSS px wide the hero renders at DPR 1: a phone. */
 export const PHONE_MAX_WIDTH = 768;
 /** Frames in one judged window. */
@@ -39,7 +41,7 @@ export interface FrameBudget {
 export function percentile(values: readonly number[], p: number): number {
   if (values.length === 0) return Number.NaN;
   const sorted = [...values].sort((a, b) => a - b);
-  const rank = Math.ceil(Math.min(1, Math.max(0, p)) * sorted.length) - 1;
+  const rank = Math.ceil(clamp01(p) * sorted.length) - 1;
   return sorted[Math.max(0, rank)];
 }
 

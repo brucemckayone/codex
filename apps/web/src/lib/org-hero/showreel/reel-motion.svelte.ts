@@ -100,8 +100,8 @@ function maskPixelsOf(source: TexImageSource | null): MaskPixels | null {
 
 /** The window's width over its height: the fixed canvas's. */
 function viewportAspect(): number {
-  const { clientWidth, clientHeight } = document.documentElement;
-  return clientWidth > 0 && clientHeight > 0 ? clientWidth / clientHeight : 1;
+  const { clientWidth: w, clientHeight: h } = document.documentElement;
+  return w > 0 && h > 0 ? w / h : 1;
 }
 
 /**
@@ -265,7 +265,7 @@ export function useReelMotion(source: ReelMotionSource): {
       return {
         x: event.clientX / Math.max(w, 1),
         y: 1 - event.clientY / Math.max(h, 1),
-        aspect: w > 0 && h > 0 ? w / h : 1,
+        aspect: viewportAspect(),
       };
     };
     const move = (event: PointerEvent) => {

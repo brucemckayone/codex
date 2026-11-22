@@ -90,6 +90,10 @@ export interface ReelMotionOptions {
   readonly maskPixels?: () => MaskPixels | null;
 }
 
+/** A trail with a phone's fewer points, or the full set. */
+const trailFor = (phone: boolean) =>
+  new PointerTrail(phone ? PHONE_TRAIL_POINTS : undefined);
+
 /** The name at rest: as drawn, all of it, no dive. */
 const NAME_REST: NameFrame = { zoom: 1, alpha: 1, weight: 0, dive: 0 };
 
@@ -141,9 +145,7 @@ export class ReelMotion {
       values: restMotion(),
       running: null,
     };
-    this.#trail = new PointerTrail(
-      setup.phone ? PHONE_TRAIL_POINTS : undefined
-    );
+    this.#trail = trailFor(setup.phone);
     this.#maskPixels = options.maskPixels ?? (() => null);
     this.#apply(setup);
   }
@@ -184,11 +186,14 @@ export class ReelMotion {
     }
     if (was.phone !== setup.phone) {
       this.#trail.clear();
-      this.#trail = new PointerTrail(
-        setup.phone ? PHONE_TRAIL_POINTS : undefined
-      );
+      this.#trail = trailFor(setup.phone);
     }
     this.#apply(setup);
+  }
+
+  /** The opening and the way in dive through the name (Corner and Wide). */
+  get #dives(): boolean {
+    return this.#setup.frame !== 'film-name';
   }
 
   #apply(setup: ReelMotionSetup): void {
@@ -325,7 +330,7 @@ export class ReelMotion {
     this.#openingDue = false;
     if (!runs) return;
     this.#openingFrom = now;
-    if (this.#setup.frame !== 'film-name') this.#aimDive(this.#openAspect);
+    if (this.#dives) this.#aimDive(this.#openAspect);
   }
 
   /**
@@ -448,7 +453,7 @@ export class ReelMotion {
       } else {
         const opening = openingAt(
           now - this.#openingFrom,
-          frame !== 'film-name',
+          this.#dives,
           this.#depth
         );
         if (opening.done) this.#openingFrom = null;
@@ -461,9 +466,7 @@ export class ReelMotion {
     // Waiting to open: the opening's own first frame, so it starts from
     // exactly what shows (the letters dark, the film already held to them).
     this.#setName(
-      this.#openingDue
-        ? openingAt(0, frame !== 'film-name', this.#depth)
-        : NAME_REST
+      this.#openingDue ? openingAt(0, this.#dives, this.#depth) : NAME_REST
     );
     // Waiting for the pass: frames, so a frozen hero draws and it says.
     return busy || this.#openWaitFrom !== null;
