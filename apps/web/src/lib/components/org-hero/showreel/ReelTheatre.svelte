@@ -108,6 +108,14 @@
     };
   });
 
+  /**
+   * Whether the player's own alert says a failure: a film's player is in the
+   * accessible tree and announces its error itself. A recording's is hidden
+   * (its picture is the cover), and with no player in there is none, so the
+   * theatre's line is then the one alert. A failure is said once.
+   */
+  const playerAnnounces = $derived(!!Player && item.kind !== 'audio');
+
   const now = $derived(core?.clock() ?? SILENT);
   const busy = $derived(
     !error &&
@@ -399,7 +407,7 @@
     <div class="sr-only" role="status">
       {#if busy}{m.player_loading()}{/if}
     </div>
-    {#if error}<p class="theatre__error" role="alert">{error}</p>{/if}
+    {#if error}<p class="theatre__error" role={playerAnnounces ? undefined : 'alert'}>{error}</p>{/if}
   </div>
 </div>
 
