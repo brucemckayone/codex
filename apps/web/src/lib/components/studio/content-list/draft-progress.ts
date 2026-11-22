@@ -6,7 +6,7 @@
  * left is put right on the Write step, and Continue opens the step still to
  * do.
  */
-import { hasBeenLive } from '@codex/constants';
+import { hasBeenLive, isUploadStalled } from '@codex/constants';
 import type { ContentWithRelations } from '$lib/types';
 import type { PayoutsRead } from '$lib/utils/connect-readiness';
 import * as m from '$paraglide/messages';
@@ -58,11 +58,17 @@ export function draftProgress(
     connectReady: payouts === 'ready',
     organizationId: row.organizationId ?? null,
   });
+  // The transcode's % as the row was read (Codex-a6ofh.3.1, owner: as of the
+  // read, no status socket on the list): "being prepared (64%)".
+  const gapMedia = row.mediaItem
+    ? {
+        status: row.mediaItem.status,
+        progress: row.mediaItem.transcodingProgress ?? null,
+        stalled: isUploadStalled(row.mediaItem),
+      }
+    : null;
   const left = gaps.map((gap) => {
-    const shown = gapRow(gap, {
-      contentType,
-      media: media ? { status: media.status, progress: null } : null,
-    });
+    const shown = gapRow(gap, { contentType, media: gapMedia });
     // Not read (yet) is not "not set up": say so, and never call it ready.
     if (gap !== 'CREATOR_CONNECT_REQUIRED') return shown;
     if (payouts === 'unread')

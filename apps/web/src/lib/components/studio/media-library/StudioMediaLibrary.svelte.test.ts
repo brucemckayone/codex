@@ -11,6 +11,8 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { nav } from '../__fixtures__/app-state.svelte';
+import { LIST_SEARCH_DEBOUNCE_MS } from '../list-url-writer';
 
 type Item = {
   id: string;
@@ -40,9 +42,6 @@ type Summary = {
 };
 
 const s = vi.hoisted(() => ({
-  url: new URL('https://studio.test/studio/media'),
-  // `navigating.to`: a navigation in flight, or none.
-  to: null as { url: URL } | null,
   first: { current: undefined as unknown, error: undefined as unknown },
   later: new Map<number, unknown>(),
   summary: { current: undefined as unknown, error: undefined as unknown },
@@ -50,16 +49,7 @@ const s = vi.hoisted(() => ({
   refreshSummary: vi.fn(async () => {}),
 }));
 
-vi.mock('$app/state', () => ({
-  get page() {
-    return { url: s.url };
-  },
-  navigating: {
-    get to() {
-      return s.to;
-    },
-  },
-}));
+vi.mock('$app/state', () => import('../__fixtures__/app-state.svelte'));
 
 // Typed like kit's goto, so a test can stand in for the navigation it starts.
 const goto = vi.hoisted(() =>
@@ -138,6 +128,8 @@ vi.mock('$lib/client/upload-queue.svelte', () => ({
     onComplete: vi.fn(() => () => {}),
     cancel: vi.fn(),
     add: vi.fn(),
+    // An empty queue has no word on any upload.
+    wordOn: () => null,
   },
 }));
 
@@ -171,7 +163,7 @@ function listOf(items: Item[], total = items.length, page = 1): ListPage {
 let component: ReturnType<typeof mount> | null = null;
 
 function render(query = '') {
-  s.url = new URL(`https://studio.test/studio/media${query}`);
+  nav.url = new URL(`https://studio.test/studio/media${query}`);
   component = mount(StudioMediaLibrary, {
     target: document.body,
     props: { studioName: 'Studio Alpha' },
@@ -195,7 +187,7 @@ function button(name: string | RegExp): HTMLButtonElement | undefined {
 }
 
 beforeEach(() => {
-  s.to = null;
+  nav.to = null;
   s.first = { current: undefined, error: undefined };
   s.summary = { current: undefined, error: undefined };
   s.later.clear();
@@ -300,7 +292,7 @@ describe('StudioMediaLibrary: URL writes (runaway, Codex-a6ofh.1.7)', () => {
     render('?view=list');
     await settle();
     const shown = document.querySelector<HTMLButtonElement>(
-      '.segment--icons [role="radio"][aria-checked="true"]'
+      '.segment[data-variant="icons"] [role="radio"][aria-checked="true"]'
     );
     expect(shown).not.toBeNull();
     shown?.click();
@@ -310,10 +302,10 @@ describe('StudioMediaLibrary: URL writes (runaway, Codex-a6ofh.1.7)', () => {
 
   const viewRadio = (checked: boolean) =>
     document.querySelector<HTMLButtonElement>(
-      `.segment--icons [role="radio"][aria-checked="${checked}"]`
+      `.segment[data-variant="icons"] [role="radio"][aria-checked="${checked}"]`
     );
   const inFlight = (path: string) => {
-    s.to = { url: new URL(`https://studio.test${path}`) };
+    nav.to = { url: new URL(`https://studio.test${path}`) };
   };
 
   // The page still shows grid while a navigation to list is under way: grid
@@ -360,8 +352,8 @@ describe('StudioMediaLibrary: URL writes (runaway, Codex-a6ofh.1.7)', () => {
 
     viewRadio(false)?.click();
     await settle();
-    s.url = new URL('https://studio.test/studio/media?view=list');
-    s.to = null;
+    nav.url = new URL('https://studio.test/studio/media?view=list');
+    nav.to = null;
     viewRadio(false)?.click();
     await settle();
     expect(goto).toHaveBeenCalledTimes(1);
@@ -379,12 +371,30 @@ describe('StudioMediaLibrary: URL writes (runaway, Codex-a6ofh.1.7)', () => {
     expect(box).not.toBeNull();
     box!.value = 'intro';
     box!.dispatchEvent(new Event('input', { bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) =>
+      setTimeout(resolve, LIST_SEARCH_DEBOUNCE_MS + 50)
+    );
     await settle();
     expect(goto).toHaveBeenCalledWith(
       '/studio/media?usage=unused&q=intro',
       expect.anything()
     );
+  });
+
+  test('a facet written while typing keeps what was typed in the box', () => {
+    s.first.current = listOf([item(1)]);
+    render();
+    const box = document.querySelector<HTMLInputElement>(
+      'input[type="search"]'
+    );
+    expect(box).not.toBeNull();
+    box!.value = 'intro';
+    box!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    // The usage lands in the URL before the search's debounce has written it.
+    nav.url = new URL('https://studio.test/studio/media?usage=unused');
+    flushSync();
+    expect(box!.value).toBe('intro');
   });
 
   // A navigation to another page is not this library's URL.

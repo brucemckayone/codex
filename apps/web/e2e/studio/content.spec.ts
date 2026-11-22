@@ -59,17 +59,36 @@ test.describe('Studio Content - List Page', () => {
       '/content'
     );
 
-    // New org: EmptyState (.empty-state). Populated org: the redesigned list
-    // uses an <ol class="row-stack"> (no <table>) and optionally a
-    // ContentFeatureSlab. Wait for the loading skeleton to clear and then
+    // New org: the first piece's EmptyState (.empty-state). Populated org:
+    // StudioContentList (Codex-a6ofh.3.1) draws a table (.content-table) or,
+    // in grid view, cards (.content-grid), a row per piece either way
+    // ([data-content-id]). Wait for the loading skeleton to clear, then
     // assert one of the two terminal states.
     const emptyState = page.locator('.empty-state');
-    const rowStack = page.locator('ol.row-stack');
+    const row = page.locator('[data-content-id]');
 
     // Either state should appear once data resolves.
-    await expect(emptyState.or(rowStack).first()).toBeVisible({
+    await expect(emptyState.or(row).first()).toBeVisible({
       timeout: 15000,
     });
+  });
+
+  // The tabs are lifecycles (Codex-a6ofh.3.6): Drafts are the drafts never
+  // live, and Off sale, once Archived, what was live and is not on sale now.
+  test('the status tabs are All, Drafts, Published and Off sale', async ({
+    page,
+  }) => {
+    await navigateToStudioPage(
+      page,
+      sharedAuth.member.organization.slug,
+      '/content'
+    );
+
+    const tabs = page.getByRole('radiogroup', { name: 'Filter by status' });
+    await expect(tabs.getByRole('radio')).toHaveText(
+      ['All', 'Drafts', 'Published', 'Off sale'],
+      { timeout: 15000 }
+    );
   });
 
   // The empty list's create link: no type asked for, so a video.

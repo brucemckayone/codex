@@ -57,7 +57,12 @@ import type {
   AgreementWithShare,
   CreatorOrganizationAgreement,
 } from '@codex/agreements';
-import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
+import {
+  COOKIES,
+  type ContentAttentionCounts,
+  HEADERS,
+  MIME_TYPES,
+} from '@codex/constants';
 import type {
   Category,
   CourseSubscriptionPlan,
@@ -78,7 +83,9 @@ import type {
   BrandingSettingsResponse,
   CheckSlugResponse,
   ContactSettingsResponse,
+  ContentBulkResponse,
   ContentPortalUses,
+  ContentWhereCounts,
   CourseOffer,
   FeatureSettingsResponse,
   MediaLibrarySummary,
@@ -117,6 +124,9 @@ import type {
   CancelSubscriptionInput,
   ChangeTierInput,
   ConnectMeOnboardInput,
+  ContentBulkAccessInput,
+  ContentBulkCategoriesInput,
+  ContentBulkInput,
   CreateCategoryInput,
   CreateCheckoutInput,
   CreatePortalSessionInput,
@@ -647,6 +657,20 @@ const REQUEST_TIMEOUT_MS = 10000;
  */
 const COURSE_FILM_TIMEOUT_MS = 6000;
 
+/**
+ * How long a bulk action may take (Codex-a6ofh.3.5): up to CONTENT_BULK_MAX
+ * pieces, one transaction each, in turn, and each waits at most a second on
+ * a row held elsewhere. The default would cut a slow run off as a 408 while
+ * the worker went on changing pieces the page then calls not done.
+ */
+const CONTENT_BULK_TIMEOUT_MS = 30000;
+
+/** A bulk action and its body: the action names the route, the rest is sent. */
+type ContentBulkRequest =
+  | ({ action: 'publish' | 'unpublish' | 'delete' } & ContentBulkInput)
+  | ({ action: 'categories' } & ContentBulkCategoriesInput)
+  | ({ action: 'access' } & ContentBulkAccessInput);
+
 /** `fetch` options, plus a per-call timeout for a caller that gives up sooner. */
 type RequestOptions = RequestInit & { timeoutMs?: number };
 
@@ -1109,6 +1133,8 @@ export function createServerApi(
        * - accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'course' (optional list filter — a query KIND label, not the stored flags)
        * - category: string filter (max 120 chars, no NUL, optional)
        * - organizationId: UUID filter (optional)
+       * - scope: 'personal' (optional): content filed under no org; refused
+       *   beside organizationId. Omitting both lists every org's content.
        * - creatorId: user id filter (BetterAuth text, not a UUID; optional)
        * - search: text search (max 255 chars, optional)
        * - sortBy: 'createdAt' | 'updatedAt' | 'publishedAt' | 'title' | 'viewCount' | 'purchaseCount' (default: 'createdAt')
@@ -1129,6 +1155,24 @@ export function createServerApi(
         request<PaginatedListResponse<ContentWithRelations>>(
           'content',
           `/api/content${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * How the creator's content is filed (Codex-a6ofh.3.2): the personal
+       * studio's "Where" menu, "Everywhere 14 · Personal 3 · Studio Alpha 9".
+       */
+      whereCounts: () =>
+        request<ContentWhereCounts>('content', '/api/content/where-counts'),
+
+      /**
+       * What the creator's own pieces need, by kind (Codex-a6ofh.3.4): the
+       * content list's "Needs you" counts, where the list looks
+       * (`organizationId`, or `scope=personal`, or neither).
+       */
+      attention: (params?: URLSearchParams) =>
+        request<ContentAttentionCounts>(
+          'content',
+          `/api/content/attention${params ? `?${params}` : ''}`
         ),
 
       /**
@@ -1216,6 +1260,19 @@ export function createServerApi(
       delete: (id: string) =>
         request<void>('content', `/api/content/${id}`, {
           method: 'DELETE',
+        }),
+
+      /**
+       * One action on up to CONTENT_BULK_MAX of the creator's pieces
+       * (Codex-a6ofh.3.5), a result for each: `publish`, `unpublish` and
+       * `delete` take `{ ids }`, `categories` `{ ids, categoryIds }`, and
+       * `access` `{ ids, access }`, typed by the action.
+       */
+      bulk: ({ action, ...body }: ContentBulkRequest) =>
+        request<ContentBulkResponse>('content', `/api/content/bulk/${action}`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+          timeoutMs: CONTENT_BULK_TIMEOUT_MS,
         }),
 
       /**

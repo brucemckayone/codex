@@ -149,6 +149,13 @@ export function formatPriceCompact(cents: number | null | undefined): string {
   return gbpCompactFormatter.format(cents / 100);
 }
 
+const countFormatter = new Intl.NumberFormat(LOCALE);
+
+/** A whole count, grouped as the UK writes it: `1,204` views. */
+export function formatCount(count: number): string {
+  return countFormatter.format(count);
+}
+
 /**
  * Extract avatar initials from a display name with an optional fallback.
  *

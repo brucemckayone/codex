@@ -63,6 +63,25 @@ export const STUDIO_ROLES: ReadonlySet<string> = new Set<string>([
   AUTH_ROLES.PLATFORM_OWNER,
 ]);
 
+/**
+ * Platform roles the category routes admit (content-api `categories.ts`,
+ * which then checks the org). Narrower than the studio: an org studio
+ * admits any team member above `member`, whatever their platform role, so
+ * the web asks only for these and never sends a read it is refused
+ * (Codex-a6ofh.3.3).
+ */
+export const CATEGORY_ROUTE_ROLES = [
+  AUTH_ROLES.CREATOR,
+  AUTH_ROLES.ADMIN,
+] as const;
+
+/** Whether a platform role reaches the category routes. */
+export function readsCategoryRoutes(role: string | null | undefined): boolean {
+  return (
+    role != null && (CATEGORY_ROUTE_ROLES as readonly string[]).includes(role)
+  );
+}
+
 export const BRAND_COLORS = {
   DEFAULT_BLUE: '#3B82F6',
 } as const;

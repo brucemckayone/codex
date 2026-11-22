@@ -19,7 +19,7 @@ import { accessGroupToFlags } from '$lib/utils/content-access';
 import { formatPrice } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import { TYPE_WORD } from './canvas-text';
-import type { DraftValues } from './draft-session.svelte';
+import type { DraftAccess, DraftValues } from './draft-session.svelte';
 import type { EditorContentType } from './editor-url';
 
 /** A row of the checklist: a refusal's own code, or a title still to type. */
@@ -69,10 +69,26 @@ export function publishGaps(facts: PublishFacts): PublishGap[] {
     gaps.push('MEDIA_NOT_READY');
   }
   if (facts.coverDeleted) gaps.push('THUMBNAIL_MEDIA_DELETED');
+  gaps.push(
+    ...accessGaps(values.access, facts.organizationId, facts.connectReady)
+  );
+  return gaps;
+}
 
-  // The same flags a save sends, so the rules read what would go live.
-  const { access } = values;
-  const flags = accessGroupToFlags(access, facts.organizationId);
+/**
+ * What the access group alone is refused for: a price under £1, a plan
+ * switch with none ticked, and an earning piece without payouts. Judged on
+ * the same flags a save sends, so the rules read what would go live. The
+ * Publish step's last rows, and what holds the content list's Change access
+ * sheet back (Codex-a6ofh.3.5), so both judge by one rule.
+ */
+export function accessGaps(
+  access: DraftAccess,
+  organizationId: string | null,
+  connectReady: boolean
+): PublishGap[] {
+  const flags = accessGroupToFlags(access, organizationId);
+  const gaps: PublishGap[] = [];
   if (flags.isPurchasable && (flags.priceCents ?? 0) < PRICE_LIMITS.MIN_CENTS) {
     gaps.push('PRICE_REQUIRED');
   }
@@ -84,7 +100,7 @@ export function publishGaps(facts: PublishFacts): PublishGap[] {
   ) {
     gaps.push('TIER_REQUIRED_TO_PUBLISH');
   }
-  if (!facts.connectReady && earnsByFlags(flags)) {
+  if (!connectReady && earnsByFlags(flags)) {
     gaps.push('CREATOR_CONNECT_REQUIRED');
   }
   return gaps;
@@ -139,6 +155,12 @@ type GapMedia = {
   status: string;
   progress: number | null;
   onItsWay?: boolean;
+  /**
+   * An upload that stopped: it needs new media. The list judges it by the
+   * clock line (`isUploadStalled`); the Publish screen by the tile's rule,
+   * which hears this tab and the socket first.
+   */
+  stalled?: boolean;
 } | null;
 
 /**
@@ -180,13 +202,23 @@ export function gapRow(
     case 'MEDIA_REQUIRED':
       return { gap, words: m.studio_publish_gap_media({ type }), fix: 'write' };
     case 'MEDIA_NOT_READY':
-      return media?.status === MEDIA_STATUS.FAILED
-        ? {
-            gap,
-            words: m.studio_publish_gap_media_failed({ type }),
-            fix: 'write',
-          }
-        : { gap, words: mediaWaitWords(type, media), fix: null };
+      if (media?.status === MEDIA_STATUS.FAILED) {
+        return {
+          gap,
+          words: m.studio_publish_gap_media_failed({ type }),
+          fix: 'write',
+        };
+      }
+      // Stopped, it is never ready by waiting, as the "Needs you" chip and
+      // the media library say (owner, 2026-11-12).
+      if (media?.stalled) {
+        return {
+          gap,
+          words: m.studio_publish_gap_upload_stopped({ type }),
+          fix: 'write',
+        };
+      }
+      return { gap, words: mediaWaitWords(type, media), fix: null };
     case 'MEDIA_DELETED':
       return {
         gap,

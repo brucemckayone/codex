@@ -2,7 +2,8 @@
   @component MediaTile
 
   Media tile for the Studio media library grid. 16:9 thumbnail (or branded
-  placeholder when thumbnailUrl is absent) with the media-type chip top-left
+  placeholder when thumbnailUrl is absent, or its file fails to load:
+  `FallbackImage`, Codex-a6ofh.3.6) with the media-type chip top-left
   and the duration bottom-right. Upload and transcode progress render as an
   overlaid bar on the thumbnail with a step label. Its actions sit in an
   always-visible ⋯ menu named with the title (Codex-a6ofh.1.6, mockup M1
@@ -19,7 +20,7 @@
 <script lang="ts">
   import { mediaStatus } from '$lib/client/media-status.svelte';
   import type { MediaItemWithRelations } from '$lib/types';
-  import { Button } from '$lib/components/ui';
+  import { Button, FallbackImage } from '$lib/components/ui';
   import {
     FilmIcon,
     MusicIcon,
@@ -157,20 +158,19 @@
 
 <article class="tile" data-status={pill}>
   <div class="tile-thumb">
-    {#if media.thumbnailUrl}
-      <img
-        src={media.thumbnailUrl}
-        srcset={getThumbnailSrcset(media.thumbnailUrl) || undefined}
-        sizes={TILE_SIZES}
-        alt=""
-        class="thumb-img"
-        loading="lazy"
-      />
-    {:else}
-      <span class="thumb-placeholder">
-        <typeMeta.icon size={36} />
-      </span>
-    {/if}
+    <FallbackImage
+      src={media.thumbnailUrl}
+      srcset={getThumbnailSrcset(media.thumbnailUrl) || undefined}
+      sizes={TILE_SIZES}
+      alt=""
+      loading="lazy"
+    >
+      {#snippet fallback()}
+        <span class="thumb-placeholder">
+          <typeMeta.icon size={36} />
+        </span>
+      {/snippet}
+    </FallbackImage>
 
     <!-- Top-left type chip -->
     <span class="thumb-type-chip" aria-hidden="true">
@@ -337,13 +337,6 @@
       );
     box-shadow:
       0 var(--space-1) var(--space-3) color-mix(in srgb, var(--color-text) 4%, transparent);
-  }
-
-  .thumb-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
   }
 
   .thumb-placeholder {
@@ -527,7 +520,7 @@
   }
 
   /* The tile's own controls stay above the stretched open button. */
-  .tile :global(.media-actions-trigger),
+  .tile :global(.row-actions-trigger),
   .tile :global(.use-chip),
   .tile-cta {
     position: relative;

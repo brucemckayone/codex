@@ -152,6 +152,14 @@ vi.mock('$lib/client/upload-queue.svelte', () => ({
     cancel: vi.fn(),
     retry: vi.fn(),
     remove: vi.fn(),
+    // The real queue's word by its rows (its memory past a row is pinned in
+    // upload-queue.test.ts).
+    wordOn: (mediaId: string) => {
+      const status = queue.items.find((row) => row.id === mediaId)?.status;
+      if (status === 'uploading' || status === 'completing') return 'sending';
+      if (status === 'error') return 'stopped';
+      return status === 'done' ? 'done' : null;
+    },
   },
 }));
 

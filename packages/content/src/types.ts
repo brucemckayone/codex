@@ -5,7 +5,12 @@
  * All types are inferred from database schema or explicitly defined.
  */
 
-import type { MediaStatusGroup, PublishBlockedReason } from '@codex/constants';
+import type {
+  ContentAttentionKind,
+  ContentLifecycle,
+  MediaStatusGroup,
+  PublishBlockedReason,
+} from '@codex/constants';
 import type { DatabaseClient, dbHttp } from '@codex/database';
 import type {
   Content,
@@ -15,6 +20,7 @@ import type {
   Organization,
   ServedMediaItem,
 } from '@codex/database/schema';
+import type { ContentBulkResult } from '@codex/shared-types';
 
 /**
  * Database client type — re-exported from `@codex/database` so consumers
@@ -53,10 +59,31 @@ export type {
 };
 
 /**
+ * A bulk action's report (Codex-a6ofh.3.5): each piece's result, for the
+ * response, and the pieces whose public face changed, for the route's cache
+ * work, which runs once per org after the loop.
+ */
+export interface ContentBulkReport {
+  results: ContentBulkResult[];
+  touched: BulkTouchedPiece[];
+}
+
+/** A piece a bulk action changed, and the org it is filed in, if any. */
+export interface BulkTouchedPiece {
+  id: string;
+  organizationId: string | null;
+}
+
+/**
  * Content query filters
  */
 export interface ContentFilters {
   status?: 'draft' | 'published' | 'archived';
+  /**
+   * Where the pieces are in their life (Codex-a6ofh.3.6, the status tabs):
+   * a never-live draft, on sale, or off sale. Studio only.
+   */
+  lifecycle?: ContentLifecycle;
   contentType?: 'video' | 'audio' | 'written';
   accessType?:
     | 'free'
@@ -65,7 +92,12 @@ export interface ContentFilters {
     | 'subscribers'
     | 'team'
     | 'course';
+  /** A category's slug: the pieces filed in it (in the org, when given). */
   category?: string;
+  /** A category's id: the pieces filed in it (Codex-a6ofh.3.3). */
+  categoryId?: string;
+  /** What the pieces need: a "Needs you" chip's (Codex-a6ofh.3.4). */
+  needs?: ContentAttentionKind;
   organizationId?: string | null;
   creatorId?: string;
   search?: string;
@@ -114,6 +146,8 @@ export interface ContentWithRelations extends Content {
     /** Absent on the anonymous public list (`listPublic`), which never selects it. */
     email?: string;
     name: string | null;
+    /** The studio list's rows only: a personal piece's address is under it. */
+    username?: string | null;
   };
   organization?: Organization | null;
   mediaItem?: ServedMediaItem | null;
@@ -130,6 +164,27 @@ export interface ContentWithRelations extends Content {
    */
   categoryIds?: string[];
   /**
+   * The live categories it is filed in, in their order (`sortOrder`, then
+   * name); `[]` when in none. The studio list's rows carry it
+   * (Codex-a6ofh.3.3), from one read over the page; `get` sends
+   * `categoryIds`.
+   */
+  categories?: ContentCategoryRef[];
+  /**
+   * How many people bought it: completed purchases, disputed ones included
+   * (Codex-a6ofh.3.5, owner R2). The studio list's rows carry it, from one
+   * grouped read over the page, for its Sales column. A public row never
+   * does. Not `purchaseCount`, which nothing writes (Codex-r7os5).
+   */
+  buyerCount?: number;
+  /**
+   * How many people would lose it, paid for or given, through the piece or
+   * a course that holds it (Codex-a6ofh.3.5, owner 2026-11-13): what a bulk
+   * delete, or a move to Followers or Team only, leaves alone. The studio
+   * list's rows only, beside `buyerCount`.
+   */
+  holderCount?: number;
+  /**
    * The exact tiers that include this item (Codex-2hxff.91), by tier
    * `sortOrder`, inactive tiers included; `[]` when not behind the switch.
    * Every content read attaches it (`withTierWire`).
@@ -144,6 +199,12 @@ export interface ContentWithRelations extends Content {
 }
 
 export type { ServedMediaItem };
+
+/** A category a piece is filed in, as a list row names it (Codex-a6ofh.3.3). */
+export interface ContentCategoryRef {
+  id: string;
+  name: string;
+}
 
 /**
  * Media item with populated relations

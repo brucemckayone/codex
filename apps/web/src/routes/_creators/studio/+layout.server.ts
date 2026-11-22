@@ -5,7 +5,11 @@
  * Redirects unauthenticated users to login and non-creators to homepage.
  * Loads creator profile and organization list for the sidebar/switcher.
  */
-import { STUDIO_ROLES } from '@codex/constants';
+import {
+  CONTENT_LIFECYCLE,
+  CONTENT_LIST_SCOPE,
+  STUDIO_ROLES,
+} from '@codex/constants';
 import { redirect } from '@sveltejs/kit';
 import { shouldResumeInWizard } from '$lib/onboarding/onboarding-flow';
 import { getProfile } from '$lib/remote/account.remote';
@@ -13,6 +17,7 @@ import { getCreatorOnboarding } from '$lib/remote/onboarding.remote';
 import { getMyOrganizations } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { logSignedInReadFailure } from '$lib/server/read-failure';
 import { buildPlatformUrl } from '$lib/utils/subdomain';
 import type { LayoutServerLoad } from './$types';
 
@@ -53,28 +58,28 @@ export const load: LayoutServerLoad = async ({
 
   depends('cache:studio');
 
-  // Load profile and orgs in parallel for sidebar/switcher
-  const [profile, orgsResult] = await Promise.all([
+  // Profile, orgs and the draft badge in parallel for the sidebar/switcher.
+  const [profile, orgsResult, draftCount] = await Promise.all([
     getProfile().catch(() => null),
     getMyOrganizations().catch(() => []),
+    // Non-critical: the badge just won't show. Logged, so a refused scope or
+    // an outage is never read as "no drafts".
+    countPersonalDrafts(platform, cookies).catch((error: unknown) => {
+      logSignedInReadFailure(
+        {
+          refused: 'studio.draft_badge_refused',
+          unavailable: 'studio.draft_badge_unavailable',
+        },
+        { scope: CONTENT_LIST_SCOPE.PERSONAL },
+        error
+      );
+      return 0;
+    }),
   ]);
 
-  // Draft count: lightweight call — limit=1 just to get pagination.total
-  // No organizationId = personal content only
-  let draftCount = 0;
-  try {
-    const api = createServerApi(platform, cookies);
-    const draftParams = new URLSearchParams();
-    draftParams.set('status', 'draft');
-    draftParams.set('limit', '1');
-    draftParams.set('page', '1');
-    const draftResult = await api.content.list(draftParams);
-    draftCount = draftResult?.pagination?.total ?? 0;
-  } catch {
-    // Non-critical — badge just won't show
-  }
-
   const orgs = (orgsResult ?? []).map((o) => ({
+    // The content list's Where names its org by id (Codex-a6ofh.3.2).
+    id: o.id,
     name: o.name,
     slug: o.slug,
     logoUrl: o.logoUrl ?? undefined,
@@ -97,3 +102,24 @@ export const load: LayoutServerLoad = async ({
     },
   };
 };
+
+/**
+ * The draft badge's count: a limit-1 read, for its `pagination.total`. The
+ * personal drafts, as the list the badge opens shows them: with no scope the
+ * read spans every org, so the badge counted org drafts the list (Personal by
+ * default) leaves out (Codex-a6ofh.3.2).
+ */
+async function countPersonalDrafts(
+  ...api: Parameters<typeof createServerApi>
+): Promise<number> {
+  const result = await createServerApi(...api).content.list(
+    new URLSearchParams({
+      // The drafts never live, the Drafts tab's (Codex-a6ofh.3.6).
+      lifecycle: CONTENT_LIFECYCLE.DRAFT,
+      scope: CONTENT_LIST_SCOPE.PERSONAL,
+      limit: '1',
+      page: '1',
+    })
+  );
+  return result?.pagination?.total ?? 0;
+}

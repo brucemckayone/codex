@@ -45,9 +45,17 @@ export interface ContentWithRelations
     /** Absent on the anonymous public list, which never selects it. */
     email?: string;
     name: string | null;
+    /** The studio list's rows only: a personal piece's address is under it. */
+    username?: string | null;
   };
   organization?: Organization | null;
-  mediaItem?: ServedMediaItem | null;
+  /**
+   * Its media as the row joins it. `thumbnailUrl` is the poster resolved from
+   * the row's key, which the studio list sends (Codex-a6ofh.3.1) so a piece
+   * with no cover shows its video's poster; absent elsewhere, so treat ABSENT
+   * as "not resolved", never as "no poster".
+   */
+  mediaItem?: (ServedMediaItem & { thumbnailUrl?: string | null }) | null;
   /**
    * The creator's video its thumbnail is a frame of, its own included
    * (Codex-tqvmx). Only the single read sends it; absent from a content-api
@@ -67,6 +75,25 @@ export interface ContentWithRelations
    * `@codex/content` sends them; current memberships only.
    */
   categoryIds?: string[];
+  /**
+   * The live categories it is filed in, in their order; `[]` for none. The
+   * studio list's rows send them (Codex-a6ofh.3.3); absent elsewhere, so
+   * treat ABSENT as "not sent", never as "in none".
+   */
+  categories?: { id: string; name: string }[];
+  /**
+   * How many people bought it: completed purchases, disputed ones included
+   * (Codex-a6ofh.3.5). The studio list's rows only: its Sales column reads
+   * it. `purchaseCount` is never written (Codex-r7os5).
+   */
+  buyerCount?: number;
+  /**
+   * How many people would lose it, paid for or given, through the piece or
+   * a course that holds it (owner 2026-11-13). The studio list's rows only:
+   * the delete and Change access warnings read it, as the server's refusal
+   * counts.
+   */
+  holderCount?: number;
 }
 
 /**

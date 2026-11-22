@@ -119,6 +119,8 @@ vi.mock('$lib/client/upload-queue.svelte', () => ({
     cancel: vi.fn(),
     retry: vi.fn(),
     remove: vi.fn(),
+    // An empty queue has no word on any upload.
+    wordOn: () => null,
   },
 }));
 // The photo goes as picked: shrinking is its own module's to test.

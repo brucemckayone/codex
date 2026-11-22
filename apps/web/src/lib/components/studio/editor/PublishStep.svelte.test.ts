@@ -4,6 +4,7 @@
  * and Publish saves what is on screen, then publishes. A refusal the server
  * sends anyway is listed by its code, or said in its own words.
  */
+import { MEDIA_UPLOAD_STALLED_AFTER_MS } from '@codex/constants';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { uploadQueue } from '$lib/client/upload-queue.svelte';
 import {
@@ -76,7 +77,7 @@ const live = vi.hoisted(() => ({
       progress?: number | null;
       errorCode?: string | null;
       attemptsLeft?: number;
-      upload?: { here: boolean; pct: number | null } | null;
+      upload?: { here: boolean; pct: number | null; stopped?: boolean } | null;
     }
   >(),
 }));
@@ -374,6 +375,151 @@ describe('PublishStep · what is missing', () => {
       m.studio_publish_gap_media_failed({ type: 'video' })
     );
     expect(publishButton()?.disabled).toBe(true);
+  });
+
+  // Owner, 2026-11-12: an upload that stopped says so, by the tile's rule.
+  test('an upload no tab reports, past its stall line, says it stopped, with the way back to writing', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000),
+    };
+    render();
+    expect(text()).toContain(
+      m.studio_publish_gap_upload_stopped({ type: 'video' })
+    );
+    expect(
+      [...document.querySelectorAll<HTMLAnchorElement>('.publish-gap-fix')].map(
+        (link) => link.getAttribute('href')
+      )
+    ).toEqual(['/studio/content/c1/edit']);
+  });
+
+  test('an upload another tab still sends, past its stall line, is still uploading', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000),
+    };
+    // A report beats the clock line. (This tab's own sending is its queue's
+    // to say: a socket "here" with no row is an upload this tab let go of.)
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: false, pct: 30 },
+    });
+    render();
+    expect(text()).not.toContain(
+      m.studio_publish_gap_upload_stopped({ type: 'video' })
+    );
+    expect(text()).toContain('still uploading');
+  });
+
+  test('an upload a tab reports stopped, inside its line, says so, and nothing waits for it', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: false, pct: 40, stopped: true },
+    });
+    render();
+    expect(text()).toContain(
+      m.studio_publish_gap_upload_stopped({ type: 'video' })
+    );
+    expect(publishButton()?.textContent?.trim()).not.toBe(
+      m.studio_publish_button_when_ready()
+    );
+    expect(publishButton()?.disabled).toBe(true);
+  });
+
+  test('an upload in this tab’s own queue, unheard by the socket, past its line, is still uploading', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000),
+    };
+    uploadQueue.items = [
+      { key: 'k1', id: MEDIA_ID, status: 'uploading', progress: 30 } as never,
+    ];
+    try {
+      render();
+      expect(text()).not.toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(text()).toContain('still uploading');
+    } finally {
+      uploadQueue.items = [];
+    }
+  });
+
+  test('an upload this tab’s queue gave up on says it stopped, though the socket still says it is here', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    // The status object lets go of an upload only when the socket closes, so
+    // it still echoes this tab's last report, inside the line.
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: true, pct: 40 },
+    });
+    uploadQueue.items = [
+      { key: 'k1', id: MEDIA_ID, status: 'error', progress: 40 } as never,
+    ];
+    try {
+      render();
+      expect(text()).toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(publishButton()?.textContent?.trim()).not.toBe(
+        m.studio_publish_button_when_ready()
+      );
+      expect(publishButton()?.disabled).toBe(true);
+    } finally {
+      uploadQueue.items = [];
+    }
+  });
+
+  test('an upload this tab’s queue sent all of, its lifecycle not moved on yet, is not stopped', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    // Completed, but the status object still says uploading, and the socket
+    // has since closed, so it says the upload stopped: the queue's row is the
+    // word that counts, and the server moves it on in a moment.
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: false, pct: 100, stopped: true },
+    });
+    uploadQueue.items = [
+      { key: 'k1', id: MEDIA_ID, status: 'done', progress: 100 } as never,
+    ];
+    try {
+      render();
+      expect(text()).not.toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(publishButton()?.textContent?.trim()).toBe(
+        m.studio_publish_button_when_ready()
+      );
+    } finally {
+      uploadQueue.items = [];
+    }
   });
 
   test('media gone (deleted, or not theirs) is listed, with the way back to writing', () => {
@@ -1798,6 +1944,56 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
     ).not.toBeNull();
   });
 
+  // Owner, 2026-11-12: an upload that stopped says so. Scheduled, the
+  // checklist leaves the wait to the banner, so the banner says it.
+  test('its upload stopped while scheduled: never "goes live by itself", only another file or Cancel', async () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000),
+    };
+    render(scheduled());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).toContain(
+      m.studio_publish_gap_upload_stopped({ type: 'video' })
+    );
+    expect(bannerText()).not.toContain(m.studio_publish_scheduled_heading());
+    expect(banner()?.querySelector('a')?.getAttribute('href')).toBe(
+      '/studio/content/c1/edit'
+    );
+    expect(cancelButton()).not.toBeNull();
+  });
+
+  test('its upload stopping while scheduled is said, and focus goes to the banner', async () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: false, pct: 40 },
+    });
+    render(scheduled());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+    // The uploading tab closed: the status object says the upload stopped.
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: false, pct: 40, stopped: true },
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(notice()).toContain(
+      m.studio_publish_gap_upload_stopped({ type: 'video' })
+    );
+    expect(bannerText()).not.toContain(m.studio_publish_scheduled_heading());
+    expect(document.activeElement).toBe(banner());
+  });
+
   test('reads that never answer say so, not "it should be live in a moment" alone', async () => {
     onItsWay();
     remotes.readPublishState.mockRejectedValue({ status: 503 });
@@ -2166,7 +2362,65 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
     }
   });
 
-  test('uploading from this tab: the foot says to keep it open, not that it can close', () => {
+  test('an upload this tab let go of (its row gone, the socket still saying "here"): stopped, and the tab can close', async () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    // Cancelled, removed after failing, or tried again as new media: the
+    // status object holds this tab's last report until the socket closes,
+    // so only the queue's memory says it will not finish.
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: true, pct: 30 },
+    });
+    const word = vi.spyOn(uploadQueue, 'wordOn').mockReturnValue('stopped');
+    try {
+      render(scheduled());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bannerText()).toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(bannerText()).not.toContain(m.studio_publish_scheduled_heading());
+      expect(text()).toContain(m.studio_publish_scheduled_close());
+      expect(text()).not.toContain(m.studio_publish_scheduled_keep_open());
+    } finally {
+      word.mockRestore();
+    }
+  });
+
+  test('a finished upload cleared from the tray, its lifecycle behind, is not stopped, even once the socket says so', async () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    // Sent and completed; the tray's Clear took the row; the socket closed,
+    // so the object says stopped, its lifecycle not yet moved on.
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: false, pct: 100, stopped: true },
+    });
+    const word = vi.spyOn(uploadQueue, 'wordOn').mockReturnValue('done');
+    try {
+      render(scheduled());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bannerText()).not.toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+      expect(text()).not.toContain(m.studio_publish_scheduled_keep_open());
+    } finally {
+      word.mockRestore();
+    }
+  });
+
+  test('a failed upload removed from the tray while scheduled stays stopped, never "goes live by itself"', async () => {
     media.item = {
       id: MEDIA_ID,
       status: 'uploading',
@@ -2178,9 +2432,100 @@ describe('PublishStep · publish when ready (Codex-a6ofh.2.9)', () => {
       progress: null,
       upload: { here: true, pct: 30 },
     });
+    uploadQueue.items = [
+      { key: 'k1', id: MEDIA_ID, status: 'error', progress: 30 } as never,
+    ];
+    try {
+      render(scheduled());
+      await vi.advanceTimersByTimeAsync(0);
+      const stopped = m.studio_publish_gap_upload_stopped({ type: 'video' });
+      expect(bannerText()).toContain(stopped);
+      // Remove: the row goes and its media is discarded, which the queue
+      // remembers; the socket still echoes the report until it closes.
+      const word = vi.spyOn(uploadQueue, 'wordOn').mockReturnValue('stopped');
+      try {
+        uploadQueue.items = [];
+        await vi.advanceTimersByTimeAsync(20);
+        expect(bannerText()).toContain(stopped);
+        expect(bannerText()).not.toContain(
+          m.studio_publish_scheduled_heading()
+        );
+      } finally {
+        word.mockRestore();
+      }
+    } finally {
+      uploadQueue.items = [];
+    }
+  });
+
+  test('a finished upload cleared from the tray, with no other report, stays on its way: Publish when ready', () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    // The r5 regression: the socket's stale "here" after Clear read as stopped.
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: true, pct: 100 },
+    });
+    const word = vi.spyOn(uploadQueue, 'wordOn').mockReturnValue('done');
+    try {
+      render(draft());
+      expect(text()).not.toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(publishButton()?.textContent?.trim()).toBe(
+        m.studio_publish_button_when_ready()
+      );
+    } finally {
+      word.mockRestore();
+    }
+  });
+
+  test('its stall line passing while the step is open says it stopped, with no read to bring it', async () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS + 5_000),
+    };
     render(scheduled());
-    expect(text()).toContain(m.studio_publish_scheduled_keep_open());
-    expect(text()).not.toContain(m.studio_publish_scheduled_close());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bannerText()).toContain(m.studio_publish_scheduled_heading());
+    await vi.advanceTimersByTimeAsync(6_000);
+    const stopped = m.studio_publish_gap_upload_stopped({ type: 'video' });
+    expect(bannerText()).toContain(stopped);
+    expect(notice()).toContain(stopped);
+  });
+
+  test('an upload this tab’s queue gave up on, while scheduled: stopped, and the tab can close', async () => {
+    media.item = {
+      id: MEDIA_ID,
+      status: 'uploading',
+      title: 'Winter Light',
+      createdAt: new Date(),
+    };
+    live.items.set(MEDIA_ID, {
+      lifecycle: 'uploading',
+      progress: null,
+      upload: { here: true, pct: 30 },
+    });
+    uploadQueue.items = [
+      { key: 'k1', id: MEDIA_ID, status: 'error', progress: 30 } as never,
+    ];
+    try {
+      render(scheduled());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bannerText()).toContain(
+        m.studio_publish_gap_upload_stopped({ type: 'video' })
+      );
+      expect(text()).not.toContain(m.studio_publish_scheduled_keep_open());
+    } finally {
+      uploadQueue.items = [];
+    }
   });
 
   test("didn't go live: why, and where it is put right, with no Dismiss (owner)", () => {

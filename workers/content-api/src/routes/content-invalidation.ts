@@ -7,8 +7,11 @@
 
 import { CacheType, VersionedCache } from '@codex/cache';
 import {
+  type BulkTouchedPiece,
   type ContentInvalidationReason,
   invalidateContentAccess,
+  invalidateContentAccessMany,
+  orgsOf,
 } from '@codex/content';
 import { createDbClient } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
@@ -96,44 +99,125 @@ export function fanContentInvalidation(
   obs?: ObservabilityClient,
   options: { includeFollowers?: boolean } = {}
 ): void {
+  fanOut(
+    env,
+    executionCtx,
+    obs,
+    { contentId, organizationId, reason },
+    (deps) =>
+      invalidateContentAccess({
+        ...deps,
+        contentId,
+        organizationId: organizationId ?? null,
+        reason,
+        includeFollowers: options.includeFollowers ?? false,
+      })
+  );
+}
+
+/**
+ * {@link fanContentInvalidation} for a bulk action's pieces (Codex-a6ofh.3.5):
+ * one background task on one DB client, each user's library bumped once
+ * however many of the pieces it covers. The catalogue keys are left to
+ * {@link afterBulkChange}, which bumps each once.
+ */
+function fanContentInvalidationMany(
+  env: HonoEnv['Bindings'],
+  executionCtx: ExecutionContext,
+  pieces: BulkTouchedPiece[],
+  reason: ContentInvalidationReason,
+  obs?: ObservabilityClient
+): void {
+  if (pieces.length === 0) return;
+  fanOut(env, executionCtx, obs, { pieces: pieces.length, reason }, (deps) =>
+    invalidateContentAccessMany({
+      ...deps,
+      pieces,
+      reason,
+      catalogue: false,
+    })
+  );
+}
+
+/**
+ * The fan-out's plumbing: the cache, given `obs` because it swallows a
+ * failed bump and logs it only through its own client, and the whole run
+ * in `waitUntil`, so its DB reads never hold up the response. The client is
+ * built inside the promise, as in bumpOrgContentVersion: one that cannot be
+ * built lands in the `.catch`, never throws to a caller with more to refresh.
+ */
+function fanOut(
+  env: HonoEnv['Bindings'],
+  executionCtx: ExecutionContext,
+  obs: ObservabilityClient | undefined,
+  failureContext: Record<string, unknown>,
+  run: (deps: {
+    db: ReturnType<typeof createDbClient>;
+    cache: VersionedCache;
+    waitUntil: (promise: Promise<unknown>) => void;
+    logger?: ObservabilityClient;
+  }) => Promise<void>
+): void {
   if (!env.CACHE_KV) return;
-  // Given `obs`: the cache swallows a failed bump and logs it only through
-  // its own client, so the `.catch` below never sees one.
   const cache = new VersionedCache({
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
     obs,
   });
   const waitUntil = executionCtx.waitUntil.bind(executionCtx);
-
-  // Wrap the whole fanout in waitUntil so the DB `resolveAffectedUsers`
-  // query does not block the response. The helper internally hands each
-  // per-user KV bump to waitUntil as well. The client is built inside the
-  // promise, as in bumpOrgContentVersion: one that cannot be built lands in
-  // the `.catch`, never throws to a caller with more to refresh.
   executionCtx.waitUntil(
     Promise.resolve()
       .then(() =>
-        invalidateContentAccess({
-          db: createDbClient(env),
-          cache,
-          waitUntil,
-          contentId,
-          organizationId: organizationId ?? null,
-          reason,
-          logger: obs,
-          includeFollowers: options.includeFollowers ?? false,
-        })
+        run({ db: createDbClient(env), cache, waitUntil, logger: obs })
       )
       .catch((err: unknown) => {
         obs?.warn('content-invalidation: fanout failed', {
-          contentId,
-          organizationId,
-          reason,
+          ...failureContext,
           error: err instanceof Error ? err.message : String(err),
         });
       })
   );
+}
+
+/**
+ * After a bulk action (Codex-a6ofh.3.5), each key once: the platform's
+ * published list (with a `reason`, as a per-piece fan-out bumps it), each
+ * org's lists, topics, portal rails and slug caches (`bumpOrgContentVersion`),
+ * and, with a `reason`, the libraries of the people the pieces reach. Fifteen
+ * per-piece refreshes would write one KV key fifteen times, and KV keeps
+ * about one write a second to a key, so the last ones would be lost and
+ * public pages stay stale for the cache's TTL.
+ */
+export function afterBulkChange(
+  env: HonoEnv['Bindings'],
+  executionCtx: ExecutionContext,
+  touched: BulkTouchedPiece[],
+  reason: ContentInvalidationReason | null,
+  obs?: ObservabilityClient
+): void {
+  if (touched.length === 0) return;
+  for (const organizationId of orgsOf(touched)) {
+    bumpOrgContentVersion(env, executionCtx, organizationId, obs);
+  }
+  if (!reason) return;
+  if (env.CACHE_KV) {
+    const cache = new VersionedCache({
+      kv: env.CACHE_KV,
+      waitUntil: (promise) => executionCtx.waitUntil(promise),
+      obs,
+    });
+    executionCtx.waitUntil(
+      cache
+        .invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED)
+        .catch((err: unknown) => {
+          obs?.warn('Cache invalidation failed', {
+            key: 'content:published',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        })
+    );
+  }
+  fanContentInvalidationMany(env, executionCtx, touched, reason, obs);
 }
 
 /**

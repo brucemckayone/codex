@@ -138,6 +138,14 @@ vi.mock('$lib/client/upload-queue.svelte', () => ({
     retry: (key: string) => retry(key),
     remove: (key: string) => removeRow(key),
     cancel: (key: string) => cancelRow(key),
+    // The real queue's word by its rows (its memory past a row is pinned in
+    // upload-queue.test.ts).
+    wordOn: (mediaId: string) => {
+      const status = queue.items.find((item) => item.id === mediaId)?.status;
+      if (status === 'uploading' || status === 'completing') return 'sending';
+      if (status === 'error') return 'stopped';
+      return status === 'done' ? 'done' : null;
+    },
   },
 }));
 
@@ -786,6 +794,55 @@ describe('MediaPickerDialog: failures never read as progress or as empty (review
     expect(
       document.querySelector('.field-card')?.getAttribute('data-status')
     ).toBe('stopped');
+  });
+
+  // Owner, 2026-11-12 (one reader): the Publish screen sends the creator
+  // here to fix a stopped upload, so this field says what it says. Mounted
+  // afresh (the Write step again), the field follows nothing: only this
+  // tab's queue knows.
+  test('a chosen upload this tab’s queue gave up on reads as stopped, inside its line; one it still sends, past it, as uploading', () => {
+    const fresh = new Date().toISOString();
+    const old = '2026-01-01T00:00:00.000Z';
+    remote.getMediaItem.mockImplementation((id: string) =>
+      fakeQuery({
+        id,
+        title: 'Hono APIs: screen capture',
+        mediaType: 'video',
+        status: 'uploading',
+        createdAt: id === CHOSEN ? fresh : old,
+      })
+    );
+    const status = () =>
+      document.querySelector('.field-card')?.getAttribute('data-status');
+    queue.items = [
+      {
+        key: 'k-failed',
+        id: CHOSEN,
+        status: 'error',
+        title: 'a',
+        progress: 60,
+        mediaType: 'video',
+      },
+      {
+        key: 'k-sending',
+        id: OTHER,
+        status: 'uploading',
+        title: 'b',
+        progress: 30,
+        mediaType: 'video',
+      },
+    ];
+    try {
+      render({ value: CHOSEN });
+      expect(status()).toBe('stopped');
+      if (component) unmount(component);
+      component = null;
+
+      render({ value: OTHER });
+      expect(status()).not.toBe('stopped');
+    } finally {
+      queue.items = [];
+    }
   });
 
   test('a facet change whose first read fails says so, even after an empty list: never "no media"', () => {

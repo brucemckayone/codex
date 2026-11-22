@@ -7,11 +7,11 @@
   drafts are read when the menu first opens; a read that fails says so and
   offers Try again, and is never "no drafts". Both studios' lists use it.
 
-  @prop {string | null} organizationId - The org whose drafts it offers; null in the personal studio
+  @prop {string | null} organizationId - The org whose drafts it offers; null in the personal studio, which offers its personal drafts (filed under no org), as its list shows them (Codex-a6ofh.3.2)
   @prop {PayoutsRead} payouts - The page's one payouts read, for each draft's step
 -->
 <script lang="ts">
-  import { hasBeenLive } from '@codex/constants';
+  import { CONTENT_LIFECYCLE, CONTENT_LIST_SCOPE } from '@codex/constants';
   import * as m from '$paraglide/messages';
   import * as DropdownMenu from '$lib/components/ui/DropdownMenu';
   import {
@@ -28,7 +28,7 @@
   import { DRAFTS_HREF } from './content-status';
   import type { ContentWithRelations } from '$lib/types';
   import type { PayoutsRead } from '$lib/utils/connect-readiness';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { type DraftProgress, draftMenuWords, draftProgress } from './draft-progress';
 
   interface Props {
@@ -56,28 +56,36 @@
   let open = $state(false);
   const menuKey = $props.id();
 
-  const draftsQuery = $derived(
-    asked
-      ? listContent({
-          ...(organizationId && { organizationId }),
-          status: 'draft',
-          page: 1,
-          limit: MENU_DRAFTS,
-          sortBy: 'updatedAt',
-          sortOrder: 'desc',
-        })
-      : null
-  );
+  /**
+   * One query per org, made untracked. Kit (2.55) drops a query whose first
+   * read failed, and a derivation that makes one tracks its promise (kit
+   * reads `.then` inside the call), so a Try again would re-run it and be
+   * handed a new query, still loading: the failure it was judging would
+   * vanish, and a second failure read as a success (Codex-if444's census).
+   */
+  const draftsQuery = $derived.by(() => {
+    if (!asked) return null;
+    const org = organizationId;
+    return untrack(() =>
+      listContent({
+        // The personal studio's drafts are its list's, Personal: so "All
+        // drafts (n)" opens a list of n (Codex-a6ofh.3.2).
+        ...(org ? { organizationId: org } : { scope: CONTENT_LIST_SCOPE.PERSONAL }),
+        // The drafts to continue are the drafts never live: one live once is
+        // off sale, opens in the live editor, and has no step to continue
+        // (Codex-a6ofh.2, the epic review). Asked of the query, the Drafts
+        // tab's own (Codex-a6ofh.3.6), so the newest few are never all off
+        // sale and "All drafts (n)" opens a list of n.
+        lifecycle: CONTENT_LIFECYCLE.DRAFT,
+        page: 1,
+        limit: MENU_DRAFTS,
+        sortBy: 'updatedAt',
+        sortOrder: 'desc',
+      })
+    );
+  });
   // A value wins (a failed refresh keeps the last one), then a failure, then loading.
   const drafts = $derived(draftsQuery?.current?.items ?? null);
-  /**
-   * The drafts to continue: a piece that has been live and is a draft again
-   * is off sale, opens in the live editor, and has no step to continue
-   * (Codex-a6ofh.2, the epic review). Filtered here, from the page read: when
-   * the newest few are all off sale, none is offered. The list's Drafts and
-   * Off sale filters (Codex-a6ofh.3.6) move this to the query.
-   */
-  const toContinue = $derived(drafts?.filter((row) => !hasBeenLive(row)) ?? null);
   const draftTotal = $derived(draftsQuery?.current?.pagination.total ?? 0);
   const failed = $derived(drafts === null && draftsQuery?.error != null);
   $effect(() => {
@@ -106,14 +114,17 @@
   }
 
   async function retry() {
-    if (retrying || !draftsQuery) return;
+    const query = draftsQuery;
+    if (retrying || !query) return;
     retrying = true;
+    // Judged on the read's own answer: the menu holds the query it refreshed.
     try {
-      await draftsQuery.refresh();
+      await query.refresh();
+      failedAgain = false;
     } catch {
       // Kept on the query's `error`, which the effect above logs.
+      failedAgain = true;
     }
-    failedAgain = draftsQuery.current == null && draftsQuery.error != null;
     retrying = false;
     if (failedAgain || !open) return;
     // The pressed item went with the failure, leaving focus on the menu
@@ -142,9 +153,9 @@
   </DropdownMenu.Trigger>
 
   <DropdownMenu.Content class="new-menu" data-new-menu={menuKey}>
-    {#if toContinue && toContinue.length > 0}
+    {#if drafts && drafts.length > 0}
       <p class="new-menu-heading" aria-hidden="true">{m.studio_new_menu_drafts()}</p>
-      {#each toContinue as row (row.id)}
+      {#each drafts as row (row.id)}
         {@const progress = draftProgress(row, payouts)}
         <DropdownMenu.Item href={progress?.href ?? editHref(row.id)}>
           <span class="new-menu-draft">

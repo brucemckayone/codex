@@ -88,6 +88,9 @@ const makeQuery = (fn: (...args: unknown[]) => unknown) => {
     { __: { type: 'query', id: '', name: '' } }
   );
 };
+/** The signed-in viewer's platform role (getCategories reads it). */
+const viewer = vi.hoisted(() => ({ role: 'creator' as string | undefined }));
+
 vi.mock('$app/server', () => ({
   command: vi.fn((...args: unknown[]) => makeRemote('command', lastArg(args))),
   form: vi.fn((...args: unknown[]) => makeRemote('form', lastArg(args))),
@@ -105,6 +108,7 @@ vi.mock('$app/server', () => ({
   getRequestEvent: vi.fn(() => ({
     platform: { env: {} },
     cookies: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    locals: { user: viewer.role === undefined ? null : { role: viewer.role } },
   })),
 }));
 
@@ -129,10 +133,22 @@ const remote = (await import('./content.remote')) as unknown as {
   }) => Promise<unknown>;
   uploadThumbnailForm: CoverForm;
   stageThumbnailForm: CoverForm;
+  listContent: (args?: Record<string, unknown>) => Promise<unknown>;
+  getContentWhereCounts: () => Promise<unknown>;
+  getContentAttention: (args: Record<string, unknown>) => Promise<unknown>;
+};
+const media = (await import('./media.remote')) as unknown as {
+  listMedia: (args: Record<string, unknown>) => Promise<unknown>;
+};
+const categoriesRemote = (await import('./categories.remote')) as unknown as {
+  getCategories: (organizationId: string) => Promise<unknown>;
 };
 
 const CONTENT_ID = '55555555-5555-4555-8555-555555555555';
 const NOT_YOURS = 'Content not found';
+
+/** What a validation 400 names: each refused field's path and static message. */
+const REFUSED_FIELDS = [{ path: ['status'], message: 'Invalid option' }];
 
 /** One worker answer: the envelope `mapErrorToResponse` writes. */
 function envelope(status: number, message: string) {
@@ -146,8 +162,11 @@ function envelope(status: number, message: string) {
                 ? 'NOT_FOUND'
                 : status === 403
                   ? 'FORBIDDEN'
-                  : 'INTERNAL_ERROR',
+                  : status === 400
+                    ? 'VALIDATION_ERROR'
+                    : 'INTERNAL_ERROR',
             message,
+            ...(status === 400 && { details: REFUSED_FIELDS }),
           },
         };
   return new Response(JSON.stringify(body), {
@@ -199,6 +218,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   refreshes.clear();
   cache.clear();
+  viewer.role = 'creator';
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -224,6 +244,318 @@ describe('getContent', () => {
     const err = await rejection(remote.getContent(CONTENT_ID));
     expect(err).not.toHaveProperty('body');
     expect(err).not.toMatchObject({ status: 404 });
+  });
+});
+
+/**
+ * The studio lists tell a refusal from an outage too (Codex-a6ofh.3.1
+ * review): a 401 or 403 reached them as kit's 500, so it read as an outage,
+ * with a Try again that could never work, and was logged as one.
+ */
+describe.each([
+  [
+    'listContent',
+    (search?: string) =>
+      remote.listContent({ page: 1, limit: 24, ...(search && { search }) }),
+    'content.list_refused',
+    'content.list_unavailable',
+  ],
+  [
+    'listMedia',
+    (search?: string) =>
+      media.listMedia({ page: 1, limit: 24, ...(search && { search }) }),
+    'media.list_refused',
+    'media.list_unavailable',
+  ],
+] as const)('%s', (_name, list, refused, unavailable) => {
+  it('a 403 keeps its status', async () => {
+    workerAnswers(403, 'Forbidden');
+    const err = await rejection(list());
+    expect(err).toMatchObject({ status: 403, body: { message: 'Forbidden' } });
+  });
+
+  /** Every server line this read wrote, as [level, event, fields]. */
+  const lines = () =>
+    (['error', 'warn'] as const).flatMap((level) =>
+      vi
+        .mocked(logger[level])
+        .mock.calls.filter(
+          ([event]) => event === refused || event === unavailable
+        )
+        .map(([event, fields]) => [level, event, fields] as const)
+    );
+
+  // Kit skips handleError for an HttpError: without these lines a refused
+  // read reached no log at all, on a page that logs none of its own. Behind
+  // a session the level is the route's own (Codex-a6ofh.3.1 review rounds
+  // 3-4): a sign-out is no contract bug, and an error alert must not page
+  // for one. Exactly one line each: a second at the other level would page
+  // all the same.
+  it.each([
+    [400, 'Invalid request data', 'error', 'refused'],
+    [401, 'Authentication required', 'warn', 'refused'],
+    [403, 'Forbidden', 'error', 'refused'],
+    [429, 'Too many requests', 'warn', 'refused'],
+    [408, 'Request to content timed out', 'error', 'unavailable'],
+  ] as const)('a forwarded %i writes one server line, at %s, as %s', async (status, message, level, kind) => {
+    workerAnswers(status, message);
+    await rejection(list());
+    const event = kind === 'refused' ? refused : unavailable;
+    expect(lines().map(([at, name]) => [at, name])).toEqual([[level, event]]);
+    expect(lines()[0]?.[2]).toMatchObject({
+      status,
+      page: 1,
+      limit: 24,
+      statusFilter: 'all',
+    });
+  });
+
+  // The field the worker refused is how a contract bug is found: the
+  // message alone is always "Invalid request data".
+  it('a contract bug names the field the worker refused', async () => {
+    workerAnswers(400, 'Invalid request data');
+    await rejection(list());
+    expect(lines()[0]?.[2]).toMatchObject({ details: REFUSED_FIELDS });
+  });
+
+  it('a sign-out names no field', async () => {
+    workerAnswers(401, 'Authentication required');
+    await rejection(list());
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]?.[2]).not.toHaveProperty('details');
+  });
+
+  it('says a search was on, never what was searched for', async () => {
+    workerAnswers(401, 'Authentication required');
+    await rejection(list('private notes'));
+    expect(lines()[0]?.[2]).toMatchObject({ hasSearch: true });
+    expect(JSON.stringify(lines())).not.toContain('private notes');
+  });
+
+  it('a 5xx is not forwarded: it stays an unexpected error for handleError', async () => {
+    workerAnswers(500, 'connection to Neon failed');
+    const err = await rejection(list());
+    expect(err).not.toHaveProperty('body');
+    // handleError logs it; a line here would log it twice.
+    expect(lines()).toEqual([]);
+  });
+});
+
+/**
+ * A status tab asks a lifecycle, not a status (Codex-a6ofh.3.6): a refused
+ * Drafts or Off sale read names the tab it asked, so it is told apart from
+ * a read of the whole list (review: it logged `statusFilter: 'all'`).
+ */
+describe('listContent: the tab it asked', () => {
+  const lines = () =>
+    vi
+      .mocked(logger.warn)
+      .mock.calls.filter(([event]) => event === 'content.list_refused');
+
+  it('a refused tab read names its lifecycle', async () => {
+    workerAnswers(401, 'Authentication required');
+    await rejection(
+      remote.listContent({ page: 1, limit: 24, lifecycle: 'off-sale' })
+    );
+    expect(lines()[0]?.[1]).toMatchObject({
+      lifecycle: 'off-sale',
+      statusFilter: 'all',
+    });
+  });
+
+  it('a read of every piece says so', async () => {
+    workerAnswers(401, 'Authentication required');
+    await rejection(remote.listContent({ page: 1, limit: 24 }));
+    expect(lines()[0]?.[1]).toMatchObject({
+      lifecycle: 'all',
+      hasCategory: false,
+    });
+  });
+
+  // The org studio's Category facet sends `categoryId`, not the legacy
+  // `category` slug (review round 2): its refusal says a category narrowed.
+  it('a refused category read says a category was asked, never which', async () => {
+    const category = '3c111111-1111-4111-8111-111111111aaa';
+    workerAnswers(401, 'Authentication required');
+    await rejection(
+      remote.listContent({
+        page: 1,
+        limit: 24,
+        organizationId: '3c111111-1111-4111-8111-111111111999',
+        categoryId: category,
+      })
+    );
+    expect(lines()[0]?.[1]).toMatchObject({ hasCategory: true });
+    expect(JSON.stringify(lines())).not.toContain(category);
+  });
+});
+
+/**
+ * An org's categories forward and log as the lists do (Codex-a6ofh.3.3):
+ * the content list's Category facet joined the management page and the
+ * editor on this read, which let the worker's ApiError escape, so a
+ * sign-out reached kit as a 500 and was logged as an error.
+ */
+describe('getCategories', () => {
+  const ORG = '3c111111-1111-4111-8111-111111111999';
+  const REFUSED = 'categories.list_refused';
+  const UNAVAILABLE = 'categories.list_unavailable';
+
+  const lines = () =>
+    (['error', 'warn'] as const).flatMap((level) =>
+      vi
+        .mocked(logger[level])
+        .mock.calls.filter(
+          ([event]) => event === REFUSED || event === UNAVAILABLE
+        )
+        .map(([event, fields]) => [level, event, fields] as const)
+    );
+
+  it('a 403 keeps its status', async () => {
+    workerAnswers(403, 'Forbidden');
+    const err = await rejection(categoriesRemote.getCategories(ORG));
+    expect(err).toMatchObject({ status: 403, body: { message: 'Forbidden' } });
+  });
+
+  it.each([
+    [400, 'Invalid request data', 'error', REFUSED],
+    [401, 'Authentication required', 'warn', REFUSED],
+    // A creator holds the route's role: a 403 is the guards disagreeing.
+    [403, 'Forbidden', 'error', REFUSED],
+    [429, 'Too many requests', 'warn', REFUSED],
+    [408, 'Request to content timed out', 'error', UNAVAILABLE],
+  ] as const)('a forwarded %i writes one server line, at %s, as %s', async (status, message, level, event) => {
+    workerAnswers(status, message);
+    await rejection(categoriesRemote.getCategories(ORG));
+    expect(lines().map(([at, name]) => [at, name])).toEqual([[level, event]]);
+    expect(lines()[0]?.[2]).toMatchObject({ status, organizationId: ORG });
+  });
+
+  it.each([
+    ['a customer', 'customer'],
+    ['no role read', undefined],
+  ] as const)('a 403 for %s, whom the route turns away by role, warns', async (_who, role) => {
+    viewer.role = role;
+    workerAnswers(403, 'Insufficient permissions');
+    await rejection(categoriesRemote.getCategories(ORG));
+    expect(lines().map(([at, name]) => [at, name])).toEqual([
+      ['warn', REFUSED],
+    ]);
+  });
+
+  it('a 5xx is not forwarded: it stays an unexpected error for handleError', async () => {
+    workerAnswers(500, 'connection to Neon failed');
+    const err = await rejection(categoriesRemote.getCategories(ORG));
+    expect(err).not.toHaveProperty('body');
+    expect(lines()).toEqual([]);
+  });
+});
+
+/**
+ * A refused list read's line says where it looked (Codex-a6ofh.3.2 review):
+ * the API's one scope, one org, or everywhere, never "all" beside an org.
+ */
+describe('listContent: where a refused read looked', () => {
+  const ORG = '3c111111-1111-4111-8111-111111111999';
+
+  it.each([
+    ['personal', { scope: 'personal' }],
+    ['org', { organizationId: ORG }],
+    ['all', {}],
+  ] as const)('logs scope %s', async (scope, args) => {
+    workerAnswers(401, 'Authentication required');
+    await rejection(remote.listContent({ page: 1, limit: 24, ...args }));
+    expect(logger.warn).toHaveBeenCalledWith(
+      'content.list_refused',
+      expect.objectContaining({ scope })
+    );
+  });
+});
+
+/**
+ * The Where counts forward and log as the lists do (Codex-a6ofh.3.2
+ * review): they reached the page as kit's 500, so the personal dashboard's
+ * content tile paged an error for a sign-out or a rate limit, and the
+ * menu's client line called every cause an outage.
+ */
+describe('getContentWhereCounts', () => {
+  const REFUSED = 'content.where_counts_refused';
+  const UNAVAILABLE = 'content.where_counts_unavailable';
+
+  /** Every server line this read wrote, as [level, event, fields]. */
+  const lines = () =>
+    (['error', 'warn'] as const).flatMap((level) =>
+      vi
+        .mocked(logger[level])
+        .mock.calls.filter(
+          ([event]) => event === REFUSED || event === UNAVAILABLE
+        )
+        .map(([event, fields]) => [level, event, fields] as const)
+    );
+
+  it('a 401 keeps its status', async () => {
+    workerAnswers(401, 'Authentication required');
+    const err = await rejection(remote.getContentWhereCounts());
+    // The body is kit's HttpError's: a bare ApiError has a status too.
+    expect(err).toMatchObject({
+      status: 401,
+      body: { message: 'Authentication required' },
+    });
+  });
+
+  it.each([
+    [400, 'Invalid request data', 'error', REFUSED],
+    [401, 'Authentication required', 'warn', REFUSED],
+    [429, 'Too many requests', 'warn', REFUSED],
+    [408, 'Request to content timed out', 'error', UNAVAILABLE],
+  ] as const)('a forwarded %i writes one server line, at %s, as %s', async (status, message, level, event) => {
+    workerAnswers(status, message);
+    await rejection(remote.getContentWhereCounts());
+    expect(lines().map(([at, name]) => [at, name])).toEqual([[level, event]]);
+    expect(lines()[0]?.[2]).toMatchObject({ status });
+  });
+
+  it('a 5xx is not forwarded: it stays an unexpected error for handleError', async () => {
+    workerAnswers(500, 'connection to Neon failed');
+    const err = await rejection(remote.getContentWhereCounts());
+    expect(err).not.toHaveProperty('body');
+    expect(lines()).toEqual([]);
+  });
+});
+
+/**
+ * The "Needs you" counts forward and log as the Where counts do
+ * (Codex-a6ofh.3.4), asking where the list looks.
+ */
+describe('getContentAttention', () => {
+  const ORG = '3c111111-1111-4111-8111-111111111999';
+  const REFUSED = 'content.attention_refused';
+
+  it.each([
+    [{ organizationId: ORG }, `organizationId=${ORG}`, 'org'],
+    [{ scope: 'personal' }, 'scope=personal', 'personal'],
+    [{}, '', 'all'],
+  ] as const)('asks where the list looks: %o', async (args, query, scope) => {
+    const fetch = workerAnswers(401, 'Authentication required');
+    await rejection(remote.getContentAttention({ ...args }));
+    const [url] = fetch.mock.calls[0] ?? [];
+    const asked = new URL(String(url));
+    expect(asked.pathname).toBe('/api/content/attention');
+    expect(asked.search.replace(/^\?/, '')).toBe(query);
+    expect(logger.warn).toHaveBeenCalledWith(
+      REFUSED,
+      expect.objectContaining({ scope, status: 401 })
+    );
+  });
+
+  it('a 400 keeps its status, and is an error: the args were ours', async () => {
+    workerAnswers(400, 'Invalid request data');
+    const err = await rejection(remote.getContentAttention({}));
+    expect(err).toMatchObject({ status: 400 });
+    expect(logger.error).toHaveBeenCalledWith(
+      REFUSED,
+      expect.objectContaining({ status: 400 })
+    );
   });
 });
 

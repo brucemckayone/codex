@@ -147,7 +147,12 @@ describe('every landed client gate is still wired', () => {
    * drawer facet a silent no-op for anyone on a hand-typed `?q=Bo`.
    */
   const GATED_SURFACES: { file: string; shape: 'arg' | 'fetch' | 'hold' }[] = [
-    { file: 'routes/_org/[slug]/studio/content/+page.svelte', shape: 'arg' },
+    // The studio content list (Codex-a6ofh.3.1): both studios' one component,
+    // which issues `listContent` from the client. Was the org page's own.
+    {
+      file: 'lib/components/studio/content-list/StudioContentList.svelte',
+      shape: 'arg',
+    },
     { file: 'routes/_org/[slug]/studio/customers/+page.svelte', shape: 'arg' },
     { file: 'routes/_org/[slug]/(space)/explore/+page.svelte', shape: 'hold' },
     { file: 'routes/(platform)/discover/+page.svelte', shape: 'arg' },

@@ -8,12 +8,17 @@
  * (`current` undefined, the rejection on `error`). `refresh` is a spy that
  * changes nothing, so a test lands the outcome itself.
  *
+ * `useKitQuery()` opts a test into kit's own behaviour around a failed read
+ * (`kit-query.mock`): a Try again on a query whose first read failed hands
+ * a page that tracks it a NEW query, still loading.
+ *
  * A `.svelte.ts` module (runes compiled), NOT a `*.test.*` file → never
  * collected as a suite.
  */
 
 import { vi } from 'vitest';
 import type { ContentWithRelations } from '$lib/types';
+import { type KitQuery, kitQuery } from './kit-query.mock.svelte';
 
 type ContentPage = {
   items: ContentWithRelations[];
@@ -32,15 +37,27 @@ const state = $state<{ page: ContentPage | undefined; error: unknown }>({
 
 export const refreshListContent = vi.fn(async () => {});
 
-export const listContent = vi.fn((_input?: unknown) => ({
-  get current() {
-    return state.page;
-  },
-  get error() {
-    return state.error;
-  },
-  refresh: refreshListContent,
-}));
+let kit: KitQuery<ContentPage> | null = null;
+
+/** Answer as kit 2.55 does around a failed read, until the next reset. */
+export function useKitQuery(): KitQuery<ContentPage> {
+  kit = kitQuery<ContentPage>();
+  return kit;
+}
+
+export const listContent = vi.fn((_input?: unknown) =>
+  kit
+    ? kit.get()
+    : {
+        get current() {
+          return state.page;
+        },
+        get error() {
+          return state.error;
+        },
+        refresh: refreshListContent,
+      }
+);
 
 // ── test controls ───────────────────────────────────────────────────────
 
@@ -65,6 +82,7 @@ export function failContent(
 }
 
 export function resetListContent() {
+  kit = null;
   state.page = undefined;
   state.error = undefined;
   listContent.mockClear();

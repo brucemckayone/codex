@@ -54,3 +54,124 @@ export function logReadFailure(
     error: error instanceof Error ? error.message : String(error),
   });
 }
+
+/** The events a signed-in read logs a forwarded 4xx under, named in full so a log line greps back to its read. */
+export interface RefusedReadEvents {
+  /** The worker said no: the session, a role, a rate limit, or our request. */
+  refused: string;
+  /**
+   * The worker did not answer. For `logRefusedRead`, the api client's own
+   * abort (408), since its 5xx escapes to `handleError`; for
+   * `logSignedInReadFailure`, any outage (a 408, a 5xx, the network). The
+   * line's `status` tells them apart.
+   */
+  unavailable: string;
+}
+
+/** How one signed-in read's refusals log, beside its events. */
+export interface RefusedReadOptions {
+  /**
+   * The route asks a platform role the viewer does not hold
+   * (`/api/categories`: creator or admin), which the page's own guard does
+   * not ask: the org studio admits any member above `member`
+   * (Codex-a6ofh.3.3). Its 403 is that refusal, not our request: warn, as
+   * a 401 is. Any other 403, for a viewer who holds the role, stays an
+   * error: the two guards disagree.
+   */
+  viewerLacksRole?: boolean;
+}
+
+/**
+ * Runs a SIGNED-IN read whose 4xx goes on to the page (`forwardClientErrors`),
+ * logging that 4xx first. Kit skips `handleError`, and so its server log, for
+ * an `HttpError`, so a forwarded 4xx was logged nowhere unless every page that
+ * reads it logged its own (Codex-a6ofh.3.1 review). A 5xx is left to escape to
+ * `handleError`, which logs it.
+ *
+ * Its levels are a signed-in read's, not `apiErrorFields`' public-page rule,
+ * where any 4xx but 408 and 429 is our bug, nor `isReadOutage`'s, where a
+ * 429 is an outage and a 400 a refusal. These reads (the studio lists) need
+ * a session and no role, and the remote parses their args with the worker's
+ * own schema first. Behind a session:
+ *
+ * - 401: the session ended (a sign-out in another tab, an expiry). Warn: as
+ *   an error, every sign-out would page.
+ * - 429: a rate limit. Warn: `procedure()` limits before it refuses a
+ *   missing session, so anyone can raise one at will, and it must never
+ *   reach an error alert (Codex-osuqt's class). The lists' client logs call
+ *   it an outage; for the dashboard's counts this warn is the only trace.
+ * - 408: the worker did not answer. An outage: error, under `unavailable`,
+ *   never a "refusal".
+ * - 403, for a viewer the read says lacks the route's role: warn (see
+ *   `viewerLacksRole`).
+ * - Any other 4xx, a 403 among them: these routes gate on no role, so it is
+ *   our request or a deploy skew, a contract bug. Error, with the worker's
+ *   `details` naming the field it refused (`logReadFailure`).
+ *
+ * `context` must never carry what the creator typed (a search, a slug).
+ */
+export async function logRefusedRead<T>(
+  events: RefusedReadEvents,
+  context: Record<string, unknown>,
+  read: () => Promise<T>,
+  options: RefusedReadOptions = {}
+): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (isClientError(error)) logRefusal(events, context, error, options);
+    throw error;
+  }
+}
+
+/**
+ * Logs a SIGNED-IN read whose failure the page swallows (a badge that just
+ * does not show), so neither a forwarded 4xx nor `handleError` will: a
+ * refusal at `logRefusedRead`'s levels, and every outage (a 5xx, the network,
+ * and a 408, the client's own timeout) at one level, a warning under
+ * `unavailable`. `logRefusedRead` errors a 408 because its other outages
+ * escape to `handleError`, which errors them; here none does, so a slow
+ * worker and a dead one log alike (Codex-a6ofh.3.2 review round 2).
+ */
+export function logSignedInReadFailure(
+  events: RefusedReadEvents,
+  context: Record<string, unknown>,
+  error: unknown
+): void {
+  if (isClientError(error) && error.status !== 408) {
+    logRefusal(events, context, error);
+    return;
+  }
+  logReadFailure(events.unavailable, context, error);
+}
+
+function isClientError(error: unknown): error is ApiError {
+  return (
+    ApiError.isApiError(error) && error.status >= 400 && error.status < 500
+  );
+}
+
+function logRefusal(
+  events: RefusedReadEvents,
+  context: Record<string, unknown>,
+  error: ApiError,
+  options: RefusedReadOptions = {}
+): void {
+  const fields = {
+    ...context,
+    status: error.status,
+    code: error.code,
+    error: error.message,
+  };
+  if (
+    error.status === 401 ||
+    error.status === 429 ||
+    (error.status === 403 && options.viewerLacksRole === true)
+  ) {
+    logger.warn(events.refused, fields);
+  } else if (error.status === 408) {
+    logger.error(events.unavailable, fields);
+  } else {
+    logReadFailure(events.refused, context, error);
+  }
+}

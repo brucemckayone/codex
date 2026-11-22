@@ -4,7 +4,8 @@
  * Shared by the anonymous public content routes (public.ts), the signed-in
  * browse route (content.ts) and the withdrawn read (content-access.ts,
  * Codex-ov2ii), so a withdrawn item draws its thumbnail and preview exactly as
- * it did on the storefront. It is a helper module, not a router, so those
+ * it did on the storefront. The studio list (content.ts) resolves its posters
+ * here too (`withPosterUrls`). It is a helper module, not a router, so those
  * routes do not import a router file to reach it.
  *
  * Every RELATION on the item is BUILT field by field, never spread
@@ -47,6 +48,9 @@ import type {
 // `@codex/access` holds them, so the org intro film resolves its poster and
 // preview exactly as the catalogue does (Codex-376dl).
 export { type R2PublicBases, resolveR2PublicBases };
+
+/** The R2 keys a media item's public URLs are built from. */
+type MediaKeys = { thumbnailKey: string | null; hlsPreviewKey: string | null };
 
 /** The three relations a catalogue row carries out of the service. */
 type CatalogueRelations = {
@@ -104,7 +108,7 @@ function buildPublicItem<T extends CatalogueRelations>(
  * never per row.
  */
 function warnOnUnresolvedKeys(
-  rows: readonly CatalogueRelations[],
+  rows: readonly { mediaItem?: MediaKeys | null }[],
   bases: R2PublicBases,
   obs: Logger | undefined
 ): void {
@@ -152,4 +156,39 @@ export function toPublicItems<T extends CatalogueRelations>(
 ): PublicItem<T>[] {
   warnOnUnresolvedKeys(rows, bases, obs);
   return rows.map((row) => buildPublicItem(row, bases));
+}
+
+/** A studio row with its media item's poster resolved beside the key. */
+export type WithPosterUrl<T extends { mediaItem?: MediaKeys | null }> = Omit<
+  T,
+  'mediaItem'
+> & {
+  mediaItem:
+    | (NonNullable<T['mediaItem']> & { thumbnailUrl: string | null })
+    | null;
+};
+
+/**
+ * The studio list's rows with each media item's poster URL
+ * (`mediaItem.thumbnailUrl`, Codex-a6ofh.3.1, mockup L1 note 6): a piece with
+ * no cover of its own shows its video's poster, as the catalogue does. These
+ * are the creator's own rows, already whole (`MEDIA_ITEM_RESPONSE_COLUMNS`),
+ * so the URL goes beside the key rather than rebuilding the relation as the
+ * catalogue must. A key with no base warns once for the page, as there.
+ */
+export function withPosterUrls<T extends { mediaItem?: MediaKeys | null }>(
+  rows: T[],
+  bases: R2PublicBases,
+  obs: Logger | undefined
+): WithPosterUrl<T>[] {
+  warnOnUnresolvedKeys(rows, bases, obs);
+  return rows.map(({ mediaItem, ...rest }) => ({
+    ...rest,
+    mediaItem: mediaItem
+      ? {
+          ...mediaItem,
+          thumbnailUrl: publicUrl(bases.assets, mediaItem.thumbnailKey),
+        }
+      : null,
+  }));
 }
