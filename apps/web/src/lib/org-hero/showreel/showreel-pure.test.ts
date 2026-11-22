@@ -10,7 +10,7 @@ import { bindingLuminance } from '$lib/brand-editor/ground';
 import { TEXT_ON_BRAND_LUMINANCE_PIVOT } from '$lib/brand-editor/ink';
 import type { OrgHeroPiece } from '../hero-config';
 import type { ReelEntry } from '../reel';
-import { fitTitle, nameLines } from './name-lines';
+import { fitTitle, nameInRoom, nameLines } from './name-lines';
 import { prefersSavingData, reelMode } from './playback';
 import { PIECE_MS, ReelClock, reelKey, reelKeys } from './reel-clock.svelte';
 import { reelMedia } from './reel-media';
@@ -334,6 +334,61 @@ describe('nameLines and fitTitle', () => {
     });
     // Never above the largest size.
     expect(nameLines('Om', measure, 1000, 228).size).toBe(228);
+  });
+
+  it('sets the name in its room as nameLines does when the room holds it (the owner floor, 2026-11-22)', () => {
+    expect(
+      nameInRoom('Of Blood & Bones', measure, 1000, 196, 1000, 72)
+    ).toEqual({
+      ...nameLines('Of Blood & Bones', measure, 1000, 196),
+      grows: false,
+    });
+  });
+
+  it('shrinks the name to its room, in whichever break sets it largest there', () => {
+    // Two lines while two lines fit the room larger...
+    expect(nameInRoom('Of Blood & Bones', measure, 1000, 196, 300, 72)).toEqual(
+      {
+        lines: ['Of Blood', '& Bones'],
+        size: 150,
+        grows: false,
+      }
+    );
+    // ...then one line, as the room gets shorter.
+    expect(nameInRoom('Of Blood & Bones', measure, 1000, 196, 200, 72)).toEqual(
+      {
+        lines: ['Of Blood & Bones'],
+        size: 125,
+        grows: false,
+      }
+    );
+    expect(nameInRoom('Of Blood & Bones', measure, 1000, 196, 100, 72)).toEqual(
+      {
+        lines: ['Of Blood & Bones'],
+        size: 100,
+        grows: false,
+      }
+    );
+  });
+
+  it('never sets the name under the floor: it keeps the floor in its fewest lines across, and the hero grows', () => {
+    expect(nameInRoom('Of Blood & Bones', measure, 1000, 196, 60, 72)).toEqual({
+      lines: ['Of Blood & Bones'],
+      size: 72,
+      grows: true,
+    });
+    // One line is too wide at the floor here: two lines.
+    expect(nameInRoom('Of Blood & Bones', measure, 500, 196, 60, 72)).toEqual({
+      lines: ['Of Blood', '& Bones'],
+      size: 72,
+      grows: true,
+    });
+    // No break fits across at the floor: to the width, under it.
+    expect(nameInRoom('Of Blood & Bones', measure, 200, 196, 60, 72)).toEqual({
+      lines: ['Of Blood', '& Bones'],
+      size: 50,
+      grows: true,
+    });
   });
 
   it("fits the Wide title to the width, within the mock's range", () => {

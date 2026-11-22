@@ -400,15 +400,25 @@ describe("Showreel's sizers: every piece's words, unseen, hold the words' slot (
     render('wide', { reel: WITH_PREVIEW });
     // What the CSS holds Wide's sizer titles at: WIDE_TITLE.max, from the
     // server's first paint (an inline size would come with the fit, after it).
+    // A title's own size is `--_size`, which the owner's floor scales in CSS.
     expect(q('.reel')?.style.getPropertyValue('--_wide-max')).toBe('150px');
+    expect(q('.reel')?.style.getPropertyValue('--_type-floor')).toBe('72px');
     expect(
-      sizers().map(
-        (s) => s.querySelector<HTMLElement>('.reel__title')?.style.fontSize
-      )
-    ).toEqual(['', '', '', '']);
+      sizers().map((s) => {
+        const t = s.querySelector<HTMLElement>('.reel__title');
+        return [t?.style.fontSize, t?.style.getPropertyValue('--_size')];
+      })
+    ).toEqual([
+      ['', ''],
+      ['', ''],
+      ['', ''],
+      ['', ''],
+    ]);
     // floor(100 * 1000 / (length * 60)), within 72 and 150.
     const shownSize = () =>
-      q<HTMLElement>('.reel__words .reel__title')?.style.fontSize;
+      q<HTMLElement>('.reel__words .reel__title')?.style.getPropertyValue(
+        '--_size'
+      );
     expect(shownSize()).toBe('104px');
     // The next piece's title takes its own size as it shows.
     frame(PIECE_MS + 100);

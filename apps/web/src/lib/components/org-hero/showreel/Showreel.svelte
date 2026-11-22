@@ -59,7 +59,7 @@
   import type { HeroOptions } from '$lib/org-hero/hero-config';
   import type { ReelEntry } from '$lib/org-hero/reel';
   import { type GlyphBox, glyphBox } from '$lib/org-hero/showreel/glyph-box';
-  import { fitTitle, type NameLines, nameLines } from '$lib/org-hero/showreel/name-lines';
+  import { fitTitle, type NameLines, nameInRoom, nameLines } from '$lib/org-hero/showreel/name-lines';
   import { prefersSavingData, reelMode } from '$lib/org-hero/showreel/playback';
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
   import { reelMedia } from '$lib/org-hero/showreel/reel-media';
@@ -177,6 +177,15 @@
   const NAME_MAX = { desk: 228, deskPeek: 196, phone: 138 };
   /** The Wide title's range (the mock's). */
   const WIDE_TITLE = { min: 72, max: 150 };
+  /**
+   * The owner's floor (2026-11-22): on a short screen the big type shrinks
+   * with the room it has, never under this, Wide's least fitted size, and the
+   * hero grows only as far as the floor needs. Type already under it (a
+   * phone's) keeps its own size.
+   */
+  const TYPE_FLOOR = WIDE_TITLE.min;
+  /** Where the name window rests out of flow, its centre, as a share of the hero's height (`top: 36%`). */
+  const NAME_AT = 0.36;
   /** The longest word a phone's top bar holds whole, in letters (`longWord`). */
   const NAME_WORD_MAX = 17;
 
@@ -601,18 +610,102 @@
   });
   const wideSize = $derived(wideSizes?.[shown] ?? null);
 
+  // The name as large as the width and its room let it be, never under
+  // TYPE_FLOOR. Out of flow (a tall screen) the window moves nothing, so the
+  // fit takes the room it has at its place, between the top bar and the
+  // words. On a short screen CSS puts it in flow (the owner's floor): the
+  // window fills the room between them, and CSS sets the name at the floor
+  // there, so the hero grows only where the floor needs it. The fit sets the
+  // name in that box and holds the box at what CSS drew (`nameBox`), so
+  // nothing moves when the page hydrates.
   let nameFit = $state<NameLines | null>(null);
+  let nameBox = $state<number | null>(null);
   $effect(() => {
     const el = windowEl;
     const max = desktop.current ? (peek ? NAME_MAX.deskPeek : NAME_MAX.desk) : NAME_MAX.phone;
+    // The words' slot is the room's foot: it moves with the pieces' words.
+    void words;
     if (layout !== 'name' || !el) {
       nameFit = null;
+      nameBox = null;
       return;
     }
     return refit(() => {
-      nameFit = nameLines(name, (text) => widthAt100(el, text), el.clientWidth, max);
+      const measure = (text: string) => widthAt100(el, text);
+      if (getComputedStyle(el).position === 'absolute') {
+        nameBox = null;
+        const room = roomAt(el);
+        nameFit =
+          room === null
+            ? nameLines(name, measure, el.clientWidth, max)
+            : nameInRoom(name, measure, el.clientWidth, max, room, TYPE_FLOOR);
+        return;
+      }
+      const drawn = drawnName(el);
+      const room = Math.max(drawn, rowRoom(el));
+      const fit = nameInRoom(name, measure, el.clientWidth, max, room, TYPE_FLOOR);
+      nameBox = drawn;
+      // A name the canvas sets taller than CSS drew it keeps CSS's, so the
+      // box never grows past the server's paint.
+      nameFit = fit.lines.length * fit.size <= room + 0.5 ? fit : null;
     });
   });
+  /**
+   * The name in flow as CSS draws it, the server's paint: the height of one
+   * run of text in the window's own rules (its size, `--_name-size`, the
+   * floor; its tracking, in em), wrapped to the window's width. A hidden copy
+   * of the window, with none of the fit's inline sizes, taken out at once.
+   */
+  function drawnName(el: HTMLElement): number {
+    const probe = el.cloneNode(false);
+    if (!(probe instanceof HTMLElement)) return 0;
+    probe.removeAttribute('style');
+    probe.style.cssText = `position:absolute;top:0;left:0;width:${el.clientWidth}px;margin:0;visibility:hidden`;
+    const run = document.createElement('span');
+    run.textContent = name;
+    probe.appendChild(run);
+    el.insertAdjacentElement('afterend', probe);
+    const height = probe.getBoundingClientRect().height;
+    probe.remove();
+    return height;
+  }
+  /**
+   * The room the window in flow has as CSS lays it out: the second row as the
+   * hero's least height leaves it, less the window's margins. Read from the
+   * inner's other rows, which the window never sizes, so the name the fit set
+   * last never inflates it.
+   */
+  function rowRoom(el: HTMLElement): number {
+    const inner = el.parentElement;
+    if (!inner) return 0;
+    const grid = getComputedStyle(inner);
+    const own = getComputedStyle(el);
+    const [bar = 0, , foot = 0] = grid.gridTemplateRows.split(' ').map(Number.parseFloat);
+    const room =
+      Number.parseFloat(grid.minHeight) -
+      Number.parseFloat(grid.paddingTop) -
+      Number.parseFloat(grid.paddingBottom) -
+      bar -
+      foot -
+      Number.parseFloat(own.marginTop) -
+      Number.parseFloat(own.marginBottom);
+    return Number.isFinite(room) ? Math.max(0, room) : 0;
+  }
+  /**
+   * The room the name has out of flow, at its place (NAME_AT of the hero's
+   * height, its centre): twice the less of its centre's reach up to the top
+   * bar's foot and down to the words' slot. The window, out of flow, moves
+   * neither. Null where nothing is laid out.
+   */
+  function roomAt(el: HTMLElement): number | null {
+    const inner = el.parentElement;
+    const top = inner?.querySelector('.reel__top')?.getBoundingClientRect();
+    const slot = inner?.querySelector('.reel__slot')?.getBoundingClientRect();
+    const box = inner?.getBoundingClientRect();
+    if (!top || !slot || !box || !(box.height > 0)) return null;
+    const centre = box.top + NAME_AT * box.height;
+    return Math.max(0, 2 * Math.min(centre - top.bottom, slot.top - centre));
+  }
 
   // The name as the film's window: drawn where the page lays it out, each
   // word on its baseline in its letter-spacing, at the window's size, white
@@ -1175,6 +1268,7 @@
     bind:this={windowEl}
     data-still={media[shown]?.still ? '' : undefined}
     style:font-size={nameFit ? `${nameFit.size}px` : undefined}
+    style:min-block-size={nameBox === null ? undefined : `${nameBox}px`}
     style:--_still={media[shown]?.still ? `url("${media[shown]?.still}")` : undefined}
   >
     {#if nameFit}
@@ -1217,7 +1311,7 @@
         bind:this={titleEl}
         data-ink="large"
         data-long={now.title.length > 20 ? '' : undefined}
-        style:font-size={wideSize ? `${wideSize}px` : undefined}
+        style:--_size={wideSize ? `${wideSize}px` : undefined}
       >
         {now.title}
       </h2>
@@ -1329,6 +1423,7 @@
   style:--_fp-deepen={FIRST_PAINT.deepen}
   style:--_fp-pale={FIRST_PAINT.pale}
   style:--_wide-max={`${WIDE_TITLE.max}px`}
+  style:--_type-floor={`${TYPE_FLOOR}px`}
   style:--_name-fade-px={`${NAME_FADE_PX}px`}
   style:--_peak-top={firstShades['--_peak-top']}
   style:--_top-0={firstShades['--_top-0']}
@@ -1435,11 +1530,14 @@
     --_push-progress: 0;
     /* The peek's lift: none until `data-peek` sets it. */
     --_lift: 0px;
+    /* The hero's least height: the screen less the lift. The big type's caps
+       on a short screen are read from it (the owner's floor, below). */
+    --_room: calc(100svh - var(--_lift));
 
     position: relative;
     z-index: 2;
     isolation: isolate;
-    min-height: calc(100svh - var(--_lift));
+    min-height: var(--_room);
     overflow: hidden;
     color: var(--_ink);
     touch-action: pan-y;
@@ -1759,8 +1857,8 @@
   }
 
   /* A sizer's title is no heading: it takes what the words' h2 has as one,
-     the reel's heading margin (`.reel h2`, which outranks `.reel__title`'s
-     own) and base.css's tracking, so its box is the words' title's. */
+     the reel's heading margin (`.reel h2`) and base.css's tracking, so its
+     box is the words' title's. */
   .reel__sizer .reel__title {
     margin: 0;
     letter-spacing: var(--tracking-tight);
@@ -1773,7 +1871,7 @@
      S5: 17-21 px). */
   @media (--breakpoint-md) {
     .reel[data-layout='wide'] .reel__sizer .reel__title {
-      font-size: max(var(--_wide-max), calc(var(--text-display) * 1.6));
+      --_size: max(var(--_wide-max), calc(var(--text-display) * 1.6));
     }
   }
 
@@ -1807,24 +1905,28 @@
     color: var(--_ink);
   }
 
+  /* Each title's own size is `--_size`. On a short screen Wide's big type
+     takes its cap (`--_cap`, the owner's floor, 2026-11-22), never more: CSS,
+     so the server's paint is the fitted one. With no cap (Corner, whose index
+     holds a short screen's hero whatever its title's size), its own size. */
   .reel__title {
-    margin-top: var(--space-4);
+    --_size: calc(var(--text-display) * 1.3);
     font-family: var(--font-heading);
     font-weight: var(--font-normal);
-    font-size: calc(var(--text-display) * 1.3);
+    font-size: min(var(--_size), var(--_cap, var(--_size)));
     line-height: var(--leading-none);
     color: var(--_ink);
     text-wrap: balance;
   }
 
   .reel__title[data-long] {
-    font-size: calc(var(--text-display) * 1.1);
+    --_size: calc(var(--text-display) * 1.1);
   }
 
   .reel__title--line {
     max-width: 52ch;
     margin-inline: auto;
-    font-size: var(--text-2xl);
+    --_size: var(--text-2xl);
     line-height: var(--leading-relaxed);
   }
 
@@ -2072,8 +2174,28 @@
   }
 
   .reel[data-layout='wide'] .reel__title {
-    font-size: calc(var(--text-display) * 1.6);
+    --_size: calc(var(--text-display) * 1.6);
     white-space: nowrap;
+  }
+
+  /* The owner's floor (2026-11-22): on a short screen Wide's title, and so
+     its sizers and the slot, takes what the hero's least height leaves it
+     (`--_cap`), never under the floor. The rest of the hero, beside the title
+     (the bar, the kicker, the line and buttons, the strip and the margins),
+     is the floor sweep's on OBB: 304 px from 1280 up, and 335 below, where
+     the bar wraps at 844. A brand whose rest is taller grows the hero a
+     little past the screen; nothing is clipped, the parts are in flow. A
+     phone's title is under the floor and keeps its size. */
+  @media (--breakpoint-md) {
+    .reel[data-layout='wide'] {
+      --_cap: max(var(--_type-floor), calc(var(--_room) - 335px));
+    }
+  }
+
+  @media (--breakpoint-xl) {
+    .reel[data-layout='wide'] {
+      --_cap: max(var(--_type-floor), calc(var(--_room) - 304px));
+    }
   }
 
   .reel[data-layout='wide'] .reel__row {
@@ -2096,6 +2218,8 @@
 
   /* ── Name window: the name is the window; the piece beneath ── */
   .reel__window {
+    /* Its own size, before the fit sets the name's (`nameFit`). */
+    --_name-size: calc(var(--text-display) * 2.8);
     position: absolute;
     left: var(--_gutter);
     right: var(--_gutter);
@@ -2104,9 +2228,10 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     font-family: var(--font-heading);
     font-weight: var(--font-normal);
-    font-size: calc(var(--text-display) * 2.8);
+    font-size: var(--_name-size);
     line-height: var(--leading-none);
     text-align: center;
     /* The canvas draws the letters as the film's window; without it (no
@@ -2122,6 +2247,45 @@
   /* With no still to show through, the name is drawn in ink. */
   .reel__window:not([data-still]) {
     color: var(--_ink);
+  }
+
+  /* The owner's floor (2026-11-22). On a screen too short for the name to
+     sit clear at its place, CSS puts the window in flow: it fills the room
+     between the top bar and the words (the inner's second row), with the
+     name set at the floor (`--_type-floor`), so the hero grows only where
+     the room holds less than the name at the floor. The fit then sets the
+     name as large as that box lets it be, and holds the box at what CSS drew
+     (`nameBox`): nothing moves when the page hydrates.
+
+     The heights are where OBB's name stops sitting clear at its place on
+     HEAD, by width band and peek (the floor sweep, 2026-11-22): in flow
+     there and below, at its place above. They differ with a brand's density
+     and an org's words; where they are off, the fit still keeps the name out
+     of the bar and the words (`roomAt`). */
+  @media (--below-md) and (max-height: 601px),
+    (--breakpoint-md) and (max-width: 79.9375rem) and (max-height: 705px),
+    (--breakpoint-xl) and (max-height: 822px) {
+    .reel:not([data-peek]) .reel__window {
+      --_name-size: var(--_type-floor);
+      position: relative;
+      inset: auto;
+      transform: none;
+      grid-area: 2 / 1;
+      margin-block: var(--space-6);
+    }
+  }
+
+  @media (--below-md) and (max-height: 713px),
+    (--breakpoint-md) and (max-width: 79.9375rem) and (max-height: 833px),
+    (--breakpoint-xl) and (max-height: 862px) {
+    .reel[data-peek] .reel__window {
+      --_name-size: var(--_type-floor);
+      position: relative;
+      inset: auto;
+      transform: none;
+      grid-area: 2 / 1;
+      margin-block: var(--space-6);
+    }
   }
 
   /* The canvas draws the name while the page is at the top. Its letters hold
@@ -2159,11 +2323,11 @@
   }
 
   .reel[data-layout='name'] .reel__title {
-    font-size: var(--text-5xl);
+    --_size: var(--text-5xl);
   }
 
   .reel[data-layout='name'] .reel__title--line {
-    font-size: var(--text-xl);
+    --_size: var(--text-xl);
   }
 
   .reel[data-layout='name'] .reel__line {
@@ -2284,15 +2448,15 @@
     }
 
     .reel__title {
-      font-size: calc(var(--text-display) * 0.9);
+      --_size: calc(var(--text-display) * 0.9);
     }
 
     .reel__title[data-long] {
-      font-size: calc(var(--text-display) * 0.78);
+      --_size: calc(var(--text-display) * 0.78);
     }
 
     .reel[data-layout='wide'] .reel__title {
-      font-size: calc(var(--text-display) * 1.13);
+      --_size: calc(var(--text-display) * 1.13);
       white-space: normal;
     }
 
@@ -2301,12 +2465,12 @@
     }
 
     .reel[data-layout='name'] .reel__title {
-      font-size: calc(var(--text-display) * 0.6);
+      --_size: calc(var(--text-display) * 0.6);
     }
 
     .reel__title--line,
     .reel[data-layout='name'] .reel__title--line {
-      font-size: var(--text-lg);
+      --_size: var(--text-lg);
     }
 
     .reel__line {
@@ -2335,7 +2499,7 @@
     }
 
     .reel__window {
-      font-size: calc(var(--text-display) * 3.1);
+      --_name-size: calc(var(--text-display) * 3.1);
     }
   }
 
