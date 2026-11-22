@@ -1,21 +1,16 @@
 /**
- * The values a Showreel film pass is drawn with, and how they reach its
- * uniforms.
+ * The values a Showreel film pass is drawn with (`setPassUniforms` sets
+ * them, as it does every pass's).
  *
  * A film pass may read any name in `FILM_PASS_UNIFORMS`: the compositor's own
  * (`uniforms.ts`) and the motion's (`motion-uniforms.ts`). `FilmPassValues`
  * holds one value per non-sampler name, and TypeScript makes `filmPassValues`
  * fill it in full, so no name a pass declares is left unset and reading zero.
  * `shaders:check` proves each composed pass declares nothing outside the
- * table (`scripts/film-pass-gate.mjs`).
+ * table (`scripts/shader-gate.mjs`).
  */
 import type { FilmPassUniform, MotionValues } from './effects/motion-uniforms';
-import {
-  isSampler,
-  SAMPLER_UNITS,
-  type UniformValues,
-  uploadUniform,
-} from './effects/uniforms';
+import type { UniformValues } from './effects/uniforms';
 import { governFlash } from './flash';
 
 /** One value per non-sampler uniform a film pass can read. */
@@ -57,19 +52,3 @@ export type FilmPassLocations = readonly (readonly [
   FilmPassUniform,
   WebGLUniformLocation | null,
 ])[];
-
-/**
- * Set each of a film pass's uniforms: a sampler to its fixed unit, the
- * trail as the array it is (`uniform4fv`), the rest by their size.
- */
-export function setFilmPassUniforms(
-  gl: WebGL2RenderingContext,
-  locations: FilmPassLocations,
-  values: FilmPassValues
-): void {
-  for (const [name, loc] of locations) {
-    if (loc === null) continue;
-    if (isSampler(name)) gl.uniform1i(loc, SAMPLER_UNITS[name]);
-    else uploadUniform(gl, loc, values[name]);
-  }
-}

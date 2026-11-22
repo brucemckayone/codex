@@ -10,12 +10,11 @@ import {
   restMotion,
   TRAIL_POINTS,
 } from '../effects/motion-uniforms';
-import { SAMPLER_UNITS } from '../effects/uniforms';
+import { SAMPLER_UNITS, setPassUniforms } from '../effects/uniforms';
 import {
   type FilmPassLocations,
   type FrameShared,
   filmPassValues,
-  setFilmPassUniforms,
 } from '../film-pass-values';
 import { governFlash } from '../flash';
 
@@ -66,7 +65,7 @@ describe('filmPassValues', () => {
   });
 });
 
-describe('setFilmPassUniforms', () => {
+describe('setPassUniforms, for a film pass', () => {
   function recordingGl() {
     const calls: [string, unknown[]][] = [];
     const record =
@@ -102,7 +101,7 @@ describe('setFilmPassUniforms', () => {
       // A name the driver optimised out: nothing is set for it.
       ['u_dive', null],
     ];
-    setFilmPassUniforms(gl, locations, values);
+    setPassUniforms(gl, locations, values);
     expect(calls).toEqual([
       ['uniform1i', [loc('u_scene'), SAMPLER_UNITS.u_scene]],
       ['uniform1i', [loc('u_mask'), SAMPLER_UNITS.u_mask]],
@@ -119,7 +118,7 @@ describe('setFilmPassUniforms', () => {
 
   it('never sets a sampler from the values, whatever they hold', () => {
     const { gl, calls } = recordingGl();
-    setFilmPassUniforms(
+    setPassUniforms(
       gl,
       [['u_media', loc('u_media')]],
       filmPassValues(shared, [1, 1], 0, restMotion())

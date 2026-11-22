@@ -85,23 +85,40 @@ export type UniformValues = {
   [K in ValueName]: GlslValue[Exclude<(typeof UNIFORMS)[K], 'sampler2D'>];
 };
 
-export const isSampler = (name: string): name is SamplerName =>
-  name in SAMPLER_UNITS;
+const isSampler = (name: string): name is SamplerName => name in SAMPLER_UNITS;
 
-/**
- * Set one uniform by its value's shape: a float, a vec2, vec3 or vec4, or a
- * packed vec4 array (`uniform4fv`).
- */
-export function uploadUniform(
+/** A uniform's value: a float, a vec2, vec3 or vec4, or a packed vec4 array. */
+type UniformValue = number | Float32Array | readonly number[];
+
+/** Set one uniform by its value's shape (a packed array: `uniform4fv`). */
+function uploadUniform(
   gl: WebGL2RenderingContext,
   loc: WebGLUniformLocation,
-  v: number | Float32Array | readonly number[]
+  v: UniformValue
 ): void {
   if (typeof v === 'number') gl.uniform1f(loc, v);
   else if (v instanceof Float32Array) gl.uniform4fv(loc, v);
   else if (v.length === 2) gl.uniform2f(loc, v[0], v[1]);
   else if (v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]);
   else gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
+}
+
+/**
+ * Set each of a pass's uniforms: a sampler to its fixed unit, the rest from
+ * `values` by their shape. A location the driver dropped (null) is skipped.
+ * `values` must hold every non-sampler name the locations can name, so a
+ * declared uniform is never left unset (reading zero).
+ */
+export function setPassUniforms<N extends string>(
+  gl: WebGL2RenderingContext,
+  locations: readonly (readonly [N, WebGLUniformLocation | null])[],
+  values: { readonly [K in Exclude<N, SamplerName>]: UniformValue }
+): void {
+  for (const [name, loc] of locations) {
+    if (loc === null) continue;
+    if (isSampler(name)) gl.uniform1i(loc, SAMPLER_UNITS[name]);
+    else uploadUniform(gl, loc, values[name]);
+  }
 }
 
 /** The GLSL declarations for a pass that reads `names`. */

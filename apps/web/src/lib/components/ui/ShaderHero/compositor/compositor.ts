@@ -60,18 +60,15 @@ import {
 } from './effects/ids';
 import { assembleEffect, FRAMES } from './effects/registry';
 import {
-  isSampler,
   SAMPLER_UNITS,
+  setPassUniforms,
   type UniformName,
-  type UniformValues,
-  uploadUniform,
 } from './effects/uniforms';
 import { createFilmMotionPasses, type FilmMotion } from './film-motion';
 import {
   type FilmPassLocations,
   type FrameShared,
   filmPassValues,
-  setFilmPassUniforms,
 } from './film-pass-values';
 import { effectTime } from './flash';
 import { createMediaRunner, planMedia, treatedSize } from './media-pass';
@@ -362,14 +359,6 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     return program;
   }
 
-  function setUniforms(pass: Pass, values: UniformValues) {
-    for (const [name, loc] of pass.locs) {
-      if (loc === null) continue;
-      if (isSampler(name)) gl.uniform1i(loc, SAMPLER_UNITS[name]);
-      else uploadUniform(gl, loc, values[name]);
-    }
-  }
-
   function bindUnit(unit: number, tex: WebGLTexture | null) {
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -393,7 +382,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     gl.useProgram(pass.prog);
     quad.bind(pass.prog);
     bindUnit(SAMPLER_UNITS.u_scene, input);
-    setUniforms(pass, {
+    setPassUniforms(gl, pass.locs, {
       ...values,
       u_resolution: size,
       u_amount: amount,
@@ -828,7 +817,7 @@ export function createCompositor(gl: WebGL2RenderingContext): Compositor {
     gl.useProgram(program.prog);
     quad.bind(program.prog);
     bindUnit(SAMPLER_UNITS.u_scene, picture.tex);
-    setFilmPassUniforms(
+    setPassUniforms(
       gl,
       program.locs,
       filmPassValues(values, f.output, f.time, motion.values)
