@@ -480,15 +480,10 @@
  * The five collectors are exported so the accompanying `node --test` suite can
  * point them at fixture trees; `main()` runs only as the CLI entrypoint.
  */
-import {
-  existsSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-} from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './is-entrypoint.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -1792,23 +1787,4 @@ function main() {
   );
 }
 
-/**
- * Whether this file is the process's entry, so the self-test can import it
- * without running main(). Compared as real paths: Node resolves
- * import.meta.url through symlinks but not argv[1], so a plain comparison
- * skipped main() under a symlinked path and exited 0 having checked nothing
- * (Codex-noyrq).
- */
-function isEntrypoint() {
-  if (!process.argv[1]) return false;
-  try {
-    return (
-      realpathSync(process.argv[1]) ===
-      realpathSync(fileURLToPath(import.meta.url))
-    );
-  } catch {
-    return false;
-  }
-}
-
-if (isEntrypoint()) main();
+if (isEntrypoint(import.meta.url)) main();

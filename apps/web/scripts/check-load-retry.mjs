@@ -79,10 +79,11 @@
  * `--root <dir>` (or `--root=<dir>`) scans `<dir>/src` instead of
  * apps/web/src, without the real tree's ALLOWLIST. Any other argument exits 2.
  */
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'svelte/compiler';
+import { isEntrypoint } from '../../../scripts/checks/is-entrypoint.mjs';
 
 const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -909,21 +910,4 @@ function main(argv = process.argv.slice(2)) {
   );
 }
 
-/**
- * Whether this file is the process's entry. Compared as real paths: Node
- * resolves import.meta.url through symlinks but not argv[1], so a plain
- * comparison skips main() under a symlinked checkout and exits 0 unchecked.
- */
-function isEntrypoint() {
-  if (!process.argv[1]) return false;
-  try {
-    return (
-      realpathSync(process.argv[1]) ===
-      realpathSync(fileURLToPath(import.meta.url))
-    );
-  } catch {
-    return false;
-  }
-}
-
-if (isEntrypoint()) main();
+if (isEntrypoint(import.meta.url)) main();

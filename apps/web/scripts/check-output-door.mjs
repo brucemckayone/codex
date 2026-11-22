@@ -57,10 +57,11 @@
  * other argument exits 2. Exported (`collectViolations`, `blankComments`,
  * `scanSource`) for the tests; `main()` runs only as the CLI entrypoint.
  */
-import { readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'svelte/compiler';
+import { isEntrypoint } from '../../../scripts/checks/is-entrypoint.mjs';
 
 const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const HERO_DIR = join(WEB_ROOT, 'src/lib/components/ui/ShaderHero');
@@ -531,21 +532,4 @@ function main() {
   );
 }
 
-/**
- * Whether this file is the process's entry. Compared as real paths: Node
- * resolves import.meta.url through symlinks but not argv[1], so a plain
- * comparison skips main() under a symlinked checkout and exits 0 unchecked.
- */
-function isEntrypoint() {
-  if (!process.argv[1]) return false;
-  try {
-    return (
-      realpathSync(process.argv[1]) ===
-      realpathSync(fileURLToPath(import.meta.url))
-    );
-  } catch {
-    return false;
-  }
-}
-
-if (isEntrypoint()) main();
+if (isEntrypoint(import.meta.url)) main();
