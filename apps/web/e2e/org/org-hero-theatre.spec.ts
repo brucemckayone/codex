@@ -461,16 +461,21 @@ test.describe('the Showreel theatre', () => {
       route.fulfill({ status: 404, body: '' })
     );
     const { opener, theatre } = await openTheatre(page);
-    await expect(theatre.getByRole('alert')).toHaveText(
-      'This film could not be played.'
-    );
+    // Seen in the theatre's line, and said by an alert. That the alert is
+    // the only one is ReelTheatre.alerts.svelte.test.ts's: this checks the
+    // close, so it reads the line, whichever build says it.
+    const said = 'This film could not be played.';
+    await expect(theatre.locator('.theatre__error')).toHaveText(said);
+    await expect(
+      theatre.getByRole('alert').filter({ hasText: said }).first()
+    ).toBeAttached();
     // A tap hit-tests: it fails while anything paints over the button.
     await bar(theatre).close.tap({ timeout: 5000 });
     await expect(theatre).toHaveCount(0);
     await expect.poll(() => focusCameBack(page, opener)).toBe(true);
 
     const again = await openTheatre(page);
-    await expect(again.theatre.getByRole('alert')).toBeVisible();
+    await expect(again.theatre.locator('.theatre__error')).toHaveText(said);
     await page.keyboard.press('Escape');
     await expect(again.theatre).toHaveCount(0);
     await expect.poll(() => focusCameBack(page, again.opener)).toBe(true);
