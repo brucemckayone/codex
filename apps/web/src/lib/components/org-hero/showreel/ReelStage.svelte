@@ -87,6 +87,7 @@
   const refused: Record<string, boolean> = $state({});
   /** The still has loaded. */
   const loaded: Record<string, boolean> = $state({});
+  /** The still failed to load: it keeps its place, unseen (a load failure keeps its box). */
   const brokenStill: Record<string, boolean> = $state({});
   /** Rebuilds so far; a new value rebuilds the player. */
   const restarts: Record<string, number> = $state({});
@@ -300,9 +301,10 @@
     {@const active = i === index || i === next}
     {@const attempt = restarts[k] ?? 0}
     <div class="reel-stage__item" data-on={i === index ? '' : undefined}>
-      {#if item.still && !brokenStill[k]}
+      {#if item.still}
         <img
           bind:this={stills[k]}
+          data-failed={brokenStill[k] ? '' : undefined}
           {@attach stillLoaded(k)}
           src={item.still}
           srcset={getThumbnailSrcset(item.still) || undefined}
@@ -363,6 +365,11 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  /* A still that failed keeps its place, unseen. */
+  .reel-stage__item img[data-failed] {
+    visibility: hidden;
   }
 
   /* The poster shows until the video has a frame. */

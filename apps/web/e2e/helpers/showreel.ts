@@ -276,6 +276,12 @@ export interface ShowreelOptions {
    * page is opened at DOMContentLoaded: its load event waits on the logo.
    */
   failLogo?: Promise<unknown>;
+  /**
+   * Fail on what breaks the page as it loads (`loadBreaks`), as `introFilm`
+   * and `featureRecording` do: for a test whose server paint and client draw
+   * agree, where a `hydration_mismatch` is the page's, not the rewrite's.
+   */
+  guardHydration?: boolean;
 }
 
 /**
@@ -294,6 +300,7 @@ export async function openShowreel(
     featureRecording = false,
     name,
     failLogo,
+    guardHydration = false,
   }: ShowreelOptions = {}
 ): Promise<Page> {
   const url = `${orgOrigin(ORG, baseURL)}/`;
@@ -305,7 +312,8 @@ export async function openShowreel(
   const page = await context.newPage();
   // A rewrite of the reel's own data leaves the server's markup and the
   // client's apart, so its load must not break the page doing it.
-  const broken = introFilm || featureRecording ? loadBreaks(page) : null;
+  const broken =
+    introFilm || featureRecording || guardHydration ? loadBreaks(page) : null;
   let served = 'no response';
   const unset: string[] = [];
   // Set in the route handler, so typed past the narrowing of `null`.

@@ -534,17 +534,6 @@ describe('a hero picture that fails keeps its box', () => {
   }
 
   /**
-   * Awaiting their fixes, each with its own owner. Each must still be found,
-   * so this list cannot outlive a fix: delete an entry as it lands.
-   * - The stage's still (Showreel stage): a failed one is dropped. Its box is
-   *   the stage item's (absolute, inset 0), so it moves nothing, but it is
-   *   still a picture taken away.
-   */
-  const PENDING = [
-    'showreel/ReelStage.svelte: {#if item.still && !brokenStill[k]} holds a picture',
-  ];
-
-  /**
    * A failure flag handed to a child that keeps the picture's box itself, so
    * no removal: `<file>: <Child> attribute`, and why. The child is an org-hero
    * component, so this same guard holds it to the rule. Each must still be
@@ -566,14 +555,11 @@ describe('a hero picture that fails keeps its box', () => {
       .flatMap((f) => findings(f, readFileSync(join(ORG_HERO_DIR, f), 'utf8')));
 
   test('no org-hero component takes a failed picture away, or blanks one through a prop', () => {
-    expect(found().filter((f) => !PENDING.includes(f) && !accepted(f))).toEqual(
-      []
-    );
+    expect(found().filter((f) => !accepted(f))).toEqual([]);
   });
 
-  test('each pending exception is still there to fix, and each child that keeps the box is still handed its flag', () => {
+  test('each child that keeps the box is still handed its flag', () => {
     const now = found();
-    expect(PENDING.filter((p) => !now.includes(p))).toEqual([]);
     expect(
       Object.keys(KEEPS_THE_BOX).filter(
         (key) => !now.includes(`${key} reads a failure state`)

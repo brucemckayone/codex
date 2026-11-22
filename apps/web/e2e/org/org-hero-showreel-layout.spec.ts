@@ -7,7 +7,9 @@
  * - On a short one (a phone held sideways, a small one, a short laptop
  *   window), peek on or off, the hero holds its top bar, words and index or
  *   strip inside it and apart: never clipped by its overflow (owner,
- *   2026-11-21; WCAG 2.4.11, a tabbable index item hidden by it).
+ *   2026-11-21; WCAG 2.4.11, a tabbable index item hidden by it). Its big
+ *   type shrinks with the room, never under the floor, and every box is
+ *   CSS's from the server's first paint (the owner's floor, 2026-11-22).
  * - The words' slot is the tallest piece's (its sizers), so a hero grown to
  *   hold it keeps its height as the pieces change; and the sizers, hidden
  *   copies of every piece's words, are met by neither axe nor the tab order.
@@ -183,56 +185,355 @@ test.describe('the Showreel in flow (WP-5b)', () => {
     });
   }
 
+  /**
+   * The owner's floor on a short screen (2026-11-22), with no hydration
+   * shift: the big type (Corner's and Wide's titles, the Name window's name)
+   * shrinks with the room it has, never under TYPE_FLOOR, and the hero grows
+   * only as far as the floor needs. It is CSS from the server's first paint,
+   * so no box moves when the page hydrates and the fit lands.
+   *
+   * One page per layout, width and peek, stepped down the floor sweep's
+   * heights (a fresh load at six of them read the same as the stepped one).
+   * At each height:
+   * - R1: every part's box as CSS alone draws it (`drawn`) equals the fitted
+   *   one, to 0.5 px: no box moves when the page hydrates and the fit lands.
+   * - R3: no part is clipped by the hero or over another, the window's top is
+   *   on the screen, and the big type is at the floor at least, or at its own
+   *   size where that is under the floor (a phone's).
+   * - The hero's height is noted on the test, for the R4 table.
+   */
+  const FLOOR_HEIGHTS = [900, 844, 768, 650, 560, 450, 390, 375];
+  const FLOOR_WIDTHS = [667, 844, 1280, 1440];
+  const TYPE_FLOOR = 72;
+  /** The parts R1 holds still: the words' slot, not the words, which change with the piece. */
+  const HELD = {
+    top: '.reel__top',
+    slot: '.reel__slot',
+    window: '.reel__window',
+    index: '.reel__index',
+    strip: '.reel__strip',
+  } as const;
+
+  /**
+   * R1's read. First each part's box as fitted. Then as CSS alone draws it:
+   * - every inline property the client set is stripped. On the parts that is
+   *   all of them but the still. On the root it is all but those the server's
+   *   HTML sets there (`served`);
+   * - the window's marks go, all but `data-still`;
+   * - the name goes back to the one run of text the server sends.
+   * Then everything is put back. `changed` says the strip changed a size the
+   * fit set, so equal boxes were not compared blind.
+   */
+  const drawnAndFitted = (page: Page, served: string[]) =>
+    page.evaluate(
+      ([held, served]) => {
+        const reel = document.querySelector<HTMLElement>('.reel');
+        const inner = reel?.querySelector<HTMLElement>('.reel__inner');
+        if (!reel || !inner) throw new Error('no reel');
+        const read = () => {
+          const hero = reel.getBoundingClientRect();
+          const out: Record<string, number[]> = { hero: [hero.height] };
+          for (const [part, selector] of Object.entries(held)) {
+            const r = reel.querySelector(selector)?.getBoundingClientRect();
+            if (r && r.width > 1 && r.height > 1) {
+              out[part] = [
+                r.top - hero.top,
+                r.bottom - hero.top,
+                r.left - hero.left,
+                r.right - hero.left,
+              ];
+            }
+          }
+          return out;
+        };
+        const sizes = () =>
+          [...reel.querySelectorAll('.reel__title, .reel__window')]
+            .map((el) => getComputedStyle(el).fontSize)
+            .join(' ');
+        const fitted = read();
+        const fittedSizes = sizes();
+        const styled = [
+          reel,
+          ...inner.querySelectorAll<HTMLElement>('[style]'),
+        ].map((el) => [el, el.getAttribute('style')] as const);
+        for (const prop of [...reel.style]) {
+          if (prop.startsWith('--') && !served.includes(prop))
+            reel.style.removeProperty(prop);
+        }
+        for (const el of inner.querySelectorAll<HTMLElement>('[style]')) {
+          for (const prop of [...el.style])
+            if (prop !== '--_still') el.style.removeProperty(prop);
+        }
+        const win = inner.querySelector<HTMLElement>('.reel__window');
+        const kids = win ? [...win.childNodes] : [];
+        const marks = win
+          ? win
+              .getAttributeNames()
+              .filter((a) => a.startsWith('data-') && a !== 'data-still')
+          : [];
+        const marked = marks.map(
+          (a) => [a, win?.getAttribute(a) ?? ''] as const
+        );
+        if (win) {
+          for (const a of marks) win.removeAttribute(a);
+          const run = document.createElement('span');
+          run.dataset.line = '';
+          run.textContent = [...win.querySelectorAll('[data-line]')]
+            .map((line) => line.textContent)
+            .join(' ');
+          win.replaceChildren(run);
+        }
+        const drawn = read();
+        const drawnSizes = sizes();
+        for (const [el, style] of styled) {
+          if (style === null) el.removeAttribute('style');
+          else el.setAttribute('style', style);
+        }
+        if (win) {
+          win.replaceChildren(...kids);
+          for (const [a, v] of marked) win.setAttribute(a, v);
+        }
+        return {
+          fitted,
+          drawn,
+          again: read(),
+          changed: drawnSizes !== fittedSizes,
+        };
+      },
+      [HELD, served] as const
+    );
+
+  /** The custom properties the server's HTML sets on the reel's root. */
+  const servedOnRoot = async (page: Page) => {
+    const html = await (await page.request.get(page.url())).text();
+    const root = /<section class="reel[^"]*"[^>]*\sstyle="([^"]*)"/.exec(html);
+    expect(root, "the server's reel and its style").not.toBeNull();
+    return [...(root?.[1] ?? '').matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]);
+  };
+
+  /** The parts, the big type and its own size, once the fit has settled at this height. */
+  const settledAt = async (page: Page) => {
+    let last = '';
+    for (let i = 0; i < 12; i++) {
+      await page.waitForTimeout(300);
+      const now = await page.evaluate(() => {
+        const reel = document.querySelector('.reel');
+        if (!reel) return null;
+        const big =
+          reel.querySelector<HTMLElement>('.reel__window') ??
+          reel.querySelector<HTMLElement>(
+            '.reel__words .reel__title:not(.reel__title--line)'
+          );
+        // A title's own size, uncapped: its `--_size`. The name's is none:
+        // the fit sets it, and OBB's at every swept width is over the floor.
+        let own: number | null = null;
+        if (big?.classList.contains('reel__title')) {
+          const probe = document.createElement('span');
+          probe.style.cssText =
+            'position:absolute;visibility:hidden;font-size:var(--_size)';
+          big.append(probe);
+          own = Number.parseFloat(getComputedStyle(probe).fontSize);
+          probe.remove();
+        }
+        return {
+          fitting: reel.hasAttribute('data-fitting'),
+          inFlow: big?.classList.contains('reel__window')
+            ? getComputedStyle(big).position !== 'absolute'
+            : null,
+          type: big ? Number.parseFloat(getComputedStyle(big).fontSize) : null,
+          own,
+          least: Number.parseFloat(getComputedStyle(reel).minHeight),
+        };
+      });
+      const parts = await boxes(page);
+      const key = JSON.stringify([now, parts]);
+      if (now && !now.fitting && key === last) return { ...now, parts };
+      last = key;
+    }
+    throw new Error('the fit never settled');
+  };
+
   for (const layout of ['corner', 'wide', 'name'] as const) {
-    for (const viewport of [
-      { width: 844, height: 390 }, // a phone held sideways: the desktop lift
-      { width: 667, height: 375 }, // a small phone held sideways: the phone lift
-      { width: 1280, height: 560 }, // a short laptop window
-    ]) {
+    for (const width of FLOOR_WIDTHS) {
       for (const peek of ['on', 'off'] as const) {
-        const size = `${viewport.width}x${viewport.height}`;
-        test(`a short screen: ${layout} at ${size}, peek ${peek}: the hero's top, words and index fit inside it, apart`, async ({
+        test(`the floor: ${layout} at ${width} wide, peek ${peek}, every swept height: the boxes CSS draws are the fitted ones, nothing clipped or over another, the big type at the floor at least`, async ({
           browser,
           baseURL,
         }) => {
-          test.fixme(
-            layout === 'name',
-            'owner decision pending: Name height bound'
-          );
           const page = await open(browser, baseURL, {
-            context: { viewport },
+            context: { viewport: { width, height: FLOOR_HEIGHTS[0] } },
             keys: { 'reel-layout': layout, 'reel-peek': peek },
           });
           await fitted(page);
           await onShow(page, 1);
-          const now = await boxes(page);
-          // The pause sits over the strip's last column (Wide, Name) and
-          // the index's top (Corner), by design: judged inside, not apart.
-          const shown = (Object.keys(PARTS) as Part[]).flatMap((part) => {
-            const box = now[part];
-            return box ? [[part, box] as const] : [];
-          });
-          expect(shown.map(([part]) => part)).toContain('words');
-          for (const [part, [top, bottom]] of shown) {
-            expect.soft(top, `${part} top`).toBeGreaterThanOrEqual(-0.5);
-            expect
-              .soft(bottom, `${part} bottom`)
-              .toBeLessThanOrEqual(now.hero.height + 0.5);
-          }
-          const apart = shown.filter(([part]) => part !== 'ctl');
-          for (let i = 0; i < apart.length; i++) {
-            for (let j = i + 1; j < apart.length; j++) {
-              const [pa, a] = apart[i];
-              const [pb, b] = apart[j];
-              const overlap =
-                a[2] < b[3] && b[2] < a[3] && a[0] < b[1] && b[0] < a[1];
-              expect.soft(overlap, `${pa} overlaps ${pb}`).toBe(false);
+          // Off the words, the index and the strip, so nothing holds the reel.
+          await page.mouse.move(2, 2);
+          const served = await servedOnRoot(page);
+          expect(served, "the server's own root properties").toContain(
+            '--_wide-max'
+          );
+          let compared = false;
+          const heroes: string[] = [];
+          for (const height of FLOOR_HEIGHTS) {
+            await page.setViewportSize({ width, height });
+            const at = await settledAt(page);
+            const cell = `${width}x${height}`;
+            heroes.push(`${height}: ${at.parts.hero.height.toFixed(1)}`);
+
+            // R1: what CSS draws is what the fit keeps.
+            const read = await drawnAndFitted(page, served);
+            compared ||= read.changed;
+            for (const [part, was] of Object.entries(read.fitted)) {
+              const is = read.drawn[part];
+              // Out of flow the window moves nothing, so the fit may size it.
+              if (part === 'window' && !at.inFlow) continue;
+              expect.soft(is, `${cell}: ${part} drawn`).toBeDefined();
+              if (!is) continue;
+              was.forEach((edge, i) => {
+                expect
+                  .soft(
+                    Math.abs(is[i] - edge),
+                    `${cell}: ${part} [${i}] drawn ${is[i]}, fitted ${edge}`
+                  )
+                  .toBeLessThanOrEqual(0.5);
+              });
             }
+            expect(
+              JSON.stringify(read.again),
+              `${cell}: the read put it all back`
+            ).toBe(JSON.stringify(read.fitted));
+
+            // R3: inside the hero and apart (the pause sits over the strip's
+            // last column and the index's top, by design).
+            const shown = (Object.keys(PARTS) as Part[]).flatMap((part) => {
+              const box = at.parts[part];
+              return box ? [[part, box] as const] : [];
+            });
+            expect(shown.map(([part]) => part)).toContain('words');
+            for (const [part, [top, bottom]] of shown) {
+              expect
+                .soft(top, `${cell}: ${part} top`)
+                .toBeGreaterThanOrEqual(-0.5);
+              expect
+                .soft(bottom, `${cell}: ${part} bottom`)
+                .toBeLessThanOrEqual(at.parts.hero.height + 0.5);
+            }
+            const apart = shown.filter(([part]) => part !== 'ctl');
+            for (let i = 0; i < apart.length; i++) {
+              for (let j = i + 1; j < apart.length; j++) {
+                const [pa, a] = apart[i];
+                const [pb, b] = apart[j];
+                const over =
+                  a[2] < b[3] && b[2] < a[3] && a[0] < b[1] && b[0] < a[1];
+                expect.soft(over, `${cell}: ${pa} over ${pb}`).toBe(false);
+              }
+            }
+            expect(at.type, `${cell}: the big type`).not.toBeNull();
+            expect
+              .soft(at.type ?? 0, `${cell}: the big type at the floor at least`)
+              .toBeGreaterThanOrEqual(
+                Math.min(TYPE_FLOOR, at.own ?? TYPE_FLOOR) - 0.5
+              );
           }
+          test
+            .info()
+            .annotations.push({ type: 'hero', description: heroes.join(', ') });
+          // The instrument: on Wide and Name the fit sets a size, so the
+          // strip changed one at some height.
+          if (layout === 'name' || (layout === 'wide' && width >= 768))
+            expect(compared, 'the strip changed a size the fit set').toBe(true);
           await page.context().close();
         });
       }
     }
+  }
+
+  /**
+   * No layout shift on the real path: the hero as OBB stores it (Wide, peek
+   * on), so the server's first paint and the client draw the same one, at the
+   * short heights where the floor's cap sets the type. Each is loaded fresh,
+   * with hydration guarded (a `hydration_mismatch` fails it), and its layout
+   * shifts are summed from the first paint through hydration and the fit
+   * (`layout-shift`, buffered). The total must be 0, to 0.001. HEAD read
+   * 0.0123 at 844x450 and 0.0030 at 1440x560 (the words settling as the fit
+   * set the title); the floor reads 0.0001 and 0.0005, the brand font's swap
+   * in the top bar.
+   *
+   * Only the stored options: the payload rewrite (`helpers/showreel.ts`) can't
+   * change the server's first paint, so a CLS reading on an injected layout or
+   * peek measures the harness's switch from the stored hero, not a shift a
+   * visitor sees (rewriting only peek, on to off, read 0.1361 at 844x650
+   * against 0.0084 as stored). The injected layouts' proof is R1, above.
+   */
+  for (const [width, height] of [
+    [667, 560],
+    [844, 450],
+    [1440, 560],
+  ] as const) {
+    test(`the floor on the stored hero (Wide, peek on) at ${width}x${height}: no layout shift from the first paint through the fit`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const page = await open(browser, baseURL, {
+        context: { viewport: { width, height } },
+        // The stored layout, so the rewrite sets what the server painted.
+        keys: { 'reel-layout': 'wide' },
+        guardHydration: true,
+        init: () => {
+          const shifts: { value: number; nodes: string[] }[] = [];
+          Object.assign(window, { __shifts: shifts });
+          new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+              const shift = entry as PerformanceEntry & {
+                value: number;
+                hadRecentInput: boolean;
+                sources?: { node?: Node | null }[];
+              };
+              if (shift.hadRecentInput) continue;
+              shifts.push({
+                value: shift.value,
+                nodes: (shift.sources ?? []).map((source) => {
+                  const node = source.node;
+                  return node instanceof Element
+                    ? `${node.tagName.toLowerCase()}.${[...node.classList].join('.')}`
+                    : String(node?.nodeName);
+                }),
+              });
+            }
+          }).observe({ type: 'layout-shift', buffered: true });
+        },
+      });
+      // The server painted the hero the client draws, or the reading would
+      // be the harness's.
+      const html = await (await page.request.get(page.url())).text();
+      const served = /<section class="reel[^"]*"([^>]*)>/.exec(html)?.[1] ?? '';
+      expect(served, "the server's own hero is Wide").toContain(
+        'data-layout="wide"'
+      );
+      expect(served, "the server's own hero peeks").toContain('data-peek=""');
+      await expect(page.locator('.reel')).toHaveAttribute(
+        'data-layout',
+        'wide'
+      );
+      await expect(page.locator('.reel')).toHaveAttribute('data-peek', '');
+      await fitted(page);
+      await settledAt(page);
+      const shifts = await page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __shifts?: { value: number; nodes: string[] }[];
+            }
+          ).__shifts ?? []
+      );
+      const total = shifts.reduce((sum, shift) => sum + shift.value, 0);
+      test.info().annotations.push({
+        type: 'cls',
+        description: `${total.toFixed(4)}${shifts.length ? ` (${shifts.flatMap((shift) => shift.nodes).join(' ')})` : ''}`,
+      });
+      expect(total, 'layout shift').toBeLessThanOrEqual(0.001);
+      await page.context().close();
+    });
   }
 
   for (const layout of ['corner', 'wide', 'name'] as const) {
@@ -286,6 +587,10 @@ test.describe('the Showreel in flow (WP-5b)', () => {
             heldSize: heldTitle
               ? Number.parseFloat(getComputedStyle(heldTitle).fontSize)
               : 0,
+            shownSize: Number.parseFloat(
+              getComputedStyle(words.querySelector('.reel__title') ?? words)
+                .fontSize
+            ),
             slot: slot.getBoundingClientRect().height,
             tallest,
             hidden: getComputedStyle(sizer).visibility,
@@ -296,7 +601,8 @@ test.describe('the Showreel in flow (WP-5b)', () => {
         // The piece's sizer lays its words out as they show, part by part:
         // one that drifted from the words would hold the slot at the wrong
         // height. Wide's title alone is held at its most, on its one line
-        // (WIDE_TITLE.max, review r5 S5), so it is never short of the fit.
+        // (WIDE_TITLE.max, review r5 S5), or at the floor's cap where the
+        // screen is short (`--_cap`), so it is never short of the fit.
         const held = layout === 'wide';
         for (const part of ['kicker', 'title', 'row'] as const) {
           const [ww, wh, wl, wr] = read.words[part];
@@ -311,9 +617,11 @@ test.describe('the Showreel in flow (WP-5b)', () => {
               .toBeLessThanOrEqual(0.5);
           }
           if (part === 'title' && held) {
+            // At its most, or at the floor's cap on this short screen: never
+            // under the title on show.
             expect
               .soft(read.heldSize, `piece ${n}: held title`)
-              .toBeGreaterThanOrEqual(150);
+              .toBeGreaterThanOrEqual(read.shownSize - 0.5);
             expect
               .soft(Math.abs(sh - read.heldSize), `piece ${n}: one line`)
               .toBeLessThanOrEqual(0.5);
@@ -351,57 +659,6 @@ test.describe('the Showreel in flow (WP-5b)', () => {
       expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(
         0.5
       );
-      await page.context().close();
-    });
-  }
-
-  // Review r5 S5: the server paints Wide's titles at their CSS size and the
-  // fit sets each its own after hydration. Read the hero as fitted, then with
-  // every title in the slot stripped of its inline size (the server's paint),
-  // then fitted again: before the sizers held the title at its most, a short
-  // screen's hero grew 17-21 px when the fit landed.
-  for (const viewport of [
-    { width: 844, height: 390 },
-    { width: 1280, height: 560 },
-  ]) {
-    test(`Wide at ${viewport.width}x${viewport.height}: the hero is one height before the title fit and after it (review r5 S5)`, async ({
-      browser,
-      baseURL,
-    }) => {
-      const page = await open(browser, baseURL, {
-        context: { viewport },
-        keys: { 'reel-layout': 'wide' },
-      });
-      await fitted(page);
-      await page.evaluate(() => document.fonts.ready);
-      const read = await page.evaluate(() => {
-        const reel = document.querySelector('.reel');
-        const visible = document.querySelector<HTMLElement>(
-          '.reel__words .reel__title'
-        );
-        if (!reel || !visible) return null;
-        const titles = [
-          ...document.querySelectorAll<HTMLElement>('.reel__slot .reel__title'),
-        ];
-        const height = () => reel.getBoundingClientRect().height;
-        const fitted = height();
-        const fittedSize = getComputedStyle(visible).fontSize;
-        const saved = titles.map((t) => t.style.fontSize);
-        for (const t of titles) t.style.fontSize = '';
-        const painted = height();
-        const paintedSize = getComputedStyle(visible).fontSize;
-        titles.forEach((t, i) => {
-          t.style.fontSize = saved[i];
-        });
-        return { fitted, painted, again: height(), fittedSize, paintedSize };
-      });
-      expect(read).not.toBeNull();
-      if (!read) return;
-      // The instrument: stripping the fit's size changed the title's size,
-      // and putting it back restored the hero.
-      expect(read.paintedSize).not.toBe(read.fittedSize);
-      expect(Math.abs(read.again - read.fitted)).toBeLessThanOrEqual(0.5);
-      expect(Math.abs(read.fitted - read.painted)).toBeLessThanOrEqual(0.5);
       await page.context().close();
     });
   }
@@ -723,6 +980,36 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
     expect(await nameAt(page)).toEqual(ruled);
     await page.context().close();
   });
+
+  // A wordmark logo keeps its aspect at the bar's height (`.reel__sig img`),
+  // so a 4:1 one is 160 px wide, not the square logo NAME_WORD_MAX (17
+  // letters) is set for. Beside it a word the server leaves whole still sits
+  // inside the reel. OBB's own logo is the control.
+  for (const [width, name] of [
+    [320, 'Transformationals Studio'],
+    [375, 'Photojournalism Collective'],
+  ] as const) {
+    test(`a ${name.split(' ')[0]?.length}-letter word beside a 4:1 wordmark on a ${width} phone: inside the reel`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const page = await open(browser, baseURL, {
+        context: { viewport: { width, height: 760 } },
+        name,
+      });
+      await fitted(page);
+      // The control: the logo as OBB ships it.
+      const plain = await inside(page);
+      expect(plain.longWord).toBe(false);
+      // A 4:1 wordmark at the bar's height.
+      await page.addStyleTag({
+        content: '.reel .reel__sig img { width: 160px !important; }',
+      });
+      await frames(page);
+      await inside(page);
+      await page.context().close();
+    });
+  }
 
   /**
    * A logo that fails once the page has painted (its CDN down; CI starts no

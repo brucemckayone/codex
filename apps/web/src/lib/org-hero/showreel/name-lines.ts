@@ -36,6 +36,62 @@ export function nameLines(
 }
 
 /**
+ * The name window on a short screen (the owner's floor, 2026-11-22): the
+ * name in the `room` between the top bar and the words, a box of
+ * `lines x size` (its line height 1). Each way of breaking it is sized to
+ * the width and the cap (`nameLines`) and to the room, and the largest wins;
+ * of equals, the one the width sets largest. Never under `floor`: when the
+ * room holds less, it keeps the floor in its fewest lines that fit across at
+ * it, and `grows` says the hero must grow to hold it. A name no break fits
+ * across at the floor (a very long one on a phone) is set to the width,
+ * under it.
+ */
+export function nameInRoom(
+  name: string,
+  measure: (text: string) => number,
+  available: number,
+  maxSize: number,
+  room: number,
+  floor: number
+): NameLines & { grows: boolean } {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const shapes = [[words.join(' ')]];
+  for (let k = 1; k < words.length; k++) {
+    shapes.push([words.slice(0, k).join(' '), words.slice(k).join(' ')]);
+  }
+  const across = (lines: string[]) =>
+    Math.min(
+      maxSize,
+      Math.floor((100 * available) / Math.max(1, ...lines.map(measure)))
+    );
+  // Of breaks the room sets equal, the one the width sets largest: the
+  // balanced break ("Of Blood" / "& Bones"), never the first ("Of" / ...).
+  let best: NameLines = { lines: shapes[0] ?? [], size: -1 };
+  let bestAcross = -1;
+  for (const lines of shapes) {
+    const wide = across(lines);
+    const size = Math.min(wide, Math.floor(room / lines.length));
+    if (size > best.size || (size === best.size && wide > bestAcross)) {
+      best = { lines, size };
+      bestAcross = wide;
+    }
+  }
+  if (best.size >= floor) return { ...best, grows: false };
+  // At the floor: its fewest lines that fit across, the balanced break of
+  // those.
+  const fits = shapes.filter((lines) => across(lines) >= floor);
+  const fewest = Math.min(...fits.map((lines) => lines.length));
+  let fit: string[] | null = null;
+  for (const lines of fits) {
+    if (lines.length !== fewest) continue;
+    if (!fit || across(lines) > across(fit)) fit = lines;
+  }
+  if (fit) return { lines: fit, size: floor, grows: true };
+  const widest = nameLines(name, measure, available, maxSize);
+  return { ...widest, grows: true };
+}
+
+/**
  * The Wide title's size: the title set across the available width, from its
  * width at 100 px, held between `min` and `max` (the mock's 72-150 px).
  */
