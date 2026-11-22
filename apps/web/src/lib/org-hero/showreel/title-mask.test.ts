@@ -199,6 +199,50 @@ describe('titleWords and drawTitleMask', () => {
     expect(context?.fillStyle).toBe('#fff');
   });
 
+  it('spaces the letters glyph by glyph, as the page does, where the canvas has no letterSpacing (Safari before 18.4)', () => {
+    // The page tracks its titles in (-2.4 px a letter at 96 px); a canvas
+    // with no `letterSpacing` would draw each word 2.4 px a letter too wide.
+    style = {
+      transform: 'none',
+      fontWeight: '400',
+      fontSize: '96px',
+      fontFamily: 'Brand Serif',
+      letterSpacing: '-2.4px',
+    };
+    const ctx = context ?? {};
+    Reflect.deleteProperty(ctx, 'letterSpacing');
+    ctx.measureText = (text: string) => ({
+      ...metrics,
+      width: 40 * text.length,
+    });
+    drawTitleMask(title('Of Blood'));
+    const advance = 40 - 2.4;
+    const want = [
+      ['O', box(0).left, 0],
+      ['f', box(0).left, 1],
+      ['B', box(1).left, 0],
+      ['l', box(1).left, 1],
+      ['o', box(1).left, 2],
+      ['o', box(1).left, 3],
+      ['d', box(1).left, 4],
+    ] as const;
+    expect(drawn.map(({ text }) => text)).toEqual(want.map(([text]) => text));
+    want.forEach(([, left, i], k) => {
+      expect(drawn[k]?.x).toBeCloseTo(left + i * advance, 9);
+      expect(drawn[k]?.y).toBe((k < 2 ? box(0) : box(1)).top + 62);
+    });
+    // Nothing written to a property the canvas does not have.
+    expect('letterSpacing' in ctx).toBe(false);
+  });
+
+  it('draws each word whole where the canvas has no letterSpacing and the title is not tracked', () => {
+    style = { transform: 'none', letterSpacing: 'normal' };
+    const ctx = context ?? {};
+    Reflect.deleteProperty(ctx, 'letterSpacing');
+    drawTitleMask(title('Of Blood'));
+    expect(drawn.map(({ text }) => text)).toEqual(['Of', 'Blood']);
+  });
+
   it('centres the font’s content area in a box of another height, as CSS’s half-leading does', () => {
     // A box 80 high round a content area of 100 (ascent 76, descent 24):
     // the area overhangs it 10 px top and bottom, so the baseline sits at

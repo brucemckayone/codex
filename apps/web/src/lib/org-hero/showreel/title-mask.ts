@@ -144,6 +144,32 @@ function measuredBaseline(
   }
 }
 
+/** The letters of `text`, as the page spaces them (grapheme clusters). */
+function lettersOf(text: string): string[] {
+  if (typeof Intl.Segmenter !== 'function') return Array.from(text);
+  const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  return Array.from(graphemes.segment(text), ({ segment }) => segment);
+}
+
+/**
+ * Draw `text` at (x, y) with `spacing` CSS px after each letter, glyph by
+ * glyph, for a canvas with no `letterSpacing` (Safari before 18.4). Exact for
+ * the tracking; only the font's kerning pairs are lost, a sub-pixel cost.
+ */
+function fillSpaced(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  spacing: number
+): void {
+  let at = x;
+  for (const letter of lettersOf(text)) {
+    ctx.fillText(letter, at, y);
+    at += ctx.measureText(letter).width + spacing;
+  }
+}
+
 /**
  * The title `el` (or the Name window's name) drawn as the film's window: a
  * window-sized canvas, the words white on black in its font, each on its
@@ -173,8 +199,17 @@ export function drawTitleMask(
   ctx.fillRect(0, 0, width, height);
   ctx.fillStyle = '#fff';
   ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-  if (style.letterSpacing && style.letterSpacing !== 'normal')
-    ctx.letterSpacing = style.letterSpacing;
+  // The page's tracking (every h1 and h2 has some). A canvas with no
+  // `letterSpacing` would take the assignment as a plain property and draw
+  // each word too wide, so there the letters are spaced one by one: the
+  // computed value is in px.
+  const tracked = Boolean(
+    style.letterSpacing && style.letterSpacing !== 'normal'
+  );
+  const native = 'letterSpacing' in ctx;
+  if (tracked && native) ctx.letterSpacing = style.letterSpacing;
+  const spacing =
+    tracked && !native ? Number.parseFloat(style.letterSpacing) || 0 : 0;
   ctx.textAlign = 'left';
   // Each word on its baseline where the page sets it: the font's content
   // area (its ascent and descent) centred in the word's box, as CSS lays
@@ -197,7 +232,9 @@ export function drawTitleMask(
       );
       below = measured;
     }
-    ctx.fillText(word.text, word.left, word.top + below);
+    if (spacing)
+      fillSpaced(ctx, word.text, word.left, word.top + below, spacing);
+    else ctx.fillText(word.text, word.left, word.top + below);
   }
   return canvas;
 }
