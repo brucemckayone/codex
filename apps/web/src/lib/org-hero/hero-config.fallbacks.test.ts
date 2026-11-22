@@ -19,8 +19,9 @@
  * changes on purpose, this file has done its job (proving the split) and is
  * deleted. One exception, landed with the split (WP-5b, Codex-1yd58.6): the
  * owner's own 2026-11-21 changes are carried into the copy, marked `5b:` at
- * each of its three places, and WP-6's opening default by layout (Codex-
- * 1yd58.7, the same day), marked `WP-6:`, and nothing else.
+ * each of its three places, WP-6's opening default by layout (Codex-
+ * 1yd58.7, the same day), marked `WP-6:`, and WP-6 r5's logo-led reel (only
+ * the Name window gives way), marked `WP-6 r5:`, and nothing else.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -321,9 +322,9 @@ describe('D. whole option sets', () => {
 /**
  * hero-config.ts at 61d2dfe83, from baseOptions to the end of applyFallbacks,
  * verbatim but for two `export` keywords, the owner's three 5b changes
- * (marked `5b:`) and WP-6's opening default (marked `WP-6:`), inside a
- * function so its names stay out of this module's
- * scope. Never edit it to match the live code.
+ * (marked `5b:`), WP-6's opening default (marked `WP-6:`) and WP-6 r5's
+ * logo-led reel (marked `WP-6 r5:`), inside a function so its names stay out
+ * of this module's scope. Never edit it to match the live code.
  */
 function frozenBeforeSplit() {
   /** The org's own starting point, before any purpose. */
@@ -573,8 +574,10 @@ function frozenBeforeSplit() {
     if (c.lead !== 'name' && !facts.hasLogo) c.lead = 'name';
     // With the logo leading alone the name is out of sight, so the reel never
     // plays through it: no name window, no opening or way into the film by it.
-    if (c.lead === 'logo') {
-      if (c['reel-layout'] === 'name') c['reel-layout'] = 'corner';
+    // WP-6 r5: only the Name window plays through the name; Corner and Wide
+    // play through the piece's title, so the rewrites hang on the layout.
+    if (c.lead === 'logo' && c['reel-layout'] === 'name') {
+      c['reel-layout'] = 'corner';
       if (c['reel-opening'] === 'name') c['reel-opening'] = 'none';
       if (c['reel-film'] === 'name') c['reel-film'] = 'smoke';
     }

@@ -526,6 +526,54 @@ describe('the Showreel', () => {
     ).toMatchObject(byName);
   });
 
+  it('plays the opening and the film through the title on Corner and Wide, whatever leads', () => {
+    // Corner and Wide play 'name' through the piece's title, which the logo
+    // never hides. Only the Name window plays through the org's name, so
+    // only it gives way when the logo leads alone.
+    const leadsAlone = [
+      ['the logo chosen to lead', { lead: 'logo' }, FULL],
+      ["the org's hidden name", {}, { ...FULL, hideTitle: true }],
+    ] as const;
+    const expected = {
+      corner: { layout: 'corner', opening: 'name', film: 'name' },
+      wide: { layout: 'wide', opening: 'name', film: 'name' },
+      name: { layout: 'corner', opening: 'none', film: 'smoke' },
+    } as const;
+    for (const [how, chosen, facts] of leadsAlone)
+      for (const layout of HERO_OPTION_VALUES['reel-layout']) {
+        const r = resolveHero(
+          'consume',
+          {
+            comp: 'showreel',
+            'reel-layout': layout,
+            'reel-opening': 'name',
+            'reel-film': 'name',
+            ...chosen,
+          },
+          facts
+        );
+        expect(r.lead, `${how}, ${layout}: the logo leads`).toBe('logo');
+        expect(
+          {
+            layout: r['reel-layout'],
+            opening: r['reel-opening'],
+            film: r['reel-film'],
+          },
+          `${how}, ${layout}`
+        ).toEqual(expected[layout]);
+      }
+    // Auto keeps the film's own default there too: through the title.
+    for (const layout of ['corner', 'wide'] as const)
+      expect(
+        resolveHero(
+          'consume',
+          { comp: 'showreel', 'reel-layout': layout, lead: 'logo' },
+          FULL
+        )['reel-film'],
+        layout
+      ).toBe('name');
+  });
+
   it('peeks at the featured row only when there is one', () => {
     expect(
       resolveHero('consume', { 'reel-peek': 'on' }, FULL)['reel-peek']

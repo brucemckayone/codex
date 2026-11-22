@@ -500,13 +500,16 @@ function leadFallbacks(c: HeroOptions, facts: HeroFacts): void {
 }
 
 /**
- * The reel's own keys, once the lead is settled. With the logo leading alone
- * the name is out of sight, so the reel never plays through it: no name
- * window, no opening or way into the film by it.
+ * The reel's own keys, once the lead is settled. The Name window plays its
+ * opening and its way into the film through the org's name. With the logo
+ * leading alone that name is out of sight, so the window becomes Corner, and
+ * an opening or a way in through the name becomes none and the smoke. Corner
+ * and Wide play theirs through the piece's title, which the logo never hides,
+ * so there they stay as chosen.
  */
 function reelFallbacks(c: HeroOptions, facts: HeroFacts): void {
-  if (c.lead === 'logo') {
-    if (c['reel-layout'] === 'name') c['reel-layout'] = 'corner';
+  if (c.lead === 'logo' && c['reel-layout'] === 'name') {
+    c['reel-layout'] = 'corner';
     if (c['reel-opening'] === 'name') c['reel-opening'] = 'none';
     if (c['reel-film'] === 'name') c['reel-film'] = 'smoke';
   }
