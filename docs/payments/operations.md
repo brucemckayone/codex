@@ -477,7 +477,14 @@ first set. A refund named there that was made after the covering refund is
 never covered by it. Each writer reads the set together with what its amount
 subtracts (review r11): support's refund of all that's left reads both from
 one snapshot of our record before Stripe's list, and the blocked payment's
-and the late win's in one statement. So a refund that fails afterwards is
+and the late win's in one statement. Each syncs the charge's refunds from
+Stripe first (review r12), so a refund Stripe has failed whose event isn't
+handled yet is in the set; support's syncs again once its refund is made, so
+the refund counts at once. If the first sync fails, no refund is made and the
+page says it couldn't be sent; if the second fails, the refund stands and
+"Support's refund was made, but our record of the charge's refunds could not
+be synced after it…" is logged at error with the ids (the `charge.refunded`
+event syncs it again). So a refund that fails afterwards is
 owed in Failed refunds, or paid and then covered once nothing is owed, never
 covered unpaid; and a refund of the set settled elsewhere afterwards is
 always the alert below.

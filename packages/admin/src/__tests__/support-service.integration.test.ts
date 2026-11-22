@@ -67,6 +67,7 @@ import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
+  afterEach,
   beforeAll,
   beforeEach,
   describe,
@@ -347,6 +348,15 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
     warn: ReturnType<typeof vi.fn>;
     error: ReturnType<typeof vi.fn>;
   };
+
+  // Every refund this test's fake made or listed is removed with the rest:
+  // support's syncs record each one of a charge it refunds (review r12),
+  // whether the test registered it or not.
+  afterEach(() => {
+    for (const listed of fake.refundsByCharge.values()) {
+      for (const refund of listed) created.stripeRefundIds.push(refund.id);
+    }
+  });
 
   beforeEach(() => {
     fake = fakeStripe();
@@ -944,12 +954,12 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         metadata: { codex_support_key: key },
       });
       fake.keys.set(key, { fingerprint: 'another tab', refund: made });
-      // The first read of the list predates that refund.
-      vi.mocked(fake.stripe.refunds.list).mockResolvedValueOnce({
-        object: 'list',
-        data: [],
-        has_more: false,
-      } as never);
+      // The first reads of the list (the sync before support reads, and
+      // support's own, review r12) predate that refund.
+      const empty = { object: 'list', data: [], has_more: false } as never;
+      vi.mocked(fake.stripe.refunds.list)
+        .mockResolvedValueOnce(empty)
+        .mockResolvedValueOnce(empty);
 
       const result = await service.issueRefund(
         chargeId,
@@ -4162,13 +4172,18 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
               .filter((refund) => refund.id !== made.id)
               .map((refund) => ({ ...refund }));
             await failsAtStripe(charge.chargeId, counted.id);
-            vi.mocked(fake.stripe.refunds.list).mockImplementationOnce(
-              (async () => ({
+            // Support's own read (the second: the sync before it reads Stripe
+            // as it is, review r12).
+            const list = vi.mocked(fake.stripe.refunds.list);
+            const real = list.getMockImplementation();
+            if (!real) throw new Error('the fake has no list');
+            list
+              .mockImplementationOnce(real)
+              .mockImplementationOnce((async () => ({
                 object: 'list',
                 data: stale,
                 has_more: false,
-              })) as never
-            );
+              })) as never);
             const errors = syncErrors();
 
             const again = await service.issueRefund(
@@ -5226,16 +5241,27 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           const LATE_WIN_OVERPAID_SEEN =
             'Late win: its refund and the refunds that count pay back more than the payment, by failed refunds its refund included that were settled refunded elsewhere: the one incident to recover is theirs';
 
-          /** Stripe's list, once, after `meanwhile` changed our record: what lands between support's reads. */
-          function betweenTheReads(meanwhile: () => Promise<void>) {
+          /**
+           * Support's own read of Stripe's list (the second list of the
+           * charge in its request: the sync before it is the first, review
+           * r12), returned as it stood when read, and then `meanwhile` lands
+           * before support reads anything else. Our record is never ahead of
+           * what Stripe listed, so this is what production can do.
+           */
+          function rightAfterSupportsList(meanwhile: () => Promise<void>) {
             const list = vi.mocked(fake.stripe.refunds.list);
             const real = list.getMockImplementation();
             if (!real) throw new Error('the fake has no list');
-            list.mockImplementationOnce((async (
+            list.mockImplementationOnce(real).mockImplementationOnce((async (
               ...args: Parameters<typeof real>
             ) => {
+              const page = await real(...args);
+              const asListed = {
+                ...page,
+                data: page.data.map((refund: Stripe.Refund) => ({ ...refund })),
+              };
               await meanwhile();
-              return real(...args);
+              return asListed;
             }) as never);
           }
 
@@ -5250,11 +5276,13 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
               .where(eq(refunds.id, id));
           };
 
-          it("writer 4 reads its set FIRST: a refund standing in Stripe's list that has failed since is owed, never covered unpaid", async () => {
+          it("writer 4 reads its set FIRST: a refund standing when Stripe listed it, which fails (at Stripe and in our record) before support's next read, is owed, never covered unpaid", async () => {
             const charge = await purchaseCharge(3600, lossBuyer);
             const inSet = await failedAt(charge, 100);
             const standing = await standingAt(charge, 400);
-            betweenTheReads(() => fails(standing.id));
+            rightAfterSupportsList(() =>
+              failsAtStripe(charge.chargeId, standing.id)
+            );
 
             const made = await service.issueRefund(
               charge.chargeId,
@@ -5271,12 +5299,12 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
             });
           });
 
-          it('writer 4 with a failure AND a settle between its reads: the failed one stays owed, and the one of its set settled elsewhere is alerted as the residual, never paid twice in silence', async () => {
+          it('writer 4 with a failure AND a settle right after its list: the failed one stays owed, and the one of its set settled elsewhere is alerted as the residual, never paid twice in silence', async () => {
             const charge = await purchaseCharge(3600, lossBuyer);
             const inSet = await failedAt(charge, 100);
             const standing = await standingAt(charge, 400);
-            betweenTheReads(async () => {
-              await fails(standing.id);
+            rightAfterSupportsList(async () => {
+              await failsAtStripe(charge.chargeId, standing.id);
               await settledElsewhereNow(inSet.id);
             });
             const said = supportErrors();
@@ -5312,6 +5340,236 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
               amountCents: 400,
             });
             said.mockRestore();
+          });
+
+          // Review r12 (the silent reviewer's probe): writer 4 syncs our
+          // record before it reads it, and again once its refund is made.
+          const SYNC_AFTER_FAILED =
+            "Support's refund was made, but our record of the charge's refunds could not be synced after it: the charge.refunded event syncs it again, and until then a failed refund it paid may show in Failed refunds";
+
+          /** Stripe failed `refundId` and our record doesn't know yet: its refund.updated isn't handled. */
+          function failedAtStripeOnly(chargeId: string, refundId: string) {
+            const listed = (fake.refundsByCharge.get(chargeId) ?? []).find(
+              (refund) => refund.id === refundId
+            );
+            if (!listed) throw new Error('no such refund at Stripe');
+            listed.status = 'failed';
+          }
+
+          const createsOn = (chargeId: string) =>
+            vi
+              .mocked(fake.stripe.refunds.create)
+              .mock.calls.filter(
+                ([params]) =>
+                  (params as Stripe.RefundCreateParams).charge === chargeId
+              );
+
+          it("the probe: our record lags Stripe (a refund failed there, its event not handled): support's sync first puts it in the set, so the £10.00 refund covers it, and a settle of it is refused: never £14.00 back on £10.00", async () => {
+            const charge = await purchaseCharge(3600, lossBuyer);
+            const standing = await standingAt(charge, 400);
+            failedAtStripeOnly(charge.chargeId, standing.id);
+            const said = supportErrors();
+            const syncSaid = syncErrors();
+
+            const made = await service.issueRefund(
+              charge.chargeId,
+              refundInput(1000, 1),
+              supportId
+            );
+            created.stripeRefundIds.push(made.refund.id);
+            // The refund.updated event lands now.
+            await fails(standing.id);
+
+            expect(made.refund.amountCents).toBe(1000);
+            expect(newestAtStripe(charge.chargeId).metadata).toMatchObject({
+              codex_covers: standing.id,
+            });
+            const standingRow = await rowIdOf(standing.id);
+            expect(await coverOf(standingRow)).toEqual(covered(made.refund.id));
+            expect(await queueRowOf(standingRow)).toBeUndefined();
+            expect(
+              (await failureOf(settleElsewhere(standingRow))).context
+            ).toMatchObject({ code: 'ALREADY_SETTLED' });
+            // Covered exactly by its own set: no cover had to be made up.
+            expect([...said.mock.calls, ...syncSaid.mock.calls]).toEqual([]);
+            said.mockRestore();
+            syncSaid.mockRestore();
+          });
+
+          it("a refund that fails at Stripe BETWEEN support's sync and its list is paid by the refund and in no set: the sync after it counts the refund, so the cover of a payment that owes nothing covers it, alerted, and a settle of it is refused", async () => {
+            const charge = await purchaseCharge(3600, lossBuyer);
+            const standing = await standingAt(charge, 400);
+            const list = vi.mocked(fake.stripe.refunds.list);
+            const real = list.getMockImplementation();
+            if (!real) throw new Error('the fake has no list');
+            list.mockImplementationOnce(real).mockImplementationOnce((async (
+              ...args: Parameters<typeof real>
+            ) => {
+              failedAtStripeOnly(charge.chargeId, standing.id);
+              return real(...args);
+            }) as never);
+            const syncSaid = syncErrors();
+
+            const made = await service.issueRefund(
+              charge.chargeId,
+              refundInput(1000, 1),
+              supportId
+            );
+            created.stripeRefundIds.push(made.refund.id);
+
+            const standingRow = await rowIdOf(standing.id);
+            expect(await coverOf(standingRow)).toEqual(covered(made.refund.id));
+            expect(
+              linesOf(syncSaid, NOTHING_OWED_COVERED, charge.purchase.id)
+            ).toEqual([
+              [
+                NOTHING_OWED_COVERED,
+                expect.objectContaining({
+                  source: 'refunds_sync',
+                  coveringRefundId: made.refund.id,
+                  coveredRefundIds: [standing.id],
+                }),
+              ],
+            ]);
+            expect(
+              (await failureOf(settleElsewhere(standingRow))).context
+            ).toMatchObject({ code: 'ALREADY_SETTLED' });
+            syncSaid.mockRestore();
+          });
+
+          it("support's sync before it reads our record fails: no refund is asked of Stripe, and the request fails as a 5xx the page offers to retry", async () => {
+            const charge = await purchaseCharge(3600, lossBuyer);
+            await failedAt(charge, 300);
+            vi.mocked(fake.stripe.refunds.list).mockImplementationOnce(
+              (async () => {
+                throw Object.assign(new Error('socket hang up'), {
+                  type: 'StripeConnectionError',
+                });
+              }) as never
+            );
+
+            const refused = await failureOf(
+              service.issueRefund(
+                charge.chargeId,
+                refundInput(1000, 1),
+                supportId
+              )
+            );
+
+            expect(refused).toMatchObject({
+              statusCode: 500,
+              code: 'INTERNAL_ERROR',
+            });
+            expect(createsOn(charge.chargeId)).toEqual([]);
+          });
+
+          it("support's sync after its refund fails: the refund made is the answer, and one error line says so with the ids", async () => {
+            const charge = await purchaseCharge(3600, lossBuyer);
+            const inSet = await failedAt(charge, 300);
+            const list = vi.mocked(fake.stripe.refunds.list);
+            const real = list.getMockImplementation();
+            if (!real) throw new Error('the fake has no list');
+            list
+              .mockImplementationOnce(real)
+              .mockImplementationOnce(real)
+              .mockImplementationOnce((async () => {
+                throw Object.assign(new Error('socket hang up'), {
+                  type: 'StripeConnectionError',
+                });
+              }) as never);
+            const said = supportErrors();
+
+            const made = await service.issueRefund(
+              charge.chargeId,
+              refundInput(1000, 1),
+              supportId
+            );
+            created.stripeRefundIds.push(made.refund.id);
+
+            expect(made).toMatchObject({
+              replayed: false,
+              refund: { amountCents: 1000 },
+            });
+            expect(await coverOf(inSet.id)).toEqual(covered(made.refund.id));
+            expect(
+              said.mock.calls.filter(
+                ([message]) => message === SYNC_AFTER_FAILED
+              )
+            ).toEqual([
+              [
+                SYNC_AFTER_FAILED,
+                {
+                  errorId: expect.any(String),
+                  chargeId: charge.chargeId,
+                  refundId: made.refund.id,
+                  purchaseId: charge.purchase.id,
+                  code: null,
+                  lockTimeout: false,
+                  reason: 'socket hang up',
+                },
+              ],
+            ]);
+            said.mockRestore();
+          });
+
+          it("the backstop's search for payments that owe nothing failing logs its code and reason, never the failed query", async () => {
+            const failedQuery = Object.assign(
+              new Error(
+                'Failed query: select "purchase_id" from "refunds" "open_failed"\nparams: ch_secret'
+              ),
+              {
+                cause: Object.assign(
+                  new Error('relation "open_failed" does not exist'),
+                  { code: '42P01' }
+                ),
+              }
+            );
+            const broken = new Proxy(db, {
+              get(target, property) {
+                if (property === 'select') {
+                  return () => {
+                    throw failedQuery;
+                  };
+                }
+                const value: unknown = Reflect.get(target, property, target);
+                return typeof value === 'function' ? value.bind(target) : value;
+              },
+            });
+            const purchase = new PurchaseService(
+              { db: broken, environment: 'test', ...createTestMoneyDeps() },
+              fake.stripe
+            );
+            const errors = vi.spyOn(
+              (
+                purchase as unknown as {
+                  obs: { error: (message: string, meta?: object) => void };
+                }
+              ).obs,
+              'error'
+            );
+
+            await (
+              purchase as unknown as {
+                coverPaymentsOwingNothing: (limit: number) => Promise<void>;
+              }
+            ).coverPaymentsOwingNothing(10);
+
+            const lines = errors.mock.calls.filter(([message]) =>
+              message.startsWith('Could not look for failed refunds')
+            );
+            expect(lines).toEqual([
+              [
+                expect.any(String),
+                {
+                  errorId: expect.any(String),
+                  code: '42P01',
+                  lockTimeout: false,
+                  reason: 'relation "open_failed" does not exist',
+                },
+              ],
+            ]);
+            expect(JSON.stringify(lines)).not.toContain('Failed query');
+            expect(JSON.stringify(lines)).not.toContain('ch_secret');
           });
 
           it('the late win: one double payment is ONE incident to recover by hand; its overpaid check logs at info under the residual errorId, and a re-run of the adoption adds no new incident', async () => {

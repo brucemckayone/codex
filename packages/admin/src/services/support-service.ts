@@ -56,7 +56,12 @@ import {
   STRIPE_SUPPORT_KEY_METADATA_KEY,
   SUBSCRIPTION_STATUS,
 } from '@codex/constants';
-import { type DatabaseClient, toIso, withPagination } from '@codex/database';
+import {
+  type DatabaseClient,
+  dbErrorFacts,
+  toIso,
+  withPagination,
+} from '@codex/database';
 import {
   agreementProposals,
   type ConnectBalance,
@@ -1871,6 +1876,10 @@ export class SupportService extends BaseService {
   /**
    * Refund the charge, in full or in part, in this order (data design §5):
    *
+   * 0. sync our record of the charge's refunds from Stripe, then read it in
+   *    one snapshot: the failed refunds a refund of all that is left
+   *    includes, and those settled elsewhere (`syncChargeRefunds`,
+   *    `recordBeforeStripe`, review r11, r12);
    * 1. list the charge's refunds;
    * 2. one already carrying this decision's key is returned, `replayed`,
    *    once the charge's refunds are synced, which covers the set it
@@ -1887,9 +1896,10 @@ export class SupportService extends BaseService {
    *    (`codex_covers`, review r9); when Stripe does not make it,
    *    `refundNotMade` says why.
    *
-   * `charge.refunded` records the refund. Written here: only the cover of
-   * the failed refunds it includes (owner D73), and on Stripe's "already
-   * refunded" the sync's covers (owner D81).
+   * After it, the cover of the failed refunds it includes (owner D73), then
+   * the sync again, so it counts at once (`syncAfterRefund`, review r12; its
+   * failure is logged, never the answer). `charge.refunded` records it too.
+   * On Stripe's "already refunded", the sync's covers (owner D81).
    */
   async issueRefund(
     chargeId: string,
@@ -1900,9 +1910,11 @@ export class SupportService extends BaseService {
       const readCharge = this.chargeReader(chargeId, false);
       const source = await this.sourceOfCharge(chargeId, readCharge);
 
-      // Our record FIRST, in one snapshot (review r11): the set a refund of
-      // all that is left includes, and what its amount subtracts as settled
-      // elsewhere. Then Stripe's list.
+      // Our record brought up to date with Stripe (review r12), then read
+      // FIRST, in one snapshot (review r11): the set a refund of all that is
+      // left includes, and what its amount subtracts as settled elsewhere.
+      // Then Stripe's list. A failed sync makes no refund.
+      await this.syncChargeRefunds(chargeId, readCharge);
       const before = await this.recordBeforeStripe(source, chargeId);
       const listed = await listChargeRefunds(this.stripe, chargeId);
       const key = supportRefundKey(
@@ -1966,6 +1978,7 @@ export class SupportService extends BaseService {
         return await this.refundedMeanwhile(source, charge);
       }
       await this.coverMade(covering, chargeId, made.refundId);
+      await this.syncAfterRefund(source, chargeId, readCharge, made.refundId);
 
       this.obs.info('Support refund issued', {
         chargeId,
@@ -2020,6 +2033,60 @@ export class SupportService extends BaseService {
       standingCents(listed) -
       settledElsewhereBeyondStripe(listed, elsewhere)
     );
+  }
+
+  /**
+   * Sync our record of the charge's refunds from Stripe
+   * (`recordChargeRefunds`), as the late win and the blocked payment's own
+   * refund do before they read it (review r12), with its covers: each
+   * refund's recorded set, then a payment that owes nothing (owner D81).
+   * Before writer 4 reads our record, so a refund Stripe has failed but whose
+   * `refund.updated` isn't handled yet is in the set its amount pays, not
+   * paid and left open. A failure propagates, typed: nothing has been asked
+   * of Stripe, so the request fails retryably and no refund is made.
+   */
+  private async syncChargeRefunds(
+    chargeId: string,
+    readCharge: () => Promise<Stripe.Charge>
+  ): Promise<void> {
+    await this.purchase.recordChargeRefunds({
+      id: chargeId,
+      paymentIntentId: paymentIntentIdOf(await readCharge()),
+    });
+  }
+
+  /**
+   * Sync again once the refund is made and covered (review r12), so it
+   * counts at once: a refund that failed at Stripe between the sync before
+   * it and Stripe's list was paid by it but is in no set, and with the
+   * refund counted nothing is owed, so the sync's cover of a payment that
+   * owes nothing covers it, alerted (owner D81), and a settle of it is
+   * refused. The refund is made, so a failure here never turns it into a
+   * failed answer: it is logged at error with an errorId and the ids, and
+   * the `charge.refunded` event syncs the charge again. Not a swallow: the
+   * money step is done and recorded at Stripe, and the line says what is
+   * left undone.
+   */
+  private async syncAfterRefund(
+    source: ChargeSource,
+    chargeId: string,
+    readCharge: () => Promise<Stripe.Charge>,
+    refundId: string
+  ): Promise<void> {
+    try {
+      await this.syncChargeRefunds(chargeId, readCharge);
+    } catch (error) {
+      this.obs.error(
+        "Support's refund was made, but our record of the charge's refunds could not be synced after it: the charge.refunded event syncs it again, and until then a failed refund it paid may show in Failed refunds",
+        {
+          errorId: crypto.randomUUID(),
+          chargeId,
+          refundId,
+          purchaseId: source.type === 'purchase' ? source.purchaseId : null,
+          ...dbErrorFacts(error),
+        }
+      );
+    }
   }
 
   /**

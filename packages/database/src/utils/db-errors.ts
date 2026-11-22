@@ -128,12 +128,18 @@ export function isLockNotAvailable(error: unknown): boolean {
 }
 
 /**
- * What a log line may say of a database error (review r11): the Postgres
- * error code of it or of its cause (drizzle wraps every failed query, so the
- * code is on the cause), whether it was a lock given up
- * (`isLockNotAvailable`, 55P03), and its reason as `messageForLog` gives it,
- * the driver's own words. Never the error's message: a failed query's is
- * its SQL and params. It runs in catch blocks, so it never throws.
+ * What a log line may say of a database error (review r11, r12): the Postgres
+ * error code found down its cause chain, whether it was a lock given up
+ * (55P03), and its reason as `messageForLog` gives it, the driver's own
+ * words. Never the error's message: a failed query's is its SQL and params.
+ *
+ * The chain is walked (at most `MAX_CAUSE_HOPS`) because a service wraps a
+ * failed query (`handleError` makes an InternalServiceError whose cause is
+ * drizzle's wrapper, whose cause is the driver's error), and a wrapper's own
+ * `code` is not the database's: a link carrying an HTTP `statusCode` (a
+ * service error, a Stripe error) is passed over. With no code found, the
+ * reason is the innermost error's. It runs in catch blocks, so it never
+ * throws.
  */
 export function dbErrorFacts(error: unknown): {
   code: string | null;
@@ -141,21 +147,35 @@ export function dbErrorFacts(error: unknown): {
   reason: string;
 } {
   try {
-    let code: string | null = null;
-    if (isPostgresError(error)) {
-      code = error.code;
-    } else if (error instanceof Error && 'cause' in error) {
-      const cause = (error as { cause: unknown }).cause;
-      if (isPostgresError(cause)) code = cause.code;
+    let link: unknown = error;
+    for (let hop = 0; hop < MAX_CAUSE_HOPS; hop++) {
+      if (isPostgresError(link) && !hasStatusCode(link)) {
+        return {
+          code: link.code,
+          lockTimeout: link.code === POSTGRES_ERROR_CODES.LOCK_NOT_AVAILABLE,
+          reason: messageForLog(link),
+        };
+      }
+      const cause = causeOf(link);
+      if (cause === undefined) break;
+      link = cause;
     }
-    return {
-      code,
-      lockTimeout: isLockNotAvailable(error),
-      reason: messageForLog(error),
-    };
+    return { code: null, lockTimeout: false, reason: messageForLog(link) };
   } catch {
     return { code: null, lockTimeout: false, reason: messageForLog(error) };
   }
+}
+
+/** An error's `cause`, if it has one worth following. */
+function causeOf(error: unknown): unknown {
+  if (!(error instanceof Error) || !('cause' in error)) return undefined;
+  const { cause } = error as { cause: unknown };
+  return isReason(cause) ? cause : undefined;
+}
+
+/** A link that answers an HTTP status: a service's or Stripe's error, never the driver's. */
+function hasStatusCode(error: Error): boolean {
+  return typeof (error as { statusCode?: unknown }).statusCode === 'number';
 }
 
 /**

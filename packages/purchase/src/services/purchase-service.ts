@@ -2044,12 +2044,11 @@ export class PurchaseService extends BaseService {
         .orderBy(min(openFailed.createdAt))
         .limit(limit);
     } catch (error) {
+      // Its code and reason, never its message: a failed query's is the SQL
+      // and its params (review r12).
       this.obs.error(
         "Could not look for failed refunds on payments that owe nothing; the sweep's refunds are not affected",
-        {
-          errorId: crypto.randomUUID(),
-          error: error instanceof Error ? error.message : String(error),
-        }
+        { errorId: crypto.randomUUID(), ...dbErrorFacts(error) }
       );
       return;
     }

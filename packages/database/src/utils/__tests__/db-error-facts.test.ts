@@ -55,6 +55,36 @@ describe('dbErrorFacts', () => {
     });
   });
 
+  it("finds the driver's code under a service's wrapper, whose own code is not the database's", () => {
+    // handleError's InternalServiceError, over drizzle's wrapper, over the driver.
+    const wrapped = Object.assign(new Error('An unexpected error occurred'), {
+      code: 'INTERNAL_ERROR',
+      statusCode: 500,
+      cause: failedQuery(
+        pgError('canceling statement due to lock timeout', '55P03')
+      ),
+    });
+
+    expect(dbErrorFacts(wrapped)).toEqual({
+      code: '55P03',
+      lockTimeout: true,
+      reason: 'canceling statement due to lock timeout',
+    });
+  });
+
+  it('gives no code for a Stripe error, only its reason', () => {
+    const stripe = Object.assign(new Error('No such charge'), {
+      code: 'resource_missing',
+      statusCode: 404,
+    });
+
+    expect(dbErrorFacts(stripe)).toEqual({
+      code: null,
+      lockTimeout: false,
+      reason: 'No such charge',
+    });
+  });
+
   it('withholds a failed query the driver gave no reason for', () => {
     const facts = dbErrorFacts(failedQuery(undefined));
 

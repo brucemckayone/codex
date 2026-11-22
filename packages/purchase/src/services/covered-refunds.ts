@@ -345,21 +345,34 @@ export function uncoveredFailedRefundIdsOf(
 
 /**
  * The driver's value of `uncoveredFailedRefundIdsOf`'s JSON array: parsed,
- * or its text. Anything else is a defect, never an empty set: an empty set
- * read wrongly would include nothing, and a refund then asked would cover
- * nothing it paid.
+ * or its text. Anything else, text that is not JSON included, is a defect,
+ * never an empty set: an empty set read wrongly would include nothing, and a
+ * refund then asked would cover nothing it paid.
  */
 function refundIdsOf(value: unknown): string[] {
-  const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : value;
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch (error) {
+      throw notRefundIds('string', error);
+    }
+  }
   if (
     Array.isArray(parsed) &&
     parsed.every((id): id is string => typeof id === 'string')
   ) {
     return parsed;
   }
-  throw new InternalServiceError(
+  throw notRefundIds(typeof parsed);
+}
+
+/** `refundIdsOf`'s defect: what came back, by its type only (a 5xx, no data). */
+function notRefundIds(received: string, cause?: unknown): InternalServiceError {
+  return new InternalServiceError(
     "A payment's failed refunds were read as something other than a list of ids",
-    { received: typeof parsed }
+    { received },
+    cause === undefined ? undefined : { cause }
   );
 }
 
