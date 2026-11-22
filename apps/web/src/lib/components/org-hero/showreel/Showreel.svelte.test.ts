@@ -987,6 +987,21 @@ describe('Showreel names the org as the hero says', () => {
     expect(q('.reel__name')?.classList.contains('sr-only')).toBe(false);
   });
 
+  // Showreel.ssr.test.ts checks the same names in the server's HTML.
+  it("marks a name with a word longer than any phone's top bar holds, so there it steps down and breaks (WP-5a)", () => {
+    const props = render('corner');
+    const marked = () => q('.reel__name')?.hasAttribute('data-long-word');
+    expect(marked()).toBe(false);
+    // 17 letters: whole on any phone.
+    props.name = 'Transformationals Studio';
+    flushSync();
+    expect(marked()).toBe(false);
+    // 18 letters: past a 320 px phone's bar at 0.6 em a letter.
+    props.name = 'Neuroendocrinology Studio';
+    flushSync();
+    expect(marked()).toBe(true);
+  });
+
   it("draws the Name window's letters in ink for a piece with no still", () => {
     render('name', {
       reel: [

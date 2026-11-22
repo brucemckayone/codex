@@ -154,6 +154,21 @@ function orgName(html: string): string | null {
   return literal ? JSON.parse(literal) : null;
 }
 
+/**
+ * The landing's HTML with the org named `name` wherever its seeded name is
+ * (the markup's and the page data's), so the server and hydration both draw
+ * it, or null when the page names no org. Plain names only: letters, digits,
+ * spaces and `&`.
+ */
+function withOrgName(html: string, name: string): string | null {
+  const seeded = orgName(html);
+  if (!seeded) return null;
+  const markup = (text: string) => text.replaceAll('&', '&amp;');
+  return html
+    .replaceAll(markup(seeded), () => markup(name))
+    .replaceAll(seeded, () => name);
+}
+
 /** The title of the first piece in the server's own markup of the reel, or null. */
 function serverFirstTitle(html: string): string | null {
   const span =
@@ -246,6 +261,8 @@ export interface ShowreelOptions {
   introFilm?: { fullFilm: boolean };
   /** Put a recording with a preview in the reel. */
   featureRecording?: boolean;
+  /** The org's name instead of its seeded one (`withOrgName`). */
+  name?: string;
 }
 
 /**
@@ -262,6 +279,7 @@ export async function openShowreel(
     init,
     introFilm,
     featureRecording = false,
+    name,
   }: ShowreelOptions = {}
 ): Promise<Page> {
   const url = `${orgOrigin(ORG, baseURL)}/`;
@@ -297,6 +315,8 @@ export async function openShowreel(
       if (next === null) unset.push(what);
       else body = next;
     };
+    // First, so every rewrite after it reads the name the page will draw.
+    if (name) set('an org name', (doc) => withOrgName(doc, name));
     if (introFilm)
       set('an intro film', (doc) => {
         const done = withIntroFilm(doc, introFilm.fullFilm);
@@ -313,10 +333,13 @@ export async function openShowreel(
   await expect(page.locator('.reel')).toBeVisible({ timeout: 30_000 });
   // The server draws the Showreel too (the consume default), so in sight is
   // not yet hydrated, and a click then does nothing. The bar's first write
-  // (`--_progress`) is the browser's own: the reel is live from there.
-  await expect(page.locator('.reel')).toHaveAttribute('style', /--_progress/, {
-    timeout: 30_000,
-  });
+  // (`--_progress`) is the browser's own: the reel is live from there. It is
+  // written as the reel hydrates, so no other mark comes sooner: missing, the
+  // page itself was slow to hydrate (a loaded dev server), not the reel.
+  await expect(
+    page.locator('.reel'),
+    'server-drawn, not hydrated after 30 s'
+  ).toHaveAttribute('style', /--_progress/, { timeout: 30_000 });
   if (film) await filmLeads(page, film, serverFirst);
   return page;
 }

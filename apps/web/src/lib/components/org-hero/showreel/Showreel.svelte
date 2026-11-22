@@ -89,6 +89,7 @@
     type Shade,
     scrimAlpha,
     scrimTint,
+    secondCarrier,
     shadeFloor,
     shadeProps,
     wordRoom,
@@ -168,6 +169,8 @@
   const NAME_MAX = { desk: 228, deskPeek: 196, phone: 138 };
   /** The Wide title's range (the mock's). */
   const WIDE_TITLE = { min: 72, max: 150 };
+  /** The longest word a phone's top bar holds whole, in letters (`longWord`). */
+  const NAME_WORD_MAX = 17;
 
   // The complement of `--below-md` (breakpoints.css), as the landing reads it.
   const desktop = new MediaQuery('(min-width: 48rem)');
@@ -910,7 +913,11 @@
         const left = glowLeaves(need, glows.get(groupOf(role.el)) ?? 0);
         if (left <= SHADE_PEAK_MAX) asked.set({ span: role.span, need: left }, role);
       }
-      const grown = growShades([...asked.keys()]);
+      // A word its carrier leaves short takes a second, bounded so the
+      // header still reads as a shadow from each side (`secondCarrier`; a
+      // phone's top-bar name, 2026-11-22).
+      const needs = [...asked.keys()];
+      const grown = secondCarrier(needs, growShades(needs).shades);
       shades = grown.shades;
       // A word still short where it sits: one step further, and again. A
       // colour carried as it is but short here (review r3 M1) starts at its
@@ -1085,6 +1092,10 @@
   // readers (OrgHero's rule), and in sight when there is no logo to lead,
   // a failed one included (OrgHero hands back '' for it).
   const nameHidden = $derived(options.lead === 'logo' && !!logoUrl);
+  // A word in the name longer than any phone's top bar holds (320 px less
+  // the gutters, a logo and its gap, at 0.6 em a letter): it steps down and
+  // breaks where it must on a phone, never past the reel (WP-5a).
+  const longWord = $derived(name.split(/\s+/).some((word) => word.length > NAME_WORD_MAX));
 </script>
 
 {#snippet item(w: ReelWords, i: number, kind: boolean)}
@@ -1125,7 +1136,7 @@
   <header class="reel__top">
     <div class="reel__sig">
       {#if logoUrl}<img src={logoUrl} alt="" onerror={onlogofail} />{/if}
-      {#if layout !== 'name'}<h1 class={['reel__name', { 'sr-only': nameHidden }]} data-ink="body">{name}</h1>{/if}
+      {#if layout !== 'name'}<h1 class={['reel__name', { 'sr-only': nameHidden }]} data-ink="body" data-long-word={longWord ? '' : undefined}>{name}</h1>{/if}
     </div>
     <div class="reel__meta">
       {#if facts}<span data-ink="body">{facts}</span>{/if}
@@ -2198,6 +2209,24 @@
        org's action wait for the page below. */
     .reel__meta {
       display: none;
+    }
+
+    /* The org's name in balanced lines no longer than 7em (WP-5a,
+       2026-11-22): on one line it reached past what the header's left shade
+       carries (OBB's, 0.15-0.66 of a 390 reel, 3.2-4.3:1); wrapped, it sits
+       near its corner. A word longer than the measure keeps its own width
+       (the least wins over the most); one longer than any phone's bar
+       (`data-long-word`) takes a step down and breaks where it must. */
+    .reel__name {
+      max-inline-size: 7em;
+      min-inline-size: min-content;
+      text-wrap: balance;
+    }
+
+    .reel__name[data-long-word] {
+      min-inline-size: 0;
+      font-size: var(--text-lg);
+      overflow-wrap: anywhere;
     }
 
     .reel__index,

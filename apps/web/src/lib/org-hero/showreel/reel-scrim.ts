@@ -369,20 +369,11 @@ export function growShades(
   const base = shades.map((shade) =>
     shade.corners.map((corner) => ({ ...corner }))
   );
-  const centre = ({ left, top, right, bottom }: Span) =>
-    [(left + right) / 2, (top + bottom) / 2] as const;
   const carry = new Map<string, Need[]>();
   for (const need of needs) {
     if (need.need > SHADE_PEAK_MAX) continue;
-    const [x, y] = centre(need.span);
-    let best = '';
-    let most = -1;
-    for (const [s, shade] of shades.entries()) {
-      for (const [c, corner] of shade.corners.entries()) {
-        const laid = shadeAt(x, y, [{ peak: shade.peak, corners: [corner] }]);
-        if (laid > most) [most, best] = [laid, `${s}:${c}`];
-      }
-    }
+    const [s, c] = carrierOf(need.span, shades);
+    const best = `${s}:${c}`;
     carry.set(best, [...(carry.get(best) ?? []), need]);
   }
   const met = (list: readonly Need[]) =>
@@ -414,6 +405,26 @@ export function growShades(
     ({ span, need }) => shadeFloor(span, grown) < need
   );
   return { shades: grown, short };
+}
+
+/**
+ * The ellipse that carries a word in `growShades`, as [shade, corner]: the
+ * one that lays the most at the word's centre, the first on a tie.
+ */
+function carrierOf(
+  { left, top, right, bottom }: Span,
+  shades: readonly Shade[] = SHADES
+): readonly [number, number] {
+  const [x, y] = [(left + right) / 2, (top + bottom) / 2];
+  let best: readonly [number, number] = [0, 0];
+  let most = -1;
+  for (const [s, shade] of shades.entries()) {
+    for (const [c, corner] of shade.corners.entries()) {
+      const laid = shadeAt(x, y, [{ peak: shade.peak, corners: [corner] }]);
+      if (laid > most) [most, best] = [laid, [s, c]];
+    }
+  }
+  return best;
 }
 
 /** The shades' alpha at a point of the box (fractions), composited. */
@@ -453,6 +464,146 @@ export function shadeFloor(
     }
   }
   return least;
+}
+
+/** Where over a box the shades lay the least, sampled as `shadeFloor` does. */
+function weakestAt(
+  span: Span,
+  shades: readonly Shade[]
+): readonly [number, number] {
+  let least = 2;
+  let at: readonly [number, number] = [span.left, span.top];
+  for (let i = 0; i <= 8; i++) {
+    for (let j = 0; j <= 2; j++) {
+      const x = span.left + ((span.right - span.left) * i) / 8;
+      const y = span.top + ((span.bottom - span.top) * j) / 2;
+      const laid = shadeAt(x, y, shades);
+      if (laid < least) [least, at] = [laid, [x, y]];
+    }
+  }
+  return at;
+}
+
+/**
+ * How far out the ramp still lays `share` of its peak: `rampAt` read
+ * backwards, between its stops as CSS reads them (0 at a share of 1 or more).
+ */
+function rampReach(share: number): number {
+  if (share >= 1) return 0;
+  let [t0, f0] = [0, 1];
+  for (const [t1, f1] of RAMP) {
+    if (f1 <= share) {
+      return f0 === f1 ? t1 : t0 + ((f0 - share) / (f0 - f1)) * (t1 - t0);
+    }
+    [t0, f0] = [t1, f1];
+  }
+  return 1;
+}
+
+/**
+ * The stretch of the reel's edge one ellipse lays at least half on, alone at
+ * its shade's peak, in fractions of the width: the top edge for an ellipse
+ * anchored above the reel (the header's), the foot for one below. Null where
+ * it lays less than half all along that edge.
+ */
+export function halfSpan(
+  { cx, cy, rx, ry }: Corner,
+  peak: number
+): readonly [number, number] | null {
+  if (peak < 0.5) return null;
+  const t = rampReach(0.5 / peak);
+  const dy = ((cy < 0.5 ? 0 : 1) - cy) / ry;
+  const across = t * t - dy * dy;
+  if (across < 0) return null;
+  const half = rx * Math.sqrt(across);
+  return [cx - half, cx + half];
+}
+
+/**
+ * Whether a shade still reads as a shadow from each side, the owner's rule
+ * for the header (2026-11-20: "a shadow coming from each side", no band):
+ * its ellipses' half-strength stretches along their edge (`halfSpan`) never
+ * meet. Computed from the ellipses, never from pixels.
+ */
+export function readsAsTwo(shade: Shade): boolean {
+  const spans = shade.corners
+    .map((corner) => halfSpan(corner, shade.peak))
+    .filter((span): span is readonly [number, number] => span !== null)
+    .sort((a, b) => a[0] - b[0]);
+  let end = Number.NEGATIVE_INFINITY;
+  for (const [from, to] of spans) {
+    if (from <= end) return false;
+    end = to;
+  }
+  return true;
+}
+
+/**
+ * The words `growShades` leaves short with their carrier at its most,
+ * carried further by a second ellipse (a phone's top-bar name reaches past
+ * the header's left corner, 2026-11-22): the other ellipse of the same shade
+ * that lays the most at the word's weakest point, grown the same way (peak
+ * first, then reach, to the same caps), only as far as the word needs, and
+ * never so far that the shade stops reading as two (`readsAsTwo`): a word
+ * that bound leaves short stays in `short`, for the caller to report. A
+ * shade that already reads as one takes no second carrier. `grown` is
+ * `growShades`'s output for these needs over `shades`.
+ */
+export function secondCarrier(
+  needs: readonly Need[],
+  grown: readonly Shade[],
+  shades: readonly Shade[] = SHADES
+): { shades: Shade[]; short: Need[] } {
+  const next = grown.map((shade) => ({
+    peak: shade.peak,
+    corners: shade.corners.map((corner) => ({ ...corner })),
+  }));
+  for (const { span, need } of needs) {
+    const met = () => shadeFloor(span, next) >= need;
+    if (need > SHADE_PEAK_MAX || met()) continue;
+    const [s, first] = carrierOf(span, shades);
+    const shade = next[s];
+    if (!shade || !readsAsTwo(shade)) continue;
+    const [x, y] = weakestAt(span, next);
+    let c = -1;
+    let most = -1;
+    for (const [i, corner] of shade.corners.entries()) {
+      if (i === first) continue;
+      const laid = shadeAt(x, y, [{ peak: shade.peak, corners: [corner] }]);
+      if (laid > most) [most, c] = [laid, i];
+    }
+    const corner = shade.corners[c];
+    const from = shades[s]?.corners[c];
+    if (!corner || !from) continue;
+    while (!met() && shade.peak < SHADE_PEAK_MAX) {
+      const was = shade.peak;
+      shade.peak = Math.min(
+        SHADE_PEAK_MAX,
+        Math.round((shade.peak + 0.02) * 100) / 100
+      );
+      if (!readsAsTwo(shade)) {
+        shade.peak = was;
+        break;
+      }
+    }
+    let scale = Math.round((corner.rx / from.rx) * 100) / 100;
+    while (!met() && scale < SHADE_REACH_MAX) {
+      const step = Math.min(
+        SHADE_REACH_MAX,
+        Math.round((scale + 0.04) * 100) / 100
+      );
+      const [rx, ry] = [corner.rx, corner.ry];
+      corner.rx = from.rx * step;
+      corner.ry = from.ry * step;
+      if (!readsAsTwo(shade)) {
+        [corner.rx, corner.ry] = [rx, ry];
+        break;
+      }
+      scale = step;
+    }
+  }
+  const short = needs.filter(({ span, need }) => shadeFloor(span, next) < need);
+  return { shades: next, short };
 }
 
 /**
