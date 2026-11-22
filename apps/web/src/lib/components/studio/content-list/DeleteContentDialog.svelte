@@ -73,6 +73,11 @@
   const many = $derived(
     target?.mode === 'many' && leavesOn ? manyNotice(target.pieces, leavesOn) : null
   );
+  // Cancel, Unpublish instead and Delete in 30 days need about 32rem in one
+  // row, as mockup LN1 draws them, and `sm` is 28rem (owner, 2026-11-22);
+  // 34rem leaves room for a wider font. The footer wraps rather than clip,
+  // but the mockup's row is the layout.
+  const wide = $derived(Boolean(one?.unpublish));
 </script>
 
 {#snippet leaveBanner(title: string, body: string)}
@@ -92,7 +97,7 @@
   dismissible={!busy}
   role="alertdialog"
 >
-  <Dialog.Content size="sm">
+  <Dialog.Content size="sm" maxWidth={wide ? '34rem' : undefined}>
     <Dialog.Header>
       <Dialog.Title>
         {#if target?.mode === 'one'}

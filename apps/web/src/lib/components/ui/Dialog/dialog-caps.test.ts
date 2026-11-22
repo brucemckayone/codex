@@ -72,6 +72,7 @@ function rulesOf(file: string): Rule[] {
 
 const content = rulesOf('DialogContent.svelte');
 const toolbar = rulesOf('DialogToolbar.svelte');
+const footer = rulesOf('DialogFooter.svelte');
 
 /** The one value `property` takes in the one rule for `selector` (inside `within`). */
 function value(
@@ -309,5 +310,21 @@ describe("DialogToolbar's cap", () => {
       // Flush: outside CAPPED, its own bare box.
       { rule: '.dialog-toolbar[data-flush]', sets: ['padding'] },
     ]);
+  });
+});
+
+describe("DialogFooter's row", () => {
+  // A flex row that cannot wrap overflows off its start edge, where the
+  // Cancel sits: the leaving-notice delete dialog showed "ncel" at 28rem
+  // (2026-11-22, measured in Chromium at 1440).
+  it('wraps a row too wide for its panel rather than clip it', () => {
+    expect(value(footer, '.dialog-footer', 'flex-wrap')).toBe('wrap');
+  });
+
+  it('is never turned back to one line by a later rule', () => {
+    const wraps = footer
+      .filter((r) => r.decls.has('flex-wrap') || r.decls.has('flex-flow'))
+      .map((r) => [r.selector, ...r.within].join(' '));
+    expect(wraps).toEqual(['.dialog-footer']);
   });
 });

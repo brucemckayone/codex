@@ -4,9 +4,15 @@
   The action row, last in the panel (or in its Dialog.Form).
 
   @prop {'end' | 'between'} [align='end'] - `end`: actions stacked on a
-    phone, right-aligned in a row from sm. `between`: one row at every width,
+    phone, right-aligned in a row from sm. `between`: a row at every width,
     the first action at the start and the last at the end (a Clear beside an
-    Apply).
+    Apply) while it fits; wrapped, a lone action on the next line sits at the
+    start.
+
+  A row too wide for its panel wraps onto a second line: it never clips. A
+  flex row that cannot wrap overflows off its start edge, which is where the
+  Cancel sits (the leaving-notice delete dialog lost it to "ncel" at 28rem,
+  2026-11-22). A row that fits is laid out as before.
 -->
 <script lang="ts">
   import { getContext, type Snippet } from 'svelte';
@@ -38,6 +44,8 @@
   .dialog-footer {
     display: flex;
     flex-direction: column-reverse;
+    /* Only a row ever wraps: a column of auto height has nothing to wrap into. */
+    flex-wrap: wrap;
     gap: var(--space-2);
     padding: var(--space-4) var(--space-6) var(--space-6);
     border-top: var(--border-width) var(--border-style) var(--color-border-subtle);
