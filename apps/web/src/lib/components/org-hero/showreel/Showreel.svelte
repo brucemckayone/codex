@@ -99,6 +99,7 @@
   import { type TheatreItem, theatreFor } from '$lib/org-hero/showreel/theatre';
   import { themeState } from '$lib/theme.svelte';
   import * as m from '$paraglide/messages';
+  import ReelEntries from './ReelEntries.svelte';
   import ReelStage from './ReelStage.svelte';
   import ReelTheatre from './ReelTheatre.svelte';
 
@@ -1022,17 +1023,6 @@
   const longWord = $derived(name.split(/\s+/).some((word) => word.length > NAME_WORD_MAX));
 </script>
 
-{#snippet item(w: ReelWords, i: number, kind: boolean)}
-  <li>
-    <button type="button" class="reel__item" aria-current={i === shown ? 'true' : undefined} onclick={() => clock.go(i)}>
-      <span class="reel__n" data-ink="body">{w.number}</span>
-      <span class="reel__t" data-ink="body">{w.title}</span>
-      {#if kind}<span class="reel__k" data-ink="body">{w.kind}</span>{/if}
-      <span class="reel__bar" aria-hidden="true"><i></i></span>
-    </button>
-  </li>
-{/snippet}
-
 <!-- The pause, first in the reel's tab order (WCAG 2.2.2), drawn where each
      layout keeps it: atop the index, at the strip's end, by the phone's segments. -->
 {#snippet pause()}
@@ -1203,22 +1193,6 @@
   </div>
 {/snippet}
 
-<!-- Every entry: the strip along the foot (Wide, Name), or the index (Corner). -->
-{#snippet entries()}
-  {#if strip}
-    <ol class="reel__strip" onpointerenter={hover(true)} onpointerleave={hover(false)}>
-      {#each words as w, i (i)}{@render item(w, i, false)}{/each}
-    </ol>
-  {:else}
-    <nav class="reel__index" aria-label={m.org_hero_reel_label()} onpointerenter={hover(true)} onpointerleave={hover(false)}>
-      <ol>
-        {#each words as w, i (i)}{@render item(w, i, true)}{/each}
-      </ol>
-      <a class="reel__all" href={exploreHref} data-ink="body">{m.org_hero_explore_everything()}</a>
-    </nav>
-  {/if}
-{/snippet}
-
 <section
   class="reel"
   bind:this={rootEl}
@@ -1267,7 +1241,7 @@
         {#each words as w, i (i)}{@render sizer(w, i)}{/each}
       </div>
     </div>
-    {@render entries()}
+    <ReelEntries {strip} {words} {shown} onpick={(i) => clock.go(i)} {hover} {exploreHref} />
   </div>
   {#if theatre}
     <ReelTheatre
@@ -1366,24 +1340,24 @@
      task the fit took the lift off, so the fit judged it carried and dropped
      it, and its transitionend fitted again: a fit every 230 ms, the scrim
      flickering. Their background and border still ease. */
-  .reel :is([data-ink], [data-ink] *, a, .reel__ghost, .reel__round) {
+  .reel :global(:is([data-ink], [data-ink] *, a, .reel__ghost, .reel__round)) {
     transition-property: background-color, border-color;
   }
 
   /* The first paint (see `--_pole-ink`): set aside only while a fit reads
      the brand's colours (`data-fitting`, within one task, never painted). */
-  .reel:not([data-fit]):not([data-fitting]) :is([data-ink], [data-ink] *, .reel__ghost, .reel__round) {
+  .reel:not([data-fit]):not([data-fitting]) :global(:is([data-ink], [data-ink] *, .reel__ghost, .reel__round)) {
     color: var(--_pole-ink) !important;
   }
 
   .reel :global(p),
   .reel h1,
   .reel h2,
-  .reel ol {
+  .reel :global(ol) {
     margin: 0;
   }
 
-  .reel ol {
+  .reel :global(ol) {
     padding: 0;
     list-style: none;
   }
@@ -1543,7 +1517,7 @@
      ground), blurred all through, at its group's strongest need (`--_glow`).
      It lays a share of that on the ground touching the glyphs (GLOW_SHARE,
      from the 1 px ring probe), and the shades grow only for the rest. */
-  .reel[data-edge='shadow'] [data-ink] {
+  .reel[data-edge='shadow'] :global([data-ink]) {
     --_g: color-mix(in srgb, var(--_scrim) calc(var(--_glow, var(--_pool)) * 100%), transparent);
 
     text-shadow:
@@ -1560,7 +1534,7 @@
      each stroke keeps the word's floor over any frame; then a soft glow. A
      word no scrim of the tint can carry is outlined in its own pole
      (`--_ring-tint`: red on a dark brand, pale) at its own strength. */
-  .reel[data-edge='outline'] [data-ink] {
+  .reel[data-edge='outline'] :global([data-ink]) {
     --_h: var(--_halo, var(--_pool));
     --_h-ring: color-mix(
       in srgb,
@@ -1642,26 +1616,16 @@
     height: var(--space-3-5);
   }
 
-  /* R14's ring, on keyboard focus only. A row of the index or strip, and the
-     "All" link, have no inline padding (their words sit on the box's edges),
-     so their ring stands further off and rounds, clear of "01" and "Film". */
+  /* R14's ring, on keyboard focus only (the index's and strip's rows, and
+     their "All" link, take it in ReelEntries.svelte). */
   .reel__ghost:focus-visible,
   .reel__round:focus-visible,
-  .reel__btn:focus-visible,
-  .reel__item:focus-visible,
-  .reel__all:focus-visible {
+  .reel__btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
     /* Its own band of the solid scrim under the ring and a little past it:
        a two-tone indicator, so the ring keeps 3:1 over any frame. */
     box-shadow: 0 0 0 calc(var(--space-0-5) + var(--border-width-thick) + var(--space-0-5)) var(--_scrim);
-  }
-
-  .reel__item:focus-visible,
-  .reel__all:focus-visible {
-    outline-offset: var(--space-1-5);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 0 0 calc(var(--space-1-5) + var(--border-width-thick) + var(--space-0-5)) var(--_scrim);
   }
 
   /* ── what is playing: the words over their pieces' sizers, at the foot ── */
@@ -1876,8 +1840,7 @@
     margin: var(--space-6) 0 0;
   }
 
-  .reel[data-layout='corner'] .reel__ctl,
-  .reel__index {
+  .reel[data-layout='corner'] .reel__ctl {
     grid-area: 3 / 2;
   }
 
@@ -1886,120 +1849,14 @@
     margin-bottom: 0;
   }
 
-  .reel__index {
-    padding-top: calc(var(--space-9) + var(--space-3-5));
-  }
-
-  .reel__index .reel__item {
-    position: relative;
-    display: grid;
-    grid-template-columns: var(--space-9) minmax(0, 1fr) auto;
-    gap: var(--space-2);
-    align-items: baseline;
-    width: 100%;
-    padding: var(--space-3) 0;
-    border: none;
-    border-top: var(--border-width) solid var(--_line);
-    background: none;
-    color: var(--_ink-soft);
-    font-size: var(--text-base);
-    text-align: start;
-    cursor: pointer;
-  }
-
-  .reel__index li:last-child .reel__item {
-    border-bottom: var(--border-width) solid var(--_line);
-  }
-
-  .reel__item[aria-current] {
-    color: var(--_ink);
-  }
-
-  .reel__n,
-  .reel__k {
-    font-size: var(--text-xs);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .reel__t {
-    font-family: var(--font-heading);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .reel__bar {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: var(--space-0-5);
-    overflow: hidden;
-  }
-
-  /* A piece's progress: the index's and strip's bars, the phone's segments. */
-  .reel__bar i,
+  /* A piece's progress: the phone's segments (the index's and strip's bars
+     take the same in ReelEntries.svelte). */
   .reel__segs li i {
     display: block;
     height: 100%;
     background: var(--_ink);
     transform: scaleX(0);
     transform-origin: left;
-  }
-
-  [aria-current] > .reel__bar i {
-    transform: scaleX(var(--_progress));
-  }
-
-  .reel__all {
-    display: inline-block;
-    margin-top: var(--space-3-5);
-    font-size: var(--text-sm);
-    color: var(--_ink);
-  }
-
-  /* ── Wide and Name: the strip along the foot ── */
-  .reel__strip {
-    grid-area: 3 / 1;
-    align-self: end;
-    display: grid;
-    grid-auto-columns: minmax(0, 1fr);
-    grid-auto-flow: column;
-    gap: var(--space-5);
-    align-items: end;
-  }
-
-  /* Where the pause stands too. On the inner's own: `.reel ol`'s margin
-     reset outranks the strip's class. */
-  .reel__inner > .reel__strip {
-    margin-bottom: var(--space-9);
-  }
-
-  /* The pause's column, the strip's last (the pause is drawn over it). */
-  .reel__strip::after {
-    content: '';
-  }
-
-  .reel__strip .reel__item {
-    position: relative;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: var(--space-2-5);
-    align-items: baseline;
-    width: 100%;
-    padding: var(--space-3) 0 0;
-    border: none;
-    background: none;
-    color: var(--_ink-soft);
-    font-size: var(--text-sm);
-    text-align: start;
-    cursor: pointer;
-  }
-
-  .reel__strip .reel__bar {
-    top: 0;
-    bottom: auto;
-    background: var(--_line);
   }
 
   .reel[data-layout='wide'] .reel__title {
@@ -2261,11 +2118,6 @@
       min-inline-size: 0;
       font-size: var(--text-lg);
       overflow-wrap: anywhere;
-    }
-
-    .reel__index,
-    .reel__strip {
-      display: none;
     }
 
     .reel__slot,
