@@ -127,7 +127,7 @@
     overflow: hidden;
   }
 
-  /* A piece's progress (the phone's segments take the same in Showreel.svelte). */
+  /* A piece's progress (the phone's segments take the same in ReelSegments.svelte). */
   .reel__bar i {
     display: block;
     height: 100%;

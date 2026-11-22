@@ -100,6 +100,7 @@
   import { themeState } from '$lib/theme.svelte';
   import * as m from '$paraglide/messages';
   import ReelEntries from './ReelEntries.svelte';
+  import ReelSegments from './ReelSegments.svelte';
   import ReelStage from './ReelStage.svelte';
   import ReelTheatre from './ReelTheatre.svelte';
 
@@ -1081,17 +1082,6 @@
   </h1>
 {/snippet}
 
-<!-- The phone's story segments. -->
-{#snippet segments()}
-  <div class="reel__segs">
-    <ol>
-      {#each words as _, i (i)}
-        <li data-on={i === shown ? '' : undefined} data-done={i < shown ? '' : undefined}><i></i></li>
-      {/each}
-    </ol>
-  </div>
-{/snippet}
-
 <!-- What is playing: its number and kind, its title, its line and its button. -->
 {#snippet playingNow(now: ReelWords)}
   <div
@@ -1234,7 +1224,7 @@
     {@render pause()}
     {@render top()}
     {#if layout === 'name'}{@render nameWindow()}{/if}
-    {@render segments()}
+    <ReelSegments count={words.length} {shown} />
     <div class="reel__slot">
       {#if current}{@render playingNow(current)}{/if}
       <div class="reel__sizers" aria-hidden="true" inert>
@@ -1849,16 +1839,6 @@
     margin-bottom: 0;
   }
 
-  /* A piece's progress: the phone's segments (the index's and strip's bars
-     take the same in ReelEntries.svelte). */
-  .reel__segs li i {
-    display: block;
-    height: 100%;
-    background: var(--_ink);
-    transform: scaleX(0);
-    transform-origin: left;
-  }
-
   .reel[data-layout='wide'] .reel__title {
     --_size: calc(var(--text-display) * 1.6);
     white-space: nowrap;
@@ -2024,33 +2004,6 @@
     margin-top: var(--space-6);
   }
 
-  /* ── the phone's story segments (hidden on a desktop) ── */
-  .reel__segs {
-    display: none;
-  }
-
-  .reel__segs ol {
-    display: flex;
-    flex: 1;
-    gap: var(--space-1);
-  }
-
-  .reel__segs li {
-    flex: 1;
-    height: var(--space-0-5);
-    border-radius: var(--radius-full);
-    background: var(--_line);
-    overflow: hidden;
-  }
-
-  .reel__segs li[data-done] i {
-    transform: none;
-  }
-
-  .reel__segs li[data-on] i {
-    transform: scaleX(var(--_progress));
-  }
-
   @media (--below-md) {
     .reel {
       --_gutter: var(--space-4);
@@ -2058,24 +2011,6 @@
 
     .reel[data-peek] {
       --_lift: calc(var(--space-32) + var(--space-1));
-    }
-
-    .reel__segs {
-      position: absolute;
-      top: var(--space-3);
-      left: var(--_gutter);
-      right: var(--_gutter);
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
-    }
-
-    /* The pause's place, top right, which the segments' pool covers. */
-    .reel__segs::after {
-      content: '';
-      flex: none;
-      width: var(--space-9);
-      height: var(--space-9);
     }
 
     /* One column; the top bar under the segments. */
