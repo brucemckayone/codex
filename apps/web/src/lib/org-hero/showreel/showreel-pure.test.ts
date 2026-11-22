@@ -41,6 +41,7 @@ import {
   RING_MARGIN,
   RING_TAKE_UP,
   rampAt,
+  ringCarries,
   ringHalo,
   SHADE_PEAK_MAX,
   SHADE_REACH_MAX,
@@ -1355,11 +1356,13 @@ describe('the first paint, in both edges: the cap, until the fit runs', () => {
  * slack. L1 as first written shrank those rooms by the ring's margin, and
  * grey 110's "02" read 4.48 on the ring probe.
  *
- * The spans are every fixture this file holds. Ten are OBB's Corner at 1440:
- * its kicker and an index row by their glyphs (review r3), and its eight
- * words by their boxes (the first paint's table, review R5). Two stand in
- * for a word in the foot's corner and the header's facts line. No span here
- * is measured from Wide, Name or a phone.
+ * The spans: every fixture this file held, ten of them OBB's Corner at 1440
+ * (its kicker and an index row by their glyphs, review r3; its eight words
+ * by their boxes, the first paint's table, review R5) and two standing in for
+ * a word in the foot's corner and the header's facts line; and every word's
+ * box as Outline lays it (`MEASURED`, review r5), measured from local OBB on
+ * every piece: Wide and Name at 1440 x 900, and all three layouts at
+ * 390 x 844. The least headroom is Wide's kicker on piece 06: 0.62 for 0.62.
  */
 describe("Outline's room never under its ink's need in the pole: the soft ink's knife edge (WP-5a review r5, L1)", () => {
   const ROLES: readonly [string, Span, 'ink' | 'soft', number][] = [
@@ -1396,6 +1399,393 @@ describe("Outline's room never under its ink's need in the pole: the soft ink's 
     ['row', { left: 0.72, top: 0.4, right: 0.97, bottom: 0.43 }, 'soft', 4.5],
     ['all', { left: 0.72, top: 0.86, right: 0.85, bottom: 0.89 }, 'ink', 4.5],
   ];
+  /** Every word's box on local OBB, as fractions of the reel's (review r5). */
+  const MEASURED: readonly [string, Span, 'ink' | 'soft', number][] = [
+    [
+      'Wide 1440, name (every piece)',
+      { left: 0.0917, top: 0.045, right: 0.2584, bottom: 0.087 },
+      'ink',
+      4.5,
+    ],
+    [
+      'Wide 1440, facts (every piece)',
+      { left: 0.5991, top: 0.0503, right: 0.8629, bottom: 0.0817 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 1440, kicker (01, 05)',
+      { left: 0.0589, top: 0.5517, right: 0.9411, bottom: 0.5874 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 1440, title (01, 05)',
+      { left: 0.0589, top: 0.5874, right: 0.9411, bottom: 0.757 },
+      'ink',
+      3,
+    ],
+    [
+      'Wide 1440, line (every piece)',
+      { left: 0.0589, top: 0.779, right: 0.5709, bottom: 0.8768 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 01's number",
+      { left: 0.0589, top: 0.924, right: 0.0706, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 01's title",
+      { left: 0.0768, top: 0.9201, right: 0.1744, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 02's number",
+      { left: 0.1867, top: 0.924, right: 0.2001, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 02's title",
+      { left: 0.2063, top: 0.9201, right: 0.3022, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 03's number",
+      { left: 0.3144, top: 0.924, right: 0.3279, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 03's title",
+      { left: 0.3341, top: 0.9201, right: 0.43, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 04's number",
+      { left: 0.4422, top: 0.924, right: 0.4554, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 04's title",
+      { left: 0.4615, top: 0.9201, right: 0.5578, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 05's number",
+      { left: 0.57, top: 0.924, right: 0.583, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 05's title",
+      { left: 0.5891, top: 0.9201, right: 0.6855, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 06's number",
+      { left: 0.6978, top: 0.9328, right: 0.7116, bottom: 0.9601 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Wide 1440, row 06's title",
+      { left: 0.7177, top: 0.9289, right: 0.8133, bottom: 0.9604 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 1440, kicker (02)',
+      { left: 0.0589, top: 0.5841, right: 0.9411, bottom: 0.6197 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 1440, title (02)',
+      { left: 0.0589, top: 0.6197, right: 0.9411, bottom: 0.757 },
+      'ink',
+      3,
+    ],
+    [
+      'Wide 1440, kicker (03)',
+      { left: 0.0589, top: 0.5893, right: 0.9411, bottom: 0.6249 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 1440, title (03)',
+      { left: 0.0589, top: 0.6249, right: 0.9411, bottom: 0.757 },
+      'ink',
+      3,
+    ],
+    [
+      'Wide 1440, kicker (04)',
+      { left: 0.0589, top: 0.6152, right: 0.9411, bottom: 0.6508 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 1440, title (04)',
+      { left: 0.0589, top: 0.6508, right: 0.9411, bottom: 0.757 },
+      'ink',
+      3,
+    ],
+    [
+      'Wide 1440, kicker (06)',
+      { left: 0.0589, top: 0.5271, right: 0.9411, bottom: 0.5628 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 1440, title (06)',
+      { left: 0.0589, top: 0.5628, right: 0.9411, bottom: 0.757 },
+      'ink',
+      3,
+    ],
+    [
+      'Name 1440, facts (every piece)',
+      { left: 0.5991, top: 0.0503, right: 0.8629, bottom: 0.0817 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Name 1440, kicker (01)',
+      { left: 0.0589, top: 0.6445, right: 0.9411, bottom: 0.6801 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Name 1440, title line (01)',
+      { left: 0.0589, top: 0.6801, right: 0.7534, bottom: 0.7976 },
+      'ink',
+      4.5,
+    ],
+    [
+      "Name 1440, row 01's number",
+      { left: 0.0589, top: 0.924, right: 0.0706, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 01's title",
+      { left: 0.0768, top: 0.9201, right: 0.1744, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 02's number",
+      { left: 0.1867, top: 0.924, right: 0.2001, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 02's title",
+      { left: 0.2063, top: 0.9201, right: 0.3022, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 03's number",
+      { left: 0.3144, top: 0.924, right: 0.3279, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 03's title",
+      { left: 0.3341, top: 0.9201, right: 0.43, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 04's number",
+      { left: 0.4422, top: 0.924, right: 0.4554, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 04's title",
+      { left: 0.4615, top: 0.9201, right: 0.5578, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 05's number",
+      { left: 0.57, top: 0.924, right: 0.583, bottom: 0.9513 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 05's title",
+      { left: 0.5891, top: 0.9201, right: 0.6855, bottom: 0.9516 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 06's number",
+      { left: 0.6978, top: 0.9328, right: 0.7116, bottom: 0.9601 },
+      'soft',
+      4.5,
+    ],
+    [
+      "Name 1440, row 06's title",
+      { left: 0.7177, top: 0.9289, right: 0.8133, bottom: 0.9604 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Name 1440, kicker (02, 03, 04, 05, 06)',
+      { left: 0.0589, top: 0.7004, right: 0.9411, bottom: 0.7361 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Name 1440, title (02, 03, 04, 05, 06)',
+      { left: 0.0589, top: 0.7361, right: 0.9411, bottom: 0.7976 },
+      'ink',
+      3,
+    ],
+    [
+      'Corner 390, name (every piece)',
+      { left: 0.1516, top: 0.0693, right: 0.6578, bottom: 0.1072 },
+      'ink',
+      4.5,
+    ],
+    [
+      'Corner 390, kicker (01, 05)',
+      { left: 0.0349, top: 0.5159, right: 0.9651, bottom: 0.5521 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Corner 390, title (01, 05)',
+      { left: 0.0349, top: 0.5521, right: 0.9651, bottom: 0.6689 },
+      'ink',
+      3,
+    ],
+    [
+      'Corner 390, line (every piece)',
+      { left: 0.0349, top: 0.6922, right: 0.9651, bottom: 0.8188 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Corner 390, kicker (02, 03, 04)',
+      { left: 0.0349, top: 0.5315, right: 0.9651, bottom: 0.5677 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Corner 390, title (02, 03, 04)',
+      { left: 0.0349, top: 0.5677, right: 0.9651, bottom: 0.6689 },
+      'ink',
+      3,
+    ],
+    [
+      'Corner 390, kicker (06)',
+      { left: 0.0349, top: 0.5743, right: 0.9651, bottom: 0.6105 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Corner 390, title (06)',
+      { left: 0.0349, top: 0.6105, right: 0.9651, bottom: 0.6689 },
+      'ink',
+      3,
+    ],
+    [
+      'Wide 390, name (every piece)',
+      { left: 0.1516, top: 0.0693, right: 0.6578, bottom: 0.1072 },
+      'ink',
+      4.5,
+    ],
+    [
+      'Wide 390, kicker (01, 05)',
+      { left: 0.0349, top: 0.5514, right: 0.9651, bottom: 0.5876 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 390, title (01, 05)',
+      { left: 0.0349, top: 0.5876, right: 0.9651, bottom: 0.7344 },
+      'ink',
+      3,
+    ],
+    [
+      'Wide 390, line (every piece)',
+      { left: 0.0349, top: 0.7576, right: 0.9651, bottom: 0.842 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 390, kicker (02, 03, 04)',
+      { left: 0.0349, top: 0.478, right: 0.9651, bottom: 0.5142 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 390, title (02, 03, 04)',
+      { left: 0.0349, top: 0.5142, right: 0.9651, bottom: 0.7344 },
+      'ink',
+      3,
+    ],
+    [
+      'Wide 390, kicker (06)',
+      { left: 0.0349, top: 0.6248, right: 0.9651, bottom: 0.661 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Wide 390, title (06)',
+      { left: 0.0349, top: 0.661, right: 0.9651, bottom: 0.7344 },
+      'ink',
+      3,
+    ],
+    [
+      'Name 390, kicker (01)',
+      { left: 0.0349, top: 0.6352, right: 0.9651, bottom: 0.6714 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Name 390, title line (01)',
+      { left: 0.0349, top: 0.6714, right: 0.9651, bottom: 0.8142 },
+      'ink',
+      4.5,
+    ],
+    [
+      'Name 390, kicker (02, 03, 05, 06)',
+      { left: 0.0349, top: 0.739, right: 0.9651, bottom: 0.7752 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Name 390, title (02, 03, 05, 06)',
+      { left: 0.0349, top: 0.7752, right: 0.9651, bottom: 0.8142 },
+      'ink',
+      3,
+    ],
+    [
+      'Name 390, kicker (04)',
+      { left: 0.0349, top: 0.7001, right: 0.9651, bottom: 0.7362 },
+      'soft',
+      4.5,
+    ],
+    [
+      'Name 390, title (04)',
+      { left: 0.0349, top: 0.7362, right: 0.9651, bottom: 0.8142 },
+      'ink',
+      3,
+    ],
+  ];
   /** A role's ink in its pole: the main ink solid, the soft one at 80%. */
   const needInPole = (groundY: number, kind: 'ink' | 'soft', ratio: number) => {
     const { veil, ink } = groundPoles(groundY);
@@ -1409,7 +1799,7 @@ describe("Outline's room never under its ink's need in the pole: the soft ink's 
     const short: string[] = [];
     // OBB's dark ground (a black veil) and the platform's light one (white).
     for (const groundY of [0.00097, 0.7835]) {
-      for (const [role, span, kind, ratio] of ROLES) {
+      for (const [role, span, kind, ratio] of [...ROLES, ...MEASURED]) {
         const need = needInPole(groundY, kind, ratio);
         const room = wordRoom('outline', span);
         if (need === null || room < need) {
@@ -1420,5 +1810,17 @@ describe("Outline's room never under its ink's need in the pole: the soft ink's 
       }
     }
     expect(short).toEqual([]);
+  });
+
+  it("is what Outline's ring carries: at its room it carries the need, a hundredth over, it does not (review r5)", () => {
+    for (const [role, span] of [...ROLES, ...MEASURED]) {
+      const room = wordRoom('outline', span);
+      const under = shadeFloor(span, SHADES);
+      expect(ringCarries(room, under), role).toBe(true);
+      expect(
+        ringCarries(Math.round((room + 0.01) * 100) / 100, under),
+        role
+      ).toBe(false);
+    }
   });
 });

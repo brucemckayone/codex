@@ -463,6 +463,23 @@ export function shadeFloor(
 export const RING_TAKE_UP = 1.6;
 
 /**
+ * Whether a word's ring in 'outline' can lay what its `need` asks where the
+ * shades lay `under`: its solved halo (`haloAlpha`) taken up by RING_TAKE_UP,
+ * at or under solid. Past solid even a solid ring lays less than the halo
+ * asks, so the word is short where it sits. `wordRoom` bounds the tint by
+ * it; the fit lifts a word it fails, as one its shades fall short under in
+ * 'shadow', and reports one its pole cannot rescue either (review r5: Outline
+ * had counted no word short, so with the room bounded by the drawn ring,
+ * grey 110's kicker asked 1.008 of its ring, unlifted and unreported). It is
+ * the model's bound only: that build's "02" asked 0.96 and still read 4.48
+ * on the ring probe, a gap in the ring's calibration that no check of this
+ * kind can see.
+ */
+export function ringCarries(need: number, under: number): boolean {
+  return haloAlpha(need, under) * RING_TAKE_UP <= 1;
+}
+
+/**
  * The most a word's own scrim need may be where it sits (its glyphs' `span`)
  * for what can be drawn there to carry it, in hundredths as the needs are
  * (review r3 n1, n3). In 'shadow', what `growShades` draws at its glyphs for
@@ -472,8 +489,9 @@ export const RING_TAKE_UP = 1.6;
  * where it sat: OBB's kicker 0.645 laid against 0.71), with its own soft glow
  * counted at the least it lays (its group's is never weaker). Never every
  * ellipse grown for it: that darkens more of the film than the word needs.
- * In 'outline', a ring still short of solid over the shades as drawn: the
- * solved halo's, whose drawn margin may clip at solid (`RING_MARGIN`).
+ * In 'outline', a ring that carries it over the shades as drawn
+ * (`ringCarries`): the solved halo's, whose drawn margin may clip at solid
+ * (`RING_MARGIN`).
  */
 export function wordRoom(edge: 'shadow' | 'outline', span: Span): number {
   const alone =
@@ -483,8 +501,7 @@ export function wordRoom(edge: 'shadow' | 'outline', span: Span): number {
   const fits =
     edge === 'shadow'
       ? (need: number) => glowLeaves(need, need) <= alone
-      : (need: number) =>
-          haloAlpha(need, shadeFloor(span, SHADES)) * RING_TAKE_UP <= 1;
+      : (need: number) => ringCarries(need, shadeFloor(span, SHADES));
   let room = 0;
   for (let step = 1; step <= 100 && fits(step / 100); step++) room = step / 100;
   return room;

@@ -139,6 +139,7 @@ function render(
     push?: 'on' | 'off';
     /** A stored opening; unset, the layout's default (Auto). */
     opening?: 'name' | 'none';
+    edge?: 'shadow' | 'outline';
   } = {}
 ) {
   const options = resolveHero(
@@ -150,6 +151,7 @@ function render(
       ...(over.peek ? { 'reel-peek': over.peek } : {}),
       ...(over.push ? { 'reel-push': over.push } : {}),
       ...(over.opening ? { 'reel-opening': over.opening } : {}),
+      ...(over.edge ? { 'reel-edge': over.edge } : {}),
     },
     { ...FACTS, ...over.facts }
   );
@@ -1699,6 +1701,56 @@ describe("Showreel's fit over the film", () => {
     // ...but only as far as it needs: still the brand's coral, never the pole.
     // Fails today: the code paints [255, 255, 255].
     expect([r, g, b]).not.toEqual([255, 255, 255]);
+  });
+
+  it('lifts a carried colour its Outline ring falls short for just far enough, never straight onto the pole (review r5)', async () => {
+    // The coral needs 0.89 of the dark tint where no shade reaches (every
+    // word here over the whole box): a halo of 0.89, which its ring would
+    // lay at 0.89 x 1.6, past solid. Fails today: Outline counted no word
+    // short, so the coral kept its colour inside a ring that cannot carry it.
+    const CORAL = 'rgb(230, 90, 100)';
+    paintable({
+      ground: '#100000',
+      ink: WHITE,
+      brand: { '.reel__kicker, .reel__kicker span': CORAL },
+    });
+    render('corner', { edge: 'outline' });
+    await Promise.resolve();
+    frame(32);
+    const kicker = q('.reel__kicker');
+    expect(kicker).not.toBeNull();
+    if (!kicker) return;
+    expect(kicker.hasAttribute('data-lifted')).toBe(true);
+    const [r = 0, g = 0, b = 0] = channels(kicker);
+    // Toward white, only as far as its ring then carries it: still coral.
+    expect(r).toBeGreaterThanOrEqual(230);
+    expect(g).toBeGreaterThan(90);
+    expect(b).toBeGreaterThan(100);
+    expect([r, g, b]).not.toEqual([255, 255, 255]);
+    // Rescued, so nothing to report.
+    expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+  });
+
+  it('reports an Outline word its pole cannot rescue either: its ring asked past solid (review r5)', async () => {
+    // White at 70% needs 0.68 of the dark tint: a ring past solid (0.68 x
+    // 1.6), and a lift toward white leaves it as it is. Fails today: no
+    // report, as grey 110's kicker asked 1.008 of its ring with none (its
+    // room bounded by the drawn ring, review r5).
+    paintable({
+      ground: '#120408',
+      ink: WHITE,
+      brand: {
+        '.reel__kicker, .reel__kicker span': 'rgba(255, 255, 255, 0.7)',
+      },
+    });
+    render('corner', { edge: 'outline' });
+    await Promise.resolve();
+    frame(32);
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(logger.warn).mock.calls[0]?.[1]).toMatchObject({
+      edge: 'outline',
+      roles: expect.stringContaining('reel__kicker'),
+    });
   });
 
   it("lands only the reel's own words' colour eases, never another's inside it (a theatre's, the film layer's): wp4-review r3 LOW", async () => {

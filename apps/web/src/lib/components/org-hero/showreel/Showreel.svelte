@@ -81,6 +81,7 @@
     over,
     ownPole,
     type Rgb,
+    ringCarries,
     ringHalo,
     SHADE_PEAK_MAX,
     SHADES,
@@ -866,6 +867,17 @@
     const groupOf = (el: HTMLElement) => el.closest<HTMLElement>(GROUPED) ?? el;
     let shades: readonly Shade[] = SHADES;
     const glows = new Map<HTMLElement, number>();
+    // A word short where it sits, of what is drawn under it: in 'shadow', its
+    // shades with its group's glow (a shade that falls short is no solve,
+    // review R4); in 'outline', its ring, which past solid lays less than its
+    // need asks (`ringCarries`, review r5).
+    const short = (role: Role) => {
+      const need = needOf(role);
+      if (need === null || role.fill) return false;
+      const under = shadeFloor(role.span, shades);
+      if (edge === 'outline') return !ringCarries(need, under);
+      return glowLeaves(need, glows.get(groupOf(role.el)) ?? 0) > under + 1e-9;
+    };
     for (let round = 0; round <= 20; round++) {
       glows.clear();
       for (const role of roles) {
@@ -874,7 +886,23 @@
         const group = groupOf(role.el);
         glows.set(group, Math.max(glows.get(group) ?? 0, need));
       }
-      if (edge === 'outline') break;
+      if (edge === 'outline') {
+        // No shade grows in 'outline': a word short of its ring lifts its
+        // failing nodes one step further, a twentieth at a time, as one short
+        // of its shades does below.
+        const further = roles.flatMap((role) => {
+          if (role.step >= 20 || !short(role)) return [];
+          const under = shadeFloor(role.span, shades);
+          role.lifted = liftedNodes(role.nodes, role.lifted, (ink) => {
+            const need = scrimAlpha([{ ink, ratio: role.ratio }], tint);
+            return need === null || !ringCarries(need, under);
+          });
+          return role.lifted.length > 0 ? [role] : [];
+        });
+        if (further.length === 0) break;
+        for (const role of further) role.step += 1;
+        continue;
+      }
       const asked = new Map<Need, Role>();
       for (const role of roles) {
         const need = needOf(role);
@@ -906,16 +934,9 @@
       for (const role of further) role.step += 1;
     }
     // Checked, never assumed: every role must now have a solved need that
-    // what is drawn under it meets (in 'shadow', its shades with its group's
-    // glow: a shade that falls short is no solve, review R4), or, in
-    // 'outline', a ring of its own pole that carries it. One that does not
-    // wears the pole outright; one the pole cannot rescue either is reported.
-    const short = (role: Role) => {
-      const need = needOf(role);
-      if (need === null || role.fill || edge !== 'shadow') return false;
-      const left = glowLeaves(need, glows.get(groupOf(role.el)) ?? 0);
-      return left > shadeFloor(role.span, shades) + 1e-9;
-    };
+    // what is drawn under it meets (never `short`), or, in 'outline', a ring
+    // of its own pole that carries it. One that does not wears the pole
+    // outright; one the pole cannot rescue either is reported.
     const solved = (role: Role) => {
       if (needOf(role) !== null) return !short(role);
       if (role.fill || edge === 'shadow') return false;
