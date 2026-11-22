@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { type AST, parse } from 'svelte/compiler';
 import { describe, expect, test } from 'vitest';
 
@@ -428,5 +428,161 @@ describe('the painting-shader selector reads what ShaderHero writes', () => {
       ) ?? [];
     expect(mounts).toHaveLength(1);
     expect(mounts[0]).toMatch(/\sclass="shader-hero--fullpage"[\s/]/);
+  });
+});
+
+/**
+ * A hero picture that fails keeps its box (#677 → #679, owner-approved): a
+ * load failure may hide a picture, never take it, or what it sits in, away.
+ * Removing one after first paint is a layout shift, and it is always after
+ * first paint: an error the browser saw before hydration is replayed at
+ * hydration (Svelte's SSR `onerror="this.__e=event"`), and CI, with no dev
+ * CDN, fails every seeded org's pictures that way. Cover pictures go through
+ * FallbackImage, which hides one in its box; a bespoke `<img onerror>` (a
+ * logo) hides itself with `style:visibility`. So no picture may sit inside an
+ * `{#if}` on a failure state, and no prop may blank one on failure.
+ *
+ * Read from every org-hero component's template, parsed by Svelte's own
+ * compiler (comments dropped), so prose cannot satisfy it.
+ */
+describe('a hero picture that fails keeps its box', () => {
+  const ORG_HERO_DIR = dirname(ORG_HERO);
+  /** A failure state: the hero's `shows()`, or a failed, broken or dead flag. */
+  const FAILURE = /\bshows\(|failed|broken|\bdead\b/i;
+  /** A prop that reads one to choose its value (a handler's name is no read). */
+  const READS_FAILURE =
+    /\bshows\(|\bfailed\.has\(|\b\w*(?:failed|broken)\b\s*(?:\?|&&|\|\|)/i;
+
+  type Node = {
+    type?: string;
+    start?: number;
+    end?: number;
+    [key: string]: unknown;
+  };
+  /** Every node under `node`, depth first (ESTree expressions included). */
+  function* nodes(node: unknown): Generator<Node> {
+    if (Array.isArray(node)) {
+      for (const child of node) yield* nodes(child);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    const n = node as Node;
+    if (typeof n.type === 'string') yield n;
+    for (const [key, value] of Object.entries(n))
+      if (
+        key !== 'parent' &&
+        key !== 'metadata' &&
+        value &&
+        typeof value === 'object'
+      )
+        yield* nodes(value);
+  }
+  const isPicture = (n: Node) =>
+    (n.type === 'RegularElement' && n.name === 'img') ||
+    (n.type === 'Component' && n.name === 'FallbackImage');
+
+  /** What breaks the rule in one component's template, worded per finding. */
+  function findings(file: string, source: string): string[] {
+    const out: string[] = [];
+    const ast = parse(source, { modern: true });
+    const text = (n: Node) => source.slice(n.start, n.end);
+    // The script's names that carry a failure state (`const showLogo =
+    // $derived(… shows(logoUrl))`), to a fixed point: a name read from one
+    // carries it too.
+    const carriers = new Set<string>();
+    const declarators = [...nodes(ast.instance?.content)].filter(
+      (n) => n.type === 'VariableDeclarator'
+    );
+    const reads = (expr: string) =>
+      FAILURE.test(expr) ||
+      [...carriers].some((c) => new RegExp(`\\b${c}\\b`).test(expr));
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const d of declarators) {
+        const id = d.id as Node;
+        const name = id.type === 'Identifier' ? String(id.name) : null;
+        if (
+          name &&
+          !carriers.has(name) &&
+          d.init &&
+          reads(text(d.init as Node))
+        ) {
+          carriers.add(name);
+          grew = true;
+        }
+      }
+    }
+    for (const n of nodes(ast.fragment)) {
+      // {#if shows(url)}<img …>: the picture is taken away when it fails
+      if (n.type === 'IfBlock' && reads(text(n.test as Node))) {
+        const holds = [...nodes(n.consequent)].some(isPicture);
+        if (holds)
+          out.push(`${file}: {#if ${text(n.test as Node)}} holds a picture`);
+      }
+      // a picture blanked through a prop (`logoUrl={shows(url) ? url : ''}`)
+      if (n.type === 'Component')
+        for (const a of (n.attributes ?? []) as Node[])
+          if (
+            a.type === 'Attribute' &&
+            !Array.isArray(a.value) &&
+            a.value &&
+            READS_FAILURE.test(text(a.value as Node))
+          )
+            out.push(`${file}: <${n.name}> ${a.name} reads a failure state`);
+    }
+    return out;
+  }
+
+  /**
+   * Awaiting their fixes, each with its own owner. Each must still be found,
+   * so this list cannot outlive a fix: delete an entry as it lands.
+   * - The Showreel's top-bar logo (lane A): OrgHero blanks the prop on a
+   *   failure and the Showreel drops its img.
+   * - The stage's still (Showreel stage): a failed one is dropped. Its box is
+   *   the stage item's (absolute, inset 0), so it moves nothing, but it is
+   *   still a picture taken away.
+   */
+  const PENDING = [
+    'OrgHero.svelte: <Showreel> logoUrl reads a failure state',
+    'showreel/ReelStage.svelte: {#if item.still && !brokenStill[k]} holds a picture',
+  ];
+
+  const found = () =>
+    readdirSync(ORG_HERO_DIR, { recursive: true, encoding: 'utf8' })
+      .filter((f) => f.endsWith('.svelte') && !f.endsWith('.test.svelte'))
+      .sort()
+      .flatMap((f) => findings(f, readFileSync(join(ORG_HERO_DIR, f), 'utf8')));
+
+  test('no org-hero component takes a failed picture away, or blanks one through a prop', () => {
+    expect(found().filter((f) => !PENDING.includes(f))).toEqual([]);
+  });
+
+  test('each pending exception is still there to fix', () => {
+    const now = found();
+    expect(PENDING.filter((p) => !now.includes(p))).toEqual([]);
+  });
+
+  test('the guard sees each kind of removal (planted)', () => {
+    const planted = `<script>
+  let { url, shows, failed, broken, markFailed } = $props();
+  const showIt = $derived(!!url && shows(url));
+</script>
+{#if shows(url)}<img src={url} alt="" />{/if}
+{#if !failed}<FallbackImage src={url} srcset={undefined} sizes={undefined}>{#snippet fallback()}{/snippet}</FallbackImage>{/if}
+{#if url && !broken[0]}<span><img src={url} alt="" /></span>{/if}
+<img src={url} alt="" onerror={markFailed} style:visibility={failed ? 'hidden' : undefined} />
+{#if failed}<span>the name</span>{/if}
+<Child logoUrl={shows(url) ? url : ''} onfail={markFailed} />
+<Child src={broken ? '' : url} />
+{#if showIt}<img src={url} alt="" />{/if}`;
+    // kept: the img hidden in place, a name drawn on failure, a handler passed on
+    expect(findings('planted.svelte', planted)).toEqual([
+      'planted.svelte: {#if shows(url)} holds a picture',
+      'planted.svelte: {#if !failed} holds a picture',
+      'planted.svelte: {#if url && !broken[0]} holds a picture',
+      'planted.svelte: <Child> logoUrl reads a failure state',
+      'planted.svelte: <Child> src reads a failure state',
+      'planted.svelte: {#if showIt} holds a picture',
+    ]);
   });
 });

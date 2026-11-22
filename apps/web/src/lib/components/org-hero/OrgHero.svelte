@@ -31,6 +31,7 @@
   import type { Snippet } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { preloadPlayerOnIntent } from '$lib/components/player/load-core';
+  import { FallbackImage } from '$lib/components/ui';
   import { logImageFailure } from '$lib/components/ui/FallbackImage/log-image-failure';
   import { HeroLoopVideo } from '$lib/components/ui/HeroLoopVideo';
   import { PlayIcon, SearchIcon } from '$lib/components/ui/Icon';
@@ -121,12 +122,15 @@
         : null
   );
 
-  // A picture that fails (deleted, missing variant, CDN hiccup) is dropped, and
-  // the hero draws what it would without it: the name where the logo was, the
-  // brand's plate in the Showcase frame (a title card in the split panel, which
-  // has no caption), the Showcase frame instead of a billboard. Each failure
-  // is logged as FallbackImage logs it (`image.fallback_shown`): a picture that
-  // quietly vanished looks exactly like a piece that never had one.
+  // A picture that fails (deleted, missing variant, CDN hiccup) keeps its box,
+  // so nothing moves after first paint: a failure the browser saw before
+  // hydration is replayed at hydration (Svelte's `onerror="this.__e=event"`),
+  // and CI, with no dev CDN, fails every seeded org's pictures that way. The
+  // cover pictures go through FallbackImage: hidden, with the brand's plate or
+  // the box's own ground in their place, the billboard still a billboard. A
+  // logo is hidden in a box sized before it loads, and a logo leading alone
+  // draws the name in that box. Each failure is logged (`image.fallback_shown`):
+  // a picture that quietly vanished looks exactly like a piece that never had one.
   const failed = new SvelteSet<string>();
   const shows = (url: string | null | undefined): url is string => !!url && !failed.has(url);
   function markFailed(event: Event & { currentTarget: HTMLImageElement }) {
@@ -137,9 +141,10 @@
     logImageFailure(img.currentSrc || src);
   }
 
-  const billboard = $derived(o.comp === 'billboard' && shows(spot?.imageUrl));
-  // The composition actually drawn: a billboard whose picture failed is drawn
-  // as the Showcase frame, with an alignment that frame can take.
+  const billboard = $derived(o.comp === 'billboard' && !!spot?.imageUrl);
+  // The composition actually drawn: a billboard with no picture is drawn as
+  // the Showcase frame, with an alignment that frame can take. One whose
+  // picture fails stays a billboard, over the brand's plate.
   const drawnComp = $derived(o.comp === 'billboard' && !billboard ? 'showcase' : o.comp);
   const drawnAlign = $derived(
     HERO_ALIGN_ALLOWED[drawnComp].includes(o.align) ? o.align : HERO_ALIGN_ALLOWED[drawnComp][0]
@@ -149,9 +154,10 @@
   const titleWords = $derived(title.trim().split(/\s+/));
   const titleHead = $derived(titleWords.slice(0, -1).join(' '));
   const titleLast = $derived(titleWords.at(-1) ?? '');
-  const showLogo = $derived(!billboard && o.lead !== 'name' && shows(logoUrl));
-  // With the logo leading alone, the name stays in the page for screen readers,
-  // and comes back into view if the logo fails.
+  const showLogo = $derived(!billboard && o.lead !== 'name' && !!logoUrl);
+  const logoFailed = $derived(!!logoUrl && failed.has(logoUrl));
+  // With the logo leading alone, the name stays in the page for screen readers;
+  // a logo that fails draws the name in the logo's own box instead.
   const titleHidden = $derived(showLogo && o.lead === 'logo');
 
   // The org's own film fills the Showcase frame: it loops there silently, and
@@ -294,17 +300,19 @@
   {@attach fitCheck}
 >
   <div class="org-hero__bg" aria-hidden="true">
-    {#if billboard && spot && shows(spot.imageUrl)}
-      <img
-        onerror={markFailed}
-        class="org-hero__bg-media"
-        src={spot.imageUrl}
-        srcset={getThumbnailSrcset(spot.imageUrl)}
-        sizes={billboardSizes(spot.imageUrl)}
-        alt=""
-        fetchpriority="high"
-        decoding="async"
-      />
+    {#if billboard && spot?.imageUrl}
+      <div class="org-hero__bg-media">
+        <FallbackImage
+          src={spot.imageUrl}
+          srcset={getThumbnailSrcset(spot.imageUrl)}
+          sizes={billboardSizes(spot.imageUrl)}
+          alt=""
+          fetchpriority="high"
+          decoding="async"
+        >
+          {#snippet fallback()}<span class="org-hero__plate"></span>{/snippet}
+        </FallbackImage>
+      </div>
     {:else if o.bg === 'film' && film?.previewUrl}
       <div class="org-hero__bg-media">
         <HeroLoopVideo
@@ -325,12 +333,15 @@
     <div class="org-hero__words">
       {#if billboard && spot}
         <p class="org-hero__id org-hero__in" style:--_i="0">
-          {#if shows(logoUrl)}<img onerror={markFailed} src={logoUrl} alt="" />{/if}
+          {#if logoUrl}<img onerror={markFailed} src={logoUrl} alt="" style:visibility={logoFailed ? 'hidden' : undefined} />{/if}
           <span>{name}</span>
         </p>
         <p class="org-hero__kicker org-hero__in" style:--_i="1">{spot.kicker}</p>
       {:else if showLogo}
-        <img onerror={markFailed} class="org-hero__logo org-hero__in" style:--_i="1" src={logoUrl} alt="" />
+        <span class="org-hero__logo org-hero__in" style:--_i="1">
+          <img onerror={markFailed} src={logoUrl} alt="" style:visibility={logoFailed ? 'hidden' : undefined} />
+          {#if logoFailed && o.lead === 'logo'}<span class="org-hero__logo-name" aria-hidden="true">{name}</span>{/if}
+        </span>
       {/if}
 
       <h1 class="org-hero__title org-hero__in" class:org-hero__title--hidden={titleHidden} style:--_i="2">
@@ -384,7 +395,9 @@
             {@attach preloadPlayerOnIntent}
           >
             <span class="org-hero__film-poster" aria-hidden="true">
-              {#if shows(film.posterUrl)}<img onerror={markFailed} src={film.posterUrl} srcset={getThumbnailSrcset(film.posterUrl)} sizes="4rem" alt="" decoding="async" />{/if}
+              <FallbackImage src={film.posterUrl} srcset={getThumbnailSrcset(film.posterUrl)} sizes="4rem" alt="" decoding="async">
+                {#snippet fallback()}{/snippet}
+              </FallbackImage>
               <PlayIcon size={14} />
             </span>
             <span class="org-hero__film-label" aria-hidden="true">{m.org_hero_watch_film()}{#if film.duration}{` · ${film.duration}`}{/if}</span>
@@ -414,7 +427,16 @@
             <li>
               <a href={piece.href}>
                 <span class="org-hero__shelf-thumb">
-                  {#if shows(piece.imageUrl)}<img onerror={markFailed} src={piece.imageUrl} srcset={getThumbnailSrcset(piece.imageUrl)} sizes={shelfSizes(piece.imageUrl, index, shelf.length, shelfWall)} alt="" loading="lazy" decoding="async" />{/if}
+                  <FallbackImage
+                    src={piece.imageUrl}
+                    srcset={getThumbnailSrcset(piece.imageUrl)}
+                    sizes={piece.imageUrl ? shelfSizes(piece.imageUrl, index, shelf.length, shelfWall) : undefined}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                  >
+                    {#snippet fallback()}{/snippet}
+                  </FallbackImage>
                 </span>
                 <span class="org-hero__shelf-text"><b>{piece.title}</b><small>{piece.meta}</small></span>
               </a>
@@ -432,8 +454,6 @@
       {frameShape}
       {filmLabel}
       onfilm={pressFilm}
-      {shows}
-      onimagefail={markFailed}
     />
   </div>
 </section>
@@ -456,6 +476,9 @@
     --_btn-bg: var(--color-interactive);
     --_btn-ink: var(--color-on-interactive);
     --_accent: var(--color-interactive);
+    /* The brand's plate: what a picture's box shows when it has none, or it
+       failed (the billboard's ground here, HeroSpot's frame and panel). */
+    --_plate: radial-gradient(circle at 50% 30%, color-mix(in oklab, var(--color-brand-primary) 55%, transparent), transparent 70%);
 
     position: relative;
     z-index: 2;
@@ -543,6 +566,13 @@
     object-fit: cover;
   }
 
+  /* A billboard whose picture failed keeps its composition over the plate. */
+  .org-hero__plate {
+    position: absolute;
+    inset: 0;
+    background: var(--_plate);
+  }
+
   .org-hero[data-ambient='drift'] .org-hero__bg-media,
   .org-hero[data-ambient='drift'][data-bg='pattern'] .org-hero__bg {
     animation: org-hero-drift calc(var(--duration-slowest) * 32) var(--ease-in-out) infinite alternate;
@@ -612,7 +642,11 @@
     pointer-events: none;
   }
 
+  /* `--_logo-at`: where the logo sits in its full-width box, kept with the
+     words' own alignment in every rule that sets it. */
   .org-hero__words {
+    --_logo-at: left;
+
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -661,12 +695,16 @@
 
   .org-hero[data-align='center'] .org-hero__words,
   .org-hero[data-comp='centre'] .org-hero__words {
+    --_logo-at: center;
+
     justify-self: center;
     align-items: center;
     text-align: center;
   }
 
   .org-hero[data-align='end'][data-comp='statement'] .org-hero__words {
+    --_logo-at: right;
+
     justify-self: end;
     align-items: flex-end;
     text-align: right;
@@ -693,12 +731,37 @@
   .org-hero[data-comp='centre'][data-logo='l'] { --_logo: calc(var(--space-48) * 1.2); }
   .org-hero[data-comp='centre'][data-logo='s'] { --_logo: var(--space-20); }
 
+  /* The logo's box is sized before it loads (the words' width, the logo's
+     height), so a logo that fails, hidden, moves nothing. The logo draws in
+     it contained, where the words align: as a box of its own width did. */
   .org-hero__logo {
+    position: relative;
+    display: block;
+    inline-size: 100%;
+    block-size: calc(var(--_logo) * var(--_fit));
     margin-bottom: var(--space-2);
-    height: calc(var(--_logo) * var(--_fit));
-    width: auto;
-    max-width: 100%;
+  }
+
+  .org-hero__logo img {
+    display: block;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
+    object-position: var(--_logo-at) center;
+  }
+
+  /* A logo leading alone that failed: the name, one line at the logo's
+     height, in its box (the h1 stays in the page for screen readers). */
+  .org-hero__logo-name {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    font-family: var(--font-heading);
+    font-size: calc(var(--_logo) * var(--_fit) * 0.62);
+    line-height: calc(var(--_logo) * var(--_fit));
+    color: var(--_ink-strong);
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .org-hero__id {
@@ -912,7 +975,7 @@
     color: var(--color-player-text);
   }
 
-  .org-hero__film-poster img {
+  .org-hero__film-poster :global(img) {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -980,7 +1043,7 @@
     box-shadow: var(--shadow-lg);
   }
 
-  .org-hero__shelf-thumb img {
+  .org-hero__shelf-thumb :global(img) {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -988,7 +1051,7 @@
     transition: transform var(--duration-slower) var(--ease-smooth);
   }
 
-  .org-hero__shelf a:hover .org-hero__shelf-thumb img { transform: scale(1.05); }
+  .org-hero__shelf a:hover .org-hero__shelf-thumb :global(img) { transform: scale(1.05); }
 
   .org-hero__shelf-text { display: grid; gap: var(--space-1); min-width: 0; text-align: left; }
 
@@ -1139,6 +1202,8 @@
     .org-hero[data-comp='showcase'] .org-hero__words,
     .org-hero[data-comp='split'] .org-hero__words,
     .org-hero[data-comp='statement'] .org-hero__words {
+      --_logo-at: left;
+
       justify-self: stretch;
       align-items: flex-start;
       text-align: left;

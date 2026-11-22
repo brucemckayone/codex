@@ -88,9 +88,13 @@ function props(
 }
 
 /**
- * OrgHero (Codex-1yd58 WP-0): a picture that fails is dropped and the hero
- * draws what it would without it, and the failure is logged, so a vanished
- * picture never leaves an empty frame or a front page with no name.
+ * OrgHero (Codex-1yd58 WP-0, keep-the-box rule): a picture that fails is
+ * hidden and keeps its box, so nothing moves after first paint (a failure the
+ * browser saw before hydration is replayed at hydration). The composition
+ * holds, the brand's plate or the box's own ground shows in the picture's
+ * place, a logo leading alone draws the name in its own box, and the failure
+ * is logged, so a vanished picture never leaves an empty frame or a front
+ * page with no name.
  */
 describe('OrgHero, when a picture fails', () => {
   let component: ReturnType<typeof mount> | null = null;
@@ -109,10 +113,18 @@ describe('OrgHero, when a picture fails', () => {
     target?.remove();
   });
 
-  function render(options: HeroOptions, spot: OrgHeroPiece, logo = 'logo.png') {
+  function render(
+    options: HeroOptions,
+    spot: OrgHeroPiece,
+    logo = 'logo.png',
+    more: Partial<ReturnType<typeof props>> = {}
+  ) {
     target = document.createElement('div');
     document.body.appendChild(target);
-    component = mount(OrgHero, { target, props: props(options, spot, logo) });
+    component = mount(OrgHero, {
+      target,
+      props: { ...props(options, spot, logo), ...more },
+    });
     flushSync();
   }
 
@@ -126,24 +138,56 @@ describe('OrgHero, when a picture fails', () => {
   const section = () => target.querySelector<HTMLElement>('[data-hero-root]');
   const titleHidden = () =>
     target.querySelector('h1')?.classList.contains('org-hero__title--hidden');
+  /** The picture is still in its box, hidden: FallbackImage's or a logo's. */
+  const hiddenInBox = (selector: string) => {
+    const img = target.querySelector<HTMLImageElement>(selector);
+    expect(img, selector).not.toBeNull();
+    return img?.style.display === 'none' || img?.style.visibility === 'hidden';
+  };
 
-  test('a logo leading alone that fails brings the name back into view', () => {
+  test('a logo leading alone that fails keeps its box and draws the name in it', () => {
     render(
       resolveHero('grow', { lead: 'logo' }, FACTS),
       piece('a'),
       'logo-a.png'
     );
+    const box = target.querySelector('.org-hero__logo');
     expect(titleHidden()).toBe(true);
+    expect(target.querySelector('.org-hero__logo-name')).toBeNull();
 
-    fail('.org-hero__logo');
+    fail('img[src$="logo-a.png"]');
 
-    expect(target.querySelector('.org-hero__logo')).toBeNull();
-    expect(titleHidden()).toBe(false);
+    expect(target.querySelector('.org-hero__logo')).toBe(box);
+    expect(hiddenInBox('img[src$="logo-a.png"]')).toBe(true);
+    const drawn = target.querySelector('.org-hero__logo .org-hero__logo-name');
+    expect(drawn?.textContent).toBe('Of Blood & Bones');
+    expect(drawn?.getAttribute('aria-hidden')).toBe('true');
+    // the h1 stays in the page for screen readers, out of the flow
+    expect(titleHidden()).toBe(true);
     vi.runOnlyPendingTimers();
     expect(logger.warn).toHaveBeenCalledWith(
       'image.fallback_shown',
       expect.objectContaining({ file: 'logo-a.png' })
     );
+  });
+
+  test('a logo leading with the name that fails keeps its box, empty', () => {
+    render(
+      resolveHero('grow', { lead: 'both' }, FACTS),
+      piece('a2'),
+      'logo-a2.png'
+    );
+    const box = target.querySelector('.org-hero__logo');
+    expect(box).not.toBeNull();
+    expect(titleHidden()).toBe(false);
+
+    fail('img[src$="logo-a2.png"]');
+
+    expect(target.querySelector('.org-hero__logo')).toBe(box);
+    expect(hiddenInBox('img[src$="logo-a2.png"]')).toBe(true);
+    // the name is already in view: it is not drawn twice
+    expect(target.querySelector('.org-hero__logo-name')).toBeNull();
+    expect(titleHidden()).toBe(false);
   });
 
   const frameTitle = () =>
@@ -156,7 +200,7 @@ describe('OrgHero, when a picture fails', () => {
 
     fail('.org-hero__frame-art img');
 
-    expect(target.querySelector('.org-hero__frame-art img')).toBeNull();
+    expect(hiddenInBox('.org-hero__frame-art img')).toBe(true);
     // a plate, not a second title: the caption already names the piece
     expect(target.querySelector('.org-hero__frame-fallback')?.textContent).toBe(
       ''
@@ -164,42 +208,85 @@ describe('OrgHero, when a picture fails', () => {
     expect(frameTitle()).toBe('Bone Deep');
   });
 
-  test('a billboard whose picture fails is drawn as the Showcase frame', () => {
+  test("a billboard whose picture fails stays a billboard, over the brand's plate", () => {
     render(resolveHero('spotlight', { comp: 'billboard' }, FACTS), piece('c'));
     expect(section()?.dataset.comp).toBe('billboard');
+    expect(target.querySelector('.org-hero__plate')).toBeNull();
 
-    fail('.org-hero__bg-media');
+    fail('.org-hero__bg img');
 
-    expect(section()?.dataset.comp).toBe('showcase');
-    expect(target.querySelector('h1')?.textContent?.trim()).toBe(
-      'Of Blood & Bones'
-    );
-    expect(target.querySelector('.org-hero__frame-fallback')).not.toBeNull();
-    expect(frameTitle()).toBe('Bone Deep');
+    expect(section()?.dataset.comp).toBe('billboard');
+    expect(section()?.dataset.bg).toBe('picture');
+    expect(hiddenInBox('.org-hero__bg img')).toBe(true);
+    expect(
+      target.querySelector('.org-hero__bg-media .org-hero__plate')
+    ).not.toBeNull();
+    // its words are the piece's still, and no Showcase frame is drawn
+    expect(target.querySelector('h1')?.textContent?.trim()).toBe('Bone Deep');
+    expect(target.querySelector('.org-hero__frame')).toBeNull();
   });
 
-  test('a billboard that falls back takes an alignment the Showcase frame can draw', () => {
+  test('a billboard whose picture fails keeps its alignment', () => {
     // grow centres its words, which a billboard allows and a Showcase does not
     render(resolveHero('grow', { comp: 'billboard' }, FACTS), piece('e'));
     expect(section()?.dataset.align).toBe('center');
 
-    fail('.org-hero__bg-media');
+    fail('.org-hero__bg img');
 
-    expect(section()?.dataset.comp).toBe('showcase');
-    expect(section()?.dataset.align).toBe('start');
+    expect(section()?.dataset.comp).toBe('billboard');
+    expect(section()?.dataset.align).toBe('center');
+  });
+
+  test("a billboard's logo beside the name that fails keeps its place, hidden", () => {
+    render(
+      resolveHero('spotlight', { comp: 'billboard' }, FACTS),
+      piece('f'),
+      'logo-f.png'
+    );
+    const id = target.querySelector('.org-hero__id');
+
+    fail('.org-hero__id img');
+
+    expect(target.querySelector('.org-hero__id')).toBe(id);
+    expect(hiddenInBox('.org-hero__id img')).toBe(true);
+    expect(id?.textContent?.trim()).toBe('Of Blood & Bones');
   });
 
   test('a split panel whose picture fails keeps its column with a title card', () => {
     render(resolveHero('intro', {}, FACTS), piece('d'));
     expect(section()?.dataset.comp).toBe('split');
+    const panel = target.querySelector('.org-hero__media');
 
     fail('.org-hero__media img');
 
-    const panel = target.querySelector('.org-hero__media');
-    expect(panel).not.toBeNull();
+    expect(target.querySelector('.org-hero__media')).toBe(panel);
+    expect(hiddenInBox('.org-hero__media img')).toBe(true);
     expect(panel?.querySelector('.org-hero__frame-fallback')?.textContent).toBe(
       'Bone Deep'
     );
+  });
+
+  test("a shelf piece's thumbnail that fails keeps its tile", () => {
+    const shelf = [
+      piece('g'),
+      { ...piece('h'), href: '/content/h', title: 'Ancestral Threads' },
+    ];
+    render(
+      resolveHero('grow', { proof: 'shelf' }, FACTS),
+      piece('g0'),
+      'logo.png',
+      { shelf }
+    );
+    const thumbs = target.querySelectorAll('.org-hero__shelf-thumb');
+    expect(thumbs).toHaveLength(2);
+
+    fail('.org-hero__shelf-thumb img');
+
+    expect(target.querySelectorAll('.org-hero__shelf-thumb')).toHaveLength(2);
+    expect(target.querySelector('.org-hero__shelf-thumb')).toBe(thumbs[0]);
+    // the failed one, not the next tile's
+    expect(thumbs[0]?.querySelector('img')).not.toBeNull();
+    expect(hiddenInBox('.org-hero__shelf-thumb img')).toBe(true);
   });
 });
 

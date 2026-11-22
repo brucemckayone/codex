@@ -10,10 +10,14 @@
   opens with `:global(.org-hero[...])`, OrgHero's root. Scoped or global, that
   compound weighs the same, so every rule here has the specificity it had in
   OrgHero.svelte. The elements stay scoped to this file, and nothing here is
-  styled from OrgHero.svelte.
+  styled from OrgHero.svelte. The pictures are FallbackImage's (a failed one
+  is hidden in its box, the plate in its place), so their rules reach them
+  through `:global(…)`: the frame's by its own class, since the film frame's
+  art holds HeroLoopVideo's still, an img these rules never styled.
 -->
 <script lang="ts">
   import { preloadPlayerOnIntent } from '$lib/components/player/load-core';
+  import { FallbackImage } from '$lib/components/ui';
   import { HeroLoopVideo } from '$lib/components/ui/HeroLoopVideo';
   import { PlayIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
@@ -36,12 +40,9 @@
     frameShape: HeroFrameShape | undefined;
     filmLabel: string;
     onfilm: (event: MouseEvent & { currentTarget: HTMLButtonElement }) => void;
-    /** False once a picture has failed: the frame draws the brand's plate instead. */
-    shows: (url: string | null | undefined) => url is string;
-    onimagefail: (event: Event & { currentTarget: HTMLImageElement }) => void;
   }
 
-  const { comp, spot, film, filmFrame, frameShape, filmLabel, onfilm, shows, onimagefail }: Props = $props();
+  const { comp, spot, film, filmFrame, frameShape, filmLabel, onfilm }: Props = $props();
 </script>
 
 {#if comp === 'showcase'}
@@ -79,20 +80,19 @@
          as tall as the hero. One link: the whole frame. -->
     <a class="org-hero__frame" data-shape={frameShape} href={spot.href}>
       <span class="org-hero__frame-art" aria-hidden="true">
-        {#if shows(spot.imageUrl)}
-          <img
-            onerror={onimagefail}
-            src={spot.imageUrl}
-            srcset={getThumbnailSrcset(spot.imageUrl)}
-            sizes={frameSizes(spot.imageUrl, frameShape)}
-            alt=""
-            decoding="async"
-            fetchpriority="high"
-          />
-        {:else}
-          <!-- the brand's own plate: the caption below already names the piece -->
-          <span class="org-hero__frame-fallback"></span>
-        {/if}
+        <!-- with no picture, or a failed one, the brand's own plate: the
+             caption below already names the piece -->
+        <FallbackImage
+          class="org-hero__frame-img"
+          src={spot.imageUrl}
+          srcset={getThumbnailSrcset(spot.imageUrl)}
+          sizes={spot.imageUrl ? frameSizes(spot.imageUrl, frameShape) : undefined}
+          alt=""
+          decoding="async"
+          fetchpriority="high"
+        >
+          {#snippet fallback()}<span class="org-hero__frame-fallback"></span>{/snippet}
+        </FallbackImage>
       </span>
       {#if spot.kind === 'video' || spot.kind === 'audio'}
         <span class="org-hero__frame-play" aria-hidden="true"><PlayIcon size={22} /></span>
@@ -107,19 +107,16 @@
   {/if}
 {:else if comp === 'split' && spot}
   <a class="org-hero__media" href={spot.href} aria-label={m.org_hero_piece_label({ kicker: spot.kicker, title: spot.title })}>
-    {#if shows(spot.imageUrl)}
-      <img
-        onerror={onimagefail}
-        src={spot.imageUrl}
-        srcset={getThumbnailSrcset(spot.imageUrl)}
-        sizes={panelSizes(spot.imageUrl)}
-        alt=""
-        decoding="async"
-        fetchpriority="high"
-      />
-    {:else}
-      <span class="org-hero__frame-fallback" aria-hidden="true">{spot.title}</span>
-    {/if}
+    <FallbackImage
+      src={spot.imageUrl}
+      srcset={getThumbnailSrcset(spot.imageUrl)}
+      sizes={spot.imageUrl ? panelSizes(spot.imageUrl) : undefined}
+      alt=""
+      decoding="async"
+      fetchpriority="high"
+    >
+      {#snippet fallback()}<span class="org-hero__frame-fallback" aria-hidden="true">{spot.title}</span>{/snippet}
+    </FallbackImage>
   </a>
 {/if}
 
@@ -175,7 +172,7 @@
     z-index: -1;
   }
 
-  .org-hero__frame-art img {
+  .org-hero__frame-art :global(.org-hero__frame-img) {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -183,7 +180,7 @@
     transition: transform var(--duration-slowest) var(--ease-smooth);
   }
 
-  .org-hero__frame:hover .org-hero__frame-art img { transform: scale(1.04); }
+  .org-hero__frame:hover .org-hero__frame-art :global(.org-hero__frame-img) { transform: scale(1.04); }
 
   /* The film frame is a button: none of a button's own dress. */
   .org-hero__frame--film {
@@ -259,7 +256,7 @@
     font-size: var(--text-5xl);
     line-height: var(--leading-tight);
     color: var(--_ink-strong);
-    background: radial-gradient(circle at 50% 30%, color-mix(in oklab, var(--color-brand-primary) 55%, transparent), transparent 70%);
+    background: var(--_plate);
   }
 
   .org-hero__frame-play {
@@ -346,7 +343,7 @@
     border-radius: calc(var(--radius-card) * 1.5);
   }
 
-  .org-hero__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .org-hero__media :global(img) { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   @media (--breakpoint-md) {
     /* the call sits in the middle of the picture's VISIBLE part (the mask
@@ -406,7 +403,7 @@
   :global(.org-hero[data-entrance]) .org-hero__frame {
     animation: org-hero-open calc(var(--duration-slowest) * 1.6) var(--ease-smooth) backwards;
   }
-  :global(.org-hero[data-entrance]) .org-hero__frame-art img {
+  :global(.org-hero[data-entrance]) .org-hero__frame-art :global(.org-hero__frame-img) {
     animation: org-hero-settle calc(var(--duration-slowest) * 3) var(--ease-out) backwards;
   }
   :global(.org-hero[data-entrance]) .org-hero__frame-caption {
@@ -414,7 +411,7 @@
     animation-delay: var(--duration-slowest);
   }
   :global(.org-hero[data-entrance='none']) .org-hero__frame,
-  :global(.org-hero[data-entrance='none']) .org-hero__frame-art img,
+  :global(.org-hero[data-entrance='none']) .org-hero__frame-art :global(.org-hero__frame-img),
   :global(.org-hero[data-entrance='none']) .org-hero__frame-caption,
   :global(.org-hero[data-entrance='none']) .org-hero__media {
     animation: none;
