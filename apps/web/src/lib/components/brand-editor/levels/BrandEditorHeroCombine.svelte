@@ -24,9 +24,9 @@
   import {
     type ControlConfig,
     HERO_FX_PRESET_CONTROLS,
-    HERO_FX_PRESETS,
     presetFxControls,
-  } from '$lib/brand-editor/hero-fx-presets';
+  } from '$lib/brand-editor/hero-fx-controls';
+  import { HERO_FX_PRESETS } from '$lib/brand-editor/hero-fx-presets';
   import SortableRows from '$lib/components/page-builder/editor/SortableRows.svelte';
   import ListSegment from '$lib/components/studio/list-toolbar/ListSegment.svelte';
   import * as DropdownMenu from '$lib/components/ui/DropdownMenu';

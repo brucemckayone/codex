@@ -2,12 +2,11 @@
   import { brandEditor } from '$lib/brand-editor';
   import {
     HERO_FX_COLOR_CONTROLS,
-    HERO_FX_DEFAULTS,
-    HERO_FX_PRESETS,
     HERO_FX_PRESET_CONTROLS,
     presetFxControls,
     type ControlConfig,
-  } from '$lib/brand-editor/hero-fx-presets';
+  } from '$lib/brand-editor/hero-fx-controls';
+  import { HERO_FX_DEFAULTS, HERO_FX_PRESETS } from '$lib/brand-editor/hero-fx-presets';
   import {
     selectPreset as selectPresetHelper,
     updateOverride as updateOverrideHelper,

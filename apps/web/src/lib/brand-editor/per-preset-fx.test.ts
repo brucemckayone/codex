@@ -15,17 +15,14 @@ import {
   darkTokenOverridesToCssVars,
   tokenOverridesToCssVars,
 } from './css-injection';
+import { presetFxControls } from './hero-fx-controls';
 import {
   type FxOverrideMaps,
   migrateSharedFx,
   selectPreset,
   updateOverride,
 } from './hero-fx-helpers';
-import {
-  ALL_HERO_FX_SHADER_KEYS,
-  HERO_FX_DEFAULTS,
-  presetFxControls,
-} from './hero-fx-presets';
+import { ALL_HERO_FX_SHADER_KEYS, HERO_FX_DEFAULTS } from './hero-fx-presets';
 import { ATMOSPHERE_AXES, atmosphereShaderTokens } from './preset-axes';
 import type { BrandEditorState } from './types';
 

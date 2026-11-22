@@ -12,12 +12,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { LIVE_PRESET_IDS } from '$lib/components/ui/ShaderHero/preset-fx-defaults';
 import { getShaderConfig } from '$lib/components/ui/ShaderHero/shader-config';
+import { HERO_FX_PRESET_CONTROLS, presetFxControls } from './hero-fx-controls';
 import { updateOverride } from './hero-fx-helpers';
-import {
-  HERO_FX_DEFAULTS,
-  HERO_FX_PRESET_CONTROLS,
-  presetFxControls,
-} from './hero-fx-presets';
+import { HERO_FX_DEFAULTS } from './hero-fx-presets';
 
 /** Each control key, and the config field the hero reads it into. */
 const FIELDS: Record<string, Record<string, string>> = {

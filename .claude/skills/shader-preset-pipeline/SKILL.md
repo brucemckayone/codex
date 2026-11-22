@@ -22,7 +22,7 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
 
 **FBO presets size their simulation with `sim-grid.ts`:** `simGridFor(width, height)` shapes the grid like the canvas (≈512² texels, sides multiples of 64), `simGridChanged` gates rebuilds on resize, and `createStepClock(stepsPerSecond)` turns elapsed time into steps so 120 Hz screens do not run twice as fast. Measure brush and drop distances in texels (`(v_uv - uMouse) / uTexel`), never in uv, or they draw as ellipses on wide heroes. Seed with something smooth (`PERIODIC_NOISE_GLSL` tiles over the wrapped grid) and warm up on the first render, so a reduced-motion visitor's single frame is not raw noise. Both `simGridFor(width, height, base, cell)` and `resizeSim(gl, grid, buf, width, height, base, cell)` take an optional `base` (texels across, default `SIM_BASE`) and `cell` (the side multiple, default 64); a small grid passes both, as lenia does (`LENIA_GRID_BASE` 256, cell 16), or a 64 multiple distorts it. `createStepClock(stepsPerSecond, maxPerFrame = 4)` caps the steps one slow frame may catch up: size it so the slowest frame rate you support still gets every step it owes (lenia: `Math.max(4, 2 * perFrame)`, so 30 and 20 fps keep full speed), and guard `tick()`'s `dt`, which can be 0 (`if (!(dt > 0)) return`).
 
-**Each preset owns its intensity, grain and vignette (Codex-1yd58 WP-1d):** the keys are `shader-<id>-intensity` / `-grain` / `-vignette`, listed in `PRESET_FX_KEYS` (spread into `BRAND_PREFIX_KEYS` and the editor's `HERO_FX_DEFAULTS`); the defaults are one row of `PRESET_FX_DEFAULTS` in `preset-fx-defaults.ts` (`FX_BASE` until tuned; `fxDefaultsFor(id)` reads it), and the editor's sliders come from `presetFxControls(id)`. The shared `shader-intensity` keys are only a legacy fallback, read when a brand saved before WP-1d holds them. A renderer's own `DEFAULTS` for the three are a fallback for a partial config, never where a preset is tuned.
+**Each preset owns its intensity, grain and vignette:** the keys are `shader-<id>-intensity` / `-grain` / `-vignette`, listed in `PRESET_FX_KEYS` (spread into `BRAND_PREFIX_KEYS` and the editor's `HERO_FX_DEFAULTS`); the defaults are one row of `PRESET_FX_DEFAULTS` in `preset-fx-defaults.ts` (`FX_BASE` until tuned; `fxDefaultsFor(id)` reads it), and the editor's sliders come from `presetFxControls(id)`. The shared `shader-intensity` keys are only a legacy fallback, read when an older brand holds them. A renderer's own `DEFAULTS` for the three are a fallback for a partial config, never where a preset is tuned.
 
 **One splash per press:** queue a click splash on the burst's RISING edge, `createClickEdge().clicked(mouse.burstStrength)` from `click-edge.ts`, and play it out over a few input steps. Never splash on `burstStrength > 0`: it holds on every frame of its decay, about 28 splashes a click at 60 Hz and 56 at 120 Hz. Don't clear the edge in `reset()`: a reseed mid-decay would read the falling value as a new press.
 
@@ -44,7 +44,10 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
 | WebGL helpers | `apps/web/src/lib/components/ui/ShaderHero/webgl-utils.ts` |
 | Main component | `apps/web/src/lib/components/ui/ShaderHero/ShaderHero.svelte` |
 | CSS injection | `apps/web/src/lib/brand-editor/css-injection.ts` |
-| Brand editor UI | `apps/web/src/lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte` |
+| Intensity / grain / vignette defaults | `apps/web/src/lib/components/ui/ShaderHero/preset-fx-defaults.ts` |
+| The editor's preset menu + every key's default | `apps/web/src/lib/brand-editor/hero-fx-presets.ts` |
+| The editor's controls, as data | `apps/web/src/lib/brand-editor/hero-fx-controls.ts` |
+| Brand editor UI (renders the controls; no per-preset code) | `apps/web/src/lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte` |
 | Plan docs | `docs/shader-plans/` |
 
 ---
@@ -62,12 +65,16 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
 - `apps/web/src/lib/components/ui/ShaderHero/shaders/{name}-display.frag.ts`
 - `apps/web/src/lib/components/ui/ShaderHero/renderers/{name}-renderer.ts`
 
-### Files to MODIFY (4 files, every preset)
+### Files to MODIFY (6 files, every preset)
 
 1. **`shader-config.ts`** -- Add to ShaderPresetId union, add Config interface, add to ShaderConfig union, add DEFAULTS, add a `PRESET_BUILDERS` entry
 2. **`css-injection.ts`** -- Add ALL new `shader-{name}-*` keys to BRAND_PREFIX_KEYS set
 3. **`load-renderer.ts`** -- Add the preset to `RENDERER_LOADERS` (typed `Record<ShaderPresetId, RendererLoader>`, so a missing entry is a compile error)
-4. **`BrandEditorHeroEffects.svelte`** -- Add preset card to PRESETS array, add DEFAULTS entries, add `$derived` values, add slider section
+4. **`preset-fx-defaults.ts`** -- Add the preset's row to `PRESET_FX_DEFAULTS` (`FX_BASE` until tuned; typed `Record<ShaderPresetId, ...>`, so a missing row is a compile error). The row is what makes it a live preset (`LIVE_PRESET_IDS`), which gives it its own intensity, grain and vignette keys and sliders
+5. **`hero-fx-presets.ts`** -- Add the preset to `HERO_FX_PRESETS` (the menu every picker reads) and each `shader-{name}-*` key's default to `HERO_FX_DEFAULTS`
+6. **`hero-fx-controls.ts`** -- Add the preset's section to `HERO_FX_PRESET_CONTROLS`
+
+`BrandEditorHeroEffects.svelte` needs no change: it renders the controls from the data.
 
 ---
 
@@ -86,9 +93,9 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
    - Brand color mapping (which visual element uses which color)
    - Gotchas specific to this preset
 
-### Phase 2: Update shared files (4 files)
+### Phase 2: Update shared files (6 files)
 
-These 4 modifications can be done in parallel by separate agents since they touch different files.
+These modifications can be done in parallel by separate agents since they touch different files.
 
 **File 1: `shader-config.ts`**
 
@@ -158,50 +165,30 @@ Add an entry to `RENDERER_LOADERS` (one lazy chunk per preset). `loadRenderer(id
   (await import('./renderers/{name}-renderer')).create{Name}Renderer(),
 ```
 
-**File 4: `BrandEditorHeroEffects.svelte`**
+**File 4: `preset-fx-defaults.ts`**
 
-Four additions required:
+Add a row to `PRESET_FX_DEFAULTS`:
+```typescript
+{name}: FX_BASE,
+```
 
-(a) Add to PRESETS array:
+**File 5: `hero-fx-presets.ts`**
+
+(a) Add to `HERO_FX_PRESETS`:
 ```typescript
 { id: '{name}', label: '{Label}', description: '{Short description}' },
 ```
 
-(b) Add to DEFAULTS record (string values, kebab-case keys):
-```typescript
-'shader-{name}-param-a': '1.00',
-'shader-{name}-param-b': '0.50',
-```
-
-(c) Add `$derived` values:
+(b) Add to `HERO_FX_DEFAULTS` (string values, kebab-case keys), each written as a range input reports it (`String(n)`: `'1'`, not `'1.00'`), so a slider set back to its default drops the override. Use the same numbers as `shader-config.ts`'s DEFAULTS: the slider's default must be what the hero paints:
 ```typescript
 // {Name}
-const {name}ParamA = $derived(readNum('shader-{name}-param-a'));
-const {name}ParamB = $derived(readNum('shader-{name}-param-b'));
+'shader-{name}-param-a': '1',
+'shader-{name}-param-b': '0.5',
 ```
 
-(d) Add slider section in the template (after the last `{:else if}` block, before the closing `{/if}`):
-```svelte
-{:else if activePreset === '{name}'}
-  <section class="hero-fx__section">
-    <span class="hero-fx__section-label">{Label}</span>
+**File 6: `hero-fx-controls.ts`**
 
-    <BrandSliderField
-      id="shader-{name}-param-a"
-      label="Param A"
-      value={{name}ParamA.toFixed(2)}
-      min={0.00}
-      max={2.00}
-      step={0.10}
-      current={{name}ParamA}
-      minLabel="Low"
-      maxLabel="High"
-      oninput={handleSliderInput('shader-{name}-param-a')}
-    />
-
-    <!-- For int params: value={String(Math.round({name}ParamB))} -->
-  </section>
-```
+Add the preset's section to `HERO_FX_PRESET_CONTROLS` (template in Section 5). The editor draws it under the preset's own intensity, grain and vignette sliders and the shared palette controls.
 
 ### Phase 3: Implement shader + renderer files
 
@@ -210,7 +197,7 @@ See template code in Section 5 below.
 ### Phase 4: Merge + verify
 
 1. Copy from worktrees if applicable
-2. Run typecheck: `npx tsc --noEmit --project apps/web/tsconfig.json` -- zero errors required
+2. Run typecheck: `pnpm --filter web typecheck` (svelte-kit sync, then tsc) -- zero errors required
 3. Run dev server: `pnpm dev` (from monorepo root, NEVER cd into individual workers)
 4. Navigate to an org subdomain, open brand editor, select the new preset
 5. Verify: preset renders, all sliders update the shader in real-time, mouse interaction works
@@ -1002,41 +989,26 @@ export interface {Name}Config extends ShaderConfigBase {
 }),
 ```
 
-### BrandEditorHeroEffects Slider Section Template
+### HERO_FX_PRESET_CONTROLS Entry Template
 
-```svelte
-{:else if activePreset === '{name}'}
-  <section class="hero-fx__section">
-    <span class="hero-fx__section-label">{Display Label}</span>
-
-    <BrandSliderField
-      id="shader-{name}-param-a"
-      label="Param A Label"
-      value={{name}ParamA.toFixed(2)}
-      min={0.00}
-      max={2.00}
-      step={0.10}
-      current={{name}ParamA}
-      minLabel="Low"
-      maxLabel="High"
-      oninput={handleSliderInput('shader-{name}-param-a')}
-    />
-
-    <BrandSliderField
-      id="shader-{name}-param-b"
-      label="Param B Label"
-      value={{name}ParamB.toFixed(2)}
-      min={0.00}
-      max={1.00}
-      step={0.05}
-      current={{name}ParamB}
-      minLabel="Subtle"
-      maxLabel="Strong"
-      oninput={handleSliderInput('shader-{name}-param-b')}
-    />
-
-    <!-- For int params: value={String(Math.round({name}ParamInt))} -->
-  </section>
+```typescript
+{name}: {
+  sectionLabel: '{Display Label}',
+  controls: [
+    {
+      kind: 'slider',
+      key: 'shader-{name}-param-a',
+      label: 'Param A Label',
+      min: 0,
+      max: 2,
+      step: 0.1,
+      format: 'fixed2', // 'int' | 'fixed1' | 'fixed2' | 'fixed3' | 'angle'
+      minLabel: 'Low',
+      maxLabel: 'High',
+    },
+    // 'color' and 'toggle' controls take only kind, key and label
+  ],
+},
 ```
 
 ### BRAND_PREFIX_KEYS Entry Template
@@ -1053,11 +1025,11 @@ export interface {Name}Config extends ShaderConfigBase {
 
 ### Phase 1: Shared file modifications (3 parallel agents)
 
-Since the 4 modified files are independent, split across agents:
+Since the modified files are independent, split across agents:
 
 - **Agent A:** `shader-config.ts` (types, defaults, `PRESET_BUILDERS` entry)
 - **Agent B:** `css-injection.ts` (BRAND_PREFIX_KEYS) + `load-renderer.ts` (RENDERER_LOADERS entry) -- these are small changes in different files, one agent handles both
-- **Agent C:** `BrandEditorHeroEffects.svelte` (PRESETS, DEFAULTS, $derived, sliders)
+- **Agent C:** `preset-fx-defaults.ts` (row) + `hero-fx-presets.ts` (menu entry, defaults) + `hero-fx-controls.ts` (control section)
 
 ### Phase 2: Shader + renderer implementation (isolated worktree agents)
 
@@ -1070,7 +1042,7 @@ For batch implementation of multiple presets:
 
 1. Copy new shader/renderer files from worktrees to main tree
 2. Ensure all Phase 1 shared-file modifications are in place
-3. Run `npx tsc --noEmit --project apps/web/tsconfig.json` -- must be zero errors
+3. Run `pnpm --filter web typecheck` -- must be zero errors
 4. Run `pnpm dev` and visually verify each new preset
 5. Close beads issues
 
@@ -1087,12 +1059,12 @@ For batch implementation of multiple presets:
 | FBO simulation doesn't start / stays black | `reset()` not seeding initial state | Seed both FBO sides in `reset()` using the init program |
 | Gray-Scott / Turing patterns wrong | Laplacian needs specific scaling factor | Use `0.21` scaling for Gray-Scott Laplacian: `laplacian = (n+s+e+w + 0.05*(ne+nw+se+sw) - (4.0+0.2)*center) * 0.21` |
 | Everything looks uniform/flat | Density threshold too wide | Use narrow band for pattern visibility (e.g., `smoothstep(0.2, 0.25, value)`) |
-| Sliders exist but default values differ | DEFAULTS mismatch between shader-config.ts and BrandEditorHeroEffects.svelte | Ensure both files use the same numeric values (one in camelCase, one as string in kebab-case) |
+| Sliders exist but default values differ | DEFAULTS mismatch between shader-config.ts and `HERO_FX_DEFAULTS` in hero-fx-presets.ts | Ensure both files use the same numeric values (one in camelCase, one as string in kebab-case) |
 | TypeScript error: type not in union | Config interface not added to `ShaderConfig` union type | Add `\| {Name}Config` to the union in shader-config.ts |
 | TypeScript error: property missing | The `PRESET_BUILDERS` entry doesn't return all fields from the config interface | Ensure every field in the interface has a corresponding `rv()` call in the builder |
 | `uniform1f` used for int uniform | Renderer uses wrong GL call | Use `gl.uniform1i()` for `uniform int` declarations, `gl.uniform1f()` for `uniform float` |
 | For-loop doesn't execute all iterations | GLSL ES 3.0 requires constant loop bounds | Use pattern: `for (int i = 0; i < MAX; i++) { if (i >= u_count) break; ... }` |
 | Mouse interaction feels wrong | Aspect ratio not corrected for mouse coordinates | Apply same aspect correction to both mouse UV and fragment UV before distance calculation |
 | Brand editor changes don't take effect | Config polling cadence too slow for testing | Config is polled every 30 frames (~0.5s). Changes will appear within half a second. |
-| Preset not appearing in dropdown | Not added to PRESETS array in BrandEditorHeroEffects.svelte | Add `{ id: '{name}', label: '{Label}', description: '{desc}' }` to the array |
+| Preset not appearing in dropdown | Not added to `HERO_FX_PRESETS` in hero-fx-presets.ts | Add `{ id: '{name}', label: '{Label}', description: '{desc}' }` to the array |
 | loadRenderer returns null | The id is neither a live preset nor in `CUT_PRESET_ALIASES` (`resolvePresetId` returned null; `shader.unknown_preset` is logged) | Add the preset to `ShaderPresetId` and `RENDERER_LOADERS` (a missing loader is a compile error) |
