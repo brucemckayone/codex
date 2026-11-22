@@ -7,6 +7,11 @@
  * next load. Shared by the Showreel's spec and its theatre's, so the setup
  * lives once; the origin comes from `origin.ts`, as every spec's does.
  *
+ * A test that needs a kind of film or piece sets it the same way, so it runs
+ * whatever the seed holds, opting in per test: `introFilm` sets an intro film
+ * and how it plays, and `featureRecording` puts a recording with a preview in
+ * the reel. Each FAILS, never skips, when the page has nothing to set it from.
+ *
  * A fulfilled document has no address, so Chrome's Local Network Access counts
  * it public and blocks its requests to the local servers: a spec using this
  * passes `SHOWREEL_LAUNCH` to `test.use`.
@@ -27,11 +32,18 @@ export const PIECE_MS = 7000;
 /** A piece, plus the words' swap and a slow CI frame. */
 export const MOVES_ON = PIECE_MS + 5000;
 
+/**
+ * `--disable-audio-output` plays sound into a fake device. Where Chrome can
+ * open no real one (headless on a Mac), media with its sound on never starts
+ * its clock: it sits on its first frame, not paused and with no error, while
+ * the same media muted plays. The page still sees its sound on.
+ */
 export const SHOWREEL_LAUNCH = {
   launchOptions: {
     args: [
       '--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights',
       '--autoplay-policy=no-user-gesture-required',
+      '--disable-audio-output',
     ],
   },
 };
@@ -64,7 +76,183 @@ export function withHeroOptions(
   );
 }
 
-/** The landing as the Showreel (Corner unless `keys` say otherwise); skips when OBB has no brand payload. */
+/** A string as the page's data writes one. */
+const STRING = String.raw`"(?:[^"\\]|\\.)*"`;
+/** The org's intro film in the page's data: a flat object, or null. */
+const INTRO_FILM = new RegExp(
+  String.raw`introFilm:(\{(?:[^{}"]|${STRING})*\}|null)`
+);
+const FULL_FILM = /fullFilm:(?:true|false)/;
+
+/** The first `key:"…"` in `text`, as written, or null. */
+const stringAt = (text: string, key: string) =>
+  new RegExp(`${key}:(${STRING})`).exec(text)?.[1] ?? null;
+
+/** Where a test's intro film came from: the org's own, or a catalogue film's media. */
+export type IntroFilmSource = 'real' | `injected:${string}`;
+
+/**
+ * The landing's HTML with an intro film played in full or as its preview, and
+ * where the film came from, or null when there is none to play. The org's own
+ * film is kept, only its `fullFilm` set. When it has none (CI's seed sets
+ * none) the catalogue's newest film with a preview stands in. The page's
+ * `fullFilm` is a hint: a press on a full film still asks the worker, which
+ * re-checks and answers null when only the preview may play, and the player
+ * then plays the preview.
+ */
+export function withIntroFilm(
+  html: string,
+  fullFilm: boolean
+): { html: string; source: IntroFilmSource } | null {
+  const match = INTRO_FILM.exec(html);
+  if (!match) return null;
+  const film =
+    match[1] === 'null'
+      ? standInFilm(html)
+      : { text: match[1], source: 'real' as const };
+  if (film === null || !FULL_FILM.test(film.text)) return null;
+  const set = film.text.replace(FULL_FILM, `fullFilm:${fullFilm}`);
+  return {
+    html: html.replace(match[0], () => `introFilm:${set}`),
+    source: film.source,
+  };
+}
+
+/** The catalogue's newest film with a preview: its row, and that preview as written. */
+function newestFilm(html: string): { text: string; previewUrl: string } | null {
+  for (const { text } of catalogueRows(html)) {
+    const previewUrl = stringAt(text, 'hlsPreviewUrl');
+    if (text.includes('contentType:"video"') && previewUrl !== null)
+      return { text, previewUrl };
+  }
+  return null;
+}
+
+/**
+ * The catalogue's newest film with a preview, written as the page writes an
+ * intro film and named by its media, or null. A row's first `title`,
+ * `thumbnailUrl` and `mediaItemId` are its own: the objects inside it come
+ * after them.
+ */
+function standInFilm(
+  html: string
+): { text: string; source: IntroFilmSource } | null {
+  const film = newestFilm(html);
+  if (!film) return null;
+  const title = stringAt(film.text, 'title') ?? '""';
+  const posterUrl = stringAt(film.text, 'thumbnailUrl') ?? 'null';
+  const mediaId = stringAt(film.text, 'mediaItemId')?.slice(1, -1) ?? '?';
+  return {
+    text: `{title:${title},posterUrl:${posterUrl},previewUrl:${film.previewUrl},durationSeconds:30,fullFilm:false}`,
+    source: `injected:${mediaId}`,
+  };
+}
+
+/** The org's name in the page's data, as each of its rows names it. */
+function orgName(html: string): string | null {
+  const literal = new RegExp(`name:(${STRING}),slug:"${ORG}"`).exec(html)?.[1];
+  return literal ? JSON.parse(literal) : null;
+}
+
+/** The title of the first piece in the server's own markup of the reel, or null. */
+function serverFirstTitle(html: string): string | null {
+  const span =
+    /class="reel__item\b[^"]*"[^>]*>[\s\S]*?class="reel__t\b[^"]*"[^>]*>([\s\S]*?)<\/span>/.exec(
+      html
+    )?.[1];
+  if (span === undefined) return null;
+  return span
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+/**
+ * The catalogue's rows (`allContent`, newest first) as they stand in the
+ * page's data, each with where it starts: the array's top-level objects,
+ * read past strings so a brace inside one counts for nothing.
+ */
+function catalogueRows(html: string): { start: number; text: string }[] {
+  const KEY = 'allContent:[';
+  const at = html.indexOf(KEY);
+  if (at < 0) return [];
+  const rows: { start: number; text: string }[] = [];
+  let depth = 0;
+  let start = 0;
+  let inString = false;
+  for (let i = at + KEY.length; i < html.length; i++) {
+    const ch = html[i];
+    if (inString) {
+      if (ch === '\\') i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === '{' || ch === '[') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}' || ch === ']') {
+      if (depth === 0) break;
+      depth--;
+      if (depth === 0 && ch === '}')
+        rows.push({ start, text: html.slice(start, i + 1) });
+    }
+  }
+  return rows;
+}
+
+/**
+ * The landing's HTML with its newest recording that has a preview marked
+ * featured, so the reel plays it, or null when the catalogue has no such
+ * recording or no film with a preview. Its preview becomes the newest film's:
+ * a seeded recording's own may be missing from the dev CDN (Sound Therapy's
+ * 404s locally), and the theatre draws a recording as one whatever its
+ * stream. A query of its own keeps it apart from the intro film's preview,
+ * as `buildReel` drops a row whose preview is the film's. A row's own
+ * `featured` is its only one: the objects inside it (its media, org and
+ * creator) carry none.
+ */
+export function withRecordingFeatured(html: string): string | null {
+  const film = newestFilm(html);
+  const row = catalogueRows(html).find(
+    ({ text }) =>
+      text.includes('contentType:"audio"') &&
+      stringAt(text, 'hlsPreviewUrl') !== null
+  );
+  if (!film || !row) return null;
+  const url = film.previewUrl.slice(0, -1);
+  const previewUrl = `${url}${url.includes('?') ? '&' : '?'}as=recording"`;
+  const text = row.text
+    .replace('featured:false', 'featured:true')
+    .replace(
+      new RegExp(`hlsPreviewUrl:${STRING}`),
+      () => `hlsPreviewUrl:${previewUrl}`
+    );
+  return (
+    html.slice(0, row.start) + text + html.slice(row.start + row.text.length)
+  );
+}
+
+export interface ShowreelOptions {
+  context?: BrowserContextOptions;
+  keys?: Record<string, string>;
+  init?: () => void;
+  /**
+   * An intro film, played in full (true) or as its preview (false). Opt-in:
+   * a test that leaves it out sees the page's own film, or none.
+   */
+  introFilm?: { fullFilm: boolean };
+  /** Put a recording with a preview in the reel. */
+  featureRecording?: boolean;
+}
+
+/**
+ * The landing as the Showreel (Corner unless `keys` say otherwise). Fails when
+ * the page has no brand payload to set it on, or nothing to set `introFilm` or
+ * `featureRecording` from.
+ */
 export async function openShowreel(
   browser: Browser,
   baseURL: string | undefined,
@@ -72,11 +260,9 @@ export async function openShowreel(
     context: contextOptions = {},
     keys = {},
     init,
-  }: {
-    context?: BrowserContextOptions;
-    keys?: Record<string, string>;
-    init?: () => void;
-  } = {}
+    introFilm,
+    featureRecording = false,
+  }: ShowreelOptions = {}
 ): Promise<Page> {
   const url = `${orgOrigin(ORG, baseURL)}/`;
   const context = await browser.newContext({
@@ -85,23 +271,45 @@ export async function openShowreel(
   });
   if (init) await context.addInitScript(init);
   const page = await context.newPage();
-  let rewritten = false;
+  let served = 'no response';
+  const unset: string[] = [];
+  // Set in the route handler, so typed past the narrowing of `null`.
+  let film = null as { source: IntroFilmSource; name: string | null } | null;
+  let serverFirst = null as string | null;
   await page.route(url, async (route) => {
     const response = await route.fetch();
-    const body = withHeroOptions(await response.text(), {
+    const html = await response.text();
+    let body = withHeroOptions(html, {
       purpose: 'consume',
       comp: 'showreel',
       'reel-layout': 'corner',
       ...keys,
     });
-    rewritten = body !== null;
+    served = `HTTP ${response.status()}`;
+    serverFirst = serverFirstTitle(html);
+    if (body === null) unset.push('a brand payload');
+    const set = (
+      what: string,
+      rewrite: (html: string) => string | null
+    ): void => {
+      if (body === null) return;
+      const next = rewrite(body);
+      if (next === null) unset.push(what);
+      else body = next;
+    };
+    if (introFilm)
+      set('an intro film', (doc) => {
+        const done = withIntroFilm(doc, introFilm.fullFilm);
+        if (done) film = { source: done.source, name: orgName(doc) };
+        return done?.html ?? null;
+      });
+    if (featureRecording)
+      set('a recording with a preview', withRecordingFeatured);
     await route.fulfill({ response, body: body ?? undefined });
   });
   await page.goto(url);
-  test.skip(
-    !rewritten,
-    `${ORG}'s landing has no brand payload to set the Showreel on`
-  );
+  // An error page has no payload either, so the status says which this is.
+  expect(unset, `what ${ORG}'s landing (${served}) lacks`).toEqual([]);
   await expect(page.locator('.reel')).toBeVisible({ timeout: 30_000 });
   // The server draws the Showreel too (the consume default), so in sight is
   // not yet hydrated, and a click then does nothing. The bar's first write
@@ -109,7 +317,37 @@ export async function openShowreel(
   await expect(page.locator('.reel')).toHaveAttribute('style', /--_progress/, {
     timeout: 30_000,
   });
+  if (film) await filmLeads(page, film, serverFirst);
   return page;
+}
+
+/**
+ * The intro film leads the reel (`buildReel`), its title the org's name: in
+ * the hydrated page always, and in the server's own markup when it is the
+ * org's real film. An injected film is the browser's alone, as the server
+ * rendered before the rewrite. Which ran is noted on the test.
+ */
+async function filmLeads(
+  page: Page,
+  film: { source: IntroFilmSource; name: string | null },
+  serverFirst: string | null
+): Promise<void> {
+  test.info().annotations.push(
+    { type: 'intro film', description: film.source },
+    {
+      type: "server's first piece",
+      description: serverFirst ?? '(no reel in the markup)',
+    }
+  );
+  expect(film.name, `${ORG}'s name in the page's data`).not.toBeNull();
+  await expect(
+    page.locator('.reel .reel__item .reel__t').first(),
+    'the hydrated reel leads with the film'
+  ).toHaveText(film.name ?? '');
+  if (film.source === 'real')
+    expect(serverFirst, "the server's markup leads with the film").toBe(
+      film.name
+    );
 }
 
 /** The piece the index says is playing. */

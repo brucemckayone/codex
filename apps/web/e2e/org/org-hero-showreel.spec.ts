@@ -16,16 +16,16 @@
  *
  * Measured on of-blood-and-bones without a DB write, through
  * `helpers/showreel.ts`: the landing's HTML is rewritten in the browser to set
- * the hero options the brand editor would save, and `SHOWREEL_LAUNCH` lifts
- * Chrome's Local Network Access block on the fulfilled document for this file
- * only.
+ * the hero options the brand editor would save (and, for the film button's
+ * tests, a full film, whatever the seeded film is), and `SHOWREEL_LAUNCH`
+ * lifts Chrome's Local Network Access block on the fulfilled document for
+ * this file only.
  */
 
 import { expect, type Page, test } from '@playwright/test';
 import {
   currentPiece as current,
   MOVES_ON,
-  ORG,
   offTheWords,
   openShowreel as open,
   PIECE_MS,
@@ -635,16 +635,14 @@ test.describe('the Showreel on a landing', () => {
     browser,
     baseURL,
   }) => {
-    const page = await open(browser, baseURL);
+    // A full film plays in the page's own player (a preview opens the reel's
+    // theatre: org-hero-theatre.spec.ts), so this one plays in full.
+    const page = await open(browser, baseURL, {
+      introFilm: { fullFilm: true },
+    });
     // The words' own: each piece's sizer copies its button's box (WP-5b).
     const button = page.locator('.reel__words .reel__btn');
-    const label = (await button.textContent())?.trim() ?? '';
-    // Only the full film plays in the page's own player: a preview opens the
-    // reel's own theatre (Codex-1yd58.8, org-hero-theatre.spec.ts).
-    test.skip(
-      !/^Watch our film/.test(label),
-      `${ORG}'s reel plays no full film here ("${label}")`
-    );
+    await expect(button).toHaveText(/^\s*Watch our film/);
     await button.click();
     await expect(page.locator('.hero-film')).toBeVisible();
     await expect(page.locator('.reel__inner')).toHaveAttribute('inert', '');
@@ -665,7 +663,9 @@ test.describe('the Showreel on a landing', () => {
     browser,
     baseURL,
   }) => {
+    // A full film plays in the page's pop-up: this one plays in full.
     const page = await open(browser, baseURL, {
+      introFilm: { fullFilm: true },
       context: {
         viewport: { width: 390, height: 844 },
         isMobile: true,
@@ -673,13 +673,7 @@ test.describe('the Showreel on a landing', () => {
       },
     });
     const button = page.locator('.reel__words .reel__btn');
-    const label = (await button.textContent())?.trim() ?? '';
-    // Only the full film plays in the page's pop-up: a preview opens the
-    // reel's own theatre (Codex-1yd58.8, org-hero-theatre.spec.ts).
-    test.skip(
-      !/^Watch our film/.test(label),
-      `${ORG}'s reel plays no full film here ("${label}")`
-    );
+    await expect(button).toHaveText(/^\s*Watch our film/);
     await button.click();
     const modal = page.locator('.intro-modal');
     await expect(modal).toBeVisible();
