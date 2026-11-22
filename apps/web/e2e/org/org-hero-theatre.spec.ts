@@ -156,7 +156,7 @@ async function requirePlaying(theatre: Locator): Promise<void> {
   ).toBe(true);
 }
 
-/** True when focus is on the opener or, the opener gone, the index's current piece. */
+/** True when focus is on the opener or, where it can't take it, where the Showreel hands it. */
 async function focusCameBack(page: Page, opener: Locator): Promise<boolean> {
   const onOpener = await opener
     .evaluate((el) => el === document.activeElement, undefined, {
@@ -168,15 +168,21 @@ async function focusCameBack(page: Page, opener: Locator): Promise<boolean> {
 }
 
 /**
- * True when focus is on exactly the index's button for the piece on show:
- * never the reel's pause, which comes before it (WP-7 review r2).
+ * True when focus is on exactly where the Showreel hands it (`nextFocus`):
+ * the index's button for the piece on show, never the reel's pause, which
+ * comes before it (WP-7 review r2); where the index is out of sight (a
+ * phone's), the reel's pause.
  */
 const onIndexItem = (page: Page) =>
-  page.evaluate(
-    () =>
-      document.activeElement ===
-      document.querySelector('.reel__index .reel__item[aria-current="true"]')
-  );
+  page.evaluate(() => {
+    const item = document.querySelector<HTMLElement>(
+      '.reel__index .reel__item[aria-current="true"]'
+    );
+    const target = item?.checkVisibility()
+      ? item
+      : document.querySelector('.reel .reel__round');
+    return target !== null && document.activeElement === target;
+  });
 
 /** Videos outside every dialog that are playing: the reel's stage footage. */
 const stagePlaying = (page: Page) =>
@@ -441,6 +447,38 @@ test.describe('the Showreel theatre', () => {
     await expect
       .poll(() => page.evaluate(() => window.scrollY))
       .toBeGreaterThan(top);
+    await page.context().close();
+  });
+
+  test("on a phone, a preview that can't play says so, and its bar still closes by tap and by Escape", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL, { context: PHONE });
+    // Every preview's playlist answers 404, so none plays in any browser:
+    // the failure path a visitor meets when theirs can't play it.
+    await page.route(/\/preview\/[^/?]+\.m3u8(\?|$)/, (route) =>
+      route.fulfill({ status: 404, body: '' })
+    );
+    const { opener, theatre } = await openTheatre(page);
+    // Seen in the theatre's line, and said by an alert. That the alert is
+    // the only one is ReelTheatre.alerts.svelte.test.ts's: this checks the
+    // close, so it reads the line, whichever build says it.
+    const said = 'This film could not be played.';
+    await expect(theatre.locator('.theatre__error')).toHaveText(said);
+    await expect(
+      theatre.getByRole('alert').filter({ hasText: said }).first()
+    ).toBeAttached();
+    // A tap hit-tests: it fails while anything paints over the button.
+    await bar(theatre).close.tap({ timeout: 5000 });
+    await expect(theatre).toHaveCount(0);
+    await expect.poll(() => focusCameBack(page, opener)).toBe(true);
+
+    const again = await openTheatre(page);
+    await expect(again.theatre.locator('.theatre__error')).toHaveText(said);
+    await page.keyboard.press('Escape');
+    await expect(again.theatre).toHaveCount(0);
+    await expect.poll(() => focusCameBack(page, again.opener)).toBe(true);
     await page.context().close();
   });
 

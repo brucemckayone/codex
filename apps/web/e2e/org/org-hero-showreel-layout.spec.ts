@@ -104,6 +104,10 @@ test.describe('the Showreel in flow (WP-5b)', () => {
    * item there, so its `top` was taken from the foot's grid cell, under the
    * words at the bottom right (674 px down); it is now top right, beside the
    * segments, where every other layout keeps it (the mock's), as Wide's is.
+   *
+   * And the top bar's foot on a phone (WP-5a): the org's name wraps to two
+   * lines there, so the bar ends at 103 px, not 81.6; the words, the pause
+   * and the hero stay where they were (the 1fr row takes it).
    */
   const HEAD: Record<string, Boxes> = {
     'corner 1440x900': {
@@ -122,14 +126,16 @@ test.describe('the Showreel in flow (WP-5b)', () => {
     },
     'corner 390x844': {
       hero: { width: 390, height: 731.8 },
-      top: [47.6, 81.6, 13.6, 376.4],
+      // HEAD: [47.6, 81.6, 13.6, 376.4] (see above).
+      top: [47.6, 103, 13.6, 376.4],
       words: [377.5, 657, 13.6, 376.4],
       // HEAD: [674, 704.6, 345.8, 376.4] (see above).
       ctl: [10.2, 40.8, 345.8, 376.4],
     },
     'wide 390x844': {
       hero: { width: 390, height: 731.8 },
-      top: [47.6, 81.6, 13.6, 376.4],
+      // HEAD: [47.6, 81.6, 13.6, 376.4] (see above).
+      top: [47.6, 103, 13.6, 376.4],
       words: [403.5, 657, 13.6, 376.4],
       ctl: [10.2, 40.8, 345.8, 376.4],
     },
@@ -475,6 +481,320 @@ test.describe('the Showreel in flow (WP-5b)', () => {
           ).length
       );
       expect(stops).toHaveLength(controls);
+      await page.context().close();
+    });
+  }
+});
+
+/**
+ * The org's name in the top bar (WP-5a, Codex-1yd58.6). On a phone it wraps
+ * to balanced lines no longer than 7em, so it stays where the header's left
+ * shade carries it: on one line OBB's reached 0.66 of a 390 reel and read
+ * 3.2-4.3:1 in 'shadow'. A word longer than the measure keeps its width; one
+ * longer than any phone's bar takes a step down and breaks where it must.
+ * On a desktop it is as it was, whatever its length.
+ */
+test.describe("the org's name in the top bar (WP-5a)", () => {
+  type Edge = { top: number; bottom: number; left: number; right: number };
+  /**
+   * The name's lines and box, the logo's, the pause's and the bar's, in the
+   * hero: the top bar's `.reel__name`, never the words, which `withOrgName`
+   * retitles with it where a film carries the org's name.
+   */
+  const nameAt = (page: Page) =>
+    page.evaluate(() => {
+      const reel = document.querySelector('.reel');
+      const name = reel?.querySelector<HTMLElement>('.reel__name');
+      if (!reel || !name) throw new Error('no name');
+      const hero = reel.getBoundingClientRect();
+      const box = (r?: DOMRect) =>
+        r && {
+          top: r.top - hero.top,
+          bottom: r.bottom - hero.top,
+          left: r.left - hero.left,
+          right: r.right - hero.left,
+        };
+      const range = document.createRange();
+      range.selectNodeContents(name);
+      const rects = [...range.getClientRects()].filter((r) => r.width > 0.5);
+      const tops = [...new Set(rects.map((r) => Math.round(r.top)))].sort(
+        (a, b) => a - b
+      );
+      const lines = tops.map((top) => {
+        const on = rects.filter((r) => Math.round(r.top) === top);
+        return {
+          top: Math.min(...on.map((r) => r.top)) - hero.top,
+          bottom: Math.max(...on.map((r) => r.bottom)) - hero.top,
+          left: Math.min(...on.map((r) => r.left)) - hero.left,
+          right: Math.max(...on.map((r) => r.right)) - hero.left,
+        };
+      });
+      const inner = reel.querySelector('.reel__inner') ?? reel;
+      return {
+        width: hero.width,
+        gutter: Number.parseFloat(getComputedStyle(inner).paddingRight),
+        size: Number.parseFloat(getComputedStyle(name).fontSize),
+        longWord: name.hasAttribute('data-long-word'),
+        lines,
+        name: box(name.getBoundingClientRect()),
+        logo: box(
+          reel.querySelector('.reel__sig img')?.getBoundingClientRect()
+        ),
+        pause: box(reel.querySelector('.reel__ctl')?.getBoundingClientRect()),
+        top: box(reel.querySelector('.reel__top')?.getBoundingClientRect()),
+      };
+    });
+  const overlap = (a?: Edge, b?: Edge) =>
+    !!a &&
+    !!b &&
+    a.left < b.right &&
+    b.left < a.right &&
+    a.top < b.bottom &&
+    b.top < a.bottom;
+  /** The name as it would lay out with no measure: the rule set aside. */
+  const UNRULED =
+    '.reel .reel__name { max-inline-size: none !important; min-inline-size: auto !important; text-wrap: wrap !important; }';
+  /** Still and filmless, so two shots of the bar differ only where it does. */
+  const STILL =
+    '.reel *, .reel *::before, .reel *::after { animation: none !important; transition: none !important; } .shader-hero--fullpage, .reel-stage { visibility: hidden !important; } .reel { background: #000 !important; }';
+  const frames = (page: Page) =>
+    page.evaluate(
+      () =>
+        new Promise((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(done))
+        )
+    );
+  /** Inside the reel and clear of the pause and the logo, every line of it. */
+  async function inside(page: Page) {
+    const at = await nameAt(page);
+    for (const [i, line] of at.lines.entries()) {
+      expect
+        .soft(line.right, `line ${i + 1} right`)
+        .toBeLessThanOrEqual(at.width - at.gutter + 0.5);
+      expect
+        .soft(overlap(line, at.pause), `line ${i + 1} under the pause`)
+        .toBe(false);
+      expect
+        .soft(overlap(line, at.logo), `line ${i + 1} over the logo`)
+        .toBe(false);
+    }
+    return at;
+  }
+
+  for (const layout of ['corner', 'wide'] as const) {
+    test(`OBB's name on a phone (${layout}): two balanced lines within the measure, the logo beside the first, inside the reel`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const page = await open(browser, baseURL, {
+        context: { viewport: { width: 390, height: 844 } },
+        keys: { 'reel-layout': layout },
+      });
+      await fitted(page);
+      const at = await inside(page);
+      expect(at.lines).toHaveLength(2);
+      // OBB's own name, so its own words: the bar, two lines tall, stays
+      // clear of them.
+      const wordsTop = await page.evaluate(() => {
+        const hero = document.querySelector('.reel')?.getBoundingClientRect();
+        const words = document
+          .querySelector('.reel__words')
+          ?.getBoundingClientRect();
+        return hero && words ? words.top - hero.top : null;
+      });
+      expect(wordsTop, 'the words').not.toBeNull();
+      expect(at.top?.bottom, 'the bar').toBeDefined();
+      expect(at.top?.bottom ?? 0).toBeLessThanOrEqual((wordsTop ?? 0) + 0.5);
+      for (const line of at.lines) {
+        expect(line.right - line.left).toBeLessThanOrEqual(7 * at.size + 0.5);
+      }
+      // As the board's (c) shows: the logo beside the first line, centred on
+      // the name's two.
+      const [first] = at.lines;
+      if (!first || !at.logo || !at.name) throw new Error('no logo or name');
+      expect(at.logo.top).toBeLessThan(first.bottom);
+      expect(at.logo.bottom).toBeGreaterThan(first.top);
+      expect(
+        Math.abs(
+          (at.logo.top + at.logo.bottom) / 2 -
+            (at.name.top + at.name.bottom) / 2
+        )
+      ).toBeLessThanOrEqual(1);
+      await page.context().close();
+    });
+  }
+
+  test('a short name on a phone: one line, pixel-equal to it with no measure', async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL, {
+      context: { viewport: { width: 390, height: 844 } },
+      name: 'Studio Nine',
+    });
+    await fitted(page);
+    await page.addStyleTag({ content: STILL });
+    await frames(page);
+    const ruled = await nameAt(page);
+    expect(ruled.lines).toHaveLength(1);
+    const shot = await page.locator('.reel__sig').screenshot();
+    await page.addStyleTag({ content: UNRULED });
+    await frames(page);
+    expect(await nameAt(page)).toEqual(ruled);
+    expect((await page.locator('.reel__sig').screenshot()).equals(shot)).toBe(
+      true
+    );
+    await page.context().close();
+  });
+
+  test('a long name on a phone: the lines it needs and no more, inside the reel, clear of the logo and the pause', async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL, {
+      context: { viewport: { width: 390, height: 844 } },
+      name: 'The Northern Centre for Somatic Movement and Breathwork',
+    });
+    await fitted(page);
+    const at = await inside(page);
+    expect(at.lines.length).toBeGreaterThan(2);
+    for (const line of at.lines) {
+      expect(line.right - line.left).toBeLessThanOrEqual(7 * at.size + 0.5);
+    }
+    // Balanced, never more lines than the measure filled greedily takes.
+    await page.addStyleTag({
+      content: '.reel .reel__name { text-wrap: wrap !important; }',
+    });
+    await frames(page);
+    expect(at.lines.length).toBeLessThanOrEqual(
+      (await nameAt(page)).lines.length
+    );
+    await page.context().close();
+  });
+
+  for (const [name, broken] of [
+    ['Transformationals Studio', false],
+    ['Psychoneuroimmunologicalness Studio', true],
+  ] as const) {
+    test(`a ${broken ? 'word longer than any phone bar' : '17-letter word'} on a 320 phone: ${broken ? 'a step down, broken, never past the reel' : 'whole, inside the reel'}`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const page = await open(browser, baseURL, {
+        context: { viewport: { width: 320, height: 700 } },
+        name,
+      });
+      await fitted(page);
+      const at = await inside(page);
+      expect(at.longWord).toBe(broken);
+      const word = name.split(' ')[0] ?? '';
+      // The word whole is on one line: some line holds it alone or with more.
+      const whole = await page.evaluate((w) => {
+        const el = document.querySelector('.reel__name');
+        const text = el?.firstChild;
+        if (!el || !text) return false;
+        const at = (el.textContent ?? '').indexOf(w);
+        const range = document.createRange();
+        range.setStart(text, at);
+        range.setEnd(text, at + w.length);
+        return (
+          new Set([...range.getClientRects()].map((r) => Math.round(r.top)))
+            .size === 1
+        );
+      }, word);
+      expect(whole).toBe(!broken);
+      await page.context().close();
+    });
+  }
+
+  test('a long name on a desktop: one line, as it was with no measure', async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await open(browser, baseURL, {
+      name: 'The Northern Centre for Somatic Movement',
+    });
+    await fitted(page);
+    const ruled = await nameAt(page);
+    expect(ruled.lines).toHaveLength(1);
+    expect(ruled.longWord).toBe(false);
+    await page.addStyleTag({ content: UNRULED });
+    await frames(page);
+    expect(await nameAt(page)).toEqual(ruled);
+    await page.context().close();
+  });
+
+  /**
+   * A logo that fails once the page has painted (its CDN down; CI starts no
+   * dev CDN, so there every seeded logo fails) keeps its box, unseen: a load
+   * failure must keep its box. On a desktop the logo sets the bar's height,
+   * so dropping it shortened the bar (68 to 66.4 px) and moved the name
+   * into its place. A logo leading alone gets the name as its stand-in, out
+   * of flow over its place. Read with the logo's request held (pending),
+   * then failed, and read again once the failure has landed (OrgHero marked
+   * it failed, or dropped it).
+   */
+  for (const [width, height, lead] of [
+    [1440, 900, 'both'],
+    [390, 844, 'both'],
+    [1440, 900, 'logo'],
+  ] as const) {
+    test(`a logo that fails late at ${width}x${height}, lead ${lead}: its box kept, nothing in the top bar moves`, async ({
+      browser,
+      baseURL,
+    }) => {
+      let fail = () => {};
+      const page = await open(browser, baseURL, {
+        context: { viewport: { width, height } },
+        keys: { lead },
+        failLogo: new Promise<void>((done) => {
+          fail = () => done();
+        }),
+      });
+      await page.evaluate(() => document.fonts.ready);
+      const failed = () =>
+        page.evaluate(() => {
+          const img = document.querySelector('.reel__sig img');
+          return !img || img.hasAttribute('data-failed');
+        });
+      expect(await failed(), 'the logo still pending at the first read').toBe(
+        false
+      );
+      const before = await nameAt(page);
+      fail();
+      await expect.poll(failed, { timeout: 20_000 }).toBe(true);
+      await frames(page);
+      const after = await nameAt(page);
+      for (const part of ['top', 'name'] as const) {
+        for (const edge of ['top', 'bottom', 'left', 'right'] as const) {
+          const was = before[part]?.[edge] ?? Number.NaN;
+          const is = after[part]?.[edge] ?? Number.NaN;
+          expect
+            .soft(Math.abs(is - was), `${part} ${edge}: ${is} (before ${was})`)
+            .toBeLessThanOrEqual(0.5);
+        }
+      }
+      if (lead === 'logo') {
+        // The name stands in where the logo was, in sight, clear of the pause.
+        const standIn = await page.evaluate(() => {
+          const el = document.querySelector('.reel__stand-in');
+          const r = el?.getBoundingClientRect();
+          const pause = document
+            .querySelector('.reel__ctl')
+            ?.getBoundingClientRect();
+          return r && pause
+            ? {
+                width: r.width,
+                clear: r.right <= pause.left || r.bottom <= pause.top,
+              }
+            : null;
+        });
+        expect(
+          standIn?.width,
+          'the name stands in for the logo'
+        ).toBeGreaterThan(0);
+        expect(standIn?.clear, 'the stand-in clear of the pause').toBe(true);
+      }
       await page.context().close();
     });
   }

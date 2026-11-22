@@ -162,6 +162,7 @@ function render(
     description: 'Ancestral healing.',
     logoUrl: over.logoUrl ?? '',
     onlogofail: vi.fn(),
+    logoFailed: false,
     facts: '4 portals and 15 essays',
     action: { href: '/pricing', label: 'Join Of Blood & Bones' },
     exploreHref: '/explore',
@@ -963,18 +964,35 @@ describe('Showreel names the org as the hero says', () => {
     expect(q('.reel__sig img')?.getAttribute('src')).toBe(LOGO);
   });
 
-  it("hands a logo that fails to the hero's own handler, and leads with the name once it goes", () => {
+  it("hands a logo that fails to the hero's own handler, keeps its box unseen, and stands the name in for it", () => {
     const props = render('corner', {
       facts: { hideTitle: true },
       logoUrl: LOGO,
     });
+    expect(q('.reel__stand-in')).toBeNull();
     q('.reel__sig img')?.dispatchEvent(new Event('error'));
     expect(props.onlogofail).toHaveBeenCalledTimes(1);
-    // OrgHero's answer to it: no logo.
-    props.logoUrl = '';
+    // OrgHero's answer to it: the logo failed.
+    props.logoFailed = true;
     flushSync();
-    expect(q('.reel__sig img')).toBeNull();
-    expect(q('.reel__name')?.classList.contains('sr-only')).toBe(false);
+    // A load failure keeps its box: the logo stays in the bar, unseen.
+    expect(q('.reel__sig img')?.getAttribute('src')).toBe(LOGO);
+    expect(q('.reel__sig img')?.hasAttribute('data-failed')).toBe(true);
+    // The name stands in over its place, unseen to screen readers, which
+    // keep the one heading.
+    const standIn = q('.reel__stand-in');
+    expect(standIn?.textContent).toBe('Of Blood & Bones');
+    expect(standIn?.getAttribute('aria-hidden')).toBe('true');
+    expect(q('h1.reel__name')?.classList.contains('sr-only')).toBe(true);
+  });
+
+  it('stands no name in for a failed logo that shared the bar with it', () => {
+    const props = render('corner', { logoUrl: LOGO });
+    props.logoFailed = true;
+    flushSync();
+    expect(q('.reel__sig img')?.hasAttribute('data-failed')).toBe(true);
+    expect(q('.reel__stand-in')).toBeNull();
+    expect(q('h1.reel__name')?.classList.contains('sr-only')).toBe(false);
   });
 
   it('shows the name with the logo, and alone when there is no logo to lead', () => {
@@ -985,6 +1003,21 @@ describe('Showreel names the org as the hero says', () => {
     document.body.innerHTML = '';
     render('corner', { facts: { hideTitle: true }, logoUrl: '' });
     expect(q('.reel__name')?.classList.contains('sr-only')).toBe(false);
+  });
+
+  // Showreel.ssr.test.ts checks the same names in the server's HTML.
+  it("marks a name with a word longer than any phone's top bar holds, so there it steps down and breaks (WP-5a)", () => {
+    const props = render('corner');
+    const marked = () => q('.reel__name')?.hasAttribute('data-long-word');
+    expect(marked()).toBe(false);
+    // 17 letters: whole on any phone.
+    props.name = 'Transformationals Studio';
+    flushSync();
+    expect(marked()).toBe(false);
+    // 18 letters: past a 320 px phone's bar at 0.6 em a letter.
+    props.name = 'Neuroendocrinology Studio';
+    flushSync();
+    expect(marked()).toBe(true);
   });
 
   it("draws the Name window's letters in ink for a piece with no still", () => {
@@ -1786,6 +1819,51 @@ describe("Showreel's fit over the film", () => {
     frame(32);
     expect(q('.reel')?.hasAttribute('data-fit')).toBe(false);
     expect(solved().scrim).toBe('');
+  });
+
+  // wp4-review r6 L1: the warning was deduped on the solved tint alone, so a
+  // later fit under the same tint, short in a different role (after a piece
+  // change, a resize or a font landing), was never reported. Every word sits
+  // at the bottom-left corner, where the shades carry it, but one, mid-reel,
+  // where none reaches; fit 1 has the kicker there, fit 2 the name. The
+  // ground (#120203) is this test's alone, so no earlier test reported its
+  // tint, and white on a dark ground keeps the tint at the ground in both.
+  it('reports a role short in a later fit that the first report did not name: never silent for a short one (S1; wp4-review r6 L1)', async () => {
+    paintable({ ground: '#120203', ink: WHITE });
+    let far = '.reel__kicker';
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(
+      function (this: HTMLElement) {
+        const box = this.matches('.reel')
+          ? { left: 0, top: 0, right: 1000, bottom: 1000 }
+          : this.matches(far)
+            ? { left: 450, top: 300, right: 550, bottom: 320 }
+            : { left: 20, top: 900, right: 200, bottom: 950 };
+        return {
+          ...box,
+          width: box.right - box.left,
+          height: box.bottom - box.top,
+          x: box.left,
+          y: box.top,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+    );
+    render('corner');
+    await Promise.resolve();
+    frame(32);
+    const said = () =>
+      vi.mocked(logger.warn).mock.calls.map((call) => JSON.stringify(call));
+    // Fit 1: the kicker is short, and named (passes today: the calibration).
+    expect(said().filter((line) => line.includes('reel__kicker'))).toHaveLength(
+      1
+    );
+    expect(said().some((line) => line.includes('reel__name'))).toBe(false);
+    // Fit 2: the kicker is carried again and the name is short instead.
+    far = '.reel__name';
+    refit();
+    expect(q('.reel__name')?.hasAttribute('data-lifted')).toBe(true);
+    // Fails today: no report names the name, since its tint was reported once.
+    expect(said().some((line) => line.includes('reel__name'))).toBe(true);
   });
 });
 

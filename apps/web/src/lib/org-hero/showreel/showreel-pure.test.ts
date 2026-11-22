@@ -26,6 +26,7 @@ import {
   groundPoles,
   growShades,
   HEADER_SHADE,
+  halfSpan,
   haloAlpha,
   type Ink,
   inkPole,
@@ -41,15 +42,18 @@ import {
   RING_MARGIN,
   RING_TAKE_UP,
   rampAt,
+  readsAsTwo,
   ringCarries,
   ringHalo,
   SHADE_PEAK_MAX,
   SHADE_REACH_MAX,
   SHADES,
   SHADES_CAP,
+  type Shade,
   type Span,
   scrimAlpha,
   scrimTint,
+  secondCarrier,
   shadeAt,
   shadeFloor,
   shadeProps,
@@ -1038,6 +1042,162 @@ describe("the 'shadow' edge: the shades grow as far as each word needs", () => {
     const { shades, short } = growShades([word]);
     expect(shades[0]?.peak).toBe(HEADER_SHADE.peak);
     expect(short).toEqual([word]);
+  });
+});
+
+describe("the 'shadow' edge: a word its carrier leaves short takes a second, bounded (WP-5a)", () => {
+  // OBB's phone, 390x844, as the fit drew it (the probe's dumps, 2026-11-22):
+  // the header's left corner at its most, its right as drawn, and the foot as
+  // the words below grew it.
+  const header = (rx = 0.64, ry = 0.24): Shade => ({
+    peak: SHADE_PEAK_MAX,
+    corners: [
+      { cx: 0.02, cy: -0.06, rx: 0.72, ry: 0.44 },
+      { cx: 1, cy: -0.06, rx, ry },
+    ],
+  });
+  const foot = (rx: number, ry: number): Shade => ({
+    peak: SHADE_PEAK_MAX,
+    corners: [
+      { cx: 0, cy: 1.08, rx, ry },
+      { cx: 1.02, cy: 1.08, rx: 0.6, ry: 0.82 },
+    ],
+  });
+  // What the name's group needs of the shades on OBB (its glow, 0.55).
+  const obb = glowLeaves(0.55, 0.55);
+  // The right header corner at `k` times its drawn radii.
+  const reach = (shade: Shade, k: number): Shade => ({
+    peak: shade.peak,
+    corners: shade.corners.map((corner, i) =>
+      i === 1 ? { ...corner, rx: 0.64 * k, ry: 0.24 * k } : corner
+    ),
+  });
+
+  it("reads the phone's header as two shadows as drawn, 83 px apart at 390, and as a band once its corners' halves meet", () => {
+    const drawn = header();
+    const [left, right] = drawn.corners.map((c) => halfSpan(c, drawn.peak));
+    if (!left || !right)
+      throw new Error('both corners lay half on the top edge');
+    expect((right[0] - left[1]) * 390).toBeCloseTo(83.5, 0);
+    expect(readsAsTwo(drawn)).toBe(true);
+    // (a) on grey135 (the board, 2026-11-22): 115% x 43%, 42 px of overlap.
+    expect(readsAsTwo(header(1.15, 0.43))).toBe(false);
+  });
+
+  it('takes none where the carrier already carries the word (the wrapped name, OBB peek on)', () => {
+    const wrapped = { left: 0.152, top: 0.065, right: 0.408, bottom: 0.14 };
+    const grown = [header(), foot(1.2792, 1.3448)];
+    expect(shadeFloor(wrapped, grown)).toBeGreaterThanOrEqual(obb);
+    const { shades, short } = secondCarrier(
+      [{ span: wrapped, need: obb }],
+      grown
+    );
+    expect(shades).toEqual(grown);
+    expect(short).toEqual([]);
+  });
+
+  it('takes none for any word growShades already carries (a desktop header and kicker)', () => {
+    const facts = { left: 0.6, top: 0.04, right: 0.88, bottom: 0.07 };
+    const kicker = { left: 0.04, top: 0.62, right: 0.3, bottom: 0.66 };
+    const needs = [
+      { span: facts, need: 0.63 },
+      { span: kicker, need: 0.7 },
+    ];
+    const grown = growShades(needs);
+    expect(grown.short).toEqual([]);
+    expect(secondCarrier(needs, grown.shades)).toEqual(grown);
+  });
+
+  it("grows the header's right corner the least that carries the wrapped name (OBB peek off, Wide)", () => {
+    // The wrapped name's glyphs with the peek off (the reel 844 high),
+    // measured on OBB at 390x844, Wide, 2026-11-22.
+    const wrapped = { left: 0.152, top: 0.056, right: 0.408, bottom: 0.121 };
+    const grown = [header(), foot(1.1544, 1.2136)];
+    expect(shadeFloor(wrapped, grown)).toBeLessThan(obb);
+    const { shades, short } = secondCarrier(
+      [{ span: wrapped, need: obb }],
+      grown
+    );
+    expect(short).toEqual([]);
+    const [top, under] = shades;
+    if (!top) throw new Error('the header shade');
+    const k = (top.corners[1]?.rx ?? 0) / 0.64;
+    expect(k).toBeCloseTo(1.24, 6);
+    // The least: one step less leaves it short.
+    expect(
+      shadeFloor(wrapped, [reach(top, k - 0.04), foot(1.1544, 1.2136)])
+    ).toBeLessThan(obb);
+    expect(readsAsTwo(top)).toBe(true);
+    // Only that corner moves: the left and the foot stay as drawn.
+    expect(top.corners[0]).toEqual(grown[0]?.corners[0]);
+    expect(under).toEqual(grown[1]);
+  });
+
+  it('stops a step before the header would read as a band, and leaves the word short', () => {
+    // One line at the greys' need, with the foot as drawn (no help from it).
+    const word = {
+      span: { left: 0.152, top: 0.069, right: 0.658, bottom: 0.106 },
+      need: glowLeaves(0.69, 0.69),
+    };
+    const { shades, short } = secondCarrier(
+      [word],
+      [header(), foot(0.78, 0.82)]
+    );
+    expect(short).toEqual([word]);
+    const [top] = shades;
+    if (!top) throw new Error('the header shade');
+    expect(readsAsTwo(top)).toBe(true);
+    const k = (top.corners[1]?.rx ?? 0) / 0.64;
+    expect(k).toBeGreaterThan(1);
+    expect(readsAsTwo(reach(top, k + 0.04))).toBe(false);
+  });
+
+  it('takes none from a shade that already reads as one: the foot, as the words grew it', () => {
+    const grown = [header(), foot(1.2792, 1.3448)];
+    const [, under] = grown;
+    if (!under) throw new Error('the foot shade');
+    expect(readsAsTwo(under)).toBe(false);
+    // A word at the foot's right the words' corner leaves short.
+    const word = {
+      span: { left: 0.55, top: 0.8, right: 0.95, bottom: 0.86 },
+      need: 0.93,
+    };
+    expect(shadeFloor(word.span, grown)).toBeLessThan(word.need);
+    const { shades, short } = secondCarrier([word], grown);
+    expect(shades).toEqual(grown);
+    expect(short).toEqual([word]);
+  });
+
+  // wp4-review r6 L2, pinned: the second carrier is not gated on a phone. On
+  // a 1440 desktop, a name long enough that its one carrier at its cap leaves
+  // it short (40 letters or more at OBB's need) takes the bounded second
+  // carrier too: carried, never a band (S3 as restated, 2026-11-22). OBB's
+  // own 16 letters are carried by the one, and nothing moves.
+  it("carries a desktop name its one carrier leaves short, never as a band; OBB's 16 letters are byte-unchanged (wp4-review r6 L2)", () => {
+    // The name's glyphs at 1440, the review's estimate from the CSS: after
+    // the 96 px gutter, a 40 px logo and its 12 px gap, about 11 px a letter,
+    // in a bar at y 0.03-0.07.
+    const deskName = (letters: number) => ({
+      left: 0.103,
+      top: 0.03,
+      right: 0.103 + (letters * 11) / 1440,
+      bottom: 0.07,
+    });
+    const long = [{ span: deskName(48), need: obb }];
+    const grown = growShades(long);
+    // The one carrier at its cap leaves it short.
+    expect(grown.short).toHaveLength(1);
+    const second = secondCarrier(long, grown.shades);
+    expect(second.short).toEqual([]);
+    const [top] = second.shades;
+    if (!top) throw new Error('the header shade');
+    expect(top).not.toEqual(grown.shades[0]);
+    expect(readsAsTwo(top)).toBe(true);
+    // OBB's own name: carried by the one, so the second takes nothing.
+    const own = [{ span: deskName(16), need: obb }];
+    const drawn = growShades(own);
+    expect(drawn.short).toEqual([]);
+    expect(secondCarrier(own, drawn.shades)).toEqual(drawn);
   });
 });
 

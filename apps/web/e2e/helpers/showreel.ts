@@ -154,6 +154,26 @@ function orgName(html: string): string | null {
   return literal ? JSON.parse(literal) : null;
 }
 
+/**
+ * The landing's HTML with the org named `name` wherever its seeded name is
+ * (the markup's and the page data's), so the server and hydration both draw
+ * it, or null when the page names no org. Plain names only: letters, digits,
+ * spaces and `&`.
+ *
+ * Everywhere means everything titled with it too: OBB's first film carries
+ * the org's name, so it is retitled with the rest (the words, the index, the
+ * sizers). A test of the name reads the top bar's `.reel__name` alone, so the
+ * film's title never decides it.
+ */
+function withOrgName(html: string, name: string): string | null {
+  const seeded = orgName(html);
+  if (!seeded) return null;
+  const markup = (text: string) => text.replaceAll('&', '&amp;');
+  return html
+    .replaceAll(markup(seeded), () => markup(name))
+    .replaceAll(seeded, () => name);
+}
+
 /** The title of the first piece in the server's own markup of the reel, or null. */
 function serverFirstTitle(html: string): string | null {
   const span =
@@ -246,6 +266,16 @@ export interface ShowreelOptions {
   introFilm?: { fullFilm: boolean };
   /** Put a recording with a preview in the reel. */
   featureRecording?: boolean;
+  /** The org's name instead of its seeded one (`withOrgName`). */
+  name?: string;
+  /**
+   * The top bar's logo request is held until this settles, then aborted, as
+   * a logo whose CDN is down fails (CI starts no dev CDN, so there every
+   * seeded logo fails). The test settles it once the page has hydrated and
+   * painted, which is when dropping the logo's box would move the bar. The
+   * page is opened at DOMContentLoaded: its load event waits on the logo.
+   */
+  failLogo?: Promise<unknown>;
 }
 
 /**
@@ -262,6 +292,8 @@ export async function openShowreel(
     init,
     introFilm,
     featureRecording = false,
+    name,
+    failLogo,
   }: ShowreelOptions = {}
 ): Promise<Page> {
   const url = `${orgOrigin(ORG, baseURL)}/`;
@@ -271,6 +303,9 @@ export async function openShowreel(
   });
   if (init) await context.addInitScript(init);
   const page = await context.newPage();
+  // A rewrite of the reel's own data leaves the server's markup and the
+  // client's apart, so its load must not break the page doing it.
+  const broken = introFilm || featureRecording ? loadBreaks(page) : null;
   let served = 'no response';
   const unset: string[] = [];
   // Set in the route handler, so typed past the narrowing of `null`.
@@ -297,6 +332,8 @@ export async function openShowreel(
       if (next === null) unset.push(what);
       else body = next;
     };
+    // First, so every rewrite after it reads the name the page will draw.
+    if (name) set('an org name', (doc) => withOrgName(doc, name));
     if (introFilm)
       set('an intro film', (doc) => {
         const done = withIntroFilm(doc, introFilm.fullFilm);
@@ -305,20 +342,58 @@ export async function openShowreel(
       });
     if (featureRecording)
       set('a recording with a preview', withRecordingFeatured);
+    if (failLogo) {
+      const logo = /class="reel__sig[^"]*">(?:<!--[^>]*-->)?<img src="([^"]+)"/
+        .exec(body ?? html)?.[1]
+        ?.replaceAll('&amp;', '&');
+      if (logo)
+        await context.route(
+          (target) => target.href === logo,
+          async (logoRoute) => {
+            await failLogo;
+            await logoRoute.abort();
+          }
+        );
+      else unset.push('a logo in the top bar to fail');
+    }
     await route.fulfill({ response, body: body ?? undefined });
   });
-  await page.goto(url);
+  await page.goto(url, failLogo ? { waitUntil: 'domcontentloaded' } : {});
   // An error page has no payload either, so the status says which this is.
   expect(unset, `what ${ORG}'s landing (${served}) lacks`).toEqual([]);
   await expect(page.locator('.reel')).toBeVisible({ timeout: 30_000 });
   // The server draws the Showreel too (the consume default), so in sight is
   // not yet hydrated, and a click then does nothing. The bar's first write
-  // (`--_progress`) is the browser's own: the reel is live from there.
-  await expect(page.locator('.reel')).toHaveAttribute('style', /--_progress/, {
-    timeout: 30_000,
-  });
+  // (`--_progress`) is the browser's own: the reel is live from there. It is
+  // written as the reel hydrates, so no other mark comes sooner: missing, the
+  // page itself was slow to hydrate (a loaded dev server), not the reel.
+  await expect(
+    page.locator('.reel'),
+    'server-drawn, not hydrated after 30 s'
+  ).toHaveAttribute('style', /--_progress/, { timeout: 30_000 });
   if (film) await filmLeads(page, film, serverFirst);
+  if (broken) expect(broken, 'what broke as the page loaded').toEqual([]);
   return page;
+}
+
+/**
+ * What breaks a page as it loads: an uncaught error, or Svelte giving up on
+ * the server's markup (`hydration_mismatch`), which it repairs by drawing the
+ * page again. An attribute it keeps at the server's value
+ * (`hydration_attribute_changed`) is noted on the test, not failed: the
+ * rewrite moves which piece sits where.
+ */
+function loadBreaks(page: Page): string[] {
+  const broken: string[] = [];
+  page.on('pageerror', (error) => broken.push(`uncaught: ${error.message}`));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (/hydration_mismatch|hydration failed/i.test(text))
+      broken.push(`${message.type()}: ${text}`);
+    else if (/hydration_attribute_changed/.test(text))
+      test.info().annotations.push({ type: 'hydration', description: text });
+  });
+  return broken;
 }
 
 /**

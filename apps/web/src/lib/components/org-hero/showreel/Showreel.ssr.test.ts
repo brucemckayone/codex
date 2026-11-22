@@ -61,7 +61,10 @@ const REEL: ReelEntry[] = [
   { type: 'piece', piece: piece('Fire Ceremony at Dusk'), show: 'still' },
 ];
 
-function html(layout: 'corner' | 'wide' | 'name'): string {
+function html(
+  layout: 'corner' | 'wide' | 'name',
+  name = 'Of Blood & Bones'
+): string {
   const options = resolveHero(
     'consume',
     { comp: 'showreel', 'reel-layout': layout },
@@ -71,7 +74,7 @@ function html(layout: 'corner' | 'wide' | 'name'): string {
     props: {
       reel: REEL,
       options,
-      name: 'Of Blood & Bones',
+      name,
       description: 'Ancestral healing.',
       logoUrl: '',
       onlogofail: () => {},
@@ -98,5 +101,18 @@ describe('the Showreel on the server', () => {
     const root = /<section[^>]*class="reel[^"]*"[^>]*>/.exec(html(layout))?.[0];
     expect(root).toBeDefined();
     expect(root).toContain(`--_name-fade-px: ${NAME_FADE_PX}px`);
+  });
+
+  // The same names Showreel.svelte.test.ts marks in the browser's DOM: the
+  // flag is in the server's first paint and the hydrated page alike (WP-5a).
+  it.each([
+    ['Transformationals Studio', false],
+    ['Neuroendocrinology Studio', true],
+  ] as const)("marks '%s' as a word longer than any phone's bar: %s, from its first paint", (name, long) => {
+    const h1 = /<h1[^>]*class="reel__name[^"]*"[^>]*>/.exec(
+      html('corner', name)
+    )?.[0];
+    expect(h1).toBeDefined();
+    expect(h1?.includes('data-long-word')).toBe(long);
   });
 });
