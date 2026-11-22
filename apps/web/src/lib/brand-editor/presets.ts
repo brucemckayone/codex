@@ -971,8 +971,3 @@ export const PRESET_CATEGORY_ORDER: readonly PresetCategory[] = [
   'Playful',
   'Atmospheric',
 ];
-
-/** Look up a preset by id. Variants are addressed as `parent.variant-label`. */
-export function findPreset(id: string): CategorizedPreset | undefined {
-  return BRAND_PRESETS.find((p) => p.id === id);
-}

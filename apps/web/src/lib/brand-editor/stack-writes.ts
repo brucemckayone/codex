@@ -39,7 +39,7 @@ import type { SetOverride } from './hero-fx-helpers';
 export type KeptLayerItem = Extract<LayerItem, { kind: 'skipped' }>;
 
 /** The layers token for the drawn layers in order, then the kept items. */
-export function layersText(
+function layersText(
   layers: readonly EditedLayer[],
   kept: readonly KeptLayerItem[]
 ): string | null {

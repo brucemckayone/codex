@@ -79,7 +79,7 @@ export { contrast };
  * in ./ink.ts) bar 1 491 colours just under the exact pivot, where `inkOn`
  * takes black and white would be at most 0.025 better; neither fails AA there.
  */
-export function bestInkOn(backgroundHex: string): string {
+function bestInkOn(backgroundHex: string): string {
   const white = contrast('#FFFFFF', backgroundHex);
   const black = contrast('#000000', backgroundHex);
   if (white === null || black === null) return '#FFFFFF';
@@ -180,7 +180,7 @@ export const NO_MID_WEIGHT_FONTS: ReadonlySet<string> = new Set([
 // ── Type axis ──────────────────────────────────────────────────────────────
 
 /** A complete typographic treatment. */
-export interface TypeAxis {
+interface TypeAxis {
   readonly id: string;
   /** Plain-language name shown in the guided mixer. */
   readonly label: string;
@@ -328,7 +328,7 @@ export type TypeAxisId = keyof typeof TYPE_AXES;
 // ── Form axis ──────────────────────────────────────────────────────────────
 
 /** Shape, density and material response. */
-export interface FormAxis {
+interface FormAxis {
   readonly id: string;
   readonly label: string;
   readonly description: string;
@@ -1177,15 +1177,3 @@ export const COMPOSED_DESIGN_KEYS: readonly string[] = [
   'hero-cta-bg',
   'hero-cta-text',
 ];
-
-/** Surfaces a composed preset's headings are measured against, for tests and
- *  for the guided mixer's contrast readout. */
-export function presetSurfaces(p: PresetPalette): {
-  light: string;
-  dark: string;
-} {
-  return {
-    light: p.background ?? DEFAULT_LIGHT_SURFACE,
-    dark: p.background ? p.darkBackground : DEFAULT_DARK_SURFACE,
-  };
-}

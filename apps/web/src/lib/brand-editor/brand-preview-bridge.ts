@@ -92,7 +92,7 @@ export interface BrandPreviewResolved {
  * Iframe → parent report message. `resolved: null` withdraws the last one:
  * the landing has gone (the preview navigated) or draws no new hero.
  */
-export interface BrandPreviewResolvedMessage {
+interface BrandPreviewResolvedMessage {
   readonly type: typeof BRAND_PREVIEW_RESOLVED_TYPE;
   readonly resolved: BrandPreviewResolved | null;
 }

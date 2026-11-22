@@ -9447,14 +9447,6 @@ export const branding_hero_field_main = () => `Main button`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_main_consume = () => `Start watching`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_main_explore = () => `Explore`
 
 

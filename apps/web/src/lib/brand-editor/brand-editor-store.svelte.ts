@@ -40,7 +40,7 @@ const STORAGE_KEY = 'codex:brand-editor';
 // the page editor's rule (page-builder-store) (Codex-0keaj).
 
 /** What {@link open} did with the tab's crash-recovery row. */
-export type RecoveryOutcome = 'none' | 'restored' | 'discarded';
+type RecoveryOutcome = 'none' | 'restored' | 'discarded';
 
 interface RecoveryRow {
   orgId: string;
