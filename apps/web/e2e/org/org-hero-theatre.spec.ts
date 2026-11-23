@@ -51,16 +51,26 @@ import {
   type ShowreelOptions,
 } from '../helpers/showreel';
 
-/** The Showreel with its intro film as a preview, whose button opens the theatre. */
-const open = (
+/**
+ * The Showreel with its intro film as a preview, whose button opens the
+ * theatre. On a desktop the mouse then rests on the index, which holds the
+ * reel on its piece (the reel's own pointer hold): a test reads that piece
+ * and presses its film button, and on CI those steps took longer than a
+ * piece's turn (PIECE_MS), so the button had gone before the press. A
+ * phone's index is out of sight, and its tests press at once.
+ */
+async function open(
   browser: Browser,
   baseURL: string | undefined,
   options: ShowreelOptions = {}
-) =>
-  openShowreel(browser, baseURL, {
+): Promise<Page> {
+  const page = await openShowreel(browser, baseURL, {
     ...options,
     introFilm: { fullFilm: false },
   });
+  if (!options.context?.isMobile) await currentItem(page).hover();
+  return page;
+}
 
 const PHONE: BrowserContextOptions = {
   viewport: { width: 390, height: 844 },
@@ -282,10 +292,6 @@ test.describe('the Showreel theatre', () => {
     baseURL,
   }) => {
     const page = await open(browser, baseURL);
-    // The mouse on the index holds the reel on its piece while this reads it
-    // and opens the theatre: on CI that took a whole piece (PIECE_MS), and
-    // the film button went with it before the press.
-    await currentItem(page).hover();
     const piece = (await currentItem(page).textContent()) ?? '';
     // Behind it, the reel takes no focus and no press: inert while it is open.
     const behindInert = () =>
