@@ -258,6 +258,10 @@ The static-analysis job runs these too. The CI-GATES rule keeps this list and th
 | BRAND-BOUNDARY | The public bundle never imports the brand editor | `pnpm --filter web run check:brand-boundary:test`<br>`pnpm --filter web run check:brand-boundary` |
 | DIALOG-STRUCTURE | Dialogs are built from the shared Dialog parts | `pnpm --filter web run check:dialog-structure:test`<br>`pnpm --filter web run check:dialog-structure` |
 | LOAD-RETRY | A load failure renders the shared LoadFailedAlert with Retry | `pnpm --filter web run check:load-retry:test`<br>`pnpm --filter web run check:load-retry` |
+| OUTPUT-DOOR | A ShaderHero renderer reaches the screen only through bindOutput | `pnpm --filter web run check:output-door:test`<br>`pnpm --filter web run check:output-door` |
+| SHADER | Every GLSL source compiles, and each compositor layer draws its input at amount 0 | `pnpm --filter web run shaders:check:test`<br>`pnpm --filter web run shaders:check` |
+| FILM-PASS | The Showreel's film passes, as text: no stray uniform, no shared pass id, no real clock in a flash | `pnpm --filter web run shaders:gate:test`<br>`pnpm --filter web run shaders:gate` |
+| E2E-PORTS | No hardcoded app or worker port under e2e/ | `pnpm --filter web run check:e2e-ports:test`<br>`pnpm --filter web run check:e2e-ports` |
 | DATA-ACCESS | Cache-Control from presets, no floating KV write, shared search inputs, deterministic sql time, VersionedCache gets waitUntil | `node --test scripts/checks/check-data-access-contract.test.mjs`<br>`node scripts/checks/check-data-access-contract.mjs` |
 | SVELTE-BASELINE | svelte-check finds no error beyond its baseline | `pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide`<br>`pnpm --filter web run check:svelte-baseline:test`<br>`pnpm --filter web run check:svelte-baseline`<br>reads `apps/web/svelte.config.js`<br>its baseline `apps/web/scripts/svelte-check-baseline.json` |
 | ARCH | The rules on this page, and countersigned loosening | `node --test scripts/checks/check-architecture.test.mjs`<br>`node scripts/checks/check-architecture.mjs --ci` |

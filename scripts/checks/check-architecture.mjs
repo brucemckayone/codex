@@ -86,7 +86,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -110,6 +109,7 @@ const { applyIgnores, IGNORE_KEYWORD, ignoreProblems, parseIgnores } =
   await import('./architecture-ignores.mjs');
 const { globToRegExp } = await import('./architecture-lists.mjs');
 const { MATCHERS } = await import('./architecture-matchers.mjs');
+const { isEntrypoint } = await import('./is-entrypoint.mjs');
 const {
   blockState,
   checkLoosening,
@@ -1951,24 +1951,6 @@ function init(root, baselineFile, rules, results, ruleId) {
   return 0;
 }
 
-/**
- * Whether this file is the process's entry, so the self-test can import it
- * without running main(). Compared as real paths, as the data-access gate
- * learned (Codex-noyrq): a symlinked argv[1] otherwise skips main() and exits 0
- * having checked nothing.
- */
-function isEntrypoint() {
-  if (!process.argv[1]) return false;
-  try {
-    return (
-      realpathSync(process.argv[1]) ===
-      realpathSync(fileURLToPath(import.meta.url))
-    );
-  } catch {
-    return false;
-  }
-}
-
-if (isEntrypoint()) {
+if (isEntrypoint(import.meta.url)) {
   process.exitCode = await main();
 }

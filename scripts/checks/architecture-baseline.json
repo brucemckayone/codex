@@ -7,7 +7,7 @@
   "DOC-BUDGET": {
     "CLAUDE.md": 3636,
     "apps/web/CLAUDE.md": 4584,
-    "apps/web/e2e/CLAUDE.md": 2312,
+    "apps/web/e2e/CLAUDE.md": 2378,
     "packages/CLAUDE.md": 1018,
     "packages/access/CLAUDE.md": 2953,
     "packages/admin/CLAUDE.md": 1398,
@@ -764,6 +764,90 @@
     "docs/shader-plans/00-improvement-brief.md": [
       "scripts/validate-shaders.mjs"
     ],
+    "docs/shader-plans/bismuth-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/bismuth-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/bismuth.frag.ts"
+    ],
+    "docs/shader-plans/clouds-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/clouds-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/clouds.frag.ts"
+    ],
+    "docs/shader-plans/frost-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/frost-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/frost-display.frag.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/frost-sim.frag.ts"
+    ],
+    "docs/shader-plans/geode-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/geode-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/geode.frag.ts"
+    ],
+    "docs/shader-plans/glow-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/glow-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/glow.frag.ts"
+    ],
+    "docs/shader-plans/growth-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/growth-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/growth-display.frag.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/growth-sim.frag.ts"
+    ],
+    "docs/shader-plans/gyroid-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/gyroid-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/gyroid.frag.ts"
+    ],
+    "docs/shader-plans/julia-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/julia-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/julia.frag.ts"
+    ],
+    "docs/shader-plans/life-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/life-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/life-display.frag.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/life-sim.frag.ts"
+    ],
+    "docs/shader-plans/mycelium-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/mycelium-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/mycelium-display.frag.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/mycelium-sim.frag.ts"
+    ],
+    "docs/shader-plans/nebula-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/nebula-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/nebula.frag.ts"
+    ],
+    "docs/shader-plans/ocean-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/ocean-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/ocean.frag.ts"
+    ],
+    "docs/shader-plans/pearl-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/pearl-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/pearl.frag.ts"
+    ],
+    "docs/shader-plans/pollen-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/pollen-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/pollen.frag.ts"
+    ],
+    "docs/shader-plans/rain-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/rain-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/rain.frag.ts"
+    ],
+    "docs/shader-plans/tendrils-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/tendrils-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/tendrils.frag.ts"
+    ],
+    "docs/shader-plans/tunnel-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/tunnel-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/tunnel.frag.ts"
+    ],
+    "docs/shader-plans/vapor-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/vapor-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/vapor.frag.ts"
+    ],
+    "docs/shader-plans/vortex-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/vortex-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/vortex.frag.ts"
+    ],
+    "docs/shader-plans/waves-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/waves-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/waves.frag.ts"
+    ],
     "docs/triage/iter-010-audit-x0pa.md": [
       ".github/workflows/e2e.yml",
       "apps/web/src/lib/components/studio/ContentForm.svelte",
@@ -807,6 +891,18 @@
     "apps/web/e2e/page-kit/brand-fidelity.spec.ts": [
       "docs/handover/phase3-sources/review-brands/brands.json"
     ],
+    "apps/web/src/lib/components/layout/MobileNav/MobileBottomNav.svelte": [
+      "docs/handover/org-landing-sources/mobile-dock/"
+    ],
+    "apps/web/src/lib/components/layout/MobileNav/MobileBottomNav.svelte.test.ts": [
+      "docs/handover/org-landing-sources/mobile-dock/"
+    ],
+    "apps/web/src/lib/components/org-hero/OrgHero.svelte": [
+      "docs/handover/org-landing-sources/round2"
+    ],
+    "apps/web/src/lib/components/org-hero/showreel/Showreel.svelte": [
+      "docs/handover/org-landing-sources/showreel"
+    ],
     "apps/web/src/lib/components/studio/media-library/MediaTile.svelte": [
       "docs/handover/live-media-status/index.html"
     ],
@@ -815,6 +911,21 @@
     ],
     "apps/web/src/lib/components/studio/media-library/tile-state.ts": [
       "docs/handover/live-media-status/index.html"
+    ],
+    "apps/web/src/lib/components/support/FailedRefundsTable.svelte": [
+      "docs/handover/phase3-sources/pause-trials/support-short-loss.html"
+    ],
+    "apps/web/src/lib/components/support/PaidAnotherWayDialog.svelte": [
+      "docs/handover/phase3-sources/pause-trials/support-short-loss.html"
+    ],
+    "apps/web/src/lib/components/support/SettleNoticeAlert.svelte": [
+      "docs/handover/phase3-sources/pause-trials/"
+    ],
+    "apps/web/src/lib/components/support/settle-notice.ts": [
+      "docs/handover/phase3-sources/pause-trials/support-short-loss.html"
+    ],
+    "apps/web/src/lib/components/support/short-loss-view.ts": [
+      "docs/handover/phase3-sources/pause-trials/support-short-loss.html"
     ],
     "apps/web/src/lib/page-builder/kit/styles/schemes.test.ts": [
       "docs/handover/phase3-sources/review-brands/brands.json"
@@ -861,14 +972,14 @@
     "packages/payments/src/payout-ledger.ts": 1811,
     "packages/payments/src/repay.ts": 1471,
     "packages/purchase/src/services/fee-config-service.ts": 1400,
-    "packages/purchase/src/services/purchase-service.ts": 5643,
+    "packages/purchase/src/services/purchase-service.ts": 7158,
     "packages/subscription/src/services/connect-account-service.ts": 1412,
-    "packages/subscription/src/services/course-subscription-service.ts": 3187,
+    "packages/subscription/src/services/course-subscription-service.ts": 3209,
     "packages/subscription/src/services/pending-price-change.ts": 1373,
     "packages/subscription/src/services/price-moves-sweep.ts": 1586,
-    "packages/subscription/src/services/subscription-service.ts": 9015,
+    "packages/subscription/src/services/subscription-service.ts": 9037,
     "packages/subscription/src/services/tier-service.ts": 1702,
-    "workers/ecom-api/src/handlers/payment-webhook.ts": 1512,
+    "workers/ecom-api/src/handlers/payment-webhook.ts": 1571,
     "workers/ecom-api/src/routes/agreements.ts": 920
   }
 }

@@ -68,6 +68,7 @@ const GATE_MODULES = [
   'architecture-raises.mjs',
   'architecture-spec.mjs',
   'check-data-access-contract.mjs',
+  'is-entrypoint.mjs',
 ];
 
 const CALL_RULE = {

@@ -131,6 +131,8 @@ export const CI_CALLERS = [
 export const CI_SETUP_STEPS = [
   'pnpm install --frozen-lockfile',
   'pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide',
+  // The GLSL compiler the shader gate runs: CI only (gate.sh never runs sudo).
+  'sudo apt-get update && sudo apt-get install -y --no-install-recommends glslang-tools',
 ];
 
 /**
@@ -209,6 +211,35 @@ export const GATES = [
     title: 'A load failure renders the shared LoadFailedAlert with Retry',
     selfTest: 'pnpm --filter web run check:load-retry:test',
     run: 'pnpm --filter web run check:load-retry',
+  },
+  {
+    id: 'OUTPUT-DOOR',
+    title: 'A ShaderHero renderer reaches the screen only through bindOutput',
+    selfTest: 'pnpm --filter web run check:output-door:test',
+    run: 'pnpm --filter web run check:output-door',
+  },
+  {
+    id: 'SHADER',
+    title:
+      'Every GLSL source compiles, and each compositor layer draws its input at amount 0',
+    // CI installs glslang with apt (CI_SETUP_STEPS); locally it is a
+    // precondition, never a `before`.
+    needs: 'glslang on PATH (brew install glslang) and a Chrome with WebGL2',
+    selfTest: 'pnpm --filter web run shaders:check:test',
+    run: 'pnpm --filter web run shaders:check',
+  },
+  {
+    id: 'FILM-PASS',
+    title:
+      "The Showreel's film passes, as text: no stray uniform, no shared pass id, no real clock in a flash",
+    selfTest: 'pnpm --filter web run shaders:gate:test',
+    run: 'pnpm --filter web run shaders:gate',
+  },
+  {
+    id: 'E2E-PORTS',
+    title: 'No hardcoded app or worker port under e2e/',
+    selfTest: 'pnpm --filter web run check:e2e-ports:test',
+    run: 'pnpm --filter web run check:e2e-ports',
   },
   {
     id: 'DATA-ACCESS',
