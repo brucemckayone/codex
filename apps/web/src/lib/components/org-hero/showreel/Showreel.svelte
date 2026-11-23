@@ -408,6 +408,12 @@
   $effect(() => {
     clock.hold('film', filmPlaying || theatre !== null);
   });
+  // While the opening holds the words back the first piece has not begun:
+  // its turn starts when its words come in (it ran under the hold, and the
+  // words showed for under half the turn).
+  $effect(() => {
+    clock.hold('opening', reelMotion.wordsHeld);
+  });
 
   // The tab or the hero out of view: nothing plays, nothing moves on.
   let pageVisible = $state(true);

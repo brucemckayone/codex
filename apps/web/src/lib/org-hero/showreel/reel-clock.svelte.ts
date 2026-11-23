@@ -25,8 +25,16 @@ import type { ReelEntry } from '../reel';
 export const PIECE_MS = 7000;
 
 /** Why the reel waits: the pointer over its words, index or strip; focus
- *  inside; a phone's press; the film playing; the hero off screen. */
-export type HoldReason = 'pointer' | 'focus' | 'press' | 'film' | 'away';
+ *  inside; a phone's press; the film playing; the hero off screen; the
+ *  opening holding the words back, so the first piece's turn starts when
+ *  its words come in. */
+export type HoldReason =
+  | 'pointer'
+  | 'focus'
+  | 'press'
+  | 'film'
+  | 'away'
+  | 'opening';
 
 /** What an entry is to the clock: the piece itself, never its place or its look. */
 export function reelKey(entry: ReelEntry): string {

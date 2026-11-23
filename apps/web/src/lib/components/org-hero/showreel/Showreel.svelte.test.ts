@@ -442,6 +442,26 @@ describe('Showreel clock', () => {
     expect(title()).toBe('The Medicine of Grief');
   });
 
+  it('holds while the opening holds the words back, so the first piece gets its whole turn once its words are in', () => {
+    render('corner', { opening: 'name' });
+    const held = () => q('.reel')?.hasAttribute('data-opening') ?? false;
+    expect(held(), 'the opening holds the words at first').toBe(true);
+    // Here no pass runs the opening, so it ends when its wait runs out.
+    for (let waited = 0; held() && waited < 20_000; waited += 100) frame(100);
+    expect(held(), 'the opening ends').toBe(false);
+    // The clock moving starts the words' swap out (the index follows at the
+    // cut's bottom): not yet, a whole turn from the words coming in.
+    frame(PIECE_MS - 300);
+    expect(
+      q('.reel__words')?.dataset.swap,
+      'moved on before its turn'
+    ).not.toBe('out');
+    expect(current()).toBe('Of Blood & Bones');
+    frame(600);
+    frame(CUT);
+    expect(current()).toBe('The Medicine of Grief');
+  });
+
   it('pauses everything, the shader included, and plays again (WCAG 2.2.2)', () => {
     render();
     const pause = q<HTMLButtonElement>('.reel__ctl .reel__round');
