@@ -41,6 +41,7 @@ import {
   env,
   waitOnExecutionContext,
 } from 'cloudflare:test';
+import { BASE_VERSION, buildVersionedCacheKey, CacheType } from '@codex/cache';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -271,6 +272,7 @@ describe('GET /api/content/public/categories — cache write survives', () => {
         icon: null,
         sortOrder: 0,
         coverImageKey: null,
+        contentCount: 3,
       },
     ];
     categorySpies.listPublicForOrg.mockResolvedValue(rows);
@@ -282,6 +284,8 @@ describe('GET /api/content/public/categories — cache write survives', () => {
       `/api/content/public/categories?orgId=${ORG_ID}`
     );
 
+    // `contentCount` on BOTH reads: the count is in the cached slot, not
+    // re-derived after it, so a hit carries it too.
     const expected = {
       data: [
         {
@@ -292,11 +296,63 @@ describe('GET /api/content/public/categories — cache write survives', () => {
           icon: null,
           sortOrder: 0,
           coverImageUrl: null,
+          contentCount: 3,
         },
       ],
     };
     expect(await first.json()).toEqual(expected);
     expect(await second.json()).toEqual(expected);
+    expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
+  });
+
+  // The v3 slot added `contentCount`. A v2 slot written before the deploy has
+  // no counts and lives for the 2h TTL, so it must be a miss, never served.
+  it('never serves a v2 slot, which predates the counts', async () => {
+    const kv = env.CACHE_KV;
+    if (!kv) throw new Error('CACHE_KV must be bound for this suite');
+    // The key the v2 code read for a never-invalidated org.
+    await kv.put(
+      buildVersionedCacheKey(
+        'cache',
+        'public:topics:v2',
+        CacheType.CATEGORIES(ORG_ID),
+        BASE_VERSION
+      ),
+      JSON.stringify([
+        {
+          id: '4d000000-0000-4000-8000-0000000000c4',
+          name: 'Stale',
+          slug: 'stale',
+          description: null,
+          icon: null,
+          sortOrder: 0,
+          coverImageKey: null,
+        },
+      ])
+    );
+    categorySpies.listPublicForOrg.mockResolvedValue([
+      {
+        id: '4d000000-0000-4000-8000-0000000000c5',
+        name: 'Fresh',
+        slug: 'fresh',
+        description: null,
+        icon: null,
+        sortOrder: 0,
+        coverImageKey: null,
+        contentCount: 4,
+      },
+    ]);
+
+    const res = await dispatch(
+      `/api/content/public/categories?orgId=${ORG_ID}`
+    );
+
+    const { data } = (await res.json()) as {
+      data: Array<{ slug: string; contentCount?: number }>;
+    };
+    expect(
+      data.map(({ slug, contentCount }) => ({ slug, contentCount }))
+    ).toEqual([{ slug: 'fresh', contentCount: 4 }]);
     expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
   });
 

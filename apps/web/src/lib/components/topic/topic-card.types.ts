@@ -35,4 +35,10 @@ export interface TopicItem {
    * cover — in which case the card paints a brand-duotone gradient fallback.
    */
   coverImageUrl?: string | null;
+  /**
+   * Published pieces in the topic (≥ 1 on a listed topic). Absent when the
+   * response predates the count: a consumer hides a missing count, never
+   * renders it as 0.
+   */
+  contentCount?: number;
 }

@@ -7,7 +7,9 @@
  *   item — a draft-only or empty topic is excluded (no dead-end cards);
  * - is org-scoped — another org's categories never leak (cross-tenant guard,
  *   asserted unconditionally);
- * - ordered by sortOrder then name (the curator's landing order).
+ * - ordered by sortOrder then name (the curator's landing order);
+ * - each row's `contentCount` counts the pieces the topic lists (published,
+ *   not deleted, this org's), as a number.
  *
  * Database Isolation: neon-testing ephemeral branch per file; per-test token in
  * category names keeps assertions independent of other rows in the branch.
@@ -130,6 +132,68 @@ describe('CategoriesService.listPublicForOrg', () => {
     // Unconditional: draft-only and empty topics MUST be absent.
     expect(ids).not.toContain(draftOnly.id);
     expect(ids).not.toContain(empty.id);
+  });
+
+  it('counts each topic’s published, undeleted pieces in this org only', async () => {
+    const token = uniqueToken();
+    const breath = await service.create(
+      { name: `Breath ${token}` },
+      { creatorId, organizationId: orgAId }
+    );
+    const rest = await service.create(
+      { name: `Rest ${token}` },
+      { creatorId, organizationId: orgAId }
+    );
+
+    const both = await seedContent({
+      organizationId: orgAId,
+      status: 'published',
+    });
+    const breathOnly = await seedContent({
+      organizationId: orgAId,
+      status: 'published',
+    });
+    const draft = await seedContent({
+      organizationId: orgAId,
+      status: 'draft',
+    });
+    const deleted = await seedContent({
+      organizationId: orgAId,
+      status: 'published',
+    });
+    await db
+      .update(content)
+      .set({ deletedAt: new Date() })
+      .where(eq(content.id, deleted));
+    // Another org's published piece linked into org A's topic: the count is
+    // scoped by the piece's org, not just the topic's.
+    const otherOrgs = await seedContent({
+      organizationId: orgBId,
+      status: 'published',
+    });
+    const restOnly = await seedContent({
+      organizationId: orgAId,
+      status: 'published',
+    });
+
+    await db.insert(contentCategories).values([
+      ...[both, breathOnly, draft, deleted, otherOrgs].map((contentId) => ({
+        contentId,
+        categoryId: breath.id,
+      })),
+      // A piece in two topics counts once in each.
+      { contentId: both, categoryId: rest.id },
+      { contentId: restOnly, categoryId: rest.id },
+    ]);
+
+    const rows = await service.listPublicForOrg(orgAId);
+    const countOf = (id: string) =>
+      rows.find((row) => row.id === id)?.contentCount;
+
+    // `toBe` on a number: Postgres sends count(*) as a bigint string, which
+    // a lost decoder would hand through as '2'.
+    expect(countOf(breath.id)).toBe(2);
+    expect(countOf(rest.id)).toBe(2);
   });
 
   it('is org-scoped — another org’s categories never leak', async () => {

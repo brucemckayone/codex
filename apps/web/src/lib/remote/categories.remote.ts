@@ -108,6 +108,7 @@ export const getPublicCategories = query(
       slug: row.slug,
       description: row.description,
       coverImageUrl: row.coverImageUrl,
+      contentCount: row.contentCount,
     }));
   }
 );

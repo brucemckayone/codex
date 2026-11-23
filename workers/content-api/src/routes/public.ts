@@ -170,18 +170,26 @@ app.get(
  * List an org's published topic categories for the landing "Browse by topic".
  *
  * Returns ORG-space categories that have ≥1 published content item, ordered by
- * the curator's `sortOrder`. Raw R2 cover keys are never exposed — the md
- * variant is resolved to a CDN URL.
+ * the curator's `sortOrder`, each with its published `contentCount`. Raw R2
+ * cover keys are never exposed — the md variant is resolved to a CDN URL.
  *
  * Security: Public endpoint, API rate limit. Requires orgId.
  * Cache: KV cache-aside under CATEGORIES(orgId) — invalidated on category
  * mutation AND on content publish/unpublish/delete (which changes the
- * ≥1-published set). The slot holds each category's cover KEY and the URL is
- * built after the read, as the content list does (`toWire`), so a fixed CDN
- * base shows on the next request instead of after the TTL (Codex-yjyju). The
- * `v2` marks that shape: a `public:topics` slot holds finished URLs. CDN
- * `Cache-Control` is `cache: 'public'` on the policy — the taxonomy is org
- * chrome, identical for every viewer.
+ * ≥1-published set and the counts). The slot holds each category's cover KEY
+ * and the URL is built after the read, as the content list does (`toWire`), so
+ * a fixed CDN base shows on the next request instead of after the TTL
+ * (Codex-yjyju). CDN `Cache-Control` is `cache: 'public'` on the policy — the
+ * taxonomy is org chrome, identical for every viewer.
+ *
+ * The slot's version suffix is the shape of the cached value. `v2` holds keys
+ * instead of `public:topics`'s finished URLs; `v3` adds `contentCount`, so a
+ * 2h-old `v2` row with no counts is never read. Bump the SLOT, not
+ * `CacheType.CATEGORIES`: the slot is part of the data key only, while every
+ * invalidation (here, organization-api's org delete, worker-utils' member
+ * departure) bumps the version under the CATEGORIES id. The workers deploy one
+ * at a time, so renaming that id would leave a not-yet-deployed worker bumping
+ * a version this route no longer reads.
  */
 app.get(
   '/categories',
@@ -201,13 +209,14 @@ app.get(
           icon: row.icon,
           sortOrder: row.sortOrder,
           coverImageKey: row.coverImageKey,
+          contentCount: row.contentCount,
         }));
       };
 
       const categories = await cachedRead(
         ctx,
         CacheType.CATEGORIES(orgId),
-        'public:topics:v2',
+        'public:topics:v3',
         fetchCategories,
         { ttl: PUBLIC_CATEGORIES_CACHE_TTL }
       );
