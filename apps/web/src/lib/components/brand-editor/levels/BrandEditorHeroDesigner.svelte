@@ -22,8 +22,8 @@
 -->
 <script lang="ts">
   import { answers, brandEditor, previewResolved } from '$lib/brand-editor';
-  import { reelInkWarnings } from '$lib/brand-editor/reel-ink-warning';
   import ListSegment from '$lib/components/studio/list-toolbar/ListSegment.svelte';
+  import ReelInkWarning from '../ReelInkWarning.svelte';
   import { orgShader } from '$lib/page-builder/org-grounds';
   import * as m from '$paraglide/messages';
   import {
@@ -203,18 +203,6 @@
   // The surfaces and the band are drawn by the shader (hero-config's ground
   // step sets them aside without one), read as the page reads it.
   const hasShader = $derived(orgShader(null, brandEditor.pending));
-  // The ink the reel draws its words in, on each theme's ground, as the reel
-  // judges a word (reel-scrim's `contrast`): below the floor, Text over
-  // footage decides what the reel does with it. Both themes, whichever is
-  // being edited, each named in its own line.
-  const inkWarnings = $derived(
-    reelInkWarnings({
-      background: brandEditor.pending?.backgroundColor,
-      backgroundDark: brandEditor.pending?.darkOverrides?.backgroundColor,
-      tokenOverrides: brandEditor.pending?.tokenOverrides,
-      darkTokenOverrides: brandEditor.pending?.darkTokenOverrides,
-    })
-  );
 
   /** The segment's options: Auto (no stored value, '') and every value. */
   function optionsOf(field: Field) {
@@ -324,19 +312,9 @@
             {:else if instead}
               <p class="hero-designer__instead">{m.branding_hero_resolved_hint({ value: instead })}</p>
             {/if}
-            {#if field.key === 'reel-edge' && inkWarnings.length > 0}
-              <div class="hero-designer__warning" data-ink-warning>
-                <strong>{m.branding_hero_reel_ink_warning_title()}</strong>
-                {#each inkWarnings as warning (warning.theme)}
-                  {@const numbers = { ratio: String(warning.ratio), floor: String(warning.floor) }}
-                  <p data-theme-warning={warning.theme}>
-                    {warning.theme === 'dark'
-                      ? m.branding_hero_reel_ink_warning_dark(numbers)
-                      : m.branding_hero_reel_ink_warning_light(numbers)}
-                  </p>
-                {/each}
-                <p>{m.branding_hero_reel_ink_warning_fix()}</p>
-              </div>
+            {#if field.key === 'reel-edge'}
+              <!-- Below the floor, Text over footage decides what the reel does with it. -->
+              <ReelInkWarning />
             {/if}
           </div>
         {/each}
@@ -463,22 +441,6 @@
     margin: 0;
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
-  }
-
-  .hero-designer__warning {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    padding: var(--space-2) var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-status-warning-border);
-    border-radius: var(--radius-md);
-    background: var(--color-status-warning-surface);
-    color: var(--color-status-warning-text);
-    font-size: var(--text-xs);
-  }
-
-  .hero-designer__warning p {
-    margin: 0;
   }
 
   .hero-designer__quiet {

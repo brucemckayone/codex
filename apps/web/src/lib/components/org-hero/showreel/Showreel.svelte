@@ -844,6 +844,9 @@
     );
     /* The big words: the title, the Name window, the opening's name. */
     --_ink-title: var(--brand-hero-title-color, var(--_ink));
+    /* Their weight: the brand's heading weight (Fine-tune > Typography),
+       else regular. */
+    --_title-weight: var(--heading-weight, var(--font-normal));
     /* The ink that stands furthest from the veil: white over a dark brand's,
        black over a light one's. Every word wears it until the fit has solved
        the brand's own colours over this film (`data-fit`), and with no script
@@ -855,6 +858,11 @@
        root: pale enough that every word clears its floor's margin on a light
        ground at the pivot), held over the header and the foot's
        lower two thirds. */
+    /* A focus ring's own band of the solid scrim, under the ring and a
+       little past it: a two-tone indicator, so a ring keeps 3:1 over any
+       frame (the reel's buttons here, the index and strip in ReelEntries).
+       Declared here, where the fit sets --_scrim. */
+    --_focus-band: 0 0 0 calc(var(--space-0-5) + var(--border-width-thick) + var(--space-0-5)) var(--_scrim);
     --_scrim: color-mix(
       in oklab,
       white calc(var(--_light) * var(--_fp-pale, 0.2) * 100%),
@@ -1183,9 +1191,7 @@
   .reel__btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
-    /* Its own band of the solid scrim under the ring and a little past it:
-       a two-tone indicator, so the ring keeps 3:1 over any frame. */
-    box-shadow: 0 0 0 calc(var(--space-0-5) + var(--border-width-thick) + var(--space-0-5)) var(--_scrim);
+    box-shadow: var(--_focus-band);
   }
 
   /* ── what is playing: the words over their pieces' sizers, at the foot ── */
@@ -1265,8 +1271,7 @@
   .reel__title {
     --_size: calc(var(--text-display) * 1.3);
     font-family: var(--font-heading);
-    /* The brand's heading weight (Fine-tune > Typography), else regular. */
-    font-weight: var(--heading-weight, var(--font-normal));
+    font-weight: var(--_title-weight);
     font-size: min(var(--_size), var(--_cap, var(--_size)));
     line-height: var(--leading-none);
     color: var(--_ink-title);
@@ -1342,7 +1347,7 @@
     top: 50%;
     transform: translateY(-50%);
     font-family: var(--font-heading);
-    font-weight: var(--heading-weight, var(--font-normal));
+    font-weight: var(--_title-weight);
     font-size: min(calc(var(--text-display) * 2.8), 14cqw);
     line-height: var(--leading-none);
     letter-spacing: var(--tracking-tight);
@@ -1506,7 +1511,7 @@
     align-items: center;
     justify-content: center;
     font-family: var(--font-heading);
-    font-weight: var(--heading-weight, var(--font-normal));
+    font-weight: var(--_title-weight);
     font-size: var(--_name-size);
     line-height: var(--leading-none);
     text-align: center;
