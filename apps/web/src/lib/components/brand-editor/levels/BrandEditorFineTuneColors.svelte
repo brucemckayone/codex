@@ -14,7 +14,7 @@
   import BrandSliderField from '../BrandSliderField.svelte';
   import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
-  import { reelInkWarnings } from '$lib/brand-editor/reel-ink-warning';
+  import ReelInkWarning from '../ReelInkWarning.svelte';
 
   interface Props {
     section?: 'page' | 'hero';
@@ -154,17 +154,6 @@
   // own opens on its one group.
   let toggled = $state<string | null | undefined>(undefined);
   const expandedGroup = $derived(toggled === undefined ? (section === 'hero' ? 'Hero' : null) : toggled);
-  // Hero colours the reel can't carry over film, even at its strongest shade.
-  const inkWarnings = $derived(
-    section === 'hero'
-      ? reelInkWarnings({
-          background: brandEditor.pending?.backgroundColor,
-          backgroundDark: brandEditor.pending?.darkOverrides?.backgroundColor,
-          tokenOverrides: brandEditor.pending?.tokenOverrides,
-          darkTokenOverrides: brandEditor.pending?.darkTokenOverrides,
-        })
-      : []
-  );
 
   function getOverride(key: string): string | null {
     const overrides = brandEditor.pending?.tokenOverrides ?? {};
@@ -248,20 +237,7 @@
 </script>
 
 <div class="fine-tune">
-  {#if inkWarnings.length > 0}
-    <div class="fine-tune__warning" data-ink-warning>
-      <strong>{m.branding_hero_reel_ink_warning_title()}</strong>
-      {#each inkWarnings as warning (warning.theme)}
-        {@const numbers = { ratio: String(warning.ratio), floor: String(warning.floor) }}
-        <p>
-          {warning.theme === 'dark'
-            ? m.branding_hero_reel_ink_warning_dark(numbers)
-            : m.branding_hero_reel_ink_warning_light(numbers)}
-        </p>
-      {/each}
-      <p>{m.branding_hero_reel_ink_warning_fix()}</p>
-    </div>
-  {/if}
+  {#if section === 'hero'}<ReelInkWarning />{/if}
   {#each groups as group (group.label)}
     {@const isExpanded = expandedGroup === group.label}
     {@const overrideCount = group.tokens.filter((t) => getOverride(t.key) != null).length}
@@ -405,22 +381,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-  }
-
-  .fine-tune__warning {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    padding: var(--space-2) var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-status-warning-border);
-    border-radius: var(--radius-md);
-    background: var(--color-status-warning-surface);
-    color: var(--color-status-warning-text);
-    font-size: var(--text-xs);
-  }
-
-  .fine-tune__warning p {
-    margin: 0;
   }
 
   .fine-tune__group {

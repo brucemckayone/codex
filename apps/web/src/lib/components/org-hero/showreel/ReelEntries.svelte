@@ -60,9 +60,7 @@
   .reel__all:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
-    /* Its own band of the solid scrim under the ring and a little past it:
-       a two-tone indicator, so the ring keeps 3:1 over any frame. */
-    box-shadow: 0 0 0 calc(var(--space-0-5) + var(--border-width-thick) + var(--space-0-5)) var(--_scrim);
+    box-shadow: var(--_focus-band);
   }
 
   .reel__item:focus-visible,
