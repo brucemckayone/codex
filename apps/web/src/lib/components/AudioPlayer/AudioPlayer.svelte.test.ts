@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
+  currentDockBanner,
+  DOCK_BANNER_PRIORITY,
+} from '$lib/components/layout/DockBanner';
+import {
   flushSync,
   mount,
   unmount,
@@ -564,6 +568,185 @@ describe('AudioPlayer — unmount', () => {
 
     expect(el.getAttribute('src')).toBeNull();
     expect(pauseSpy).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The mini-player is a banner OFFER (Codex-r9ws7): the player renders no
+ * floating bar, it hands the page's banner slot a description, and the slot
+ * (the phone dock, or DockBannerHost elsewhere) draws it. So these tests read
+ * the slot, not the DOM. The observer is the real one the component builds;
+ * only its callback is driven, as a scroll would.
+ */
+describe('AudioPlayer — mini-player banner', () => {
+  /** The callback watching each element, so a test can scroll the player. */
+  let watching: Map<Element, IntersectionObserverCallback>;
+  /**
+   * The player under test. `afterEach` unmounts it: the slot is
+   * module-level, so a test that fails before its own cleanup would leave
+   * its offer there for the next test to read.
+   */
+  let player: Awaited<ReturnType<typeof mountPlayer>>['component'] | null =
+    null;
+
+  class WatchingObserver {
+    readonly callback: IntersectionObserverCallback;
+    constructor(callback: IntersectionObserverCallback) {
+      this.callback = callback;
+    }
+    observe(el: Element) {
+      watching.set(el, this.callback);
+    }
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  }
+
+  function playerRegion(): HTMLElement {
+    const el = document.body.querySelector<HTMLElement>('.audio-player');
+    if (!el) throw new Error('no player rendered');
+    return el;
+  }
+
+  function scrollPlayer(inView: boolean) {
+    const callback = watching.get(playerRegion());
+    if (!callback) throw new Error('nothing observes the player');
+    callback(
+      [{ isIntersecting: inView } as IntersectionObserverEntry],
+      {} as IntersectionObserver
+    );
+    flushSync();
+  }
+
+  async function mountHere() {
+    ({ component: player } = await mountPlayer());
+  }
+
+  /** Mounted, playing, and scrolled out of view: the banner is on offer. */
+  async function playOutOfView() {
+    await mountHere();
+    simulatePlaying(audioElement(), 42);
+    flushSync();
+    scrollPlayer(false);
+  }
+
+  beforeEach(() => {
+    watching = new Map();
+    vi.stubGlobal('IntersectionObserver', WatchingObserver);
+  });
+
+  afterEach(() => {
+    if (player) unmount(player);
+    player = null;
+  });
+
+  test('offers nothing while the player is in view', async () => {
+    await mountHere();
+    simulatePlaying(audioElement(), 42);
+    scrollPlayer(true);
+
+    expect(currentDockBanner()).toBeNull();
+  });
+
+  test('offers nothing when a paused player scrolls away', async () => {
+    await mountHere();
+    scrollPlayer(false);
+
+    expect(currentDockBanner()).toBeNull();
+  });
+
+  test('playing out of view offers the mini-player; back in view withdraws it', async () => {
+    await playOutOfView();
+
+    const offer = currentDockBanner();
+    expect(offer).toMatchObject({
+      priority: DOCK_BANNER_PRIORITY.audio,
+      region: 'Audio mini player',
+      title: 'Session one',
+      subtitle: 'Now playing',
+      titleActionLabel: 'Back to the player',
+      action: { icon: 'pause', label: 'Pause' },
+      dismiss: { label: 'Close mini player' },
+    });
+    expect(offer?.id).toMatch(/^audio-mini-player-/);
+
+    scrollPlayer(true);
+    expect(currentDockBanner()).toBeNull();
+  });
+
+  test('a pause keeps the banner as the resume target, its action now Play', async () => {
+    await playOutOfView();
+    const el = audioElement();
+    Object.defineProperty(el, 'paused', { configurable: true, value: true });
+    el.dispatchEvent(new Event('pause'));
+    flushSync();
+
+    expect(currentDockBanner()?.action).toMatchObject({
+      icon: 'play',
+      label: 'Play',
+    });
+  });
+
+  test('its action plays and pauses the player', async () => {
+    await playOutOfView();
+    pauseSpy.mockClear();
+
+    currentDockBanner()?.action.onclick?.();
+
+    expect(pauseSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('pressing it leaves focus on the banner, not the off-screen player', async () => {
+    await playOutOfView();
+    const focus = vi.spyOn(playerRegion(), 'focus');
+
+    currentDockBanner()?.action.onclick?.();
+
+    expect(pauseSpy).toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  test('its headline scrolls back to the full player', async () => {
+    await playOutOfView();
+    // jsdom does not implement scrollIntoView.
+    const scrollIntoView = vi.fn();
+    playerRegion().scrollIntoView = scrollIntoView;
+
+    currentDockBanner()?.onTitleClick?.();
+
+    expect(scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({ block: 'center' })
+    );
+  });
+
+  test('its dismiss withdraws the offer', async () => {
+    await playOutOfView();
+
+    currentDockBanner()?.dismiss?.onclick();
+    flushSync();
+
+    expect(currentDockBanner()).toBeNull();
+  });
+
+  test('a failed stream withdraws it: the error card lives in the main player', async () => {
+    await playOutOfView();
+
+    recorded[0].onError?.('The stream failed', 'network', 42);
+    flushSync();
+
+    expect(currentDockBanner()).toBeNull();
+  });
+
+  test('unmounting withdraws it', async () => {
+    await playOutOfView();
+    expect(currentDockBanner()).not.toBeNull();
+    const mounted = player;
+    player = null;
+    if (mounted) unmount(mounted);
+
+    expect(currentDockBanner()).toBeNull();
   });
 });
 

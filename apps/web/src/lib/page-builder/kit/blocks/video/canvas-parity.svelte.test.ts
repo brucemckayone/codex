@@ -94,7 +94,7 @@ function withoutEditing(root: HTMLElement, dropCanvasOnly: boolean): string {
       el.removeAttribute(attr);
     }
   }
-  copy.querySelector('.lp-sticky')?.remove();
+  copy.querySelector('.lp-cta-anchor')?.remove();
   return copy.innerHTML.replace(/<!--[\s\S]*?-->/g, '');
 }
 

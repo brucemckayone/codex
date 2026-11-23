@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { currentDockBanner } from '$lib/components/layout/DockBanner';
 import { shaderStill } from '$lib/components/ui/ShaderHero/shader-still.svelte';
 import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
 import {
@@ -45,6 +46,7 @@ afterEach(() => {
   if (app) unmount(app);
   app = null;
   document.body.innerHTML = '';
+  vi.unstubAllGlobals();
 });
 
 async function render(props: Record<string, unknown> = {}) {
@@ -90,7 +92,7 @@ function publicMarkup(root: HTMLElement): string {
       el.removeAttribute(attr);
     }
   }
-  copy.querySelector('.lp-sticky')?.remove();
+  copy.querySelector('.lp-cta-anchor')?.remove();
   // The one sanctioned editor-only element (contract A4): an empty-state prompt.
   for (const el of copy.querySelectorAll('[data-lp-edit-only]')) el.remove();
   // Attributes in name order: the markup keeps them in the order they were
@@ -957,7 +959,9 @@ describe('PageRenderer', () => {
 
   // Codex-61zsk.39: a creator who recommends a path other than the platform's
   // must see that same path featured everywhere the page sells.
-  it('features the pricing section’s recommended path in the call to action and the floating bar too', async () => {
+  it('features the pricing section’s recommended path in the call to action and the dock’s banner too', async () => {
+    // Observers that report only when told, so the banner can be offered.
+    install();
     const page = samplePage('bold', ['hero', 'pricing', 'cta']);
     const pricing = page.sections.find((s) => s.type === 'pricing');
     expect(pricing).toBeDefined();
@@ -985,46 +989,26 @@ describe('PageRenderer', () => {
     expect(
       root.querySelector('.pricing a[href*="offer=purchase"]')
     ).not.toBeNull();
-    expect(document.body.querySelector('.lp-sticky__price')?.textContent).toBe(
-      priceWithCadence(authored!)
-    );
+    // Past the opening, no offer on screen: the banner carries the same path.
+    const hero = root.querySelector('[data-lp-type="hero"]');
+    expect(hero).not.toBeNull();
+    for (const o of FakeObserver.all)
+      if (hero) o.report(hero, { top: -900, intersecting: false });
+    flushSync();
+    expect(currentDockBanner()?.subtitle).toBe(priceWithCadence(authored!));
   });
 
-  it('keeps the floating call to action outside every query container', async () => {
+  // The anchor finds the page from its parent, so it must sit beside
+  // `.lp-page`, never inside it; it shows nothing, and the banner is offered
+  // only once the page has been observed (jsdom's observer never reports).
+  it('watches the page from a hidden anchor beside it, offering nothing on a guess', async () => {
     const root = await render();
-    const bar = root.querySelector<HTMLElement>('.lp-sticky');
-    expect(bar?.parentElement).toBe(root);
-    expect(bar?.closest('.lp-page')).toBeNull();
-    // Hidden until it has observed the page (jsdom's observer never reports).
-    // Svelte sets `inert` as a property; jsdom does not reflect it.
-    expect(bar?.inert || bar?.hasAttribute('inert')).toBe(true);
-    expect(bar?.hasAttribute('data-shown')).toBe(false);
-  });
-
-  it.each(
-    PAGE_STYLE_IDS
-  )('draws the %s floating bar in the scheme its Style names', async (style) => {
-    const root = await render({ page: samplePage(style) });
-    expect(
-      root.querySelector('.lp-sticky')?.getAttribute('data-lp-scheme')
-    ).toBe(STYLES[style].sticky ?? 'base');
-  });
-
-  it('floats the bar on the org’s own surface (base, its raised card) unless a Style names a band: Cinematic’s on its tint', async () => {
-    const bars: Record<string, string | null | undefined> = {};
-    for (const style of ['quiet', 'cinematic', 'bold'] as const) {
-      const root = await render({ page: samplePage(style) });
-      bars[style] = root
-        .querySelector('.lp-sticky')
-        ?.getAttribute('data-lp-scheme');
-      if (app) unmount(app);
-      app = null;
-    }
-    expect(bars).toEqual({
-      quiet: 'base',
-      cinematic: 'soft',
-      bold: 'base',
-    });
+    const anchor = root.querySelector<HTMLElement>('.lp-cta-anchor');
+    expect(anchor?.parentElement).toBe(root);
+    expect(anchor?.closest('.lp-page')).toBeNull();
+    expect(anchor?.hidden).toBe(true);
+    expect(anchor?.childNodes.length).toBe(0);
+    expect(currentDockBanner()).toBeNull();
   });
 });
 

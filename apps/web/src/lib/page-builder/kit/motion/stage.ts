@@ -8,9 +8,9 @@
  * it is as it appears (the page waking up, or content rendered later): on
  * screen or already passed, it is left as it is — that visitor has seen it;
  * below the fold it is ARMED, waiting on its first frame out of sight. An
- * armed element plays when its top clears a line above the floating call to
- * action, or — at the foot of a page that cannot scroll that far — as soon as
- * it is in view. Nothing is staged on a still page (the canvas, thumbnails),
+ * armed element plays when its top clears a line above the screen's foot
+ * (clear of a phone's dock and its banner), or — at the foot of a page that
+ * cannot scroll that far — as soon as it is in view. Nothing is staged on a still page (the canvas, thumbnails),
  * under reduced motion or with the motion dial at `still` (03 X62), and
  * without JavaScript nothing is ever armed: the final state is what the
  * server sends.
@@ -27,10 +27,8 @@ export interface Actor {
   settle(): void;
 }
 
-/** The line never sits lower than this share of the screen, from its foot. */
-const FLOOR = 0.15;
-/** Room between the floating call to action and the line, as a share. */
-const AIR = 0.02;
+/** The line's height above the screen's foot, as a percentage. */
+const LINE = 15;
 /** Elements entering together step in at most this many times. */
 const STEPS = 3;
 
@@ -47,16 +45,6 @@ export function stageFor(el: Element): Stage | null {
     stages.set(root, stage);
   }
   return stage;
-}
-
-/** The line's height above the screen's foot, as a percentage: over the bar. */
-function lineShare(root: Element): number {
-  const bar = root.querySelector<HTMLElement>(':scope > .lp-sticky');
-  // `offsetTop` ignores the transform that tucks a hidden bar away.
-  const footprint = bar?.offsetHeight
-    ? (innerHeight - bar.offsetTop) / innerHeight + AIR
-    : 0;
-  return Math.round(Math.min(0.5, Math.max(FLOOR, footprint)) * 100);
 }
 
 /** How much further the page can still scroll down. */
@@ -82,18 +70,16 @@ export class Stage {
   private readonly cast = new Map<Element, Part>();
   private readonly view: IntersectionObserver;
   private readonly line: IntersectionObserver;
-  private readonly share: number;
 
   constructor(
     private readonly root: Element,
     private readonly closed: () => void
   ) {
-    this.share = lineShare(root);
     this.view = new IntersectionObserver((entries) => this.seen(entries));
     this.line = new IntersectionObserver(
       (entries) =>
         this.play(entries.filter((e) => e.isIntersecting).map((e) => e.target)),
-      { rootMargin: `0px 0px -${this.share}% 0px` }
+      { rootMargin: `0px 0px -${LINE}% 0px` }
     );
   }
 
@@ -133,7 +119,7 @@ export class Stage {
   /** Can the page still scroll far enough to lift it to the line? */
   private reachable(entry: IntersectionObserverEntry): boolean {
     const height = entry.rootBounds?.height ?? innerHeight;
-    const rise = entry.boundingClientRect.top - height * (1 - this.share / 100);
+    const rise = entry.boundingClientRect.top - height * (1 - LINE / 100);
     return rise <= ahead(this.root) + 1;
   }
 
