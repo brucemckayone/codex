@@ -3572,39 +3572,10 @@ describe('the hero’s main button over a photo is the org’s own button (owner
   });
 });
 
-// ── 14. the floating bar is a raised card (owner, D9) ───────────────────────
-describe('the floating bar is a raised card in the org’s card colour (owner, D9)', () => {
-  const KIT = join(LIB, 'page-builder', 'kit');
-  const read = (path: string) =>
-    squash(
-      readFileSync(join(KIT, path), 'utf8')
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/<!--[\s\S]*?-->/g, '')
-    );
-  const STICKY = read('StickyCta.svelte');
-  const KIT_CSS = read('styles/kit.css');
-  const QUIET = read('styles/style-quiet.css');
-
-  it('draws the bar on the org’s surfaces in its scheme’s card colour, on the org’s floating shadow', () => {
-    expect(STICKY).toContain(
-      ".lp-sticky[data-lp-scheme='base'] { background: var(--lp-panel); }"
-    );
-    expect(STICKY).toMatch(
-      /\.lp-sticky \{[^}]*box-shadow: var\(--lp-shadow-raised\);/
-    );
-    expect(KIT_CSS).toContain('--lp-shadow-raised: var(--shadow-xl);');
-    // Quiet keeps its rim, over the same shadow.
-    expect(QUIET).toMatch(
-      /\.lp-sticky\[data-lp-scheme\] \{ box-shadow: 0 0 0 var\(--border-width\) var\(--lp-line\), var\(--lp-shadow-raised\); \}/
-    );
-    // On base, the card colour is the org's card.
-    expect(CODE).toContain(
-      ".lp [data-lp-scheme='base'] { --lp-bg: var(--lp-ground); --lp-panel: var(--_base-panel);"
-    );
-    expect(POLE.light).toContain('--_base-panel: var(--_org-panel);');
-  });
-
-  it('holds the org’s card in the ground’s own band in each pole, so the floors proven on that band are the bar’s', () => {
+// ── 14. the org's card on base (owner, D9) ──────────────────────────────────
+// On base the kit's card is the org's card (parity, §1, pins the tokens).
+describe('the org’s card on base, held in the ground’s band (owner, D9)', () => {
+  it('holds the org’s card in the ground’s own band in each pole, so the floors proven on that band are the card’s', () => {
     for (const pole of ['light', 'dark'] as const) {
       const band = (name: string, from: string) =>
         POLE[pole].match(
@@ -3617,7 +3588,7 @@ describe('the floating bar is a raised card in the org’s card colour (owner, D
   });
 
   it(
-    'holds the bar’s words and button on its card for any brand and org ground, in both poles',
+    'holds words and a button on the org’s card for any brand and org ground, in both poles',
     { timeout: 60_000 },
     () => {
       const brands: Rgb[] = Object.values(BRANDS).map(hex);
@@ -3658,7 +3629,7 @@ describe('the floating bar is a raised card in the org’s card colour (owner, D
     }
   );
 
-  it('names the seeded orgs whose card is their ground, where the shadow alone carries the bar', () => {
+  it('names the seeded orgs whose card is their ground, where a shadow alone would carry it', () => {
     const byte = (rgb: Rgb) => clip(rgb).map((c) => Math.round(c * 255));
     const same: string[] = [];
     const lift: Record<string, string> = {};

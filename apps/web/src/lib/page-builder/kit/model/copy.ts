@@ -99,7 +99,7 @@ export const COPY = {
     play: 'Play video',
   },
   sticky: {
-    /** Accessible name of the floating bar's landmark. */
+    /** Accessible name of the floating call to action's banner region (the dock's). */
     region: 'Join this course',
   },
 } as const;

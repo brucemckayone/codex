@@ -13,7 +13,6 @@ import {
   oklchStep,
   PLATFORM_GROUND_LUMINANCE,
   paintableColour,
-  STICKY_GLASS_OPACITY,
 } from './ground';
 import { relativeLuminance, TEXT_ON_BRAND_LUMINANCE_PIVOT } from './ink';
 import { hexToOklch, srgbToHex } from './oklch-math';
@@ -294,21 +293,11 @@ describe('a background or brand colour the page may paint', () => {
 });
 
 // Owner, Codex-mik4h: "Brand text, glass at 94%". The sticky subscribe bar's
-// glass is a surface its eyebrow and any link must read on.
+// glass was a surface its eyebrow and any link must read on. No stylesheet
+// paints it since Codex-r9ws7 (the pin to its two stylesheets went with
+// them); the ground still counts it, pending the owner's decision
+// (STICKY_GLASS_OPACITY in ground.ts).
 describe('the sticky glass', () => {
-  const src = join(dirname(fileURLToPath(import.meta.url)), '../..');
-  test.each([
-    'lib/components/subscription/SubscribeStickyBar.svelte',
-    'routes/_org/[slug]/(space)/pricing/+page.svelte',
-  ])('is the opacity %s paints', (path) => {
-    const css = readFileSync(join(src, path), 'utf8');
-    const rule = css.match(/\.sticky-bar__inner \{[^}]*\}/)?.[0] ?? '';
-    const opacity = rule.match(
-      /color-mix\(in srgb, var\(--color-surface\) (\d+)%, transparent\)/
-    )?.[1];
-    expect(Number(opacity) / 100).toBe(STICKY_GLASS_OPACITY);
-  });
-
   test('never binds on the platform: its fallbacks are its panels', () => {
     expect(glassLuminance('#ffffff')).toBeGreaterThan(
       PLATFORM_GROUND_LUMINANCE.light

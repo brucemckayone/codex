@@ -17,7 +17,7 @@
   core's own `toggle` and `toggleMute`, and the core's `clock` (the
   element's own figures: nothing polls) fills the strip. The hidden core
   keeps the card's size, so it pauses once scrolled away and moves the
-  floating bar aside as any film does. When the clip ends the core stays,
+  floating call to action aside as any film does. When the clip ends the core stays,
   the strip full and the time at its end, and the button offers "Play
   again", which replays it in place, unless it asked for the full recording
   and got the preview: then, as `InlineFilm`'s "Watch again", it asks

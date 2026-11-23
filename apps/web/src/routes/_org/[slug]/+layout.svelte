@@ -19,6 +19,7 @@
   import { buildPlatformUrl } from '$lib/utils/subdomain';
   import type { LayoutData } from './$types';
   import { SidebarRail } from '$lib/components/layout/SidebarRail';
+  import { DockBannerHost } from '$lib/components/layout/DockBanner';
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
@@ -559,6 +560,9 @@
     <MobileBottomSheet bind:open={moreOpen} variant="org" user={data.user} />
     <CommandPaletteSearch scope="org" orgSlug={data.org.slug} bind:open={searchOpen} />
   {/if}
+  <!-- The page's one floating banner where the dock isn't showing it (desktop,
+       the studio). Inside the brand scope, so it wears the org's brand. -->
+  <DockBannerHost />
 </div>
 
 <style>
@@ -614,8 +618,8 @@
     view-transition-name: page-content;
     background: color-mix(in srgb, var(--color-background) 80%, transparent);
     /* Lift org-main above .org-footer's backdrop-filter stacking context so
-       fixed-positioned descendants (audio mini-player) can paint over the
-       footer when they overlap. Without this, the footer's stacking context
+       fixed-positioned descendants (the back-to-top button) can paint over
+       the footer when they overlap. Without this, the footer's stacking context
        traps the fixed child regardless of its internal z-index. */
     position: relative;
     z-index: 1;

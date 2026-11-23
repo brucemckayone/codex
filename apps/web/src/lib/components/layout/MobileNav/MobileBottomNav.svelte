@@ -9,12 +9,19 @@
   contrast readings: docs/handover/org-landing-sources/mobile-dock/ (variant D).
 
   FOOTPRINT. A --space-14 row 8px (--space-2) off the bottom is --space-16, as
-  the old full-width bar was. AudioPlayer, SubscribeStickyBar,
-  ContentDetailView and the pricing, creators and journeys pages clear the
-  dock by --space-16; keep the sum, or move them with it.
+  the old full-width bar was. ContentDetailView, BackToTop and the pricing,
+  creators and journeys pages clear the dock by --space-16; keep the sum, or
+  move them with it. A page banner (layout/DockBanner) rides --space-12 tall
+  a --space-2 gap above it while the dock is open, and inside it once shrunk.
 -->
 <script lang="ts">
   import { page } from '$app/state';
+  import {
+    claimDockBanner,
+    currentDockBanner,
+    DockBanner,
+    dockShowsBanner,
+  } from '$lib/components/layout/DockBanner';
   import { MoreHorizontalIcon, SearchIcon } from '$lib/components/ui/Icon';
   import { getOrgMobileNav, PLATFORM_MOBILE_NAV } from '$lib/config/navigation';
   import { RAIL_ICON_MAP } from '$lib/config/rail-icons';
@@ -80,6 +87,12 @@
     shrunkOn = next ? page.url.pathname : null;
   }
 
+  /* THE BANNER SLOT (dock-banner.svelte.ts). While mounted the dock shows the
+     page's one banner below md: attached on top while open, inside the gap
+     between the bubble and Search while shrunk (iOS's tab-bar accessory). */
+  claimDockBanner();
+  const banner = $derived(dockShowsBanner() ? currentDockBanner() : null);
+
   let lastY = 0;
   let run = 0;
 
@@ -95,57 +108,68 @@
 
 <svelte:window onscroll={onScroll} />
 
-<nav class="dock" data-compact={compact ? '' : undefined} aria-label="Mobile navigation">
-  <div
-    class="dock__bar"
-    data-dir={lens.dir}
-    data-squash={lens.squash}
-    data-no-current={current < 0 ? '' : undefined}
-    style:--_n={navItems.length + 1}
-    style:--_i={lens.index}
-  >
-    <span class="dock__lens" aria-hidden="true"></span>
-    {#each navItems as item, i (item.href)}
-      {@const IconComponent = RAIL_ICON_MAP[item.icon]}
-      <a
-        href={item.href}
+<div class="dock" data-compact={compact ? '' : undefined}>
+  <nav class="dock__nav" aria-label="Mobile navigation">
+    <div
+      class="dock__bar"
+      data-dir={lens.dir}
+      data-squash={lens.squash}
+      data-no-current={current < 0 ? '' : undefined}
+      style:--_n={navItems.length + 1}
+      style:--_i={lens.index}
+    >
+      <span class="dock__lens" aria-hidden="true"></span>
+      {#each navItems as item, i (item.href)}
+        {@const IconComponent = RAIL_ICON_MAP[item.icon]}
+        <a
+          href={item.href}
+          class="dock__tab"
+          aria-label={item.label}
+          aria-current={i === current ? 'page' : undefined}
+          inert={compact}
+        >
+          <IconComponent size={24} />
+        </a>
+      {/each}
+      <button
+        type="button"
         class="dock__tab"
-        aria-label={item.label}
-        aria-current={i === current ? 'page' : undefined}
+        onclick={onMoreClick}
+        aria-label="More"
         inert={compact}
       >
-        <IconComponent size={24} />
-      </a>
-    {/each}
-    <button
-      type="button"
-      class="dock__tab"
-      onclick={onMoreClick}
-      aria-label="More"
-      inert={compact}
-    >
-      <MoreHorizontalIcon size={24} />
-    </button>
-    <button
-      type="button"
-      class="dock__bubble"
-      onclick={() => setCompact(false)}
-      aria-label="Show navigation"
-      inert={!compact}
-    >
-      <BubbleIcon size={24} />
-    </button>
-  </div>
+        <MoreHorizontalIcon size={24} />
+      </button>
+      <button
+        type="button"
+        class="dock__bubble"
+        onclick={() => setCompact(false)}
+        aria-label="Show navigation"
+        inert={!compact}
+      >
+        <BubbleIcon size={24} />
+      </button>
+    </div>
 
-  <button
-    type="button"
-    class="dock__search"
-    onclick={onSearchClick}
-    aria-label="Search"
-  >
-    <SearchIcon size={24} />
-  </button>
-</nav>
+    <button
+      type="button"
+      class="dock__search"
+      onclick={onSearchClick}
+      aria-label="Search"
+    >
+      <SearchIcon size={24} />
+    </button>
+  </nav>
+
+  {#if banner}
+    <div class="dock__banner">
+      <!-- A different banner arriving plays the entry again. -->
+      {#key banner.id}
+        <DockBanner offer={banner} {compact} />
+      {/key}
+    </div>
+  {/if}
+</div>
 
 <style>
   .dock {
@@ -176,6 +200,11 @@
     /* The dock stays a phone's width on a small tablet. */
     max-inline-size: 26rem;
     margin-inline: auto;
+    block-size: var(--_h);
+  }
+
+  .dock__nav {
+    block-size: 100%;
     display: flex;
     align-items: center;
     /* Search keeps the right end while the capsule shrinks to the left. */
@@ -187,6 +216,29 @@
     .dock {
       display: none;
     }
+  }
+
+  /* THE BANNER: attached on top of the dock, its exact width, while open;
+     inside the gap between the bubble and Search, at the dock's height and
+     shape, while shrunk. It moves between the two on the shrink's spring. */
+  .dock__banner {
+    --dock-banner-radius: min(var(--radius-md) * 4, var(--space-12) / 2);
+    position: absolute;
+    inset-inline: 0;
+    inset-block-end: calc(100% + var(--space-2));
+    block-size: var(--space-12);
+    transition:
+      inset-block-end calc(var(--duration-slow) * 1.4) var(--ease-spring),
+      inset-inline-start calc(var(--duration-slow) * 1.4) var(--ease-spring),
+      inset-inline-end calc(var(--duration-slow) * 1.4) var(--ease-spring),
+      block-size calc(var(--duration-slow) * 1.4) var(--ease-spring);
+  }
+
+  .dock[data-compact] .dock__banner {
+    --dock-banner-radius: var(--_r);
+    inset-block-end: 0;
+    inset-inline: calc(var(--_h) + var(--space-2));
+    block-size: var(--_h);
   }
 
   /* An overlay that is the whole screen on a phone (the Showreel's theatre
@@ -396,6 +448,36 @@
     scale: 1;
     pointer-events: auto;
     transition-delay: var(--duration-fast);
+  }
+
+  /* REDUCED MOTION: every state still changes, nothing travels. The motion
+     tokens already make these near-instant; the gate says so outright, and
+     drops the squash and the press dip, which are motion for its own sake.
+     Colour and opacity still fade. */
+  @media (prefers-reduced-motion: reduce) {
+    .dock__bar,
+    .dock__lens,
+    .dock__bubble,
+    .dock__banner,
+    .dock__tab :global(svg),
+    .dock__search :global(svg) {
+      transition: none;
+    }
+
+    .dock__tab {
+      transition:
+        color var(--duration-normal) var(--ease-default),
+        opacity var(--duration-fast) var(--ease-out);
+    }
+
+    .dock__bar[data-squash] .dock__lens {
+      animation: none;
+    }
+
+    .dock__tab:active :global(svg),
+    .dock__search:active :global(svg) {
+      transform: none;
+    }
   }
 
   /* A phone on its side (480px tall or less) gets a shorter row. No

@@ -12,8 +12,8 @@
  * code never do, and the signs and words stay as they are.
  *
  * The page's stage (`./stage`) times it like every other entrance: a figure
- * below the fold waits at zero and counts once it clears the floating call to
- * action; one on screen when the page wakes up has been seen, and stays. It
+ * below the fold waits at zero and counts once it clears the stage's line
+ * above the screen's foot; one on screen when the page wakes up has been seen, and stays. It
  * never runs on a still page (the canvas, thumbnails), under reduced motion,
  * or where the Style opts out (`--lp-stat-count: none`).
  */

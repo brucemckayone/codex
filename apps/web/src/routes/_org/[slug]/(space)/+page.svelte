@@ -34,7 +34,7 @@
     BrowseType,
   } from '$lib/components/browse/browse-module.types';
   import SubscribeCTA from '$lib/components/subscription/SubscribeCTA.svelte';
-  import SubscribeStickyBar from '$lib/components/subscription/SubscribeStickyBar.svelte';
+  import SubscribeNudge from '$lib/components/subscription/SubscribeNudge.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { preloadPlayerOnIntent } from '$lib/components/player/load-core';
@@ -1217,8 +1217,8 @@
   <!-- Subscribe CTA — quiet closing banner at the very bottom of the feed
        (R4 ⑤): moved here so it never interrupts the content flow. Pricing is
        streamed; it renders immediately and swaps "From £X/mo" in on resolve.
-       The persistent SubscribeStickyBar below is intentionally kept as the
-       always-visible prompt. -->
+       The SubscribeNudge below is intentionally kept as the always-visible
+       prompt. -->
   {#if shouldShowSubscribeCTA}
     {@const orgId = data.org.id}
     {@const orgDisplayName = data.org.name ?? 'us'}
@@ -1271,12 +1271,11 @@
   />
 {/if}
 
-<!-- Sticky subscribe CTA — appears once the hero has scrolled above the
-     viewport (mirrors the audio mini-player's appearance pattern). Hidden
-     for users who are already subscribed to this org, and dismissable with
-     a 4-day TTL via the dismissalCollection. -->
+<!-- The subscribe nudge, offered to the page's floating banner (the dock's
+     on a phone) once the visitor has scrolled past the hero. Not offered to
+     members of this org; dismissable for 4 days via the dismissalCollection. -->
 {#if shouldShowSubscribeCTA && data.org?.id}
-  <SubscribeStickyBar
+  <SubscribeNudge
     orgName={orgName}
     dismissKey={`subscribe-cta:${data.org.id}`}
   />

@@ -14,7 +14,9 @@
  *
  * Measured with probes (`box-shadow: var(--shadow-*)`) inside the org's main
  * and on `body`, outside any org scope, and on what paints them: explore's
- * cards and a sales page's floating bar (the org's card, D9).
+ * cards and a sales page's floating call to action — the dock's banner, a lit
+ * inner rim over `--shadow-lg`, drawn by `DockBannerHost` inside the org's
+ * brand scope.
  */
 
 import { type Browser, expect, type Page, test } from '@playwright/test';
@@ -56,6 +58,26 @@ async function open(
   return page;
 }
 
+/** The sales page's floating call to action: the dock's banner. */
+const BANNER = '[role="region"][aria-label="Join this course"]';
+
+/**
+ * The banner exists only while the kit's `StickyCta` offers it: once the
+ * hero has left the screen. Scroll there and wait for the visible one (the
+ * phone dock stays mounted, hidden, with its own copy).
+ */
+async function showBanner(page: Page) {
+  await page.evaluate(() => {
+    const hero = document.querySelector('[data-lp-type="hero"]');
+    if (!hero) throw new Error('no hero section');
+    window.scrollTo({
+      top: window.scrollY + hero.getBoundingClientRect().bottom + 1,
+      behavior: 'instant',
+    });
+  });
+  await page.locator(BANNER).filter({ visible: true }).waitFor();
+}
+
 /** Runs in the page: the scale inside the org's main and on body, and what
  * the page paints with it. */
 function readShadows() {
@@ -80,8 +102,18 @@ function readShadows() {
     org: main
       ? { md: probe(main, '--shadow-md'), xl: probe(main, '--shadow-xl') }
       : null,
+    /** The org's `--shadow-lg`, which the banner's glass sits on. */
+    orgLg: main ? probe(main, '--shadow-lg') : null,
     cards: shadowOf('.cc__thumb'),
-    sticky: shadowOf('.lp-sticky'),
+    // `BANNER`, spelled out: this function runs in the page. Only the shown
+    // copy; the hidden phone dock's is skipped.
+    banner: [
+      ...document.querySelectorAll<HTMLElement>(
+        '[role="region"][aria-label="Join this course"]'
+      ),
+    ]
+      .filter((el) => el.checkVisibility())
+      .map((el) => getComputedStyle(el).boxShadow),
   };
 }
 
@@ -94,13 +126,14 @@ const origin = (baseURL: string, org: string | null) => {
 };
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`of-blood-and-bones ${theme}: its cards and floating bar take the brand's shadow scale`, async ({
+  test(`of-blood-and-bones ${theme}: its cards and floating banner take the brand's shadow scale`, async ({
     browser,
     baseURL,
   }) => {
     const host = origin(baseURL as string, 'of-blood-and-bones');
     for (const path of ['/explore', '/journeys/return-to-the-shoreline']) {
       const page = await open(browser, `${host}${path}`, theme);
+      if (path !== '/explore') await showBanner(page);
       const read = await page.evaluate(readShadows);
       await page.context().close();
       const detail = `${path} ${JSON.stringify(read)}`;
@@ -124,8 +157,21 @@ for (const theme of ['light', 'dark'] as const) {
         expect(read.cards.length, detail).toBeGreaterThan(0);
         for (const s of read.cards) expect(s, detail).toBe(read.org.md);
       } else {
-        expect(read.sticky.length, detail).toBeGreaterThan(0);
-        for (const s of read.sticky) expect(s, detail).toBe(read.org.xl);
+        // The banner's glass: a lit inner rim over the org's `--shadow-lg`,
+        // whose layers take the same strengths as `--shadow-md`'s, so the
+        // seed's alphas.
+        const orgLg = read.orgLg ?? '';
+        const lg = alphas(orgLg);
+        expect(lg.length, detail).toBe(2);
+        for (const [i, a] of lg.entries()) {
+          expect(
+            Math.abs(a - (SEED_ALPHAS[theme][i] ?? 0)),
+            detail
+          ).toBeLessThanOrEqual(1 / 255);
+        }
+        expect(read.banner.length, detail).toBe(1);
+        for (const s of read.banner)
+          expect(s.endsWith(`, ${orgLg}`), detail).toBe(true);
         expect(read.org.xl, detail).not.toBe(PLATFORM[theme].xl);
       }
     }

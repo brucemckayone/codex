@@ -14,9 +14,10 @@
  * stylesheet says. For a base section it reads the kit's ground, ink, soft
  * ink, hairline, heading, focus ring and button (fill and label), and the
  * org's own tokens where the org's pages read them (`.org-main`), and holds
- * them equal. The floating bar draws the org's own button on the org's own
- * ground, and every call to action is the org's button height and weight. A CSS string
- * check cannot do this: one `var()` hop and it is reading a name, not a colour.
+ * them equal. Every call to action is the org's button height and weight. A
+ * CSS string check cannot do this: one `var()` hop and it is reading a name,
+ * not a colour. (The page's floating call to action is no longer the kit's to
+ * draw: it is offered to the dock's banner, in the dock's glass.)
  *
  * Colours are normalised through a canvas readback, never parsed by hand;
  * equal means within 1/255 a channel (the two sides take different relative
@@ -94,16 +95,6 @@ const MAPPING = [
   ['focus', '--color-focus'],
   ['button', '--color-interactive'],
   ['button label', '--color-on-interactive'],
-] as const;
-
-/**
- * The floating bar, where the page has one: a raised card in the org's card
- * colour (checked in its test, against the band), holding the org's button
- * (owner, D9).
- */
-const STICKY_MAPPING = [
-  ['bar button', '--color-interactive'],
-  ['bar button label', '--color-on-interactive'],
 ] as const;
 
 interface Setup {
@@ -276,15 +267,6 @@ function readColours(orgHost: 'main' | 'root'): Reading {
     button: token(section, '--lp-button-bg'),
     'button label': token(section, '--lp-button-ink'),
   };
-  // The bar is rendered, styled and measurable before it is shown.
-  const bar = root.querySelector<HTMLElement>('.lp-sticky');
-  if (bar) {
-    kit['bar card'] = hexOf(getComputedStyle(bar).backgroundColor);
-    kit['bar ink'] = hexOf(getComputedStyle(bar).color);
-    kit['bar soft ink'] = token(bar, '--lp-ink-soft');
-    kit['bar button'] = token(bar, '--lp-button-bg');
-    kit['bar button label'] = token(bar, '--lp-button-ink');
-  }
   return { org, kit };
 }
 
@@ -393,14 +375,9 @@ for (const item of CASES) {
   });
 }
 
-// ── the floating bar, and the button's shape ──────────────────────────────────
-// of-blood-and-bones' pages sell, so they carry the bar (the seeded Quiet and
-// Cinematic pages have no offer on sale, and so no bar). It used to be a dark
-// band, where the rust brand had to turn #ff481b with a black label, and then
-// the org's ground, where it was flat against the page it floats over. The
-// owner chose "Raised card (Recommended)" (D9): the org's card colour, lifted
-// by the shadow the org floats its own bar on, holding the org's button. Its
-// words and button still hold their floors on that card.
+// ── the button's shape ────────────────────────────────────────────────────────
+// of-blood-and-bones' pages sell, so every call to action is on them (the
+// seeded Quiet and Cinematic pages have no offer on sale).
 const SELLING = CASES.filter((item) => item.org === 'of-blood-and-bones');
 
 /** WCAG's contrast ratio of two `#rrggbb` colours. */
@@ -408,78 +385,6 @@ const ratio = (x: string, y: string) => {
   const [hi = 0, lo = 0] = [luminance(x), luminance(y)].sort((p, q) => q - p);
   return (hi + 0.05) / (lo + 0.05);
 };
-
-for (const item of SELLING) {
-  for (const theme of ['light', 'dark'] as const) {
-    test(`${item.org}/${item.slug} ${theme}: the floating bar is a raised card in the org’s card colour, with the org’s button`, async ({
-      browser,
-      baseURL,
-    }) => {
-      const page = await openAs(browser, baseURL as string, item, theme);
-      await apply(page, {});
-      const reading = await page.evaluate(readColours, 'main');
-      // The org's own floating bar's shadow (`SubscribeStickyBar`), resolved
-      // where its pages read it, and the kit bar's.
-      const shadow = await page.evaluate(() => {
-        const main = document.querySelector('main#main-content, .org-main');
-        const bar = document.querySelector('.lp .lp-sticky');
-        if (!main || !bar) throw new Error('no org main or bar');
-        const probe = document.createElement('div');
-        probe.style.cssText = 'position:absolute;box-shadow:var(--shadow-xl)';
-        main.appendChild(probe);
-        const org = getComputedStyle(probe).boxShadow;
-        probe.remove();
-        return { org, bar: getComputedStyle(bar).boxShadow };
-      });
-      await page.context().close();
-      const why = JSON.stringify({ reading, shadow });
-      expect(
-        reading.kit['bar button'],
-        'the page has a floating bar'
-      ).toBeTruthy();
-      expect(mismatches(reading, reading.org, STICKY_MAPPING), why).toEqual([]);
-      // The org's card exactly, when it lies in the ground's band; a card
-      // outside it (the platform's dark #404040, L 0.37) is held on the
-      // band's edge, as the ground would be (Task 1), and the floors are the
-      // band's.
-      const own = reading.org['--color-surface-card'] ?? '';
-      const drawn = reading.kit['bar card'] ?? '';
-      const light = oklab(reading.kit.ground ?? '')[0] >= 0.5;
-      const ownL = oklab(own)[0];
-      if (light ? ownL >= 0.9 : ownL <= 0.24)
-        expect(
-          mismatches(reading, reading.org, [
-            ['bar card', '--color-surface-card'],
-          ]),
-          why
-        ).toEqual([]);
-      else
-        expect(
-          Math.abs(oklab(drawn)[0] - (light ? 0.9 : 0.24)),
-          why
-        ).toBeLessThan(0.005);
-      expect(shadow.org, why).not.toBe('none');
-      expect(shadow.bar, why).toContain(shadow.org);
-      const { kit } = reading;
-      const card = kit['bar card'] ?? '';
-      expect(ratio(kit['bar ink'] ?? card, card), why).toBeGreaterThanOrEqual(
-        4.5
-      );
-      expect(
-        ratio(kit['bar soft ink'] ?? card, card),
-        why
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        ratio(kit['bar button'] ?? card, card),
-        why
-      ).toBeGreaterThanOrEqual(3);
-      expect(
-        ratio(kit['bar button label'] ?? '', kit['bar button'] ?? ''),
-        why
-      ).toBeGreaterThanOrEqual(4.5);
-    });
-  }
-}
 
 test('every call to action is the org’s button height and weight', async ({
   browser,
@@ -948,7 +853,7 @@ for (const theme of ['light', 'dark'] as const) {
 // The org sets its labels' case in one token, `--text-transform-label`
 // (uppercase unless it chose otherwise), and has no tracking token of its own
 // for them: its uppercase labels pair the case with `--tracking-wider` (the
-// floating bar's, the pricing page's, the catalogue tile's). The kit's
+// pricing page's, the catalogue tile's). The kit's
 // eyebrow is its kicker, so on every page it is drawn the same way. On
 // explore, Tending the Grief's card reads "FOR THE WEIGHT YOU CARRY"; its
 // page's hero must read the same.

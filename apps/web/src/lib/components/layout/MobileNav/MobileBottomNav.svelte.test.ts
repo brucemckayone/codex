@@ -1,7 +1,7 @@
 /**
  * The phone's glass dock (Codex-r9ws7): icon-only controls that still carry
  * their names, the lens that follows the current tab and which way it moved,
- * and shrink on scroll.
+ * shrink on scroll, and the page banner it carries.
  *
  * jsdom has no layout and no scrolling, so a test sets `scrollY` and fires the
  * scroll event itself. The look and the motion (the lens's stretch and squash,
@@ -21,14 +21,21 @@ vi.mock(
   () => import('$lib/components/support/__fixtures__/app-state.mock.svelte')
 );
 
+import {
+  type DockBannerOffer,
+  offerDockBanner,
+} from '$lib/components/layout/DockBanner';
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
 import MobileBottomNav from './MobileBottomNav.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
+let withdraw: (() => void) | null = null;
 const onSearchClick = vi.fn();
 const onMoreClick = vi.fn();
 
 afterEach(() => {
+  withdraw?.();
+  withdraw = null;
   if (component) unmount(component);
   component = null;
   document.body.innerHTML = '';
@@ -88,7 +95,37 @@ function navigate(path: string) {
   flushSync();
 }
 
-const compact = () => nav().hasAttribute('data-compact');
+function dock(): HTMLElement {
+  const el = document.querySelector<HTMLElement>('.dock');
+  if (!el) throw new Error('no dock');
+  return el;
+}
+
+const compact = () => dock().hasAttribute('data-compact');
+
+/** A page offering a banner, the way SubscribeNudge does. */
+function offer(banner: DockBannerOffer) {
+  withdraw = $effect.root(() => {
+    offerDockBanner(() => banner);
+  });
+  flushSync();
+}
+
+const SUBSCRIBE: DockBannerOffer = {
+  id: 'subscribe:test',
+  priority: 10,
+  region: 'Subscribe call to action',
+  title: 'Become a member',
+  subtitle: 'Tidewater Yoga',
+  action: { label: 'Subscribe', href: '/pricing' },
+  dismiss: { label: 'Dismiss subscribe banner', onclick: () => {} },
+};
+
+function banner(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    '[role="region"][aria-label="Subscribe call to action"]'
+  );
+}
 
 describe('MobileBottomNav', () => {
   test('every icon-only control is named, and Search and More stay inside the landmark', () => {
@@ -189,5 +226,27 @@ describe('MobileBottomNav', () => {
     expect(compact()).toBe(true);
     navigate('/explore');
     expect(compact()).toBe(false);
+  });
+
+  test('it carries the page banner on top, and inside itself once shrunk', () => {
+    mountDock('/');
+    expect(banner()).toBeNull();
+
+    offer(SUBSCRIBE);
+    const region = banner();
+    expect(region).not.toBeNull();
+    // Beside the navigation landmark, not inside it.
+    expect(nav().contains(region)).toBe(false);
+    expect(dock().contains(region)).toBe(true);
+    expect(region?.querySelector('a')?.getAttribute('href')).toBe('/pricing');
+    expect(region?.hasAttribute('data-compact')).toBe(false);
+
+    scrollToY(100);
+    expect(banner()?.hasAttribute('data-compact')).toBe(true);
+
+    withdraw?.();
+    withdraw = null;
+    flushSync();
+    expect(banner()).toBeNull();
   });
 });
