@@ -119,14 +119,14 @@ void main() {
   vec2 mouseUV = u_mouse * aspect;
   float mouseDist = distance(uv, mouseUV);
   float mouseWave = u_ripple * sin(mouseDist * 20.0 - t * 4.0)
-                  * smoothstep(0.5, 0.0, mouseDist)
+                  * (1.0 - smoothstep(0.0, 0.5, mouseDist))
                   * 0.15;
   thickness += mouseWave;
 
   if (u_burstStrength > 0.01) {
     float burstWave = sin(mouseDist * 15.0 - t * 6.0)
                     * u_burstStrength
-                    * smoothstep(0.8, 0.0, mouseDist)
+                    * (1.0 - smoothstep(0.0, 0.8, mouseDist))
                     * 0.25;
     thickness += burstWave;
   }

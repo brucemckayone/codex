@@ -21,8 +21,10 @@
  * and Poster, which draw the largest, Anton and Unbounded, the narrowest and
  * the widest the brand editor offers, set on the page as its own fonts are.
  */
+
 import { expect, test } from '@playwright/test';
 import { headingRuns } from '../../src/lib/page-builder/kit/model/long-heading';
+import { orgOrigin } from '../helpers/origin';
 import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 test.skip(
@@ -134,7 +136,7 @@ test('the poster hero cuts no word and draws nothing over its picture', async ({
       for (const { brand, face } of FACES) {
         if (face && style !== 'poster' && style !== 'bold') continue;
         await page.goto(
-          `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}&brand=${brand}&only=hero&layout=poster&theme=light&chrome=0`
+          `${orgOrigin('studio-alpha')}/studio/page-kit?style=${style}&brand=${brand}&only=hero&layout=poster&theme=light&chrome=0`
         );
         await page
           .locator('.hero-poster[data-pictured]')

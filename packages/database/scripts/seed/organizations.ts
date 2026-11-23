@@ -326,7 +326,10 @@ export async function seedOrganizations(db: typeof DbClient) {
       organizationId: ORGS.bones.id,
       primaryColorHex: ORGS.bones.primaryColor,
       backgroundColorHex: '#F3F0E7',
-      fontHeading: 'Cardo',
+      // A face the brand editor offers, with a metric-matched fallback
+      // (font-fallbacks.ts): Cardo had none, so the Showreel's words rewrapped
+      // when it arrived and the stored hero's layout-shift cells read 0.07.
+      fontHeading: 'Libre Baskerville',
       fontBody: null,
       radiusValue: '0.33',
       densityValue: '1',
@@ -339,6 +342,12 @@ export async function seedOrganizations(db: typeof DbClient) {
         'heading-weight': '400',
         'body-weight': '400',
         'shadow-scale': '0.5',
+        // The stored hero (Wide, peek on) the Showreel e2e cells read from the server's HTML.
+        'hero-opt-purpose': 'consume',
+        'hero-opt-comp': 'showreel',
+        'hero-opt-reel-layout': 'wide',
+        'hero-opt-reel-pointer': 'none',
+        'hero-opt-second': 'auto',
       }),
       createdAt: now,
       updatedAt: now,

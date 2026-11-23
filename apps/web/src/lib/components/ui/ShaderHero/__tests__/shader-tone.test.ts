@@ -58,7 +58,7 @@ describe('shaderTone', () => {
     expect(shaderTone.blur).toBe(20);
   });
 
-  // 03 X62: a page's motion dial holds the org's moving background still.
+  // A page's motion dial holds the org's moving background still.
   it('is held while any page holds it, telling the shader only as the first takes hold and the last lets go', () => {
     const told = vi.fn();
     shaderTone.onHold(told);

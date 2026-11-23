@@ -49,7 +49,11 @@
  * not control. An org can still override them by hand in fine-tune; a preset
  * asserting a value would be a guess dressed as a design.
  */
-import { DEFAULTS } from '$lib/components/ui/ShaderHero/shader-config';
+import { presetFxKey } from '$lib/components/ui/ShaderHero/preset-fx-defaults';
+import {
+  DEFAULTS,
+  resolvePresetId,
+} from '$lib/components/ui/ShaderHero/shader-config';
 import { contrastRatio as contrast } from './ink';
 import { hexToOklch, oklchToHex } from './oklch-math';
 import type { BrandPreset } from './types';
@@ -75,7 +79,7 @@ export { contrast };
  * in ./ink.ts) bar 1 491 colours just under the exact pivot, where `inkOn`
  * takes black and white would be at most 0.025 better; neither fails AA there.
  */
-export function bestInkOn(backgroundHex: string): string {
+function bestInkOn(backgroundHex: string): string {
   const white = contrast('#FFFFFF', backgroundHex);
   const black = contrast('#000000', backgroundHex);
   if (white === null || black === null) return '#FFFFFF';
@@ -176,7 +180,7 @@ export const NO_MID_WEIGHT_FONTS: ReadonlySet<string> = new Set([
 // ── Type axis ──────────────────────────────────────────────────────────────
 
 /** A complete typographic treatment. */
-export interface TypeAxis {
+interface TypeAxis {
   readonly id: string;
   /** Plain-language name shown in the guided mixer. */
   readonly label: string;
@@ -324,7 +328,7 @@ export type TypeAxisId = keyof typeof TYPE_AXES;
 // ── Form axis ──────────────────────────────────────────────────────────────
 
 /** Shape, density and material response. */
-export interface FormAxis {
+interface FormAxis {
   readonly id: string;
   readonly label: string;
   readonly description: string;
@@ -447,19 +451,20 @@ export type FormAxisId = keyof typeof FORM_AXES;
  *
  * `heroInk` is the whole reason this is an axis rather than a shader id. Every
  * `--brand-hero-*` token falls back to `white` in `(space)/+page.svelte`, which
- * is correct over `lava` or `nebula` and wrong over `pearl` or `clouds` — pale
- * shaders that would render white text on a white field. Naming the ink per
+ * is correct over `lava` or `aurora` and wrong over a pale field — a shader
+ * run at low intensity over a light ground, which every shader mixes toward —
+ * where it would render white text on a white field. Naming the ink per
  * atmosphere makes that combination unrepresentable.
  *
  * WHY `tempo` IS A MULTIPLIER AND NOT A SPEED
  * ------------------------------------------
  * Each shader's speed is tuned in `shader-config.ts` `DEFAULTS`, and the tuned
- * values are not comparable across shaders: `cloudsSpeed` is 0.03 while
- * `wavesSpeed` is 1.0 — a 33x spread for two effects that both read as "slow".
- * Hand-authoring an absolute therefore guesses at a scale you cannot see, and
- * the shipped presets did exactly that: `clouds-speed: 0.4` was 13x its tuned
- * value, and `nebula-depth: 0.8` hit a `Math.round` and became 1 where the
- * shader wants 8.
+ * values are not comparable across shaders: `filmSpeed` is 0.1 while
+ * `flowFieldSpeed` is 1.0 — a 10x spread for two effects that both read as
+ * "slow". Hand-authoring an absolute therefore guesses at a scale you cannot
+ * see, and the shipped presets did exactly that: one speed was 13x its tuned
+ * value, and a layer count of 0.8 hit a `Math.round` and became 1 where the
+ * shader wanted 8.
  *
  * So an atmosphere says "0.6x as fast as this shader was tuned to run" and
  * `composePreset` resolves that against `DEFAULTS`. A shader retune moves every
@@ -476,15 +481,15 @@ export interface AtmosphereAxis {
   readonly shader: string;
   /**
    * Multiplier on this shader's own tuned speed default. 1 = exactly as tuned.
-   * Ignored for shaders with no speed parameter (`spore`, `none`), which must
-   * declare 1.
+   * Ignored for shaders with no speed parameter (`physarum`, `lenia`, `none`),
+   * which must declare 1.
    */
   readonly tempo: number;
-  /** `--brand-shader-intensity`, 0..1. A generic post-process, safe absolute. */
+  /** The shader's own intensity (`shader-<id>-intensity`). A safe absolute. */
   readonly intensity: number;
-  /** `--brand-shader-vignette`, 0..1. */
+  /** The shader's own vignette (`shader-<id>-vignette`), 0..1. */
   readonly vignette: number;
-  /** `--brand-shader-grain`, 0..1. Omitted = leave the shader's default. */
+  /** The shader's own grain (`shader-<id>-grain`). Omitted = its default. */
   readonly grain?: number;
   /** Deliberate non-speed deviations, keyed WITHOUT the `shader-` prefix. */
   readonly params?: Readonly<Record<string, string>>;
@@ -505,35 +510,27 @@ export interface AtmosphereAxis {
  * Which `DEFAULTS` entry is each shader's "speed", and which token writes it.
  *
  * Not derivable by naming convention: `ether` calls it `rotation-speed`, `flow`
- * calls it `field-speed`, and `glow`/`pollen` have no speed at all — their
- * motion knob is `drift`. `null` means the shader has no tempo control, and the
- * test asserts those atmospheres declare `tempo: 1`.
+ * calls it `field-speed`, `ripple` calls it `wave-speed`, and `physarum` and
+ * `lenia` have none a multiplier can drive (below). `null` means the shader has
+ * no tempo control, and the test asserts those atmospheres declare `tempo: 1`.
  */
 export const SHADER_TEMPO: Readonly<
   Record<string, { token: string; base: keyof typeof DEFAULTS } | null>
 > = {
   none: null,
-  spore: null, // sensor/decay driven — no speed uniform
+  physarum: null, // sensor/decay driven — no speed uniform
+  // `lenia-speed` is a Math.round-ed count of sim steps per frame (default 2),
+  // so a multiplier would land on a fraction; its time step `dt` is part of
+  // the tuned ruleset, where a change kills the lifeforms.
+  lenia: null,
   topo: { token: 'topo-speed', base: 'topoSpeed' },
-  silk: { token: 'silk-speed', base: 'silkSpeed' },
-  clouds: { token: 'clouds-speed', base: 'cloudsSpeed' },
-  gyroid: { token: 'gyroid-speed', base: 'gyroidSpeed' },
-  glow: { token: 'glow-drift', base: 'glowDrift' },
-  plasma: { token: 'plasma-speed', base: 'plasmaSpeed' },
   lava: { token: 'lava-speed', base: 'lavaSpeed' },
   flux: { token: 'flux-speed', base: 'fluxSpeed' },
-  nebula: { token: 'nebula-speed', base: 'nebulaSpeed' },
   aurora: { token: 'aurora-speed', base: 'auroraSpeed' },
-  vortex: { token: 'vortex-speed', base: 'vortexSpeed' },
-  rain: { token: 'rain-speed', base: 'rainSpeed' },
   ether: { token: 'rotation-speed', base: 'rotationSpeed' },
   caustic: { token: 'caustic-speed', base: 'causticSpeed' },
-  waves: { token: 'waves-speed', base: 'wavesSpeed' },
-  growth: { token: 'growth-speed', base: 'growthSpeed' },
-  pollen: { token: 'pollen-drift', base: 'pollenDrift' },
+  ripple: { token: 'wave-speed', base: 'waveSpeed' },
   flow: { token: 'flow-field-speed', base: 'flowFieldSpeed' },
-  bismuth: { token: 'bismuth-speed', base: 'bismuthSpeed' },
-  pearl: { token: 'pearl-speed', base: 'pearlSpeed' },
   film: { token: 'film-speed', base: 'filmSpeed' },
 };
 
@@ -570,13 +567,13 @@ export const ATMOSPHERE_AXES = {
   drape: {
     id: 'drape',
     label: 'Drape',
-    description: 'Folded silk with a slow sheen — composed and premium',
-    shader: 'silk',
+    description: 'A slow iridescent sheen — composed and premium',
+    shader: 'film',
     tempo: 1.4,
     intensity: 0.8,
     vignette: 0.5,
-    // More sheen than default (0.15) is what reads as satin rather than cloth.
-    params: { 'silk-sheen': '0.35', 'silk-fold-scale': '2.2' },
+    // Broader than the default scale (2.5): long, draped bands, not fine ones.
+    params: { 'film-scale': '2.2' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -585,14 +582,16 @@ export const ATMOSPHERE_AXES = {
   haze: {
     id: 'haze',
     label: 'Haze',
-    description: 'Soft pale cloud drift — carries dark hero ink',
-    shader: 'clouds',
+    description: 'Soft pale paint drift — carries dark hero ink',
+    shader: 'flow',
     tempo: 1.5,
     intensity: 0.55,
     vignette: 0.2,
     grain: 0.05,
-    params: { 'clouds-cover': '0.35' },
-    // Clouds render pale. White hero text would vanish into it.
+    // Softer streaks than the default contrast (12).
+    params: { 'flow-contrast': '8' },
+    // Flow mixes toward the palette's ground by intensity, so at 0.55 over a
+    // light ground the field reads pale. White hero text would vanish into it.
     heroInk: 'dark',
     titleBlend: 'normal',
     logoScale: 1,
@@ -601,12 +600,14 @@ export const ATMOSPHERE_AXES = {
   lattice: {
     id: 'lattice',
     label: 'Lattice',
-    description: 'A rotating gyroid mesh — structural and precise',
-    shader: 'gyroid',
+    description: 'A rotating aetheric fold — structural and precise',
+    shader: 'ether',
     tempo: 1.2,
     intensity: 0.75,
     vignette: 0.5,
-    params: { 'gyroid-thickness': '0.05' },
+    // Fewer fold steps and less glow than the default (6, 0.5): cleaner edges.
+    // `complexity` is a rounded iteration count.
+    params: { complexity: '4', glow: '0.3' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -617,12 +618,13 @@ export const ATMOSPHERE_AXES = {
   bloomlight: {
     id: 'bloomlight',
     label: 'Bloom',
-    description: 'Drifting coloured orbs — warm and inviting',
-    shader: 'glow',
+    description: 'Soft glowing forms — warm and inviting',
+    shader: 'ether',
     tempo: 1.6,
     intensity: 0.9,
     vignette: 0.45,
-    params: { 'glow-count': '8', 'glow-size': '0.8' },
+    // More glow than the default (0.5).
+    params: { glow: '0.8' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1.05,
@@ -631,12 +633,13 @@ export const ATMOSPHERE_AXES = {
   charge: {
     id: 'charge',
     label: 'Charge',
-    description: 'Crackling plasma — loud, electric, unmissable',
-    shader: 'plasma',
+    description: 'Hard, fast paint streams — loud, electric, unmissable',
+    shader: 'flow',
     tempo: 1.3,
     intensity: 1,
     vignette: 0.35,
-    params: { 'plasma-bands': '30' },
+    // Harder streaks than the default contrast (12).
+    params: { 'flow-contrast': '16' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -676,18 +679,15 @@ export const ATMOSPHERE_AXES = {
   deepfield: {
     id: 'deepfield',
     label: 'Deep field',
-    description: 'Dust, depth and stars — vast and cinematic',
-    shader: 'nebula',
+    description: 'Deep, wide curtains of light — vast and cinematic',
+    shader: 'aurora',
     tempo: 0.8,
     intensity: 0.9,
     vignette: 0.6,
-    // `nebula-depth` is Math.round-ed to a layer COUNT — a fraction here
-    // collapses the volume to a single sheet. Default is 8.
-    params: {
-      'nebula-density': '0.9',
-      'nebula-stars': '0.6',
-      'nebula-depth': '9',
-    },
+    // `aurora-layers` is Math.round-ed to a layer COUNT — a fraction here
+    // collapses the curtains to one. Default is 5, spread 0.25: more and wider
+    // than Borealis, so the two read apart.
+    params: { 'aurora-layers': '8', 'aurora-spread': '0.4' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -710,13 +710,14 @@ export const ATMOSPHERE_AXES = {
   maelstrom: {
     id: 'maelstrom',
     label: 'Maelstrom',
-    description: 'A tightening spiral — tense and dramatic',
-    shader: 'vortex',
+    description: 'Fast, dense folds — tense and dramatic',
+    shader: 'ether',
     tempo: 1.4,
     intensity: 0.9,
     vignette: 0.65,
-    // `vortex-density` is a rounded arm COUNT (default 40), not a 0..1 ratio.
-    params: { 'vortex-twist': '1.5', 'vortex-density': '48' },
+    // The most fold steps the shader runs (3-8; default 6), drawn in closer
+    // than the default zoom (5). `complexity` is a rounded iteration count.
+    params: { complexity: '8', zoom: '4' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -725,12 +726,13 @@ export const ATMOSPHERE_AXES = {
   drizzle: {
     id: 'drizzle',
     label: 'Drizzle',
-    description: 'Rain on glass — meditative and quiet',
-    shader: 'rain',
+    description: 'Small ripples on still water — meditative and quiet',
+    shader: 'ripple',
     tempo: 0.9,
     intensity: 0.7,
     vignette: 0.5,
-    params: { 'rain-density': '0.7', 'rain-blur': '1.3' },
+    // Smaller drops than the default size (0.03).
+    params: { 'ripple-size': '0.02' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -770,12 +772,13 @@ export const ATMOSPHERE_AXES = {
   dunes: {
     id: 'dunes',
     label: 'Dunes',
-    description: 'Long rolling swells — patient and wide',
-    shader: 'waves',
+    description: 'Long, slow swells — patient and wide',
+    shader: 'ripple',
     tempo: 0.6,
     intensity: 0.8,
     vignette: 0.5,
-    params: { 'waves-chop': '0.5', 'waves-height': '1.2' },
+    // Broader drops than the default size (0.03).
+    params: { 'ripple-size': '0.05' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -784,12 +787,14 @@ export const ATMOSPHERE_AXES = {
   canopy: {
     id: 'canopy',
     label: 'Canopy',
-    description: 'Branching growth — alive and unhurried',
-    shader: 'growth',
-    tempo: 1.2,
+    description: 'Soft artificial lifeforms — alive and unhurried',
+    shader: 'lenia',
+    // `lenia` has no speed a multiplier can drive (SHADER_TEMPO.lenia is
+    // null), and its radius/growth/width ruleset is tuned as a set — a change
+    // to one kills the lifeforms — so this look keeps the tuned values.
+    tempo: 1,
     intensity: 0.8,
     vignette: 0.55,
-    params: { 'growth-glow': '1', 'growth-scale': '2.4' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -798,12 +803,13 @@ export const ATMOSPHERE_AXES = {
   driftseed: {
     id: 'driftseed',
     label: 'Driftseed',
-    description: 'Pollen adrift in shallow depth of field — gentle',
-    shader: 'pollen',
+    description: 'A soft, defocused glow adrift — gentle',
+    shader: 'ether',
     tempo: 1.6,
     intensity: 0.75,
     vignette: 0.45,
-    params: { 'pollen-bokeh': '0.8', 'pollen-density': '0.7' },
+    // Twice the default colour fringe (0.003) reads as a shallow focus.
+    params: { aberration: '0.006', glow: '0.6' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1.05,
@@ -827,16 +833,16 @@ export const ATMOSPHERE_AXES = {
     id: 'spores',
     label: 'Spores',
     description: 'Agent trails seeking and reinforcing — emergent',
-    shader: 'spore',
-    // `spore` has no speed uniform; its motion comes from sensor geometry and
-    // trail decay, so tempo must be 1 (SHADER_TEMPO.spore is null).
+    shader: 'physarum',
+    // `physarum` has no speed uniform; its motion comes from sensor geometry
+    // and trail decay, so tempo must be 1 (SHADER_TEMPO.physarum is null).
     tempo: 1,
     intensity: 0.8,
     vignette: 0.6,
     grain: 0.08,
-    // `spore-decay` is a per-frame trail retention — 0.998 is the tuned value
-    // and small changes are enormous. 0.995 fades trails perceptibly faster.
-    params: { 'spore-decay': '0.995', 'spore-step-size': '7' },
+    // `physarum-decay` is a per-frame trail retention — 0.98 is the tuned
+    // value and small changes are large. 0.97 fades trails perceptibly faster.
+    params: { 'physarum-decay': '0.97' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -847,12 +853,13 @@ export const ATMOSPHERE_AXES = {
   facet: {
     id: 'facet',
     label: 'Facet',
-    description: 'Iridescent bismuth terraces — jewelled and hard',
-    shader: 'bismuth',
+    description: 'Hard iridescent bands — jewelled and bright',
+    shader: 'film',
     tempo: 1.3,
     intensity: 0.9,
     vignette: 0.6,
-    params: { 'bismuth-iridescence': '0.9', 'bismuth-terraces': '6' },
+    // More, further-shifted bands than the default (4, 0.3).
+    params: { 'film-bands': '7', 'film-shift': '0.5' },
     heroInk: 'light',
     titleBlend: 'normal',
     logoScale: 1,
@@ -862,12 +869,14 @@ export const ATMOSPHERE_AXES = {
     id: 'alabaster',
     label: 'Alabaster',
     description: 'Pale nacre sheen — carries dark hero ink',
-    shader: 'pearl',
+    shader: 'film',
     tempo: 0.6,
     intensity: 0.6,
     vignette: 0.25,
-    params: { 'pearl-fresnel': '2.4' },
-    // Pearl is the palest shader in the set. Light ink is unreadable on it.
+    // Gentler than the default ripple (1.5): a still, nacreous surface.
+    params: { 'film-ripple': '0.8' },
+    // Film mixes toward the palette's ground by intensity, so at 0.6 over a
+    // light ground the sheen reads pale. Light ink is unreadable on it.
     heroInk: 'dark',
     titleBlend: 'normal',
     logoScale: 1,
@@ -898,10 +907,19 @@ export function atmosphereShaderTokens(
 ): Record<string, string> {
   const tokens: Record<string, string> = {
     'shader-preset': atmos.shader,
-    'shader-intensity': String(atmos.intensity),
-    'shader-vignette': String(atmos.vignette),
   };
-  if (atmos.grain !== undefined) tokens['shader-grain'] = String(atmos.grain);
+  // The post-process is the shader's OWN (`shader-<id>-intensity` etc.,
+  // preset-fx-defaults.ts): a preset applies by merging over the brand, so
+  // the shared key would lose to a value the creator tuned on this shader
+  // before. A still hero ('none') has none to set.
+  const live = resolvePresetId(atmos.shader);
+  if (live && live !== 'none') {
+    tokens[presetFxKey(live, 'intensity')] = String(atmos.intensity);
+    tokens[presetFxKey(live, 'vignette')] = String(atmos.vignette);
+    if (atmos.grain !== undefined) {
+      tokens[presetFxKey(live, 'grain')] = String(atmos.grain);
+    }
+  }
 
   const tempo = SHADER_TEMPO[atmos.shader];
   if (tempo) {
@@ -1159,15 +1177,3 @@ export const COMPOSED_DESIGN_KEYS: readonly string[] = [
   'hero-cta-bg',
   'hero-cta-text',
 ];
-
-/** Surfaces a composed preset's headings are measured against, for tests and
- *  for the guided mixer's contrast readout. */
-export function presetSurfaces(p: PresetPalette): {
-  light: string;
-  dark: string;
-} {
-  return {
-    light: p.background ?? DEFAULT_LIGHT_SURFACE,
-    dark: p.background ? p.darkBackground : DEFAULT_DARK_SURFACE,
-  };
-}

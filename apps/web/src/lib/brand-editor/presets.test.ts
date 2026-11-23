@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { DEFAULTS } from '$lib/components/ui/ShaderHero/shader-config';
-import { tokenOverridesToCssVars } from './css-injection';
+import { BRAND_PREFIX_KEYS, tokenOverridesToCssVars } from './css-injection';
 import { findFont } from './font-catalog';
 import { HERO_FX_PRESETS } from './hero-fx-presets';
 import {
@@ -33,7 +33,7 @@ import {
  * its expectation from source rather than from a copied list, so the guard
  * cannot silently rot when the thing it guards moves:
  *
- *   - writable keys        ← parsed out of css-injection.ts
+ *   - writable keys        ← the real exported BRAND_PREFIX_KEYS
  *   - dark-capable keys    ← parsed out of org-brand.css + the org layout
  *   - integer shader params← parsed out of shader-config.ts `Math.round(rv(…))`
  *   - shader tempo bases   ← the real exported DEFAULTS object
@@ -46,15 +46,10 @@ const SRC = resolve(HERE, '../..');
 
 // ── Source-derived expectations ────────────────────────────────────────────
 
-const injectionSrc = readFileSync(join(HERE, 'css-injection.ts'), 'utf8');
-const keysStart = injectionSrc.indexOf('BRAND_PREFIX_KEYS = new Set([');
-const WRITABLE_KEYS = new Set(
-  [
-    ...injectionSrc
-      .slice(keysStart, injectionSrc.indexOf('])', keysStart))
-      .matchAll(/'([\w-]+)'/g),
-  ].map((m) => m[1])
-);
+// The real set, not a parse of its source: it is not all string
+// literals (each preset's own intensity/grain/vignette keys are spread in from
+// preset-fx-defaults.ts), and a parse would call those keys unwritable.
+const WRITABLE_KEYS: ReadonlySet<string> = BRAND_PREFIX_KEYS;
 
 const shaderConfigSrc = readFileSync(
   join(SRC, 'lib/components/ui/ShaderHero/shader-config.ts'),

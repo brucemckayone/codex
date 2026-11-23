@@ -14,6 +14,7 @@
     contentAttrs?: Record<string, string>;
     /** Attributes a page might pass to Trigger. */
     triggerAttrs?: Record<string, string>;
+    disabled?: boolean;
   }
 
   let {
@@ -23,10 +24,11 @@
     onKeep,
     contentAttrs = {},
     triggerAttrs = {},
+    disabled = false,
   }: Props = $props();
 </script>
 
-<DropdownMenu bind:open {defaultOpen} {onOpenChange} forceVisible={false}>
+<DropdownMenu bind:open {defaultOpen} {onOpenChange} {disabled} forceVisible={false}>
   <DropdownMenuTrigger data-testid="dropdown-trigger" {...triggerAttrs}>Menu</DropdownMenuTrigger>
   <DropdownMenuContent data-testid="dropdown-content" {...contentAttrs}>
     <DropdownMenuItem data-testid="item-1">Item One</DropdownMenuItem>

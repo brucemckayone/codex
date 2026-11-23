@@ -38,6 +38,7 @@
   import { browser } from '$app/environment';
   import type Hls from 'hls.js';
   import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
+  import { logImageFailure } from '$lib/components/ui/FallbackImage/log-image-failure';
 
   interface Props {
     /** HLS manifest URL — the 30s public sell preview, not the full asset. */
@@ -53,6 +54,10 @@
   }
 
   const { src, posterUrl = null, posterSrcset = '', posterSizes }: Props = $props();
+
+  // A still that fails gives way to the plain plate, and is logged as every
+  // stored picture is: a vanished still looks exactly like none.
+  let failedStill = $state<string | null>(null);
 
   let videoEl = $state<HTMLVideoElement | undefined>(undefined);
   let hlsInstance = $state<Hls | null>(null);
@@ -131,7 +136,7 @@
 
 {#if reduced || !src}
   <!-- Continuous decoration, removed by preference. The still is the fallback. -->
-  {#if posterUrl}
+  {#if posterUrl && posterUrl !== failedStill}
     <img
       class="hero-loop__still"
       src={posterUrl}
@@ -139,6 +144,12 @@
       sizes={posterSrcset ? posterSizes : undefined}
       alt=""
       decoding="async"
+      onerror={(event) => {
+        failedStill = posterUrl;
+        // The file the browser chose from the srcset, else the src itself.
+        const img = event.currentTarget;
+        logImageFailure((img instanceof HTMLImageElement && img.currentSrc) || posterUrl);
+      }}
     />
   {:else}
     <span class="hero-loop__plate" aria-hidden="true"></span>

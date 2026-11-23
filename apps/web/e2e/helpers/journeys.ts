@@ -37,6 +37,11 @@
  */
 
 import { expect, type Page } from '@playwright/test';
+import { orgUrl } from './origin';
+
+// Moved to origin.ts (the suite's one origin helper); re-exported here so
+// existing imports keep working.
+export { orgUrl };
 
 /**
  * The platform's generic meta description, emitted by the ROOT layout as the
@@ -187,21 +192,6 @@ export function journeyFixture(org: string, pageSlug: string): JourneyFixture {
     );
   }
   return found;
-}
-
-/**
- * Build an absolute URL on an org's subdomain from the configured `baseURL`.
- *
- * The org slug lives in the HOSTNAME, never the path, so a journey page cannot
- * be reached with a root-relative `page.goto()` unless the browser is already on
- * that subdomain. Reading the port from `baseURL` keeps every spec portable
- * between the default `lvh.me:5173` and a `PLAYWRIGHT_BASE_URL` override (this
- * effort's worktree serves on `:3010`).
- */
-export function orgUrl(baseUrl: string, org: string, path: string): string {
-  const base = new URL(baseUrl);
-  const suffix = path.startsWith('/') ? path : `/${path}`;
-  return `${base.protocol}//${org}.${base.host}${suffix}`;
 }
 
 /** `orgUrl` bound to the spec's configured baseURL, for use inside a test. */

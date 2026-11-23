@@ -159,7 +159,7 @@ describe('BrandStudioRail', () => {
     expect(labels.some((l) => l.includes('Hero'))).toBe(true);
   });
 
-  test('browse lists all eight control rows in order', () => {
+  test('browse lists all ten control rows in order', () => {
     component = mountRail();
     expect(visibleRowLabels()).toEqual([
       'Colours',
@@ -171,7 +171,20 @@ describe('BrandStudioRail', () => {
       'Effects',
       // The intro film (Codex-376dl).
       'Film',
+      // The hero's own colours, moved from Fine-tune (Codex-1yd58).
+      'Hero colours',
+      // The purpose-first hero and its compositions (Codex-1yd58).
+      'Composition',
     ]);
+  });
+
+  test("Hero colours opens in the Hero group's own focus (the owner's, 2026-11-23)", () => {
+    component = mountRail();
+    openRow('Hero colours');
+    expect(document.querySelector('.brand-rail__focus-body')).toBeTruthy();
+    expect(
+      document.querySelector('.brand-rail__focus-h')?.textContent?.trim()
+    ).toBe('Hero colours');
   });
 
   test('clicking a control row opens its full-height focus', () => {

@@ -101,6 +101,14 @@
 		}
 	}
 
+	/* An overlay that is the whole screen on a phone (the Showreel's theatre
+	   sets `data-covers-page`) sits inside the page's stacking context, below
+	   this fixed bar: the bar steps aside, out of sight and out of reach,
+	   while it is open (Codex-1yd58.8 review M2). */
+	:global(body:has([data-covers-page])) .bottom-nav {
+		display: none;
+	}
+
 	.bottom-nav__tab {
 		display: flex;
 		flex-direction: column;

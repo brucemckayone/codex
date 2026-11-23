@@ -2,6 +2,10 @@
   @component BrandEditorFineTuneColors
   Level 2 — Per-token color overrides with auto-derive reset.
   Depends on tokenOverrides DB column (Codex-r7il, now complete).
+
+  `section`: the page's groups (Colours > Fine-tune), or the hero's own
+  (the rail's Hero > Hero colours, open, with the reel's ink warning): the
+  hero is edited in one place (the owner's, 2026-11-23).
 -->
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
@@ -10,6 +14,13 @@
   import BrandSliderField from '../BrandSliderField.svelte';
   import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
+  import { reelInkWarnings } from '$lib/brand-editor/reel-ink-warning';
+
+  interface Props {
+    section?: 'page' | 'hero';
+  }
+
+  let { section = 'page' }: Props = $props();
 
   interface TokenDef {
     key: string;
@@ -56,16 +67,16 @@
     },
     {
       label: 'Hero',
-      description: 'Colors for the hero section over the shader background',
+      description: 'The hero over your shader and films. Unset, each reads over any film.',
       tokens: [
-        { key: 'hero-title-color', name: 'Title', auto: 'White with adaptive blend (inverts against shader)', defaultSeed: '#ffffff', brandPrefix: true, blendControl: true, linkedKey: 'hero-title-blend', linkedValue: 'normal' },
-        { key: 'hero-text', name: 'Content Text', auto: 'Description, pills, stat numbers', defaultSeed: '#ffffff', brandPrefix: true },
-        { key: 'hero-text-muted', name: 'Muted Text', auto: 'Stat labels, category pills', defaultSeed: '#ffffff', brandPrefix: true },
-        { key: 'hero-cta-bg', name: 'Primary CTA Bg', auto: 'Browse/Explore button background', defaultSeed: '#ffffff', brandPrefix: true },
-        { key: 'hero-cta-text', name: 'Primary CTA Text', auto: 'Browse/Explore button text', defaultSeed: '#1a1a2e', brandPrefix: true },
-        { key: 'hero-glass-tint', name: 'Glass CTA Tint', auto: 'Semi-transparent button tint color', defaultSeed: '#ffffff', brandPrefix: true },
-        { key: 'hero-glass-text', name: 'Glass CTA Text', auto: 'Library/Meet Creators button text', defaultSeed: '#ffffff', brandPrefix: true },
-        { key: 'hero-border-tint', name: 'Dividers', auto: 'Pill borders, stat separator line', defaultSeed: '#ffffff', brandPrefix: true },
+        { key: 'hero-title-color', name: 'Title', auto: 'The big title, and your name where it is the window', defaultSeed: '#ffffff', brandPrefix: true, blendControl: true, linkedKey: 'hero-title-blend', linkedValue: 'normal' },
+        { key: 'hero-text', name: 'Content Text', auto: 'The words over the hero: line, top bar, the piece on show', defaultSeed: '#ffffff', brandPrefix: true },
+        { key: 'hero-text-muted', name: 'Muted Text', auto: 'Quieter words: labels, facts, the other pieces', defaultSeed: '#ffffff', brandPrefix: true },
+        { key: 'hero-cta-bg', name: 'Main Button', auto: "The hero's main button", defaultSeed: '#ffffff', brandPrefix: true },
+        { key: 'hero-cta-text', name: 'Main Button Text', auto: "The main button's words", defaultSeed: '#1a1a2e', brandPrefix: true },
+        { key: 'hero-glass-tint', name: 'Glass Buttons', auto: 'See-through buttons: Follow, Join, Preview, Pause', defaultSeed: '#ffffff', brandPrefix: true },
+        { key: 'hero-glass-text', name: 'Glass Button Text', auto: "The see-through buttons' words", defaultSeed: '#ffffff', brandPrefix: true },
+        { key: 'hero-border-tint', name: 'Dividers', auto: 'Lines between pieces, button borders', defaultSeed: '#ffffff', brandPrefix: true },
       ],
     },
     {
@@ -136,7 +147,24 @@
     },
   ];
 
-  let expandedGroup = $state<string | null>(null);
+  const groups = $derived(
+    TOKEN_GROUPS.filter((group) => (group.label === 'Hero') === (section === 'hero'))
+  );
+  // The group the editor opened, or closed (null); before any, the hero's
+  // own opens on its one group.
+  let toggled = $state<string | null | undefined>(undefined);
+  const expandedGroup = $derived(toggled === undefined ? (section === 'hero' ? 'Hero' : null) : toggled);
+  // Hero colours the reel can't carry over film, even at its strongest shade.
+  const inkWarnings = $derived(
+    section === 'hero'
+      ? reelInkWarnings({
+          background: brandEditor.pending?.backgroundColor,
+          backgroundDark: brandEditor.pending?.darkOverrides?.backgroundColor,
+          tokenOverrides: brandEditor.pending?.tokenOverrides,
+          darkTokenOverrides: brandEditor.pending?.darkTokenOverrides,
+        })
+      : []
+  );
 
   function getOverride(key: string): string | null {
     const overrides = brandEditor.pending?.tokenOverrides ?? {};
@@ -220,14 +248,28 @@
 </script>
 
 <div class="fine-tune">
-  {#each TOKEN_GROUPS as group (group.label)}
+  {#if inkWarnings.length > 0}
+    <div class="fine-tune__warning" data-ink-warning>
+      <strong>{m.branding_hero_reel_ink_warning_title()}</strong>
+      {#each inkWarnings as warning (warning.theme)}
+        {@const numbers = { ratio: String(warning.ratio), floor: String(warning.floor) }}
+        <p>
+          {warning.theme === 'dark'
+            ? m.branding_hero_reel_ink_warning_dark(numbers)
+            : m.branding_hero_reel_ink_warning_light(numbers)}
+        </p>
+      {/each}
+      <p>{m.branding_hero_reel_ink_warning_fix()}</p>
+    </div>
+  {/if}
+  {#each groups as group (group.label)}
     {@const isExpanded = expandedGroup === group.label}
     {@const overrideCount = group.tokens.filter((t) => getOverride(t.key) != null).length}
     <section class="fine-tune__group">
       <button
         class="fine-tune__group-header"
         class:fine-tune__group-header--expanded={isExpanded}
-        onclick={() => { expandedGroup = isExpanded ? null : group.label; }}
+        onclick={() => { toggled = isExpanded ? null : group.label; }}
       >
         <h3 class="fine-tune__group-label">{group.label}</h3>
         {#if overrideCount > 0}
@@ -363,6 +405,22 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
+  }
+
+  .fine-tune__warning {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-status-warning-border);
+    border-radius: var(--radius-md);
+    background: var(--color-status-warning-surface);
+    color: var(--color-status-warning-text);
+    font-size: var(--text-xs);
+  }
+
+  .fine-tune__warning p {
+    margin: 0;
   }
 
   .fine-tune__group {

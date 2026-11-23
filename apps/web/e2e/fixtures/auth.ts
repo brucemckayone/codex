@@ -23,13 +23,14 @@ import {
   type PlaywrightCookie,
 } from '@codex/test-utils/e2e';
 import { test as base, type Page } from '@playwright/test';
+import { workerUrl } from '../helpers/workers';
 
 /**
  * Check if the Auth Worker is healthy and ready to accept requests
  */
 async function checkAuthWorkerHealthy(): Promise<boolean> {
   try {
-    const response = await fetch('http://localhost:42069/health');
+    const response = await fetch(`${workerUrl('AUTH')}/health`);
     return response.status === 200 || response.status === 503;
   } catch {
     return false;
@@ -57,7 +58,7 @@ export const test = base.extend<AuthFixtures>({
     const isHealthy = await checkAuthWorkerHealthy();
     if (!isHealthy) {
       console.warn(
-        'Auth Worker not running on port 42069 - authentication may fail'
+        `Auth Worker not running at ${workerUrl('AUTH')} - authentication may fail`
       );
     }
 
@@ -128,7 +129,7 @@ export async function registerSharedUser(): Promise<SharedAuthCookies> {
   const isHealthy = await checkAuthWorkerHealthy();
   if (!isHealthy) {
     console.warn(
-      'Auth Worker not running on port 42069 - shared auth may fail'
+      `Auth Worker not running at ${workerUrl('AUTH')} - shared auth may fail`
     );
   }
 

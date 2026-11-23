@@ -11,7 +11,7 @@
   brandEditor.pending.tokenOverrides — this component is presentation-only.
 -->
 <script lang="ts">
-  import type { ControlConfig } from '$lib/brand-editor/hero-fx-presets';
+  import type { ControlConfig } from '$lib/brand-editor/hero-fx-controls';
   import BrandSliderField from '../BrandSliderField.svelte';
 
   interface Props {

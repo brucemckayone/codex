@@ -55,7 +55,7 @@ describe('isUnbrandedState', () => {
 
   it('is false once token overrides exist', () => {
     expect(
-      isUnbrandedState(state({ tokenOverrides: { 'shader-preset': 'silk' } }))
+      isUnbrandedState(state({ tokenOverrides: { 'shader-preset': 'film' } }))
     ).toBe(false);
   });
 

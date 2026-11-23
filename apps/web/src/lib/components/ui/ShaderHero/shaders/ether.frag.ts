@@ -20,6 +20,17 @@
  *  - u_treble amplifies bloom-boost magnitude.
  *  - u_level lifts saturation pump + ambient brightness.
  *  - u_beatPulse adds a short-lived overall brightness splash.
+ *
+ * The form and its cost:
+ *  - The form is the CENTREPIECE: centred on the canvas and fitted to its
+ *    short side. nimitz's framing (/res.y - (0.9, 0.5)) is right for a
+ *    1.8:1 canvas only; on a phone it put the form off-screen (black).
+ *  - The colour split shares ONE march: the rotation is built once per
+ *    pixel, and only map()'s cheap ripple term is evaluated per channel.
+ *    It used to run three whole marches (each rebuilding three rotation
+ *    matrices on every map() call), so it is now on by default.
+ *  - Rotation follows u_phase, integrated on the CPU, so a speed change
+ *    (the slider, or the music) no longer jumps the angle.
  */
 import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
 
@@ -35,7 +46,7 @@ uniform vec3 u_brandPrimary;
 uniform vec3 u_brandSecondary;
 uniform vec3 u_brandAccent;
 uniform vec3 u_bgColor;
-uniform float u_rotSpeed;
+uniform float u_phase;        // integral of the rotation speed (CPU)
 uniform int u_complexity;     // 3-8 raymarch steps
 uniform float u_glow;         // glow intensity multiplier
 uniform float u_scale;        // map() detail scale
@@ -74,20 +85,44 @@ vec3 brandPalette(float t) {
 }
 
 // -- SDF map (nimitz) + subtle breathing axis for organic motion --
-// bassBreath adds a slow low-frequency wobble to the sampled point so bass
-// energy is felt as "pressure moving through the ether."
-float map(vec3 p, float t, float rotSpd, float scl, float bassBreath) {
-  p.xz *= m(t * rotSpd);
-  p.xy *= m(t * rotSpd * 0.75);
+// map(p) = shell(warp(p)) + ripples(warp(p), scale), split in parts so the
+// colour split re-evaluates only ripples() per channel.
+
+// nimitz's three rotations, in order, as one matrix built once per pixel.
+vec3 rotSteps(vec3 p, float phase) {
+  p.xz *= m(phase);
+  p.xy *= m(phase * 0.75);
   // Breathing wobble: slow sinusoidal third axis — avoids the "spin around a fixed centre" feel
-  p.yz *= m(sin(t * rotSpd * 0.3) * 0.15);
-  // Bass-driven sub-sonic displacement — audible low end becomes a visible
-  // slow swirl in the volumetric structure. Magnitudes kept small so the
-  // base SDF topology stays intact.
-  p.xy += vec2(sin(p.z + t * 0.8), cos(p.z + t * 0.65)) * bassBreath;
+  p.yz *= m(sin(phase * 0.3) * 0.15);
+  return p;
+}
+mat3 etherRotation(float phase) {
+  return mat3(
+    rotSteps(vec3(1.0, 0.0, 0.0), phase),
+    rotSteps(vec3(0.0, 1.0, 0.0), phase),
+    rotSteps(vec3(0.0, 0.0, 1.0), phase)
+  );
+}
+
+// The rotated point, plus the bass breath: a slow low-frequency wobble so
+// bass is felt as "pressure moving through the ether". Magnitudes kept
+// small so the base SDF topology stays intact.
+vec3 warpPoint(vec3 p, mat3 rot, float t, float bassBreath) {
+  p = rot * p;
+  if (bassBreath > 0.0) {
+    p.xy += vec2(sin(p.z + t * 0.8), cos(p.z + t * 0.65)) * bassBreath;
+  }
+  return p;
+}
+
+// sinT7 = sin(t * 0.7), the same for every sample of a pixel.
+float shell(vec3 p, float sinT7) {
+  return length(p + vec3(sinT7)) * log(length(p) + 1.0) - 1.0;
+}
+
+float ripples(vec3 p, float t, float scl) {
   vec3 q = p * scl + t;
-  return length(p + vec3(sin(t * 0.7))) * log(length(p) + 1.0)
-       + sin(q.x + sin(q.z + sin(q.y))) * 0.5 - 1.0;
+  return sin(q.x + sin(q.z + sin(q.y))) * 0.5;
 }
 
 // -- ACES filmic tone map (Narkowicz 2015 approximation) --
@@ -97,8 +132,10 @@ vec3 aces(vec3 x) {
   return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
-// -- One full raymarch pass. Returns accumulated light. --
-// scaleMul is used to produce per-channel offsets for true chromatic aberration.
+// -- The raymarch. Returns accumulated light. --
+// split: map() scale per channel (R, G, B) for the chromatic aberration;
+// all 1.0 with it off. The march steps by G; R and B differ only in
+// ripples(), so a split costs two cheap terms a step, not two more marches.
 // roOffset shifts the ray origin laterally — used by the wanderer to drift
 // the volumetric focal point along a Lissajous path during audio playback.
 // bassBreath is forwarded into map() for sub-sonic swirl.
@@ -106,11 +143,15 @@ vec3 aces(vec3 x) {
 vec3 raymarchEther(
   vec2 uv,
   float t,
-  float scaleMul,
+  float glow,
+  vec3 split,
   vec3 roOffset,
   float bassBreath,
   float midsSparkle
 ) {
+  mat3 rot = etherRotation(u_phase);
+  float sinT7 = sin(t * 0.7);
+  bool splitOn = split.x != split.z;
   vec3 baseLight = u_brandPrimary * 0.28;
   // Highlight magnitude sparkles with mids — the brightest in-loop injection
   // picks up extra punch when midrange energy is present. Gated inside the
@@ -125,8 +166,17 @@ vec3 raymarchEther(
     if (i >= u_complexity) break;
     vec3 p = vec3(0.0, 0.0, u_zoom) + roOffset
            + normalize(vec3(uv, -1.0)) * d;
-    float rz = map(p, t, u_rotSpeed, u_scale * scaleMul, bassBreath);
-    float grad = clamp((rz - map(p + vec3(0.1), t, u_rotSpeed, u_scale * scaleMul, bassBreath)) * 0.5, -0.1, 1.0);
+    vec3 w = warpPoint(p, rot, t, bassBreath);
+    vec3 w2 = warpPoint(p + vec3(0.1), rot, t, bassBreath);
+    float base = shell(w, sinT7);
+    float rzG = base + ripples(w, t, u_scale * split.g);
+    float rz2 = shell(w2, sinT7) + ripples(w2, t, u_scale * split.g);
+    float grad = clamp((rzG - rz2) * 0.5, -0.1, 1.0);
+    vec3 rz = vec3(rzG);
+    if (splitOn) {
+      rz.r = base + ripples(w, t, u_scale * split.r);
+      rz.b = base + ripples(w, t, u_scale * split.b);
+    }
 
     // Palette lookup by distance + gradient — tighter structures pull toward accent
     float palT = clamp(1.0 - d * 0.11 + grad * 0.35, 0.0, 1.0);
@@ -134,9 +184,9 @@ vec3 raymarchEther(
 
     vec3 l = baseLight + highlight * grad;
     // Multiplicative accumulation with palette injection — warmer, more dimensional than pure multiply
-    cl = cl * l + smoothstep(2.5, 0.0, rz) * u_glow * mix(l, paletteCol * 2.0, 0.55);
+    cl = cl * l + (1.0 - smoothstep(0.0, 2.5, rz)) * glow * mix(l, paletteCol * 2.0, 0.55);
 
-    d += min(rz, 1.0);
+    d += min(rzG, 1.0);
   }
   return cl;
 }
@@ -148,11 +198,10 @@ void main() {
   float mx = (u_mouse.x - 0.5) * 0.3;
   float my = (u_mouse.y - 0.5) * 0.2;
 
-  // Shadertoy-style coordinate mapping (nimitz's original framing)
-  vec2 uv = gl_FragCoord.xy / u_resolution.y - vec2(
-    0.9 + mx,
-    0.5 + my
-  );
+  // Centred, and fitted to the SHORT side: the form is the centrepiece on
+  // any canvas. On landscape the scale is nimitz's (height spans 1.0).
+  float shortSide = min(u_resolution.x, u_resolution.y);
+  vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / shortSide - vec2(mx, my);
 
   // ── Audio coupling pre-computation ─────────────────────────────
   // Wanderer shift: convert UV-space wanderer [0..1] to centred [-0.5, 0.5]
@@ -167,18 +216,17 @@ void main() {
   // Mids sparkle amount fed into the highlight term.
   float midsSparkle = u_mids * u_audioActive;
 
-  // -- Raymarch (with optional true per-channel chromatic aberration) --
-  vec3 cl;
-  if (u_aberration > 0.001) {
-    // 3x cost: offset the map() scale per channel to produce real RGB fringing at edges.
-    float ab = u_aberration * 6.0;
-    vec3 etherR = raymarchEther(uv, t, 1.0 - ab, roOffset, bassBreath, midsSparkle);
-    vec3 etherG = raymarchEther(uv, t, 1.0,       roOffset, bassBreath, midsSparkle);
-    vec3 etherB = raymarchEther(uv, t, 1.0 + ab,  roOffset, bassBreath, midsSparkle);
-    cl = vec3(etherR.r, etherG.g, etherB.b);
-  } else {
-    cl = raymarchEther(uv, t, 1.0, roOffset, bassBreath, midsSparkle);
-  }
+  // -- Glow by the ground. On a light ground the glow turns the whole hero a
+  // mid-grey that neither a dark nor a light ink reads on (Tide's best ink 2.6
+  // -> 1.4 at a glow of 1.5), so it is a third of the setting there; on a dark
+  // ground, the setting.
+  float bgLum = dot(u_bgColor, vec3(0.299, 0.587, 0.114));
+  float glow = u_glow * mix(1.0 / 3.0, 1.0, 1.0 - smoothstep(0.35, 0.62, bgLum));
+
+  // -- Raymarch, with the per-channel chromatic aberration (map() scale
+  // offset per channel: RGB fringing at the edges) when it is on --
+  float ab = u_aberration > 0.001 ? u_aberration * 6.0 : 0.0;
+  vec3 cl = raymarchEther(uv, t, glow, vec3(1.0 - ab, 1.0, 1.0 + ab), roOffset, bassBreath, midsSparkle);
 
   // ── Wanderer glow: additive radial contribution centred on the wanderer
   // UV. Gives a subtle drifting "focal bright spot" that reads even when
@@ -232,7 +280,7 @@ void main() {
   // Standard radial darkening, but with a soft lift where the cursor is.
   vec2 mouseOffset = (u_mouse - 0.5) * 2.0;
   float mouseDist = length(vc - mouseOffset * 0.3);
-  float spotlight = smoothstep(1.2, 0.0, mouseDist) * 0.12;
+  float spotlight = (1.0 - smoothstep(0.0, 1.2, mouseDist)) * 0.12;
   float vig = clamp(1.0 - r2 * u_vignette + spotlight, 0.0, 1.2);
   color *= vig;
 
