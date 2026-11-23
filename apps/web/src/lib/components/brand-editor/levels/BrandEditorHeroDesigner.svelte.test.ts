@@ -80,12 +80,14 @@ const held = (): HeroSettings =>
 function report(
   options: Partial<HeroOptions>,
   kind: HeroContentKind = 'watch',
-  chosen: HeroSettings = held()
+  chosen: HeroSettings = held(),
+  bandShows = true
 ) {
   previewResolved.current = {
     options: { ...defaultOptions('consume', FACTS), ...options },
     kind,
     chosen,
+    bandShows,
   };
   flushSync();
 }
@@ -219,6 +221,19 @@ describe('the Showreel group: shown whenever the hero is a Showreel', () => {
       'Join or Explore sits at the top beside Follow'
     );
     expect(hint('proof')).toContain('Facts reads at the top');
+  });
+
+  test("the shader band hides where the preview says the reel has no landscape piece, and on the Name layout (the owner's, 2026-11-23)", () => {
+    const band = () =>
+      document.querySelector('.hero-designer__field[data-key="reel-band"]');
+    render({ 'hero-opt-purpose': 'consume', 'hero-opt-comp': 'showreel' });
+    expect(band(), 'before a report').not.toBeNull();
+    report({ comp: 'showreel', 'reel-layout': 'wide' }, 'watch', held(), true);
+    expect(band(), 'a landscape piece').not.toBeNull();
+    report({ comp: 'showreel', 'reel-layout': 'wide' }, 'watch', held(), false);
+    expect(band(), 'portrait pieces only').toBeNull();
+    report({ comp: 'showreel', 'reel-layout': 'name' }, 'watch', held(), true);
+    expect(band(), 'the Name layout').toBeNull();
   });
 
   test('another composition keeps every general option, with no Showreel lines', () => {

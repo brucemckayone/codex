@@ -365,6 +365,7 @@ const RESOLVED: BrandPreviewResolved = {
   }),
   kind: 'listen',
   chosen: { purpose: 'consume', options: { lead: 'name' } },
+  bandShows: false,
 };
 
 /** A studio window: records its message listeners so a test can deliver. */

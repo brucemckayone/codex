@@ -39,6 +39,7 @@
   the entry shows its still for the visit.
 -->
 <script lang="ts">
+  import { reelShapes } from '$lib/org-hero/showreel/reel-shapes.svelte';
   import { showreelFeed } from '$lib/components/ui/ShaderHero/compositor/showreel-feed';
   import {
     type FilmLook,
@@ -282,11 +283,17 @@
    * there, inside the cut (the owner saw the transitions stall, 2026-11-23).
    */
   function decoded(k: string, img: HTMLImageElement) {
+    shaped(img.naturalWidth, img.naturalHeight);
     const show = () => {
       if (!brokenStill[k]) loaded[k] = true;
     };
     if (typeof img.decode === 'function') img.decode().then(show, show);
     else show();
+  }
+
+  /** A piece the band can meet: landscape or square (`reelShapes`). */
+  function shaped(width: number, height: number) {
+    if (width > 0 && width >= height) reelShapes.landscape = true;
   }
 
   function stillFailed(k: string, event: Event) {
@@ -327,7 +334,9 @@
           decoding="async"
           loading={i === 0 ? 'eager' : 'lazy'}
           fetchpriority={i === 0 ? 'high' : undefined}
-          onload={(event) => decoded(k, event.currentTarget)}
+          onload={(event) => {
+            if (event.currentTarget instanceof HTMLImageElement) decoded(k, event.currentTarget);
+          }}
           onerror={(event) => stillFailed(k, event)}
         />
       {/if}
@@ -344,6 +353,7 @@
           disablepictureinpicture
           disableremoteplayback
           tabindex="-1"
+          onloadedmetadata={(event) => shaped(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
           onloadeddata={() => (framed[k] = true)}
           onerror={() => failed(k, 'media')}
         ></video>

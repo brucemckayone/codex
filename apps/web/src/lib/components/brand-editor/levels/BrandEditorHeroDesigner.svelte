@@ -180,12 +180,21 @@
       (reelReport ? reelReport.options.comp === 'showreel' : settings.purpose === 'consume')
   );
   const isShowreel = $derived(storedComp === 'showreel' || showreelOnAuto);
+  // The band shows only where the shader meets a landscape or square piece,
+  // never on the Name layout: hidden where the preview says it can't show
+  // (the owner's, 2026-11-23), so no choice in sight changes nothing. Before
+  // a report, in sight.
+  const layoutNow = $derived(report?.options['reel-layout'] ?? settings.options['reel-layout'] ?? null);
+  const bandHidden = $derived(layoutNow === 'name' || report?.bandShows === false);
   // A Showreel places its own words, ground and buttons: of the other
   // groups it shows only what it reads (REEL_READS), so no choice in sight
   // changes nothing.
   const groups = $derived(
     GROUPS.flatMap((group): Group[] => {
-      if (group.showreel) return isShowreel ? [group] : [];
+      if (group.showreel)
+        return isShowreel
+          ? [{ ...group, fields: group.fields.filter((field) => field.key !== 'reel-band' || !bandHidden) }]
+          : [];
       if (!isShowreel) return [group];
       const fields = group.fields.filter((field) => REEL_READS.has(field.key));
       return fields.length > 0 ? [{ ...group, fields }] : [];

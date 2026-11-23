@@ -86,6 +86,8 @@ export interface BrandPreviewResolved {
   readonly options: HeroOptions;
   readonly kind: HeroContentKind;
   readonly chosen: HeroSettings;
+  /** The reel has a landscape or square piece, which the shader band meets. */
+  readonly bandShows: boolean;
 }
 
 /**
@@ -109,6 +111,7 @@ function isResolvedMessage(data: unknown): data is BrandPreviewResolvedMessage {
     options?: unknown;
     kind?: unknown;
     chosen?: { purpose?: unknown; options?: unknown } | null;
+    bandShows?: unknown;
   };
   return (
     typeof resolved === 'object' &&
@@ -122,7 +125,8 @@ function isResolvedMessage(data: unknown): data is BrandPreviewResolvedMessage {
     (resolved.chosen.purpose === null ||
       typeof resolved.chosen.purpose === 'string') &&
     typeof resolved.chosen.options === 'object' &&
-    resolved.chosen.options !== null
+    resolved.chosen.options !== null &&
+    typeof resolved.bandShows === 'boolean'
   );
 }
 
@@ -332,6 +336,7 @@ export function reportPreviewResolved(
         purpose: resolved.chosen.purpose,
         options: { ...resolved.chosen.options },
       },
+      bandShows: resolved.bandShows,
     },
   };
   const key = JSON.stringify(message.resolved);

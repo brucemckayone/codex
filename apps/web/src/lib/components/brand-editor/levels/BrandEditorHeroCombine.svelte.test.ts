@@ -209,6 +209,7 @@ describe('Combine: what each control writes', () => {
       options,
       kind: 'watch',
       chosen: { purpose: 'intro', options: {} },
+      bandShows: false,
     };
     flushSync();
     expect(document.querySelector('.combine__note')?.textContent).toContain(

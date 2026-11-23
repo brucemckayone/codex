@@ -84,6 +84,7 @@
     type OrgHeroPiece,
   } from '$lib/org-hero/hero-config';
   import { buildReel, reelQualifies } from '$lib/org-hero/reel';
+  import { reelShapes } from '$lib/org-hero/showreel/reel-shapes.svelte';
   import type { ContentItem } from './feed-types';
   import type { PageData } from './$types';
 
@@ -687,7 +688,9 @@
   // draws the classic hero. Inert on a visitor's page.
   $effect(() => {
     reportPreviewResolved(
-      heroOptions ? { options: heroOptions, kind: heroContentKind, chosen: heroSettings } : null
+      heroOptions
+        ? { options: heroOptions, kind: heroContentKind, chosen: heroSettings, bandShows: reelShapes.landscape }
+        : null
     );
   });
   // Leaving the landing inside the preview (a link followed) withdraws the
