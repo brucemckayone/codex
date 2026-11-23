@@ -41,7 +41,7 @@ export interface VeilBackdrop {
 export const LIVE_VEIL_MARGIN = 1.02;
 
 /** The step the search takes between the Style's veil and the proven one. */
-export const LIVE_VEIL_STEP = 0.005;
+const LIVE_VEIL_STEP = 0.005;
 
 const channel = (c: number) => {
   const v = c / 255;
