@@ -104,17 +104,17 @@
     onclick={() => (sheetOpen = true)}
   >
     <LayoutGridIcon size={16} />
-    <span>{m.browse_topics_title()}</span>
+    <span>{m.topic_bar_title()}</span>
   </button>
 
-  <div class="topic-bar__chips" role="group" aria-label={m.browse_topics_label()}>
+  <div class="topic-bar__chips" role="group" aria-label={m.topic_bar_label()}>
     <button
       type="button"
       class="topic-bar__chip topic-bar__chip--all"
       aria-pressed={active === null}
       onclick={() => onSelect(null)}
     >
-      {m.browse_topics_all()}
+      {m.topic_bar_all()}
     </button>
     {#each topics as topic (topic.slug)}
       <button
@@ -147,10 +147,10 @@
   <Popover.Root bind:open={popoverOpen} positioning={{ placement: 'bottom-end' }}>
     <Popover.Trigger class="topic-bar__more">
       <LayoutGridIcon size={16} />
-      <span>{m.browse_topics_see_all({ count: topics.length })}</span>
+      <span>{m.topic_bar_see_all({ count: topics.length })}</span>
       <ChevronDownIcon size={16} />
     </Popover.Trigger>
-    <Popover.Content class="topic-bar__pop" aria-label={m.browse_topics_title()}>
+    <Popover.Content class="topic-bar__pop" aria-label={m.topic_bar_title()}>
       {@render topicGrid(active)}
     </Popover.Content>
   </Popover.Root>
@@ -162,7 +162,7 @@
 <FilterDrawer
   open={sheetOpen}
   onOpenChange={(open) => (sheetOpen = open)}
-  title={m.browse_topics_title()}
+  title={m.topic_bar_title()}
   filters={facets}
   sort=""
   defaultFilters={NO_TOPIC}
@@ -170,9 +170,9 @@
   onFilterChange={(next) => onSelect(next.topic)}
   onSortChange={() => {}}
   onClearAll={() => pick(null)}
-  applyLabel={m.browse_topics_apply()}
-  doneLabel={m.browse_topics_done()}
-  clearLabel={m.browse_topics_all()}
+  applyLabel={m.topic_bar_apply()}
+  doneLabel={m.topic_bar_done()}
+  clearLabel={m.topic_bar_all()}
 >
   {#snippet sections({ filters })}
     <section class="filter-drawer__section">

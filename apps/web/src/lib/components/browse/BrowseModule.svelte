@@ -261,8 +261,8 @@
 
 <div class="browse">
   {#if topics.length > 0}
-    <!-- `display: contents`, so a sticky selector (One bar) sticks within the
-         whole module rather than within a wrapper its own height. -->
+    <!-- A full-width block for every style (see the CSS), except One bar's
+         `display: contents`. -->
     <div class="browse__topics" data-topic-style={selector}>
       {#if selector === 'windows'}
         <TopicWindows {topics} active={category} onSelect={onCategoryChange} />
@@ -379,7 +379,18 @@
     gap: var(--space-8);
   }
 
+  /* The selector slot is a full-width block: Windows and Channels size
+     themselves with container queries (`container-type: inline-size`), which
+     collapse to zero width in a shrink-to-fit parent. */
   .browse__topics {
+    display: block;
+    inline-size: 100%;
+  }
+
+  /* One bar is sticky, and a sticky box only travels inside its parent: in a
+     wrapper its own height it would never stick. `contents` drops the wrapper
+     so the bar sticks within the whole module. */
+  .browse__topics[data-topic-style='bar'] {
     display: contents;
   }
 
