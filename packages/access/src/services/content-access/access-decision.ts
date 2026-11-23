@@ -48,6 +48,7 @@ import {
   contentAccessBranch,
   isContentReleased,
   ORGANIZATION_TEAM_ROLES,
+  ownerKeepsInBranch,
   PURCHASE_STATUS,
 } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
@@ -75,6 +76,7 @@ import {
 import { LOG_EVENTS, LOG_SEVERITY } from '../../constants';
 import { AccessDeniedError } from '../../errors';
 import type { RevocationReason } from '../access-revocation';
+import { type Ownership, ownershipOf } from './content-owner';
 import {
   type AccessQueryClient,
   contentReachableViaOwnedCourse,
@@ -181,7 +183,15 @@ export type GrantVia =
   | 'paid_purchase'
   | 'paid_entitlement'
   | 'paid_course'
-  | 'paid_management';
+  | 'paid_management'
+  /**
+   * An existing owner of a piece whose branch admits no buyer by its own arms:
+   * moved to course-only, team-only or followers-only, or made free and then
+   * unpublished (D2, Codex-a6ofh.6.3). One per kind of {@link Ownership}.
+   */
+  | 'owner_purchase'
+  | 'owner_entitlement'
+  | 'owner_course';
 
 /** The two arms granted by a subscription the user is paying for. */
 export type SubscriptionGrantVia =
@@ -353,9 +363,45 @@ async function decidePolicyAccess(
 
   // The branch, in the decision's order: `contentAccessBranch` in
   // @codex/constants holds it, so purchase completion reads the same order
-  // when it asks whether a buyer would be refused (Codex-z1t3c). Each arm's
-  // body, and so its queries and their order, is as before.
-  switch (contentAccessBranch(policy)) {
+  // when it asks whether a buyer would be refused (Codex-z1t3c).
+  const branch = contentAccessBranch(policy);
+  const onOffer = policy.status === CONTENT_STATUS.PUBLISHED;
+
+  // An existing owner keeps a piece whose access moved (D2,
+  // Codex-a6ofh.6.3): `ownershipOf`, the same owner the leaving download
+  // reads, in a branch whose `owner` is kept (`BRANCH_BUYERS`).
+  const ownerGrant = async (
+    courses: boolean
+  ): Promise<AccessDecision | null> => {
+    if (userId == null || !ownerKeepsInBranch(branch)) return null;
+    const owns = await ownershipOf(db, purchaseService, userId, contentId, {
+      courses,
+    });
+    return owns == null ? null : grant(OWNER_GRANT[owns]);
+  };
+
+  // For the branches that admit no buyer by their own arms (course-only,
+  // team-only, followers-only, and free once unpublished). On offer, the
+  // branch's arms answer first, as before, and the owner is asked only before
+  // a refusal, so a grant costs no extra reads. Off offer the owner is asked
+  // FIRST, as the subscribers arm tries its surviving arms first: the
+  // branch's own grants are relationships the publication rule refuses once
+  // unpublished, so a follower who also bought the piece would otherwise be
+  // granted as a follower and then refused.
+  // `courses: false` where the branch's own arms already read every course
+  // grant (course-only), so the owner is not asked the same thing twice.
+  const keptForOwner = async (
+    arms: () => Promise<AccessDecision>,
+    { courses = true }: { courses?: boolean } = {}
+  ): Promise<AccessDecision> => {
+    if (!onOffer) return (await ownerGrant(courses)) ?? arms();
+    const decision = await arms();
+    return decision.granted
+      ? decision
+      : ((await ownerGrant(courses)) ?? decision);
+  };
+
+  switch (branch) {
     // ── Fail-closed guard: orgless content can never tier-gate
     // (Codex-up7bx). `subscription_tiers` is org-scoped, so the tier switch on
     // content with NO `organizationId` is a semantically invalid row — deny
@@ -368,16 +414,23 @@ async function decidePolicyAccess(
     // all org content). Placed before the standalone flag branches so it wins
     // "regardless of the other flags".
     case 'course_only':
-      if (await viaOwnedCourse()) return grant('course');
-      if (await hasManagementMembership()) return grant('management');
-      return deny('course_only');
+      return keptForOwner(
+        async () => {
+          if (await viaOwnedCourse()) return grant('course');
+          if (await hasManagementMembership()) return grant('management');
+          return deny('course_only');
+        },
+        { courses: false }
+      );
 
     // ── team-only — management role only (WP-1). ────────────────────────────
     case 'team_only':
       if (!orgId) return deny('team_only_requires_org');
-      return (await hasManagementMembership())
-        ? grant('team_management')
-        : deny('team_only');
+      return keptForOwner(async () =>
+        (await hasManagementMembership())
+          ? grant('team_management')
+          : deny('team_only')
+      );
 
     // ── followers-only — active subscription OR follower row OR management.
     // (Codex-xybr3: subscribers ⊇ followers.) Checked SEQUENTIALLY,
@@ -385,15 +438,16 @@ async function decidePolicyAccess(
     // lookup ever running (the short-circuit the WP-1 streaming tree + its
     // observability suite pin). Then the follower fallback (ex-subscribers
     // with a live follow), then the management bypass.
-    case 'followers_only': {
+    case 'followers_only':
       if (!orgId) return deny('followers_only_requires_org');
-      const sub = await grantingSubscription(null);
-      if (sub) return grantBySubscription('followers_subscription', sub);
-      if (await hasFollower()) return grant('followers_follower');
-      return (await hasManagementMembership())
-        ? grant('followers_management')
-        : deny('followers_only');
-    }
+      return keptForOwner(async () => {
+        const sub = await grantingSubscription(null);
+        if (sub) return grantBySubscription('followers_subscription', sub);
+        if (await hasFollower()) return grant('followers_follower');
+        return (await hasManagementMembership())
+          ? grant('followers_management')
+          : deny('followers_only');
+      });
 
     // ── tier-gated (subscribers) — the switch is on (orgId guaranteed by the
     // orgless guard above). Subscription + purchase are independent →
@@ -414,7 +468,6 @@ async function decidePolicyAccess(
       // subscription: a subscriber who also bought it keeps it (owner,
       // "one-off buyers keep what they bought"; Codex-2hxff.64). On offer, the
       // subscription still answers first, as before.
-      const onOffer = policy.status === CONTENT_STATUS.PUBLISHED;
       if (sub && onOffer)
         return grantBySubscription('subscribers_subscription', sub);
       if (purchased) return grant('subscribers_purchase');
@@ -439,11 +492,23 @@ async function decidePolicyAccess(
         ? grant('paid_management')
         : deny('paid');
 
-    // ── free / fallthrough — WP-1 granted here (free content, no price). ─────
+    // ── free / fallthrough — WP-1 granted here (free content, no price). Once
+    // unpublished the free arm no longer opens (the publication rule), but
+    // someone who owned it, bought while it was paid, keeps it (D2).
     case 'free':
-      return grant('free');
+      return keptForOwner(async () => grant('free'));
   }
 }
+
+/** The grant an owner's {@link Ownership} gives (D2). */
+const OWNER_GRANT: Record<
+  Ownership,
+  Exclude<GrantVia, SubscriptionGrantVia>
+> = {
+  purchase: 'owner_purchase',
+  entitlement: 'owner_entitlement',
+  course: 'owner_course',
+};
 
 /**
  * Does this grant arm outlive UNPUBLICATION of the content? (Codex-p3m5j)
@@ -488,6 +553,13 @@ const GRANT_SURVIVES_UNPUBLICATION: Record<GrantVia, boolean> = {
   course: true,
   paid_course: true,
   subscribers_course: true,
+
+  // ── OWNED BEFORE ITS ACCESS MOVED (D2): the same three kinds of owning,
+  // kept in a branch that admits no new buyer. The reason they exist: a
+  // leaving piece is unpublished, and its owners keep it for 30 days.
+  owner_purchase: true,
+  owner_entitlement: true,
+  owner_course: true,
 
   // ── RELATIONSHIP: access for as long as the item is on offer. A cancelled
   // subscriber does not keep the back catalogue, and unpublishing is the
@@ -594,21 +666,27 @@ export type DisputeHold = Extract<
  * Only a grant the policy branch reads, and that a win would give back:
  * - `'purchase_dispute'`: a `completed` purchase of this item carrying
  *   `disputed_at` (the one `verifyPurchase` refuses because of the mark),
- *   where the branch reads a purchase (tier-gated or paid); or a disputed
- *   purchase of a course holding the item, where it reads the course arm
- *   (course-only, tier-gated or paid).
+ *   where the branch reads a purchase: tier-gated or paid by their own arms,
+ *   and course-only, team-only, followers-only and free for an owner whose
+ *   access moved (D2, `ownerKeepsInBranch`); or a disputed purchase of a
+ *   course holding the item, where it reads the course arm (course-only,
+ *   tier-gated or paid) or a course owner (team-only, followers-only, free).
  * - `'subscription_dispute'`: a tier-gated or followers-only item that a
  *   subscription would grant but for its `disputed_at`, publication rule
  *   included; or, through the course arm, a course grant a disputed course
  *   or tier subscription holds back.
- * - `null` otherwise: team-only, an orgless tier gate, a follow, a
+ * - `null` otherwise: an orgless tier gate or orgless team-only or
+ *   followers-only content (refused before any arm), a team role, a follow, a
  *   subscription below the item's tier, or a row never released, which no
  *   grant reaches, so no dispute explains its refusal (Codex-nacky). A course
  *   grant survives unpublication of a released row, so the course arm needs
  *   no publication rule of its own.
  *
- * Mirrors the branch order of `decidePolicyAccess`. It only picks the copy
- * the page shows; the refusal itself stands either way.
+ * Mirrors the branches of `decidePolicyAccess`, not their order: off offer
+ * the decision asks a course-only piece's owner before its course arm, while
+ * this asks the course hold first. When both a course hold and a dispute of
+ * the piece's own purchase exist, either names a real dispute. It only picks
+ * the copy the page shows; the refusal itself stands either way.
  */
 async function disputeHold(
   db: AccessQueryClient,
@@ -620,16 +698,26 @@ async function disputeHold(
   const orgId = policy.organizationId;
   // The branch `decidePolicyAccess` takes, from the same rule.
   const branch = contentAccessBranch(policy);
-  if (branch === 'course_only') {
-    return courseDisputeHold(db, userId, contentId);
+  // Refused before any arm, the owner's included (`*_requires_org`), so a
+  // won dispute would give nothing back.
+  if (
+    orgId == null &&
+    (branch === 'team_only' || branch === 'followers_only')
+  ) {
+    return null;
   }
-  // An orgless tier gate, team-only and free are none of these, so they read
-  // no grant a dispute holds and fall through to null.
+  if (branch === 'course_only') {
+    const held = await courseDisputeHold(db, userId, contentId);
+    if (held) return held;
+  }
+  // An orgless tier gate reads no grant a dispute holds and falls through to
+  // null. Every other branch reads a purchase of the item: the tier and paid
+  // arms by their own arms, the rest for an owner whose access moved (D2).
   const followersOnly = branch === 'followers_only';
   const tierGated = branch === 'subscribers';
   const paid = branch === 'paid';
 
-  if (tierGated || paid) {
+  if (ownerKeepsInBranch(branch)) {
     const disputed = await db.query.purchases.findFirst({
       where: and(
         eq(purchases.contentId, contentId),
@@ -661,7 +749,17 @@ async function disputeHold(
     }
   }
 
-  return tierGated || paid ? courseDisputeHold(db, userId, contentId) : null;
+  if (tierGated || paid) return courseDisputeHold(db, userId, contentId);
+
+  // A course OWNER of a piece whose access moved (D2): team-only,
+  // followers-only, free. Only a held course PURCHASE explains the refusal: a
+  // won dispute gives the grant back and `ownershipOf` reads it, while a
+  // course subscriber never owned the piece. Course-only asked above.
+  if (ownerKeepsInBranch(branch) && branch !== 'course_only') {
+    const held = await courseGrantHeldByDispute(db, userId, contentId);
+    return held === 'course_purchase' ? 'purchase_dispute' : null;
+  }
+  return null;
 }
 
 /** The course arm's hold: the kind of dispute behind a held course grant. */

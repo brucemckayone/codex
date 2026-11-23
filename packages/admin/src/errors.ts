@@ -31,10 +31,13 @@ export {
 } from '@codex/service-errors';
 
 /**
- * A support grant was asked for content a grant cannot open (422): free,
- * followers-only, team-only or course-only content, where the access decision
- * never reads an entitlement (`isGrantableContent`, `@codex/constants`;
- * Codex-2hxff.21). The context is client-facing — the error mapper serialises
+ * A support grant was asked for content a grant may not be given for (422):
+ * free, followers-only, team-only or course-only content
+ * (`isGrantableContent`, `@codex/constants`; Codex-2hxff.21). Access keeps
+ * any live grant on the last three, and on free content once unpublished, as
+ * an owner's (D2, Codex-a6ofh.6.3), so
+ * this refusal is the only thing that stops a support grant making a new
+ * owner there. The context is client-facing — the error mapper serialises
  * it — so it carries the content id only.
  */
 export class ContentNotGrantableError extends BusinessLogicError {

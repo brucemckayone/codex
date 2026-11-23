@@ -25,6 +25,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { LEAVING_NOTICE_DAYS } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
 import {
   content,
@@ -445,6 +446,80 @@ describe('a purchase whose item became unavailable before it landed (Codex-z1t3c
       expect(await grantsOf(customerId, item.id)).toEqual({
         entitlements: 0,
         access: 0,
+      });
+    });
+
+    // The leaving notice (Codex-a6ofh.6.3, design section 3 Change 1): a
+    // checkout opened before the piece's delete gave notice completes as a
+    // blocked sale. Its owners keep it; no one new buys in. The paid arm
+    // opens to a buyer published or withdrawn, so only the leaving check
+    // refuses here (the archived twin below completes).
+    describe('a piece deleted with notice (leaving) before the payment lands', () => {
+      /** Archived and off sale, as the delete writes a piece with owners. */
+      const offSale = {
+        status: 'archived',
+        publishedAt: new Date('2026-01-01T00:00:00Z'),
+        offSaleAt: new Date(),
+      } as const;
+
+      it('leaving: blocked and refunded the same way, no grant', async () => {
+        const { service, stripe } = fresh();
+        const item = await insertContent({
+          ...offSale,
+          leavesAt: new Date(
+            Date.now() + LEAVING_NOTICE_DAYS * 24 * 60 * 60 * 1000
+          ),
+          leavingByCreator: true,
+        });
+        const customerId = await buyer();
+        const pi = `pi_leaving_${uid()}`;
+
+        const result = await complete(
+          service,
+          pi,
+          customerId,
+          item.id,
+          `ch_leaving_${uid()}`
+        );
+
+        expect(result).toMatchObject({
+          status: 'refunded',
+          refundReason: 'item_unavailable',
+          refundAmountCents: 1500,
+        });
+        expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+        expect(refundCall(stripe, 0)[1]).toEqual({
+          idempotencyKey: `refund_unavailable_${pi}_1500`,
+        });
+        expect(await slicesOf(result.id)).toHaveLength(0);
+        expect(await grantsOf(customerId, item.id)).toEqual({
+          entitlements: 0,
+          access: 0,
+        });
+      });
+
+      it('the same piece archived but NOT leaving still completes and grants', async () => {
+        const { service, stripe } = fresh();
+        const item = await insertContent(offSale);
+        const customerId = await buyer();
+
+        const result = await complete(
+          service,
+          `pi_archived_${uid()}`,
+          customerId,
+          item.id,
+          `ch_archived_${uid()}`
+        );
+
+        expect(result).toMatchObject({
+          status: 'completed',
+          refundReason: null,
+        });
+        expect(stripe.refunds.create).not.toHaveBeenCalled();
+        expect(await grantsOf(customerId, item.id)).toEqual({
+          entitlements: 1,
+          access: 1,
+        });
       });
     });
 

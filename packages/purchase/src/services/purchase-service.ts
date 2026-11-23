@@ -1523,6 +1523,9 @@ export class PurchaseService extends BaseService {
         status: content.status,
         publishedAt: content.publishedAt,
         deletedAt: content.deletedAt,
+        // A leaving piece refuses a new buyer (Codex-a6ofh.6.3): a checkout
+        // opened before its delete completes as a blocked sale, refunded.
+        leavesAt: content.leavesAt,
         priceCents: content.priceCents,
         isTierGated: content.isTierGated,
         courseOnly: content.courseOnly,

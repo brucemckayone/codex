@@ -1177,21 +1177,23 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
       });
     });
 
-    it('an item bought on its own and since made course-only is dimmed only while a dispute on its course holds it back', async () => {
+    // D2 (Codex-a6ofh.6.3): an owner keeps a piece whose access moved, so an
+    // undisputed purchase made before the move still opens it. Its dispute is
+    // then exactly what holds it back, and a win would give it back.
+    it('an item bought on its own and since made course-only: its own dispute dims it, as a course dispute does', async () => {
       const buyer = await newUser();
       const { item, courseId } = await courseOnlyLesson('agree-lib-course');
       await buy(buyer, item.id, { disputedAt: new Date() });
 
-      // Its own purchase opens nothing now, so its own dispute explains nothing.
-      expect(await verdict(buyer, item.id)).toBe('course_only');
-      expect(await dimmed(buyer, item.id)).toBe(false);
+      expect(await verdict(buyer, item.id)).toBe('purchase_dispute');
+      expect(await dimmed(buyer, item.id)).toBe(true);
 
       await disputedCoursePurchase(buyer, courseId);
       expect(await verdict(buyer, item.id)).toBe('purchase_dispute');
       expect(await dimmed(buyer, item.id)).toBe(true);
     });
 
-    it('an item bought on its own and since made team-only: not dimmed, and its own gate', async () => {
+    it('an item bought on its own and since made team-only: its own dispute dims it', async () => {
       const buyer = await newUser();
       const item = await createItem('agree-team-only');
       await db
@@ -1200,8 +1202,91 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
         .where(eq(content.id, item.id));
       await buy(buyer, item.id, { disputedAt: new Date() });
 
-      expect(await verdict(buyer, item.id)).toBe('team_only');
-      expect(await dimmed(buyer, item.id)).toBe(false);
+      expect(await verdict(buyer, item.id)).toBe('purchase_dispute');
+      expect(await dimmed(buyer, item.id)).toBe(true);
+    });
+
+    // D2: an OWNER of a piece whose access moved keeps it (its buyer, or a
+    // buyer of a course holding it), so the dispute of what they bought is
+    // what holds it back. A course SUBSCRIBER never owned it, so their dispute
+    // explains nothing there. A tier subscriber's dispute does explain a
+    // followers-only refusal, since any live subscription opens one.
+    describe.each([
+      ['team-only', { isTeamOnly: true }, 'team_only', 'team_only'],
+      [
+        'followers-only',
+        { isFollowerGated: true },
+        'followers_only',
+        'subscription_dispute',
+      ],
+      [
+        'free, unpublished after release',
+        {
+          isFree: true,
+          isPurchasable: false,
+          priceCents: 0,
+          status: 'draft',
+        },
+        'unpublished_requires_purchase',
+        'unpublished_requires_purchase',
+      ],
+    ] as const)('an item since made %s', (slug, shape, gate, tierVerdict) => {
+      async function movedCourseItem(suffix: string) {
+        const item = await createItem(
+          `agree-${slug.replace(/[^a-z]+/g, '-')}-${suffix}`
+        );
+        const courseId = await courseHolding(item.id);
+        await db.update(content).set(shape).where(eq(content.id, item.id));
+        return { item, courseId };
+      }
+
+      it("its own purchase's dispute dims it", async () => {
+        const buyer = await newUser();
+        const { item } = await movedCourseItem('own');
+        await buy(buyer, item.id, { disputedAt: new Date() });
+
+        expect(await verdict(buyer, item.id)).toBe('purchase_dispute');
+      });
+
+      it("its course purchase's dispute dims it", async () => {
+        const buyer = await newUser();
+        const { item, courseId } = await movedCourseItem('buyer');
+        await disputedCoursePurchase(buyer, courseId);
+
+        expect(await verdict(buyer, item.id)).toBe('purchase_dispute');
+      });
+
+      it("a course subscription's dispute names no hold: its own gate", async () => {
+        const subscriber = await newUser();
+        const { item, courseId } = await movedCourseItem('sub');
+        await courseSubscriber(subscriber, courseId, true);
+
+        // `verdict` also holds resolveDisputePause to null here.
+        expect(await verdict(subscriber, item.id)).toBe(gate);
+      });
+
+      it("a tier subscription's dispute, through the course: the tier's own answer", async () => {
+        const subscriber = await newUser();
+        const { item, courseId } = await movedCourseItem('tier');
+        await db
+          .insert(courseTierAccess)
+          .values({ courseId, tierId, organizationId });
+        await subscribe(subscriber, tierId, true);
+
+        expect(await verdict(subscriber, item.id)).toBe(tierVerdict);
+      });
+    });
+
+    it('an item made team-only that its viewer never bought: its own gate, no hold', async () => {
+      const stranger = await newUser();
+      const item = await createItem('agree-team-stranger');
+      await db
+        .update(content)
+        .set({ isTeamOnly: true })
+        .where(eq(content.id, item.id));
+
+      // `verdict` also holds the stream's refusal to resolveDisputePause.
+      expect(await verdict(stranger, item.id)).toBe('team_only');
     });
   });
 

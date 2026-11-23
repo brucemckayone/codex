@@ -11,11 +11,9 @@
  * `null` for the download route, the print view's read and (later, WP-7) the
  * page's withdrawn download field, so the three cannot disagree.
  *
- * Owners are narrower than the email list (design §3): `holderCountsOf`
- * counts a disputing buyer, but `verifyPurchase` leaves a disputed purchase
- * out, so a disputing buyer is emailed and can neither play nor download.
- * A subscriber (a tier or a course subscription) never owned the piece, and
- * neither did the team.
+ * Who owns the piece is {@link ownershipOf} (content-owner.ts), the same
+ * answer the access decision gives an owner whose piece's access moved (D2),
+ * so playing and downloading cannot disagree about who owns it.
  *
  * Every refusal is the same 404, whatever the reason, so the route tells a
  * stranger nothing about a piece they do not own. The work is uniform too:
@@ -27,16 +25,11 @@
  */
 import { CONTENT_TYPES, MIME_TO_EXTENSION } from '@codex/constants';
 import { type DatabaseClient, toIso } from '@codex/database';
-import {
-  content,
-  courseStages,
-  entitlements,
-  stagePractices,
-} from '@codex/database/schema';
+import { content } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
 import { InternalServiceError, isServiceError } from '@codex/service-errors';
 import type { WithdrawnContentQuery } from '@codex/validation';
-import { and, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../../constants';
 import { ContentNotFoundError, R2SigningError } from '../../errors';
 import type {
@@ -45,10 +38,8 @@ import type {
 } from '../../types';
 import type { AccessRevocation } from '../access-revocation';
 import { isOfDeletedOrg, type PurchaseVerifier } from './access-decision';
-import {
-  type AccessQueryClient,
-  hasStoredContentEntitlement,
-} from './entitlements-resolver';
+import { ownershipOf } from './content-owner';
+import type { AccessQueryClient } from './entitlements-resolver';
 import type { R2Signer } from './r2-signer';
 
 /** What an owner of a leaving piece may take: its file, or a print view. */
@@ -66,71 +57,6 @@ interface LeavingPiece {
   ownersCanDownload: boolean;
   mediaItem: { deletedAt: Date | null } | null;
   organization: { deletedAt: Date | null } | null;
-}
-
-/**
- * The course grants that make a holder an owner, as `holdersOf` counts them:
- * a course bought or given. A course subscription is a subscriber.
- */
-const COURSE_OWNER_SOURCES: string[] = ['course_purchase', 'grant'];
-
-/**
- * Does the user own this piece, for its download? A completed purchase not
- * under dispute (`verifyPurchase`), a live stored gift or grant of it, or a
- * live purchase or grant of a course one of whose live stages holds it. The
- * three reads are independent, so they run in parallel.
- */
-async function ownsLeavingPiece(
-  db: AccessQueryClient,
-  purchaseService: PurchaseVerifier,
-  userId: string,
-  contentId: string
-): Promise<boolean> {
-  const arms = await Promise.all([
-    purchaseService.verifyPurchase(contentId, userId),
-    hasStoredContentEntitlement(db, userId, contentId),
-    ownsACourseHolding(db, userId, contentId),
-  ]);
-  return arms.some(Boolean);
-}
-
-/**
- * The course arm, narrowed to owners: a live `course_purchase` or `grant` of
- * a course whose live stages hold the piece. A disputed course purchase has
- * no live grant (the chargeback revoked it), so it is out, as `verifyPurchase`
- * leaves a disputed purchase of the piece out.
- */
-async function ownsACourseHolding(
-  db: AccessQueryClient,
-  userId: string,
-  contentId: string
-): Promise<boolean> {
-  const rows = await db
-    .select({ id: entitlements.id })
-    .from(entitlements)
-    .innerJoin(courseStages, eq(courseStages.courseId, entitlements.courseId))
-    .innerJoin(stagePractices, eq(stagePractices.stageId, courseStages.id))
-    .where(
-      and(
-        eq(entitlements.userId, userId),
-        eq(stagePractices.contentId, contentId),
-        isNull(courseStages.deletedAt),
-        inArray(entitlements.source, COURSE_OWNER_SOURCES),
-        isNull(entitlements.revokedAt),
-        notExpired()
-      )
-    )
-    .limit(1);
-  return rows.length > 0;
-}
-
-/**
- * A grant with no expiry, or one still ahead. Raw `sql` rather than drizzle's
- * `or()`, which is typed `SQL | undefined`: `and()` drops an undefined
- * argument without complaint, and an expired grant would then count.
- */
-function notExpired(): SQL {
-  return sql`(${entitlements.expiresAt} IS NULL OR ${entitlements.expiresAt} > now())`;
 }
 
 /**
@@ -158,7 +84,7 @@ function offeredKind(piece: LeavingPiece): LeavingDownloadKind | null {
 /**
  * THE eligibility: what this user may take of this piece, `'file'`, `'print'`
  * or `null`. The piece must be leaving and offer a download
- * ({@link offeredKind}), and the user must own it ({@link ownsLeavingPiece}).
+ * ({@link offeredKind}), and the user must own it ({@link ownershipOf}).
  * The owner reads run for every piece, offering or not, so a refusal takes
  * as long either way (the module's note).
  */
@@ -168,9 +94,9 @@ async function leavingDownloadOf(
   userId: string,
   piece: LeavingPiece
 ): Promise<LeavingDownloadKind | null> {
-  const owns = await ownsLeavingPiece(db, purchaseService, userId, piece.id);
+  const owns = await ownershipOf(db, purchaseService, userId, piece.id);
   const kind = offeredKind(piece);
-  return owns ? kind : null;
+  return owns != null ? kind : null;
 }
 
 /**

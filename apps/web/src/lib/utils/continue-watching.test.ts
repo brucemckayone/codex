@@ -57,6 +57,7 @@ function makeItem(overrides: ItemOverrides = {}): LibraryItem {
       durationSeconds,
       organizationId: 'org-1',
       organizationSlug,
+      leavesAt: null,
     },
     accessType,
     purchase,
