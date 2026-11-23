@@ -26,6 +26,11 @@
  * module's active-topic chip. See +page.svelte for render + URL sync.
  */
 
+import {
+  heroMayOfferJoin,
+  parseHeroOverrides,
+  readHeroSettings,
+} from '$lib/org-hero/hero-config';
 import { getPublicCategories } from '$lib/remote/categories.remote';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { listPublishedJourneys } from '$lib/remote/journeys.remote';
@@ -220,6 +225,16 @@ export const load: PageServerLoad = async ({
     })
     .catch(() => null);
 
+  // The purpose-first hero's Join button must be right in the server HTML: a
+  // button that changed after hydration would move the hero. So an org whose
+  // hero can offer Join waits for its plans (Join with none on sale opens an
+  // empty pricing page); every other org keeps them streamed, as above.
+  const heroHasPlans = heroMayOfferJoin(
+    readHeroSettings(parseHeroOverrides(org.brandFineTune?.tokenOverrides))
+  )
+    ? (await tiersPromise) !== null
+    : null;
+
   return {
     allContent,
     // Awaited — see MAX_FEATURED_PORTALS. These become "Editor's picks" slides
@@ -239,6 +254,9 @@ export const load: PageServerLoad = async ({
     // awaited call already had to fetch. Side benefit: the rail is now in the
     // SSR HTML instead of arriving after hydration.
     journeys,
+    // The rail's read stops at its cap, so the hero counts portals only below it.
+    journeysAtCap: journeys.length >= MAX_JOURNEY_RAIL_ITEMS,
+    heroHasPlans,
     // Streamed: already shaped + `.catch()`-guarded where it was created.
     creators: creatorsPromise,
     subscriptionPricing: tiersPromise,

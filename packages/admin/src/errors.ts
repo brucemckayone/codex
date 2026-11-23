@@ -8,6 +8,8 @@
  * most admin operations reuse existing domain errors (NotFoundError, etc.)
  */
 
+import type { ShortLossStage } from '@codex/constants';
+import type { BlockedPaymentKind } from '@codex/purchase';
 import {
   BusinessLogicError,
   ConflictError,
@@ -228,3 +230,170 @@ export class LateWinRefundNotRepayableError extends BusinessLogicError {
     );
   }
 }
+
+/** Why there is no access to give back, per kind of blocked payment. */
+const NO_ACCESS_TO_GIVE_BACK: Record<BlockedPaymentKind, string> = {
+  duplicate: 'this was a second payment for something the buyer already has',
+  unavailable: 'the item was no longer available',
+};
+
+/**
+ * A "creators re-paid" settlement of a blocked payment's failed refund (owner
+ * D55; widened to duplicates by D57): a duplicate, a second payment for an
+ * item the buyer already has (Codex-2hxff.14), or a blocked sale of an item
+ * its buyer could no longer open when it landed (Codex-z1t3c). Either paid no
+ * one and granted nothing, so there is nothing to re-pay and no access to
+ * give back, and the buyer is still owed the refund: settling it so would
+ * close the row with the buyer charged. Refused for good, as a late win's own
+ * refund is (`LateWinRefundNotRepayableError`). Support refunds the buyer
+ * another way, then settles it as refunded elsewhere. Its message says why by
+ * kind: a duplicate's buyer kept the item. The context is the purchase's id
+ * and the kind as `reason` (`duplicate` or `unavailable`), which support's
+ * dialog reads for its words, as it reads `REPAY_BLOCKED_BY_LATER_CAUSE`'s.
+ */
+export class BlockedPaymentRefundNotRepayableError extends BusinessLogicError {
+  constructor(purchaseId: string, kind: BlockedPaymentKind) {
+    super(
+      `There's no access to give back: ${NO_ACCESS_TO_GIVE_BACK[kind]}. The buyer is still owed this refund. Refund them another way, then settle it as refunded elsewhere.`,
+      { code: 'BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE', purchaseId, reason: kind }
+    );
+  }
+}
+
+/** Why a failed refund is its chargeback's to decide (`RefundDecidedByChargebackError`). */
+export type RefundDecidedByChargebackReason =
+  | 'chargeback_open'
+  | 'chargeback_lost';
+
+/**
+ * A failed refund of a blocked payment that its chargeback decides (422;
+ * owner D66, D67), settled from the queue:
+ * - `chargeback_open`: the bank hasn't decided. Stripe won't refund the
+ *   charge meanwhile, and the decision changes what the buyer is owed, so
+ *   nothing is settled yet. Won in time, it is settled as before;
+ * - `chargeback_lost`: a stage carries its debt (`chargebackCarriesRefund`):
+ *   lost, or won late after a first mark with no late-win refund. The bank
+ *   returned some or all of the payment, and what is still owed lives on the
+ *   charge page alone, marked there "Paid another way": settling this
+ *   refund as well would pay it twice. A late win with no mark, or one whose
+ *   own refund was made, carries nothing, and the refund is settled as
+ *   before (review r7).
+ * The queue offers neither, so a call is a stale page or a direct one.
+ * Nothing is written. The context is the reason and the charge, which the
+ * page's notice links to.
+ */
+export class RefundDecidedByChargebackError extends BusinessLogicError {
+  constructor(reason: RefundDecidedByChargebackReason, chargeId: string) {
+    super(DECIDED_BY_CHARGEBACK[reason], {
+      code: 'REFUND_DECIDED_BY_CHARGEBACK',
+      reason,
+      chargeId,
+    });
+  }
+}
+
+const DECIDED_BY_CHARGEBACK: Record<RefundDecidedByChargebackReason, string> = {
+  chargeback_open:
+    "This refund is waiting for the buyer's chargeback, so nothing was settled. If the chargeback is won, settle it then.",
+  chargeback_lost:
+    "The buyer's chargeback was lost, so what's still owed is settled on the charge page. Nothing was settled here.",
+};
+
+/** Why a failed refund waits for its payment's own refund (`RefundAwaitsPaymentRefundError`). */
+export type RefundAwaitsPaymentRefundReason = 'late_win' | 'blocked_refund';
+
+/**
+ * A settlement of a failed refund while a refund of everything its payment
+ * owes is still being made (422; review r8). That refund will include this
+ * one and cover it (owner D73), so settling it now would pay the buyer twice
+ * (or re-pay its creators for money the buyer gets back):
+ * - `late_win`: a late win on its charge is still being undone, so the late
+ *   win's refund (owner D69) is being asked for, or retried while Stripe
+ *   refuses it;
+ * - `blocked_refund`: its purchase is a blocked payment still owed its own
+ *   refund, which the checkout or the hourly sweep makes.
+ * Nothing is written. The context is the reason and the charge.
+ */
+export class RefundAwaitsPaymentRefundError extends BusinessLogicError {
+  constructor(reason: RefundAwaitsPaymentRefundReason, chargeId: string) {
+    super(AWAITS_PAYMENT_REFUND[reason], {
+      code: 'REFUND_AWAITS_PAYMENT_REFUND',
+      reason,
+      chargeId,
+    });
+  }
+}
+
+/** Client-facing: word for word the page's notices (owner D79). */
+const AWAITS_PAYMENT_REFUND: Record<RefundAwaitsPaymentRefundReason, string> = {
+  late_win:
+    "This refund is waiting for the late win's refund to finish, so nothing was settled.",
+  blocked_refund:
+    "This refund is waiting for the payment's own refund, which includes it, so nothing was settled.",
+};
+
+/**
+ * A `refunded_elsewhere` settlement that would pay the buyer back more than
+ * the payment (412; review r8): what counts against it now, this refund,
+ * what was paid another way and its chargebacks while lost add up to more
+ * than was paid. Two settles of one charge (two tabs, two people), or a
+ * refund made on the charge page since this one failed, are how. Nothing is
+ * settled. The context is the charge and what can still be paid back
+ * (`maxCents`, never below 0), which the page's notice names.
+ */
+export class SettleExceedsPaidError extends PreconditionFailedError {
+  constructor(chargeId: string, maxCents: number) {
+    super(
+      'Settling this would pay back more than was paid, so nothing was settled.',
+      { code: 'SETTLE_EXCEEDS_PAID', chargeId, maxCents }
+    );
+  }
+}
+
+/**
+ * What the charge's blocked payment is owed is not what the page showed
+ * (412): the dispute named is not the one owed, it is owed at another stage
+ * (a late win since, owner D63), what is owed changed (a refund stood or
+ * stopped standing since, or the dispute's amount moved), or what was paid
+ * another way moved while more is owed (another mark since, owner D66).
+ * Nothing is marked; the page reloads and support checks it again (owner
+ * D61). The context is what is owed now and at which stage.
+ */
+export class ShortLossChangedError extends PreconditionFailedError {
+  constructor(now: { owedCents: number; stage: ShortLossStage }) {
+    super(
+      "What's owed on this payment changed since it was loaded. Reload it and check.",
+      { code: 'SHORT_LOSS_CHANGED', owedCents: now.owedCents, stage: now.stage }
+    );
+  }
+}
+
+/** Why a charge can't be marked paid another way (`NotOwedAfterLossError`). */
+export type NotOwedAfterLossReason =
+  | 'not_blocked'
+  | 'no_lost_dispute'
+  | 'not_short';
+
+/**
+ * "Paid another way" asked of a charge with nothing owed after a lost
+ * chargeback (422; owner D60, D61, D63): its payment isn't a blocked one (a
+ * sale keeps the bank's decision), it has no lost chargeback (open, won, or
+ * won late with no first mark), or nothing is owed on it now. Nothing is
+ * marked. The context's `reason` says which, for support's notice.
+ */
+export class NotOwedAfterLossError extends BusinessLogicError {
+  constructor(reason: NotOwedAfterLossReason) {
+    super(NOT_OWED_AFTER_LOSS[reason], {
+      code: 'NOT_OWED_AFTER_LOSS',
+      reason,
+    });
+  }
+}
+
+const NOT_OWED_AFTER_LOSS: Record<NotOwedAfterLossReason, string> = {
+  not_blocked:
+    'Only a blocked payment is owed the rest of a lost chargeback, so nothing was marked.',
+  no_lost_dispute:
+    'This payment has no lost chargeback, so nothing was marked.',
+  not_short: 'Nothing is owed on this payment any more, so nothing was marked.',
+};

@@ -25,6 +25,16 @@
   won chargeback still paying the creators back, nothing left) shows the
   reason in place of the form; the server refuses all five too.
 
+  A blocked payment owed what Stripe won't refund (`detail.shortLoss`, owner
+  D59-D66), after its chargeback was lost for less than the payment or again
+  after support paid the rest and the chargeback was won late, shows what is
+  owed instead, and "Mark as paid another way" (PaidAnotherWayDialog):
+  support pays it outside Stripe and records it. While anything is owed it
+  shows, whatever marks exist (a refund that counted at a mark can fail
+  later, D66). Once nothing is owed, the refunded-outside-Stripe block shows,
+  with a line saying how the buyer was paid. The dialog's answer goes to the page (`onSettled`), which shows
+  it, reloads the charge and focuses the notice.
+
   A preview the route REFUSES (a 4xx: the amount no longer fits, nothing is
   left) means the charge moved since it loaded, so trying again can never
   work: the form asks the page to reload it, once per charge state and
@@ -42,6 +52,7 @@
   @prop {boolean} [locked=false] - A refund is still being made: nothing more is sent until the charge is reloaded.
   @prop {(outcome: RefundOutcome) => void} onOutcome
   @prop {() => void} [onStale] - Reload the charge: the preview was refused.
+  @prop {(notice: SettleNotice) => void} onSettled - "Paid another way" answered.
 -->
 <script lang="ts">
   import type { ChargeDetail, RefundBlock, RefundPreviewLine } from '@codex/admin';
@@ -67,8 +78,11 @@
     refundOutcomeOf,
     rejectedOutcome,
   } from './refund-outcome';
+  import PaidAnotherWayDialog from './PaidAnotherWayDialog.svelte';
   import { isSessionEnded } from './session';
   import SessionEndedAlert from './SessionEndedAlert.svelte';
+  import type { SettleNotice } from './settle-notice';
+  import { shortLossAlert, shortLossOwes, shortLossPaidNote } from './short-loss-view';
   import {
     formatDay,
     formatTime,
@@ -84,9 +98,11 @@
     locked?: boolean;
     onOutcome: (outcome: RefundOutcome) => void;
     onStale?: () => void;
+    onSettled: (notice: SettleNotice) => void;
   }
 
-  const { detail, stale = false, locked = false, onOutcome, onStale }: Props = $props();
+  const { detail, stale = false, locked = false, onOutcome, onStale, onSettled }: Props =
+    $props();
 
   /** After the last keystroke, before the preview is asked for. */
   const PREVIEW_DEBOUNCE_MS = 300;
@@ -423,6 +439,17 @@
     }
   }
 
+  // ── Owed what Stripe won't refund, after a loss or a late win (owner D59-D66)
+  const shortLoss = $derived(detail.shortLoss);
+  /** Owed now, whatever marks exist (D66): shown in place of the block. */
+  const owedAfterLoss = $derived(shortLoss && shortLossOwes(shortLoss) ? shortLoss : null);
+  const shortLossText = $derived(
+    owedAfterLoss ? shortLossAlert(owedAfterLoss, detail.charge.amountCents) : null
+  );
+  /** How the buyer was paid, once marked: under the refunded-outside-Stripe block. */
+  const paidNote = $derived(shortLoss ? shortLossPaidNote(shortLoss) : null);
+  let paidAnotherWayOpen = $state(false);
+
   /**
    * What the form can refund, and until when. A window a late-won chargeback
    * lifted (owner Q7) has no end, and its `closesAt` has passed: no date.
@@ -572,7 +599,29 @@
     {/if}
   </Card.Header>
   <Card.Content>
-    {#if detail.refundable.blocked}
+    {#if owedAfterLoss && shortLossText}
+      <Alert
+        variant="warning"
+        data-testid="short-loss"
+        data-kind={owedAfterLoss.kind}
+        data-stage={owedAfterLoss.stage}
+      >
+        <div class="short-loss">
+          <p><strong>{shortLossText.lead}</strong> {shortLossText.body}</p>
+          <p class="short-loss__hint">{m.support_short_loss_hourly()}</p>
+        </div>
+        <div class="alert-actions">
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="paid-another-way"
+            onclick={() => (paidAnotherWayOpen = true)}
+          >
+            {m.support_short_loss_mark()}
+          </Button>
+        </div>
+      </Alert>
+    {:else if detail.refundable.blocked}
       {@const alert = blockedAlert(detail.refundable.blocked)}
       <Alert variant={alert.variant} data-testid="refund-blocked" data-reason={detail.refundable.blocked}>
         <p>
@@ -580,6 +629,9 @@
           {alert.body}
         </p>
       </Alert>
+      {#if paidNote}
+        <p class="paid-note" data-testid="short-loss-paid">{paidNote}</p>
+      {/if}
     {:else}
       <div class="refund-form">
         <fieldset class="radio-group">
@@ -872,6 +924,12 @@
   </Dialog.Root>
 {/if}
 
+<!-- Mounted while the charge has a short loss, marked or not: a close is never
+     unmounted in the same flush, so the dialog's focus handling always runs. -->
+{#if shortLoss}
+  <PaidAnotherWayDialog {detail} bind:open={paidAnotherWayOpen} onFinished={onSettled} />
+{/if}
+
 <style>
   .refund-form {
     display: flex;
@@ -955,6 +1013,26 @@
 
   .amount-error:empty {
     margin-top: 0;
+  }
+
+  .short-loss {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .short-loss p {
+    margin: 0;
+  }
+
+  .short-loss__hint {
+    font-size: var(--text-xs);
+  }
+
+  .paid-note {
+    margin: var(--space-3) 0 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
   }
 
   .alert-actions {

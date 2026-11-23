@@ -473,7 +473,8 @@ describe('handlePaymentWebhook — disputes', () => {
     expect(purchase.processLostDispute).toHaveBeenCalledWith(
       'pi_test_dispute',
       1999,
-      'dp_test_dispute'
+      'dp_test_dispute',
+      { chargeId: 'ch_test' }
     );
     expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
     expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledWith(
@@ -1366,8 +1367,9 @@ describe('handlePaymentWebhook — disputes', () => {
         'refund',
         'mark',
       ]);
-      // The dispute keys the refund (late_win_refund_<dispute>), so a rerun
-      // makes no second one.
+      // The dispute and the amount key the refund
+      // (late_win_refund_<dispute>_<amount>), and its id is written once, so
+      // a rerun makes no second one (owner D69).
       expect(purchase.refundFirstPaymentAfterLateWin).toHaveBeenCalledWith(
         'dp_test_dispute',
         { id: 'ch_test', amountCents: 1999 },
@@ -1407,6 +1409,33 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(bundle.mock._obs.info).toHaveBeenCalledWith(
         'Late win: loss undone',
         expect.objectContaining({ outcome: 'duplicate', refund: 'done' })
+      );
+    });
+
+    it('a late-won blocked sale of unavailable content is refunded as a duplicate is: it granted nothing (Codex-z1t3c)', async () => {
+      recordedLateWin();
+      restoredAs('unavailable');
+
+      const bundle = await deliver();
+
+      expect(calls).toEqual([
+        'restore purchase',
+        'restore',
+        'repay',
+        'refund',
+        'mark',
+      ]);
+      expect(purchase.refundFirstPaymentAfterLateWin).toHaveBeenCalledWith(
+        'dp_test_dispute',
+        { id: 'ch_test', amountCents: 1999 },
+        'test'
+      );
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(mockClear).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.info).toHaveBeenCalledWith(
+        'Late win: loss undone',
+        expect.objectContaining({ outcome: 'unavailable', refund: 'done' })
       );
     });
 
@@ -1843,7 +1872,8 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(purchase.processLostDispute).toHaveBeenCalledWith(
         'pi_test_dispute',
         1999,
-        'dp_test_dispute'
+        'dp_test_dispute',
+        { chargeId: 'ch_test' }
       );
       expect(
         purchase.markDisputeOutcomeApplied
@@ -1866,7 +1896,8 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(purchase.processLostDispute).toHaveBeenCalledWith(
         'pi_test_dispute',
         1999,
-        'dp_test_dispute'
+        'dp_test_dispute',
+        { chargeId: 'ch_test' }
       );
       expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
         'dp_test_dispute',

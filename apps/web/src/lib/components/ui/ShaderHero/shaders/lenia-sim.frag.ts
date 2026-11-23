@@ -35,10 +35,15 @@
  * is a slightly different fixed kernel rather than added noise: the convolution
  * stays spatially smooth and nothing speckles.
  *
- * **Frame-rate independence.** The renderer ran a fixed number of substeps per
- * rendered frame at a fixed `uDt`, so the whole simulation evolved twice as
- * fast on a 120Hz display. `uDtScale` carries the frame's share of a
- * 60Hz-equivalent step; see the renderer for the clamp that keeps it stable.
+ * **Frame-rate independence.** The renderer runs a step clock (sim-grid.ts):
+ * `speed` x 60 steps a second at any frame rate, each a fixed `uDt`. It ran
+ * `speed` substeps a frame with a frame-scaled dt (clamped, so a 144 Hz display
+ * still ran about 20% fast).
+ *
+ * **Shape.** The grid has the canvas's shape at about LENIA_GRID_BASE²
+ * texels, and the kernel, the pointer and the drops measure in texels, so a
+ * creature is round on screen. A square grid stretched them 1.8x wide on a
+ * 16:9 hero.
  *
  * **Audio.** Previously none. mu and sigma ARE the Lenia ruleset, so both move
  * only with `u_energy` (tau 4s) and only by a fraction of the distance to the
@@ -53,6 +58,9 @@
  */
 import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
 
+/** Lenia's texel budget: its 48-tap kernel costs 4x as much at 512². */
+export const LENIA_GRID_BASE = 256;
+
 export const LENIA_SIM_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -64,7 +72,6 @@ uniform float uRadius;
 uniform float uGrowth;
 uniform float uWidth;
 uniform float uDt;
-uniform float uDtScale;
 uniform vec2 uMouse;
 uniform float uMouseActive;
 uniform float uMouseStrength;
@@ -109,9 +116,20 @@ float bumpWeight(float nr) {
   return exp(4.0 - 4.0 / (4.0 * nr * (1.0 - nr)));
 }
 
+/**
+ * Distance to p in base texels. The grid has the canvas's shape at about
+ * LENIA_GRID_BASE² texels (sim-grid.ts), so this is the old uv distance on a
+ * square canvas and round on screen at any shape.
+ */
+float texelDistance2(vec2 p) {
+  vec2 d = (v_uv - p) / uTexel / ${LENIA_GRID_BASE}.0;
+  return dot(d, d);
+}
+
 void main() {
   float state = texture(uState, v_uv).r;
-  float radius = uRadius * uTexel.x;
+  // The kernel radius in texels, each way: round on a canvas-shaped grid.
+  vec2 radius = uRadius * uTexel;
 
   // ---- 1. Bump-kernel convolution over an equal-area spiral ----
   // nr_k = sqrt(a^2 + (b^2 - a^2) * (k + 0.5) / N) places the same annular area
@@ -150,31 +168,22 @@ void main() {
 
   // ---- 4. Integrate, paced by the musical clock ----
   // audioBreath() is a raised sine over one beat, so growth surges on the beat
-  // and eases between them. The band is 0.55x..1.15x of the silent rate, which
-  // combined with the renderer's clamp on uDtScale keeps the per-step change
-  // inside the range where the explicit Euler step is stable.
+  // and eases between them. The band is 0.55x..1.15x of the silent rate.
   float pace = mix(1.0, 0.55 + 0.6 * audioBreath(u_beatPhase), u_audioActive);
-  float newState = state + uDt * uDtScale * pace * growth;
+  float newState = state + uDt * pace * growth;
 
   // ---- 5. Deposits ----
   // Both injectors are unguarded: an inactive one is parked at (-10, -10),
   // where the Gaussian exponent is around -1e4 and exp() underflows to zero.
-  vec2 dm = v_uv - uMouse;
-  newState += uMouseStrength * 0.5 * exp(-dot(dm, dm) / 0.0016)
+  newState += uMouseStrength * 0.5 * exp(-texelDistance2(uMouse) / 0.0016)
             * step(0.5, uMouseActive);
+  newState += uDropGain * exp(-texelDistance2(uDropPos) / 0.0036);
 
-  vec2 dd = v_uv - uDropPos;
-  newState += uDropGain * exp(-dot(dd, dd) / 0.0036);
-
-  // ---- 6. Clamp + edge damping ----
+  // ---- 6. Clamp ---- No edge damping: the grid wraps (REPEAT, set by the
+  // renderer), so a creature crossing an edge comes back on the other side. The
+  // damping it replaces killed every creature within 8 texels of an edge, and
+  // the ones beside that dead strip drew a frame round the hero.
   newState = clamp(newState, 0.0, 1.0);
-
-  // Wider than the other presets' damping because the kernel radius is large:
-  // a creature whose kernel overlaps the boundary reads the clamped edge as
-  // dead space and dissolves, so fade before it gets there.
-  vec2 edge = smoothstep(vec2(0.0), vec2(uTexel * 8.0), v_uv)
-            * smoothstep(vec2(0.0), vec2(uTexel * 8.0), 1.0 - v_uv);
-  newState *= edge.x * edge.y;
 
   fragColor = vec4(newState, 0.0, 0.0, 1.0);
 }

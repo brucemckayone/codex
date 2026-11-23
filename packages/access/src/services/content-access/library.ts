@@ -11,6 +11,7 @@ import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
+  ITEM_UNAVAILABLE_REFUND_REASON,
   ORGANIZATION_TEAM_ROLES,
   PURCHASE_STATUS,
 } from '@codex/constants';
@@ -338,7 +339,12 @@ export async function listUserLibrary(
   // mid-buying), or holds a live support grant for, so `queryPurchased` stays
   // the single owner of those rows and the accessType tag is never wrong.
   // Both `completed` (webhook landed) and `pending` (Stripe redirect beat the
-  // webhook) count as "already owned".
+  // webhook) count as "already owned". A blocked sale is never one
+  // (Codex-z1t3c): it is `pending` only until its refund lands, grants
+  // nothing, and its item is one the purchase could not open, so it must not
+  // hide the item from an arm that still opens it (a follower's
+  // followers-only item, a team member's team-only one). IS DISTINCT FROM,
+  // so a purchase with no refund reason still counts.
   //
   // MUST be NOT EXISTS, never `id NOT IN (SELECT content_id ...)`.
   // `purchases.content_id` is NULL for COURSE purchases (those rows carry
@@ -354,6 +360,7 @@ export async function listUserLibrary(
     WHERE ${purchases.customerId} = ${userId}
       AND ${purchases.contentId} = ${content.id}
       AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING})
+      AND ${purchases.refundReason} IS DISTINCT FROM ${ITEM_UNAVAILABLE_REFUND_REASON}
   ) AND NOT EXISTS (
     SELECT 1 FROM ${entitlements}
     WHERE ${entitlements.userId} = ${userId}

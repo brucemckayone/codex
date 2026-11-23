@@ -5,9 +5,9 @@
  *
  * Topology:
  *   - Owner lives in an org. They drive the studio at
- *     `${orgSlug}.lvh.me:${PORT}/studio/monetisation/revenue-share`.
+ *     `${orgSlug}.${E2E_HOST}/studio/monetisation/revenue-share`.
  *   - Creator is an org member with role `creator`. They view their
- *     personal portfolio at `creators.lvh.me:${PORT}/studio/negotiations`.
+ *     personal portfolio at `creators.${E2E_HOST}/studio/negotiations`.
  *
  * Cookies are scoped to `.lvh.me` so both subdomains share auth state per
  * browser context. Two contexts share the org but each has its own session.
@@ -29,8 +29,8 @@ import {
   type Page,
 } from '@playwright/test';
 import { aliasSessionCookies } from './auth-cookies';
+import { E2E_BASE_URL, orgUrl } from './origin';
 
-export const E2E_BASE_PORT = 5173;
 const PASSWORD = 'Test123!@#';
 
 /**
@@ -141,12 +141,12 @@ export async function createOwnerWithCreators(creatorCount: number): Promise<{
  * On org subdomains the slug is in the hostname, not the path.
  */
 export function ownerRevenueSharePath(orgSlug: string): string {
-  return `http://${orgSlug}.lvh.me:${E2E_BASE_PORT}/studio/monetisation/revenue-share`;
+  return orgUrl(E2E_BASE_URL, orgSlug, '/studio/monetisation/revenue-share');
 }
 
 /** Creator negotiations portfolio URL — uses the `creators` subdomain. */
 export function creatorNegotiationsUrl(): string {
-  return `http://creators.lvh.me:${E2E_BASE_PORT}/studio/negotiations`;
+  return orgUrl(E2E_BASE_URL, 'creators', '/studio/negotiations');
 }
 
 /**

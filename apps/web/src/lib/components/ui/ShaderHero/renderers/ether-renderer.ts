@@ -26,7 +26,6 @@
 import {
   AUDIO_UNIFORM_NAMES,
   createAudioFade,
-  createDeltaClock,
   uploadAudioUniforms,
 } from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
@@ -34,12 +33,11 @@ import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { EtherConfig, ShaderConfig } from '../shader-config';
 import { ETHER_FRAG } from '../shaders/ether.frag';
 import {
-  createProgram,
-  createQuad,
-  drawQuad,
-  getUniforms,
-  VERTEX_SHADER,
-} from '../webgl-utils';
+  createSinglePass,
+  easePointer,
+  restingPointer,
+  setPalette,
+} from './single-pass';
 
 // ── Wanderer tunables (mirror ripple-renderer.ts) ──────────────
 /** Wanderer path base frequencies — irrational ratio, never exactly repeats. */
@@ -62,7 +60,7 @@ const UNIFORM_NAMES = [
   'u_brandSecondary',
   'u_brandAccent',
   'u_bgColor',
-  'u_rotSpeed',
+  'u_phase',
   'u_complexity',
   'u_glow',
   'u_scale',
@@ -76,32 +74,29 @@ const UNIFORM_NAMES = [
   ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
-type EtherUniform = (typeof UNIFORM_NAMES)[number];
-
 /** Default values matching the prototype. */
+// The lab's tuning, which shader-config's DEFAULTS also carry.
 const DEFAULTS = {
-  rotSpeed: 0.4,
-  complexity: 6,
-  glow: 0.5,
-  scale: 2.0,
-  zoom: 5.0,
-  intensity: 0.4,
-  grain: 0.02,
-  vignette: 0.2,
-  aberration: 0.003,
+  rotSpeed: 0.9,
+  complexity: 8,
+  glow: 1.5,
+  scale: 4.0,
+  zoom: 5.5,
+  intensity: 0.65,
+  grain: 0.07,
+  vignette: 0.3,
+  aberration: 0.02,
 } as const;
 
+/** Per-frame share of the way the eased pointer moves toward the real one. */
+const MOUSE_LERP = 0.04;
+
 export function createEtherRenderer(): ShaderRenderer {
-  let program: WebGLProgram | null = null;
-  let uniforms: Record<EtherUniform, WebGLUniformLocation | null> | null = null;
-  let quad: ReturnType<typeof createQuad> | null = null;
-
+  const pass = createSinglePass(ETHER_FRAG, UNIFORM_NAMES);
   const audioFade = createAudioFade();
-  const _deltaClock = createDeltaClock();
 
-  // Internal lerped mouse state for smooth parallax
-  let lerpedMouse = { x: 0.5, y: 0.5 };
-  const MOUSE_LERP = 0.04;
+  // Eased for smooth parallax; only its position is uploaded.
+  let pointer = restingPointer();
 
   /** Last render time — used for frame-rate-independent fades. */
   let lastRenderTime = 0;
@@ -111,6 +106,9 @@ export function createEtherRenderer(): ShaderRenderer {
    * Gates all audio-reactive visual boosts so the shader doesn't pop.
    */
   let wandererFade = 0;
+
+  /** Rotation angle: the integral of the rotation speed, see u_phase. */
+  let phase = 0;
 
   /**
    * Wanderer position — noise-perturbed Lissajous. Smooth everywhere, never
@@ -132,17 +130,11 @@ export function createEtherRenderer(): ShaderRenderer {
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
-      program = createProgram(gl, VERTEX_SHADER, ETHER_FRAG);
-      if (!program) return false;
-
-      uniforms = getUniforms(gl, program, UNIFORM_NAMES);
-      quad = createQuad(gl);
-
-      // Reset lerped mouse to center
-      lerpedMouse = { x: 0.5, y: 0.5 };
+      if (!pass.init(gl)) return false;
+      pointer = restingPointer();
       lastRenderTime = 0;
       wandererFade = 0;
-
+      phase = 0;
       return true;
     },
 
@@ -155,7 +147,8 @@ export function createEtherRenderer(): ShaderRenderer {
       height: number,
       audio?: AudioState
     ): void {
-      if (!program || !uniforms || !quad) return;
+      const u = pass.begin(gl, width, height);
+      if (!u) return;
 
       const cfg = config as EtherConfig;
       const bassSmooth = audio?.bassSmooth ?? 0;
@@ -177,77 +170,63 @@ export function createEtherRenderer(): ShaderRenderer {
       wandererFade +=
         (fadeTarget - wandererFade) * Math.min(1, dt * WANDERER_FADE_RATE);
 
-      // Lerp mouse for smooth parallax
-      const targetX = mouse.active ? mouse.x : 0.5;
-      const targetY = mouse.active ? mouse.y : 0.5;
-      lerpedMouse.x += (targetX - lerpedMouse.x) * MOUSE_LERP;
-      lerpedMouse.y += (targetY - lerpedMouse.y) * MOUSE_LERP;
+      easePointer(pointer, mouse, MOUSE_LERP);
 
       // Wanderer position (UV 0..1) — feeds both focal-point shift and
       // additive glow in the shader.
       const wanderer = wandererPosition(time, amplitudeSmooth);
 
-      gl.viewport(0, 0, width, height);
-      gl.useProgram(program);
-      uploadAudioUniforms(gl, uniforms, a);
-      quad.bind(program);
-
-      // Time
-      gl.uniform1f(uniforms.u_time, time);
-      gl.uniform2f(uniforms.u_resolution, width, height);
-      gl.uniform2f(uniforms.u_mouse, lerpedMouse.x, lerpedMouse.y);
+      uploadAudioUniforms(gl, u, a);
+      gl.uniform1f(u.u_time, time);
+      gl.uniform2f(u.u_resolution, width, height);
+      gl.uniform2f(u.u_mouse, pointer.x, pointer.y);
 
       // Immersive colour cycling when audio is active — smoothed amplitude
       // so palette phase doesn't jitter.
-      const colours = audioActive
-        ? computeImmersiveColours(time, cfg.colors, amplitudeSmooth)
-        : cfg.colors;
-
-      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
-      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
+      setPalette(
+        gl,
+        u,
+        audioActive
+          ? computeImmersiveColours(time, cfg.colors, amplitudeSmooth)
+          : cfg.colors
+      );
 
       // Preset-specific config. Rotation speed drifts very gently with
       // smoothed amplitude (not raw) so loud passages feel more alive without
-      // jitter on transients.
-      gl.uniform1f(
-        uniforms.u_rotSpeed,
-        (cfg.rotationSpeed ?? DEFAULTS.rotSpeed) + amplitudeSmooth * 0.12
-      );
-      gl.uniform1i(
-        uniforms.u_complexity,
-        cfg.complexity ?? DEFAULTS.complexity
-      );
+      // jitter on transients. It is integrated here: the shader used
+      // time * speed, so any change of speed jumped the angle by time * the
+      // change (after a minute, a slider nudge spun the form).
+      phase +=
+        dt *
+        ((cfg.rotationSpeed ?? DEFAULTS.rotSpeed) + amplitudeSmooth * 0.12);
+      gl.uniform1f(u.u_phase, phase);
+      gl.uniform1i(u.u_complexity, cfg.complexity ?? DEFAULTS.complexity);
       // Glow lifts visibly with smoothed bass — deeper low-frequency presence.
       // Expanded from the old raw `bass * 0.1` to a larger envelope on
       // bassSmooth, gated by the wanderer fade.
       gl.uniform1f(
-        uniforms.u_glow,
+        u.u_glow,
         (cfg.glow ?? DEFAULTS.glow) * (1.0 + bassSmooth * 0.45 * wandererFade)
       );
-      gl.uniform1f(uniforms.u_scale, cfg.scale ?? DEFAULTS.scale);
-      gl.uniform1f(uniforms.u_zoom, cfg.zoom ?? DEFAULTS.zoom);
-      gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
-      gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
+      gl.uniform1f(u.u_scale, cfg.scale ?? DEFAULTS.scale);
+      gl.uniform1f(u.u_zoom, cfg.zoom ?? DEFAULTS.zoom);
+      gl.uniform1f(u.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
+      gl.uniform1f(u.u_grain, cfg.grain ?? DEFAULTS.grain);
       gl.uniform1f(
-        uniforms.u_vignette,
+        u.u_vignette,
         audioActive ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
       );
       // Treble pushes aberration up — keeps the baseline tunable value but
       // adds edge colour fringing on bright high-frequency passages.
       gl.uniform1f(
-        uniforms.u_aberration,
+        u.u_aberration,
         (cfg.aberration ?? DEFAULTS.aberration) *
           (1.0 + trebleSmooth * 1.5 * wandererFade)
       );
 
       // Audio-reactive uniforms
-      gl.uniform2f(uniforms.u_wanderer, wanderer.x, wanderer.y);
-
-      // Draw to screen (no FBO)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      drawQuad(gl);
+      gl.uniform2f(u.u_wanderer, wanderer.x, wanderer.y);
+      pass.draw(gl);
     },
 
     resize(_gl: WebGL2RenderingContext, _width: number, _height: number): void {
@@ -256,21 +235,13 @@ export function createEtherRenderer(): ShaderRenderer {
 
     reset(_gl: WebGL2RenderingContext): void {
       // No simulation state to reset for single-pass presets.
-      lerpedMouse = { x: 0.5, y: 0.5 };
+      pointer = restingPointer();
       lastRenderTime = 0;
       wandererFade = 0;
     },
 
     destroy(gl: WebGL2RenderingContext): void {
-      if (program) {
-        gl.deleteProgram(program);
-        program = null;
-      }
-      if (quad) {
-        gl.deleteBuffer(quad.buffer);
-        quad = null;
-      }
-      uniforms = null;
+      pass.destroy(gl);
     },
   };
 }

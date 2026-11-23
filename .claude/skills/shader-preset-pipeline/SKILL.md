@@ -16,14 +16,22 @@ Use this skill when implementing new shader presets for the ShaderHero system in
 
 The ShaderHero system renders animated WebGL2 shader backgrounds for organization hero sections. Each org can select a shader preset and configure it via the brand editor. The system reads configuration from CSS custom properties (`--brand-shader-*`) injected by the brand editor, and passes them as uniforms to GLSL ES 3.0 fragment shaders.
 
-**Current presets (36 + none):** suture, ether, warp, ripple, pulse, ink, topo, nebula, turing, silk, glass, film, flux, lava, caustic, physarum, rain, frost, glow, life, mycelium, aurora, tendrils, pollen, growth, geode, lenia, ocean, bismuth, pearl, vortex, gyroid, waves, clouds, fracture, julia, vapor, tunnel.
+**Current presets (16 + none), after the shader lab cull:** flow, suture, ripple, film, caustic (the owner kept these as they were), and ether, pulse, ink, topo, glass, flux, lava, physarum, aurora, lenia, fracture (the owner had these reworked).
+
+**25 presets were cut.** Their ids still exist in stored data (branding `shader-preset`, content `shader_preset`), so every id goes through `resolvePresetId()` in `shader-config.ts`, which maps a cut id to its survivor via `CUT_PRESET_ALIASES`. Never turn a stored id into a renderer without it: an unknown id used to fall through to `'none'` and blank the org silently. A new preset is a survivor; a removed one is an alias entry, never a deletion alone.
+
+**FBO presets size their simulation with `sim-grid.ts`:** `simGridFor(width, height)` shapes the grid like the canvas (≈512² texels, sides multiples of 64), `simGridChanged` gates rebuilds on resize, and `createStepClock(stepsPerSecond)` turns elapsed time into steps so 120 Hz screens do not run twice as fast. Measure brush and drop distances in texels (`(v_uv - uMouse) / uTexel`), never in uv, or they draw as ellipses on wide heroes. Seed with something smooth (`PERIODIC_NOISE_GLSL` tiles over the wrapped grid) and warm up on the first render, so a reduced-motion visitor's single frame is not raw noise. Both `simGridFor(width, height, base, cell)` and `resizeSim(gl, grid, buf, width, height, base, cell)` take an optional `base` (texels across, default `SIM_BASE`) and `cell` (the side multiple, default 64); a small grid passes both, as lenia does (`LENIA_GRID_BASE` 256, cell 16), or a 64 multiple distorts it. `createStepClock(stepsPerSecond, maxPerFrame = 4)` caps the steps one slow frame may catch up: size it so the slowest frame rate you support still gets every step it owes (lenia: `Math.max(4, 2 * perFrame)`, so 30 and 20 fps keep full speed), and guard `tick()`'s `dt`, which can be 0 (`if (!(dt > 0)) return`).
+
+**Each preset owns its intensity, grain and vignette:** the keys are `shader-<id>-intensity` / `-grain` / `-vignette`, listed in `PRESET_FX_KEYS` (spread into `BRAND_PREFIX_KEYS` and the editor's `HERO_FX_DEFAULTS`); the defaults are one row of `PRESET_FX_DEFAULTS` in `preset-fx-defaults.ts` (`FX_BASE` until tuned; `fxDefaultsFor(id)` reads it), and the editor's sliders come from `presetFxControls(id)`. The shared `shader-intensity` keys are only a legacy fallback, read when an older brand holds them. A renderer's own `DEFAULTS` for the three are a fallback for a partial config, never where a preset is tuned.
+
+**One splash per press:** queue a click splash on the burst's RISING edge, `createClickEdge().clicked(mouse.burstStrength)` from `click-edge.ts`, and play it out over a few input steps. Never splash on `burstStrength > 0`: it holds on every frame of its decay, about 28 splashes a click at 60 Hz and 56 at 120 Hz. Don't clear the edge in `reset()`: a reseed mid-decay would read the falling value as a new press.
 
 **Two types of presets:**
 
 | Type | Description | Files per preset | FBO? | Example |
 |------|-------------|-----------------|------|---------|
-| **Single-pass** | One fragment shader, fullscreen quad, no simulation state | 1 `.frag.ts` + 1 `-renderer.ts` | No | topo, caustic, silk, glass |
-| **FBO-based** | Ping-pong simulation buffer (512x512) + display pass | 1 `-sim.frag.ts` + 1 `-display.frag.ts` + 1 `-renderer.ts` | Yes | ink, turing, ripple, lenia, life |
+| **Single-pass** | One fragment shader, fullscreen quad, no simulation state | 1 `.frag.ts` + 1 `-renderer.ts` | No | topo, caustic, film, glass |
+| **FBO-based** | Ping-pong simulation buffer shaped like the canvas (~512² texels) + display pass | 1 `-sim.frag.ts` + 1 `-display.frag.ts` + 1 `-renderer.ts` | Yes | flow, suture, ripple, ink, lenia |
 
 **File locations:**
 
@@ -36,7 +44,10 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
 | WebGL helpers | `apps/web/src/lib/components/ui/ShaderHero/webgl-utils.ts` |
 | Main component | `apps/web/src/lib/components/ui/ShaderHero/ShaderHero.svelte` |
 | CSS injection | `apps/web/src/lib/brand-editor/css-injection.ts` |
-| Brand editor UI | `apps/web/src/lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte` |
+| Intensity / grain / vignette defaults | `apps/web/src/lib/components/ui/ShaderHero/preset-fx-defaults.ts` |
+| The editor's preset menu + every key's default | `apps/web/src/lib/brand-editor/hero-fx-presets.ts` |
+| The editor's controls, as data | `apps/web/src/lib/brand-editor/hero-fx-controls.ts` |
+| Brand editor UI (renders the controls; no per-preset code) | `apps/web/src/lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte` |
 | Plan docs | `docs/shader-plans/` |
 
 ---
@@ -54,12 +65,16 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
 - `apps/web/src/lib/components/ui/ShaderHero/shaders/{name}-display.frag.ts`
 - `apps/web/src/lib/components/ui/ShaderHero/renderers/{name}-renderer.ts`
 
-### Files to MODIFY (4 files, every preset)
+### Files to MODIFY (6 files, every preset)
 
-1. **`shader-config.ts`** -- Add to ShaderPresetId union, add Config interface, add to ShaderConfig union, add DEFAULTS, add getShaderConfig switch case
+1. **`shader-config.ts`** -- Add to ShaderPresetId union, add Config interface, add to ShaderConfig union, add DEFAULTS, add a `PRESET_BUILDERS` entry
 2. **`css-injection.ts`** -- Add ALL new `shader-{name}-*` keys to BRAND_PREFIX_KEYS set
-3. **`ShaderHero.svelte`** -- Add case to `loadRenderer()` switch
-4. **`BrandEditorHeroEffects.svelte`** -- Add preset card to PRESETS array, add DEFAULTS entries, add `$derived` values, add slider section
+3. **`load-renderer.ts`** -- Add the preset to `RENDERER_LOADERS` (typed `Record<ShaderPresetId, RendererLoader>`, so a missing entry is a compile error)
+4. **`preset-fx-defaults.ts`** -- Add the preset's row to `PRESET_FX_DEFAULTS` (`FX_BASE` until tuned; typed `Record<ShaderPresetId, ...>`, so a missing row is a compile error). The row is what makes it a live preset (`LIVE_PRESET_IDS`), which gives it its own intensity, grain and vignette keys and sliders
+5. **`hero-fx-presets.ts`** -- Add the preset to `HERO_FX_PRESETS` (the menu every picker reads) and each `shader-{name}-*` key's default to `HERO_FX_DEFAULTS`
+6. **`hero-fx-controls.ts`** -- Add the preset's section to `HERO_FX_PRESET_CONTROLS`
+
+`BrandEditorHeroEffects.svelte` needs no change: it renders the controls from the data.
 
 ---
 
@@ -78,9 +93,9 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
    - Brand color mapping (which visual element uses which color)
    - Gotchas specific to this preset
 
-### Phase 2: Update shared files (4 files)
+### Phase 2: Update shared files (6 files)
 
-These 4 modifications can be done in parallel by separate agents since they touch different files.
+These modifications can be done in parallel by separate agents since they touch different files.
 
 **File 1: `shader-config.ts`**
 
@@ -119,16 +134,15 @@ const DEFAULTS = {
 };
 ```
 
-(e) Add switch case in `getShaderConfig()`:
+(e) Add a builder to `PRESET_BUILDERS` (typed `Record<ShaderPresetId, PresetBuilder>`, so a missing entry is a compile error; `getShaderConfig()` calls `PRESET_BUILDERS[resolvedPreset](base, rv, style, isDark)`):
 ```typescript
-case '{name}':
-  return {
-    ...base,
-    preset: '{name}',
-    paramA: rv('shader-{name}-param-a', DEFAULTS.{name}ParamA),
-    paramB: rv('shader-{name}-param-b', DEFAULTS.{name}ParamB),
-    // For int params: Math.round(rv('shader-{name}-count', DEFAULTS.{name}Count)),
-  };
+{name}: (base, rv) => ({
+  ...base,
+  preset: '{name}',
+  paramA: rv('shader-{name}-param-a', DEFAULTS.{name}ParamA),
+  paramB: rv('shader-{name}-param-b', DEFAULTS.{name}ParamB),
+  // For int params: Math.round(rv('shader-{name}-count', DEFAULTS.{name}Count)),
+}),
 ```
 
 **File 2: `css-injection.ts`**
@@ -143,60 +157,38 @@ const BRAND_PREFIX_KEYS = new Set([
 ]);
 ```
 
-**File 3: `ShaderHero.svelte`**
+**File 3: `load-renderer.ts`**
 
-Add case to `loadRenderer()` switch (inside the `<script>` block):
+Add an entry to `RENDERER_LOADERS` (one lazy chunk per preset). `loadRenderer(id)` resolves the id through `resolvePresetId()` first, so a cut id loads its survivor:
 ```typescript
-case '{name}': {
-  const { create{Name}Renderer } = await import('./renderers/{name}-renderer');
-  return create{Name}Renderer();
-}
+{name}: async () =>
+  (await import('./renderers/{name}-renderer')).create{Name}Renderer(),
 ```
 
-**File 4: `BrandEditorHeroEffects.svelte`**
+**File 4: `preset-fx-defaults.ts`**
 
-Four additions required:
+Add a row to `PRESET_FX_DEFAULTS`:
+```typescript
+{name}: FX_BASE,
+```
 
-(a) Add to PRESETS array:
+**File 5: `hero-fx-presets.ts`**
+
+(a) Add to `HERO_FX_PRESETS`:
 ```typescript
 { id: '{name}', label: '{Label}', description: '{Short description}' },
 ```
 
-(b) Add to DEFAULTS record (string values, kebab-case keys):
-```typescript
-'shader-{name}-param-a': '1.00',
-'shader-{name}-param-b': '0.50',
-```
-
-(c) Add `$derived` values:
+(b) Add to `HERO_FX_DEFAULTS` (string values, kebab-case keys), each written as a range input reports it (`String(n)`: `'1'`, not `'1.00'`), so a slider set back to its default drops the override. Use the same numbers as `shader-config.ts`'s DEFAULTS: the slider's default must be what the hero paints:
 ```typescript
 // {Name}
-const {name}ParamA = $derived(readNum('shader-{name}-param-a'));
-const {name}ParamB = $derived(readNum('shader-{name}-param-b'));
+'shader-{name}-param-a': '1',
+'shader-{name}-param-b': '0.5',
 ```
 
-(d) Add slider section in the template (after the last `{:else if}` block, before the closing `{/if}`):
-```svelte
-{:else if activePreset === '{name}'}
-  <section class="hero-fx__section">
-    <span class="hero-fx__section-label">{Label}</span>
+**File 6: `hero-fx-controls.ts`**
 
-    <BrandSliderField
-      id="shader-{name}-param-a"
-      label="Param A"
-      value={{name}ParamA.toFixed(2)}
-      min={0.00}
-      max={2.00}
-      step={0.10}
-      current={{name}ParamA}
-      minLabel="Low"
-      maxLabel="High"
-      oninput={handleSliderInput('shader-{name}-param-a')}
-    />
-
-    <!-- For int params: value={String(Math.round({name}ParamB))} -->
-  </section>
-```
+Add the preset's section to `HERO_FX_PRESET_CONTROLS` (template in Section 5). The editor draws it under the preset's own intensity, grain and vignette sliders and the shared palette controls.
 
 ### Phase 3: Implement shader + renderer files
 
@@ -205,7 +197,7 @@ See template code in Section 5 below.
 ### Phase 4: Merge + verify
 
 1. Copy from worktrees if applicable
-2. Run typecheck: `npx tsc --noEmit --project apps/web/tsconfig.json` -- zero errors required
+2. Run typecheck: `pnpm --filter web typecheck` (svelte-kit sync, then tsc) -- zero errors required
 3. Run dev server: `pnpm dev` (from monorepo root, NEVER cd into individual workers)
 4. Navigate to an org subdomain, open brand editor, select the new preset
 5. Verify: preset renders, all sliders update the shader in real-time, mouse interaction works
@@ -243,21 +235,18 @@ function readBrandVar(el: Element, key: string): string | null {
 ### 3. Integer uniforms
 
 Integer uniforms require special handling at three levels:
-- **shader-config.ts:** Wrap with `Math.round()` in the switch case
+- **shader-config.ts:** Wrap with `Math.round()` in the `PRESET_BUILDERS` entry
 - **Renderer:** Use `gl.uniform1i()` (NOT `gl.uniform1f()`)
 - **GLSL:** Declare as `uniform int u_param;`
 - **For-loops:** Need constant upper bound with early exit: `for (int i = 0; i < 5; i++) { if (i >= u_param) break; ... }`
 
 ### 4. Post-processing chain
 
-EVERY shader (single-pass display or FBO display) MUST end with this exact post-processing chain:
+Shaders end with a tone-map, intensity mix, vignette, grain and final clamp, as below. **The "75% brightness cap" this skill used to mandate is not what the presets do**: an audit found it in only 4 of 60 shader files; the rest clamp at 1.0. Do not add it by rote. Hero text contrast is handled by the hero (tone sampling, ink choice, veil) and measured on the rendered page (Codex-t2t6o), not by capping the shader:
 
 ```glsl
 // Reinhard tonemapping
 color = color / (1.0 + color);
-
-// Brightness cap (75%)
-color = min(color, vec3(0.75));
 
 // Intensity blend with background
 color = mix(u_bgColor, color, u_intensity);
@@ -270,7 +259,7 @@ color *= clamp(1.0 - dot(vc, vc) * u_vignette, 0.0, 1.0);
 color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * u_grain;
 
 // Final clamp
-fragColor = vec4(clamp(color, 0.0, 0.75), 1.0);
+fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 ```
 
 ### 5. GLSL ES 3.0 requirements
@@ -303,8 +292,9 @@ export function create{Name}Renderer(): ShaderRenderer { ... }
 FBO-based renderers MUST:
 - Check `gl.getExtension('EXT_color_buffer_float')` in `init()` and return false if missing
 - Also get `gl.getExtension('OES_texture_float_linear')` for linear filtering
-- Use `createDoubleFBO(gl, SIM_RES, SIM_RES)` where `SIM_RES = 512`
-- Run two substeps per frame (one with input, one coasting)
+- Use `createDoubleFBO(gl, grid.w, grid.h)` with `grid = simGridFor(width, height)` from `sim-grid.ts`, and rebuild it in `resize()` with `resizeSim` from `sim-resize.ts` (the template below does both)
+- Step with `createStepClock(stepsPerSecond, maxPerFrame)`, not a fixed count per frame, and apply pointer input on every `inputStride(stepsPerSecond)`-th step (60 pushes a second at any frame rate)
+- Splash once per press, on `click-edge.ts`'s rising edge (the template below does)
 - Seed initial state in `reset()` by rendering the init shader into both FBO sides
 - Have a separate init program (simple clear shader)
 
@@ -330,11 +320,11 @@ interface MouseState {
   x: number;      // 0-1 left to right
   y: number;      // 0-1 bottom to top
   active: boolean; // mouse is over canvas
-  burstStrength: number; // 0-1, decays at 0.85/frame
+  burstStrength: number; // 0-1; ShaderHero decays it per SECOND (BURST_DECAY_PER_SECOND = 0.85 ** 60), so it fades at the same speed at any frame rate
 }
 ```
 
-The ShaderHero component handles lerped mouse smoothing internally. Mouse x/y are updated on `mousemove` and `touchmove` events. `burstStrength` is set to 1.0 on click/touchstart and decays each frame.
+ShaderHero passes the raw pointer position: mouse x/y are updated on `mousemove` and `touchmove` events, unsmoothed. A renderer that wants smooth motion lerps its own copy (see `lerpedMouse` in `ether-renderer.ts`). `burstStrength` is set to 1.0 once per press (one primary-button `pointerdown`: a tap is not counted twice) and decays by elapsed time, not per frame.
 
 ### 11. Design tokens in brand editor
 
@@ -382,6 +372,10 @@ out vec2 v_uv;
 void main() { v_uv = a_position * 0.5 + 0.5; gl_Position = vec4(a_position, 0, 1); }
 ```
 
+### 14. The output door
+
+A renderer reaches "the screen" ONLY through `bindOutput(gl)` from `output-target.ts`, both for its visible draw and whenever it finishes with one of its own framebuffers. Never `gl.bindFramebuffer(gl.FRAMEBUFFER, null)`: the brand shader stack's compositor (`ShaderHero/compositor/`) attaches its scene framebuffer as the output, and a raw null bind would draw to the canvas behind its back. The `check:output-door` gate (`apps/web/scripts/check-output-door.mjs`, a CI static-analysis step) fails on any raw null bind under `ShaderHero/` outside `output-target.ts`: `gl.`, `gl!.`, `gl?.` and cast receivers, `null` or `undefined` (also as one branch, `fbo ?? null`), `FRAMEBUFFER` or `DRAW_FRAMEBUFFER`, wrapped or not. Run it locally with `pnpm --filter web run check:output-door`. Import it in every renderer: `import { bindOutput } from '../output-target';` (both templates below do).
+
 ---
 
 ## 5. Template Code Snippets
@@ -398,6 +392,8 @@ void main() { v_uv = a_position * 0.5 + 0.5; gl_Position = vec4(a_position, 0, 1
  * Brand colors: {describe color mapping}.
  */
 
+import { bindOutput } from '../output-target';
+import { FX_BASE } from '../preset-fx-defaults';
 import type { MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig, {Name}Config } from '../shader-config';
 import { {NAME}_FRAG } from '../shaders/{name}.frag';
@@ -433,9 +429,9 @@ type {Name}Uniform = (typeof UNIFORM_NAMES)[number];
 const DEFAULTS = {
   paramA: 1.0,
   paramB: 0.5,
-  intensity: 0.65,
-  grain: 0.025,
-  vignette: 0.2,
+  // A fallback for a partial config only: tune the preset's intensity,
+  // grain and vignette in `preset-fx-defaults.ts`.
+  ...FX_BASE,
 } as const;
 
 export function create{Name}Renderer(): ShaderRenderer {
@@ -499,7 +495,7 @@ export function create{Name}Renderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
 
       // Draw to screen (no FBO)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl); // never a raw null bind: check:output-door fails on one
       drawQuad(gl);
     },
 
@@ -593,9 +589,6 @@ void main() {
   // Reinhard tone map
   color = color / (1.0 + color);
 
-  // Brightness cap at 75%
-  color = min(color, vec3(0.75));
-
   // Mix with background by intensity
   color = mix(u_bgColor, color, u_intensity);
 
@@ -606,25 +599,35 @@ void main() {
   // Film grain
   color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * u_grain;
 
-  fragColor = vec4(clamp(color, 0.0, 0.75), 1.0);
+  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `;
 ```
 
-### FBO Renderer Template (based on ink-renderer)
+### FBO Renderer Template (stepping and resize as flow-renderer)
 
 ```typescript
 /**
  * {Name} renderer -- {brief description}.
  *
- * Ping-pong FBO simulation at 512x512 + display pass.
+ * Ping-pong FBO shaped like the canvas (~512² texels, `sim-grid.ts`) + display pass.
+ * Steps follow elapsed time (`createStepClock`), so 120 Hz runs at 60 Hz speed.
  * Buffer format: {describe what RGBA channels store}.
  */
 
+import { createClickEdge } from '../click-edge';
+import { bindOutput } from '../output-target';
 import type { MouseState, ShaderRenderer } from '../renderer-types';
 import type { {Name}Config, ShaderConfig } from '../shader-config';
 import { {NAME}_DISPLAY_FRAG } from '../shaders/{name}-display.frag';
 import { {NAME}_SIM_FRAG } from '../shaders/{name}-sim.frag';
+import {
+  createStepClock,
+  inputStride,
+  type SimGrid,
+  simGridFor,
+} from '../sim-grid';
+import { resizeSim } from '../sim-resize';
 import {
   createDoubleFBO,
   createProgram,
@@ -636,7 +639,12 @@ import {
   VERTEX_SHADER,
 } from '../webgl-utils';
 
-const SIM_RES = 512;
+/** Simulation steps a second (2 a frame at 60 Hz, 1 at 120 Hz). */
+const STEPS_PER_SECOND = 120;
+/** Pointer input on every n-th step: 60 pushes a second at any frame rate. */
+const INPUT_STRIDE = inputStride(STEPS_PER_SECOND);
+/** Input steps one press's splash plays over. */
+const CLICK_BURST_STEPS = 5;
 
 /** Init fragment shader -- seeds the initial state. */
 const {NAME}_INIT_FRAG = `#version 300 es
@@ -683,6 +691,11 @@ export function create{Name}Renderer(): ShaderRenderer {
 
   let quad: ReturnType<typeof createQuad> | null = null;
   let simBuf: DoubleFBO | null = null;
+  let grid: SimGrid = simGridFor(0, 0);
+  const clock = createStepClock(STEPS_PER_SECOND);
+  // One splash per press, queued on the burst's rising edge.
+  const clickEdge = createClickEdge();
+  let splashSteps = 0;
 
   // ── Sim step helper ────────────────────────────────
   function stepSim(
@@ -696,7 +709,7 @@ export function create{Name}Renderer(): ShaderRenderer {
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
 
-    gl.viewport(0, 0, SIM_RES, SIM_RES);
+    gl.viewport(0, 0, grid.w, grid.h);
     gl.useProgram(simProg);
     quad.bind(simProg);
 
@@ -704,8 +717,8 @@ export function create{Name}Renderer(): ShaderRenderer {
     gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
     gl.uniform1i(simU.uState, 0);
 
-    const tx = 1.0 / SIM_RES;
-    gl.uniform2f(simU.uTexel, tx, tx);
+    // Texel size per axis: measure brush distance in texels so it is round.
+    gl.uniform2f(simU.uTexel, 1.0 / grid.w, 1.0 / grid.h);
     gl.uniform1f(simU.uTime, time);
     gl.uniform2f(simU.uMouse, mouseX, mouseY);
     gl.uniform1f(simU.uMouseActive, mouseOn ? 1.0 : 0.0);
@@ -717,12 +730,12 @@ export function create{Name}Renderer(): ShaderRenderer {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    bindOutput(gl); // never a raw null bind: check:output-door fails on one
     simBuf.swap();
   }
 
   return {
-    init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
+    init(gl: WebGL2RenderingContext, width: number, height: number): boolean {
       // Check required extensions
       if (!gl.getExtension('EXT_color_buffer_float')) return false;
       gl.getExtension('OES_texture_float_linear');
@@ -738,9 +751,10 @@ export function create{Name}Renderer(): ShaderRenderer {
       simU = getUniforms(gl, simProg, SIM_UNIFORM_NAMES);
       displayU = getUniforms(gl, displayProg, DISPLAY_UNIFORM_NAMES);
 
-      // Create geometry and FBOs
+      // Create geometry and FBOs: the grid takes the canvas's shape.
       quad = createQuad(gl);
-      simBuf = createDoubleFBO(gl, SIM_RES, SIM_RES);
+      grid = simGridFor(width, height);
+      simBuf = createDoubleFBO(gl, grid.w, grid.h);
 
       // Initialize simulation state
       this.reset(gl);
@@ -760,18 +774,27 @@ export function create{Name}Renderer(): ShaderRenderer {
 
       const cfg = config as {Name}Config;
 
-      // ── Substep 1: with mouse input ───────────────
-      stepSim(
-        gl, time,
-        mouse.active ? mouse.x : -10.0,
-        mouse.active ? mouse.y : -10.0,
-        mouse.active,
-        mouse.burstStrength ?? 0.0,
-        cfg
-      );
-
-      // ── Substep 2: coast (no input) ───────────────
-      stepSim(gl, time, -10.0, -10.0, false, 0.0, cfg);
+      // ── Simulation steps: by elapsed time, not per frame ──
+      // A frozen (reduced-motion) redraw ticks 0 steps; the first tick
+      // after a reset runs at least one. Input lands on a fixed stride.
+      if (clickEdge.clicked(mouse.burstStrength ?? 0)) {
+        splashSteps = CLICK_BURST_STEPS;
+      }
+      const { steps, first } = clock.tick(time);
+      for (let i = 0; i < steps; i++) {
+        const onStride = (first + i) % INPUT_STRIDE === 0;
+        const splash = onStride && splashSteps > 0;
+        if (splash) splashSteps--;
+        const input = onStride && (mouse.active || splash);
+        stepSim(
+          gl, time,
+          input ? mouse.x : -10.0,
+          input ? mouse.y : -10.0,
+          input,
+          splash ? 1.0 : 0.0,
+          cfg
+        );
+      }
 
       // ── Display pass ──────────────────────────────
       gl.viewport(0, 0, width, height);
@@ -791,19 +814,26 @@ export function create{Name}Renderer(): ShaderRenderer {
       gl.uniform1f(displayU.uVignette, cfg.vignette);
       gl.uniform1f(displayU.uTime, time);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl); // never a raw null bind: check:output-door fails on one
       drawQuad(gl);
     },
 
-    resize(_gl: WebGL2RenderingContext, _width: number, _height: number): void {
-      // FBO sim resolution is fixed at 512x512.
-      // Display pass viewport is set each frame in render().
+    resize(gl: WebGL2RenderingContext, width: number, height: number): void {
+      // Rebuild only on a real change of shape, never on a lost context,
+      // allocating before destroying (`resizeSim` in sim-resize.ts). The
+      // display viewport is set each frame in render().
+      const resized = resizeSim(gl, grid, simBuf, width, height);
+      if (!resized) return;
+      grid = resized.grid;
+      simBuf = resized.buf;
+      this.reset(gl);
     },
 
     reset(gl: WebGL2RenderingContext): void {
       if (!initProg || !simBuf || !quad) return;
 
-      gl.viewport(0, 0, SIM_RES, SIM_RES);
+      clock.reset();
+      gl.viewport(0, 0, grid.w, grid.h);
       gl.useProgram(initProg);
       quad.bind(initProg);
 
@@ -812,7 +842,7 @@ export function create{Name}Renderer(): ShaderRenderer {
       drawQuad(gl);
       gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
       drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl); // never a raw null bind: check:output-door fails on one
     },
 
     destroy(gl: WebGL2RenderingContext): void {
@@ -837,7 +867,7 @@ export function create{Name}Renderer(): ShaderRenderer {
 /**
  * {Name} simulation fragment shader (GLSL ES 3.0).
  *
- * Ping-pong at 512x512.
+ * Ping-pong on a grid shaped like the canvas (`simGridFor`).
  * Buffer format: {describe RGBA channels}.
  */
 export const {NAME}_SIM_FRAG = `#version 300 es
@@ -919,9 +949,6 @@ void main() {
   // Reinhard tone map
   color = color / (1.0 + color);
 
-  // Brightness cap
-  color = min(color, vec3(0.75));
-
   // Intensity blend -- NOTE: for FBO display, the mix is already done
   // via the color mapping above, but include if needed for consistency
 
@@ -933,7 +960,7 @@ void main() {
   color += (hash(v_uv * 512.0 + fract(uTime * 7.13)) - 0.5) * uGrain;
 
   // Final clamp
-  fragColor = vec4(clamp(color, 0.0, 0.75), 1.0);
+  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `;
 ```
@@ -949,55 +976,39 @@ export interface {Name}Config extends ShaderConfigBase {
 }
 ```
 
-### getShaderConfig Switch Case Template
+### PRESET_BUILDERS Entry Template
 
 ```typescript
-case '{name}':
-  return {
-    ...base,
-    preset: '{name}',
-    paramA: rv('shader-{name}-param-a', DEFAULTS.{name}ParamA),
-    paramB: rv('shader-{name}-param-b', DEFAULTS.{name}ParamB),
-    // For int params:
-    // paramInt: Math.round(rv('shader-{name}-param-int', DEFAULTS.{name}ParamInt)),
-  };
+{name}: (base, rv) => ({
+  ...base,
+  preset: '{name}',
+  paramA: rv('shader-{name}-param-a', DEFAULTS.{name}ParamA),
+  paramB: rv('shader-{name}-param-b', DEFAULTS.{name}ParamB),
+  // For int params:
+  // paramInt: Math.round(rv('shader-{name}-param-int', DEFAULTS.{name}ParamInt)),
+}),
 ```
 
-### BrandEditorHeroEffects Slider Section Template
+### HERO_FX_PRESET_CONTROLS Entry Template
 
-```svelte
-{:else if activePreset === '{name}'}
-  <section class="hero-fx__section">
-    <span class="hero-fx__section-label">{Display Label}</span>
-
-    <BrandSliderField
-      id="shader-{name}-param-a"
-      label="Param A Label"
-      value={{name}ParamA.toFixed(2)}
-      min={0.00}
-      max={2.00}
-      step={0.10}
-      current={{name}ParamA}
-      minLabel="Low"
-      maxLabel="High"
-      oninput={handleSliderInput('shader-{name}-param-a')}
-    />
-
-    <BrandSliderField
-      id="shader-{name}-param-b"
-      label="Param B Label"
-      value={{name}ParamB.toFixed(2)}
-      min={0.00}
-      max={1.00}
-      step={0.05}
-      current={{name}ParamB}
-      minLabel="Subtle"
-      maxLabel="Strong"
-      oninput={handleSliderInput('shader-{name}-param-b')}
-    />
-
-    <!-- For int params: value={String(Math.round({name}ParamInt))} -->
-  </section>
+```typescript
+{name}: {
+  sectionLabel: '{Display Label}',
+  controls: [
+    {
+      kind: 'slider',
+      key: 'shader-{name}-param-a',
+      label: 'Param A Label',
+      min: 0,
+      max: 2,
+      step: 0.1,
+      format: 'fixed2', // 'int' | 'fixed1' | 'fixed2' | 'fixed3' | 'angle'
+      minLabel: 'Low',
+      maxLabel: 'High',
+    },
+    // 'color' and 'toggle' controls take only kind, key and label
+  ],
+},
 ```
 
 ### BRAND_PREFIX_KEYS Entry Template
@@ -1014,11 +1025,11 @@ case '{name}':
 
 ### Phase 1: Shared file modifications (3 parallel agents)
 
-Since the 4 modified files are independent, split across agents:
+Since the modified files are independent, split across agents:
 
-- **Agent A:** `shader-config.ts` (types, defaults, switch case)
-- **Agent B:** `css-injection.ts` (BRAND_PREFIX_KEYS) + `ShaderHero.svelte` (loadRenderer case) -- these are small changes in different files, one agent handles both
-- **Agent C:** `BrandEditorHeroEffects.svelte` (PRESETS, DEFAULTS, $derived, sliders)
+- **Agent A:** `shader-config.ts` (types, defaults, `PRESET_BUILDERS` entry)
+- **Agent B:** `css-injection.ts` (BRAND_PREFIX_KEYS) + `load-renderer.ts` (RENDERER_LOADERS entry) -- these are small changes in different files, one agent handles both
+- **Agent C:** `preset-fx-defaults.ts` (row) + `hero-fx-presets.ts` (menu entry, defaults) + `hero-fx-controls.ts` (control section)
 
 ### Phase 2: Shader + renderer implementation (isolated worktree agents)
 
@@ -1031,7 +1042,7 @@ For batch implementation of multiple presets:
 
 1. Copy new shader/renderer files from worktrees to main tree
 2. Ensure all Phase 1 shared-file modifications are in place
-3. Run `npx tsc --noEmit --project apps/web/tsconfig.json` -- must be zero errors
+3. Run `pnpm --filter web typecheck` -- must be zero errors
 4. Run `pnpm dev` and visually verify each new preset
 5. Close beads issues
 
@@ -1048,12 +1059,12 @@ For batch implementation of multiple presets:
 | FBO simulation doesn't start / stays black | `reset()` not seeding initial state | Seed both FBO sides in `reset()` using the init program |
 | Gray-Scott / Turing patterns wrong | Laplacian needs specific scaling factor | Use `0.21` scaling for Gray-Scott Laplacian: `laplacian = (n+s+e+w + 0.05*(ne+nw+se+sw) - (4.0+0.2)*center) * 0.21` |
 | Everything looks uniform/flat | Density threshold too wide | Use narrow band for pattern visibility (e.g., `smoothstep(0.2, 0.25, value)`) |
-| Sliders exist but default values differ | DEFAULTS mismatch between shader-config.ts and BrandEditorHeroEffects.svelte | Ensure both files use the same numeric values (one in camelCase, one as string in kebab-case) |
+| Sliders exist but default values differ | DEFAULTS mismatch between shader-config.ts and `HERO_FX_DEFAULTS` in hero-fx-presets.ts | Ensure both files use the same numeric values (one in camelCase, one as string in kebab-case) |
 | TypeScript error: type not in union | Config interface not added to `ShaderConfig` union type | Add `\| {Name}Config` to the union in shader-config.ts |
-| TypeScript error: property missing | Switch case doesn't return all fields from the config interface | Ensure every field in the interface has a corresponding `rv()` call in the switch case |
+| TypeScript error: property missing | The `PRESET_BUILDERS` entry doesn't return all fields from the config interface | Ensure every field in the interface has a corresponding `rv()` call in the builder |
 | `uniform1f` used for int uniform | Renderer uses wrong GL call | Use `gl.uniform1i()` for `uniform int` declarations, `gl.uniform1f()` for `uniform float` |
 | For-loop doesn't execute all iterations | GLSL ES 3.0 requires constant loop bounds | Use pattern: `for (int i = 0; i < MAX; i++) { if (i >= u_count) break; ... }` |
 | Mouse interaction feels wrong | Aspect ratio not corrected for mouse coordinates | Apply same aspect correction to both mouse UV and fragment UV before distance calculation |
 | Brand editor changes don't take effect | Config polling cadence too slow for testing | Config is polled every 30 frames (~0.5s). Changes will appear within half a second. |
-| Preset not appearing in dropdown | Not added to PRESETS array in BrandEditorHeroEffects.svelte | Add `{ id: '{name}', label: '{Label}', description: '{desc}' }` to the array |
-| loadRenderer returns null | Missing case in ShaderHero.svelte switch | Add the dynamic import case for the new preset |
+| Preset not appearing in dropdown | Not added to `HERO_FX_PRESETS` in hero-fx-presets.ts | Add `{ id: '{name}', label: '{Label}', description: '{desc}' }` to the array |
+| loadRenderer returns null | The id is neither a live preset nor in `CUT_PRESET_ALIASES` (`resolvePresetId` returned null; `shader.unknown_preset` is logged) | Add the preset to `ShaderPresetId` and `RENDERER_LOADERS` (a missing loader is a compile error) |

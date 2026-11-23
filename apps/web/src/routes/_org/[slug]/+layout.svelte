@@ -22,6 +22,8 @@
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
+  import { shaderLive } from '$lib/components/ui/ShaderHero/shader-live.svelte';
+  import { heroShaderActive, orgShader } from '$lib/page-builder/org-grounds';
   import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
   // Every brand face's own fallback, so a face on its way draws on its lines (Codex-61zsk.61).
@@ -175,22 +177,23 @@
     };
   });
 
-  // Shader-active flag — true iff the org has a non-empty, non-'none' shader preset.
-  // Reads from brand editor when open, server tokenOverrides otherwise. Drives
-  // the `data-hero-shader-active` attribute that gates the shader-less fallback
-  // backdrop on .hero (so orgs without a shader get a legible dark gradient for
-  // the difference-blended title, Codex-tl2ts).
-  const hasShaderPreset = $derived.by(() => {
-    const overrides = brandEditor.isOpen
-      ? (brandEditor.pending?.tokenOverrides ?? {})
-      : (() => {
-          const raw = data.org?.brandFineTune?.tokenOverrides;
-          if (!raw) return {};
-          try { return JSON.parse(raw) as Record<string, string | null>; } catch { return {}; }
-        })();
-    const preset = overrides['shader-preset'];
-    return typeof preset === 'string' && preset.length > 0 && preset !== 'none';
-  });
+  // Shader-active flag (`data-hero-shader-active`). The page kit's see-through
+  // "Moving background" surfaces (kit/styles/surfaces.css and friends, the live
+  // veil in atmosphere-veil.ts) and this layout's own clearing rules below
+  // read it. It starts as the page kit's rule (`orgShader`): the brand
+  // editor's pending tokens while it is open, else the saved ones, and the
+  // LIGHT `shader-preset` only. The server renders that. Once the fullpage
+  // shader settles, what it reports (`shaderLive`) replaces the guess
+  // (`heroShaderActive`). A shader that cannot draw then clears the gate, so
+  // the surfaces stay opaque, and a dark-only preset that does draw sets it.
+  // The home hero does not read this flag: its ink keys on ShaderHero's own
+  // `data-live`.
+  const shaderActive = $derived(
+    heroShaderActive(
+      orgShader(data.org, brandEditor.isOpen ? brandEditor.pending : null),
+      shaderLive.state
+    )
+  );
 
   // Fine-tune branding fields — text/heading/body weight, shadow scale/color,
   // heading colour, etc. are now read exclusively from the tokenOverrides JSON
@@ -492,7 +495,7 @@
   data-hero-hide-description={heroHideFlags.description ? '' : undefined}
   data-hero-hide-logo={heroHideFlags.logo ? '' : undefined}
   data-hero-hide-title={heroHideFlags.title ? '' : undefined}
-  data-hero-shader-active={hasShaderPreset ? '' : undefined}
+  data-hero-shader-active={shaderActive ? '' : undefined}
   style:--brand-color={brandInputVars['--brand-color']}
   style:--brand-secondary={brandInputVars['--brand-secondary']}
   style:--brand-accent={brandInputVars['--brand-accent']}
@@ -622,9 +625,10 @@
     margin-left: 0;
   }
 
-  /* Landing page: drop view-transition-name + allow blend-mode to reach shader.
-     view-transition-name creates an isolated stacking context that blocks
-     mix-blend-mode from compositing against the shader canvas. */
+  /* Landing page: drop view-transition-name and the page background, so the
+     shader shows through. This does NOT let the hero title's mix-blend-mode
+     reach the shader canvas: .org-main keeps position: relative; z-index: 1
+     (above), still a stacking context that isolates the blend (Codex-hdzjw). */
   .org-main--blendable {
     view-transition-name: none;
     background: transparent;

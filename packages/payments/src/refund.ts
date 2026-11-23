@@ -23,8 +23,13 @@ type RefundTarget =
   | { chargeId: string; paymentIntentId?: never };
 
 export type IssueRefundInput = RefundTarget & {
-  /** Stripe's own reason enum; `duplicate` for a second payment. */
-  reason: Stripe.RefundCreateParams.Reason;
+  /**
+   * Stripe's own reason enum; `duplicate` for a second payment. `null` when
+   * none of Stripe's fits, rather than a false one: a payment for an item
+   * its buyer could no longer open when it landed (Codex-z1t3c). Required,
+   * so a caller says which; only a non-null reason is sent.
+   */
+  reason: Stripe.RefundCreateParams.Reason | null;
   /** Stripe's `amount`, in pence, for a partial refund. Omitted: in full. */
   amountCents?: number;
   /**
@@ -82,7 +87,7 @@ export async function issueRefund(
         ...(input.amountCents === undefined
           ? {}
           : { amount: input.amountCents }),
-        reason: input.reason,
+        ...(input.reason === null ? {} : { reason: input.reason }),
         metadata: {
           ...input.metadata,
           ...stripeEnvMetadata(input.environment),

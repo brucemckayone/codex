@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { HTMLAttributes } from 'svelte/elements';
-	import { getCtx } from './ctx.js';
+	import { getCtx, getDisabledCtx } from './ctx.js';
 
 	const {
 		children,
@@ -20,6 +20,8 @@
 	const {
 		elements: { trigger }
 	} = getCtx();
+	// The Root's `disabled`: the menu will not open, so the button says so.
+	const disabled = getDisabledCtx();
 </script>
 
 <button
@@ -30,6 +32,8 @@
 	{...rest}
 	id={$trigger.id}
 	aria-controls={$trigger['aria-controls']}
+	aria-disabled={disabled() ? 'true' : rest['aria-disabled']}
+	data-disabled={disabled() ? '' : undefined}
 >
 	{@render children()}
 </button>

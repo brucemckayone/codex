@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 import * as dotenv from 'dotenv';
+import { E2E_BASE_URL, E2E_HOSTNAME, E2E_PORT } from './e2e/helpers/origin';
 
 // Load environment variables for E2E tests
 // .env.test is at the monorepo root, not in apps/web
@@ -78,7 +79,7 @@ export default defineConfig({
       testMatch: /.*\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://lvh.me:5173',
+        baseURL: E2E_BASE_URL,
       },
     },
     // Accessibility tests against Storybook
@@ -98,7 +99,7 @@ export default defineConfig({
       testMatch: /.*\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://lvh.me:5173',
+        baseURL: E2E_BASE_URL,
       },
     },
   ],
@@ -110,8 +111,11 @@ export default defineConfig({
     ? undefined
     : [
         {
-          command: 'pnpm dev --port 5173 --host lvh.me --strictPort',
-          url: 'http://lvh.me:5173',
+          // The web app at E2E_BASE_URL (e2e/helpers/origin.ts). One already
+          // serving there is reused, so a run against another worktree's dev
+          // server never starts a second one in this tree.
+          command: `pnpm dev --port ${E2E_PORT} --host ${E2E_HOSTNAME} --strictPort`,
+          url: E2E_BASE_URL,
           timeout: 180000, // 3 minutes - SvelteKit can take time to start
           reuseExistingServer: true,
         },

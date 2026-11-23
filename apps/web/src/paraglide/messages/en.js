@@ -1475,6 +1475,486 @@ export const org_hero_hours = (params) => `${params.hours} hrs of content`
 
 
 /**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_watch_film_duration = (params) => `Watch our film, ${params.duration}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_explore_everything = () => `Explore everything`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_play_preview = () => `Play the preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_label = () => `Showreel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_preview_sound = () => `Preview with sound`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_theatre_close = () => `Close the preview`
+
+
+/**
+ * @param {{ length: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_theatre_caption = (params) => `Preview, ${params.length}`
+
+
+/**
+ * @param {{ number: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_slide = (params) => `${params.number} of ${params.total}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_pause = () => `Pause the reel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_play = () => `Play the reel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_film_kicker = () => `Our film`
+
+
+/**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_film_kicker_duration = (params) => `Our film, ${params.duration}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_film = () => `Film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_recording = () => `Recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_essay = () => `Essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_portal = () => `Portal`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_join_name = (params) => `Join ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_follow_releases = () => `Follow for new releases`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_follow_short = () => `+ Follow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_follow_note = () => `Free. We’ll tell you when something new lands.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_join_note = () => `Everything here in one membership · cancel anytime`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_search_placeholder = (params) => `Search ${params.name}`
+
+
+/**
+ * @param {{ kicker: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_piece_label = (params) => `${params.kicker}: ${params.title}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_start_watching = () => `Start watching`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_start_listening = () => `Start listening`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_start_reading = () => `Start reading`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_free_note_watch = () => `Some pieces are free to watch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_free_note_listen = () => `Some pieces are free to listen to`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_free_note_read = () => `Some pieces are free to read`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_featured_portal = () => `Featured portal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_featured_film = () => `Featured film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_featured_recording = () => `Featured recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_featured_essay = () => `Featured essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_new_film = () => `New film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_new_recording = () => `New recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_new_essay = () => `New essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_cta_portal = () => `Enter the portal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_cta_watch = () => `Watch the film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_cta_listen = () => `Listen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_cta_read = () => `Read the essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_portal = () => `A portal`
+
+
+/**
+ * @param {{ stages: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_portal_stages = (params) => `A portal in ${params.stages}`
+
+
+/**
+ * @param {{ practices: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_portal_practices = (params) => `A portal, with ${params.practices}`
+
+
+/**
+ * @param {{ stages: NonNullable<unknown>, practices: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_portal_both = (params) => `A portal in ${params.stages}, with ${params.practices}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_stages_one = () => `1 stage`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_stages_other = (params) => `${params.count} stages`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_practices_one = () => `1 practice`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_practices_other = (params) => `${params.count} practices`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_film = () => `A film`
+
+
+/**
+ * @param {{ minutes: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_film_minutes = (params) => `A ${params.minutes}-minute film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_recording = () => `A recording`
+
+
+/**
+ * @param {{ minutes: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_recording_minutes = (params) => `A ${params.minutes}-minute recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_essay = () => `An essay`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_portals = (params) => `${params.count} portals`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_films_recordings = (params) => `${params.count} films & recordings`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_films = (params) => `${params.count} films`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_recordings = (params) => `${params.count} recordings`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_essays = (params) => `${params.count} essays`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_minutes = (params) => `${params.count} minutes to watch`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_hours = (params) => `${params.count} hours to watch`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -1512,6 +1992,14 @@ export const org_follow = () => `Follow`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const org_following = () => `Following`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_follow_failed = () => `Couldn’t update your follow. Try again.`
 
 
 /**
@@ -8376,6 +8864,1790 @@ export const branding_film_load_failed = () => `Couldn't load your film.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const branding_film_save_failed = () => `Couldn't save the film. Try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_intro = () => `Pick what your front page is for and the hero sets everything else to match. Every choice stays changeable, and your current hero is kept until you save.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_try = () => `Try the new hero`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_label = () => `What is the front page for?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_unchanged = () => `As the purpose sets it`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_changed = (params) => `${params.count} changed from the purpose`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reset = () => `Reset to purpose`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_back_classic = () => `Back to the classic hero`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_auto = () => `Auto`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_on = () => `On`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_off = () => `Off`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_none = () => `None`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_consume_watch = () => `Get people watching`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_consume_listen = () => `Get people listening`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_consume_read = () => `Get people reading`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_consume_hint = () => `Your newest piece, one tap away`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_grow = () => `Grow members`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_grow_hint = () => `Join, and what it includes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_intro = () => `Introduce yourself`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_intro_hint = () => `Who you are and why`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_library = () => `Show the whole library`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_library_hint = () => `Search and browse first`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_follow = () => `Build a following`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_follow_hint = () => `Free pieces and a follow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_spotlight = () => `Spotlight something`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_spotlight_hint = () => `One piece, gently`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_arrangement = () => `Arrangement`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_background = () => `Background`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_words = () => `Words`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_buttons = () => `Buttons`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_spotlight = () => `Spotlight & proof`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_feeling = () => `Feeling`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_comp = () => `Composition`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_statement = () => `Statement`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_centre = () => `Centre stage`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_showcase = () => `Showcase`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_split = () => `Split`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_billboard = () => `Billboard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_showreel = () => `Showreel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_align = () => `Alignment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_align_start = () => `Start`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_align_center = () => `Centre`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_align_end = () => `End`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_height = () => `Height`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_height_full = () => `Full screen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_height_tall = () => `Tall`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_height_compact = () => `Compact`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_bg = () => `Background`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_shader = () => `Brand shader`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_film = () => `Film loop`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_gradient = () => `Gradient`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_pattern = () => `Pattern`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_plain = () => `Plain`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_veil = () => `Veil`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_veil_auto = () => `Shaped`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_veil_soft = () => `Soft`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_veil_strong = () => `Strong`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_ambient = () => `Ambient motion`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_ambient_drift = () => `Slow drift`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_ambient_still = () => `Still`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_grain = () => `Grain`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_lead = () => `Lead with`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_lead_both = () => `Logo + name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_lead_logo = () => `Logo only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_lead_name = () => `Name only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_logo = () => `Logo size`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_logo_s = () => `S`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_logo_m = () => `M`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_logo_l = () => `L`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_line = () => `Supporting line`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_line_desc = () => `Description`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_search = () => `Search box`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_main = () => `Main button`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_main_explore = () => `Explore`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_main_join = () => `Join`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_main_film = () => `Our film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_main_follow = () => `Follow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_second = () => `Second button`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_second_auto = () => `Film or Explore`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_micro = () => `Line under the button`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_bstyle = () => `Button style`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bstyle_solid = () => `Solid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bstyle_outline = () => `Outline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bstyle_pill = () => `Pill`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bstyle_link = () => `Text + arrow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_spot = () => `Spotlight`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_spot_featured = () => `Featured piece`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_spot_latest = () => `Latest piece`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_spot_film = () => `Our film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_proof = () => `Proof`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_proof_facts = () => `Facts line`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_proof_shelf = () => `Shelf`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_type = () => `Title style`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_type_classic = () => `Classic`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_type_expressive = () => `Expressive`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_type_caps = () => `Spaced caps`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_type_oversized = () => `Oversized`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_accent = () => `Accent`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_accent_underline = () => `Underline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_accent_highlight = () => `Highlight`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_entrance = () => `Entrance`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_entrance_rise = () => `Rise`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_entrance_reveal = () => `Reveal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_entrance_fade = () => `Fade`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_title = () => `Combine`
+
+
+/**
+ * @param {{ preset: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_lede = (params) => `Build on ${params.preset}: mix in a second effect, add finishing layers, frame it. Every hero layout uses it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_second = () => `Mix in a second effect`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_second_none = () => `None`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend = () => `How they meet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_mix = () => `Even mix`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_mix_desc = () => `Half of each, evenly.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_screen = () => `Add light`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_screen_desc = () => `Both glow: where they meet, their light adds up.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_multiply = () => `Darken`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_multiply_desc = () => `Only what is dark in both stays dark.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_difference = () => `Invert`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_difference_desc = () => `Where they cross, the colours flip.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_smoke_key = () => `Through the smoke`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_smoke_key_desc = () => `The second shows where the first is dark.`
+
+
+/**
+ * @param {{ preset: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_strength = (params) => `Strength of ${params.preset}`
+
+
+/**
+ * @param {{ preset: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_tune = (params) => `Tune ${params.preset}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_tune_hint = () => `Its own settings, the same ones it has as the main effect.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers = () => `Finishing layers`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_count = (params) => `${params.count} of ${params.max}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_hint = () => `Drawn top to bottom, each over the whole picture.`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_empty = (params) => `No layers yet. Add film grain, halftone, a light leak and more, up to ${params.max}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_add = () => `Add a layer`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_full = (params) => `${params.max} layers is the most: each one is drawn over the whole picture, so more would slow phones. Remove one to add another.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_too_long = () => `The list is as long as a brand can save: remove a layer or a retired item to add or change one.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layer_in_use = () => `In use`
+
+
+/**
+ * @param {{ layer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layer_strength = (params) => `${params.layer} strength`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layer_still = () => `Left out for visitors who ask for less motion.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_retired = () => `Retired, not drawn`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_retired_surface = () => `Showreel only, not drawn here`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_retired_over_cap = (params) => `Past the ${params.max}, not drawn`
+
+
+/**
+ * @param {{ item: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_remove = (params) => `Remove ${params.item}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame = () => `Frame`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_shader_only = () => `Shader only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_shader_only_desc = () => `Just the picture.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_through_name = () => `Through the name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_through_name_desc = () => `The picture shows only inside the letters of your name.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_name_glows = () => `Name glows`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_name_glows_desc = () => `The picture dims and your name glows out of it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_no_name = () => `Your logo leads alone, so there is no name to frame: it draws as Shader only.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_grain = () => `Film grain`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_grain_desc = () => `Fine grain that moves, like film stock.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_halftone = () => `Halftone print`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_halftone_desc = () => `Printed dots in your colour.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_crt = () => `Scanlines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_crt_desc = () => `An old screen: curved glass and lines.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_chroma = () => `Colour split`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_chroma_desc = () => `Colour edges pull apart around the pointer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_glitch = () => `Signal glitch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_glitch_desc = () => `Bands slip in short bursts, at most 3 a second.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_leak = () => `Light leak`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_leak_desc = () => `Warm light drifts in from the edges.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_duotone = () => `Brand duotone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_duotone_desc = () => `Two of your colours, by light and dark.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_dither = () => `Brand dither`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_dither_desc = () => `Your four colours in a pixel pattern.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_ink = () => `Ink edges`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_ink_desc = () => `Outlines drawn in your colour.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_glow = () => `Glow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_glow_desc = () => `The brightest parts bloom.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_mosaic = () => `Mosaic`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_mosaic_desc = () => `Big soft pixels.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_liquid = () => `Liquid pointer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_liquid_desc = () => `The picture swirls under the pointer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_reeded = () => `Reeded glass`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_reeded_desc = () => `Seen through fluted glass.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_monotone = () => `Brand monotone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_monotone_desc = () => `One colour of yours, by light.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_showreel = () => `Showreel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_showreel_lede = () => `How your film and featured pieces play through the shader.`
+
+
+/**
+ * @param {{ purpose: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_showreel_auto_note = (params) => `${params.purpose} plays your film and pieces as a Showreel.`
+
+
+/**
+ * @param {{ value: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_resolved_hint = (params) => `Your page shows “${params.value}” instead.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_needs_shader = () => `Drawn by the shader. Choose one in Hero Effects to see it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_layout = () => `Layout`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_layout_corner = () => `Corner`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_layout_wide = () => `Wide title`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_layout_name = () => `Name window`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_peek = () => `Featured`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_peek_off = () => `Hero fills the screen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_peek_on = () => `Peeking above the fold`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_pointer = () => `Pointer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_pointer_liquid = () => `Liquid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_pointer_smoke = () => `Smoke`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_pointer_glitch = () => `Glitch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_trans = () => `Between pieces`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_trans_burn = () => `Smoke burn`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_trans_liquid = () => `Liquid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_trans_glitch = () => `Glitch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_trans_light_leak = () => `Light leak`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_surface = () => `Over every piece`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_surface_duotone = () => `Duotone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_surface_colour = () => `Your colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_surface_grain = () => `Film grain`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_push = () => `Pictures`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_push_on = () => `Push in slowly`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_push_off = () => `Hold still`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_band = () => `Shader band`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_under = () => `Under the words`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_fade = () => `Fade`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_edges = () => `All round`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_hint = () => `Where the shader meets a landscape picture or film. A portrait one sits on the right with no band, and the Name layout has none.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_main_hint = () => `On the Showreel, Join or Explore sits at the top beside Follow. The other choices put no button there.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_proof_hint = () => `On the Showreel, Facts reads at the top, and Shelf shows as Facts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_edge = () => `Text over footage`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_edge_shadow = () => `Shadow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_edge_outline = () => `Outline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_title = () => `A hero text colour is hard to read over film`
+
+
+/**
+ * @param {{ ratio: NonNullable<unknown>, floor: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_light = (params) => `On your light theme's background it reaches ${params.ratio}:1, and text this size needs ${params.floor}:1.`
+
+
+/**
+ * @param {{ ratio: NonNullable<unknown>, floor: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_dark = (params) => `On your dark theme's background it reaches ${params.ratio}:1, and text this size needs ${params.floor}:1.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_fix = () => `Over footage, Shadow shifts it just enough to read; Outline keeps your colour and adds an outline. Everywhere else it stays as you set it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_opening = () => `Opening`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_opening_name = () => `Through the letters`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_film = () => `Into the film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_film_name = () => `Through the letters`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_letters_hint = () => `Through the letters means through the big title, or through your name on the Name window.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_film_smoke = () => `Smoke parts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_film_liquid = () => `Liquid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_loop = () => `At the end`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_loop_on = () => `Loop and move on`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_loop_off = () => `Stop on the last piece`
 
 
 /**
@@ -24035,6 +26307,14 @@ export const studio_page_editor_row_moved = (params) => `${params.item} moved to
 
 
 /**
+ * @param {{ item: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_removed = (params) => `Removed ${params.item}`
+
+
+/**
  * @param {{ max: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -27139,6 +29419,54 @@ export const support_amount_outside_stripe = (params) => `${params.amount} · re
 
 
 /**
+ * @param {{ amount: NonNullable<unknown>, lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_short_loss_owed = (params) => `${params.amount} · ${params.lost} back through the lost chargeback · ${params.owed} still owed to the buyer`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, lost: NonNullable<unknown>, paid: NonNullable<unknown>, dates: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_short_loss_paid = (params) => `${params.amount} · ${params.lost} back through the lost chargeback · ${params.paid} paid another way (${params.dates})`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, lost: NonNullable<unknown>, paid: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_short_loss_owed_paid = (params) => `${params.amount} · ${params.lost} back through the lost chargeback · ${params.paid} paid another way · ${params.owed} still owed to the buyer`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_owed_again = (params) => `${params.amount} · ${params.paid} paid another way · chargeback won late · ${params.owed} owed to the buyer again`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, dates: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_paid_again = (params) => `${params.amount} · ${params.paid} paid another way (${params.dates})`
+
+
+/**
+ * @param {{ first: NonNullable<unknown>, second: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_paid_another_way_dates = (params) => `${params.first}, ${params.second}`
+
+
+/**
  * @param {{ date: NonNullable<unknown>, left: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -27624,6 +29952,22 @@ export const support_refund_failed = () => `Failed`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_refund_canceled = () => `Cancelled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_covered = () => `Covered`
+
+
+/**
+ * @param {{ refundId: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_covered_by = (params) => `Included in refund ${params.refundId} (${params.amount}), so nothing more is owed for it.`
 
 
 /**
@@ -28315,6 +30659,390 @@ export const support_blocked_refunded_outside_stripe_body = () => `Don't refund 
 
 
 /**
+ * @param {{ owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_lead = (params) => `${params.owed} is still owed to the buyer.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_why_unavailable = (params) => `This payment was blocked because the item was no longer available, so the buyer is owed all ${params.amount} back.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_why_duplicate = (params) => `This was a second payment for an item the buyer already had, so they're owed all ${params.amount} back.`
+
+
+/**
+ * @param {{ refunded: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_refunded_stripe = (params) => `${params.refunded} has been refunded through Stripe.`
+
+
+/**
+ * @param {{ refunded: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_refunded_elsewhere = (params) => `${params.refunded} was refunded another way, after a refund through Stripe failed.`
+
+
+/**
+ * @param {{ paid: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_paid_before = (params) => `${params.paid} was paid to them another way on ${params.date}.`
+
+
+/**
+ * @param {{ lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_bank = (params) => `The bank returned ${params.lost} through the lost chargeback, and Stripe won't refund a charged-back payment, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_hourly = () => `Until it's marked, support is alerted about it every hour.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_mark = () => `Mark as paid another way`
+
+
+/**
+ * @param {{ lost: NonNullable<unknown>, paid: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_paid_note = (params) => `The bank returned ${params.lost} through the lost chargeback; the other ${params.paid} was paid another way.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown>, buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_title = (params) => `Mark ${params.owed} as paid to ${params.buyer}?`
+
+
+/**
+ * @param {{ item: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_description = (params) => `${params.item} · paid ${params.date} · chargeback lost`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_fact_paid = () => `The buyer paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_fact_lost = () => `Back through the lost chargeback`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_fact_owed = () => `Still owed, to pay another way`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_paid_first_lead = (params) => `Only mark it once ${params.buyer} has the money.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_paid_first = () => `This doesn't send anything: it records that you paid the rest outside Stripe.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_follows = () => `The hourly alert stops for this payment, and the charge can't be refunded through Stripe again. A mark can't be undone here.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown>, paid: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_adds = (params) => `This adds ${params.owed} to the ${params.paid} already marked: ${params.total} paid another way in all.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_dialog_submit = (params) => `Mark ${params.owed} as paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_failed_lead = () => `We couldn't save that, so nothing has changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_failed = () => `Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_session_ended = () => `Nothing was marked. Sign in again, then reload this page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_done_lead = () => `Marked as paid another way.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown>, buyer: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_done = (params) => `${params.owed} to ${params.buyer}, on ${params.date}. The hourly alert stops for this payment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_already_lead = () => `Already marked as paid another way`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_already = (params) => `on ${params.date}, so nothing changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_changed_lead = () => `What's owed on this payment changed since it was loaded, so nothing was marked.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_changed = () => `It has been reloaded: check it again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_refused_not_short = () => `Nothing is owed on this payment any more, so nothing was marked: the buyer has all of it back.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_refused_no_lost_dispute = () => `This payment no longer has a lost chargeback, so nothing was marked. The bank may have decided it again: check the chargeback.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_short_loss_refused_not_blocked = () => `Only a blocked payment is owed the rest of a lost chargeback, so nothing was marked.`
+
+
+/**
+ * @param {{ owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_lead = (params) => `${params.owed} is owed to the buyer again.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_body_unavailable = (params) => `This payment was blocked, so the buyer is owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_body_duplicate = (params) => `This was a second payment for an item the buyer already had, so they're owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, refunded: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_refunded_unavailable = (params) => `This payment was blocked, so the buyer is owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them, and ${params.refunded} has been refunded through Stripe. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, refunded: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_refunded_duplicate = (params) => `This was a second payment for an item the buyer already had, so they're owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them, and ${params.refunded} has been refunded through Stripe. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, elsewhere: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_elsewhere_unavailable = (params) => `This payment was blocked, so the buyer is owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them, and ${params.elsewhere} was refunded another way. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, elsewhere: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_elsewhere_duplicate = (params) => `This was a second payment for an item the buyer already had, so they're owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them, and ${params.elsewhere} was refunded another way. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, refunded: NonNullable<unknown>, elsewhere: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_both_unavailable = (params) => `This payment was blocked, so the buyer is owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them, ${params.refunded} has been refunded through Stripe, and ${params.elsewhere} was refunded another way. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, paid: NonNullable<unknown>, date: NonNullable<unknown>, lost: NonNullable<unknown>, refunded: NonNullable<unknown>, elsewhere: NonNullable<unknown>, owed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_both_duplicate = (params) => `This was a second payment for an item the buyer already had, so they're owed all ${params.amount} back. ${params.paid} was paid to them another way on ${params.date}, after the chargeback was lost. The chargeback was then won late, so the bank took back the ${params.lost} it had returned to them, ${params.refunded} has been refunded through Stripe, and ${params.elsewhere} was refunded another way. This charge can't be refunded through Stripe, so pay the other ${params.owed} another way, such as a bank transfer, then mark it here.`
+
+
+/**
+ * @param {{ item: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_dialog_description = (params) => `${params.item} · paid ${params.date} · chargeback won late`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_fact_refunded = () => `Refunded through Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_fact_refunded_elsewhere = () => `Refunded another way`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_fact_paid_before = (params) => `Paid another way on ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_fact_owed = () => `Owed again, to pay another way`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_dialog_follows = () => `The hourly alert stops for this payment. A mark can't be undone here.`
+
+
+/**
+ * @param {{ paid: NonNullable<unknown>, dates: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_again_paid_note = (params) => `The chargeback was lost, then won late: ${params.paid} was paid another way (${params.dates}).`
+
+
+/**
  * @param {{ amount: NonNullable<unknown>, buyer: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -28800,6 +31528,38 @@ export const support_queue_tab_debts = () => `Creator debts`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_queue_failed_intro = () => `The buyer's bank sent these refunds back, so the money is in the platform's Stripe balance again. The payees' shares stay taken back until you decide.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_waiting_badge = () => `Waiting for the chargeback`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_waiting_note = (params) => `Opened ${params.date}. Nothing can be settled while the bank decides: if it's won, settle it here; if it's lost, what's still owed moves to the charge page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_waiting_refund_badge = () => `Waiting for the payment's refund`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_waiting_refund_note = () => `The payment's own refund includes this. If Stripe won't make it, support is alerted to refund the payment by hand.`
 
 
 /**
@@ -29583,6 +32343,86 @@ export const support_settle_gone = () => `This is no longer in the queue. The li
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_settle_waiting_lead = () => `This refund is waiting for the chargeback.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_waiting = () => `Nothing was settled. If the chargeback is won, settle it here; if it's lost, the charge page shows what's still owed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_on_charge_lead = () => `Settle this on the charge page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_on_charge = () => `The buyer's chargeback was lost, so the bank has returned some or all of this payment to them: don't pay this refund's amount. The charge page shows what's still owed. Nothing was settled here, and the list is up to date now.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_open_charge = () => `Open the charge`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_exceeds_paid_lead = (params) => `Only ${params.amount} more can be paid back on this payment, so this wasn't settled.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_exceeds_paid = (params) => `Refund ${params.amount} on the charge page; that settles this one.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_exceeds_paid_none = () => `Everything paid on this payment has already been paid back, so this wasn't settled.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_awaits_late_win = () => `This refund is waiting for the late win's refund to finish, so nothing was settled.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_awaits_payment_refund = () => `This refund is waiting for the payment's own refund, which includes it, so nothing was settled.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_settle_clawback_running = () => `This refund's clawback is still running. Try again later.`
 
 
@@ -29691,6 +32531,38 @@ export const support_repay_late_win_body = () => `Refund the buyer another way, 
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_unavailable_lead = () => `There's no access to give back: the item was no longer available.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_duplicate_lead = (params) => `There's no access to give back: this was a second payment for something ${params.buyer} already has.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_still_owed_body = (params) => `${params.buyer} is still owed this refund. Refund them another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_blocked_payment_lead = () => `There's no access to give back: this payment was blocked.`
+
+
+/**
  * @param {{ buyer: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -29784,6 +32656,30 @@ export const support_repay_off_needs_person = () => `Re-pay is off: this one nee
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_repay_off_late_win = () => `Re-pay is off: this refund pays back a buyer who paid twice. Settle it another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_unavailable = () => `Re-pay is off: the item was no longer available, so the buyer is still owed this refund. Settle it another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_duplicate = () => `Re-pay is off: this was a second payment for something the buyer already has, so they are still owed this refund. Settle it another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_blocked_payment = () => `Re-pay is off: this payment was blocked, so the buyer is still owed this refund. Settle it another way.`
 
 
 /**

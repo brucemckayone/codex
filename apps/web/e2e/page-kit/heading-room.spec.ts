@@ -34,9 +34,11 @@
  * (0–4) narrow the run, to calibrate a plant fast; `ROOM_OUT=<file.json>`
  * writes every heading's room and line.
  */
+
 import { writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { SECTION_LAYOUTS } from '../../src/lib/page-builder/kit/model/ids';
+import { orgOrigin } from '../helpers/origin';
 import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 test.skip(
@@ -101,7 +103,7 @@ test('a heading is fitted to the line its layout gives it', async ({
           // visible, so the page is waited for, not its first band.
           try {
             await page.goto(
-              `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}&brand=0&theme=light&chrome=0&${extra}${bare ? '&media=off' : ''}`
+              `${orgOrigin('studio-alpha')}/studio/page-kit?style=${style}&brand=0&theme=light&chrome=0&${extra}${bare ? '&media=off' : ''}`
             );
             await page
               .locator('.lp .lp-section')

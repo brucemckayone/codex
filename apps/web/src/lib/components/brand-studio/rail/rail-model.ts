@@ -27,7 +27,9 @@ export type RailControlId =
   | 'hero-text'
   | 'hero-layout'
   | 'hero-effects'
-  | 'hero-film';
+  | 'hero-film'
+  | 'hero-colours'
+  | 'hero-designer';
 
 export interface RailControlMeta {
   readonly id: RailControlId;
@@ -175,6 +177,14 @@ export const RAIL_GROUPS: readonly RailGroupMeta[] = [
           'background',
           'preset',
           'canvas',
+          // Combine (WP-9): the second preset, its blend, layers and frame
+          'combine',
+          'blend',
+          'layer',
+          'grain',
+          'halftone',
+          'glitch',
+          'frame',
         ],
         affects: ['Hero background'],
       },
@@ -185,6 +195,46 @@ export const RAIL_GROUPS: readonly RailGroupMeta[] = [
         label: 'Film',
         icon: '▶',
         keywords: ['film', 'intro', 'video', 'trailer'],
+        affects: ['Hero section'],
+      },
+      {
+        // The hero's own colours (Fine-tune's Hero group, moved here: the
+        // owner's, 2026-11-23, "the hero is edited in one place").
+        id: 'hero-colours',
+        label: 'Hero colours',
+        icon: '◐',
+        keywords: [
+          'title colour',
+          'text colour',
+          'heading colour',
+          'button colour',
+          'glass',
+          'dividers',
+          'hero text',
+        ],
+        affects: ['Hero section'],
+      },
+      {
+        // The purpose-first hero ($lib/org-hero/hero-config.ts): what the
+        // hero is for, and the composition that serves it. Last in the group,
+        // with words no other control uses, so it never takes a search match
+        // from Layout, Effects or Film.
+        id: 'hero-designer',
+        label: 'Composition',
+        icon: '✦',
+        keywords: [
+          'purpose',
+          'composition',
+          'spotlight',
+          'showcase',
+          'showreel',
+          // the Showreel's own options (WP-9)
+          'reel',
+          'transition',
+          'between pieces',
+          'pointer',
+          'loop',
+        ],
         affects: ['Hero section'],
       },
     ],

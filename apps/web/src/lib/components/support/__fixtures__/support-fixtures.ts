@@ -8,6 +8,7 @@
 import type {
   ChargebackRow,
   ChargeDetail,
+  ChargeShortLoss,
   ChargeSummary,
   CreatorDebtItem,
   CreatorDebtPerson,
@@ -16,9 +17,11 @@ import type {
   FeeNoticeItem,
   HeldPriceMove,
   HistoryLine,
+  OwedAgainAfterLateWin,
   OwedToCreatorItem,
   RefundPreview,
   RefundRow,
+  ShortAfterLoss,
   Slice,
   StoppedPriceChange,
   StripeHeldTakeBack,
@@ -88,6 +91,7 @@ export function refundRow(overrides: Partial<RefundRow> = {}): RefundRow {
     notifiedAt: '2026-10-20T08:13:00.000Z',
     requestedBy: { userId: 'user-jordan', name: 'Jordan Reid', deleted: false },
     resolution: null,
+    coveredBy: null,
     ...overrides,
   };
 }
@@ -144,6 +148,7 @@ export function chargeDetail(
     split: { takenTotalCents: 400, platformFeeShareBps: 1000 },
     refunds: [refundRow()],
     chargebacks: [],
+    shortLoss: null,
     ...overrides,
   };
 }
@@ -250,6 +255,11 @@ export function failedRefund(
     accessRestoreBlockedReason: null,
     // An ordinary failed refund: not a late win's own.
     isLateWinRefund: false,
+    // Nor a blocked payment's (a duplicate or a blocked sale): Re-pay is on offer.
+    blockedPayment: null,
+    // No open chargeback holds it (owner D67): both settlements are on offer.
+    waitingForChargeback: null,
+    waitingForPaymentRefund: false,
     ...overrides,
   };
 }
@@ -280,6 +290,129 @@ export const LIFTED_WINDOW = {
   isOpen: true,
   liftedByLateWin: true,
 };
+
+/** The short-loss mockup's lost dispute (pause-trials/support-short-loss.html). */
+export const SHORT_LOSS_DISPUTE_ID = 'du_1QjK7pXk9vRb88aQ';
+
+/**
+ * The short-loss mockup (owner D59-D61; pause-trials/support-short-loss.html):
+ * Ellie Marsh's £15.00 blocked sale of a deleted item, paid 1 Oct, its £10.00
+ * chargeback lost, £5.00 still owed. Before the mark the lost chargeback
+ * blocks a refund; after it (`paidAnotherWayOn`), the refunded-outside-Stripe
+ * mark does. Marked with nothing owed is `{ owedCents: 0, paidAnotherWayCents,
+ * paidAnotherWayOn }` (S3); owed more after a mark is the same with
+ * `owedCents` above 0 (owner D66, B4).
+ */
+export function shortLossDetail(
+  overrides: Partial<ShortAfterLoss> = {}
+): ChargeDetail {
+  const shortLoss: ShortAfterLoss = {
+    stage: 'short',
+    stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+    kind: 'unavailable',
+    lostCents: 1000,
+    refundedThroughStripeCents: 0,
+    refundedElsewhereCents: 0,
+    paidAnotherWayCents: null,
+    paidAnotherWayOn: null,
+    owedCents: 500,
+    ...overrides,
+  };
+  return shortLossCharge(shortLoss, {
+    blocked: shortLoss.paidAnotherWayOn
+      ? 'refunded_outside_stripe'
+      : 'chargeback',
+    refundedOutsideStripeOn: shortLoss.paidAnotherWayOn,
+    chargeback: { status: 'lost', lateWonOn: null },
+  });
+}
+
+/**
+ * The same sale owed again (owner D63; the mockup's A1-A4): £5.00 was paid
+ * another way on 17 Nov, then the chargeback was won late on 1 Dec, so the
+ * bank took the £10.00 back from Ellie: £10.00 is owed again. The first
+ * mark keeps the charge refunded outside Stripe; after the second mark
+ * (`{ owedCents: 0, paidAnotherWayCents: 1500, paidAgainOn }`: each mark
+ * adds, owner D66), the refund card says how both payments were made.
+ */
+export function owedAgainDetail(
+  overrides: Partial<OwedAgainAfterLateWin> = {}
+): ChargeDetail {
+  const shortLoss: OwedAgainAfterLateWin = {
+    stage: 'owed_again',
+    stripeDisputeId: SHORT_LOSS_DISPUTE_ID,
+    kind: 'unavailable',
+    lostCents: 1000,
+    paidAnotherWayCents: 500,
+    paidAnotherWayOn: '2026-11-17T10:00:00.000Z',
+    lateWonOn: '2026-12-01T10:00:00.000Z',
+    refundedThroughStripeCents: 0,
+    refundedElsewhereCents: 0,
+    owedCents: 1000,
+    paidAgainOn: null,
+    ...overrides,
+  };
+  return shortLossCharge(shortLoss, {
+    blocked: 'refunded_outside_stripe',
+    refundedOutsideStripeOn: shortLoss.paidAnotherWayOn,
+    chargeback: { status: 'won', lateWonOn: shortLoss.lateWonOn },
+  });
+}
+
+/** The mockup's £15.00 blocked sale, carrying `shortLoss`. */
+function shortLossCharge(
+  shortLoss: ChargeShortLoss,
+  state: {
+    blocked: ChargeDetail['refundable']['blocked'];
+    refundedOutsideStripeOn: string | null;
+    chargeback: Pick<ChargebackRow, 'status' | 'lateWonOn'>;
+  }
+): ChargeDetail {
+  const base = chargeDetail();
+  return chargeDetail({
+    charge: {
+      ...base.charge,
+      amountCents: 1500,
+      refundedCents: 0,
+      paidAt: '2026-10-01T13:32:00.000Z',
+    },
+    source: {
+      type: 'purchase',
+      purchaseId: 'purchase-1',
+      status: 'refunded',
+      item: {
+        kind: 'content',
+        id: 'content-1',
+        title: 'Sleep Reset Programme',
+        deleted: true,
+      },
+    },
+    window: {
+      closesAt: '2026-10-15T13:32:00.000Z',
+      isOpen: false,
+      liftedByLateWin: false,
+    },
+    refundable: {
+      maxCents: 1500,
+      blocked: state.blocked,
+      refundedOutsideStripeOn: state.refundedOutsideStripeOn,
+    },
+    refundCount: 0,
+    refunds: [],
+    chargebacks: [
+      chargebackRow({
+        id: SHORT_LOSS_DISPUTE_ID,
+        amountCents: 1000,
+        reason: 'fraudulent',
+        createdAt: '2026-10-06T09:00:00.000Z',
+        respondBy: null,
+        lostOn: '2026-10-20T09:00:00.000Z',
+        ...state.chargeback,
+      }),
+    ],
+    shortLoss,
+  });
+}
 
 /** A chargeback on the charge, as `ChargebacksCard` lists it: open, by default. */
 export function chargebackRow(

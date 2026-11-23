@@ -158,6 +158,73 @@ describe('Failed refunds table', () => {
   });
 });
 
+// Owner D67, D72 (mockup B1): a blocked payment's failed refund while its
+// chargeback is open waits, with no settle; an ordinary row keeps both.
+describe('a failed refund waiting for its chargeback', () => {
+  test('in place of both actions: the badge, and when it was opened; the ordinary row keeps both', () => {
+    const onSettle = vi.fn();
+    render(FailedRefundsTable, {
+      items: [
+        failedRefund({
+          waitingForChargeback: {
+            stripeDisputeId: 'du_1QjK7pXk9vRb88aQ',
+            openedOn: '2026-10-06T09:00:00.000Z',
+          },
+        }),
+        failedRefund({ refundId: 'r-2' }),
+      ],
+      onSettle,
+    });
+    const [waiting, ordinary] = [
+      ...document.querySelectorAll('table [data-testid="failed-refund-row"]'),
+    ];
+    const note = waiting?.querySelector(
+      '[data-testid="waiting-for-chargeback"]'
+    );
+    expect(note?.textContent?.replace(/\s+/g, ' ')).toContain(
+      m.support_queue_waiting_badge()
+    );
+    expect(note?.textContent?.replace(/\s+/g, ' ')).toContain(
+      m.support_queue_waiting_note({ date: '6 Oct 2026' })
+    );
+    expect(waiting?.querySelectorAll('button')).toHaveLength(0);
+    expect(
+      ordinary?.querySelector('[data-testid="waiting-for-chargeback"]')
+    ).toBeNull();
+    expect(ordinary?.querySelectorAll('button')).toHaveLength(2);
+  });
+
+  // Review r8: a blocked payment still owed its own refund waits for it,
+  // with no settle: that refund includes this one and covers it (D73).
+  test('one whose blocked payment is still owed its own refund: the badge and its note in place of both actions', () => {
+    const onSettle = vi.fn();
+    render(FailedRefundsTable, {
+      items: [
+        failedRefund({
+          blockedPayment: 'unavailable',
+          waitingForPaymentRefund: true,
+        }),
+        failedRefund({ refundId: 'r-2' }),
+      ],
+      onSettle,
+    });
+    const [waiting, ordinary] = [
+      ...document.querySelectorAll('table [data-testid="failed-refund-row"]'),
+    ];
+    const note = waiting?.querySelector(
+      '[data-testid="waiting-for-payment-refund"]'
+    );
+    // The owner's words (D79).
+    expect(note?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      "Waiting for the payment's refund The payment's own refund includes this. If Stripe won't make it, support is alerted to refund the payment by hand."
+    );
+    expect(waiting?.querySelectorAll('button')).toHaveLength(0);
+    expect(
+      ordinary?.querySelector('[data-testid="waiting-for-payment-refund"]')
+    ).toBeNull();
+  });
+});
+
 describe('a row whose re-pay was refused for a later cause', () => {
   test('keeps Re-pay off, says why beside it, and still offers "refunded another way"', () => {
     const blocked = failedRefund();
@@ -210,6 +277,39 @@ describe('a row whose re-pay was refused for a later cause', () => {
       row?.querySelector('[data-testid="repay-off"]')?.textContent
     ).toContain(m.support_repay_off_late_win());
     expect(buttonIn(m.support_action_elsewhere())?.disabled).toBe(false);
+  });
+
+  // Owner D55, widened to duplicates by D57: each kind says its own why. A
+  // duplicate's buyer kept the item, so its note never says it is gone.
+  test.each([
+    ['a blocked sale', 'unavailable', () => m.support_repay_off_unavailable()],
+    ['a duplicate', 'duplicate', () => m.support_repay_off_duplicate()],
+  ] as const)('%s\'s refund never offers Re-pay, says why in its own words, and still offers "refunded another way"', (_shape, blockedPayment, note) => {
+    const onSettle = vi.fn();
+    render(FailedRefundsTable, {
+      items: [failedRefund({ blockedPayment })],
+      onSettle,
+    });
+    const row = document.querySelector<HTMLElement>(
+      'table [data-testid="failed-refund-row"]'
+    );
+    const buttonIn = (label: string) =>
+      [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (b) => b.textContent?.includes(label)
+      );
+    // Known from the queue itself: nothing had to be refused first.
+    expect(repayBlockReason(failedRefund().refundId)).toBeNull();
+    expect(buttonIn(m.support_action_repay())?.disabled).toBe(true);
+    const off = row?.querySelector('[data-testid="repay-off"]')?.textContent;
+    expect(off).toContain(note());
+    if (blockedPayment === 'duplicate') {
+      expect(off).not.toContain('no longer available');
+    }
+    buttonIn(m.support_action_elsewhere())?.click();
+    expect(onSettle).toHaveBeenCalledWith(
+      failedRefund({ blockedPayment }),
+      'refunded_elsewhere'
+    );
   });
 });
 
@@ -889,6 +989,128 @@ describe('Settling a failed refund', () => {
     );
   });
 
+  // Owner D66, D67 (mockup B1, B2): a page older than the chargeback's
+  // decision gets the refusal; the dialog closes with a notice linking to
+  // the charge, and nothing was settled.
+  test.each([
+    [
+      'chargeback_open',
+      'info',
+      m.support_settle_waiting_lead(),
+      m.support_settle_waiting(),
+    ],
+    [
+      'chargeback_lost',
+      'warning',
+      m.support_settle_on_charge_lead(),
+      m.support_settle_on_charge(),
+    ],
+  ] as const)('a refund its chargeback decides (%s) closes with a notice that links the charge', async (reason, variant, lead, said) => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'REFUND_DECIDED_BY_CHARGEBACK', reason })
+    );
+    const notices = renderDialog('refunded_elsewhere');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([
+      {
+        variant,
+        lead,
+        text: said,
+        link: {
+          href: '/admin/refunds/ch_3QdP7aLk2vRb11aA',
+          label: m.support_settle_open_charge(),
+        },
+      },
+    ]);
+    expect(submit()).toBeNull();
+  });
+
+  // Review r8: a settle that would pay back more than was paid (412), and
+  // one whose payment's own refund is still being made (422), close with a
+  // notice linking the charge; nothing was settled.
+  test('a settle that would pay back more than was paid closes with a notice naming what is left, linking the charge', async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({
+        status: 412,
+        detailsCode: 'SETTLE_EXCEEDS_PAID',
+        maxCents: 500,
+      })
+    );
+    const notices = renderDialog('refunded_elsewhere');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([
+      {
+        variant: 'warning',
+        lead: m.support_settle_exceeds_paid_lead({ amount: '£5.00' }),
+        text: m.support_settle_exceeds_paid({ amount: '£5.00' }),
+        link: {
+          href: '/admin/refunds/ch_3QdP7aLk2vRb11aA',
+          label: m.support_settle_open_charge(),
+        },
+      },
+    ]);
+    expect(submit()).toBeNull();
+  });
+
+  test.each([
+    ['late_win', m.support_settle_awaits_late_win()],
+    ['blocked_refund', m.support_settle_awaits_payment_refund()],
+  ] as const)("a refund waiting for its payment's own refund (%s) closes with a one-sentence notice linking the charge", async (reason, said) => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'REFUND_AWAITS_PAYMENT_REFUND', reason })
+    );
+    const notices = renderDialog('refunded_elsewhere');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([
+      {
+        variant: 'info',
+        text: said,
+        link: {
+          href: '/admin/refunds/ch_3QdP7aLk2vRb11aA',
+          label: m.support_settle_open_charge(),
+        },
+      },
+    ]);
+  });
+
+  test.each([
+    { detailsCode: 'SETTLE_EXCEEDS_PAID', maxCents: null, reason: null },
+    {
+      detailsCode: 'REFUND_AWAITS_PAYMENT_REFUND',
+      maxCents: null,
+      reason: 'new',
+    },
+  ])('$detailsCode without what its notice needs keeps the dialog open as a failure', async (refusal) => {
+    resolveFailedRefund.mockResolvedValue(failure(refusal));
+    const notices = renderDialog('refunded_elsewhere');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([]);
+    expect(
+      document
+        .querySelector('[data-testid="settle-problem"]')
+        ?.getAttribute('data-problem')
+    ).toBe('failed');
+  });
+
+  test('a reason this page does not know keeps the dialog open as a failure', async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'REFUND_DECIDED_BY_CHARGEBACK', reason: 'new' })
+    );
+    const notices = renderDialog('refunded_elsewhere');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([]);
+    expect(
+      document
+        .querySelector('[data-testid="settle-problem"]')
+        ?.getAttribute('data-problem')
+    ).toBe('failed');
+  });
+
   test('a clawback step only a person can read: settle it by hand, and Re-pay stays off', async () => {
     resolveFailedRefund.mockResolvedValue(
       failure({ detailsCode: 'REFUND_CLAWBACK_NEEDS_PERSON' })
@@ -937,6 +1159,144 @@ describe('Settling a failed refund', () => {
     expect(text()).not.toContain(
       m.support_repay_access_lead({ buyer: 'Daniel Price' })
     );
+  });
+
+  // Owner D55, widened to duplicates by D57: each kind in its own words.
+  test.each([
+    [
+      'a blocked sale',
+      'unavailable',
+      'unavailable_sale',
+      "There's no access to give back: the item was no longer available. Daniel Price is still owed this refund. Refund them another way.",
+    ],
+    [
+      'a duplicate',
+      'duplicate',
+      'duplicate_payment',
+      "There's no access to give back: this was a second payment for something Daniel Price already has. Daniel Price is still owed this refund. Refund them another way.",
+    ],
+  ] as const)("%s's refund, opened for re-paying: no access to give back, the buyer is still owed it, and nothing to submit", async (_shape, blockedPayment, problemCode, words) => {
+    const notices = renderDialog(
+      'creators_repaid',
+      failedRefund({ blockedPayment })
+    );
+    const problem = document.querySelector('[data-testid="settle-problem"]');
+    expect(problem?.getAttribute('data-problem')).toBe(problemCode);
+    expect(problem?.getAttribute('data-variant')).toBe('warning');
+    expect(problem?.textContent?.replace(/\s+/g, ' ').trim()).toBe(words);
+    expect(submit()?.disabled).toBe(true);
+    // Nothing is promised about access, and nothing is sent.
+    expect(text()).not.toContain(
+      m.support_repay_access_lead({ buyer: 'Daniel Price' })
+    );
+    typeNote('Re-pay.');
+    submit()?.click();
+    await settled();
+    expect(resolveFailedRefund).not.toHaveBeenCalled();
+    expect(notices).toHaveLength(0);
+  });
+
+  test.each([
+    [
+      'a blocked sale',
+      'unavailable',
+      'unavailable_sale',
+      () => m.support_repay_unavailable_lead(),
+    ],
+    [
+      'a duplicate',
+      'duplicate',
+      'duplicate_payment',
+      () => m.support_repay_duplicate_lead({ buyer: 'Daniel Price' }),
+    ],
+  ] as const)("%s's refund the server refuses (BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE, a page older than its flag): it says why by the kind it names, and Re-pay stays off", async (_shape, reason, problemCode, lead) => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE', reason })
+    );
+    const notices = renderDialog('creators_repaid');
+    typeNote('Re-pay.');
+    submit()?.click();
+    await settled();
+    const problem = document.querySelector('[data-testid="settle-problem"]');
+    expect(problem?.getAttribute('data-problem')).toBe(problemCode);
+    expect(problem?.textContent).toContain(lead());
+    expect(problem?.textContent).toContain(
+      m.support_repay_still_owed_body({ buyer: 'Daniel Price' })
+    );
+    expect(notices).toHaveLength(0);
+    expect(submit()?.disabled).toBe(true);
+    expect(repayBlockReason(failedRefund().refundId)).toBe(problemCode);
+  });
+
+  // Review r2: a refusal naming neither kind (or none) gets words that fit
+  // both, never one kind's by default.
+  test.each([
+    ['no reason', null],
+    ['a reason it does not know', 'something_new'],
+  ] as const)('a blocked payment refusal with %s says only that the payment was blocked, and Re-pay stays off', async (_shape, reason) => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE', reason })
+    );
+    const notices = renderDialog('creators_repaid');
+    typeNote('Re-pay.');
+    submit()?.click();
+    await settled();
+    const problem = document.querySelector('[data-testid="settle-problem"]');
+    expect(problem?.getAttribute('data-problem')).toBe('blocked_payment');
+    const words = problem?.textContent?.replace(/\s+/g, ' ').trim();
+    expect(words).toBe(
+      "There's no access to give back: this payment was blocked. Daniel Price is still owed this refund. Refund them another way."
+    );
+    expect(words).not.toContain('no longer available');
+    expect(words).not.toContain('second payment');
+    expect(notices).toHaveLength(0);
+    expect(submit()?.disabled).toBe(true);
+    expect(repayBlockReason(failedRefund().refundId)).toBe('blocked_payment');
+  });
+
+  test('a row whose re-pay a kindless refusal blocked says so in words that fit both kinds', () => {
+    markRepayBlocked(failedRefund().refundId, 'blocked_payment');
+    render(FailedRefundsTable, { items: [failedRefund()], onSettle: vi.fn() });
+    const off = document.querySelector(
+      'table [data-testid="failed-refund-row"] [data-testid="repay-off"]'
+    )?.textContent;
+    expect(off).toContain(m.support_repay_off_blocked_payment());
+  });
+
+  test.each([
+    ['a blocked sale', 'unavailable'],
+    ['a duplicate', 'duplicate'],
+  ] as const)("%s's refund is still settled refunded another way", async (_shape, blockedPayment) => {
+    resolveFailedRefund.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        refundId: failedRefund().refundId,
+        resolution: 'refunded_elsewhere',
+        resolvedAt: NOW.toISOString(),
+        repaid: [],
+        accessRestored: false,
+        accessNotRestoredReason: null,
+        systemSettled: [],
+      },
+    });
+    const notices = renderDialog(
+      'refunded_elsewhere',
+      failedRefund({ blockedPayment })
+    );
+    expect(document.querySelector('[data-testid="settle-problem"]')).toBeNull();
+    expect(submit()?.disabled).toBe(false);
+    submit()?.click();
+    await settled();
+    expect(resolveFailedRefund).toHaveBeenCalledWith({
+      refundId: failedRefund().refundId,
+      body: { resolution: 'refunded_elsewhere', note: '' },
+    });
+    expect(notices).toEqual([
+      {
+        variant: 'success',
+        text: m.support_settled_elsewhere({ buyer: 'Daniel Price' }),
+      },
+    ]);
   });
 
   test('a prediction the server couldn’t make says so, and promises nothing', () => {

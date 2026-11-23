@@ -65,7 +65,14 @@ export const refunds = pgTable(
       onDelete: 'set null',
     }),
 
-    /** How support settled a failed refund. */
+    /**
+     * How a failed refund was settled: by support (`refunded_elsewhere`,
+     * `creators_repaid`), or by the platform (`covered_by_refund`, owner
+     * D73): a refund of everything the payment owed, made once this one had
+     * failed, included it (`coveredByRefundId`). Only `refunded_elsewhere`
+     * counts as the buyer's money back; a covered one counts nothing, since
+     * the refund that covered it counts, and its clawback stands.
+     */
     resolution: varchar('resolution', { length: 32 }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     resolvedByUserId: text('resolved_by_user_id').references(() => users.id, {
@@ -73,6 +80,16 @@ export const refunds = pgTable(
     }),
     /** Support's note on the settlement: a money record, not a log line (Q6). */
     resolutionNote: text('resolution_note'),
+    /**
+     * The `re_` refund that covered this failed one (`covered_by_refund`,
+     * owner D73): the late win's refund, or the blocked payment's own, of
+     * everything still owed when it was asked for, so it paid this one
+     * back. Set with the resolution, by the platform, so `resolved_by_user_id`
+     * stays null. Not a foreign key: the covering refund's own row is
+     * recorded by the sync after the cover. Only a covered row has it
+     * (`check_refunds_covered_by`).
+     */
+    coveredByRefundId: varchar('covered_by_refund_id', { length: 255 }),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -99,7 +116,11 @@ export const refunds = pgTable(
     ),
     check(
       'check_refunds_resolution',
-      sql`${table.resolution} IS NULL OR (${table.status} = 'failed' AND ${table.resolution} IN ('refunded_elsewhere', 'creators_repaid'))`
+      sql`${table.resolution} IS NULL OR (${table.status} = 'failed' AND ${table.resolution} IN ('refunded_elsewhere', 'creators_repaid', 'covered_by_refund'))`
+    ),
+    check(
+      'check_refunds_covered_by',
+      sql`(${table.coveredByRefundId} IS NULL) = (${table.resolution} IS DISTINCT FROM 'covered_by_refund')`
     ),
     check(
       'check_refunds_resolved_pair',
@@ -131,4 +152,7 @@ export type RefundStatus =
   | 'succeeded'
   | 'failed'
   | 'canceled';
-export type RefundResolution = 'refunded_elsewhere' | 'creators_repaid';
+export type RefundResolution =
+  | 'refunded_elsewhere'
+  | 'creators_repaid'
+  | 'covered_by_refund';

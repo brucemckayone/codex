@@ -1427,7 +1427,7 @@ jobs:
 
       # `pnpm test:e2e` is `turbo run test:e2e --filter=web`, in turbo's strict
       # env mode. Specs that write fixtures through dbHttp
-      # (helpers/subscription.ts, brand-editor-hero-effects.spec.ts) need
+      # (helpers/subscription.ts, subscription/01-studio-connect-onboarding) need
       # DATABASE_URL_LOCAL_PROXY, which `tasks["test:e2e"].passThroughEnv`
       # declares. Not --env-mode=loose: turbo hashes the mode, so every
       # dependency would be rebuilt under the workers already serving it.

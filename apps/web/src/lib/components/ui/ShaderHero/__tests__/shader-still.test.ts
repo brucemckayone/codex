@@ -1,8 +1,8 @@
 /**
- * The studio's copy of the org's moving background (Codex-61zsk.73, #20b):
- * the channel that holds it, and the copy itself. jsdom has no 2D canvas and
- * no object URLs, so both are stand-ins; what is checked is what reaches the
- * channel, and that a copy that cannot be made leaves the glow.
+ * The studio's copy of the org's moving background: the channel that holds it,
+ * and the copy itself. jsdom has no 2D canvas and no object URLs, so both are
+ * stand-ins; what is checked is what reaches the channel, and that a copy that
+ * cannot be made leaves the glow.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureStill, STILL_SIZE, shaderStill } from '../shader-still.svelte';

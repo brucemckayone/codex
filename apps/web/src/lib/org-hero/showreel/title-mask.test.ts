@@ -1,0 +1,358 @@
+/**
+ * The title as the film's window on Corner and Wide: its words where the page
+ * lays them out, taken back by the words' swap transform, drawn white on black
+ * in the title's font, and no mask at all when there is no word to draw (so the
+ * motion falls back). jsdom lays nothing out, so each word's Range box is given
+ * here.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  drawTitleMask,
+  titleWords,
+  translationOf,
+  wordsAt,
+} from './title-mask';
+
+describe('wordsAt', () => {
+  it('finds each word and where it sits, past any whitespace', () => {
+    expect(wordsAt('\n  Of Blood &  Bones ')).toEqual([
+      { word: 'Of', start: 3, end: 5 },
+      { word: 'Blood', start: 6, end: 11 },
+      { word: '&', start: 12, end: 13 },
+      { word: 'Bones', start: 15, end: 20 },
+    ]);
+    expect(wordsAt('   ')).toEqual([]);
+  });
+});
+
+describe('translationOf', () => {
+  it('reads a 2D and a 3D matrix’s translation, and none for none', () => {
+    expect(translationOf('none')).toEqual({ x: 0, y: 0 });
+    expect(translationOf('')).toEqual({ x: 0, y: 0 });
+    expect(translationOf('matrix(1, 0, 0, 1, 4, 12)')).toEqual({ x: 4, y: 12 });
+    expect(
+      translationOf('matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -3, 8, 0, 1)')
+    ).toEqual({ x: -3, y: 8 });
+  });
+});
+
+describe('titleWords and drawTitleMask', () => {
+  /** The boxes jsdom cannot lay out: word i of the title, in a row. */
+  const box = (i: number, shift = 0) => ({
+    left: 40 + 120 * i,
+    top: 300 + shift,
+    width: 100,
+    height: 80,
+  });
+  let rise = 0;
+  let style: Partial<CSSStyleDeclaration> = {};
+  let drawn: {
+    text: string;
+    x: number;
+    y: number;
+    font: string;
+    baseline: string;
+  }[] = [];
+  let context: Record<string, unknown> | null = null;
+  /** The font's content area as measureText reports it (`fontBoundingBox*`). */
+  let metrics = { fontBoundingBoxAscent: 62, fontBoundingBoxDescent: 18 };
+
+  beforeEach(() => {
+    rise = 0;
+    style = { transform: 'none' };
+    drawn = [];
+    metrics = { fontBoundingBoxAscent: 62, fontBoundingBoxDescent: 18 };
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value(this: Range) {
+        const before = (this.startContainer.textContent ?? '')
+          .slice(0, this.startOffset)
+          .trim();
+        const i = before ? before.split(/\s+/).length : 0;
+        return box(i, rise);
+      },
+    });
+    for (const [side, size] of [
+      ['clientWidth', 1280],
+      ['clientHeight', 800],
+    ] as const)
+      Object.defineProperty(document.documentElement, side, {
+        configurable: true,
+        value: size,
+      });
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el) => {
+      const computed = real(el);
+      return new Proxy(computed, {
+        get: (target, prop) =>
+          prop in style
+            ? style[prop as keyof CSSStyleDeclaration]
+            : Reflect.get(target, prop, target),
+      });
+    });
+    context = {
+      scale() {},
+      fillRect() {},
+      fillText(text: string, x: number, y: number) {
+        drawn.push({
+          text,
+          x,
+          y,
+          font: String(context?.font),
+          baseline: String(context?.textBaseline),
+        });
+      },
+      measureText: () => metrics,
+      font: '',
+      fillStyle: '',
+      textAlign: '',
+      textBaseline: '',
+      letterSpacing: '0px',
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () => context as unknown as CanvasRenderingContext2D
+    );
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
+    Reflect.deleteProperty(document.documentElement, 'clientWidth');
+    Reflect.deleteProperty(document.documentElement, 'clientHeight');
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  const title = (text: string) => {
+    const el = document.createElement('h2');
+    el.textContent = text;
+    document.body.appendChild(el);
+    return el;
+  };
+
+  it('places each word at its laid-out box', () => {
+    const words = titleWords(title('Of Blood & Bones'));
+    expect(words.map((w) => w.text)).toEqual(['Of', 'Blood', '&', 'Bones']);
+    expect(words[3]).toEqual({ text: 'Bones', ...box(3) });
+  });
+
+  it('places the words where the title sits, not where its swap’s rise has it this frame', () => {
+    // Mid-rise: the title, and so every word box, 12 px down.
+    rise = 12;
+    style = { transform: 'matrix(1, 0, 0, 1, 0, 12)' };
+    const words = titleWords(title('Of Blood'));
+    expect(words[1]?.top).toBe(box(1).top);
+  });
+
+  it('keeps a translation where the window rests (the Name window’s translateY(-50%))', () => {
+    // Centred by its transform: every word box 100 px up, and that is where
+    // the name sits, so the mask keeps it (the title takes its swap's out).
+    rise = -100;
+    style = { transform: 'matrix(1, 0, 0, 1, 0, -100)' };
+    const el = title('Of Blood');
+    expect(titleWords(el, { undoTranslation: false })[1]?.top).toBe(
+      box(1, -100).top
+    );
+    drawTitleMask(el, { undoTranslation: false });
+    expect(drawn.map(({ y }) => y)).toEqual([
+      box(0, -100).top + 62,
+      box(1, -100).top + 62,
+    ]);
+  });
+
+  it('reads words across the title’s own elements, as the page wraps them', () => {
+    const el = title('');
+    el.innerHTML = 'River <em>Songs</em>';
+    expect(titleWords(el).map((w) => w.text)).toEqual(['River', 'Songs']);
+  });
+
+  it('draws each word white on black in the title’s font, on its baseline where the page sets it', () => {
+    style = {
+      transform: 'none',
+      fontWeight: '400',
+      fontSize: '96px',
+      fontFamily: 'Brand Serif',
+      letterSpacing: '-0.02em',
+    };
+    const canvas = drawTitleMask(title('Of Blood'));
+    expect(canvas).toBeInstanceOf(HTMLCanvasElement);
+    // The box is the font's content area (80 = ascent 62 + descent 18), so the
+    // baseline is its ascent below the box's top. NOT the box's middle on the
+    // em square's middle ('middle', top + 40): that put every glyph 8 CSS px
+    // above the page's at 96 px in OBB's serif.
+    expect(drawn).toEqual([
+      {
+        text: 'Of',
+        x: box(0).left,
+        y: box(0).top + 62,
+        font: '400 96px Brand Serif',
+        baseline: 'alphabetic',
+      },
+      {
+        text: 'Blood',
+        x: box(1).left,
+        y: box(1).top + 62,
+        font: '400 96px Brand Serif',
+        baseline: 'alphabetic',
+      },
+    ]);
+    expect(context?.letterSpacing).toBe('-0.02em');
+    expect(context?.fillStyle).toBe('#fff');
+  });
+
+  it('spaces the letters glyph by glyph, as the page does, where the canvas has no letterSpacing (Safari before 18.4)', () => {
+    // The page tracks its titles in (-2.4 px a letter at 96 px); a canvas
+    // with no `letterSpacing` would draw each word 2.4 px a letter too wide.
+    style = {
+      transform: 'none',
+      fontWeight: '400',
+      fontSize: '96px',
+      fontFamily: 'Brand Serif',
+      letterSpacing: '-2.4px',
+    };
+    const ctx = context ?? {};
+    Reflect.deleteProperty(ctx, 'letterSpacing');
+    ctx.measureText = (text: string) => ({
+      ...metrics,
+      width: 40 * text.length,
+    });
+    drawTitleMask(title('Of Blood'));
+    const advance = 40 - 2.4;
+    const want = [
+      ['O', box(0).left, 0],
+      ['f', box(0).left, 1],
+      ['B', box(1).left, 0],
+      ['l', box(1).left, 1],
+      ['o', box(1).left, 2],
+      ['o', box(1).left, 3],
+      ['d', box(1).left, 4],
+    ] as const;
+    expect(drawn.map(({ text }) => text)).toEqual(want.map(([text]) => text));
+    want.forEach(([, left, i], k) => {
+      expect(drawn[k]?.x).toBeCloseTo(left + i * advance, 9);
+      expect(drawn[k]?.y).toBe((k < 2 ? box(0) : box(1)).top + 62);
+    });
+    // Nothing written to a property the canvas does not have.
+    expect('letterSpacing' in ctx).toBe(false);
+  });
+
+  it('draws each word whole where the canvas has no letterSpacing and the title is not tracked', () => {
+    style = { transform: 'none', letterSpacing: 'normal' };
+    const ctx = context ?? {};
+    Reflect.deleteProperty(ctx, 'letterSpacing');
+    drawTitleMask(title('Of Blood'));
+    expect(drawn.map(({ text }) => text)).toEqual(['Of', 'Blood']);
+  });
+
+  it('centres the font’s content area in a box of another height, as CSS’s half-leading does', () => {
+    // A box 80 high round a content area of 100 (ascent 76, descent 24):
+    // the area overhangs it 10 px top and bottom, so the baseline sits at
+    // 80/2 - 100/2 + 76 = 66 below the box's top.
+    metrics = { fontBoundingBoxAscent: 76, fontBoundingBoxDescent: 24 };
+    drawTitleMask(title('Of'));
+    expect(drawn.map(({ y, baseline }) => ({ y, baseline }))).toEqual([
+      { y: box(0).top + 66, baseline: 'alphabetic' },
+    ]);
+  });
+
+  it('measures the page’s own baseline where the font reports no content area, and leaves no trace', () => {
+    // A browser without `fontBoundingBox*` (Firefox before 116): a zero-size
+    // inline-block at the title's end sits on its last line's baseline, here
+    // 70 below the last word's box top. Never 'middle' (top + 40).
+    metrics = {} as typeof metrics;
+    const el = title('Of Blood');
+    const seen: string[] = [];
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        seen.push(this.style.display);
+        const bottom = box(1).top + 70;
+        return {
+          top: bottom,
+          bottom,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 0,
+          x: 0,
+          y: bottom,
+          toJSON: () => ({}),
+        };
+      }
+    );
+    drawTitleMask(el);
+    expect(seen).toEqual(['inline-block']);
+    expect(drawn.map(({ y }) => y)).toEqual([box(0).top + 70, box(1).top + 70]);
+    expect(el.childNodes).toHaveLength(1);
+  });
+
+  it('on a flex window (the Name window’s lines are flex items), measures inside the last word’s own line', () => {
+    // A marker added to the window itself would be a flex item, its bottom on
+    // no line's baseline: it goes in the last word's own element.
+    metrics = {} as typeof metrics;
+    const el = title('');
+    el.innerHTML =
+      '<span data-line>Of Blood</span><span data-line>&amp; Bones</span>';
+    const parents: (Element | null)[] = [];
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        parents.push(this.parentElement);
+        const bottom = box(1).top + 70;
+        return {
+          top: bottom,
+          bottom,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 0,
+          x: 0,
+          y: bottom,
+          toJSON: () => ({}),
+        };
+      }
+    );
+    drawTitleMask(el);
+    expect(parents).toEqual([el.lastElementChild]);
+    expect(el.lastElementChild?.childNodes).toHaveLength(1);
+  });
+
+  it('sets Libre Baskerville on its baseline in a 1-em line box, and its fallback within 0.03 em', () => {
+    // OBB's heading font as Chrome reads the file: ascent 970, descent 270
+    // per 1000 (measured on the page). The Name window's lines are 1-em line
+    // boxes; at 80 px, the baseline is (80 - 99.2) / 2 + 77.6 = 68 below the
+    // box's top, where the page sets it (0.85 em).
+    metrics = { fontBoundingBoxAscent: 77.6, fontBoundingBoxDescent: 21.6 };
+    drawTitleMask(title('Of'));
+    expect(drawn[0]?.y).toBeCloseTo(box(0).top + 68, 6);
+    // Without the metrics, the page's own baseline (the marker), not a share
+    // of the box (four fifths would be 0.05 em high here).
+    drawn = [];
+    metrics = {} as typeof metrics;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      () =>
+        ({
+          top: box(0).top + 68,
+          bottom: box(0).top + 68,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect
+    );
+    drawTitleMask(title('Of'));
+    expect(
+      Math.abs((drawn[0]?.y ?? 0) - (box(0).top + 68))
+    ).toBeLessThanOrEqual(0.03 * 80);
+  });
+
+  it('draws no mask for a title with no words, so the motion falls back', () => {
+    expect(drawTitleMask(title('  '))).toBeNull();
+    expect(drawn).toEqual([]);
+  });
+
+  it('draws no mask before the window is laid out', () => {
+    Reflect.deleteProperty(document.documentElement, 'clientWidth');
+    expect(drawTitleMask(title('Of Blood'))).toBeNull();
+  });
+});

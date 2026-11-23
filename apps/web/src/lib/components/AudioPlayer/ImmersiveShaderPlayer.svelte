@@ -8,7 +8,8 @@
   Mouse interaction still works — hover/click drive both mouse and audio inputs.
 
   @prop {HTMLAudioElement} audioElement - The audio element to analyse
-  @prop {string} shaderPreset - Shader preset ID to render
+  @prop {string | null} shaderPreset - The piece's own preset, if any; `immersivePreset()`
+    decides what paints (the piece's, else the org's brand shader, else flow)
   @prop {() => void} onclose - Called when user exits immersive mode
   @prop {HTMLElement | null} opener - What opened it; focus goes back there as it closes
 -->
@@ -16,8 +17,14 @@
   import { onMount, onDestroy } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { createAudioAnalyser, type AudioAnalyserHandle } from './audio-analyser';
-  import { loadRenderer } from '$lib/components/ui/ShaderHero/load-renderer';
-  import { getShaderConfig, type ShaderPresetId, type ShaderConfig } from '$lib/components/ui/ShaderHero/shader-config';
+  import {
+    getBrandPresetId,
+    getShaderConfig,
+    presetIsUnknown,
+    type ShaderConfig,
+    warnUnknownPreset,
+  } from '$lib/components/ui/ShaderHero/shader-config';
+  import { destroyRenderer, startRenderer } from '$lib/components/ui/ShaderHero/start-renderer';
   import { createPollConfig } from '$lib/components/ui/ShaderHero/use-poll-config';
   import type { ShaderRenderer, MouseState, AudioState } from '$lib/components/ui/ShaderHero/renderer-types';
   import { PlayIcon, PauseIcon, Volume2Icon, VolumeXIcon, XIcon } from '$lib/components/ui/Icon';
@@ -28,10 +35,12 @@
   import { describeThrown } from '$lib/client-log';
   import { logger } from '$lib/observability';
   import { lockScroll } from '$lib/utils/scroll-lock';
+  import { immersivePreset } from './immersive-preset';
 
   interface Props {
     audioElement: HTMLAudioElement;
-    shaderPreset: string;
+    /** The piece's own shader preset; null or 'none' when it has none. */
+    shaderPreset: string | null;
     onclose: () => void;
     /** Content title — threads through to `aria-label` on the overlay landmark. */
     title?: string;
@@ -60,7 +69,7 @@
   // Set true in onDestroy so async work resuming after an `await` can bail out
   // before touching `bind:this` refs that Svelte nulls on unmount.
   let cancelled = false;
-  // Lazy-initialised in onMount once `shaderPreset` is captured. Amortises
+  // Lazy-initialised in onMount once the preset is chosen. Amortises
   // getShaderConfig (forced style recalc) across ~30 frames per ShaderHero pattern.
   let pollConfig: (() => ShaderConfig) | null = null;
   let controlsVisible = $state(true);
@@ -88,7 +97,18 @@
 
   function togglePlay() {
     if (audioElement.paused) {
-      audioElement.play().catch(() => {});
+      audioElement.play().catch((error: unknown) => {
+        // The browser refusing playback without a gesture, or a pause/seek
+        // interrupting it, is expected: the button stays a Play button.
+        // Anything else is a real fault.
+        if (
+          error instanceof DOMException &&
+          (error.name === 'NotAllowedError' || error.name === 'AbortError')
+        ) {
+          return;
+        }
+        logger.warn('immersive.play_failed', describeThrown(error));
+      });
     } else {
       audioElement.pause();
     }
@@ -152,7 +172,8 @@
   }
 
   function renderFrame() {
-    if (!gl || !renderer || !canvasEl) return;
+    // A renderer only exists once onMount has chosen the preset and set the poller.
+    if (!gl || !renderer || !canvasEl || !pollConfig) return;
 
     const time = (performance.now() - startTime) / 1000;
     const w = canvasEl.width;
@@ -189,12 +210,10 @@
       };
     }
 
-    // Build config with the immersive preset (not the org's hero preset).
+    // Build config with the immersive preset chosen at mount (see onMount).
     // Polled at ~30-frame cadence (see use-poll-config.ts) — getShaderConfig
     // forces a style recalc, so per-frame calls dominate render-loop cost.
-    const config = pollConfig
-      ? pollConfig()
-      : getShaderConfig(null, shaderPreset as ShaderPresetId);
+    const config = pollConfig();
 
     renderer.render(gl, time, mouse, config, w, h, audioState);
     animFrameId = requestAnimationFrame(renderFrame);
@@ -216,33 +235,55 @@
       return;
     }
 
-    // Load shader renderer
-    const preset = shaderPreset as ShaderPresetId;
-    pollConfig = createPollConfig(() => getShaderConfig(null, preset));
-    renderer = await loadRenderer(preset);
-    // Race guard: dynamic import is the long await — user may have closed the
-    // overlay in the meantime, in which case canvasEl/gl have been nulled.
-    if (cancelled || !canvasEl || !gl) return;
-    if (!renderer) {
-      rendererError = 'Unable to load shader preset. Exiting immersive mode.';
+    // Load shader renderer. The preset is decided once, here, where the org
+    // layout is in the DOM to read: the piece's own shader, else the org's
+    // brand shader, else flow (`immersivePreset`). The config and the renderer
+    // are both built from that one id, so they always agree.
+    // A saved id naming no preset plays the fallback; say so in the logs.
+    if (shaderPreset && presetIsUnknown(shaderPreset)) {
+      warnUnknownPreset(shaderPreset, 'content');
+    }
+    // `startRenderer` logs a load or init failure, destroys a half-built
+    // renderer, and retries an init failure once on single-pass `film` (flow,
+    // the last resort, needs float render targets).
+    const context = gl;
+    const started = await startRenderer(
+      immersivePreset(shaderPreset, getBrandPresetId()),
+      {
+        gl: context,
+        surface: 'immersive',
+        size: () => {
+          resize();
+          return canvasEl ? { width: canvasEl.width, height: canvasEl.height } : null;
+        },
+        // Race guard: dynamic import is the long await — user may have closed the
+        // overlay in the meantime, in which case canvasEl has been nulled.
+        isCurrent: () => !cancelled && Boolean(canvasEl),
+      }
+    );
+    if (cancelled || !canvasEl || !gl) {
+      if (started.ok === true) destroyRenderer(started.renderer, context, 'immersive');
+      return;
+    }
+    if (started.ok === false) {
+      rendererError =
+        started.reason === 'init'
+          ? 'Shader initialisation failed. Exiting immersive mode.'
+          : 'Unable to load shader preset. Exiting immersive mode.';
       setTimeout(() => onclose(), 1200);
       return;
     }
-
-    // Init renderer
-    resize();
-    const ok = renderer.init(gl, canvasEl.width, canvasEl.height);
-    if (!ok) {
-      rendererError = 'Shader initialisation failed. Exiting immersive mode.';
-      setTimeout(() => onclose(), 1200);
-      return;
-    }
+    renderer = started.renderer;
+    // The config is built for the preset that STARTED (the fallback, if it ran).
+    const chosen = started.preset;
+    pollConfig = createPollConfig(() => getShaderConfig(null, chosen));
 
     // Create audio analyser (lazy — first time only, reuses via WeakMap)
     try {
       analyser = createAudioAnalyser(audioElement);
       await analyser.resume();
-    } catch {
+    } catch (error) {
+      logger.warn('immersive.analyser_failed', describeThrown(error));
       rendererError = 'Audio analyser failed to start. Visuals will play without audio reactivity.';
       // Not fatal — continue rendering.
     }

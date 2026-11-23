@@ -128,6 +128,58 @@ export function isLockNotAvailable(error: unknown): boolean {
 }
 
 /**
+ * What a log line may say of a database error (review r11, r12): the Postgres
+ * error code found down its cause chain, whether it was a lock given up
+ * (55P03), and its reason as `messageForLog` gives it, the driver's own
+ * words. Never the error's message: a failed query's is its SQL and params.
+ *
+ * The chain is walked (at most `MAX_CAUSE_HOPS`) because a service wraps a
+ * failed query (`handleError` makes an InternalServiceError whose cause is
+ * drizzle's wrapper, whose cause is the driver's error), and a wrapper's own
+ * `code` is not the database's: a link carrying an HTTP `statusCode` (a
+ * service error, a Stripe error) is passed over. With a code found, the
+ * reason is that link's, the driver's. With none, it is the ORIGINAL error's
+ * (`messageForLog`), which keeps a wrapper's own specific message, as that
+ * doc says to. It runs in catch blocks, so it never throws.
+ */
+export function dbErrorFacts(error: unknown): {
+  code: string | null;
+  lockTimeout: boolean;
+  reason: string;
+} {
+  try {
+    let link: unknown = error;
+    for (let hop = 0; hop < MAX_CAUSE_HOPS; hop++) {
+      if (isPostgresError(link) && !hasStatusCode(link)) {
+        return {
+          code: link.code,
+          lockTimeout: link.code === POSTGRES_ERROR_CODES.LOCK_NOT_AVAILABLE,
+          reason: messageForLog(link),
+        };
+      }
+      const cause = causeOf(link);
+      if (cause === undefined) break;
+      link = cause;
+    }
+    return { code: null, lockTimeout: false, reason: messageForLog(error) };
+  } catch {
+    return { code: null, lockTimeout: false, reason: messageForLog(error) };
+  }
+}
+
+/** An error's `cause`, if it has one worth following. */
+function causeOf(error: unknown): unknown {
+  if (!(error instanceof Error) || !('cause' in error)) return undefined;
+  const { cause } = error as { cause: unknown };
+  return isReason(cause) ? cause : undefined;
+}
+
+/** A link that answers an HTTP status: a service's or Stripe's error, never the driver's. */
+function hasStatusCode(error: Error): boolean {
+  return typeof (error as { statusCode?: unknown }).statusCode === 'number';
+}
+
+/**
  * Check if error is a not-null violation
  * Postgres error code: 23502
  *

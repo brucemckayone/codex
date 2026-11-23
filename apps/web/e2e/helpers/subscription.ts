@@ -14,6 +14,18 @@ import {
   type BrowserCookie,
   parseSetCookieStrings,
 } from './auth-cookies';
+import { E2E_HOST, E2E_ORIGIN, orgOrigin } from './origin';
+import { workerUrl } from './workers';
+
+/**
+ * The auth worker on `lvh.me`. A call that SETS cookies must use this host,
+ * not localhost (e2e/CLAUDE.md, "Cookie domain gotcha"), so it is not
+ * buildServiceUrl's localhost URL. Ports come from SERVICE_PORTS (workers.ts).
+ */
+const AUTH_LVH = workerUrl('AUTH', 'lvh.me');
+/** The auth worker on localhost, as the test-only fast-register has used. */
+const AUTH_LOCAL = workerUrl('AUTH');
+
 import {
   loadValidatedSeededCreatorCookies,
   saveSeededCreatorCookies,
@@ -44,7 +56,7 @@ export const STUDIO_ALPHA = {
   slug: 'studio-alpha',
   name: 'Studio Alpha',
   /** Use {@link buildOrgUrl} via {@link import('@playwright/test').Page} `baseURL` for portable URL building. */
-  baseUrl: 'http://studio-alpha.lvh.me:5173',
+  baseUrl: orgOrigin('studio-alpha'),
 } as const;
 
 /**
@@ -59,10 +71,10 @@ export function buildOrgUrl(
 ): string {
   const base = new URL(page.url());
   // If page hasn't navigated yet (about:blank), fall back to the configured
-  // baseURL via context options. lvh.me:5173 is the dev default.
+  // base URL (origin.ts).
   const protocol =
     base.protocol === 'about:' || !base.protocol ? 'http:' : base.protocol;
-  const host = base.host && base.host !== '' ? base.host : 'lvh.me:5173';
+  const host = base.host && base.host !== '' ? base.host : E2E_HOST;
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${protocol}//${orgSlug}.${host}${cleanPath}`;
 }
@@ -143,15 +155,16 @@ export async function signInSeededCreatorForCapture(): Promise<
   // BetterAuth's `validateFormCsrf` middleware (Node 22 undici auto-sends
   // `sec-fetch-mode: cors`; without Origin BetterAuth throws 403
   // MISSING_OR_NULL_ORIGIN).
-  const response = await fetch('http://lvh.me:42069/api/auth/sign-in/email', {
+  const response = await fetch(`${AUTH_LVH}/api/auth/sign-in/email`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       // Origin MUST match BetterAuth's trustedOrigins for the test env
-      // (packages/urls/src/cors-origins.ts case 'test') — lvh.me:5173 is
-      // the Playwright webServer port and an entry in the trusted list.
-      // Using lvh.me:42069 here gets rejected with INVALID_ORIGIN.
-      Origin: 'http://lvh.me:5173',
+      // (packages/urls/src/cors-origins.ts case 'test'): the web app's
+      // origin (origin.ts; the default port is in the trusted list).
+      // Using the auth worker's own origin here gets rejected with
+      // INVALID_ORIGIN.
+      Origin: E2E_ORIGIN,
     },
     body: JSON.stringify({
       email: SEEDED_CREATOR.email,
@@ -207,17 +220,14 @@ export async function createFreshOwnerWithBypass(opts: {
   const orgName = opts.orgName ?? `E2E x0pa Org ${timestamp}`;
 
   // Step 1: Fast-register (test endpoint, NOT rate-limited).
-  const registerRes = await fetch(
-    'http://localhost:42069/api/test/fast-register',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: 'http://localhost:42069',
-      },
-      body: JSON.stringify({ email, password, name, role: 'customer' }),
-    }
-  );
+  const registerRes = await fetch(`${AUTH_LOCAL}/api/test/fast-register`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: AUTH_LOCAL,
+    },
+    body: JSON.stringify({ email, password, name, role: 'customer' }),
+  });
   if (!registerRes.ok) {
     throw new Error(
       `createFreshOwnerWithBypass: fast-register failed ${registerRes.status}: ${await registerRes.text()}`
@@ -235,14 +245,14 @@ export async function createFreshOwnerWithBypass(opts: {
 
   // Step 2: Sign in — the first charge to this brand-new credential.
   // lvh.me host + Origin header — see captureSeededCreatorCookies note above.
-  const signInRes = await fetch('http://lvh.me:42069/api/auth/sign-in/email', {
+  const signInRes = await fetch(`${AUTH_LVH}/api/auth/sign-in/email`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      // Origin matches the Playwright webServer port (lvh.me:5173) which
-      // is in BetterAuth's trustedOrigins for `test` env — see note in
+      // Origin is the web app's origin (origin.ts), which is in
+      // BetterAuth's trustedOrigins for `test` env — see note in
       // captureSeededCreatorCookies above.
-      Origin: 'http://lvh.me:5173',
+      Origin: E2E_ORIGIN,
     },
     body: JSON.stringify({ email, password }),
   });

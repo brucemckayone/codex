@@ -162,9 +162,11 @@
   // Mini-player
   let miniMode = $state(false);
 
-  // Immersive shader mode. When content has no preset assigned (or 'none'),
-  // fall back to 'nebula' so every audio piece is immersive-capable — all 25
-  // presets are audio-reactive, so there's no UX reason to hide the entry.
+  // Immersive shader mode. Every audio piece is immersive-capable — every
+  // preset is audio-reactive, so there's no UX reason to hide the entry. A
+  // piece with no shader of its own (null or 'none') paints its org's brand
+  // shader, else flow: `immersivePreset`, which the overlay applies on mount
+  // where the org layout is in the DOM to read.
   let showImmersive = $state(false);
   // The button that opened it, from the press: it gets focus back.
   let immersiveOpener = $state.raw<HTMLElement | null>(null);
@@ -177,10 +179,6 @@
   $effect(() => {
     immersiveOffered = canShowImmersive();
   });
-  const resolvedShaderPreset = $derived(
-    shaderPreset && shaderPreset !== 'none' ? shaderPreset : 'nebula'
-  );
-
   // Audio analysis for waveform reactivity
   let analyserHandle: AudioAnalyserHandle | null = null;
   let audioAnalysis: AudioAnalysis | null = $state(null);
@@ -1031,8 +1029,8 @@
             </div>
           </div>
 
-          <!-- Immersive mode — wherever it can open; falls back to 'nebula'
-               when content has no preset assigned. -->
+          <!-- Immersive mode — wherever it can open; a piece with no shader
+               of its own paints its org's brand shader, else flow. -->
           {#if immersiveOffered}
             <button
               type="button"
@@ -1134,7 +1132,7 @@
 {#if showImmersive && audioEl}
   <ImmersiveShaderPlayer
     audioElement={audioEl}
-    shaderPreset={resolvedShaderPreset}
+    {shaderPreset}
     {title}
     opener={immersiveOpener}
     onclose={() => { showImmersive = false; }}

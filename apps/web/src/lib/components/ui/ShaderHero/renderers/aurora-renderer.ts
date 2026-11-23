@@ -16,18 +16,18 @@ import {
   AUDIO_UNIFORM_NAMES,
   createAudioFade,
   createDeltaClock,
+  createMusicalPace,
   uploadAudioUniforms,
 } from '../audio-uniforms';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { AuroraConfig, ShaderConfig } from '../shader-config';
 import { AURORA_FRAG } from '../shaders/aurora.frag';
 import {
-  createProgram,
-  createQuad,
-  drawQuad,
-  getUniforms,
-  VERTEX_SHADER,
-} from '../webgl-utils';
+  createSinglePass,
+  easePointer,
+  restingPointer,
+  setPalette,
+} from './single-pass';
 
 const UNIFORM_NAMES = [
   'u_time',
@@ -50,8 +50,6 @@ const UNIFORM_NAMES = [
   'u_clock',
   ...AUDIO_UNIFORM_NAMES,
 ] as const;
-
-type AuroraUniform = (typeof UNIFORM_NAMES)[number];
 
 const DEFAULTS = {
   layers: 5,
@@ -85,46 +83,19 @@ const MOUSE_TAU_SEC = 0.45;
  */
 const IDLE_CLOCK_RATE = 1.0;
 
-/**
- * Upper bound on the differentiated musical clock, in clock-units per second.
- *
- * `beatPhase` advances at 0.35..1.5/s in normal operation, but the render loop
- * pauses (hidden tab, preset switch, reduced motion) while the analyser clamps
- * its own dt rather than freezing, so one frame after a long pause can show a
- * large phase jump. Differentiating that unclamped spikes the rate and jerks
- * the curtains exactly once.
- */
-const MAX_CLOCK_RATE = 3.0;
-
 export function createAuroraRenderer(): ShaderRenderer {
-  let program: WebGLProgram | null = null;
-  let uniforms: Record<AuroraUniform, WebGLUniformLocation | null> | null =
-    null;
-  let quad: ReturnType<typeof createQuad> | null = null;
-
-  // Damped pointer state — position and active weight.
-  let lerpedMouse = { x: 0.5, y: 0.5 };
-  let lerpedActive = 0;
-
+  const pass = createSinglePass(AURORA_FRAG, UNIFORM_NAMES);
+  let pointer = restingPointer();
   const audioFade = createAudioFade();
   const deltaClock = createDeltaClock();
-
+  const pace = createMusicalPace(IDLE_CLOCK_RATE);
   /** Integrated pacing clock. Monotone — see u_clock in aurora.frag.ts. */
   let clock = 0;
-  /** Previous `beatPhase` sample, for differentiating the musical clock. */
-  let prevBeatPhase = -1;
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
-      program = createProgram(gl, VERTEX_SHADER, AURORA_FRAG);
-      if (!program) return false;
-
-      uniforms = getUniforms(gl, program, UNIFORM_NAMES);
-      quad = createQuad(gl);
-
-      lerpedMouse = { x: 0.5, y: 0.5 };
-      lerpedActive = 0;
-
+      if (!pass.init(gl)) return false;
+      pointer = restingPointer();
       return true;
     },
 
@@ -137,89 +108,52 @@ export function createAuroraRenderer(): ShaderRenderer {
       height: number,
       audio?: AudioState
     ): void {
-      if (!program || !uniforms || !quad) return;
+      const u = pass.begin(gl, width, height);
+      if (!u) return;
 
       const cfg = config as AuroraConfig;
       const dt = deltaClock(time);
       const a = audioFade.update(audio, dt);
 
-      // Frame-rate-independent pointer damping.
-      const k = 1 - Math.exp(-dt / MOUSE_TAU_SEC);
-      const targetX = mouse.active ? mouse.x : 0.5;
-      const targetY = mouse.active ? mouse.y : 0.5;
-      lerpedMouse.x += (targetX - lerpedMouse.x) * k;
-      lerpedMouse.y += (targetY - lerpedMouse.y) * k;
-      lerpedActive += ((mouse.active ? 1 : 0) - lerpedActive) * k;
+      // Frame-rate-independent damping, position and active weight together.
+      easePointer(pointer, mouse, 1 - Math.exp(-dt / MOUSE_TAU_SEC));
+      clock += dt * pace.rate(a, dt);
 
-      // Integrate the pacing clock by blending RATES, never positions. See the
-      // u_clock comment in aurora.frag.ts: beatPhase starts at 0 while u_time
-      // does not, so crossfading the two positions sweeps the clock backwards
-      // the moment playback starts.
-      let musicalRate = IDLE_CLOCK_RATE;
-      if (!a.silent) {
-        // The first audio frame has no previous sample to difference against.
-        musicalRate =
-          prevBeatPhase < 0
-            ? IDLE_CLOCK_RATE
-            : Math.min(
-                MAX_CLOCK_RATE,
-                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
-              );
-        prevBeatPhase = a.beatPhase;
-      } else {
-        prevBeatPhase = -1;
-      }
-      clock +=
-        dt * (IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active);
-
-      gl.viewport(0, 0, width, height);
-      gl.useProgram(program);
-      quad.bind(program);
-
-      gl.uniform1f(uniforms.u_time, time);
-      gl.uniform2f(uniforms.u_resolution, width, height);
-      gl.uniform2f(uniforms.u_mouse, lerpedMouse.x, lerpedMouse.y);
-      gl.uniform1f(uniforms.u_mouseActive, lerpedActive);
-      gl.uniform1f(uniforms.u_burst, mouse.burstStrength ?? 0.0);
+      gl.uniform1f(u.u_time, time);
+      gl.uniform2f(u.u_resolution, width, height);
+      gl.uniform2f(u.u_mouse, pointer.x, pointer.y);
+      gl.uniform1f(u.u_mouseActive, pointer.active);
+      gl.uniform1f(u.u_burst, mouse.burstStrength);
 
       // Brand colours as configured rather than through
       // computeImmersiveColours(): the three stops are this preset's
       // elevation ramp, so cycling them fights the parallax cue they exist to
       // give. Audio moves colour through u_centroid, which slides the ramp
       // position and leaves every stop recognisable.
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      setPalette(gl, u, cfg.colors);
 
       // CRITICAL: u_layers is int — use uniform1i, NOT uniform1f
-      gl.uniform1i(
-        uniforms.u_layers,
-        Math.round(cfg.layers ?? DEFAULTS.layers)
-      );
+      gl.uniform1i(u.u_layers, Math.round(cfg.layers ?? DEFAULTS.layers));
       // Speed still means "how fast the curtains travel sideways", exactly as
       // before. It is NOT folded into u_clock: at the default of 0.1 that
       // would have slowed the flame and fringe shimmer tenfold.
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
-      gl.uniform1f(uniforms.u_height, cfg.height ?? DEFAULTS.height);
-      gl.uniform1f(uniforms.u_spread, cfg.spread ?? DEFAULTS.spread);
-      gl.uniform1f(uniforms.u_shimmer, cfg.shimmer ?? DEFAULTS.shimmer);
-      gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
-      gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_clock, clock);
+      gl.uniform1f(u.u_speed, cfg.speed ?? DEFAULTS.speed);
+      gl.uniform1f(u.u_height, cfg.height ?? DEFAULTS.height);
+      gl.uniform1f(u.u_spread, cfg.spread ?? DEFAULTS.spread);
+      gl.uniform1f(u.u_shimmer, cfg.shimmer ?? DEFAULTS.shimmer);
+      gl.uniform1f(u.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
+      gl.uniform1f(u.u_grain, cfg.grain ?? DEFAULTS.grain);
+      gl.uniform1f(u.u_clock, clock);
       // Vignette reads as a frame around a hero but as a tunnel in fullscreen
       // immersive mode, so it fades with the audio ramp. Switching it off on
       // `audio.active` (the old behaviour) popped on the first beat.
       gl.uniform1f(
-        uniforms.u_vignette,
+        u.u_vignette,
         (cfg.vignette ?? DEFAULTS.vignette) * (1 - a.active)
       );
 
-      uploadAudioUniforms(gl, uniforms, a);
-
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      drawQuad(gl);
+      uploadAudioUniforms(gl, u, a);
+      pass.draw(gl);
     },
 
     resize(_gl: WebGL2RenderingContext, _width: number, _height: number): void {
@@ -227,24 +161,15 @@ export function createAuroraRenderer(): ShaderRenderer {
     },
 
     reset(_gl: WebGL2RenderingContext): void {
-      lerpedMouse = { x: 0.5, y: 0.5 };
-      lerpedActive = 0;
+      pointer = restingPointer();
       // Rewind the integrated clock: reset() means "start fresh", and leaving
       // it running would resume the curtains mid-travel.
       clock = 0;
-      prevBeatPhase = -1;
+      pace.reset();
     },
 
     destroy(gl: WebGL2RenderingContext): void {
-      if (program) {
-        gl.deleteProgram(program);
-        program = null;
-      }
-      if (quad) {
-        gl.deleteBuffer(quad.buffer);
-        quad = null;
-      }
-      uniforms = null;
+      pass.destroy(gl);
     },
   };
 }

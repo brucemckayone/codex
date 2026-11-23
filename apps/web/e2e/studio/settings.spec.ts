@@ -23,7 +23,7 @@ import {
  * it; the replacement below asserts the *absence* of a tablist, so a one-item
  * strip cannot creep back in. `/studio/settings/branding` remains a 301 stub
  * whose only job is to forward old bookmarks. The brand workspace itself is
- * covered by studio/navigation.spec.ts and brand-editor-hero-effects.spec.ts —
+ * covered by studio/navigation.spec.ts and studio/brand-combine.spec.ts —
  * do not re-test its contents here.
  */
 

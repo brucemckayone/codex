@@ -387,24 +387,26 @@ export const getMyMembership = query(z.string().uuid(), async (orgId) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Follow an organization (idempotent).
+ * Follow an organization (idempotent). A worker 4xx (a session that ran out,
+ * a rate limit) reaches the page with its status, so it can send the visitor
+ * to sign in rather than say "try again" to a 401 for ever.
  */
 export const followOrganization = command(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  await api.org.follow(orgId);
+  await forwardClientErrors(() => api.org.follow(orgId));
   return { success: true as const };
 });
 
 /**
- * Unfollow an organization (idempotent).
+ * Unfollow an organization (idempotent). 4xx forwarded, as `followOrganization`.
  */
 export const unfollowOrganization = command(
   z.string().uuid(),
   async (orgId) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    await api.org.unfollow(orgId);
+    await forwardClientErrors(() => api.org.unfollow(orgId));
     return { success: true as const };
   }
 );

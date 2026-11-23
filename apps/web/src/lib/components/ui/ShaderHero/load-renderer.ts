@@ -5,7 +5,7 @@
  */
 
 import type { ShaderRenderer } from './renderer-types';
-import type { ShaderPresetId } from './shader-config';
+import { resolvePresetId, type ShaderPresetId } from './shader-config';
 
 type RendererLoader = () => Promise<ShaderRenderer | null>;
 
@@ -16,8 +16,6 @@ const RENDERER_LOADERS: Record<ShaderPresetId, RendererLoader> = {
     (await import('./renderers/suture-renderer')).createSutureRenderer(),
   ether: async () =>
     (await import('./renderers/ether-renderer')).createEtherRenderer(),
-  warp: async () =>
-    (await import('./renderers/warp-renderer')).createWarpRenderer(),
   ripple: async () =>
     (await import('./renderers/ripple-renderer')).createRippleRenderer(),
   pulse: async () =>
@@ -26,12 +24,6 @@ const RENDERER_LOADERS: Record<ShaderPresetId, RendererLoader> = {
     (await import('./renderers/ink-renderer')).createInkRenderer(),
   topo: async () =>
     (await import('./renderers/topo-renderer')).createTopoRenderer(),
-  nebula: async () =>
-    (await import('./renderers/nebula-renderer')).createNebulaRenderer(),
-  turing: async () =>
-    (await import('./renderers/turing-renderer')).createTuringRenderer(),
-  silk: async () =>
-    (await import('./renderers/silk-renderer')).createSilkRenderer(),
   glass: async () =>
     (await import('./renderers/glass-renderer')).createGlassRenderer(),
   film: async () =>
@@ -44,62 +36,29 @@ const RENDERER_LOADERS: Record<ShaderPresetId, RendererLoader> = {
     (await import('./renderers/caustic-renderer')).createCausticRenderer(),
   physarum: async () =>
     (await import('./renderers/physarum-renderer')).createPhysarumRenderer(),
-  rain: async () =>
-    (await import('./renderers/rain-renderer')).createRainRenderer(),
-  frost: async () =>
-    (await import('./renderers/frost-renderer')).createFrostRenderer(),
-  glow: async () =>
-    (await import('./renderers/glow-renderer')).createGlowRenderer(),
-  life: async () =>
-    (await import('./renderers/life-renderer')).createLifeRenderer(),
-  mycelium: async () =>
-    (await import('./renderers/mycelium-renderer')).createMyceliumRenderer(),
   aurora: async () =>
     (await import('./renderers/aurora-renderer')).createAuroraRenderer(),
-  tendrils: async () =>
-    (await import('./renderers/tendrils-renderer')).createTendrilsRenderer(),
-  pollen: async () =>
-    (await import('./renderers/pollen-renderer')).createPollenRenderer(),
-  growth: async () =>
-    (await import('./renderers/growth-renderer')).createGrowthRenderer(),
-  geode: async () =>
-    (await import('./renderers/geode-renderer')).createGeodeRenderer(),
   lenia: async () =>
     (await import('./renderers/lenia-renderer')).createLeniaRenderer(),
-  ocean: async () =>
-    (await import('./renderers/ocean-renderer')).createOceanRenderer(),
-  bismuth: async () =>
-    (await import('./renderers/bismuth-renderer')).createBismuthRenderer(),
-  pearl: async () =>
-    (await import('./renderers/pearl-renderer')).createPearlRenderer(),
-  vortex: async () =>
-    (await import('./renderers/vortex-renderer')).createVortexRenderer(),
-  gyroid: async () =>
-    (await import('./renderers/gyroid-renderer')).createGyroidRenderer(),
-  waves: async () =>
-    (await import('./renderers/waves-renderer')).createWavesRenderer(),
-  clouds: async () =>
-    (await import('./renderers/clouds-renderer')).createCloudsRenderer(),
   fracture: async () =>
     (await import('./renderers/fracture-renderer')).createFractureRenderer(),
-  julia: async () =>
-    (await import('./renderers/julia-renderer')).createJuliaRenderer(),
-  vapor: async () =>
-    (await import('./renderers/vapor-renderer')).createVaporRenderer(),
-  tunnel: async () =>
-    (await import('./renderers/tunnel-renderer')).createTunnelRenderer(),
-  plasma: async () =>
-    (await import('./renderers/plasma-renderer')).createPlasmaRenderer(),
   flow: async () =>
     (await import('./renderers/flow-renderer')).createFlowRenderer(),
-  spore: async () =>
-    (await import('./renderers/spore-renderer')).createSporeRenderer(),
   none: async () => null,
 };
 
+/**
+ * The renderer for a preset id; `null` for `'none'`, or for an id that names
+ * no preset.
+ *
+ * Takes a plain string because callers hold stored ids — a content item's
+ * `shader_preset`, the brand's token, a menu id — and resolves it through
+ * `resolvePresetId`, so a cut preset loads its survivor's renderer rather
+ * than nothing.
+ */
 export async function loadRenderer(
-  preset: ShaderPresetId
+  preset: string | null | undefined
 ): Promise<ShaderRenderer | null> {
-  const loader = RENDERER_LOADERS[preset];
-  return loader ? loader() : null;
+  const id = resolvePresetId(preset);
+  return id ? RENDERER_LOADERS[id]() : null;
 }

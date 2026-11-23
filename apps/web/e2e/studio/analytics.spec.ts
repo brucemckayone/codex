@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { test } from '../fixtures/auth';
+import { E2E_BASE_URL, orgUrl } from '../helpers/origin';
 import {
   cleanupSharedStudioAuth,
   injectSharedStudioAuth,
@@ -27,8 +28,6 @@ import {
  * synchronously.
  */
 
-const BASE_PORT = 5173;
-
 test.describe('Studio Analytics - Auth Redirect', () => {
   test('unauthenticated user is redirected away from /studio/analytics', async ({
     page,
@@ -36,7 +35,7 @@ test.describe('Studio Analytics - Auth Redirect', () => {
     // Fresh context: ensure no session cookie leaks in.
     await page.context().clearCookies();
 
-    await page.goto(`http://some-org.lvh.me:${BASE_PORT}/studio/analytics`, {
+    await page.goto(orgUrl(E2E_BASE_URL, 'some-org', '/studio/analytics'), {
       waitUntil: 'load',
     });
 
@@ -153,7 +152,7 @@ test.describe('Studio Analytics - Role Gate', () => {
     const member = await setupStudioUser(page, { orgRole: 'creator' });
 
     await page.goto(
-      `http://${member.organization.slug}.lvh.me:${BASE_PORT}/studio/analytics`,
+      orgUrl(E2E_BASE_URL, member.organization.slug, '/studio/analytics'),
       { waitUntil: 'load' }
     );
 

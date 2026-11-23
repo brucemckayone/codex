@@ -22,6 +22,7 @@ import {
   courseSubscriptionPlans,
   courseSubscriptions,
   courses,
+  disputes,
   entitlements,
   organizationMemberships,
   organizations,
@@ -1165,37 +1166,38 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
   // K5: the hourly sweep. Its query is global, so these rows are dated 1990
   // and it is asked only for rows recorded before 2000: no other run's rows.
   describe('settleOwedDuplicates', () => {
+    /** A duplicate recorded in 1990 and never settled: owed. */
+    async function owedDuplicate(service: CourseSubscriptionService) {
+      const { cId, pId } = await makeCourseWithPlan();
+      const live = courseSub(cId, pId);
+      await service.handleCourseSubscriptionCreated(live);
+      const liveRow = await rowFor(live.id);
+      const item = live.items.data[0];
+      const stripeSubscriptionId = `sub_${randomUUID().slice(0, 8)}`;
+      await db.insert(courseSubscriptions).values({
+        userId: subscriberId,
+        courseId: cId,
+        planId: pId,
+        organizationId: orgId,
+        stripeSubscriptionId,
+        stripeCustomerId: `cus_${randomUUID().slice(0, 8)}`,
+        status: 'cancelled',
+        billingInterval: 'month',
+        currentPeriodStart: new Date((item?.current_period_start ?? 0) * 1000),
+        currentPeriodEnd: new Date((item?.current_period_end ?? 0) * 1000),
+        duplicateOfCourseSubscriptionId: liveRow?.id,
+        createdAt: new Date('1990-01-01T00:00:00Z'),
+      });
+      const owed = await rowFor(stripeSubscriptionId);
+      if (!owed) throw new Error('duplicate not recorded');
+      return owed;
+    }
+    const olderThanMs = () => Date.now() - Date.parse('2000-01-01T00:00:00Z');
+
     it('settles the owed duplicates Stripe accepts and returns the ones it still refuses', async () => {
       const { stripe, service } = serviceWith();
-      const owedDuplicate = async () => {
-        const { cId, pId } = await makeCourseWithPlan();
-        const live = courseSub(cId, pId);
-        await service.handleCourseSubscriptionCreated(live);
-        const liveRow = await rowFor(live.id);
-        const item = live.items.data[0];
-        const stripeSubscriptionId = `sub_${randomUUID().slice(0, 8)}`;
-        await db.insert(courseSubscriptions).values({
-          userId: subscriberId,
-          courseId: cId,
-          planId: pId,
-          organizationId: orgId,
-          stripeSubscriptionId,
-          stripeCustomerId: `cus_${randomUUID().slice(0, 8)}`,
-          status: 'cancelled',
-          billingInterval: 'month',
-          currentPeriodStart: new Date(
-            (item?.current_period_start ?? 0) * 1000
-          ),
-          currentPeriodEnd: new Date((item?.current_period_end ?? 0) * 1000),
-          duplicateOfCourseSubscriptionId: liveRow?.id,
-          createdAt: new Date('1990-01-01T00:00:00Z'),
-        });
-        const owed = await rowFor(stripeSubscriptionId);
-        if (!owed) throw new Error('duplicate not recorded');
-        return owed;
-      };
-      const refused = await owedDuplicate();
-      const accepted = await owedDuplicate();
+      const refused = await owedDuplicate(service);
+      const accepted = await owedDuplicate(service);
       vi.mocked(stripe.subscriptions.retrieve).mockImplementation((async (
         id: string
       ) => {
@@ -1206,10 +1208,9 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
         }
         return { id, status: 'active' };
       }) as never);
-      const olderThanMs = Date.now() - Date.parse('2000-01-01T00:00:00Z');
 
       const first = await service.settleOwedDuplicates({
-        olderThanMs,
+        olderThanMs: olderThanMs(),
         limit: 50,
       });
 
@@ -1231,13 +1232,79 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
         id: string
       ) => ({ id, status: 'canceled' })) as never);
       const second = await service.settleOwedDuplicates({
-        olderThanMs,
+        olderThanMs: olderThanMs(),
         limit: 50,
       });
       expect(second.stillOwed.map((r) => r.id)).not.toContain(refused.id);
       expect(
         (await rowFor(refused.stripeSubscriptionId))?.duplicateSettledAt
       ).not.toBeNull();
+    });
+
+    // Owner D58: a duplicate's refund waits for an OPEN chargeback on it, as a
+    // purchase's does, and only while it is open; one held past Stripe's
+    // dispute lifecycle is alerted. The dispute names the duplicate's own row
+    // (`pauseForDispute`, through the charge's payout rows or the invoice
+    // Stripe says it paid; subscription-dispute.ts).
+    it('leaves a duplicate to its chargeback while it is open, alerting one open past 120 days, and settles it once the chargeback has ended (owner D58)', async () => {
+      const { stripe, service } = serviceWith();
+      const held = await owedDuplicate(service);
+      const stripeDisputeId = `dp_d58_${randomUUID().slice(0, 8)}`;
+      await db.insert(disputes).values({
+        stripeDisputeId,
+        stripeChargeId: `ch_${randomUUID().slice(0, 8)}`,
+        courseSubscriptionId: held.id,
+        amountCents: 4999,
+        currency: 'gbp',
+        status: 'needs_response',
+        stripeCreatedAt: new Date(Date.now() - 121 * 24 * 60 * 60 * 1000),
+      });
+      vi.mocked(stripe.subscriptions.retrieve).mockImplementation((async (
+        id: string
+      ) => ({ id, status: 'canceled' })) as never);
+      const askedAboutIt = () =>
+        vi
+          .mocked(stripe.subscriptions.retrieve)
+          .mock.calls.filter(([id]) => id === held.stripeSubscriptionId).length;
+      const errors = vi.spyOn(errorLog(service), 'error');
+      try {
+        const first = await service.settleOwedDuplicates({
+          olderThanMs: olderThanMs(),
+          limit: 50,
+        });
+        expect(first.stillOwed.map((r) => r.id)).not.toContain(held.id);
+        expect(askedAboutIt()).toBe(0);
+        expect(
+          (await rowFor(held.stripeSubscriptionId))?.duplicateSettledAt
+        ).toBeNull();
+        expect(errors).toHaveBeenCalledWith(
+          'Duplicate course subscription refunds still held by a chargeback after 120 days: check the dispute in Stripe, then refund them by hand',
+          expect.objectContaining({
+            errorId: expect.any(String),
+            link: 'courseSubscription',
+            held: expect.arrayContaining([
+              expect.objectContaining({ id: held.id, stripeDisputeId }),
+            ]),
+          })
+        );
+
+        await db
+          .update(disputes)
+          .set({ status: 'prevented' })
+          .where(eq(disputes.stripeDisputeId, stripeDisputeId));
+        await service.settleOwedDuplicates({
+          olderThanMs: olderThanMs(),
+          limit: 50,
+        });
+        expect(askedAboutIt()).toBeGreaterThan(0);
+        expect(
+          (await rowFor(held.stripeSubscriptionId))?.duplicateSettledAt
+        ).not.toBeNull();
+      } finally {
+        await db
+          .delete(disputes)
+          .where(eq(disputes.stripeDisputeId, stripeDisputeId));
+      }
     });
   });
 

@@ -318,7 +318,7 @@ describe('the colour the canvas draws for the hero', () => {
   };
 
   it('is the moving background, by default, in an org with a shader', () => {
-    layout.org = org({ 'shader-preset': 'glow' });
+    layout.org = org({ 'shader-preset': 'ether' });
     render([hero('h')], 'h');
     expect(swatches()).toEqual({
       value: ['atmosphere'],
@@ -336,7 +336,7 @@ describe('the colour the canvas draws for the hero', () => {
 
   it('is base where the org’s ground is on a band a moving background is not drawn on', () => {
     // #D2C3A8 is L 0.82: band l80, where PageRenderer draws base.
-    layout.org = org({ 'shader-preset': 'glow' }, '#D2C3A8');
+    layout.org = org({ 'shader-preset': 'ether' }, '#D2C3A8');
     render([hero('h')], 'h');
     expect(swatches()).toEqual({ value: ['base'], default: ['base'] });
   });
@@ -393,7 +393,7 @@ describe('the Moving note, by who is looking', () => {
   });
 
   it('keeps today’s note where the org has one', () => {
-    layout.org = org('glow');
+    layout.org = org('ether');
     layout.userRole = 'admin';
     render([hero('h')], 'h');
     expect(note()?.textContent).toContain('set in Brand');

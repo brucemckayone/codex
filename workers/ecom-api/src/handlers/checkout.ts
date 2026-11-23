@@ -28,6 +28,7 @@ import { invalidateUserLibrary } from '@codex/cache';
 import type { ObservabilityClient } from '@codex/observability';
 import {
   isDuplicatePayment,
+  isUnavailableBlock,
   type PaymentIntentCharge,
   type Purchase,
   type PurchaseService,
@@ -332,6 +333,18 @@ export async function completeCheckoutSession(
     // Its refund email tells them; a receipt would say they bought it again.
     if (isDuplicatePayment(purchase)) {
       obs?.warn(sale.logs.duplicate, {
+        purchaseId: purchase.id,
+        customerId: sale.customerId,
+        ...sale.item,
+      });
+      return { kind: 'completed', purchase };
+    }
+    // A payment for an item its buyer could no longer open (content deleted,
+    // team-only or detached; content or a course whose organisation was
+    // deleted) was refunded, not sold (Codex-z1t3c): nothing to receipt, and
+    // no library to bump. Its refund email says the item is gone.
+    if (isUnavailableBlock(purchase)) {
+      obs?.warn('Payment for an unavailable item refunded instead of sold', {
         purchaseId: purchase.id,
         customerId: sale.customerId,
         ...sale.item,

@@ -192,6 +192,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   let mockRecordChargeRefunds: ReturnType<typeof vi.fn>;
   let mockClaimRefundEmails: ReturnType<typeof vi.fn>;
   let mockRestateStandingRefunds: ReturnType<typeof vi.fn>;
+  let mockChargebackCarryingRefund: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -225,6 +226,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
         { stripeRefundId: 're_test_refund', amountCents: 1999 },
       ]);
     mockRestateStandingRefunds = vi.fn().mockResolvedValue(undefined);
+    // No blocked payment's chargeback carries the refund's debt (review r7).
+    mockChargebackCarryingRefund = vi.fn().mockResolvedValue(null);
     mockRelease = vi.fn();
     mockStripe = {} as Stripe;
 
@@ -238,6 +241,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
           recordChargeRefunds: mockRecordChargeRefunds,
           claimRefundEmails: mockClaimRefundEmails,
           restateStandingRefunds: mockRestateStandingRefunds,
+          chargebackCarryingRefund: mockChargebackCarryingRefund,
         },
         // charge.refunded reverses subscription payouts first (Codex-13v21),
         // and last cancels on a full refund of the latest payment (P-4).
@@ -610,6 +614,151 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(emails()[1]?.accessNote).toBe(
       'Your access to Test Content has ended.'
     );
+  });
+
+  it('a blocked sale’s refund email says the item is no longer available and was refunded in full (Codex-z1t3c)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      // A blocked sale ended no access of its own; the line is the item's.
+      accessEnded: true,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: true,
+      refundedInFull: true,
+      restOwed: false,
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Winter Light',
+        accessNote:
+          "Winter Light is no longer available, so we've refunded you in full.",
+      }),
+    ]);
+  });
+
+  it('a PARTIAL refund of a blocked sale never says "in full" was done: it says the rest will follow (Codex-z1t3c)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: true,
+      refundedInFull: false,
+      // Still pending: its own refund, or the hourly sweep, makes the rest.
+      restOwed: true,
+    });
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_part', amountCents: 500 },
+    ]);
+    const bundle = buildContext();
+
+    // Support refunded £5.00 of £19.99; the blocked sale's own refund of
+    // the rest is still to come (the checkout's, or the hourly sweep's).
+    await handlePaymentWebhook(
+      createRefundEvent({ amount_refunded: 500 }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Winter Light',
+        refundAmount: '£5.00',
+        originalAmount: '£19.99',
+        accessNote:
+          "Winter Light is no longer available, so we're refunding your payment in full. The rest will follow.",
+      }),
+    ]);
+  });
+
+  it('a part refund of a blocked sale with nothing more to come promises nothing: it says only that this refunds part (Codex-z1t3c)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: true,
+      // The row is refunded already (its refund failed afterwards, say):
+      // this hand-made part refund is all there is.
+      refundedInFull: false,
+      restOwed: false,
+    });
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_hand', amountCents: 500 },
+    ]);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createRefundEvent({ amount_refunded: 500 }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        accessNote:
+          'Winter Light is no longer available. This refunds part of your payment.',
+      }),
+    ]);
+  });
+
+  it('out of order, the words come from the fresh total, never the event’s snapshot: a stale part refund processed after the rest landed says "in full" (Codex-z1t3c)', async () => {
+    // The refunds standing now cover the charge, though this retried event's
+    // snapshot still shows only the first part.
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: true,
+      refundedInFull: true,
+      restOwed: false,
+    });
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_part', amountCents: 500 },
+      { stripeRefundId: 're_rest', amountCents: 1499 },
+    ]);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createRefundEvent({ amount_refunded: 500 }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(emails().map((data) => data.accessNote)).toEqual([
+      "Winter Light is no longer available, so we've refunded you in full.",
+      "Winter Light is no longer available, so we've refunded you in full.",
+    ]);
+  });
+
+  it('an ordinary refund’s email never reads the no-longer-available line', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: true,
+      duplicatePayment: false,
+      itemTitle: 'Winter Light',
+      lateWinKeptThrough: null,
+      itemUnavailable: false,
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        accessNote: 'Your access to Winter Light has ended.',
+      }),
+    ]);
+    expect(emails()[0]?.accessNote).not.toContain('no longer available');
   });
 
   it('a duplicate payment’s refund email says the buyer still has the item, and why (Codex-2hxff.14)', async () => {
@@ -1155,6 +1304,64 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(mockProcessRefund.mock.invocationCallOrder[0]).toBeLessThan(
       mockRestateStandingRefunds.mock.invocationCallOrder[0] ?? 0
     );
+    // No chargeback carries it: the ordinary wording, never the charge page's.
+    expect(mockChargebackCarryingRefund).toHaveBeenCalledWith({
+      stripeRefundId: 're_pending_then_paid',
+      chargeId: 'ch_updated',
+    });
+    expect(bundle.mock._obs.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('support charge page'),
+      expect.anything()
+    );
+  });
+
+  // Owner D66, review r7: a blocked payment's failed refund whose chargeback
+  // carries what is still owed is hidden from Failed refunds, so its alert
+  // points at the charge page, with the charge and the dispute.
+  it('refund.updated failed on a blocked payment whose chargeback carries the debt: the alert names the charge page, the charge and the dispute, read before the record', async () => {
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+    mockChargebackCarryingRefund.mockResolvedValue('dp_carries');
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({
+        status: 'failed',
+        failure_reason: 'charge_for_pending_refund_disputed',
+      }),
+      stripe,
+      bundle.context
+    );
+
+    const failedAlerts = vi
+      .mocked(bundle.mock._obs.error)
+      .mock.calls.filter(([message]) =>
+        String(message).includes('failed at Stripe')
+      );
+    expect(failedAlerts).toEqual([
+      [
+        "A blocked payment's refund failed at Stripe, and its chargeback carries what is still owed: settle it on the support charge page (Paid another way), not in Failed refunds, which doesn't list it",
+        {
+          errorId: expect.any(String),
+          refundId: 're_pending_then_paid',
+          chargeId: 'ch_updated',
+          disputeId: 'dp_carries',
+          amountCents: 1000,
+          failureReason: 'charge_for_pending_refund_disputed',
+        },
+      ],
+    ]);
+    // Read first: a failure of the read fails the event, and its redelivery
+    // still finds the record's change, so it still alerts.
+    expect(
+      mockChargebackCarryingRefund.mock.invocationCallOrder[0]
+    ).toBeLessThan(mockRecordRefund.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it('refund.updated succeeded asks nothing about a chargeback', async () => {
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+    await handlePaymentWebhook(refundUpdatedEvent({}), stripe, bundle.context);
+    expect(mockChargebackCarryingRefund).not.toHaveBeenCalled();
   });
 
   it('refund.failed is handled the same way, and a redelivery raises no second alert', async () => {

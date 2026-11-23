@@ -1,0 +1,239 @@
+/**
+ * The title as the film's window on the Corner and Wide layouts: the big title
+ * words are the letters "through the name" plays in, so the opening and the way
+ * into the film run on every layout, the defaults included. The Name window's
+ * mask is drawn here too (Showreel's `drawMask`): one placement for both, so
+ * neither window's letters sit off the page's.
+ *
+ * The title wraps where the page wraps it (`text-wrap: balance`), so its
+ * lines are read from the page, never re-wrapped here: each word's box comes
+ * from a Range over its text, in the title's own font. The words' swap moves
+ * the title a few px (`translateY`), so each box is taken back by the
+ * title's computed translation: the window is where the title SITS, never
+ * where its rise has it this frame.
+ *
+ * The canvas is window sized, white on black (the compositor reads the red
+ * channel), the words placed in document space as the Name window's are.
+ */
+
+/** A word of the title where the page lays it out, in CSS px. */
+export interface MaskWord {
+  readonly text: string;
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** The words of `text` and where each sits in it. PURE. */
+export function wordsAt(
+  text: string
+): { word: string; start: number; end: number }[] {
+  return [...text.matchAll(/\S+/g)].map((match) => {
+    const start = match.index ?? 0;
+    return { word: match[0], start, end: start + match[0].length };
+  });
+}
+
+/**
+ * The translation a computed `transform` applies, in px: `none`, a
+ * `matrix(a, b, c, d, e, f)` (e, f) or a `matrix3d(...)` (its 13th and 14th).
+ * PURE.
+ */
+export function translationOf(transform: string): { x: number; y: number } {
+  const values = /^matrix(3d)?\(([^)]*)\)$/.exec(transform.trim());
+  if (!values?.[2]) return { x: 0, y: 0 };
+  const n = values[2].split(',').map((v) => Number.parseFloat(v));
+  const at = values[1] ? 12 : 4;
+  const x = n[at] ?? 0;
+  const y = n[at + 1] ?? 0;
+  return {
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? y : 0,
+  };
+}
+
+/** How a window's own translation is read. */
+export interface MaskOptions {
+  /**
+   * Take the element's computed translation back out (the default): the
+   * title's swap moves it a few px for a moment, and the window is where it
+   * SITS. False where the translation is where the element rests (the Name
+   * window is centred by `translateY(-50%)`).
+   */
+  readonly undoTranslation?: boolean;
+}
+
+/** The translation `el`'s words are taken back by, in px. */
+function shiftOf(
+  el: HTMLElement,
+  options: MaskOptions
+): { x: number; y: number } {
+  if (options.undoTranslation === false) return { x: 0, y: 0 };
+  const view = el.ownerDocument.defaultView;
+  return translationOf(view?.getComputedStyle(el).transform ?? 'none');
+}
+
+/** Each word of the title `el` where it sits, in document space. */
+export function titleWords(
+  el: HTMLElement,
+  options: MaskOptions = {}
+): MaskWord[] {
+  const doc = el.ownerDocument;
+  const view = doc.defaultView;
+  if (!view) return [];
+  const shift = shiftOf(el, options);
+  const words: MaskWord[] = [];
+  const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent ?? '';
+    for (const { word, start, end } of wordsAt(text)) {
+      const range = doc.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, end);
+      const box = range.getBoundingClientRect();
+      if (box.width <= 0 || box.height <= 0) continue;
+      words.push({
+        text: word,
+        left: box.left - shift.x,
+        top: box.top - shift.y + view.scrollY,
+        width: box.width,
+        height: box.height,
+      });
+    }
+  }
+  return words;
+}
+
+/** The longest side the mask is drawn at, in device px per CSS px. */
+const MAX_DPR = 2;
+
+/**
+ * How far below a word box's top the page sets the baseline, measured in the
+ * page, for a browser whose `measureText` reports no content area (Firefox
+ * before 116): a zero-size inline-block's bottom sits on its line's
+ * baseline, so one after the last word, on its line, measures it for every
+ * word (one font, one size). It goes in that word's own element: on a flex
+ * window (the Name window's lines are flex items) one added to the window
+ * would be a flex item, its bottom on no line's baseline. Taken out at once.
+ */
+function measuredBaseline(
+  el: HTMLElement,
+  last: MaskWord,
+  options: MaskOptions
+): number {
+  const doc = el.ownerDocument;
+  const view = doc.defaultView;
+  const shift = shiftOf(el, options);
+  let host: Element = el;
+  const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode())
+    if (/\S/.test(node.textContent ?? '') && node.parentElement)
+      host = node.parentElement;
+  const marker = doc.createElement('span');
+  marker.style.cssText =
+    'display:inline-block;width:0;height:0;vertical-align:baseline';
+  host.appendChild(marker);
+  try {
+    const { bottom } = marker.getBoundingClientRect();
+    // in document space, as the words are
+    return bottom - shift.y + (view?.scrollY ?? 0) - last.top;
+  } finally {
+    marker.remove();
+  }
+}
+
+/** The letters of `text`, as the page spaces them (grapheme clusters). */
+function lettersOf(text: string): string[] {
+  if (typeof Intl.Segmenter !== 'function') return Array.from(text);
+  const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  return Array.from(graphemes.segment(text), ({ segment }) => segment);
+}
+
+/**
+ * Draw `text` at (x, y) with `spacing` CSS px after each letter, glyph by
+ * glyph, for a canvas with no `letterSpacing` (Safari before 18.4). Exact for
+ * the tracking; only the font's kerning pairs are lost, a sub-pixel cost.
+ */
+function fillSpaced(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  spacing: number
+): void {
+  let at = x;
+  for (const letter of lettersOf(text)) {
+    ctx.fillText(letter, at, y);
+    at += ctx.measureText(letter).width + spacing;
+  }
+}
+
+/**
+ * The title `el` (or the Name window's name) drawn as the film's window: a
+ * window-sized canvas, the words white on black in its font, each on its
+ * baseline where the page sets it. Null when there is no word to draw (no
+ * title, or one not laid out), so "through the name" falls back.
+ */
+export function drawTitleMask(
+  el: HTMLElement,
+  options: MaskOptions = {}
+): HTMLCanvasElement | null {
+  const doc = el.ownerDocument;
+  const view = doc.defaultView;
+  const { clientWidth: width, clientHeight: height } = doc.documentElement;
+  // No window laid out (a page not rendered yet): nothing to place words in.
+  if (!view || width <= 0 || height <= 0) return null;
+  const words = titleWords(el, options);
+  if (words.length === 0) return null;
+  const dpr = Math.min(view.devicePixelRatio || 1, MAX_DPR);
+  const canvas = doc.createElement('canvas');
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const style = view.getComputedStyle(el);
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#fff';
+  ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  // The page's tracking (every h1 and h2 has some). A canvas with no
+  // `letterSpacing` would take the assignment as a plain property and draw
+  // each word too wide, so there the letters are spaced one by one: the
+  // computed value is in px.
+  const tracked = Boolean(
+    style.letterSpacing && style.letterSpacing !== 'normal'
+  );
+  const native = 'letterSpacing' in ctx;
+  if (tracked && native) ctx.letterSpacing = style.letterSpacing;
+  const spacing =
+    tracked && !native ? Number.parseFloat(style.letterSpacing) || 0 : 0;
+  ctx.textAlign = 'left';
+  // Each word on its baseline where the page sets it: the font's content area
+  // (its ascent and descent) centred in the word's box, as CSS lays glyphs in a
+  // line (half-leading). The em square's middle ('middle' at the box's middle)
+  // sits higher in most faces: 8 CSS px at 96 px in OBB's serif, a copy of the
+  // title showing above its ink.
+  ctx.textBaseline = 'alphabetic';
+  let measured: number | null = null;
+  for (const word of words) {
+    const { fontBoundingBoxAscent: ascent, fontBoundingBoxDescent: descent } =
+      ctx.measureText(word.text);
+    const area = ascent + descent;
+    let below: number;
+    if (Number.isFinite(area)) below = (word.height - area) / 2 + ascent;
+    else {
+      measured ??= measuredBaseline(
+        el,
+        words[words.length - 1] ?? word,
+        options
+      );
+      below = measured;
+    }
+    if (spacing)
+      fillSpaced(ctx, word.text, word.left, word.top + below, spacing);
+    else ctx.fillText(word.text, word.left, word.top + below);
+  }
+  return canvas;
+}

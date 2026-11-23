@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { workerUrl } from './helpers/workers';
 
 /**
  * Streaming Revocation E2E (PR 2 — defense-in-depth)
@@ -47,7 +48,7 @@ import { expect, test } from '@playwright/test';
  * Option A is recommended.
  *
  * Follow the Codex-a8g6h patterns exactly (see account-subscription-cancel.spec.ts):
- *   - baseURL from playwright.config.ts (http://lvh.me:5173)
+ *   - baseURL from playwright.config.ts (E2E_BASE_URL, helpers/origin.ts)
  *   - login via the real form + auth worker
  *   - health-probe bail-out in beforeAll so missing workers skip cleanly
  *   - idempotent teardown — clear the revocation key in afterEach
@@ -133,24 +134,37 @@ test.describe
   .serial('Streaming revocation — revoked user is denied + overlay renders', () => {
     test.beforeAll(async ({ request }) => {
       try {
-        const res = await request.get('http://localhost:42069/health');
-        if (!res.ok()) test.skip(true, 'Auth worker not running on port 42069');
+        const res = await request.get(`${workerUrl('AUTH')}/health`);
+        if (!res.ok())
+          test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
       } catch {
-        test.skip(true, 'Auth worker not running on port 42069');
+        test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
       }
       try {
-        const res = await request.get('http://localhost:42072/health');
+        const res = await request.get(`${workerUrl('ECOMMERCE')}/health`);
         if (!res.ok())
-          test.skip(true, 'Ecom-api worker not running on port 42072');
+          test.skip(
+            true,
+            `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+          );
       } catch {
-        test.skip(true, 'Ecom-api worker not running on port 42072');
+        test.skip(
+          true,
+          `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+        );
       }
       try {
-        const res = await request.get('http://localhost:4001/health');
+        const res = await request.get(`${workerUrl('CONTENT')}/health`);
         if (!res.ok())
-          test.skip(true, 'Content-api worker not running on port 4001');
+          test.skip(
+            true,
+            `Content-api worker not running at ${workerUrl('CONTENT')}`
+          );
       } catch {
-        test.skip(true, 'Content-api worker not running on port 4001');
+        test.skip(
+          true,
+          `Content-api worker not running at ${workerUrl('CONTENT')}`
+        );
       }
     });
 

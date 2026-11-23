@@ -2,16 +2,17 @@
   import { brandEditor } from '$lib/brand-editor';
   import {
     HERO_FX_COLOR_CONTROLS,
-    HERO_FX_DEFAULTS,
-    HERO_FX_PRESETS,
-    HERO_FX_SHARED_CONTROLS,
     HERO_FX_PRESET_CONTROLS,
+    presetFxControls,
     type ControlConfig,
-  } from '$lib/brand-editor/hero-fx-presets';
+  } from '$lib/brand-editor/hero-fx-controls';
+  import { HERO_FX_DEFAULTS, HERO_FX_PRESETS } from '$lib/brand-editor/hero-fx-presets';
   import {
     selectPreset as selectPresetHelper,
     updateOverride as updateOverrideHelper,
   } from '$lib/brand-editor/hero-fx-helpers';
+  import { resolvePresetId } from '$lib/components/ui/ShaderHero/shader-config';
+  import BrandEditorHeroCombine from './BrandEditorHeroCombine.svelte';
   import ControlField from './ControlField.svelte';
 
   // ── Read current overrides ─────────────────────────────────────────────
@@ -26,7 +27,16 @@
     }
     return light;
   });
-  const activePreset = $derived(overrides['shader-preset'] ?? 'none');
+  // Through the alias door: a brand saved on a cut preset paints its survivor,
+  // so that survivor's card is the one marked active and its controls show.
+  const activePreset = $derived(
+    resolvePresetId(overrides['shader-preset']) ?? 'none'
+  );
+  // Intensity, grain and vignette write the ACTIVE preset's own keys, so a
+  // switch never carries one preset's tuning to the next.
+  const fxControls = $derived(
+    activePreset === 'none' ? [] : presetFxControls(activePreset)
+  );
 
   // Which palette controls to show. The four colour pickers are pointless
   // while the shader is matching the brand palette — they would appear live
@@ -87,12 +97,13 @@
     updateOverrideHelper(key, value, brandEditor.setThemeTokenOverride);
   }
 
-  // GOTCHA #1 (Codex-6itei §4.2): selectPreset('none') MUST iterate
+  // GOTCHA #1 (Codex-6itei §4.2): selectPreset('none') MUST clear
   // ALL_HERO_FX_SHADER_KEYS — the union of every shader-* key across every
-  // preset plus 'shader-preset' itself — so no stale overrides linger when
-  // the user picks "None". Tested in hero-fx-helpers.test.ts.
+  // preset plus 'shader-preset' itself — and every other shader-* key the
+  // overrides hold (a cut preset's), so no stale overrides linger when the
+  // user picks "None". Tested in hero-fx-helpers.test.ts.
   function selectPreset(presetId: string) {
-    selectPresetHelper(presetId, brandEditor.setThemeTokenOverride);
+    selectPresetHelper(presetId, brandEditor.setThemeTokenOverride, overrides);
   }
 </script>
 
@@ -115,11 +126,12 @@
     </div>
   </section>
 
-  <!-- Shared sliders + per-preset controls (only when a preset is active) -->
+  <!-- This preset's intensity/grain/vignette + its own controls (only when a
+       preset is active). Not "Global": each preset keeps its own. -->
   {#if activePreset !== 'none'}
     <section class="hero-fx__section">
-      <span class="hero-fx__section-label">Global</span>
-      {#each HERO_FX_SHARED_CONTROLS as control (control.key)}
+      <span class="hero-fx__section-label">This effect</span>
+      {#each fxControls as control (control.key)}
         <ControlField
           {control}
           currentValue={readControlValue(control)}
@@ -160,6 +172,14 @@
         {/each}
       </section>
     {/if}
+
+    <!-- Build on this preset (second, blend, layers, frame). -->
+    <BrandEditorHeroCombine
+      base={activePreset}
+      {overrides}
+      readControl={readControlValue}
+      onControl={updateOverride}
+    />
   {/if}
 </div>
 

@@ -16,6 +16,7 @@
   import * as Card from '$lib/components/ui/Card';
   import { CheckIcon, CopyIcon } from '$lib/components/ui/Icon';
   import { formatPrice } from '$lib/utils/format';
+  import { shortLossAmountLine } from './short-loss-view';
   import {
     daysLeftText,
     formatDay,
@@ -37,6 +38,9 @@
 
   const amountLine = $derived.by(() => {
     const amount = formatPrice(charge.amountCents);
+    // A blocked payment owed what Stripe won't refund (owner D59-D64): where
+    // the money went, and what is owed, before each mark and after.
+    if (detail.shortLoss) return shortLossAmountLine(detail.shortLoss, charge.amountCents);
     // Stripe lists no refund for a charge settled by hand (owner decision
     // 2026-11-08), so "nothing refunded" would mislead.
     const outsideStripe = detail.refundable.refundedOutsideStripeOn;
