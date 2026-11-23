@@ -1,5 +1,6 @@
 /**
- * Minimal, typed shape for a "Browse by topic" card — mirrors ONE row of
+ * Minimal, typed shape for one topic — the item every topic selector in
+ * Browse everything (`browse/topics/`) renders. Mirrors ONE row of
  * `GET /api/content/public/categories`
  * (workers/content-api/src/routes/public.ts). The endpoint never exposes the
  * raw R2 `coverImageKey`; it resolves the md variant to a CDN URL and hands
