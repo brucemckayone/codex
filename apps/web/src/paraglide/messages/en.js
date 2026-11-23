@@ -2047,6 +2047,54 @@ export const browse_topic_retry = () => `Retry`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const browse_topics_label = () => `Filter by topic`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topics_all = () => `All topics`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topics_title = () => `Topics`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topics_see_all = (params) => `See all ${params.count}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topics_apply = () => `Apply`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topics_done = () => `Done`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const org_view_all_content = () => `View all content`
 
 
