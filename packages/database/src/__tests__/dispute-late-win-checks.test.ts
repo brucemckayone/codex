@@ -21,6 +21,12 @@
  * an older worker after a rollback too, and its late win, which doesn't
  * clear the mark, must still be recorded.
  *
+ * And 0131's two (Codex-z1t3c; owner D61-D64, D66): what was paid another
+ * way is stored only with the first mark's date, and above 0
+ * (`check_disputes_paid_another_way`); the second mark's date only on a
+ * late-won row with that amount (`check_disputes_late_win_paid_another_way`).
+ * A mark ADDS to the amount (D66), so a raised amount is accepted too.
+ *
  * Real DB. Skips when DB_METHOD is not configured (fee-config-schema.test.ts).
  */
 
@@ -242,6 +248,122 @@ describe.skipIf(!HAS_DB)('0130 dispute appeals: the disputes CHECK', () => {
       lost: check,
       under_review: check,
       appeal_won: check,
+    });
+  });
+});
+
+describe.skipIf(!HAS_DB)('0131 paid another way: the disputes CHECKs', () => {
+  it('accepts a first mark, a second mark on a late-won marked row, and a mark that adds; refuses each row its CHECKs forbid', async () => {
+    const { dbWs } = await import('../index');
+    const tag = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = (name: string) => `du_paid_${name}_${tag}`;
+    const day = (n: number) => new Date(Date.UTC(2026, 10, n, 12));
+    /** A row of `status` with these mark columns: null where not given. */
+    const insert = (
+      name: string,
+      status: 'lost' | 'won',
+      marks: {
+        lateWonAt?: Date;
+        refundedOutsideStripeAt?: Date;
+        paidAnotherWayCents?: number;
+        lateWinRefundedOutsideStripeAt?: Date;
+      }
+    ) =>
+      sql`INSERT INTO disputes (stripe_dispute_id, stripe_charge_id, amount_cents, currency, stripe_created_at, status, late_won_at, refunded_outside_stripe_at, paid_another_way_cents, late_win_refunded_outside_stripe_at)
+          VALUES (${id(name)}, ${`ch_paid_${name}_${tag}`}, 1000, 'gbp', ${day(1)}, ${status}, ${marks.lateWonAt ?? null}, ${marks.refundedOutsideStripeAt ?? null}, ${marks.paidAnotherWayCents ?? null}, ${marks.lateWinRefundedOutsideStripeAt ?? null})`;
+
+    const accepted: string[] = [];
+    const refused: Record<string, { code?: string; constraint?: string }> = {};
+    try {
+      await dbWs.transaction(async (tx) => {
+        await tx.execute(
+          insert('first', 'lost', {
+            refundedOutsideStripeAt: day(17),
+            paidAnotherWayCents: 500,
+          })
+        );
+        accepted.push('a first mark');
+        await tx.execute(
+          insert('second', 'won', {
+            lateWonAt: day(1 + 30),
+            refundedOutsideStripeAt: day(17),
+            paidAnotherWayCents: 1500,
+            lateWinRefundedOutsideStripeAt: day(2 + 30),
+          })
+        );
+        accepted.push('a second mark on a late-won marked row');
+        // A mark that adds (D66): it must have written the row.
+        const added = await tx.execute(
+          sql`UPDATE disputes SET paid_another_way_cents = paid_another_way_cents + 300
+              WHERE stripe_dispute_id = ${id('first')}
+              RETURNING paid_another_way_cents`
+        );
+        expect(added.rows).toEqual([{ paid_another_way_cents: 800 }]);
+        accepted.push('a mark that adds');
+
+        const refuse = async (
+          name: string,
+          statement: ReturnType<typeof sql>
+        ) => {
+          try {
+            await tx.transaction(async (savepoint) => {
+              await savepoint.execute(statement);
+            });
+          } catch (error) {
+            refused[name] = refusal(error);
+          }
+        };
+        await refuse(
+          'an amount with no date',
+          insert('no_date', 'lost', { paidAnotherWayCents: 500 })
+        );
+        await refuse(
+          'an amount of 0',
+          insert('zero', 'lost', {
+            refundedOutsideStripeAt: day(17),
+            paidAnotherWayCents: 0,
+          })
+        );
+        await refuse(
+          'a second mark with no first mark',
+          insert('no_first', 'won', {
+            lateWonAt: day(1 + 30),
+            lateWinRefundedOutsideStripeAt: day(2 + 30),
+          })
+        );
+        // `won` with no late win: it breaks only the second mark's CHECK.
+        await refuse(
+          'a second mark with no late win',
+          insert('no_late_win', 'won', {
+            refundedOutsideStripeAt: day(17),
+            paidAnotherWayCents: 500,
+            lateWinRefundedOutsideStripeAt: day(2 + 30),
+          })
+        );
+        throw new Rollback();
+      });
+    } catch (error) {
+      if (!(error instanceof Rollback)) throw error;
+    }
+
+    expect(accepted).toEqual([
+      'a first mark',
+      'a second mark on a late-won marked row',
+      'a mark that adds',
+    ]);
+    const first = {
+      code: '23514',
+      constraint: 'check_disputes_paid_another_way',
+    };
+    const second = {
+      code: '23514',
+      constraint: 'check_disputes_late_win_paid_another_way',
+    };
+    expect(refused).toEqual({
+      'an amount with no date': first,
+      'an amount of 0': first,
+      'a second mark with no first mark': second,
+      'a second mark with no late win': second,
     });
   });
 });

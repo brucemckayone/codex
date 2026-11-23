@@ -15,7 +15,8 @@
  * users are returned with `deleted: true`, for the page to label.
  */
 
-import type { DisputeAppealStatus } from '@codex/constants';
+import type { DisputeAppealStatus, ShortLossStage } from '@codex/constants';
+import type { BlockedPaymentKind } from '@codex/purchase';
 
 /** What was paid for: a one-off purchase, or an invoice of a subscription. */
 export type SupportChargeKind =
@@ -169,8 +170,9 @@ export interface ChargeDetail {
      * When the buyer was refunded outside Stripe
      * (`disputes.refunded_outside_stripe_at`): support settled the charge by
      * hand, settled the late win's own failed refund as refunded elsewhere,
-     * or recorded a refund another way by hand (R19 (b)). Null otherwise. Stripe lists no standing refund for it, so
-     * `refundedCents` doesn't count it.
+     * recorded a refund another way by hand (R19 (b)), or marked a short
+     * lost chargeback paid another way (owner D61). Null otherwise. Stripe
+     * lists no standing refund for it, so `refundedCents` doesn't count it.
      */
     refundedOutsideStripeOn: string | null;
   };
@@ -196,7 +198,95 @@ export interface ChargeDetail {
   };
   refunds: RefundRow[];
   chargebacks: ChargebackRow[];
+  /**
+   * A blocked payment owed what Stripe won't refund (owner D59-D66): after
+   * its chargeback was lost for less than the payment (`short`), or after
+   * that chargeback was won late once support had paid the rest
+   * (`owed_again`), with what is owed now, how it adds up, and support's
+   * marks. Owed (`owedCents` above 0) whatever marks exist (D66), or marked
+   * at its stage with nothing owed. Null for anything else: a sale, an
+   * invoice, a loss in full.
+   */
+  shortLoss: ChargeShortLoss | null;
 }
+
+/** A charge's blocked payment owed what Stripe won't refund (`findShortLosses`, `@codex/purchase`). */
+export type ChargeShortLoss = ShortAfterLoss | OwedAgainAfterLateWin;
+
+/** Its chargeback was lost for less than the payment (owner D59-D61, D66). */
+export interface ShortAfterLoss {
+  stage: Extract<ShortLossStage, 'short'>;
+  /** The lost `du_` dispute: the mark is written on it. */
+  stripeDisputeId: string;
+  kind: BlockedPaymentKind;
+  /** What the bank returned: the lost chargeback's amount. */
+  lostCents: number;
+  /** The refunds standing on the charge: refunded through Stripe, in all. */
+  refundedThroughStripeCents: number;
+  /** Its failed refunds support settled refunded elsewhere, in all (owner D55, D66). */
+  refundedElsewhereCents: number;
+  /**
+   * Everything paid another way so far (`paid_another_way_cents`), each mark
+   * adding to it (owner D66), or null before the first mark.
+   */
+  paidAnotherWayCents: number | null;
+  /** `refunded_outside_stripe_at`, ISO: the first mark (a repeat keeps it, D71). */
+  paidAnotherWayOn: string | null;
+  /** Still owed now, by the one count: 0 once the marks have paid it. */
+  owedCents: number;
+}
+
+/**
+ * Support paid the rest another way, then the chargeback was won late: the
+ * bank took it back from the buyer and no refund was made (owner D62, D63),
+ * so the buyer is owed again.
+ */
+export interface OwedAgainAfterLateWin {
+  stage: Extract<ShortLossStage, 'owed_again'>;
+  /** The late-won `du_` dispute: the second mark is written on it. */
+  stripeDisputeId: string;
+  kind: BlockedPaymentKind;
+  /** What the bank took back from the buyer: the chargeback's amount. */
+  lostCents: number;
+  /**
+   * Everything paid another way (`paid_another_way_cents`): the first
+   * stage's marks, and once marked again, this stage's too (owner D66).
+   */
+  paidAnotherWayCents: number;
+  /** The first mark's date, ISO. */
+  paidAnotherWayOn: string;
+  /** When the chargeback was won late, ISO. */
+  lateWonOn: string;
+  /** The refunds standing on the charge: refunded through Stripe, in all. */
+  refundedThroughStripeCents: number;
+  /** Its failed refunds support settled refunded elsewhere, in all (owner D55, D66). */
+  refundedElsewhereCents: number;
+  /** Owed again: paid, less the refunds that count, less what was paid another way (owner D64, D66). */
+  owedCents: number;
+  /** `late_win_refunded_outside_stripe_at`, ISO: this stage's first mark (a repeat keeps it, D71). */
+  paidAgainOn: string | null;
+}
+
+/**
+ * "Paid another way" (POST .../charges/:chargeId/paid-another-way; owner D61,
+ * D63, D66): a mark made, which adds what it paid, or one made already
+ * (`alreadyMarked`), which marks nothing and names no amount.
+ */
+export type PaidAnotherWayResult = {
+  chargeId: string;
+  stripeDisputeId: string;
+  /** Which mark: the first (`short`) or the second (`owed_again`). */
+  stage: ShortLossStage;
+  /** The stage's mark date, ISO: when it was first marked at that stage (D71). */
+  paidAnotherWayOn: string;
+} & (
+  | {
+      alreadyMarked: false;
+      /** What this mark paid another way, added to what was marked before. */
+      owedCents: number;
+    }
+  | { alreadyMarked: true; owedCents: null }
+);
 
 /** One payee's (or the platform fee's) slice of the charge. */
 export interface Slice {
@@ -381,13 +471,28 @@ export interface RefundRow {
   notifiedAt: string | null;
   requestedBy: RefundRequester;
   /**
-   * How support settled it in Failed refunds, from our record; null while it
-   * is open, and for a refund that didn't fail. A failed one settled
-   * `refunded_elsewhere` counts as refunded (Codex-3xnta), and the card says
-   * "Refunded another way" for it, not "Failed".
+   * How it was settled, from our record; null while it is open, and for a
+   * refund that didn't fail. A failed one settled `refunded_elsewhere` counts
+   * as refunded (Codex-3xnta), and the card says "Refunded another way" for
+   * it, not "Failed". One `covered_by_refund` was paid by a later refund of
+   * everything owed (owner D73): the card says "Covered" (D74), with
+   * `coveredBy`.
    */
-  resolution: FailedRefundResolution | null;
+  resolution: RefundRowResolution | null;
+  /**
+   * The refund that covered it, with that refund's amount from Stripe's
+   * list; null unless `resolution` is `covered_by_refund`.
+   */
+  coveredBy: { refundId: string; amountCents: number } | null;
 }
+
+/**
+ * How a charge's failed refund was settled (`RefundRow.resolution`): by
+ * support (`FailedRefundResolution`), or by the platform, covered by a later
+ * refund of everything owed (owner D73). Only the platform writes
+ * `covered_by_refund`, so support's settle takes `FailedRefundResolution`.
+ */
+export type RefundRowResolution = FailedRefundResolution | 'covered_by_refund';
 
 /** One dispute of the charge, from `disputes`. */
 export interface ChargebackRow {
@@ -537,6 +642,35 @@ export interface FailedRefundItem {
    * known only from Stripe's metadata reads false, and is still settled.
    */
   isLateWinRefund: boolean;
+  /**
+   * The refund of a blocked payment, by kind, or null for a sale's: a
+   * `duplicate`, a second payment for an item the buyer already has (they
+   * kept it), or `unavailable`, a payment for an item its buyer could no
+   * longer open (Codex-z1t3c; they have nothing). Either paid no one and
+   * granted nothing, so it is only ever settled refunded elsewhere:
+   * `creators_repaid` is refused (`BLOCKED_PAYMENT_REFUND_NOT_REPAYABLE`,
+   * owner D55, widened to duplicates by D57), and the queue offers no Re-pay
+   * for it. The kind picks the queue's words.
+   */
+  blockedPayment: BlockedPaymentKind | null;
+  /**
+   * The blocked payment's chargeback, while it is open (owner D67, D72): the
+   * row is listed and counted, but nothing is settled until the bank
+   * decides (`REFUND_DECIDED_BY_CHARGEBACK`, `chargeback_open`). Won in time,
+   * this is null again and it is settled as before; lost, the row leaves the
+   * queue, and what is still owed is the charge page's (D66). Null for every
+   * other row.
+   */
+  waitingForChargeback: { stripeDisputeId: string; openedOn: string } | null;
+  /**
+   * The row's blocked payment is still owed its own refund (review r8): the
+   * checkout's, or the hourly sweep's retry, of everything owed, which will
+   * include this refund and cover it (owner D73). It is listed and counted,
+   * but nothing is settled meanwhile (`REFUND_AWAITS_PAYMENT_REFUND`,
+   * `blocked_refund`), since settling it would pay the buyer twice. False for
+   * every other row, and while its chargeback is open (`waitingForChargeback`).
+   */
+  waitingForPaymentRefund: boolean;
 }
 
 /** A payee's role on a slice, as the queue labels it. */
@@ -797,6 +931,10 @@ export interface ResolvedFailedRefund {
  * - `not_refunded`: the purchase is in another status;
  * - `dispute_holds`: a chargeback is open or was lost on it;
  * - `duplicate`: a duplicate payment, which never granted anything;
+ * - `unavailable`: a blocked sale of an item its buyer could not open when
+ *   its payment landed (Codex-z1t3c), which never granted anything. A
+ *   settlement no longer reaches it: `creators_repaid` is refused for a
+ *   blocked sale (owner D55), so only one settled before that reads it;
  * - `rebought`: the buyer bought the item again, and that purchase grants it;
  * - `still_refunded`: the refunds that still stand cover the payment;
  * - `no_purchase`: an invoice's charge, or one we hold no purchase for.
@@ -806,6 +944,7 @@ export type AccessNotRestoredReason =
   | 'not_refunded'
   | 'dispute_holds'
   | 'duplicate'
+  | 'unavailable'
   | 'rebought'
   | 'still_refunded'
   | 'no_purchase';

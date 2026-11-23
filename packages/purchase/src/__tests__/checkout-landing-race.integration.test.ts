@@ -145,6 +145,10 @@ describe('The success page and the webhook complete one checkout at once (Codex-
               organizationId: orgId,
               contentType: 'written',
               slug: createUniqueSlug(`landing-race-${token}`),
+              // Published, as anything a checkout sells is: completion blocks a
+              // sale of content its buyer could not open (Codex-z1t3c, D54).
+              status: 'published',
+              publishedAt: new Date(),
             })
           )
           .returning()

@@ -181,6 +181,10 @@ describe("an owner's sale of their own work (Codex-2hxff.77)", () => {
             organizationId: orgId,
             contentType: 'written',
             slug: createUniqueSlug('owner-own-content'),
+            // Published, as anything a checkout sells is: completion blocks a
+            // sale of content its buyer could not open (Codex-z1t3c, D54).
+            status: 'published',
+            publishedAt: new Date(),
           })
         )
         .returning()

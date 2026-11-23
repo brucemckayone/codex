@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
+  CourseNotPurchasableError,
   LateWinRefundRefusedError,
   PaymentProcessingError,
   PurchaseNotFoundError,
@@ -288,6 +289,31 @@ describe('Purchase Service Errors', () => {
           reason: 'no_price',
           code: 'CONTENT_NOT_PURCHASABLE',
         });
+      });
+    });
+
+    it('a context can never overwrite the id, reason or code', () => {
+      const error = new ContentNotPurchasableError('content-123', 'deleted', {
+        contentId: 'other',
+        reason: 'Content not found or deleted',
+        code: 'SOMETHING_ELSE',
+        status: 'draft',
+      });
+      expect(error.context).toEqual({
+        contentId: 'content-123',
+        reason: 'deleted',
+        code: 'CONTENT_NOT_PURCHASABLE',
+        status: 'draft',
+      });
+      const course = new CourseNotPurchasableError('course-1', 'no_price', {
+        courseId: 'other',
+        reason: 'free text',
+        code: 'SOMETHING_ELSE',
+      });
+      expect(course.context).toEqual({
+        courseId: 'course-1',
+        reason: 'no_price',
+        code: 'COURSE_NOT_PURCHASABLE',
       });
     });
 

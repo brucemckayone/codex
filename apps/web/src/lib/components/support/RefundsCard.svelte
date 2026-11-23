@@ -9,7 +9,9 @@
   row says "Taking back shares…". After support makes a refund the page
   reloads once and offers Refresh (Q10); nothing polls. A failed refund
   support settled as refunded elsewhere reads "Refunded another way", not
-  "Failed": it counts as refunded (Codex-3xnta).
+  "Failed": it counts as refunded (Codex-3xnta). One a later refund of
+  everything owed covered reads "Covered", with the refund that included it
+  (owner D73, D74).
 
   @prop {ChargeDetail} detail
   @prop {() => void} [onRefresh] - Shows the Refresh button.
@@ -26,6 +28,7 @@
   import {
     formatDayTime,
     formatShortDay,
+    refundCoveredLine,
     refundReasonLabel,
     refundStatus,
     requesterLabel,
@@ -68,9 +71,13 @@
 
 {#snippet status(refund: RefundRow)}
   {@const badge = refundStatus(refund)}
+  {@const covered = refundCoveredLine(refund)}
   <Badge variant={badge.variant}>{badge.label}</Badge>
   {#if refund.status === 'failed' && refund.failureLabel}
     <span class="cell-sub">{refund.failureLabel}</span>
+  {/if}
+  {#if covered}
+    <span class="cell-sub" data-testid="refund-covered">{covered}</span>
   {/if}
   {#if takingBack(refund)}
     <span class="cell-sub" data-testid="taking-back">{m.support_taking_back()}</span>

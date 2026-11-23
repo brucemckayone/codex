@@ -159,12 +159,31 @@ async function retryClawbacks(
 }
 
 /**
+ * The alert for refunds still owed, per kind. Only the purchase kind can hold
+ * a blocked sale of an item its buyer could not open (Codex-z1t3c), and its
+ * entries say which they are (`blocked`); the plan kinds hold duplicates only.
+ */
+const STILL_OWED_ALERT = {
+  purchase:
+    'Refunds are still owed after the hourly retry (a duplicate payment, or an item no longer available): refund them by hand',
+  subscription:
+    'Duplicate refunds are still owed after the hourly retry: refund them by hand',
+  courseSubscription:
+    'Duplicate refunds are still owed after the hourly retry: refund them by hand',
+} as const satisfies Record<
+  'purchase' | 'subscription' | 'courseSubscription',
+  string
+>;
+
+/**
  * Retry the refunds still owed on duplicates (Codex-2hxff.15): a second
  * purchase of an item, or a second subscription to an org or course plan,
  * whose refund was refused while Stripe redelivered its event, and then
- * stopped. Each kind runs on its own, so one failing never stops the others,
- * and nothing here fails the cron. What is still owed afterwards is alerted
- * with its ids, for support to settle.
+ * stopped. The purchase kind also retries blocked sales of an item its buyer
+ * could not open (Codex-z1t3c). Each kind runs on its own, so one failing
+ * never stops the others, and nothing here fails the cron. What is still owed
+ * afterwards is alerted with its ids, in its kind's words
+ * (`STILL_OWED_ALERT`), for support to settle.
  */
 export async function runOwedDuplicatesSweep(
   services: Record<
@@ -190,10 +209,11 @@ export async function runOwedDuplicatesSweep(
         });
       }
       if (result.stillOwed.length > 0) {
-        obs.error(
-          'Duplicate refunds are still owed after the hourly retry: refund them by hand',
-          { errorId: crypto.randomUUID(), kind, stillOwed: result.stillOwed }
-        );
+        obs.error(STILL_OWED_ALERT[kind], {
+          errorId: crypto.randomUUID(),
+          kind,
+          stillOwed: result.stillOwed,
+        });
       }
     } catch (error) {
       obs.error('owed duplicate refunds could not be retried', {

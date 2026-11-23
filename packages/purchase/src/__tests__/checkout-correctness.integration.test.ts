@@ -35,6 +35,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   ContentNotPurchasableError,
   CourseAlreadyOwnedError,
+  CourseNotPurchasableError,
   PaymentProcessingError,
 } from '../errors';
 import { PurchaseService } from '../services/purchase-service';
@@ -135,7 +136,9 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
     );
   }
 
-  async function insertCourse() {
+  async function insertCourse(
+    values: Partial<typeof schema.courses.$inferInsert> = {}
+  ) {
     return takeFirst(
       await db
         .insert(schema.courses)
@@ -146,6 +149,7 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
           title: 'Sellable course',
           status: 'published',
           priceCents: 4999,
+          ...values,
         })
         .returning()
     );
@@ -157,6 +161,101 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
       .from(schema.checkoutSessions)
       .where(eq(schema.checkoutSessions.customerId, customerId));
   }
+
+  // Completion blocks and refunds a sale of what its buyer could not open,
+  // and Stripe keeps its fee (Codex-z1t3c), so checkout never starts one.
+  describe('what its buyer could not open (Codex-z1t3c)', () => {
+    /** An organisation, soft-deleted as `OrganizationService.delete` does. */
+    async function deletedOrg(): Promise<string> {
+      const org = takeFirst(
+        await db
+          .insert(schema.organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      await db
+        .update(schema.organizations)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(schema.organizations.id, org.id));
+      return org.id;
+    }
+
+    it('refuses content of a deleted organisation: no Stripe session, no reservation', async () => {
+      const { service, stripe } = fresh();
+      const item = await insertContent({ organizationId: await deletedOrg() });
+      const customerId = await buyer();
+
+      const refused = await service
+        .createCheckoutSession({ contentId: item.id, ...URLS }, customerId)
+        .catch((e: unknown) => e);
+
+      expect(refused).toBeInstanceOf(ContentNotPurchasableError);
+      expect((refused as ContentNotPurchasableError).code).toBe(
+        'BUSINESS_LOGIC_ERROR'
+      );
+      expect((refused as ContentNotPurchasableError).context).toMatchObject({
+        code: 'CONTENT_NOT_PURCHASABLE',
+        reason: 'deleted',
+      });
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+      expect(await sessionsFor(customerId)).toHaveLength(0);
+    });
+
+    // Content of a deleted organisation and content with no row are both
+    // "gone": a client must not tell them apart, as it can't for courses.
+    it('refuses content of a deleted organisation exactly as content with no row', async () => {
+      const { service } = fresh();
+      const customerId = await buyer();
+      const refusalOf = async (contentId: string) => {
+        const refused = await service
+          .createCheckoutSession({ contentId, ...URLS }, customerId)
+          .catch((e: unknown) => e);
+        expect(refused).toBeInstanceOf(ContentNotPurchasableError);
+        const { message, context } = refused as ContentNotPurchasableError;
+        return { message, context: { ...context, contentId: '<id>' } };
+      };
+      const item = await insertContent({ organizationId: await deletedOrg() });
+
+      const ofDeletedOrg = await refusalOf(item.id);
+      const ofNoRow = await refusalOf(crypto.randomUUID());
+
+      expect(ofDeletedOrg).toEqual(ofNoRow);
+      expect(ofNoRow).toEqual({
+        message: 'Content is no longer available',
+        context: {
+          contentId: '<id>',
+          reason: 'deleted',
+          code: 'CONTENT_NOT_PURCHASABLE',
+        },
+      });
+    });
+
+    it('refuses a course of a deleted organisation: no Stripe session, no reservation', async () => {
+      const { service, stripe } = fresh();
+      const course = await insertCourse({
+        organizationId: await deletedOrg(),
+      });
+      const customerId = await buyer();
+
+      const refused = await service
+        .createCourseCheckoutSession(
+          { courseId: course.id, ...URLS },
+          customerId
+        )
+        .catch((e: unknown) => e);
+
+      expect(refused).toBeInstanceOf(CourseNotPurchasableError);
+      expect((refused as CourseNotPurchasableError).code).toBe(
+        'BUSINESS_LOGIC_ERROR'
+      );
+      expect((refused as CourseNotPurchasableError).context).toMatchObject({
+        code: 'COURSE_NOT_PURCHASABLE',
+        reason: 'deleted',
+      });
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+      expect(await sessionsFor(customerId)).toHaveLength(0);
+    });
+  });
 
   describe('what checkout sells', () => {
     it.each([
@@ -585,9 +684,10 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
       expect(stripe.refunds.create).toHaveBeenCalledWith(
         expect.objectContaining({
           payment_intent: secondPi,
+          amount: 1500,
           reason: 'duplicate',
         }),
-        { idempotencyKey: `refund_duplicate_${secondPi}` }
+        { idempotencyKey: `refund_duplicate_${secondPi}_1500` }
       );
 
       // No slice for the duplicate's charge, though it carried one.
@@ -705,6 +805,11 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
       expect(refused.stillOwed.map((o) => o.stripePaymentIntentId)).toContain(
         owedPi
       );
+      // Support is told which kind it is: this buyer kept the item.
+      expect(
+        refused.stillOwed.find((o) => o.stripePaymentIntentId === owedPi)
+          ?.blocked
+      ).toBe('duplicate');
       expect((await owedRow())?.status).toBe('pending');
 
       // Stripe accepts: refunded, and no longer owed.
@@ -810,6 +915,9 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
         duplicatePayment: true,
         itemTitle: item.title,
         lateWinKeptThrough: null,
+        itemUnavailable: false,
+        refundedInFull: true,
+        restOwed: false,
       });
       const [access] = await db
         .select()

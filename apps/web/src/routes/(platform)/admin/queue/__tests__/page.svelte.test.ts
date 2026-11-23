@@ -465,6 +465,129 @@ describe('settling', () => {
       document.querySelector('[data-testid="settle-notice"]')
     );
   });
+
+  // Owner D66 (mockup B2): a page loaded before the chargeback was lost
+  // settles nothing; the list and the counts reload (the row has gone), and
+  // the notice links to the charge page, where what is owed lives.
+  test('a refund its lost chargeback decides: nothing settled, the list reloads, and the notice links the charge', async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({
+        detailsCode: 'REFUND_DECIDED_BY_CHARGEBACK',
+        reason: 'chargeback_lost',
+      })
+    );
+    mountAt('/admin/queue');
+    failedSlot().current = list([failedRefund()]);
+    flushSync();
+
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="failed-refund-row"] button'
+      ),
+    ]
+      .find((b) => b.textContent?.includes(m.support_action_elsewhere()))
+      ?.click();
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="settle-submit"]')
+      ?.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    flushSync();
+
+    expect(failedSlot().refresh).toHaveBeenCalledTimes(1);
+    expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
+    const notice = document.querySelector('[data-testid="settle-notice"]');
+    expect(notice?.getAttribute('data-variant')).toBe('warning');
+    expect(notice?.textContent?.replace(/\s+/g, ' ').trim()).toContain(
+      `${m.support_settle_on_charge_lead()} ${m.support_settle_on_charge()}`
+    );
+    const link = notice?.querySelector<HTMLAnchorElement>(
+      '[data-testid="settle-notice-link"]'
+    );
+    expect(link?.getAttribute('href')).toBe(
+      `/admin/refunds/${failedRefund().chargeId}`
+    );
+    expect(link?.textContent?.trim()).toBe(m.support_settle_open_charge());
+  });
+
+  // Owner D78-D80 (review r8): the two refusals that keep a settle from
+  // paying the buyer a second time, in the owner's exact words, each linking
+  // the charge. Nothing was settled.
+  test.each([
+    {
+      name: '412 SETTLE_EXCEEDS_PAID',
+      refusal: {
+        status: 412,
+        detailsCode: 'SETTLE_EXCEEDS_PAID',
+        maxCents: 500,
+      },
+      variant: 'warning',
+      said: "Only £5.00 more can be paid back on this payment, so this wasn't settled. Refund £5.00 on the charge page; that settles this one.",
+    },
+    {
+      // Race 1's loser: the other settle paid back everything (D80).
+      name: '412 SETTLE_EXCEEDS_PAID, nothing left',
+      refusal: {
+        status: 412,
+        detailsCode: 'SETTLE_EXCEEDS_PAID',
+        maxCents: 0,
+      },
+      variant: 'warning',
+      said: "Everything paid on this payment has already been paid back, so this wasn't settled.",
+    },
+    {
+      name: '422 REFUND_AWAITS_PAYMENT_REFUND, late_win',
+      refusal: {
+        detailsCode: 'REFUND_AWAITS_PAYMENT_REFUND',
+        reason: 'late_win',
+      },
+      variant: 'info',
+      said: "This refund is waiting for the late win's refund to finish, so nothing was settled.",
+    },
+    {
+      name: '422 REFUND_AWAITS_PAYMENT_REFUND, blocked_refund',
+      refusal: {
+        detailsCode: 'REFUND_AWAITS_PAYMENT_REFUND',
+        reason: 'blocked_refund',
+      },
+      variant: 'info',
+      said: "This refund is waiting for the payment's own refund, which includes it, so nothing was settled.",
+    },
+  ])("$name: nothing settled, the notice in the owner's words, linking the charge", async ({
+    refusal,
+    variant,
+    said,
+  }) => {
+    resolveFailedRefund.mockResolvedValue(failure(refusal));
+    mountAt('/admin/queue');
+    failedSlot().current = list([failedRefund()]);
+    flushSync();
+
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="failed-refund-row"] button'
+      ),
+    ]
+      .find((b) => b.textContent?.includes(m.support_action_elsewhere()))
+      ?.click();
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="settle-submit"]')
+      ?.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    flushSync();
+
+    const notice = document.querySelector('[data-testid="settle-notice"]');
+    expect(notice?.getAttribute('data-variant')).toBe(variant);
+    expect(notice?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      `${said} Open the charge`
+    );
+    expect(
+      notice
+        ?.querySelector('[data-testid="settle-notice-link"]')
+        ?.getAttribute('href')
+    ).toBe(`/admin/refunds/${failedRefund().chargeId}`);
+  });
 });
 
 describe('Owed to creators (?tab=owed)', () => {
@@ -625,6 +748,32 @@ describe('Owed to creators (?tab=owed)', () => {
     );
     expect(owedSlot().refresh).not.toHaveBeenCalled();
     expect(countsSlot().refresh).not.toHaveBeenCalled();
+  });
+
+  // Svelte trims a space at a block's end, so a space inside the lead's
+  // `{#if}` ran the bold lead into the text ("…answer.Try…").
+  test('a notice with a lead reads the lead, a space, then the text', async () => {
+    checkOwedToCreator.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        creditId: checkRow().creditId,
+        outcome: 'still_unknown',
+        state: 'needs_check',
+        amountCents: null,
+        stripeReversalId: null,
+        note: null,
+        checkedAt: NOW.toISOString(),
+        action: 'check',
+      },
+    });
+    mountAt('/admin/queue?tab=owed');
+    owedSlot().current = list([checkRow()]);
+    flushSync();
+    owedButton(m.support_owed_action_check())?.click();
+    await answered();
+    expect(notice()?.textContent?.trim()).toBe(
+      `${m.support_credit_check_unknown_lead()} ${m.support_credit_check_unknown_body()}`
+    );
   });
 
   test('a check the ledger cannot attribute: the row now asks a person, so the list reloads', async () => {
