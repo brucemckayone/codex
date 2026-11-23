@@ -8,7 +8,7 @@
   in one of two mutually-exclusive views:
 
     • BROWSE  (focusedId === null) — a short, scannable list of control rows
-      grouped under Foundations / Identity / Hero, plus search. Pure navigation:
+      grouped under Foundations / Identity / Hero / Page, plus search. Pure navigation:
       no editing happens here, so it stays short and never competes for height.
 
     • FOCUS   (focusedId set) — the chosen control OWNS THE FULL RAIL HEIGHT.
@@ -48,6 +48,7 @@
   import BrandEditorHeroText from '$lib/components/brand-editor/levels/BrandEditorHeroText.svelte';
   import BrandEditorLogo from '$lib/components/brand-editor/levels/BrandEditorLogo.svelte';
   import BrandEditorShape from '$lib/components/brand-editor/levels/BrandEditorShape.svelte';
+  import BrandEditorTopics from '$lib/components/brand-editor/levels/BrandEditorTopics.svelte';
   import BrandEditorTypography from '$lib/components/brand-editor/levels/BrandEditorTypography.svelte';
   import * as m from '$paraglide/messages';
   import ChangeLedger from './rail/ChangeLedger.svelte';
@@ -327,6 +328,8 @@
     <BrandEditorFineTuneColors section="hero" />
   {:else if id === 'hero-designer'}
     <BrandEditorHeroDesigner />
+  {:else if id === 'topics'}
+    <BrandEditorTopics />
   {/if}
 {/snippet}
 

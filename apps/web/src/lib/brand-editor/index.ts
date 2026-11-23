@@ -61,4 +61,7 @@ export {
 export type { PresetAxisPoint, PresetCategory } from './presets';
 // Brand Editor - Presets
 export { BRAND_PRESETS, PRESET_CATEGORY_ORDER } from './presets';
+// Brand Editor - The landing's topic-selector style (Codex-8swlj.2). Pure, so
+// the public landing bundle can read it.
+export { resolveTopicsStyle } from './topics-style';
 export type { BrandEditorState } from './types';
