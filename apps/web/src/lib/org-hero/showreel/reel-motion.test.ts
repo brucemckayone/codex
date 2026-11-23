@@ -392,6 +392,37 @@ describe('ReelMotion opening', () => {
     expect(v.u_nameAlpha).toBe(1);
   });
 
+  it('holds the words back while the opening runs, until they come in (wordsIn)', () => {
+    // Corner/Wide: the letters breathe, dive, then the words come in.
+    const driver = opening({ frame: 'film-fill' });
+    driver.frame(0);
+    expect(driver.wordsHeld, 'due, before the canvas shows the film').toBe(
+      true
+    );
+    runs(driver);
+    driver.open(100, 1.6);
+    driver.frame(1000);
+    expect(driver.wordsHeld, 'breathing').toBe(true);
+    driver.frame(100 + 3600);
+    expect(driver.wordsHeld, 'just past the dive').toBe(true);
+    driver.frame(100 + 3800);
+    expect(driver.wordsHeld, 'the words come in').toBe(false);
+  });
+
+  it('never holds the words where no opening runs', () => {
+    const none = new ReelMotion(setup());
+    none.frame(0);
+    expect(none.wordsHeld, 'no opening chosen').toBe(false);
+    const ruledOut = opening();
+    runs(ruledOut, { opening: 'none' });
+    ruledOut.open(100, 1.6);
+    ruledOut.frame(100);
+    expect(ruledOut.wordsHeld, 'the pass runs none').toBe(false);
+    const still = opening({ moves: false });
+    still.frame(0);
+    expect(still.wordsHeld, 'a reel that never moves on').toBe(false);
+  });
+
   it('opens once a visit', () => {
     const driver = opening();
     runs(driver);

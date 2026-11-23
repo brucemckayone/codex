@@ -68,12 +68,27 @@ function frameTerm(frame: FilmFrameId, throughName: boolean): string {
       : 'float frame = bandShows(local);';
   if (!throughName) return band;
   // The opening and the dive draw the film into the letters on these
-  // layouts too, as far as the name's weight says.
+  // layouts too, as far as the name's weight says. A portrait piece fills
+  // the letters across the window as a landscape one does (its column alone
+  // left most of the name empty), handing over to its column as the name
+  // gives way.
+  const portraitFills =
+    frame === 'film-portrait'
+      ? '\n    frame = mix(frame, 1.0, u_nameWeight);'
+      : '';
   return `${band}
   if (u_nameWeight > 0.0) {
-    float veil = nameVeil(v_uv, mo.warp);
+    float veil = nameVeil(v_uv, mo.warp);${portraitFills}
     frame *= u_nameWeight >= 1.0 ? veil : mix(1.0, veil, u_nameWeight);
   }`;
+}
+
+/** Through the letters a portrait piece is sampled covering the stage, as far as the name's weight says. */
+function portraitInLetters(frame: FilmFrameId, throughName: boolean): string {
+  if (frame !== 'film-portrait' || !throughName) return '';
+  return `
+  if (u_nameWeight > 0.0 && mo.glitch <= 0.01)
+    f = mix(f, film(moved ? stageAt(v_uv + mo.warp) : local), u_nameWeight);`;
 }
 
 const FRAME_UNIFORMS: Record<FilmFrameId, readonly FilmPassUniform[]> = {
@@ -119,7 +134,7 @@ void main() {
   // Unmoved, the film is sampled exactly where the frame samples it.
   bool moved = mo.warp != vec2(0.0);
   vec3 f = mo.glitch > 0.01 ? glitchedFilm(v_uv + mo.warp, mo.glitch)
-                            : frameFilm(moved ? stageAt(v_uv + mo.warp) : local);
+                            : frameFilm(moved ? stageAt(v_uv + mo.warp) : local);${portraitInLetters(frame, throughName)}
   ${frameTerm(frame, throughName)}
   if (u_fill > 0.0) frame = mix(frame, 1.0, u_fill);
   float m = filmShows(local) * frame * mo.shows;

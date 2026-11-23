@@ -426,7 +426,9 @@
     z-index: 1;
     color: var(--_t-ink);
     outline: none;
-    animation: theatre-in var(--duration-slow) var(--ease-out) both;
+    /* After the way into the film, where the reel runs one first
+       (`--_theatre-delay`, the Showreel's). */
+    animation: theatre-in var(--_theatre-in, var(--duration-slow)) var(--ease-out) var(--_theatre-delay, 0s) both;
   }
 
   @keyframes theatre-in {

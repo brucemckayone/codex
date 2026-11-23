@@ -453,7 +453,10 @@
     moves: () => moves,
     phone: () => !desktop.current,
     reducedMotion: () => reducedMotion.current,
-    filmPlaying: () => filmPlaying,
+    // A film's preview in the theatre goes in the way the film does
+    // (`reel-film`), the theatre fading in as the dive lands
+    // (`--_theatre-delay`).
+    filmPlaying: () => filmPlaying || theatre?.item.kind === 'video',
   });
   // The words come in when the stage shows their piece: at the
   // cut's bottom, never over the piece going out. With no stage named yet
@@ -736,6 +739,7 @@
   data-mode={mode}
   data-paused={clock.paused ? '' : undefined}
   data-theatre={theatre?.item.kind}
+  data-opening={reelMotion.wordsHeld ? 'hold' : undefined}
   aria-roledescription="carousel"
   aria-label={m.org_hero_reel_label()}
   style:--_pool={FIRST_PAINT.pool}
@@ -1295,6 +1299,33 @@
 
   .reel[data-theatre] .reel__scrim-foot {
     opacity: 0.45;
+  }
+
+  /* A film's preview: the words step aside, the way into the film runs
+     (about a second, `intoLength`), and the theatre fades in as it lands. */
+  .reel[data-theatre='video'] {
+    --_theatre-delay: var(--duration-slowest);
+    --_theatre-in: var(--duration-slower);
+  }
+
+  /* ── the opening, through the letters: they open on their own ──
+     The reel's words, its bar and its shades wait while the opening runs
+     (`data-opening`, from the server's paint, `ReelMotion.wordsHeld`), and
+     come in as it lands (their opacity transition, above). Never with
+     reduced motion, where no opening runs. Should the page's script never
+     run, they come in on their own, past the longest the script holds them
+     (the film's wait, OPEN_WAIT_MS, then the opening, about 9 s). */
+  @media (prefers-reduced-motion: no-preference) {
+    .reel[data-opening] :is(.reel__inner, .reel__scrim-top, .reel__scrim-foot) {
+      opacity: 0;
+      animation: reel-held var(--duration-slower) var(--ease-out) 12s forwards;
+    }
+  }
+
+  @keyframes reel-held {
+    to {
+      opacity: 1;
+    }
   }
 
   .reel__btn {

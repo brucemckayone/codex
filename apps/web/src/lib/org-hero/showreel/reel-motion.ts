@@ -130,6 +130,8 @@ export class ReelMotion {
   /** The canvas showed the film while the pass had not said what it runs. */
   #openWaitFrom: number | null = null;
   #openAspect = 1;
+  /** The opening holds the reel's words back (`wordsHeld`). */
+  #wordsHeld = false;
 
   #intoFrom: number | null = null;
   #intoKind: IntoId | null = null;
@@ -166,6 +168,15 @@ export class ReelMotion {
    */
   get stageKey(): string | null {
     return this.#keys[this.#stage] ?? null;
+  }
+
+  /**
+   * The opening holds the reel's words, its bar and its shades back: while it
+   * is due, and once it runs until its words come in (`wordsIn`), so the
+   * letters open on their own. Read after each frame.
+   */
+  get wordsHeld(): boolean {
+    return this.#wordsHeld;
   }
 
   /**
@@ -374,6 +385,7 @@ export class ReelMotion {
     this.#openingDue = false;
     this.#openWaitFrom = null;
     this.#opened = true;
+    this.#wordsHeld = false;
   }
 
   /** The film closed: the band and the letters come back. */
@@ -457,11 +469,13 @@ export class ReelMotion {
         );
         if (opening.done) this.#openingFrom = null;
         else {
+          this.#wordsHeld = !opening.wordsIn;
           this.#setName(opening);
           return true;
         }
       }
     }
+    this.#wordsHeld = this.#openingDue;
     // Waiting to open: the opening's own first frame, so it starts from
     // exactly what shows (the letters dark, the film already held to them).
     this.#setName(

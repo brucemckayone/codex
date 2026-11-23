@@ -125,8 +125,12 @@ function inkFollowsScrollInCss(): boolean {
  */
 export function useReelMotion(source: ReelMotionSource): {
   readonly stage: number | null;
+  readonly wordsHeld: boolean;
 } {
   let stageKey = $state<string | null>(null);
+  // Before the driver's first frame (the server's render, hydration): held
+  // whenever an opening is chosen, as the server drew it.
+  let heldByDriver = $state<boolean | null>(null);
   let driver: ReelMotion | null = null;
   let frameId = 0;
   const now = () => performance.now();
@@ -137,6 +141,7 @@ export function useReelMotion(source: ReelMotionSource): {
     if (!d) return;
     const busy = d.frame(time);
     if (d.stageKey !== stageKey) stageKey = d.stageKey;
+    if (d.wordsHeld !== heldByDriver) heldByDriver = d.wordsHeld;
     showreelFeed.motionFrame();
     if (busy) wake();
   }
@@ -343,6 +348,10 @@ export function useReelMotion(source: ReelMotionSource): {
   });
 
   return {
+    /** The opening holds the words back (`ReelMotion.wordsHeld`). */
+    get wordsHeld() {
+      return heldByDriver ?? source.options()['reel-opening'] === 'name';
+    },
     get stage() {
       if (stageKey === null) return null;
       const at = source.keys().indexOf(stageKey);
