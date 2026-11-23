@@ -170,6 +170,7 @@ export function useReelMotion(source: ReelMotionSource): {
       else {
         driver = new ReelMotion(setup, {
           maskPixels: () => maskPixelsOf(showreelFeed.mask),
+          stageSettled: () => showreelFeed.settled,
         });
       }
       showreelFeed.setMotion(driver.motion);
