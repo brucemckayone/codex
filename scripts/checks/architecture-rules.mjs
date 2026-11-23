@@ -262,9 +262,10 @@ export const RULES = [
     },
     match: {
       kind: 'call',
-      // Optional chaining and spacing included: `transfers?.create (`.
+      // Optional chaining and spacing included: `transfers?.create (`, and an
+      // optional call, `create?.(`.
       pattern:
-        /\b(?:transfers\s*\??\.\s*(?:create|createReversal)|refunds\s*\??\.\s*create|payouts\s*\??\.\s*create)\s*\(/,
+        /\b(?:transfers\s*\??\.\s*(?:create|createReversal)|refunds\s*\??\.\s*create|payouts\s*\??\.\s*create)\s*(?:\?\.\s*)?\(/,
     },
     fix: 'Move the money through @codex/payments (payout-ledger, clawback, refund or bank-payouts); never call these Stripe APIs directly.',
   },

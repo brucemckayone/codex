@@ -91,7 +91,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // The gate's own modules load here, under a handler that exists only while
@@ -118,6 +118,7 @@ const {
   GATE_DIR,
   GATE_ENTRY_PATHS,
   gateAt,
+  callerPrint,
   gateDependencies,
   hashOf,
   isGateCode,
@@ -1412,10 +1413,17 @@ function verifyBase(root, ci) {
 
 /**
  * The sign that lets the owner merge past a base copy that cannot run. It
- * covers that base and the gate code as it stands, so a further edit to the
- * gate after the owner signed asks again (review round 5).
+ * covers the base copy's code (what failed to run, not the base's sha, so a
+ * dev move that leaves the base gate as it was keeps the sign) and this
+ * change's gate code as it stands, the calling workflows' gate parts
+ * included (S6 (3)): a further edit to any of it after the owner signed asks
+ * again (review rounds 5 and 6).
  */
-function baseJudgeKey(root, base, baselineFile) {
+function baseJudgeKey(root, base, baselineFile, callers) {
+  const read = (f) => {
+    const path = join(root, f);
+    return existsSync(path) ? readFileSync(path, 'utf8') : '';
+  };
   const files = spawnSync('git', ['ls-files', '-z'], {
     cwd: root,
     encoding: 'utf8',
@@ -1423,11 +1431,22 @@ function baseJudgeKey(root, base, baselineFile) {
     .stdout.split('\0')
     .filter((f) => f && isGateCode(f, baselineFile))
     .sort();
-  const code = files.map((f) => {
-    const path = join(root, f);
-    return `${f}\n${existsSync(path) ? readFileSync(path, 'utf8') : ''}`;
-  });
-  return `GATE base-judge@${hashOf([base, ...code].join('\0'))}`;
+  const code = files.map((f) => `${f}\n${read(f)}`);
+  const workflow = '.github/workflows/static_analysis.yml';
+  const callerCode = callers.map(
+    (c) => `${c}\n${callerPrint(read(c) || null, workflow)}`
+  );
+  const baseTree = spawnSync(
+    'git',
+    ['ls-tree', '-r', base, '--', GATE_DIR, ...GATE_ENTRY_PATHS],
+    { cwd: root, encoding: 'utf8' }
+  );
+  if (baseTree.status !== 0) throw new Error(`git ls-tree ${base} failed`);
+  const baseCode = baseTree.stdout
+    .split('\n')
+    .filter((l) => l && !l.endsWith(`\t${baselineFile}`))
+    .sort();
+  return `GATE base-judge@${hashOf([...baseCode, ...code, ...callerCode].join('\0'))}`;
 }
 
 /**
@@ -1449,7 +1468,7 @@ function baseJudgeKey(root, base, baselineFile) {
  * owner can sign `G0-RAISE: GATE base-judge@<base> — <why>` to merge past it.
  * It needs only node, so it runs before `pnpm install`.
  */
-function baseGateJudges(root, base, baselineFile) {
+function baseGateJudges(root, base, baselineFile, callers, rulesFile) {
   const gitIn = (args, input) =>
     spawnSync('git', args, {
       cwd: root,
@@ -1501,6 +1520,17 @@ function baseGateJudges(root, base, baselineFile) {
     }
     const copy = join(dir, entry);
     const common = ['--root', root, '--baseline', baselineFile];
+    // A registry given by --rules (the self-test's) is judged at the base's
+    // version too, as the base copy's own registry would be.
+    const rel = rulesFile ? relative(root, rulesFile) : null;
+    if (rel && !rel.startsWith('..')) {
+      const shown = gitIn(['show', `${base}:${rel}`]);
+      if (shown.status === 0) {
+        const rules = join(dir, 'rules-at-base.mjs');
+        writeFileSync(rules, shown.stdout);
+        common.push('--rules', rules);
+      }
+    }
     console.log(
       `The gate's own code changed since ${base}, so its copy there (${entry}) judges the countersigns too:`
     );
@@ -1510,7 +1540,7 @@ function baseGateJudges(root, base, baselineFile) {
       { cwd: root, stdio: 'inherit' }
     );
     if (judged.status !== 0 && judged.status !== 1) {
-      const key = baseJudgeKey(root, base, baselineFile);
+      const key = baseJudgeKey(root, base, baselineFile, callers);
       if (countersignsIn(root, base).signed.has(key)) {
         console.log(
           `note: the base's copy could not run (exit ${judged.status ?? judged.signal}); the owner signed ${key} for this gate code.`
@@ -1617,6 +1647,46 @@ function idleGlobs(rules, files) {
   return idle;
 }
 
+/** What spentAtBase compares with: the base's tree and its baseline. */
+function atBaseOf(root, base, renames, baselineFile) {
+  return {
+    baseSource: revSource(root, base, []),
+    baseBaseline: baselineAt(
+      root,
+      base,
+      renames.get(baselineFile) ?? baselineFile
+    ),
+    renames,
+  };
+}
+
+/**
+ * Growth into a pin above what the base measured, as problems: blocking in a
+ * pull request into dev (or a local --ci), a note on a release PR or a push
+ * to dev or main (S5, S8; a trunk push notes it too, review round 6). The
+ * owner's sign of the pin covers it, as it covers a raise of that pin (owner,
+ * 19 Nov), and every run lists what such a sign covers, so the headroom it
+ * spends is never silent (round 6).
+ */
+function unsignedSpends(root, rules, results, baseline, atBase, ci) {
+  const spent = spentAtBase(rules, results, baseline, atBase);
+  if (spent.length === 0) return [];
+  const { signed } = countersignsIn(root, ci.base);
+  const covered = spent.filter((p) => signed.has(p.sign));
+  for (const p of covered) {
+    const what = p.spent
+      ? `${p.spent.length} key(s): ${p.spent.join(', ')}`
+      : `${p.found} ${MATCHERS[p.rule.match.kind].unit} where the base measured ${p.atBase}`;
+    console.log(
+      `note: the owner's G0-RAISE: ${p.sign} covers ${p.file} growing into its pin above what the base measured, ${what}.`
+    );
+  }
+  const blocking = ci.kind === 'pr' || ci.kind === 'branch';
+  return spent
+    .filter((p) => !signed.has(p.sign))
+    .map((p) => Object.assign(p, { blocking }));
+}
+
 async function run(opts) {
   const root = opts.root ? resolve(opts.root) : REPO_ROOT;
   const baselineFile = opts.baseline ?? BASELINE_FILE;
@@ -1657,9 +1727,34 @@ async function run(opts) {
       return 0;
     }
     verifyBase(root, ci);
-    return loosening(root, forLoosening, baselineFile, ci.base, {
+    const raised = loosening(root, forLoosening, baselineFile, ci.base, {
       notice: ci.kind === 'trunk' || ci.kind === 'release',
     });
+    // Growth into a pin above what the base measured needs the same sign as
+    // a raise (S5), so this copy judges it too, with its own rules: a newer
+    // copy that dropped the spend check can't approve its own spend (S8,
+    // review round 6).
+    const tree = treeSource(root);
+    tree.renames = renamesSince(root, ci.base);
+    const spends = unsignedSpends(
+      root,
+      rules,
+      collect(rules, tree),
+      readBaseline(tree, root, baselineFile, false),
+      atBaseOf(root, ci.base, tree.renames, baselineFile),
+      ci
+    );
+    const spendCode =
+      spends.length > 0
+        ? report(
+            spends,
+            'OK: nothing grows into a pin above what the base measured.',
+            {
+              staged: false,
+            }
+          )
+        : 0;
+    return Math.max(raised, spendCode);
   }
 
   const source = opts.staged ? stagedSource(root) : treeSource(root);
@@ -1764,28 +1859,14 @@ async function run(opts) {
     ? (file) => source.changed.has(file) || source.deleted.includes(file)
     : () => false;
   const problems = compare(rules, results, baseline, source, { bankFails });
-  if (ci?.base && ci.kind !== 'trunk') {
-    const atBase = {
-      baseSource: revSource(root, ci.base, []),
-      baseBaseline: baselineAt(
-        root,
-        ci.base,
-        source.renames.get(baselineFile) ?? baselineFile
-      ),
-      renames: source.renames,
-    };
+  if (ci?.base) {
+    const atBase = atBaseOf(root, ci.base, source.renames, baselineFile);
     if (ci.kind === 'pr' || ci.kind === 'branch') {
       judgeFixesAtBase(rules, problems, atBase);
     }
-    const spent = spentAtBase(rules, results, baseline, atBase);
-    if (spent.length > 0) {
-      const { signed } = countersignsIn(root, ci.base);
-      for (const p of spent) {
-        if (signed.has(p.sign)) continue; // the owner accepted it
-        p.blocking = ci.kind !== 'release';
-        problems.push(p);
-      }
-    }
+    problems.push(
+      ...unsignedSpends(root, rules, results, baseline, atBase, ci)
+    );
   }
   const judged = [...results.values()].reduce(
     (n, r) => n + r.evaluated.size,
@@ -1804,7 +1885,13 @@ async function run(opts) {
         loosening(root, forLoosening, baselineFile, ci.base, {
           notice: ci.kind === 'trunk' || ci.kind === 'release',
         }),
-        baseGateJudges(root, ci.base, baselineFile)
+        baseGateJudges(
+          root,
+          ci.base,
+          baselineFile,
+          forLoosening.callers,
+          opts.rules && resolve(opts.rules)
+        )
       );
     } else console.log(`note: no countersign check (${ci.note}).`);
   }

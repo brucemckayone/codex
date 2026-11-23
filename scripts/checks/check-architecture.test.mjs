@@ -1207,6 +1207,159 @@ describe('the CLI against a real git repository', () => {
     assert.equal(signed.status, 0, signed.stdout + signed.stderr);
   });
 
+  // Round 6 (owner, 23 Nov): a test for each finding. Each failed before its fix.
+  test('the base copy judges growth into a stale pin, and a trunk push notes it', () => {
+    setUp({ gate: false });
+    for (const file of GATE_MODULES) {
+      write(`scripts/checks/${file}`, readFileSync(join(HERE, file), 'utf8'));
+    }
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'the gate']);
+    initAndCommit();
+    write('src/pinned.ts', 'ok();\n');
+    commit('fixed on dev, never banked');
+    const base = head();
+    write('src/pinned.ts', 'forbidden();\n');
+    commit('re-add the call dev had fixed');
+    // A push to dev never blocks, but says what grew (review round 6). It runs
+    // before the gate changes, so no base copy can be the one that says it.
+    const event = join(repo, '.git', 'push.json');
+    writeFileSync(event, JSON.stringify({ before: base }));
+    const push = cliWith(
+      {
+        GITHUB_EVENT_NAME: 'push',
+        GITHUB_EVENT_PATH: event,
+        GITHUB_REF: 'refs/heads/dev',
+      },
+      '--ci'
+    );
+    assert.equal(push.status, 0, push.stdout + push.stderr);
+    assert.match(
+      push.stdout,
+      /grow into a pin above what the base measured/,
+      'review finding: a trunk push said nothing of a re-grown stale pin'
+    );
+    // This change's copy stops looking for growth into a stale pin.
+    const runner = 'scripts/checks/check-architecture.mjs';
+    const text = readFileSync(join(repo, runner), 'utf8');
+    const blind = text.replace(
+      'const spent = spentAtBase(rules, results, baseline, atBase);',
+      'const spent = [];'
+    );
+    assert.notEqual(blind, text, 'the fixture found the spend check');
+    write(runner, blind);
+    commit('refactor the gate');
+    const own = (env, ...args) =>
+      spawnSync(
+        process.execPath,
+        [
+          join(repo, runner),
+          '--root',
+          repo,
+          '--rules',
+          join(repo, 'rules.mjs'),
+          '--baseline',
+          'baseline.json',
+          ...args,
+        ],
+        { encoding: 'utf8', env: { ...process.env, ...LOCAL, ...env } }
+      );
+    const judged = own(prEnv(base), '--ci');
+    assert.equal(judged.status, 1, judged.stdout + judged.stderr);
+    const keys = asked(judged);
+    const spend = keys.find((k) => k.startsWith('T1 src/pinned.ts@'));
+    assert.ok(
+      spend,
+      `review finding: only the new copy looked for the spend, and it was dropped:\n${judged.stdout}${judged.stderr}`
+    );
+    ownerSigns(
+      trailers(
+        keys.filter((k) => k !== spend),
+        'the gate refactor is reviewed'
+      )
+    );
+    assert.equal(
+      own(prEnv(base), '--ci').status,
+      1,
+      'the GATE sign alone does not cover the spend'
+    );
+    ownerSigns(trailers([spend], 'the call comes back on purpose'));
+    const signed = own(prEnv(base), '--ci');
+    assert.equal(signed.status, 0, signed.stdout + signed.stderr);
+    assert.match(
+      signed.stdout,
+      /note: the owner's G0-RAISE: T1 src\/pinned\.ts@[0-9a-f]{8} covers src\/pinned\.ts/,
+      'a signed pin lists the headroom it covers'
+    );
+  });
+
+  test('the sign past a base copy covers the calling workflows and survives a dev move', () => {
+    const CALLER = '.github/workflows/testing.yml';
+    const callerYaml = (needs) =>
+      `on:\n  pull_request:\njobs:\n  static-analysis:\n${needs}    uses: ./.github/workflows/static_analysis.yml\n`;
+    repo = mkdtempSync(join(tmpdir(), 'arch-gate-'));
+    sh(['init', '-q', '-b', 'dev']);
+    write(
+      'rules.mjs',
+      `${rulesModule(T1)}export const CI_CALLERS = ['${CALLER}'];\n`
+    );
+    write(GATE_STAND_IN, 'process.exit(2);\n');
+    write('src/a.ts', 'ok();\n');
+    write(CALLER, callerYaml(''));
+    sh(['add', '.']);
+    sh(['commit', '-qm', 'a base gate that cannot run']);
+    initAndCommit();
+    const branchPoint = head();
+    sh(['checkout', '-qb', 'feat/x']);
+    write(GATE_STAND_IN, '// the new gate\n');
+    commit('replace the gate');
+    ownerSigns(
+      trailers(asked(cli('--raises', branchPoint)), 'the new gate is reviewed')
+    );
+    const first = cliWith(prEnv(branchPoint), '--ci');
+    assert.equal(first.status, 2, first.stdout + first.stderr);
+    const override = /G0-RAISE: (GATE base-judge@[0-9a-f]{8})/.exec(
+      first.stderr
+    )?.[1];
+    assert.ok(override, first.stderr);
+    ownerSigns(trailers([override], 'the old gate cannot read the new flags'));
+    assert.equal(cliWith(prEnv(branchPoint), '--ci').status, 0);
+    // dev moves on and leaves the base's gate as it was: the sign holds.
+    sh(['checkout', '-q', 'dev']);
+    write('src/other.ts', 'ok();\n');
+    sh(['add', 'src/other.ts']);
+    commit('unrelated work on dev');
+    const devTip = head();
+    const tip = sh(['rev-parse', 'feat/x']);
+    sh(['checkout', '-q', '--detach', devTip]);
+    sh(['merge', '-q', '--no-ff', '-m', 'Merge feat/x into dev', tip]);
+    const moved = cliWith(
+      { ...prEnv(devTip), GITHUB_HEAD_REF: 'feat/x', GITHUB_BASE_REF: 'dev' },
+      '--ci'
+    );
+    assert.equal(
+      moved.status,
+      0,
+      `review finding: a dev move voided the owner's sign for the same gate code:\n${moved.stdout}${moved.stderr}`
+    );
+    // An edit to a caller's static-analysis job is gate code the sign never saw.
+    sh(['checkout', '-q', 'feat/x']);
+    write(CALLER, callerYaml('    needs: [build]\n'));
+    commit('wait for the build first');
+    ownerSigns(
+      trailers(
+        asked(cli('--raises', branchPoint)),
+        'static analysis waits for build'
+      )
+    );
+    const after = cliWith(prEnv(branchPoint), '--ci');
+    assert.equal(
+      after.status,
+      2,
+      `review finding: the override signed for earlier gate code still covered it:\n${after.stdout}`
+    );
+  });
+
   test('--ci in a PR: headroom a fix left unbanked on dev cannot be spent', () => {
     setUp();
     initAndCommit();
@@ -3415,11 +3568,13 @@ describe('round 3: the base, the gate and keys', () => {
       '  await stripe.payouts.create({});',
       '}',
     ].join('\n');
-    const { results } = run([a1], { 'packages/x/src/a.ts': text }, {});
+    // Routes are read in a worker's source only (review round 6).
+    const file = 'workers/w/src/routes/a.ts';
+    const { results } = run([a1], { [file]: text }, {});
     assert.deepEqual(
       results
         .get('A1')
-        .perFile.get('packages/x/src/a.ts')
+        .perFile.get(file)
         .hits.map((h) => h.key),
       [
         'POST /refund/handler>refunds.create(',
@@ -3515,6 +3670,7 @@ describe('round 3: what the gate is made of', () => {
       'package.json#scripts.check:ci',
       'package.json#scripts.typecheck',
       'pnpm-workspace.yaml#packages',
+      'pnpm-workspace.yaml#settings',
       'scripts/d.mjs',
       'scripts/d.test.mjs',
       'scripts/e.test.mjs',
@@ -4269,11 +4425,11 @@ describe('round 5: the spec, and a test for each finding', async () => {
     );
     assert.equal(
       words(
-        { 'CLAUDE.md': 'Read @README. It says.\n', README: big },
+        { 'CLAUDE.md': 'Read @README for it.\n', README: big },
         'CLAUDE.md'
       ),
       104,
-      'Claude Code documents an import with no extension; the full stop is prose'
+      'Claude Code documents an import with no extension'
     );
     assert.equal(
       words(
@@ -4429,6 +4585,517 @@ describe('round 5: the spec, and a test for each finding', async () => {
           what: ['a.ts:1: one', 'a.ts:4: two'],
         },
       ]
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 6 (owner, 23 Nov): a failing test for each finding against the spec.
+// A test below that names a review finding failed before its fix.
+// ---------------------------------------------------------------------------
+describe('round 6: a test for each finding', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const { gateDependencies, hashOf } = await import(
+    './architecture-raises.mjs'
+  );
+  const byId = (id) => RULES.find((r) => r.id === id);
+  const keys = (text, file = 'packages/x/src/a.ts') =>
+    run([byId('A1')], { [file]: text }, {})
+      .results.get('A1')
+      .perFile.get(file)
+      .hits.map((h) => `${h.line}:${h.key}`);
+  const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
+  const partsOf = (gates, tree) =>
+    gateDependencies(gates, {
+      files: Object.keys(tree),
+      read: (f) => tree[f] ?? null,
+    });
+  const labels = (gates, tree) => partsOf(gates, tree).map((p) => p.label);
+  const unreadable = (gates, tree) =>
+    partsOf(gates, tree)
+      .filter((p) => p.file.startsWith('\0'))
+      .map((p) => p.label);
+
+  test('A1 sees an optional call and a regex after a brace-less if', () => {
+    assert.deepEqual(
+      keys(
+        [
+          'export function pay(s: string) {',
+          '  if (s) /`/.exec(s);',
+          '  return stripe.transfers.create(p);',
+          '}',
+        ].join('\n')
+      ),
+      ['3:pay>transfers.create('],
+      'review finding: the backtick in the regex opened a template that hid the call'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'function pay() {',
+          '  return stripe.transfers.create?.(p);',
+          '}',
+        ].join('\n')
+      ),
+      ['2:pay>transfers.create?.(']
+    );
+  });
+
+  test('a key names a one-line arrow, a #private method, a parenthesised value and functionsOf(); routes are read only in a worker', () => {
+    assert.deepEqual(
+      keys(
+        [
+          'export const payCreator = (p: Params) => stripe.transfers.create(p);',
+          'export const payOrg = (p: Params) => stripe.transfers.create(p);',
+        ].join('\n')
+      ),
+      ['1:payCreator>transfers.create(', '2:payOrg>transfers.create('],
+      'review finding: two one-line arrows shared the key (top level)'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'export class PayoutService {',
+          '  async #payCreator(id: string) {',
+          '    await this.stripe.transfers.create({ id });',
+          '  }',
+          '',
+          '  #payOrg = async (id: string) => {',
+          '    await this.stripe.transfers.create({ id });',
+          '  };',
+          '}',
+        ].join('\n')
+      ),
+      ['3:#payCreator>transfers.create(', '7:#payOrg>transfers.create('],
+      'review finding: every private method was keyed as its class'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'export async function payCreators(deps: Deps) {',
+          '  const paid = (await deps.pending()).map((row) =>',
+          '    stripe.transfers.create(row)',
+          '  );',
+          '}',
+          'export function payOrgs(list: Row[]) {',
+          '  for (const row of functionsOf(list)) {',
+          '    stripe.transfers.create(row);',
+          '  }',
+          '}',
+        ].join('\n')
+      ),
+      ['3:payCreators>transfers.create(', '8:payOrgs>transfers.create('],
+      'review finding: `= (` read as an arrow, and functionsOf( as `function sOf(`'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'export class PayoutService {',
+          '  async payCreator(id: string) {',
+          '    this.cache.get(PAYOUT_KEY, async () => {',
+          '      await stripe.transfers.create({ id });',
+          '    });',
+          '  }',
+          '',
+          '  async payOrg(id: string) {',
+          '    await api',
+          "      .post('/payouts', {",
+          '        json: await stripe.transfers.create({ id }),',
+          '      })',
+          '      .json();',
+          '  }',
+          '}',
+        ].join('\n')
+      ),
+      [
+        '4:payCreator/this.cache.get>transfers.create(',
+        '11:payOrg>transfers.create(',
+      ],
+      'review finding (a round-5 regression): calls in a service read as routes'
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'app',
+          "  .post('/refund', async (c) => {",
+          '    await stripe.refunds.create({});',
+          '  });',
+        ].join('\n'),
+        'workers/w/src/routes/r.ts'
+      ),
+      ['3:POST /refund>refunds.create(']
+    );
+    assert.deepEqual(
+      keys(
+        [
+          'export class PayoutService {',
+          '  async payCreator(id: string) {',
+          '    this.cache.get(PAYOUT_KEY, async () => {',
+          '      await stripe.transfers.create({ id });',
+          '    });',
+          '  }',
+          '  async payOrg(id: string) {',
+          '    this.cache.get(PAYOUT_KEY, async () => {',
+          '      await stripe.transfers.create({ id });',
+          '    });',
+          '  }',
+          '}',
+        ].join('\n'),
+        'workers/w/src/services/payouts.ts'
+      ),
+      [
+        '4:payCreator/this.cache.get>transfers.create(',
+        '9:payOrg/this.cache.get>transfers.create(',
+      ],
+      'a property chain is no router, even in a worker'
+    );
+  });
+
+  test('RATE-LIMIT-BINDING: a key is judged by the code before it, and a computed or template import is unreadable', () => {
+    const limitsTs = [
+      'export const RATE_LIMIT_PRESETS = {',
+      '  STRICT: {',
+      "    store: 'binding',",
+      "    bindingName: 'RATE_LIMIT_STRICT',",
+      '  },',
+      '  API: {',
+      "    store: 'binding',",
+      "    bindingName: 'RATE_LIMIT_API',",
+      '  },',
+      '} as const;',
+      '',
+    ].join('\n');
+    const wrangler = JSON.stringify({
+      name: 'w',
+      ratelimits: [{ name: 'RATE_LIMIT_API', namespace_id: '1' }],
+    });
+    const fires = (route) =>
+      run(
+        [byId('RATE-LIMIT-BINDING')],
+        {
+          'packages/constants/src/limits.ts': limitsTs,
+          'workers/w/wrangler.jsonc': wrangler,
+          'workers/w/src/routes.ts': route,
+        },
+        {}
+      ).problems.filter((p) => p.type === 'new').length;
+    const strict = [
+      '',
+      'export const remove = route({',
+      "  policy: { auth: 'required', rateLimit: 'strict' },",
+      '});',
+    ];
+    assert.ok(
+      fires(
+        [
+          'const route = destructive',
+          `  ? // ${'a long comment that fills the window before the name '.repeat(2)}`,
+          '    procedure',
+          '  : (options: Options) => options;',
+          ...strict,
+        ].join('\n')
+      ) > 0,
+      'review finding: a comment before a ternary alias made it read as a key'
+    );
+    for (const head of [
+      'const { procedure: route } = await import(`@codex/worker-utils`);',
+      'const { procedure: route } = require(`@codex/worker-utils`);',
+      'const { procedure: route } = await import(MODULE);',
+    ]) {
+      assert.ok(
+        fires([head, ...strict].join('\n')) > 0,
+        `review finding: ${head} brought the limiter in unread`
+      );
+    }
+    assert.equal(
+      fires(
+        [
+          "type KV = import('@cloudflare/workers-types').KVNamespace;",
+          "import { procedure } from '@codex/worker-utils';",
+          "export const list = procedure({ policy: { rateLimit: 'api' } });",
+        ].join('\n')
+      ),
+      0,
+      'a quoted import of another module is read'
+    );
+  });
+
+  test('DOC-BUDGET reads imports as Claude Code does: route characters, emphasis, a full stop and a parenthesis', () => {
+    const big = 'w '.repeat(100);
+    const words = (md, target) =>
+      run(
+        [byId('DOC-BUDGET')],
+        { 'apps/web/CLAUDE.md': md, [`apps/web/${target}`]: big },
+        {}
+      )
+        .results.get('DOC-BUDGET')
+        .perFile.get('apps/web/CLAUDE.md').found;
+    for (const path of [
+      'src/routes/(platform)/+layout.svelte',
+      'src/routes/_org/[slug]/studio/+layout.ts',
+    ]) {
+      assert.equal(
+        words(`see @${path}\n`, path),
+        102,
+        `review finding: @${path} was cut at a route character`
+      );
+    }
+    const rules = 'docs/rules.md';
+    assert.equal(
+      words('_Also read @docs/rules.md_\n', rules),
+      103,
+      'review finding: an import inside emphasis was not counted'
+    );
+    assert.equal(words('**@docs/rules.md**\n', rules), 101);
+    assert.equal(words('see [the @docs/rules.md](x)\n', rules), 103);
+    assert.equal(
+      words('Read @docs/rules.md. Then go.\n', rules),
+      4,
+      'Claude Code reads `docs/rules.md.`, which is no file'
+    );
+    assert.equal(
+      words('Rules (@docs/rules.md) apply.\n', rules),
+      3,
+      'an @ after a parenthesis is no import to Claude Code'
+    );
+    assert.equal(
+      words('<!-- @docs/rules.md -->\n`@docs/rules.md`\n', rules),
+      4,
+      'a comment and a code span import nothing'
+    );
+  });
+
+  test("the command reader follows tsx, wrappers, preloads and pnpm's exec fallback; anything else is a registry error", () => {
+    const tree = {
+      'package.json': json({
+        name: 'root',
+        scripts: {
+          'check:x': 'pnpm exec tsx scripts/x.ts',
+          'check:y': 'dotenv -e .env.ci -- node scripts/y.mjs',
+          'check:z': './scripts/z.mjs',
+          list: 'node scripts/w.mjs',
+        },
+      }),
+      'pnpm-workspace.yaml': 'packages:\n  - apps/*\n',
+      'apps/web/package.json': json({ name: 'web', scripts: {} }),
+      'apps/web/scripts/v.mjs': '',
+      'scripts/x.ts': '',
+      'scripts/y.mjs': '',
+      'scripts/z.mjs': "import './z-lib.mjs';\n",
+      'scripts/z-lib.mjs': '',
+      'scripts/setup.mjs': '',
+      'scripts/w.mjs': '',
+    };
+    const parts = (command) => labels([{ id: 'G', run: command }], tree);
+    const reads = (command) => unreadable([{ id: 'G', run: command }], tree);
+    for (const [command, part, why] of [
+      ['pnpm check:x', 'scripts/x.ts', 'tsx swallowed the file it runs'],
+      ['pnpm check:y', 'scripts/y.mjs', 'dotenv … -- swallowed it'],
+      [
+        'pnpm check:z',
+        'scripts/z-lib.mjs',
+        "a ./file.mjs's imports were not followed",
+      ],
+      [
+        'env FOO=1 cross-env BAR=2 node scripts/w.mjs',
+        'scripts/w.mjs',
+        'an env wrapper swallowed it',
+      ],
+      [
+        'node --import ./scripts/setup.mjs scripts/w.mjs',
+        'scripts/setup.mjs',
+        'a preload was no part',
+      ],
+      [
+        'NODE_OPTIONS=--max-old-space-size=8192 node scripts/w.mjs',
+        'scripts/w.mjs',
+        'a memory flag preloads nothing',
+      ],
+      [
+        'pnpm --filter web node scripts/v.mjs',
+        'apps/web/scripts/v.mjs',
+        "pnpm's exec fallback was read as an absent script",
+      ],
+      [
+        'pnpm --filter web node scripts/v.mjs',
+        'apps/web/package.json#scripts.node',
+        'the absent script is a part: adding it changes what runs',
+      ],
+    ]) {
+      assert.ok(
+        parts(command).includes(part),
+        `review finding: ${why} (${command})`
+      );
+    }
+    for (const command of [
+      'vitest run scripts/w.test.mjs',
+      'npx tsc',
+      'concurrently "node scripts/w.mjs"',
+      'pnpm audit --prod',
+      // pnpm runs its own `list`, never the package's script of that name
+      'pnpm list',
+      'dotenv -e .env node scripts/w.mjs',
+      'NODE_OPTIONS="--require ./scripts/setup.mjs" node scripts/w.mjs',
+      'env -i node scripts/w.mjs',
+    ]) {
+      assert.ok(
+        reads(command).length > 0,
+        `review finding: ${command} read as nothing to follow`
+      );
+    }
+    assert.deepEqual(
+      reads('tsc --noEmit && biome check . && vite build'),
+      [],
+      'the leaf binaries the gates reach'
+    );
+  });
+
+  test('pnpm-workspace.yaml is read in every YAML form, and a manifest the gate cannot parse is a registry error', () => {
+    const tree = {
+      'package.json': json({
+        name: 'root',
+        scripts: { typecheck: 'turbo run typecheck' },
+      }),
+      'turbo.json': json({ tasks: { typecheck: {} } }),
+      'packages/p/package.json': json({
+        name: '@x/p',
+        scripts: { typecheck: 'tsc -p .' },
+      }),
+    };
+    const gates = [{ id: 'TYPECHECK', run: 'pnpm typecheck' }];
+    const script = 'packages/p/package.json#scripts.typecheck';
+    for (const yaml of [
+      'packages:\n  - packages/*\n',
+      "packages:\n- 'packages/*'\n",
+      "packages: ['packages/*']\n",
+      "'packages':\n  - packages/*\n",
+    ]) {
+      assert.ok(
+        labels(gates, { ...tree, 'pnpm-workspace.yaml': yaml }).includes(
+          script
+        ),
+        `review finding: ${JSON.stringify(yaml)} read as no packages`
+      );
+    }
+    for (const yaml of [
+      'packages: *globs\n',
+      "packages:\n  - '!**/test/**'\n",
+      'packages: packages/*\n',
+    ]) {
+      assert.ok(
+        unreadable(gates, { ...tree, 'pnpm-workspace.yaml': yaml }).some((l) =>
+          l.startsWith('pnpm-workspace.yaml')
+        ),
+        `${JSON.stringify(yaml)} is a registry error, never an empty workspace`
+      );
+    }
+    const yaml = { 'pnpm-workspace.yaml': 'packages:\n  - packages/*\n' };
+    const bom = `﻿${tree['packages/p/package.json']}`;
+    assert.ok(
+      labels(gates, {
+        ...tree,
+        ...yaml,
+        'packages/p/package.json': bom,
+      }).includes(script),
+      'review finding: a BOM hid every script of the manifest'
+    );
+    assert.ok(
+      unreadable(gates, {
+        ...tree,
+        ...yaml,
+        'packages/p/package.json': '{ "name": "@x/p", ',
+      }).some((l) => l.startsWith('packages/p/package.json')),
+      'review finding: a manifest the gate derives parts from must parse'
+    );
+  });
+
+  test("every task typecheck reaches counts in every package; the workspace script settings and a Biome config's local extends are gate parts", () => {
+    const tree = {
+      'package.json': json({
+        name: 'root',
+        scripts: { typecheck: 'turbo run typecheck' },
+      }),
+      'pnpm-workspace.yaml':
+        'packages:\n  - packages/*\nscriptShell: /bin/bash\n',
+      'turbo.json': json({
+        tasks: { typecheck: { dependsOn: ['^build'] }, build: {} },
+      }),
+      'packages/p/package.json': json({
+        name: '@x/p',
+        scripts: {
+          typecheck: 'tsc -p .',
+          build: 'node build.mjs',
+          gen: 'node gen.mjs',
+        },
+      }),
+      'packages/p/build.mjs': '',
+      'packages/p/gen.mjs': '',
+      'packages/p/turbo.json': json({
+        extends: ['//'],
+        tasks: { typecheck: { dependsOn: ['^build', 'gen'] } },
+      }),
+      'biome.json': json({
+        extends: ['./config/biome/strict.json', '@org/preset'],
+      }),
+      'config/biome/strict.json': json({ linter: {} }),
+    };
+    const gates = [
+      { id: 'TYPECHECK', run: 'pnpm typecheck' },
+      { id: 'BIOME', run: 'biome check .', files: ['biome.json'] },
+    ];
+    const parts = partsOf(gates, tree);
+    const found = parts.map((p) => p.label);
+    for (const [part, why] of [
+      [
+        'packages/p/turbo.json#tasks.gen',
+        "review finding: a package turbo.json's own dependsOn was not followed",
+      ],
+      [
+        'packages/p/package.json#scripts.gen',
+        'the script of a task typecheck reaches',
+      ],
+      ['packages/p/gen.mjs', 'what that script runs'],
+      [
+        'packages/p/package.json#scripts.build',
+        'owner, 23 Nov: build scripts count',
+      ],
+      ['packages/p/build.mjs', 'what the build script runs'],
+      [
+        'pnpm-workspace.yaml#settings',
+        'owner, 23 Nov: scriptShell switches every script',
+      ],
+      [
+        'config/biome/strict.json',
+        'owner, 23 Nov: a local extends decides what lint enforces',
+      ],
+    ]) {
+      assert.ok(found.includes(part), `${part}: ${why}`);
+    }
+    assert.ok(
+      !found.some((l) => l.includes('@org')),
+      'a package preset stays outside'
+    );
+    const part = (label) => parts.find((p) => p.label === label);
+    const settings = part('pnpm-workspace.yaml#settings');
+    assert.equal(settings.changed('', 'scriptShell: /usr/bin/true\n'), true);
+    assert.equal(
+      settings.changed(
+        'packages:\n  - a/*\n',
+        'packages:\n  - a/*\npatchedDependencies: {}\n'
+      ),
+      false,
+      'another key of pnpm-workspace.yaml stays outside'
+    );
+    const biome = part('biome.json');
+    assert.equal(
+      biome.changed('{ "a": 1, "b": 2 }', '{ "b": 2, "a": 1 }'),
+      false,
+      'review finding: a re-sorted biome.json asked again'
+    );
+    assert.equal(
+      hashOf(biome.state('{ "a": 1, "b": 2 }')),
+      hashOf(biome.state('{\n  "b": 2,\n  "a": 1\n}')),
+      'a whole JSON part hashes in canonical form'
     );
   });
 });

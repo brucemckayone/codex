@@ -221,6 +221,7 @@ function exceptionSignatures(file, text) {
     return enclosingName(context.maskedLines, line, {
       startsInside: context.startsInside,
       lines,
+      file,
     });
   };
   return parseIgnores(file, text)
@@ -353,71 +354,197 @@ const workspaceGlob = (glob) =>
       .replace(/\0/g, '.*')}/package\\.json$`
   );
 
-/** pnpm-workspace.yaml's `packages:` list: the only key of it a gate reads. */
+/** What a reader returns for text it can't parse: the raw text, so a change to it still counts. */
+class Unparseable {
+  constructor(text) {
+    this.unparseable = text;
+  }
+}
+
+/** One glob of pnpm-workspace.yaml's list, quoted or not; undefined for a form this doesn't read. */
+function workspaceGlobOf(item) {
+  const text = item.trim();
+  const quoted = /^(['"])(.*)\1$/.exec(text);
+  const glob = quoted ? quoted[2] : text;
+  // an unquoted `*x` or `&x` is a YAML alias or anchor; `!` is an exclusion
+  if (!quoted && /^[*&]/.test(glob)) return undefined;
+  return /^[^'"#\s,![\]{}]+$/.test(glob) ? glob : undefined;
+}
+
+/**
+ * pnpm-workspace.yaml's `packages:` list, in each YAML form pnpm reads the
+ * same: a block sequence, indented or at column 0, or a one-line flow
+ * sequence, under a key quoted or not. A form this doesn't read (an anchor, a
+ * `!` exclusion, anything else under the key) is Unparseable, which the
+ * caller makes a registry error: never an empty workspace (review round 6).
+ */
 function workspaceList(yaml) {
   if (yaml === null) return null;
-  const globs = [];
-  let inPackages = false;
-  for (const line of yaml.split('\n')) {
-    if (/^packages\s*:/.test(line)) inPackages = true;
-    else if (/^\S/.test(line)) inPackages = false;
-    else if (inPackages) {
-      const m = /^\s*-\s*(['"]?)([^'"#\s]+)\1/.exec(line);
-      if (m) globs.push(m[2]);
+  const lines = yaml.replace(/^﻿/, '').split('\n');
+  const uncommented = (l) => l.replace(/(^|\s)#.*$/, '');
+  for (let i = 0; i < lines.length; i++) {
+    const key = /^(['"]?)packages\1\s*:(.*)$/.exec(lines[i]);
+    if (!key) continue;
+    const value = uncommented(key[2]).trim();
+    let globs = null;
+    if (/^\[.*\]$/.test(value)) {
+      globs = value
+        .slice(1, -1)
+        .split(',')
+        .filter((s) => s.trim())
+        .map(workspaceGlobOf);
+    } else if (value === '') {
+      globs = [];
+      for (const raw of lines.slice(i + 1)) {
+        const line = uncommented(raw);
+        if (line.trim() === '') continue;
+        const item = /^\s*-\s+(.*)$/.exec(line);
+        if (item) globs.push(workspaceGlobOf(item[1]));
+        else if (/^\S/.test(line))
+          break; // the next key
+        else globs.push(undefined); // something under the key this doesn't read
+      }
     }
+    return globs?.length && globs.every(Boolean)
+      ? globs
+      : new Unparseable(yaml);
   }
-  return globs;
+  return [];
 }
 
-/** The package.json files pnpm treats as the workspace: the root plus pnpm-workspace.yaml's globs. */
-function workspacePackages(files, read) {
-  const globs = (workspaceList(read('pnpm-workspace.yaml')) ?? []).map(
-    workspaceGlob
-  );
+/** The package.json files pnpm treats as the workspace: the root plus the list's globs. */
+function workspacePackages(files, globs) {
+  const res = globs.map(workspaceGlob);
   return files.filter(
-    (f) => f === 'package.json' || globs.some((re) => re.test(f))
+    (f) => f === 'package.json' || res.some((re) => re.test(f))
   );
 }
 
-/** The files a `node …` command runs: every file argument with --test, else the entry. */
+/**
+ * pnpm-workspace.yaml's settings that decide how every script runs. pnpm 10
+ * reads them there as well as in .npmrc, and `scriptShell: /usr/bin/true`
+ * switches every gate script off (owner, 23 Nov). Each value is its line's
+ * text after the colon; every other key stays outside (S6).
+ */
+const SCRIPT_SETTINGS = [
+  'scriptShell',
+  'shellEmulator',
+  'ignoreScripts',
+  'enablePrePostScripts',
+];
+function scriptSettings(yaml) {
+  if (yaml === null) return null;
+  const out = {};
+  for (const line of yaml.replace(/^﻿/, '').split('\n')) {
+    const m = /^(['"]?)([\w-]+)\1\s*:(.*)$/.exec(line);
+    if (m && SCRIPT_SETTINGS.includes(m[2])) out[m[2]] = m[3].trim();
+  }
+  return out;
+}
+
+/**
+ * The files a node-like command runs: every file argument with --test, else
+ * the entry; the modules it preloads (`--import ./x.mjs`, `-r ./x.cjs`; a
+ * package name stays outside); and its `--env-file`s.
+ */
 function nodeFiles(words) {
   const files = [];
+  const preloads = [];
+  const envFiles = [];
   const test = words.includes('--test');
-  const takesValue = new Set([
+  const PRELOAD = new Set([
     '--import',
     '--require',
     '-r',
     '--loader',
     '--experimental-loader',
-    '--env-file',
   ]);
   for (let k = 0; k < words.length; k++) {
-    const w = words[k];
-    if (takesValue.has(w)) {
-      k += 1;
+    const eq = /^(--[\w-]+)=(.*)$/.exec(words[k]);
+    const flag = eq ? eq[1] : words[k];
+    if (PRELOAD.has(flag) || flag === '--env-file') {
+      const value = eq ? eq[2] : words[++k];
+      if (value === undefined) continue;
+      if (flag === '--env-file') envFiles.push(value);
+      else if (/^\.{1,2}\//.test(value) || /\.[mc]?[jt]s$/.test(value)) {
+        preloads.push(value);
+      }
       continue;
     }
-    if (w.startsWith('-')) continue;
-    if (/\.[mc]?[jt]s$/.test(w)) files.push(w);
+    if (flag.startsWith('-')) continue;
+    if (/\.[mc]?[jt]s$/.test(flag)) files.push(flag);
     if (!test) break; // the rest are the script's own arguments
   }
-  return files;
+  return { files, preloads, envFiles };
 }
 
-/** A command segment's words, as a shell splits them: quotes dropped, a leading `VAR=value` skipped. */
+/** A command segment's words, as a shell splits them: `A="b c"` is one word, quotes dropped. */
 function shellWords(segment) {
-  const words = [...segment.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(
-    (m) => m[1] ?? m[2] ?? m[3]
+  return [...segment.matchAll(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)].map((m) =>
+    m[0].replace(/"([^"]*)"|'([^']*)'/g, '$1$2')
   );
-  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) {
-    words.shift();
-  }
-  return words;
 }
 
-/** Runners that fetch or run a package the gate can't fingerprint. */
-const OPAQUE_RUNNERS = new Set(['npx', 'npm', 'yarn', 'bun', 'bunx', 'deno']);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+/**
+ * A command with its wrappers peeled off: leading `VAR=value`s, `env` and
+ * `cross-env` with their assignments, `dotenv [options] --`, `time`, `nice`
+ * and `exec` each run the rest as a command. A string is why the gate can't
+ * read it: a `NODE_OPTIONS` that preloads a module (a memory flag is fine),
+ * an `env` flag, a `dotenv` without `--`.
+ */
+function peel(words) {
+  let rest = words;
+  for (;;) {
+    while (rest.length && ASSIGNMENT.test(rest[0])) {
+      const options = /^NODE_OPTIONS=(.*)$/.exec(rest[0])?.[1] ?? '';
+      if (
+        /(?:^|\s)(?:--import|--require|-r|--loader|--experimental-loader)\b/.test(
+          options
+        )
+      ) {
+        return 'a NODE_OPTIONS preload, which the gate cannot follow';
+      }
+      rest = rest.slice(1);
+    }
+    const [first] = rest;
+    if (first === 'env' || first === 'cross-env') {
+      rest = rest.slice(1);
+      if (rest[0]?.startsWith('-'))
+        return `an ${first} flag the gate cannot read`;
+    } else if (first === 'dotenv') {
+      const end = rest.indexOf('--');
+      if (end === -1) return 'dotenv without -- before its command';
+      rest = rest.slice(end + 1);
+    } else if (first === 'time' || first === 'nice' || first === 'exec') {
+      rest = rest.slice(1);
+    } else {
+      return rest;
+    }
+  }
+}
+
+/** Runners that run a file with node, read as node is. */
+const NODE_LIKE = new Set(['node', 'tsx', 'ts-node', 'vite-node']);
 const SHELLS = new Set(['bash', 'sh', 'zsh']);
+/**
+ * The binaries a gate's commands may run whose command text is all the gate
+ * reads of them: the tools the registry's gates reach, at the versions the
+ * lockfile pins (S6 outside). Any other first word (vitest, npx, concurrently,
+ * a new tool) is a registry error until it is added here or followed: an
+ * allow-list, not a guess that an unknown word reads nothing (review round 6).
+ */
+const LEAF_BINARIES = new Set([
+  'biome',
+  'husky',
+  'paraglide-js',
+  'svelte-check',
+  'svelte-kit',
+  'tsc',
+  'vite',
+  'echo',
+  'true',
+]);
 /** Scripts `pnpm install` runs in every workspace package, before every later gate. */
 const LIFECYCLE = [
   'pnpm:devPreinstall',
@@ -428,32 +555,43 @@ const LIFECYCLE = [
   'prepare',
   'postprepare',
 ];
+/** A Biome config, at any depth. */
+const BIOME_CONFIG = /(?:^|\/)\.?biome\.jsonc?$/;
 
 const pick = (value, path) =>
   path.reduce((v, k) => (v && typeof v === 'object' ? v[k] : undefined), value);
 
-/** A JSON(C) file at a path, or the raw text when it doesn't parse, so a change to it still counts. */
+/** A JSON(C) file at a path, or Unparseable when it doesn't parse. */
 const view = (text, path) => {
   if (text === null) return null;
   try {
     return pick(parseJsonc(text), path) ?? null;
   } catch {
-    return { unparseable: text };
+    return new Unparseable(text);
   }
 };
 
-/** The tasks a turbo task runs through `dependsOn` (`^build` -> build), itself first. */
-function taskClosure(task, turbo) {
-  const tasks = view(turbo, ['tasks']) ?? {};
+/**
+ * The tasks a turbo task runs through `dependsOn` (`^build` -> build), itself
+ * first, read from the root turbo.json and from every package's own, since a
+ * package's turbo.json can give its task another dependency (review round 6).
+ * One set for every package: a task reached in any package counts in all of
+ * them (owner, 23 Nov: the whole closure).
+ */
+function taskClosure(task, configs) {
   const seen = new Set();
   const visit = (t) => {
     if (seen.has(t)) return;
     seen.add(t);
-    for (const [key, config] of Object.entries(tasks)) {
-      if (key !== t && !key.endsWith(`#${t}`)) continue;
-      for (const dep of config?.dependsOn ?? []) {
-        if (typeof dep === 'string')
-          visit(dep.replace(/^\^/, '').replace(/^.*#/, ''));
+    for (const tasks of configs) {
+      if (!tasks || typeof tasks !== 'object') continue;
+      for (const [key, config] of Object.entries(tasks)) {
+        if (key !== t && !key.endsWith(`#${t}`)) continue;
+        const deps = Array.isArray(config?.dependsOn) ? config.dependsOn : [];
+        for (const dep of deps) {
+          if (typeof dep === 'string')
+            visit(dep.replace(/^\^/, '').replace(/^.*#/, ''));
+        }
       }
     }
   };
@@ -467,28 +605,35 @@ function taskClosure(task, turbo) {
  * `state(text)` is what a countersign's hash covers. Derived from each gate's
  * commands, followed as a shell would (S6 of architecture-spec.mjs):
  *
- *   node [flags] <file …>    the file, and every module it imports relatively
+ *   node|tsx|ts-node|vite-node [flags] <file …>
+ *                            the file, every module it imports relatively,
+ *                            what it preloads, and its --env-file
+ *   env, cross-env, dotenv … --, time, nice, exec, VAR=value
+ *                            peeled: the rest is the command
  *   pnpm [-F|--filter[=]p] [run] <script> [args]
  *                            the script's value in that package, with its
- *                            pre/post scripts, followed in turn;
- *                            pnpm-workspace.yaml's packages list, .npmrc and
- *                            .pnpmfile.cjs; `pnpm exec` follows its command
- *   turbo [run] <task …>     the root turbo.json, whole; each package's
- *                            turbo.json at the tasks the task depends on; and
- *                            every workspace package's script for each task
- *   bash <file>, ./<file>    the file
+ *                            pre/post scripts, followed in turn; a bare
+ *                            `pnpm <name>` with no such script runs <name>
+ *                            as `pnpm exec` does. pnpm-workspace.yaml's
+ *                            packages list and script settings, .npmrc and
+ *                            .pnpmfile.cjs
+ *   turbo [run] <task …>     the root turbo.json, whole; every task the task
+ *                            depends on, root or package turbo.json, at each
+ *                            package's turbo.json and as each package's script
+ *   bash <file>, ./<file>    the file; a ./<file>.mjs is followed as node
  *
  * plus every workspace package's install lifecycle scripts, and what the
- * registry declares: `files` (configs like biome.json) and `ratchets`
- * (another gate's baseline, where only a rise counts). Globs a gate reads by
- * pattern (`filesMatching`) are matched against the change by the caller,
- * since a new nested config is not a tracked file yet.
+ * registry declares: `files` (configs like biome.json, with the files a Biome
+ * config `extends`) and `ratchets` (another gate's baseline, where only a rise
+ * counts). Globs a gate reads by pattern (`filesMatching`) are matched against
+ * the change by the caller, since a new nested config is not a tracked file
+ * yet; the tracked ones' `extends` are followed here.
  *
  * A command it can't resolve (`pnpm -r`, a filter naming no package, `node`
- * with no file, `npx`) becomes a part no tracked file can be, so the full
- * run's registry check names it and exits 2: never a part that fingerprints
- * nothing. Any other first word is a binary, whose command text is what the
- * gate reads (and that text is itself a part, in a script or the registry).
+ * with no file, a first word that isn't in LEAF_BINARIES), and a manifest it
+ * derives parts from but can't parse, becomes a part no tracked file can be,
+ * so the full run's registry check names it and exits 2: never a part that
+ * fingerprints nothing.
  *
  * @param {{ files: string[], read: (file: string) => string|null }} tree
  */
@@ -504,8 +649,17 @@ export function gateDependencies(gates, { files, read: readFile }) {
   const add = (part) => {
     if (!parts.has(part.label)) parts.set(part.label, part);
   };
+  // A JSON file is compared and hashed in canonical form, so re-sorting one
+  // signs nothing away and asks nothing (S7).
   const whole = (file) =>
-    add({ label: file, file, changed: (a, b) => a !== b, state: (t) => t });
+    /\.jsonc?$/.test(file)
+      ? add({
+          label: file,
+          file,
+          changed: (a, b) => canonical(view(a, [])) !== canonical(view(b, [])),
+          state: (t) => view(t, []),
+        })
+      : add({ label: file, file, changed: (a, b) => a !== b, state: (t) => t });
   const json = (file, path, label) =>
     add({
       label,
@@ -520,10 +674,22 @@ export function gateDependencies(gates, { files, read: readFile }) {
       changed: () => false,
       state: () => null,
     });
-  const packages = workspacePackages(files, read);
-  const scriptsOf = (file) => view(read(file), ['scripts']);
+  // A file parts are DERIVED from must parse: read as no scripts and no tasks,
+  // an unparseable one (a BOM'd manifest) hid every part it holds (round 6).
+  const parsed = (file, path) => {
+    const value = view(read(file), path);
+    if (!(value instanceof Unparseable)) return value;
+    unreadable(file, 'a file the gate derives parts from but cannot parse');
+    return null;
+  };
+  const list = workspaceList(read('pnpm-workspace.yaml'));
+  if (list instanceof Unparseable) {
+    unreadable('pnpm-workspace.yaml', 'a packages list the gate cannot read');
+  }
+  const packages = workspacePackages(files, Array.isArray(list) ? list : []);
+  const scriptsOf = (file) => parsed(file, ['scripts']);
   const packageNamed = (name) =>
-    packages.find((f) => view(read(f), ['name']) === name) ?? null;
+    packages.find((f) => parsed(f, ['name']) === name) ?? null;
   const dirOf = (file) => posix.dirname(file).replace(/^\.$/, '');
   const resolveModule = (path) =>
     [path, `${path}.mjs`, `${path}.js`, `${path}.ts`, `${path}/index.mjs`].find(
@@ -556,16 +722,25 @@ export function gateDependencies(gates, { files, read: readFile }) {
       if (typeof value === 'string') runs(value, dirOf(file));
     }
   };
+  const nestedTurbo = (pkg) => {
+    const dir = dirOf(pkg);
+    return dir && tracked.has(`${dir}/turbo.json`) ? `${dir}/turbo.json` : null;
+  };
   const turboTask = (task) => {
     whole('turbo.json');
-    const closure = taskClosure(task, read('turbo.json'));
+    const closure = taskClosure(task, [
+      parsed('turbo.json', ['tasks']),
+      ...packages
+        .map(nestedTurbo)
+        .filter(Boolean)
+        .map((f) => parsed(f, ['tasks'])),
+    ]);
     for (const pkg of packages) {
-      const nested = `${dirOf(pkg) ? `${dirOf(pkg)}/` : ''}turbo.json`;
-      if (nested !== 'turbo.json' && tracked.has(nested)) {
-        for (const t of closure)
-          json(nested, ['tasks', t], `${nested}#tasks.${t}`);
+      const nested = nestedTurbo(pkg);
+      for (const t of closure) {
+        if (nested) json(nested, ['tasks', t], `${nested}#tasks.${t}`);
+        if (scriptsOf(pkg)?.[t] !== undefined) script(pkg, t);
       }
-      if (scriptsOf(pkg)?.[task] !== undefined) script(pkg, task);
     }
   };
   const pnpmSetup = () => {
@@ -577,6 +752,13 @@ export function gateDependencies(gates, { files, read: readFile }) {
           canonical(workspaceList(a)) !== canonical(workspaceList(b)),
         state: (t) => workspaceList(t),
       });
+      add({
+        label: 'pnpm-workspace.yaml#settings',
+        file: 'pnpm-workspace.yaml',
+        changed: (a, b) =>
+          canonical(scriptSettings(a)) !== canonical(scriptSettings(b)),
+        state: (t) => scriptSettings(t),
+      });
     }
     for (const file of ['.npmrc', '.pnpmfile.cjs']) {
       if (tracked.has(file)) whole(file);
@@ -584,19 +766,25 @@ export function gateDependencies(gates, { files, read: readFile }) {
   };
   const runs = (command, dir) => {
     for (const segment of command.split(/&&|\|\||;|\|/)) {
-      const words = shellWords(segment);
+      const shown = segment.trim();
+      const words = peel(shellWords(segment));
+      if (typeof words === 'string') {
+        unreadable(shown, words);
+        continue;
+      }
       if (words.length === 0) continue;
       const [first, ...rest] = words;
-      const shown = segment.trim();
       const at = (f) => posix.normalize(dir ? `${dir}/${f}` : f);
-      if (first === 'node') {
+      if (NODE_LIKE.has(first)) {
         if (rest.some((w) => ['-e', '--eval', '-p', '--print'].includes(w))) {
           continue; // inline code: the command text is all it runs
         }
-        const entry = nodeFiles(rest);
-        if (entry.length === 0)
-          unreadable(shown, 'a node command with no file');
-        for (const f of entry) followNode(at(f), new Set());
+        const { files: entry, preloads, envFiles } = nodeFiles(rest);
+        if (entry.length === 0) {
+          unreadable(shown, `a ${first} command with no file`);
+        }
+        for (const f of [...preloads, ...entry]) followNode(at(f), new Set());
+        for (const f of envFiles) if (tracked.has(at(f))) whole(at(f));
       } else if (first === 'turbo') {
         const tasks = (rest[0] === 'run' ? rest.slice(1) : rest).filter(
           (w) => !w.startsWith('-')
@@ -622,6 +810,15 @@ export function gateDependencies(gates, { files, read: readFile }) {
             runs(target.command, dirOf(file));
           } else {
             script(file, target.script);
+            // A bare `pnpm <name>` with no such script runs <name> as a
+            // command, as `pnpm exec` does (round 6). The absent script is
+            // still a part: adding it changes what runs.
+            if (
+              target.command &&
+              scriptsOf(file)?.[target.script] === undefined
+            ) {
+              runs(target.command, dirOf(file));
+            }
           }
         }
       } else if (SHELLS.has(first)) {
@@ -629,10 +826,26 @@ export function gateDependencies(gates, { files, read: readFile }) {
         if (file) whole(at(file));
         else unreadable(shown, `${first} with no script file`);
       } else if (first.includes('/')) {
-        whole(at(first));
-      } else if (OPAQUE_RUNNERS.has(first)) {
-        unreadable(shown, `${first} runs a package the gate can't fingerprint`);
+        // A path command runs by its shebang: node, for a module.
+        if (/\.[mc]?[jt]s$/.test(first)) followNode(at(first), new Set());
+        else whole(at(first));
+      } else if (!LEAF_BINARIES.has(first)) {
+        unreadable(shown, `${first} is no command the gate can follow`);
       }
+    }
+  };
+  // The files a Biome config extends decide what it enforces, so each local
+  // one is a part (owner, 23 Nov). A package preset stays outside.
+  const followExtends = (file, seen = new Set()) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const value = parsed(file, ['extends']);
+    for (const target of [value ?? []].flat()) {
+      if (typeof target !== 'string') continue;
+      if (!/^\.{1,2}\//.test(target) && !/\.jsonc?$/.test(target)) continue;
+      const path = posix.normalize(posix.join(dirOf(file), target));
+      whole(path);
+      followExtends(path, seen);
     }
   };
 
@@ -650,9 +863,23 @@ export function gateDependencies(gates, { files, read: readFile }) {
     )) {
       runs(command, '');
     }
-    for (const file of gate.files ?? []) whole(file);
+    for (const file of gate.files ?? []) {
+      whole(file);
+      if (BIOME_CONFIG.test(file)) followExtends(file);
+    }
+    const patterns = (gate.filesMatching ?? []).map(globToRegExp);
+    for (const file of files) {
+      if (BIOME_CONFIG.test(file) && patterns.some((re) => re.test(file))) {
+        followExtends(file);
+      }
+    }
     for (const file of gate.ratchets ?? []) {
-      add({ label: file, file, changed: countsRose, state: (t) => t });
+      add({
+        label: file,
+        file,
+        changed: countsRose,
+        state: (t) => view(t, []),
+      });
     }
   }
   return [...parts.values()];

@@ -142,6 +142,9 @@ export function blankCode(text) {
   return lines.join('\n').replace(/`[^`\n]+`/g, blank);
 }
 
+/** The heads whose `)` a brace-less body follows: a `/` there is a regex. */
+const CONTROL_HEADS = new Set(['if', 'for', 'while', 'with']);
+
 /**
  * One pass over JS/TS source with ONE grammar for comments, strings and
  * templates, so they can't disagree. Two passes did: the comment blanker
@@ -190,6 +193,22 @@ export function scanSource(source) {
     while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) k -= 1;
     return k < 0 || source[k] === '\n';
   };
+  // `if (s) /`/.exec(s);`: a `/` after the `)` that closes an if, for, while
+  // or with head starts a brace-less body, so it is a regex, not a division.
+  const afterControlHead = (at) => {
+    let k = at - 1;
+    while (k >= 0 && /\s/.test(masked[k])) k -= 1;
+    if (masked[k] !== ')') return false;
+    for (let depth = 0; k >= 0; k--) {
+      if (masked[k] === ')') depth += 1;
+      else if (masked[k] === '(' && --depth === 0) break;
+    }
+    let end = k - 1;
+    while (end >= 0 && /\s/.test(masked[end])) end -= 1;
+    let start = end;
+    while (start >= 0 && /[\w$]/.test(masked[start])) start -= 1;
+    return CONTROL_HEADS.has(masked.slice(start + 1, end + 1).join(''));
+  };
 
   // Code, from i to the end or (in an interpolation) to the `}` closing it.
   const scanCode = (inInterpolation) => {
@@ -212,7 +231,7 @@ export function scanSource(source) {
         i = stop;
       } else if (
         c === '/' &&
-        (regexCanStart(masked, i) || startsLine(i)) &&
+        (regexCanStart(masked, i) || startsLine(i) || afterControlHead(i)) &&
         regexEnd(source, i) !== -1
       ) {
         i = regexEnd(source, i);
@@ -340,17 +359,26 @@ const MODIFIERS =
   '(?:(?:public|private|protected|static|async|override|readonly|get|set)\\s+)*';
 /** A declaration that names a function: the key stops here. */
 const STRONG = [
-  /(?:^|\s)function\s*\*?\s*([\w$]+)\s*[<(]/,
-  /^(?:export\s+)?(?:const|let|var)\s+([\w$]+)\b[^=]*=\s*(?:async\s+)?(?:function\b|\(|[\w$]+\s*=>|<)/,
-  // a class field holding a function: `pay = async () => {`
+  // `function` as a word: `functionsOf(list)` is a call, not `function sOf(`
+  /(?:^|\s)function(?![\w$])\s*\*?\s*([\w$]+)\s*[<(]/,
+  /^(?:export\s+)?(?:const|let|var)\s+([\w$]+)\b[^=]*=\s*(?:async\s+)?(?:function\b|[\w$]+\s*=>|<)/,
+  // a class field holding a function: `pay = async () => {`, `#pay = () =>`
   new RegExp(
-    `^${MODIFIERS}([\\w$]+)\\s*(?::[^=]+)?=\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*(?::[^=]+)?=>|[\\w$]+\\s*=>)`
+    `^${MODIFIERS}(#?[\\w$]+)\\s*(?::[^=]+)?=\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*(?::[^=]+)?=>|[\\w$]+\\s*=>)`
   ),
   /(?:^|\s)class\s+([\w$]+)/,
 ];
-/** A method's head up to its `(`: `async payOut(`, `get counts(`, `*items(`. */
+/**
+ * `const pay = (` is a function only when that parenthesis is a parameter
+ * list, its `)` followed by an optional return type and `=>`. `const paid =
+ * (await pending()).map(` is a parenthesised value.
+ */
+const CONST_PAREN =
+  /^((?:export\s+)?(?:const|let|var)\s+([\w$]+)\b[^=]*=\s*(?:async\s+)?)\(/;
+const ARROW_AFTER_PARAMS = /^\s*(?::.*?)?=>/;
+/** A method's head up to its `(`: `async payOut(`, `get counts(`, `*items(`, `#pay(`. */
 const METHOD_HEAD = new RegExp(
-  `^${MODIFIERS}\\*?\\s*([\\w$]+)\\s*(?:<[^>]*>)?\\s*\\(`
+  `^${MODIFIERS}\\*?\\s*(#?[\\w$]+)\\s*(?:<[^>]*>)?\\s*\\(`
 );
 /**
  * What follows a method's parameter list: an optional return type, then its
@@ -374,10 +402,15 @@ const WEAK = [
  * `app.post(` with the path on the next line, a chained `.post('/payout', …`,
  * or, at the top level only, an assigned `export const r = app.post(…`. The
  * path is a literal starting with / or a CONSTANT_NAME, so `cache.get('payout',
- * …)` names nothing.
+ * …)` names nothing. The receiver is one name (`app`, `router`): a property
+ * chain (`this.cache.get(KEY, …)`) is no router. Routes are read only in a
+ * worker's source (ROUTE_FILE): in a service, `api.post('/payouts', …)` is an
+ * HTTP call, and reading it as a route dropped the method around it out of the
+ * key (review round 6).
  */
 const ROUTE_HEAD =
-  /^(\s*)((?:export\s+)?(?:const|let|var)\s+[\w$]+\s*=\s*|export\s+default\s+)?(?:[\w$]+(?:\.[\w$]+)*)?\.(get|post|put|patch|delete|all)\(\s*(?:(['"`])(\/[^'"`]*)\4|([A-Z][A-Z0-9_]*)\s*,)?/;
+  /^(\s*)((?:export\s+)?(?:const|let|var)\s+[\w$]+\s*=\s*|export\s+default\s+)?(?:[\w$]+)?\.(get|post|put|patch|delete|all)\(\s*(?:(['"`])(\/[^'"`]*)\4|([A-Z][A-Z0-9_]*)\s*,)?/;
+const ROUTE_FILE = /^workers\/[^/]+\/src\//;
 const ROUTE_PATH = /^\s*(?:(['"`])(\/[^'"`]*)\1|([A-Z][A-Z0-9_]*)\s*,)/;
 
 /**
@@ -435,6 +468,20 @@ function routeName(lines, i) {
   return path ? `${head[3].toUpperCase()} ${path}` : null;
 }
 
+/** The function, class or class field a (masked, trimmed) line declares. */
+function declaredName(maskedLines, i, text) {
+  for (const pattern of STRONG) {
+    const name = pattern.exec(text)?.[1];
+    if (name && !NOT_A_NAME.has(name)) return name;
+  }
+  const paren = CONST_PAREN.exec(text);
+  if (!paren || NOT_A_NAME.has(paren[2])) return null;
+  const line = maskedLines[i];
+  const indent = line.length - line.trimStart().length;
+  const after = afterParens(maskedLines, i, indent + paren[1].length);
+  return after && ARROW_AFTER_PARAMS.test(after.rest) ? paren[2] : null;
+}
+
 /**
  * The function, method or class a line sits in, read from the code's
  * indentation: biome formats every source file, so each less-indented line
@@ -443,12 +490,22 @@ function routeName(lines, i) {
  * passed to a call) narrow the key and the walk goes on to the declaration or
  * the route that names it. A call's KEY carries this name, so a fix in one
  * function can't pay for a new call in another.
+ *
+ * `before` is the hit line's masked text up to the match: a declaration that
+ * starts there (`export const pay = (p) => stripe.transfers.create(p);`, how
+ * biome writes a short arrow) names the key. `file` decides whether routes are
+ * read (a worker's source only).
  */
 export function enclosingName(
   maskedLines,
   lineNo,
-  { startsInside = new Set(), lines = maskedLines } = {}
+  { startsInside = new Set(), lines = maskedLines, file = '', before } = {}
 ) {
+  if (before !== undefined && !startsInside.has(lineNo)) {
+    const own = declaredName(maskedLines, lineNo - 1, before.trim());
+    if (own) return own;
+  }
+  const routes = ROUTE_FILE.test(file);
   const indentOf = (l) => l.length - l.trimStart().length;
   // A line that starts inside a template (a dedented `${…}` line) takes its
   // place from the code line the template starts on: that line is the
@@ -472,12 +529,10 @@ export function enclosingName(
     const text = line.trim();
     headPending = /^[)\]}>]/.test(text);
     if (headPending) continue;
-    const route = routeName(lines, i);
+    const route = routes ? routeName(lines, i) : null;
     if (route) return named(route);
-    for (const pattern of STRONG) {
-      const name = pattern.exec(text)?.[1];
-      if (name && !NOT_A_NAME.has(name)) return named(name);
-    }
+    const declared = declaredName(maskedLines, i, text);
+    if (declared) return named(declared);
     const method = methodName(maskedLines, i);
     if (method) return named(method);
     if (!weak) {
@@ -579,13 +634,36 @@ function isPlaceholderPath(path) {
 }
 
 /**
- * A CLAUDE.md import as Claude Code reads one: `@docs/x.md`, `@./AGENTS.md`,
- * `@../../docs/x.md`, `@.claude/rules.md`, `@README`. Relative to the
- * importing file; it counts only when it names a tracked file, so a package
- * name (`@codex/database`) imports nothing, and an address (`a@b.com`) is no
- * import at all.
+ * A CLAUDE.md's imports, read as Claude Code reads them (2.1.330, the
+ * import scan in its CLAUDE.md loader): an `@` at the start of a text run or
+ * after whitespace, then every non-space character (`\ ` is an escaped space),
+ * cut at `#`, starting `./`, `~/`, `/` or one of `[A-Za-z0-9._-]`. Code
+ * blocks, code spans and HTML comments are skipped. Claude Code scans
+ * markdown's text runs, so emphasis (`_see @docs/x.md_`) and a link's label
+ * hold imports too. A path keeps its punctuation, as Claude Code keeps it:
+ * `@README.` names `README.`, and `(@docs/x.md)` is no import. Relative to
+ * the importing file; it counts only when it names a tracked file, so a
+ * package name (`@codex/database`) imports nothing, and an address
+ * (`a@b.com`) is no import at all. Claude Code skips an import in a table or
+ * an HTML block; this counts it, on the budget's safe side.
  */
-const CLAUDE_IMPORT = /(?<![\w@/.-])@((?:\.{1,2}\/)*[\w.-][\w./-]*)/g;
+const CLAUDE_IMPORT = /(?:^|\s)@((?:[^\s\\]|\\ )+)/g;
+const EMPHASIS = /(^|[\s\p{P}])([*_]{1,3})(?=\S)(.*?\S)\2(?=$|[\s\p{P}])/gmu;
+function claudeImports(body) {
+  let text = blankCode(body)
+    .replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '))
+    .replace(/!?\[([^\]\n]*)\]\([^)\n]*\)/g, ' $1 ');
+  for (let was = ''; was !== text; ) {
+    was = text;
+    text = text.replace(EMPHASIS, (_m, lead, _d, inner) => `${lead} ${inner} `);
+  }
+  const paths = [];
+  for (const m of text.matchAll(CLAUDE_IMPORT)) {
+    const path = m[1].split('#')[0].replaceAll('\\ ', ' ');
+    if (/^(?:\.\/|~\/|\/.|[A-Za-z0-9._-])/.test(path)) paths.push(path);
+  }
+  return paths;
+}
 /** How deep Claude Code follows imports. */
 const MAX_IMPORT_HOPS = 5;
 
@@ -602,7 +680,7 @@ export const MATCHERS = {
         throw new Error(`rule ${rule.id}: match.pattern must be a RegExp`);
       }
     },
-    file(rule, _path, text) {
+    file(rule, path, text) {
       const { lineOf, textOf } = lineIndex(text);
       // Matched on string-masked code: a log line or an error message that
       // names the API is not a call.
@@ -613,7 +691,16 @@ export const MATCHERS = {
       for (const m of masked.matchAll(globalCopy(rule.match.pattern))) {
         const line = lineOf(m.index);
         const call = m[0].replace(/\s+/g, '');
-        const name = enclosingName(maskedLines, line, { startsInside, lines });
+        const before = masked.slice(
+          masked.lastIndexOf('\n', m.index) + 1,
+          m.index
+        );
+        const name = enclosingName(maskedLines, line, {
+          startsInside,
+          lines,
+          file: path,
+          before,
+        });
         hits.push({ line, text: textOf(line), key: `${name}>${call}` });
       }
       return { found: hits.length, hits };
@@ -916,12 +1003,11 @@ export const MATCHERS = {
       const count = (at, body, depth) => {
         found += words(body);
         if (depth === MAX_IMPORT_HOPS) return;
-        for (const m of blankCode(body).matchAll(CLAUDE_IMPORT)) {
-          // Sentence punctuation after the path is not part of it.
-          const target = [m[1], m[1].replace(/[.,;:!?)]+$/, '')]
-            .map((p) => normalise(`${dirname(at)}/${p}`))
-            .find((p) => source?.has(p));
-          if (!target || seen.has(target)) continue;
+        for (const path of claudeImports(body)) {
+          // `~/` and `/` name files outside the repository (S4 outside).
+          if (/^[~/]/.test(path)) continue;
+          const target = normalise(`${dirname(at)}/${path}`);
+          if (!source?.has(target) || seen.has(target)) continue;
           seen.add(target);
           count(target, source.read(target), depth + 1);
         }

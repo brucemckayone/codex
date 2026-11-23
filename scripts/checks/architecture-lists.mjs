@@ -64,7 +64,8 @@ function readPresetBindings(source) {
 
 /** JSONC (wrangler.jsonc, turbo.json) as data: comments blanked, trailing commas dropped. */
 export function parseJsonc(text) {
-  const { code } = scanSource(text);
+  // A BOM: node's require and pnpm strip it; JSON.parse rejects it (round 6).
+  const { code } = scanSource(text.replace(/^\uFEFF/, ''));
   return JSON.parse(code.replace(/,(\s*[}\]])/g, '$1'));
 }
 
@@ -138,15 +139,22 @@ function unreadableUses(code, masked, namespaces) {
     before: masked.slice(Math.max(0, m.index - 80), m.index),
     after: masked.slice(m.index + m[0].length, m.index + m[0].length + 40),
   });
+  // The code character before `at`, however far back: a window's start is no
+  // line start, and a blanked comment is all spaces (review round 6).
+  const previous = (at) => {
+    let k = at - 1;
+    while (k >= 0 && /\s/.test(masked[k])) k -= 1;
+    return k < 0 ? '' : masked[k];
+  };
   for (const m of masked.matchAll(name)) {
-    const { before, after } = around(m);
+    const { after } = around(m);
     // A call (type args are read below). `wu?.procedure(` is caught as `wu?.`.
     if (/^\s*[(<]/.test(after)) continue;
     if (inImport(m.index) && !m[1] && !/^\s*as\b/.test(after)) continue;
     if (
       !m[1] &&
       /^\s*\??\s*:(?!:)/.test(after) &&
-      /(?:^|[{,;])\s*$/.test(before)
+      /^[{,;]?$/.test(previous(m.index))
     ) {
       continue; // an object key or a type member
     }
@@ -164,10 +172,18 @@ function unreadableUses(code, masked, namespaces) {
       uses.push({ index: m.index, text: m[0] + after.slice(0, 20) });
     }
   }
-  for (const m of code.matchAll(
-    /\b(?:import|require)\s*\(\s*(['"])(@codex\/(?:worker-utils|security)(?:\/[\w/-]+)?)\1/g
-  )) {
-    uses.push({ index: m.index, text: m[0] });
+  // A dynamic import is read only when its argument is a quoted literal naming
+  // another module. One of the limiter modules, or a specifier the gate can't
+  // read (`import(name)`, `import(`@codex/${pkg}`)`), may name the limiter.
+  for (const m of code.matchAll(/(?<![\w$.])(?:import|require)\s*\(/g)) {
+    const arg = /^\s*(['"`])((?:(?!\$\{)[^'"`\n])*)\1\s*[),]/.exec(
+      code.slice(m.index + m[0].length)
+    );
+    if (arg && !LIMITER_MODULE.test(arg[2])) continue;
+    uses.push({
+      index: m.index,
+      text: code.slice(m.index, m.index + m[0].length + 40).split('\n')[0],
+    });
   }
   return uses.sort((a, b) => a.index - b.index);
 }
@@ -584,11 +600,79 @@ function readKey(step, text, line) {
 export const gateCommands = (gate) => [gate.selfTest, gate.run].filter(Boolean);
 
 /**
+ * pnpm's own commands: `pnpm <one of these>` runs pnpm's code, not a script
+ * or a binary, so the gate can't read what it does.
+ */
+const PNPM_OWN = new Set([
+  'dlx',
+  'add',
+  'remove',
+  'rm',
+  'up',
+  'update',
+  'create',
+  'audit',
+  'list',
+  'ls',
+  'll',
+  'la',
+  'why',
+  'outdated',
+  'store',
+  'config',
+  'get',
+  'set',
+  'licenses',
+  'root',
+  'bin',
+  'prune',
+  'fetch',
+  'link',
+  'ln',
+  'unlink',
+  'rebuild',
+  'rb',
+  'pack',
+  'publish',
+  'import',
+  'deploy',
+  'patch',
+  'patch-commit',
+  'patch-remove',
+  'env',
+  'setup',
+  'server',
+  'doctor',
+  'self-update',
+  'init',
+  'cache',
+  'approve-builds',
+  'ignored-builds',
+  'dedupe',
+  'install-test',
+  'it',
+  'ci',
+  'sbom',
+  'help',
+]);
+/** pnpm's shortcuts that run a script and never fall back to a binary. */
+const PNPM_SCRIPT_SHORTCUTS = new Set([
+  'test',
+  't',
+  'tst',
+  'start',
+  'restart',
+  'stop',
+]);
+
+/**
  * What `pnpm <words…>` runs, read the way pnpm reads it: `{ kind: 'script',
  * pkg, script }` for `[-F p|--filter p|--filter=p] [run] <script> [args]`,
  * `{ kind: 'exec', pkg, command }`, `{ kind: 'install' }`, or null for a form
- * this gate doesn't follow (`-r`, `-C`, `dlx`, `add`…), which its callers
- * treat as unreadable, never as nothing to read.
+ * this gate doesn't follow (`-r`, `-C`, `dlx`, `audit`…), which its callers
+ * treat as unreadable, never as nothing to read. A bare `pnpm <name>` also
+ * carries `command`: when the package has no script <name>, pnpm runs that
+ * as a command, as `pnpm exec` does (review round 6).
  */
 export function pnpmCommand(words) {
   let pkg = '(root)';
@@ -612,16 +696,26 @@ export function pnpmCommand(words) {
     const command = words.slice(k + 1).join(' ');
     return command ? { kind: 'exec', pkg, command } : null;
   }
-  if (['dlx', 'add', 'remove', 'up', 'update', 'create'].includes(sub)) {
-    return null;
-  }
+  if (PNPM_OWN.has(sub)) return null;
   if (sub === 'run' || sub === 'run-script') {
     const script = words[k + 1];
     return script && !script.startsWith('-')
       ? { kind: 'script', pkg, script }
       : null;
   }
-  return { kind: 'script', pkg, script: sub };
+  if (PNPM_SCRIPT_SHORTCUTS.has(sub)) {
+    return {
+      kind: 'script',
+      pkg,
+      script: sub === 't' || sub === 'tst' ? 'test' : sub,
+    };
+  }
+  return {
+    kind: 'script',
+    pkg,
+    script: sub,
+    command: words.slice(k).join(' '),
+  };
 }
 
 /** The package and script a `pnpm …` command runs, if it runs one. */
