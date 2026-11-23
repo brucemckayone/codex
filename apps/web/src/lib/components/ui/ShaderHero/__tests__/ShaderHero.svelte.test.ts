@@ -112,6 +112,11 @@ import { loadRenderer } from '../load-renderer';
 import type { MouseState, ShaderRenderer } from '../renderer-types';
 import ShaderHero from '../ShaderHero.svelte';
 import type { ShaderPresetId } from '../shader-config';
+import {
+  isShaderLive,
+  onShaderFrame,
+  requestShaderFrame,
+} from '../shader-frame.svelte';
 import { shaderLive } from '../shader-live.svelte';
 import { shaderStill } from '../shader-still.svelte';
 import { shaderTone } from '../shader-tone';
@@ -145,7 +150,12 @@ function step(count = 1) {
 
 /** Mount, then let the async renderer load and its first frame queue. */
 async function start(
-  props: { still?: boolean; tone?: boolean; preset?: ShaderPresetId },
+  props: {
+    still?: boolean;
+    tone?: boolean;
+    preset?: ShaderPresetId;
+    publishFrames?: boolean;
+  },
   target: HTMLElement = document.body
 ) {
   app = mount(ShaderHero, { target, props });
@@ -1069,6 +1079,104 @@ describe('ShaderHero live', () => {
     if (app) unmount(app);
     app = null;
     expect(shaderLive.state).toBe('pending');
+  });
+});
+
+// ── The shader windows' frames (`shader-frame.svelte.ts`) ─────────
+describe('ShaderHero publishFrames', () => {
+  const canvas = () => document.querySelector('canvas') as HTMLCanvasElement;
+  /** A shader window's stand-in: how many draws the renderer had made each
+   *  time it was handed a frame (an `expect` in it would be caught). */
+  const listen = () => {
+    const rendersSeen: number[] = [];
+    releases.push(
+      onShaderFrame(() => rendersSeen.push(renderer.render.mock.calls.length))
+    );
+    return rendersSeen;
+  };
+
+  it('hands each frame it draws to the windows, straight after the draw', async () => {
+    const rendersSeen = listen();
+    await start({ publishFrames: true });
+    expect(isShaderLive()).toBe(false);
+    step(3);
+    expect(rendersSeen).toEqual([1, 2, 3]);
+    expect(isShaderLive()).toBe(true);
+  });
+
+  it('hands the windows the canvas it draws on', async () => {
+    let seen: HTMLCanvasElement | null = null;
+    releases.push(
+      onShaderFrame((source) => {
+        seen = source;
+      })
+    );
+    await start({ publishFrames: true });
+    step(1);
+    expect(seen).toBe(canvas());
+  });
+
+  it('publishes nothing, and nothing is live, without the prop', async () => {
+    const rendersSeen = listen();
+    await start({ tone: true });
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(3);
+    expect(rendersSeen).toEqual([]);
+    expect(isShaderLive()).toBe(false);
+  });
+
+  it('draws a still frame once more when a window asks, and moves on untouched', async () => {
+    const rendersSeen = listen();
+    await start({ still: true, publishFrames: true });
+    step(3);
+    expect(rendersSeen).toEqual([1]);
+    expect(frames).toHaveLength(0);
+
+    requestShaderFrame();
+    // Two windows asking at once draw it once.
+    requestShaderFrame();
+    step(3);
+    expect(rendersSeen).toEqual([1, 2]);
+    if (app) unmount(app);
+    app = null;
+
+    // Moving, a frame is coming anyway: asking schedules no other.
+    await start({ publishFrames: true });
+    step(1);
+    expect(frames).toHaveLength(1);
+    requestShaderFrame();
+    expect(frames).toHaveLength(1);
+  });
+
+  it('is not live with no preset, once its context is lost, or once unmounted', async () => {
+    const rendersSeen = listen();
+    brand.config = { preset: 'none' };
+    await start({ publishFrames: true });
+    step(3);
+    expect(isShaderLive()).toBe(false);
+    expect(rendersSeen).toEqual([]);
+    if (app) unmount(app);
+    app = null;
+    frames = [];
+
+    brand.config = { preset: 'ether' };
+    await start({ publishFrames: true });
+    step(1);
+    expect(isShaderLive()).toBe(true);
+    contextLost = true;
+    canvas().dispatchEvent(new Event('webglcontextlost'));
+    expect(isShaderLive()).toBe(false);
+    if (app) unmount(app);
+    app = null;
+    frames = [];
+    contextLost = false;
+
+    await start({ publishFrames: true });
+    step(1);
+    expect(isShaderLive()).toBe(true);
+    if (app) unmount(app);
+    app = null;
+    expect(isShaderLive()).toBe(false);
   });
 });
 
