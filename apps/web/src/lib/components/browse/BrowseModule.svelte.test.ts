@@ -398,11 +398,12 @@ describe('BrowseModule — the selector slot', () => {
       >['topicStyle'],
     });
     expect(styleOf()).toBe(expected);
-    // Every selector lists the topics as aria-pressed buttons.
-    const pressed = document.querySelectorAll(
-      '[data-topic-style] button[aria-pressed]'
+    // Every selector gives each topic a control: One bar and Shader windows
+    // as aria-pressed buttons, Channels as the tabs of an ARIA tablist.
+    const controls = document.querySelectorAll(
+      '[data-topic-style] button[aria-pressed], [data-topic-style] [role="tab"]'
     );
-    expect(pressed.length).toBeGreaterThanOrEqual(topics.length);
+    expect(controls.length).toBeGreaterThanOrEqual(topics.length);
   });
 
   test('a selector pick reaches onCategoryChange with the slug', () => {
