@@ -2551,6 +2551,46 @@ export const filters_active_count = (params) => `${params.count} active`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const topic_windows_label = () => `Topics`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const topic_windows_count_one = () => `1 piece`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const topic_windows_count_other = (params) => `${params.count} pieces`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const topic_windows_show_all = (params) => `Show all ${params.count}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const topic_windows_show_fewer = () => `Show fewer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const org_creators_title = () => `Our Creators`
 
 
