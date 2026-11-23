@@ -63,6 +63,8 @@ interface TypeFitSource {
   readonly titleEl: () => HTMLElement | undefined;
   /** The name window (Name). */
   readonly windowEl: () => HTMLElement | undefined;
+  /** The opening's centred name on Corner and Wide, while it opens. */
+  readonly openerEl: () => HTMLElement | null | undefined;
   readonly options: () => HeroOptions;
   readonly words: () => readonly ReelWords[];
   /** The piece on show, and its title. */
@@ -228,6 +230,8 @@ export function useTypeFit(source: TypeFitSource): {
     void source.title();
     void wideSize;
     if (layout === 'name') return;
+    // The opening's own name is the window while it opens (below).
+    if (source.openerEl()) return;
     if (!titleWindow || !el) {
       showreelFeed.setNameMask(null);
       return;
@@ -255,6 +259,29 @@ export function useTypeFit(source: TypeFitSource): {
     return () => {
       live = false;
       idle?.();
+      stop();
+    };
+  });
+
+  // ── the opening's name on Corner and Wide: centred, as the Name window is ──
+  // The film's window while the opening runs (the owner's, 2026-11-23: "the
+  // Of Blood and Bones text in the middle, and then we zoom into one of the
+  // letters"); the title takes the window back once the words come in.
+  $effect(() => {
+    const el = source.openerEl();
+    if (!el) return;
+    let live = true;
+    let stop = () => {};
+    void tick().then(() => {
+      if (live)
+        stop = refit(() =>
+          showreelFeed.setNameMask(
+            drawTitleMask(el, { undoTranslation: false })
+          )
+        );
+    });
+    return () => {
+      live = false;
       stop();
     };
   });

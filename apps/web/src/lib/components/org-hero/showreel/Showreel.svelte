@@ -528,9 +528,14 @@
 
   // ── type that fits: the Wide title, the name window, and both film windows' masks ──
   // The logic is the hook's (`reel-type-fit.svelte.ts`).
+  // The opening's name on Corner and Wide: centred, the film's window while
+  // the opening holds the reel back (the Name layout's own window is it).
+  let openerEl = $state<HTMLElement | null>(null);
+  const opener = $derived(layout !== 'name' && reelMotion.wordsHeld);
   const typeFit = useTypeFit({
     titleEl: () => titleEl,
     windowEl: () => windowEl,
+    openerEl: () => openerEl,
     options: () => options,
     words: () => words,
     shown: () => shown,
@@ -774,6 +779,7 @@
     {@render pause()}
     {@render top()}
     {#if layout === 'name'}{@render nameWindow()}{/if}
+    {#if opener}<div class="reel__opener" bind:this={openerEl} aria-hidden="true">{name}</div>{/if}
     <ReelSegments count={words.length} {shown} />
     <div class="reel__slot">
       {#if current}{@render playingNow(current)}{/if}
@@ -1309,6 +1315,25 @@
   .reel[data-theatre='video'] {
     --_theatre-delay: var(--duration-slowest);
     --_theatre-in: var(--duration-slower);
+  }
+
+  /* The opening's name on Corner and Wide: centred in the reel, as large as
+     the width lets it be, never drawn itself (the canvas draws its letters,
+     the film inside them). Out of flow, so nothing moves when it goes. */
+  .reel__opener {
+    position: absolute;
+    inset-inline: var(--_gutter);
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: var(--font-heading);
+    font-weight: var(--font-normal);
+    font-size: min(calc(var(--text-display) * 2.8), 14cqw);
+    line-height: var(--leading-none);
+    letter-spacing: var(--tracking-tight);
+    text-align: center;
+    text-wrap: balance;
+    color: transparent;
+    pointer-events: none;
   }
 
   /* ── the opening, through the letters: they open on their own ──

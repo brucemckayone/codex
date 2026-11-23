@@ -63,11 +63,16 @@ const REEL: ReelEntry[] = [
 
 function html(
   layout: 'corner' | 'wide' | 'name',
-  name = 'Of Blood & Bones'
+  name = 'Of Blood & Bones',
+  opening: 'name' | 'none' | null = null
 ): string {
   const options = resolveHero(
     'consume',
-    { comp: 'showreel', 'reel-layout': layout },
+    {
+      comp: 'showreel',
+      'reel-layout': layout,
+      ...(opening ? { 'reel-opening': opening } : {}),
+    },
     FACTS
   );
   return render(Showreel, {
@@ -114,5 +119,36 @@ describe('the Showreel on the server', () => {
     )?.[0];
     expect(h1).toBeDefined();
     expect(h1?.includes('data-long-word')).toBe(long);
+  });
+
+  // The owner's, 2026-11-23: the opening plays on its own, the reel held back
+  // from the first paint; on Corner and Wide through the name, centred.
+  it.each([
+    'corner',
+    'wide',
+  ] as const)('on %s, an opening through the letters holds the reel from its first paint, its name centred', (layout) => {
+    const page = html(layout, 'Of Blood & Bones', 'name');
+    expect(/<section[^>]*class="reel[^"]*"[^>]*>/.exec(page)?.[0]).toContain(
+      'data-opening="hold"'
+    );
+    expect(page).toMatch(
+      /<div class="reel__opener[^"]*" aria-hidden="true">Of Blood &amp; Bones<\/div>/
+    );
+  });
+
+  it.each([
+    ['corner', 'none'],
+    ['wide', 'none'],
+    ['wide', null],
+  ] as const)('on %s with the opening %s, nothing is held and no opening name is drawn', (layout, opening) => {
+    const page = html(layout, 'Of Blood & Bones', opening);
+    expect(page).not.toContain('data-opening');
+    expect(page).not.toContain('reel__opener');
+  });
+
+  it('on the Name layout, the opening holds the reel and its own window is the name', () => {
+    const page = html('name', 'Of Blood & Bones', 'name');
+    expect(page).toContain('data-opening="hold"');
+    expect(page).not.toContain('reel__opener');
   });
 });
