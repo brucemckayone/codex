@@ -61,6 +61,12 @@ export interface ReelMotionSource {
   readonly paused: () => boolean;
   /** The reel moves on by itself (not the static path). */
   readonly moves: () => boolean;
+  /**
+   * This visit has had its opening (`opening-seen.ts`): the driver runs none,
+   * and the words come straight in. The first paint still holds them, as the
+   * server drew it, until the driver's first frame.
+   */
+  readonly skipOpening?: () => boolean;
   readonly phone: () => boolean;
   readonly reducedMotion: () => boolean;
   /** The film plays, in the hero or the phone's pop-up. */
@@ -151,8 +157,9 @@ export function useReelMotion(source: ReelMotionSource): {
 
   // The settings and circumstances: the first run makes the driver.
   $effect(() => {
+    const chosen = motionChoice(source.options());
     const setup: ReelMotionSetup = {
-      choice: motionChoice(source.options()),
+      choice: source.skipOpening?.() ? { ...chosen, opening: 'none' } : chosen,
       frame: source.frame(),
       phone: source.phone(),
       reducedMotion: source.reducedMotion(),
