@@ -190,13 +190,16 @@ describe('the Showreel group: shown whenever the hero is a Showreel', () => {
     expect(letters).toHaveLength(1);
   });
 
-  test('the shader band says it is for landscape pieces: a portrait one sits on the right, with none', () => {
+  // True on every layout and screen: a portrait piece is placed only on a
+  // landscape stage (an upright phone fills it, band and all), and the Name
+  // window draws no band at all.
+  test('the shader band says a portrait piece sits on the right with none on a wide screen, and Name has none', () => {
     render({ 'hero-opt-purpose': 'spotlight', 'hero-opt-comp': 'showreel' });
     const band = showreel()?.querySelector(
       '.hero-designer__field[data-key="reel-band"]'
     );
     expect(band?.querySelector('[data-hint]')?.textContent).toBe(
-      'For landscape pieces. A portrait picture or film sits on the right, with no band.'
+      'On a wide screen, a portrait picture or film sits on the right, with no band. The Name layout has none.'
     );
   });
 });

@@ -52,7 +52,7 @@ describe('placedRect', () => {
   const STILL_45 = [1200, 1500] as const;
   const STILL_23 = [1000, 1500] as const;
 
-  it('draws a placed piece at least 62% of the stage’s width', () => {
+  it('keeps the placed width’s floor at 62% of the stage (the owner’s 60–65%)', () => {
     expect(PORTRAIT_MIN_WIDTH).toBe(0.62);
   });
 
