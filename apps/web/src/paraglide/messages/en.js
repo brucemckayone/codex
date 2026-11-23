@@ -1975,6 +1975,78 @@ export const org_no_content_yet = () => `No content available yet`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const browse_topic_count_one = () => `1 piece`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topic_count_other = (params) => `${params.count} pieces`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topic_clear = () => `Clear`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topic_clear_label = (params) => `Clear topic filter: ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topic_open_explore = () => `Open in Explore`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topic_see_all = (params) => `See all ${params.count} in Explore`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topic_loading = () => `Loading everything in this topic…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topic_load_failed = () => `Couldn’t load every piece in this topic.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const browse_topic_retry = () => `Retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const org_view_all_content = () => `View all content`
 
 
