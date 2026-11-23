@@ -166,3 +166,18 @@ export function reportCompositorFailure(
     ...(thrown === undefined ? {} : describeThrown(thrown)),
   });
 }
+
+let frameListenerReported = false;
+
+/**
+ * Log, once per session, a shader-frame listener that threw
+ * (`shader_hero.frame_listener_failed`): a shader window whose copy failed.
+ * Its frame is dropped, and the shader and every other window carry on
+ * (`shader-frame.svelte.ts`). Once, because a copy that fails fails the same
+ * way up to 30 times a second.
+ */
+export function reportFrameListenerFailure(thrown: unknown): void {
+  if (frameListenerReported) return;
+  frameListenerReported = true;
+  logger.warn('shader_hero.frame_listener_failed', describeThrown(thrown));
+}
